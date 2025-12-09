@@ -1,0 +1,5 @@
+# Python
+__pycache__/
+
+# Claude Code (personal state)
+.claude/settings.local.json

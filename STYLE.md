@@ -73,6 +73,10 @@ pytest tests/
 
 Follow PEP8. Consistency with existing code matters more than any specific rule.
 
+Keep `__init__.py` files empty. They exist only to mark directories as packages.
+
+Keep information in one place. Version numbers, configuration, documentation—each piece of information should have a single source of truth. Don't duplicate versions in `__init__.py` and `pyproject.toml`. Don't copy FAQs into multiple READMEs. If something needs to appear in multiple places, generate it or reference the source.
+
 Put imports at the top of the file. Declare dependencies in `pyproject.toml` and assume they're available.
 
 Keep one implementation. Avoid `v2_`, `_old`, `_new`, `_backup` prefixes and suffixes—look up old versions in git. If you're tempted to keep both old and new code around, delete the old version and commit. You can always get it back from git if needed.

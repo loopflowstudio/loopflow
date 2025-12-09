@@ -1,0 +1,31 @@
+Turn a design doc into working code.
+
+Read the design doc at `dd/{feature}.md` and implement what it describes. The doc contains data structures, APIs, constraints, and a "done when" verification step.
+
+## Approach
+
+Start with the data structures. Get the core types right first—everything else builds on them.
+
+Then implement APIs one at a time. Follow the signatures in the design doc. If something's underspecified, make a reasonable choice and move on.
+
+Run the "done when" check from the design doc to verify the implementation works.
+
+## Constraints
+
+**Don't commit.** Leave that to the caller. Just write the code.
+
+**Follow STYLE.md closely.** Read it before starting. Match the style and structure already in the codebase. When in doubt, look at how similar things are done nearby.
+
+**Stay in scope.** Implement what the design doc describes, nothing more. If you notice something that should be added, note it but don't build it.
+
+**Delete the design doc when done.** Once the code exists and works, `rm dd/{feature}.md`. The code is now the source of truth.
+
+**Add documentation per the style guide.** The best documentation is simple code—descriptive names, type hints, clear APIs. Skip obvious docstrings. If a module needs explanation, add a brief comment at the top of the file, not a separate doc. Update the README only if user-facing behavior changed.
+
+**Add tests that prove it works.** Test user behavior, not implementation details. A good test proves something users care about actually works. Keep tests short and focused. If a test requires elaborate mocking, it's testing the wrong thing—write something simpler or skip it.
+
+## If something's wrong
+
+If the design doc is unclear or seems wrong, ask before proceeding in interactive mode. In batch mode, make the simplest, clearest choice and move on. The code can be rewritten if a different choice is needed later.
+
+If implementation reveals a flaw in the design, note it. The design doc was scaffolding—it's fine for reality to diverge from the plan.

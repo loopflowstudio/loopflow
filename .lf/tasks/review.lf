@@ -1,6 +1,39 @@
-Review the codebase for:
-- Code quality and adherence to style guide
-- Potential bugs or issues
-- Opportunities for improvement
+Review the diff on the current branch against `main` and fix any issues found.
 
-Provide a summary of your findings.
+The deliverable is the fixes themselves, not a written review.
+
+## Process
+
+1. Run `git diff main...HEAD` to see committed changes on this branch
+2. Run `git diff` to see uncommitted changes
+3. Review against STYLE.md and general code quality
+4. Fix issues directly—don't just note them
+
+## What to look for
+
+**Style guide violations.** Read STYLE.md. Check naming, error handling, documentation patterns, test quality.
+
+**Bugs.** Logic errors, edge cases, off-by-ones, unhandled errors.
+
+**Unnecessary complexity.** Code that could be simpler. Abstractions that don't earn their keep. Features beyond what was asked.
+
+**Missing pieces.** Tests that should exist. README updates for changed behavior.
+
+## What to ignore
+
+Don't expand scope. If something unrelated to this branch's changes could be better, leave it alone.
+
+Don't refactor working code just because you'd write it differently. Only fix actual problems.
+
+## Output
+
+Make the fixes, then commit with a message summarizing what was fixed. Format:
+
+```
+review: brief summary
+
+- Fixed X
+- Fixed Y
+```
+
+If there's nothing to fix, say so and stop.

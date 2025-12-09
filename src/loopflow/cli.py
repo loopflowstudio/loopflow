@@ -19,7 +19,7 @@ def claude(
         False, "-p", "-P", "--print", help="Use Claude's print mode"
     ),
     role: str = typer.Option(
-        "default", "-r", "--role", help="Role file to use"
+        None, "-r", "--role", help="Role file to use (default from settings.json)"
     ),
 ):
     """Launch a Claude Code session with context."""

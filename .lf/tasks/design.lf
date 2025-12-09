@@ -1,0 +1,50 @@
+This task produces a short implementation spec that another LLM session can use to write a first draft of a feature.
+
+The design doc is scaffolding—meant to be deleted once the code exists. It's a checkpoint for recovery, not documentation for posterity. If a session crashes, the spec lets a fresh LLM pick up where things left off.
+
+## Workflow
+
+1. Brief conversation to extract what's needed
+2. Write spec to `dd/{feature}.md`
+3. Commit with message `design: {feature}`
+4. End session—implementation happens in a separate `lf claude implement` invocation
+
+## What makes a good design doc
+
+From the style guide: "Design around data structures and public APIs. Aim for a 1:1 mapping between real-world concepts and their representation in code."
+
+The design doc should be **heavy on code**—not working code, but code that makes ideas concrete. Sketch data structures, function signatures, example API calls. The code is for communication, not execution.
+
+```python
+# This doesn't need to run. It shows the shape.
+class Worktree:
+    path: Path
+    branch: str
+
+def create_worktree(name: str) -> Worktree:
+    """Create sibling worktree at ../{name}"""
+    ...
+```
+
+**Quote the user generously.** When the user says something that captures intent, constraint, or priority—copy it verbatim into the doc. These quotes anchor what matters and prevent drift.
+
+> "I want to be able to spin up a fresh LLM and hand it the spec"
+> — captured during design conversation
+
+## The spec should cover (~2000 words max):
+
+- **What to build** — One sentence. What exists after this is done that doesn't exist now.
+- **Data structures** — The core types. Sketch them in code.
+- **APIs** — Key functions or endpoints. Signatures with brief intent.
+- **Constraints** — What would cause a rewrite if guessed wrong. Dependencies, patterns to match, things to avoid.
+- **Done when** — How to verify it works. A command to run, output to see.
+
+## Conversation guidance
+
+Bias toward brevity. Ask only what's needed to start coding.
+
+Exploring uncertain ideas is fine—the doc has room (~2000 words). But keep narrowing toward a buildable thing. If scope is unclear, ask "what's the smallest version that's useful?" and spec that.
+
+When the user says something important, confirm it and note that you'll quote it in the doc.
+
+Don't worry about being complete. Wrong guesses get fixed in implementation. The goal is to not block the implementing LLM, not to predict everything.

@@ -1,5 +1,6 @@
 """Context gathering for LLM sessions."""
 
+import json
 from pathlib import Path
 
 
@@ -42,8 +43,27 @@ def gather_style(repo_root: Path) -> str | None:
     return None
 
 
-def gather_role(repo_root: Path, name: str = "default") -> str | None:
+def load_settings(repo_root: Path) -> dict:
+    """Load settings from .lf/settings.json."""
+    settings_path = repo_root / ".lf" / "settings.json"
+    if settings_path.exists():
+        try:
+            return json.loads(settings_path.read_text())
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def get_default_role(repo_root: Path) -> str:
+    """Get the default role from settings, falling back to 'artist'."""
+    settings = load_settings(repo_root)
+    return settings.get("default_role", "artist")
+
+
+def gather_role(repo_root: Path, name: str | None = None) -> str | None:
     """Gather role file content."""
+    if name is None:
+        name = get_default_role(repo_root)
     lf_dir = repo_root / ".lf" / "roles"
     for ext in [".lf", ".md", ".txt", ""]:
         content = _read_file_if_exists(lf_dir / f"{name}{ext}")
@@ -65,7 +85,7 @@ def gather_task(repo_root: Path, name: str) -> str | None:
 def build_prompt(
     repo_root: Path,
     task: str,
-    role: str = "default",
+    role: str | None = None,
 ) -> str:
     """Build the full prompt for an LLM session."""
     parts = []
@@ -78,9 +98,10 @@ def build_prompt(
     if style:
         parts.append(f"# Style Guide\n\n{style}")
 
-    role_content = gather_role(repo_root, role)
+    effective_role = role if role else get_default_role(repo_root)
+    role_content = gather_role(repo_root, effective_role)
     if role_content:
-        parts.append(f"# Role: {role}\n\n{role_content}")
+        parts.append(f"# Role: {effective_role}\n\n{role_content}")
 
     task_content = gather_task(repo_root, task)
     if task_content:

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from loopflow.config import load_config
 from loopflow.context import build_prompt, find_repo_root, gather_task
+from loopflow.git import create_and_track_branch
 from loopflow.launcher import check_claude_available, launch_claude
 from loopflow.pipeline import run_pipeline
 
@@ -52,6 +53,9 @@ def run(
     context: list[str] = typer.Option(
         None, "-c", "--context", help="Additional files for context"
     ),
+    branch: str = typer.Option(
+        None, "-b", "--branch", help="Create and track new branch"
+    ),
 ):
     """Run a task with Claude."""
     repo_root = find_repo_root()
@@ -63,10 +67,20 @@ def run(
         typer.echo("Error: 'claude' CLI not found. Run: lf install", err=True)
         raise typer.Exit(1)
 
+    if branch:
+        if not create_and_track_branch(repo_root, branch):
+            typer.echo(f"Error: Could not create branch '{branch}'", err=True)
+            raise typer.Exit(1)
+
     config = load_config(repo_root)
     skip_permissions = config.dangerously_skip_permissions if config else False
 
-    prompt = build_prompt(repo_root, task, arg=arg, context=context)
+    # Merge config context with CLI context
+    all_context = list(config.context) if config else []
+    if context:
+        all_context.extend(context)
+
+    prompt = build_prompt(repo_root, task, arg=arg, context=all_context or None)
     exit_code, _ = launch_claude(
         prompt,
         print_mode=print_mode,
@@ -168,6 +182,12 @@ def pipeline(
     context: list[str] = typer.Option(
         None, "-c", "--context", help="Context files for all tasks"
     ),
+    branch: str = typer.Option(
+        None, "-b", "--branch", help="Create and track new branch"
+    ),
+    pr: bool = typer.Option(
+        None, "--pr", help="Open PR when done"
+    ),
 ):
     """Run a named pipeline."""
     repo_root = find_repo_root()
@@ -179,17 +199,33 @@ def pipeline(
         typer.echo("Error: 'claude' CLI not found. Run: lf install", err=True)
         raise typer.Exit(1)
 
+    if branch:
+        if not create_and_track_branch(repo_root, branch):
+            typer.echo(f"Error: Could not create branch '{branch}'", err=True)
+            raise typer.Exit(1)
+
     config = load_config(repo_root)
     if not config or name not in config.pipelines:
         typer.echo(f"Error: Pipeline '{name}' not found in .lf/config.yaml", err=True)
         raise typer.Exit(1)
 
+    # Merge config context with CLI context
+    all_context = list(config.context) if config.context else []
+    if context:
+        all_context.extend(context)
+
+    # Flag overrides config
+    push_enabled = config.push
+    pr_enabled = pr if pr is not None else config.pr
+
     exit_code = run_pipeline(
         config.pipelines[name],
         repo_root,
         arg=arg,
-        context=context,
+        context=all_context or None,
         skip_permissions=config.dangerously_skip_permissions,
+        push_enabled=push_enabled,
+        pr_enabled=pr_enabled,
     )
     raise typer.Exit(exit_code)
 

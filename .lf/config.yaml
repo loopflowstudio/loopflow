@@ -1,9 +1,13 @@
 dangerously_skip_permissions: true
+context: "."
+push: true
 
 pipelines:
   ship:
-    - implement
-    - review
-    - rebase
-    - test
-    - draft_commit
+    tasks:
+      - implement
+      - review
+      - rebase
+      - test
+      - draft_commit
+    pr: true

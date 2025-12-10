@@ -12,6 +12,9 @@ from loopflow.pipeline import Pipeline
 class Config:
     pipelines: dict[str, Pipeline] = field(default_factory=dict)
     dangerously_skip_permissions: bool = False
+    push: bool = False
+    pr: bool = False
+    context: list[str] = field(default_factory=list)
 
 
 def load_config(repo_root: Path) -> Config | None:
@@ -26,9 +29,30 @@ def load_config(repo_root: Path) -> Config | None:
 
     pipelines = {}
     if "pipelines" in data:
-        for name, tasks in data["pipelines"].items():
-            pipelines[name] = Pipeline(name=name, tasks=tasks)
+        for name, pipeline_data in data["pipelines"].items():
+            if isinstance(pipeline_data, list):
+                # Old format: just a list of tasks
+                pipelines[name] = Pipeline(name=name, tasks=pipeline_data)
+            else:
+                # New format: dict with tasks, push, pr
+                pipelines[name] = Pipeline(
+                    name=name,
+                    tasks=pipeline_data.get("tasks", pipeline_data),
+                    push=pipeline_data.get("push"),
+                    pr=pipeline_data.get("pr"),
+                )
 
     dangerously_skip_permissions = data.get("dangerously_skip_permissions", False)
+    push = data.get("push", False)
+    pr = data.get("pr", False)
+    context_raw = data.get("context", [])
+    if isinstance(context_raw, str):
+        context_raw = context_raw.split()
 
-    return Config(pipelines=pipelines, dangerously_skip_permissions=dangerously_skip_permissions)
+    return Config(
+        pipelines=pipelines,
+        dangerously_skip_permissions=dangerously_skip_permissions,
+        push=push,
+        pr=pr,
+        context=context_raw,
+    )

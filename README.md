@@ -79,6 +79,12 @@ Add context files with `-c`:
 lf implement design.md -c src/models.py -c src/api.py
 ```
 
+Create and track a new branch with `-b`:
+
+```bash
+lf implement -b feature-name design.md
+```
+
 ## Commands
 
 **Built-in commands:**
@@ -104,6 +110,7 @@ lf whatever      # → .lf/whatever.lf
 |--------|-------------|
 | `-p, --print` | Run non-interactively (batch mode) |
 | `-c, --context FILE` | Add context files (repeatable) |
+| `-b, --branch NAME` | Create and track new branch |
 
 **Note:** Batch mode (`-p`) automatically runs with `--dangerously-skip-permissions` since there's no way to approve permissions interactively.
 
@@ -132,6 +139,36 @@ lf ship design.md   # runs implement -> review -> rebase -> test -> draft_commit
 - Each task commits its changes before the next task starts
 - macOS notification when pipeline finishes
 
+### Auto-Push and PR Creation
+
+Enable automatic push and PR creation per-pipeline:
+
+```yaml
+push: true          # auto-push when upstream exists
+pr: false           # don't open PRs by default
+
+pipelines:
+  ship:
+    - implement
+    - review
+    - draft_commit
+    pr: true        # this pipeline opens a PR
+```
+
+Or use flags:
+
+```bash
+lf ship --pr design.md       # run pipeline and open PR
+lf ship -b feature-x design.md  # create branch, run pipeline
+```
+
+Behavior:
+- `push: true` - auto-push after each commit if branch tracks a remote
+- `pr: true` - open draft PR when pipeline completes (implies push)
+- Pipeline settings override global config
+- Use `-b` to create and track a new branch before running
+- PR uses `gh` CLI (`--fill --draft`)
+
 ## Configuration
 
 Create `.lf/config.yaml` for repo-wide settings:
@@ -140,6 +177,10 @@ Create `.lf/config.yaml` for repo-wide settings:
 # Skip permission prompts in interactive mode (default: false)
 dangerously_skip_permissions: true
 
+# Auto-push/PR defaults (default: false)
+push: true
+pr: false
+
 pipelines:
   ship:
     - implement
@@ -147,6 +188,7 @@ pipelines:
     - rebase
     - test
     - draft_commit
+    pr: true  # override: this pipeline opens PRs
 ```
 
 ## Prompt Structure

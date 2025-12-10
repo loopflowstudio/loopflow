@@ -68,3 +68,104 @@ def test_load_config_skip_permissions_defaults_false(temp_repo):
 
     assert config is not None
     assert config.dangerously_skip_permissions is False
+
+
+def test_load_config_push_pr_flags(temp_repo):
+    """push and pr flags are loaded from config."""
+    config_yaml = temp_repo / ".lf" / "config.yaml"
+    config_yaml.write_text("""
+push: true
+pr: false
+""")
+
+    config = load_config(temp_repo)
+
+    assert config is not None
+    assert config.push is True
+    assert config.pr is False
+
+
+def test_load_config_push_pr_defaults_false(temp_repo):
+    """push and pr default to False when not set."""
+    config_yaml = temp_repo / ".lf" / "config.yaml"
+    config_yaml.write_text("pipelines:\n  foo:\n    - task1\n")
+
+    config = load_config(temp_repo)
+
+    assert config is not None
+    assert config.push is False
+    assert config.pr is False
+
+
+def test_load_config_pipeline_push_pr_override(temp_repo):
+    """Pipeline-specific push/pr settings override globals."""
+    config_yaml = temp_repo / ".lf" / "config.yaml"
+    config_yaml.write_text("""
+push: false
+pr: false
+pipelines:
+  ship:
+    tasks:
+      - implement
+      - review
+    pr: true
+""")
+
+    config = load_config(temp_repo)
+
+    assert config is not None
+    assert config.push is False
+    assert config.pr is False
+    assert config.pipelines["ship"].pr is True
+    assert config.pipelines["ship"].push is None
+
+
+def test_load_config_pipeline_old_format(temp_repo):
+    """Old pipeline format (list) still works."""
+    config_yaml = temp_repo / ".lf" / "config.yaml"
+    config_yaml.write_text("""
+pipelines:
+  ship:
+    - implement
+    - review
+""")
+
+    config = load_config(temp_repo)
+
+    assert config is not None
+    assert config.pipelines["ship"].tasks == ["implement", "review"]
+    assert config.pipelines["ship"].push is None
+    assert config.pipelines["ship"].pr is None
+
+
+def test_load_config_context_as_string(temp_repo):
+    """context as space-separated string is split into list."""
+    config_yaml = temp_repo / ".lf" / "config.yaml"
+    config_yaml.write_text('context: ". src/foo tests/"\n')
+
+    config = load_config(temp_repo)
+
+    assert config is not None
+    assert config.context == [".", "src/foo", "tests/"]
+
+
+def test_load_config_context_as_list(temp_repo):
+    """context as YAML list works."""
+    config_yaml = temp_repo / ".lf" / "config.yaml"
+    config_yaml.write_text("context:\n  - src\n  - tests\n")
+
+    config = load_config(temp_repo)
+
+    assert config is not None
+    assert config.context == ["src", "tests"]
+
+
+def test_load_config_context_defaults_empty(temp_repo):
+    """context defaults to empty list."""
+    config_yaml = temp_repo / ".lf" / "config.yaml"
+    config_yaml.write_text("dangerously_skip_permissions: false\n")
+
+    config = load_config(temp_repo)
+
+    assert config is not None
+    assert config.context == []

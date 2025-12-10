@@ -1,0 +1,9 @@
+pipelines: auto-push and PR creation
+
+Add push/pr flags to auto-push commits and open PRs when pipelines finish.
+Configure globally in config.yaml or per-pipeline. Use -b to create and
+track branches before running. PR creation uses gh CLI with --fill --draft.
+
+Also adds context field to config for files included in all tasks, removes
+backwards compat for old pipeline list format (now requires tasks: key),
+and makes lf land push after merge.

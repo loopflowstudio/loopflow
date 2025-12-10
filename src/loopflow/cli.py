@@ -172,6 +172,12 @@ def doctor():
         typer.echo("✗ claude - Run: lf install")
         all_ok = False
 
+    # Optional: gh for PR creation
+    if shutil.which("gh"):
+        typer.echo("✓ gh (optional, for PR creation)")
+    else:
+        typer.echo("- gh (optional, for PR creation): brew install gh")
+
     raise typer.Exit(0 if all_ok else 1)
 
 

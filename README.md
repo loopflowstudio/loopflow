@@ -69,20 +69,30 @@ lf my-custom-task            # Run any task you've defined
 Tasks can take an argument (a primary input file):
 
 ```bash
-lf implement design.md       # design.md becomes the "task input"
+lf implement dd/auth.md      # explicit design doc path
 lf review src/api.py         # review this specific file
+```
+
+Or use the branch-based workflow (recommended):
+
+```bash
+lf start auth-feature        # create worktree at .lf/worktrees/auth-feature/
+cd .lf/worktrees/auth-feature
+lf design                    # writes to auth-feature.md at repo root
+lf implement                 # design doc auto-included in prompt
 ```
 
 Add context files with `-c`:
 
 ```bash
-lf implement design.md -c src/models.py -c src/api.py
+lf implement -c src/models.py -c src/api.py
 ```
 
-Create and track a new branch with `-b`:
+Or run an inline prompt without a task file:
 
 ```bash
-lf implement -b feature-name design.md
+lf : "fix the typo in README"           # Quick inline prompt
+lf : "add tests for the parser" -c src/parser.py
 ```
 
 ## Commands
@@ -91,6 +101,7 @@ lf implement -b feature-name design.md
 
 | Command | Description |
 |---------|-------------|
+| `lf start <name>` | Create worktree and branch for a new feature |
 | `lf install` | Install Node.js and Claude Code (macOS) |
 | `lf doctor` | Check dependencies |
 | `lf version` | Show version |
@@ -110,7 +121,7 @@ lf whatever      # → .lf/whatever.lf
 |--------|-------------|
 | `-p, --print` | Run non-interactively (batch mode) |
 | `-c, --context FILE` | Add context files (repeatable) |
-| `-b, --branch NAME` | Create and track new branch |
+| `-b, --branch NAME` | Create worktree and run task there |
 
 **Note:** Batch mode (`-p`) automatically runs with `--dangerously-skip-permissions` since there's no way to approve permissions interactively.
 
@@ -131,10 +142,10 @@ pipelines:
 Run with:
 
 ```bash
-lf ship design.md   # runs implement -> review -> rebase -> test -> draft_commit
+lf ship             # runs implement -> review -> rebase -> test -> draft_commit
 ```
 
-- First task gets the argument (`design.md`)
+- Design doc (`<branch>.md`) is auto-included in prompt
 - Each task runs in batch mode with streaming output
 - Each task commits its changes before the next task starts
 - macOS notification when pipeline finishes
@@ -159,15 +170,15 @@ pipelines:
 Or use flags:
 
 ```bash
-lf ship --pr design.md       # run pipeline and open PR
-lf ship -b feature-x design.md  # create branch, run pipeline
+lf ship --pr                 # run pipeline and open PR
+lf start feature-x && cd .lf/worktrees/feature-x && lf ship
 ```
 
 Behavior:
 - `push: true` - auto-push after each commit if branch tracks a remote
 - `pr: true` - open draft PR when pipeline completes (implies push)
 - Pipeline settings override global config
-- Use `-b` to create and track a new branch before running
+- Use `lf start` to create a worktree before running
 - PR uses `gh` CLI (`--fill --draft`)
 
 ## Configuration

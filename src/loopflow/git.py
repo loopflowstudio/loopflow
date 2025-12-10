@@ -24,24 +24,28 @@ def push(repo_root: Path) -> bool:
     return result.returncode == 0
 
 
-def create_and_track_branch(repo_root: Path, name: str) -> bool:
-    """Create branch and set up tracking with origin. Returns success."""
-    # Create branch
-    result = subprocess.run(
-        ["git", "checkout", "-b", name],
-        cwd=repo_root,
-        capture_output=True,
-    )
-    if result.returncode != 0:
-        return False
+def create_worktree(repo_root: Path, name: str) -> Path | None:
+    """Create a worktree with a new branch. Returns worktree path or None on failure."""
+    worktree_path = repo_root / ".lf" / "worktrees" / name
 
-    # Set up tracking
+    if worktree_path.exists():
+        # Worktree already exists, return it
+        return worktree_path
+
+    # Create parent directory
+    worktree_path.parent.mkdir(parents=True, exist_ok=True)
+
     result = subprocess.run(
-        ["git", "push", "-u", "origin", name],
+        ["git", "worktree", "add", "-b", name, str(worktree_path)],
         cwd=repo_root,
         capture_output=True,
+        text=True,
     )
-    return result.returncode == 0
+
+    if result.returncode != 0:
+        return None
+
+    return worktree_path
 
 
 def open_pr(repo_root: Path, draft: bool = True) -> tuple[str | None, str | None]:

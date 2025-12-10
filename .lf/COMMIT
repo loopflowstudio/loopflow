@@ -1,6 +1,0 @@
-inline prompts and context enhancements
-
-Add `lf : "prompt"` for quick inline prompts without task files.
-Context files now expand directories and globs (e.g., `-c src` or `-c **/*.py`).
-Include git diff in prompts when on feature branches.
-Update design.lf workflow to write docs incrementally during conversations.

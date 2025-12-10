@@ -8,7 +8,7 @@ This is the governing document of the loopflow codebase. Humans and LLMs alike a
 - Prefix private functions with `_`
 - Return `None` for "not found"; raise exceptions for "shouldn't happen"
 - No `Args:`/`Returns:` docstrings—if types are clear, skip the docstring
-- Delete tests that require elaborate mocking
+- Mock side effects, but don't test mock wiring
 - Design docs go in `<branch>.md` at repo root; delete them when the feature ships
 
 ## File-Type Guidelines
@@ -20,7 +20,7 @@ When editing `*.py` files:
 
 When editing `*_test.py` or `test_*.py` files:
 - Keep tests short and focused on one behavior
-- Prefer simple assertions over elaborate mocking
+- Mock side effects (network, subprocess), but assert on results, not mock calls
 - Delete flaky tests rather than adding retries
 
 When writing CLI code with Typer:
@@ -171,7 +171,38 @@ Aim for a mix:
 - **Edge case tests**: What happens at boundaries?
 - **Value tests**: Does this feature do what users expect?
 
-Use mocks to avoid slow or flaky dependencies. But if a test requires elaborate mocking, it's probably testing implementation rather than behavior—throw it out and write something simpler.
+## When to Mock
+
+Mock to isolate your code from things that shouldn't be part of unit tests:
+- **External systems**: Network calls, databases, file systems (when testing logic, not I/O)
+- **Side effects**: Sending emails, writing logs, spawning processes
+- **Slow operations**: Anything that would make tests take seconds instead of milliseconds
+
+Don't mock to verify internal wiring. If a test's assertions are just "did we call the mock with the right args?"—that's testing implementation, not behavior. The test will break when you refactor, even if the feature still works.
+
+```python
+# Bad: testing that we called the mock correctly
+def test_send_notification():
+    with patch("app.email.send") as mock_send:
+        notify_user(user)
+        mock_send.assert_called_once_with(user.email, ANY)
+
+# Good: mock the side effect, test the behavior
+def test_notify_user_returns_success():
+    with patch("app.email.send"):  # prevent actual email
+        result = notify_user(user)
+        assert result.success
+
+# Better: if possible, test without mocking
+def test_notification_message_format():
+    msg = build_notification(user)
+    assert user.name in msg.body
+```
+
+If a test requires elaborate mock setup, it's usually a sign that either:
+1. The code under test does too much (refactor it)
+2. You're testing implementation rather than behavior (test something else)
+3. This should be an integration test, not a unit test (move it)
 
 # Pre-Commit Checklist
 
@@ -179,8 +210,8 @@ Before committing, verify:
 - [ ] No new `Args:`/`Returns:` docstrings on functions with clear types
 - [ ] No inline imports; all imports at top of file
 - [ ] No `v2_`, `_old`, `_new`, `_backup` etc.; keep one implementation, use git for history
-- [ ] Tests are simple; delete any that need elaborate mocking
-- [ ] Tests test user behavior, not implementation details
+- [ ] Mocks prevent side effects, not verify internal wiring
+- [ ] Tests assert on results, not mock calls
 - [ ] README changes don't duplicate source code
 - [ ] Existing READMEs updated if behavior changed
 

@@ -8,7 +8,7 @@ Arrange LLMs to code in harmony.
 
 ```bash
 pip install loopflow
-lf install  # installs Node.js (via Homebrew) and Claude Code
+lf meta install  # installs Node.js (via Homebrew) and Claude Code
 ```
 
 ## How It Works
@@ -76,7 +76,7 @@ lf review src/api.py         # review this specific file
 Or use the branch-based workflow (recommended):
 
 ```bash
-lf start auth-feature        # create worktree at .lf/worktrees/auth-feature/
+lf wt create auth-feature    # create worktree at .lf/worktrees/auth-feature/
 cd .lf/worktrees/auth-feature
 lf design                    # writes to auth-feature.md at repo root
 lf implement                 # design doc auto-included in prompt
@@ -97,22 +97,47 @@ lf : "add tests for the parser" -c src/parser.py
 
 ## Commands
 
-**Built-in commands:**
+### Tasks
 
-| Command | Description |
-|---------|-------------|
-| `lf start <name>` | Create worktree and branch for a new feature |
-| `lf install` | Install Node.js and Claude Code (macOS) |
-| `lf doctor` | Check dependencies |
-| `lf version` | Show version |
-| `lf land [-m msg]` | Squash-merge current branch to main |
-
-**Task commands** - anything else runs a task from `.lf/`:
+Run tasks from `.lf/` by name:
 
 ```bash
 lf review        # → .lf/review.lf
 lf implement     # → .lf/implement.lf
 lf whatever      # → .lf/whatever.lf
+```
+
+### Worktrees (`lf wt`)
+
+| Command | Description |
+|---------|-------------|
+| `lf wt create <name>` | Create worktree and branch, open IDEs |
+| `lf wt open <name>` | Open IDEs at existing worktree |
+| `lf wt list` | List worktrees with status |
+| `lf wt clean` | Remove worktrees for branches no longer on origin |
+
+### Pull Requests (`lf pr`)
+
+| Command | Description |
+|---------|-------------|
+| `lf pr create` | Create a GitHub PR for current branch |
+| `lf pr land [--add]` | Squash-merge to main using PR title/body as commit message |
+
+`lf pr land` requires branch to be clean and pushed. Use `--add` to auto-commit and push first.
+
+### Setup (`lf meta`)
+
+| Command | Description |
+|---------|-------------|
+| `lf meta install` | Install dependencies based on config (macOS) |
+| `lf meta doctor` | Check dependencies based on config |
+| `lf meta version` | Show version |
+
+### Inline Prompts
+
+```bash
+lf : "fix the typo in README"           # Quick inline prompt
+lf : "add tests for the parser" -c src/parser.py
 ```
 
 ## Options
@@ -171,14 +196,14 @@ Or use flags:
 
 ```bash
 lf ship --pr                 # run pipeline and open PR
-lf start feature-x && cd .lf/worktrees/feature-x && lf ship
+lf wt create feature-x && cd .lf/worktrees/feature-x && lf ship
 ```
 
 Behavior:
 - `push: true` - auto-push after each commit if branch tracks a remote
 - `pr: true` - open draft PR when pipeline completes (implies push)
 - Pipeline settings override global config
-- Use `lf start` to create a worktree before running
+- Use `lf wt create` to create a worktree before running
 - PR uses `gh` CLI (`--fill --draft`)
 
 ## Configuration
@@ -192,6 +217,12 @@ dangerously_skip_permissions: true
 # Auto-push/PR defaults (default: false)
 push: true
 pr: false
+
+# IDE settings for lf wt create/open (all default: true)
+ide:
+  warp: true
+  cursor: true
+  workspace: myproject.code-workspace  # optional: explicit workspace file
 
 pipelines:
   ship:

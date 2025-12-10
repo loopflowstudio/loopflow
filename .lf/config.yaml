@@ -11,3 +11,9 @@ pipelines:
       - test
       - draft_commit
     pr: true
+  submit:
+    tasks:
+      - review
+      - test
+      - draft_commit
+    pr: true

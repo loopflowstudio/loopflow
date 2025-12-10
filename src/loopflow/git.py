@@ -1,7 +1,107 @@
 """Git operations for push and PR automation."""
 
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
+
+
+@dataclass
+class WorktreeInfo:
+    name: str
+    path: Path
+    branch: str
+    on_origin: bool
+    is_dirty: bool
+
+
+def list_worktrees(repo_root: Path) -> list[WorktreeInfo]:
+    """List all worktrees in .lf/worktrees/ with their status."""
+    worktrees_dir = repo_root / ".lf" / "worktrees"
+    if not worktrees_dir.exists():
+        return []
+
+    # Get remote branches
+    result = subprocess.run(
+        ["git", "branch", "-r", "--format=%(refname:short)"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    remote_branches = set()
+    if result.returncode == 0:
+        for line in result.stdout.strip().split("\n"):
+            if line.startswith("origin/"):
+                remote_branches.add(line[7:])  # strip "origin/"
+
+    worktrees = []
+    for path in sorted(worktrees_dir.iterdir()):
+        if not path.is_dir():
+            continue
+
+        name = path.name
+
+        # Get branch name
+        branch_result = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=path,
+            capture_output=True,
+            text=True,
+        )
+        branch = branch_result.stdout.strip() if branch_result.returncode == 0 else name
+
+        # Check if dirty
+        status_result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=path,
+            capture_output=True,
+            text=True,
+        )
+        is_dirty = bool(status_result.stdout.strip())
+
+        worktrees.append(WorktreeInfo(
+            name=name,
+            path=path,
+            branch=branch,
+            on_origin=branch in remote_branches,
+            is_dirty=is_dirty,
+        ))
+
+    return worktrees
+
+
+def remove_worktree(repo_root: Path, name: str) -> bool:
+    """Remove a worktree and its branch. Returns success."""
+    worktree_path = repo_root / ".lf" / "worktrees" / name
+
+    if not worktree_path.exists():
+        return False
+
+    # Get branch name before removing
+    branch_result = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=worktree_path,
+        capture_output=True,
+        text=True,
+    )
+    branch = branch_result.stdout.strip() if branch_result.returncode == 0 else name
+
+    # Remove worktree
+    result = subprocess.run(
+        ["git", "worktree", "remove", str(worktree_path), "--force"],
+        cwd=repo_root,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        return False
+
+    # Delete branch
+    subprocess.run(
+        ["git", "branch", "-D", branch],
+        cwd=repo_root,
+        capture_output=True,
+    )
+
+    return True
 
 
 def has_upstream(repo_root: Path) -> bool:

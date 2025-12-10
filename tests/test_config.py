@@ -2,8 +2,7 @@
 
 import pytest
 
-from loopflow.config import load_config
-from loopflow.pipeline import Pipeline
+from loopflow.config import load_config, PipelineConfig
 
 
 @pytest.fixture
@@ -153,3 +152,50 @@ def test_load_config_context_defaults_empty(temp_repo):
 
     assert config is not None
     assert config.context == []
+
+
+def test_load_config_ide_defaults(temp_repo):
+    """ide settings default to warp=True, cursor=True, workspace=None."""
+    config_yaml = temp_repo / ".lf" / "config.yaml"
+    config_yaml.write_text("dangerously_skip_permissions: false\n")
+
+    config = load_config(temp_repo)
+
+    assert config is not None
+    assert config.ide.warp is True
+    assert config.ide.cursor is True
+    assert config.ide.workspace is None
+
+
+def test_load_config_ide_settings(temp_repo):
+    """ide settings are loaded from config."""
+    config_yaml = temp_repo / ".lf" / "config.yaml"
+    config_yaml.write_text("""
+ide:
+  warp: false
+  cursor: true
+  workspace: myproject.code-workspace
+""")
+
+    config = load_config(temp_repo)
+
+    assert config is not None
+    assert config.ide.warp is False
+    assert config.ide.cursor is True
+    assert config.ide.workspace == "myproject.code-workspace"
+
+
+def test_load_config_ide_partial(temp_repo):
+    """ide settings can be partially specified."""
+    config_yaml = temp_repo / ".lf" / "config.yaml"
+    config_yaml.write_text("""
+ide:
+  cursor: false
+""")
+
+    config = load_config(temp_repo)
+
+    assert config is not None
+    assert config.ide.warp is True  # default
+    assert config.ide.cursor is False
+    assert config.ide.workspace is None  # default

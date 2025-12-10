@@ -2,7 +2,7 @@
 
 import pytest
 
-from loopflow.config import load_config, PipelineConfig
+from loopflow.config import load_config, PipelineConfig, ConfigError
 
 
 @pytest.fixture
@@ -199,3 +199,25 @@ ide:
     assert config.ide.warp is True  # default
     assert config.ide.cursor is False
     assert config.ide.workspace is None  # default
+
+
+def test_load_config_raises_on_invalid_yaml(temp_repo):
+    """Invalid YAML raises ConfigError."""
+    config_yaml = temp_repo / ".lf" / "config.yaml"
+    config_yaml.write_text("foo: [invalid\n")
+
+    with pytest.raises(ConfigError, match="Invalid YAML"):
+        load_config(temp_repo)
+
+
+def test_load_config_raises_on_invalid_schema(temp_repo):
+    """Invalid config schema raises ConfigError."""
+    config_yaml = temp_repo / ".lf" / "config.yaml"
+    config_yaml.write_text("""
+pipelines:
+  ship:
+    wrong_field: value
+""")
+
+    with pytest.raises(ConfigError, match="Invalid config"):
+        load_config(temp_repo)

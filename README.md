@@ -13,21 +13,21 @@ lf meta install  # installs Node.js (via Homebrew) and Claude Code
 
 ## How It Works
 
-Loopflow builds prompts for Claude from two sources:
+Loopflow builds prompts from two sources:
 
 1. **Repository docs** (`.md` files at repo root) - guidance that applies to all tasks
 2. **Task definitions** (`.lf/` directory) - specific instructions for each task
 
-### Step 1: Write Documentation for Claude
+### Step 1: Write Documentation for the LLM
 
-Put `.md` files at your repo root. Claude reads all of them before every task. Use these to communicate:
+Put `.md` files at your repo root. Loopflow includes all of them in every task prompt. Use these to communicate:
 
 - What the project does and how it's structured
 - Code style, conventions, and patterns to follow
-- How you want Claude to think and communicate
+- How you want the LLM to think and communicate
 - Development workflow and practices
 
-Write them for Claude, not just humans. For example:
+Write them for the LLM, not just humans. For example:
 
 ```markdown
 # STYLE.md

@@ -2,7 +2,7 @@
 
 import pytest
 
-from loopflow.context import find_repo_root, build_prompt
+from loopflow.context import find_repo_root, build_prompt, gather_task
 
 
 @pytest.fixture
@@ -123,3 +123,48 @@ def test_build_prompt_inline_with_context(temp_repo):
     assert "add tests" in result
     assert "<lf:files>" in result
     assert "print('hello')" in result
+
+
+def test_gather_task_prefers_lf_extension(temp_repo):
+    """Task file with .lf extension is preferred."""
+    lf = temp_repo / ".lf"
+    (lf / "test.lf").write_text("Task from .lf file\n")
+    (lf / "test.md").write_text("Task from .md file\n")
+    (lf / "test.txt").write_text("Task from .txt file\n")
+
+    result = gather_task(temp_repo, "test")
+    assert result == "Task from .lf file\n"
+
+
+def test_gather_task_prefers_md_over_other_extensions(temp_repo):
+    """Task file with .md extension preferred over others."""
+    lf = temp_repo / ".lf"
+    (lf / "test.md").write_text("Task from .md file\n")
+    (lf / "test.txt").write_text("Task from .txt file\n")
+
+    result = gather_task(temp_repo, "test")
+    assert result == "Task from .md file\n"
+
+
+def test_gather_task_accepts_other_extensions(temp_repo):
+    """Task file with other extension works when .lf/.md absent."""
+    lf = temp_repo / ".lf"
+    (lf / "test.txt").write_text("Task from .txt file\n")
+
+    result = gather_task(temp_repo, "test")
+    assert result == "Task from .txt file\n"
+
+
+def test_gather_task_accepts_bare_name(temp_repo):
+    """Task file with no extension works as fallback."""
+    lf = temp_repo / ".lf"
+    (lf / "test").write_text("Task from bare file\n")
+
+    result = gather_task(temp_repo, "test")
+    assert result == "Task from bare file\n"
+
+
+def test_gather_task_returns_none_when_missing(temp_repo):
+    """gather_task returns None when no matching file exists."""
+    result = gather_task(temp_repo, "nonexistent")
+    assert result is None

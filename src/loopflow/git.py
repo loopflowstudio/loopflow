@@ -46,7 +46,17 @@ def create_and_track_branch(repo_root: Path, name: str) -> bool:
 
 def open_pr(repo_root: Path, draft: bool = True) -> str | None:
     """Open GitHub PR for current branch. Returns PR URL or None on failure."""
-    cmd = ["gh", "pr", "create", "--fill"]
+    commit_file = repo_root / ".lf" / "COMMIT"
+
+    if commit_file.exists():
+        content = commit_file.read_text().strip()
+        lines = content.split("\n", 1)
+        title = lines[0]
+        body = lines[1].strip() if len(lines) > 1 else ""
+        cmd = ["gh", "pr", "create", "--title", title, "--body", body]
+    else:
+        cmd = ["gh", "pr", "create", "--fill"]
+
     if draft:
         cmd.append("--draft")
 

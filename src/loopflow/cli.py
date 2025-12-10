@@ -11,7 +11,7 @@ from pathlib import Path
 
 from loopflow.config import load_config
 from loopflow.context import build_prompt, find_repo_root, gather_task
-from loopflow.git import create_and_track_branch
+from loopflow.git import create_and_track_branch, open_pr
 from loopflow.launcher import check_claude_available, launch_claude
 from loopflow.pipeline import run_pipeline
 
@@ -237,6 +237,26 @@ def pipeline(
 
 
 @app.command()
+def pr():
+    """Create a GitHub PR for this branch."""
+    repo_root = find_repo_root()
+    if not repo_root:
+        typer.echo("Error: Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    if not shutil.which("gh"):
+        typer.echo("Error: 'gh' CLI not found. Install with: brew install gh", err=True)
+        raise typer.Exit(1)
+
+    pr_url = open_pr(repo_root, draft=False)
+    if pr_url:
+        typer.echo(pr_url)
+    else:
+        typer.echo("Error: Could not create PR", err=True)
+        raise typer.Exit(1)
+
+
+@app.command()
 def land(
     message: str = typer.Option(None, "-m", "--message", help="Commit message"),
 ):
@@ -283,6 +303,16 @@ def land(
         typer.echo("Error: No commit message. Use -m or create .lf/COMMIT", err=True)
         raise typer.Exit(1)
 
+    # Remove COMMIT file before merge so it doesn't end up in main
+    if commit_file.exists():
+        commit_file.unlink()
+        subprocess.run(["git", "add", "-A"], cwd=repo_root, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "remove .lf/COMMIT before land"],
+            cwd=repo_root,
+            check=True,
+        )
+
     # Land it
     subprocess.run(["git", "checkout", "main"], cwd=repo_root, check=True)
     subprocess.run(["git", "merge", "--squash", branch], cwd=repo_root, check=True)
@@ -290,16 +320,12 @@ def land(
     subprocess.run(["git", "branch", "-D", branch], cwd=repo_root, check=True)
     subprocess.run(["git", "push"], cwd=repo_root, check=True)
 
-    # Clean up commit file if it was used
-    if commit_file.exists():
-        commit_file.unlink()
-
     typer.echo(f"Landed {branch} to main and pushed.")
 
 
 def main():
     """Entry point that supports 'lf <task>' and 'lf <pipeline>' shorthand."""
-    known_commands = {"run", "pipeline", "version", "install", "doctor", "land", "--help", "-h"}
+    known_commands = {"run", "pipeline", "version", "install", "doctor", "pr", "land", "--help", "-h"}
 
     if len(sys.argv) > 1 and sys.argv[1] not in known_commands:
         name = sys.argv[1]

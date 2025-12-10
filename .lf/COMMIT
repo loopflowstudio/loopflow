@@ -1,0 +1,7 @@
+lf open: reopen existing worktrees in Warp + Cursor
+
+`lf start` now opens Warp and Cursor automatically. `lf open <name>`
+reopens an existing worktree without recreating it.
+
+Worktrees are stored in `.lf/worktrees/` and gitignored. Added `submit`
+pipeline for quick review → test → commit flow.

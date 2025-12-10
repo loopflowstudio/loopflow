@@ -25,11 +25,13 @@ def test_load_config_parses_pipelines(temp_repo):
     config_yaml.write_text("""
 pipelines:
   ship:
-    - implement
-    - review
-    - commit
+    tasks:
+      - implement
+      - review
+      - commit
   quick:
-    - implement
+    tasks:
+      - implement
 """)
 
     config = load_config(temp_repo)
@@ -62,7 +64,7 @@ def test_load_config_skip_permissions_flag(temp_repo):
 def test_load_config_skip_permissions_defaults_false(temp_repo):
     """dangerously_skip_permissions defaults to False when not set."""
     config_yaml = temp_repo / ".lf" / "config.yaml"
-    config_yaml.write_text("pipelines:\n  foo:\n    - task1\n")
+    config_yaml.write_text("pipelines:\n  foo:\n    tasks:\n      - task1\n")
 
     config = load_config(temp_repo)
 
@@ -88,7 +90,7 @@ pr: false
 def test_load_config_push_pr_defaults_false(temp_repo):
     """push and pr default to False when not set."""
     config_yaml = temp_repo / ".lf" / "config.yaml"
-    config_yaml.write_text("pipelines:\n  foo:\n    - task1\n")
+    config_yaml.write_text("pipelines:\n  foo:\n    tasks:\n      - task1\n")
 
     config = load_config(temp_repo)
 
@@ -118,24 +120,6 @@ pipelines:
     assert config.pr is False
     assert config.pipelines["ship"].pr is True
     assert config.pipelines["ship"].push is None
-
-
-def test_load_config_pipeline_old_format(temp_repo):
-    """Old pipeline format (list) still works."""
-    config_yaml = temp_repo / ".lf" / "config.yaml"
-    config_yaml.write_text("""
-pipelines:
-  ship:
-    - implement
-    - review
-""")
-
-    config = load_config(temp_repo)
-
-    assert config is not None
-    assert config.pipelines["ship"].tasks == ["implement", "review"]
-    assert config.pipelines["ship"].push is None
-    assert config.pipelines["ship"].pr is None
 
 
 def test_load_config_context_as_string(temp_repo):

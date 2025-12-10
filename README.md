@@ -78,8 +78,8 @@ Or use the branch-based workflow (recommended):
 ```bash
 lf start auth-feature        # create worktree at .lf/worktrees/auth-feature/
 cd .lf/worktrees/auth-feature
-lf design                    # writes to .lf/auth-feature.md
-lf implement                 # reads from .lf/auth-feature.md (no arg needed)
+lf design                    # writes to auth-feature.md at repo root
+lf implement                 # design doc auto-included in prompt
 ```
 
 Add context files with `-c`:
@@ -145,7 +145,7 @@ Run with:
 lf ship             # runs implement -> review -> rebase -> test -> draft_commit
 ```
 
-- First task reads from `.lf/<branch>.md` by default
+- Design doc (`<branch>.md`) is auto-included in prompt
 - Each task runs in batch mode with streaming output
 - Each task commits its changes before the next task starts
 - macOS notification when pipeline finishes
@@ -170,15 +170,15 @@ pipelines:
 Or use flags:
 
 ```bash
-lf ship --pr design.md       # run pipeline and open PR
-lf ship -b feature-x design.md  # create branch, run pipeline
+lf ship --pr                 # run pipeline and open PR
+lf start feature-x && cd .lf/worktrees/feature-x && lf ship
 ```
 
 Behavior:
 - `push: true` - auto-push after each commit if branch tracks a remote
 - `pr: true` - open draft PR when pipeline completes (implies push)
 - Pipeline settings override global config
-- Use `-b` to create and track a new branch before running
+- Use `lf start` to create a worktree before running
 - PR uses `gh` CLI (`--fill --draft`)
 
 ## Configuration

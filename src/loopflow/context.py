@@ -1,5 +1,6 @@
 """Context gathering for LLM sessions."""
 
+import subprocess
 from pathlib import Path
 
 from loopflow.files import gather_docs, gather_files, format_files
@@ -48,6 +49,32 @@ def gather_arg(repo_root: Path, arg: str) -> tuple[str, str] | None:
     return (str(rel_path), path.read_text())
 
 
+def gather_diff(repo_root: Path) -> str | None:
+    """Get diff against main branch. Returns None if on main or no diff."""
+    # Get current branch
+    result = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    branch = result.stdout.strip()
+    if not branch or branch == "main":
+        return None
+
+    # Get diff against main
+    result = subprocess.run(
+        ["git", "diff", "main...HEAD"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+
+    return result.stdout
+
+
 def build_prompt(
     repo_root: Path,
     task: str | None = None,
@@ -67,6 +94,11 @@ def build_prompt(
             doc_parts.append(f"<lf:{name}>\n{content}\n</lf:{name}>")
         docs_body = "\n\n".join(doc_parts)
         parts.append(f"Repository documentation. Follow VOICE and STYLE carefully.\n\n<lf:docs>\n{docs_body}\n</lf:docs>")
+
+    # Diff against main (on feature branches only)
+    diff = gather_diff(repo_root)
+    if diff:
+        parts.append(f"Changes on this branch (diff against main).\n\n<lf:diff>\n{diff}\n</lf:diff>")
 
     # Task argument (the primary input to the task)
     if arg:

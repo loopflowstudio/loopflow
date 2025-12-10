@@ -4,14 +4,14 @@ The design doc is scaffolding—meant to be deleted once the code exists. It's a
 
 ## Workflow
 
-1. Create `.lf/<branch>.md` early — after the first exchange or two (e.g., `.lf/context-and-worktrees.md` on the `context-and-worktrees` branch)
+1. Create `<branch>.md` at repo root early — after the first exchange or two (e.g., `context-and-worktrees.md` on the `context-and-worktrees` branch)
 2. Keep refining the doc as the conversation continues
 3. Commit with message `design: <branch>` when done
 4. End session—implementation happens in a separate `lf implement` invocation
 
 Write as you go, not at the end. The doc is a living artifact during the conversation. If the session crashes mid-design, the partial doc is still useful. Let writing it inspire new questions—gaps become obvious when you try to make things concrete.
 
-**Important:** Design docs are tied to branches. If you're on `main`, create a branch first with `lf start <name>`.
+**Important:** Design docs are tied to branches and live at repo root so they're auto-included in the prompt. If you're on `main`, create a branch first with `lf start <name>`.
 
 ## What makes a good design doc
 

@@ -1,0 +1,13 @@
+error handling: raise exceptions instead of returning error tuples
+
+Replace (result, error) tuples with exceptions for git operations and config loading.
+Callers now catch GitError and ConfigError for cleaner error handling.
+
+Changes:
+- `create_worktree()` raises GitError on failure instead of returning None
+- `open_pr()` raises GitError and returns URL directly
+- `load_config()` raises ConfigError on invalid YAML or schema
+- CLI commands catch specific exceptions and display user-friendly errors
+- Moved `autocommit()` to git.py, added push and verbose parameters
+- Added priority order for task file extensions: .lf > .md > other > bare name
+- Comprehensive test coverage for new error handling paths

@@ -27,13 +27,4 @@ Don't refactor working code just because you'd write it differently. Only fix ac
 
 ## Output
 
-Make the fixes, then commit with a message summarizing what was fixed. Format:
-
-```
-review: brief summary
-
-- Fixed X
-- Fixed Y
-```
-
-If there's nothing to fix, say so and stop.
+Make the fixes. If there's nothing to fix, say so.

@@ -1,0 +1,12 @@
+Simplify structure: flat tasks, VOICE.md, context files
+
+Major restructuring for clarity:
+- Tasks now live in .lf/*.lf (flat, not .lf/tasks/)
+- VOICE.md replaces the role system (artist/scientist)
+- Context files (-c) with parent doc gathering
+- New commands: install, doctor, land
+- Task arguments for primary input files
+
+The CLI becomes `lf <task> [arg] [-c files...]` instead of
+`lf claude <task> -r role`. Roles are gone—VOICE.md defines
+how Claude approaches all tasks.

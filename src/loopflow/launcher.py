@@ -1,7 +1,6 @@
 """Launch LLM coding sessions."""
 
 import subprocess
-import sys
 from pathlib import Path
 
 
@@ -9,17 +8,24 @@ def launch_claude(
     prompt: str,
     print_mode: bool = False,
     cwd: Path | None = None,
-) -> int:
-    """Launch a Claude Code session with the given prompt."""
+) -> tuple[int, str | None]:
+    """Launch a Claude Code session with the given prompt.
+
+    Returns (exit_code, output). Output is only captured in print mode.
+    """
     cmd = ["claude"]
 
     if print_mode:
         cmd.append("--print")
 
-    cmd.extend(["--prompt", prompt])
+    cmd.append(prompt)
 
-    result = subprocess.run(cmd, cwd=cwd)
-    return result.returncode
+    if print_mode:
+        result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+        return result.returncode, result.stdout
+    else:
+        result = subprocess.run(cmd, cwd=cwd)
+        return result.returncode, None
 
 
 def check_claude_available() -> bool:

@@ -1,7 +1,8 @@
 """Context gathering for LLM sessions."""
 
-import json
 from pathlib import Path
+
+from loopflow.files import gather_docs, gather_files, format_files
 
 
 def find_repo_root(start: Path | None = None) -> Path | None:
@@ -25,88 +26,76 @@ def _read_file_if_exists(path: Path) -> str | None:
     return None
 
 
-def gather_readme(repo_root: Path) -> str | None:
-    """Gather README content from the repository."""
-    for name in ["README.md", "README.txt", "README"]:
-        content = _read_file_if_exists(repo_root / name)
-        if content:
-            return content
-    return None
-
-
-def gather_style(repo_root: Path) -> str | None:
-    """Gather STYLE guide content from the repository."""
-    for name in ["STYLE.md", "STYLE.txt", "STYLE"]:
-        content = _read_file_if_exists(repo_root / name)
-        if content:
-            return content
-    return None
-
-
-def load_settings(repo_root: Path) -> dict:
-    """Load settings from .lf/settings.json."""
-    settings_path = repo_root / ".lf" / "settings.json"
-    if settings_path.exists():
-        try:
-            return json.loads(settings_path.read_text())
-        except json.JSONDecodeError:
-            return {}
-    return {}
-
-
-def get_default_role(repo_root: Path) -> str:
-    """Get the default role from settings, falling back to 'artist'."""
-    settings = load_settings(repo_root)
-    return settings.get("default_role", "artist")
-
-
-def gather_role(repo_root: Path, name: str | None = None) -> str | None:
-    """Gather role file content."""
-    if name is None:
-        name = get_default_role(repo_root)
-    lf_dir = repo_root / ".lf" / "roles"
-    for ext in [".lf", ".md", ".txt", ""]:
-        content = _read_file_if_exists(lf_dir / f"{name}{ext}")
-        if content:
-            return content
-    return None
-
-
 def gather_task(repo_root: Path, name: str) -> str | None:
-    """Gather task file content."""
-    lf_dir = repo_root / ".lf" / "tasks"
+    """Gather task file content from .lf/."""
+    lf_dir = repo_root / ".lf"
     for ext in [".lf", ".md", ".txt", ""]:
         content = _read_file_if_exists(lf_dir / f"{name}{ext}")
         if content:
             return content
     return None
+
+
+def gather_arg(repo_root: Path, arg: str) -> tuple[str, str] | None:
+    """Read the task argument file. Returns (relative_path, content) or None."""
+    path = (repo_root / arg).resolve()
+    if not path.exists() or not path.is_file():
+        return None
+    try:
+        rel_path = path.relative_to(repo_root)
+    except ValueError:
+        rel_path = path  # Outside repo, use absolute
+    return (str(rel_path), path.read_text())
+
+
+PRINT_MODE_SUFFIX = """
+When finished, output a brief summary of what you changed. This will be used as a commit message. Don't commit yourself—just output the summary.
+"""
 
 
 def build_prompt(
     repo_root: Path,
     task: str,
-    role: str | None = None,
+    arg: str | None = None,
+    print_mode: bool = False,
+    context: list[str] | None = None,
 ) -> str:
     """Build the full prompt for an LLM session."""
     parts = []
 
-    readme = gather_readme(repo_root)
-    if readme:
-        parts.append(f"# Project README\n\n{readme}")
+    # Gather root documentation as named sections
+    root_docs = gather_docs(repo_root, repo_root)
+    if root_docs:
+        doc_parts = []
+        for doc_path, content in root_docs:
+            name = doc_path.stem  # README, STYLE, VOICE, etc.
+            doc_parts.append(f"<lf:{name}>\n{content}\n</lf:{name}>")
+        docs_body = "\n\n".join(doc_parts)
+        parts.append(f"Repository documentation. Follow VOICE and STYLE carefully.\n\n<lf:docs>\n{docs_body}\n</lf:docs>")
 
-    style = gather_style(repo_root)
-    if style:
-        parts.append(f"# Style Guide\n\n{style}")
+    # Task argument (the primary input to the task)
+    if arg:
+        arg_result = gather_arg(repo_root, arg)
+        if arg_result:
+            rel_path, content = arg_result
+            parts.append(f"Task input.\n\n<lf:arg path=\"{rel_path}\">\n{content}\n</lf:arg>")
 
-    effective_role = role if role else get_default_role(repo_root)
-    role_content = gather_role(repo_root, effective_role)
-    if role_content:
-        parts.append(f"# Role: {effective_role}\n\n{role_content}")
-
+    # Task definition
     task_content = gather_task(repo_root, task)
     if task_content:
-        parts.append(f"# Task: {task}\n\n{task_content}")
+        parts.append(f"The task.\n\n<lf:task:{task}>\n{task_content}\n</lf:task:{task}>")
     else:
-        parts.append(f"# Task: {task}\n\nNo task file found for '{task}'.")
+        parts.append(f"The task.\n\n<lf:task:{task}>\nNo task file found for '{task}'.\n</lf:task:{task}>")
 
-    return "\n\n---\n\n".join(parts)
+    # Additional context files
+    if context:
+        gathered = gather_files(context, repo_root)
+        if gathered:
+            parts.append(format_files(gathered, repo_root))
+
+    prompt = "\n\n".join(parts)
+
+    if print_mode:
+        prompt += PRINT_MODE_SUFFIX
+
+    return prompt

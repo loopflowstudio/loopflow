@@ -20,10 +20,16 @@ classifiers = [
 ]
 dependencies = [
     "typer>=0.9.0",
+    "pathspec>=0.11.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
 ]
 
 [project.scripts]
-lf = "loopflow.cli:app"
+lf = "loopflow.cli:main"
 
 [build-system]
 requires = ["hatchling"]

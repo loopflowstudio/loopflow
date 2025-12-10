@@ -4,16 +4,74 @@ Arrange LLMs to code in harmony.
 
 ## Installation
 
-`pip install loopflow`
+```bash
+pip install loopflow
+lf install  # installs Claude Code via npm
+```
 
-## Basic Usage
+Requires Node.js for the `lf install` step. Alternatively, install [Claude Code](https://docs.anthropic.com/en/docs/claude-code) manually.
 
-`lf claude review`: Launches a claude code session with a default initial prompt. Should Include:
-* README and STYLE info from the entire codebase
-* A default "perspective" file, i.e. something like `.lf/perspectives/default.lf`
-* The contents of the task, e.g. something like `.lf/tasks/review.lf`
+## Usage
 
-`lf claude review -p`: Uses claude's print mode, which is to say:
-* Also wraps the claude code in our commit wrapper to make it easier to make atomic in git
+```bash
+lf <task> [arg] [-c context...]
+```
 
-`lf claude review -p artist`: Uses `.lf/perspectives/artist.lf` or something
+### Examples
+
+```bash
+# Run a task
+lf review
+lf commit
+
+# Task with input file
+lf implement design.md
+
+# Add context files
+lf implement design.md -c src/api.py -c src/models.py
+
+# Print mode: run non-interactively
+lf review -p
+
+# Check dependencies
+lf doctor
+```
+
+## Project Structure
+
+Loopflow reads from your repo:
+
+```
+.lf/
+├── review.lf           # Task definitions
+├── implement.lf
+└── commit.lf
+
+VOICE.md                # How Claude should think and work
+STYLE.md                # Code style guide
+README.md               # Project documentation
+```
+
+### Tasks
+
+Task files define what Claude should do. Place them in `.lf/` with `.lf`, `.md`, or `.txt` extension.
+
+### Task Arguments vs Context
+
+- **Argument** (`lf implement design.md`): The primary input to the task. Appears prominently in the prompt as "Task input."
+- **Context** (`-c file.py`): Supporting files. Appears as "Reference files" with parent documentation.
+
+### VOICE.md
+
+Defines Claude's voice—how it approaches problems, balances creativity with pragmatism, and communicates. This applies to all tasks.
+
+## Context Gathering
+
+Loopflow automatically gathers context for Claude:
+
+1. **Repository docs** - All `.md` files at the repo root (README, STYLE, VOICE, etc.)
+2. **Task argument** - The input file for the task (if provided)
+3. **Task definition** - From `.lf/<task>.lf`
+4. **Context files** - Any files specified with `-c`, plus their parent `.md` documentation
+
+Output uses `<lf:tag>` delimiters for unambiguous parsing.

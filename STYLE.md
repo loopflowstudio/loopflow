@@ -32,6 +32,7 @@ When editing `README.md` files:
 - Start with Usage and example commands
 - Don't duplicate what's in the source code
 - Write for users, not maintainers
+- Update when adding or changing user-facing features
 
 When editing `dd/*.md` design docs:
 - Focus on what's left to build, not what's done

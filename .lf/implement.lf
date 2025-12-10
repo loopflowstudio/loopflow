@@ -1,6 +1,6 @@
 Turn a design doc into working code.
 
-Read the design doc at `dd/{feature}.md` and implement what it describes. The doc contains data structures, APIs, constraints, and a "done when" verification step.
+The design doc is provided in the File Library (e.g., `lf claude implement dd/auth.md`). The doc contains data structures, APIs, constraints, and a "done when" verification step.
 
 ## Approach
 

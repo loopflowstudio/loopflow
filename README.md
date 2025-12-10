@@ -121,7 +121,9 @@ lf whatever      # → .lf/whatever.lf
 | Command | Description |
 |---------|-------------|
 | `lf pr create` | Create a GitHub PR for current branch |
-| `lf pr land [-m msg]` | Squash-merge current branch to main |
+| `lf pr land [--add]` | Squash-merge to main using PR title/body as commit message |
+
+`lf pr land` requires branch to be clean and pushed. Use `--add` to auto-commit and push first.
 
 ### Setup (`lf meta`)
 

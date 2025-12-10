@@ -1,0 +1,155 @@
+"""Pull request workflow commands."""
+
+import json
+import shutil
+import subprocess
+
+import typer
+
+from loopflow.context import find_repo_root
+from loopflow.git import open_pr
+
+app = typer.Typer(help="Pull request workflow.")
+
+
+@app.command()
+def create():
+    """Create a GitHub PR for this branch."""
+    repo_root = find_repo_root()
+    if not repo_root:
+        typer.echo("Error: Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    if not shutil.which("gh"):
+        typer.echo("Error: 'gh' CLI not found. Install with: brew install gh", err=True)
+        raise typer.Exit(1)
+
+    pr_url, error = open_pr(repo_root, draft=False)
+    if pr_url:
+        typer.echo(pr_url)
+        subprocess.run(["open", pr_url])
+    else:
+        typer.echo(f"Error: {error}", err=True)
+        raise typer.Exit(1)
+
+
+@app.command()
+def land(
+    add: bool = typer.Option(False, "-a", "--add", help="Add, commit, and push changes first"),
+):
+    """Land this branch: squash-merge to main and clean up.
+
+    Requires a PR with a title. Commit message is PR title + body.
+    Branch must be clean and pushed (use --add to auto-commit first).
+    """
+    repo_root = find_repo_root()
+    if not repo_root:
+        typer.echo("Error: Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    if not shutil.which("gh"):
+        typer.echo("Error: 'gh' CLI not found. Install with: brew install gh", err=True)
+        raise typer.Exit(1)
+
+    # Reject if .lf/COMMIT exists - should use PR metadata instead
+    commit_file = repo_root / ".lf" / "COMMIT"
+    if commit_file.exists():
+        typer.echo("Error: .lf/COMMIT exists. Delete it and put the message in the PR.", err=True)
+        raise typer.Exit(1)
+
+    # Get current branch
+    result = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    branch = result.stdout.strip()
+
+    if not branch or branch == "main":
+        typer.echo("Error: Already on main (or detached HEAD)", err=True)
+        raise typer.Exit(1)
+
+    # Check for uncommitted changes
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    has_changes = bool(result.stdout.strip())
+
+    if has_changes:
+        if add:
+            typer.echo("Adding and committing changes...")
+            subprocess.run(["git", "add", "-A"], cwd=repo_root, check=True)
+            subprocess.run(["git", "commit", "-m", "wip"], cwd=repo_root, check=True)
+        else:
+            typer.echo("Error: Uncommitted changes. Use --add or commit manually.", err=True)
+            raise typer.Exit(1)
+
+    # Check if pushed to origin
+    result = subprocess.run(
+        ["git", "rev-parse", "@{u}"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    has_upstream = result.returncode == 0
+
+    if has_upstream:
+        # Check if local is ahead of remote
+        result = subprocess.run(
+            ["git", "rev-list", "@{u}..HEAD", "--count"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+        )
+        unpushed = int(result.stdout.strip()) if result.returncode == 0 else 0
+
+        if unpushed > 0:
+            if add:
+                typer.echo("Pushing to origin...")
+                subprocess.run(["git", "push"], cwd=repo_root, check=True)
+            else:
+                typer.echo("Error: Unpushed commits. Use --add or push manually.", err=True)
+                raise typer.Exit(1)
+    else:
+        if add:
+            typer.echo("Pushing to origin...")
+            subprocess.run(["git", "push", "-u", "origin", branch], cwd=repo_root, check=True)
+        else:
+            typer.echo("Error: Branch not pushed. Use --add or push manually.", err=True)
+            raise typer.Exit(1)
+
+    # Get commit message from PR
+    result = subprocess.run(
+        ["gh", "pr", "view", "--json", "title,body"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        typer.echo("Error: No PR found. Run 'lf pr create' first.", err=True)
+        raise typer.Exit(1)
+
+    pr_data = json.loads(result.stdout)
+    title = pr_data.get("title", "").strip()
+    body = pr_data.get("body", "").strip()
+
+    if not title:
+        typer.echo("Error: PR has no title", err=True)
+        raise typer.Exit(1)
+
+    commit_msg = title
+    if body:
+        commit_msg += f"\n\n{body}"
+
+    # Land it
+    subprocess.run(["git", "checkout", "main"], cwd=repo_root, check=True)
+    subprocess.run(["git", "merge", "--squash", branch], cwd=repo_root, check=True)
+    subprocess.run(["git", "commit", "-m", commit_msg], cwd=repo_root, check=True)
+    subprocess.run(["git", "branch", "-D", branch], cwd=repo_root, check=True)
+    subprocess.run(["git", "push"], cwd=repo_root, check=True)
+
+    typer.echo(f"Landed {branch} to main and pushed.")

@@ -27,5 +27,6 @@ Review and run tests for this branch.
 From STYLE.md:
 - Test user behavior, not implementation details
 - Keep tests short and focused on one behavior
-- Prefer simple assertions over elaborate mocking
 - Delete flaky tests rather than adding retries
+
+**Mocking**: Use mocks to prevent side effects (network, subprocess, file I/O) and speed up tests. But don't write tests that just verify mock calls—if your assertion is `mock.assert_called_with(...)`, you're testing implementation, not behavior. Mock the dependency, then assert on the *result* of the function under test.

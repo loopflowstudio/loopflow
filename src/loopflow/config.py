@@ -1,20 +1,53 @@
 """Configuration loading for loopflow."""
 
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
+from pydantic import BaseModel, Field, field_validator
 
-from loopflow.pipeline import Pipeline
+
+class IdeConfig(BaseModel):
+    warp: bool = True
+    cursor: bool = True
+    workspace: str | None = None
 
 
-@dataclass
-class Config:
-    pipelines: dict[str, Pipeline] = field(default_factory=dict)
+class PipelineConfig(BaseModel):
+    name: str = ""
+    tasks: list[str]
+    push: bool | None = None
+    pr: bool | None = None
+
+
+class Config(BaseModel):
+    pipelines: dict[str, PipelineConfig] = Field(default_factory=dict)
     dangerously_skip_permissions: bool = False
     push: bool = False
     pr: bool = False
-    context: list[str] = field(default_factory=list)
+    context: list[str] = Field(default_factory=list)
+    ide: IdeConfig = Field(default_factory=IdeConfig)
+
+    @field_validator("context", mode="before")
+    @classmethod
+    def split_context_string(cls, v):
+        if isinstance(v, str):
+            return v.split()
+        return v
+
+    @field_validator("pipelines", mode="before")
+    @classmethod
+    def parse_pipelines(cls, v):
+        if not v:
+            return {}
+        return {
+            name: PipelineConfig(name=name, **data) if isinstance(data, dict) else data
+            for name, data in v.items()
+        }
+
+
+class ConfigError(Exception):
+    """User-friendly config error."""
+    pass
 
 
 def load_config(repo_root: Path) -> Config | None:
@@ -23,31 +56,22 @@ def load_config(repo_root: Path) -> Config | None:
     if not config_path.exists():
         return None
 
-    data = yaml.safe_load(config_path.read_text())
+    try:
+        data = yaml.safe_load(config_path.read_text())
+    except yaml.YAMLError as e:
+        raise ConfigError(f"Invalid YAML in {config_path}:\n{e}")
+
     if not data:
         return None
 
-    pipelines = {}
-    if "pipelines" in data:
-        for name, pipeline_data in data["pipelines"].items():
-            pipelines[name] = Pipeline(
-                name=name,
-                tasks=pipeline_data["tasks"],
-                push=pipeline_data.get("push"),
-                pr=pipeline_data.get("pr"),
-            )
-
-    dangerously_skip_permissions = data.get("dangerously_skip_permissions", False)
-    push = data.get("push", False)
-    pr = data.get("pr", False)
-    context_raw = data.get("context", [])
-    if isinstance(context_raw, str):
-        context_raw = context_raw.split()
-
-    return Config(
-        pipelines=pipelines,
-        dangerously_skip_permissions=dangerously_skip_permissions,
-        push=push,
-        pr=pr,
-        context=context_raw,
-    )
+    try:
+        return Config(**data)
+    except Exception as e:
+        # Extract the useful part from Pydantic errors
+        msg = str(e)
+        if "validation error" in msg.lower():
+            # Simplify Pydantic's verbose output
+            lines = msg.split("\n")
+            errors = [l.strip() for l in lines[1:] if l.strip() and not l.startswith("For further")]
+            raise ConfigError(f"Invalid config in {config_path}:\n" + "\n".join(errors))
+        raise ConfigError(f"Invalid config in {config_path}: {e}")

@@ -1,25 +1,17 @@
 """Pipeline execution for chaining tasks."""
 
 import subprocess
-from dataclasses import dataclass
 from pathlib import Path
 
+from loopflow.config import PipelineConfig
 from loopflow.context import build_prompt
 from loopflow.git import has_upstream, open_pr
 from loopflow.git import push as git_push
 from loopflow.launcher import launch_claude
 
 
-@dataclass
-class Pipeline:
-    name: str
-    tasks: list[str]
-    push: bool | None = None
-    pr: bool | None = None
-
-
 def run_pipeline(
-    pipeline: Pipeline,
+    pipeline: PipelineConfig,
     repo_root: Path,
     arg: str | None = None,
     context: list[str] | None = None,

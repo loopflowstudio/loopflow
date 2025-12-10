@@ -107,3 +107,56 @@ def test_format_files_uses_unique_delimiters(temp_repo):
     assert "def main(): pass" in result
     assert "</lf:file>" in result
     assert "</lf:files>" in result
+
+
+# --- Path expression tests ---
+
+
+def test_gather_files_directory_expands_to_all_files(temp_repo):
+    """A directory path gathers all non-ignored files recursively."""
+    results = gather_files(["src"], temp_repo)
+    paths = [p for p, _ in results]
+
+    assert temp_repo / "src" / "app.py" in paths
+    assert temp_repo / "src" / "README.md" in paths
+
+
+def test_gather_files_dot_expands_to_whole_repo(temp_repo):
+    """'.' gathers all non-ignored files in the repo."""
+    results = gather_files(["."], temp_repo)
+    paths = [p for p, _ in results]
+
+    assert temp_repo / "main.py" in paths
+    assert temp_repo / "src" / "app.py" in paths
+    assert temp_repo / "README.md" in paths
+    # Ignored files still excluded
+    assert temp_repo / "debug.log" not in paths
+    assert temp_repo / "build" / "output.txt" not in paths
+
+
+def test_gather_files_glob_pattern(temp_repo):
+    """Glob patterns expand to matching files."""
+    results = gather_files(["*.py"], temp_repo)
+    paths = [p for p, _ in results]
+
+    assert temp_repo / "main.py" in paths
+
+
+def test_gather_files_recursive_glob_pattern(temp_repo):
+    """Recursive glob patterns expand to matching files in subdirs."""
+    results = gather_files(["**/*.py"], temp_repo)
+    paths = [p for p, _ in results]
+
+    assert temp_repo / "main.py" in paths
+    assert temp_repo / "src" / "app.py" in paths
+
+
+def test_gather_files_mixed_paths(temp_repo):
+    """Mix of files, directories, and globs all work together."""
+    results = gather_files(["main.py", "src", "*.md"], temp_repo)
+    paths = [p for p, _ in results]
+
+    assert temp_repo / "main.py" in paths
+    assert temp_repo / "src" / "app.py" in paths
+    assert temp_repo / "README.md" in paths
+    assert temp_repo / "CONTRIBUTING.md" in paths

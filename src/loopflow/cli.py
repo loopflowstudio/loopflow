@@ -11,7 +11,7 @@ from pathlib import Path
 
 from loopflow.config import load_config
 from loopflow.context import build_prompt, find_repo_root, gather_task
-from loopflow.git import create_and_track_branch, open_pr
+from loopflow.git import create_worktree, open_pr
 from loopflow.launcher import check_claude_available, launch_claude
 from loopflow.pipeline import run_pipeline
 
@@ -54,7 +54,7 @@ def run(
         None, "-c", "--context", help="Additional files for context"
     ),
     branch: str = typer.Option(
-        None, "-b", "--branch", help="Create and track new branch"
+        None, "-b", "--branch", help="Create worktree and run task there"
     ),
 ):
     """Run a task with Claude."""
@@ -67,10 +67,13 @@ def run(
         typer.echo("Error: 'claude' CLI not found. Run: lf install", err=True)
         raise typer.Exit(1)
 
+    # Create worktree and run task there
     if branch:
-        if not create_and_track_branch(repo_root, branch):
-            typer.echo(f"Error: Could not create branch '{branch}'", err=True)
+        worktree_path = create_worktree(repo_root, branch)
+        if not worktree_path:
+            typer.echo(f"Error: Could not create worktree '{branch}'", err=True)
             raise typer.Exit(1)
+        repo_root = worktree_path
 
     config = load_config(repo_root)
     skip_permissions = config.dangerously_skip_permissions if config else False
@@ -91,6 +94,9 @@ def run(
 
     if print_mode and exit_code == 0:
         _autocommit(repo_root, task, arg)
+
+    if branch:
+        typer.echo(f"\nWorktree: {repo_root}")
 
     raise typer.Exit(exit_code)
 
@@ -182,6 +188,24 @@ def doctor():
 
 
 @app.command()
+def start(
+    name: str = typer.Argument(help="Branch/worktree name"),
+):
+    """Create a worktree and branch for a new feature."""
+    repo_root = find_repo_root()
+    if not repo_root:
+        typer.echo("Error: Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    worktree_path = create_worktree(repo_root, name)
+    if not worktree_path:
+        typer.echo(f"Error: Could not create worktree '{name}'", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(str(worktree_path))
+
+
+@app.command()
 def pipeline(
     name: str = typer.Argument(help="Pipeline name from config.yaml"),
     arg: str = typer.Argument(None, help="Input for first task"),
@@ -189,7 +213,7 @@ def pipeline(
         None, "-c", "--context", help="Context files for all tasks"
     ),
     branch: str = typer.Option(
-        None, "-b", "--branch", help="Create and track new branch"
+        None, "-b", "--branch", help="Create worktree and run pipeline there"
     ),
     pr: bool = typer.Option(
         None, "--pr", help="Open PR when done"
@@ -205,10 +229,13 @@ def pipeline(
         typer.echo("Error: 'claude' CLI not found. Run: lf install", err=True)
         raise typer.Exit(1)
 
+    # Create worktree and run pipeline there
     if branch:
-        if not create_and_track_branch(repo_root, branch):
-            typer.echo(f"Error: Could not create branch '{branch}'", err=True)
+        worktree_path = create_worktree(repo_root, branch)
+        if not worktree_path:
+            typer.echo(f"Error: Could not create worktree '{branch}'", err=True)
             raise typer.Exit(1)
+        repo_root = worktree_path
 
     config = load_config(repo_root)
     if not config or name not in config.pipelines:
@@ -255,6 +282,49 @@ def pr():
     else:
         typer.echo(f"Error: {error}", err=True)
         raise typer.Exit(1)
+
+
+@app.command()
+def inline(
+    prompt: str = typer.Argument(help="Inline prompt to run with Claude"),
+    print_mode: bool = typer.Option(
+        False, "-p", "-P", "--print", help="Run non-interactively"
+    ),
+    context: list[str] = typer.Option(
+        None, "-c", "--context", help="Additional files for context"
+    ),
+):
+    """Run an inline prompt with Claude."""
+    repo_root = find_repo_root()
+    if not repo_root:
+        typer.echo("Error: Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    if not check_claude_available():
+        typer.echo("Error: 'claude' CLI not found. Run: lf install", err=True)
+        raise typer.Exit(1)
+
+    config = load_config(repo_root)
+    skip_permissions = config.dangerously_skip_permissions if config else False
+
+    # Merge config context with CLI context
+    all_context = list(config.context) if config and config.context else []
+    if context:
+        all_context.extend(context)
+
+    prompt_text = build_prompt(repo_root, task=None, inline=prompt, context=all_context or None)
+    exit_code, _ = launch_claude(
+        prompt_text,
+        print_mode=print_mode,
+        stream=print_mode,
+        skip_permissions=skip_permissions,
+        cwd=repo_root,
+    )
+
+    if print_mode and exit_code == 0:
+        _autocommit(repo_root, ":", prompt)
+
+    raise typer.Exit(exit_code)
 
 
 @app.command()
@@ -326,28 +396,35 @@ def land(
 
 def main():
     """Entry point that supports 'lf <task>' and 'lf <pipeline>' shorthand."""
-    known_commands = {"run", "pipeline", "version", "install", "doctor", "pr", "land", "--help", "-h"}
+    known_commands = {"run", "pipeline", "version", "install", "doctor", "start", "pr", "land", "inline", "--help", "-h"}
 
-    if len(sys.argv) > 1 and sys.argv[1] not in known_commands:
-        name = sys.argv[1]
-        repo_root = find_repo_root()
-        config = load_config(repo_root) if repo_root else None
+    if len(sys.argv) > 1:
+        first_arg = sys.argv[1]
 
-        has_pipeline = config and name in config.pipelines
-        has_task = repo_root and gather_task(repo_root, name) is not None
+        # Inline prompt: lf : "prompt"
+        if first_arg == ":":
+            sys.argv.pop(1)  # Remove the ":"
+            sys.argv.insert(1, "inline")
+        elif first_arg not in known_commands:
+            name = sys.argv[1]
+            repo_root = find_repo_root()
+            config = load_config(repo_root) if repo_root else None
 
-        if has_pipeline and has_task:
-            typer.echo(
-                f"Error: '{name}' exists as both a pipeline and a task. "
-                "Remove one to resolve the conflict.",
-                err=True,
-            )
-            raise SystemExit(1)
+            has_pipeline = config and name in config.pipelines
+            has_task = repo_root and gather_task(repo_root, name) is not None
 
-        if has_pipeline:
-            sys.argv.insert(1, "pipeline")
-        else:
-            sys.argv.insert(1, "run")
+            if has_pipeline and has_task:
+                typer.echo(
+                    f"Error: '{name}' exists as both a pipeline and a task. "
+                    "Remove one to resolve the conflict.",
+                    err=True,
+                )
+                raise SystemExit(1)
+
+            if has_pipeline:
+                sys.argv.insert(1, "pipeline")
+            else:
+                sys.argv.insert(1, "run")
 
     app()
 

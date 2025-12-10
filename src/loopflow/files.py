@@ -82,6 +82,29 @@ def gather_file(path: Path, repo_root: Path) -> tuple[Path, str] | None:
     return (path, path.read_text())
 
 
+def _expand_path(path_str: str, repo_root: Path) -> list[Path]:
+    """Expand a path string to a list of file paths.
+
+    Handles:
+    - Regular files: returns [path]
+    - Directories: returns all files recursively
+    - Glob patterns (* or **): returns matching files
+    """
+    # Check for glob patterns
+    if "*" in path_str:
+        return sorted(repo_root.glob(path_str))
+
+    path = (repo_root / path_str).resolve()
+
+    if path.is_file():
+        return [path]
+
+    if path.is_dir():
+        return sorted(path.rglob("*"))
+
+    return []
+
+
 def gather_files(paths: list[str], repo_root: Path) -> list[tuple[Path, str]]:
     """Gather files and their parent READMEs.
 
@@ -91,19 +114,20 @@ def gather_files(paths: list[str], repo_root: Path) -> list[tuple[Path, str]]:
     results: list[tuple[Path, str]] = []
 
     for path_str in paths:
-        path = (repo_root / path_str).resolve()
+        expanded = _expand_path(path_str, repo_root)
 
-        # Gather parent documentation first
-        for doc_path, content in gather_docs(path, repo_root):
-            if doc_path not in seen:
-                seen.add(doc_path)
-                results.append((doc_path, content))
+        for path in expanded:
+            # Gather parent documentation first
+            for doc_path, content in gather_docs(path, repo_root):
+                if doc_path not in seen:
+                    seen.add(doc_path)
+                    results.append((doc_path, content))
 
-        # Gather the file itself
-        file_result = gather_file(path, repo_root)
-        if file_result and file_result[0] not in seen:
-            seen.add(file_result[0])
-            results.append(file_result)
+            # Gather the file itself
+            file_result = gather_file(path, repo_root)
+            if file_result and file_result[0] not in seen:
+                seen.add(file_result[0])
+                results.append(file_result)
 
     return results
 

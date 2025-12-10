@@ -85,6 +85,13 @@ Create and track a new branch with `-b`:
 lf implement -b feature-name design.md
 ```
 
+Or run an inline prompt without a task file:
+
+```bash
+lf : "fix the typo in README"           # Quick inline prompt
+lf : "add tests for the parser" -c src/parser.py
+```
+
 ## Commands
 
 **Built-in commands:**

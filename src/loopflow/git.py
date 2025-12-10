@@ -48,14 +48,30 @@ def open_pr(repo_root: Path, draft: bool = True) -> tuple[str | None, str | None
     """Open GitHub PR for current branch. Returns (url, error)."""
     commit_file = repo_root / ".lf" / "COMMIT"
 
+    # Read COMMIT for PR title/body before deleting
     if commit_file.exists():
         content = commit_file.read_text().strip()
         lines = content.split("\n", 1)
         title = lines[0]
         body = lines[1].strip() if len(lines) > 1 else ""
         cmd = ["gh", "pr", "create", "--title", title, "--body", body]
+        # Remove COMMIT before push - PR becomes source of truth
+        commit_file.unlink()
+        subprocess.run(["git", "add", "-A"], cwd=repo_root, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "remove .lf/COMMIT"],
+            cwd=repo_root,
+            check=True,
+        )
     else:
         cmd = ["gh", "pr", "create", "--fill"]
+
+    # Push to origin
+    subprocess.run(
+        ["git", "push", "-u", "origin", "HEAD"],
+        cwd=repo_root,
+        capture_output=True,
+    )
 
     if draft:
         cmd.append("--draft")

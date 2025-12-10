@@ -251,6 +251,7 @@ def pr():
     pr_url, error = open_pr(repo_root, draft=False)
     if pr_url:
         typer.echo(pr_url)
+        subprocess.run(["open", pr_url])
     else:
         typer.echo(f"Error: {error}", err=True)
         raise typer.Exit(1)

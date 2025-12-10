@@ -101,7 +101,8 @@ lf : "add tests for the parser" -c src/parser.py
 
 | Command | Description |
 |---------|-------------|
-| `lf start <name>` | Create worktree and branch for a new feature |
+| `lf start <name>` | Create worktree and branch, open Warp + Cursor |
+| `lf open <name>` | Open Warp + Cursor at existing worktree |
 | `lf install` | Install Node.js and Claude Code (macOS) |
 | `lf doctor` | Check dependencies |
 | `lf version` | Show version |

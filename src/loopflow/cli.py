@@ -188,10 +188,8 @@ def doctor():
 
 
 def _open_worktree(path: Path) -> None:
-    """Open Warp terminal and Cursor at the given path."""
-    # Open Warp
+    """Open Warp terminal and Cursor at path."""
     subprocess.run(["open", f"warp://action/new_window?path={path}"])
-    # Open Cursor
     subprocess.run(["cursor", str(path)])
 
 

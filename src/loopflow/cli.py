@@ -187,11 +187,19 @@ def doctor():
     raise typer.Exit(0 if all_ok else 1)
 
 
+def _open_worktree(path: Path) -> None:
+    """Open Warp terminal and Cursor at the given path."""
+    # Open Warp
+    subprocess.run(["open", f"warp://action/new_window?path={path}"])
+    # Open Cursor
+    subprocess.run(["cursor", str(path)])
+
+
 @app.command()
 def start(
     name: str = typer.Argument(help="Branch/worktree name"),
 ):
-    """Create a worktree and branch for a new feature."""
+    """Create a worktree and branch for a new feature, open Warp + Cursor."""
     repo_root = find_repo_root()
     if not repo_root:
         typer.echo("Error: Not in a git repository", err=True)
@@ -202,6 +210,26 @@ def start(
         typer.echo(f"Error: Could not create worktree '{name}'", err=True)
         raise typer.Exit(1)
 
+    _open_worktree(worktree_path)
+    typer.echo(str(worktree_path))
+
+
+@app.command(name="open")
+def open_worktree(
+    name: str = typer.Argument(help="Branch/worktree name"),
+):
+    """Open Warp + Cursor at an existing worktree."""
+    repo_root = find_repo_root()
+    if not repo_root:
+        typer.echo("Error: Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    worktree_path = repo_root / ".lf" / "worktrees" / name
+    if not worktree_path.exists():
+        typer.echo(f"Error: Worktree '{name}' not found at {worktree_path}", err=True)
+        raise typer.Exit(1)
+
+    _open_worktree(worktree_path)
     typer.echo(str(worktree_path))
 
 
@@ -396,7 +424,7 @@ def land(
 
 def main():
     """Entry point that supports 'lf <task>' and 'lf <pipeline>' shorthand."""
-    known_commands = {"run", "pipeline", "version", "install", "doctor", "start", "pr", "land", "inline", "--help", "-h"}
+    known_commands = {"run", "pipeline", "version", "install", "doctor", "start", "open", "pr", "land", "inline", "--help", "-h"}
 
     if len(sys.argv) > 1:
         first_arg = sys.argv[1]

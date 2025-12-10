@@ -121,7 +121,7 @@ lf whatever      # → .lf/whatever.lf
 |--------|-------------|
 | `-p, --print` | Run non-interactively (batch mode) |
 | `-c, --context FILE` | Add context files (repeatable) |
-| `-b, --branch NAME` | Create and track new branch |
+| `-b, --branch NAME` | Create worktree and run task there |
 
 **Note:** Batch mode (`-p`) automatically runs with `--dangerously-skip-permissions` since there's no way to approve permissions interactively.
 

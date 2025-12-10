@@ -1,0 +1,9 @@
+dangerously_skip_permissions: true
+
+pipelines:
+  ship:
+    - implement
+    - review
+    - rebase
+    - test
+    - draft_commit

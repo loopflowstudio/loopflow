@@ -2,76 +2,168 @@
 
 Arrange LLMs to code in harmony.
 
+**macOS only** (for now)
+
 ## Installation
 
 ```bash
 pip install loopflow
-lf install  # installs Claude Code via npm
+lf install  # installs Node.js (via Homebrew) and Claude Code
 ```
 
-Requires Node.js for the `lf install` step. Alternatively, install [Claude Code](https://docs.anthropic.com/en/docs/claude-code) manually.
+## How It Works
 
-## Usage
+Loopflow builds prompts for Claude from two sources:
 
-```bash
-lf <task> [arg] [-c context...]
+1. **Repository docs** (`.md` files at repo root) - guidance that applies to all tasks
+2. **Task definitions** (`.lf/` directory) - specific instructions for each task
+
+### Step 1: Write Documentation for Claude
+
+Put `.md` files at your repo root. Claude reads all of them before every task. Use these to communicate:
+
+- What the project does and how it's structured
+- Code style, conventions, and patterns to follow
+- How you want Claude to think and communicate
+- Development workflow and practices
+
+Write them for Claude, not just humans. For example:
+
+```markdown
+# STYLE.md
+
+Use descriptive variable names. Prefer early returns over nested conditionals.
+Keep functions under 30 lines. Don't add docstrings to obvious functions.
 ```
 
-### Examples
+Common files: `README.md`, `STYLE.md`, `VOICE.md`, `CONTRIBUTING.md` - but name them whatever makes sense.
 
-```bash
-# Run a task
-lf review
-lf commit
+### Step 2: Define Tasks
 
-# Task with input file
-lf implement design.md
-
-# Add context files
-lf implement design.md -c src/api.py -c src/models.py
-
-# Print mode: run non-interactively
-lf review -p
-
-# Check dependencies
-lf doctor
-```
-
-## Project Structure
-
-Loopflow reads from your repo:
+Create task files in `.lf/`:
 
 ```
 .lf/
-├── review.lf           # Task definitions
+├── review.lf
 ├── implement.lf
 └── commit.lf
-
-VOICE.md                # How Claude should think and work
-STYLE.md                # Code style guide
-README.md               # Project documentation
 ```
 
-### Tasks
+Each file contains instructions for that task. For example:
 
-Task files define what Claude should do. Place them in `.lf/` with `.lf`, `.md`, or `.txt` extension.
+```markdown
+# .lf/review.lf
 
-### Task Arguments vs Context
+Review the code for bugs, style issues, and potential improvements.
+Be direct. If something is wrong, say so.
+```
 
-- **Argument** (`lf implement design.md`): The primary input to the task. Appears prominently in the prompt as "Task input."
-- **Context** (`-c file.py`): Supporting files. Appears as "Reference files" with parent documentation.
+### Step 3: Run Tasks
 
-### VOICE.md
+```bash
+lf review                    # Run the review task
+lf implement                 # Run the implement task
+lf my-custom-task            # Run any task you've defined
+```
 
-Defines Claude's voice—how it approaches problems, balances creativity with pragmatism, and communicates. This applies to all tasks.
+Tasks can take an argument (a primary input file):
 
-## Context Gathering
+```bash
+lf implement design.md       # design.md becomes the "task input"
+lf review src/api.py         # review this specific file
+```
 
-Loopflow automatically gathers context for Claude:
+Add context files with `-c`:
 
-1. **Repository docs** - All `.md` files at the repo root (README, STYLE, VOICE, etc.)
-2. **Task argument** - The input file for the task (if provided)
-3. **Task definition** - From `.lf/<task>.lf`
-4. **Context files** - Any files specified with `-c`, plus their parent `.md` documentation
+```bash
+lf implement design.md -c src/models.py -c src/api.py
+```
 
-Output uses `<lf:tag>` delimiters for unambiguous parsing.
+## Commands
+
+**Built-in commands:**
+
+| Command | Description |
+|---------|-------------|
+| `lf install` | Install Node.js and Claude Code (macOS) |
+| `lf doctor` | Check dependencies |
+| `lf version` | Show version |
+| `lf land [-m msg]` | Squash-merge current branch to main |
+
+**Task commands** - anything else runs a task from `.lf/`:
+
+```bash
+lf review        # → .lf/review.lf
+lf implement     # → .lf/implement.lf
+lf whatever      # → .lf/whatever.lf
+```
+
+## Options
+
+| Option | Description |
+|--------|-------------|
+| `-p, --print` | Run non-interactively (batch mode) |
+| `-c, --context FILE` | Add context files (repeatable) |
+
+**Note:** Batch mode (`-p`) automatically runs with `--dangerously-skip-permissions` since there's no way to approve permissions interactively.
+
+## Pipelines
+
+Chain tasks into named sequences. Define them in `.lf/config.yaml`:
+
+```yaml
+pipelines:
+  ship:
+    - implement
+    - review
+    - rebase
+    - test
+    - draft_commit
+```
+
+Run with:
+
+```bash
+lf ship design.md   # runs implement -> review -> rebase -> test -> draft_commit
+```
+
+- First task gets the argument (`design.md`)
+- Each task runs in batch mode with streaming output
+- Each task commits its changes before the next task starts
+- macOS notification when pipeline finishes
+
+## Configuration
+
+Create `.lf/config.yaml` for repo-wide settings:
+
+```yaml
+# Skip permission prompts in interactive mode (default: false)
+dangerously_skip_permissions: true
+
+pipelines:
+  ship:
+    - implement
+    - review
+    - rebase
+    - test
+    - draft_commit
+```
+
+## Prompt Structure
+
+Loopflow assembles prompts with `<lf:tag>` delimiters:
+
+```
+<lf:docs>
+<lf:README>...</lf:README>
+<lf:STYLE>...</lf:STYLE>
+</lf:docs>
+
+<lf:task:review>...</lf:task:review>
+
+<lf:input path="design.md">...</lf:input>
+
+<lf:files>
+<lf:file path="src/api.py">...</lf:file>
+</lf:files>
+```

@@ -1,12 +1,25 @@
-Simplify structure: flat tasks, VOICE.md, context files
+pipelines: chain tasks into named sequences
 
-Major restructuring for clarity:
-- Tasks now live in .lf/*.lf (flat, not .lf/tasks/)
-- VOICE.md replaces the role system (artist/scientist)
-- Context files (-c) with parent doc gathering
-- New commands: install, doctor, land
-- Task arguments for primary input files
+Define pipelines in `.lf/config.yaml` to run tasks in sequence. Each task
+runs in batch mode with streaming output, commits automatically, then the
+next task starts.
 
-The CLI becomes `lf <task> [arg] [-c files...]` instead of
-`lf claude <task> -r role`. Roles are gone—VOICE.md defines
-how Claude approaches all tasks.
+Example config:
+
+```yaml
+pipelines:
+  ship:
+    - implement
+    - review
+    - test
+    - rebase
+    - draft_commit
+```
+
+Run with `lf ship design.md`. First task gets the argument; subsequent tasks
+run without args. Context files (-c) apply to all tasks. macOS notification
+when pipeline completes.
+
+Includes new tasks `test`, `rebase`, and `draft_commit` for common workflows.
+Adds `dangerously_skip_permissions` config option. Updates README with full
+pipeline documentation.

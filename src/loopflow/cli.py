@@ -76,7 +76,7 @@ def run(
     skip_permissions = config.dangerously_skip_permissions if config else False
 
     # Merge config context with CLI context
-    all_context = list(config.context) if config else []
+    all_context = list(config.context) if config and config.context else []
     if context:
         all_context.extend(context)
 

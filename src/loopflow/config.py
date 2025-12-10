@@ -30,17 +30,12 @@ def load_config(repo_root: Path) -> Config | None:
     pipelines = {}
     if "pipelines" in data:
         for name, pipeline_data in data["pipelines"].items():
-            if isinstance(pipeline_data, list):
-                # Old format: just a list of tasks
-                pipelines[name] = Pipeline(name=name, tasks=pipeline_data)
-            else:
-                # New format: dict with tasks, push, pr
-                pipelines[name] = Pipeline(
-                    name=name,
-                    tasks=pipeline_data.get("tasks", pipeline_data),
-                    push=pipeline_data.get("push"),
-                    pr=pipeline_data.get("pr"),
-                )
+            pipelines[name] = Pipeline(
+                name=name,
+                tasks=pipeline_data["tasks"],
+                push=pipeline_data.get("push"),
+                pr=pipeline_data.get("pr"),
+            )
 
     dangerously_skip_permissions = data.get("dangerously_skip_permissions", False)
     push = data.get("push", False)

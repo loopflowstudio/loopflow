@@ -149,9 +149,10 @@ pr: false           # don't open PRs by default
 
 pipelines:
   ship:
-    - implement
-    - review
-    - draft_commit
+    tasks:
+      - implement
+      - review
+      - draft_commit
     pr: true        # this pipeline opens a PR
 ```
 
@@ -183,11 +184,12 @@ pr: false
 
 pipelines:
   ship:
-    - implement
-    - review
-    - rebase
-    - test
-    - draft_commit
+    tasks:
+      - implement
+      - review
+      - rebase
+      - test
+      - draft_commit
     pr: true  # override: this pipeline opens PRs
 ```
 

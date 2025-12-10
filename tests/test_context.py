@@ -62,13 +62,6 @@ def test_build_prompt_handles_missing_task(temp_repo):
     assert "No task file found" in result
 
 
-def test_build_prompt_print_mode_requests_commit_summary(temp_repo):
-    """Print mode adds instructions for commit message output."""
-    result = build_prompt(temp_repo, "implement", print_mode=True)
-
-    assert "commit message" in result
-
-
 def test_build_prompt_includes_arg(temp_repo):
     """Task arg appears as primary input before task definition."""
     (temp_repo / "design.md").write_text("# Design\n\nBuild a widget.\n")

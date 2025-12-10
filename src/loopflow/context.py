@@ -48,16 +48,10 @@ def gather_arg(repo_root: Path, arg: str) -> tuple[str, str] | None:
     return (str(rel_path), path.read_text())
 
 
-PRINT_MODE_SUFFIX = """
-When finished, output a brief summary of what you changed. This will be used as a commit message. Don't commit yourself—just output the summary.
-"""
-
-
 def build_prompt(
     repo_root: Path,
     task: str,
     arg: str | None = None,
-    print_mode: bool = False,
     context: list[str] | None = None,
 ) -> str:
     """Build the full prompt for an LLM session."""
@@ -93,9 +87,4 @@ def build_prompt(
         if gathered:
             parts.append(format_files(gathered, repo_root))
 
-    prompt = "\n\n".join(parts)
-
-    if print_mode:
-        prompt += PRINT_MODE_SUFFIX
-
-    return prompt
+    return "\n\n".join(parts)

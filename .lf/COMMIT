@@ -1,0 +1,20 @@
+lf wt: add worktree management commands
+
+Organize CLI into subcommands: `lf wt`, `lf pr`, `lf meta`. The new
+`lf wt` commands manage git worktrees at `.lf/worktrees/`:
+
+- `lf wt create <name>` - create worktree, branch, and open IDEs
+- `lf wt open <name>` - reopen IDEs at existing worktree
+- `lf wt list` - show worktrees with dirty/local status
+- `lf wt clean` - remove worktrees for branches not on origin
+
+IDE integration opens Warp and Cursor based on config settings. Falls
+back to cursor alone if no workspace file found, or uses explicit
+workspace path from config.
+
+Moves `lf install`, `lf doctor`, `lf version` to `lf meta` namespace.
+Moves `lf land` and PR creation to `lf pr` namespace. Top-level task
+commands like `lf review` and pipelines remain unchanged.
+
+Adds pydantic for validated config loading with IdeConfig model. Tests
+updated to use PipelineConfig directly instead of Pipeline dataclass.

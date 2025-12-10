@@ -69,20 +69,23 @@ lf my-custom-task            # Run any task you've defined
 Tasks can take an argument (a primary input file):
 
 ```bash
-lf implement design.md       # design.md becomes the "task input"
+lf implement dd/auth.md      # explicit design doc path
 lf review src/api.py         # review this specific file
+```
+
+Or use the branch-based workflow (recommended):
+
+```bash
+lf start auth-feature        # create worktree at .lf/worktrees/auth-feature/
+cd .lf/worktrees/auth-feature
+lf design                    # writes to .lf/auth-feature.md
+lf implement                 # reads from .lf/auth-feature.md (no arg needed)
 ```
 
 Add context files with `-c`:
 
 ```bash
-lf implement design.md -c src/models.py -c src/api.py
-```
-
-Create and track a new branch with `-b`:
-
-```bash
-lf implement -b feature-name design.md
+lf implement -c src/models.py -c src/api.py
 ```
 
 Or run an inline prompt without a task file:
@@ -98,6 +101,7 @@ lf : "add tests for the parser" -c src/parser.py
 
 | Command | Description |
 |---------|-------------|
+| `lf start <name>` | Create worktree and branch for a new feature |
 | `lf install` | Install Node.js and Claude Code (macOS) |
 | `lf doctor` | Check dependencies |
 | `lf version` | Show version |
@@ -138,10 +142,10 @@ pipelines:
 Run with:
 
 ```bash
-lf ship design.md   # runs implement -> review -> rebase -> test -> draft_commit
+lf ship             # runs implement -> review -> rebase -> test -> draft_commit
 ```
 
-- First task gets the argument (`design.md`)
+- First task reads from `.lf/<branch>.md` by default
 - Each task runs in batch mode with streaming output
 - Each task commits its changes before the next task starts
 - macOS notification when pipeline finishes

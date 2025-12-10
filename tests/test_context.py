@@ -99,3 +99,27 @@ def test_build_prompt_arg_and_context_separate(temp_repo):
     # Both present, in different sections
     assert "Task input" in result
     assert "Reference files" in result
+
+
+def test_build_prompt_inline_instead_of_task(temp_repo):
+    """Inline prompt replaces task file lookup."""
+    result = build_prompt(temp_repo, task=None, inline="fix the bug in main.py")
+
+    assert "The task" in result
+    assert "<lf:task>" in result
+    assert "fix the bug in main.py" in result
+    assert "</lf:task>" in result
+    # Should not have task name in delimiters
+    assert "<lf:task:implement>" not in result
+
+
+def test_build_prompt_inline_with_context(temp_repo):
+    """Inline prompt works with context files."""
+    (temp_repo / "main.py").write_text("print('hello')\n")
+
+    result = build_prompt(temp_repo, task=None, inline="add tests", context=["main.py"])
+
+    assert "<lf:task>" in result
+    assert "add tests" in result
+    assert "<lf:files>" in result
+    assert "print('hello')" in result

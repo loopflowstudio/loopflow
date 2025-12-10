@@ -23,7 +23,7 @@ The deliverable is the fixes themselves, not a written review.
 
 Don't expand scope. If something unrelated to this branch's changes could be better, leave it alone.
 
-Don't refactor working code just because you'd write it differently. Only fix actual problems.
+Don't refactor working code that isn't broken. Only fix actual problems.
 
 ## Output
 

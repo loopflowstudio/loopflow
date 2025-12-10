@@ -246,12 +246,13 @@ def land(
     subprocess.run(["git", "merge", "--squash", branch], cwd=repo_root, check=True)
     subprocess.run(["git", "commit", "-m", commit_msg], cwd=repo_root, check=True)
     subprocess.run(["git", "branch", "-D", branch], cwd=repo_root, check=True)
+    subprocess.run(["git", "push"], cwd=repo_root, check=True)
 
     # Clean up commit file if it was used
     if commit_file.exists():
         commit_file.unlink()
 
-    typer.echo(f"Landed {branch} to main.")
+    typer.echo(f"Landed {branch} to main and pushed.")
 
 
 def main():

@@ -248,11 +248,11 @@ def pr():
         typer.echo("Error: 'gh' CLI not found. Install with: brew install gh", err=True)
         raise typer.Exit(1)
 
-    pr_url = open_pr(repo_root, draft=False)
+    pr_url, error = open_pr(repo_root, draft=False)
     if pr_url:
         typer.echo(pr_url)
     else:
-        typer.echo("Error: Could not create PR", err=True)
+        typer.echo(f"Error: {error}", err=True)
         raise typer.Exit(1)
 
 

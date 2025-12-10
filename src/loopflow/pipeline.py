@@ -62,9 +62,11 @@ def run_pipeline(
         _autocommit(repo_root, task_name, task_arg, push=should_push)
 
     if should_pr:
-        pr_url = open_pr(repo_root, draft=True)
+        pr_url, error = open_pr(repo_root, draft=False)
         if pr_url:
             print(f"\nPR created: {pr_url}")
+        else:
+            print(f"\nPR creation failed: {error}")
 
     _notify_done(pipeline.name)
     return 0

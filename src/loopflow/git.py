@@ -44,8 +44,8 @@ def create_and_track_branch(repo_root: Path, name: str) -> bool:
     return result.returncode == 0
 
 
-def open_pr(repo_root: Path, draft: bool = True) -> str | None:
-    """Open GitHub PR for current branch. Returns PR URL or None on failure."""
+def open_pr(repo_root: Path, draft: bool = True) -> tuple[str | None, str | None]:
+    """Open GitHub PR for current branch. Returns (url, error)."""
     commit_file = repo_root / ".lf" / "COMMIT"
 
     if commit_file.exists():
@@ -78,7 +78,7 @@ def open_pr(repo_root: Path, draft: bool = True) -> str | None:
                 text=True,
             )
             if view_result.returncode == 0:
-                return view_result.stdout.strip()
-        return None
+                return view_result.stdout.strip(), None
+        return None, result.stderr.strip()
 
-    return result.stdout.strip()
+    return result.stdout.strip(), None

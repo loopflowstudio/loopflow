@@ -1,0 +1,8 @@
+lf start/open: launch IDEs when opening worktrees
+
+Run `lf start feature` to create a worktree and automatically open Warp
+and Cursor. Use `lf open feature` to reopen IDEs for existing worktrees.
+
+Worktrees are created at .lf/worktrees/ (now gitignored). Added helper
+function _open_worktree() to centralize IDE launching logic. Updated
+command table in README.

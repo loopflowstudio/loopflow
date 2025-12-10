@@ -7,7 +7,7 @@ import subprocess
 import typer
 
 from loopflow.context import find_repo_root
-from loopflow.git import open_pr
+from loopflow.git import GitError, open_pr
 
 app = typer.Typer(help="Pull request workflow.")
 
@@ -24,13 +24,13 @@ def create():
         typer.echo("Error: 'gh' CLI not found. Install with: brew install gh", err=True)
         raise typer.Exit(1)
 
-    pr_url, error = open_pr(repo_root, draft=False)
-    if pr_url:
-        typer.echo(pr_url)
-        subprocess.run(["open", pr_url])
-    else:
-        typer.echo(f"Error: {error}", err=True)
+    try:
+        pr_url = open_pr(repo_root, draft=False)
+    except GitError as e:
+        typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
+    typer.echo(pr_url)
+    subprocess.run(["open", pr_url])
 
 
 @app.command()

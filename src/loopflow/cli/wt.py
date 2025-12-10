@@ -8,7 +8,7 @@ from pathlib import Path
 
 from loopflow.config import Config, load_config
 from loopflow.context import find_repo_root
-from loopflow.git import create_worktree, list_worktrees, remove_worktree
+from loopflow.git import GitError, create_worktree, list_worktrees, remove_worktree
 
 app = typer.Typer(help="Worktree management.")
 
@@ -53,9 +53,10 @@ def create(
         typer.echo("Error: Not in a git repository", err=True)
         raise typer.Exit(1)
 
-    worktree_path = create_worktree(repo_root, name)
-    if not worktree_path:
-        typer.echo(f"Error: Could not create worktree '{name}'", err=True)
+    try:
+        worktree_path = create_worktree(repo_root, name)
+    except GitError as e:
+        typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
     config = load_config(repo_root)

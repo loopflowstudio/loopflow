@@ -5,8 +5,7 @@ from pathlib import Path
 
 from loopflow.config import PipelineConfig
 from loopflow.context import build_prompt
-from loopflow.git import has_upstream, open_pr
-from loopflow.git import push as git_push
+from loopflow.git import GitError, autocommit, open_pr
 from loopflow.launcher import launch_claude
 
 
@@ -51,42 +50,17 @@ def run_pipeline(
             print(f"\n[{task_name}] failed with exit code {exit_code}")
             return exit_code
 
-        _autocommit(repo_root, task_name, task_arg, push=should_push)
+        autocommit(repo_root, task_name, task_arg, push=should_push, verbose=True)
 
     if should_pr:
-        pr_url, error = open_pr(repo_root, draft=False)
-        if pr_url:
+        try:
+            pr_url = open_pr(repo_root, draft=False)
             print(f"\nPR created: {pr_url}")
-        else:
-            print(f"\nPR creation failed: {error}")
+        except GitError as e:
+            print(f"\nPR creation failed: {e}")
 
     _notify_done(pipeline.name)
     return 0
-
-
-def _autocommit(repo_root: Path, task: str, arg: str | None, push: bool = False) -> None:
-    """Commit changes, optionally push."""
-    result = subprocess.run(
-        ["git", "status", "--porcelain"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-    )
-    if not result.stdout.strip():
-        print(f"\n[{task}] no changes to commit")
-        return
-
-    msg = f"lf {task}"
-    if arg:
-        msg += f" {arg}"
-
-    subprocess.run(["git", "add", "-A"], cwd=repo_root, check=True)
-    subprocess.run(["git", "commit", "-m", msg], cwd=repo_root, check=True)
-    print(f"\n[{task}] committed: {msg}")
-
-    if push and has_upstream(repo_root):
-        git_push(repo_root)
-        print(f"[{task}] pushed to origin")
 
 
 def _notify_done(pipeline_name: str) -> None:

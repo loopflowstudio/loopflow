@@ -5,6 +5,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+class GitError(Exception):
+    """Git operation failed."""
+    pass
+
+
 @dataclass
 class WorktreeInfo:
     name: str
@@ -124,15 +129,54 @@ def push(repo_root: Path) -> bool:
     return result.returncode == 0
 
 
-def create_worktree(repo_root: Path, name: str) -> Path | None:
-    """Create a worktree with a new branch. Returns worktree path or None on failure."""
+def autocommit(
+    repo_root: Path,
+    task: str,
+    arg: str | None = None,
+    push: bool = False,
+    verbose: bool = False,
+) -> bool:
+    """Commit changes with task name as message. Returns True if committed."""
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if not result.stdout.strip():
+        if verbose:
+            print(f"\n[{task}] no changes to commit")
+        return False
+
+    msg = f"lf {task}"
+    if arg:
+        msg += f" {arg}"
+
+    subprocess.run(["git", "add", "-A"], cwd=repo_root, check=True)
+    subprocess.run(["git", "commit", "-m", msg], cwd=repo_root, check=True)
+
+    if verbose:
+        print(f"\n[{task}] committed: {msg}")
+
+    if push and has_upstream(repo_root):
+        result = subprocess.run(
+            ["git", "push"],
+            cwd=repo_root,
+            capture_output=True,
+        )
+        if verbose:
+            print(f"[{task}] pushed to origin")
+
+    return True
+
+
+def create_worktree(repo_root: Path, name: str) -> Path:
+    """Create a worktree with a new branch. Raises GitError on failure."""
     worktree_path = repo_root / ".lf" / "worktrees" / name
 
     if worktree_path.exists():
-        # Worktree already exists, return it
         return worktree_path
 
-    # Create parent directory
     worktree_path.parent.mkdir(parents=True, exist_ok=True)
 
     result = subprocess.run(
@@ -143,13 +187,17 @@ def create_worktree(repo_root: Path, name: str) -> Path | None:
     )
 
     if result.returncode != 0:
-        return None
+        # Extract useful part from git error
+        error = result.stderr.strip()
+        if "already exists" in error:
+            raise GitError(f"Branch '{name}' already exists")
+        raise GitError(error or "Failed to create worktree")
 
     return worktree_path
 
 
-def open_pr(repo_root: Path, draft: bool = True) -> tuple[str | None, str | None]:
-    """Open GitHub PR for current branch. Returns (url, error)."""
+def open_pr(repo_root: Path, draft: bool = True) -> str:
+    """Open GitHub PR for current branch. Returns URL. Raises GitError on failure."""
     commit_file = repo_root / ".lf" / "COMMIT"
 
     # Read COMMIT for PR title/body before deleting
@@ -190,7 +238,6 @@ def open_pr(repo_root: Path, draft: bool = True) -> tuple[str | None, str | None
     if result.returncode != 0:
         # Check if PR already exists
         if "already exists" in result.stderr:
-            # Get existing PR URL
             view_result = subprocess.run(
                 ["gh", "pr", "view", "--json", "url", "-q", ".url"],
                 cwd=repo_root,
@@ -198,7 +245,7 @@ def open_pr(repo_root: Path, draft: bool = True) -> tuple[str | None, str | None
                 text=True,
             )
             if view_result.returncode == 0:
-                return view_result.stdout.strip(), None
-        return None, result.stderr.strip()
+                return view_result.stdout.strip()
+        raise GitError(result.stderr.strip() or "Failed to create PR")
 
-    return result.stdout.strip(), None
+    return result.stdout.strip()

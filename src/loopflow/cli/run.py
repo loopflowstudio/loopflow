@@ -1,35 +1,12 @@
 """Task execution commands."""
 
-import subprocess
-
 import typer
-
-from pathlib import Path
 
 from loopflow.config import load_config
 from loopflow.context import build_prompt, find_repo_root
-from loopflow.git import create_worktree
+from loopflow.git import GitError, autocommit, create_worktree
 from loopflow.launcher import check_claude_available, launch_claude
 from loopflow.pipeline import run_pipeline
-
-
-def _autocommit(repo_root: Path, task: str, arg: str | None) -> None:
-    """Commit changes with the lf command as the message."""
-    result = subprocess.run(
-        ["git", "status", "--porcelain"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-    )
-    if not result.stdout.strip():
-        return
-
-    msg = f"lf {task}"
-    if arg:
-        msg += f" {arg}"
-
-    subprocess.run(["git", "add", "-A"], cwd=repo_root, check=True)
-    subprocess.run(["git", "commit", "-m", msg], cwd=repo_root, check=True)
 
 
 def run(
@@ -56,9 +33,10 @@ def run(
         raise typer.Exit(1)
 
     if branch:
-        worktree_path = create_worktree(repo_root, branch)
-        if not worktree_path:
-            typer.echo(f"Error: Could not create worktree '{branch}'", err=True)
+        try:
+            worktree_path = create_worktree(repo_root, branch)
+        except GitError as e:
+            typer.echo(f"Error: {e}", err=True)
             raise typer.Exit(1)
         repo_root = worktree_path
 
@@ -79,7 +57,7 @@ def run(
     )
 
     if print_mode and exit_code == 0:
-        _autocommit(repo_root, task, arg)
+        autocommit(repo_root, task, arg)
 
     if branch:
         typer.echo(f"\nWorktree: {repo_root}")
@@ -123,7 +101,7 @@ def inline(
     )
 
     if print_mode and exit_code == 0:
-        _autocommit(repo_root, ":", prompt)
+        autocommit(repo_root, ":", prompt)
 
     raise typer.Exit(exit_code)
 
@@ -152,9 +130,10 @@ def pipeline(
         raise typer.Exit(1)
 
     if branch:
-        worktree_path = create_worktree(repo_root, branch)
-        if not worktree_path:
-            typer.echo(f"Error: Could not create worktree '{branch}'", err=True)
+        try:
+            worktree_path = create_worktree(repo_root, branch)
+        except GitError as e:
+            typer.echo(f"Error: {e}", err=True)
             raise typer.Exit(1)
         repo_root = worktree_path
 

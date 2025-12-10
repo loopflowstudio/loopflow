@@ -1,13 +1,13 @@
 This task produces a short implementation spec that another LLM session can use to write a first draft of a feature.
 
-The design doc is scaffolding—meant to be deleted once the code exists. It's a checkpoint for recovery, not documentation for posterity. If a session crashes, the spec lets a fresh LLM pick up where things left off.
+The design doc is scaffolding—meant to be deleted once the code exists. It's a checkpoint for recovery, not documentation for posterity. If a session crashes, the spec lets a fresh session pick up where things left off.
 
 ## Workflow
 
 1. Brief conversation to extract what's needed
 2. Write spec to `dd/{feature}.md`
 3. Commit with message `design: {feature}`
-4. End session—implementation happens in a separate `lf claude implement` invocation
+4. End session—implementation happens in a separate `lf implement` invocation
 
 ## What makes a good design doc
 
@@ -45,6 +45,6 @@ Bias toward brevity. Ask only what's needed to start coding.
 
 Exploring uncertain ideas is fine—the doc has room (~2000 words). But keep narrowing toward a buildable thing. If scope is unclear, ask "what's the smallest version that's useful?" and spec that.
 
-When the user says something important, confirm it and note that you'll quote it in the doc.
+When the user says something important, confirm it and note that it will be quoted in the doc.
 
-Don't worry about being complete. Wrong guesses get fixed in implementation. The goal is to not block the implementing LLM, not to predict everything.
+Completeness is not required. Wrong guesses get fixed in implementation. The goal is to not block the implementing session, not to predict everything.

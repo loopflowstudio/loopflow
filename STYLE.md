@@ -234,3 +234,5 @@ and open Warp + Cursor. Reuses existing worktree if branch exists.
 ```
 
 Keep messages short—one sentence to one paragraph.
+
+Do not add AI attribution footers like "Generated with Claude Code" or "Co-Authored-By: Claude" to commits. The git history should read the same whether written by a human or AI.

@@ -117,6 +117,9 @@ def clean(
         typer.echo("Error: Not in a git repository", err=True)
         raise typer.Exit(1)
 
+    # Prune stale remote-tracking branches
+    subprocess.run(["git", "fetch", "--prune"], cwd=main_repo, capture_output=True)
+
     worktrees = list_worktrees(main_repo)
     to_remove = [wt for wt in worktrees if not wt.on_origin and not wt.is_dirty]
 

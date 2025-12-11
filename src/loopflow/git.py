@@ -154,7 +154,9 @@ def autocommit(
     push: bool = False,
     verbose: bool = False,
 ) -> bool:
-    """Commit changes with task name as message. Returns True if committed."""
+    """Commit changes with task name + generated message. Returns True if committed."""
+    from loopflow.llm_http import generate_commit_message
+
     result = subprocess.run(
         ["git", "status", "--porcelain"],
         cwd=repo_root,
@@ -166,15 +168,27 @@ def autocommit(
             print(f"\n[{task}] no changes to commit")
         return False
 
-    msg = f"lf {task}"
+    # Build prefix: lf {task} [{arg}]
+    prefix = f"lf {task}"
     if arg:
-        msg += f" {arg}"
+        prefix += f" {arg}"
 
     subprocess.run(["git", "add", "-A"], cwd=repo_root, check=True)
+
+    # Generate commit message from staged diff
+    if verbose:
+        print(f"\n[{task}] generating commit message...")
+    generated = generate_commit_message(repo_root)
+
+    # Combine: prefix on first line, then generated title and body
+    msg = f"{prefix}: {generated.title}"
+    if generated.body:
+        msg += f"\n\n{generated.body}"
+
     subprocess.run(["git", "commit", "-m", msg], cwd=repo_root, check=True)
 
     if verbose:
-        print(f"\n[{task}] committed: {msg}")
+        print(f"[{task}] committed: {prefix}: {generated.title}")
 
     if push and has_upstream(repo_root):
         result = subprocess.run(

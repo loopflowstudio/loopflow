@@ -6,7 +6,7 @@ Review the diff against main and summarize what changed and why.
 
 Return a structured response with:
 - **title**: lowercase, with optional area prefix (e.g. `llm_http: add structured output`)
-- **body**: how to use it, then what changed and why
+- **body**: markdown with headers, code blocks for commands, and bullet lists
 
 ## Title style
 
@@ -19,16 +19,27 @@ Examples:
 
 ## Body style
 
-Open with usage—how to try it, run it, or see it in action. Then explain what changed and why.
+Use markdown headers to organize the body. Open with a "Usage" or "Try it" section showing commands in code blocks. Then explain what changed.
 
-Keep it medium length—a short paragraph or 3-5 bullets. Use prose for context/why, bullets for lists of changes. Stay high-level; don't enumerate every file.
+Structure:
+1. **Usage section** (header + code block) - how to try it, run it, or see it in action
+2. **Summary** - one paragraph explaining what this PR does and why
+3. **Changes** (optional) - bullet list of notable changes if helpful
+
+Keep it medium length. Stay high-level; don't enumerate every file.
 
 Example body:
 ```
+## Usage
+
+\`\`\`bash
 lf pr create -a
 lf pr update -a
+\`\`\`
 
 PR create and update now generate title/body via Claude API instead of reading from .lf/COMMIT. The -a flag adds, commits, and pushes before creating/updating.
+
+## Changes
 
 - New llm_http module for structured LLM responses
 - Builtin prompts stored in package, separate from user .lf/ tasks

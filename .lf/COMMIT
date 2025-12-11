@@ -1,0 +1,3 @@
+files: skip binary files when gathering context
+
+Binary files (images, PDFs, compiled code) are now excluded from context gathering. Detection uses both extension matching (fast path) and null-byte content sniffing (fallback). Text formats like .json, .lock, and .svg continue to be included.

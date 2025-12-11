@@ -7,6 +7,7 @@ import pytest
 from loopflow.files import (
     gather_files,
     format_files,
+    is_binary,
     _load_gitignore,
 )
 
@@ -298,3 +299,97 @@ def test_exclude_doublestar_md_all_levels(temp_repo):
     assert temp_repo / "README.md" not in paths
     assert temp_repo / "CONTRIBUTING.md" not in paths
     assert temp_repo / "src" / "README.md" not in paths
+
+
+# --- Binary file detection tests ---
+
+
+def test_is_binary_by_extension(temp_repo):
+    """is_binary returns True for known binary extensions."""
+    png_file = temp_repo / "image.png"
+    png_file.write_bytes(b"fake png data")
+
+    assert is_binary(png_file) is True
+
+
+def test_is_binary_by_content(temp_repo):
+    """is_binary returns True for files with null bytes."""
+    binary_file = temp_repo / "data.bin"
+    binary_file.write_bytes(b"some\x00data")
+
+    assert is_binary(binary_file) is True
+
+
+def test_is_binary_text_file(temp_repo):
+    """is_binary returns False for text files."""
+    text_file = temp_repo / "text.txt"
+    text_file.write_text("hello world")
+
+    assert is_binary(text_file) is False
+
+
+def test_is_binary_unreadable_file(temp_repo):
+    """is_binary returns True for unreadable files."""
+    import os
+    unreadable = temp_repo / "unreadable.txt"
+    unreadable.write_text("content")
+    os.chmod(unreadable, 0o000)
+
+    try:
+        assert is_binary(unreadable) is True
+    finally:
+        os.chmod(unreadable, 0o644)
+
+
+def test_gather_files_skips_binary_by_extension(temp_repo):
+    """gather_files excludes binary files by extension."""
+    png_file = temp_repo / "image.png"
+    png_file.write_bytes(b"\x89PNG\r\n\x1a\n")  # PNG header
+    (temp_repo / "text.txt").write_text("hello")
+
+    results = gather_files(["image.png", "text.txt"], temp_repo)
+    paths = [p for p, _ in results]
+
+    assert temp_repo / "text.txt" in paths
+    assert temp_repo / "image.png" not in paths
+
+
+def test_gather_files_skips_binary_by_content(temp_repo):
+    """gather_files excludes binary files by content sniffing."""
+    binary_file = temp_repo / "unknown.data"
+    binary_file.write_bytes(b"content\x00with\x00nulls")
+    (temp_repo / "text.txt").write_text("hello")
+
+    results = gather_files(["unknown.data", "text.txt"], temp_repo)
+    paths = [p for p, _ in results]
+
+    assert temp_repo / "text.txt" in paths
+    assert temp_repo / "unknown.data" not in paths
+
+
+def test_gather_files_includes_text_formats(temp_repo):
+    """gather_files includes common text formats like .json, .lock, .svg."""
+    (temp_repo / "data.json").write_text('{"key": "value"}')
+    (temp_repo / "uv.lock").write_text("# Lock file\n")
+    (temp_repo / "icon.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg"></svg>')
+
+    results = gather_files(["data.json", "uv.lock", "icon.svg"], temp_repo)
+    paths = [p for p, _ in results]
+
+    assert temp_repo / "data.json" in paths
+    assert temp_repo / "uv.lock" in paths
+    assert temp_repo / "icon.svg" in paths
+
+
+def test_gather_files_glob_with_binary_files(temp_repo):
+    """gather_files with glob patterns excludes binary files."""
+    (temp_repo / "image.png").write_bytes(b"\x89PNG")
+    (temp_repo / "doc.pdf").write_bytes(b"%PDF-1.4")
+    (temp_repo / "code.py").write_text("print('hello')")
+
+    results = gather_files(["."], temp_repo)
+    paths = [p for p, _ in results]
+
+    assert temp_repo / "code.py" in paths
+    assert temp_repo / "image.png" not in paths
+    assert temp_repo / "doc.pdf" not in paths

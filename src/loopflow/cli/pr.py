@@ -8,9 +8,42 @@ import typer
 
 from loopflow.context import find_worktree_root
 from loopflow.git import GitError, open_pr, update_pr
-from loopflow.llm_http import generate_pr_message
+from loopflow.llm_http import generate_commit_message, generate_pr_message
 
 app = typer.Typer(help="Pull request workflow.")
+
+
+def _add_commit_push(repo_root, push: bool = True) -> bool:
+    """Add, commit (with generated message), and optionally push. Returns True if committed."""
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if not result.stdout.strip():
+        if push:
+            typer.echo("Pushing to origin...")
+            subprocess.run(["git", "push"], cwd=repo_root, check=True)
+        return False
+
+    typer.echo("Adding changes...")
+    subprocess.run(["git", "add", "-A"], cwd=repo_root, check=True)
+
+    typer.echo("Generating commit message...")
+    message = generate_commit_message(repo_root)
+    commit_msg = message.title
+    if message.body:
+        commit_msg += f"\n\n{message.body}"
+
+    typer.echo(f"Committing: {message.title}")
+    subprocess.run(["git", "commit", "-m", commit_msg], cwd=repo_root, check=True)
+
+    if push:
+        typer.echo("Pushing to origin...")
+        subprocess.run(["git", "push"], cwd=repo_root, check=True)
+
+    return True
 
 
 @app.command()
@@ -28,20 +61,7 @@ def create(
         raise typer.Exit(1)
 
     if add:
-        # Check for uncommitted changes
-        result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-        )
-        if result.stdout.strip():
-            typer.echo("Adding and committing changes...")
-            subprocess.run(["git", "add", "-A"], cwd=repo_root, check=True)
-            subprocess.run(["git", "commit", "-m", "wip"], cwd=repo_root, check=True)
-
-        typer.echo("Pushing to origin...")
-        subprocess.run(["git", "push"], cwd=repo_root, check=True)
+        _add_commit_push(repo_root)
 
     typer.echo("Generating PR message...")
     message = generate_pr_message(repo_root)
@@ -70,20 +90,7 @@ def update(
         raise typer.Exit(1)
 
     if add:
-        # Check for uncommitted changes
-        result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-        )
-        if result.stdout.strip():
-            typer.echo("Adding and committing changes...")
-            subprocess.run(["git", "add", "-A"], cwd=repo_root, check=True)
-            subprocess.run(["git", "commit", "-m", "wip"], cwd=repo_root, check=True)
-
-        typer.echo("Pushing to origin...")
-        subprocess.run(["git", "push"], cwd=repo_root, check=True)
+        _add_commit_push(repo_root)
 
     typer.echo("Generating PR message...")
     message = generate_pr_message(repo_root)
@@ -138,9 +145,7 @@ def land(
 
     if has_changes:
         if add:
-            typer.echo("Adding and committing changes...")
-            subprocess.run(["git", "add", "-A"], cwd=repo_root, check=True)
-            subprocess.run(["git", "commit", "-m", "wip"], cwd=repo_root, check=True)
+            _add_commit_push(repo_root, push=False)
         else:
             typer.echo("Error: Uncommitted changes. Use --add or commit manually.", err=True)
             raise typer.Exit(1)

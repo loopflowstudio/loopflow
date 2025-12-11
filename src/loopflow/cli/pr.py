@@ -66,6 +66,10 @@ def create(
     typer.echo("Generating PR title and body...")
     message = generate_pr_message(repo_root)
 
+    typer.echo(f"\n{message.title}\n")
+    typer.echo(message.body)
+    typer.echo("")
+
     try:
         pr_url = open_pr(repo_root, title=message.title, body=message.body)
     except GitError as e:
@@ -94,6 +98,10 @@ def update(
 
     typer.echo("Generating PR title and body...")
     message = generate_pr_message(repo_root)
+
+    typer.echo(f"\n{message.title}\n")
+    typer.echo(message.body)
+    typer.echo("")
 
     try:
         pr_url = update_pr(repo_root, title=message.title, body=message.body)

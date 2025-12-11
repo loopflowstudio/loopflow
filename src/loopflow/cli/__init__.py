@@ -4,8 +4,8 @@ import sys
 
 import typer
 
-from loopflow.config import load_config
-from loopflow.context import find_repo_root, gather_task
+from loopflow.config import ConfigError, load_config
+from loopflow.context import find_worktree_root, gather_task
 
 app = typer.Typer(
     name="lf",
@@ -31,35 +31,39 @@ def main():
     """Entry point that supports 'lf <task>' and 'lf <pipeline>' shorthand."""
     known_commands = {"run", "pipeline", "inline", "wt", "pr", "meta", "--help", "-h"}
 
-    if len(sys.argv) > 1:
-        first_arg = sys.argv[1]
+    try:
+        if len(sys.argv) > 1:
+            first_arg = sys.argv[1]
 
-        # Inline prompt: lf : "prompt"
-        if first_arg == ":":
-            sys.argv.pop(1)
-            sys.argv.insert(1, "inline")
-        elif first_arg not in known_commands:
-            name = sys.argv[1]
-            repo_root = find_repo_root()
-            config = load_config(repo_root) if repo_root else None
+            # Inline prompt: lf : "prompt"
+            if first_arg == ":":
+                sys.argv.pop(1)
+                sys.argv.insert(1, "inline")
+            elif first_arg not in known_commands:
+                name = sys.argv[1]
+                repo_root = find_worktree_root()
+                config = load_config(repo_root) if repo_root else None
 
-            has_pipeline = config and name in config.pipelines
-            has_task = repo_root and gather_task(repo_root, name) is not None
+                has_pipeline = config and name in config.pipelines
+                has_task = repo_root and gather_task(repo_root, name) is not None
 
-            if has_pipeline and has_task:
-                typer.echo(
-                    f"Error: '{name}' exists as both a pipeline and a task. "
-                    "Remove one to resolve the conflict.",
-                    err=True,
-                )
-                raise SystemExit(1)
+                if has_pipeline and has_task:
+                    typer.echo(
+                        f"Error: '{name}' exists as both a pipeline and a task. "
+                        "Remove one to resolve the conflict.",
+                        err=True,
+                    )
+                    raise SystemExit(1)
 
-            if has_pipeline:
-                sys.argv.insert(1, "pipeline")
-            else:
-                sys.argv.insert(1, "run")
+                if has_pipeline:
+                    sys.argv.insert(1, "pipeline")
+                else:
+                    sys.argv.insert(1, "run")
 
-    app()
+        app()
+    except ConfigError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

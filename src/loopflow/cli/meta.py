@@ -7,7 +7,7 @@ import subprocess
 import typer
 
 from loopflow.config import load_config
-from loopflow.context import find_repo_root
+from loopflow.context import find_worktree_root
 from loopflow.launcher import check_claude_available
 
 app = typer.Typer(help="Setup and diagnostics.")
@@ -57,7 +57,7 @@ def install():
         raise typer.Exit(1)
 
     # Load config to check what's needed
-    repo_root = find_repo_root()
+    repo_root = find_worktree_root()
     config = load_config(repo_root) if repo_root else None
     ide = config.ide if config else None
 
@@ -117,7 +117,7 @@ def doctor():
     all_ok = True
 
     # Load config to check what's needed
-    repo_root = find_repo_root()
+    repo_root = find_worktree_root()
     config = load_config(repo_root) if repo_root else None
     ide = config.ide if config else None
 

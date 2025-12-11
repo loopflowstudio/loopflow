@@ -1,0 +1,6 @@
+refactor: consolidate git helpers and improve error handling
+
+Moves autocommit() to git.py, deduplicating the function that existed in
+both run.py and pipeline.py. Adds GitError exception for cleaner error
+handling across CLI commands. Improves task file resolution to prefer
+.lf > .md > other extensions. Adds test coverage for git operations.

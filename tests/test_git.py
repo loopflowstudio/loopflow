@@ -119,19 +119,19 @@ def test_autocommit_creates_commit_when_dirty(temp_repo):
 
         mock_run.side_effect = side_effect
 
-        result = autocommit(temp_repo, "test", arg="foo.md")
+        result = autocommit(temp_repo, "test")
 
         assert result is True
         # Verify git add and git commit were called
         assert mock_run.call_count >= 3
 
-        # Check commit message includes task and arg
+        # Check commit message includes task
         # Find the actual git commit call (not just containing "commit" substring)
         commit_calls = [c for c in mock_run.call_args_list if len(c[0]) > 0 and c[0][0][0] == "git" and "commit" in c[0][0]]
         assert len(commit_calls) > 0
         # The commit message should be in the -m flag
         commit_args = commit_calls[0][0][0]
-        assert "lf test foo.md" in " ".join(commit_args)
+        assert "lf test" in " ".join(commit_args)
 
 
 def test_autocommit_pushes_when_flag_set(temp_repo):

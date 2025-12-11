@@ -14,7 +14,6 @@ from loopflow.llm_http import generate_pr_message
 def run_pipeline(
     pipeline: PipelineConfig,
     repo_root: Path,
-    arg: Optional[str] = None,
     context: Optional[list[str]] = None,
     exclude: Optional[list[str]] = None,
     skip_permissions: bool = False,
@@ -32,15 +31,12 @@ def run_pipeline(
 
     total = len(pipeline.tasks)
     for i, task_name in enumerate(pipeline.tasks):
-        # Only first task gets the arg
-        task_arg = arg if i == 0 else None
-
         # Task header
         print(f"\n{'='*60}")
         print(f"[{i+1}/{total}] {task_name}")
         print(f"{'='*60}\n")
 
-        prompt = build_prompt(repo_root, task_name, arg=task_arg, context=context, exclude=exclude)
+        prompt = build_prompt(repo_root, task_name, context=context, exclude=exclude)
         exit_code, _ = launch_claude(
             prompt,
             print_mode=True,
@@ -53,7 +49,7 @@ def run_pipeline(
             print(f"\n[{task_name}] failed with exit code {exit_code}")
             return exit_code
 
-        autocommit(repo_root, task_name, task_arg, push=should_push, verbose=True)
+        autocommit(repo_root, task_name, push=should_push, verbose=True)
 
     if should_pr:
         try:

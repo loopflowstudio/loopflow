@@ -150,24 +150,11 @@ class TokenTree:
 def analyze_prompt_tokens(
     docs: Optional[list[tuple[Path, str]]] = None,
     diff: Optional[str] = None,
-    arg: Optional[tuple[str, str]] = None,
     task: Optional[tuple[str, str]] = None,
     context_files: Optional[list[tuple[Path, str]]] = None,
     repo_root: Optional[Path] = None,
 ) -> TokenTree:
-    """Analyze token distribution in prompt components.
-
-    Args:
-        docs: List of (path, content) for documentation files
-        diff: Diff content
-        arg: (path, content) for task argument
-        task: (name, content) for task definition
-        context_files: List of (path, content) for context files
-        repo_root: Root path for making relative paths
-
-    Returns:
-        TokenTree with hierarchical breakdown
-    """
+    """Analyze token distribution in prompt components."""
     tree = TokenTree()
 
     if docs:
@@ -178,11 +165,6 @@ def analyze_prompt_tokens(
     if diff:
         tokens = count_tokens(diff)
         tree.add("diff", "branch diff", tokens)
-
-    if arg:
-        path, content = arg
-        tokens = count_tokens(content)
-        tree.add("arg", path, tokens)
 
     if task:
         name, content = task
@@ -207,7 +189,6 @@ def analyze_components(components) -> TokenTree:
     return analyze_prompt_tokens(
         docs=components.docs,
         diff=components.diff,
-        arg=components.arg,
         task=components.task,
         context_files=components.context_files,
         repo_root=components.repo_root,

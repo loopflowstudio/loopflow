@@ -130,14 +130,6 @@ def test_analyze_prompt_tokens_task():
     assert "task" in tree.root.children
 
 
-def test_analyze_prompt_tokens_arg():
-    """analyze_prompt_tokens handles arg."""
-    tree = analyze_prompt_tokens(arg=("design.md", "# Design\n\nBuild a widget."))
-
-    assert tree.total() > 0
-    assert "arg" in tree.root.children
-
-
 def test_analyze_prompt_tokens_context_files():
     """analyze_prompt_tokens handles context files with repo_root."""
     repo_root = Path("/project")
@@ -157,7 +149,6 @@ def test_analyze_prompt_tokens_combined():
     tree = analyze_prompt_tokens(
         docs=[(Path("README.md"), "# Readme")],
         diff="+ line",
-        arg=("input.md", "input content"),
         task=("implement", "task content"),
         context_files=[(Path("/p/main.py"), "code")],
         repo_root=Path("/p"),
@@ -166,6 +157,5 @@ def test_analyze_prompt_tokens_combined():
     # All categories present
     assert "docs" in tree.root.children
     assert "diff" in tree.root.children
-    assert "arg" in tree.root.children
     assert "task" in tree.root.children
     assert "context" in tree.root.children

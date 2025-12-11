@@ -69,19 +69,6 @@ def test_build_prompt_handles_missing_task(temp_repo):
     assert "No task file found" in result
 
 
-def test_build_prompt_includes_arg(temp_repo):
-    """Task arg appears as primary input before task definition."""
-    (temp_repo / "design.md").write_text("# Design\n\nBuild a widget.\n")
-
-    result = build_prompt(temp_repo, "implement", arg="design.md")
-
-    assert "Task input" in result
-    assert '<lf:arg path="design.md">' in result
-    assert "Build a widget." in result
-    # Arg should come before task
-    assert result.index("<lf:arg") < result.index("<lf:task")
-
-
 def test_build_prompt_includes_context_files(temp_repo):
     """Context files passed via -c appear in output."""
     (temp_repo / "main.py").write_text("print('hello')\n")
@@ -92,20 +79,6 @@ def test_build_prompt_includes_context_files(temp_repo):
     assert "<lf:files>" in result
     assert '<lf:file path="main.py">' in result
     assert "print('hello')" in result
-
-
-def test_build_prompt_arg_and_context_separate(temp_repo):
-    """Arg and context are distinct sections."""
-    (temp_repo / "design.md").write_text("# Design\n")
-    (temp_repo / "main.py").write_text("print('hello')\n")
-
-    result = build_prompt(temp_repo, "implement", arg="design.md", context=["main.py"])
-
-    assert "<lf:arg" in result
-    assert "<lf:files>" in result
-    # Both present, in different sections
-    assert "Task input" in result
-    assert "Reference files" in result
 
 
 def test_build_prompt_inline_instead_of_task(temp_repo):
@@ -187,18 +160,6 @@ def test_gather_prompt_components_returns_dataclass(temp_repo):
     assert components.task == ("implement", "Implement the feature.\n")
 
 
-def test_gather_prompt_components_includes_arg(temp_repo):
-    """gather_prompt_components captures arg as tuple."""
-    (temp_repo / "design.md").write_text("# Design\n")
-
-    components = gather_prompt_components(temp_repo, "implement", arg="design.md")
-
-    assert components.arg is not None
-    rel_path, content = components.arg
-    assert rel_path == "design.md"
-    assert "# Design" in content
-
-
 def test_gather_prompt_components_includes_context(temp_repo):
     """gather_prompt_components captures context files as list of tuples."""
     (temp_repo / "main.py").write_text("print('hello')")
@@ -240,15 +201,13 @@ def test_format_prompt_from_components(temp_repo):
 
 def test_format_prompt_with_all_components(temp_repo):
     """format_prompt includes all component types."""
-    (temp_repo / "design.md").write_text("# Design\n")
     (temp_repo / "main.py").write_text("print('hello')")
 
     components = gather_prompt_components(
-        temp_repo, "implement", arg="design.md", context=["main.py"]
+        temp_repo, "implement", context=["main.py"]
     )
     formatted = format_prompt(components)
 
     assert "<lf:docs>" in formatted
-    assert "<lf:arg" in formatted
     assert "<lf:task:implement>" in formatted
     assert "<lf:files>" in formatted

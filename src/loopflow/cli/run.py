@@ -19,7 +19,6 @@ def _copy_to_clipboard(text: str) -> None:
 
 def run(
     task: str = typer.Argument(help="Task name (e.g., 'review', 'implement')"),
-    arg: str = typer.Argument(None, help="Input path for the task"),
     print_mode: bool = typer.Option(
         False, "-p", "--print", help="Run non-interactively"
     ),
@@ -59,7 +58,7 @@ def run(
         all_context.extend(context)
 
     exclude = list(config.exclude) if config and config.exclude else None
-    components = gather_prompt_components(repo_root, task, arg=arg, context=all_context or None, exclude=exclude)
+    components = gather_prompt_components(repo_root, task, context=all_context or None, exclude=exclude)
 
     if copy:
         prompt = format_prompt(components)
@@ -79,7 +78,7 @@ def run(
     )
 
     if print_mode and exit_code == 0:
-        autocommit(repo_root, task, arg)
+        autocommit(repo_root, task)
 
     if worktree:
         typer.echo(f"\nWorktree: {repo_root}")
@@ -144,7 +143,6 @@ def inline(
 
 def pipeline(
     name: str = typer.Argument(help="Pipeline name from config.yaml"),
-    arg: str = typer.Argument(None, help="Input for first task"),
     context: list[str] = typer.Option(
         None, "-x", "--context", help="Context files for all tasks"
     ),
@@ -190,7 +188,7 @@ def pipeline(
     if copy:
         # Show tokens for first task in pipeline
         first_task = config.pipelines[name].tasks[0]
-        components = gather_prompt_components(repo_root, first_task, arg=arg, context=all_context or None, exclude=exclude)
+        components = gather_prompt_components(repo_root, first_task, context=all_context or None, exclude=exclude)
         prompt = format_prompt(components)
         _copy_to_clipboard(prompt)
         tree = analyze_components(components)
@@ -205,7 +203,6 @@ def pipeline(
     exit_code = run_pipeline(
         config.pipelines[name],
         repo_root,
-        arg=arg,
         context=all_context or None,
         exclude=exclude,
         skip_permissions=config.dangerously_skip_permissions,

@@ -7,14 +7,17 @@ import subprocess
 import typer
 
 from loopflow.context import find_worktree_root
-from loopflow.git import GitError, open_pr
+from loopflow.git import GitError, open_pr, update_pr
+from loopflow.llm_http import generate_pr_message
 
 app = typer.Typer(help="Pull request workflow.")
 
 
 @app.command()
-def create():
-    """Create a GitHub PR for this branch."""
+def create(
+    add: bool = typer.Option(False, "-a", "--add", help="Add, commit, and push changes first"),
+):
+    """Create a GitHub PR for this branch with generated title/body."""
     repo_root = find_worktree_root()
     if not repo_root:
         typer.echo("Error: Not in a git repository", err=True)
@@ -24,13 +27,73 @@ def create():
         typer.echo("Error: 'gh' CLI not found. Install with: brew install gh", err=True)
         raise typer.Exit(1)
 
+    if add:
+        # Check for uncommitted changes
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+        )
+        if result.stdout.strip():
+            typer.echo("Adding and committing changes...")
+            subprocess.run(["git", "add", "-A"], cwd=repo_root, check=True)
+            subprocess.run(["git", "commit", "-m", "wip"], cwd=repo_root, check=True)
+
+        typer.echo("Pushing to origin...")
+        subprocess.run(["git", "push"], cwd=repo_root, check=True)
+
+    typer.echo("Generating PR message...")
+    message = generate_pr_message(repo_root)
+
     try:
-        pr_url = open_pr(repo_root, draft=False)
+        pr_url = open_pr(repo_root, title=message.title, body=message.body)
     except GitError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
     typer.echo(pr_url)
     subprocess.run(["open", pr_url])
+
+
+@app.command()
+def update(
+    add: bool = typer.Option(False, "-a", "--add", help="Add, commit, and push changes first"),
+):
+    """Update existing PR title/body with regenerated message."""
+    repo_root = find_worktree_root()
+    if not repo_root:
+        typer.echo("Error: Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    if not shutil.which("gh"):
+        typer.echo("Error: 'gh' CLI not found. Install with: brew install gh", err=True)
+        raise typer.Exit(1)
+
+    if add:
+        # Check for uncommitted changes
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+        )
+        if result.stdout.strip():
+            typer.echo("Adding and committing changes...")
+            subprocess.run(["git", "add", "-A"], cwd=repo_root, check=True)
+            subprocess.run(["git", "commit", "-m", "wip"], cwd=repo_root, check=True)
+
+        typer.echo("Pushing to origin...")
+        subprocess.run(["git", "push"], cwd=repo_root, check=True)
+
+    typer.echo("Generating PR message...")
+    message = generate_pr_message(repo_root)
+
+    try:
+        pr_url = update_pr(repo_root, title=message.title, body=message.body)
+    except GitError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+    typer.echo(f"Updated: {pr_url}")
 
 
 @app.command()
@@ -49,12 +112,6 @@ def land(
 
     if not shutil.which("gh"):
         typer.echo("Error: 'gh' CLI not found. Install with: brew install gh", err=True)
-        raise typer.Exit(1)
-
-    # Reject if .lf/COMMIT exists - should use PR metadata instead
-    commit_file = repo_root / ".lf" / "COMMIT"
-    if commit_file.exists():
-        typer.echo("Error: .lf/COMMIT exists. Delete it and put the message in the PR.", err=True)
         raise typer.Exit(1)
 
     # Get current branch

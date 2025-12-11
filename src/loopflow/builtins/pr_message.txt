@@ -1,0 +1,24 @@
+Generate a PR title and body for the changes on this branch.
+
+Review the diff against main and write a commit message that summarizes what changed and why.
+
+## Output format
+
+You must return a structured response with:
+- **title**: One line, imperative mood ("Add feature" not "Added feature"), no period, 50 chars or less
+- **body**: What this branch accomplished and why. Can use markdown. Focus on the "why" not the "what".
+
+## Style
+
+Summarize the branch as a whole, not individual commits. Be concise.
+
+Example title: `Add user authentication`
+
+Example body:
+```
+Users can now log in with email/password. Sessions expire after 24h.
+
+- Login page with email/password form
+- Session middleware for protected routes
+- Logout endpoint
+```

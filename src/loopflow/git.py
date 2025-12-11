@@ -214,28 +214,12 @@ def create_worktree(repo_root: Path, name: str) -> Path:
     return worktree_path
 
 
-def open_pr(repo_root: Path, draft: bool = True) -> str:
+def open_pr(
+    repo_root: Path,
+    title: str | None = None,
+    body: str | None = None,
+) -> str:
     """Open GitHub PR for current branch. Returns URL. Raises GitError on failure."""
-    commit_file = repo_root / ".lf" / "COMMIT"
-
-    # Read COMMIT for PR title/body before deleting
-    if commit_file.exists():
-        content = commit_file.read_text().strip()
-        lines = content.split("\n", 1)
-        title = lines[0]
-        body = lines[1].strip() if len(lines) > 1 else ""
-        cmd = ["gh", "pr", "create", "--title", title, "--body", body]
-        # Remove COMMIT before push - PR becomes source of truth
-        commit_file.unlink()
-        subprocess.run(["git", "add", "-A"], cwd=repo_root, check=True)
-        subprocess.run(
-            ["git", "commit", "-m", "remove .lf/COMMIT"],
-            cwd=repo_root,
-            check=True,
-        )
-    else:
-        cmd = ["gh", "pr", "create", "--fill"]
-
     # Push to origin
     subprocess.run(
         ["git", "push", "-u", "origin", "HEAD"],
@@ -243,8 +227,10 @@ def open_pr(repo_root: Path, draft: bool = True) -> str:
         capture_output=True,
     )
 
-    if draft:
-        cmd.append("--draft")
+    if title:
+        cmd = ["gh", "pr", "create", "--title", title, "--body", body or ""]
+    else:
+        cmd = ["gh", "pr", "create", "--fill"]
 
     result = subprocess.run(
         cmd,
@@ -267,3 +253,40 @@ def open_pr(repo_root: Path, draft: bool = True) -> str:
         raise GitError(result.stderr.strip() or "Failed to create PR")
 
     return result.stdout.strip()
+
+
+def update_pr(
+    repo_root: Path,
+    title: str,
+    body: str,
+) -> str:
+    """Update existing PR title and body. Returns URL. Raises GitError on failure."""
+    # Push any new commits
+    subprocess.run(
+        ["git", "push"],
+        cwd=repo_root,
+        capture_output=True,
+    )
+
+    # Update PR
+    result = subprocess.run(
+        ["gh", "pr", "edit", "--title", title, "--body", body],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode != 0:
+        raise GitError(result.stderr.strip() or "Failed to update PR")
+
+    # Get PR URL
+    view_result = subprocess.run(
+        ["gh", "pr", "view", "--json", "url", "-q", ".url"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if view_result.returncode != 0:
+        raise GitError("PR updated but could not get URL")
+
+    return view_result.stdout.strip()

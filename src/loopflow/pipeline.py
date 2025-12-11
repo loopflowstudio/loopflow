@@ -7,6 +7,7 @@ from loopflow.config import PipelineConfig
 from loopflow.context import build_prompt
 from loopflow.git import GitError, autocommit, open_pr
 from loopflow.launcher import launch_claude
+from loopflow.llm_http import generate_pr_message
 
 
 def run_pipeline(
@@ -54,7 +55,8 @@ def run_pipeline(
 
     if should_pr:
         try:
-            pr_url = open_pr(repo_root, draft=False)
+            message = generate_pr_message(repo_root)
+            pr_url = open_pr(repo_root, title=message.title, body=message.body)
             print(f"\nPR created: {pr_url}")
         except GitError as e:
             print(f"\nPR creation failed: {e}")

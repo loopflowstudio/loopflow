@@ -23,11 +23,11 @@ def _add_commit_push(repo_root, push: bool = True) -> bool:
     )
     if not result.stdout.strip():
         if push:
-            typer.echo("Pushing to origin...")
+            typer.echo("Pushing...")
             subprocess.run(["git", "push"], cwd=repo_root, check=True)
         return False
 
-    typer.echo("Adding changes...")
+    typer.echo("Staging changes...")
     subprocess.run(["git", "add", "-A"], cwd=repo_root, check=True)
 
     typer.echo("Generating commit message...")
@@ -40,7 +40,7 @@ def _add_commit_push(repo_root, push: bool = True) -> bool:
     subprocess.run(["git", "commit", "-m", commit_msg], cwd=repo_root, check=True)
 
     if push:
-        typer.echo("Pushing to origin...")
+        typer.echo("Pushing...")
         subprocess.run(["git", "push"], cwd=repo_root, check=True)
 
     return True
@@ -63,7 +63,7 @@ def create(
     if add:
         _add_commit_push(repo_root)
 
-    typer.echo("Generating PR message...")
+    typer.echo("Generating PR title and body...")
     message = generate_pr_message(repo_root)
 
     try:
@@ -92,7 +92,7 @@ def update(
     if add:
         _add_commit_push(repo_root)
 
-    typer.echo("Generating PR message...")
+    typer.echo("Generating PR title and body...")
     message = generate_pr_message(repo_root)
 
     try:

@@ -1,6 +1,7 @@
 """Configuration loading for loopflow."""
 
 from pathlib import Path
+from typing import Optional
 
 import yaml
 from pydantic import BaseModel, Field, field_validator
@@ -9,14 +10,14 @@ from pydantic import BaseModel, Field, field_validator
 class IdeConfig(BaseModel):
     warp: bool = True
     cursor: bool = True
-    workspace: str | None = None
+    workspace: Optional[str] = None
 
 
 class PipelineConfig(BaseModel):
     name: str = ""
     tasks: list[str]
-    push: bool | None = None
-    pr: bool | None = None
+    push: Optional[bool] = None
+    pr: Optional[bool] = None
 
 
 class Config(BaseModel):
@@ -25,11 +26,19 @@ class Config(BaseModel):
     push: bool = False
     pr: bool = False
     context: list[str] = Field(default_factory=list)
+    exclude: list[str] = Field(default_factory=list)
     ide: IdeConfig = Field(default_factory=IdeConfig)
 
     @field_validator("context", mode="before")
     @classmethod
     def split_context_string(cls, v):
+        if isinstance(v, str):
+            return v.split()
+        return v
+
+    @field_validator("exclude", mode="before")
+    @classmethod
+    def split_exclude_string(cls, v):
         if isinstance(v, str):
             return v.split()
         return v

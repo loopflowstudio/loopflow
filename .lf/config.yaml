@@ -1,5 +1,6 @@
 dangerously_skip_permissions: true
 context: "."
+exclude: "uv.lock"
 push: true
 
 pipelines:

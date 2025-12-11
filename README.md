@@ -52,8 +52,7 @@ Run tasks by name:
 
 ```bash
 lf review                     # run .lf/review.lf
-lf implement spec.md          # pass input file
-lf review -c src/utils.py     # add context files
+lf review -x src/utils.py     # add context files
 lf : "fix the typo"           # inline prompt, no task file
 ```
 
@@ -98,9 +97,10 @@ ide:
 
 | Option | Description |
 |--------|-------------|
-| `-p` | Batch mode (non-interactive) |
-| `-c FILE` | Add context files |
-| `-b NAME` | Create worktree first |
+| `-p, --print` | Batch mode (non-interactive) |
+| `-x, --context` | Add context files |
+| `-w, --worktree` | Create worktree and run task there |
+| `-c, --copy` | Copy prompt to clipboard, show token breakdown |
 
 ## Commands
 

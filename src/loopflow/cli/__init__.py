@@ -57,8 +57,12 @@ def main():
 
                 if has_pipeline:
                     sys.argv.insert(1, "pipeline")
-                else:
+                elif has_task:
                     sys.argv.insert(1, "run")
+                else:
+                    typer.echo(f"Error: No task or pipeline named '{name}'", err=True)
+                    typer.echo(f"Create .lf/{name}.lf or add '{name}' to pipelines in .lf/config.yaml", err=True)
+                    raise SystemExit(1)
 
         app()
     except ConfigError as e:

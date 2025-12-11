@@ -7,7 +7,7 @@ import subprocess
 import typer
 
 from loopflow.context import find_worktree_root
-from loopflow.git import GitError, open_pr, update_pr
+from loopflow.git import GitError, find_main_repo, open_pr, update_pr
 from loopflow.llm_http import generate_commit_message, generate_pr_message
 
 app = typer.Typer(help="Pull request workflow.")
@@ -125,6 +125,12 @@ def land(
         typer.echo("Error: Not in a git repository", err=True)
         raise typer.Exit(1)
 
+    # Get main repo (different from repo_root when in a worktree)
+    main_repo = find_main_repo(repo_root)
+    if not main_repo:
+        typer.echo("Error: Could not find main repository", err=True)
+        raise typer.Exit(1)
+
     if not shutil.which("gh"):
         typer.echo("Error: 'gh' CLI not found. Install with: brew install gh", err=True)
         raise typer.Exit(1)
@@ -215,11 +221,17 @@ def land(
     if body:
         commit_msg += f"\n\n{body}"
 
-    # Land it
-    subprocess.run(["git", "checkout", "main"], cwd=repo_root, check=True)
-    subprocess.run(["git", "merge", "--squash", branch], cwd=repo_root, check=True)
-    subprocess.run(["git", "commit", "-m", commit_msg], cwd=repo_root, check=True)
-    subprocess.run(["git", "branch", "-D", branch], cwd=repo_root, check=True)
-    subprocess.run(["git", "push"], cwd=repo_root, check=True)
+    # Land it (operations happen in main repo where main is checked out)
+    subprocess.run(["git", "fetch", "origin", branch], cwd=main_repo, check=True)
+    subprocess.run(["git", "merge", "--squash", f"origin/{branch}"], cwd=main_repo, check=True)
+    subprocess.run(["git", "commit", "-m", commit_msg], cwd=main_repo, check=True)
+    subprocess.run(["git", "push"], cwd=main_repo, check=True)
+
+    # Clean up: remove worktree and branch
+    from loopflow.git import remove_worktree
+    if repo_root != main_repo:
+        remove_worktree(main_repo, branch)
+    else:
+        subprocess.run(["git", "branch", "-D", branch], cwd=main_repo, check=True)
 
     typer.echo(f"Landed {branch} to main and pushed.")

@@ -202,12 +202,42 @@ def autocommit(
     return True
 
 
+def _sync_main(repo_root: Path) -> None:
+    """Fetch origin/main and fast-forward main to match. Raises GitError if main is dirty."""
+    # Check if main repo is dirty
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.stdout.strip():
+        raise GitError("Main repo has uncommitted changes. Commit or stash them first.")
+
+    # Fetch latest
+    subprocess.run(
+        ["git", "fetch", "origin", "main"],
+        cwd=repo_root,
+        capture_output=True,
+    )
+
+    # Reset main to origin/main
+    subprocess.run(
+        ["git", "reset", "--hard", "origin/main"],
+        cwd=repo_root,
+        capture_output=True,
+    )
+
+
 def create_worktree(repo_root: Path, name: str) -> Path:
-    """Create a worktree with a new branch. Raises GitError on failure."""
+    """Create a worktree with a new branch from latest main. Raises GitError on failure."""
     worktree_path = repo_root / ".lf" / "worktrees" / name
 
     if worktree_path.exists():
         return worktree_path
+
+    # Sync main with origin before branching
+    _sync_main(repo_root)
 
     worktree_path.parent.mkdir(parents=True, exist_ok=True)
 

@@ -1,6 +1,6 @@
 [project]
 name = "loopflow"
-version = "0.2.0"
+version = "0.2.1"
 description = "Arrange LLMs to code in harmony"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -24,6 +24,7 @@ dependencies = [
     "pyyaml>=6.0",
     "pydantic>=2.12.5",
     "pydantic-ai-slim[anthropic]>=1.0.0",
+    "tiktoken>=0.7.0",
 ]
 
 [project.optional-dependencies]

@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 
 def launch_claude(
@@ -11,7 +12,7 @@ def launch_claude(
     print_mode: bool = False,
     stream: bool = False,
     skip_permissions: bool = False,
-    cwd: Path | None = None,
+    cwd: Optional[Path] = None,
 ) -> tuple[int, str | None]:
     """Launch a Claude Code session with the given prompt.
 
@@ -39,7 +40,7 @@ def launch_claude(
         return result.returncode, None
 
 
-def _run_streaming(cmd: list[str], cwd: Path | None) -> tuple[int, str | None]:
+def _run_streaming(cmd: list[str], cwd: Optional[Path]) -> tuple[int, str | None]:
     """Run claude with streaming output, displaying progress."""
     process = subprocess.Popen(
         cmd,

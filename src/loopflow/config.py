@@ -72,6 +72,9 @@ def load_config(repo_root: Path) -> Config | None:
         if "validation error" in msg.lower():
             # Simplify Pydantic's verbose output
             lines = msg.split("\n")
-            errors = [l.strip() for l in lines[1:] if l.strip() and not l.startswith("For further")]
+            errors = [
+                l.strip() for l in lines[1:]
+                if l.strip() and not l.strip().startswith("For further")
+            ]
             raise ConfigError(f"Invalid config in {config_path}:\n" + "\n".join(errors))
         raise ConfigError(f"Invalid config in {config_path}: {e}")

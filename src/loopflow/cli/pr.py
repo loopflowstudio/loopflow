@@ -6,16 +6,52 @@ import subprocess
 
 import typer
 
-from loopflow.context import find_repo_root
-from loopflow.git import open_pr
+from loopflow.context import find_worktree_root
+from loopflow.git import GitError, open_pr, update_pr
+from loopflow.llm_http import generate_commit_message, generate_pr_message
 
 app = typer.Typer(help="Pull request workflow.")
 
 
+def _add_commit_push(repo_root, push: bool = True) -> bool:
+    """Add, commit (with generated message), and optionally push. Returns True if committed."""
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if not result.stdout.strip():
+        if push:
+            typer.echo("Pushing...")
+            subprocess.run(["git", "push"], cwd=repo_root, check=True)
+        return False
+
+    typer.echo("Staging changes...")
+    subprocess.run(["git", "add", "-A"], cwd=repo_root, check=True)
+
+    typer.echo("Generating commit message...")
+    message = generate_commit_message(repo_root)
+    commit_msg = message.title
+    if message.body:
+        commit_msg += f"\n\n{message.body}"
+
+    typer.echo(f"Committing: {message.title}")
+    subprocess.run(["git", "commit", "-m", commit_msg], cwd=repo_root, check=True)
+
+    if push:
+        typer.echo("Pushing...")
+        subprocess.run(["git", "push"], cwd=repo_root, check=True)
+
+    return True
+
+
 @app.command()
-def create():
-    """Create a GitHub PR for this branch."""
-    repo_root = find_repo_root()
+def create(
+    add: bool = typer.Option(False, "-a", "--add", help="Add, commit, and push changes first"),
+):
+    """Create a GitHub PR for this branch with generated title/body."""
+    repo_root = find_worktree_root()
     if not repo_root:
         typer.echo("Error: Not in a git repository", err=True)
         raise typer.Exit(1)
@@ -24,13 +60,55 @@ def create():
         typer.echo("Error: 'gh' CLI not found. Install with: brew install gh", err=True)
         raise typer.Exit(1)
 
-    pr_url, error = open_pr(repo_root, draft=False)
-    if pr_url:
-        typer.echo(pr_url)
-        subprocess.run(["open", pr_url])
-    else:
-        typer.echo(f"Error: {error}", err=True)
+    if add:
+        _add_commit_push(repo_root)
+
+    typer.echo("Generating PR title and body...")
+    message = generate_pr_message(repo_root)
+
+    typer.echo(f"\n{message.title}\n")
+    typer.echo(message.body)
+    typer.echo("")
+
+    try:
+        pr_url = open_pr(repo_root, title=message.title, body=message.body)
+    except GitError as e:
+        typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
+    typer.echo(pr_url)
+    subprocess.run(["open", pr_url])
+
+
+@app.command()
+def update(
+    add: bool = typer.Option(False, "-a", "--add", help="Add, commit, and push changes first"),
+):
+    """Update existing PR title/body with regenerated message."""
+    repo_root = find_worktree_root()
+    if not repo_root:
+        typer.echo("Error: Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    if not shutil.which("gh"):
+        typer.echo("Error: 'gh' CLI not found. Install with: brew install gh", err=True)
+        raise typer.Exit(1)
+
+    if add:
+        _add_commit_push(repo_root)
+
+    typer.echo("Generating PR title and body...")
+    message = generate_pr_message(repo_root)
+
+    typer.echo(f"\n{message.title}\n")
+    typer.echo(message.body)
+    typer.echo("")
+
+    try:
+        pr_url = update_pr(repo_root, title=message.title, body=message.body)
+    except GitError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+    typer.echo(f"Updated: {pr_url}")
 
 
 @app.command()
@@ -42,19 +120,13 @@ def land(
     Requires a PR with a title. Commit message is PR title + body.
     Branch must be clean and pushed (use --add to auto-commit first).
     """
-    repo_root = find_repo_root()
+    repo_root = find_worktree_root()
     if not repo_root:
         typer.echo("Error: Not in a git repository", err=True)
         raise typer.Exit(1)
 
     if not shutil.which("gh"):
         typer.echo("Error: 'gh' CLI not found. Install with: brew install gh", err=True)
-        raise typer.Exit(1)
-
-    # Reject if .lf/COMMIT exists - should use PR metadata instead
-    commit_file = repo_root / ".lf" / "COMMIT"
-    if commit_file.exists():
-        typer.echo("Error: .lf/COMMIT exists. Delete it and put the message in the PR.", err=True)
         raise typer.Exit(1)
 
     # Get current branch
@@ -81,9 +153,7 @@ def land(
 
     if has_changes:
         if add:
-            typer.echo("Adding and committing changes...")
-            subprocess.run(["git", "add", "-A"], cwd=repo_root, check=True)
-            subprocess.run(["git", "commit", "-m", "wip"], cwd=repo_root, check=True)
+            _add_commit_push(repo_root, push=False)
         else:
             typer.echo("Error: Uncommitted changes. Use --add or commit manually.", err=True)
             raise typer.Exit(1)

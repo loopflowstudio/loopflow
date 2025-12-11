@@ -5,6 +5,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+class GitError(Exception):
+    """Git operation failed."""
+    pass
+
+
 @dataclass
 class WorktreeInfo:
     name: str
@@ -12,6 +17,24 @@ class WorktreeInfo:
     branch: str
     on_origin: bool
     is_dirty: bool
+
+
+def find_main_repo(start: Path | None = None) -> Path | None:
+    """Find the main repo root, even from inside a worktree."""
+    cwd = start or Path.cwd()
+    result = subprocess.run(
+        ["git", "rev-parse", "--git-common-dir"],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    # --git-common-dir returns the .git directory; parent is repo root
+    git_dir = Path(result.stdout.strip())
+    if not git_dir.is_absolute():
+        git_dir = (cwd / git_dir).resolve()
+    return git_dir.parent
 
 
 def list_worktrees(repo_root: Path) -> list[WorktreeInfo]:
@@ -124,15 +147,68 @@ def push(repo_root: Path) -> bool:
     return result.returncode == 0
 
 
-def create_worktree(repo_root: Path, name: str) -> Path | None:
-    """Create a worktree with a new branch. Returns worktree path or None on failure."""
+def autocommit(
+    repo_root: Path,
+    task: str,
+    arg: str | None = None,
+    push: bool = False,
+    verbose: bool = False,
+) -> bool:
+    """Commit changes with task name + generated message. Returns True if committed."""
+    from loopflow.llm_http import generate_commit_message
+
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if not result.stdout.strip():
+        if verbose:
+            print(f"\n[{task}] no changes to commit")
+        return False
+
+    # Build prefix: lf {task} [{arg}]
+    prefix = f"lf {task}"
+    if arg:
+        prefix += f" {arg}"
+
+    subprocess.run(["git", "add", "-A"], cwd=repo_root, check=True)
+
+    # Generate commit message from staged diff
+    if verbose:
+        print(f"\n[{task}] generating commit message...")
+    generated = generate_commit_message(repo_root)
+
+    # Combine: prefix on first line, then generated title and body
+    msg = f"{prefix}: {generated.title}"
+    if generated.body:
+        msg += f"\n\n{generated.body}"
+
+    subprocess.run(["git", "commit", "-m", msg], cwd=repo_root, check=True)
+
+    if verbose:
+        print(f"[{task}] committed: {prefix}: {generated.title}")
+
+    if push and has_upstream(repo_root):
+        result = subprocess.run(
+            ["git", "push"],
+            cwd=repo_root,
+            capture_output=True,
+        )
+        if verbose:
+            print(f"[{task}] pushed to origin")
+
+    return True
+
+
+def create_worktree(repo_root: Path, name: str) -> Path:
+    """Create a worktree with a new branch. Raises GitError on failure."""
     worktree_path = repo_root / ".lf" / "worktrees" / name
 
     if worktree_path.exists():
-        # Worktree already exists, return it
         return worktree_path
 
-    # Create parent directory
     worktree_path.parent.mkdir(parents=True, exist_ok=True)
 
     result = subprocess.run(
@@ -143,33 +219,21 @@ def create_worktree(repo_root: Path, name: str) -> Path | None:
     )
 
     if result.returncode != 0:
-        return None
+        # Extract useful part from git error
+        error = result.stderr.strip()
+        if "already exists" in error:
+            raise GitError(f"Branch '{name}' already exists")
+        raise GitError(error or "Failed to create worktree")
 
     return worktree_path
 
 
-def open_pr(repo_root: Path, draft: bool = True) -> tuple[str | None, str | None]:
-    """Open GitHub PR for current branch. Returns (url, error)."""
-    commit_file = repo_root / ".lf" / "COMMIT"
-
-    # Read COMMIT for PR title/body before deleting
-    if commit_file.exists():
-        content = commit_file.read_text().strip()
-        lines = content.split("\n", 1)
-        title = lines[0]
-        body = lines[1].strip() if len(lines) > 1 else ""
-        cmd = ["gh", "pr", "create", "--title", title, "--body", body]
-        # Remove COMMIT before push - PR becomes source of truth
-        commit_file.unlink()
-        subprocess.run(["git", "add", "-A"], cwd=repo_root, check=True)
-        subprocess.run(
-            ["git", "commit", "-m", "remove .lf/COMMIT"],
-            cwd=repo_root,
-            check=True,
-        )
-    else:
-        cmd = ["gh", "pr", "create", "--fill"]
-
+def open_pr(
+    repo_root: Path,
+    title: str | None = None,
+    body: str | None = None,
+) -> str:
+    """Open GitHub PR for current branch. Returns URL. Raises GitError on failure."""
     # Push to origin
     subprocess.run(
         ["git", "push", "-u", "origin", "HEAD"],
@@ -177,8 +241,10 @@ def open_pr(repo_root: Path, draft: bool = True) -> tuple[str | None, str | None
         capture_output=True,
     )
 
-    if draft:
-        cmd.append("--draft")
+    if title:
+        cmd = ["gh", "pr", "create", "--title", title, "--body", body or ""]
+    else:
+        cmd = ["gh", "pr", "create", "--fill"]
 
     result = subprocess.run(
         cmd,
@@ -190,7 +256,6 @@ def open_pr(repo_root: Path, draft: bool = True) -> tuple[str | None, str | None
     if result.returncode != 0:
         # Check if PR already exists
         if "already exists" in result.stderr:
-            # Get existing PR URL
             view_result = subprocess.run(
                 ["gh", "pr", "view", "--json", "url", "-q", ".url"],
                 cwd=repo_root,
@@ -198,7 +263,44 @@ def open_pr(repo_root: Path, draft: bool = True) -> tuple[str | None, str | None
                 text=True,
             )
             if view_result.returncode == 0:
-                return view_result.stdout.strip(), None
-        return None, result.stderr.strip()
+                return view_result.stdout.strip()
+        raise GitError(result.stderr.strip() or "Failed to create PR")
 
-    return result.stdout.strip(), None
+    return result.stdout.strip()
+
+
+def update_pr(
+    repo_root: Path,
+    title: str,
+    body: str,
+) -> str:
+    """Update existing PR title and body. Returns URL. Raises GitError on failure."""
+    # Push any new commits
+    subprocess.run(
+        ["git", "push"],
+        cwd=repo_root,
+        capture_output=True,
+    )
+
+    # Update PR
+    result = subprocess.run(
+        ["gh", "pr", "edit", "--title", title, "--body", body],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode != 0:
+        raise GitError(result.stderr.strip() or "Failed to update PR")
+
+    # Get PR URL
+    view_result = subprocess.run(
+        ["gh", "pr", "view", "--json", "url", "-q", ".url"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if view_result.returncode != 0:
+        raise GitError("PR updated but could not get URL")
+
+    return view_result.stdout.strip()

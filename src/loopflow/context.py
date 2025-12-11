@@ -6,8 +6,13 @@ from pathlib import Path
 from loopflow.files import gather_docs, gather_files, format_files
 
 
-def find_repo_root(start: Path | None = None) -> Path | None:
-    """Find the git repository root from the given path."""
+def find_worktree_root(start: Path | None = None) -> Path | None:
+    """Find the git worktree root from the given path.
+
+    In a worktree, returns the worktree root.
+    In the main repo, returns the main repo root.
+    Use git.find_main_repo() to always get the main repo.
+    """
     path = start or Path.cwd()
     path = path.resolve()
 
@@ -28,13 +33,27 @@ def _read_file_if_exists(path: Path) -> str | None:
 
 
 def gather_task(repo_root: Path, name: str) -> str | None:
-    """Gather task file content from .lf/."""
+    """Gather task file content from .lf/.
+
+    Priority: .lf > .md > any other extension > bare name.
+    """
     lf_dir = repo_root / ".lf"
-    for ext in [".lf", ".md", ".txt", ""]:
+
+    # Preferred extensions first
+    for ext in [".lf", ".md"]:
         content = _read_file_if_exists(lf_dir / f"{name}{ext}")
         if content:
             return content
-    return None
+
+    # Any other extension
+    for path in sorted(lf_dir.glob(f"{name}.*")):
+        if path.suffix not in [".lf", ".md"]:
+            content = _read_file_if_exists(path)
+            if content:
+                return content
+
+    # Bare name (no extension)
+    return _read_file_if_exists(lf_dir / name)
 
 
 def gather_arg(repo_root: Path, arg: str) -> tuple[str, str] | None:

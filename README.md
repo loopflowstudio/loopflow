@@ -52,7 +52,6 @@ Run tasks by name:
 
 ```bash
 lf review                     # run .lf/review.lf
-lf implement spec.md          # pass input file
 lf review -x src/utils.py     # add context files
 lf : "fix the typo"           # inline prompt, no task file
 ```

@@ -154,6 +154,39 @@ def test_load_config_context_defaults_empty(temp_repo):
     assert config.context == []
 
 
+def test_load_config_exclude_as_string(temp_repo):
+    """exclude as space-separated string is split into list."""
+    config_yaml = temp_repo / ".lf" / "config.yaml"
+    config_yaml.write_text('exclude: "*.log build/"\n')
+
+    config = load_config(temp_repo)
+
+    assert config is not None
+    assert config.exclude == ["*.log", "build/"]
+
+
+def test_load_config_exclude_as_list(temp_repo):
+    """exclude as YAML list works."""
+    config_yaml = temp_repo / ".lf" / "config.yaml"
+    config_yaml.write_text("exclude:\n  - '*.log'\n  - build/\n")
+
+    config = load_config(temp_repo)
+
+    assert config is not None
+    assert config.exclude == ["*.log", "build/"]
+
+
+def test_load_config_exclude_defaults_empty(temp_repo):
+    """exclude defaults to empty list."""
+    config_yaml = temp_repo / ".lf" / "config.yaml"
+    config_yaml.write_text("dangerously_skip_permissions: false\n")
+
+    config = load_config(temp_repo)
+
+    assert config is not None
+    assert config.exclude == []
+
+
 def test_load_config_ide_defaults(temp_repo):
     """ide settings default to warp=True, cursor=True, workspace=None."""
     config_yaml = temp_repo / ".lf" / "config.yaml"

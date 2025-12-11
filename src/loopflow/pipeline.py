@@ -2,6 +2,7 @@
 
 import subprocess
 from pathlib import Path
+from typing import Optional
 
 from loopflow.config import PipelineConfig
 from loopflow.context import build_prompt
@@ -13,8 +14,9 @@ from loopflow.llm_http import generate_pr_message
 def run_pipeline(
     pipeline: PipelineConfig,
     repo_root: Path,
-    arg: str | None = None,
-    context: list[str] | None = None,
+    arg: Optional[str] = None,
+    context: Optional[list[str]] = None,
+    exclude: Optional[list[str]] = None,
     skip_permissions: bool = False,
     push_enabled: bool = False,
     pr_enabled: bool = False,
@@ -38,7 +40,7 @@ def run_pipeline(
         print(f"[{i+1}/{total}] {task_name}")
         print(f"{'='*60}\n")
 
-        prompt = build_prompt(repo_root, task_name, arg=task_arg, context=context)
+        prompt = build_prompt(repo_root, task_name, arg=task_arg, context=context, exclude=exclude)
         exit_code, _ = launch_claude(
             prompt,
             print_mode=True,

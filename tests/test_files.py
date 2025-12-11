@@ -160,3 +160,141 @@ def test_gather_files_mixed_paths(temp_repo):
     assert temp_repo / "src" / "app.py" in paths
     assert temp_repo / "README.md" in paths
     assert temp_repo / "CONTRIBUTING.md" in paths
+
+
+# --- Exclude pattern tests ---
+
+
+def test_gather_files_exclude_pattern(temp_repo):
+    """Exclude patterns filter out matching files."""
+    results = gather_files(["main.py", "src/app.py"], temp_repo, exclude=["**/*.py"])
+    paths = [p for p, _ in results]
+
+    # Python files excluded (using **/*.py for all levels)
+    assert temp_repo / "main.py" not in paths
+    assert temp_repo / "src" / "app.py" not in paths
+    # Docs still included
+    assert temp_repo / "README.md" in paths
+
+
+def test_gather_files_exclude_directory(temp_repo):
+    """Exclude patterns can match directories."""
+    results = gather_files([".", "src/app.py"], temp_repo, exclude=["src/*"])
+    paths = [p for p, _ in results]
+
+    assert temp_repo / "main.py" in paths
+    assert temp_repo / "src" / "app.py" not in paths
+    assert temp_repo / "src" / "README.md" not in paths
+
+
+def test_gather_files_exclude_glob_root_only(temp_repo):
+    """Exclude *.md only matches root level (Path.glob semantics)."""
+    results = gather_files(["."], temp_repo, exclude=["*.md"])
+    paths = [p for p, _ in results]
+
+    assert temp_repo / "main.py" in paths
+    # *.md matches root only
+    assert temp_repo / "README.md" not in paths
+    assert temp_repo / "CONTRIBUTING.md" not in paths
+    # Subdirectory .md files NOT excluded by *.md
+    assert temp_repo / "src" / "README.md" in paths
+
+
+def test_gather_files_exclude_glob_recursive(temp_repo):
+    """Exclude **/*.md matches all levels (Path.glob semantics)."""
+    results = gather_files(["."], temp_repo, exclude=["**/*.md"])
+    paths = [p for p, _ in results]
+
+    assert temp_repo / "main.py" in paths
+    # **/*.md matches all levels
+    assert temp_repo / "README.md" not in paths
+    assert temp_repo / "CONTRIBUTING.md" not in paths
+    assert temp_repo / "src" / "README.md" not in paths
+
+
+def test_gather_files_exclude_multiple_patterns(temp_repo):
+    """Multiple exclude patterns all apply."""
+    results = gather_files(["."], temp_repo, exclude=["**/*.py", "**/*.md"])
+    paths = [p for p, _ in results]
+
+    # Both .py and .md excluded at all levels
+    assert temp_repo / "main.py" not in paths
+    assert temp_repo / "README.md" not in paths
+    assert temp_repo / "src" / "app.py" not in paths
+
+
+def test_gather_files_exclude_overrides_include(temp_repo):
+    """Exclude patterns take precedence over explicit includes."""
+    # Explicitly request main.py but also exclude it
+    results = gather_files(["main.py"], temp_repo, exclude=["main.py"])
+    paths = [p for p, _ in results]
+
+    # Exclude wins - main.py should not be included
+    assert temp_repo / "main.py" not in paths
+
+
+def test_gather_files_exclude_overrides_glob_include(temp_repo):
+    """Exclude patterns filter out files matched by include globs."""
+    # Include all .py files but exclude main.py
+    results = gather_files(["**/*.py"], temp_repo, exclude=["main.py"])
+    paths = [p for p, _ in results]
+
+    # main.py excluded, src/app.py included
+    assert temp_repo / "main.py" not in paths
+    assert temp_repo / "src" / "app.py" in paths
+
+
+# --- Glob semantics consistency tests ---
+
+
+def test_include_star_md_root_only(temp_repo):
+    """Include *.md only matches root level."""
+    results = gather_files(["*.md"], temp_repo)
+    paths = [p for p, _ in results]
+
+    assert temp_repo / "README.md" in paths
+    assert temp_repo / "CONTRIBUTING.md" in paths
+    # src/README.md not directly matched by *.md
+    # (but may appear as parent doc if other src files included)
+    src_readme_direct = any(
+        p == temp_repo / "src" / "README.md"
+        for p, _ in results
+        if "src" in str(p) and p.name == "README.md"
+    )
+    # Filter to just the files matched by the pattern itself (not parent docs)
+    # *.md should only match root level
+    root_mds = [p for p in paths if p.parent == temp_repo and p.suffix == ".md"]
+    assert len(root_mds) == 2  # README.md and CONTRIBUTING.md
+
+
+def test_include_doublestar_md_all_levels(temp_repo):
+    """Include **/*.md matches all levels."""
+    results = gather_files(["**/*.md"], temp_repo)
+    paths = [p for p, _ in results]
+
+    assert temp_repo / "README.md" in paths
+    assert temp_repo / "CONTRIBUTING.md" in paths
+    assert temp_repo / "src" / "README.md" in paths
+
+
+def test_exclude_star_md_root_only(temp_repo):
+    """Exclude *.md only excludes root level."""
+    results = gather_files(["."], temp_repo, exclude=["*.md"])
+    paths = [p for p, _ in results]
+
+    # Root .md files excluded
+    assert temp_repo / "README.md" not in paths
+    assert temp_repo / "CONTRIBUTING.md" not in paths
+    # Subdirectory .md NOT excluded
+    assert temp_repo / "src" / "README.md" in paths
+
+
+def test_exclude_doublestar_md_all_levels(temp_repo):
+    """Exclude **/*.md excludes all levels."""
+    results = gather_files(["."], temp_repo, exclude=["**/*.md"])
+    paths = [p for p, _ in results]
+
+    # All .md files excluded
+    assert temp_repo / "README.md" not in paths
+    assert temp_repo / "CONTRIBUTING.md" not in paths
+    assert temp_repo / "src" / "README.md" not in paths

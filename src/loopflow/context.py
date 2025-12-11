@@ -1,12 +1,26 @@
 """Context gathering for LLM sessions."""
 
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 from loopflow.files import gather_docs, gather_files, format_files
 
 
-def find_worktree_root(start: Path | None = None) -> Path | None:
+@dataclass
+class PromptComponents:
+    """Raw components of a prompt before assembly."""
+
+    docs: list[tuple[Path, str]]
+    diff: str | None
+    arg: tuple[str, str] | None
+    task: tuple[str, str] | None  # (name, content)
+    context_files: list[tuple[Path, str]]
+    repo_root: Path
+
+
+def find_worktree_root(start: Optional[Path] = None) -> Path | None:
     """Find the git worktree root from the given path.
 
     In a worktree, returns the worktree root.
@@ -94,52 +108,82 @@ def gather_diff(repo_root: Path) -> str | None:
     return result.stdout
 
 
-def build_prompt(
+def gather_prompt_components(
     repo_root: Path,
-    task: str | None = None,
-    inline: str | None = None,
-    arg: str | None = None,
-    context: list[str] | None = None,
-) -> str:
-    """Build the full prompt for an LLM session."""
+    task: Optional[str] = None,
+    inline: Optional[str] = None,
+    arg: Optional[str] = None,
+    context: Optional[list[str]] = None,
+    exclude: Optional[list[str]] = None,
+) -> PromptComponents:
+    """Gather all prompt components without assembling them."""
+    docs = gather_docs(repo_root, repo_root, exclude)
+    diff = gather_diff(repo_root)
+
+    arg_result = gather_arg(repo_root, arg) if arg else None
+
+    task_result = None
+    if inline:
+        task_result = ("inline", inline)
+    elif task:
+        task_content = gather_task(repo_root, task)
+        if task_content:
+            task_result = (task, task_content)
+        else:
+            task_result = (task, f"No task file found for '{task}'.")
+
+    context_files = gather_files(context, repo_root, exclude) if context else []
+
+    return PromptComponents(
+        docs=docs,
+        diff=diff,
+        arg=arg_result,
+        task=task_result,
+        context_files=context_files,
+        repo_root=repo_root,
+    )
+
+
+def format_prompt(components: PromptComponents) -> str:
+    """Format prompt components into the final prompt string."""
     parts = []
 
-    # Gather root documentation as named sections
-    root_docs = gather_docs(repo_root, repo_root)
-    if root_docs:
+    if components.docs:
         doc_parts = []
-        for doc_path, content in root_docs:
-            name = doc_path.stem  # README, STYLE, VOICE, etc.
+        for doc_path, content in components.docs:
+            name = doc_path.stem
             doc_parts.append(f"<lf:{name}>\n{content}\n</lf:{name}>")
         docs_body = "\n\n".join(doc_parts)
         parts.append(f"Repository documentation. Follow VOICE and STYLE carefully.\n\n<lf:docs>\n{docs_body}\n</lf:docs>")
 
-    # Diff against main (on feature branches only)
-    diff = gather_diff(repo_root)
-    if diff:
-        parts.append(f"Changes on this branch (diff against main).\n\n<lf:diff>\n{diff}\n</lf:diff>")
+    if components.diff:
+        parts.append(f"Changes on this branch (diff against main).\n\n<lf:diff>\n{components.diff}\n</lf:diff>")
 
-    # Task argument (the primary input to the task)
-    if arg:
-        arg_result = gather_arg(repo_root, arg)
-        if arg_result:
-            rel_path, content = arg_result
-            parts.append(f"Task input.\n\n<lf:arg path=\"{rel_path}\">\n{content}\n</lf:arg>")
+    if components.arg:
+        rel_path, content = components.arg
+        parts.append(f"Task input.\n\n<lf:arg path=\"{rel_path}\">\n{content}\n</lf:arg>")
 
-    # Task definition (inline prompt or task file)
-    if inline:
-        parts.append(f"The task.\n\n<lf:task>\n{inline}\n</lf:task>")
-    elif task:
-        task_content = gather_task(repo_root, task)
-        if task_content:
-            parts.append(f"The task.\n\n<lf:task:{task}>\n{task_content}\n</lf:task:{task}>")
+    if components.task:
+        name, content = components.task
+        if name == "inline":
+            parts.append(f"The task.\n\n<lf:task>\n{content}\n</lf:task>")
         else:
-            parts.append(f"The task.\n\n<lf:task:{task}>\nNo task file found for '{task}'.\n</lf:task:{task}>")
+            parts.append(f"The task.\n\n<lf:task:{name}>\n{content}\n</lf:task:{name}>")
 
-    # Additional context files
-    if context:
-        gathered = gather_files(context, repo_root)
-        if gathered:
-            parts.append(format_files(gathered, repo_root))
+    if components.context_files:
+        parts.append(format_files(components.context_files, components.repo_root))
 
     return "\n\n".join(parts)
+
+
+def build_prompt(
+    repo_root: Path,
+    task: Optional[str] = None,
+    inline: Optional[str] = None,
+    arg: Optional[str] = None,
+    context: Optional[list[str]] = None,
+    exclude: Optional[list[str]] = None,
+) -> str:
+    """Build the full prompt for an LLM session."""
+    components = gather_prompt_components(repo_root, task, inline, arg, context, exclude)
+    return format_prompt(components)

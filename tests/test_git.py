@@ -19,26 +19,28 @@ def temp_repo(tmp_path):
 
 def test_create_worktree_raises_on_existing_branch(temp_repo):
     """Creating worktree with existing branch raises GitError."""
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(
-            returncode=1,
-            stderr="fatal: a branch named 'feature' already exists"
-        )
+    with patch("loopflow.git._sync_main"):  # Skip syncing for this test
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=1,
+                stderr="fatal: a branch named 'feature' already exists"
+            )
 
-        with pytest.raises(GitError, match="already exists"):
-            create_worktree(temp_repo, "feature")
+            with pytest.raises(GitError, match="already exists"):
+                create_worktree(temp_repo, "feature")
 
 
 def test_create_worktree_raises_on_failure(temp_repo):
     """Creating worktree that fails raises GitError."""
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(
-            returncode=1,
-            stderr="fatal: some other error"
-        )
+    with patch("loopflow.git._sync_main"):  # Skip syncing for this test
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=1,
+                stderr="fatal: some other error"
+            )
 
-        with pytest.raises(GitError, match="some other error"):
-            create_worktree(temp_repo, "feature")
+            with pytest.raises(GitError, match="some other error"):
+                create_worktree(temp_repo, "feature")
 
 
 def test_create_worktree_returns_existing_path(temp_repo):

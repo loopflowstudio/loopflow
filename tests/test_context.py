@@ -2,7 +2,14 @@
 
 import pytest
 
-from loopflow.context import find_worktree_root, build_prompt, gather_task
+from loopflow.context import (
+    find_worktree_root,
+    build_prompt,
+    gather_task,
+    gather_prompt_components,
+    format_prompt,
+    PromptComponents,
+)
 
 
 @pytest.fixture
@@ -168,3 +175,80 @@ def test_gather_task_returns_none_when_missing(temp_repo):
     """gather_task returns None when no matching file exists."""
     result = gather_task(temp_repo, "nonexistent")
     assert result is None
+
+
+def test_gather_prompt_components_returns_dataclass(temp_repo):
+    """gather_prompt_components returns PromptComponents with all fields."""
+    components = gather_prompt_components(temp_repo, "implement")
+
+    assert isinstance(components, PromptComponents)
+    assert components.repo_root == temp_repo
+    assert len(components.docs) == 3  # README, STYLE, VOICE
+    assert components.task == ("implement", "Implement the feature.\n")
+
+
+def test_gather_prompt_components_includes_arg(temp_repo):
+    """gather_prompt_components captures arg as tuple."""
+    (temp_repo / "design.md").write_text("# Design\n")
+
+    components = gather_prompt_components(temp_repo, "implement", arg="design.md")
+
+    assert components.arg is not None
+    rel_path, content = components.arg
+    assert rel_path == "design.md"
+    assert "# Design" in content
+
+
+def test_gather_prompt_components_includes_context(temp_repo):
+    """gather_prompt_components captures context files as list of tuples."""
+    (temp_repo / "main.py").write_text("print('hello')")
+
+    components = gather_prompt_components(temp_repo, "implement", context=["main.py"])
+
+    # context_files includes main.py (may also include parent docs)
+    main_files = [(p, c) for p, c in components.context_files if p.name == "main.py"]
+    assert len(main_files) == 1
+    path, content = main_files[0]
+    assert "print('hello')" in content
+
+
+def test_gather_prompt_components_inline_task(temp_repo):
+    """gather_prompt_components handles inline task."""
+    components = gather_prompt_components(temp_repo, task=None, inline="fix the bug")
+
+    assert components.task == ("inline", "fix the bug")
+
+
+def test_gather_prompt_components_missing_task(temp_repo):
+    """gather_prompt_components handles missing task file."""
+    components = gather_prompt_components(temp_repo, "nonexistent")
+
+    assert components.task is not None
+    name, content = components.task
+    assert name == "nonexistent"
+    assert "No task file found" in content
+
+
+def test_format_prompt_from_components(temp_repo):
+    """format_prompt produces same output as build_prompt."""
+    components = gather_prompt_components(temp_repo, "implement")
+    formatted = format_prompt(components)
+    direct = build_prompt(temp_repo, "implement")
+
+    assert formatted == direct
+
+
+def test_format_prompt_with_all_components(temp_repo):
+    """format_prompt includes all component types."""
+    (temp_repo / "design.md").write_text("# Design\n")
+    (temp_repo / "main.py").write_text("print('hello')")
+
+    components = gather_prompt_components(
+        temp_repo, "implement", arg="design.md", context=["main.py"]
+    )
+    formatted = format_prompt(components)
+
+    assert "<lf:docs>" in formatted
+    assert "<lf:arg" in formatted
+    assert "<lf:task:implement>" in formatted
+    assert "<lf:files>" in formatted

@@ -3,6 +3,7 @@
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 
 class GitError(Exception):
@@ -19,7 +20,7 @@ class WorktreeInfo:
     is_dirty: bool
 
 
-def find_main_repo(start: Path | None = None) -> Path | None:
+def find_main_repo(start: Optional[Path] = None) -> Path | None:
     """Find the main repo root, even from inside a worktree."""
     cwd = start or Path.cwd()
     result = subprocess.run(
@@ -150,7 +151,7 @@ def push(repo_root: Path) -> bool:
 def autocommit(
     repo_root: Path,
     task: str,
-    arg: str | None = None,
+    arg: Optional[str] = None,
     push: bool = False,
     verbose: bool = False,
 ) -> bool:
@@ -260,8 +261,8 @@ def create_worktree(repo_root: Path, name: str) -> Path:
 
 def open_pr(
     repo_root: Path,
-    title: str | None = None,
-    body: str | None = None,
+    title: Optional[str] = None,
+    body: Optional[str] = None,
 ) -> str:
     """Open GitHub PR for current branch. Returns URL. Raises GitError on failure."""
     # Push to origin

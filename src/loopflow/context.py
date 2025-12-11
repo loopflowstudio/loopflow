@@ -6,8 +6,13 @@ from pathlib import Path
 from loopflow.files import gather_docs, gather_files, format_files
 
 
-def find_repo_root(start: Path | None = None) -> Path | None:
-    """Find the git repository root from the given path."""
+def find_worktree_root(start: Path | None = None) -> Path | None:
+    """Find the git worktree root from the given path.
+
+    In a worktree, returns the worktree root.
+    In the main repo, returns the main repo root.
+    Use git.find_main_repo() to always get the main repo.
+    """
     path = start or Path.cwd()
     path = path.resolve()
 

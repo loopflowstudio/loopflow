@@ -6,7 +6,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from loopflow.git import GitError, autocommit, create_worktree, open_pr
+from loopflow.git import GitError, autocommit, create_worktree, find_main_repo, open_pr
 
 
 @pytest.fixture
@@ -155,3 +155,45 @@ def test_autocommit_pushes_when_flag_set(temp_repo):
         # Verify push was called
         push_calls = [c for c in mock_run.call_args_list if "push" in str(c)]
         assert len(push_calls) > 0
+
+
+def test_find_main_repo_from_main_repo(temp_repo):
+    """find_main_repo returns repo root when in main repo."""
+    with patch("subprocess.run") as mock_run:
+        # Simulate being in a regular repo (not a worktree)
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=str(temp_repo / ".git")
+        )
+
+        result = find_main_repo(temp_repo)
+        assert result == temp_repo
+
+
+def test_find_main_repo_from_worktree(tmp_path):
+    """find_main_repo returns main repo root when in a worktree."""
+    main_repo = tmp_path / "main"
+    main_repo.mkdir()
+    (main_repo / ".git").mkdir()
+
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+
+    with patch("subprocess.run") as mock_run:
+        # Simulate git returning the main repo's .git dir
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=str(main_repo / ".git")
+        )
+
+        result = find_main_repo(worktree)
+        assert result == main_repo
+
+
+def test_find_main_repo_not_in_git_repo(tmp_path):
+    """find_main_repo returns None when not in a git repo."""
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=128, stdout="", stderr="fatal: not a git repository")
+
+        result = find_main_repo(tmp_path)
+        assert result is None

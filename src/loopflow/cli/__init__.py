@@ -5,7 +5,7 @@ import sys
 import typer
 
 from loopflow.config import ConfigError, load_config
-from loopflow.context import find_repo_root, gather_task
+from loopflow.context import find_worktree_root, gather_task
 
 app = typer.Typer(
     name="lf",
@@ -41,7 +41,7 @@ def main():
                 sys.argv.insert(1, "inline")
             elif first_arg not in known_commands:
                 name = sys.argv[1]
-                repo_root = find_repo_root()
+                repo_root = find_worktree_root()
                 config = load_config(repo_root) if repo_root else None
 
                 has_pipeline = config and name in config.pipelines

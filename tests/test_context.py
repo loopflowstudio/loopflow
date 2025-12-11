@@ -2,7 +2,7 @@
 
 import pytest
 
-from loopflow.context import find_repo_root, build_prompt, gather_task
+from loopflow.context import find_worktree_root, build_prompt, gather_task
 
 
 @pytest.fixture
@@ -20,18 +20,18 @@ def temp_repo(tmp_path):
     return tmp_path
 
 
-def test_find_repo_root_from_subdirectory(temp_repo):
-    """Can find repo root from any subdirectory."""
+def test_find_worktree_root_from_subdirectory(temp_repo):
+    """Can find worktree root from any subdirectory."""
     subdir = temp_repo / "src" / "utils"
     subdir.mkdir(parents=True)
 
-    assert find_repo_root(temp_repo) == temp_repo
-    assert find_repo_root(subdir) == temp_repo
+    assert find_worktree_root(temp_repo) == temp_repo
+    assert find_worktree_root(subdir) == temp_repo
 
 
-def test_find_repo_root_returns_none_outside_repo(tmp_path):
+def test_find_worktree_root_returns_none_outside_repo(tmp_path):
     """Returns None when not in a git repository."""
-    assert find_repo_root(tmp_path) is None
+    assert find_worktree_root(tmp_path) is None
 
 
 def test_build_prompt_assembles_full_context(temp_repo):

@@ -3,7 +3,7 @@
 import typer
 
 from loopflow.config import load_config
-from loopflow.context import build_prompt, find_repo_root
+from loopflow.context import build_prompt, find_worktree_root
 from loopflow.git import GitError, autocommit, create_worktree
 from loopflow.launcher import check_claude_available, launch_claude
 from loopflow.pipeline import run_pipeline
@@ -23,7 +23,7 @@ def run(
     ),
 ):
     """Run a task with Claude."""
-    repo_root = find_repo_root()
+    repo_root = find_worktree_root()
     if not repo_root:
         typer.echo("Error: Not in a git repository", err=True)
         raise typer.Exit(1)
@@ -75,7 +75,7 @@ def inline(
     ),
 ):
     """Run an inline prompt with Claude."""
-    repo_root = find_repo_root()
+    repo_root = find_worktree_root()
     if not repo_root:
         typer.echo("Error: Not in a git repository", err=True)
         raise typer.Exit(1)
@@ -120,7 +120,7 @@ def pipeline(
     ),
 ):
     """Run a named pipeline."""
-    repo_root = find_repo_root()
+    repo_root = find_worktree_root()
     if not repo_root:
         typer.echo("Error: Not in a git repository", err=True)
         raise typer.Exit(1)

@@ -19,6 +19,24 @@ class WorktreeInfo:
     is_dirty: bool
 
 
+def find_main_repo(start: Path | None = None) -> Path | None:
+    """Find the main repo root, even from inside a worktree."""
+    cwd = start or Path.cwd()
+    result = subprocess.run(
+        ["git", "rev-parse", "--git-common-dir"],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    # --git-common-dir returns the .git directory; parent is repo root
+    git_dir = Path(result.stdout.strip())
+    if not git_dir.is_absolute():
+        git_dir = (cwd / git_dir).resolve()
+    return git_dir.parent
+
+
 def list_worktrees(repo_root: Path) -> list[WorktreeInfo]:
     """List all worktrees in .lf/worktrees/ with their status."""
     worktrees_dir = repo_root / ".lf" / "worktrees"

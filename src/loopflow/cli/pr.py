@@ -6,7 +6,7 @@ import subprocess
 
 import typer
 
-from loopflow.context import find_repo_root
+from loopflow.context import find_worktree_root
 from loopflow.git import GitError, open_pr
 
 app = typer.Typer(help="Pull request workflow.")
@@ -15,7 +15,7 @@ app = typer.Typer(help="Pull request workflow.")
 @app.command()
 def create():
     """Create a GitHub PR for this branch."""
-    repo_root = find_repo_root()
+    repo_root = find_worktree_root()
     if not repo_root:
         typer.echo("Error: Not in a git repository", err=True)
         raise typer.Exit(1)
@@ -42,7 +42,7 @@ def land(
     Requires a PR with a title. Commit message is PR title + body.
     Branch must be clean and pushed (use --add to auto-commit first).
     """
-    repo_root = find_repo_root()
+    repo_root = find_worktree_root()
     if not repo_root:
         typer.echo("Error: Not in a git repository", err=True)
         raise typer.Exit(1)

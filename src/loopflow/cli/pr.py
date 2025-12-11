@@ -224,6 +224,16 @@ def land(
     # Land it (operations happen in main repo where main is checked out)
     subprocess.run(["git", "fetch", "origin", branch], cwd=main_repo, check=True)
     subprocess.run(["git", "merge", "--squash", f"origin/{branch}"], cwd=main_repo, check=True)
+
+    # Check if there are staged changes to commit
+    result = subprocess.run(
+        ["git", "diff", "--cached", "--quiet"],
+        cwd=main_repo,
+    )
+    if result.returncode == 0:
+        typer.echo(f"Nothing to land - {branch} has no changes relative to main.", err=True)
+        raise typer.Exit(1)
+
     subprocess.run(["git", "commit", "-m", commit_msg], cwd=main_repo, check=True)
     subprocess.run(["git", "push"], cwd=main_repo, check=True)
 

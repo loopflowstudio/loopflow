@@ -403,7 +403,6 @@ wheels = [
 
 [[package]]
 name = "loopflow"
-version = "0.2.1"
 source = { editable = "." }
 dependencies = [
     { name = "pathspec" },

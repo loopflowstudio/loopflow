@@ -7,6 +7,40 @@ from typing import Optional
 import pathspec
 
 
+# Known binary extensions (skip without reading)
+_BINARY_EXTENSIONS: set[str] = {
+    # Images
+    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".bmp", ".tiff",
+    # Archives
+    ".zip", ".tar", ".gz", ".bz2", ".7z", ".rar",
+    # Executables/libraries
+    ".exe", ".dll", ".so", ".dylib", ".o", ".a",
+    # Documents
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+    # Media
+    ".mp3", ".mp4", ".wav", ".avi", ".mov", ".mkv",
+    # Fonts
+    ".ttf", ".otf", ".woff", ".woff2", ".eot",
+    # Other
+    ".pyc", ".class", ".sqlite", ".db",
+}
+
+
+def is_binary(path: Path) -> bool:
+    """Check if file is binary by extension or content sniffing."""
+    # Fast path: check extension
+    if path.suffix.lower() in _BINARY_EXTENSIONS:
+        return True
+
+    # Slow path: read first bytes and check for null bytes
+    try:
+        with open(path, "rb") as f:
+            chunk = f.read(8192)
+            return b"\x00" in chunk
+    except (OSError, IOError):
+        return True  # Can't read = skip it
+
+
 @lru_cache(maxsize=64)
 def _load_gitignore(gitignore_path: Path) -> pathspec.PathSpec | None:
     """Load and parse a .gitignore file."""
@@ -86,12 +120,14 @@ def gather_docs(path: Path, repo_root: Path, exclude: Optional[list[str]] = None
 
 
 def gather_file(path: Path, repo_root: Path, exclude: Optional[list[str]] = None) -> tuple[Path, str] | None:
-    """Gather a single file if it exists and isn't ignored."""
+    """Gather a single file if it exists, isn't ignored, and isn't binary."""
     if not path.exists():
         return None
     if not path.is_file():
         return None
     if is_ignored(path, repo_root, exclude):
+        return None
+    if is_binary(path):
         return None
     return (path, path.read_text())
 

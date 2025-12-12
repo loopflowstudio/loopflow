@@ -245,7 +245,11 @@ def land(
     if body:
         commit_msg += f"\n\n{body}"
 
-    # Land it (operations happen in main repo where main is checked out)
+    # If on a branch (not worktree), checkout main first
+    if repo_root == main_repo:
+        subprocess.run(["git", "checkout", "main"], cwd=main_repo, check=True)
+
+    # Land it (main is now checked out either way)
     subprocess.run(["git", "fetch", "origin", branch], cwd=main_repo, check=True)
     subprocess.run(["git", "merge", "--squash", f"origin/{branch}"], cwd=main_repo, check=True)
 

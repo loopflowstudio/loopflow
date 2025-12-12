@@ -39,8 +39,8 @@ def find_main_repo(start: Optional[Path] = None) -> Path | None:
 
 
 def list_worktrees(repo_root: Path) -> list[WorktreeInfo]:
-    """List all worktrees in .lf/worktrees/ with their status."""
-    worktrees_dir = repo_root / ".lf" / "worktrees"
+    """List all worktrees in .worktrees/ with their status."""
+    worktrees_dir = repo_root.parent / ".worktrees" / repo_root.name
     if not worktrees_dir.exists():
         return []
 
@@ -95,7 +95,7 @@ def list_worktrees(repo_root: Path) -> list[WorktreeInfo]:
 
 def remove_worktree(repo_root: Path, name: str) -> bool:
     """Remove a worktree and its branch. Returns success."""
-    worktree_path = repo_root / ".lf" / "worktrees" / name
+    worktree_path = repo_root.parent / ".worktrees" / repo_root.name / name
 
     if not worktree_path.exists():
         return False
@@ -229,7 +229,7 @@ def _sync_main(repo_root: Path) -> None:
 
 def create_worktree(repo_root: Path, name: str) -> Path:
     """Create a worktree with a new branch from latest main. Raises GitError on failure."""
-    worktree_path = repo_root / ".lf" / "worktrees" / name
+    worktree_path = repo_root.parent / ".worktrees" / repo_root.name / name
 
     if worktree_path.exists():
         return worktree_path

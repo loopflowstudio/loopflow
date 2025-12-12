@@ -45,7 +45,7 @@ def test_create_worktree_raises_on_failure(temp_repo):
 
 def test_create_worktree_returns_existing_path(temp_repo):
     """Creating worktree for existing path returns it without error."""
-    worktree_path = temp_repo / ".lf" / "worktrees" / "feature"
+    worktree_path = temp_repo.parent / ".worktrees" / temp_repo.name / "feature"
     worktree_path.mkdir(parents=True)
 
     result = create_worktree(temp_repo, "feature")

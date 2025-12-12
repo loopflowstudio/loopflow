@@ -60,6 +60,18 @@ def create(
         typer.echo("Error: 'gh' CLI not found. Install with: brew install gh", err=True)
         raise typer.Exit(1)
 
+    # Check we're on a feature branch (not main)
+    result = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    branch = result.stdout.strip()
+    if not branch or branch == "main":
+        typer.echo("Error: Must be on a feature branch", err=True)
+        raise typer.Exit(1)
+
     if add:
         _add_commit_push(repo_root)
 
@@ -91,6 +103,18 @@ def update(
 
     if not shutil.which("gh"):
         typer.echo("Error: 'gh' CLI not found. Install with: brew install gh", err=True)
+        raise typer.Exit(1)
+
+    # Check we're on a feature branch (not main)
+    result = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    branch = result.stdout.strip()
+    if not branch or branch == "main":
+        typer.echo("Error: Must be on a feature branch", err=True)
         raise typer.Exit(1)
 
     if add:
@@ -236,6 +260,9 @@ def land(
 
     subprocess.run(["git", "commit", "-m", commit_msg], cwd=main_repo, check=True)
     subprocess.run(["git", "push"], cwd=main_repo, check=True)
+
+    # Close PR and delete remote branch
+    subprocess.run(["gh", "pr", "close", branch, "--delete-branch"], cwd=main_repo, capture_output=True)
 
     # Clean up: remove worktree and branch
     from loopflow.git import remove_worktree

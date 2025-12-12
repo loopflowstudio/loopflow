@@ -73,7 +73,7 @@ def open_cmd(
         typer.echo("Error: Not in a git repository", err=True)
         raise typer.Exit(1)
 
-    worktree_path = main_repo / ".lf" / "worktrees" / name
+    worktree_path = main_repo.parent / ".worktrees" / main_repo.name / name
     if not worktree_path.exists():
         typer.echo(f"Error: Worktree '{name}' not found at {worktree_path}", err=True)
         raise typer.Exit(1)

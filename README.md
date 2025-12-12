@@ -21,7 +21,7 @@ The workflow: create a worktree, run tasks there, merge when ready. You can have
 
 ```bash
 lf wt create my-feature       # branch + worktree, opens IDEs
-cd .lf/worktrees/my-feature
+cd ../.worktrees/loopflow/my-feature
 
 lf design                     # interactive: figure out what to build
 lf ship                       # batch: implement, review, test, commit, open PR
@@ -76,7 +76,7 @@ lf ship    # runs each task, auto-commits between steps
 ## Worktrees
 
 ```bash
-lf wt create auth             # .lf/worktrees/auth/, opens Warp + Cursor
+lf wt create auth             # ../.worktrees/loopflow/auth/, opens Warp + Cursor
 lf wt list                    # show all worktrees
 lf wt clean                   # remove merged branches
 ```

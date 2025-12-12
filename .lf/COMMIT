@@ -1,3 +1,3 @@
-files: skip binary files when gathering context
+pr land: fix landing from main branch
 
-Binary files (images, PDFs, compiled code) are now excluded from context gathering. Detection uses both extension matching (fast path) and null-byte content sniffing (fallback). Text formats like .json, .lock, and .svg continue to be included.
+Landing from main now checks out main first before merge. Also closes PR and deletes remote branch after landing. Prevents "Must be on a feature branch" errors during PR create/update.

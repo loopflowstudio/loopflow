@@ -3,6 +3,7 @@
 import platform
 import shutil
 import subprocess
+from pathlib import Path
 
 import typer
 
@@ -156,7 +157,6 @@ def doctor():
         typer.echo("- gh (optional): brew install gh")
 
     # Check for .worktrees/ in global gitignore
-    from pathlib import Path
     gitignore = Path.home() / ".config" / "git" / "ignore"
     if gitignore.exists() and ".worktrees" in gitignore.read_text():
         typer.echo("✓ .worktrees in global gitignore")

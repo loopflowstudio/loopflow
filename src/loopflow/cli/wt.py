@@ -85,7 +85,7 @@ def open_cmd(
 
 @app.command(name="list")
 def list_cmd():
-    """List all worktrees with status."""
+    """List all worktrees with status and dependencies."""
     main_repo = find_main_repo()
     if not main_repo:
         typer.echo("Error: Not in a git repository", err=True)
@@ -96,15 +96,50 @@ def list_cmd():
         typer.echo("No worktrees found")
         return
 
+    # Build dependency tree: group worktrees by their base branch
+    by_base: dict[str, list] = {}
     for wt in worktrees:
+        base = wt.base_branch or "main"
+        by_base.setdefault(base, []).append(wt)
+
+    def format_status(wt) -> str:
         status = []
         if wt.is_dirty:
             status.append("dirty")
         if not wt.on_origin:
             status.append("local")
+        if not wt.base_branch:
+            status.append("no PR")
+        return f" ({', '.join(status)})" if status else ""
 
-        status_str = f" ({', '.join(status)})" if status else ""
-        typer.echo(f"{wt.name}{status_str}")
+    def print_children(parent: str, indent: int, printed: set):
+        for wt in by_base.get(parent, []):
+            if wt.name in printed:
+                continue
+            printed.add(wt.name)
+            prefix = "  " * indent + "└─ "
+            typer.echo(f"{prefix}{wt.name}{format_status(wt)}")
+            print_children(wt.name, indent + 1, printed)
+
+    printed: set[str] = set()
+
+    # Print branches rooted at main
+    if "main" in by_base:
+        typer.echo("main")
+        print_children("main", 1, printed)
+
+    # Print branches with other bases (dependent on non-main branches)
+    for base, children in by_base.items():
+        if base == "main":
+            continue
+        # Check if base is itself a worktree we've printed
+        if base not in printed:
+            typer.echo(f"{base} (not a worktree)")
+        for wt in children:
+            if wt.name not in printed:
+                printed.add(wt.name)
+                typer.echo(f"  └─ {wt.name}{format_status(wt)}")
+                print_children(wt.name, 2, printed)
 
 
 @app.command()

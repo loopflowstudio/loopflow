@@ -115,10 +115,11 @@ def update(
 def land(
     add: bool = typer.Option(False, "-a", "--add", help="Add, commit, and push changes first"),
 ):
-    """Land this branch: squash-merge to main and clean up.
+    """Land this branch: squash-merge to base branch and clean up.
 
     Requires a PR with a title. Commit message is PR title + body.
     Branch must be clean and pushed (use --add to auto-commit first).
+    Merges onto the PR's base branch (supports dependent branches).
     """
     repo_root = find_worktree_root()
     if not repo_root:
@@ -144,8 +145,8 @@ def land(
     )
     branch = result.stdout.strip()
 
-    if not branch or branch == "main":
-        typer.echo("Error: Already on main (or detached HEAD)", err=True)
+    if not branch:
+        typer.echo("Error: Detached HEAD", err=True)
         raise typer.Exit(1)
 
     # Check for uncommitted changes
@@ -198,9 +199,9 @@ def land(
             typer.echo("Error: Branch not pushed. Use --add or push manually.", err=True)
             raise typer.Exit(1)
 
-    # Get commit message from PR
+    # Get PR info including base branch
     result = subprocess.run(
-        ["gh", "pr", "view", "--json", "title,body"],
+        ["gh", "pr", "view", "--json", "title,body,baseRefName"],
         cwd=repo_root,
         capture_output=True,
         text=True,
@@ -212,18 +213,57 @@ def land(
     pr_data = json.loads(result.stdout)
     title = pr_data.get("title", "").strip()
     body = pr_data.get("body", "").strip()
+    base_branch = pr_data.get("baseRefName", "main").strip()
 
     if not title:
         typer.echo("Error: PR has no title", err=True)
+        raise typer.Exit(1)
+
+    if branch == base_branch:
+        typer.echo(f"Error: Cannot land {branch} onto itself", err=True)
         raise typer.Exit(1)
 
     commit_msg = title
     if body:
         commit_msg += f"\n\n{body}"
 
-    # Land it (operations happen in main repo where main is checked out)
+    # Check main repo is clean before we modify it
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=main_repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.stdout.strip():
+        typer.echo("Error: Main repo has uncommitted changes", err=True)
+        raise typer.Exit(1)
+
+    # Save current branch in main repo to restore later
+    result = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=main_repo,
+        capture_output=True,
+        text=True,
+    )
+    original_branch = result.stdout.strip()
+
+    # Fetch and checkout base branch
+    typer.echo(f"Checking out {base_branch}...")
+    subprocess.run(["git", "fetch", "origin", base_branch], cwd=main_repo, check=True)
+    subprocess.run(["git", "checkout", base_branch], cwd=main_repo, check=True)
+    subprocess.run(["git", "reset", "--hard", f"origin/{base_branch}"], cwd=main_repo, check=True)
+
+    # Fetch the branch we're landing and squash merge
     subprocess.run(["git", "fetch", "origin", branch], cwd=main_repo, check=True)
-    subprocess.run(["git", "merge", "--squash", f"origin/{branch}"], cwd=main_repo, check=True)
+    result = subprocess.run(
+        ["git", "merge", "--squash", f"origin/{branch}"],
+        cwd=main_repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        typer.echo(f"Error: Merge failed. Resolve conflicts manually.\n{result.stderr}", err=True)
+        raise typer.Exit(1)
 
     # Check if there are staged changes to commit
     result = subprocess.run(
@@ -231,7 +271,10 @@ def land(
         cwd=main_repo,
     )
     if result.returncode == 0:
-        typer.echo(f"Nothing to land - {branch} has no changes relative to main.", err=True)
+        typer.echo(f"Nothing to land - {branch} has no changes relative to {base_branch}.", err=True)
+        # Restore original branch
+        if original_branch:
+            subprocess.run(["git", "checkout", original_branch], cwd=main_repo, capture_output=True)
         raise typer.Exit(1)
 
     subprocess.run(["git", "commit", "-m", commit_msg], cwd=main_repo, check=True)
@@ -242,6 +285,9 @@ def land(
     if repo_root != main_repo:
         remove_worktree(main_repo, branch)
     else:
+        # If we landed from main repo, switch back before deleting branch
+        if original_branch and original_branch != branch:
+            subprocess.run(["git", "checkout", original_branch], cwd=main_repo, capture_output=True)
         subprocess.run(["git", "branch", "-D", branch], cwd=main_repo, check=True)
 
-    typer.echo(f"Landed {branch} to main and pushed.")
+    typer.echo(f"Landed {branch} onto {base_branch} and pushed.")

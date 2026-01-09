@@ -23,7 +23,7 @@ app.add_typer(meta.app, name="meta")
 app.add_typer(maestro.app, name="maestro")
 
 # Register top-level commands
-app.command(context_settings={"allow_extra_args": True, "allow_interspersed_args": False})(run_module.run)
+app.command(context_settings={"allow_extra_args": True, "allow_interspersed_args": True})(run_module.run)
 app.command()(run_module.inline)
 app.command(name="pipeline")(run_module.pipeline)
 app.command()(status.status)

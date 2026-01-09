@@ -56,10 +56,10 @@ def init(
     # Get bundled assets path
     bundled_dir = Path(__file__).parent.parent
     prompts_dir = bundled_dir / "prompts"
-    style_template = bundled_dir / "STYLE_TEMPLATE.md"
+    style_template = bundled_dir / "LOOPFLOW_STYLE.md"
     config_template = bundled_dir / "config_template.yaml"
 
-    # Install prompts
+    # Install prompts to .claude/commands/ (accessible via raw claude too)
     if install_prompts:
         commands_dir = repo_root / ".claude" / "commands"
         commands_dir.mkdir(parents=True, exist_ok=True)
@@ -74,14 +74,16 @@ def init(
                 shutil.copy(src, dst)
                 typer.echo(f"✓ Created .claude/commands/{prompt_name}")
 
-    # Install style guide
+    # Install style guide to .lf/ (only included in lf sessions, not raw claude/codex)
     if install_style:
-        style_dst = repo_root / "STYLE.md"
+        lf_dir = repo_root / ".lf"
+        lf_dir.mkdir(exist_ok=True)
+        style_dst = lf_dir / "LOOPFLOW_STYLE.md"
         if style_dst.exists():
-            typer.echo("- STYLE.md (already exists)")
+            typer.echo("- .lf/LOOPFLOW_STYLE.md (already exists)")
         else:
             shutil.copy(style_template, style_dst)
-            typer.echo("✓ Created STYLE.md")
+            typer.echo("✓ Created .lf/LOOPFLOW_STYLE.md")
 
     # Install config
     if install_config:

@@ -122,6 +122,13 @@ def gather_prompt_components(
 ) -> PromptComponents:
     """Gather all prompt components without assembling them."""
     docs = gather_docs(repo_root, repo_root, exclude)
+
+    # Include loopflow style guide if present (only in lf sessions)
+    loopflow_style = repo_root / ".lf" / "LOOPFLOW_STYLE.md"
+    if loopflow_style.exists():
+        content = loopflow_style.read_text()
+        docs.insert(0, (loopflow_style, content))
+
     diff = gather_diff(repo_root, exclude)
 
     task_result = None

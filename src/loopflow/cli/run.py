@@ -27,8 +27,8 @@ def _copy_to_clipboard(text: str) -> None:
 
 
 def run(
+    ctx: typer.Context,
     task: str = typer.Argument(help="Task name (e.g., 'review', 'implement')"),
-    args: Optional[list[str]] = typer.Argument(None, help="Arguments for task ($ARGUMENTS, $1, $2, ...)"),
     print_mode: bool = typer.Option(
         False, "-p", "--print", help="Run non-interactively"
     ),

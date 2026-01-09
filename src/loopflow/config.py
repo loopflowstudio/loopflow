@@ -21,6 +21,7 @@ class PipelineConfig(BaseModel):
 
 
 class Config(BaseModel):
+    backend: str = "claude"
     pipelines: dict[str, PipelineConfig] = Field(default_factory=dict)
     dangerously_skip_permissions: bool = False
     push: bool = False

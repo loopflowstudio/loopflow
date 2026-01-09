@@ -7,7 +7,7 @@ from typing import Optional
 from loopflow.config import PipelineConfig
 from loopflow.context import build_prompt
 from loopflow.git import GitError, autocommit, open_pr
-from loopflow.launcher import launch_claude
+from loopflow.launcher import get_backend
 from loopflow.llm_http import generate_pr_message
 
 
@@ -19,6 +19,7 @@ def run_pipeline(
     skip_permissions: bool = False,
     push_enabled: bool = False,
     pr_enabled: bool = False,
+    backend: str = "claude",
 ) -> int:
     """Run each task in sequence. Returns first non-zero exit code, or 0."""
     # Pipeline settings override globals
@@ -29,6 +30,8 @@ def run_pipeline(
     if should_pr:
         should_push = True
 
+    backend_impl = get_backend(backend)
+
     total = len(pipeline.tasks)
     for i, task_name in enumerate(pipeline.tasks):
         # Task header
@@ -37,7 +40,7 @@ def run_pipeline(
         print(f"{'='*60}\n")
 
         prompt = build_prompt(repo_root, task_name, context=context, exclude=exclude)
-        exit_code, _ = launch_claude(
+        result = backend_impl.launch(
             prompt,
             print_mode=True,
             stream=True,
@@ -45,9 +48,9 @@ def run_pipeline(
             cwd=repo_root,
         )
 
-        if exit_code != 0:
-            print(f"\n[{task_name}] failed with exit code {exit_code}")
-            return exit_code
+        if result.exit_code != 0:
+            print(f"\n[{task_name}] failed with exit code {result.exit_code}")
+            return result.exit_code
 
         autocommit(repo_root, task_name, push=should_push, verbose=True)
 

@@ -106,6 +106,7 @@ def gather_prompt_components(
     inline: Optional[str] = None,
     context: Optional[list[str]] = None,
     exclude: Optional[list[str]] = None,
+    task_args: Optional[list[str]] = None,
 ) -> PromptComponents:
     """Gather all prompt components without assembling them."""
     docs = gather_docs(repo_root, repo_root, exclude)
@@ -117,6 +118,12 @@ def gather_prompt_components(
     elif task:
         task_content = gather_task(repo_root, task)
         if task_content:
+            # Replace template variables if task_args provided
+            if task_args:
+                for arg in task_args:
+                    if "=" in arg:
+                        key, value = arg.split("=", 1)
+                        task_content = task_content.replace(f"{{{{{key}}}}}", value)
             task_result = (task, task_content)
         else:
             task_result = (task, f"No task file found for '{task}'.")

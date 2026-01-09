@@ -2,7 +2,7 @@
 
 Run LLM coding tasks from reusable prompt files.
 
-macOS only. Currently uses Claude Code; other backends planned.
+macOS only. Supports Claude Code and other LLM backends via configuration.
 
 ## Install
 
@@ -102,6 +102,7 @@ When maestro is running, tasks automatically register, and you'll get macOS noti
 
 ```yaml
 # .lf/config.yaml
+backend: claude   # LLM backend (claude or codex)
 push: true        # auto-push after commits
 pr: false         # open PR after pipelines
 
@@ -118,6 +119,8 @@ ide:
 | `-x, --context` | Add context files |
 | `-w, --worktree` | Create worktree and run task there |
 | `-c, --copy` | Copy prompt to clipboard, show token breakdown |
+| `-b, --backend` | Choose backend (claude, codex) |
+| `--parallel` | Run with multiple backends in parallel |
 
 ## Commands
 
@@ -127,8 +130,10 @@ ide:
 | `lf <pipeline>` | Run a pipeline |
 | `lf : "prompt"` | Inline prompt |
 | `lf wt create/list/clean` | Worktree management |
+| `lf wt compare <a> <b>` | Compare two worktree implementations |
 | `lf pr create` | Open GitHub PR |
 | `lf pr land [-a]` | Squash-merge to main |
+| `lf meta init` | Initialize repo with prompts and config |
 | `lf meta install` | Install Claude Code |
 | `lf meta doctor` | Check dependencies |
 | `lf maestro start` | Start session tracking daemon |

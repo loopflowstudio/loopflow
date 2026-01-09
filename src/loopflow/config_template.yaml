@@ -1,0 +1,36 @@
+# Loopflow configuration
+# See: https://github.com/loopflowstudio/loopflow
+
+# Model to use (claude or codex)
+model: claude
+
+# Context: files/directories to include by default
+context: "."
+
+# Exclude: patterns to ignore
+exclude:
+  - "*.lock"
+  - "node_modules"
+  - ".venv"
+
+# Push commits to origin automatically
+push: false
+
+# Open PR automatically after pipeline completes
+pr: false
+
+# Skip all permission prompts
+yolo: false
+
+# IDE configuration for worktree commands
+ide:
+  cursor: true
+  warp: true
+  workspace: null  # Optional: specify .code-workspace file
+
+# Example pipelines
+# pipelines:
+#   review-and-test:
+#     tasks:
+#       - review
+#       - test

@@ -23,7 +23,7 @@ app.add_typer(meta.app, name="meta")
 app.add_typer(maestro.app, name="maestro")
 
 # Register top-level commands
-app.command()(run_module.run)
+app.command(context_settings={"allow_extra_args": True, "allow_interspersed_args": False})(run_module.run)
 app.command()(run_module.inline)
 app.command(name="pipeline")(run_module.pipeline)
 app.command()(status.status)
@@ -42,6 +42,9 @@ def main():
                 sys.argv.pop(1)
                 sys.argv.insert(1, "inline")
             elif first_arg not in known_commands:
+                # Handle colon suffix: "lf implement: add logout" -> "lf implement add logout"
+                if first_arg.endswith(":"):
+                    sys.argv[1] = first_arg[:-1]
                 name = sys.argv[1]
                 repo_root = find_worktree_root()
                 config = load_config(repo_root) if repo_root else None

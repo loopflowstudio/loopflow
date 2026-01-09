@@ -45,11 +45,13 @@ def test_create_worktree_raises_on_failure(temp_repo):
 
 def test_create_worktree_returns_existing_path(temp_repo):
     """Creating worktree for existing path returns it without error."""
-    worktree_path = temp_repo / ".lf" / "worktrees" / "feature"
-    worktree_path.mkdir(parents=True)
+    from loopflow.git import worktree_path
+
+    wt_path = worktree_path(temp_repo, "feature")
+    wt_path.mkdir(parents=True)
 
     result = create_worktree(temp_repo, "feature")
-    assert result == worktree_path
+    assert result == wt_path
 
 
 def test_open_pr_raises_on_failure(temp_repo):
@@ -198,4 +200,32 @@ def test_find_main_repo_not_in_git_repo(tmp_path):
         mock_run.return_value = MagicMock(returncode=128, stdout="", stderr="fatal: not a git repository")
 
         result = find_main_repo(tmp_path)
+        assert result is None
+
+
+def test_get_current_branch_returns_branch_name(temp_repo):
+    """get_current_branch returns current branch name."""
+    from loopflow.git import get_current_branch
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="feature-branch\n"
+        )
+
+        result = get_current_branch(temp_repo)
+        assert result == "feature-branch"
+
+
+def test_get_current_branch_returns_none_when_detached(temp_repo):
+    """get_current_branch returns None when HEAD is detached."""
+    from loopflow.git import get_current_branch
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=""
+        )
+
+        result = get_current_branch(temp_repo)
         assert result is None

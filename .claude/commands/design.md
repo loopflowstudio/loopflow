@@ -1,6 +1,6 @@
 This task produces a short implementation spec that another LLM session can use to write a first draft of a feature.
 
-The design doc is scaffolding—meant to be deleted once the code exists. It's a checkpoint for recovery, not documentation for posterity. If a session crashes, the spec lets a fresh session pick up where things left off.
+The design doc is scaffolding. It's a checkpoint for recovery, not documentation for posterity. If a session crashes, the spec lets a fresh session pick up where things left off. After implementation, `lf review` transforms it into a human review guide. `lf pr land` removes it.
 
 ## Workflow
 

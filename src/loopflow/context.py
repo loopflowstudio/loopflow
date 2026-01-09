@@ -137,12 +137,19 @@ def gather_prompt_components(
     elif task:
         task_content = gather_task(repo_root, task)
         if task_content:
-            # Replace template variables if task_args provided
+            # Process task_args if provided
             if task_args:
+                plain_args = []
                 for arg in task_args:
                     if "=" in arg:
+                        # Template substitution: {{key}} -> value
                         key, value = arg.split("=", 1)
                         task_content = task_content.replace(f"{{{{{key}}}}}", value)
+                    else:
+                        plain_args.append(arg)
+                # Append plain args to task content
+                if plain_args:
+                    task_content = task_content.rstrip() + "\n\n" + " ".join(plain_args)
             task_result = (task, task_content)
         else:
             task_result = (task, f"No task file found for '{task}'.")

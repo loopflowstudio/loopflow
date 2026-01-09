@@ -2,7 +2,7 @@
 
 Run LLM coding tasks from reusable prompt files.
 
-macOS only. Supports Claude Code and other LLM backends via configuration.
+macOS only. Supports Claude Code and OpenAI Codex via configuration.
 
 ## Install
 
@@ -102,7 +102,7 @@ When maestro is running, tasks automatically register, and you'll get macOS noti
 
 ```yaml
 # .lf/config.yaml
-backend: claude   # LLM backend (claude or codex)
+model: claude     # Model to use (claude or codex)
 push: true        # auto-push after commits
 pr: false         # open PR after pipelines
 
@@ -119,8 +119,8 @@ ide:
 | `-x, --context` | Add context files |
 | `-w, --worktree` | Create worktree and run task there |
 | `-c, --copy` | Copy prompt to clipboard, show token breakdown |
-| `-b, --backend` | Choose backend (claude, codex) |
-| `--parallel` | Run with multiple backends in parallel |
+| `-m, --model` | Choose model (claude, codex) |
+| `--parallel` | Run with multiple models in parallel |
 
 ## Commands
 

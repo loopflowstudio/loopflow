@@ -50,25 +50,25 @@ def test_load_config_empty_file(temp_repo):
 
 
 def test_load_config_skip_permissions_flag(temp_repo):
-    """dangerously_skip_permissions flag is loaded."""
+    """yolo flag is loaded."""
     config_yaml = temp_repo / ".lf" / "config.yaml"
-    config_yaml.write_text("dangerously_skip_permissions: true\n")
+    config_yaml.write_text("yolo: true\n")
 
     config = load_config(temp_repo)
 
     assert config is not None
-    assert config.dangerously_skip_permissions is True
+    assert config.yolo is True
 
 
 def test_load_config_skip_permissions_defaults_false(temp_repo):
-    """dangerously_skip_permissions defaults to False when not set."""
+    """yolo defaults to False when not set."""
     config_yaml = temp_repo / ".lf" / "config.yaml"
     config_yaml.write_text("pipelines:\n  foo:\n    tasks:\n      - task1\n")
 
     config = load_config(temp_repo)
 
     assert config is not None
-    assert config.dangerously_skip_permissions is False
+    assert config.yolo is False
 
 
 def test_load_config_push_pr_flags(temp_repo):
@@ -146,7 +146,7 @@ def test_load_config_context_as_list(temp_repo):
 def test_load_config_context_defaults_empty(temp_repo):
     """context defaults to empty list."""
     config_yaml = temp_repo / ".lf" / "config.yaml"
-    config_yaml.write_text("dangerously_skip_permissions: false\n")
+    config_yaml.write_text("yolo: false\n")
 
     config = load_config(temp_repo)
 
@@ -179,7 +179,7 @@ def test_load_config_exclude_as_list(temp_repo):
 def test_load_config_exclude_defaults_empty(temp_repo):
     """exclude defaults to empty list."""
     config_yaml = temp_repo / ".lf" / "config.yaml"
-    config_yaml.write_text("dangerously_skip_permissions: false\n")
+    config_yaml.write_text("yolo: false\n")
 
     config = load_config(temp_repo)
 
@@ -190,7 +190,7 @@ def test_load_config_exclude_defaults_empty(temp_repo):
 def test_load_config_ide_defaults(temp_repo):
     """ide settings default to warp=True, cursor=True, workspace=None."""
     config_yaml = temp_repo / ".lf" / "config.yaml"
-    config_yaml.write_text("dangerously_skip_permissions: false\n")
+    config_yaml.write_text("yolo: false\n")
 
     config = load_config(temp_repo)
 
@@ -256,23 +256,23 @@ pipelines:
         load_config(temp_repo)
 
 
-def test_load_config_backend_defaults_claude(temp_repo):
-    """backend defaults to 'claude' when not set."""
+def test_load_config_model_defaults_claude(temp_repo):
+    """model defaults to 'claude' when not set."""
     config_yaml = temp_repo / ".lf" / "config.yaml"
     config_yaml.write_text("push: false\n")
 
     config = load_config(temp_repo)
 
     assert config is not None
-    assert config.backend == "claude"
+    assert config.model == "claude"
 
 
-def test_load_config_backend_setting(temp_repo):
-    """backend is loaded from config."""
+def test_load_config_model_setting(temp_repo):
+    """model is loaded from config."""
     config_yaml = temp_repo / ".lf" / "config.yaml"
-    config_yaml.write_text("backend: codex\n")
+    config_yaml.write_text("model: codex\n")
 
     config = load_config(temp_repo)
 
     assert config is not None
-    assert config.backend == "codex"
+    assert config.model == "codex"

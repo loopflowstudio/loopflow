@@ -1,4 +1,5 @@
-dangerously_skip_permissions: true
+model: codex
+yolo: true
 context: "."
 exclude: "uv.lock"
 push: true

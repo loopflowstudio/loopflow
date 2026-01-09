@@ -9,7 +9,7 @@ from pathlib import Path
 from loopflow.config import Config, load_config
 from loopflow.context import gather_prompt_components, format_prompt
 from loopflow.git import GitError, WorktreeInfo, create_worktree, find_main_repo, list_worktrees, remove_worktree, worktree_path
-from loopflow.launcher import get_backend
+from loopflow.launcher import get_runner
 
 app = typer.Typer(help="Worktree management.")
 
@@ -380,7 +380,7 @@ def clean(
 def compare(
     a: str = typer.Argument(help="First worktree name"),
     b: str = typer.Argument(help="Second worktree name"),
-    backend: str = typer.Option("claude", "-b", "--backend", help="Backend to use for analysis"),
+    model: str = typer.Option("claude", "-m", "--model", help="Model to use for analysis"),
 ):
     """Compare two worktree implementations and analyze differences."""
     main_repo = find_main_repo()
@@ -435,19 +435,19 @@ def compare(
 
     prompt = format_prompt(components)
 
-    # Launch backend
+    # Launch runner
     try:
-        backend_impl = get_backend(backend)
+        runner = get_runner(model)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
-    if not backend_impl.is_available():
-        typer.echo(f"Error: '{backend}' CLI not found", err=True)
+    if not runner.is_available():
+        typer.echo(f"Error: '{model}' CLI not found", err=True)
         raise typer.Exit(1)
 
-    skip_permissions = config.dangerously_skip_permissions if config else False
-    result = backend_impl.launch(
+    skip_permissions = config.yolo if config else False
+    result = runner.launch(
         prompt,
         print_mode=False,
         skip_permissions=skip_permissions,

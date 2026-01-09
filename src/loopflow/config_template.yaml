@@ -1,8 +1,8 @@
 # Loopflow configuration
 # See: https://github.com/loopflowstudio/loopflow
 
-# Backend to use (claude or codex)
-backend: claude
+# Model to use (claude or codex)
+model: claude
 
 # Context: files/directories to include by default
 context: "."
@@ -19,8 +19,8 @@ push: false
 # Open PR automatically after pipeline completes
 pr: false
 
-# Skip permission prompts (use with caution)
-dangerously_skip_permissions: false
+# Skip all permission prompts
+yolo: false
 
 # IDE configuration for worktree commands
 ide:

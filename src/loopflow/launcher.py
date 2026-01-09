@@ -11,14 +11,14 @@ from typing import Optional
 
 @dataclass
 class LaunchResult:
-    """Result from launching a backend."""
+    """Result from launching a runner."""
 
     exit_code: int
     output: Optional[str] = None
 
 
-class Backend(ABC):
-    """Abstract base class for LLM backends."""
+class Runner(ABC):
+    """Abstract base class for model runners (Claude Code, Codex, etc.)."""
 
     @abstractmethod
     def launch(
@@ -34,12 +34,12 @@ class Backend(ABC):
 
     @abstractmethod
     def is_available(self) -> bool:
-        """Check if the backend CLI is available."""
+        """Check if the runner CLI is available."""
         pass
 
 
-class ClaudeBackend(Backend):
-    """Claude Code CLI backend."""
+class ClaudeRunner(Runner):
+    """Claude Code CLI runner."""
 
     def launch(
         self,
@@ -49,17 +49,15 @@ class ClaudeBackend(Backend):
         skip_permissions: bool = False,
         cwd: Optional[Path] = None,
     ) -> LaunchResult:
-        """Launch a Claude Code session with the given prompt."""
         exit_code, output = launch_claude(prompt, print_mode, stream, skip_permissions, cwd)
         return LaunchResult(exit_code, output)
 
     def is_available(self) -> bool:
-        """Check if the claude CLI is available."""
         return check_claude_available()
 
 
-class CodexBackend(Backend):
-    """OpenAI Codex CLI backend."""
+class CodexRunner(Runner):
+    """OpenAI Codex CLI runner."""
 
     def launch(
         self,
@@ -69,13 +67,12 @@ class CodexBackend(Backend):
         skip_permissions: bool = False,
         cwd: Optional[Path] = None,
     ) -> LaunchResult:
-        """Launch a Codex CLI session with the given prompt."""
         cmd = ["codex"]
 
         if print_mode:
             cmd.append("--quiet")
         if skip_permissions:
-            cmd.extend(["--approval-mode", "full-auto"])
+            cmd.append("--full-auto")
 
         cmd.append(prompt)
 
@@ -87,7 +84,6 @@ class CodexBackend(Backend):
             return LaunchResult(result.returncode, None)
 
     def is_available(self) -> bool:
-        """Check if the codex CLI is available."""
         try:
             subprocess.run(
                 ["codex", "--version"],
@@ -99,15 +95,15 @@ class CodexBackend(Backend):
             return False
 
 
-def get_backend(name: str) -> Backend:
-    """Get a backend instance by name."""
-    backends = {
-        "claude": ClaudeBackend,
-        "codex": CodexBackend,
+def get_runner(model: str) -> Runner:
+    """Get a runner instance for the given model."""
+    runners = {
+        "claude": ClaudeRunner,
+        "codex": CodexRunner,
     }
-    if name not in backends:
-        raise ValueError(f"Unknown backend: {name}. Available: {list(backends.keys())}")
-    return backends[name]()
+    if model not in runners:
+        raise ValueError(f"Unknown model: {model}. Available: {list(runners.keys())}")
+    return runners[model]()
 
 
 def launch_claude(

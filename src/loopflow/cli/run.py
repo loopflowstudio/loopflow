@@ -12,13 +12,13 @@ import typer
 from loopflow.config import load_config
 from loopflow.context import find_worktree_root, gather_prompt_components, format_prompt
 from loopflow.git import GitError, autocommit, create_worktree, find_main_repo
-from loopflow.launcher import get_backend
+from loopflow.launcher import get_runner
 from loopflow.maestro import Session, SessionStatus, connect_maestro
 from loopflow.pipeline import run_pipeline
 from loopflow.tokens import analyze_components
 
 
-BackendType = Optional[str]
+ModelType = Optional[str]
 
 
 def _copy_to_clipboard(text: str) -> None:
@@ -41,14 +41,14 @@ def run(
     copy: bool = typer.Option(
         False, "-c", "--copy", help="Copy prompt to clipboard and show token breakdown"
     ),
-    backend: BackendType = typer.Option(
-        None, "-b", "--backend", help="Backend to use (claude, codex)"
+    model: ModelType = typer.Option(
+        None, "-m", "--model", help="Model to use (claude, codex)"
     ),
     parallel: str = typer.Option(
-        None, "--parallel", help="Run in parallel with multiple backends (e.g., 'claude,codex')"
+        None, "--parallel", help="Run in parallel with multiple models (e.g., 'claude,codex')"
     ),
 ):
-    """Run a task with an LLM backend."""
+    """Run a task with an LLM model."""
     repo_root = find_worktree_root()
     if not repo_root:
         typer.echo("Error: Not in a git repository", err=True)
@@ -56,15 +56,15 @@ def run(
 
     # Handle parallel execution
     if parallel:
-        backends = [b.strip() for b in parallel.split(",")]
-        for backend_name in backends:
-            wt_name = f"{task}-{backend_name}"
-            cmd = ["lf", task, "-w", wt_name, "--backend", backend_name, "-p"]
-            if args:
-                cmd.extend(args)
+        models = [m.strip() for m in parallel.split(",")]
+        for model_name in models:
+            wt_name = f"{task}-{model_name}"
+            cmd = ["lf", task, "-w", wt_name, "--model", model_name, "-p"]
+            if ctx.args:
+                cmd.extend(ctx.args)
             if context:
-                for ctx in context:
-                    cmd.extend(["-x", ctx])
+                for ctx_file in context:
+                    cmd.extend(["-x", ctx_file])
 
             subprocess.Popen(
                 cmd,
@@ -80,16 +80,16 @@ def run(
         raise typer.Exit(0)
 
     config = load_config(repo_root)
-    backend_name = backend or (config.backend if config else "claude")
+    model_name = model or (config.model if config else "claude")
 
     try:
-        backend_impl = get_backend(backend_name)
+        runner = get_runner(model_name)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
-    if not copy and not backend_impl.is_available():
-        typer.echo(f"Error: '{backend_name}' CLI not found", err=True)
+    if not copy and not runner.is_available():
+        typer.echo(f"Error: '{model_name}' CLI not found", err=True)
         raise typer.Exit(1)
 
     if worktree:
@@ -101,13 +101,14 @@ def run(
         repo_root = worktree_path
 
     config = load_config(repo_root)
-    skip_permissions = config.dangerously_skip_permissions if config else False
+    skip_permissions = config.yolo if config else False
 
     all_context = list(config.context) if config and config.context else []
     if context:
         all_context.extend(context)
 
     exclude = list(config.exclude) if config and config.exclude else None
+    args = ctx.args or None
     components = gather_prompt_components(repo_root, task, context=all_context or None, exclude=exclude, task_args=args)
 
     if copy:
@@ -135,7 +136,7 @@ def run(
 
     try:
         prompt = format_prompt(components)
-        result = backend_impl.launch(
+        result = runner.launch(
             prompt,
             print_mode=print_mode,
             stream=print_mode,
@@ -170,30 +171,30 @@ def inline(
     copy: bool = typer.Option(
         False, "-c", "--copy", help="Copy prompt to clipboard and show token breakdown"
     ),
-    backend: BackendType = typer.Option(
-        None, "-b", "--backend", help="Backend to use (claude, codex)"
+    model: ModelType = typer.Option(
+        None, "-m", "--model", help="Model to use (claude, codex)"
     ),
 ):
-    """Run an inline prompt with an LLM backend."""
+    """Run an inline prompt with an LLM model."""
     repo_root = find_worktree_root()
     if not repo_root:
         typer.echo("Error: Not in a git repository", err=True)
         raise typer.Exit(1)
 
     config = load_config(repo_root)
-    backend_name = backend or (config.backend if config else "claude")
+    model_name = model or (config.model if config else "claude")
 
     try:
-        backend_impl = get_backend(backend_name)
+        runner = get_runner(model_name)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
-    if not copy and not backend_impl.is_available():
-        typer.echo(f"Error: '{backend_name}' CLI not found", err=True)
+    if not copy and not runner.is_available():
+        typer.echo(f"Error: '{model_name}' CLI not found", err=True)
         raise typer.Exit(1)
 
-    skip_permissions = config.dangerously_skip_permissions if config else False
+    skip_permissions = config.yolo if config else False
 
     all_context = list(config.context) if config and config.context else []
     if context:
@@ -227,7 +228,7 @@ def inline(
 
     try:
         prompt_text = format_prompt(components)
-        result = backend_impl.launch(
+        result = runner.launch(
             prompt_text,
             print_mode=print_mode,
             stream=print_mode,
@@ -262,8 +263,8 @@ def pipeline(
     copy: bool = typer.Option(
         False, "-c", "--copy", help="Copy first task prompt to clipboard and show token breakdown"
     ),
-    backend: BackendType = typer.Option(
-        None, "-b", "--backend", help="Backend to use (claude, codex)"
+    model: ModelType = typer.Option(
+        None, "-m", "--model", help="Model to use (claude, codex)"
     ),
 ):
     """Run a named pipeline."""
@@ -277,16 +278,16 @@ def pipeline(
         typer.echo(f"Error: Pipeline '{name}' not found in .lf/config.yaml", err=True)
         raise typer.Exit(1)
 
-    backend_name = backend or config.backend
+    model_name = model or config.model
 
     try:
-        backend_impl = get_backend(backend_name)
+        runner = get_runner(model_name)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
-    if not copy and not backend_impl.is_available():
-        typer.echo(f"Error: '{backend_name}' CLI not found", err=True)
+    if not copy and not runner.is_available():
+        typer.echo(f"Error: '{model_name}' CLI not found", err=True)
         raise typer.Exit(1)
 
     if worktree:
@@ -323,9 +324,9 @@ def pipeline(
         repo_root,
         context=all_context or None,
         exclude=exclude,
-        skip_permissions=config.dangerously_skip_permissions,
+        skip_permissions=config.yolo,
         push_enabled=push_enabled,
         pr_enabled=pr_enabled,
-        backend=backend_name,
+        model=model_name,
     )
     raise typer.Exit(exit_code)

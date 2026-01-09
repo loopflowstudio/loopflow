@@ -43,7 +43,7 @@ build-backend = "hatchling.build"
 packages = ["src/loopflow"]
 include = [
     "src/loopflow/prompts/*.md",
-    "src/loopflow/STYLE_TEMPLATE.md",
+    "src/loopflow/LOOPFLOW_STYLE.md",
     "src/loopflow/config_template.yaml",
 ]
 
@@ -51,7 +51,7 @@ include = [
 include = [
     "src/loopflow",
     "src/loopflow/prompts/*.md",
-    "src/loopflow/STYLE_TEMPLATE.md",
+    "src/loopflow/LOOPFLOW_STYLE.md",
     "src/loopflow/config_template.yaml",
 ]
 

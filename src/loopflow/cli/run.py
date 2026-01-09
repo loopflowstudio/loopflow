@@ -11,7 +11,7 @@ import typer
 
 from loopflow.config import load_config
 from loopflow.context import find_worktree_root, gather_prompt_components, format_prompt
-from loopflow.git import GitError, autocommit, create_worktree, find_main_repo
+from loopflow.git import GitError, autocommit, create_worktree, find_main_repo, worktree_path
 from loopflow.launcher import get_backend
 from loopflow.maestro import Session, SessionStatus, connect_maestro
 from loopflow.pipeline import run_pipeline
@@ -95,7 +95,7 @@ def run(
         # Schedule notifications for completion
         for backend_name in backends:
             wt_name = f"{task}-{backend_name}"
-            wt_path = repo_root / ".lf" / "worktrees" / wt_name
+            wt_path = worktree_path(repo_root, wt_name)
             _notify_on_completion(wt_name, wt_path)
 
         raise typer.Exit(0)

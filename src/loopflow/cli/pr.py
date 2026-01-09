@@ -7,7 +7,7 @@ import subprocess
 import typer
 
 from loopflow.context import find_worktree_root
-from loopflow.git import GitError, find_main_repo, open_pr, update_pr
+from loopflow.git import GitError, find_main_repo, open_pr, update_pr, worktree_path
 from loopflow.llm_http import generate_commit_message, generate_pr_message
 
 app = typer.Typer(help="Pull request workflow.")
@@ -128,7 +128,7 @@ def land(
         if not main_repo:
             typer.echo("Error: Not in a git repository", err=True)
             raise typer.Exit(1)
-        repo_root = main_repo / ".lf" / "worktrees" / worktree
+        repo_root = worktree_path(main_repo, worktree)
         if not repo_root.exists():
             typer.echo(f"Error: Worktree '{worktree}' not found", err=True)
             raise typer.Exit(1)

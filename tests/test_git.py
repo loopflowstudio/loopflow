@@ -45,11 +45,13 @@ def test_create_worktree_raises_on_failure(temp_repo):
 
 def test_create_worktree_returns_existing_path(temp_repo):
     """Creating worktree for existing path returns it without error."""
-    worktree_path = temp_repo / ".lf" / "worktrees" / "feature"
-    worktree_path.mkdir(parents=True)
+    from loopflow.git import worktree_path
+
+    wt_path = worktree_path(temp_repo, "feature")
+    wt_path.mkdir(parents=True)
 
     result = create_worktree(temp_repo, "feature")
-    assert result == worktree_path
+    assert result == wt_path
 
 
 def test_open_pr_raises_on_failure(temp_repo):

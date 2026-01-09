@@ -8,40 +8,40 @@ from pathlib import Path
 
 from loopflow.config import Config, load_config
 from loopflow.context import gather_prompt_components, format_prompt
-from loopflow.git import GitError, create_worktree, find_main_repo, list_worktrees, remove_worktree
+from loopflow.git import GitError, WorktreeInfo, create_worktree, find_main_repo, list_worktrees, remove_worktree, worktree_path
 from loopflow.launcher import get_backend
 
 app = typer.Typer(help="Worktree management.")
 
 
-def _find_workspace(worktree_path: Path, config: Config | None) -> Path | None:
+def _find_workspace(wt_path: Path, config: Config | None) -> Path | None:
     """Find workspace file in the worktree."""
     if config and config.ide.workspace:
-        workspace_path = worktree_path / config.ide.workspace
+        workspace_path = wt_path / config.ide.workspace
         if workspace_path.exists():
             return workspace_path
         return None
 
-    workspaces = list(worktree_path.glob("*.code-workspace"))
+    workspaces = list(wt_path.glob("*.code-workspace"))
     if len(workspaces) == 1:
         return workspaces[0]
 
     return None
 
 
-def _open_ide(worktree_path: Path, config: Config | None) -> None:
+def _open_ide(wt_path: Path, config: Config | None) -> None:
     """Open configured IDEs at worktree path."""
     ide = config.ide if config else None
 
     if not ide or ide.warp:
-        subprocess.run(["open", f"warp://action/new_window?path={worktree_path}"])
+        subprocess.run(["open", f"warp://action/new_window?path={wt_path}"])
 
     if not ide or ide.cursor:
-        workspace = _find_workspace(worktree_path, config)
+        workspace = _find_workspace(wt_path, config)
         if workspace:
             subprocess.run(["cursor", str(workspace)])
         else:
-            subprocess.run(["cursor", str(worktree_path)])
+            subprocess.run(["cursor", str(wt_path)])
 
 
 @app.command()
@@ -55,14 +55,14 @@ def create(
         raise typer.Exit(1)
 
     try:
-        worktree_path = create_worktree(main_repo, name)
+        wt_path = create_worktree(main_repo, name)
     except GitError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
     config = load_config(main_repo)
-    _open_ide(worktree_path, config)
-    typer.echo(f"cd {worktree_path}")
+    _open_ide(wt_path, config)
+    typer.echo(f"cd {wt_path}")
 
 
 @app.command(name="open")
@@ -75,19 +75,59 @@ def open_cmd(
         typer.echo("Error: Not in a git repository", err=True)
         raise typer.Exit(1)
 
-    worktree_path = main_repo / ".lf" / "worktrees" / name
-    if not worktree_path.exists():
-        typer.echo(f"Error: Worktree '{name}' not found at {worktree_path}", err=True)
+    wt_path = worktree_path(main_repo, name)
+    if not wt_path.exists():
+        typer.echo(f"Error: Worktree '{name}' not found at {wt_path}", err=True)
         raise typer.Exit(1)
 
     config = load_config(main_repo)
-    _open_ide(worktree_path, config)
-    typer.echo(f"cd {worktree_path}")
+    _open_ide(wt_path, config)
+    typer.echo(f"cd {wt_path}")
+
+
+def _format_status_symbols(wt: WorktreeInfo) -> str:
+    """Format status symbols: +!? for staged/modified/untracked."""
+    symbols = ""
+    if wt.has_staged:
+        symbols += "+"
+    if wt.has_modified:
+        symbols += "!"
+    if wt.has_untracked:
+        symbols += "?"
+    return symbols
+
+
+def _format_main_rel(wt: WorktreeInfo) -> str:
+    """Format ahead/behind main like ↑3↓1."""
+    parts = []
+    if wt.ahead_main > 0:
+        parts.append(f"↑{wt.ahead_main}")
+    if wt.behind_main > 0:
+        parts.append(f"↓{wt.behind_main}")
+    return "".join(parts) if parts else "="
+
+
+def _format_pr(wt: WorktreeInfo) -> str:
+    """Format PR info."""
+    if wt.pr_number:
+        return f"#{wt.pr_number}"
+    elif wt.on_origin:
+        return "pushed"
+    return "local"
 
 
 @app.command(name="list")
-def list_cmd():
-    """List all worktrees with status and dependencies."""
+def list_cmd(
+    full: bool = typer.Option(False, "--full", "-f", help="Show full details including commit message"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """List all worktrees with status and dependencies.
+
+    Status symbols: + (staged), ! (modified), ? (untracked)
+    Main column: ↑N (ahead), ↓N (behind), = (in sync)
+    """
+    import json
+
     main_repo = find_main_repo()
     if not main_repo:
         typer.echo("Error: Not in a git repository", err=True)
@@ -95,7 +135,35 @@ def list_cmd():
 
     worktrees = list_worktrees(main_repo)
     if not worktrees:
-        typer.echo("No worktrees found")
+        if json_output:
+            typer.echo("[]")
+        else:
+            typer.echo("No worktrees found")
+        return
+
+    # JSON output
+    if json_output:
+        data = []
+        for wt in worktrees:
+            data.append({
+                "name": wt.name,
+                "branch": wt.branch,
+                "path": str(wt.path),
+                "on_origin": wt.on_origin,
+                "is_dirty": wt.is_dirty,
+                "base_branch": wt.base_branch,
+                "pr_url": wt.pr_url,
+                "pr_number": wt.pr_number,
+                "commit_sha": wt.commit_sha,
+                "commit_age": wt.commit_age,
+                "commit_message": wt.commit_message,
+                "ahead_main": wt.ahead_main,
+                "behind_main": wt.behind_main,
+                "has_staged": wt.has_staged,
+                "has_modified": wt.has_modified,
+                "has_untracked": wt.has_untracked,
+            })
+        typer.echo(json.dumps(data, indent=2))
         return
 
     # Build dependency tree: group worktrees by their base branch
@@ -104,44 +172,91 @@ def list_cmd():
         base = wt.base_branch or "main"
         by_base.setdefault(base, []).append(wt)
 
-    def format_status(wt) -> str:
-        status = []
-        if wt.is_dirty:
-            status.append("dirty")
-        if not wt.on_origin:
-            status.append("local")
-        if not wt.base_branch:
-            status.append("no PR")
-        return f" ({', '.join(status)})" if status else ""
+    # Calculate column widths dynamically
+    max_name = max(len(wt.name) for wt in worktrees)
+    max_tree_indent = 8  # space for tree chars like "└─ "
+    max_name = max(max_name + max_tree_indent, 12)
 
-    def print_children(parent: str, indent: int, printed: set):
-        for wt in by_base.get(parent, []):
+    def format_row(wt: WorktreeInfo, tree_prefix: str = "") -> str:
+        """Format a single worktree row."""
+        status = _format_status_symbols(wt)
+        main_rel = _format_main_rel(wt)
+        pr = _format_pr(wt)
+        age = wt.commit_age or ""
+        sha = wt.commit_sha or ""
+
+        # Build the row
+        name_col = f"{tree_prefix}{wt.name}"
+        name_col = name_col.ljust(max_name)
+
+        status_col = status.ljust(3)
+        main_col = main_rel.ljust(6)
+        pr_col = pr.ljust(8)
+        sha_col = sha.ljust(8)
+        age_col = age.ljust(14)
+
+        if full and wt.commit_message:
+            return f"{name_col}  {status_col}  {main_col}  {pr_col}  {sha_col}  {age_col}  {wt.commit_message}"
+        else:
+            return f"{name_col}  {status_col}  {main_col}  {pr_col}  {sha_col}  {age_col}"
+
+    def print_header():
+        name_col = "Branch".ljust(max_name)
+        status_col = "St".ljust(3)
+        main_col = "main".ljust(6)
+        pr_col = "PR".ljust(8)
+        sha_col = "Commit".ljust(8)
+        age_col = "Age".ljust(14)
+
+        if full:
+            typer.echo(f"{name_col}  {status_col}  {main_col}  {pr_col}  {sha_col}  {age_col}  Message")
+        else:
+            typer.echo(f"{name_col}  {status_col}  {main_col}  {pr_col}  {sha_col}  {age_col}")
+
+    def print_tree(parent: str, indent: int, printed: set, connector: str = ""):
+        children = by_base.get(parent, [])
+        for i, wt in enumerate(children):
             if wt.name in printed:
                 continue
             printed.add(wt.name)
-            prefix = "  " * indent + "└─ "
-            typer.echo(f"{prefix}{wt.name}{format_status(wt)}")
-            print_children(wt.name, indent + 1, printed)
 
+            # Build tree prefix
+            is_last = (i == len(children) - 1)
+            if indent == 0:
+                tree_prefix = ""
+                child_connector = ""
+            else:
+                tree_prefix = connector + ("└─ " if is_last else "├─ ")
+                child_connector = connector + ("   " if is_last else "│  ")
+
+            typer.echo(format_row(wt, tree_prefix))
+            print_tree(wt.name, indent + 1, printed, child_connector)
+
+    print_header()
     printed: set[str] = set()
 
     # Print branches rooted at main
     if "main" in by_base:
-        typer.echo("main")
-        print_children("main", 1, printed)
+        print_tree("main", 0, printed)
 
-    # Print branches with other bases (dependent on non-main branches)
+    # Print branches with other bases (dependent on non-main branches that may not be worktrees)
     for base, children in by_base.items():
         if base == "main":
             continue
         # Check if base is itself a worktree we've printed
         if base not in printed:
-            typer.echo(f"{base} (not a worktree)")
+            # It's a base branch that isn't a worktree
+            typer.echo(f"\n{base} (external)")
         for wt in children:
             if wt.name not in printed:
                 printed.add(wt.name)
-                typer.echo(f"  └─ {wt.name}{format_status(wt)}")
-                print_children(wt.name, 2, printed)
+                typer.echo(format_row(wt, "└─ "))
+                print_tree(wt.name, 2, printed, "   ")
+
+    # Summary
+    dirty_count = sum(1 for wt in worktrees if wt.is_dirty)
+    pr_count = sum(1 for wt in worktrees if wt.pr_number)
+    typer.echo(f"\n{len(worktrees)} worktrees, {pr_count} with PRs, {dirty_count} dirty")
 
 
 @app.command()
@@ -192,9 +307,8 @@ def compare(
         typer.echo("Error: Not in a git repository", err=True)
         raise typer.Exit(1)
 
-    wt_dir = main_repo / ".lf" / "worktrees"
-    wt_a = wt_dir / a
-    wt_b = wt_dir / b
+    wt_a = worktree_path(main_repo, a)
+    wt_b = worktree_path(main_repo, b)
 
     if not wt_a.exists():
         typer.echo(f"Error: Worktree '{a}' not found", err=True)

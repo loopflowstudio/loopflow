@@ -19,6 +19,16 @@ class WorktreeInfo:
     on_origin: bool
     is_dirty: bool
     base_branch: str | None = None  # PR target branch, if PR exists
+    pr_url: str | None = None
+    pr_number: int | None = None
+    commit_sha: str | None = None
+    commit_age: str | None = None
+    commit_message: str | None = None
+    ahead_main: int = 0
+    behind_main: int = 0
+    has_staged: bool = False
+    has_modified: bool = False
+    has_untracked: bool = False
 
 
 def find_main_repo(start: Optional[Path] = None) -> Path | None:
@@ -39,10 +49,28 @@ def find_main_repo(start: Optional[Path] = None) -> Path | None:
     return git_dir.parent
 
 
+def worktree_path(repo_root: Path, branch: str) -> Path:
+    """Get the path for a worktree (worktrunk-compatible).
+
+    Pattern: ../{repo}.{branch} with / replaced by -
+    """
+    sanitized = branch.replace("/", "-").replace("\\", "-")
+    return repo_root.parent / f"{repo_root.name}.{sanitized}"
+
+
 def list_worktrees(repo_root: Path) -> list[WorktreeInfo]:
-    """List all worktrees in .lf/worktrees/ with their status."""
-    worktrees_dir = repo_root / ".lf" / "worktrees"
-    if not worktrees_dir.exists():
+    """List all worktrees (worktrunk-compatible sibling directories).
+
+    Looks for directories matching ../{repo}.* pattern.
+    """
+    parent = repo_root.parent
+    prefix = f"{repo_root.name}."
+
+    wt_paths = sorted([
+        p for p in parent.iterdir()
+        if p.is_dir() and p.name.startswith(prefix)
+    ])
+    if not wt_paths:
         return []
 
     # Get remote branches
@@ -59,11 +87,9 @@ def list_worktrees(repo_root: Path) -> list[WorktreeInfo]:
                 remote_branches.add(line[7:])  # strip "origin/"
 
     worktrees = []
-    for path in sorted(worktrees_dir.iterdir()):
-        if not path.is_dir():
-            continue
-
-        name = path.name
+    for path in wt_paths:
+        # Extract branch name: loopflow.feature-x -> feature-x
+        name = path.name[len(prefix):]
 
         # Get branch name
         branch_result = subprocess.run(
@@ -74,25 +100,73 @@ def list_worktrees(repo_root: Path) -> list[WorktreeInfo]:
         )
         branch = branch_result.stdout.strip() if branch_result.returncode == 0 else name
 
-        # Check if dirty
+        # Check detailed status
         status_result = subprocess.run(
             ["git", "status", "--porcelain"],
             cwd=path,
             capture_output=True,
             text=True,
         )
-        is_dirty = bool(status_result.stdout.strip())
+        status_lines = status_result.stdout.strip().split("\n") if status_result.stdout.strip() else []
+        has_staged = any(line and line[0] in "MADRC" for line in status_lines)
+        has_modified = any(line and len(line) > 1 and line[1] in "MD" for line in status_lines)
+        has_untracked = any(line and line.startswith("??") for line in status_lines)
+        is_dirty = bool(status_lines)
 
-        # Get PR base branch if PR exists
+        # Get PR info
         base_branch = None
+        pr_url = None
+        pr_number = None
         pr_result = subprocess.run(
-            ["gh", "pr", "view", "--json", "baseRefName", "-q", ".baseRefName"],
+            ["gh", "pr", "view", "--json", "baseRefName,url,number", "-q", ".baseRefName,.url,.number"],
             cwd=path,
             capture_output=True,
             text=True,
         )
         if pr_result.returncode == 0 and pr_result.stdout.strip():
-            base_branch = pr_result.stdout.strip()
+            parts = pr_result.stdout.strip().split("\n")
+            if len(parts) >= 3:
+                base_branch = parts[0]
+                pr_url = parts[1]
+                try:
+                    pr_number = int(parts[2])
+                except ValueError:
+                    pass
+
+        # Get commit info
+        commit_result = subprocess.run(
+            ["git", "log", "-1", "--format=%h%n%ar%n%s"],
+            cwd=path,
+            capture_output=True,
+            text=True,
+        )
+        commit_sha = None
+        commit_age = None
+        commit_message = None
+        if commit_result.returncode == 0:
+            parts = commit_result.stdout.strip().split("\n")
+            if len(parts) >= 3:
+                commit_sha = parts[0]
+                commit_age = parts[1]
+                commit_message = parts[2][:50]  # truncate
+
+        # Get ahead/behind main
+        ahead_main = 0
+        behind_main = 0
+        rev_result = subprocess.run(
+            ["git", "rev-list", "--left-right", "--count", "main...HEAD"],
+            cwd=path,
+            capture_output=True,
+            text=True,
+        )
+        if rev_result.returncode == 0 and rev_result.stdout.strip():
+            parts = rev_result.stdout.strip().split()
+            if len(parts) == 2:
+                try:
+                    behind_main = int(parts[0])
+                    ahead_main = int(parts[1])
+                except ValueError:
+                    pass
 
         worktrees.append(WorktreeInfo(
             name=name,
@@ -101,6 +175,16 @@ def list_worktrees(repo_root: Path) -> list[WorktreeInfo]:
             on_origin=branch in remote_branches,
             is_dirty=is_dirty,
             base_branch=base_branch,
+            pr_url=pr_url,
+            pr_number=pr_number,
+            commit_sha=commit_sha,
+            commit_age=commit_age,
+            commit_message=commit_message,
+            ahead_main=ahead_main,
+            behind_main=behind_main,
+            has_staged=has_staged,
+            has_modified=has_modified,
+            has_untracked=has_untracked,
         ))
 
     return worktrees
@@ -108,15 +192,15 @@ def list_worktrees(repo_root: Path) -> list[WorktreeInfo]:
 
 def remove_worktree(repo_root: Path, name: str) -> bool:
     """Remove a worktree and its branch. Returns success."""
-    worktree_path = repo_root / ".lf" / "worktrees" / name
+    wt_path = worktree_path(repo_root, name)
 
-    if not worktree_path.exists():
+    if not wt_path.exists():
         return False
 
     # Get branch name before removing
     branch_result = subprocess.run(
         ["git", "branch", "--show-current"],
-        cwd=worktree_path,
+        cwd=wt_path,
         capture_output=True,
         text=True,
     )
@@ -124,7 +208,7 @@ def remove_worktree(repo_root: Path, name: str) -> bool:
 
     # Remove worktree
     result = subprocess.run(
-        ["git", "worktree", "remove", str(worktree_path), "--force"],
+        ["git", "worktree", "remove", str(wt_path), "--force"],
         cwd=repo_root,
         capture_output=True,
     )
@@ -257,10 +341,10 @@ def create_worktree(repo_root: Path, name: str, base: str | None = None) -> Path
 
     If base is None, uses current branch. If current is main or detached, syncs main first.
     """
-    worktree_path = repo_root / ".lf" / "worktrees" / name
+    wt_path = worktree_path(repo_root, name)
 
-    if worktree_path.exists():
-        return worktree_path
+    if wt_path.exists():
+        return wt_path
 
     # Determine base branch
     if base is None:
@@ -280,10 +364,8 @@ def create_worktree(repo_root: Path, name: str, base: str | None = None) -> Path
         )
         start_point = f"origin/{base}"
 
-    worktree_path.parent.mkdir(parents=True, exist_ok=True)
-
     result = subprocess.run(
-        ["git", "worktree", "add", "-b", name, str(worktree_path), start_point],
+        ["git", "worktree", "add", "-b", name, str(wt_path), start_point],
         cwd=repo_root,
         capture_output=True,
         text=True,
@@ -296,7 +378,7 @@ def create_worktree(repo_root: Path, name: str, base: str | None = None) -> Path
             raise GitError(f"Branch '{name}' already exists")
         raise GitError(error or "Failed to create worktree")
 
-    return worktree_path
+    return wt_path
 
 
 def open_pr(

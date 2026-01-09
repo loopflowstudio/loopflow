@@ -7,7 +7,9 @@ import typer
 from pathlib import Path
 
 from loopflow.config import Config, load_config
+from loopflow.context import gather_prompt_components, format_prompt
 from loopflow.git import GitError, create_worktree, find_main_repo, list_worktrees, remove_worktree
+from loopflow.launcher import get_backend
 
 app = typer.Typer(help="Worktree management.")
 
@@ -176,3 +178,85 @@ def clean(
             typer.echo(f"Removed {wt.name}")
         else:
             typer.echo(f"Failed to remove {wt.name}", err=True)
+
+
+@app.command()
+def compare(
+    a: str = typer.Argument(help="First worktree name"),
+    b: str = typer.Argument(help="Second worktree name"),
+    backend: str = typer.Option("claude", "-b", "--backend", help="Backend to use for analysis"),
+):
+    """Compare two worktree implementations and analyze differences."""
+    main_repo = find_main_repo()
+    if not main_repo:
+        typer.echo("Error: Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    wt_dir = main_repo / ".lf" / "worktrees"
+    wt_a = wt_dir / a
+    wt_b = wt_dir / b
+
+    if not wt_a.exists():
+        typer.echo(f"Error: Worktree '{a}' not found", err=True)
+        raise typer.Exit(1)
+
+    if not wt_b.exists():
+        typer.echo(f"Error: Worktree '{b}' not found", err=True)
+        raise typer.Exit(1)
+
+    # Get diffs against main for both worktrees
+    diff_a = subprocess.run(
+        ["git", "diff", "main...HEAD"],
+        cwd=wt_a,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+    diff_b = subprocess.run(
+        ["git", "diff", "main...HEAD"],
+        cwd=wt_b,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+    # Gather compare task components
+    config = load_config(main_repo)
+    exclude = list(config.exclude) if config and config.exclude else None
+
+    # Prepare task args with the diffs
+    task_args = [
+        f"name_a={a}",
+        f"name_b={b}",
+        f"diff_a={diff_a}",
+        f"diff_b={diff_b}",
+    ]
+
+    components = gather_prompt_components(
+        main_repo,
+        task="compare",
+        task_args=task_args,
+        exclude=exclude,
+    )
+
+    prompt = format_prompt(components)
+
+    # Launch backend
+    try:
+        backend_impl = get_backend(backend)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    if not backend_impl.is_available():
+        typer.echo(f"Error: '{backend}' CLI not found", err=True)
+        raise typer.Exit(1)
+
+    skip_permissions = config.dangerously_skip_permissions if config else False
+    result = backend_impl.launch(
+        prompt,
+        print_mode=False,
+        skip_permissions=skip_permissions,
+        cwd=main_repo,
+    )
+
+    raise typer.Exit(result.exit_code)

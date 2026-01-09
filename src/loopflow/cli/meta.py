@@ -3,6 +3,7 @@
 import platform
 import shutil
 import subprocess
+from pathlib import Path
 
 import typer
 
@@ -34,6 +35,71 @@ def _install_cask(name: str) -> bool:
         capture_output=True,
     )
     return result.returncode == 0
+
+
+@app.command()
+def init(
+    prompts_only: bool = typer.Option(False, "--prompts", help="Only install prompts"),
+    style_only: bool = typer.Option(False, "--style", help="Only install style guide"),
+):
+    """Initialize a repository with loopflow prompts, style guide, and config."""
+    repo_root = find_worktree_root()
+    if not repo_root:
+        typer.echo("Error: Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    # Determine what to install
+    install_prompts = prompts_only or not style_only
+    install_style = style_only or not prompts_only
+    install_config = not prompts_only and not style_only
+
+    # Get bundled assets path
+    bundled_dir = Path(__file__).parent.parent
+    prompts_dir = bundled_dir / "prompts"
+    style_template = bundled_dir / "STYLE_TEMPLATE.md"
+    config_template = bundled_dir / "config_template.yaml"
+
+    # Install prompts
+    if install_prompts:
+        commands_dir = repo_root / ".claude" / "commands"
+        commands_dir.mkdir(parents=True, exist_ok=True)
+
+        for prompt_name in ["review.md", "implement.md", "design.md"]:
+            src = prompts_dir / prompt_name
+            dst = commands_dir / prompt_name
+
+            if dst.exists():
+                typer.echo(f"- .claude/commands/{prompt_name} (already exists)")
+            else:
+                shutil.copy(src, dst)
+                typer.echo(f"✓ Created .claude/commands/{prompt_name}")
+
+    # Install style guide
+    if install_style:
+        style_dst = repo_root / "STYLE.md"
+        if style_dst.exists():
+            typer.echo("- STYLE.md (already exists)")
+        else:
+            shutil.copy(style_template, style_dst)
+            typer.echo("✓ Created STYLE.md")
+
+    # Install config
+    if install_config:
+        config_dir = repo_root / ".lf"
+        config_dir.mkdir(exist_ok=True)
+        config_dst = config_dir / "config.yaml"
+
+        if config_dst.exists():
+            typer.echo("- .lf/config.yaml (already exists)")
+        else:
+            shutil.copy(config_template, config_dst)
+            typer.echo("✓ Created .lf/config.yaml")
+
+    if install_prompts and not prompts_only:
+        typer.echo("\nYou can now use:")
+        typer.echo("  lf review        # or: claude /review")
+        typer.echo("  lf implement")
+        typer.echo("  lf design")
 
 
 @app.command()

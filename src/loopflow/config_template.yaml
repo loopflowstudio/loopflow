@@ -1,5 +1,5 @@
 # Loopflow configuration
-# See: https://github.com/jackwillis/loopflow
+# See: https://github.com/loopflowstudio/loopflow
 
 # Backend to use (claude or codex)
 backend: claude

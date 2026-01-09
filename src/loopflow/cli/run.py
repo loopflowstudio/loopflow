@@ -29,11 +29,14 @@ def _copy_to_clipboard(text: str) -> None:
 def _notify_on_completion(name: str, worktree_path: Path) -> None:
     """Send macOS notification when worktree task completes."""
     script = f"""
-    while [ ! -f "{worktree_path}/.lf-done" ]; do
+    for i in {{1..360}}; do  # 30 minute timeout (360 * 5s)
+        if [ -f "{worktree_path}/.lf-done" ]; then
+            osascript -e 'display notification "Task completed" with title "{name}"'
+            rm "{worktree_path}/.lf-done"
+            exit 0
+        fi
         sleep 5
     done
-    osascript -e 'display notification "Task completed" with title "{name}"'
-    rm "{worktree_path}/.lf-done"
     """
     subprocess.Popen(
         ["bash", "-c", script],

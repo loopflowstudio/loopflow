@@ -138,9 +138,9 @@ def land(
             typer.echo("Error: Not in a git repository", err=True)
             raise typer.Exit(1)
         main_repo = find_main_repo(repo_root)
-    if not main_repo:
-        typer.echo("Error: Could not find main repository", err=True)
-        raise typer.Exit(1)
+        if not main_repo:
+            typer.echo("Error: Could not find main repository", err=True)
+            raise typer.Exit(1)
 
     if not shutil.which("gh"):
         typer.echo("Error: 'gh' CLI not found. Install with: brew install gh", err=True)

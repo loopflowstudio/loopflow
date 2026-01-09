@@ -9,7 +9,7 @@ This is the governing document of the loopflow codebase. Humans and LLMs alike a
 - Return `None` for "not found"; raise exceptions for "shouldn't happen"
 - No `Args:`/`Returns:` docstrings—if types are clear, skip the docstring
 - Mock side effects, but don't test mock wiring
-- Design docs go in `<branch>.md` at repo root; delete them when the feature ships
+- Design docs go in `<branch>.md` at repo root; `lf pr land` removes them
 
 ## File-Type Guidelines
 
@@ -36,7 +36,8 @@ When editing `README.md` files:
 
 When editing `<branch>.md` design docs:
 - Focus on what's left to build, not what's done
-- Delete the doc when the feature ships
+- `lf review` transforms it into a human review guide
+- `lf pr land` removes it automatically
 
 # Goals
 
@@ -160,7 +161,7 @@ def open_warp(path: Path) -> None:
 
 Give each module a `README.md` for users. Use inline comments for maintainers. Don't duplicate what's in the code.
 
-Start features with design docs in `<branch>.md` at repo root. Delete the design doc when implementation is complete—by then, the code and its README should speak for themselves.
+Start features with design docs in `<branch>.md` at repo root. After implementation, `lf review` transforms the doc into a human review guide. `lf pr land` removes it—by then, the code and its README should speak for themselves.
 
 # Testing
 

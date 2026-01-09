@@ -2,7 +2,7 @@
 
 Run LLM coding tasks from reusable prompt files.
 
-macOS only. Currently uses Claude Code; other backends planned.
+macOS only. Supports Claude Code and OpenAI Codex via configuration.
 
 ## Install
 
@@ -21,7 +21,7 @@ The workflow: create a worktree, run tasks there, merge when ready. You can have
 
 ```bash
 lf wt create my-feature       # branch + worktree, opens IDEs
-cd .lf/worktrees/my-feature
+cd ../loopflow.my-feature     # worktrees are sibling directories
 
 lf design                     # interactive: figure out what to build
 lf ship                       # batch: implement, review, test, commit, open PR
@@ -76,7 +76,7 @@ lf ship    # runs each task, auto-commits between steps
 ## Worktrees
 
 ```bash
-lf wt create auth             # .lf/worktrees/auth/, opens Warp + Cursor
+lf wt create auth             # ../loopflow.auth/, opens Warp + Cursor
 lf wt list                    # show all worktrees
 lf wt clean                   # remove merged branches
 ```
@@ -102,6 +102,7 @@ When maestro is running, tasks automatically register, and you'll get macOS noti
 
 ```yaml
 # .lf/config.yaml
+model: claude     # Model to use (claude or codex)
 push: true        # auto-push after commits
 pr: false         # open PR after pipelines
 
@@ -118,6 +119,8 @@ ide:
 | `-x, --context` | Add context files |
 | `-w, --worktree` | Create worktree and run task there |
 | `-c, --copy` | Copy prompt to clipboard, show token breakdown |
+| `-m, --model` | Choose model (claude, codex) |
+| `--parallel` | Run with multiple models in parallel |
 
 ## Commands
 
@@ -127,8 +130,10 @@ ide:
 | `lf <pipeline>` | Run a pipeline |
 | `lf : "prompt"` | Inline prompt |
 | `lf wt create/list/clean` | Worktree management |
+| `lf wt compare <a> <b>` | Compare two worktree implementations |
 | `lf pr create` | Open GitHub PR |
 | `lf pr land [-a]` | Squash-merge to main |
+| `lf meta init` | Initialize repo with prompts and config |
 | `lf meta install` | Install Claude Code |
 | `lf meta doctor` | Check dependencies |
 | `lf maestro start` | Start session tracking daemon |

@@ -46,10 +46,22 @@ def _read_file_if_exists(path: Path) -> str | None:
 
 
 def gather_task(repo_root: Path, name: str) -> str | None:
-    """Gather task file content from .lf/.
+    """Gather task file content.
 
-    Priority: .lf > .md > any other extension > bare name.
+    Search order:
+    1. .claude/commands/{name}.md (Claude Code compatible)
+    2. .lf/{name}.lf
+    3. .lf/{name}.md
+    4. .lf/{name}.* (any other extension)
+    5. .lf/{name} (bare name)
     """
+    # Check .claude/commands first (portable format)
+    claude_cmd = repo_root / ".claude" / "commands" / f"{name}.md"
+    content = _read_file_if_exists(claude_cmd)
+    if content:
+        return content
+
+    # Fall back to .lf directory
     lf_dir = repo_root / ".lf"
 
     # Preferred extensions first
@@ -106,9 +118,17 @@ def gather_prompt_components(
     inline: Optional[str] = None,
     context: Optional[list[str]] = None,
     exclude: Optional[list[str]] = None,
+    task_args: Optional[list[str]] = None,
 ) -> PromptComponents:
     """Gather all prompt components without assembling them."""
     docs = gather_docs(repo_root, repo_root, exclude)
+
+    # Include loopflow style guide if present (only in lf sessions)
+    loopflow_style = repo_root / ".lf" / "LOOPFLOW_STYLE.md"
+    if loopflow_style.exists():
+        content = loopflow_style.read_text()
+        docs.insert(0, (loopflow_style, content))
+
     diff = gather_diff(repo_root, exclude)
 
     task_result = None
@@ -117,6 +137,19 @@ def gather_prompt_components(
     elif task:
         task_content = gather_task(repo_root, task)
         if task_content:
+            # Process task_args if provided
+            if task_args:
+                plain_args = []
+                for arg in task_args:
+                    if "=" in arg:
+                        # Template substitution: {{key}} -> value
+                        key, value = arg.split("=", 1)
+                        task_content = task_content.replace(f"{{{{{key}}}}}", value)
+                    else:
+                        plain_args.append(arg)
+                # Append plain args to task content
+                if plain_args:
+                    task_content = task_content.rstrip() + "\n\n" + " ".join(plain_args)
             task_result = (task, task_content)
         else:
             task_result = (task, f"No task file found for '{task}'.")

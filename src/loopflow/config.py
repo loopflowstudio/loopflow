@@ -21,8 +21,9 @@ class PipelineConfig(BaseModel):
 
 
 class Config(BaseModel):
+    model: str = "claude"
     pipelines: dict[str, PipelineConfig] = Field(default_factory=dict)
-    dangerously_skip_permissions: bool = False
+    yolo: bool = False  # Skip all permission prompts
     push: bool = False
     pr: bool = False
     context: list[str] = Field(default_factory=list)

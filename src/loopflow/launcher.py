@@ -3,8 +3,107 @@
 import json
 import subprocess
 import sys
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
+
+@dataclass
+class LaunchResult:
+    """Result from launching a runner."""
+
+    exit_code: int
+    output: Optional[str] = None
+
+
+class Runner(ABC):
+    """Abstract base class for model runners (Claude Code, Codex, etc.)."""
+
+    @abstractmethod
+    def launch(
+        self,
+        prompt: str,
+        print_mode: bool = False,
+        stream: bool = False,
+        skip_permissions: bool = False,
+        cwd: Optional[Path] = None,
+    ) -> LaunchResult:
+        """Launch a coding session with the given prompt."""
+        pass
+
+    @abstractmethod
+    def is_available(self) -> bool:
+        """Check if the runner CLI is available."""
+        pass
+
+
+class ClaudeRunner(Runner):
+    """Claude Code CLI runner."""
+
+    def launch(
+        self,
+        prompt: str,
+        print_mode: bool = False,
+        stream: bool = False,
+        skip_permissions: bool = False,
+        cwd: Optional[Path] = None,
+    ) -> LaunchResult:
+        exit_code, output = launch_claude(prompt, print_mode, stream, skip_permissions, cwd)
+        return LaunchResult(exit_code, output)
+
+    def is_available(self) -> bool:
+        return check_claude_available()
+
+
+class CodexRunner(Runner):
+    """OpenAI Codex CLI runner."""
+
+    def launch(
+        self,
+        prompt: str,
+        print_mode: bool = False,
+        stream: bool = False,
+        skip_permissions: bool = False,
+        cwd: Optional[Path] = None,
+    ) -> LaunchResult:
+        cmd = ["codex"]
+
+        if print_mode:
+            cmd.append("--quiet")
+        if skip_permissions:
+            cmd.append("--full-auto")
+
+        cmd.append(prompt)
+
+        if print_mode:
+            result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+            return LaunchResult(result.returncode, result.stdout)
+        else:
+            result = subprocess.run(cmd, cwd=cwd)
+            return LaunchResult(result.returncode, None)
+
+    def is_available(self) -> bool:
+        try:
+            subprocess.run(
+                ["codex", "--version"],
+                capture_output=True,
+                check=True,
+            )
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return False
+
+
+def get_runner(model: str) -> Runner:
+    """Get a runner instance for the given model."""
+    runners = {
+        "claude": ClaudeRunner,
+        "codex": CodexRunner,
+    }
+    if model not in runners:
+        raise ValueError(f"Unknown model: {model}. Available: {list(runners.keys())}")
+    return runners[model]()
 
 
 def launch_claude(

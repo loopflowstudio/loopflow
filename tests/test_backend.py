@@ -74,25 +74,25 @@ def test_claude_runner_launch_returns_result():
         assert result.output == "output"
 
 
-def test_codex_runner_launch_print_mode():
-    """CodexRunner.launch() with print_mode captures output."""
+def test_codex_runner_launch_auto_mode():
+    """CodexRunner.launch() with auto captures output."""
     runner = CodexRunner()
 
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stdout="codex output")
-        result = runner.launch("test prompt", print_mode=True)
+        result = runner.launch("test prompt", auto=True)
 
         assert result.exit_code == 0
         assert result.output == "codex output"
 
 
 def test_codex_runner_launch_interactive():
-    """CodexRunner.launch() without print_mode runs interactively."""
+    """CodexRunner.launch() without auto runs interactively."""
     runner = CodexRunner()
 
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0)
-        result = runner.launch("test prompt", print_mode=False)
+        result = runner.launch("test prompt", auto=False)
 
         assert result.exit_code == 0
         assert result.output is None

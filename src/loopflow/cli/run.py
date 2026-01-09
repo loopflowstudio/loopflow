@@ -29,8 +29,8 @@ def _copy_to_clipboard(text: str) -> None:
 def run(
     ctx: typer.Context,
     task: str = typer.Argument(help="Task name (e.g., 'review', 'implement')"),
-    print_mode: bool = typer.Option(
-        False, "-p", "--print", help="Run non-interactively"
+    auto: bool = typer.Option(
+        False, "-a", "--auto", help="Run autonomously without interaction"
     ),
     context: list[str] = typer.Option(
         None, "-x", "--context", help="Additional files for context"
@@ -40,6 +40,9 @@ def run(
     ),
     copy: bool = typer.Option(
         False, "-c", "--copy", help="Copy prompt to clipboard and show token breakdown"
+    ),
+    paste: bool = typer.Option(
+        False, "-v", "--paste", help="Include clipboard content in prompt"
     ),
     model: ModelType = typer.Option(
         None, "-m", "--model", help="Model to use (claude, codex)"
@@ -59,7 +62,7 @@ def run(
         models = [m.strip() for m in parallel.split(",")]
         for model_name in models:
             wt_name = f"{task}-{model_name}"
-            cmd = ["lf", task, "-w", wt_name, "--model", model_name, "-p"]
+            cmd = ["lf", task, "-w", wt_name, "--model", model_name, "-a"]
             if ctx.args:
                 cmd.extend(ctx.args)
             if context:
@@ -109,7 +112,7 @@ def run(
 
     exclude = list(config.exclude) if config and config.exclude else None
     args = ctx.args or None
-    components = gather_prompt_components(repo_root, task, context=all_context or None, exclude=exclude, task_args=args)
+    components = gather_prompt_components(repo_root, task, context=all_context or None, exclude=exclude, task_args=args, paste=paste)
 
     if copy:
         prompt = format_prompt(components)
@@ -128,7 +131,7 @@ def run(
         worktree=repo_root,
         status=SessionStatus.RUNNING,
         started_at=datetime.now(),
-        pid=os.getpid() if print_mode else None,
+        pid=os.getpid() if auto else None,
     )
     maestro = connect_maestro()
     if maestro:
@@ -138,13 +141,13 @@ def run(
         prompt = format_prompt(components)
         result = runner.launch(
             prompt,
-            print_mode=print_mode,
-            stream=print_mode,
+            auto=auto,
+            stream=auto,
             skip_permissions=skip_permissions,
             cwd=repo_root,
         )
 
-        if print_mode and result.exit_code == 0:
+        if auto and result.exit_code == 0:
             autocommit(repo_root, task)
 
         if maestro:
@@ -162,14 +165,17 @@ def run(
 
 def inline(
     prompt: str = typer.Argument(help="Inline prompt to run"),
-    print_mode: bool = typer.Option(
-        False, "-p", "--print", help="Run non-interactively"
+    auto: bool = typer.Option(
+        False, "-a", "--auto", help="Run autonomously without interaction"
     ),
     context: list[str] = typer.Option(
         None, "-x", "--context", help="Additional files for context"
     ),
     copy: bool = typer.Option(
         False, "-c", "--copy", help="Copy prompt to clipboard and show token breakdown"
+    ),
+    paste: bool = typer.Option(
+        False, "-v", "--paste", help="Include clipboard content in prompt"
     ),
     model: ModelType = typer.Option(
         None, "-m", "--model", help="Model to use (claude, codex)"
@@ -201,7 +207,7 @@ def inline(
         all_context.extend(context)
 
     exclude = list(config.exclude) if config and config.exclude else None
-    components = gather_prompt_components(repo_root, task=None, inline=prompt, context=all_context or None, exclude=exclude)
+    components = gather_prompt_components(repo_root, task=None, inline=prompt, context=all_context or None, exclude=exclude, paste=paste)
 
     if copy:
         prompt_text = format_prompt(components)
@@ -220,7 +226,7 @@ def inline(
         worktree=repo_root,
         status=SessionStatus.RUNNING,
         started_at=datetime.now(),
-        pid=os.getpid() if print_mode else None,
+        pid=os.getpid() if auto else None,
     )
     maestro = connect_maestro()
     if maestro:
@@ -230,13 +236,13 @@ def inline(
         prompt_text = format_prompt(components)
         result = runner.launch(
             prompt_text,
-            print_mode=print_mode,
-            stream=print_mode,
+            auto=auto,
+            stream=auto,
             skip_permissions=skip_permissions,
             cwd=repo_root,
         )
 
-        if print_mode and result.exit_code == 0:
+        if auto and result.exit_code == 0:
             autocommit(repo_root, ":", prompt)
 
         if maestro:

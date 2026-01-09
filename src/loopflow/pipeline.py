@@ -42,7 +42,7 @@ def run_pipeline(
         prompt = build_prompt(repo_root, task_name, context=context, exclude=exclude)
         result = runner.launch(
             prompt,
-            print_mode=True,
+            auto=True,
             stream=True,
             skip_permissions=skip_permissions,
             cwd=repo_root,

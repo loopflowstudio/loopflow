@@ -17,6 +17,7 @@ class PromptComponents:
     task: tuple[str, str] | None  # (name, content)
     context_files: list[tuple[Path, str]]
     repo_root: Path
+    clipboard: str | None = None
 
 
 def find_worktree_root(start: Optional[Path] = None) -> Path | None:
@@ -42,6 +43,14 @@ def find_worktree_root(start: Optional[Path] = None) -> Path | None:
 def _read_file_if_exists(path: Path) -> str | None:
     if path.exists() and path.is_file():
         return path.read_text()
+    return None
+
+
+def _read_clipboard() -> str | None:
+    """Read text from clipboard using pbpaste."""
+    result = subprocess.run(["pbpaste"], capture_output=True, text=True)
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout
     return None
 
 
@@ -119,6 +128,7 @@ def gather_prompt_components(
     context: Optional[list[str]] = None,
     exclude: Optional[list[str]] = None,
     task_args: Optional[list[str]] = None,
+    paste: bool = False,
 ) -> PromptComponents:
     """Gather all prompt components without assembling them."""
     docs = gather_docs(repo_root, repo_root, exclude)
@@ -155,6 +165,7 @@ def gather_prompt_components(
             task_result = (task, f"No task file found for '{task}'.")
 
     context_files = gather_files(context, repo_root, exclude) if context else []
+    clipboard = _read_clipboard() if paste else None
 
     return PromptComponents(
         docs=docs,
@@ -162,6 +173,7 @@ def gather_prompt_components(
         task=task_result,
         context_files=context_files,
         repo_root=repo_root,
+        clipboard=clipboard,
     )
 
 
@@ -189,6 +201,9 @@ def format_prompt(components: PromptComponents) -> str:
 
     if components.context_files:
         parts.append(format_files(components.context_files, components.repo_root))
+
+    if components.clipboard:
+        parts.append(f"Content from clipboard.\n\n<lf:clipboard>\n{components.clipboard}\n</lf:clipboard>")
 
     return "\n\n".join(parts)
 

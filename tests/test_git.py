@@ -199,3 +199,31 @@ def test_find_main_repo_not_in_git_repo(tmp_path):
 
         result = find_main_repo(tmp_path)
         assert result is None
+
+
+def test_get_current_branch_returns_branch_name(temp_repo):
+    """get_current_branch returns current branch name."""
+    from loopflow.git import get_current_branch
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="feature-branch\n"
+        )
+
+        result = get_current_branch(temp_repo)
+        assert result == "feature-branch"
+
+
+def test_get_current_branch_returns_none_when_detached(temp_repo):
+    """get_current_branch returns None when HEAD is detached."""
+    from loopflow.git import get_current_branch
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=""
+        )
+
+        result = get_current_branch(temp_repo)
+        assert result is None

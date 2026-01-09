@@ -240,20 +240,50 @@ def _sync_main(repo_root: Path) -> None:
     )
 
 
-def create_worktree(repo_root: Path, name: str) -> Path:
-    """Create a worktree with a new branch from latest main. Raises GitError on failure."""
+def get_current_branch(repo_root: Path) -> str | None:
+    """Get current branch name, or None if detached HEAD."""
+    result = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    branch = result.stdout.strip()
+    return branch if branch else None
+
+
+def create_worktree(repo_root: Path, name: str, base: str | None = None) -> Path:
+    """Create a worktree with a new branch. Raises GitError on failure.
+
+    If base is None, uses current branch. If current is main or detached, syncs main first.
+    """
     worktree_path = repo_root / ".lf" / "worktrees" / name
 
     if worktree_path.exists():
         return worktree_path
 
-    # Sync main with origin before branching
-    _sync_main(repo_root)
+    # Determine base branch
+    if base is None:
+        current = get_current_branch(repo_root)
+        base = current if current and current != "main" else None
+
+    # If branching from main (or no base specified), sync main first
+    if base is None or base == "main":
+        _sync_main(repo_root)
+        start_point = "main"
+    else:
+        # Fetch the base branch to get latest
+        subprocess.run(
+            ["git", "fetch", "origin", base],
+            cwd=repo_root,
+            capture_output=True,
+        )
+        start_point = f"origin/{base}"
 
     worktree_path.parent.mkdir(parents=True, exist_ok=True)
 
     result = subprocess.run(
-        ["git", "worktree", "add", "-b", name, str(worktree_path)],
+        ["git", "worktree", "add", "-b", name, str(worktree_path), start_point],
         cwd=repo_root,
         capture_output=True,
         text=True,

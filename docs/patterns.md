@@ -45,12 +45,12 @@ Run multiple features simultaneously in separate worktrees:
 # Terminal 1
 lf wt create feature-a
 cd ../myrepo.feature-a
-lf ship -p &              # runs in background
+lf ship -a &              # runs in background
 
 # Terminal 2
 lf wt create feature-b
 cd ../myrepo.feature-b
-lf ship -p &
+lf ship -a &
 
 # Check status from anywhere
 lf status                 # shows running sessions
@@ -78,15 +78,15 @@ Compare results:
 lf wt compare implement-claude implement-codex
 ```
 
-## Batch pipeline
+## Autonomous pipeline
 
 Run a full pipeline non-interactively:
 
 ```bash
-lf ship -p                # -p for batch/print mode
+lf ship -a                # -a for autonomous mode
 ```
 
-In batch mode:
+In autonomous mode:
 - No interactive prompts
 - Auto-commits between tasks
 - Pushes if `push: true` in config
@@ -98,7 +98,7 @@ Just run review without implementation:
 
 ```bash
 lf review                 # finds issues
-lf review -p              # finds and fixes issues automatically
+lf review -a              # finds and fixes issues automatically
 ```
 
 A review task might look like:

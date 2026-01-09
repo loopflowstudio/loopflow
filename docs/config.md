@@ -51,7 +51,7 @@ lf review -m codex
 
 ### push
 
-Auto-push after commits in batch mode (`-p`).
+Auto-push after commits in autonomous mode (`-a`).
 
 ```yaml
 push: true
@@ -111,7 +111,7 @@ ide:
 
 ## Pipelines
 
-Pipelines chain tasks together. Each task runs in batch mode (`-p`), with auto-commits between steps.
+Pipelines chain tasks together. Each task runs in autonomous mode (`-a`), with auto-commits between steps.
 
 ```yaml
 pipelines:

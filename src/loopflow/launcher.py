@@ -24,7 +24,7 @@ class Runner(ABC):
     def launch(
         self,
         prompt: str,
-        print_mode: bool = False,
+        auto: bool = False,
         stream: bool = False,
         skip_permissions: bool = False,
         cwd: Optional[Path] = None,
@@ -44,12 +44,12 @@ class ClaudeRunner(Runner):
     def launch(
         self,
         prompt: str,
-        print_mode: bool = False,
+        auto: bool = False,
         stream: bool = False,
         skip_permissions: bool = False,
         cwd: Optional[Path] = None,
     ) -> LaunchResult:
-        exit_code, output = launch_claude(prompt, print_mode, stream, skip_permissions, cwd)
+        exit_code, output = launch_claude(prompt, auto, stream, skip_permissions, cwd)
         return LaunchResult(exit_code, output)
 
     def is_available(self) -> bool:
@@ -62,21 +62,22 @@ class CodexRunner(Runner):
     def launch(
         self,
         prompt: str,
-        print_mode: bool = False,
+        auto: bool = False,
         stream: bool = False,
         skip_permissions: bool = False,
         cwd: Optional[Path] = None,
     ) -> LaunchResult:
         cmd = ["codex"]
 
-        if print_mode:
+        if skip_permissions or auto:
+            # Never ask for approval, but sandbox to workspace
+            cmd.extend(["-a", "never", "--sandbox", "workspace-write"])
+        if auto:
             cmd.append("--quiet")
-        if skip_permissions:
-            cmd.append("--full-auto")
 
         cmd.append(prompt)
 
-        if print_mode:
+        if auto:
             result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
             return LaunchResult(result.returncode, result.stdout)
         else:
@@ -108,7 +109,7 @@ def get_runner(model: str) -> Runner:
 
 def launch_claude(
     prompt: str,
-    print_mode: bool = False,
+    auto: bool = False,
     stream: bool = False,
     skip_permissions: bool = False,
     cwd: Optional[Path] = None,
@@ -119,7 +120,7 @@ def launch_claude(
     """
     cmd = ["claude"]
 
-    if print_mode:
+    if auto:
         # Batch mode always skips permissions (no way to grant them interactively)
         cmd.extend(["--print", "--dangerously-skip-permissions"])
         if stream:
@@ -129,9 +130,9 @@ def launch_claude(
 
     cmd.append(prompt)
 
-    if print_mode and stream:
+    if auto and stream:
         return _run_streaming(cmd, cwd)
-    elif print_mode:
+    elif auto:
         result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
         return result.returncode, result.stdout
     else:

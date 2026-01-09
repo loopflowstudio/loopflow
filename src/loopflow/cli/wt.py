@@ -449,7 +449,7 @@ def compare(
     skip_permissions = config.yolo if config else False
     result = runner.launch(
         prompt,
-        print_mode=False,
+        auto=False,
         skip_permissions=skip_permissions,
         cwd=main_repo,
     )

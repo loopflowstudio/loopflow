@@ -11,7 +11,7 @@ import typer
 
 from loopflow.config import load_config
 from loopflow.context import find_worktree_root, gather_prompt_components, format_prompt
-from loopflow.git import GitError, autocommit, create_worktree, find_main_repo, worktree_path
+from loopflow.git import GitError, autocommit, create_worktree, find_main_repo
 from loopflow.launcher import get_backend
 from loopflow.maestro import Session, SessionStatus, connect_maestro
 from loopflow.pipeline import run_pipeline
@@ -24,25 +24,6 @@ BackendType = Optional[str]
 def _copy_to_clipboard(text: str) -> None:
     """Copy text to clipboard using pbcopy."""
     subprocess.run(["pbcopy"], input=text.encode(), check=True)
-
-
-def _notify_on_completion(name: str, worktree_path: Path) -> None:
-    """Send macOS notification when worktree task completes."""
-    script = f"""
-    for i in {{1..360}}; do  # 30 minute timeout (360 * 5s)
-        if [ -f "{worktree_path}/.lf-done" ]; then
-            osascript -e 'display notification "Task completed" with title "{name}"'
-            rm "{worktree_path}/.lf-done"
-            exit 0
-        fi
-        sleep 5
-    done
-    """
-    subprocess.Popen(
-        ["bash", "-c", script],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
 
 
 def run(
@@ -92,11 +73,9 @@ def run(
             )
             typer.echo(f"Started {wt_name}")
 
-        # Schedule notifications for completion
-        for backend_name in backends:
-            wt_name = f"{task}-{backend_name}"
-            wt_path = worktree_path(repo_root, wt_name)
-            _notify_on_completion(wt_name, wt_path)
+        # Suggest maestro for notifications if not running
+        if not connect_maestro():
+            typer.echo("\nTip: Run 'lf maestro start' to get notifications when tasks complete")
 
         raise typer.Exit(0)
 
@@ -173,7 +152,6 @@ def run(
 
         if worktree:
             typer.echo(f"\nWorktree: {repo_root}")
-            (repo_root / ".lf-done").touch()
 
         raise typer.Exit(result.exit_code)
     finally:

@@ -12,12 +12,20 @@ Worktrees use worktrunk-compatible sibling directory pattern:
 
 `lf wt list` now shows a table with:
 - **Branch**: Name with tree connectors (├─, └─) showing PR dependency chains
-- **St**: Status symbols (+!?) for staged/modified/untracked
+- **St**: Status symbols (+!?⤴⤵) for staged/modified/untracked/rebase/merge
 - **main**: Ahead/behind main (↑N↓N or =)
-- **PR**: PR number (#123) or "pushed"/"local"
+- **remote**: Ahead/behind remote tracking branch (↑N↓N, =, or - if local)
+- **CI**: CI status (✓ passed, ✗ failed, ● running, - none) with clickable link
+- **PR**: PR number (#123, clickable link) or "pushed"/"local"
+- **Diff**: Line diff stats vs main (+N -M)
 - **Commit**: Short SHA
 - **Age**: Relative time (e.g., "2 hours ago")
 - **Message** (with `--full`): First line of commit message
+
+Features:
+- Dimmed rows for worktrees safe to delete (merged or branch gone from origin)
+- Terminal hyperlinks (OSC 8) on PR numbers and CI indicators
+- JSON output includes all fields for scripting
 
 Options:
 - `--full` / `-f`: Include commit message column
@@ -27,43 +35,38 @@ Options:
 
 worktrunk has several features we don't yet support. Here's what makes sense for loopflow:
 
-### High Priority (Natural fit for loopflow)
+### High Priority (Natural fit for loopflow) - DONE
 
-1. **CI Status Integration**
-   - worktrunk shows colored dots (green/red/blue/yellow) for CI status
-   - For loopflow: `gh pr checks` already gives us this data
+1. **CI Status Integration** ✓
    - Display: `✓` (passed), `✗` (failed), `●` (running), `-` (none)
-   - Fits loopflow: CI status matters for PR review/land decisions
+   - Fetched from `gh pr checks`
 
-2. **Clickable PR/CI Links**
-   - Terminal hyperlinks (OSC 8) are widely supported now
-   - PR column could link to the PR URL
-   - CI indicator could link to the checks page
-   - Fits loopflow: Faster navigation from terminal to GitHub
+2. **Clickable PR/CI Links** ✓
+   - Terminal hyperlinks (OSC 8) on PR numbers and CI indicators
+   - PR links to PR URL, CI links to checks page
 
-3. **Dimmed "Safe to Delete" Rows**
-   - worktrunk dims worktrees that are merged and clean
-   - We could dim worktrees where branch is deleted on origin (merged)
-   - Fits loopflow: Visual cue for `lf wt clean` candidates
+3. **Dimmed "Safe to Delete" Rows** ✓
+   - Worktrees where branch is gone from origin or merged are dimmed
+   - Visual cue for `lf wt clean` candidates
 
-### Medium Priority (Useful but not core)
+### Medium Priority (Useful but not core) - DONE
 
-4. **Remote Sync Status**
-   - Separate column for ahead/behind remote (vs. main)
-   - Shows if local branch has unpushed commits
-   - Mildly useful: We already show "pushed" vs "local"
+4. **Remote Sync Status** ✓
+   - Separate "remote" column shows ahead/behind remote tracking branch
+   - Shows ↑N/↓N or = if in sync, - if local-only
 
-5. **Line Diff Stats**
-   - worktrunk shows +N -M lines changed
-   - Could be helpful for gauging PR size
-   - Implementation: `git diff --stat main...HEAD`
+5. **Line Diff Stats** ✓
+   - "Diff" column shows +N -M lines changed vs main
+   - Helpful for gauging PR size
+
+### Skipped (Out of scope)
 
 6. **Progressive Rendering**
    - worktrunk shows branch names immediately, fills in status as git commands complete
    - Only matters for very large repos
-   - Probably over-engineering for loopflow's use case
+   - Over-engineering for loopflow's use case
 
-### Low Priority (Out of scope)
+### Low Priority - DONE
 
 7. **Worktree Creation/Deletion from List**
    - worktrunk has `wt new`, `wt delete`
@@ -75,46 +78,9 @@ worktrunk has several features we don't yet support. Here's what makes sense for
    - loopflow is specifically about worktrees for parallel agent work
    - Out of scope: Use `git branch` for that
 
-9. **Rebase/Merge State Indicators**
-   - worktrunk shows ⤴ (rebase) and ⤵ (merge) in progress
-   - Rare edge case; user would know if they're mid-rebase
-   - Nice to have but low priority
-
-## Recommended Next Steps
-
-1. **Add CI status** - biggest bang for buck
-2. **Add terminal hyperlinks** - makes PR column actionable
-3. **Dim merged branches** - helps identify cleanup candidates
-
-## Implementation Notes
-
-### CI Status
-
-```python
-# Get CI status from gh
-result = subprocess.run(
-    ["gh", "pr", "checks", "--json", "state", "-q", ".[].state"],
-    cwd=path,
-    capture_output=True,
-    text=True,
-)
-# Aggregate: any FAILURE = ✗, all SUCCESS = ✓, any PENDING = ●, else -
-```
-
-### Terminal Hyperlinks
-
-```python
-def link(url: str, text: str) -> str:
-    """Format as clickable terminal hyperlink (OSC 8)."""
-    return f"\033]8;;{url}\033\\{text}\033]8;;\033\\"
-```
-
-### Detecting Merged Branches
-
-A branch is "safe to delete" if:
-1. Not dirty
-2. Branch deleted on origin (not in remote_branches)
-3. OR: `git merge-base --is-ancestor HEAD origin/main` succeeds
+9. **Rebase/Merge State Indicators** ✓
+   - St column shows ⤴ (rebase) and ⤵ (merge) in progress
+   - Detected via .git/rebase-merge, .git/REBASE_HEAD, .git/MERGE_HEAD
 
 ## Spirit of Loopflow
 

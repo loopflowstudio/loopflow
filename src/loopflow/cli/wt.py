@@ -85,8 +85,18 @@ def open_cmd(
     typer.echo(f"cd {wt_path}")
 
 
+def _link(url: str, text: str) -> str:
+    """Format as clickable terminal hyperlink (OSC 8)."""
+    return f"\033]8;;{url}\033\\{text}\033]8;;\033\\"
+
+
+def _dim(text: str) -> str:
+    """Apply dim styling to text."""
+    return f"\033[2m{text}\033[0m"
+
+
 def _format_status_symbols(wt: WorktreeInfo) -> str:
-    """Format status symbols: +!? for staged/modified/untracked."""
+    """Format status symbols: +!?⤴⤵ for staged/modified/untracked/rebase/merge."""
     symbols = ""
     if wt.has_staged:
         symbols += "+"
@@ -94,6 +104,10 @@ def _format_status_symbols(wt: WorktreeInfo) -> str:
         symbols += "!"
     if wt.has_untracked:
         symbols += "?"
+    if wt.is_rebasing:
+        symbols += "⤴"
+    if wt.is_merging:
+        symbols += "⤵"
     return symbols
 
 
@@ -108,12 +122,50 @@ def _format_main_rel(wt: WorktreeInfo) -> str:
 
 
 def _format_pr(wt: WorktreeInfo) -> str:
-    """Format PR info."""
+    """Format PR info with clickable hyperlink if available."""
     if wt.pr_number:
-        return f"#{wt.pr_number}"
+        text = f"#{wt.pr_number}"
+        if wt.pr_url:
+            return _link(wt.pr_url, text)
+        return text
     elif wt.on_origin:
         return "pushed"
     return "local"
+
+
+def _format_ci(wt: WorktreeInfo) -> str:
+    """Format CI status with clickable hyperlink if available."""
+    if not wt.ci_status:
+        return "-"
+    # Link to checks page if we have a PR URL
+    if wt.pr_url and wt.ci_status != "-":
+        checks_url = f"{wt.pr_url}/checks"
+        return _link(checks_url, wt.ci_status)
+    return wt.ci_status
+
+
+def _format_remote_rel(wt: WorktreeInfo) -> str:
+    """Format ahead/behind remote like ↑3↓1 or = if in sync."""
+    if not wt.on_origin:
+        return "-"
+    parts = []
+    if wt.ahead_remote > 0:
+        parts.append(f"↑{wt.ahead_remote}")
+    if wt.behind_remote > 0:
+        parts.append(f"↓{wt.behind_remote}")
+    return "".join(parts) if parts else "="
+
+
+def _format_diff_stats(wt: WorktreeInfo) -> str:
+    """Format line diff stats like +45 -12."""
+    if wt.lines_added == 0 and wt.lines_removed == 0:
+        return "-"
+    parts = []
+    if wt.lines_added > 0:
+        parts.append(f"+{wt.lines_added}")
+    if wt.lines_removed > 0:
+        parts.append(f"-{wt.lines_removed}")
+    return " ".join(parts)
 
 
 @app.command(name="list")
@@ -123,8 +175,15 @@ def list_cmd(
 ):
     """List all worktrees with status and dependencies.
 
-    Status symbols: + (staged), ! (modified), ? (untracked)
-    Main column: ↑N (ahead), ↓N (behind), = (in sync)
+    Columns:
+    - St: Status symbols (+!?⤴⤵) for staged/modified/untracked/rebase/merge
+    - main: Ahead/behind main (↑N, ↓N, = for in sync)
+    - remote: Ahead/behind remote tracking branch (↑N, ↓N, = for in sync, - if local)
+    - CI: CI status (✓ passed, ✗ failed, ● running, - none)
+    - PR: PR number (clickable link) or "pushed"/"local"
+    - Diff: Line diff stats vs main (+N -M)
+
+    Dimmed rows indicate worktrees safe to delete (merged or branch gone).
     """
     import json
 
@@ -162,6 +221,14 @@ def list_cmd(
                 "has_staged": wt.has_staged,
                 "has_modified": wt.has_modified,
                 "has_untracked": wt.has_untracked,
+                "ci_status": wt.ci_status,
+                "safe_to_delete": wt.safe_to_delete,
+                "ahead_remote": wt.ahead_remote,
+                "behind_remote": wt.behind_remote,
+                "lines_added": wt.lines_added,
+                "lines_removed": wt.lines_removed,
+                "is_rebasing": wt.is_rebasing,
+                "is_merging": wt.is_merging,
             })
         typer.echo(json.dumps(data, indent=2))
         return
@@ -181,7 +248,10 @@ def list_cmd(
         """Format a single worktree row."""
         status = _format_status_symbols(wt)
         main_rel = _format_main_rel(wt)
+        remote_rel = _format_remote_rel(wt)
+        ci = _format_ci(wt)
         pr = _format_pr(wt)
+        diff = _format_diff_stats(wt)
         age = wt.commit_age or ""
         sha = wt.commit_sha or ""
 
@@ -189,29 +259,40 @@ def list_cmd(
         name_col = f"{tree_prefix}{wt.name}"
         name_col = name_col.ljust(max_name)
 
-        status_col = status.ljust(3)
+        status_col = status.ljust(5)
         main_col = main_rel.ljust(6)
+        remote_col = remote_rel.ljust(6)
+        ci_col = ci.ljust(2)
         pr_col = pr.ljust(8)
+        diff_col = diff.ljust(10)
         sha_col = sha.ljust(8)
         age_col = age.ljust(14)
 
         if full and wt.commit_message:
-            return f"{name_col}  {status_col}  {main_col}  {pr_col}  {sha_col}  {age_col}  {wt.commit_message}"
+            row = f"{name_col}  {status_col}  {main_col}  {remote_col}  {ci_col}  {pr_col}  {diff_col}  {sha_col}  {age_col}  {wt.commit_message}"
         else:
-            return f"{name_col}  {status_col}  {main_col}  {pr_col}  {sha_col}  {age_col}"
+            row = f"{name_col}  {status_col}  {main_col}  {remote_col}  {ci_col}  {pr_col}  {diff_col}  {sha_col}  {age_col}"
+
+        # Dim rows for worktrees that are safe to delete
+        if wt.safe_to_delete:
+            return _dim(row)
+        return row
 
     def print_header():
         name_col = "Branch".ljust(max_name)
-        status_col = "St".ljust(3)
+        status_col = "St".ljust(5)
         main_col = "main".ljust(6)
+        remote_col = "remote".ljust(6)
+        ci_col = "CI".ljust(2)
         pr_col = "PR".ljust(8)
+        diff_col = "Diff".ljust(10)
         sha_col = "Commit".ljust(8)
         age_col = "Age".ljust(14)
 
         if full:
-            typer.echo(f"{name_col}  {status_col}  {main_col}  {pr_col}  {sha_col}  {age_col}  Message")
+            typer.echo(f"{name_col}  {status_col}  {main_col}  {remote_col}  {ci_col}  {pr_col}  {diff_col}  {sha_col}  {age_col}  Message")
         else:
-            typer.echo(f"{name_col}  {status_col}  {main_col}  {pr_col}  {sha_col}  {age_col}")
+            typer.echo(f"{name_col}  {status_col}  {main_col}  {remote_col}  {ci_col}  {pr_col}  {diff_col}  {sha_col}  {age_col}")
 
     def print_tree(parent: str, indent: int, printed: set, connector: str = ""):
         children = by_base.get(parent, [])

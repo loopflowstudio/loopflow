@@ -4,8 +4,5 @@ __pycache__/
 # Claude Code (personal state)
 .claude/settings.local.json
 
-# Worktrees (created by lf start)
-.lf/worktrees/
-
 # Research/reference files
 files/

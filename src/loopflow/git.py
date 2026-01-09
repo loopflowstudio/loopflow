@@ -1,5 +1,6 @@
 """Git operations for push and PR automation."""
 
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +30,14 @@ class WorktreeInfo:
     has_staged: bool = False
     has_modified: bool = False
     has_untracked: bool = False
+    ci_status: str | None = None  # ✓ (passed), ✗ (failed), ● (running), - (none)
+    safe_to_delete: bool = False  # True if merged and clean
+    ahead_remote: int = 0  # Commits ahead of remote tracking branch
+    behind_remote: int = 0  # Commits behind remote tracking branch
+    lines_added: int = 0  # Lines added vs main
+    lines_removed: int = 0  # Lines removed vs main
+    is_rebasing: bool = False  # True if rebase in progress
+    is_merging: bool = False  # True if merge in progress
 
 
 def find_main_repo(start: Optional[Path] = None) -> Path | None:
@@ -168,6 +177,86 @@ def list_worktrees(repo_root: Path) -> list[WorktreeInfo]:
                 except ValueError:
                     pass
 
+        # Get CI status from PR checks
+        ci_status = None
+        if pr_number:
+            ci_result = subprocess.run(
+                ["gh", "pr", "checks", "--json", "state", "-q", ".[].state"],
+                cwd=path,
+                capture_output=True,
+                text=True,
+            )
+            if ci_result.returncode == 0 and ci_result.stdout.strip():
+                states = ci_result.stdout.strip().split("\n")
+                if any(s == "FAILURE" for s in states):
+                    ci_status = "✗"
+                elif any(s in ("PENDING", "IN_PROGRESS", "QUEUED") for s in states):
+                    ci_status = "●"
+                elif all(s == "SUCCESS" for s in states):
+                    ci_status = "✓"
+                else:
+                    ci_status = "-"
+            else:
+                ci_status = "-"
+
+        # Determine if safe to delete (merged and clean)
+        safe_to_delete = False
+        if not is_dirty and branch not in remote_branches:
+            # Branch gone from origin = likely merged
+            safe_to_delete = True
+        elif not is_dirty:
+            # Check if branch is ancestor of main (merged)
+            ancestor_result = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", "HEAD", "origin/main"],
+                cwd=path,
+                capture_output=True,
+            )
+            if ancestor_result.returncode == 0:
+                safe_to_delete = True
+
+        # Get ahead/behind remote tracking branch
+        ahead_remote = 0
+        behind_remote = 0
+        if branch in remote_branches:
+            remote_rev_result = subprocess.run(
+                ["git", "rev-list", "--left-right", "--count", "@{u}...HEAD"],
+                cwd=path,
+                capture_output=True,
+                text=True,
+            )
+            if remote_rev_result.returncode == 0 and remote_rev_result.stdout.strip():
+                parts = remote_rev_result.stdout.strip().split()
+                if len(parts) == 2:
+                    try:
+                        behind_remote = int(parts[0])
+                        ahead_remote = int(parts[1])
+                    except ValueError:
+                        pass
+
+        # Get line diff stats vs main
+        lines_added = 0
+        lines_removed = 0
+        diff_stat_result = subprocess.run(
+            ["git", "diff", "--shortstat", "main...HEAD"],
+            cwd=path,
+            capture_output=True,
+            text=True,
+        )
+        if diff_stat_result.returncode == 0 and diff_stat_result.stdout.strip():
+            # Parse: " 3 files changed, 45 insertions(+), 12 deletions(-)"
+            stat_line = diff_stat_result.stdout.strip()
+            add_match = re.search(r"(\d+) insertion", stat_line)
+            del_match = re.search(r"(\d+) deletion", stat_line)
+            if add_match:
+                lines_added = int(add_match.group(1))
+            if del_match:
+                lines_removed = int(del_match.group(1))
+
+        # Detect rebase/merge in progress
+        git_dir = path / ".git"
+        is_rebasing = (git_dir / "rebase-merge").exists() or (git_dir / "REBASE_HEAD").exists()
+        is_merging = (git_dir / "MERGE_HEAD").exists()
+
         worktrees.append(WorktreeInfo(
             name=name,
             path=path,
@@ -185,6 +274,14 @@ def list_worktrees(repo_root: Path) -> list[WorktreeInfo]:
             has_staged=has_staged,
             has_modified=has_modified,
             has_untracked=has_untracked,
+            ci_status=ci_status,
+            safe_to_delete=safe_to_delete,
+            ahead_remote=ahead_remote,
+            behind_remote=behind_remote,
+            lines_added=lines_added,
+            lines_removed=lines_removed,
+            is_rebasing=is_rebasing,
+            is_merging=is_merging,
         ))
 
     return worktrees
@@ -297,26 +394,24 @@ def autocommit(
     return True
 
 
-def _sync_main(repo_root: Path) -> None:
-    """Fetch origin/main and fast-forward main to match. Raises GitError if main is dirty."""
-    # Check if main repo is dirty
+def _is_dirty(repo_root: Path) -> bool:
+    """Check if working tree has uncommitted changes."""
     result = subprocess.run(
         ["git", "status", "--porcelain"],
         cwd=repo_root,
         capture_output=True,
         text=True,
     )
-    if result.stdout.strip():
-        raise GitError("Main repo has uncommitted changes. Commit or stash them first.")
+    return bool(result.stdout.strip())
 
-    # Fetch latest
+
+def _sync_main(repo_root: Path) -> None:
+    """Fetch origin/main and fast-forward main to match. Assumes working tree is clean."""
     subprocess.run(
         ["git", "fetch", "origin", "main"],
         cwd=repo_root,
         capture_output=True,
     )
-
-    # Reset main to origin/main
     subprocess.run(
         ["git", "reset", "--hard", "origin/main"],
         cwd=repo_root,
@@ -340,6 +435,7 @@ def create_worktree(repo_root: Path, name: str, base: str | None = None) -> Path
     """Create a worktree with a new branch. Raises GitError on failure.
 
     If base is None, uses current branch. If current is main or detached, syncs main first.
+    If main has uncommitted changes, they're moved to the new worktree.
     """
     wt_path = worktree_path(repo_root, name)
 
@@ -351,8 +447,19 @@ def create_worktree(repo_root: Path, name: str, base: str | None = None) -> Path
         current = get_current_branch(repo_root)
         base = current if current and current != "main" else None
 
+    stashed = False
+
     # If branching from main (or no base specified), sync main first
     if base is None or base == "main":
+        # Stash dirty changes to move them to the worktree
+        if _is_dirty(repo_root):
+            subprocess.run(
+                ["git", "stash", "push", "-u", "-m", f"lf: creating {name}"],
+                cwd=repo_root,
+                capture_output=True,
+            )
+            stashed = True
+
         _sync_main(repo_root)
         start_point = "main"
     else:
@@ -372,11 +479,17 @@ def create_worktree(repo_root: Path, name: str, base: str | None = None) -> Path
     )
 
     if result.returncode != 0:
-        # Extract useful part from git error
+        # Restore stashed changes on failure
+        if stashed:
+            subprocess.run(["git", "stash", "pop"], cwd=repo_root, capture_output=True)
         error = result.stderr.strip()
         if "already exists" in error:
             raise GitError(f"Branch '{name}' already exists")
         raise GitError(error or "Failed to create worktree")
+
+    # Apply stashed changes to the new worktree
+    if stashed:
+        subprocess.run(["git", "stash", "pop"], cwd=wt_path, capture_output=True)
 
     return wt_path
 

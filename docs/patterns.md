@@ -1,7 +1,6 @@
 ---
-layout: page
+layout: default
 title: Patterns
-nav_order: 3
 ---
 
 # Patterns

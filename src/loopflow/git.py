@@ -18,6 +18,7 @@ class WorktreeInfo:
     branch: str
     on_origin: bool
     is_dirty: bool
+    base_branch: str | None = None  # PR target branch, if PR exists
 
 
 def find_main_repo(start: Optional[Path] = None) -> Path | None:
@@ -82,12 +83,24 @@ def list_worktrees(repo_root: Path) -> list[WorktreeInfo]:
         )
         is_dirty = bool(status_result.stdout.strip())
 
+        # Get PR base branch if PR exists
+        base_branch = None
+        pr_result = subprocess.run(
+            ["gh", "pr", "view", "--json", "baseRefName", "-q", ".baseRefName"],
+            cwd=path,
+            capture_output=True,
+            text=True,
+        )
+        if pr_result.returncode == 0 and pr_result.stdout.strip():
+            base_branch = pr_result.stdout.strip()
+
         worktrees.append(WorktreeInfo(
             name=name,
             path=path,
             branch=branch,
             on_origin=branch in remote_branches,
             is_dirty=is_dirty,
+            base_branch=base_branch,
         ))
 
     return worktrees

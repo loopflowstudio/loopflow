@@ -1,13 +1,17 @@
 """Task execution commands."""
 
+import os
 import subprocess
+import uuid
+from datetime import datetime
 
 import typer
 
 from loopflow.config import load_config
 from loopflow.context import find_worktree_root, gather_prompt_components, format_prompt
-from loopflow.git import GitError, autocommit, create_worktree
+from loopflow.git import GitError, autocommit, create_worktree, find_main_repo
 from loopflow.launcher import check_claude_available, launch_claude
+from loopflow.maestro import Session, SessionStatus, connect_maestro
 from loopflow.pipeline import run_pipeline
 from loopflow.tokens import analyze_components
 
@@ -68,22 +72,45 @@ def run(
         typer.echo("\nCopied to clipboard.")
         raise typer.Exit(0)
 
-    prompt = format_prompt(components)
-    exit_code, _ = launch_claude(
-        prompt,
-        print_mode=print_mode,
-        stream=print_mode,
-        skip_permissions=skip_permissions,
-        cwd=repo_root,
+    # Register with maestro if running
+    main_repo = find_main_repo(repo_root) or repo_root
+    session = Session(
+        id=str(uuid.uuid4()),
+        task=task,
+        repo=main_repo,
+        worktree=repo_root,
+        status=SessionStatus.RUNNING,
+        started_at=datetime.now(),
+        pid=os.getpid() if print_mode else None,
     )
+    maestro = connect_maestro()
+    if maestro:
+        maestro.register(session)
 
-    if print_mode and exit_code == 0:
-        autocommit(repo_root, task)
+    try:
+        prompt = format_prompt(components)
+        exit_code, _ = launch_claude(
+            prompt,
+            print_mode=print_mode,
+            stream=print_mode,
+            skip_permissions=skip_permissions,
+            cwd=repo_root,
+        )
 
-    if worktree:
-        typer.echo(f"\nWorktree: {repo_root}")
+        if print_mode and exit_code == 0:
+            autocommit(repo_root, task)
 
-    raise typer.Exit(exit_code)
+        if maestro:
+            status = SessionStatus.COMPLETED if exit_code == 0 else SessionStatus.ERROR
+            maestro.update(session.id, status)
+
+        if worktree:
+            typer.echo(f"\nWorktree: {repo_root}")
+
+        raise typer.Exit(exit_code)
+    finally:
+        if maestro:
+            maestro.unregister(session.id)
 
 
 def inline(
@@ -126,19 +153,42 @@ def inline(
         typer.echo("\nCopied to clipboard.")
         raise typer.Exit(0)
 
-    prompt_text = format_prompt(components)
-    exit_code, _ = launch_claude(
-        prompt_text,
-        print_mode=print_mode,
-        stream=print_mode,
-        skip_permissions=skip_permissions,
-        cwd=repo_root,
+    # Register with maestro if running
+    main_repo = find_main_repo(repo_root) or repo_root
+    session = Session(
+        id=str(uuid.uuid4()),
+        task="inline",
+        repo=main_repo,
+        worktree=repo_root,
+        status=SessionStatus.RUNNING,
+        started_at=datetime.now(),
+        pid=os.getpid() if print_mode else None,
     )
+    maestro = connect_maestro()
+    if maestro:
+        maestro.register(session)
 
-    if print_mode and exit_code == 0:
-        autocommit(repo_root, ":", prompt)
+    try:
+        prompt_text = format_prompt(components)
+        exit_code, _ = launch_claude(
+            prompt_text,
+            print_mode=print_mode,
+            stream=print_mode,
+            skip_permissions=skip_permissions,
+            cwd=repo_root,
+        )
 
-    raise typer.Exit(exit_code)
+        if print_mode and exit_code == 0:
+            autocommit(repo_root, ":", prompt)
+
+        if maestro:
+            status = SessionStatus.COMPLETED if exit_code == 0 else SessionStatus.ERROR
+            maestro.update(session.id, status)
+
+        raise typer.Exit(exit_code)
+    finally:
+        if maestro:
+            maestro.unregister(session.id)
 
 
 def pipeline(

@@ -81,6 +81,23 @@ lf wt list                    # show all worktrees
 lf wt clean                   # remove merged branches
 ```
 
+## Session Tracking
+
+Track running tasks across multiple terminals with the maestro daemon:
+
+```bash
+lf maestro start              # start tracking daemon
+lf status                     # show running sessions
+
+# In another terminal
+lf implement -p               # batch task registers automatically
+
+# Check from anywhere
+lf status                     # see all running sessions
+```
+
+When maestro is running, tasks automatically register, and you'll get macOS notifications when batch tasks complete.
+
 ## Configuration
 
 ```yaml
@@ -114,3 +131,6 @@ ide:
 | `lf pr land [-a]` | Squash-merge to main |
 | `lf meta install` | Install Claude Code |
 | `lf meta doctor` | Check dependencies |
+| `lf maestro start` | Start session tracking daemon |
+| `lf maestro stop` | Stop session tracking daemon |
+| `lf status` | Show running sessions |

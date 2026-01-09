@@ -90,7 +90,7 @@ lf maestro start              # start tracking daemon
 lf status                     # show running sessions
 
 # In another terminal
-lf implement -p               # batch task registers automatically
+lf implement -a               # autonomous task registers automatically
 
 # Check from anywhere
 lf status                     # see all running sessions
@@ -115,10 +115,11 @@ ide:
 
 | Option | Description |
 |--------|-------------|
-| `-p, --print` | Batch mode (non-interactive) |
+| `-a, --auto` | Run autonomously without interaction |
 | `-x, --context` | Add context files |
 | `-w, --worktree` | Create worktree and run task there |
 | `-c, --copy` | Copy prompt to clipboard, show token breakdown |
+| `-v, --paste` | Include clipboard content in prompt |
 | `-m, --model` | Choose model (claude, codex) |
 | `--parallel` | Run with multiple models in parallel |
 

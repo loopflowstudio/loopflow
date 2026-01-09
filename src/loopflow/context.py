@@ -46,10 +46,22 @@ def _read_file_if_exists(path: Path) -> str | None:
 
 
 def gather_task(repo_root: Path, name: str) -> str | None:
-    """Gather task file content from .lf/.
+    """Gather task file content.
 
-    Priority: .lf > .md > any other extension > bare name.
+    Search order:
+    1. .claude/commands/{name}.md (Claude Code compatible)
+    2. .lf/{name}.lf
+    3. .lf/{name}.md
+    4. .lf/{name}.* (any other extension)
+    5. .lf/{name} (bare name)
     """
+    # Check .claude/commands first (portable format)
+    claude_cmd = repo_root / ".claude" / "commands" / f"{name}.md"
+    content = _read_file_if_exists(claude_cmd)
+    if content:
+        return content
+
+    # Fall back to .lf directory
     lf_dir = repo_root / ".lf"
 
     # Preferred extensions first

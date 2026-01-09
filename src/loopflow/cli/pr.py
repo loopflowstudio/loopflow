@@ -275,6 +275,13 @@ def land(
         typer.echo(f"Error: Merge failed. Resolve conflicts manually.\n{result.stderr}", err=True)
         raise typer.Exit(1)
 
+    # Remove design doc if present (it served its purpose)
+    design_doc = main_repo / f"{branch}.md"
+    if design_doc.exists():
+        design_doc.unlink()
+        subprocess.run(["git", "add", str(design_doc)], cwd=main_repo, check=True)
+        typer.echo(f"Removed {branch}.md")
+
     # Check if there are staged changes to commit
     result = subprocess.run(
         ["git", "diff", "--cached", "--quiet"],

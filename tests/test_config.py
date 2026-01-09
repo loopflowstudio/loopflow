@@ -254,3 +254,25 @@ pipelines:
 
     with pytest.raises(ConfigError, match="Invalid config"):
         load_config(temp_repo)
+
+
+def test_load_config_backend_defaults_claude(temp_repo):
+    """backend defaults to 'claude' when not set."""
+    config_yaml = temp_repo / ".lf" / "config.yaml"
+    config_yaml.write_text("push: false\n")
+
+    config = load_config(temp_repo)
+
+    assert config is not None
+    assert config.backend == "claude"
+
+
+def test_load_config_backend_setting(temp_repo):
+    """backend is loaded from config."""
+    config_yaml = temp_repo / ".lf" / "config.yaml"
+    config_yaml.write_text("backend: codex\n")
+
+    config = load_config(temp_repo)
+
+    assert config is not None
+    assert config.backend == "codex"

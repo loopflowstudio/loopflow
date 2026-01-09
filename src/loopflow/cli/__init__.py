@@ -15,21 +15,23 @@ app = typer.Typer(
 
 # Import and register subcommands
 from loopflow.cli import run as run_module
-from loopflow.cli import wt, pr, meta
+from loopflow.cli import wt, pr, meta, maestro, status
 
 app.add_typer(wt.app, name="wt")
 app.add_typer(pr.app, name="pr")
 app.add_typer(meta.app, name="meta")
+app.add_typer(maestro.app, name="maestro")
 
 # Register top-level commands
 app.command()(run_module.run)
 app.command()(run_module.inline)
 app.command(name="pipeline")(run_module.pipeline)
+app.command()(status.status)
 
 
 def main():
     """Entry point that supports 'lf <task>' and 'lf <pipeline>' shorthand."""
-    known_commands = {"run", "pipeline", "inline", "wt", "pr", "meta", "--help", "-h"}
+    known_commands = {"run", "pipeline", "inline", "wt", "pr", "meta", "maestro", "status", "--help", "-h"}
 
     try:
         if len(sys.argv) > 1:

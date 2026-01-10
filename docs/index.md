@@ -80,6 +80,7 @@ When done:
 
 ```bash
 lf pr create             # open PR from worktree
+lf land                  # local merge via worktrunk
 wt remove my-feature     # remove worktree + branch
 ```
 

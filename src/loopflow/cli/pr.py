@@ -7,6 +7,7 @@ import subprocess
 import typer
 
 from loopflow.context import find_worktree_root
+from loopflow.design import clear_design_artifacts, has_design_artifacts
 from loopflow.git import GitError, find_main_repo, open_pr, update_pr
 from loopflow.worktrees import remove, get_path
 from loopflow.llm_http import generate_commit_message, generate_pr_message
@@ -116,6 +117,11 @@ def update(
 def land(
     add: bool = typer.Option(False, "-a", "--add", help="Add, commit, and push changes first"),
     worktree: str = typer.Option(None, "-w", "--worktree", help="Target specific worktree by name"),
+    require_clean_design: bool = typer.Option(
+        False,
+        "--require-clean-design",
+        help="Fail if design artifacts are present instead of removing them",
+    ),
 ):
     """Land this branch: squash-merge to base branch and clean up.
 
@@ -175,6 +181,13 @@ def land(
         else:
             typer.echo("Error: Uncommitted changes. Use --add or commit manually.", err=True)
             raise typer.Exit(1)
+
+    if require_clean_design and has_design_artifacts(repo_root):
+        typer.echo(
+            "Error: design artifacts present. Remove .design contents before landing.",
+            err=True,
+        )
+        raise typer.Exit(1)
 
     # Check if pushed to origin
     result = subprocess.run(
@@ -276,12 +289,11 @@ def land(
         typer.echo(f"Error: Merge failed. Resolve conflicts manually.\n{result.stderr}", err=True)
         raise typer.Exit(1)
 
-    # Remove design doc if present (it served its purpose)
-    design_doc = main_repo / f"{branch}.md"
-    if design_doc.exists():
-        design_doc.unlink()
-        subprocess.run(["git", "add", str(design_doc)], cwd=main_repo, check=True)
-        typer.echo(f"Removed {branch}.md")
+    if clear_design_artifacts(main_repo):
+        design_dir = main_repo / ".design"
+        if design_dir.exists():
+            subprocess.run(["git", "add", "-A", str(design_dir)], cwd=main_repo, check=True)
+        typer.echo("Removed .design contents")
 
     # Check if there are staged changes to commit
     result = subprocess.run(

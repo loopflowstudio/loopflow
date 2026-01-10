@@ -120,6 +120,16 @@ def init(
             shutil.copy(config_template, config_dst)
             typer.echo("✓ Created .lf/config.yaml")
 
+        for template_name in ["COMMIT_MESSAGE.md", "CHECKPOINT_MESSAGE.md"]:
+            src = prompts_dir / template_name
+            dst = config_dir / template_name
+
+            if dst.exists():
+                typer.echo(f"- .lf/{template_name} (already exists)")
+            else:
+                shutil.copy(src, dst)
+                typer.echo(f"✓ Created .lf/{template_name}")
+
     if install_prompts and not prompts_only:
         typer.echo("\nYou can now use:")
         typer.echo("  lf design        # or: claude /design")

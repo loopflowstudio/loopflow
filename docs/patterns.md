@@ -188,6 +188,12 @@ lf pr land               # merges and cleans up
 lf pr land -a            # auto-merge when checks pass
 ```
 
+Land locally (no PR required):
+
+```bash
+lf land                  # squash + merge via worktrunk
+```
+
 ## Commit message generation
 
 The `commit` task can generate commit messages:

@@ -13,10 +13,23 @@ from loopflow.launcher import get_runner
 from loopflow.worktrees import WorktreeError, get_path, list_all
 
 
-def _get_diff_against_main(wt_path: Path) -> str:
-    """Get diff of worktree against main branch."""
+def _get_default_base_ref(repo_root: Path) -> str:
+    """Resolve the default branch ref (origin/HEAD), with main fallback."""
     result = subprocess.run(
-        ["git", "diff", "main...HEAD"],
+        ["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout.strip()
+    return "main"
+
+
+def _get_diff_against_base(wt_path: Path, base_ref: str) -> str:
+    """Get diff of a worktree against the base ref."""
+    result = subprocess.run(
+        ["git", "diff", f"{base_ref}...HEAD"],
         cwd=wt_path,
         capture_output=True,
         text=True,
@@ -24,23 +37,59 @@ def _get_diff_against_main(wt_path: Path) -> str:
     return result.stdout if result.returncode == 0 else ""
 
 
-def _find_get_path(main_repo: Path, name: str) -> Path | None:
-    """Find worktree path by name, checking both exact match and branch name."""
-    # First try exact worktree path calculation
-    wt_path = get_path(main_repo, name)
-    if wt_path.exists():
-        return wt_path
-
-    # Try finding in worktree list
+def _find_worktree_path(main_repo: Path, name: str) -> Path | None:
+    """Find worktree path by name."""
     try:
         worktrees = list_all(main_repo)
         for wt in worktrees:
-            if wt.name == name or wt.branch == name:
+            if wt.branch == name:
                 return wt.path
     except WorktreeError:
         pass
 
+    wt_path = get_path(main_repo, name)
+    if wt_path.exists():
+        return wt_path
+
     return None
+
+
+def _find_branch_ref(main_repo: Path, name: str) -> str | None:
+    """Find a branch ref for name (local preferred, then origin)."""
+    result = subprocess.run(
+        ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{name}"],
+        cwd=main_repo,
+    )
+    if result.returncode == 0:
+        return name
+
+    result = subprocess.run(
+        ["git", "show-ref", "--verify", "--quiet", f"refs/remotes/origin/{name}"],
+        cwd=main_repo,
+    )
+    if result.returncode == 0:
+        return f"origin/{name}"
+
+    return None
+
+
+def _get_diff_for_target(main_repo: Path, name: str, base_ref: str) -> tuple[str, bool]:
+    """Get diff for a worktree if present, otherwise a branch ref."""
+    wt_path = _find_worktree_path(main_repo, name)
+    if wt_path:
+        return _get_diff_against_base(wt_path, base_ref), True
+
+    branch_ref = _find_branch_ref(main_repo, name)
+    if not branch_ref:
+        return "", False
+
+    result = subprocess.run(
+        ["git", "diff", f"{base_ref}...{branch_ref}"],
+        cwd=main_repo,
+        capture_output=True,
+        text=True,
+    )
+    return (result.stdout if result.returncode == 0 else ""), True
 
 
 def compare(
@@ -53,7 +102,7 @@ def compare(
         None, "-m", "--model", help="Model to use (claude, codex)"
     ),
     output: Optional[str] = typer.Option(
-        None, "-o", "--output", help="Output file for analysis (default: <branch>.md)"
+        None, "-o", "--output", help="Output file for analysis (default: .design/)"
     ),
 ):
     """Compare two worktree implementations and analyze differences.
@@ -72,36 +121,28 @@ def compare(
         typer.echo("Error: Not in a git repository", err=True)
         raise typer.Exit(1)
 
-    # Resolve worktree paths
-    wt_a = _find_get_path(main_repo, a)
-    wt_b = _find_get_path(main_repo, b)
+    base_ref = _get_default_base_ref(main_repo)
+    diff_a, found_a = _get_diff_for_target(main_repo, a, base_ref)
+    diff_b, found_b = _get_diff_for_target(main_repo, b, base_ref)
 
-    if not wt_a:
+    if not found_a:
         typer.echo(f"Error: Worktree '{a}' not found", err=True)
         raise typer.Exit(1)
 
-    if not wt_b:
+    if not found_b:
         typer.echo(f"Error: Worktree '{b}' not found", err=True)
         raise typer.Exit(1)
 
-    # Get diffs against main for both worktrees
-    diff_a = _get_diff_against_main(wt_a)
-    diff_b = _get_diff_against_main(wt_b)
-
     if not diff_a and not diff_b:
-        typer.echo("Error: Neither worktree has changes against main", err=True)
+        typer.echo("Error: No changes found for either worktree", err=True)
         raise typer.Exit(1)
 
-    # Determine output file
+    # Determine output destination
     cwd = find_worktree_root() or Path.cwd()
     if output:
-        output_file = output
+        output_dir = output
     else:
-        current_branch = get_current_branch(cwd)
-        if current_branch and current_branch != "main":
-            output_file = f"{current_branch}.md"
-        else:
-            output_file = "compare.md"
+        output_dir = ".design/"
 
     # Load config
     config = load_config(main_repo)
@@ -126,7 +167,7 @@ def compare(
         f"name_b={b}",
         f"diff_a={diff_a}",
         f"diff_b={diff_b}",
-        f"output_file={output_file}",
+        f"output_dir={output_dir}",
     ]
 
     components = gather_prompt_components(
@@ -140,7 +181,10 @@ def compare(
     # Launch runner
     typer.echo(f"Comparing {a} vs {b}...")
     if not print_mode:
-        typer.echo(f"Analysis will be written to: {output_file}")
+        if output:
+            typer.echo(f"Analysis will be written to: {output_dir}")
+        else:
+            typer.echo("Analysis will be written under: .design/")
 
     result = runner.launch(
         prompt,

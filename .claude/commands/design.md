@@ -1,17 +1,17 @@
 This task produces a short implementation spec that another LLM session can use to write a first draft of a feature.
 
-The design doc is scaffolding. It's a checkpoint for recovery, not documentation for posterity. If a session crashes, the spec lets a fresh session pick up where things left off. After implementation, `lf review` transforms it into a human review guide. `lf pr land` removes it.
+The design doc is scaffolding. It's a checkpoint for recovery, not documentation for posterity. If a session crashes, the spec lets a fresh session pick up where things left off. After implementation, `lf review` writes the review under `.design/`. `lf pr land` removes the `.design/` contents.
 
 ## Workflow
 
-1. Create `<branch>.md` at repo root early — after the first exchange or two (e.g., `context-and-worktrees.md` on the `context-and-worktrees` branch)
+1. Create a design doc under `.design/` (pick a short descriptive name, create the folder if needed) early — after the first exchange or two
 2. Keep refining the doc as the conversation continues
 3. Commit with message `design: <branch>` when done
 4. End session—implementation happens in a separate `lf implement` invocation
 
 Write as you go, not at the end. The doc is a living artifact during the conversation. If the session crashes mid-design, the partial doc is still useful. Let writing it inspire new questions—gaps become obvious when you try to make things concrete.
 
-**Important:** Design docs are tied to branches and live at repo root so they're auto-included in the prompt. If you're on `main`, create a branch first with `lf start <name>`.
+**Important:** Design docs live under `.design/` and are auto-included in the prompt. If you're on `main`, create a branch first with `lf start <name>`.
 
 ## What makes a good design doc
 

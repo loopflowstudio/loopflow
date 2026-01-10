@@ -9,7 +9,7 @@ How should `lf pr land` adapt now that worktrunk handles worktree lifecycle?
 2. Get PR info (title, body, base branch) from GitHub
 3. Checkout base branch in main repo
 4. Squash merge the feature branch
-5. Remove `<branch>.md` design doc
+5. Remove `.design/` artifacts
 6. Commit with PR title + body as message
 7. Push to origin
 8. Remove worktree and branch
@@ -29,7 +29,7 @@ How should `lf pr land` adapt now that worktrunk handles worktree lifecycle?
 |--------|-----------|----------|
 | Commit message | PR title + body | Squashed commit message |
 | Requires PR | Yes | No |
-| Design doc cleanup | Yes (`<branch>.md`) | No |
+| Design doc cleanup | Yes (`.design/`) | No |
 | Runs from | Main repo or worktree | Worktree only |
 | Target branch | PR's base branch | Default branch (or arg) |
 | Hooks | No | Pre-merge, pre-remove, post-merge |
@@ -45,7 +45,7 @@ def land():
     # Get PR info for commit message
     pr_data = get_pr_info()
 
-    # Remove design doc
+    # Remove design docs
     remove_design_doc(branch)
 
     # Delegate to worktrunk
@@ -84,7 +84,7 @@ Use worktrunk's hook system to inject lf behavior:
 lf-pr-land = """
 # Fetch PR title/body and set GIT_COMMIT_MSG
 export GIT_COMMIT_MSG=$(lf pr message)
-# Remove design doc
+# Remove design docs
 rm -f ${BRANCH}.md
 """
 ```

@@ -18,7 +18,9 @@ def temp_repo(tmp_path):
     (tmp_path / ".git").mkdir()
     (tmp_path / "README.md").write_text("# Test Project\n")
     (tmp_path / "STYLE.md").write_text("# Style Guide\n")
-    (tmp_path / "VOICE.md").write_text("# Voice\n\nBe excellent.\n")
+    design_dir = tmp_path / ".design"
+    design_dir.mkdir()
+    (design_dir / "plan.md").write_text("# Plan\n\nDo the thing.\n")
 
     lf = tmp_path / ".lf"
     lf.mkdir()
@@ -46,14 +48,14 @@ def test_build_prompt_assembles_full_context(temp_repo):
     result = build_prompt(temp_repo, "implement")
 
     # Root docs with preamble outside
-    assert "Follow VOICE and STYLE" in result
+    assert "Follow STYLE" in result
     assert "<lf:docs>" in result
+    assert "<lf:plan>" in result
+    assert "Do the thing." in result
     assert "<lf:README>" in result
     assert "# Test Project" in result
     assert "<lf:STYLE>" in result
     assert "# Style Guide" in result
-    assert "<lf:VOICE>" in result
-    assert "Be excellent." in result
     assert "</lf:docs>" in result
 
     # Task with preamble outside
@@ -156,7 +158,7 @@ def test_gather_prompt_components_returns_dataclass(temp_repo):
 
     assert isinstance(components, PromptComponents)
     assert components.repo_root == temp_repo
-    assert len(components.docs) == 3  # README, STYLE, VOICE
+    assert len(components.docs) == 3  # .design/plan + README, STYLE
     assert components.task == ("implement", "Implement the feature.\n")
 
 

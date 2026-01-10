@@ -1,7 +1,7 @@
 """Git worktree operations.
 
 Provides worktree management for parallel development workflows.
-Implementation uses worktrunk CLI but interface is tool-agnostic.
+Interface is tool-agnostic.
 """
 
 import json
@@ -41,7 +41,7 @@ class Worktree:
 
 
 def _run_wt(args: list[str], repo_root: Path) -> str:
-    """Run worktrunk CLI command."""
+    """Run worktree CLI command."""
     cmd = ["wt", "-C", str(repo_root), *args]
     try:
         result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)

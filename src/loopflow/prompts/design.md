@@ -2,7 +2,7 @@ This task produces a short implementation spec that another LLM session can use 
 
 ## What to produce
 
-Create a design document at `<branch>.md` in repo root with:
+Create a design document under `.design/` (pick a short descriptive name, create the folder if needed) with:
 
 1. **What to build** - Clear statement of the feature or change
 2. **Data structures** - New types, fields, or schemas needed

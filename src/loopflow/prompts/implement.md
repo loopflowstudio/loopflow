@@ -2,7 +2,7 @@ Turn a design doc into working code.
 
 ## What this task does
 
-Given a design document (typically `<branch>.md` at repo root), implement the specified features:
+Given a design document under `.design/`, implement the specified features:
 
 1. Read the design doc to understand requirements
 2. Plan the implementation approach

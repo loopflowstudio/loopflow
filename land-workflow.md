@@ -23,7 +23,7 @@ pr: false  # default: lf land just works, lf pr land still available
 Both workflows use customizable prompts for generating messages:
 
 - `.lf/COMMIT_MESSAGE.md` - prompt for generating commit messages
-- `.lf/PR_MESSAGE.md` - prompt for generating PR title/body
+- `.lf/CHECKPOINT_MESSAGE.md` - prompt for generating PR title/body
 
 These are installed by `lf meta init` and can be edited. Falls back to built-in defaults if not present.
 
@@ -51,7 +51,7 @@ lf pr land --create  # create PR if it doesn't exist (default behavior)
 ```
 1. Check config & state (warn if appropriate)
 2. Generate commit message from diff (using customizable prompt)
-3. Remove design doc (<branch>.md) if present
+3. Remove design docs (.design/) contents if present
 4. Squash commits with generated message
 5. wt merge --no-squash (rebase, hooks, merge, push, cleanup)
 ```
@@ -61,7 +61,7 @@ lf pr land --create  # create PR if it doesn't exist (default behavior)
 ```
 1. Ensure PR exists (create if --create or pr: true)
 2. Get PR title/body
-3. Remove design doc (<branch>.md) if present
+3. Remove design docs (.design/) contents if present
 4. Squash merge to base branch with PR title/body as message
 5. Push
 6. Clean up worktree (wt remove)
@@ -87,7 +87,7 @@ lf pr land --create  # create PR if it doesn't exist (default behavior)
 
 ## Implementation order
 
-1. Add customizable prompts (`.lf/COMMIT_MESSAGE.md`, `.lf/PR_MESSAGE.md`)
+1. Add customizable prompts (`.lf/COMMIT_MESSAGE.md`, `.lf/CHECKPOINT_MESSAGE.md`)
 2. Update `llm_http.py` to check for user prompts first
 3. Update `lf meta init` to install prompt templates
 4. Add `lf land` command using wt merge

@@ -9,6 +9,7 @@ The deliverable is working, clean code that passes tests.
    - Review against STYLE.md and general code quality
    - Fix bugs, style violations, and unnecessary complexity directly
    - Don't just note issues—fix them
+   - Rewrite the primary design doc in `.design/` to match the implementation (keep any decisions log)
 
 2. **Test**
    - Run the full test suite
@@ -34,7 +35,7 @@ Don't expand scope. If something unrelated to this branch could be better, leave
 
 Don't refactor working code that isn't broken. Only fix actual problems.
 
-**Design doc deviations.** If a `<branch>.md` design doc exists, treat the implementation as the source of truth. Deviations are likely intentional. Evaluate code at face value, not for fidelity to the original plan.
+**Design doc deviations.** If any `.design/*.md` docs exist, treat the implementation as the source of truth. Deviations are likely intentional. Evaluate code at face value, not for fidelity to the original plan.
 
 ## Test standards
 

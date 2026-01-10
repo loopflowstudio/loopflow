@@ -14,7 +14,7 @@ Compare two implementations of the same task and produce a written analysis.
 
 ## Task
 
-Analyze both implementations and write your analysis to `{{output_file}}`.
+Analyze both implementations and write your analysis to a markdown file under `{{output_dir}}`.
 
 ### What to cover
 
@@ -32,7 +32,7 @@ Analyze both implementations and write your analysis to `{{output_file}}`.
 
 ### Format
 
-Write directly to `{{output_file}}`. Use markdown with clear sections. Be concise—aim for 500-1000 words. The goal is a decision document, not an exhaustive review.
+Write directly to a new markdown file under `{{output_dir}}` (pick a short descriptive name, create the folder if needed). Use markdown with clear sections. Be concise—aim for 500-1000 words. The goal is a decision document, not an exhaustive review.
 
 In interactive mode, discuss first if you have questions, then write the file.
 In batch mode, write the file immediately based on what you see.

@@ -144,6 +144,7 @@ ide:
 | `wt <subcommand>` | Worktree management (worktrunk) |
 | `lf pr create` | Open GitHub PR |
 | `lf pr land [-a]` | Squash-merge to main |
+| `lf land [--no-pr] [--force] [--base]` | Land locally via worktrunk |
 | `lf meta init` | Initialize repo with prompts and config |
 | `lf meta install` | Install Claude Code |
 | `lf meta doctor` | Check dependencies |

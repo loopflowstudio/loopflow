@@ -78,6 +78,7 @@ def init(
 
     # Get bundled assets path
     bundled_dir = Path(__file__).parent.parent
+    commands_src = bundled_dir / "commands"
     prompts_dir = bundled_dir / "prompts"
     style_template = bundled_dir / "LOOPFLOW_STYLE.md"
     config_template = bundled_dir / "config_template.yaml"
@@ -88,7 +89,7 @@ def init(
         commands_dir.mkdir(parents=True, exist_ok=True)
 
         for prompt_name in ["review.md", "implement.md", "design.md", "polish.md"]:
-            src = prompts_dir / prompt_name
+            src = commands_src / prompt_name
             dst = commands_dir / prompt_name
 
             if dst.exists():

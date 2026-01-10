@@ -10,3 +10,4 @@ Rebase this branch onto main.
    - For code central to the branch's intent, preserve the branch's changes
    - For code outside the branch's core purpose, defer to main
    - Continue the rebase after resolving
+5. Run `git push --force-with-lease` to update origin

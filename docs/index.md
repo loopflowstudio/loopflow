@@ -35,7 +35,7 @@ uv tool install loopflow
 # Or pip
 pip install loopflow
 
-# Install Claude Code if needed
+# Install Claude Code + worktrunk if needed
 lf meta install
 ```
 
@@ -69,7 +69,7 @@ lf ship                  # runs: implement → review → test → commit
 Loopflow works best with git worktrees. Each feature gets its own directory, so agents don't conflict with your active work.
 
 ```bash
-lf wt create my-feature  # creates branch + worktree
+wt switch --create my-feature --execute pwd
 cd ../yourrepo.my-feature
 
 lf ship                  # agents work here
@@ -80,7 +80,8 @@ When done:
 
 ```bash
 lf pr create             # open PR from worktree
-lf wt clean              # remove merged worktrees
+lf land                  # local merge via worktrunk
+wt remove my-feature     # remove worktree + branch
 ```
 
 ## Multi-model
@@ -92,11 +93,7 @@ lf review -m codex       # use Codex instead of Claude
 lf implement --parallel claude,codex  # race them
 ```
 
-Compare results:
-
-```bash
-lf wt compare feat-claude feat-codex
-```
+Compare results with `git diff` or your editor.
 
 ## Next steps
 

@@ -1,5 +1,13 @@
 # Loopflow
 
+## Usage
+
+```bash
+lf review
+lf implement: add auth
+lf ship
+```
+
 Run LLM coding tasks from reusable prompt files.
 
 macOS only. Supports Claude Code and OpenAI Codex via configuration.
@@ -8,7 +16,7 @@ macOS only. Supports Claude Code and OpenAI Codex via configuration.
 
 ```bash
 pip install loopflow
-lf meta install    # installs Claude Code via npm
+lf meta install    # installs Claude Code + worktrunk
 ```
 
 ## Why Worktrees?
@@ -20,8 +28,8 @@ The workflow: create a worktree, run tasks there, merge when ready. You can have
 ## Quick Start
 
 ```bash
-lf wt create my-feature       # branch + worktree, opens IDEs
-cd ../loopflow.my-feature     # worktrees are sibling directories
+wt switch --create my-feature --execute pwd
+cd ../loopflow.my-feature
 
 lf design                     # interactive: figure out what to build
 lf ship                       # batch: implement, review, test, commit, open PR
@@ -75,10 +83,12 @@ lf ship    # runs each task, auto-commits between steps
 
 ## Worktrees
 
+Loopflow delegates worktree management to worktrunk. Use `wt` directly:
+
 ```bash
-lf wt create auth             # ../loopflow.auth/, opens Warp + Cursor
-lf wt list                    # show all worktrees
-lf wt clean                   # remove merged branches
+wt list                       # show all worktrees
+wt switch --create auth       # create or switch to a worktree
+wt remove auth                # remove worktree + branch
 ```
 
 ## Session Tracking
@@ -130,8 +140,8 @@ ide:
 | `lf <task>` | Run a task from `.lf/` |
 | `lf <pipeline>` | Run a pipeline |
 | `lf : "prompt"` | Inline prompt |
-| `lf wt create/list/clean` | Worktree management |
-| `lf wt compare <a> <b>` | Compare two worktree implementations |
+| `lf compare a b` | Compare two worktree implementations |
+| `wt <subcommand>` | Worktree management (worktrunk) |
 | `lf pr create` | Open GitHub PR |
 | `lf pr land [-a]` | Squash-merge to main |
 | `lf meta init` | Initialize repo with prompts and config |

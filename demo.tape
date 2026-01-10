@@ -20,7 +20,7 @@ Type "lf run --help"
 Enter
 Sleep 4s
 
-Type "lf wt --help"
+Type "wt --help"
 Enter
 Sleep 3s
 

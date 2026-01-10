@@ -1,47 +1,36 @@
-Review the diff on the current branch against `main` and fix any issues found.
+Review the diff on the current branch against `main` and produce a written assessment.
 
-## Deliverables
-
-1. **Fixes** - Correct any issues in the code directly
-2. **Review guide** - Create `<branch>.md` at repo root for human reviewers (see below)
+The deliverable is a review document, not fixes. Do not edit any files.
 
 ## Process
 
-1. Read STYLE.md if present
-2. Examine the diff between main and current branch
-3. Fix issues directly: bugs, style violations, missing tests
-4. Run tests to verify fixes
-5. Update the design doc
+1. Run `git diff main...HEAD` to see committed changes on this branch
+2. Run `git diff` to see uncommitted changes
+3. Review against STYLE.md and general code quality
+4. Write your assessment
 
 ## What to look for
 
-- Bugs and correctness issues
-- Code clarity and maintainability
-- Adherence to STYLE.md conventions
-- Test coverage for new functionality
+**Style guide violations.** Read STYLE.md. Check naming, error handling, documentation patterns, test quality.
 
-Fix issues as you find them. Don't just report problems—solve them.
+**Bugs.** Logic errors, edge cases, off-by-ones, unhandled errors.
 
-## Review guide
+**Unnecessary complexity.** Code that could be simpler. Abstractions that don't earn their keep. Features beyond what was asked.
 
-Create (or update) a review guide at `<branch>.md` in the repo root.
+**Missing pieces.** Tests that should exist. README updates for changed behavior.
 
-To find the branch name:
-```bash
-git branch --show-current
-```
+## What to ignore
 
-For example, if the branch is `post-winter`, write to `post-winter.md`.
+Don't flag things unrelated to this branch's changes. Stay focused on what's in the diff.
 
-Write it for a human reviewer who hasn't seen this code yet. Help them understand:
+**Design doc deviations.** If a `<branch>.md` design doc exists, treat the implementation as the source of truth. The design doc was scaffolding—deviations are likely intentional refinements discovered during implementation. Evaluate the code at face value for bugs and style issues, not for fidelity to the original plan.
 
-- What this branch does and why
-- Notable decisions or tradeoffs worth knowing about
-- Anything risky, uncertain, or worth extra scrutiny
-- What's unfinished (if anything)
+## Output
 
-If a design doc already exists, transform it—strip implementation details that are now in code, surface what's still relevant for review.
+Write a brief review covering:
+- **Summary**: What does this change do? (1-2 sentences)
+- **Issues**: Bugs, style violations, or concerns (if any)
+- **Suggestions**: Optional improvements (if any)
+- **Verdict**: Ready to ship, or needs work?
 
-Keep it short. A few paragraphs, not a formal document.
-
-`lf pr land` removes the review guide automatically.
+Keep it concise. If there's nothing to flag, say so.

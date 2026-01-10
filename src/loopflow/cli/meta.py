@@ -37,6 +37,29 @@ def _install_cask(name: str) -> bool:
     return result.returncode == 0
 
 
+def _install_worktrunk() -> bool:
+    """Install worktrunk CLI via Homebrew, with cargo fallback."""
+    typer.echo("Installing worktrunk...")
+    result = subprocess.run(
+        ["brew", "install", "max-sixty/worktrunk/wt"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        return True
+
+    if shutil.which("cargo"):
+        typer.echo("Homebrew install failed, trying cargo...")
+        result = subprocess.run(
+            ["cargo", "install", "worktrunk"],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0
+
+    return False
+
+
 @app.command()
 def init(
     prompts_only: bool = typer.Option(False, "--prompts", help="Only install prompts"),
@@ -64,7 +87,7 @@ def init(
         commands_dir = repo_root / ".claude" / "commands"
         commands_dir.mkdir(parents=True, exist_ok=True)
 
-        for prompt_name in ["review.md", "implement.md", "design.md"]:
+        for prompt_name in ["review.md", "implement.md", "design.md", "polish.md"]:
             src = prompts_dir / prompt_name
             dst = commands_dir / prompt_name
 
@@ -99,9 +122,10 @@ def init(
 
     if install_prompts and not prompts_only:
         typer.echo("\nYou can now use:")
-        typer.echo("  lf review        # or: claude /review")
+        typer.echo("  lf design        # or: claude /design")
         typer.echo("  lf implement")
-        typer.echo("  lf design")
+        typer.echo("  lf review")
+        typer.echo("  lf polish")
 
 
 @app.command()
@@ -156,6 +180,16 @@ def install():
             typer.echo(f"✗ Could not install Claude Code: {result.stderr}", err=True)
             raise typer.Exit(1)
 
+    # Worktrunk (required for worktree operations)
+    if shutil.which("wt"):
+        typer.echo("✓ worktrunk")
+    else:
+        if _install_worktrunk() and shutil.which("wt"):
+            typer.echo("✓ worktrunk installed")
+        else:
+            typer.echo("✗ Could not install worktrunk", err=True)
+            raise typer.Exit(1)
+
     # Warp (if enabled in config, default true)
     if not ide or ide.warp:
         if shutil.which("warp"):
@@ -200,6 +234,12 @@ def doctor():
         typer.echo("✓ claude")
     else:
         typer.echo("✗ claude - Run: lf meta install")
+        all_ok = False
+
+    if shutil.which("wt"):
+        typer.echo("✓ wt")
+    else:
+        typer.echo("✗ wt - Run: lf meta install")
         all_ok = False
 
     # IDE tools (based on config)

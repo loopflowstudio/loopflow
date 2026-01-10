@@ -7,7 +7,8 @@ import subprocess
 import typer
 
 from loopflow.context import find_worktree_root
-from loopflow.git import GitError, find_main_repo, open_pr, update_pr, worktree_path
+from loopflow.git import GitError, find_main_repo, open_pr, update_pr
+from loopflow.worktrees import remove, get_path
 from loopflow.llm_http import generate_commit_message, generate_pr_message
 
 app = typer.Typer(help="Pull request workflow.")
@@ -128,7 +129,7 @@ def land(
         if not main_repo:
             typer.echo("Error: Not in a git repository", err=True)
             raise typer.Exit(1)
-        repo_root = worktree_path(main_repo, worktree)
+        repo_root = get_path(main_repo, worktree)
         if not repo_root.exists():
             typer.echo(f"Error: Worktree '{worktree}' not found", err=True)
             raise typer.Exit(1)
@@ -298,9 +299,8 @@ def land(
     subprocess.run(["git", "push"], cwd=main_repo, check=True)
 
     # Clean up: remove worktree and branch
-    from loopflow.git import remove_worktree
     if repo_root != main_repo:
-        remove_worktree(main_repo, branch)
+        remove(main_repo, branch)
     else:
         # If we landed from main repo, switch back before deleting branch
         if original_branch and original_branch != branch:

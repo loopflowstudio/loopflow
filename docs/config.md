@@ -100,7 +100,7 @@ exclude:
 
 ### ide
 
-Configure which IDEs open when creating worktrees.
+Configure which IDEs loopflow installs (used by `lf meta install`).
 
 ```yaml
 ide:

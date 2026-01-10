@@ -47,12 +47,16 @@ include = [
     "src/loopflow/config_template.yaml",
 ]
 
+[tool.hatch.build.targets.wheel.force-include]
+".claude/commands" = "loopflow/commands"
+
 [tool.hatch.build.targets.sdist]
 include = [
     "src/loopflow",
     "src/loopflow/prompts/*.md",
     "src/loopflow/LOOPFLOW_STYLE.md",
     "src/loopflow/config_template.yaml",
+    ".claude/commands",
 ]
 
 [tool.hatch.version]

@@ -8,14 +8,12 @@ pipelines:
   ship:
     tasks:
       - implement
-      - review
       - rebase
-      - test
+      - polish
       - draft_commit
     pr: true
   submit:
     tasks:
-      - review
-      - test
+      - polish
       - draft_commit
     pr: true

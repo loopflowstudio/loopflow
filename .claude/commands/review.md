@@ -1,13 +1,13 @@
-Review the diff on the current branch against `main` and fix any issues found.
+Review the diff on the current branch against `main` and produce a written assessment.
 
-The deliverable is the fixes themselves, not a written review.
+The deliverable is a review document under `.design/`, not fixes. Do not edit any files.
 
 ## Process
 
 1. Run `git diff main...HEAD` to see committed changes on this branch
 2. Run `git diff` to see uncommitted changes
 3. Review against STYLE.md and general code quality
-4. Fix issues directly—don't just note them
+4. Write your assessment to a new markdown file under `.design/` (pick a short descriptive name, create the folder if needed)
 
 ## What to look for
 
@@ -21,10 +21,16 @@ The deliverable is the fixes themselves, not a written review.
 
 ## What to ignore
 
-Don't expand scope. If something unrelated to this branch's changes could be better, leave it alone.
+Don't flag things unrelated to this branch's changes. Stay focused on what's in the diff.
 
-Don't refactor working code that isn't broken. Only fix actual problems.
+**Design doc deviations.** If any `.design/*.md` docs exist, treat the implementation as the source of truth. The design docs were scaffolding—deviations are likely intentional refinements discovered during implementation. Evaluate the code at face value for bugs and style issues, not for fidelity to the original plan.
 
 ## Output
 
-Make the fixes. If there's nothing to fix, say so.
+Write a brief review covering:
+- **Summary**: What does this change do? (1-2 sentences)
+- **Issues**: Bugs, style violations, or concerns (if any)
+- **Suggestions**: Optional improvements (if any)
+- **Verdict**: Ready to ship, or needs work?
+
+Keep it concise. If there's nothing to flag, say so.

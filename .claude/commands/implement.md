@@ -1,6 +1,6 @@
 Turn a design doc into working code.
 
-The design doc is at `<branch>.md` in repo root (e.g., `auth-feature.md` on the `auth-feature` branch). It's auto-included in the prompt as part of repo docs. The doc contains data structures, APIs, constraints, and a "done when" verification step.
+The design doc lives under `.design/`. It's auto-included in the prompt as part of repo docs. The doc contains data structures, APIs, constraints, and a "done when" verification step.
 
 ## Approach
 
@@ -18,7 +18,7 @@ Run the "done when" check from the design doc to verify the implementation works
 
 **Stay in scope.** Implement what the design doc describes, nothing more. Note anything that should be added, but don't build it.
 
-**Leave the design doc.** Don't delete `<branch>.md`—`lf review` will transform it into a human review guide, and `lf pr land` removes it.
+**Leave the design doc.** Don't delete `.design/*.md`—`lf review` writes its assessment under `.design/`, and `lf pr land` removes the `.design/` contents.
 
 **Add documentation per the style guide.** The best documentation is simple code—descriptive names, type hints, clear APIs. Skip obvious docstrings. If a module needs explanation, add a brief comment at the top of the file, not a separate doc. Update existing READMEs when user-facing behavior changes. Document new CLI commands or user-facing features in the appropriate README.
 

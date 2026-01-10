@@ -11,11 +11,12 @@ import typer
 
 from loopflow.config import load_config
 from loopflow.context import find_worktree_root, gather_prompt_components, format_prompt
-from loopflow.git import GitError, autocommit, create_worktree, find_main_repo
+from loopflow.git import autocommit, find_main_repo
 from loopflow.launcher import get_runner
 from loopflow.maestro import Session, SessionStatus, connect_maestro
 from loopflow.pipeline import run_pipeline
 from loopflow.tokens import analyze_components
+from loopflow.worktrees import WorktreeError, create
 
 
 ModelType = Optional[str]
@@ -97,8 +98,8 @@ def run(
 
     if worktree:
         try:
-            worktree_path = create_worktree(repo_root, worktree)
-        except GitError as e:
+            worktree_path = create(repo_root, worktree)
+        except WorktreeError as e:
             typer.echo(f"Error: {e}", err=True)
             raise typer.Exit(1)
         repo_root = worktree_path
@@ -298,8 +299,8 @@ def pipeline(
 
     if worktree:
         try:
-            worktree_path = create_worktree(repo_root, worktree)
-        except GitError as e:
+            worktree_path = create(repo_root, worktree)
+        except WorktreeError as e:
             typer.echo(f"Error: {e}", err=True)
             raise typer.Exit(1)
         repo_root = worktree_path

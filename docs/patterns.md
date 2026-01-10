@@ -12,7 +12,7 @@ Workflows and recipes for common scenarios.
 Start with a design task that explores the problem before writing code.
 
 ```bash
-lf wt create auth-feature
+wt switch --create auth-feature --execute pwd
 cd ../myrepo.auth-feature
 
 lf design: add OAuth login    # interactive: discuss approach
@@ -43,12 +43,12 @@ Run multiple features simultaneously in separate worktrees:
 
 ```bash
 # Terminal 1
-lf wt create feature-a
+wt switch --create feature-a --execute pwd
 cd ../myrepo.feature-a
 lf ship -a &              # runs in background
 
 # Terminal 2
-lf wt create feature-b
+wt switch --create feature-b --execute pwd
 cd ../myrepo.feature-b
 lf ship -a &
 
@@ -72,11 +72,7 @@ lf implement --parallel claude,codex: add caching layer
 
 This creates two worktrees (`implement-claude`, `implement-codex`) and runs both in parallel.
 
-Compare results:
-
-```bash
-lf wt compare implement-claude implement-codex
-```
+Compare results with `git diff` or your editor.
 
 ## Autonomous pipeline
 
@@ -173,8 +169,8 @@ lf polish    # cleanup pass
 Remove worktrees for merged branches:
 
 ```bash
-lf wt clean              # removes merged worktrees
-lf wt list               # see what's left
+wt list                  # see worktrees
+wt remove feature-a      # remove a worktree + branch
 ```
 
 ## PR workflow
@@ -190,6 +186,12 @@ Land a PR (squash-merge to main):
 ```bash
 lf pr land               # merges and cleans up
 lf pr land -a            # auto-merge when checks pass
+```
+
+Land locally (no PR required):
+
+```bash
+lf land                  # squash + merge via worktrunk
 ```
 
 ## Commit message generation

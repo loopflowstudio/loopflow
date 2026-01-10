@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from loopflow.design import gather_design_docs
 from loopflow.files import gather_docs, gather_files, format_files
 
 
@@ -139,6 +140,11 @@ def gather_prompt_components(
         content = loopflow_style.read_text()
         docs.insert(0, (loopflow_style, content))
 
+    design_docs = gather_design_docs(repo_root)
+    if design_docs:
+        insert_at = 1 if loopflow_style.exists() else 0
+        docs[insert_at:insert_at] = design_docs
+
     diff = gather_diff(repo_root, exclude)
 
     task_result = None
@@ -194,7 +200,11 @@ def format_prompt(components: PromptComponents) -> str:
             name = doc_path.stem
             doc_parts.append(f"<lf:{name}>\n{content}\n</lf:{name}>")
         docs_body = "\n\n".join(doc_parts)
-        parts.append(f"Repository documentation. Follow VOICE and STYLE carefully. May include a design doc (<branch>.md) for the current branch.\n\n<lf:docs>\n{docs_body}\n</lf:docs>")
+        parts.append(
+            "Repository documentation. Follow STYLE carefully. "
+            "May include design artifacts under .design/.\n\n"
+            f"<lf:docs>\n{docs_body}\n</lf:docs>"
+        )
 
     if components.diff:
         parts.append(f"Changes on this branch (diff against main).\n\n<lf:diff>\n{components.diff}\n</lf:diff>")

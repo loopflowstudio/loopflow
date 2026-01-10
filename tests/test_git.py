@@ -6,7 +6,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from loopflow.git import GitError, autocommit, create_worktree, find_main_repo, open_pr
+from loopflow.git import GitError, autocommit, find_main_repo, open_pr
 
 
 @pytest.fixture
@@ -15,43 +15,6 @@ def temp_repo(tmp_path):
     (tmp_path / ".git").mkdir()
     (tmp_path / ".lf").mkdir()
     return tmp_path
-
-
-def test_create_worktree_raises_on_existing_branch(temp_repo):
-    """Creating worktree with existing branch raises GitError."""
-    with patch("loopflow.git._sync_main"):  # Skip syncing for this test
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=1,
-                stderr="fatal: a branch named 'feature' already exists"
-            )
-
-            with pytest.raises(GitError, match="already exists"):
-                create_worktree(temp_repo, "feature")
-
-
-def test_create_worktree_raises_on_failure(temp_repo):
-    """Creating worktree that fails raises GitError."""
-    with patch("loopflow.git._sync_main"):  # Skip syncing for this test
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=1,
-                stderr="fatal: some other error"
-            )
-
-            with pytest.raises(GitError, match="some other error"):
-                create_worktree(temp_repo, "feature")
-
-
-def test_create_worktree_returns_existing_path(temp_repo):
-    """Creating worktree for existing path returns it without error."""
-    from loopflow.git import worktree_path
-
-    wt_path = worktree_path(temp_repo, "feature")
-    wt_path.mkdir(parents=True)
-
-    result = create_worktree(temp_repo, "feature")
-    assert result == wt_path
 
 
 def test_open_pr_raises_on_failure(temp_repo):

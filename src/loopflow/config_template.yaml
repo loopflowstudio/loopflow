@@ -22,7 +22,7 @@ pr: false
 # Skip all permission prompts
 yolo: false
 
-# IDE configuration for worktree commands
+# IDE configuration for optional tools
 ide:
   cursor: true
   warp: true
@@ -30,7 +30,15 @@ ide:
 
 # Example pipelines
 # pipelines:
-#   review-and-test:
+#   ship:
 #     tasks:
-#       - review
-#       - test
+#       - implement
+#       - rebase
+#       - polish
+#       - draft_commit
+#     pr: true
+#   submit:
+#     tasks:
+#       - polish
+#       - draft_commit
+#     pr: true

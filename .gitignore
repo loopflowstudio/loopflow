@@ -1,5 +1,6 @@
 # Python
 __pycache__/
+.pytest_cache/
 
 # Claude Code (personal state)
 .claude/settings.local.json

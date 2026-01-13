@@ -3,7 +3,6 @@
 import os
 import subprocess
 import sys
-import tempfile
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -14,17 +13,9 @@ from loopflow.context import build_prompt
 from loopflow.git import GitError, find_main_repo, open_pr
 from loopflow.launcher import build_model_command, get_runner
 from loopflow.llm_http import generate_pr_message
-from loopflow.logging import get_model_env
+from loopflow.logging import write_prompt_file
 from loopflow.maestro import Session, SessionStatus
 from loopflow.maestro.db import DEFAULT_DB_PATH, save_session, update_session_status
-
-
-def _write_prompt_file(prompt: str) -> str:
-    """Write prompt to a temp file and return the path."""
-    fd, path = tempfile.mkstemp(prefix="lf-prompt-", suffix=".txt")
-    os.write(fd, prompt.encode())
-    os.close(fd)
-    return path
 
 
 def run_pipeline(
@@ -70,7 +61,7 @@ def run_pipeline(
             include_tests_for=include_tests_for,
             run_mode="auto",
         )
-        prompt_file = _write_prompt_file(prompt)
+        prompt_file = write_prompt_file(prompt)
 
         session = Session(
             id=str(uuid.uuid4()),
@@ -112,7 +103,8 @@ def run_pipeline(
         if should_push:
             collector_cmd.append("--push")
         collector_cmd.extend(["--", *command])
-        process = subprocess.Popen(collector_cmd, cwd=repo_root, env=get_model_env())
+        # Don't strip API keys from collector env - it needs them for commit message generation
+        process = subprocess.Popen(collector_cmd, cwd=repo_root)
         session.pid = process.pid
         save_session(DEFAULT_DB_PATH, session)
         result_code = process.wait()

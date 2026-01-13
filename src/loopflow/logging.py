@@ -1,9 +1,21 @@
 """Shared logging utilities for session output."""
 
 import os
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, TextIO
+
+
+def write_prompt_file(prompt: str) -> str:
+    """Write prompt to a temp file and return the path.
+
+    The temp file is not deleted automatically; the caller should clean it up.
+    """
+    fd, path = tempfile.mkstemp(prefix="lf-prompt-", suffix=".txt")
+    os.write(fd, prompt.encode())
+    os.close(fd)
+    return path
 
 
 def get_model_env() -> dict[str, str]:

@@ -99,10 +99,10 @@ class CodexRunner(Runner):
             )
             return LaunchResult(exit_code, output)
         if auto:
-            result = subprocess.run(cmd_with_prompt, cwd=cwd, capture_output=True, text=True)
+            result = subprocess.run(cmd_with_prompt, cwd=cwd, capture_output=True, text=True, env=get_model_env())
             return LaunchResult(result.returncode, result.stdout)
 
-        result = subprocess.run(cmd_with_prompt, cwd=cwd, text=True)
+        result = subprocess.run(cmd_with_prompt, cwd=cwd, text=True, env=get_model_env())
         return LaunchResult(result.returncode, None)
 
     def is_available(self) -> bool:

@@ -1,45 +1,41 @@
-Explore ambitious changes to the project's scope or direction.
+Explore ambitious changes that extend what this branch is already doing.
 
-This is for bigger swings—new capabilities, architectural shifts, or directions that could meaningfully change what the project does or how it works.
+This is for bigger swings—but grounded in the current work. Look at what this branch changes, then ask: what's the natural next step that would multiply the value?
 
-## What to consider
+## Workflow
 
-**New capabilities.** What could this project do that it doesn't? What adjacent problems could it solve? What would make users say "I didn't know I needed this"?
-
-**Architectural evolution.** What constraints are baked into the current design? What would a v2 look like if you could start fresh? What's the path from here to there?
-
-**Integration opportunities.** What other tools or systems could this connect with? What workflows would that enable?
-
-**Scale and scope.** What happens if usage grows 10x? What if the use case expands beyond the original intent?
-
-## How to work
-
-Start by understanding the current design thoroughly. Read the key files. Understand the constraints.
-
-Then propose one significant change. Not a list of ideas—a specific direction with:
-
-- What it enables that isn't possible today
-- What it would take to build
-- What risks or downsides it introduces
-- A rough path to get there
-
-If the change is compelling, start building it. Create a design doc under `.design/` if the scope is large enough to warrant one.
+1. Run `git diff main...HEAD` to see what this branch has changed
+2. Read the modified files to understand the current direction
+3. Identify one expansion that extends this work meaningfully
+4. Write a design doc to `.design/<expansion-name>.md`
+5. If the expansion is tractable, start building it
 
 ## What makes a good expansion
 
-**Multiplicative value.** Changes that make everything else better, not just add one more thing.
+**Extends the branch's intent.** If this branch adds worktree support, expand might add parallel worktree execution. If it improves commit messages, expand might add PR description generation. The expansion should feel like "part 2" of what's already here.
 
-**Natural fit.** Extensions that feel like they were always meant to be there, not bolted on.
+**Multiplicative value.** Changes that make everything else better, not just add one more thing. A new abstraction that simplifies three existing features beats a fourth feature.
 
-**Tractable scope.** Ambitious but achievable. Something you could make real progress on in one session.
+**Tractable scope.** Ambitious but achievable in one session. If it needs a design doc longer than 500 words, it's too big for expand.
+
+## Loopflow's architectural beliefs
+
+When expanding, stay aligned with these principles:
+
+- **Worktrees over branches.** Agents run in isolated worktrees so you can work in parallel. Expansions should assume multi-worktree workflows.
+- **Prompts are files.** Tasks live in `.claude/commands/` or `.lf/`. Don't add config-driven prompt generation or template engines.
+- **Auto mode is default.** Most tasks run headless with `--print`. Interactive is the exception. Design for unattended execution.
+- **CLI passthrough.** Loopflow wraps Claude Code and Codex CLIs. Don't reimplement their features—pass args through.
+- **Design docs are scaffolding.** `.design/` is for session recovery, not permanent documentation. `lf ops pr land` deletes it.
+- **Simple data, simple APIs.** Prefer dataclasses over complex hierarchies. Prefer functions over classes when state isn't needed.
 
 ## What to avoid
 
-Don't propose changes just because they're technically interesting. The question is whether they make the project more useful.
+**Unrelated improvements.** The expansion must connect to what this branch is doing. Generic "wouldn't it be nice" ideas belong in a separate branch.
 
-Don't chase trends. The project should be better at being itself, not more like something else.
+**Abstraction layers.** If you're tempted to add a plugin system, registry pattern, or config-driven dispatch, that's a sign to stop and reconsider.
 
-Don't ignore constraints. Understand why things are the way they are before proposing to change them.
+**Trend-chasing.** The project should be better at being itself, not more like whatever's popular this month.
 
 ## Auto mode
 

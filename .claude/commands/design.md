@@ -1,55 +1,59 @@
-This task produces a short implementation spec that another LLM session can use to write a first draft of a feature.
+Produce a short implementation spec that another LLM session can use to write a first draft.
 
-The design doc is scaffolding. It's a checkpoint for recovery, not documentation for posterity. If a session crashes, the spec lets a fresh session pick up where things left off. After implementation, `lf review` writes the review under `.design/`. `lf ops pr land` removes the `.design/` contents.
+The design doc is scaffolding—a checkpoint for recovery, not documentation for posterity. If a session crashes, the spec lets a fresh session pick up where things left off. `lf ops pr land` deletes `.design/` contents.
 
 ## Workflow
 
-1. Create a design doc under `.design/` (pick a short descriptive name, create the folder if needed) early — after the first exchange or two
-2. Keep refining the doc as the conversation continues
-3. Commit with message `design: <branch>` when done
-4. End session—implementation happens in a separate `lf implement` invocation
+1. Run `git branch --show-current` to confirm you're on a feature branch (not `main`)
+2. Create `.design/<feature-name>.md` early—after the first exchange or two
+3. Write as you go, refining with each conversation turn
+4. Run `git add .design/ && git commit -m "design: <branch>"` when done
+5. End session. Implementation happens via `lf implement`.
 
-Write as you go, not at the end. The doc is a living artifact during the conversation. If the session crashes mid-design, the partial doc is still useful. Let writing it inspire new questions—gaps become obvious when you try to make things concrete.
-
-**Important:** Design docs live under `.design/` and are auto-included in the prompt. If you're on `main`, create a branch first with `lf start <name>`.
+Write as you go, not at the end. If the session crashes mid-design, the partial doc is still useful. Let writing inspire questions—gaps become obvious when you make things concrete.
 
 ## What makes a good design doc
 
-From the style guide: "Design around data structures and public APIs. Aim for a 1:1 mapping between real-world concepts and their representation in code."
-
-The design doc should be **heavy on code**—not working code, but code that makes ideas concrete. Sketch data structures, function signatures, example API calls. The code is for communication, not execution.
+**Heavy on code.** Sketch data structures, function signatures, example API calls. The code is for communication, not execution:
 
 ```python
-# This doesn't need to run. It shows the shape.
+@dataclass
 class Worktree:
     path: Path
     branch: str
 
 def create_worktree(name: str) -> Worktree:
-    """Create sibling worktree at ../{name}"""
+    """Create sibling worktree at ../{repo}.{name}"""
     ...
 ```
 
-**Quote the user generously.** When the user says something that captures intent, constraint, or priority—copy it verbatim into the doc. These quotes anchor what matters and prevent drift.
+**Quote the user verbatim.** When they say something that captures intent, constraint, or priority—copy it into the doc. Quotes anchor what matters and prevent drift.
 
-> "I want to be able to spin up a fresh LLM and hand it the spec"
-> — captured during design conversation
+**Specify "done when."** A command to run, output to expect. The implementing session needs to know when to stop.
 
-## The spec should cover (~2000 words max):
+## Required sections (~1000 words max)
 
-- **What to build** — One sentence. What exists after this is done that doesn't exist now.
-- **Data structures** — The core types. Sketch them in code.
-- **APIs** — Key functions or endpoints. Signatures with brief intent.
-- **Constraints** — What would cause a rewrite if guessed wrong. Dependencies, patterns to match, things to avoid.
-- **Done when** — How to verify it works. A command to run, output to see.
+- **What to build** — One sentence. What exists after this that doesn't exist now.
+- **Data structures** — Core types, sketched in code.
+- **Key functions** — Signatures with one-line intent.
+- **Constraints** — What would require rewriting if guessed wrong.
+- **Done when** — Verification command and expected output.
+
+## Loopflow design principles
+
+When designing for this codebase:
+
+- **Worktrees are first-class.** Features should work across isolated worktrees. Don't assume a single working directory.
+- **Prompts are files, not config.** Task definitions live in `.claude/commands/` or `.lf/`. Don't design template systems or prompt builders.
+- **Design for auto mode.** Most tasks run headless. Don't require interactive confirmation for core flows.
+- **Wrap, don't reimplement.** Loopflow delegates to Claude Code and Codex CLIs. Design to pass through, not duplicate.
+- **Simple data structures.** Prefer `@dataclass` over inheritance hierarchies. Prefer functions over classes when state isn't needed.
 
 ## Conversation guidance
 
 Bias toward brevity. Ask only what's needed to start coding.
 
-Exploring uncertain ideas is fine—the doc has room (~2000 words). But keep narrowing toward a buildable thing. If scope is unclear, ask "what's the smallest version that's useful?" and spec that.
-
-When the user says something important, confirm it and note that it will be quoted in the doc.
+If scope is unclear, ask "what's the smallest version that's useful?" and spec that.
 
 Completeness is not required. Wrong guesses get fixed in implementation. The goal is to not block the implementing session, not to predict everything.
 

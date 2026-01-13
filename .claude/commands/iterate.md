@@ -1,34 +1,41 @@
-Make meaningful improvements to the codebase.
+Make meaningful improvements to code touched by this branch.
 
-Analyze the current implementation and make changes that improve quality, usability, or maintainability. Focus on incremental wins that compound over time.
+Focus on the areas this branch has already modified. The goal is incremental quality improvements that compound—not generic refactoring across the whole codebase.
 
-## Priority order
+## Workflow
 
-Work through these in order. Stop when you've made substantial progress in one area.
+1. Run `git diff main...HEAD --stat` to see which files this branch modified
+2. Read those files and identify the highest-impact improvement
+3. Make one focused change—don't scatter effort across multiple areas
+4. Run `uv run pytest tests/` to verify nothing broke
+5. If tests pass, you're done. If not, fix what you broke.
 
-**1. User experience problems.** What's confusing, frustrating, or broken for users? Error messages that don't help. Workflows that require too many steps. Missing feedback. Fix the worst friction first.
+## Priority order (within the branch's scope)
 
-**2. Performance.** What's slow? Unnecessary work, repeated computation, blocking calls that could be async. Measure before optimizing—intuition is often wrong.
+**1. User experience problems.** Error messages that don't help. Workflows that require too many steps. Missing feedback. Fix the worst friction first.
 
-**3. Simplification.** What code can be deleted? Abstractions that don't earn their keep. Features nobody uses. Duplication that could be unified. Less code is better code.
+**2. Bugs and edge cases.** Logic errors, off-by-ones, unhandled errors in the modified code.
 
-**4. Launch readiness.** What's missing for production use? Documentation gaps. Missing tests for critical paths. Configuration that should have defaults. Polish that makes the difference between "works" and "works well."
+**3. Simplification.** Code that could be deleted. Abstractions that don't earn their keep. Duplication within the changed files.
 
-## How to work
+**4. Test coverage.** Missing tests for the new behavior. Tests that verify mock calls instead of results.
 
-Read the codebase first. Understand before changing.
+## Loopflow's quality bar
 
-Make one category of improvement per run. Don't try to fix everything at once. Deep focus beats scattered effort.
+These aren't generic best practices—they're specific to how this codebase works:
 
-Commit when done with a clear message explaining what improved and why.
+- **No Args:/Returns: docstrings.** If types are clear, skip the docstring entirely.
+- **Assert on results, not mock calls.** Mocks prevent side effects; tests verify behavior.
+- **One implementation.** No `_v2`, `_old`, `_new` suffixes. Delete the old version.
+- **Errors for users, exceptions for programmers.** Return None for "not found"; raise for "shouldn't happen."
 
 ## What to avoid
 
-Don't add features. This is about making what exists better, not expanding scope.
+**Scope creep.** Only improve code this branch touched. "While I'm here" improvements belong in a separate branch.
 
-Don't refactor working code just because you'd write it differently. Only change code that's actively problematic.
+**Refactoring for style.** Don't rewrite working code because you'd write it differently. Only fix actual problems.
 
-Don't over-engineer. Simple solutions that work beat clever solutions that might work better.
+**Adding features.** This is about quality, not scope. New capabilities need their own design.
 
 ## Auto mode
 

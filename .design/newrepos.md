@@ -1,10 +1,140 @@
-# newrepos: Improve New Repository Experience
+# newrepos: Fix Init and Improve New Repo Experience
 
 ## What to build
 
-Better first-run experience: when loopflow is run in an uninitialized repo, show helpful guidance instead of a cryptic error.
+Two things:
+1. Fix `lf ops init` to actually work (currently broken - references missing directories)
+2. Better first-run experience when loopflow is run in an uninitialized repo
 
-## Data structures
+## Part 1: Fix `lf ops init`
+
+### Current Problems
+
+**Missing commands directory** — The init code references paths that don't exist:
+
+```python
+# cli/meta.py:81
+commands_src = bundled_dir / "commands"  # This path doesn't exist!
+
+for prompt_name in ["review.md", "implement.md", ...]:
+    src = commands_src / prompt_name  # FileNotFoundError
+```
+
+**Loopflow-specific prompts** — Current prompts reference this codebase specifically:
+
+```markdown
+# From implement.md
+- **Use `uv run`** for all Python commands
+- **Imports at top of file**, never inline
+```
+
+**Missing PROMPTS.md** — The workflow documentation isn't copied.
+
+### Solution: Bundle templates in package
+
+```
+src/loopflow/
+├── templates/              # NEW: bundled templates
+│   ├── commands/           # Starter prompts for .claude/commands/
+│   │   ├── design.md
+│   │   ├── implement.md
+│   │   ├── review.md
+│   │   └── debug.md
+│   ├── PROMPTS.md          # Workflow documentation
+│   ├── STYLE.md            # Generic style guide
+│   └── config.yaml         # Default config
+├── prompts/                # Keep: internal prompts for lf itself
+│   ├── COMMIT_MESSAGE.md
+│   └── CHECKPOINT_MESSAGE.md
+```
+
+### What gets copied where
+
+| Source | Destination |
+|--------|-------------|
+| `templates/commands/*.md` | `.claude/commands/` |
+| `templates/PROMPTS.md` | `.lf/PROMPTS.md` |
+| `templates/STYLE.md` | `.lf/STYLE.md` |
+| `templates/config.yaml` | `.lf/config.yaml` |
+| `prompts/COMMIT_MESSAGE.md` | `.lf/COMMIT_MESSAGE.md` |
+| `prompts/CHECKPOINT_MESSAGE.md` | `.lf/CHECKPOINT_MESSAGE.md` |
+
+### Starter prompt set
+
+Minimal set (4 prompts) that forms a complete workflow:
+
+- `design.md` — Plan before coding
+- `implement.md` — Execute the plan
+- `review.md` — Check the work
+- `debug.md` — Fix errors
+
+Power users who want polish, iterate, reduce, expand, etc. can add them manually or use `--all`.
+
+### Generic prompts
+
+Strip loopflow-specific references:
+
+```markdown
+# Before (loopflow-specific)
+- **Use `uv run`** for all Python commands
+- **Imports at top of file**, never inline
+
+# After (generic)
+Follow your project's existing patterns. Before writing new code,
+find similar code nearby and match its style.
+```
+
+### Key functions
+
+```python
+# cli/meta.py
+
+def _get_templates_dir() -> Path:
+    """Return path to bundled templates directory."""
+    return Path(__file__).parent.parent / "templates"
+
+@app.command()
+def init(
+    prompts_only: bool = typer.Option(False, "--prompts", help="Only install prompts"),
+    style_only: bool = typer.Option(False, "--style", help="Only install style guide"),
+    all_prompts: bool = typer.Option(False, "--all", help="Install all prompts, not just starter set"),
+):
+    """Initialize a repository with loopflow prompts and config."""
+    templates = _get_templates_dir()
+
+    starter_prompts = ["design.md", "implement.md", "review.md", "debug.md"]
+    prompts_to_copy = (
+        list((templates / "commands").glob("*.md"))
+        if all_prompts
+        else [templates / "commands" / p for p in starter_prompts]
+    )
+
+    # Copy prompts to .claude/commands/
+    commands_dir = repo_root / ".claude" / "commands"
+    commands_dir.mkdir(parents=True, exist_ok=True)
+    for src in prompts_to_copy:
+        dst = commands_dir / src.name
+        if not dst.exists():
+            shutil.copy(src, dst)
+            typer.echo(f"✓ Created .claude/commands/{src.name}")
+
+    # Copy workflow docs to .lf/
+    lf_dir = repo_root / ".lf"
+    lf_dir.mkdir(exist_ok=True)
+
+    for name in ["PROMPTS.md", "STYLE.md", "config.yaml"]:
+        src = templates / name
+        dst = lf_dir / name
+        if not dst.exists():
+            shutil.copy(src, dst)
+            typer.echo(f"✓ Created .lf/{name}")
+```
+
+---
+
+## Part 2: Better Error Messages
+
+### Data structures
 
 ```python
 @dataclass
@@ -17,16 +147,6 @@ class InitStatus:
 
 def check_init_status(repo_root: Path) -> InitStatus:
     """Check repo initialization without modifying anything."""
-    ...
-```
-
-## Key functions
-
-```python
-# init_check.py (new file)
-
-def check_init_status(repo_root: Path) -> InitStatus:
-    """Return what's configured in this repo."""
     lf_dir = repo_root / ".lf"
     commands_dir = repo_root / ".claude" / "commands"
 
@@ -36,51 +156,12 @@ def check_init_status(repo_root: Path) -> InitStatus:
         has_commands=any(commands_dir.glob("*.md")) if commands_dir.exists() else False,
         missing_deps=_check_deps(),
     )
-
-def _check_deps() -> list[str]:
-    """Return list of missing required dependencies."""
-    missing = []
-    if not check_claude_available():
-        missing.append("claude")
-    if not shutil.which("wt"):
-        missing.append("wt")
-    return missing
-
-def format_init_hint(status: InitStatus, task_name: str) -> str:
-    """Format helpful message for uninitialized repo."""
-    lines = [f"No task named '{task_name}' found."]
-
-    if not status.has_commands and not status.has_lf_dir:
-        lines.append("")
-        lines.append("This repo hasn't been set up for loopflow yet.")
-        lines.append("Run: lf ops init")
-    elif not status.has_commands:
-        lines.append("")
-        lines.append("No task files found.")
-        lines.append(f"Create: .claude/commands/{task_name}.md")
-
-    if status.missing_deps:
-        lines.append("")
-        lines.append(f"Missing dependencies: {', '.join(status.missing_deps)}")
-        lines.append("Run: lf ops install")
-
-    return "\n".join(lines)
 ```
 
-## Changes to existing code
+### Changes to cli/__init__.py
 
-### cli/__init__.py
+When task not found, check if repo is initialized:
 
-Current behavior when task not found (line 73-76):
-```python
-else:
-    typer.echo(f"Error: No task or pipeline named '{name}'", err=True)
-    typer.echo(f"  Create task: .claude/commands/{name}.md (recommended)", err=True)
-    typer.echo(f"  Or pipeline: add '{name}' to .lf/config.yaml", err=True)
-    raise SystemExit(1)
-```
-
-New behavior:
 ```python
 else:
     status = check_init_status(repo_root) if repo_root else None
@@ -97,60 +178,86 @@ else:
     raise SystemExit(1)
 ```
 
-### cli/meta.py doctor command
+### Changes to doctor command
 
-Add check for repo initialization status:
+Add repo status check:
+
 ```python
-@app.command()
-def doctor():
-    """Check loopflow dependencies and repo status."""
-    all_ok = True
-
-    # Repo status
-    repo_root = find_worktree_root()
-    if repo_root:
-        status = check_init_status(repo_root)
-        if status.has_commands:
-            typer.echo("✓ task files found")
-        else:
-            typer.echo("- no task files (run: lf ops init)")
+# Repo status
+repo_root = find_worktree_root()
+if repo_root:
+    status = check_init_status(repo_root)
+    if status.has_commands:
+        typer.echo("✓ task files found")
     else:
-        typer.echo("- not in a git repo")
-
-    # ... rest of dependency checks unchanged ...
+        typer.echo("- no task files (run: lf ops init)")
+else:
+    typer.echo("- not in a git repo")
 ```
+
+---
 
 ## Constraints
 
-1. **No auto-creation** — Never create files without explicit user action. `lf ops init` is the explicit action.
+1. **No auto-creation** — Never create files without explicit `lf ops init`
+2. **Works without init** — `lf : "fix typo"` should work in any git repo
+3. **Don't break existing repos** — Only create files that don't exist
+4. **Package must be self-contained** — Templates bundled, not read from source repo
+5. **pyproject.toml** — Must include templates in package data
 
-2. **Works without init** — Users who skip init (using inline prompts only) must not see errors. `lf : "fix typo"` should work in any git repo.
-
-3. **Auto mode compatible** — Messages must be useful even in headless mode. No interactive prompts.
+---
 
 ## Files to create/modify
 
-- `src/loopflow/init_check.py` (new) — `InitStatus` dataclass and `check_init_status()` function
-- `src/loopflow/cli/__init__.py` — Update error message when task not found
-- `src/loopflow/cli/meta.py` — Add repo status to `doctor` output
+**New files:**
+- `src/loopflow/templates/commands/design.md` — Generic version
+- `src/loopflow/templates/commands/implement.md` — Generic version
+- `src/loopflow/templates/commands/review.md` — Generic version
+- `src/loopflow/templates/commands/debug.md` — Generic version
+- `src/loopflow/templates/PROMPTS.md` — Copy from repo root
+- `src/loopflow/templates/STYLE.md` — Generic style guide
+- `src/loopflow/templates/config.yaml` — Move from config_template.yaml
+- `src/loopflow/init_check.py` — InitStatus dataclass and check_init_status()
+
+**Modified files:**
+- `src/loopflow/cli/meta.py` — Fix init paths, add --all flag
+- `src/loopflow/cli/__init__.py` — Better error messages
+- `pyproject.toml` — Include templates in package data
+
+**Delete:**
+- `src/loopflow/config_template.yaml` — Moved to templates/
+- `src/loopflow/LOOPFLOW_STYLE.md` — Replaced by templates/STYLE.md
+
+---
 
 ## Done when
 
 ```bash
-# In a fresh git repo with no .lf/ directory:
-cd /tmp && rm -rf test-repo && mkdir test-repo && cd test-repo && git init
+# In a fresh git repo:
+cd /tmp && rm -rf test-init && mkdir test-init && cd test-init && git init
 
-# Running a task shows init guidance:
-lf review 2>&1 | grep -q "lf ops init"
-echo "Exit code check: $?"  # should be 0
+# Run init
+lf ops init
 
-# Inline prompts still work without init:
-# (would need claude available, but the command should at least parse)
-lf : "hello" --help 2>&1 | grep -q "inline"
+# Verify files created
+test -f .claude/commands/design.md && echo "✓ design.md"
+test -f .claude/commands/implement.md && echo "✓ implement.md"
+test -f .claude/commands/review.md && echo "✓ review.md"
+test -f .claude/commands/debug.md && echo "✓ debug.md"
+test -f .lf/PROMPTS.md && echo "✓ PROMPTS.md"
+test -f .lf/STYLE.md && echo "✓ STYLE.md"
+test -f .lf/config.yaml && echo "✓ config.yaml"
 
-# Doctor shows repo status:
-lf ops doctor 2>&1 | grep -q "task files"
+# Verify prompts are generic
+grep -q "uv run" .claude/commands/*.md && echo "FAIL: loopflow-specific" || echo "✓ generic"
+
+# Test error message in uninitialized repo
+cd /tmp && rm -rf test-uninit && mkdir test-uninit && cd test-uninit && git init
+lf review 2>&1 | grep -q "lf ops init" && echo "✓ suggests init"
+
+# Test inline prompts work without init
+lf : "hello" --help 2>&1 | grep -q "inline" && echo "✓ inline works"
 
 # Cleanup
-rm -rf /tmp/test-repo
+rm -rf /tmp/test-init /tmp/test-uninit
 ```

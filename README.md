@@ -165,6 +165,7 @@ lf implement &         # background (shell handles it)
 | `lf ops pr create` | Open GitHub PR |
 | `lf ops pr land [-a]` | Squash-merge to main |
 | `lf ops land [--no-pr] [--force] [--base]` | Land locally via worktrunk |
+| `lf ops commit [-p]` | Generate commit message and commit |
 | `lf ops init` | Initialize repo with prompts and config |
 | `lf ops install` | Install Claude Code, Codex, Gemini CLI |
 | `lf ops doctor` | Check dependencies |

@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
-from loopflow.launcher import get_runner, ClaudeRunner, CodexRunner, LaunchResult
+from loopflow.launcher import get_runner, ClaudeRunner, CodexRunner, GeminiRunner, LaunchResult
 
 
 def test_get_runner_returns_claude():
@@ -16,6 +16,12 @@ def test_get_runner_returns_codex():
     """get_runner returns CodexRunner instance for 'codex'."""
     runner = get_runner("codex")
     assert isinstance(runner, CodexRunner)
+
+
+def test_get_runner_returns_gemini():
+    """get_runner returns GeminiRunner instance for 'gemini'."""
+    runner = get_runner("gemini")
+    assert isinstance(runner, GeminiRunner)
 
 
 def test_get_runner_raises_on_unknown():
@@ -89,6 +95,42 @@ def test_codex_runner_launch_auto_mode():
 def test_codex_runner_launch_interactive():
     """CodexRunner.launch() without auto runs interactively."""
     runner = CodexRunner()
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0)
+        result = runner.launch("test prompt", auto=False)
+
+        assert result.exit_code == 0
+        assert result.output is None
+
+
+def test_gemini_runner_is_available():
+    """GeminiRunner.is_available() checks for gemini CLI."""
+    runner = GeminiRunner()
+
+    with patch("loopflow.launcher.check_gemini_available") as mock_check:
+        mock_check.return_value = True
+        assert runner.is_available() is True
+
+        mock_check.return_value = False
+        assert runner.is_available() is False
+
+
+def test_gemini_runner_launch_auto_mode():
+    """GeminiRunner.launch() with auto captures output."""
+    runner = GeminiRunner()
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="gemini output")
+        result = runner.launch("test prompt", auto=True)
+
+        assert result.exit_code == 0
+        assert result.output == "gemini output"
+
+
+def test_gemini_runner_launch_interactive():
+    """GeminiRunner.launch() without auto runs interactively."""
+    runner = GeminiRunner()
 
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0)

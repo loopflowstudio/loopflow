@@ -133,6 +133,7 @@ class GeminiRunner(Runner):
             auto=auto,
             stream=stream,
             skip_permissions=skip_permissions,
+            sandbox_root=cwd.parent if cwd else None,
             workdir=cwd,
         )
 
@@ -321,7 +322,7 @@ def build_gemini_command(
     stream mode: --output-format stream-json
     skip_permissions: --yolo
     model_variant: -m <variant>
-    sandbox_root: not used (Gemini has different sandbox model)
+    sandbox_root: included via --include-directories for git access
     workdir: not used as CLI arg (handled via cwd in subprocess)
     """
     cmd = ["gemini"]
@@ -334,6 +335,9 @@ def build_gemini_command(
 
     if skip_permissions:
         cmd.append("--yolo")
+
+    if sandbox_root:
+        cmd.extend(["--include-directories", str(sandbox_root)])
 
     return cmd
 
@@ -355,6 +359,9 @@ def build_gemini_interactive_command(
 
     if skip_permissions:
         cmd.append("--yolo")
+
+    if sandbox_root:
+        cmd.extend(["--include-directories", str(sandbox_root)])
 
     cmd.append("-i")
 

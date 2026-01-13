@@ -1,34 +1,45 @@
-Turn a design doc into working code.
+Turn the design doc into working code.
 
-The design doc lives under `.design/`. It's auto-included in the prompt as part of repo docs. The doc contains data structures, APIs, constraints, and a "done when" verification step.
+The design doc is under `.design/` and auto-included in this prompt. It contains data structures, function signatures, constraints, and a "done when" verification step.
 
-## Approach
+## Workflow
 
-Start with the data structures. Get the core types right first—everything else builds on them.
+1. Read the design doc in `.design/` to understand what to build
+2. Read STYLE.md to understand code conventions
+3. Implement data structures first—get the core types right
+4. Implement functions one at a time, following the signatures in the design
+5. Run `uv run pytest tests/` to verify nothing broke
+6. Run the "done when" check from the design doc
+7. Do not commit—leave that to the caller or pipeline
 
-Then implement APIs one at a time. Follow the signatures in the design doc. If something's underspecified, make a reasonable choice and move on.
+## Implementation rules
 
-Run the "done when" check from the design doc to verify the implementation works.
+**Match existing patterns.** Before writing new code, find similar code nearby and match its style. If the codebase uses `@dataclass`, use `@dataclass`. If it uses type hints, use type hints.
 
-## Constraints
+**Stay in scope.** Implement exactly what the design doc describes. If something should be added, note it in `.design/questions.md` but don't build it.
 
-**Don't commit.** Leave that to the caller. Just write the code.
+**Tests prove it works.** Add tests for user-visible behavior. Don't test implementation details. Don't write tests that just verify mock calls—assert on actual results.
 
-**Follow STYLE.md closely.** Read it before starting. Match the style and structure already in the codebase. When in doubt, look at how similar things are done nearby.
+**Skip obvious docstrings.** If the function name and types tell the whole story, don't repeat it in prose. No `Args:`/`Returns:` blocks.
 
-**Stay in scope.** Implement what the design doc describes, nothing more. Note anything that should be added, but don't build it.
+**Leave the design doc.** Don't delete `.design/*.md`. The review step and landing process handle cleanup.
 
-**Leave the design doc.** Don't delete `.design/*.md`—`lf review` writes its assessment under `.design/`, and `lf ops pr land` removes the `.design/` contents.
+## Loopflow code conventions
 
-**Add documentation per the style guide.** The best documentation is simple code—descriptive names, type hints, clear APIs. Skip obvious docstrings. If a module needs explanation, add a brief comment at the top of the file, not a separate doc. Update existing READMEs when user-facing behavior changes. Document new CLI commands or user-facing features in the appropriate README.
+These are specific to this codebase:
 
-**Add tests that prove it works.** Test user behavior, not implementation details. A good test proves something users care about actually works. Keep tests short and focused. If a test requires elaborate mocking, it's testing the wrong thing—write something simpler or skip it.
+- **Use `uv run`** for all Python commands, or activate `.venv` first
+- **Imports at top of file**, never inline
+- **Prefix private functions with `_`**
+- **Return `None` for "not found"**, raise exceptions for "shouldn't happen"
+- **Prefer functions over classes** when you don't need state
+- **No backwards-compatibility shims** unless explicitly required
 
 ## If something's wrong
 
-If the design doc is unclear or seems wrong, ask before proceeding in interactive mode. In batch mode, make the simplest, clearest choice and move on. The code can be rewritten if a different choice is needed later.
+If the design doc is unclear, make the simplest choice and move on. Note your assumption in `.design/questions.md`. The code can be rewritten if needed.
 
-If implementation reveals a flaw in the design, note it. The design doc was scaffolding—it's fine for reality to diverge from the plan.
+If implementation reveals a design flaw, note it but keep going. The design was scaffolding—reality should diverge when it makes sense.
 
 ## Auto mode
 

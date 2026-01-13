@@ -1,55 +1,55 @@
-Grease and polish: fix issues and run tests before landing.
+Fix issues and run tests before landing.
 
 The deliverable is working, clean code that passes tests.
 
-## Process
+## Workflow
 
-1. **Review and fix**
-   - Run `git diff main...HEAD` to see what changed
-   - Review against STYLE.md and general code quality
-   - Fix bugs, style violations, and unnecessary complexity directly
-   - Don't just note issues—fix them
-   - Rewrite the primary design doc in `.design/` to match the implementation (keep any decisions log)
-
-2. **Test**
-   - Run the full test suite
-   - If tests fail, determine: broken test or broken code?
-   - Fix failures one by one, running single tests while debugging
-   - Add missing tests for key behavior changes
-   - Reduce or simplify existing tests according to new behavioral requirements.
+1. Run `git diff main...HEAD` to see what this branch changed
+2. Run `uv run pytest tests/` to see current test status
+3. Fix any test failures (broken test or broken code?)
+4. Review changed files against STYLE.md and fix violations
+5. Run `uv run pytest tests/` again to confirm all tests pass
+6. If tests pass and code is clean, you're done
 
 ## What to fix
 
-**Style guide violations.** Read STYLE.md. Fix naming, error handling, documentation patterns.
+Focus only on code changed by this branch.
 
-**Bugs.** Logic errors, edge cases, off-by-ones, unhandled errors.
+**Test failures.** Get the suite green first. Run single tests while debugging:
+```bash
+uv run pytest tests/test_specific.py::test_name -v
+```
 
-**Unnecessary complexity.** Simplify code that's more elaborate than needed.
+**Style violations specific to this codebase:**
+- Remove `Args:`/`Returns:` docstrings when types are clear
+- Move inline imports to top of file
+- Add `_` prefix to private functions
+- Replace tests that assert on mock calls with tests that assert on results
 
-**Test failures.** Get the suite green.
+**Bugs.** Logic errors, edge cases, off-by-ones in the new code.
 
-**Missing tests.** Add tests for user-visible behaviors that aren't covered.
+**Missing tests.** Add tests for user-visible behavior that isn't covered. Keep them short and focused.
 
 ## What to ignore
 
-Don't expand scope. If something unrelated to this branch could be better, leave it.
+**Unrelated code.** Don't fix things outside this branch's scope. "While I'm here" improvements belong in a separate branch.
 
-Don't refactor working code that isn't broken. Only fix actual problems.
+**Working code you'd write differently.** Only fix actual problems, not style preferences.
 
-**Design doc deviations.** If any `.design/*.md` docs exist, treat the implementation as the source of truth. Deviations are likely intentional. Evaluate code at face value, not for fidelity to the original plan.
+**Design doc deviations.** The implementation is the source of truth. Deviations are intentional.
 
 ## Test standards
 
-From STYLE.md:
-- Test user behavior, not implementation details
-- Keep tests short and focused on one behavior
-- Delete flaky tests rather than adding retries
+These are specific to this codebase:
 
-**Mocking**: Use mocks to prevent side effects (network, subprocess, file I/O). But don't write tests that just verify mock calls—assert on the *result* of the function under test, not that a mock was called.
+- **Test behavior, not implementation.** Assert on what the function returns, not how it works internally.
+- **Mocks prevent side effects.** Use them for network, subprocess, file I/O. But don't assert on mock calls—assert on the result.
+- **Delete flaky tests.** Don't add retries or sleeps. If a test is flaky, it's testing the wrong thing.
+- **One behavior per test.** Short, focused tests that prove one thing works.
 
 ## Output
 
-Make the fixes. Run tests until they pass. If there's nothing to fix and tests pass, say so.
+Fix issues directly. Run tests until they pass. If nothing needs fixing and tests pass, say so.
 
 ## Auto mode
 

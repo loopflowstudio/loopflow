@@ -23,7 +23,6 @@ class TriggerKind(Enum):
 @dataclass
 class AgentTrigger:
     kind: TriggerKind = TriggerKind.ALWAYS
-    config: dict = field(default_factory=dict)
 
 @dataclass
 class OuterLoopConfig:

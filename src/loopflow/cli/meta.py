@@ -15,6 +15,19 @@ from loopflow.launcher import check_claude_available, check_codex_available, che
 
 app = typer.Typer(help="Setup and diagnostics.")
 
+# Prompts installed by `lf ops init`
+_BUNDLED_PROMPTS = [
+    "review.md",
+    "implement.md",
+    "design.md",
+    "polish.md",
+    "debug.md",
+    "publish.md",
+    "iterate.md",
+    "expand.md",
+    "reduce.md",
+]
+
 
 @dataclass
 class SetupStatus:
@@ -200,17 +213,7 @@ def _scaffold_repo(repo_root: Path) -> None:
     commands_dir.mkdir(parents=True, exist_ok=True)
     typer.echo("  ✓ .claude/commands/")
 
-    for prompt_name in [
-        "review.md",
-        "implement.md",
-        "design.md",
-        "polish.md",
-        "debug.md",
-        "publish.md",
-        "iterate.md",
-        "expand.md",
-        "reduce.md",
-    ]:
+    for prompt_name in _BUNDLED_PROMPTS:
         src = commands_src / prompt_name
         dst = commands_dir / prompt_name
         if not dst.exists():
@@ -227,17 +230,7 @@ def _install_subset(repo_root: Path, prompts: bool, style: bool) -> None:
         commands_dir = repo_root / ".claude" / "commands"
         commands_dir.mkdir(parents=True, exist_ok=True)
 
-        for prompt_name in [
-            "review.md",
-            "implement.md",
-            "design.md",
-            "polish.md",
-            "debug.md",
-            "publish.md",
-            "iterate.md",
-            "expand.md",
-            "reduce.md",
-        ]:
+        for prompt_name in _BUNDLED_PROMPTS:
             src = commands_src / prompt_name
             dst = commands_dir / prompt_name
 

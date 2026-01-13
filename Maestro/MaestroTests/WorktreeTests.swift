@@ -2,7 +2,7 @@
 
 import Foundation
 import Testing
-@testable import Loopflow
+@testable import Maestro
 
 @Suite("Worktree Model")
 struct WorktreeModelTests {

@@ -25,22 +25,34 @@ class AgentStatus(Enum):
 
 
 class TriggerKind(Enum):
-    ALWAYS = "always"
+    MANUAL = "manual"
     MAIN_CHANGED = "main-changed"
+    INTERVAL = "interval"
 
 
 @dataclass
 class AgentTrigger:
     """Condition that triggers an agent iteration."""
 
-    kind: TriggerKind = TriggerKind.ALWAYS
+    kind: TriggerKind = TriggerKind.MANUAL
+    interval_seconds: int | None = None
 
     def to_dict(self) -> dict:
-        return {"kind": self.kind.value}
+        result = {"kind": self.kind.value}
+        if self.interval_seconds:
+            result["interval_seconds"] = self.interval_seconds
+        return result
 
     @classmethod
     def from_dict(cls, data: dict) -> "AgentTrigger":
-        return cls(kind=TriggerKind(data.get("kind", "always")))
+        kind_str = data.get("kind", "manual")
+        # Handle migration from "always" to "manual"
+        if kind_str == "always":
+            kind_str = "manual"
+        return cls(
+            kind=TriggerKind(kind_str),
+            interval_seconds=data.get("interval_seconds"),
+        )
 
 
 @dataclass

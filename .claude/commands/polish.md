@@ -4,12 +4,23 @@ The deliverable is working, clean code that passes tests.
 
 ## Workflow
 
-1. Run `git diff main...HEAD` to see what this branch changed
-2. Run `uv run pytest tests/` to see current test status
-3. Fix any test failures (broken test or broken code?)
-4. Review changed files against STYLE.md and fix violations
-5. Run `uv run pytest tests/` again to confirm all tests pass
-6. If tests pass and code is clean, you're done
+1. **Review and fix**
+   - Run `git diff main...HEAD` to see what changed
+   - Review against STYLE.md and general code quality
+   - Fix bugs, style violations, and unnecessary complexity directly
+   - Don't just note issues—fix them
+   - Rewrite the primary design doc in `.design/` to match the implementation (keep any decisions log)
+
+2. **Test**
+   - Run the full test suite: `./dev test` (runs both Python and Swift tests)
+   - If tests fail, determine: broken test or broken code?
+   - Fix failures one by one, running single tests while debugging
+   - Add missing tests for key behavior changes
+   - Reduce or simplify existing tests according to new behavioral requirements.
+
+   For component-specific testing:
+   - Python only: `./dev py`
+   - Swift only: `./dev swift`
 
 ## What to fix
 

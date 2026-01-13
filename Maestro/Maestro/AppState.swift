@@ -10,6 +10,7 @@ final class AppState {
     var config: LoopflowConfig?
     var worktrees: [Worktree] = []
     var prompts: [PromptCard] = []
+    var agents: [Agent] = []
 
     // Prompt launcher state
     var selectedPrompt: PromptCard?
@@ -25,21 +26,48 @@ final class AppState {
     // Loading state
     var isLoading: Bool = false
     var errorMessage: String?
+    var agentsAvailable: Bool = false
 
     // Services
     private let worktreeService = WorktreeService()
     private let configLoader = ConfigLoader()
     private let promptService = PromptService()
+    private let agentService = AgentService()
 
     func openRepo(_ url: URL) async {
         currentRepo = url
         isLoading = true
         errorMessage = nil
 
+        // Ensure daemon is running on first launch
+        let setupService = SetupService()
+        do {
+            try await setupService.ensureDaemonRunning()
+        } catch {
+            // Non-fatal - daemon setup failed but app can still work
+        }
+
         do {
             config = try configLoader.load(from: url)
+
+            // Initialize context folders from config
+            if let contextPaths = config?.context {
+                if contextPaths == ["."] {
+                    // "." means include all - select all root directories
+                    selectedContextFolders = Set(listRootFolders(in: url))
+                } else {
+                    selectedContextFolders = Set(contextPaths.map { path in
+                        url.appendingPathComponent(path)
+                    })
+                }
+            } else {
+                selectedContextFolders = []
+            }
+
             await refreshWorktrees()
             prompts = try promptService.loadPrompts(from: url, config: config)
+            await estimateTokens()
+            await refreshAgents()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -69,6 +97,28 @@ final class AppState {
 
         try await worktreeService.remove(name: worktree.branch, in: repo)
         await refreshWorktrees()
+    }
+
+    func refreshAgents() async {
+        do {
+            agents = try await agentService.list()
+            agentsAvailable = true
+        } catch {
+            // API not running - agents feature unavailable
+            agents = []
+            agentsAvailable = false
+        }
+    }
+
+    func startAgent(_ agent: Agent) async throws {
+        guard let repo = currentRepo else { return }
+        try await agentService.start(agentId: agent.id, repoRoot: repo)
+        await refreshAgents()
+    }
+
+    func stopAgent(_ agent: Agent) async throws {
+        try await agentService.stop(agentId: agent.id)
+        await refreshAgents()
     }
 
     func estimateTokens() async {
@@ -111,5 +161,33 @@ final class AppState {
         }
 
         return parts.joined(separator: " ")
+    }
+
+    private func listRootFolders(in url: URL) -> [URL] {
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: [.isDirectoryKey]
+        ) else {
+            return []
+        }
+
+        let excludePatterns = config?.exclude ?? []
+
+        return contents.filter { item in
+            let name = item.lastPathComponent
+            // Filter hidden files
+            guard !name.hasPrefix(".") else { return false }
+
+            // Check if excluded by config patterns
+            for pattern in excludePatterns {
+                if name == pattern || pattern.hasPrefix(name + "/") {
+                    return false
+                }
+            }
+
+            let isDir = (try? item.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+            return isDir
+        }
     }
 }

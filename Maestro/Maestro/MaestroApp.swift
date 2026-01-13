@@ -4,12 +4,25 @@
 import SwiftUI
 
 @main
-struct LoopflowApp: App {
+struct MaestroApp: App {
     @State private var appState = AppState()
+    @State private var setupComplete = false
+    @State private var hasCheckedSetup = false
+
+    private let setupService = SetupService()
 
     var body: some Scene {
         WindowGroup {
-            ContentView(appState: appState)
+            if !hasCheckedSetup {
+                ProgressView("Loading...")
+                    .onAppear {
+                        checkSetup()
+                    }
+            } else if !setupComplete {
+                SetupView(isComplete: $setupComplete)
+            } else {
+                ContentView(appState: appState)
+            }
         }
         .windowStyle(.automatic)
         .defaultSize(width: 900, height: 700)
@@ -28,6 +41,12 @@ struct LoopflowApp: App {
                 .keyboardShortcut("r", modifiers: .command)
             }
         }
+    }
+
+    private func checkSetup() {
+        let status = setupService.checkDependencies()
+        setupComplete = status.allInstalled
+        hasCheckedSetup = true
     }
 
     private func openFolder() {

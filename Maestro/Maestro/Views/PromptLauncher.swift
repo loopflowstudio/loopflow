@@ -126,6 +126,7 @@ struct PromptLauncher: View {
                 if let repo = appState.currentRepo {
                     ContextPicker(
                         repoURL: repo,
+                        excludePatterns: appState.config?.exclude ?? [],
                         selectedFolders: $appState.selectedContextFolders
                     )
                 }
@@ -262,6 +263,7 @@ struct PromptCardView: View {
 
 struct ContextPicker: View {
     let repoURL: URL
+    let excludePatterns: [String]
     @Binding var selectedFolders: Set<URL>
 
     @State private var expandedFolders: Set<URL> = []
@@ -293,9 +295,15 @@ struct ContextPicker: View {
         rootContents = contents
             .filter { url in
                 let name = url.lastPathComponent
-                // Hide hidden files and common ignored directories
-                return !name.hasPrefix(".") &&
-                       !["node_modules", "__pycache__", "build", "dist", ".git"].contains(name)
+                // Filter hidden files
+                guard !name.hasPrefix(".") else { return false }
+                // Check exclude patterns from config
+                for pattern in excludePatterns {
+                    if name == pattern || pattern.hasPrefix(name + "/") {
+                        return false
+                    }
+                }
+                return true
             }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }

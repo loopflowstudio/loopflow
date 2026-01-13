@@ -210,26 +210,11 @@ struct TerminalLauncher {
     }
 
     private func findExecutable(_ name: String) -> URL? {
-        // Search common locations for CLI tools
-        let searchPaths = [
-            "/usr/local/bin/\(name)",
-            "/opt/homebrew/bin/\(name)",
-            "/usr/bin/\(name)",
-            "/Applications/\(name.capitalized).app/Contents/MacOS/\(name)",
-        ]
-
-        let fm = FileManager.default
-        for path in searchPaths {
-            if fm.isExecutableFile(atPath: path) {
-                return URL(fileURLWithPath: path)
-            }
-        }
-
-        // Fall back to `which` for PATH lookup
+        // Use login shell to resolve PATH properly
         let process = Process()
         let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
-        process.arguments = [name]
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = ["-l", "-c", "which \(name)"]
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
 
@@ -244,9 +229,8 @@ struct TerminalLauncher {
                 }
             }
         } catch {
-            // Ignore errors from `which`
+            // Fall through to return nil
         }
-
         return nil
     }
 }

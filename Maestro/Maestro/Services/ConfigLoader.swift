@@ -90,6 +90,8 @@ struct ConfigLoader {
                 case "terminal": terminal = value
                 case "ide": ide = value
                 case "workspace": workspace = value
+                case "context": context = [value]  // Single value as array
+                case "exclude": exclude = [value]  // Single value as array
                 case "push": push = value == "true"
                 case "pr": pr = value == "true"
                 case "yolo": yolo = value == "true"

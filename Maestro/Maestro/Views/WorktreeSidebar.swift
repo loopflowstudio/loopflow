@@ -21,6 +21,8 @@ struct WorktreeSidebar: View {
             } else {
                 worktreeList
             }
+
+            agentsSection
         }
         .sheet(isPresented: $showingNewWorktreeSheet) {
             NewWorktreeSheet(appState: appState)
@@ -147,6 +149,150 @@ struct WorktreeSidebar: View {
 
     private var ideDisplayName: String {
         appState.config?.ideApp.displayName ?? "Cursor"
+    }
+
+    private var agentsSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("AGENTS")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .padding(.top, 8)
+
+            if appState.agents.isEmpty {
+                VStack(spacing: 4) {
+                    Text("No agents")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 12)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 4) {
+                        ForEach(appState.agents) { agent in
+                            AgentRow(
+                                agent: agent,
+                                onStart: {
+                                    Task {
+                                        do {
+                                            try await appState.startAgent(agent)
+                                        } catch {
+                                            actionError = error.localizedDescription
+                                            showingActionError = true
+                                        }
+                                    }
+                                },
+                                onStop: {
+                                    Task {
+                                        do {
+                                            try await appState.stopAgent(agent)
+                                        } catch {
+                                            actionError = error.localizedDescription
+                                            showingActionError = true
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                }
+            }
+        }
+    }
+}
+
+struct AgentRow: View {
+    let agent: Agent
+    let onStart: () -> Void
+    let onStop: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 8, height: 8)
+
+                Text(agent.name)
+                    .fontWeight(.medium)
+
+                Spacer()
+
+                Text(agent.statusText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+
+                if agent.iteration > 0 {
+                    Text("\(agent.iteration) iterations")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if let lastRun = agent.lastRunText {
+                        Text("•")
+                            .foregroundStyle(.tertiary)
+                        Text(lastRun)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("trigger: \(agent.triggerText)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isHovering ? Color.primary.opacity(0.05) : Color.clear)
+        )
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            isHovering = hovering
+        }
+        .contextMenu {
+            if agent.status == .running {
+                Button("Stop") {
+                    onStop()
+                }
+            } else {
+                Button("Start") {
+                    onStart()
+                }
+            }
+        }
+    }
+
+    private var statusColor: Color {
+        switch agent.status {
+        case .running:
+            return .green
+        case .waiting:
+            return .blue
+        case .idle:
+            return .gray
+        case .error:
+            return .red
+        case .stopped:
+            return .orange
+        }
     }
 }
 

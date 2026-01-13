@@ -12,7 +12,8 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
-from loopflow.maestro.db import DEFAULT_DB_PATH, load_session, load_sessions
+from loopflow.maestro.db import DEFAULT_DB_PATH, load_session, load_sessions, load_agents, load_agent
+from loopflow.maestro.agents import start_agent, stop_agent, get_agent
 from loopflow.worktrees import WorktreeError, list_all
 
 app = FastAPI()
@@ -229,3 +230,48 @@ def _log_path(session) -> Path:
 
 def _read_log_lines(log_path: Path) -> list[str]:
     return [line.rstrip("\n") for line in log_path.read_text().splitlines()]
+
+
+# Agent endpoints
+
+
+@app.get("/api/agents")
+def agents() -> JSONResponse:
+    """List all registered agents."""
+    items = load_agents(DEFAULT_DB_PATH)
+    return JSONResponse([a.to_dict() for a in items])
+
+
+@app.get("/api/agents/{agent_id}")
+def agent_detail(agent_id: str) -> JSONResponse:
+    """Get agent details."""
+    agent = load_agent(DEFAULT_DB_PATH, agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return JSONResponse(agent.to_dict())
+
+
+@app.post("/api/agents/{agent_id}/start")
+def agent_start(agent_id: str, repo_root: str | None = None) -> JSONResponse:
+    """Start an agent."""
+    agent = get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    # Use current worktree or provided repo_root
+    root = Path(repo_root) if repo_root else Path.cwd()
+    result = start_agent(agent_id, root, background=True)
+
+    if not result.success:
+        raise HTTPException(status_code=500, detail=result.error or "Failed to start agent")
+
+    return JSONResponse({"ok": True, "log_path": str(result.log_path) if result.log_path else None})
+
+
+@app.post("/api/agents/{agent_id}/stop")
+def agent_stop(agent_id: str) -> JSONResponse:
+    """Stop a running agent."""
+    success = stop_agent(agent_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to stop agent")
+    return JSONResponse({"ok": True})

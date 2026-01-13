@@ -1,7 +1,7 @@
 // Tests for ConfigLoader YAML parsing.
 
 import Testing
-@testable import Loopflow
+@testable import Maestro
 
 @Suite("Config Loader")
 struct ConfigLoaderTests {

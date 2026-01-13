@@ -114,22 +114,28 @@ struct TerminalLauncher {
     }
 
     private func launchKitty(at path: URL, command: String?) throws {
-        var args = ["--single-instance", "--directory", path.path()]
+        guard let executableURL = findExecutable("kitty") else {
+            throw LaunchError.launchFailed("kitty not found. Install from https://sw.kovidgoyal.net/kitty/")
+        }
 
+        var args = ["--single-instance", "--directory", path.path()]
         if let cmd = command {
             args.append(contentsOf: ["--", "zsh", "-c", cmd])
         }
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/local/bin/kitty")
+        process.executableURL = executableURL
         process.arguments = args
-
         try process.run()
     }
 
     // MARK: - IDE Launchers
 
     private func openCursor(at path: URL, workspace: String?) throws {
+        guard let executableURL = findExecutable("cursor") else {
+            throw LaunchError.launchFailed("Cursor not found. Install from https://cursor.com")
+        }
+
         let targetPath: String
         if let ws = workspace {
             targetPath = path.appendingPathComponent(ws).path()
@@ -140,13 +146,16 @@ struct TerminalLauncher {
         }
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/local/bin/cursor")
+        process.executableURL = executableURL
         process.arguments = [targetPath]
-
         try process.run()
     }
 
     private func openVSCode(at path: URL, workspace: String?) throws {
+        guard let executableURL = findExecutable("code") else {
+            throw LaunchError.launchFailed("VS Code not found. Install from https://code.visualstudio.com")
+        }
+
         let targetPath: String
         if let ws = workspace {
             targetPath = path.appendingPathComponent(ws).path()
@@ -157,17 +166,19 @@ struct TerminalLauncher {
         }
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/local/bin/code")
+        process.executableURL = executableURL
         process.arguments = [targetPath]
-
         try process.run()
     }
 
     private func openZed(at path: URL) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/local/bin/zed")
-        process.arguments = [path.path()]
+        guard let executableURL = findExecutable("zed") else {
+            throw LaunchError.launchFailed("Zed not found. Install from https://zed.dev")
+        }
 
+        let process = Process()
+        process.executableURL = executableURL
+        process.arguments = [path.path()]
         try process.run()
     }
 
@@ -195,6 +206,47 @@ struct TerminalLauncher {
         if let workspace = contents.first(where: { $0.hasSuffix(".code-workspace") }) {
             return directory.appendingPathComponent(workspace)
         }
+        return nil
+    }
+
+    private func findExecutable(_ name: String) -> URL? {
+        // Search common locations for CLI tools
+        let searchPaths = [
+            "/usr/local/bin/\(name)",
+            "/opt/homebrew/bin/\(name)",
+            "/usr/bin/\(name)",
+            "/Applications/\(name.capitalized).app/Contents/MacOS/\(name)",
+        ]
+
+        let fm = FileManager.default
+        for path in searchPaths {
+            if fm.isExecutableFile(atPath: path) {
+                return URL(fileURLWithPath: path)
+            }
+        }
+
+        // Fall back to `which` for PATH lookup
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+        process.arguments = [name]
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+            if process.terminationStatus == 0 {
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                if let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !path.isEmpty {
+                    return URL(fileURLWithPath: path)
+                }
+            }
+        } catch {
+            // Ignore errors from `which`
+        }
+
         return nil
     }
 }

@@ -2,6 +2,9 @@
 __pycache__/
 .pytest_cache/
 
+# Swift
+Loopflow/.build/
+
 # Claude Code (personal state)
 .claude/settings.local.json
 

@@ -5,6 +5,9 @@ import SwiftUI
 struct PromptLauncher: View {
     @Bindable var appState: AppState
 
+    @State private var launchError: String?
+    @State private var showingLaunchError = false
+
     private let terminalLauncher = TerminalLauncher()
 
     var body: some View {
@@ -24,6 +27,13 @@ struct PromptLauncher: View {
             launchButton
         }
         .padding(24)
+        .alert("Launch Failed", isPresented: $showingLaunchError) {
+            Button("OK") {
+                launchError = nil
+            }
+        } message: {
+            Text(launchError ?? "Failed to launch terminal")
+        }
     }
 
     // MARK: - Prompt Input
@@ -201,7 +211,12 @@ struct PromptLauncher: View {
             workPath = repo
         }
 
-        try? terminalLauncher.launchTerminal(terminal, at: workPath, command: command)
+        do {
+            try terminalLauncher.launchTerminal(terminal, at: workPath, command: command)
+        } catch {
+            launchError = error.localizedDescription
+            showingLaunchError = true
+        }
     }
 }
 

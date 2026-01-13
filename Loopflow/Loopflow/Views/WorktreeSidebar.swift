@@ -7,6 +7,8 @@ struct WorktreeSidebar: View {
     @State private var showingNewWorktreeSheet = false
     @State private var showingDeleteConfirmation = false
     @State private var worktreeToDelete: Worktree?
+    @State private var actionError: String?
+    @State private var showingActionError = false
 
     private let terminalLauncher = TerminalLauncher()
 
@@ -30,11 +32,23 @@ struct WorktreeSidebar: View {
         ) { worktree in
             Button("Delete", role: .destructive) {
                 Task {
-                    try? await appState.deleteWorktree(worktree)
+                    do {
+                        try await appState.deleteWorktree(worktree)
+                    } catch {
+                        actionError = "Failed to delete worktree: \(error.localizedDescription)"
+                        showingActionError = true
+                    }
                 }
             }
         } message: { worktree in
             Text("Are you sure you want to delete '\(worktree.branch)'? This will remove the worktree and its local branch.")
+        }
+        .alert("Error", isPresented: $showingActionError) {
+            Button("OK") {
+                actionError = nil
+            }
+        } message: {
+            Text(actionError ?? "An error occurred")
         }
     }
 
@@ -78,6 +92,7 @@ struct WorktreeSidebar: View {
                     WorktreeRow(
                         worktree: worktree,
                         isSelected: appState.selectedWorktree?.id == worktree.id,
+                        ideName: ideDisplayName,
                         onSelect: {
                             appState.selectedWorktree = worktree
                         },
@@ -111,19 +126,34 @@ struct WorktreeSidebar: View {
 
     private func openInTerminal(_ worktree: Worktree) {
         let terminal = appState.config?.terminalApp ?? .warp
-        try? terminalLauncher.launchTerminal(terminal, at: URL(fileURLWithPath: worktree.path))
+        do {
+            try terminalLauncher.launchTerminal(terminal, at: URL(fileURLWithPath: worktree.path))
+        } catch {
+            actionError = "Failed to open terminal: \(error.localizedDescription)"
+            showingActionError = true
+        }
     }
 
     private func openInIDE(_ worktree: Worktree) {
         let ide = appState.config?.ideApp ?? .cursor
         let workspace = appState.config?.workspace
-        try? terminalLauncher.openInIDE(ide, at: URL(fileURLWithPath: worktree.path), workspace: workspace)
+        do {
+            try terminalLauncher.openInIDE(ide, at: URL(fileURLWithPath: worktree.path), workspace: workspace)
+        } catch {
+            actionError = "Failed to open \(ide.displayName): \(error.localizedDescription)"
+            showingActionError = true
+        }
+    }
+
+    private var ideDisplayName: String {
+        appState.config?.ideApp.displayName ?? "Cursor"
     }
 }
 
 struct WorktreeRow: View {
     let worktree: Worktree
     let isSelected: Bool
+    let ideName: String
     let onSelect: () -> Void
     let onDoubleClick: () -> Void
     let onOpenTerminal: () -> Void
@@ -175,7 +205,7 @@ struct WorktreeRow: View {
             Button("Open in Terminal") {
                 onOpenTerminal()
             }
-            Button("Open in Cursor") {
+            Button("Open in \(ideName)") {
                 onOpenIDE()
             }
             Button("Reveal in Finder") {

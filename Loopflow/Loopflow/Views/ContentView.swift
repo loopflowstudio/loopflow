@@ -4,17 +4,31 @@ import SwiftUI
 
 struct ContentView: View {
     @Bindable var appState: AppState
+    @State private var showingError = false
 
     var body: some View {
         NavigationSplitView {
             WorktreeSidebar(appState: appState)
                 .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 360)
         } detail: {
-            if appState.currentRepo != nil {
+            if appState.isLoading {
+                ProgressView("Loading...")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if appState.currentRepo != nil {
                 PromptLauncher(appState: appState)
             } else {
                 WelcomeView(appState: appState)
             }
+        }
+        .onChange(of: appState.errorMessage) { _, newValue in
+            showingError = newValue != nil
+        }
+        .alert("Error", isPresented: $showingError) {
+            Button("OK") {
+                appState.errorMessage = nil
+            }
+        } message: {
+            Text(appState.errorMessage ?? "An unknown error occurred")
         }
         .navigationTitle(appState.currentRepo?.lastPathComponent ?? "Loopflow Maestro")
         .toolbar {

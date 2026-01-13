@@ -1,8 +1,14 @@
 ---
 include:
   - tests/**
+requires: code on branch
+produces: passing tests, .design/ updated
 ---
 Fix issues and run tests before landing.
+
+## Goal
+
+Get to green quickly. Fix real problems, not hypothetical ones. The bar is "ready to land," not "perfect." The human can do another polish pass or land directly—don't gold-plate.
 
 The deliverable is working, clean code that passes tests.
 
@@ -65,8 +71,4 @@ These are specific to this codebase:
 ## Output
 
 Fix issues directly. Run tests until they pass. If nothing needs fixing and tests pass, say so.
-
-## Auto mode
-
-In auto/headless runs, do not pause to ask questions. Make the best assumption you can and append any open questions to `.design/questions.md`.
 

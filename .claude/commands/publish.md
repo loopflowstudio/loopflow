@@ -1,8 +1,14 @@
 ---
 include:
   - tests/**
+requires: passing tests, clean main
+produces: published package, git tag
 ---
 Publish the loopflow package to PyPI.
+
+## Goal
+
+Get a working release out cleanly. Unlike most prompts, don't optimize for speed—optimize for correctness. A failed publish can leave partial state (version bumped but not published, tagged but not pushed). If anything fails, stop immediately and report. The human can fix it and re-run.
 
 ```bash
 lf publish           # patch bump (default): 0.5.0 → 0.5.1
@@ -141,6 +147,3 @@ Report each step as it completes. End with:
 - New version number
 - PyPI URL: https://pypi.org/project/loopflow/
 
-## Auto mode
-
-In auto/headless runs, do not pause to ask questions. Make the best assumption you can and append any open questions to `.design/questions.md`.

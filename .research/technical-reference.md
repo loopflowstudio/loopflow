@@ -1,6 +1,6 @@
 # Technical Reference: Claude Code & Codex
 
-Deep technical details on APIs, configuration, skills, hooks, and implementation patterns for AI coding agents.
+APIs, configuration, skills, hooks, and implementation patterns. Reference material for building on top of these platforms.
 
 ---
 
@@ -508,105 +508,56 @@ notify-send "Claude Code" "Awaiting your input"
 
 ## Workflow Patterns
 
-### steipete's "Inference Speed" Workflow
+### steipete (Factory Operator)
 
-**Core Principles:**
+Don't read code. No plan mode. Commit to main. Never revert. Queue, don't orchestrate.
 
-1. **Don't read code:** "These days I don't read much code anymore. I watch the stream and sometimes look at key parts."
-
-2. **No plan mode:** Start conversations naturally, explore, build plan collaboratively, then write "build" when ready.
-
-3. **Commit to main:** "I simply commit to main... I find the added cognitive load of having to think of different states in my projects unnecessary."
-
-4. **Never revert:** "If something isn't how I like it, I ask the model to change it."
-
-5. **Queue, don't orchestrate:** Use Codex's queueing feature - add ideas to the pipeline.
-
-**Cross-Project Operations:**
 ```bash
+# Cross-project operations
 "look at ../vibetunnel and do the same for Sparkle changelogs"
-"find all my recent go projects and implement this change there too + update changelog"
+"find all my recent go projects and implement this change there too"
 ```
 
-**The Oracle Pattern (Escalation):**
+**Oracle pattern:** When stuck, escalate to stronger model via CLI tool.
 
-When agents get stuck, escalate to a stronger model:
-> "oracle - it's a CLI that allows the agent to run GPT 5 Pro and upload files + a prompt... The model sometimes by itself triggered oracle when it got stuck."
+### Boris Cherny (Orchestrator)
 
-### Boris Cherny's Workflow
+259 PRs in 30 days. 5-10 Claude instances simultaneously. iTerm notifications. "Anytime Claude does something wrong, add it to CLAUDE.md."
 
-**Stats:** 259 PRs in 30 days, 497 commits - all via Claude Code.
+### Plan → Execute
 
-**Parallel Execution:**
-- 5-10 Claude instances simultaneously
-- iTerm2 notifications for managing streams
-- "Teleport" command to hand off between web and terminal
+1. Plan mode (Shift+Tab twice)—Claude analyzes, can't modify
+2. Write plan to plan.md
+3. Execute with plan as checklist
 
-**CLAUDE.md Practice:**
-> "Anytime we see Claude do something incorrectly we add it to CLAUDE.md, so Claude knows not to do it next time."
+### Benchy (Parallel Same-Prompt)
 
-**Verification Loop:**
-> "Claude tests every single change using the Claude Chrome extension. Opens browser, tests UI, iterates until code works and UX feels good."
-
-### Plan -> Execute Pattern
-
-1. **Plan Mode (Shift+Tab twice):** Claude analyzes but cannot modify files
-2. **Write plan to plan.md:** Creates persistent artifact
-3. **Review and adjust plan**
-4. **Execute with plan as checklist**
-
-### Benchy Pattern (Parallel Same-Prompt)
-
-Run N agents with identical prompt, pick best result.
+Run N agents with identical prompt, pick best:
 
 ```
 project/
-├── specs/
-│   └── feature.md          # Shared spec
+├── specs/feature.md        # Shared spec
 └── trees/
-    ├── feature-1/          # Agent 1 worktree
-    ├── feature-2/          # Agent 2 worktree
-    └── feature-3/          # Agent 3 worktree
+    ├── feature-1/          # Agent 1
+    ├── feature-2/          # Agent 2
+    └── feature-3/          # Agent 3
 ```
-
-Compare implementations, cherry-pick best approach.
 
 ---
 
 ## Git Worktree Management
 
-### Why Worktrees for Agents
+Worktrees solve parallel agent file conflicts—each agent gets its own working directory and branch.
 
-Git worktrees solve the fundamental parallel agent problem: **file conflicts**. Each agent needs:
-- Its own working directory
-- Its own branch
-- Isolated from other agents' changes
+**When valuable:** Team repos, reviewable PRs, CI/CD pipelines, checkpoint/rollback.
 
-### The Contrarian View
-
-steipete: "I simply commit to main. I find the added cognitive load of having to think of different states in my projects unnecessary and prefer to evolve it linearly."
-
-His alternative - multiple machines: "I usually work on two Macs... Sometimes I edit different parts of the same project on each machine and sync via git."
-
-### When Worktrees Are Valuable
-
-- Team environments with shared repos
-- Need for reviewable, isolated PRs
-- CI/CD pipelines expect branches
-- Multiple features that might conflict
-- Want checkpoint/rollback capability
-
-### Manual Worktree Workflow
+**The contrarian view:** steipete commits to main: "I find the added cognitive load unnecessary." Uses multiple Macs instead of worktrees.
 
 ```bash
-# Create worktree
 git worktree add ../feature-auth -b feature/auth
-cd ../feature-auth
-claude
-
+cd ../feature-auth && claude
 # When done
 git worktree remove ../feature-auth
-git branch -d feature/auth
 ```
 
 ---

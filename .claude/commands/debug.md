@@ -1,24 +1,37 @@
+---
+produces: fixed code
+---
 Debug an error using the stacktrace or error message from clipboard.
+
+If clipboard is empty or no -v flag, ask what error to debug.
+
+## What makes a good fix
+
+**Unblock first.** Ask: what would it take to unblock the person who wants this debugged? Sometimes that's a quick workaround or explanation before a deeper fix. Get them moving, then address the root cause.
+
+**Loop until the root issue is addressed.** Don't just take the next step and stop. Fix, verify, see what happens. If a new error surfaces, keep going. The job is done when the original workflow succeeds.
+
+**Minimal and targeted.** Fix the bug, not the neighborhood. Don't refactor, don't "improve while you're here."
+
+**Grease the wheels.** If debugging was hard, add tooling that makes it easier next time—for both humans and LLMs. A well-placed log statement, a clearer error message, a helper function that surfaces state. Small improvements that compound.
+
+## Input
 
 Run with `-v` to include clipboard content:
 ```bash
 lf debug -v
 ```
 
-## Workflow
-
-1. Parse the error/stacktrace from the clipboard content
-2. Identify the file and line number where the error originated
-3. Run `git diff main...HEAD -- <file>` to see if this file was changed on this branch
-4. Read the relevant files to understand context
-5. Fix the bug
-6. Run `uv run pytest tests/` to verify the fix doesn't break anything
+Parse the error/stacktrace. Identify file and line. Check if the file was changed on this branch:
+```bash
+git diff main...HEAD -- <file>
+```
 
 ## Debugging strategy
 
 **Follow the stack trace.** The deepest frame in your code (not library code) is usually where the problem originates. Start there.
 
-**Check recent changes.** If the error is new, run `git diff` to see what changed. The bug is likely in the delta.
+**Check recent changes.** If the error is new, the bug is likely in the delta.
 
 **Reproduce first.** Before fixing, understand how to trigger the error. A fix you can't verify isn't a fix.
 
@@ -37,8 +50,4 @@ lf debug -v
 Fix the bug directly. If the cause isn't obvious from the fix, add a brief inline comment.
 
 If you can't determine the cause, describe what you learned and what additional context is needed.
-
-## Auto mode
-
-In auto/headless runs, do not pause to ask questions. Make the best assumption you can and append any open questions to `.design/questions.md`.
 

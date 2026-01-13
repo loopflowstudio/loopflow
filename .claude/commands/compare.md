@@ -1,4 +1,12 @@
+---
+requires: two branches (injected via lf ops compare)
+produces: comparison.md
+---
 Compare two implementations and recommend which to use.
+
+## Goal
+
+Give the human an informed recommendation fast. They have two implementations and need to pick one—your job is to compress the decision. Be opinionated. A clear recommendation they can disagree with is better than a balanced analysis they have to interpret.
 
 This task is typically invoked via `lf ops compare <branch-a> <branch-b>`, which injects the diffs below.
 
@@ -68,8 +76,4 @@ Write to `{{output_dir}}/comparison.md`:
 ```
 
 Keep it under 500 words. This is a decision document, not an exhaustive review.
-
-## Auto mode
-
-In auto/headless runs, do not pause to ask questions. Make the best assumption you can and append any open questions to `.design/questions.md`.
 

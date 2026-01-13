@@ -1,10 +1,16 @@
 ---
 include:
   - tests/**
+requires: .design/<branch>.md
+produces: code, tests
 ---
 Turn the design doc into working code.
 
-The design doc is under `.design/` and auto-included in this prompt. It contains data structures, function signatures, constraints, and a "done when" verification step.
+## Goal
+
+Produce a working first draft quickly. The human will review it, polish will clean it up, and you can be re-invoked if needed. Don't block on ambiguity—make the simplest choice and keep moving. Working code with rough edges beats perfect code that took too long.
+
+The design doc is under `.design/` and auto-included. It contains data structures, function signatures, constraints, and a "done when" verification step.
 
 ## Workflow
 
@@ -44,8 +50,4 @@ These are specific to this codebase:
 If the design doc is unclear, make the simplest choice and move on. Note your assumption in `.design/questions.md`. The code can be rewritten if needed.
 
 If implementation reveals a design flaw, note it but keep going. The design was scaffolding—reality should diverge when it makes sense.
-
-## Auto mode
-
-In auto/headless runs, do not pause to ask questions. Make the best assumption you can and append any open questions to `.design/questions.md`.
 

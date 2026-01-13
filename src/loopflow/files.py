@@ -62,6 +62,15 @@ def _compile_exclude_patterns(patterns: list[str], repo_root: Path) -> set[Path]
     return excluded
 
 
+def _is_excluded_by_paths(path: Path, excluded: set[Path]) -> bool:
+    if path in excluded:
+        return True
+    for parent in path.parents:
+        if parent in excluded:
+            return True
+    return False
+
+
 def is_ignored(
     path: Path,
     repo_root: Path,
@@ -88,12 +97,12 @@ def is_ignored(
 
     # Check pre-compiled exclude patterns (fast path)
     if _excluded_paths is not None:
-        if path in _excluded_paths:
+        if _is_excluded_by_paths(path, _excluded_paths):
             return True
     elif exclude:
         # Fallback: compile on demand (slower, for backwards compatibility)
         excluded = _compile_exclude_patterns(exclude, repo_root)
-        if path in excluded:
+        if _is_excluded_by_paths(path, excluded):
             return True
 
     # Check .gitignore files from repo root down to path's parent

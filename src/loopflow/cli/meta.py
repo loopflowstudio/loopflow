@@ -228,7 +228,7 @@ def install():
         if result.returncode == 0:
             typer.echo("✓ Gemini CLI installed")
         else:
-            typer.echo("- Gemini CLI: npm install -g @google/gemini-cli")
+            typer.echo(f"✗ Could not install Gemini CLI: {result.stderr}", err=True)
 
     # Worktrunk (required for worktree operations)
     if shutil.which("wt"):

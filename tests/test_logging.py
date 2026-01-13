@@ -11,6 +11,7 @@ from loopflow.logging import (
     open_json_log,
     open_log_file,
     write_log_line,
+    write_prompt_file,
 )
 
 
@@ -144,3 +145,26 @@ def test_write_log_line_handles_none():
     """write_log_line does nothing when log_file is None."""
     write_log_line(None, "ignored")
     # No exception raised
+
+
+def test_write_prompt_file_creates_temp_file():
+    """write_prompt_file creates a readable temp file."""
+    path = write_prompt_file("test prompt content")
+
+    try:
+        assert Path(path).exists()
+        assert Path(path).read_text() == "test prompt content"
+        assert "lf-prompt-" in path
+        assert path.endswith(".txt")
+    finally:
+        os.unlink(path)
+
+
+def test_write_prompt_file_handles_unicode():
+    """write_prompt_file handles unicode content."""
+    path = write_prompt_file("café ☕ 日本語")
+
+    try:
+        assert Path(path).read_text() == "café ☕ 日本語"
+    finally:
+        os.unlink(path)

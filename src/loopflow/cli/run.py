@@ -3,7 +3,6 @@
 import os
 import subprocess
 import sys
-import tempfile
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -12,14 +11,14 @@ from typing import Optional
 import typer
 
 from loopflow.config import load_config, parse_model
-from loopflow.context import find_worktree_root, gather_prompt_components, format_prompt
+from loopflow.context import find_worktree_root, gather_prompt_components, format_prompt, PromptComponents
 from loopflow.git import find_main_repo
 from loopflow.launcher import (
     build_model_command,
     build_model_interactive_command,
     get_runner,
 )
-from loopflow.logging import get_model_env
+from loopflow.logging import get_model_env, write_prompt_file
 from loopflow.maestro import Session, SessionStatus
 from loopflow.maestro.db import DEFAULT_DB_PATH, save_session, update_session_status
 from loopflow.pipeline import run_pipeline
@@ -30,21 +29,120 @@ from loopflow.worktrees import WorktreeError, create
 ModelType = Optional[str]
 
 
-def _write_prompt_file(prompt: str) -> str:
-    """Write prompt to a temp file and return the path.
-
-    The temp file is not deleted automatically; the caller should clean it up.
-    Using a file avoids exposing the prompt in ps output.
-    """
-    fd, path = tempfile.mkstemp(prefix="lf-prompt-", suffix=".txt")
-    os.write(fd, prompt.encode())
-    os.close(fd)
-    return path
-
-
 def _copy_to_clipboard(text: str) -> None:
     """Copy text to clipboard using pbcopy."""
     subprocess.run(["pbcopy"], input=text.encode(), check=True)
+
+
+def _execute_task(
+    task_name: str,
+    repo_root: Path,
+    components: PromptComponents,
+    is_interactive: bool,
+    backend: str,
+    model_variant: str | None,
+    skip_permissions: bool,
+) -> int:
+    """Execute a task (run or inline) and return exit code.
+
+    This shared helper handles session creation, command building, and execution
+    for both named tasks and inline prompts.
+    """
+    prompt = format_prompt(components)
+    prompt_file = write_prompt_file(prompt)
+
+    tree = analyze_components(components)
+    token_summary = tree.format()
+
+    main_repo = find_main_repo(repo_root) or repo_root
+    run_mode = "interactive" if is_interactive else "auto"
+    session = Session(
+        id=str(uuid.uuid4()),
+        task=task_name,
+        repo=main_repo,
+        worktree=repo_root,
+        status=SessionStatus.RUNNING,
+        started_at=datetime.now(),
+        pid=os.getpid() if not is_interactive else None,
+        backend=backend,
+        run_mode=run_mode,
+    )
+    save_session(DEFAULT_DB_PATH, session)
+
+    if is_interactive:
+        command = build_model_interactive_command(
+            backend,
+            skip_permissions=skip_permissions,
+            model_variant=model_variant,
+            sandbox_root=repo_root.parent,
+            workdir=repo_root,
+        )
+    else:
+        command = build_model_command(
+            backend,
+            auto=True,
+            stream=True,
+            skip_permissions=skip_permissions,
+            model_variant=model_variant,
+            sandbox_root=repo_root.parent,
+            workdir=repo_root,
+        )
+
+    # For interactive mode, run CLI directly to preserve terminal
+    if is_interactive:
+        typer.echo(f"\033[90m━━━ {task_name} ━━━\033[0m", err=True)
+        for line in token_summary.split("\n"):
+            typer.echo(f"\033[90m{line}\033[0m", err=True)
+        typer.echo(err=True)
+
+        # Read prompt and clean up file before exec
+        prompt_content = Path(prompt_file).read_text()
+        os.unlink(prompt_file)
+
+        # Remove API keys so CLIs use subscriptions
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+        os.environ.pop("OPENAI_API_KEY", None)
+
+        # Run CLI directly (replaces current process)
+        cmd_with_prompt = command + [prompt_content]
+        os.chdir(repo_root)
+        os.execvp(cmd_with_prompt[0], cmd_with_prompt)
+
+    # For auto mode, use collector for logging
+    collector_cmd = [
+        sys.executable,
+        "-m",
+        "loopflow.maestro.collector",
+        "--session-id",
+        session.id,
+        "--task",
+        task_name,
+        "--repo-root",
+        str(repo_root),
+        "--prompt-file",
+        prompt_file,
+        "--token-summary",
+        token_summary,
+        "--autocommit",
+        "--foreground",
+        "--",
+        *command,
+    ]
+
+    # Don't strip API keys from collector env - it needs them for commit message generation.
+    # The collector strips keys when spawning the actual agent CLI.
+    process = subprocess.Popen(collector_cmd, cwd=repo_root)
+    session.pid = process.pid
+    save_session(DEFAULT_DB_PATH, session)
+    result_code = process.wait()
+
+    # Clean up prompt file
+    os.unlink(prompt_file)
+
+    status = SessionStatus.COMPLETED if result_code == 0 else SessionStatus.ERROR
+    update_session_status(DEFAULT_DB_PATH, session.id, status)
+
+    return result_code
 
 
 def run(
@@ -114,7 +212,6 @@ def run(
     elif auto:
         is_interactive = False
     else:
-        # No flag: use config or default (auto)
         is_interactive = task_is_interactive_default
 
     agent_model = model or (config.agent_model if config else "claude:opus")
@@ -166,99 +263,15 @@ def run(
         typer.echo("\nCopied to clipboard.")
         raise typer.Exit(0)
 
-    db_path = DEFAULT_DB_PATH
-    main_repo = find_main_repo(repo_root) or repo_root
-    run_mode = "interactive" if is_interactive else "auto"
-    session = Session(
-        id=str(uuid.uuid4()),
-        task=task,
-        repo=main_repo,
-        worktree=repo_root,
-        status=SessionStatus.RUNNING,
-        started_at=datetime.now(),
-        pid=os.getpid() if not is_interactive else None,
-        backend=backend,
-        run_mode=run_mode,
-    )
-    save_session(db_path, session)
-
-    prompt = format_prompt(components)
-    prompt_file = _write_prompt_file(prompt)
-
-    # Generate token summary for startup display
-    tree = analyze_components(components)
-    token_summary = tree.format()
-
-    if is_interactive:
-        command = build_model_interactive_command(
-            backend,
-            skip_permissions=skip_permissions,
-            model_variant=model_variant,
-            sandbox_root=repo_root.parent,
-            workdir=repo_root,
-        )
-    else:
-        command = build_model_command(
-            backend,
-            auto=True,
-            stream=True,
-            skip_permissions=skip_permissions,
-            model_variant=model_variant,
-            sandbox_root=repo_root.parent,
-            workdir=repo_root,
-        )
-
-    # For interactive mode, run CLI directly to preserve terminal
-    if is_interactive:
-        typer.echo(f"\033[90m━━━ {task} ━━━\033[0m", err=True)
-        for line in token_summary.split("\n"):
-            typer.echo(f"\033[90m{line}\033[0m", err=True)
-        typer.echo(err=True)
-
-        # Read prompt and clean up file before exec
-        prompt_content = Path(prompt_file).read_text()
-        os.unlink(prompt_file)
-
-        # Remove API keys so CLIs use subscriptions
-        os.environ.pop("ANTHROPIC_API_KEY", None)
-        os.environ.pop("OPENAI_API_KEY", None)
-
-        # Run CLI directly (replaces current process)
-        cmd_with_prompt = command + [prompt_content]
-        os.chdir(repo_root)
-        os.execvp(cmd_with_prompt[0], cmd_with_prompt)
-
-    # For auto mode, use collector for logging
-    collector_cmd = [
-        sys.executable,
-        "-m",
-        "loopflow.maestro.collector",
-        "--session-id",
-        session.id,
-        "--task",
+    result_code = _execute_task(
         task,
-        "--repo-root",
-        str(repo_root),
-        "--prompt-file",
-        prompt_file,
-        "--token-summary",
-        token_summary,
-        "--autocommit",
-        "--foreground",
-        "--",
-        *command,
-    ]
-
-    process = subprocess.Popen(collector_cmd, cwd=repo_root, env=get_model_env())
-    session.pid = process.pid
-    save_session(db_path, session)
-    result_code = process.wait()
-
-    # Clean up prompt file
-    os.unlink(prompt_file)
-
-    status = SessionStatus.COMPLETED if result_code == 0 else SessionStatus.ERROR
-    update_session_status(db_path, session.id, status)
+        repo_root,
+        components,
+        is_interactive,
+        backend,
+        model_variant,
+        skip_permissions,
+    )
 
     if worktree:
         typer.echo(f"\nWorktree: {repo_root}")
@@ -295,13 +308,12 @@ def inline(
 
     config = load_config(repo_root)
 
-    # Determine run mode: default is auto for inline prompts
+    # Determine run mode: inline prompts default to auto
     if interactive:
         is_interactive = True
     elif auto:
         is_interactive = False
     else:
-        # No flag: inline prompts default to auto
         is_interactive = False
 
     agent_model = model or (config.agent_model if config else "claude:opus")
@@ -343,99 +355,15 @@ def inline(
         typer.echo("\nCopied to clipboard.")
         raise typer.Exit(0)
 
-    db_path = DEFAULT_DB_PATH
-    main_repo = find_main_repo(repo_root) or repo_root
-    run_mode = "interactive" if is_interactive else "auto"
-    session = Session(
-        id=str(uuid.uuid4()),
-        task="inline",
-        repo=main_repo,
-        worktree=repo_root,
-        status=SessionStatus.RUNNING,
-        started_at=datetime.now(),
-        pid=os.getpid() if not is_interactive else None,
-        backend=backend,
-        run_mode=run_mode,
-    )
-    save_session(db_path, session)
-
-    prompt_text = format_prompt(components)
-    prompt_file = _write_prompt_file(prompt_text)
-
-    # Generate token summary for startup display
-    tree = analyze_components(components)
-    token_summary = tree.format()
-
-    if is_interactive:
-        command = build_model_interactive_command(
-            backend,
-            skip_permissions=skip_permissions,
-            model_variant=model_variant,
-            sandbox_root=repo_root.parent,
-            workdir=repo_root,
-        )
-    else:
-        command = build_model_command(
-            backend,
-            auto=True,
-            stream=True,
-            skip_permissions=skip_permissions,
-            model_variant=model_variant,
-            sandbox_root=repo_root.parent,
-            workdir=repo_root,
-        )
-
-    # For interactive mode, run CLI directly to preserve terminal
-    if is_interactive:
-        typer.echo(f"\033[90m━━━ inline ━━━\033[0m", err=True)
-        for line in token_summary.split("\n"):
-            typer.echo(f"\033[90m{line}\033[0m", err=True)
-        typer.echo(err=True)
-
-        # Read prompt and clean up file before exec
-        prompt_content = Path(prompt_file).read_text()
-        os.unlink(prompt_file)
-
-        # Remove API keys so CLIs use subscriptions
-        os.environ.pop("ANTHROPIC_API_KEY", None)
-        os.environ.pop("OPENAI_API_KEY", None)
-
-        # Run CLI directly (replaces current process)
-        cmd_with_prompt = command + [prompt_content]
-        os.chdir(repo_root)
-        os.execvp(cmd_with_prompt[0], cmd_with_prompt)
-
-    # For auto mode, use collector for logging
-    collector_cmd = [
-        sys.executable,
-        "-m",
-        "loopflow.maestro.collector",
-        "--session-id",
-        session.id,
-        "--task",
+    result_code = _execute_task(
         "inline",
-        "--repo-root",
-        str(repo_root),
-        "--prompt-file",
-        prompt_file,
-        "--token-summary",
-        token_summary,
-        "--autocommit",
-        "--foreground",
-        "--",
-        *command,
-    ]
-
-    process = subprocess.Popen(collector_cmd, cwd=repo_root, env=get_model_env())
-    session.pid = process.pid
-    save_session(db_path, session)
-    result_code = process.wait()
-
-    # Clean up prompt file
-    os.unlink(prompt_file)
-
-    status = SessionStatus.COMPLETED if result_code == 0 else SessionStatus.ERROR
-    update_session_status(db_path, session.id, status)
+        repo_root,
+        components,
+        is_interactive,
+        backend,
+        model_variant,
+        skip_permissions,
+    )
 
     raise typer.Exit(result_code)
 

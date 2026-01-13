@@ -6,7 +6,14 @@ import typer
 
 from loopflow.context import find_worktree_root
 from loopflow.git import find_main_repo
-from loopflow.maestro.agent import AgentLoopSpec, AgentStatus, OuterLoopConfig, OuterLoopMode
+from loopflow.maestro.agent import (
+    AgentLoopSpec,
+    AgentStatus,
+    AgentTrigger,
+    OuterLoopConfig,
+    OuterLoopMode,
+    TriggerKind,
+)
 from loopflow.maestro.agents import (
     get_agent,
     get_agent_by_name,
@@ -52,12 +59,35 @@ def register(
         "--outer-loop",
         help="Outer loop mode: pr-chain or land-commits",
     ),
+    trigger: str = typer.Option(
+        "always",
+        "-t",
+        "--trigger",
+        help="Trigger condition: always or main-changed",
+    ),
+    continuous: bool = typer.Option(
+        False,
+        "-c",
+        "--continuous",
+        help="Default to continuous mode when starting",
+    ),
+    min_interval: int = typer.Option(
+        60,
+        "--min-interval",
+        help="Minimum seconds between iterations in continuous mode",
+    ),
+    max_daily: int = typer.Option(
+        None,
+        "--max-daily",
+        help="Maximum iterations per day (unlimited if not set)",
+    ),
 ):
     """Register a background agent with a prompt file and pipeline.
 
     Examples:
         lf ops agent register ui-agent -p prompts/ui.md --pipeline design,implement,review
         lf ops agent register docs-agent -p prompts/docs.md --pipeline implement -o pr-chain
+        lf ops agent register watcher -p prompts/watch.md --pipeline review -t main-changed -c
     """
     repo_root = find_worktree_root()
     if not repo_root:
@@ -85,6 +115,14 @@ def register(
         typer.echo("Valid modes: pr-chain, land-commits", err=True)
         raise typer.Exit(1)
 
+    # Parse trigger
+    try:
+        trigger_kind = TriggerKind(trigger)
+    except ValueError:
+        typer.echo(f"Error: Invalid trigger: {trigger}", err=True)
+        typer.echo("Valid triggers: always, main-changed", err=True)
+        raise typer.Exit(1)
+
     # Validate prompt file exists
     prompt_path = Path(prompt)
     if not prompt_path.is_absolute():
@@ -102,12 +140,21 @@ def register(
         pipeline=tasks,
         context=context_list,
         outer_loop=OuterLoopConfig(mode=mode),
+        trigger=AgentTrigger(kind=trigger_kind),
+        continuous=continuous,
+        min_interval_seconds=min_interval,
+        max_iterations_per_day=max_daily,
     )
 
     agent = register_agent(spec)
     typer.echo(f"Registered agent: {name} ({agent.id[:8]})")
     typer.echo(f"  Pipeline: {' → '.join(tasks)}")
     typer.echo(f"  Outer loop: {mode.value}")
+    typer.echo(f"  Trigger: {trigger_kind.value}")
+    if continuous:
+        typer.echo(f"  Continuous: yes (interval: {min_interval}s)")
+    if max_daily:
+        typer.echo(f"  Max daily: {max_daily}")
 
 
 @app.command(name="list")
@@ -134,14 +181,20 @@ def list_cmd():
 def start(
     identifier: str = typer.Argument(help="Agent name or ID prefix"),
     foreground: bool = typer.Option(False, "-f", "--foreground", help="Run in foreground"),
+    continuous: bool = typer.Option(None, "-c", "--continuous", help="Run in continuous mode"),
+    max_iterations: int = typer.Option(None, "-n", "--max-iterations", help="Stop after N iterations"),
+    check_interval: int = typer.Option(300, "--check-interval", help="Seconds between trigger checks"),
 ):
     """Start a registered agent.
 
-    Runs one iteration of the agent's pipeline in a new worktree.
+    By default runs one iteration. Use --continuous to run until stopped.
 
     Examples:
-        lf ops agent start ui-agent
-        lf ops agent start ui-agent -f
+        lf ops agent start ui-agent              # single iteration
+        lf ops agent start ui-agent -c           # continuous mode
+        lf ops agent start ui-agent -c -n 5      # 5 iterations then stop
+        lf ops agent start ui-agent -f           # foreground (single)
+        lf ops agent start ui-agent -c -f        # continuous + foreground
     """
     repo_root = find_worktree_root()
     if not repo_root:
@@ -155,13 +208,26 @@ def start(
         typer.echo(f"Error: Agent not found: {identifier}", err=True)
         raise typer.Exit(1)
 
-    if agent.status == AgentStatus.RUNNING:
+    if agent.status in (AgentStatus.RUNNING, AgentStatus.WAITING):
         typer.echo(f"Agent {agent.spec.name} is already running", err=True)
         raise typer.Exit(1)
 
-    typer.echo(f"Starting agent: {agent.spec.name}")
+    # Use agent's default continuous setting if not specified
+    use_continuous = continuous if continuous is not None else agent.spec.continuous
 
-    success = start_agent(agent.id, main_repo, background=not foreground)
+    typer.echo(f"Starting agent: {agent.spec.name}")
+    if use_continuous:
+        typer.echo(f"  Mode: continuous")
+        typer.echo(f"  Trigger: {agent.spec.trigger.kind.value}")
+
+    success = start_agent(
+        agent.id,
+        main_repo,
+        background=not foreground,
+        continuous=use_continuous,
+        max_iterations=max_iterations,
+        check_interval=check_interval,
+    )
     if success:
         if not foreground:
             typer.echo(f"Agent started in background")
@@ -184,7 +250,7 @@ def stop(
         typer.echo(f"Error: Agent not found: {identifier}", err=True)
         raise typer.Exit(1)
 
-    if agent.status != AgentStatus.RUNNING:
+    if agent.status not in (AgentStatus.RUNNING, AgentStatus.WAITING):
         typer.echo(f"Agent {agent.spec.name} is not running")
         raise typer.Exit(0)
 
@@ -238,6 +304,12 @@ def show(
     typer.echo(f"  Prompt: {agent.spec.prompt_path}")
     typer.echo(f"  Pipeline: {' → '.join(agent.spec.pipeline)}")
     typer.echo(f"  Outer loop: {agent.spec.outer_loop.mode.value}")
+    typer.echo(f"  Trigger: {agent.spec.trigger.kind.value}")
+    typer.echo(f"  Continuous: {'yes' if agent.spec.continuous else 'no'}")
+    if agent.spec.continuous:
+        typer.echo(f"  Min interval: {agent.spec.min_interval_seconds}s")
+    if agent.spec.max_iterations_per_day:
+        typer.echo(f"  Max daily: {agent.spec.max_iterations_per_day}")
     typer.echo(f"  Iterations: {agent.iteration}")
     if agent.spec.context:
         typer.echo(f"  Context: {', '.join(agent.spec.context)}")

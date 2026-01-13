@@ -25,7 +25,11 @@ from loopflow.maestro.db import (
     save_agent,
     update_agent_status,
 )
-from loopflow.maestro.runner import run_agent_iteration, stop_agent as _stop_agent
+from loopflow.maestro.runner import (
+    run_agent_continuous,
+    run_agent_iteration,
+    stop_agent as _stop_agent,
+)
 
 
 def _is_process_running(pid: int) -> bool:
@@ -79,10 +83,20 @@ def start_agent(
     agent_id: str,
     repo_root: Path,
     background: bool = True,
+    continuous: bool = False,
+    max_iterations: int | None = None,
+    check_interval: int = 300,
 ) -> bool:
     """Start an agent running.
 
-    If background=True, spawns a subprocess. Otherwise runs in foreground.
+    Args:
+        agent_id: ID of the agent to start
+        repo_root: Repository root path
+        background: If True, spawns a subprocess. Otherwise runs in foreground.
+        continuous: If True, runs in continuous mode (multiple iterations).
+        max_iterations: Stop after this many iterations (None for unlimited).
+        check_interval: Seconds between trigger checks in continuous mode.
+
     Returns True if agent was started.
     """
     agent = load_agent(DEFAULT_DB_PATH, agent_id)
@@ -101,17 +115,25 @@ def start_agent(
         log_dir = get_log_dir(repo_root)
         log_path = log_dir / f"agent-{agent.spec.name}.log"
 
+        cmd = [
+            sys.executable,
+            "-m",
+            "loopflow.maestro.agent_runner",
+            "--agent-id",
+            agent_id,
+            "--repo-root",
+            str(repo_root),
+        ]
+        if continuous:
+            cmd.append("--continuous")
+        if max_iterations is not None:
+            cmd.extend(["--max-iterations", str(max_iterations)])
+        if check_interval != 300:
+            cmd.extend(["--check-interval", str(check_interval)])
+
         with log_path.open("a") as log_file:
             process = subprocess.Popen(
-                [
-                    sys.executable,
-                    "-m",
-                    "loopflow.maestro.agent_runner",
-                    "--agent-id",
-                    agent_id,
-                    "--repo-root",
-                    str(repo_root),
-                ],
+                cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=log_file,
                 start_new_session=True,
@@ -140,7 +162,15 @@ def start_agent(
             pid=os.getpid(),
         )
         try:
-            exit_code = run_agent_iteration(agent, repo_root, foreground=True)
+            if continuous:
+                exit_code = run_agent_continuous(
+                    agent,
+                    repo_root,
+                    check_interval=check_interval,
+                    max_iterations=max_iterations,
+                )
+            else:
+                exit_code = run_agent_iteration(agent, repo_root, foreground=True)
             return exit_code == 0
         finally:
             update_agent_status(DEFAULT_DB_PATH, agent_id, AgentStatus.IDLE)

@@ -19,7 +19,32 @@ class OuterLoopMode(Enum):
 class AgentStatus(Enum):
     IDLE = "idle"
     RUNNING = "running"
+    WAITING = "waiting"  # In continuous mode, waiting for trigger
     ERROR = "error"
+    STOPPED = "stopped"  # Explicitly stopped by user
+
+
+class TriggerKind(Enum):
+    ALWAYS = "always"
+    MAIN_CHANGED = "main-changed"
+
+
+@dataclass
+class AgentTrigger:
+    """Condition that triggers an agent iteration."""
+
+    kind: TriggerKind = TriggerKind.ALWAYS
+    config: dict = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        return {"kind": self.kind.value, "config": self.config}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "AgentTrigger":
+        return cls(
+            kind=TriggerKind(data.get("kind", "always")),
+            config=data.get("config", {}),
+        )
 
 
 @dataclass
@@ -47,6 +72,10 @@ class AgentLoopSpec:
     outer_loop: OuterLoopConfig = field(
         default_factory=lambda: OuterLoopConfig(mode=OuterLoopMode.LAND_COMMITS)
     )
+    trigger: AgentTrigger = field(default_factory=AgentTrigger)
+    continuous: bool = False
+    min_interval_seconds: int = 60
+    max_iterations_per_day: int | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -55,16 +84,26 @@ class AgentLoopSpec:
             "pipeline": self.pipeline,
             "context": self.context,
             "outer_loop": self.outer_loop.to_dict(),
+            "trigger": self.trigger.to_dict(),
+            "continuous": self.continuous,
+            "min_interval_seconds": self.min_interval_seconds,
+            "max_iterations_per_day": self.max_iterations_per_day,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "AgentLoopSpec":
+        trigger_data = data.get("trigger")
+        trigger = AgentTrigger.from_dict(trigger_data) if trigger_data else AgentTrigger()
         return cls(
             name=data["name"],
             prompt_path=Path(data["prompt_path"]),
             pipeline=data["pipeline"],
             context=data.get("context", []),
             outer_loop=OuterLoopConfig.from_dict(data["outer_loop"]),
+            trigger=trigger,
+            continuous=data.get("continuous", False),
+            min_interval_seconds=data.get("min_interval_seconds", 60),
+            max_iterations_per_day=data.get("max_iterations_per_day"),
         )
 
 

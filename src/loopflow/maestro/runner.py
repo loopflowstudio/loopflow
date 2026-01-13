@@ -1,15 +1,18 @@
 """Agent loop runner.
 
 Executes a registered agent's pipeline with prompt injection and outer loop handling.
+Supports both single-iteration and continuous modes.
 """
 
 import os
 import signal
 import subprocess
 import sys
+import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+
 from loopflow.config import load_config, parse_model
 from loopflow.context import PromptComponents, gather_prompt_components, format_prompt
 from loopflow.git import find_main_repo, get_current_branch
@@ -22,6 +25,7 @@ from loopflow.maestro.agent import (
     AgentStatus,
     OuterLoopMode,
     RegisteredAgent,
+    TriggerKind,
 )
 from loopflow.maestro.db import (
     DEFAULT_DB_PATH,
@@ -32,6 +36,159 @@ from loopflow.maestro.db import (
     update_session_status,
 )
 from loopflow.worktrees import WorktreeError, create as create_worktree
+
+
+# Shutdown flag for continuous mode
+_shutdown_requested = False
+
+
+def _get_main_head(repo_root: Path) -> str | None:
+    """Get the current HEAD sha of main branch."""
+    result = subprocess.run(
+        ["git", "rev-parse", "origin/main"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def _should_run(agent: RegisteredAgent, repo_root: Path, last_main_sha: str | None) -> tuple[bool, str | None]:
+    """Check if agent should run based on its trigger.
+
+    Returns (should_run, new_main_sha).
+    """
+    trigger = agent.spec.trigger
+
+    if trigger.kind == TriggerKind.ALWAYS:
+        return True, last_main_sha
+
+    if trigger.kind == TriggerKind.MAIN_CHANGED:
+        # Fetch latest from origin
+        subprocess.run(
+            ["git", "fetch", "origin", "main"],
+            cwd=repo_root,
+            capture_output=True,
+        )
+        current_sha = _get_main_head(repo_root)
+        if current_sha and current_sha != last_main_sha:
+            return True, current_sha
+        return False, last_main_sha
+
+    return False, last_main_sha
+
+
+def _count_today_iterations(agent: RegisteredAgent) -> int:
+    """Count iterations run today for rate limiting."""
+    # For now, use the iteration counter. In a more complete implementation,
+    # we would track daily counts in the database.
+    # This is a simplification that resets on agent restart.
+    return 0
+
+
+def run_agent_continuous(
+    agent: RegisteredAgent,
+    repo_root: Path,
+    check_interval: int = 300,
+    max_iterations: int | None = None,
+) -> int:
+    """Run agent continuously until stopped.
+
+    Args:
+        agent: The agent to run
+        repo_root: Repository root path
+        check_interval: Seconds between trigger checks (default 5 minutes)
+        max_iterations: Stop after this many iterations (None for unlimited)
+
+    Returns exit code (0 for normal shutdown).
+    """
+    global _shutdown_requested
+    _shutdown_requested = False
+
+    def _handle_shutdown(signum, frame):
+        global _shutdown_requested
+        _shutdown_requested = True
+        print(f"\nAgent {agent.spec.name} received shutdown signal, stopping after current iteration...")
+
+    signal.signal(signal.SIGTERM, _handle_shutdown)
+    signal.signal(signal.SIGINT, _handle_shutdown)
+
+    main_repo = find_main_repo(repo_root) or repo_root
+    iterations = 0
+    consecutive_failures = 0
+    last_main_sha = _get_main_head(main_repo)
+    today_iterations = 0
+
+    print(f"Agent {agent.spec.name} starting in continuous mode")
+    print(f"  Trigger: {agent.spec.trigger.kind.value}")
+    print(f"  Check interval: {check_interval}s")
+    if max_iterations:
+        print(f"  Max iterations: {max_iterations}")
+
+    while not _shutdown_requested:
+        # Check daily rate limit
+        if agent.spec.max_iterations_per_day:
+            if today_iterations >= agent.spec.max_iterations_per_day:
+                print(f"Daily limit reached ({agent.spec.max_iterations_per_day}), waiting until tomorrow...")
+                update_agent_status(DEFAULT_DB_PATH, agent.id, AgentStatus.WAITING)
+                time.sleep(3600)  # Check again in an hour
+                continue
+
+        # Check trigger condition
+        should_run, new_sha = _should_run(agent, main_repo, last_main_sha)
+        last_main_sha = new_sha
+
+        if not should_run:
+            update_agent_status(DEFAULT_DB_PATH, agent.id, AgentStatus.WAITING)
+            time.sleep(check_interval)
+            continue
+
+        # Reload agent to get latest state
+        agent = load_agent(DEFAULT_DB_PATH, agent.id)
+        if not agent or agent.status == AgentStatus.STOPPED:
+            break
+
+        # Run one iteration
+        print(f"\n{'='*60}")
+        print(f"Starting iteration {iterations + 1}")
+        print(f"{'='*60}\n")
+
+        exit_code = run_agent_iteration(agent, main_repo, foreground=True)
+        iterations += 1
+        today_iterations += 1
+
+        if exit_code != 0:
+            consecutive_failures += 1
+            print(f"Iteration failed (exit code {exit_code}), failure #{consecutive_failures}")
+
+            # Back off on repeated failures
+            if consecutive_failures >= 3:
+                print("Too many consecutive failures, stopping agent")
+                update_agent_status(DEFAULT_DB_PATH, agent.id, AgentStatus.ERROR)
+                return exit_code
+
+            backoff = min(check_interval * (2 ** consecutive_failures), 3600)
+            print(f"Backing off for {backoff}s...")
+            time.sleep(backoff)
+            continue
+
+        # Reset failure counter on success
+        consecutive_failures = 0
+
+        if max_iterations and iterations >= max_iterations:
+            print(f"Reached max iterations ({max_iterations}), stopping")
+            break
+
+        # Respect minimum interval
+        min_interval = agent.spec.min_interval_seconds
+        print(f"Iteration complete, waiting {min_interval}s before next check...")
+        time.sleep(min_interval)
+
+    update_agent_status(DEFAULT_DB_PATH, agent.id, AgentStatus.IDLE)
+    print(f"\nAgent {agent.spec.name} stopped after {iterations} iterations")
+    return 0
 
 
 def _read_agent_prompt(spec: AgentLoopSpec, repo_root: Path) -> str:
@@ -329,12 +486,12 @@ def _handle_land_commits(worktree_path: Path) -> int:
 
 
 def stop_agent(agent_id: str) -> bool:
-    """Stop a running agent by its ID."""
+    """Stop a running or waiting agent by its ID."""
     agent = load_agent(DEFAULT_DB_PATH, agent_id)
     if not agent:
         return False
 
-    if agent.status != AgentStatus.RUNNING:
+    if agent.status not in (AgentStatus.RUNNING, AgentStatus.WAITING):
         return False
 
     if agent.pid:
@@ -343,5 +500,5 @@ def stop_agent(agent_id: str) -> bool:
         except OSError:
             pass
 
-    update_agent_status(DEFAULT_DB_PATH, agent_id, AgentStatus.IDLE)
+    update_agent_status(DEFAULT_DB_PATH, agent_id, AgentStatus.STOPPED)
     return True

@@ -161,49 +161,38 @@ def _generate_message_via_cli(repo_root: Path, prompt: str) -> CommitMessage:
     return _parse_cli_message(output)
 
 
+def _generate_message(repo_root: Path, prompt: str, action: str) -> CommitMessage:
+    """Generate a message via API, falling back to CLI on failure."""
+    agent = Agent(_COMMIT_MODEL, output_type=CommitMessage)
+    try:
+        result = agent.run_sync(prompt)
+        _log_success(action, "API")
+        return result.output
+    except Exception as e:
+        _log_api_failure(action, e)
+        cli_prompt = prompt + "\n\nReturn JSON with keys: title, body. No extra text."
+        try:
+            message = _generate_message_via_cli(repo_root, cli_prompt)
+            _log_success(action, "CLI")
+            return message
+        except Exception as cli_error:
+            _log_cli_failure(action, cli_error)
+            raise
+
+
 def generate_commit_message(repo_root: Path) -> CommitMessage:
     """Generate commit message for staged changes."""
     diff = _get_staged_diff(repo_root)
     task_prompt = _load_prompt(repo_root, "COMMIT_MESSAGE.md", "commit_message")
     prompt = _build_message_prompt(repo_root, diff, task_prompt)
-
-    agent = Agent(_COMMIT_MODEL, output_type=CommitMessage)
-    try:
-        result = agent.run_sync(prompt)
-        _log_success("commit message", "API")
-        return result.output
-    except Exception as e:
-        _log_api_failure("commit message", e)
-        cli_prompt = prompt + "\n\nReturn JSON with keys: title, body. No extra text."
-        try:
-            message = _generate_message_via_cli(repo_root, cli_prompt)
-            _log_success("commit message", "CLI")
-            return message
-        except Exception as cli_error:
-            _log_cli_failure("commit message", cli_error)
-            raise
+    return _generate_message(repo_root, prompt, "commit message")
 
 
 def generate_commit_message_from_diff(repo_root: Path, diff: str | None) -> CommitMessage:
     """Generate commit message for a provided diff."""
     task_prompt = _load_prompt(repo_root, "COMMIT_MESSAGE.md", "commit_message")
     prompt = _build_message_prompt(repo_root, diff, task_prompt)
-
-    agent = Agent(_COMMIT_MODEL, output_type=CommitMessage)
-    try:
-        result = agent.run_sync(prompt)
-        _log_success("commit message", "API")
-        return result.output
-    except Exception as e:
-        _log_api_failure("commit message", e)
-        cli_prompt = prompt + "\n\nReturn JSON with keys: title, body. No extra text."
-        try:
-            message = _generate_message_via_cli(repo_root, cli_prompt)
-            _log_success("commit message", "CLI")
-            return message
-        except Exception as cli_error:
-            _log_cli_failure("commit message", cli_error)
-            raise
+    return _generate_message(repo_root, prompt, "commit message")
 
 
 def generate_pr_message(repo_root: Path) -> CommitMessage:
@@ -211,19 +200,4 @@ def generate_pr_message(repo_root: Path) -> CommitMessage:
     diff = gather_diff(repo_root)
     task_prompt = _load_prompt(repo_root, "CHECKPOINT_MESSAGE.md", "pr_message")
     prompt = _build_message_prompt(repo_root, diff, task_prompt)
-
-    agent = Agent(_COMMIT_MODEL, output_type=CommitMessage)
-    try:
-        result = agent.run_sync(prompt)
-        _log_success("pr message", "API")
-        return result.output
-    except Exception as e:
-        _log_api_failure("pr message", e)
-        cli_prompt = prompt + "\n\nReturn JSON with keys: title, body. No extra text."
-        try:
-            message = _generate_message_via_cli(repo_root, cli_prompt)
-            _log_success("pr message", "CLI")
-            return message
-        except Exception as cli_error:
-            _log_cli_failure("pr message", cli_error)
-            raise
+    return _generate_message(repo_root, prompt, "pr message")

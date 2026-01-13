@@ -16,7 +16,7 @@ macOS only. Supports Claude Code and OpenAI Codex via configuration.
 
 ```bash
 pip install loopflow
-lf meta install    # installs Claude Code + worktrunk
+lf ops install    # installs Claude Code + worktrunk
 ```
 
 ## Why Worktrees?
@@ -96,14 +96,14 @@ wt remove auth                # remove worktree + branch
 Track running tasks across multiple terminals (maestro is optional):
 
 ```bash
-lf maestro start              # optional web UI (tails logs)
-lf status                     # show running sessions (reads SQLite)
+lf ops maestro start              # optional web UI (tails logs)
+lf ops status                     # show running sessions (reads SQLite)
 
 # In another terminal
 lf implement                  # auto mode task registers automatically
 
 # Check from anywhere
-lf status                     # see all running sessions
+lf ops status                     # see all running sessions
 ```
 
 Sessions write to SQLite in auto mode; the maestro UI reads the same database.
@@ -160,14 +160,14 @@ lf implement &         # background (shell handles it)
 | `lf <task>` | Run a task from `.lf/` |
 | `lf <pipeline>` | Run a pipeline |
 | `lf : "prompt"` | Inline prompt |
-| `lf compare a b` | Compare two worktree implementations |
+| `lf ops compare a b` | Compare two worktree implementations |
 | `wt <subcommand>` | Worktree management (worktrunk) |
-| `lf pr create` | Open GitHub PR |
-| `lf pr land [-a]` | Squash-merge to main |
-| `lf land [--no-pr] [--force] [--base]` | Land locally via worktrunk |
-| `lf meta init` | Initialize repo with prompts and config |
-| `lf meta install` | Install Claude Code |
-| `lf meta doctor` | Check dependencies |
-| `lf maestro start` | Start session tracking daemon |
-| `lf maestro stop` | Stop session tracking daemon |
-| `lf status` | Show running sessions |
+| `lf ops pr create` | Open GitHub PR |
+| `lf ops pr land [-a]` | Squash-merge to main |
+| `lf ops land [--no-pr] [--force] [--base]` | Land locally via worktrunk |
+| `lf ops init` | Initialize repo with prompts and config |
+| `lf ops install` | Install Claude Code |
+| `lf ops doctor` | Check dependencies |
+| `lf ops maestro start` | Start session tracking daemon |
+| `lf ops maestro stop` | Stop session tracking daemon |
+| `lf ops status` | Show running sessions |

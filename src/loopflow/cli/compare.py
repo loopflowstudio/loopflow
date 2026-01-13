@@ -111,9 +111,9 @@ def compare(
     The analysis is written to a markdown file in the current directory.
 
     Examples:
-        lf compare impl-claude impl-codex
-        lf compare feature-a feature-b -p
-        lf compare auth-v1 auth-v2 -o comparison.md
+        lf ops compare impl-claude impl-codex
+        lf ops compare feature-a feature-b -p
+        lf ops compare auth-v1 auth-v2 -o comparison.md
     """
     # Find main repo
     main_repo = find_main_repo()

@@ -1,6 +1,6 @@
 """Builtin prompts for loopflow commands.
 
-These are prompts used by loopflow's own commands (lf pr create, etc.),
+These are prompts used by loopflow's own commands (lf ops pr create, etc.),
 not user-defined tasks in .lf/.
 """
 

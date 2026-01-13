@@ -231,7 +231,7 @@ def land(
         text=True,
     )
     if result.returncode != 0:
-        typer.echo("Error: No PR found. Run 'lf pr create' first.", err=True)
+        typer.echo("Error: No PR found. Run 'lf ops pr create' first.", err=True)
         raise typer.Exit(1)
 
     pr_data = json.loads(result.stdout)

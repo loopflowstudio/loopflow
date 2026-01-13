@@ -104,7 +104,7 @@ def test_create_worktree_missing_wt_raises(tmp_path):
     with patch("loopflow.worktrees.list_all") as mock_list:
         mock_list.return_value = []
         with patch("subprocess.run", side_effect=FileNotFoundError()):
-            with pytest.raises(WorktreeError, match="lf meta install"):
+            with pytest.raises(WorktreeError, match="lf ops install"):
                 create(repo_root, "feature")
 
 

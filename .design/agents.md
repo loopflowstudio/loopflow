@@ -69,7 +69,8 @@ CREATE TABLE agent_runs (
     pid INTEGER,
     worktree TEXT,         -- which worktree it created/used
     iteration INTEGER DEFAULT 0,
-    error TEXT
+    error TEXT,
+    main_sha TEXT          -- for main-changed trigger tracking
 );
 
 CREATE INDEX idx_agent_runs_name ON agent_runs(agent_name);
@@ -189,19 +190,21 @@ Maestro app shows agents in sidebar:
 - Need to be open for agents to work
 - Manage daemon lifecycle (that's launchd's job)
 
-## Module Rename
+## Code Layout
 
 ```
 src/loopflow/
-├── maestro/     →  agents/       # Rename: it's about agents
-│   ├── agent.py     → models.py  # Agent, AgentRun dataclasses
-│   ├── agents.py    → api.py     # Public API: list, start, stop
-│   ├── daemon.py                 # Daemon loop
-│   ├── runner.py                 # Single agent run logic
-│   ├── triggers.py               # Trigger evaluation
-│   └── db.py                     # Runtime state DB
+├── maestro/
+│   ├── agent.py                 # Agent dataclasses, TriggerKind enum
+│   ├── agents.py                # Public API: list, start, stop
+│   ├── daemon.py                # Daemon loop (monitors triggers)
+│   ├── db.py                    # SQLite (sessions + agent_runs tables)
+│   ├── launchd.py               # launchd plist management
+│   ├── markdown.py              # Parse agent .md files
+│   ├── runner.py                # Single agent run logic
+│   └── triggers.py              # Trigger evaluation
 ├── cli/
-│   └── agent.py                  # CLI commands
+│   └── agent.py                 # CLI commands
 ```
 
 ## App-Managed Daemon
@@ -242,14 +245,6 @@ Or if `lf` is installed via Homebrew/pipx, use that path instead.
 **Preferences:**
 - [ ] Run background agents (toggle to unload daemon)
 - [ ] Start at login (toggle RunAtLoad in plist)
-
-## Migration Path
-
-1. Rename `loopflow/maestro/` → `loopflow/agents/`
-2. Move agent definitions to markdown files (frontmatter + prompt body)
-3. Simplify DB to runtime state only
-4. Add daemon with launchd integration
-5. Update Swift app to read new format
 
 ## Done When
 

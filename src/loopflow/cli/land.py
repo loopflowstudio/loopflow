@@ -79,10 +79,6 @@ def _ensure_clean(repo_root: Path) -> None:
         raise typer.Exit(1)
 
 
-def _clear_design_artifacts(repo_root: Path) -> bool:
-    return clear_design_artifacts(repo_root)
-
-
 def _squash_commits(repo_root: Path, base_ref: str, commit_msg: str) -> None:
     original_head = subprocess.run(
         ["git", "rev-parse", "HEAD"],
@@ -185,7 +181,7 @@ def land(
             )
             raise typer.Exit(1)
     else:
-        _clear_design_artifacts(repo_root)
+        clear_design_artifacts(repo_root)
 
     base_ref = _resolve_base_ref(repo_root, base_branch)
     diff = _get_diff(repo_root, base_ref)

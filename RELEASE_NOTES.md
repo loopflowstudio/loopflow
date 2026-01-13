@@ -1,8 +1,7 @@
-# v0.5.0
+# v0.5.1
 
-This release adds comprehensive documentation for agent orchestration workflows and Claude Code/Codex API reference materials.
+Clarifies version bump semantics in the publish command documentation, making the default (patch) explicit.
 
 ## Changes
 
-- Add agent orchestration and workflow documentation
-- Add Claude Code and Codex API reference materials
+- Update publish command to clarify version bump defaults (patch by default, minor for substantial releases)

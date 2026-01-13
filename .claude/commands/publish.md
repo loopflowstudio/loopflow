@@ -10,13 +10,25 @@ lf publish major     # major bump: 0.9.0 → 1.0.0 (explicit full version bump o
 
 Execute these steps in order. Stop if any step fails.
 
-### 1. Run tests
+### 1. Create release worktree
+
+All changes—including version bumps—must happen on a branch, then merge to main. Create a worktree for the release:
+
+```bash
+wt switch --create release-vX.Y.Z
+```
+
+Use the version you'll be releasing (determined in step 3).
+
+### 2. Run tests
+
 ```bash
 uv run pytest tests/
 ```
+
 If tests fail, stop and report which tests failed. Do not publish broken code.
 
-### 2. Determine version bump
+### 3. Determine version bump
 
 Read current version from `src/loopflow/__init__.py`. Then:
 
@@ -33,13 +45,15 @@ Calculate new version (X.Y.Z):
 
 **Default to patch.** Most releases are small iterations. Minor bumps are for fairly substantial releases with significant new functionality. Major bumps require explicit user request.
 
-### 3. Update version
+### 4. Update version
+
 Edit `src/loopflow/__init__.py`:
 ```python
 __version__ = "X.Y.Z"
 ```
 
-### 4. Generate release notes
+### 5. Generate release notes
+
 Write `RELEASE_NOTES.md` (overwrite if exists):
 ```markdown
 # vX.Y.Z
@@ -56,32 +70,66 @@ Write `RELEASE_NOTES.md` (overwrite if exists):
 <if major bump, list what breaks>
 ```
 
-### 5. Build and publish
+### 6. Commit and merge to main
+
+Commit the version bump and release notes:
+```bash
+git add src/loopflow/__init__.py RELEASE_NOTES.md
+git commit -m "release: vX.Y.Z"
+git push -u origin HEAD
+```
+
+Merge to main using worktrunk:
+```bash
+wt land
+```
+
+### 7. Verify publish readiness
+
+Switch to main and verify state using the publish helper:
+```bash
+cd /path/to/main/repo  # or wt switch main
+uv run python -m loopflow.publish
+```
+
+This checks:
+- On main branch
+- Main is synced with origin/main
+- No uncommitted changes
+
+**Do not proceed unless the script reports "Ready to publish."**
+
+### 8. Build and publish from main
+
+Build and publish the package:
 ```bash
 uv build
 uv publish
 ```
+
 Requires `UV_PUBLISH_TOKEN` env var or `~/.pypirc` credentials.
 
-### 6. Install locally
+### 9. Install locally
+
 ```bash
 uv tool install --force loopflow
 ```
 
-### 7. Commit and tag
+### 10. Tag and push
+
 ```bash
-git add src/loopflow/__init__.py RELEASE_NOTES.md
-git commit -m "release: vX.Y.Z"
 git tag vX.Y.Z
-git push && git push --tags
+git push --tags
 ```
 
 ## If something fails
 
 - **Test failures:** Stop immediately. Report which tests failed.
+- **Merge conflicts:** Resolve in the release worktree before landing.
 - **Build failures:** Check `pyproject.toml`. Common issue: missing file in `[tool.hatch.build]`.
 - **Publish failures:** Check `UV_PUBLISH_TOKEN`. May need to generate new token at pypi.org.
-- **Don't leave partial state.** If publish fails, revert the version bump before stopping.
+- **"Not ready" from publish script:** Follow the message to fix (sync main, commit changes, etc.)
+- **Don't leave partial state.** If publish fails after version bump, you may need to manually increment again.
 
 ## Output
 
@@ -92,4 +140,3 @@ Report each step as it completes. End with:
 ## Auto mode
 
 In auto/headless runs, do not pause to ask questions. Make the best assumption you can and append any open questions to `.design/questions.md`.
-

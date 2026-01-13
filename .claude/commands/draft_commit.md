@@ -1,17 +1,22 @@
+---
+requires: changes to commit
+produces: .lf/COMMIT
+---
 Draft a commit message for landing this branch.
 
-## Workflow
+You're writing for someone who sees this in `git log` or `git blame` and needs to understand intent without reading the diff. Outcome over process. Why over what. Searchable words someone would grep for.
+
+## Input
 
 ```bash
-# 1. See commit history on this branch
-git log main..HEAD --oneline
-
-# 2. See all changes
 git diff main...HEAD --stat
-git diff main...HEAD
 ```
 
-Read the changes and write a commit message to `.lf/COMMIT`.
+**If no diff:** Stop. Nothing to commit.
+
+**If on main:** Stop. This prompt is for feature branches.
+
+**If diff exists:** Read it and write a commit message to `.lf/COMMIT`.
 
 ## Commit message format
 
@@ -45,17 +50,14 @@ Both prompts now direct agents to focus on code touched by the current
 branch rather than generic improvements across the codebase.
 ```
 
-## What NOT to do
+## Common mistakes
 
-- Don't list individual commits. Summarize the branch's overall change.
-- Don't add "Generated with Claude" or co-author footers.
-- Don't use imperative mood in the body ("Add X" → "X now works").
+- **Describing the diff** — The diff shows what changed. Explain why it matters.
+- **Listing commits** — Summarize the branch's outcome, not its history.
+- **Process language** — "Refactored X to use Y" → "X now does Y"
+- **Co-author footers** — Don't add "Generated with Claude" or similar.
 
 ## Output
 
 Write the commit message to `.lf/COMMIT`. Tell the user to review it and run `lf ops land` when ready.
-
-## Auto mode
-
-In auto/headless runs, do not pause to ask questions. Make the best assumption you can and append any open questions to `.design/questions.md`.
 

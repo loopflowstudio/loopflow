@@ -115,7 +115,7 @@ def test_gather_task_prefers_lf_extension(temp_repo):
     (lf / "test.txt").write_text("Task from .txt file\n")
 
     result = gather_task(temp_repo, "test")
-    assert result == "Task from .lf file\n"
+    assert result.content == "Task from .lf file\n"
 
 
 def test_gather_task_prefers_md_over_other_extensions(temp_repo):
@@ -125,7 +125,7 @@ def test_gather_task_prefers_md_over_other_extensions(temp_repo):
     (lf / "test.txt").write_text("Task from .txt file\n")
 
     result = gather_task(temp_repo, "test")
-    assert result == "Task from .md file\n"
+    assert result.content == "Task from .md file\n"
 
 
 def test_gather_task_accepts_other_extensions(temp_repo):
@@ -134,7 +134,7 @@ def test_gather_task_accepts_other_extensions(temp_repo):
     (lf / "test.txt").write_text("Task from .txt file\n")
 
     result = gather_task(temp_repo, "test")
-    assert result == "Task from .txt file\n"
+    assert result.content == "Task from .txt file\n"
 
 
 def test_gather_task_accepts_bare_name(temp_repo):
@@ -143,7 +143,7 @@ def test_gather_task_accepts_bare_name(temp_repo):
     (lf / "test").write_text("Task from bare file\n")
 
     result = gather_task(temp_repo, "test")
-    assert result == "Task from bare file\n"
+    assert result.content == "Task from bare file\n"
 
 
 def test_gather_task_returns_none_when_missing(temp_repo):

@@ -1,4 +1,11 @@
+---
+produces: rebased branch (or no-op if up-to-date)
+---
 Rebase this branch onto main.
+
+## Goal
+
+Keep the branch current so merging is painless later. A clean rebase now prevents painful conflict resolution during landing. If conflicts are complex, abort and let the human decide—don't silently make the wrong choice about which code to keep.
 
 ## Workflow
 
@@ -51,8 +58,4 @@ git rebase --abort
 ```
 
 Then note what went wrong in `.design/questions.md` and stop.
-
-## Auto mode
-
-In auto/headless runs, do not pause to ask questions. Make the best assumption you can and append any open questions to `.design/questions.md`.
 

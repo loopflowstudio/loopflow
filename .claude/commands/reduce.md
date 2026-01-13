@@ -1,4 +1,12 @@
+---
+requires: diff vs main
+produces: simplified code
+---
 Simplify code touched by this branch while preserving user behavior.
+
+## Goal
+
+One focused simplification, then stop. The human can run you again (`reduce → reduce → reduce`) until the code is clean. Delete or simplify, verify tests pass. The best reduction is code that doesn't exist anymore.
 
 Focus on trimming complexity within files this branch has already modified. Don't refactor unrelated code.
 
@@ -38,6 +46,3 @@ Focus on trimming complexity within files this branch has already modified. Don'
 
 Make the simplification directly. Run tests to verify. Note any assumptions in `.design/questions.md`.
 
-## Auto mode
-
-In auto/headless runs, do not pause to ask questions. Make the best assumption you can and append any open questions to `.design/questions.md`.

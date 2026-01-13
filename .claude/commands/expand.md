@@ -1,4 +1,12 @@
+---
+requires: diff vs main
+produces: .design/<expansion>.md
+---
 Explore ambitious changes that extend what this branch is already doing.
+
+## Goal
+
+Sketch a possibility for the human to evaluate. Write a design doc they can read, edit, pursue, or discard. Don't over-commit—this is exploration. If the idea is good, it becomes its own branch. If not, delete the doc and move on.
 
 This is for bigger swings—but grounded in the current work. Look at what this branch changes, then ask: what's the natural next step that would multiply the value?
 
@@ -36,8 +44,4 @@ When expanding, stay aligned with these principles:
 **Abstraction layers.** If you're tempted to add a plugin system, registry pattern, or config-driven dispatch, that's a sign to stop and reconsider.
 
 **Trend-chasing.** The project should be better at being itself, not more like whatever's popular this month.
-
-## Auto mode
-
-In auto/headless runs, do not pause to ask questions. Make the best assumption you can and append any open questions to `.design/questions.md`.
 

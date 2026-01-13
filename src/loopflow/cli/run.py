@@ -11,7 +11,8 @@ from typing import Optional
 import typer
 
 from loopflow.config import load_config, parse_model
-from loopflow.context import find_worktree_root, gather_prompt_components, format_prompt, PromptComponents
+from loopflow.context import find_worktree_root, gather_prompt_components, gather_task, format_prompt, PromptComponents
+from loopflow.frontmatter import resolve_task_config, TaskConfig
 from loopflow.git import find_main_repo
 from loopflow.launcher import (
     build_model_command,
@@ -209,19 +210,32 @@ def run(
 
     config = load_config(repo_root)
 
-    # Determine run mode: default is auto unless task is in interactive list
-    task_is_interactive_default = config and task in config.interactive
+    if worktree:
+        try:
+            worktree_path = create(repo_root, worktree)
+        except WorktreeError as e:
+            typer.echo(f"Error: {e}", err=True)
+            raise typer.Exit(1)
+        repo_root = worktree_path
+        config = load_config(repo_root)
 
-    # Flags override config defaults
-    if interactive:
-        is_interactive = True
-    elif auto:
-        is_interactive = False
-    else:
-        is_interactive = task_is_interactive_default
+    # Gather task file to get frontmatter config
+    task_file = gather_task(repo_root, task)
+    frontmatter = task_file.config if task_file else TaskConfig()
 
-    agent_model = model or (config.agent_model if config else "claude:opus")
-    backend, model_variant = parse_model(agent_model)
+    # Resolve config: CLI > frontmatter > global > defaults
+    resolved = resolve_task_config(
+        task_name=task,
+        global_config=config,
+        frontmatter=frontmatter,
+        cli_interactive=True if interactive else None,
+        cli_auto=True if auto else None,
+        cli_model=model,
+        cli_context=list(context) if context else None,
+    )
+
+    is_interactive = resolved.interactive
+    backend, model_variant = parse_model(resolved.model)
 
     try:
         runner = get_runner(backend)
@@ -233,31 +247,23 @@ def run(
         typer.echo(f"Error: '{backend}' CLI not found", err=True)
         raise typer.Exit(1)
 
-    if worktree:
-        try:
-            worktree_path = create(repo_root, worktree)
-        except WorktreeError as e:
-            typer.echo(f"Error: {e}", err=True)
-            raise typer.Exit(1)
-        repo_root = worktree_path
-
-    config = load_config(repo_root)
     skip_permissions = config.yolo if config else False
 
-    all_context = list(config.context) if config and config.context else []
-    if context:
-        all_context.extend(context)
+    # Build exclude list: resolved.exclude + resolved.include adjustment
+    exclude_patterns = list(resolved.exclude)
+    # If include has tests/**, don't exclude tests
+    for pattern in resolved.include:
+        if pattern in exclude_patterns:
+            exclude_patterns.remove(pattern)
 
-    exclude = list(config.exclude) if config and config.exclude else None
     args = ctx.args or None
     components = gather_prompt_components(
         repo_root,
         task,
-        context=all_context or None,
-        exclude=exclude,
+        context=resolved.context or None,
+        exclude=exclude_patterns or None,
         task_args=args,
         paste=paste,
-        include_tests_for=config.include_tests_for if config else None,
         run_mode="interactive" if is_interactive else "auto",
     )
 
@@ -314,16 +320,19 @@ def inline(
 
     config = load_config(repo_root)
 
-    # Determine run mode: inline prompts default to auto
-    if interactive:
-        is_interactive = True
-    elif auto:
-        is_interactive = False
-    else:
-        is_interactive = False
+    # Resolve config for inline prompts (no frontmatter)
+    resolved = resolve_task_config(
+        task_name="inline",
+        global_config=config,
+        frontmatter=TaskConfig(),
+        cli_interactive=True if interactive else None,
+        cli_auto=True if auto else None,
+        cli_model=model,
+        cli_context=list(context) if context else None,
+    )
 
-    agent_model = model or (config.agent_model if config else "claude:opus")
-    backend, model_variant = parse_model(agent_model)
+    is_interactive = resolved.interactive
+    backend, model_variant = parse_model(resolved.model)
 
     try:
         runner = get_runner(backend)
@@ -337,19 +346,19 @@ def inline(
 
     skip_permissions = config.yolo if config else False
 
-    all_context = list(config.context) if config and config.context else []
-    if context:
-        all_context.extend(context)
+    # Build exclude list from resolved config
+    exclude_patterns = list(resolved.exclude)
+    for pattern in resolved.include:
+        if pattern in exclude_patterns:
+            exclude_patterns.remove(pattern)
 
-    exclude = list(config.exclude) if config and config.exclude else None
     components = gather_prompt_components(
         repo_root,
         task=None,
         inline=prompt,
-        context=all_context or None,
-        exclude=exclude,
+        context=resolved.context or None,
+        exclude=exclude_patterns or None,
         paste=paste,
-        include_tests_for=config.include_tests_for if config else None,
         run_mode="interactive" if is_interactive else "auto",
     )
 

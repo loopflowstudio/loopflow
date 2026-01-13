@@ -145,6 +145,13 @@ def open_pr(
     if result.returncode != 0:
         # Check if PR already exists
         if "already exists" in result.stderr:
+            # Update existing PR with new title/body if provided
+            if title:
+                subprocess.run(
+                    ["gh", "pr", "edit", "--title", title, "--body", body or ""],
+                    cwd=repo_root,
+                    capture_output=True,
+                )
             view_result = subprocess.run(
                 ["gh", "pr", "view", "--json", "url", "-q", ".url"],
                 cwd=repo_root,

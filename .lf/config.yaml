@@ -2,10 +2,6 @@ agent_model: claude:opus
 yolo: true
 context: "docs"
 exclude: "uv.lock"
-include_tests_for:
-  - polish
-  - implement
-  - publish
 push: true
 
 pipelines:

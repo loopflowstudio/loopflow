@@ -97,7 +97,10 @@ def _execute_task(
 
         # Read prompt and clean up file before exec
         prompt_content = Path(prompt_file).read_text()
-        os.unlink(prompt_file)
+        try:
+            os.unlink(prompt_file)
+        except OSError:
+            pass  # Best effort cleanup
 
         # Remove API keys so CLIs use subscriptions
         os.environ.pop("ANTHROPIC_API_KEY", None)
@@ -137,7 +140,10 @@ def _execute_task(
     result_code = process.wait()
 
     # Clean up prompt file
-    os.unlink(prompt_file)
+    try:
+        os.unlink(prompt_file)
+    except OSError:
+        pass  # Best effort cleanup
 
     status = SessionStatus.COMPLETED if result_code == 0 else SessionStatus.ERROR
     update_session_status(DEFAULT_DB_PATH, session.id, status)

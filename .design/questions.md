@@ -27,3 +27,9 @@
    - `lf ops server` (generic)
    - `lf ops daemon` (descriptive)
    - Or remove it entirely if the Mac app replaces it
+
+### Swift app improvements
+
+4. **YAML parser:** The hand-rolled YAML parser in ConfigLoader.swift (85 lines) is fragile. Doesn't handle edge cases like strings with colons, escaped quotes, or indentation variations. Consider using a proper YAML library or a simpler format.
+
+5. **Token estimation UX:** Token estimation only triggers on context changes, not on initial load or when prompt selection changes. Should estimate on prompt/args changes too.

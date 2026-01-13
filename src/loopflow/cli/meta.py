@@ -244,13 +244,13 @@ def doctor():
     if check_claude_available():
         typer.echo("✓ claude")
     else:
-        typer.echo("✗ claude - Run: lf ops meta install")
+        typer.echo("✗ claude - Run: lf ops install")
         all_ok = False
 
     if shutil.which("wt"):
         typer.echo("✓ wt")
     else:
-        typer.echo("✗ wt - Run: lf ops meta install")
+        typer.echo("✗ wt - Run: lf ops install")
         all_ok = False
 
     # IDE tools (based on config)
@@ -258,14 +258,14 @@ def doctor():
         if shutil.which("warp"):
             typer.echo("✓ warp")
         else:
-            typer.echo("✗ warp - Run: lf ops meta install")
+            typer.echo("✗ warp - Run: lf ops install")
             all_ok = False
 
     if not ide or ide.cursor:
         if shutil.which("cursor"):
             typer.echo("✓ cursor")
         else:
-            typer.echo("✗ cursor - Run: lf ops meta install")
+            typer.echo("✗ cursor - Run: lf ops install")
             all_ok = False
 
     # Optional: gh for PR creation

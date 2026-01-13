@@ -62,10 +62,13 @@ def test_ops_help_lists_management_commands():
     assert result.exit_code == 0
     commands = _get_command_names(result.output)
     assert "pr" in commands
-    assert "meta" in commands
     assert "maestro" in commands
     assert "status" in commands
     assert "stop" in commands
     assert "prune" in commands
     assert "compare" in commands
     assert "land" in commands
+    assert "init" in commands
+    assert "install" in commands
+    assert "doctor" in commands
+    assert "version" in commands

@@ -36,7 +36,7 @@ uv tool install loopflow
 pip install loopflow
 
 # Install Claude Code + worktrunk if needed
-lf ops meta install
+lf ops install
 ```
 
 ## Quick start
@@ -45,7 +45,7 @@ Initialize a repo with example tasks:
 
 ```bash
 cd your-repo
-lf ops meta init
+lf ops init
 ```
 
 This creates `.lf/` with starter prompts and config.

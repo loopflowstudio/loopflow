@@ -133,7 +133,7 @@ def land(
         raise typer.Exit(1)
 
     if not shutil.which("wt"):
-        typer.echo("Error: 'wt' CLI not found. Run: lf ops meta install", err=True)
+        typer.echo("Error: 'wt' CLI not found. Run: lf ops install", err=True)
         raise typer.Exit(1)
 
     main_repo = find_main_repo(repo_root) or repo_root

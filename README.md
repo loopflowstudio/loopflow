@@ -16,7 +16,7 @@ macOS only. Supports Claude Code and OpenAI Codex via configuration.
 
 ```bash
 pip install loopflow
-lf ops meta install    # installs Claude Code + worktrunk
+lf ops install    # installs Claude Code + worktrunk
 ```
 
 ## Why Worktrees?
@@ -165,9 +165,9 @@ lf implement &         # background (shell handles it)
 | `lf ops pr create` | Open GitHub PR |
 | `lf ops pr land [-a]` | Squash-merge to main |
 | `lf ops land [--no-pr] [--force] [--base]` | Land locally via worktrunk |
-| `lf ops meta init` | Initialize repo with prompts and config |
-| `lf ops meta install` | Install Claude Code |
-| `lf ops meta doctor` | Check dependencies |
+| `lf ops init` | Initialize repo with prompts and config |
+| `lf ops install` | Install Claude Code |
+| `lf ops doctor` | Check dependencies |
 | `lf ops maestro start` | Start session tracking daemon |
 | `lf ops maestro stop` | Stop session tracking daemon |
 | `lf ops status` | Show running sessions |

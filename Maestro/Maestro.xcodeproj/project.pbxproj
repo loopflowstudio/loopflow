@@ -22,6 +22,8 @@
 		A000000D /* WorktreeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B000000D; };
 		A000000E /* SetupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000010; };
 		A000000F /* SetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000011; };
+		A0000012 /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000012; };
+		A0000013 /* AgentService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000013; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -42,6 +44,8 @@
 		B000000F /* Maestro.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Maestro.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B0000010 /* SetupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupService.swift; sourceTree = "<group>"; };
 		B0000011 /* SetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupView.swift; sourceTree = "<group>"; };
+		B0000012 /* Agent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Agent.swift; sourceTree = "<group>"; };
+		B0000013 /* AgentService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -90,6 +94,7 @@
 		D0000004 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				B0000012 /* Agent.swift */,
 				B0000006 /* LoopflowConfig.swift */,
 				B0000007 /* PromptCard.swift */,
 				B0000008 /* Worktree.swift */,
@@ -100,6 +105,7 @@
 		D0000005 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				B0000013 /* AgentService.swift */,
 				B0000009 /* ConfigLoader.swift */,
 				B000000A /* PromptService.swift */,
 				B000000B /* TerminalLauncher.swift */,
@@ -185,6 +191,8 @@
 				A000000D /* WorktreeService.swift in Sources */,
 				A000000E /* SetupService.swift in Sources */,
 				A000000F /* SetupView.swift in Sources */,
+				A0000012 /* Agent.swift in Sources */,
+				A0000013 /* AgentService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

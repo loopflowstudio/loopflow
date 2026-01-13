@@ -203,6 +203,13 @@ def land(
         cmd.append(base_branch)
     subprocess.run(cmd, cwd=repo_root, check=True)
 
+    # Delete remote branch if it exists
+    subprocess.run(
+        ["git", "push", "origin", "--delete", branch],
+        cwd=main_repo,
+        capture_output=True,
+    )
+
     # Output main repo path for shell cd integration when we removed a worktree
     if was_in_worktree:
         typer.echo(str(main_repo))

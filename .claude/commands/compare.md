@@ -1,4 +1,6 @@
-Compare two implementations of the same task and produce a written analysis.
+Compare two implementations and recommend which to use.
+
+This task is typically invoked via `lf ops compare <branch-a> <branch-b>`, which injects the diffs below.
 
 ## Implementation A: {{name_a}}
 
@@ -12,30 +14,60 @@ Compare two implementations of the same task and produce a written analysis.
 {{diff_b}}
 </diff>
 
-## Task
+## Workflow
 
-Analyze both implementations and write your analysis to a markdown file under `{{output_dir}}`.
+1. Read both diffs to understand what each implementation does
+2. Identify the key differences in approach
+3. Evaluate against loopflow's design principles (below)
+4. Write your analysis to `{{output_dir}}/comparison.md`
 
-### What to cover
+## What to cover
 
-**Approach.** How does each implementation solve the problem? What are the key architectural differences?
+**Approach.** How does each solve the problem? What are the architectural differences? One-paragraph summary for each.
 
-**Trade-offs.** What does each approach gain and lose? Consider:
-- Code complexity and maintainability
-- Performance implications
-- Flexibility for future changes
+**Trade-offs.** What does each gain and lose? Consider:
+- Code complexity (less code is usually better)
+- Match with existing patterns in the codebase
 - Error handling and edge cases
+- Testability
 
-**Recommendation.** Which implementation should be used? Be specific about why. If parts of each are better, note what to cherry-pick.
+**Recommendation.** Which implementation should be used? Be specific. If parts of each are better, note what to cherry-pick.
 
-**Adaptations.** Are there pieces from the non-recommended implementation worth incorporating?
+## Evaluation criteria for loopflow
 
-### Format
+When comparing, prefer implementations that:
 
-Write directly to a new markdown file under `{{output_dir}}` (pick a short descriptive name, create the folder if needed). Use markdown with clear sections. Be concise—aim for 500-1000 words. The goal is a decision document, not an exhaustive review.
+- **Use fewer lines of code.** The best code is code that doesn't exist.
+- **Match existing patterns.** If the codebase uses `@dataclass`, use `@dataclass`. If it uses functions, use functions.
+- **Avoid new abstractions.** Don't prefer the implementation that adds a base class or registry.
+- **Work in auto mode.** Implementations that require interactive confirmation are worse.
+- **Delegate to CLIs.** Implementations that shell out to claude/codex are better than ones that reimplement.
 
-In interactive mode, discuss first if you have questions, then write the file.
-In batch mode, write the file immediately based on what you see.
+## Output format
+
+Write to `{{output_dir}}/comparison.md`:
+
+```markdown
+# {{name_a}} vs {{name_b}}
+
+## Summary
+
+<Which to use and why, in 2-3 sentences>
+
+## Approach comparison
+
+<One paragraph per implementation>
+
+## Recommendation
+
+<Specific recommendation with rationale>
+
+## Cherry-pick opportunities
+
+<If applicable: what to take from the non-recommended implementation>
+```
+
+Keep it under 500 words. This is a decision document, not an exhaustive review.
 
 ## Auto mode
 

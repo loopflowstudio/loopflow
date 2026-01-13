@@ -75,17 +75,21 @@ def autocommit(
     # Generate commit message from staged diff
     if verbose:
         print(f"\n[{task}] generating commit message...")
-    generated = generate_commit_message(repo_root)
-
-    # Combine: prefix on first line, then generated title and body
-    msg = f"{prefix}: {generated.title}"
-    if generated.body:
-        msg += f"\n\n{generated.body}"
+    try:
+        generated = generate_commit_message(repo_root)
+        msg = f"{prefix}: {generated.title}"
+        if generated.body:
+            msg += f"\n\n{generated.body}"
+    except Exception as e:
+        # Fallback if LLM unavailable (no API key, rate limit, etc)
+        if verbose:
+            print(f"[{task}] LLM unavailable, using fallback message: {e}")
+        msg = f"{prefix}: auto-generated commit"
 
     subprocess.run(["git", "commit", "-m", msg], cwd=repo_root, check=True)
 
     if verbose:
-        print(f"[{task}] committed: {prefix}: {generated.title}")
+        print(f"[{task}] committed: {msg.splitlines()[0]}")
 
     if push and has_upstream(repo_root):
         result = subprocess.run(

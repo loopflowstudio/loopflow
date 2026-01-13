@@ -20,15 +20,25 @@ class PipelineConfig(BaseModel):
     pr: Optional[bool] = None
 
 
+def parse_model(model: str) -> tuple[str, str | None]:
+    """Parse model string like 'claude:opus' into (backend, variant)."""
+    parts = model.split(":", 1)
+    backend = parts[0]
+    variant = parts[1] if len(parts) > 1 else None
+    return backend, variant
+
+
 class Config(BaseModel):
-    model: str = "claude"
+    agent_model: str = "claude:opus"  # Format: backend:variant (e.g., claude:opus, claude:sonnet, codex)
     pipelines: dict[str, PipelineConfig] = Field(default_factory=dict)
     yolo: bool = False  # Skip all permission prompts
     push: bool = False
     pr: bool = False
     context: list[str] = Field(default_factory=list)
     exclude: list[str] = Field(default_factory=list)
+    include_tests_for: Optional[list[str]] = None
     ide: IdeConfig = Field(default_factory=IdeConfig)
+    interactive: list[str] = Field(default_factory=list)  # Tasks that default to interactive
 
     @field_validator("context", mode="before")
     @classmethod
@@ -40,6 +50,13 @@ class Config(BaseModel):
     @field_validator("exclude", mode="before")
     @classmethod
     def split_exclude_string(cls, v):
+        if isinstance(v, str):
+            return v.split()
+        return v
+
+    @field_validator("include_tests_for", mode="before")
+    @classmethod
+    def split_include_tests_for_string(cls, v):
         if isinstance(v, str):
             return v.split()
         return v

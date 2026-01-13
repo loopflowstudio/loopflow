@@ -11,3 +11,8 @@ Rebase this branch onto main.
    - For code outside the branch's core purpose, defer to main
    - Continue the rebase after resolving
 5. Run `git push --force-with-lease` to update origin
+
+## Auto mode
+
+In auto/headless runs, do not pause to ask questions. Make the best assumption you can and append any open questions to `.design/questions.md`.
+

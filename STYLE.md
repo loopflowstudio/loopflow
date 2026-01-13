@@ -10,6 +10,7 @@ This is the governing document of the loopflow codebase. Humans and LLMs alike a
 - No `Args:`/`Returns:` docstrings—if types are clear, skip the docstring
 - Mock side effects, but don't test mock wiring
 - Design docs go under `.design/`; `lf pr land` removes `.design/*` contents
+- Auto runs are headless: make best-effort assumptions and append open questions to `.design/questions.md`
 
 ## File-Type Guidelines
 

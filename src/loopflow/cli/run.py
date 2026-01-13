@@ -2,6 +2,8 @@
 
 import os
 import subprocess
+import sys
+import tempfile
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -9,17 +11,35 @@ from typing import Optional
 
 import typer
 
-from loopflow.config import load_config
+from loopflow.config import load_config, parse_model
 from loopflow.context import find_worktree_root, gather_prompt_components, format_prompt
-from loopflow.git import autocommit, find_main_repo
-from loopflow.launcher import get_runner
-from loopflow.maestro import Session, SessionStatus, connect_maestro
+from loopflow.git import find_main_repo
+from loopflow.launcher import (
+    build_model_command,
+    build_model_interactive_command,
+    get_runner,
+)
+from loopflow.logging import get_model_env
+from loopflow.maestro import Session, SessionStatus
+from loopflow.maestro.db import DEFAULT_DB_PATH, save_session, update_session_status
 from loopflow.pipeline import run_pipeline
 from loopflow.tokens import analyze_components
 from loopflow.worktrees import WorktreeError, create
 
 
 ModelType = Optional[str]
+
+
+def _write_prompt_file(prompt: str) -> str:
+    """Write prompt to a temp file and return the path.
+
+    The temp file is not deleted automatically; the caller should clean it up.
+    Using a file avoids exposing the prompt in ps output.
+    """
+    fd, path = tempfile.mkstemp(prefix="lf-prompt-", suffix=".txt")
+    os.write(fd, prompt.encode())
+    os.close(fd)
+    return path
 
 
 def _copy_to_clipboard(text: str) -> None:
@@ -31,7 +51,10 @@ def run(
     ctx: typer.Context,
     task: str = typer.Argument(help="Task name (e.g., 'review', 'implement')"),
     auto: bool = typer.Option(
-        False, "-a", "--auto", help="Run autonomously without interaction"
+        False, "-a", "--auto", help="Override to run in auto mode"
+    ),
+    interactive: bool = typer.Option(
+        False, "-i", "--interactive", help="Override to run in interactive mode"
     ),
     context: list[str] = typer.Option(
         None, "-x", "--context", help="Additional files for context"
@@ -46,7 +69,7 @@ def run(
         False, "-v", "--paste", help="Include clipboard content in prompt"
     ),
     model: ModelType = typer.Option(
-        None, "-m", "--model", help="Model to use (claude, codex)"
+        None, "-m", "--model", help="Model to use (backend or backend:variant)"
     ),
     parallel: str = typer.Option(
         None, "--parallel", help="Run in parallel with multiple models (e.g., 'claude,codex')"
@@ -74,26 +97,37 @@ def run(
                 cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                env=get_model_env(),
             )
             typer.echo(f"Started {wt_name}")
-
-        # Suggest maestro for notifications if not running
-        if not connect_maestro():
-            typer.echo("\nTip: Run 'lf maestro start' to get notifications when tasks complete")
 
         raise typer.Exit(0)
 
     config = load_config(repo_root)
-    model_name = model or (config.model if config else "claude")
+
+    # Determine run mode: default is auto unless task is in interactive list
+    task_is_interactive_default = config and task in config.interactive
+
+    # Flags override config defaults
+    if interactive:
+        is_interactive = True
+    elif auto:
+        is_interactive = False
+    else:
+        # No flag: use config or default (auto)
+        is_interactive = task_is_interactive_default
+
+    agent_model = model or (config.agent_model if config else "claude:opus")
+    backend, model_variant = parse_model(agent_model)
 
     try:
-        runner = get_runner(model_name)
+        runner = get_runner(backend)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
     if not copy and not runner.is_available():
-        typer.echo(f"Error: '{model_name}' CLI not found", err=True)
+        typer.echo(f"Error: '{backend}' CLI not found", err=True)
         raise typer.Exit(1)
 
     if worktree:
@@ -113,7 +147,16 @@ def run(
 
     exclude = list(config.exclude) if config and config.exclude else None
     args = ctx.args or None
-    components = gather_prompt_components(repo_root, task, context=all_context or None, exclude=exclude, task_args=args, paste=paste)
+    components = gather_prompt_components(
+        repo_root,
+        task,
+        context=all_context or None,
+        exclude=exclude,
+        task_args=args,
+        paste=paste,
+        include_tests_for=config.include_tests_for if config else None,
+        run_mode="interactive" if is_interactive else "auto",
+    )
 
     if copy:
         prompt = format_prompt(components)
@@ -123,8 +166,9 @@ def run(
         typer.echo("\nCopied to clipboard.")
         raise typer.Exit(0)
 
-    # Register with maestro if running
+    db_path = DEFAULT_DB_PATH
     main_repo = find_main_repo(repo_root) or repo_root
+    run_mode = "interactive" if is_interactive else "auto"
     session = Session(
         id=str(uuid.uuid4()),
         task=task,
@@ -132,42 +176,84 @@ def run(
         worktree=repo_root,
         status=SessionStatus.RUNNING,
         started_at=datetime.now(),
-        pid=os.getpid() if auto else None,
+        pid=os.getpid() if not is_interactive else None,
+        backend=backend,
+        run_mode=run_mode,
     )
-    maestro = connect_maestro()
-    if maestro:
-        maestro.register(session)
+    save_session(db_path, session)
 
-    try:
-        prompt = format_prompt(components)
-        result = runner.launch(
-            prompt,
-            auto=auto,
-            stream=auto,
+    prompt = format_prompt(components)
+    prompt_file = _write_prompt_file(prompt)
+
+    # Generate token summary for startup display
+    tree = analyze_components(components)
+    token_summary = tree.format()
+
+    if is_interactive:
+        command = build_model_interactive_command(
+            backend,
             skip_permissions=skip_permissions,
-            cwd=repo_root,
+            model_variant=model_variant,
+            sandbox_root=repo_root.parent,
+            workdir=repo_root,
+        )
+    else:
+        command = build_model_command(
+            backend,
+            auto=True,
+            stream=True,
+            skip_permissions=skip_permissions,
+            model_variant=model_variant,
+            sandbox_root=repo_root.parent,
+            workdir=repo_root,
         )
 
-        if auto and result.exit_code == 0:
-            autocommit(repo_root, task)
+    collector_cmd = [
+        sys.executable,
+        "-m",
+        "loopflow.maestro.collector",
+        "--session-id",
+        session.id,
+        "--task",
+        task,
+        "--repo-root",
+        str(repo_root),
+        "--prompt-file",
+        prompt_file,
+        "--token-summary",
+        token_summary,
+    ]
+    if not is_interactive:
+        collector_cmd.append("--autocommit")
+    if is_interactive:
+        collector_cmd.append("--interactive")
+    collector_cmd.append("--foreground")
+    collector_cmd.extend(["--", *command])
 
-        if maestro:
-            status = SessionStatus.COMPLETED if result.exit_code == 0 else SessionStatus.ERROR
-            maestro.update(session.id, status)
+    process = subprocess.Popen(collector_cmd, cwd=repo_root, env=get_model_env())
+    session.pid = process.pid
+    save_session(db_path, session)
+    result_code = process.wait()
 
-        if worktree:
-            typer.echo(f"\nWorktree: {repo_root}")
+    # Clean up prompt file
+    os.unlink(prompt_file)
 
-        raise typer.Exit(result.exit_code)
-    finally:
-        if maestro:
-            maestro.unregister(session.id)
+    status = SessionStatus.COMPLETED if result_code == 0 else SessionStatus.ERROR
+    update_session_status(db_path, session.id, status)
+
+    if worktree:
+        typer.echo(f"\nWorktree: {repo_root}")
+
+    raise typer.Exit(result_code)
 
 
 def inline(
     prompt: str = typer.Argument(help="Inline prompt to run"),
     auto: bool = typer.Option(
-        False, "-a", "--auto", help="Run autonomously without interaction"
+        False, "-a", "--auto", help="Override to run in auto mode"
+    ),
+    interactive: bool = typer.Option(
+        False, "-i", "--interactive", help="Override to run in interactive mode"
     ),
     context: list[str] = typer.Option(
         None, "-x", "--context", help="Additional files for context"
@@ -179,7 +265,7 @@ def inline(
         False, "-v", "--paste", help="Include clipboard content in prompt"
     ),
     model: ModelType = typer.Option(
-        None, "-m", "--model", help="Model to use (claude, codex)"
+        None, "-m", "--model", help="Model to use (backend or backend:variant)"
     ),
 ):
     """Run an inline prompt with an LLM model."""
@@ -189,16 +275,27 @@ def inline(
         raise typer.Exit(1)
 
     config = load_config(repo_root)
-    model_name = model or (config.model if config else "claude")
+
+    # Determine run mode: default is auto for inline prompts
+    if interactive:
+        is_interactive = True
+    elif auto:
+        is_interactive = False
+    else:
+        # No flag: inline prompts default to auto
+        is_interactive = False
+
+    agent_model = model or (config.agent_model if config else "claude:opus")
+    backend, model_variant = parse_model(agent_model)
 
     try:
-        runner = get_runner(model_name)
+        runner = get_runner(backend)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
     if not copy and not runner.is_available():
-        typer.echo(f"Error: '{model_name}' CLI not found", err=True)
+        typer.echo(f"Error: '{backend}' CLI not found", err=True)
         raise typer.Exit(1)
 
     skip_permissions = config.yolo if config else False
@@ -208,7 +305,16 @@ def inline(
         all_context.extend(context)
 
     exclude = list(config.exclude) if config and config.exclude else None
-    components = gather_prompt_components(repo_root, task=None, inline=prompt, context=all_context or None, exclude=exclude, paste=paste)
+    components = gather_prompt_components(
+        repo_root,
+        task=None,
+        inline=prompt,
+        context=all_context or None,
+        exclude=exclude,
+        paste=paste,
+        include_tests_for=config.include_tests_for if config else None,
+        run_mode="interactive" if is_interactive else "auto",
+    )
 
     if copy:
         prompt_text = format_prompt(components)
@@ -218,8 +324,9 @@ def inline(
         typer.echo("\nCopied to clipboard.")
         raise typer.Exit(0)
 
-    # Register with maestro if running
+    db_path = DEFAULT_DB_PATH
     main_repo = find_main_repo(repo_root) or repo_root
+    run_mode = "interactive" if is_interactive else "auto"
     session = Session(
         id=str(uuid.uuid4()),
         task="inline",
@@ -227,33 +334,72 @@ def inline(
         worktree=repo_root,
         status=SessionStatus.RUNNING,
         started_at=datetime.now(),
-        pid=os.getpid() if auto else None,
+        pid=os.getpid() if not is_interactive else None,
+        backend=backend,
+        run_mode=run_mode,
     )
-    maestro = connect_maestro()
-    if maestro:
-        maestro.register(session)
+    save_session(db_path, session)
 
-    try:
-        prompt_text = format_prompt(components)
-        result = runner.launch(
-            prompt_text,
-            auto=auto,
-            stream=auto,
+    prompt_text = format_prompt(components)
+    prompt_file = _write_prompt_file(prompt_text)
+
+    # Generate token summary for startup display
+    tree = analyze_components(components)
+    token_summary = tree.format()
+
+    if is_interactive:
+        command = build_model_interactive_command(
+            backend,
             skip_permissions=skip_permissions,
-            cwd=repo_root,
+            model_variant=model_variant,
+            sandbox_root=repo_root.parent,
+            workdir=repo_root,
+        )
+    else:
+        command = build_model_command(
+            backend,
+            auto=True,
+            stream=True,
+            skip_permissions=skip_permissions,
+            model_variant=model_variant,
+            sandbox_root=repo_root.parent,
+            workdir=repo_root,
         )
 
-        if auto and result.exit_code == 0:
-            autocommit(repo_root, ":", prompt)
+    collector_cmd = [
+        sys.executable,
+        "-m",
+        "loopflow.maestro.collector",
+        "--session-id",
+        session.id,
+        "--task",
+        "inline",
+        "--repo-root",
+        str(repo_root),
+        "--prompt-file",
+        prompt_file,
+        "--token-summary",
+        token_summary,
+    ]
+    if not is_interactive:
+        collector_cmd.append("--autocommit")
+    if is_interactive:
+        collector_cmd.append("--interactive")
+    collector_cmd.append("--foreground")
+    collector_cmd.extend(["--", *command])
 
-        if maestro:
-            status = SessionStatus.COMPLETED if result.exit_code == 0 else SessionStatus.ERROR
-            maestro.update(session.id, status)
+    process = subprocess.Popen(collector_cmd, cwd=repo_root, env=get_model_env())
+    session.pid = process.pid
+    save_session(db_path, session)
+    result_code = process.wait()
 
-        raise typer.Exit(result.exit_code)
-    finally:
-        if maestro:
-            maestro.unregister(session.id)
+    # Clean up prompt file
+    os.unlink(prompt_file)
+
+    status = SessionStatus.COMPLETED if result_code == 0 else SessionStatus.ERROR
+    update_session_status(db_path, session.id, status)
+
+    raise typer.Exit(result_code)
 
 
 def pipeline(
@@ -271,7 +417,7 @@ def pipeline(
         False, "-c", "--copy", help="Copy first task prompt to clipboard and show token breakdown"
     ),
     model: ModelType = typer.Option(
-        None, "-m", "--model", help="Model to use (claude, codex)"
+        None, "-m", "--model", help="Model to use (backend or backend:variant)"
     ),
 ):
     """Run a named pipeline."""
@@ -285,16 +431,17 @@ def pipeline(
         typer.echo(f"Error: Pipeline '{name}' not found in .lf/config.yaml", err=True)
         raise typer.Exit(1)
 
-    model_name = model or config.model
+    agent_model = model or config.agent_model
+    backend, model_variant = parse_model(agent_model)
 
     try:
-        runner = get_runner(model_name)
+        runner = get_runner(backend)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
     if not copy and not runner.is_available():
-        typer.echo(f"Error: '{model_name}' CLI not found", err=True)
+        typer.echo(f"Error: '{backend}' CLI not found", err=True)
         raise typer.Exit(1)
 
     if worktree:
@@ -314,7 +461,13 @@ def pipeline(
     if copy:
         # Show tokens for first task in pipeline
         first_task = config.pipelines[name].tasks[0]
-        components = gather_prompt_components(repo_root, first_task, context=all_context or None, exclude=exclude)
+        components = gather_prompt_components(
+            repo_root,
+            first_task,
+            context=all_context or None,
+            exclude=exclude,
+            include_tests_for=config.include_tests_for if config else None,
+        )
         prompt = format_prompt(components)
         _copy_to_clipboard(prompt)
         tree = analyze_components(components)
@@ -331,9 +484,11 @@ def pipeline(
         repo_root,
         context=all_context or None,
         exclude=exclude,
+        include_tests_for=config.include_tests_for if config else None,
         skip_permissions=config.yolo,
         push_enabled=push_enabled,
         pr_enabled=pr_enabled,
-        model=model_name,
+        backend=backend,
+        model_variant=model_variant,
     )
     raise typer.Exit(exit_code)

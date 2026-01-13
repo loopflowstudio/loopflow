@@ -1,8 +1,8 @@
 # Loopflow configuration
 # See: https://github.com/loopflowstudio/loopflow
 
-# Model to use (claude or codex)
-model: claude
+# Model to use (backend or backend:variant)
+agent_model: claude:opus
 
 # Context: files/directories to include by default
 context: "."
@@ -12,6 +12,11 @@ exclude:
   - "*.lock"
   - "node_modules"
   - ".venv"
+
+# Tasks that default to interactive mode (default is auto)
+interactive:
+  - design
+  - iterate
 
 # Push commits to origin automatically
 push: false

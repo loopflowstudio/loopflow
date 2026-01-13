@@ -93,44 +93,64 @@ wt remove auth                # remove worktree + branch
 
 ## Session Tracking
 
-Track running tasks across multiple terminals with the maestro daemon:
+Track running tasks across multiple terminals (maestro is optional):
 
 ```bash
-lf maestro start              # start tracking daemon
-lf status                     # show running sessions
+lf maestro start              # optional web UI (tails logs)
+lf status                     # show running sessions (reads SQLite)
 
 # In another terminal
-lf implement -a               # autonomous task registers automatically
+lf implement                  # auto mode task registers automatically
 
 # Check from anywhere
 lf status                     # see all running sessions
 ```
 
-When maestro is running, tasks automatically register, and you'll get macOS notifications when batch tasks complete.
+Sessions write to SQLite in auto mode; the maestro UI reads the same database.
 
 ## Configuration
 
 ```yaml
 # .lf/config.yaml
-model: claude     # Model to use (claude or codex)
+agent_model: claude:opus     # Model to use (backend or backend:variant)
 push: true        # auto-push after commits
 pr: false         # open PR after pipelines
+
+# Tasks that default to interactive mode (default is auto)
+interactive:
+  - design
+  - iterate
 
 ide:
   warp: true
   cursor: true
 ```
 
+## Run Modes
+
+By default, tasks run in **auto mode**: non-interactive with streaming output. This is ideal for most coding tasks and background execution. All runs append logs under `~/.lf/logs/<worktree>/`.
+
+Use `-i` to run interactively (full chat, can interrupt) or configure per-task defaults:
+
+```bash
+lf implement           # auto mode (default)
+lf design              # interactive (from config)
+lf implement -i        # force interactive
+lf design -a           # force auto
+lf implement &         # background (shell handles it)
+```
+
 ## Options
 
 | Option | Description |
 |--------|-------------|
-| `-a, --auto` | Run autonomously without interaction |
+| `-i, --interactive` | Run in interactive mode (override default) |
+| `-a, --auto` | Run in auto mode (override default) |
 | `-x, --context` | Add context files |
 | `-w, --worktree` | Create worktree and run task there |
 | `-c, --copy` | Copy prompt to clipboard, show token breakdown |
 | `-v, --paste` | Include clipboard content in prompt |
-| `-m, --model` | Choose model (claude, codex) |
+| `-m, --model` | Choose model (backend or backend:variant) |
 | `--parallel` | Run with multiple models in parallel |
 
 ## Commands

@@ -13,6 +13,7 @@ from loopflow.files import gather_docs, gather_files, format_files
 class PromptComponents:
     """Raw components of a prompt before assembly."""
 
+    run_mode: str | None
     docs: list[tuple[Path, str]]
     diff: str | None
     task: tuple[str, str] | None  # (name, content)
@@ -47,6 +48,16 @@ def _read_file_if_exists(path: Path) -> str | None:
     return None
 
 
+def _read_file_if_named(dir_path: Path, filename: str) -> str | None:
+    """Read file only if an exact name match exists in the directory."""
+    if not dir_path.exists():
+        return None
+    for entry in dir_path.iterdir():
+        if entry.is_file() and entry.name == filename:
+            return entry.read_text()
+    return None
+
+
 def _read_clipboard() -> str | None:
     """Read text from clipboard using pbpaste."""
     result = subprocess.run(["pbpaste"], capture_output=True, text=True)
@@ -66,8 +77,8 @@ def gather_task(repo_root: Path, name: str) -> str | None:
     5. .lf/{name} (bare name)
     """
     # Check .claude/commands first (portable format)
-    claude_cmd = repo_root / ".claude" / "commands" / f"{name}.md"
-    content = _read_file_if_exists(claude_cmd)
+    claude_dir = repo_root / ".claude" / "commands"
+    content = _read_file_if_named(claude_dir, f"{name}.md")
     if content:
         return content
 
@@ -76,19 +87,25 @@ def gather_task(repo_root: Path, name: str) -> str | None:
 
     # Preferred extensions first
     for ext in [".lf", ".md"]:
-        content = _read_file_if_exists(lf_dir / f"{name}{ext}")
+        content = _read_file_if_named(lf_dir, f"{name}{ext}")
         if content:
             return content
 
     # Any other extension
-    for path in sorted(lf_dir.glob(f"{name}.*")):
-        if path.suffix not in [".lf", ".md"]:
-            content = _read_file_if_exists(path)
+    if lf_dir.exists():
+        for path in sorted(lf_dir.iterdir()):
+            if not path.is_file():
+                continue
+            if not path.name.startswith(f"{name}."):
+                continue
+            if path.suffix in [".lf", ".md"]:
+                continue
+            content = path.read_text()
             if content:
                 return content
 
     # Bare name (no extension)
-    return _read_file_if_exists(lf_dir / name)
+    return _read_file_if_named(lf_dir, name)
 
 
 def gather_diff(repo_root: Path, exclude: Optional[list[str]] = None) -> str | None:
@@ -130,6 +147,8 @@ def gather_prompt_components(
     exclude: Optional[list[str]] = None,
     task_args: Optional[list[str]] = None,
     paste: bool = False,
+    include_tests_for: Optional[list[str]] = None,
+    run_mode: Optional[str] = None,
 ) -> PromptComponents:
     """Gather all prompt components without assembling them."""
     docs = gather_docs(repo_root, repo_root, exclude)
@@ -170,10 +189,20 @@ def gather_prompt_components(
         else:
             task_result = (task, f"No task file found for '{task}'.")
 
-    context_files = gather_files(context, repo_root, exclude) if context else []
+    context_exclude = list(exclude) if exclude else []
+    if include_tests_for is not None:
+        task_name = task or "inline"
+        include_tests = task_name in set(include_tests_for)
+        if not include_tests and "tests/**" not in context_exclude:
+            context_exclude.append("tests/**")
+
+    context_files = (
+        gather_files(context, repo_root, context_exclude) if context else []
+    )
     clipboard = _read_clipboard() if paste else None
 
     return PromptComponents(
+        run_mode=run_mode,
         docs=docs,
         diff=diff,
         task=task_result,
@@ -186,6 +215,13 @@ def gather_prompt_components(
 def format_prompt(components: PromptComponents) -> str:
     """Format prompt components into the final prompt string."""
     parts = []
+
+    if components.run_mode == "auto":
+        parts.append(
+            "Run mode is auto (headless). Proceed without pausing for questions. "
+            "If you need clarification, make the best assumption you can and append "
+            "any open questions to `.design/questions.md`."
+        )
 
     if components.task:
         name, content = components.task
@@ -224,7 +260,17 @@ def build_prompt(
     inline: Optional[str] = None,
     context: Optional[list[str]] = None,
     exclude: Optional[list[str]] = None,
+    include_tests_for: Optional[list[str]] = None,
+    run_mode: Optional[str] = None,
 ) -> str:
     """Build the full prompt for an LLM session."""
-    components = gather_prompt_components(repo_root, task, inline, context, exclude)
+    components = gather_prompt_components(
+        repo_root,
+        task,
+        inline,
+        context,
+        exclude,
+        include_tests_for=include_tests_for,
+        run_mode=run_mode,
+    )
     return format_prompt(components)

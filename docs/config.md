@@ -10,9 +10,14 @@ Loopflow configuration lives in `.lf/config.yaml` at the root of your repository
 ## Example
 
 ```yaml
-model: claude
+agent_model: claude:opus
 push: true
 pr: false
+
+# Tasks that default to interactive mode
+interactive:
+  - design
+  - iterate
 
 context:
   - src/schema.py
@@ -35,23 +40,35 @@ pipelines:
 
 ## Options
 
-### model
+### agent_model
 
-Default model for all tasks. Currently supported: `claude`, `codex`.
+Default model for all tasks. Use `backend:variant` (e.g., `claude:opus`, `codex:o3`).
 
 ```yaml
-model: claude
+agent_model: claude:opus
 ```
 
 Override per-run with `-m`:
 
 ```bash
-lf review -m codex
+lf review -m codex:o3
 ```
+
+### interactive
+
+Tasks that default to interactive mode. All other tasks default to auto mode.
+
+```yaml
+interactive:
+  - design
+  - iterate
+```
+
+Without this setting, all tasks default to auto (non-interactive) mode. Use `-i` flag to override for any task.
 
 ### push
 
-Auto-push after commits in autonomous mode (`-a`).
+Auto-push after commits in auto mode.
 
 ```yaml
 push: true
@@ -109,9 +126,23 @@ ide:
   workspace: app.code-workspace  # optional: open this workspace file
 ```
 
+## Run Modes
+
+By default, tasks run in **auto mode**: non-interactive with streaming output. This is ideal for most coding tasks and background execution. All runs append logs under `~/.lf/logs/<worktree>/`.
+
+Tasks listed in the `interactive` config default to interactive mode instead. You can override the default for any task:
+
+```bash
+lf implement           # auto mode (default)
+lf design              # interactive (if in config.interactive list)
+lf implement -i        # force interactive
+lf design -a           # force auto
+lf implement &         # background (shell handles it)
+```
+
 ## Pipelines
 
-Pipelines chain tasks together. Each task runs in autonomous mode (`-a`), with auto-commits between steps.
+Pipelines chain tasks together. Each task runs in auto mode, with auto-commits between steps.
 
 ```yaml
 pipelines:
@@ -177,11 +208,7 @@ Follow the existing code style.
 
 ## Environment variables
 
-Override config with environment variables:
-
-| Variable | Description |
-|----------|-------------|
-| `LF_MODEL` | Default model (`claude`, `codex`) |
+No environment variable overrides are supported yet.
 
 ## Auto-included context
 

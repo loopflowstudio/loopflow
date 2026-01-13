@@ -311,7 +311,8 @@ def land(
     subprocess.run(["git", "push"], cwd=main_repo, check=True)
 
     # Clean up: remove worktree and branch
-    if repo_root != main_repo:
+    was_in_worktree = repo_root != main_repo
+    if was_in_worktree:
         remove(main_repo, branch)
     else:
         # If we landed from main repo, switch back before deleting branch
@@ -320,3 +321,7 @@ def land(
         subprocess.run(["git", "branch", "-D", branch], cwd=main_repo, check=True)
 
     typer.echo(f"Landed {branch} onto {base_branch} and pushed.")
+
+    # Output main repo path for shell cd integration when we removed a worktree
+    if was_in_worktree:
+        typer.echo(str(main_repo))

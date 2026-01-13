@@ -6,6 +6,7 @@ import typer
 
 from loopflow.config import ConfigError, load_config
 from loopflow.context import find_worktree_root, gather_task
+from loopflow.init_check import check_init_status
 
 app = typer.Typer(
     name="lf",
@@ -70,9 +71,18 @@ def main():
                 elif has_task:
                     sys.argv.insert(1, "run")
                 else:
-                    typer.echo(f"Error: No task or pipeline named '{name}'", err=True)
-                    typer.echo(f"  Create task: .claude/commands/{name}.md (recommended)", err=True)
-                    typer.echo(f"  Or pipeline: add '{name}' to .lf/config.yaml", err=True)
+                    # Check if repo is initialized
+                    status = check_init_status(repo_root) if repo_root else None
+                    if status and not status.has_commands and not status.has_lf_dir:
+                        # Uninitialized repo - suggest init
+                        typer.echo(f"No task named '{name}' found.", err=True)
+                        typer.echo("", err=True)
+                        typer.echo("This repo hasn't been set up for loopflow yet.", err=True)
+                        typer.echo("Run: lf ops init", err=True)
+                    else:
+                        # Initialized but task missing - suggest creating it
+                        typer.echo(f"No task or pipeline named '{name}'", err=True)
+                        typer.echo(f"Create: .claude/commands/{name}.md", err=True)
                     raise SystemExit(1)
 
         app()

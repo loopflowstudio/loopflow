@@ -45,20 +45,16 @@ build-backend = "hatchling.build"
 packages = ["src/loopflow"]
 include = [
     "src/loopflow/prompts/*.md",
-    "src/loopflow/LOOPFLOW_STYLE.md",
-    "src/loopflow/config_template.yaml",
+    "src/loopflow/templates/**/*.md",
+    "src/loopflow/templates/**/*.yaml",
 ]
-
-[tool.hatch.build.targets.wheel.force-include]
-".claude/commands" = "loopflow/commands"
 
 [tool.hatch.build.targets.sdist]
 include = [
     "src/loopflow",
     "src/loopflow/prompts/*.md",
-    "src/loopflow/LOOPFLOW_STYLE.md",
-    "src/loopflow/config_template.yaml",
-    ".claude/commands",
+    "src/loopflow/templates/**/*.md",
+    "src/loopflow/templates/**/*.yaml",
 ]
 
 [tool.hatch.version]

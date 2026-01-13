@@ -1,5 +1,12 @@
-maestro: scaffold swift macos app
+init: bundle templates and improve first-run experience
 
-Native macOS app for managing worktrees and launching LLM coding sessions.
-Provides a GUI for the wt (worktree sidebar) and lf (prompt launcher) CLI
-commands. Includes design docs, unit tests, and a dev script for building.
+lf ops init now works. Previously it referenced paths that didn't exist
+(a commands/ directory that was never created). Templates are now bundled
+under src/loopflow/templates/ and copied to the right places.
+
+The starter set is 6 prompts: design, implement, review, debug, polish,
+iterate. Running lf ops init --all includes additional prompts. Templates
+are generic—no loopflow-specific references like "use uv run".
+
+Error messages now detect uninitialized repos and suggest lf ops init
+instead of showing confusing "create .claude/commands/foo.md" hints.

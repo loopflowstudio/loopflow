@@ -106,15 +106,48 @@ class CodexRunner(Runner):
         return LaunchResult(result.returncode, None)
 
     def is_available(self) -> bool:
-        try:
-            subprocess.run(
-                ["codex", "--version"],
-                capture_output=True,
-                check=True,
+        return check_codex_available()
+
+
+class GeminiRunner(Runner):
+    """Google Gemini CLI runner."""
+
+    def launch(
+        self,
+        prompt: str,
+        auto: bool = False,
+        stream: bool = False,
+        skip_permissions: bool = False,
+        session_id: str | None = None,
+        cwd: Optional[Path] = None,
+    ) -> LaunchResult:
+        cmd = build_gemini_command(
+            auto=auto,
+            stream=stream,
+            skip_permissions=skip_permissions,
+            sandbox_root=cwd.parent if cwd else None,
+            workdir=cwd,
+        )
+
+        cmd_with_prompt = cmd + [prompt]
+
+        if auto and stream:
+            exit_code, output = _run_streaming_json(
+                cmd_with_prompt,
+                cwd=cwd,
+                normalize_fn=normalize_gemini_event,
+                session_id=session_id,
             )
-            return True
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            return False
+            return LaunchResult(exit_code, output)
+        if auto:
+            result = subprocess.run(cmd_with_prompt, cwd=cwd, capture_output=True, text=True, env=get_model_env())
+            return LaunchResult(result.returncode, result.stdout)
+
+        result = subprocess.run(cmd_with_prompt, cwd=cwd, text=True, env=get_model_env())
+        return LaunchResult(result.returncode, None)
+
+    def is_available(self) -> bool:
+        return check_gemini_available()
 
 
 def get_runner(model: str) -> Runner:
@@ -122,6 +155,7 @@ def get_runner(model: str) -> Runner:
     runners = {
         "claude": ClaudeRunner,
         "codex": CodexRunner,
+        "gemini": GeminiRunner,
     }
     if model not in runners:
         raise ValueError(f"Unknown model: {model}. Available: {list(runners.keys())}")
@@ -266,6 +300,66 @@ def build_codex_interactive_command(
     return cmd
 
 
+def build_gemini_command(
+    auto: bool,
+    stream: bool,
+    skip_permissions: bool,
+    model_variant: str | None = None,
+    sandbox_root: Path | None = None,
+    workdir: Path | None = None,
+) -> list[str]:
+    """Build Gemini CLI command.
+
+    auto mode: uses positional prompt (no -p flag needed)
+    stream mode: --output-format stream-json
+    skip_permissions: --yolo
+    model_variant: -m <variant>
+    sandbox_root: included via --include-directories for git access
+    workdir: not used as CLI arg (handled via cwd in subprocess)
+    """
+    cmd = ["gemini"]
+
+    if model_variant:
+        cmd.extend(["-m", model_variant])
+
+    if stream:
+        cmd.extend(["--output-format", "stream-json"])
+
+    if skip_permissions:
+        cmd.append("--yolo")
+
+    if sandbox_root:
+        cmd.extend(["--include-directories", str(sandbox_root)])
+
+    return cmd
+
+
+def build_gemini_interactive_command(
+    skip_permissions: bool,
+    model_variant: str | None = None,
+    sandbox_root: Path | None = None,
+    workdir: Path | None = None,
+) -> list[str]:
+    """Build Gemini CLI command for interactive mode.
+
+    Uses -i to accept prompt then continue interactively.
+    """
+    cmd = ["gemini"]
+
+    if model_variant:
+        cmd.extend(["-m", model_variant])
+
+    if skip_permissions:
+        cmd.append("--yolo")
+
+    if sandbox_root:
+        cmd.extend(["--include-directories", str(sandbox_root)])
+
+    cmd.append("-i")
+
+    return cmd
+
+
 def build_model_command(
     model: str,
     auto: bool,
@@ -281,6 +375,15 @@ def build_model_command(
     """
     if model == "claude":
         return build_claude_command(auto=auto, stream=stream, skip_permissions=skip_permissions, model_variant=model_variant)
+    if model == "gemini":
+        return build_gemini_command(
+            auto=auto,
+            stream=stream,
+            skip_permissions=skip_permissions,
+            model_variant=model_variant,
+            sandbox_root=sandbox_root,
+            workdir=workdir,
+        )
     return build_codex_command(
         auto=auto,
         stream=stream,
@@ -304,6 +407,13 @@ def build_model_interactive_command(
     """
     if model == "claude":
         return build_claude_command(auto=False, stream=False, skip_permissions=skip_permissions, model_variant=model_variant)
+    if model == "gemini":
+        return build_gemini_interactive_command(
+            skip_permissions=skip_permissions,
+            model_variant=model_variant,
+            sandbox_root=sandbox_root,
+            workdir=workdir,
+        )
     return build_codex_interactive_command(
         skip_permissions=skip_permissions,
         model_variant=model_variant,
@@ -405,6 +515,32 @@ def normalize_codex_event(event: dict) -> list[dict]:
     return [event] if event else []
 
 
+def normalize_gemini_event(event: dict) -> list[dict]:
+    """Normalize Gemini stream-json events to common schema."""
+    event_type = event.get("type")
+    results = []
+
+    if event_type == "text":
+        text = event.get("content", "")
+        if text:
+            results.append({"type": "text", "content": text})
+
+    elif event_type == "tool_use":
+        results.append({
+            "type": "tool_use",
+            "tool": event.get("name", "unknown"),
+            "input": event.get("input", {}),
+        })
+
+    elif event_type == "result":
+        results.append({
+            "type": "result",
+            "status": event.get("status", "unknown"),
+        })
+
+    return results
+
+
 def _format_normalized_event(event: dict) -> str | None:
     """Format a normalized event in unified format."""
     event_type = event.get("type")
@@ -432,14 +568,29 @@ def _print_status(msg: str) -> None:
     print(f"\033[90m{msg}\033[0m", file=sys.stderr)
 
 
-def check_claude_available() -> bool:
-    """Check if the claude CLI is available."""
+def _check_cli_available(cli_name: str) -> bool:
+    """Check if a CLI tool is available by running --version."""
     try:
         subprocess.run(
-            ["claude", "--version"],
+            [cli_name, "--version"],
             capture_output=True,
             check=True,
         )
         return True
     except (subprocess.CalledProcessError, FileNotFoundError):
         return False
+
+
+def check_claude_available() -> bool:
+    """Check if the claude CLI is available."""
+    return _check_cli_available("claude")
+
+
+def check_codex_available() -> bool:
+    """Check if the codex CLI is available."""
+    return _check_cli_available("codex")
+
+
+def check_gemini_available() -> bool:
+    """Check if the gemini CLI is available."""
+    return _check_cli_available("gemini")

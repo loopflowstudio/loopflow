@@ -21,10 +21,20 @@ class PipelineConfig(BaseModel):
 
 
 def parse_model(model: str) -> tuple[str, str | None]:
-    """Parse model string like 'claude:opus' into (backend, variant)."""
+    """Parse model string like 'claude:opus' into (backend, variant).
+
+    Applies smart defaults when no variant is specified:
+    - claude -> opus (Claude Opus 4.5)
+    - gemini -> 2.5-pro (Gemini 2.5 Pro)
+    - codex -> None (let Codex CLI pick its default)
+    """
+    defaults = {
+        "claude": "opus",
+        "gemini": "2.5-pro",
+    }
     parts = model.split(":", 1)
     backend = parts[0]
-    variant = parts[1] if len(parts) > 1 else None
+    variant = parts[1] if len(parts) > 1 else defaults.get(backend)
     return backend, variant
 
 

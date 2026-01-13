@@ -2,7 +2,7 @@
 
 import pytest
 
-from loopflow.config import load_config, PipelineConfig, ConfigError
+from loopflow.config import load_config, parse_model, PipelineConfig, ConfigError
 
 
 @pytest.fixture
@@ -276,3 +276,22 @@ def test_load_config_agent_model_setting(temp_repo):
 
     assert config is not None
     assert config.agent_model == "codex:o3"
+
+
+def test_parse_model_with_variant():
+    """parse_model extracts backend and variant."""
+    assert parse_model("claude:opus") == ("claude", "opus")
+    assert parse_model("codex:o3") == ("codex", "o3")
+    assert parse_model("gemini:2.5-pro") == ("gemini", "2.5-pro")
+
+
+def test_parse_model_default_variants():
+    """parse_model applies smart defaults when no variant specified."""
+    assert parse_model("claude") == ("claude", "opus")
+    assert parse_model("codex") == ("codex", None)  # let Codex CLI pick
+    assert parse_model("gemini") == ("gemini", "2.5-pro")
+
+
+def test_parse_model_unknown_backend():
+    """parse_model returns None variant for unknown backends."""
+    assert parse_model("unknown") == ("unknown", None)

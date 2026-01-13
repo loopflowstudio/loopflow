@@ -1,3 +1,6 @@
+---
+interactive: true
+---
 Produce a short implementation spec that another LLM session can use to write a first draft.
 
 The design doc is scaffolding—a checkpoint for recovery, not documentation for posterity. If a session crashes, the spec lets a fresh session pick up where things left off. `lf ops pr land` deletes `.design/` contents.

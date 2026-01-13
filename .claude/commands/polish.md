@@ -1,3 +1,7 @@
+---
+include:
+  - tests/**
+---
 Fix issues and run tests before landing.
 
 The deliverable is working, clean code that passes tests.

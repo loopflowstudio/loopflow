@@ -1,3 +1,7 @@
+---
+include:
+  - tests/**
+---
 Publish the loopflow package to PyPI.
 
 ```bash

@@ -1,3 +1,7 @@
+---
+include:
+  - tests/**
+---
 Turn the design doc into working code.
 
 The design doc is under `.design/` and auto-included in this prompt. It contains data structures, function signatures, constraints, and a "done when" verification step.

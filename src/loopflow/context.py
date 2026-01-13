@@ -7,6 +7,7 @@ from typing import Optional
 
 from loopflow.design import gather_design_docs
 from loopflow.files import gather_docs, gather_files, format_files
+from loopflow.frontmatter import TaskFile, parse_task_file
 
 
 @dataclass
@@ -66,8 +67,8 @@ def _read_clipboard() -> str | None:
     return None
 
 
-def gather_task(repo_root: Path, name: str) -> str | None:
-    """Gather task file content.
+def gather_task(repo_root: Path, name: str) -> TaskFile | None:
+    """Gather and parse task file with frontmatter.
 
     Search order:
     1. .claude/commands/{name}.md (Claude Code compatible)
@@ -75,12 +76,14 @@ def gather_task(repo_root: Path, name: str) -> str | None:
     3. .lf/{name}.md
     4. .lf/{name}.* (any other extension)
     5. .lf/{name} (bare name)
+
+    Returns TaskFile with parsed config, or None if not found.
     """
     # Check .claude/commands first (portable format)
     claude_dir = repo_root / ".claude" / "commands"
     content = _read_file_if_named(claude_dir, f"{name}.md")
     if content:
-        return content
+        return parse_task_file(name, content)
 
     # Fall back to .lf directory
     lf_dir = repo_root / ".lf"
@@ -89,7 +92,7 @@ def gather_task(repo_root: Path, name: str) -> str | None:
     for ext in [".lf", ".md"]:
         content = _read_file_if_named(lf_dir, f"{name}{ext}")
         if content:
-            return content
+            return parse_task_file(name, content)
 
     # Any other extension
     if lf_dir.exists():
@@ -102,10 +105,13 @@ def gather_task(repo_root: Path, name: str) -> str | None:
                 continue
             content = path.read_text()
             if content:
-                return content
+                return parse_task_file(name, content)
 
     # Bare name (no extension)
-    return _read_file_if_named(lf_dir, name)
+    content = _read_file_if_named(lf_dir, name)
+    if content:
+        return parse_task_file(name, content)
+    return None
 
 
 def gather_diff(repo_root: Path, exclude: Optional[list[str]] = None) -> str | None:
@@ -170,8 +176,9 @@ def gather_prompt_components(
     if inline:
         task_result = ("inline", inline)
     elif task:
-        task_content = gather_task(repo_root, task)
-        if task_content:
+        task_file = gather_task(repo_root, task)
+        if task_file:
+            task_content = task_file.content
             # Process task_args if provided
             if task_args:
                 plain_args = []

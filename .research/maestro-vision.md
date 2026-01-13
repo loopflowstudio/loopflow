@@ -4,64 +4,70 @@ What Loopflow Maestro solves and how it differs from existing tools. This docume
 
 ---
 
+## The Core Problems
+
+### 1. Context Management Is King
+
+Large codebases overwhelm agents. Context windows fill up, important information gets compacted away, and the agent loses track of the big picture. This is the hardest technical problem in AI coding—and one that tooling can actually help with by structuring what goes in and tracking what matters.
+
+### 2. Design Intent Doesn't Transfer
+
+When you start a new session or hand off to another agent, you lose the "why." The accumulated understanding of what you're building, the decisions made along the way, the constraints that shaped the approach—all gone. Each session starts from scratch, re-discovering context that was already established.
+
+### 3. Parallel Work Is Distracting
+
+Humans are bad at multitasking. Running multiple agents means constant context-switching: checking terminals, comparing outputs, deciding what to merge. But *not* running parallel agents leaves massive productivity on the table. You need infrastructure that handles the orchestration so you can focus on decisions, not babysitting.
+
+### 4. Code Quality Degrades Without Discipline
+
+Pure vibing produces slop. Agents optimize for completing the immediate task, not long-term maintainability. For professional development work, you need structure: review passes, quality gates, consistent patterns. Without this, codebases accumulate technical debt faster than they accumulate features.
+
+### 5. Prompts Aren't First-Class Artifacts
+
+Prompts are becoming as important as code. "Code is the new binary, prompts are the new code"—this is 60% true. Code still matters (often actual code beats docs and prompts), but prompts are essential. Yet there's no good way to save, compose, version, and reuse them across different tools and sessions.
+
+---
+
 ## The Gap in the Market
 
-### The Core Problem: Slash Commands Are Platform-Locked
+### Gap #1: Portable Prompt Workflows
 
-Claude Code and Codex both have custom command systems:
+The toolset is changing fast. Claude Code, Codex, Gemini CLI—each has its own conventions, its own command format, its own quirks. The tool you're using today might not be the tool you're using in six months.
 
-```
-Claude Code:  .claude/commands/my-command.md
-Codex CLI:    ~/.codex/ or AGENTS.md inline
-```
+**What users need:**
+- Own their processes in a way that's futureproof
+- Prompts that work regardless of which agent runs them
+- A format that's just markdown and git—nothing proprietary
+- The ability to switch backends without rewriting everything
 
-These are incompatible. A slash command written for Claude Code doesn't work in Codex. A skill written for one doesn't automatically work in the other.
+**Loopflow provides:**
+- Tasks as `.lf` files—plain markdown, version-controlled
+- Same prompt runs on Claude, Codex, or Gemini
+- Configuration in one place (`.lf/config.yaml`), execution anywhere
 
-**What users actually want:**
-- Write a prompt once
-- Run it on Claude, Codex, or both simultaneously
-- Compare results
-- Pick the best implementation
-
-### Gap #1: Cross-Platform Prompt Execution
-
-Simon Willison (October 2025):
-> "My daily drivers are currently Claude Code (on Sonnet 4.5), Codex CLI (on GPT-5-Codex), and Codex Cloud..."
-
-**No tool exists that:**
-1. Stores prompts in a platform-agnostic format
-2. Dispatches the same prompt to both Claude Code and Codex CLI
-3. Shows side-by-side results
-4. Lets you pick the winner
-
-**Loopflow Maestro provides:**
-- Single prompt library, multiple execution targets
-- "Run on Claude" / "Run on Codex" / "Run on both" toggle
-- Diff view for comparing implementations
-- One-click to apply the winning result
-
-### Gap #2: Git Worktree Orchestration Hell
+### Gap #2: Parallel Agent Orchestration
 
 From Feature Request #4963 on Claude Code:
 
 > "The current implementation is entirely manual and presents several significant problems:
 > - **High Cognitive Load:** The developer must manually create worktrees, navigate between directories, and manage multiple terminal windows
-> - **Manual Orchestration:** The user is forced to be the orchestrator of parallel work
-> - **Clunky and Disjointed Workflow:** Switching between tasks, checking their status, and merging results is cumbersome"
+> - **Manual Orchestration:** The user is forced to be the orchestrator of parallel work"
 
-**Current tools don't handle:**
-- Automatic worktree creation with naming conventions
-- Status dashboard across all active worktrees
-- Environment sync (.env, dependencies)
-- Unified merge/PR workflow
-- Cleanup automation
+**What exists:** Worktrunk (`wt`) handles git worktree lifecycle well—creating, switching, removing, merging. That's a solved problem and we delegate to it.
 
-**Loopflow Maestro provides:**
-- `lf start "implement auth" --parallel 3` -> creates 3 worktrees, starts 3 agents
-- Dashboard showing status of each
-- "Compare results" view when done
-- One-click to merge winner back to main
-- Auto-cleanup of worktrees
+**What's missing:** The layer above worktree management. When you want to run agents in parallel, you need:
+- Session tracking across worktrees
+- Status visibility (what's running where)
+- Unified view of what each agent produced
+- Workflow for comparing and merging results
+
+**Loopflow provides:**
+- `lf ops status` shows running sessions across all worktrees
+- Maestro UI tails logs, shows status in one place
+- `lf ops compare a b` for diffing parallel implementations
+- `lf ops land` for merging when you've picked a winner
+
+We complement worktrunk, not replace it.
 
 ### Gap #3: Commit Protocols and PR Sharing
 
@@ -83,54 +89,52 @@ When you run parallel agents:
 - "Create PR" button with prompt, model/settings, comparison links
 - Shareable prompt URLs for reproducibility
 
-### Gap #4: Running Same Task on Both Platforms
+### Gap #4: Futureproof Workflows
 
-Different models have different strengths:
+The AI coding landscape is shifting weekly. Claude Code, Codex CLI, Gemini—each has strengths, each has quirks, and the best choice depends on the task. More importantly: the tool you use today might not be the tool you use next month.
+
+Different models excel at different things:
 
 | Model | Strength | Weakness |
 |-------|----------|----------|
-| Claude (Opus) | Deep reasoning, refactoring | Sometimes over-eager, misses parts |
-| Codex (GPT-5.2) | Reads extensively before writing, fewer "fix-the-fix" loops | Slower, more literal |
+| Claude (Opus) | Deep reasoning, refactoring | Sometimes over-eager |
+| Codex (GPT-5.2) | Reads extensively before writing | Slower |
 | Gemini | Fast, multimodal | Edit tools are messy |
 
-steipete's experience:
-> "Whatever OpenAI did in post-training, codex has been trained to read LOTS of code before starting... even tho codex sometimes takes 4x longer than Opus for comparable tasks, I'm often faster because I don't have to go back and fix the fix."
+But the specific comparisons matter less than this: **you need to own your workflows in a way that survives tool changes.**
 
-**The ideal workflow:**
-1. Define task once: "Implement JWT authentication for the auth service"
-2. Click "Run on Claude + Codex"
-3. Both agents work in parallel (separate worktrees)
-4. See side-by-side comparison when both finish
-5. Pick the better implementation
-6. Optionally: merge best parts from each
+**Loopflow's approach:**
+- Workflows defined in your repo, not locked to any platform
+- Switch models with `-m codex` or change `agent_model` in config
+- Optional multi-model comparison for advanced users (`--parallel claude,codex`)
+- Your prompts are markdown files. They'll work with whatever comes next.
 
-**Loopflow Maestro provides:**
-- Prompt written once in Loopflow format
-- `lf run --agents claude,codex "implement feature X"`
-- Wait for both to complete
-- Diff view showing files changed, token usage, time taken
-- "Apply Claude's changes" / "Apply Codex's changes" / "Merge manually"
+### Gap #5: Prompts as First-Class Artifacts
 
-### Gap #5: Prompt Versioning and Reproducibility
+Prompts deserve the same treatment as code: version-controlled, reviewed, tested, reused. But current tooling scatters them across platform-specific formats, chat histories, and clipboard buffers.
 
-Slash commands are just markdown files. They don't have:
-- Version history (beyond git)
-- A/B testing infrastructure
-- Execution logs
-- Performance metrics
+**Loopflow's principle:** Everything lives in your git repo. No external prompt stores, no proprietary formats, no MCP complexity for basic operations. Your prompts are markdown. Your config is yaml. Your version control is git.
 
-**What enterprise users need:**
-1. **Audit trail:** Which prompt produced which code change?
-2. **Rollback:** Previous prompt version worked better, how do I get it back?
-3. **A/B testing:** Is prompt v2 actually better than v1?
-4. **Team sharing:** Share a prompt with confidence it'll work
+This matters because:
+- Humans can read and edit prompts directly
+- Agents can read them too—same source of truth
+- `git log` shows prompt history
+- `git diff` shows what changed
+- PR review works for prompts like it works for code
 
-**Loopflow Maestro provides:**
-- Every prompt has a version number and changelog
-- Execution history: "This prompt was run 47 times, avg success rate 82%"
-- A/B testing: "v2 completed 30% faster with same quality"
-- Export to Claude commands / Codex format with one click
-- Team sync: shared prompt library with access controls
+**Beyond plan → implement → test:**
+
+Everyone's converged on some version of "plan, implement, review, test." That's a good default. But there are more workflows:
+- Design exploration before committing to an approach
+- Iterative refinement on an existing branch
+- Polish passes before landing
+- Compare multiple implementations
+
+**Loopflow provides:**
+- Tasks: reusable prompts for common operations
+- Pipelines: composable sequences of tasks
+- Config-driven defaults: which tasks are interactive, which run headless
+- Room to experiment with new workflows as you discover them
 
 ---
 
@@ -138,36 +142,39 @@ Slash commands are just markdown files. They don't have:
 
 | Layer | Current Pain | Loopflow Solution |
 |-------|-------------|-------------------|
-| **Prompt Storage** | Platform-specific formats | Universal format, export to any platform |
-| **Execution** | One agent at a time, manual switching | Parallel dispatch to Claude + Codex |
-| **Worktree Management** | Manual create/navigate/cleanup | Automated orchestration with dashboard |
-| **Comparison** | Side-by-side terminals, manual diff | Structured diff view, metrics comparison |
-| **Commit/PR** | Manual commits, no audit trail | Metadata-rich commits, one-click PR |
-| **Versioning** | Git only, no prompt-specific features | Version history, A/B testing, metrics |
-| **Sharing** | Copy files, hope they work | Shareable URLs, reproducibility guaranteed |
+| **Prompts** | Scattered across tools, chat logs, clipboards | Markdown files in `.lf/`, versioned with git |
+| **Workflows** | Locked to specific platforms | Portable pipelines, backend-agnostic |
+| **Orchestration** | Manual terminal juggling | Session tracking, status dashboard |
+| **Quality** | Vibing produces slop | Review tasks, pipelines with quality gates |
+| **Context** | Design intent lost between sessions | Persistent task files, documented workflows |
+| **Collaboration** | Copy-paste prompts, hope they work | Same `.lf/` folder works for whole team |
 
 ---
 
-## What Loopflow Maestro Is (and Isn't)
+## What Loopflow Is (and Isn't)
 
 ### Is NOT:
 - Another Claude Code wrapper
-- A worktree management tool (worktrunk exists)
-- A prompt template library (Anthropic has one)
+- A worktree management tool (worktrunk handles that)
+- A prompt template library
 - A thin layer that models will obsolete
 
 ### IS:
-- **The prompt layer that sits above Claude/Codex**
-- **The orchestrator for cross-platform prompt execution**
-- **The comparison engine for picking the best AI output**
-- **The audit trail for prompt-to-code traceability**
-- **A harness that makes Claude Code accessible without deep Python knowledge**
+- **A workflow layer** that sits above any AI coding agent
+- **Prompts as first-class artifacts** in your git repo
+- **Composable pipelines** for quality-gated development
+- **Session management** so you can run agents without babysitting
+- **Portable** across Claude, Codex, Gemini, and whatever comes next
 
 ### The Moat
 
-**Prompt portability + parallel execution + structured comparison**
+We're not competing with agents—we're making them useful for professional work.
 
-Nobody else is doing all three.
+The differentiator isn't any single feature. It's the combination:
+- **Prompts you own** (markdown in git, not locked to a platform)
+- **Workflows you design** (pipelines, not just single prompts)
+- **Quality by default** (review tasks, not just vibing)
+- **Parallel execution** without cognitive overload
 
 ---
 
@@ -256,24 +263,25 @@ Maestro = the conductor's podium and baton, not another instrument.
 
 ### What We Build
 
-- Prompt storage and versioning
-- Cross-platform execution dispatch
-- Comparison and diff views
-- Session management and status
+- Task execution layer (dispatching prompts to agents)
+- Pipeline runner (sequencing tasks with quality gates)
+- Session tracking and status dashboard
+- Comparison tools (`lf ops compare`)
 - The Maestro UI
 
 ### What We Leverage
 
-- Claude Code / Codex CLI (the actual agents)
+- Claude Code / Codex CLI / Gemini CLI (the actual agents)
 - Worktrunk (git worktree management)
-- Git (version control, branching)
+- Git (version control for everything, including prompts)
 - SQLite (session state)
 
 ### What We Don't Build
 
 - Custom agents or subagents (use Claude Code's)
 - Custom hooks systems (use Claude Code's)
-- AI models (obviously)
+- Proprietary prompt formats (markdown + git is enough)
+- AI models
 - IDE integrations (let users choose their editor)
 
 ---
@@ -282,47 +290,47 @@ Maestro = the conductor's podium and baton, not another instrument.
 
 ### For Users
 
-1. **Time to first parallel run:** Can a new user run two agents on the same task within 5 minutes?
-2. **Comparison clarity:** When agents finish, is it obvious which produced better code?
-3. **Merge confidence:** Can users merge with confidence the right changes are being applied?
-4. **Reproducibility:** Can users share a prompt URL and get the same results?
+1. **Time to first pipeline:** Can a new user run `lf ship` on a real task within 10 minutes?
+2. **Code quality:** Does output meet the bar for production code, not just vibing?
+3. **Context preservation:** Does design intent survive across sessions and branches?
+4. **Reproducibility:** Can someone else run the same workflow and get consistent results?
 
 ### For Loopflow
 
-1. **Adoption:** Do users come back after first use?
+1. **Adoption:** Do users create their own tasks and pipelines?
 2. **Retention:** Do users keep using it as models improve?
-3. **Differentiation:** Are we solving problems Claude Code won't absorb?
+3. **Differentiation:** Are we solving problems agents can't solve themselves?
 
 ---
 
 ## Key Risks
 
-### Risk: Claude Code absorbs orchestration features
+### Risk: Claude Code absorbs workflow features
 
-**Mitigation:** Focus on cross-platform (Claude + Codex + Gemini). Anthropic won't build Codex integration.
+**Mitigation:** Stay portable. Focus on the cross-platform layer (Claude + Codex + Gemini). Anthropic won't build Codex integration.
 
-### Risk: Model improvements reduce need for parallel runs
+### Risk: Model improvements reduce need for structured workflows
 
-**Mitigation:** Focus on comparison and audit trails, not just parallel execution. Even with perfect models, teams need reproducibility.
+**Mitigation:** Quality matters more as stakes increase. Even perfect models need review passes for production code. Reproducibility and auditability don't go away.
 
 ### Risk: Power users build their own systems
 
-**Mitigation:** Target conductors, not power users. Make the 80% case effortless.
+**Mitigation:** That's fine. We're targeting people who want good defaults without building infrastructure. The 80% who want to ship, not tinker.
 
 ### Risk: Too complex for casual users
 
-**Mitigation:** Clear CLI interface, sensible defaults, progressive disclosure. Don't expose all options at once.
+**Mitigation:** Sensible defaults, progressive disclosure. `lf ship` should just work. Advanced options exist but aren't required.
 
 ---
 
 ## Next Steps
 
-1. **Define MVP** - What's the smallest thing that demonstrates the value?
-2. **Test with conductors** - Find 3-5 users who match the profile
-3. **Iterate on comparison UX** - This is the key differentiator
-4. **Build the Maestro UI** - Session tracking, status, logs
+1. **Ship the core CLI** - `lf <task>`, `lf <pipeline>`, `lf ops status`
+2. **Refine default tasks** - Make `lf ship` work well out of the box
+3. **Session visibility** - Maestro UI for tracking parallel work
+4. **Dogfood heavily** - Use loopflow to build loopflow
 
-The goal: **Make AI agent orchestration as intuitive as running a build command.**
+The goal: **Make AI coding workflows as reproducible and composable as build systems.**
 
 ---
 

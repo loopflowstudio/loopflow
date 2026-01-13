@@ -2,6 +2,8 @@ Generate a commit message for the staged changes.
 
 Review the diff and write a concise commit message.
 
+Do not ask questions. If anything is unclear, make the best assumption and proceed.
+
 ## Output format
 
 Return a structured response with:

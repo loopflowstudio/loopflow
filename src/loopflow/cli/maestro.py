@@ -11,14 +11,10 @@ import typer
 app = typer.Typer(help="Maestro daemon management.")
 
 
-def _get_paths() -> tuple[Path, Path, Path]:
+def _get_paths() -> Path:
     """Get maestro file paths."""
     lf_dir = Path.home() / ".lf"
-    return (
-        lf_dir / "maestro.sock",
-        lf_dir / "maestro.json",
-        lf_dir / "maestro.pid",
-    )
+    return lf_dir / "maestro.pid"
 
 
 def _is_running(pid_path: Path) -> bool:
@@ -38,7 +34,7 @@ def _is_running(pid_path: Path) -> bool:
 @app.command()
 def start():
     """Start the maestro daemon."""
-    socket_path, state_path, pid_path = _get_paths()
+    pid_path = _get_paths()
 
     if _is_running(pid_path):
         typer.echo("Maestro already running")
@@ -56,13 +52,13 @@ def start():
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     pid_path.write_text(str(process.pid))
 
-    typer.echo(f"Maestro listening on {socket_path}")
+    typer.echo("Maestro running at http://localhost:8420")
 
 
 @app.command()
 def stop():
     """Stop the maestro daemon."""
-    socket_path, state_path, pid_path = _get_paths()
+    pid_path = _get_paths()
 
     if not _is_running(pid_path):
         typer.echo("Maestro not running")
@@ -73,8 +69,6 @@ def stop():
     try:
         os.kill(pid, signal.SIGTERM)
         pid_path.unlink()
-        if socket_path.exists():
-            socket_path.unlink()
         typer.echo("Maestro stopped")
     except OSError:
         typer.echo("Failed to stop maestro", err=True)

@@ -256,23 +256,23 @@ pipelines:
         load_config(temp_repo)
 
 
-def test_load_config_model_defaults_claude(temp_repo):
-    """model defaults to 'claude' when not set."""
+def test_load_config_agent_model_defaults(temp_repo):
+    """agent_model defaults to 'claude:opus' when not set."""
     config_yaml = temp_repo / ".lf" / "config.yaml"
     config_yaml.write_text("push: false\n")
 
     config = load_config(temp_repo)
 
     assert config is not None
-    assert config.model == "claude"
+    assert config.agent_model == "claude:opus"
 
 
-def test_load_config_model_setting(temp_repo):
-    """model is loaded from config."""
+def test_load_config_agent_model_setting(temp_repo):
+    """agent_model is loaded from config."""
     config_yaml = temp_repo / ".lf" / "config.yaml"
-    config_yaml.write_text("model: codex\n")
+    config_yaml.write_text("agent_model: codex:o3\n")
 
     config = load_config(temp_repo)
 
     assert config is not None
-    assert config.model == "codex"
+    assert config.agent_model == "codex:o3"

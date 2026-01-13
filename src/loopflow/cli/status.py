@@ -1,12 +1,11 @@
 """Session status commands."""
 
 from datetime import datetime
-from pathlib import Path
 
 import typer
 
 from loopflow.context import find_worktree_root
-from loopflow.maestro import connect_maestro
+from loopflow.maestro.db import DEFAULT_DB_PATH, load_sessions
 
 app = typer.Typer(help="Session status.")
 
@@ -31,25 +30,20 @@ def status(
     all_repos: bool = typer.Option(False, "--all", "-a", help="Show sessions from all repos"),
 ):
     """Show running sessions."""
-    maestro = connect_maestro()
-    if not maestro:
-        typer.echo("Maestro not running. Start with: lf maestro start")
-        raise typer.Exit(1)
-
     repo = None if all_repos else find_worktree_root()
-    sessions = maestro.list_sessions(repo)
+    sessions = load_sessions(DEFAULT_DB_PATH, repo=repo)
 
     if not sessions:
         typer.echo("No running sessions")
         raise typer.Exit(0)
 
     # Print header
-    typer.echo(f"{'TASK':<14} {'WORKTREE':<24} {'STATUS':<10} {'STARTED'}")
+    typer.echo(f"{'ID':<10} {'TASK':<14} {'WORKTREE':<24} {'STATUS':<10} {'STARTED'}")
 
     # Print sessions
     for session in sessions:
         worktree_name = session.worktree.name
         time_ago = _format_time_ago(session.started_at)
         typer.echo(
-            f"{session.task:<14} {worktree_name:<24} {session.status.value:<10} {time_ago}"
+            f"{session.id[:8]:<10} {session.task:<14} {worktree_name:<24} {session.status.value:<10} {time_ago}"
         )

@@ -1,18 +1,16 @@
-"""Maestro daemon entry point."""
+"""Maestro HTTP server entry point."""
 
-from pathlib import Path
-
-from loopflow.maestro.service import Maestro
+import uvicorn
 
 
 def main():
-    """Run the maestro daemon."""
-    lf_dir = Path.home() / ".lf"
-    socket_path = lf_dir / "maestro.sock"
-    state_path = lf_dir / "maestro.json"
-
-    maestro = Maestro(socket_path, state_path)
-    maestro.run()
+    """Run the maestro HTTP server."""
+    uvicorn.run(
+        "loopflow.maestro.api:app",
+        host="127.0.0.1",
+        port=8420,
+        log_level="info",
+    )
 
 
 if __name__ == "__main__":

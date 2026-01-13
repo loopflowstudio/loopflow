@@ -93,15 +93,13 @@ class TokenTree:
             if cat_total == 0:
                 continue
 
-            pct = cat_total / total
-            bar_len = int(pct * max_bar)
-            bar = "█" * bar_len if bar_len > 0 else "▏"
+            bar = self._bar_for_tokens(cat_total, total, max_bar)
 
             lines.append(f"{cat_name:<14} {cat_total:>6,} {bar}")
 
             # Break down if significant
-            if pct >= threshold_pct:
-                self._format_children(cat_node, lines, total, threshold_pct, indent=2)
+            if cat_total / total >= threshold_pct:
+                self._format_children(cat_node, lines, total, threshold_pct, indent=2, max_bar=max_bar)
 
         return "\n".join(lines)
 
@@ -112,6 +110,7 @@ class TokenTree:
         total: int,
         threshold_pct: float,
         indent: int,
+        max_bar: int,
     ) -> None:
         """Recursively format children with adaptive detail."""
         children = sorted(
@@ -131,11 +130,19 @@ class TokenTree:
 
             if shown < 4 or child_pct >= threshold_pct:
                 prefix = " " * indent
-                lines.append(f"{prefix}{name:<{14-indent}} {child_total:>6,}")
+                bar = self._bar_for_tokens(child_total, total, max_bar)
+                lines.append(f"{prefix}{name:<{14-indent}} {child_total:>6,} {bar}")
 
                 # Recurse if this child is also significant
                 if child_pct >= threshold_pct and child.children:
-                    self._format_children(child, lines, total, threshold_pct, indent + 2)
+                    self._format_children(
+                        child,
+                        lines,
+                        total,
+                        threshold_pct,
+                        indent + 2,
+                        max_bar,
+                    )
 
                 shown += 1
             else:
@@ -144,7 +151,18 @@ class TokenTree:
 
         if rolled_up > 0:
             prefix = " " * indent
-            lines.append(f"{prefix}({rolled_up} more){'':<{8-indent}} {rolled_up_tokens:>6,}")
+            bar = self._bar_for_tokens(rolled_up_tokens, total, max_bar)
+            lines.append(
+                f"{prefix}({rolled_up} more){'':<{8-indent}} {rolled_up_tokens:>6,} {bar}"
+            )
+
+    @staticmethod
+    def _bar_for_tokens(tokens: int, total: int, max_bar: int) -> str:
+        """Render an absolute bar scaled to total tokens."""
+        if total <= 0 or tokens <= 0:
+            return "▏"
+        bar_len = int((tokens / total) * max_bar)
+        return "█" * bar_len if bar_len > 0 else "▏"
 
 
 def analyze_prompt_tokens(

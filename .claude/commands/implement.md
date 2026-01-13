@@ -29,3 +29,8 @@ Run the "done when" check from the design doc to verify the implementation works
 If the design doc is unclear or seems wrong, ask before proceeding in interactive mode. In batch mode, make the simplest, clearest choice and move on. The code can be rewritten if a different choice is needed later.
 
 If implementation reveals a flaw in the design, note it. The design doc was scaffolding—it's fine for reality to diverge from the plan.
+
+## Auto mode
+
+In auto/headless runs, do not pause to ask questions. Make the best assumption you can and append any open questions to `.design/questions.md`.
+

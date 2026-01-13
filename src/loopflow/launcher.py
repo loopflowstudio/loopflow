@@ -3,10 +3,18 @@
 import json
 import subprocess
 import sys
+from functools import lru_cache
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
+from loopflow.logging import (
+    get_model_env,
+    open_json_log,
+    open_log_file,
+    write_log_line,
+)
 
 
 @dataclass
@@ -27,6 +35,7 @@ class Runner(ABC):
         auto: bool = False,
         stream: bool = False,
         skip_permissions: bool = False,
+        session_id: str | None = None,
         cwd: Optional[Path] = None,
     ) -> LaunchResult:
         """Launch a coding session with the given prompt."""
@@ -47,9 +56,12 @@ class ClaudeRunner(Runner):
         auto: bool = False,
         stream: bool = False,
         skip_permissions: bool = False,
+        session_id: str | None = None,
         cwd: Optional[Path] = None,
     ) -> LaunchResult:
-        exit_code, output = launch_claude(prompt, auto, stream, skip_permissions, cwd)
+        exit_code, output = launch_claude(
+            prompt, auto, stream, skip_permissions, session_id, cwd
+        )
         return LaunchResult(exit_code, output)
 
     def is_available(self) -> bool:
@@ -65,24 +77,32 @@ class CodexRunner(Runner):
         auto: bool = False,
         stream: bool = False,
         skip_permissions: bool = False,
+        session_id: str | None = None,
         cwd: Optional[Path] = None,
     ) -> LaunchResult:
-        cmd = ["codex"]
+        cmd = build_codex_command(
+            auto=auto,
+            stream=stream,
+            skip_permissions=skip_permissions,
+            sandbox_root=cwd.parent if cwd else None,
+            workdir=cwd,
+        )
 
-        if skip_permissions or auto:
-            # Never ask for approval, but sandbox to workspace
-            cmd.extend(["-a", "never", "--sandbox", "workspace-write"])
+        if auto and stream:
+            exit_code, output = _run_streaming_json(
+                cmd,
+                cwd=cwd,
+                normalize_fn=normalize_codex_event,
+                session_id=session_id,
+                prompt=prompt,
+            )
+            return LaunchResult(exit_code, output)
         if auto:
-            cmd.append("--quiet")
-
-        cmd.append(prompt)
-
-        if auto:
-            result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+            result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, input=prompt)
             return LaunchResult(result.returncode, result.stdout)
-        else:
-            result = subprocess.run(cmd, cwd=cwd)
-            return LaunchResult(result.returncode, None)
+
+        result = subprocess.run(cmd, cwd=cwd, input=prompt, text=True)
+        return LaunchResult(result.returncode, None)
 
     def is_available(self) -> bool:
         try:
@@ -112,13 +132,59 @@ def launch_claude(
     auto: bool = False,
     stream: bool = False,
     skip_permissions: bool = False,
+    session_id: str | None = None,
     cwd: Optional[Path] = None,
 ) -> tuple[int, str | None]:
     """Launch a Claude Code session with the given prompt.
 
     Returns (exit_code, output). Output is only captured in print mode.
+    Prompt is passed via stdin to avoid exposing it in ps output.
+    """
+    if auto and stream:
+        cmd = build_claude_command(
+            auto=auto,
+            stream=stream,
+            skip_permissions=skip_permissions,
+        )
+        return _run_streaming_json(
+            cmd,
+            cwd=cwd,
+            normalize_fn=normalize_claude_event,
+            session_id=session_id,
+            prompt=prompt,
+        )
+    elif auto:
+        cmd = build_claude_command(
+            auto=auto,
+            stream=stream,
+            skip_permissions=skip_permissions,
+        )
+        result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, input=prompt, env=get_model_env())
+        return result.returncode, result.stdout
+    else:
+        cmd = build_claude_command(
+            auto=auto,
+            stream=stream,
+            skip_permissions=skip_permissions,
+        )
+        result = subprocess.run(cmd, cwd=cwd, input=prompt, text=True, env=get_model_env())
+        return result.returncode, None
+
+
+def build_claude_command(
+    auto: bool,
+    stream: bool,
+    skip_permissions: bool,
+    model_variant: str | None = None,
+) -> list[str]:
+    """Build Claude CLI command for the requested run mode.
+
+    Prompt is passed via stdin to avoid exposing it in ps output.
     """
     cmd = ["claude"]
+
+    if model_variant:
+        cmd.extend(["--model", model_variant])
 
     if auto:
         # Batch mode always skips permissions (no way to grant them interactively)
@@ -128,74 +194,250 @@ def launch_claude(
     elif skip_permissions:
         cmd.append("--dangerously-skip-permissions")
 
-    cmd.append(prompt)
+    return cmd
 
-    if auto and stream:
-        return _run_streaming(cmd, cwd)
+
+def build_codex_command(
+    auto: bool,
+    stream: bool,
+    skip_permissions: bool,
+    model_variant: str | None = None,
+    sandbox_root: Path | None = None,
+    workdir: Path | None = None,
+) -> list[str]:
+    """Build Codex CLI command for the requested run mode.
+
+    Prompt is passed via stdin to avoid exposing it in ps output.
+    """
+    cmd = ["codex", "exec"]
+
+    if model_variant:
+        cmd.extend(["-c", f'model="{model_variant}"'])
+
+    if workdir:
+        cmd.extend(["-C", str(workdir)])
+
+    if stream:
+        cmd.append("--json")
+
+    cmd.extend(["--sandbox", "workspace-write"])
+    if sandbox_root:
+        cmd.extend(["--add-dir", str(sandbox_root)])
+
+    if skip_permissions:
+        # Keep sandboxing but avoid approval prompts in exec mode.
+        cmd.extend(["-c", 'approval_policy="never"'])
     elif auto:
-        result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
-        return result.returncode, result.stdout
-    else:
-        result = subprocess.run(cmd, cwd=cwd)
-        return result.returncode, None
+        if _codex_exec_supports_full_auto():
+            cmd.append("--full-auto")
+        else:
+            cmd.extend(["-c", 'approval_policy="on-request"'])
+
+    return cmd
 
 
-def _run_streaming(cmd: list[str], cwd: Optional[Path]) -> tuple[int, str | None]:
-    """Run claude with streaming output, displaying progress."""
+@lru_cache(maxsize=1)
+def _codex_exec_supports_full_auto() -> bool:
+    """Check whether codex exec supports --full-auto."""
+    try:
+        result = subprocess.run(
+            ["codex", "exec", "--help"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+    return "--full-auto" in result.stdout
+
+
+def build_codex_interactive_command(
+    skip_permissions: bool,
+    model_variant: str | None = None,
+    sandbox_root: Path | None = None,
+    workdir: Path | None = None,
+) -> list[str]:
+    """Build Codex CLI command for interactive mode.
+
+    Prompt is passed via stdin to avoid exposing it in ps output.
+    """
+    cmd = ["codex"]
+    if model_variant:
+        cmd.extend(["-c", f'model="{model_variant}"'])
+    if workdir:
+        cmd.extend(["-C", str(workdir)])
+    if skip_permissions:
+        cmd.extend(["-a", "never"])
+    cmd.extend(["--sandbox", "workspace-write"])
+    if sandbox_root:
+        cmd.extend(["--add-dir", str(sandbox_root)])
+    return cmd
+
+
+def build_model_command(
+    model: str,
+    auto: bool,
+    stream: bool,
+    skip_permissions: bool,
+    model_variant: str | None = None,
+    sandbox_root: Path | None = None,
+    workdir: Path | None = None,
+) -> list[str]:
+    """Build a model command for auto/background execution.
+
+    Prompt should be passed via stdin separately.
+    """
+    if model == "claude":
+        return build_claude_command(auto=auto, stream=stream, skip_permissions=skip_permissions, model_variant=model_variant)
+    return build_codex_command(
+        auto=auto,
+        stream=stream,
+        skip_permissions=skip_permissions,
+        model_variant=model_variant,
+        sandbox_root=sandbox_root,
+        workdir=workdir,
+    )
+
+
+def build_model_interactive_command(
+    model: str,
+    skip_permissions: bool,
+    model_variant: str | None = None,
+    sandbox_root: Path | None = None,
+    workdir: Path | None = None,
+) -> list[str]:
+    """Build a model command for interactive execution.
+
+    Prompt should be passed via stdin separately.
+    """
+    if model == "claude":
+        return build_claude_command(auto=False, stream=False, skip_permissions=skip_permissions, model_variant=model_variant)
+    return build_codex_interactive_command(
+        skip_permissions=skip_permissions,
+        model_variant=model_variant,
+        sandbox_root=sandbox_root,
+        workdir=workdir,
+    )
+
+
+def _run_streaming_json(
+    cmd: list[str],
+    cwd: Optional[Path],
+    normalize_fn,
+    session_id: str | None,
+    prompt: str,
+) -> tuple[int, str | None]:
+    """Run a CLI with JSON streaming output and emit normalized events.
+
+    Prompt is passed via stdin to avoid exposing it in ps output.
+    """
     process = subprocess.Popen(
         cmd,
         cwd=cwd,
+        stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        env=get_model_env(),
     )
+    # Write prompt to stdin and close to signal EOF
+    process.stdin.write(prompt)
+    process.stdin.close()
 
     result_text = None
+    log_file = open_log_file(cwd, session_id)
+    json_log = open_json_log(cwd, session_id)
 
     for line in process.stdout:
         line = line.strip()
         if not line:
             continue
 
+        # Write raw output to JSON log
+        if json_log:
+            json_log.write(line + "\n")
+            json_log.flush()
+
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
-            continue
+            event = {"type": "text", "content": line}
 
-        _handle_stream_event(event)
+        normalized_events = normalize_fn(event)
+        for normalized in normalized_events:
+            formatted = _format_normalized_event(normalized)
+            if formatted:
+                _print_status(formatted) if formatted.startswith("→") else print(formatted, end="", flush=True)
+                write_log_line(log_file, formatted)
 
-        # Capture final result
-        if event.get("type") == "result":
-            result_text = event.get("result")
+            if normalized.get("type") == "result":
+                result_text = normalized.get("status")
 
     process.wait()
+    if log_file:
+        log_file.close()
+    if json_log:
+        json_log.close()
     return process.returncode, result_text
 
 
-def _handle_stream_event(event: dict) -> None:
-    """Print relevant streaming events."""
+def normalize_claude_event(event: dict) -> list[dict]:
+    """Normalize Claude stream-json events to common schema."""
     event_type = event.get("type")
-    subtype = event.get("subtype")
+    results = []
 
     if event_type == "assistant":
         msg = event.get("message", {})
         content = msg.get("content", [])
         for block in content:
             if block.get("type") == "tool_use":
-                tool = block.get("name", "unknown")
-                _print_status(f"→ {tool}")
+                results.append({
+                    "type": "tool_use",
+                    "tool": block.get("name", "unknown"),
+                    "input": block.get("input", {}),
+                })
             elif block.get("type") == "text":
                 text = block.get("text", "")
                 if text:
-                    # Print assistant text output
-                    print(text, end="", flush=True)
+                    results.append({
+                        "type": "text",
+                        "content": text,
+                    })
 
     elif event_type == "result":
-        if subtype == "success":
-            print()  # Newline after streaming text
-        elif subtype == "error":
-            error = event.get("error", "Unknown error")
-            _print_status(f"✗ {error}")
+        results.append({
+            "type": "result",
+            "status": event.get("subtype", "unknown"),
+        })
+
+    return results
+
+
+def normalize_codex_event(event: dict) -> list[dict]:
+    """Normalize Codex JSON events to common schema."""
+    return [event] if event else []
+
+
+def _format_normalized_event(event: dict) -> str | None:
+    """Format a normalized event in unified format."""
+    event_type = event.get("type")
+    if event_type == "tool_use":
+        tool = event.get("tool", "unknown")
+        path = ""
+        input_data = event.get("input") or {}
+        if isinstance(input_data, dict) and input_data.get("path"):
+            path = f": {input_data['path']}"
+        return f"→ {tool}{path}"
+    elif event_type == "text":
+        text = event.get("content", "")
+        return text if text else None
+    elif event_type == "result":
+        status = event.get("status", "unknown")
+        if status == "success":
+            return "\n✓ Done\n"
+        elif status == "error":
+            return "✗ Failed\n"
+    return None
 
 
 def _print_status(msg: str) -> None:

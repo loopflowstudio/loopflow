@@ -1,15 +1,19 @@
 Review the diff on the current branch against `main` and produce a written assessment.
 
-The deliverable is a review document under `.design/`, not fixes. Do not edit any files.
+The deliverable is a consolidated design document under `.design/`. Do not edit code files.
 
 ## Process
 
 1. Run `git diff main...HEAD` to see committed changes on this branch
 2. Run `git diff` to see uncommitted changes
 3. Review against STYLE.md and general code quality
-4. Write your assessment to a new markdown file under `.design/` (pick a short descriptive name, create the folder if needed)
+4. Read all existing `.design/*.md` files to understand what's already documented
+5. Write a **single consolidated document** to `.design/` that includes:
+   - Your review assessment
+   - Any still-relevant information from previous design docs
+   - Delete all other `.design/*.md` files after consolidating
 
-## What to look for
+## What to look for in the review
 
 **Style guide violations.** Read STYLE.md. Check naming, error handling, documentation patterns, test quality.
 
@@ -19,18 +23,54 @@ The deliverable is a review document under `.design/`, not fixes. Do not edit an
 
 **Missing pieces.** Tests that should exist. README updates for changed behavior.
 
-## What to ignore
+## Consolidating design docs
+
+After writing your review, merge it with anything worth keeping from existing `.design/` docs. Be aggressive about culling:
+
+**Keep:**
+- Decisions and rationale that explain non-obvious choices
+- Architecture diagrams or data structure definitions still accurate to the implementation
+- User quotes that capture intent
+- "What's not implemented" lists if still relevant
+
+**Delete:**
+- Old reviews (superseded by your new one)
+- Design details that match the obvious implementation
+- "What's done" checklists (the code is the source of truth)
+- Outdated plans or explorations
+- Anything the README or code comments already explain
+
+The goal is one lean document that helps the next person understand what was built and why, without duplicating what's obvious from reading the code.
+
+## What to ignore in review
 
 Don't flag things unrelated to this branch's changes. Stay focused on what's in the diff.
 
-**Design doc deviations.** If any `.design/*.md` docs exist, treat the implementation as the source of truth. The design docs were scaffolding—deviations are likely intentional refinements discovered during implementation. Evaluate the code at face value for bugs and style issues, not for fidelity to the original plan.
+**Design doc deviations.** Treat the implementation as the source of truth. Design docs were scaffolding—deviations are intentional refinements. Evaluate code at face value, not for fidelity to the original plan.
 
-## Output
+## Output format
 
-Write a brief review covering:
-- **Summary**: What does this change do? (1-2 sentences)
-- **Issues**: Bugs, style violations, or concerns (if any)
-- **Suggestions**: Optional improvements (if any)
-- **Verdict**: Ready to ship, or needs work?
+Write a single `.design/<branch-name>.md` file structured as:
 
-Keep it concise. If there's nothing to flag, say so.
+```markdown
+# <Branch Name>
+
+<1-2 sentence summary of what this branch does>
+
+## Review
+
+**Verdict:** Ready to ship | Needs work
+
+<Issues, if any. Skip section if none.>
+
+## Design
+
+<Consolidated design notes worth preserving. Skip section if nothing non-obvious to document.>
+```
+
+Delete all other `.design/*.md` files after writing the consolidated doc.
+
+## Auto mode
+
+In auto/headless runs, do not pause to ask questions. Make the best assumption you can and append any open questions to `.design/questions.md`.
+

@@ -200,7 +200,13 @@ def land(
 
     _squash_commits(repo_root, base_ref, commit_msg)
 
+    was_in_worktree = repo_root != main_repo
+
     cmd = ["wt", "merge", "--no-squash"]
     if base:
         cmd.append(base_branch)
     subprocess.run(cmd, cwd=repo_root, check=True)
+
+    # Output main repo path for shell cd integration when we removed a worktree
+    if was_in_worktree:
+        typer.echo(str(main_repo))

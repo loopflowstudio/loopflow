@@ -1,6 +1,14 @@
+---
+requires: diff vs main
+produces: improved code
+---
 Make meaningful improvements to code touched by this branch.
 
-Focus on the areas this branch has already modified. The goal is incremental quality improvements that compound—not generic refactoring across the whole codebase.
+## Goal
+
+One focused improvement, then stop. The human can run you again (`iterate → iterate → iterate`) or move on. Pick the highest-impact fix within scope, make it, verify tests pass. Don't try to fix everything in one pass.
+
+Focus on the areas this branch has already modified. Incremental quality improvements that compound—not generic refactoring across the whole codebase.
 
 ## Workflow
 
@@ -36,8 +44,4 @@ These aren't generic best practices—they're specific to how this codebase work
 **Refactoring for style.** Don't rewrite working code because you'd write it differently. Only fix actual problems.
 
 **Adding features.** This is about quality, not scope. New capabilities need their own design.
-
-## Auto mode
-
-In auto/headless runs, do not pause to ask questions. Make the best assumption you can and append any open questions to `.design/questions.md`.
 

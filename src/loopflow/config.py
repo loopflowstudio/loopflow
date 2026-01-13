@@ -1,5 +1,6 @@
 """Configuration loading for loopflow."""
 
+import warnings
 from pathlib import Path
 from typing import Optional
 
@@ -102,7 +103,7 @@ def load_config(repo_root: Path) -> Config | None:
         return None
 
     try:
-        return Config(**data)
+        config = Config(**data)
     except Exception as e:
         # Extract the useful part from Pydantic errors
         msg = str(e)
@@ -115,3 +116,16 @@ def load_config(repo_root: Path) -> Config | None:
             ]
             raise ConfigError(f"Invalid config in {config_path}:\n" + "\n".join(errors))
         raise ConfigError(f"Invalid config in {config_path}: {e}")
+
+    if config.include_tests_for:
+        warnings.warn(
+            "include_tests_for is deprecated. Use per-prompt frontmatter instead:\n"
+            "---\n"
+            "include:\n"
+            "  - tests/**\n"
+            "---",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+    return config

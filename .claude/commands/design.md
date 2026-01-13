@@ -1,6 +1,16 @@
+---
+interactive: true
+produces: .design/<branch>.md
+---
 Produce a short implementation spec that another LLM session can use to write a first draft.
 
-The design doc is scaffolding—a checkpoint for recovery, not documentation for posterity. If a session crashes, the spec lets a fresh session pick up where things left off. `lf ops pr land` deletes `.design/` contents.
+If on main, create a feature branch first: `git checkout -b <feature-name>`.
+
+## Who reads this
+
+The design doc is a working document for both humans and LLMs. The implementing session will execute fairly literally—what you don't specify, it will guess. But the human will likely read and edit directly before implementation. Optimize for easy to manipulate, not just easy to execute. Clear sections they can delete, add to, or rearrange. Constraints they can tighten or loosen.
+
+The design doc is scaffolding—a checkpoint for recovery, not documentation for posterity. `lf ops pr land` deletes `.design/` contents.
 
 ## Workflow
 
@@ -56,8 +66,4 @@ Bias toward brevity. Ask only what's needed to start coding.
 If scope is unclear, ask "what's the smallest version that's useful?" and spec that.
 
 Completeness is not required. Wrong guesses get fixed in implementation. The goal is to not block the implementing session, not to predict everything.
-
-## Auto mode
-
-In auto/headless runs, do not pause to ask questions. Make the best assumption you can and append any open questions to `.design/questions.md`.
 

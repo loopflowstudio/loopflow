@@ -1,11 +1,7 @@
-# v0.4.0
+# v0.5.1
 
-This release adds Google Gemini CLI as a third backend option alongside Claude Code and Codex, introduces a background agent system for running multiple tasks in parallel, and scaffolds the Maestro macOS app for session monitoring.
+Clarifies version bump semantics in the publish command documentation, making the default (patch) explicit.
 
 ## Changes
 
-- Add Google Gemini CLI provider support (`-m gemini`)
-- Add background agent system with CLI for parallel task execution
-- Scaffold Swift macOS app for Maestro session tracking UI
-- Improve task prompts for better focus and structure
-- Delete remote branches automatically after landing PRs
+- Update publish command to clarify version bump defaults (patch by default, minor for substantial releases)

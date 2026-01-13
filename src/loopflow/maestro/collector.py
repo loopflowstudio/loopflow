@@ -157,29 +157,18 @@ class _Spinner:
 def _run_streaming(command: list[str], log_file, json_log, foreground: bool, prompt: str | None = None) -> int:
     """Run a non-interactive command and stream output to logs.
 
-    Prompt is passed via stdin to avoid exposing it in ps output.
+    Prompt is passed as a CLI argument.
     """
+    cmd = command + [prompt] if prompt else command
+
     process = subprocess.Popen(
-        command,
-        stdin=subprocess.PIPE if prompt else None,
+        cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
         start_new_session=True,
         env=get_model_env(),
     )
-    # Write prompt to stdin and close to signal EOF
-    if prompt and process.stdin:
-        try:
-            process.stdin.write(prompt)
-        except BrokenPipeError:
-            # Process exited before consuming stdin; continue without failing.
-            pass
-        finally:
-            try:
-                process.stdin.close()
-            except OSError:
-                pass
 
     def _handle_signal(signum, frame):
         if process.poll() is None:
@@ -229,13 +218,9 @@ def _run_streaming(command: list[str], log_file, json_log, foreground: bool, pro
 def _run_interactive(command: list[str], log_file, json_log, foreground: bool, prompt: str | None = None) -> int:
     """Run an interactive command using pty.spawn.
 
-    Prompt is sent over stdin to avoid exposing it in ps output.
+    Prompt is passed as a CLI argument.
     """
-    stdin_read = None
-    if prompt:
-        if _is_codex_command(command) and not _prompt_supported_for_codex_interactive(prompt):
-            return 1
-        stdin_read = _prompt_stdin_reader(prompt)
+    cmd = command + [prompt] if prompt else command
 
     def master_read(fd: int) -> bytes:
         data = os.read(fd, 4096)
@@ -257,10 +242,7 @@ def _run_interactive(command: list[str], log_file, json_log, foreground: bool, p
     old_openai_key = os.environ.pop("OPENAI_API_KEY", None)
 
     try:
-        if stdin_read is None:
-            exit_code = pty.spawn(command, master_read)
-        else:
-            exit_code = pty.spawn(command, master_read, stdin_read)
+        exit_code = pty.spawn(cmd, master_read)
     finally:
         if old_anthropic_key is not None:
             os.environ["ANTHROPIC_API_KEY"] = old_anthropic_key
@@ -268,40 +250,6 @@ def _run_interactive(command: list[str], log_file, json_log, foreground: bool, p
             os.environ["OPENAI_API_KEY"] = old_openai_key
 
     return exit_code
-
-
-def _is_codex_command(command: list[str]) -> bool:
-    return bool(command) and Path(command[0]).name == "codex"
-
-
-def _prompt_supported_for_codex_interactive(prompt: str) -> bool:
-    """Guard against Codex TUI crashes with large prefills."""
-    heavy_markers = ("<lf:docs>", "<lf:diff>", "<lf:files>")
-    if any(marker in prompt for marker in heavy_markers):
-        print(
-            "Error: Codex interactive does not support large prefills yet. "
-            "Use auto mode with '-a' or switch to Claude for interactive runs.",
-            file=sys.stderr,
-        )
-        return False
-    return True
-
-
-def _prompt_stdin_reader(prompt: str):
-    """Create a stdin reader that sends the prompt once, then reads user input."""
-    if not prompt.endswith("\n"):
-        prompt = f"{prompt}\n"
-    prompt_bytes = prompt.encode()
-    sent = False
-
-    def _read(fd: int) -> bytes:
-        nonlocal sent
-        if not sent:
-            sent = True
-            return prompt_bytes
-        return os.read(fd, 1024)
-
-    return _read
 
 
 def _format_stream_line(line: str) -> list[str]:

@@ -208,6 +208,27 @@ def run(
             workdir=repo_root,
         )
 
+    # For interactive mode, run CLI directly to preserve terminal
+    if is_interactive:
+        typer.echo(f"\033[90m━━━ {task} ━━━\033[0m", err=True)
+        for line in token_summary.split("\n"):
+            typer.echo(f"\033[90m{line}\033[0m", err=True)
+        typer.echo(err=True)
+
+        # Read prompt and clean up file before exec
+        prompt_content = Path(prompt_file).read_text()
+        os.unlink(prompt_file)
+
+        # Remove API keys so CLIs use subscriptions
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+        os.environ.pop("OPENAI_API_KEY", None)
+
+        # Run CLI directly (replaces current process)
+        cmd_with_prompt = command + [prompt_content]
+        os.chdir(repo_root)
+        os.execvp(cmd_with_prompt[0], cmd_with_prompt)
+
+    # For auto mode, use collector for logging
     collector_cmd = [
         sys.executable,
         "-m",
@@ -222,13 +243,11 @@ def run(
         prompt_file,
         "--token-summary",
         token_summary,
+        "--autocommit",
+        "--foreground",
+        "--",
+        *command,
     ]
-    if not is_interactive:
-        collector_cmd.append("--autocommit")
-    if is_interactive:
-        collector_cmd.append("--interactive")
-    collector_cmd.append("--foreground")
-    collector_cmd.extend(["--", *command])
 
     process = subprocess.Popen(collector_cmd, cwd=repo_root, env=get_model_env())
     session.pid = process.pid
@@ -366,6 +385,27 @@ def inline(
             workdir=repo_root,
         )
 
+    # For interactive mode, run CLI directly to preserve terminal
+    if is_interactive:
+        typer.echo(f"\033[90m━━━ inline ━━━\033[0m", err=True)
+        for line in token_summary.split("\n"):
+            typer.echo(f"\033[90m{line}\033[0m", err=True)
+        typer.echo(err=True)
+
+        # Read prompt and clean up file before exec
+        prompt_content = Path(prompt_file).read_text()
+        os.unlink(prompt_file)
+
+        # Remove API keys so CLIs use subscriptions
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+        os.environ.pop("OPENAI_API_KEY", None)
+
+        # Run CLI directly (replaces current process)
+        cmd_with_prompt = command + [prompt_content]
+        os.chdir(repo_root)
+        os.execvp(cmd_with_prompt[0], cmd_with_prompt)
+
+    # For auto mode, use collector for logging
     collector_cmd = [
         sys.executable,
         "-m",
@@ -380,13 +420,11 @@ def inline(
         prompt_file,
         "--token-summary",
         token_summary,
+        "--autocommit",
+        "--foreground",
+        "--",
+        *command,
     ]
-    if not is_interactive:
-        collector_cmd.append("--autocommit")
-    if is_interactive:
-        collector_cmd.append("--interactive")
-    collector_cmd.append("--foreground")
-    collector_cmd.extend(["--", *command])
 
     process = subprocess.Popen(collector_cmd, cwd=repo_root, env=get_model_env())
     session.pid = process.pid

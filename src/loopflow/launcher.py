@@ -88,20 +88,21 @@ class CodexRunner(Runner):
             workdir=cwd,
         )
 
+        cmd_with_prompt = cmd + [prompt]
+
         if auto and stream:
             exit_code, output = _run_streaming_json(
-                cmd,
+                cmd_with_prompt,
                 cwd=cwd,
                 normalize_fn=normalize_codex_event,
                 session_id=session_id,
-                prompt=prompt,
             )
             return LaunchResult(exit_code, output)
         if auto:
-            result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, input=prompt)
+            result = subprocess.run(cmd_with_prompt, cwd=cwd, capture_output=True, text=True)
             return LaunchResult(result.returncode, result.stdout)
 
-        result = subprocess.run(cmd, cwd=cwd, input=prompt, text=True)
+        result = subprocess.run(cmd_with_prompt, cwd=cwd, text=True)
         return LaunchResult(result.returncode, None)
 
     def is_available(self) -> bool:
@@ -138,36 +139,27 @@ def launch_claude(
     """Launch a Claude Code session with the given prompt.
 
     Returns (exit_code, output). Output is only captured in print mode.
-    Prompt is passed via stdin to avoid exposing it in ps output.
+    Prompt is passed as a CLI argument.
     """
+    cmd = build_claude_command(
+        auto=auto,
+        stream=stream,
+        skip_permissions=skip_permissions,
+    )
+    cmd_with_prompt = cmd + [prompt]
+
     if auto and stream:
-        cmd = build_claude_command(
-            auto=auto,
-            stream=stream,
-            skip_permissions=skip_permissions,
-        )
         return _run_streaming_json(
-            cmd,
+            cmd_with_prompt,
             cwd=cwd,
             normalize_fn=normalize_claude_event,
             session_id=session_id,
-            prompt=prompt,
         )
     elif auto:
-        cmd = build_claude_command(
-            auto=auto,
-            stream=stream,
-            skip_permissions=skip_permissions,
-        )
-        result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, input=prompt, env=get_model_env())
+        result = subprocess.run(cmd_with_prompt, cwd=cwd, capture_output=True, text=True, env=get_model_env())
         return result.returncode, result.stdout
     else:
-        cmd = build_claude_command(
-            auto=auto,
-            stream=stream,
-            skip_permissions=skip_permissions,
-        )
-        result = subprocess.run(cmd, cwd=cwd, input=prompt, text=True, env=get_model_env())
+        result = subprocess.run(cmd_with_prompt, cwd=cwd, text=True, env=get_model_env())
         return result.returncode, None
 
 
@@ -179,7 +171,7 @@ def build_claude_command(
 ) -> list[str]:
     """Build Claude CLI command for the requested run mode.
 
-    Prompt is passed via stdin to avoid exposing it in ps output.
+    Prompt should be appended as a CLI argument.
     """
     cmd = ["claude"]
 
@@ -207,7 +199,7 @@ def build_codex_command(
 ) -> list[str]:
     """Build Codex CLI command for the requested run mode.
 
-    Prompt is passed via stdin to avoid exposing it in ps output.
+    Prompt should be appended as a CLI argument.
     """
     cmd = ["codex", "exec"]
 
@@ -259,7 +251,7 @@ def build_codex_interactive_command(
 ) -> list[str]:
     """Build Codex CLI command for interactive mode.
 
-    Prompt is passed via stdin to avoid exposing it in ps output.
+    Prompt should be appended as a CLI argument.
     """
     cmd = ["codex"]
     if model_variant:
@@ -285,7 +277,7 @@ def build_model_command(
 ) -> list[str]:
     """Build a model command for auto/background execution.
 
-    Prompt should be passed via stdin separately.
+    Prompt should be appended as a CLI argument.
     """
     if model == "claude":
         return build_claude_command(auto=auto, stream=stream, skip_permissions=skip_permissions, model_variant=model_variant)
@@ -308,7 +300,7 @@ def build_model_interactive_command(
 ) -> list[str]:
     """Build a model command for interactive execution.
 
-    Prompt should be passed via stdin separately.
+    Prompt should be appended as a CLI argument.
     """
     if model == "claude":
         return build_claude_command(auto=False, stream=False, skip_permissions=skip_permissions, model_variant=model_variant)
@@ -325,24 +317,19 @@ def _run_streaming_json(
     cwd: Optional[Path],
     normalize_fn,
     session_id: str | None,
-    prompt: str,
 ) -> tuple[int, str | None]:
     """Run a CLI with JSON streaming output and emit normalized events.
 
-    Prompt is passed via stdin to avoid exposing it in ps output.
+    Prompt should be included in cmd as a CLI argument.
     """
     process = subprocess.Popen(
         cmd,
         cwd=cwd,
-        stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         env=get_model_env(),
     )
-    # Write prompt to stdin and close to signal EOF
-    process.stdin.write(prompt)
-    process.stdin.close()
 
     result_text = None
     log_file = open_log_file(cwd, session_id)

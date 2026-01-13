@@ -1,9 +1,9 @@
 Publish the loopflow package to PyPI.
 
 ```bash
-lf publish           # auto-detect version bump from changes
-lf publish minor     # force minor version bump
-lf publish major     # force major version bump
+lf publish           # patch bump (default): 0.5.0 → 0.5.1
+lf publish minor     # minor bump: 0.5.0 → 0.6.0 (substantial release)
+lf publish major     # major bump: 0.9.0 → 1.0.0 (explicit full version bump only)
 ```
 
 ## Workflow
@@ -20,14 +20,18 @@ If tests fail, stop and report which tests failed. Do not publish broken code.
 
 Read current version from `src/loopflow/__init__.py`. Then:
 
-- If `minor` or `major` was passed as argument, use that
+- If `patch`, `minor`, or `major` was passed as argument, use that
 - Otherwise, analyze `git diff main...HEAD`:
-  - **Major**: Breaking changes to CLI flags, removed commands, incompatible config changes
-  - **Minor**: New commands, new flags, non-breaking additions (default)
+  - **Patch** (default): Bug fixes, documentation, small improvements (0.5.0 → 0.5.1)
+  - **Minor**: New features, substantial additions, significant new functionality (0.5.0 → 0.6.0)
+  - **Major**: Only when user explicitly requests a full version bump (0.9.0 → 1.0.0)
 
 Calculate new version (X.Y.Z):
+- Patch: increment Z
 - Minor: increment Y, reset Z to 0
 - Major: increment X, reset Y and Z to 0
+
+**Default to patch.** Most releases are small iterations. Minor bumps are for fairly substantial releases with significant new functionality. Major bumps require explicit user request.
 
 ### 3. Update version
 Edit `src/loopflow/__init__.py`:

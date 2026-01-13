@@ -50,17 +50,31 @@ def _load_gitignore(gitignore_path: Path) -> pathspec.PathSpec | None:
     return pathspec.PathSpec.from_lines("gitwildmatch", patterns)
 
 
-def _matches_glob_pattern(path: Path, pattern: str, repo_root: Path) -> bool:
-    """Check if path matches a glob pattern using Path.glob semantics."""
-    matching_paths = set(repo_root.glob(pattern))
-    return path in matching_paths
+def _compile_exclude_patterns(patterns: list[str], repo_root: Path) -> set[Path]:
+    """Pre-compute all paths matching exclude patterns.
+
+    Runs glob once per pattern instead of once per file, giving O(patterns)
+    instead of O(patterns * files) glob operations.
+    """
+    excluded: set[Path] = set()
+    for pattern in patterns:
+        excluded.update(repo_root.glob(pattern))
+    return excluded
 
 
-def is_ignored(path: Path, repo_root: Path, exclude: Optional[list[str]] = None) -> bool:
+def is_ignored(
+    path: Path,
+    repo_root: Path,
+    exclude: Optional[list[str]] = None,
+    _excluded_paths: Optional[set[Path]] = None,
+) -> bool:
     """Check if path should be excluded from context.
 
     Excludes .git, .lf (prompt config), gitignored paths, and paths matching exclude patterns.
     Exclude patterns use Path.glob semantics (*.md = root only, **/*.md = recursive).
+
+    For performance, pass _excluded_paths (from _compile_exclude_patterns) to avoid
+    re-globbing on every call.
     """
     rel_path = path.relative_to(repo_root)
 
@@ -72,11 +86,15 @@ def is_ignored(path: Path, repo_root: Path, exclude: Optional[list[str]] = None)
     if rel_path.parts and rel_path.parts[0] == ".lf":
         return True
 
-    # Check exclude patterns (Path.glob style)
-    if exclude:
-        for pattern in exclude:
-            if _matches_glob_pattern(path, pattern, repo_root):
-                return True
+    # Check pre-compiled exclude patterns (fast path)
+    if _excluded_paths is not None:
+        if path in _excluded_paths:
+            return True
+    elif exclude:
+        # Fallback: compile on demand (slower, for backwards compatibility)
+        excluded = _compile_exclude_patterns(exclude, repo_root)
+        if path in excluded:
+            return True
 
     # Check .gitignore files from repo root down to path's parent
     # Each .gitignore matches paths relative to its own directory
@@ -94,7 +112,12 @@ def is_ignored(path: Path, repo_root: Path, exclude: Optional[list[str]] = None)
     return False
 
 
-def gather_docs(path: Path, repo_root: Path, exclude: Optional[list[str]] = None) -> list[tuple[Path, str]]:
+def gather_docs(
+    path: Path,
+    repo_root: Path,
+    exclude: Optional[list[str]] = None,
+    _excluded_paths: Optional[set[Path]] = None,
+) -> list[tuple[Path, str]]:
     """Gather .md files from path up to repo root.
 
     If path is a file, starts from its parent directory.
@@ -106,7 +129,7 @@ def gather_docs(path: Path, repo_root: Path, exclude: Optional[list[str]] = None
     while current >= repo_root:
         dir_docs = []
         for md_file in sorted(current.glob("*.md")):
-            if md_file.is_file() and not is_ignored(md_file, repo_root, exclude):
+            if md_file.is_file() and not is_ignored(md_file, repo_root, exclude, _excluded_paths):
                 dir_docs.append((md_file, md_file.read_text()))
         if dir_docs:
             docs_by_dir.append(dir_docs)
@@ -119,13 +142,18 @@ def gather_docs(path: Path, repo_root: Path, exclude: Optional[list[str]] = None
     return result
 
 
-def gather_file(path: Path, repo_root: Path, exclude: Optional[list[str]] = None) -> tuple[Path, str] | None:
+def gather_file(
+    path: Path,
+    repo_root: Path,
+    exclude: Optional[list[str]] = None,
+    _excluded_paths: Optional[set[Path]] = None,
+) -> tuple[Path, str] | None:
     """Gather a single file if it exists, isn't ignored, and isn't binary."""
     if not path.exists():
         return None
     if not path.is_file():
         return None
-    if is_ignored(path, repo_root, exclude):
+    if is_ignored(path, repo_root, exclude, _excluded_paths):
         return None
     if is_binary(path):
         return None
@@ -163,18 +191,21 @@ def gather_files(paths: list[str], repo_root: Path, exclude: Optional[list[str]]
     seen: set[Path] = set()
     results: list[tuple[Path, str]] = []
 
+    # Pre-compile exclude patterns once for the entire gather operation
+    excluded_paths = _compile_exclude_patterns(exclude, repo_root) if exclude else None
+
     for path_str in paths:
         expanded = _expand_path(path_str, repo_root)
 
         for path in expanded:
             # Gather parent documentation first
-            for doc_path, content in gather_docs(path, repo_root, exclude):
+            for doc_path, content in gather_docs(path, repo_root, exclude, excluded_paths):
                 if doc_path not in seen:
                     seen.add(doc_path)
                     results.append((doc_path, content))
 
             # Gather the file itself
-            file_result = gather_file(path, repo_root, exclude)
+            file_result = gather_file(path, repo_root, exclude, excluded_paths)
             if file_result and file_result[0] not in seen:
                 seen.add(file_result[0])
                 results.append(file_result)

@@ -6,18 +6,33 @@ from loopflow.cli import app
 
 
 def _get_command_names(output: str) -> list[str]:
+    """Extract command names from Typer help output.
+
+    Handles both plain text "Commands:" and Rich-formatted "╭─ Commands ─..."
+    """
     lines = output.splitlines()
-    try:
-        start = lines.index("Commands:")
-    except ValueError:
+
+    # Find the commands section (handles Rich box formatting)
+    start = None
+    for i, line in enumerate(lines):
+        if "Commands" in line:
+            start = i
+            break
+
+    if start is None:
         return []
 
     commands = []
     for line in lines[start + 1 :]:
-        if not line.strip():
+        # Stop at section end (Rich box border or empty line)
+        if line.startswith("╰") or (not line.strip() and commands):
             break
-        if line.startswith("  "):
-            commands.append(line.split()[0])
+        # Extract command name from lines like "│ run        description │"
+        stripped = line.strip().lstrip("│").strip()
+        if stripped and not stripped.startswith("─"):
+            parts = stripped.split()
+            if parts:
+                commands.append(parts[0])
     return commands
 
 

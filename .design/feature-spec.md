@@ -1,7 +1,8 @@
 # Ops Subcommand Split
 
-## What to build
-Keep `lf` as the single CLI, but move all non-task commands under a single `ops` subcommand (e.g., `lf ops pr`, `lf ops land`, `lf ops status`).
+## What exists
+`lf` now exposes only run/inline/pipeline plus the shorthand task/pipeline resolution.
+All non-task commands live under a single `ops` subcommand (`lf ops ...`).
 
 ## User intent (quotes)
 > "I want to separate lf run and the other commanders."
@@ -22,12 +23,7 @@ Keep `lf` as the single CLI, but move all non-task commands under a single `ops`
 > "i think maybe just makes ops a single special sub command which can then be subdivided"
 > — user
 
-## Data structures
-```python
-# No new data structures expected; rewire existing Typer apps/commands.
-```
-
-## CLI layout (sketch)
+## CLI layout (implemented)
 ```python
 # lf (minimal)
 app = typer.Typer(name="lf", ...)
@@ -37,8 +33,13 @@ app.command(name="pipeline")(run.pipeline)
 
 ops = typer.Typer(name="ops", help="Management and maintenance commands.")
 ops.add_typer(pr.app, name="pr")
-ops.add_typer(meta.app, name="meta")
 ops.add_typer(maestro.app, name="maestro")
+
+# Flat ops commands
+ops.command()(meta.init)
+ops.command()(meta.install)
+ops.command()(meta.doctor)
+ops.command()(meta.version)
 ops.command()(status.status)
 ops.command()(sessions.stop)
 ops.command()(sessions.prune)
@@ -52,25 +53,17 @@ def main():
     ...
 ```
 
-## APIs
-```python
-# Add ops subcommand wiring in src/loopflow/cli/__init__.py
-# Possibly introduce a new module: src/loopflow/cli/ops.py
-```
+## Decisions
+- `meta` remains a module but its commands are flat under `lf ops` rather than `lf ops meta`.
 
-## Constraints
-- Preserve existing `lf` shorthand behavior for `lf :`, `lf <task>`, and `lf <pipeline>`.
-- Keep Typer conventions and subcommand names unchanged; only relocate them.
-- Avoid breaking existing task/pipeline resolution logic in `lf` main.
-- No backward compatibility for old `lf <subcommand>` names; move everything immediately.
-- `lf ops` is the management namespace.
+## Constraints met
+- Shorthand behavior preserved for `lf :`, `lf <task>`, and `lf <pipeline>`.
+- Non-task commands moved under `lf ops` without backward compatibility.
 
-## Done when
-- `lf` only exposes run/inline/pipeline + shorthand behavior for tasks/pipelines.
-- `lf ops` exposes pr/meta/maestro/status/sessions/compare/land.
-- `lf --help` lists `ops` as a single subcommand.
-- `lf ops --help` shows management commands.
-- Existing commands still function under their new namespace.
+## Verification
+- `lf --help` lists only `ops` plus run/inline/pipeline.
+- `lf ops --help` lists `pr`, `maestro`, `init`, `install`, `doctor`, `version`, `status`, `stop`, `prune`, `compare`, `land`.
+- Commands documented in `README.md`, `docs/index.md`, and `docs/patterns.md`.
 
-## Open questions
-- Where should help text and docs be updated (README, docs/index.md, docs/patterns.md)?
+## Remaining work
+- None.

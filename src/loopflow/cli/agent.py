@@ -26,6 +26,11 @@ from loopflow.maestro.markdown import (
     get_agent_file,
     list_agent_files,
 )
+from loopflow.maestro.worktree import (
+    ensure_agent_worktree,
+    get_agent_worktree_path,
+    remove_agent_worktree,
+)
 from loopflow.pipeline import run_pipeline
 
 app = typer.Typer(help="Background agent management.")
@@ -246,8 +251,18 @@ def show(
     typer.echo(f"  Trigger: {agent.trigger}")
     if agent.interval_seconds:
         typer.echo(f"  Interval: {agent.interval_seconds}s")
+    if agent.fresh:
+        typer.echo(f"  Fresh: yes (recreates worktree each run)")
     if agent.context:
         typer.echo(f"  Context: {', '.join(agent.context)}")
+
+    # Show worktree status
+    worktree = get_agent_worktree_path(agent)
+    if worktree:
+        typer.echo(f"  Worktree: {worktree}")
+    else:
+        typer.echo(f"  Worktree: (not created yet)")
+
     typer.echo(f"  Prompt:")
     typer.echo("")
     for line in agent.prompt.split("\n")[:10]:
@@ -270,6 +285,14 @@ def run(
     typer.echo(f"  Repo: {agent.repo}")
     typer.echo(f"  Pipeline: {' → '.join(agent.pipeline)}")
 
+    # Ensure agent has an isolated worktree
+    try:
+        worktree_path = ensure_agent_worktree(agent)
+        typer.echo(f"  Worktree: {worktree_path}")
+    except Exception as e:
+        typer.echo(f"Failed to setup worktree: {e}", err=True)
+        raise typer.Exit(1)
+
     pipeline_config = PipelineConfig(
         name=agent.name,
         tasks=agent.pipeline,
@@ -278,7 +301,7 @@ def run(
     try:
         result = run_pipeline(
             pipeline=pipeline_config,
-            repo_root=agent.repo,
+            repo_root=worktree_path,
             context=agent.context if agent.context else None,
         )
         if result == 0:
@@ -376,3 +399,49 @@ def logs(
         subprocess.run(["tail", "-f", str(log_path)])
     else:
         subprocess.run(["tail", f"-{lines}", str(log_path)])
+
+
+@app.command()
+def cleanup(
+    name: str = typer.Argument(None, help="Agent name (omit for all)"),
+    all_agents: bool = typer.Option(False, "--all", "-a", help="Clean up all agent worktrees"),
+):
+    """Remove agent worktrees."""
+    if not name and not all_agents:
+        typer.echo("Specify an agent name or use --all")
+        raise typer.Exit(1)
+
+    if all_agents:
+        agents = list_agent_files()
+        if not agents:
+            typer.echo("No agents defined")
+            return
+
+        removed = 0
+        for agent in agents:
+            worktree = get_agent_worktree_path(agent)
+            if worktree:
+                if remove_agent_worktree(agent):
+                    typer.echo(f"Removed: {worktree}")
+                    removed += 1
+
+        if removed == 0:
+            typer.echo("No agent worktrees to remove")
+        else:
+            typer.echo(f"Removed {removed} worktrees")
+    else:
+        agent = get_agent_file(name)
+        if not agent:
+            typer.echo(f"Agent '{name}' not found", err=True)
+            raise typer.Exit(1)
+
+        worktree = get_agent_worktree_path(agent)
+        if not worktree:
+            typer.echo(f"No worktree exists for agent '{name}'")
+            return
+
+        if remove_agent_worktree(agent):
+            typer.echo(f"Removed: {worktree}")
+        else:
+            typer.echo("Failed to remove worktree", err=True)
+            raise typer.Exit(1)

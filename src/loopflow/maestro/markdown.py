@@ -31,6 +31,7 @@ class AgentFile:
     context: list[str]
     prompt: str
     interval_seconds: int | None = None
+    fresh: bool = False  # force fresh worktree each run
 
 
 _FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
@@ -62,6 +63,7 @@ def parse_agent_file(path: Path) -> AgentFile | None:
         context=config.get("context", []),
         prompt=prompt,
         interval_seconds=config.get("interval"),
+        fresh=config.get("fresh", False),
     )
 
 
@@ -97,6 +99,11 @@ def _parse_yaml_frontmatter(text: str) -> dict:
             if value.startswith("[") and value.endswith("]"):
                 items = value[1:-1].split(",")
                 result[key] = [item.strip() for item in items if item.strip()]
+            # Boolean
+            elif value.lower() in ("true", "yes"):
+                result[key] = True
+            elif value.lower() in ("false", "no"):
+                result[key] = False
             # Integer
             elif value.isdigit():
                 result[key] = int(value)

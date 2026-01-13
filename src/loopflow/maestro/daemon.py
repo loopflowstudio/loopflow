@@ -18,6 +18,7 @@ from pathlib import Path
 from loopflow.maestro.db import DEFAULT_DB_PATH, get_db
 from loopflow.maestro.markdown import AgentFile, list_agent_files
 from loopflow.maestro.triggers import get_main_sha, should_trigger
+from loopflow.maestro.worktree import get_agent_worktree_path
 
 
 def _log(msg: str) -> None:
@@ -122,15 +123,15 @@ def _update_completed_runs() -> None:
     conn.close()
 
 
-def _record_run_start(agent: AgentFile, pid: int, main_sha: str | None) -> str:
+def _record_run_start(agent: AgentFile, pid: int, worktree: Path | None, main_sha: str | None) -> str:
     """Record that an agent run has started."""
     run_id = str(uuid.uuid4())
 
     conn = get_db(DEFAULT_DB_PATH)
     conn.execute(
-        """INSERT INTO agent_runs (id, agent_name, status, started_at, pid, main_sha)
-           VALUES (?, ?, 'running', ?, ?, ?)""",
-        (run_id, agent.name, datetime.now().isoformat(), pid, main_sha),
+        """INSERT INTO agent_runs (id, agent_name, status, started_at, pid, worktree, main_sha)
+           VALUES (?, ?, 'running', ?, ?, ?, ?)""",
+        (run_id, agent.name, datetime.now().isoformat(), pid, str(worktree) if worktree else None, main_sha),
     )
     conn.commit()
     conn.close()
@@ -198,7 +199,9 @@ def run_daemon(check_interval: int = 30) -> None:
 
                     pid = _spawn_agent_run(agent)
                     if pid:
-                        _record_run_start(agent, pid, current_sha)
+                        # Get expected worktree path (actual creation happens in the subprocess)
+                        worktree = get_agent_worktree_path(agent)
+                        _record_run_start(agent, pid, worktree, current_sha)
                         _log(f"Started agent {agent.name} (PID {pid})")
 
         except Exception as e:

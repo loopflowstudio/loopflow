@@ -9,7 +9,7 @@ import typer
 
 from loopflow.config import load_config
 from loopflow.context import find_worktree_root
-from loopflow.launcher import check_claude_available
+from loopflow.launcher import check_claude_available, check_codex_available, check_gemini_available
 
 app = typer.Typer(help="Setup and diagnostics.")
 
@@ -185,7 +185,7 @@ def install():
     else:
         typer.echo("✓ Node.js")
 
-    # Claude Code (always required)
+    # Claude Code
     if check_claude_available():
         typer.echo("✓ Claude Code")
     else:
@@ -199,7 +199,36 @@ def install():
             typer.echo("✓ Claude Code installed")
         else:
             typer.echo(f"✗ Could not install Claude Code: {result.stderr}", err=True)
-            raise typer.Exit(1)
+
+    # Codex
+    if check_codex_available():
+        typer.echo("✓ Codex")
+    else:
+        typer.echo("Installing Codex...")
+        result = subprocess.run(
+            ["npm", "install", "-g", "@openai/codex"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            typer.echo("✓ Codex installed")
+        else:
+            typer.echo(f"✗ Could not install Codex: {result.stderr}", err=True)
+
+    # Gemini CLI
+    if check_gemini_available():
+        typer.echo("✓ Gemini CLI")
+    else:
+        typer.echo("Installing Gemini CLI...")
+        result = subprocess.run(
+            ["npm", "install", "-g", "@google/gemini-cli"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            typer.echo("✓ Gemini CLI installed")
+        else:
+            typer.echo("- Gemini CLI: npm install -g @google/gemini-cli")
 
     # Worktrunk (required for worktree operations)
     if shutil.which("wt"):
@@ -277,6 +306,17 @@ def doctor():
         else:
             typer.echo("✗ cursor - Run: lf ops install")
             all_ok = False
+
+    # Optional model backends
+    if check_codex_available():
+        typer.echo("✓ codex (optional)")
+    else:
+        typer.echo("- codex (optional): npm install -g @openai/codex")
+
+    if check_gemini_available():
+        typer.echo("✓ gemini (optional)")
+    else:
+        typer.echo("- gemini (optional): npm install -g @google/gemini-cli")
 
     # Optional: gh for PR creation
     if shutil.which("gh"):

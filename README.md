@@ -10,13 +10,13 @@ lf ship
 
 Run LLM coding tasks from reusable prompt files.
 
-macOS only. Supports Claude Code and OpenAI Codex via configuration.
+macOS only. Supports Claude Code, OpenAI Codex, and Google Gemini CLI via configuration.
 
 ## Install
 
 ```bash
 pip install loopflow
-lf ops install    # installs Claude Code + worktrunk
+lf ops install    # installs Claude Code, Codex, Gemini CLI, worktrunk
 ```
 
 ## Why Worktrees?
@@ -112,7 +112,7 @@ Sessions write to SQLite in auto mode; the maestro UI reads the same database.
 
 ```yaml
 # .lf/config.yaml
-agent_model: claude:opus     # Model to use (backend or backend:variant)
+agent_model: claude:opus     # Model: claude, codex, gemini (or backend:variant)
 push: true        # auto-push after commits
 pr: false         # open PR after pipelines
 
@@ -166,7 +166,7 @@ lf implement &         # background (shell handles it)
 | `lf ops pr land [-a]` | Squash-merge to main |
 | `lf ops land [--no-pr] [--force] [--base]` | Land locally via worktrunk |
 | `lf ops init` | Initialize repo with prompts and config |
-| `lf ops install` | Install Claude Code |
+| `lf ops install` | Install Claude Code, Codex, Gemini CLI |
 | `lf ops doctor` | Check dependencies |
 | `lf ops maestro start` | Start session tracking daemon |
 | `lf ops maestro stop` | Stop session tracking daemon |

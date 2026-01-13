@@ -36,17 +36,6 @@ class SetupStatus:
     node: bool
     claude: bool
     worktrunk: bool
-    warp: bool
-    cursor: bool
-    codex: bool
-    gemini: bool
-    has_config: bool
-    has_prompts: bool
-
-    @property
-    def ready(self) -> bool:
-        """Can run tasks (required deps + repo setup)."""
-        return self.node and self.claude and self.worktrunk and self.has_config
 
     @property
     def missing_required(self) -> list[str]:
@@ -61,18 +50,12 @@ class SetupStatus:
         return missing
 
 
-def check_setup(repo_root: Path | None = None) -> SetupStatus:
-    """Check all dependencies and repo state. Fast (no network)."""
+def check_setup() -> SetupStatus:
+    """Check required dependencies. Fast (no network)."""
     return SetupStatus(
         node=shutil.which("npm") is not None,
         claude=shutil.which("claude") is not None,
         worktrunk=shutil.which("wt") is not None,
-        warp=shutil.which("warp") is not None,
-        cursor=shutil.which("cursor") is not None,
-        codex=shutil.which("codex") is not None,
-        gemini=shutil.which("gemini") is not None,
-        has_config=repo_root is not None and (repo_root / ".lf" / "config.yaml").exists(),
-        has_prompts=repo_root is not None and (repo_root / ".claude" / "commands").exists(),
     )
 
 
@@ -274,14 +257,13 @@ def init(
         return
 
     # Full init flow
-    status = check_setup(repo_root)
+    status = check_setup()
     _print_setup_status(status)
 
     # Handle missing deps
     if status.missing_required:
         if yes or typer.confirm("Install missing dependencies?", default=True):
             _install_missing(status)
-            status = check_setup(repo_root)  # recheck
         else:
             typer.echo("\nRun 'lf ops install' to install dependencies manually.")
             raise typer.Exit(1)

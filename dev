@@ -1,0 +1,61 @@
+#!/bin/bash
+# Development commands for loopflow
+
+set -e
+
+usage() {
+    echo "Usage: ./dev <command>"
+    echo ""
+    echo "Commands:"
+    echo "  py         Run Python tests (uv run pytest tests/)"
+    echo "  swift      Build and test Swift app"
+    echo "  build      Build Swift app only"
+    echo "  test       Run all tests (Python + Swift)"
+    echo "  run        Run the Swift app"
+    echo "  help       Show this message"
+}
+
+cd "$(dirname "$0")"
+
+case "${1:-help}" in
+    py)
+        echo "Running Python tests..."
+        uv run pytest tests/ -v
+        ;;
+    swift)
+        echo "Building and testing Swift app..."
+        cd Loopflow
+        swift build
+        swift test
+        ;;
+    build)
+        echo "Building Swift app..."
+        cd Loopflow
+        swift build
+        ;;
+    test)
+        echo "Running all tests..."
+        echo ""
+        echo "=== Python tests ==="
+        uv run pytest tests/ -v
+        echo ""
+        echo "=== Swift tests ==="
+        cd Loopflow
+        swift test
+        ;;
+    run)
+        echo "Building and running Swift app..."
+        cd Loopflow
+        swift build
+        .build/debug/Loopflow
+        ;;
+    help|--help|-h)
+        usage
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo ""
+        usage
+        exit 1
+        ;;
+esac

@@ -88,7 +88,17 @@ def init(
         commands_dir = repo_root / ".claude" / "commands"
         commands_dir.mkdir(parents=True, exist_ok=True)
 
-        for prompt_name in ["review.md", "implement.md", "design.md", "polish.md", "debug.md", "publish.md", "iterate.md", "expand.md"]:
+        for prompt_name in [
+            "review.md",
+            "implement.md",
+            "design.md",
+            "polish.md",
+            "debug.md",
+            "publish.md",
+            "iterate.md",
+            "expand.md",
+            "reduce.md",
+        ]:
             src = commands_src / prompt_name
             dst = commands_dir / prompt_name
 

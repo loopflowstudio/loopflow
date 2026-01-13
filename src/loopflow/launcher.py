@@ -106,15 +106,7 @@ class CodexRunner(Runner):
         return LaunchResult(result.returncode, None)
 
     def is_available(self) -> bool:
-        try:
-            subprocess.run(
-                ["codex", "--version"],
-                capture_output=True,
-                check=True,
-            )
-            return True
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            return False
+        return check_codex_available()
 
 
 class GeminiRunner(Runner):
@@ -576,40 +568,29 @@ def _print_status(msg: str) -> None:
     print(f"\033[90m{msg}\033[0m", file=sys.stderr)
 
 
-def check_claude_available() -> bool:
-    """Check if the claude CLI is available."""
+def _check_cli_available(cli_name: str) -> bool:
+    """Check if a CLI tool is available by running --version."""
     try:
         subprocess.run(
-            ["claude", "--version"],
+            [cli_name, "--version"],
             capture_output=True,
             check=True,
         )
         return True
     except (subprocess.CalledProcessError, FileNotFoundError):
         return False
+
+
+def check_claude_available() -> bool:
+    """Check if the claude CLI is available."""
+    return _check_cli_available("claude")
 
 
 def check_codex_available() -> bool:
     """Check if the codex CLI is available."""
-    try:
-        subprocess.run(
-            ["codex", "--version"],
-            capture_output=True,
-            check=True,
-        )
-        return True
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return False
+    return _check_cli_available("codex")
 
 
 def check_gemini_available() -> bool:
     """Check if the gemini CLI is available."""
-    try:
-        subprocess.run(
-            ["gemini", "--version"],
-            capture_output=True,
-            check=True,
-        )
-        return True
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return False
+    return _check_cli_available("gemini")

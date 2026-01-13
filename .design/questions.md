@@ -1,12 +1,11 @@
 # Open Questions
 
-The branch name `newrepos` is ambiguous. This design assumes it means "improve new repository experience" but other interpretations are possible:
+## Resolved
 
-1. **Multi-repo support?** — Managing loopflow across multiple repositories from a central location
-2. **Repo templates?** — Creating new repos from loopflow templates
-3. **Repo detection?** — Better handling when loopflow is run outside a git repo
-4. **Something else?** — The branch name may reference a feature discussed outside this session
+The branch name `newrepos` was ambiguous. After reviewing the existing design doc, the interpretation is **"improve new repository experience"** — better onboarding when loopflow is run in an uninitialized repo.
 
-## Before implementing
+## Still Open
 
-Please clarify which interpretation is correct, or provide the actual feature requirement if none of these match.
+1. **Dependency checking granularity** — Should missing deps block task execution, or just warn? Current design warns but doesn't block.
+
+2. **Error message format** — The design uses plain text. Should we use color/formatting consistent with Typer's style (e.g., `typer.style()`)? Keeping it simple for now.

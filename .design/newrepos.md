@@ -2,79 +2,155 @@
 
 ## What to build
 
-Streamlined first-run experience that guides users from `pip install loopflow` to running their first task without requiring manual discovery of `lf ops init`.
-
-## Context
-
-Branch name `newrepos` suggests improving the new-repo onboarding flow. Current gaps identified:
-
-1. Users must know to run `lf ops init` — no prompting
-2. No dependency check before first task
-3. Silent feature degradation when config missing
-4. No clear guidance on `.claude/commands/` vs `.lf/` distinction
+Better first-run experience: when loopflow is run in an uninitialized repo, show helpful guidance instead of a cryptic error.
 
 ## Data structures
 
 ```python
 @dataclass
 class InitStatus:
-    """What's been initialized in current repo."""
-    has_config: bool
-    has_prompts: bool
-    has_style: bool
-    missing_deps: list[str]  # e.g. ["claude", "worktrunk"]
+    """What's configured in the current repo."""
+    has_lf_dir: bool         # .lf/ exists
+    has_config: bool         # .lf/config.yaml exists
+    has_commands: bool       # .claude/commands/ has any .md files
+    missing_deps: list[str]  # ["claude", "wt"] etc.
 
 def check_init_status(repo_root: Path) -> InitStatus:
-    """Check what's initialized without modifying anything."""
+    """Check repo initialization without modifying anything."""
     ...
 ```
 
 ## Key functions
 
 ```python
-def prompt_init_if_needed(repo_root: Path) -> None:
-    """Auto-prompt init on first task run if nothing configured."""
-    ...
+# init_check.py (new file)
 
-def suggest_missing_deps() -> list[str]:
-    """Return list of missing but recommended dependencies."""
-    ...
+def check_init_status(repo_root: Path) -> InitStatus:
+    """Return what's configured in this repo."""
+    lf_dir = repo_root / ".lf"
+    commands_dir = repo_root / ".claude" / "commands"
 
-def run_with_init_check(task: str, repo_root: Path) -> None:
-    """Wrap task execution with init status check."""
-    ...
+    return InitStatus(
+        has_lf_dir=lf_dir.exists(),
+        has_config=(lf_dir / "config.yaml").exists(),
+        has_commands=any(commands_dir.glob("*.md")) if commands_dir.exists() else False,
+        missing_deps=_check_deps(),
+    )
+
+def _check_deps() -> list[str]:
+    """Return list of missing required dependencies."""
+    missing = []
+    if not check_claude_available():
+        missing.append("claude")
+    if not shutil.which("wt"):
+        missing.append("wt")
+    return missing
+
+def format_init_hint(status: InitStatus, task_name: str) -> str:
+    """Format helpful message for uninitialized repo."""
+    lines = [f"No task named '{task_name}' found."]
+
+    if not status.has_commands and not status.has_lf_dir:
+        lines.append("")
+        lines.append("This repo hasn't been set up for loopflow yet.")
+        lines.append("Run: lf ops init")
+    elif not status.has_commands:
+        lines.append("")
+        lines.append("No task files found.")
+        lines.append(f"Create: .claude/commands/{task_name}.md")
+
+    if status.missing_deps:
+        lines.append("")
+        lines.append(f"Missing dependencies: {', '.join(status.missing_deps)}")
+        lines.append("Run: lf ops install")
+
+    return "\n".join(lines)
 ```
 
-## Approach options
+## Changes to existing code
 
-**Option A: Auto-prompt on first run**
-- When `lf <task>` is run and no `.lf/` exists, prompt: "No loopflow config found. Run `lf ops init`? [Y/n]"
-- Minimal change, preserves explicit control
+### cli/__init__.py
 
-**Option B: Auto-init with defaults**
-- When no config exists, silently create minimal `.lf/config.yaml`
-- Risky: creates files user didn't ask for
+Current behavior when task not found (line 73-76):
+```python
+else:
+    typer.echo(f"Error: No task or pipeline named '{name}'", err=True)
+    typer.echo(f"  Create task: .claude/commands/{name}.md (recommended)", err=True)
+    typer.echo(f"  Or pipeline: add '{name}' to .lf/config.yaml", err=True)
+    raise SystemExit(1)
+```
 
-**Option C: Enhanced error messages only**
-- Keep current behavior but improve error messages
-- Add "Hint: run `lf ops init` to set up this repository"
-- Lowest risk, minimal benefit
+New behavior:
+```python
+else:
+    status = check_init_status(repo_root) if repo_root else None
+    if status and not status.has_commands and not status.has_lf_dir:
+        # Uninitialized repo - suggest init
+        typer.echo(f"No task named '{name}' found.", err=True)
+        typer.echo("", err=True)
+        typer.echo("This repo hasn't been set up for loopflow yet.", err=True)
+        typer.echo("Run: lf ops init", err=True)
+    else:
+        # Initialized but task missing - suggest creating it
+        typer.echo(f"No task or pipeline named '{name}'", err=True)
+        typer.echo(f"Create: .claude/commands/{name}.md", err=True)
+    raise SystemExit(1)
+```
+
+### cli/meta.py doctor command
+
+Add check for repo initialization status:
+```python
+@app.command()
+def doctor():
+    """Check loopflow dependencies and repo status."""
+    all_ok = True
+
+    # Repo status
+    repo_root = find_worktree_root()
+    if repo_root:
+        status = check_init_status(repo_root)
+        if status.has_commands:
+            typer.echo("✓ task files found")
+        else:
+            typer.echo("- no task files (run: lf ops init)")
+    else:
+        typer.echo("- not in a git repo")
+
+    # ... rest of dependency checks unchanged ...
+```
 
 ## Constraints
 
-- Must work in auto/headless mode (no interactive prompts in `-a` mode)
-- Cannot create files without user consent in interactive mode
-- Must not break existing workflows where users skip init intentionally
+1. **No auto-creation** — Never create files without explicit user action. `lf ops init` is the explicit action.
+
+2. **Works without init** — Users who skip init (using inline prompts only) must not see errors. `lf : "fix typo"` should work in any git repo.
+
+3. **Auto mode compatible** — Messages must be useful even in headless mode. No interactive prompts.
+
+## Files to create/modify
+
+- `src/loopflow/init_check.py` (new) — `InitStatus` dataclass and `check_init_status()` function
+- `src/loopflow/cli/__init__.py` — Update error message when task not found
+- `src/loopflow/cli/meta.py` — Add repo status to `doctor` output
 
 ## Done when
 
 ```bash
 # In a fresh git repo with no .lf/ directory:
-cd /tmp && mkdir test-repo && cd test-repo && git init
+cd /tmp && rm -rf test-repo && mkdir test-repo && cd test-repo && git init
 
-# Running a task shows helpful guidance:
+# Running a task shows init guidance:
 lf review 2>&1 | grep -q "lf ops init"
+echo "Exit code check: $?"  # should be 0
 
-# Doctor check works without init:
-lf ops doctor  # exits 0 if deps installed, shows status
+# Inline prompts still work without init:
+# (would need claude available, but the command should at least parse)
+lf : "hello" --help 2>&1 | grep -q "inline"
+
+# Doctor shows repo status:
+lf ops doctor 2>&1 | grep -q "task files"
+
+# Cleanup
+rm -rf /tmp/test-repo
 ```

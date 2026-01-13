@@ -6,9 +6,11 @@ Public API for registering and managing background agents.
 import os
 import subprocess
 import sys
+import time
 import uuid
 from pathlib import Path
 
+from loopflow.logging import get_log_dir
 from loopflow.maestro.agent import (
     AgentLoopSpec,
     AgentStatus,
@@ -24,6 +26,15 @@ from loopflow.maestro.db import (
     update_agent_status,
 )
 from loopflow.maestro.runner import run_agent_iteration, stop_agent as _stop_agent
+
+
+def _is_process_running(pid: int) -> bool:
+    """Check if a process with given PID is still running."""
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
 
 
 def register_agent(spec: AgentLoopSpec) -> RegisteredAgent:
@@ -78,25 +89,41 @@ def start_agent(
     if not agent:
         return False
 
+    # Check for stale RUNNING status - if the process isn't actually running, reset it
     if agent.status == AgentStatus.RUNNING:
-        return False
+        if agent.pid and _is_process_running(agent.pid):
+            return False
+        # Process died without updating status; reset to IDLE
+        update_agent_status(DEFAULT_DB_PATH, agent_id, AgentStatus.IDLE)
 
     if background:
-        # Spawn agent runner as background process
-        process = subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "loopflow.maestro.agent_runner",
-                "--agent-id",
-                agent_id,
-                "--repo-root",
-                str(repo_root),
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        # Create log file for subprocess stderr
+        log_dir = get_log_dir(repo_root)
+        log_path = log_dir / f"agent-{agent.spec.name}.log"
+
+        with log_path.open("a") as log_file:
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "loopflow.maestro.agent_runner",
+                    "--agent-id",
+                    agent_id,
+                    "--repo-root",
+                    str(repo_root),
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=log_file,
+                start_new_session=True,
+            )
+
+        # Brief wait to catch immediate startup failures
+        time.sleep(0.1)
+        if process.poll() is not None:
+            # Process exited immediately - startup failed
+            update_agent_status(DEFAULT_DB_PATH, agent_id, AgentStatus.ERROR)
+            return False
+
         update_agent_status(
             DEFAULT_DB_PATH,
             agent_id,

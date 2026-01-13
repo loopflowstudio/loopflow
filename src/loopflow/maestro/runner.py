@@ -10,11 +10,9 @@ import sys
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
-
 from loopflow.config import load_config, parse_model
-from loopflow.context import build_prompt, PromptComponents, gather_prompt_components, format_prompt
-from loopflow.git import find_main_repo, get_current_branch, open_pr, autocommit
+from loopflow.context import PromptComponents, gather_prompt_components, format_prompt
+from loopflow.git import find_main_repo, get_current_branch
 from loopflow.launcher import build_model_command, get_runner
 from loopflow.llm_http import generate_pr_message
 from loopflow.logging import write_prompt_file
@@ -29,7 +27,6 @@ from loopflow.maestro.db import (
     DEFAULT_DB_PATH,
     increment_agent_iteration,
     load_agent,
-    save_agent,
     save_session,
     update_agent_status,
     update_session_status,
@@ -229,7 +226,7 @@ def run_agent_iteration(
             return result_code
 
     # Handle outer loop
-    exit_code = _handle_outer_loop(agent, worktree_path, main_repo)
+    exit_code = _handle_outer_loop(agent, worktree_path)
 
     # Update agent state
     increment_agent_iteration(DEFAULT_DB_PATH, agent.id)
@@ -238,27 +235,19 @@ def run_agent_iteration(
     return exit_code
 
 
-def _handle_outer_loop(
-    agent: RegisteredAgent,
-    worktree_path: Path,
-    main_repo: Path,
-) -> int:
+def _handle_outer_loop(agent: RegisteredAgent, worktree_path: Path) -> int:
     """Handle the outer loop strategy after pipeline completion."""
     mode = agent.spec.outer_loop.mode
 
     if mode == OuterLoopMode.PR_CHAIN:
-        return _handle_pr_chain(agent, worktree_path, main_repo)
+        return _handle_pr_chain(agent, worktree_path)
     elif mode == OuterLoopMode.LAND_COMMITS:
-        return _handle_land_commits(agent, worktree_path, main_repo)
+        return _handle_land_commits(worktree_path)
 
     return 0
 
 
-def _handle_pr_chain(
-    agent: RegisteredAgent,
-    worktree_path: Path,
-    main_repo: Path,
-) -> int:
+def _handle_pr_chain(agent: RegisteredAgent, worktree_path: Path) -> int:
     """Create a PR for this iteration, chaining from previous if exists.
 
     Following Graphite-like UX: each iteration's PR depends on the previous.
@@ -272,9 +261,10 @@ def _handle_pr_chain(
         ["git", "push", "-u", "origin", branch],
         cwd=worktree_path,
         capture_output=True,
+        text=True,
     )
     if result.returncode != 0:
-        print(f"Failed to push branch: {result.stderr.decode()}")
+        print(f"Failed to push branch: {result.stderr}")
         return 1
 
     # Determine base branch for the PR
@@ -320,12 +310,8 @@ def _handle_pr_chain(
     return 0
 
 
-def _handle_land_commits(
-    agent: RegisteredAgent,
-    worktree_path: Path,
-    main_repo: Path,
-) -> int:
-    """Land commits directly to main using lf ops land."""
+def _handle_land_commits(worktree_path: Path) -> int:
+    """Land commits directly to main using wt merge."""
     # Use worktrunk merge for landing
     result = subprocess.run(
         ["wt", "merge", "--no-squash"],

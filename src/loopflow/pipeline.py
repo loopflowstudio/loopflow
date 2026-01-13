@@ -1,6 +1,7 @@
 """Pipeline execution for chaining tasks."""
 
 import os
+import platform
 import subprocess
 import sys
 import uuid
@@ -132,8 +133,13 @@ def run_pipeline(
 
 
 def _notify_done(pipeline_name: str) -> None:
-    """Show macOS notification."""
-    subprocess.run([
-        "osascript", "-e",
-        f'display notification "Pipeline complete" with title "lf {pipeline_name}"'
-    ])
+    """Show macOS notification. No-op on other platforms."""
+    if platform.system() != "Darwin":
+        return
+    try:
+        subprocess.run(
+            ["osascript", "-e", f'display notification "Pipeline complete" with title "lf {pipeline_name}"'],
+            capture_output=True,
+        )
+    except FileNotFoundError:
+        pass  # osascript not available

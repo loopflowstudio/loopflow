@@ -56,11 +56,10 @@ def main():
                 has_task = repo_root and gather_task(repo_root, name) is not None
 
                 if has_pipeline and has_task:
-                    typer.echo(
-                        f"Error: '{name}' exists as both a pipeline and a task. "
-                        "Remove one to resolve the conflict.",
-                        err=True,
-                    )
+                    typer.echo(f"Error: '{name}' exists as both a pipeline and a task", err=True)
+                    typer.echo(f"  Pipeline: defined in .lf/config.yaml", err=True)
+                    typer.echo(f"  Task: .claude/commands/{name}.md or .lf/{name}.*", err=True)
+                    typer.echo(f"Remove one to resolve the conflict.", err=True)
                     raise SystemExit(1)
 
                 if has_pipeline:
@@ -69,7 +68,8 @@ def main():
                     sys.argv.insert(1, "run")
                 else:
                     typer.echo(f"Error: No task or pipeline named '{name}'", err=True)
-                    typer.echo(f"Create .lf/{name}.lf or add '{name}' to pipelines in .lf/config.yaml", err=True)
+                    typer.echo(f"  Create task: .claude/commands/{name}.md (recommended)", err=True)
+                    typer.echo(f"  Or pipeline: add '{name}' to .lf/config.yaml", err=True)
                     raise SystemExit(1)
 
         app()

@@ -35,6 +35,7 @@ def init_db(db_path: Path) -> None:
 
         CREATE TABLE IF NOT EXISTS agents (
             id TEXT PRIMARY KEY,
+            name TEXT,
             spec TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'idle',
             last_run_at TEXT,
@@ -43,6 +44,8 @@ def init_db(db_path: Path) -> None:
             iteration INTEGER NOT NULL DEFAULT 0,
             pid INTEGER
         );
+
+        CREATE INDEX IF NOT EXISTS idx_agents_name ON agents(name);
     """)
 
     conn.commit()
@@ -52,6 +55,21 @@ def init_db(db_path: Path) -> None:
     columns = {row[1] for row in cursor.fetchall()}
     if "run_mode" not in columns:
         conn.execute("ALTER TABLE sessions ADD COLUMN run_mode TEXT NOT NULL DEFAULT 'auto'")
+
+    # Migrate agents table to include name column
+    cursor = conn.execute("PRAGMA table_info(agents)")
+    columns = {row[1] for row in cursor.fetchall()}
+    if "name" not in columns:
+        conn.execute("ALTER TABLE agents ADD COLUMN name TEXT")
+        # Backfill name from spec JSON for existing agents
+        cursor = conn.execute("SELECT id, spec FROM agents")
+        for row in cursor.fetchall():
+            spec_data = json.loads(row[1])
+            name = spec_data.get("name")
+            if name:
+                conn.execute("UPDATE agents SET name = ? WHERE id = ?", (name, row[0]))
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_agents_name ON agents(name)")
+        conn.commit()
 
     conn.close()
 
@@ -193,11 +211,12 @@ def save_agent(db_path: Path, agent: RegisteredAgent) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO agents
-        (id, spec, status, last_run_at, current_worktree, current_branch, iteration, pid)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        (id, name, spec, status, last_run_at, current_worktree, current_branch, iteration, pid)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             agent.id,
+            agent.spec.name,
             json.dumps(agent.spec.to_dict()),
             agent.status.value,
             agent.last_run_at.isoformat() if agent.last_run_at else None,
@@ -244,21 +263,18 @@ def load_agent(db_path: Path, agent_id: str) -> RegisteredAgent | None:
 
 
 def load_agent_by_name(db_path: Path, name: str) -> RegisteredAgent | None:
-    """Load an agent by spec name."""
+    """Load an agent by name using indexed lookup."""
     if not db_path.exists():
         return None
 
     conn = get_db(db_path)
-    cursor = conn.execute("SELECT * FROM agents")
-
-    for row in cursor:
-        agent = _agent_from_row(dict(row))
-        if agent.spec.name == name:
-            conn.close()
-            return agent
-
+    cursor = conn.execute("SELECT * FROM agents WHERE name = ?", (name,))
+    row = cursor.fetchone()
     conn.close()
-    return None
+
+    if not row:
+        return None
+    return _agent_from_row(dict(row))
 
 
 def update_agent_status(

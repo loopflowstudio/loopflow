@@ -131,7 +131,8 @@ class TokenTree:
             if shown < 4 or child_pct >= threshold_pct:
                 prefix = " " * indent
                 bar = self._bar_for_tokens(child_total, total, max_bar)
-                lines.append(f"{prefix}{name:<{14-indent}} {child_total:>6,} {bar}")
+                name_width = max(1, 14 - indent)
+                lines.append(f"{prefix}{name:<{name_width}} {child_total:>6,} {bar}")
 
                 # Recurse if this child is also significant
                 if child_pct >= threshold_pct and child.children:
@@ -152,8 +153,9 @@ class TokenTree:
         if rolled_up > 0:
             prefix = " " * indent
             bar = self._bar_for_tokens(rolled_up_tokens, total, max_bar)
+            pad = max(0, 8 - indent)
             lines.append(
-                f"{prefix}({rolled_up} more){'':<{8-indent}} {rolled_up_tokens:>6,} {bar}"
+                f"{prefix}({rolled_up} more){'':<{pad}} {rolled_up_tokens:>6,} {bar}"
             )
 
     @staticmethod

@@ -2,8 +2,10 @@
 __pycache__/
 .pytest_cache/
 
+# Swift
+.build/
+xcuserdata/
+.swiftpm/xcode/
+
 # Claude Code (personal state)
 .claude/settings.local.json
-
-# Research/reference files
-files/

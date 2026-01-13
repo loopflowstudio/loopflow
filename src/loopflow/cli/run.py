@@ -11,7 +11,7 @@ from typing import Optional
 import typer
 
 from loopflow.config import load_config, parse_model
-from loopflow.context import find_worktree_root, gather_prompt_components, format_prompt
+from loopflow.context import find_worktree_root, gather_prompt_components, format_prompt, PromptComponents
 from loopflow.git import find_main_repo
 from loopflow.launcher import (
     build_model_command,
@@ -37,7 +37,7 @@ def _copy_to_clipboard(text: str) -> None:
 def _execute_task(
     task_name: str,
     repo_root: Path,
-    components,
+    components: PromptComponents,
     is_interactive: bool,
     backend: str,
     model_variant: str | None,

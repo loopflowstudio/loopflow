@@ -22,6 +22,6 @@ The changes are clean and well-structured. The refactoring reduces code duplicat
 
 ### Notes
 
-- The `_execute_task` docstring describes the function well; types could be tightened (`components` is `PromptComponents` but annotated loosely).
 - The removed inline comments ("No flag: use config or default (auto)") were correct to delete—they restated what the code does.
-- The `.gitignore` and `.lf/config.yaml` uncommitted changes are local config, not part of this branch's purpose.
+- `.gitignore` adds `.pytest_cache/` to keep the repo clean.
+- `.lf/config.yaml` switches default agent model from `codex` to `claude:opus`.

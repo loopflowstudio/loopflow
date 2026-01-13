@@ -20,3 +20,8 @@ feature: add user authentication
 Users can now log in with email/password. Sessions expire after 24h.
 Includes login page, session middleware, and logout endpoint.
 ```
+
+## Auto mode
+
+In auto/headless runs, do not pause to ask questions. Make the best assumption you can and append any open questions to `.design/questions.md`.
+

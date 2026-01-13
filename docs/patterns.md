@@ -45,12 +45,12 @@ Run multiple features simultaneously in separate worktrees:
 # Terminal 1
 wt switch --create feature-a --execute pwd
 cd ../myrepo.feature-a
-lf ship -a &              # runs in background
+lf ship &                 # runs in background
 
 # Terminal 2
 wt switch --create feature-b --execute pwd
 cd ../myrepo.feature-b
-lf ship -a &
+lf ship &
 
 # Check status from anywhere
 lf status                 # shows running sessions
@@ -79,7 +79,7 @@ Compare results with `git diff` or your editor.
 Run a full pipeline non-interactively:
 
 ```bash
-lf ship -a                # -a for autonomous mode
+lf ship                   # auto mode by default
 ```
 
 In autonomous mode:

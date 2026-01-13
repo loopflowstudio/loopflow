@@ -52,3 +52,8 @@ Exploring uncertain ideas is fine—the doc has room (~2000 words). But keep nar
 When the user says something important, confirm it and note that it will be quoted in the doc.
 
 Completeness is not required. Wrong guesses get fixed in implementation. The goal is to not block the implementing session, not to predict everything.
+
+## Auto mode
+
+In auto/headless runs, do not pause to ask questions. Make the best assumption you can and append any open questions to `.design/questions.md`.
+

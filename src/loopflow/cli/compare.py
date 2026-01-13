@@ -6,7 +6,7 @@ from typing import Optional
 
 import typer
 
-from loopflow.config import load_config
+from loopflow.config import load_config, parse_model
 from loopflow.context import find_worktree_root, gather_prompt_components, format_prompt
 from loopflow.git import find_main_repo, get_current_branch
 from loopflow.launcher import get_runner
@@ -99,7 +99,7 @@ def compare(
         False, "-p", "--print", help="Run non-interactively"
     ),
     model: Optional[str] = typer.Option(
-        None, "-m", "--model", help="Model to use (claude, codex)"
+        None, "-m", "--model", help="Model to use (backend or backend:variant)"
     ),
     output: Optional[str] = typer.Option(
         None, "-o", "--output", help="Output file for analysis (default: .design/)"
@@ -146,18 +146,19 @@ def compare(
 
     # Load config
     config = load_config(main_repo)
-    model_name = model or (config.model if config else "claude")
+    agent_model = model or (config.agent_model if config else "claude:opus")
+    backend, _model_variant = parse_model(agent_model)
     skip_permissions = config.yolo if config else False
 
     # Get runner
     try:
-        runner = get_runner(model_name)
+        runner = get_runner(backend)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
     if not runner.is_available():
-        typer.echo(f"Error: '{model_name}' CLI not found", err=True)
+        typer.echo(f"Error: '{backend}' CLI not found", err=True)
         raise typer.Exit(1)
 
     # Build prompt using template substitution
@@ -175,6 +176,7 @@ def compare(
         task="compare",
         task_args=task_args,
         exclude=exclude,
+        include_tests_for=config.include_tests_for if config else None,
     )
     prompt = format_prompt(components)
 
@@ -188,7 +190,7 @@ def compare(
 
     result = runner.launch(
         prompt,
-        print_mode=print_mode,
+        auto=print_mode,
         stream=print_mode,
         skip_permissions=skip_permissions,
         cwd=cwd,

@@ -2,6 +2,8 @@ Generate a PR title and body for the changes on this branch.
 
 Review the diff against main and summarize what changed and why.
 
+Do not ask questions. If anything is unclear, make the best assumption and proceed.
+
 ## Output format
 
 Return a structured response with:

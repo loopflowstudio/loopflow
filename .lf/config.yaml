@@ -1,7 +1,11 @@
-model: codex
+agent_model: codex
 yolo: true
 context: "."
 exclude: "uv.lock"
+include_tests_for:
+  - polish
+  - implement
+  - publish
 push: true
 
 pipelines:

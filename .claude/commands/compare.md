@@ -36,3 +36,8 @@ Write directly to a new markdown file under `{{output_dir}}` (pick a short descr
 
 In interactive mode, discuss first if you have questions, then write the file.
 In batch mode, write the file immediately based on what you see.
+
+## Auto mode
+
+In auto/headless runs, do not pause to ask questions. Make the best assumption you can and append any open questions to `.design/questions.md`.
+

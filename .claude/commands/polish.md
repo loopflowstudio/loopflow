@@ -16,6 +16,7 @@ The deliverable is working, clean code that passes tests.
    - If tests fail, determine: broken test or broken code?
    - Fix failures one by one, running single tests while debugging
    - Add missing tests for key behavior changes
+   - Reduce or simplify existing tests according to new behavioral requirements.
 
 ## What to fix
 
@@ -49,3 +50,8 @@ From STYLE.md:
 ## Output
 
 Make the fixes. Run tests until they pass. If there's nothing to fix and tests pass, say so.
+
+## Auto mode
+
+In auto/headless runs, do not pause to ask questions. Make the best assumption you can and append any open questions to `.design/questions.md`.
+

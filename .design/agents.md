@@ -37,8 +37,9 @@ The filename is the agent name. The body is the prompt. Config lives in YAML fro
 ├── agents/                    # Agent definitions (markdown, user-managed)
 │   ├── docs-bot.md
 │   └── feature-bot.md
-├── agents.db                  # Runtime state only (ephemeral)
+├── maestro.db                 # Runtime state (agent_runs table)
 └── logs/
+    ├── daemon.log             # Daemon process output
     └── agents/
         ├── docs-bot.log
         └── feature-bot.log

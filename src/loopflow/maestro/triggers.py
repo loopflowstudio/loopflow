@@ -10,7 +10,6 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from loopflow.maestro.agent import TriggerKind
 from loopflow.maestro.markdown import AgentFile
 
 

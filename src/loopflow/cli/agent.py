@@ -7,14 +7,17 @@ from pathlib import Path
 
 import typer
 
+from loopflow.config import PipelineConfig
 from loopflow.context import find_worktree_root
 from loopflow.git import find_main_repo
 from loopflow.maestro.daemon import run_daemon
+from loopflow.maestro.db import DEFAULT_DB_PATH, get_db
 from loopflow.maestro.launchd import (
     get_log_path,
     install as launchd_install,
     is_installed,
     is_running,
+    restart as launchd_restart,
     uninstall as launchd_uninstall,
 )
 from loopflow.maestro.markdown import (
@@ -23,6 +26,7 @@ from loopflow.maestro.markdown import (
     get_agent_file,
     list_agent_files,
 )
+from loopflow.pipeline import run_pipeline
 
 app = typer.Typer(help="Background agent management.")
 daemon_app = typer.Typer(help="Daemon management.")
@@ -46,8 +50,7 @@ def daemon_install():
         typer.echo("Daemon already installed")
         if not is_running():
             typer.echo("Starting daemon...")
-            from loopflow.maestro.launchd import restart
-            restart()
+            launchd_restart()
         return
 
     typer.echo("Installing daemon...")
@@ -263,9 +266,6 @@ def run(
         typer.echo(f"Agent '{name}' not found", err=True)
         raise typer.Exit(1)
 
-    from loopflow.config import PipelineConfig
-    from loopflow.pipeline import run_pipeline
-
     typer.echo(f"Running agent: {agent.name}")
     typer.echo(f"  Repo: {agent.repo}")
     typer.echo(f"  Pipeline: {' → '.join(agent.pipeline)}")
@@ -332,8 +332,6 @@ def stop(
 ):
     """Stop a running agent (sends SIGTERM)."""
     # Find running process for this agent from the runs table
-    from loopflow.maestro.db import DEFAULT_DB_PATH, get_db
-
     conn = get_db(DEFAULT_DB_PATH)
     cursor = conn.execute(
         """SELECT pid FROM agent_runs

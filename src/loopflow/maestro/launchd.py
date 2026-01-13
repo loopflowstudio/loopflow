@@ -6,7 +6,6 @@ The daemon is managed by launchd so it:
 - Survives app quit and computer restart
 """
 
-import shutil
 import subprocess
 import sys
 from pathlib import Path

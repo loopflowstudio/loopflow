@@ -7,9 +7,11 @@ The daemon runs in the background (managed by launchd) and:
 4. Maintains runtime state in SQLite for the UI to read
 """
 
+import os
 import subprocess
 import sys
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -82,7 +84,6 @@ def _is_agent_running(agent_name: str) -> bool:
         return False
 
     # Check if process is actually running
-    import os
     try:
         os.kill(row["pid"], 0)
         return True
@@ -90,9 +91,39 @@ def _is_agent_running(agent_name: str) -> bool:
         return False
 
 
+def _update_completed_runs() -> None:
+    """Check all running agents and mark completed ones."""
+    conn = get_db(DEFAULT_DB_PATH)
+    cursor = conn.execute(
+        "SELECT id, agent_name, pid FROM agent_runs WHERE status = 'running'"
+    )
+    rows = cursor.fetchall()
+
+    for row in rows:
+        pid = row["pid"]
+        if not pid:
+            continue
+
+        # Check if process is still running
+        try:
+            os.kill(pid, 0)
+            # Process still running
+        except OSError:
+            # Process exited - mark as completed
+            conn.execute(
+                """UPDATE agent_runs
+                   SET status = 'completed', ended_at = ?
+                   WHERE id = ?""",
+                (datetime.now().isoformat(), row["id"]),
+            )
+            _log(f"Agent {row['agent_name']} completed (was PID {pid})")
+
+    conn.commit()
+    conn.close()
+
+
 def _record_run_start(agent: AgentFile, pid: int, main_sha: str | None) -> str:
     """Record that an agent run has started."""
-    import uuid
     run_id = str(uuid.uuid4())
 
     conn = get_db(DEFAULT_DB_PATH)
@@ -143,6 +174,9 @@ def run_daemon(check_interval: int = 30) -> None:
 
     while True:
         try:
+            # Update status of any finished runs
+            _update_completed_runs()
+
             agents = list_agent_files()
 
             for agent in agents:

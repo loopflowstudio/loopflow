@@ -146,10 +146,10 @@ def _generate_message_via_cli(repo_root: Path, prompt: str) -> CommitMessage:
             model_variant=model_variant,
         )
 
+    cmd_with_prompt = cmd + [prompt]
     result = subprocess.run(
-        cmd,
+        cmd_with_prompt,
         cwd=repo_root,
-        input=prompt,
         text=True,
         capture_output=True,
         env=get_model_env(),

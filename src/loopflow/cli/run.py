@@ -129,7 +129,9 @@ def _execute_task(
         *command,
     ]
 
-    process = subprocess.Popen(collector_cmd, cwd=repo_root, env=get_model_env())
+    # Don't strip API keys from collector env - it needs them for commit message generation.
+    # The collector strips keys when spawning the actual agent CLI.
+    process = subprocess.Popen(collector_cmd, cwd=repo_root)
     session.pid = process.pid
     save_session(DEFAULT_DB_PATH, session)
     result_code = process.wait()

@@ -13,7 +13,7 @@ from loopflow.context import build_prompt
 from loopflow.git import GitError, find_main_repo, open_pr
 from loopflow.launcher import build_model_command, get_runner
 from loopflow.llm_http import generate_pr_message
-from loopflow.logging import get_model_env, write_prompt_file
+from loopflow.logging import write_prompt_file
 from loopflow.maestro import Session, SessionStatus
 from loopflow.maestro.db import DEFAULT_DB_PATH, save_session, update_session_status
 
@@ -103,7 +103,8 @@ def run_pipeline(
         if should_push:
             collector_cmd.append("--push")
         collector_cmd.extend(["--", *command])
-        process = subprocess.Popen(collector_cmd, cwd=repo_root, env=get_model_env())
+        # Don't strip API keys from collector env - it needs them for commit message generation
+        process = subprocess.Popen(collector_cmd, cwd=repo_root)
         session.pid = process.pid
         save_session(DEFAULT_DB_PATH, session)
         result_code = process.wait()

@@ -310,6 +310,13 @@ def land(
     subprocess.run(["git", "commit", "-m", commit_msg], cwd=main_repo, check=True)
     subprocess.run(["git", "push"], cwd=main_repo, check=True)
 
+    # Delete remote branch
+    subprocess.run(
+        ["git", "push", "origin", "--delete", branch],
+        cwd=main_repo,
+        capture_output=True,
+    )
+
     # Clean up: remove worktree and branch
     was_in_worktree = repo_root != main_repo
     if was_in_worktree:

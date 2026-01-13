@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 from loopflow.logging import get_log_dir
@@ -79,6 +80,15 @@ def get_agent_by_name(name: str) -> RegisteredAgent | None:
     return load_agent_by_name(DEFAULT_DB_PATH, name)
 
 
+@dataclass
+class StartResult:
+    """Result of starting an agent."""
+
+    success: bool
+    log_path: Path | None = None
+    error: str | None = None
+
+
 def start_agent(
     agent_id: str,
     repo_root: Path,
@@ -86,27 +96,16 @@ def start_agent(
     continuous: bool = False,
     max_iterations: int | None = None,
     check_interval: int = 300,
-) -> bool:
-    """Start an agent running.
-
-    Args:
-        agent_id: ID of the agent to start
-        repo_root: Repository root path
-        background: If True, spawns a subprocess. Otherwise runs in foreground.
-        continuous: If True, runs in continuous mode (multiple iterations).
-        max_iterations: Stop after this many iterations (None for unlimited).
-        check_interval: Seconds between trigger checks in continuous mode.
-
-    Returns True if agent was started.
-    """
+) -> StartResult:
+    """Start an agent running."""
     agent = load_agent(DEFAULT_DB_PATH, agent_id)
     if not agent:
-        return False
+        return StartResult(success=False, error="Agent not found in database")
 
     # Check for stale RUNNING status - if the process isn't actually running, reset it
     if agent.status == AgentStatus.RUNNING:
         if agent.pid and _is_process_running(agent.pid):
-            return False
+            return StartResult(success=False, error=f"Agent already running (PID {agent.pid})")
         # Process died without updating status; reset to IDLE
         update_agent_status(DEFAULT_DB_PATH, agent_id, AgentStatus.IDLE)
 
@@ -142,9 +141,14 @@ def start_agent(
         # Brief wait to catch immediate startup failures
         time.sleep(0.1)
         if process.poll() is not None:
-            # Process exited immediately - startup failed
+            # Process exited immediately - read last lines of log for error
             update_agent_status(DEFAULT_DB_PATH, agent_id, AgentStatus.ERROR)
-            return False
+            error_msg = "Process exited immediately"
+            if log_path.exists():
+                lines = log_path.read_text().strip().split("\n")[-5:]
+                if lines:
+                    error_msg = "\n".join(lines)
+            return StartResult(success=False, log_path=log_path, error=error_msg)
 
         update_agent_status(
             DEFAULT_DB_PATH,
@@ -152,7 +156,7 @@ def start_agent(
             AgentStatus.RUNNING,
             pid=process.pid,
         )
-        return True
+        return StartResult(success=True, log_path=log_path)
     else:
         # Run in foreground
         update_agent_status(
@@ -171,7 +175,9 @@ def start_agent(
                 )
             else:
                 exit_code = run_agent_iteration(agent, repo_root, foreground=True)
-            return exit_code == 0
+            if exit_code != 0:
+                return StartResult(success=False, error=f"Agent exited with code {exit_code}")
+            return StartResult(success=True)
         finally:
             update_agent_status(DEFAULT_DB_PATH, agent_id, AgentStatus.IDLE)
 

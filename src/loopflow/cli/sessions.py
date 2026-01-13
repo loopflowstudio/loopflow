@@ -10,7 +10,7 @@ from loopflow.context import find_worktree_root
 from loopflow.logging import get_log_dir
 from loopflow.maestro.db import (
     DEFAULT_DB_PATH,
-    delete_session_data,
+    delete_session,
     load_sessions,
     update_session_status,
 )
@@ -82,7 +82,7 @@ def prune(
                 except OSError:
                     pass
 
-        if delete_session_data(DEFAULT_DB_PATH, session.id):
+        if delete_session(DEFAULT_DB_PATH, session.id):
             removed += 1
 
     typer.echo(f"Pruned {removed} sessions")

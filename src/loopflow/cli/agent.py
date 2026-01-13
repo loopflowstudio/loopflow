@@ -15,6 +15,7 @@ from loopflow.maestro.agent import (
     TriggerKind,
 )
 from loopflow.maestro.agents import (
+    StartResult,
     get_agent_by_name,
     list_agents,
     register_agent,
@@ -219,7 +220,7 @@ def start(
         typer.echo(f"  Mode: continuous")
         typer.echo(f"  Trigger: {agent.spec.trigger.kind.value}")
 
-    success = start_agent(
+    result = start_agent(
         agent.id,
         main_repo,
         background=not foreground,
@@ -227,11 +228,13 @@ def start(
         max_iterations=max_iterations,
         check_interval=check_interval,
     )
-    if success:
+    if result.success:
         if not foreground:
             typer.echo(f"Agent started in background")
+            if result.log_path:
+                typer.echo(f"  Log: {result.log_path}")
     else:
-        typer.echo("Failed to start agent", err=True)
+        typer.echo(f"Failed to start agent: {result.error}", err=True)
         raise typer.Exit(1)
 
 

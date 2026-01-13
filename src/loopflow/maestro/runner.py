@@ -86,16 +86,7 @@ def run_agent_continuous(
     check_interval: int = 300,
     max_iterations: int | None = None,
 ) -> int:
-    """Run agent continuously until stopped.
-
-    Args:
-        agent: The agent to run
-        repo_root: Repository root path
-        check_interval: Seconds between trigger checks (default 5 minutes)
-        max_iterations: Stop after this many iterations (None for unlimited)
-
-    Returns exit code (0 for normal shutdown).
-    """
+    """Run agent continuously until stopped. Returns 0 for normal shutdown."""
     global _shutdown_requested
     _shutdown_requested = False
 

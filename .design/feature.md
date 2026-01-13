@@ -1,101 +1,111 @@
-# Agent Loop Design
+# Agent Loops
 
-## What to build
+Background agents that run configurable pipelines with persistent prompts and optional context. Registered through Maestro, stored in SQLite.
 
-Add an "agent loop" system to Loopflow so Maestro can register background agents that run a configurable inner pipeline (design/implement/review/etc) with a persistent prompt and optional context.
-
-## Data structures
+## Data Structures
 
 ```python
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Optional
+class OuterLoopMode(Enum):
+    PR_CHAIN = "pr-chain"      # Create PRs that chain on each other
+    LAND_COMMITS = "land-commits"  # Land directly via wt merge
 
+class AgentStatus(Enum):
+    IDLE = "idle"
+    RUNNING = "running"
+    WAITING = "waiting"       # In continuous mode, waiting for trigger
+    ERROR = "error"
+    STOPPED = "stopped"       # Explicitly stopped by user
+
+class TriggerKind(Enum):
+    ALWAYS = "always"
+    MAIN_CHANGED = "main-changed"
+
+@dataclass
+class AgentTrigger:
+    kind: TriggerKind = TriggerKind.ALWAYS
+    config: dict = field(default_factory=dict)
+
+@dataclass
+class OuterLoopConfig:
+    mode: OuterLoopMode
 
 @dataclass
 class AgentLoopSpec:
     name: str
     prompt_path: Path
     pipeline: list[str]
-    context: list[str]
-    outer_loop: "OuterLoopConfig"
-
-
-@dataclass
-class OuterLoopConfig:
-    mode: str  # "pr-chain" | "land-commits"
-    # pr-chain: create PRs and chain dependencies
-    # land-commits: land commits locally (or via lf land)
-
+    context: list[str] = field(default_factory=list)
+    outer_loop: OuterLoopConfig = field(
+        default_factory=lambda: OuterLoopConfig(mode=OuterLoopMode.LAND_COMMITS)
+    )
+    trigger: AgentTrigger = field(default_factory=AgentTrigger)
+    continuous: bool = False
+    min_interval_seconds: int = 60
+    max_iterations_per_day: int | None = None
 
 @dataclass
 class RegisteredAgent:
     id: str
     spec: AgentLoopSpec
-    status: str  # "idle" | "running" | "error"
-    last_run_at: Optional[str]
+    status: AgentStatus = AgentStatus.IDLE
+    last_run_at: Optional[datetime] = None
+    current_worktree: Optional[Path] = None
+    current_branch: Optional[str] = None
+    iteration: int = 0
+    pid: Optional[int] = None
 ```
 
-## APIs
+## CLI
 
-```python
-# Maestro API
-def register_agent(spec: AgentLoopSpec) -> RegisteredAgent: ...
-def list_agents() -> list[RegisteredAgent]: ...
-def start_agent(agent_id: str) -> None: ...
-def stop_agent(agent_id: str) -> None: ...
+```bash
+# Register an agent
+lf ops agent register my-agent \
+    -p prompts/my-agent.md \
+    --pipeline design,implement,review \
+    --context src/ \
+    -o land-commits \
+    -t always
+
+# List agents
+lf ops agent list
+
+# Start agent (single iteration, background)
+lf ops agent start my-agent
+
+# Start agent (continuous mode, background)
+lf ops agent start my-agent -c
+
+# Start agent (foreground, for debugging)
+lf ops agent start my-agent -f
+
+# Stop agent
+lf ops agent stop my-agent
+
+# Show agent details
+lf ops agent show my-agent
+
+# Remove agent
+lf ops agent remove my-agent
 ```
 
-## Constraints
+## How It Works
 
-- The "agent loop" must be registered through Maestro; it is a background agent with an inner pipeline.
-- A prompt file defines the agent's overall goals and is included in all LLM requests.
-- The pipeline is a sequence of commands like design -> implement -> review -> iterate -> expand -> polish.
-- Outer loop behavior is TBD: "create PRs and chain them as dependencies on each other" vs "land commits" vs "put this into the pipeline itself".
-- Must support optional context info.
-- Use `lf pipeline` to run the inner loop.
-- Resolve prompt/context relative to repo root by default.
-- PR chaining should follow a Graphite-like UX to make chaining easy for humans.
-- Worktrees are transient; allow multiple per background agent (worktree=branch).
+1. **Registration**: Agent spec (prompt, pipeline, context, outer loop config) is saved to SQLite.
 
-## Done when
+2. **Starting**: Agent subprocess is spawned, runs the pipeline in a fresh worktree.
 
-- A background agent can be registered via Maestro API with a prompt file + pipeline.
-- Agent run includes prompt in all LLM requests for pipeline steps.
-- Both outer loop strategies exist: PR chain and land commits.
+3. **Pipeline execution**: Each task in the pipeline runs with the agent's prompt injected as a prefix.
 
-## Quotes
+4. **Outer loop handling**:
+   - `land-commits`: Uses `wt merge --no-squash` to land to main.
+   - `pr-chain`: Pushes branch, creates PR via `gh pr create`, chains PRs when multiple iterations exist.
 
-> "maestro should have an API to register background agents."
+5. **Continuous mode**: Loops until stopped, checking trigger conditions and respecting rate limits.
 
-> "Background agents get a few things:
-> - a prompt file which define the agent's overall goals and is included in all the llm requests.
-> - a pipeline which is a sequence of commands (like design -> implement -> review -> iterate -> expand -> polish etc) which is the "inner loop" of the agent.
-> - maybe some context info
-> - some sort of config on how to to handle the outerloop.  for starters we would Have maybe:
->  create PRs and chain them as dependencies on each other
-> or
->   land commits
->
-> this is tbd, maybe this could be put into the pipeline itself."
+## Files
 
-> "The goal is that I would be able to assign set up general areas of responsibility (maestro UI, background agents, onboarding and documentation quality, etc) and set the llms loose on those"
-
-> "table in maestro sql i think -- they are personal state not codebase state for now"
-
-> "agent loops are mostly via cli, will eventualyl be through swift maestro UI"
-
-> "yes, we can use lf pipeline"
-
-> "i want support for the two options for outer loop for now"
-
-> "Dont know what you mean, but generally most things hould work the same (just always use repo root as base). PR chaining -- we should learn from how graphite tries to make chaining easy for humans."
-
-> "Worktrees --i think worktree=branch so they should be transient and we should have potentially multiple per background agent"
-
-## Open questions
-
-- CLI shape: new `lf agent` command, or `lf maestro` subcommands?
-- How should agent prompt file be resolved (repo-relative vs absolute path)?
-- How should PR chaining be represented (branch naming, base branch selection)?
-- Should agent loop runs create worktrees per loop or reuse one?
+- `src/loopflow/maestro/agent.py` - Data structures
+- `src/loopflow/maestro/agents.py` - Public API
+- `src/loopflow/maestro/runner.py` - Iteration and continuous loop logic
+- `src/loopflow/maestro/db.py` - Agent CRUD operations
+- `src/loopflow/cli/agent.py` - CLI commands

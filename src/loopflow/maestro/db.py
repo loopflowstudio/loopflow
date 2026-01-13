@@ -196,11 +196,6 @@ def delete_session(db_path: Path, session_id: str) -> bool:
     return deleted
 
 
-def delete_session_data(db_path: Path, session_id: str) -> bool:
-    """Delete a session from database."""
-    return delete_session(db_path, session_id)
-
-
 # Agent CRUD operations
 
 

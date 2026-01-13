@@ -15,7 +15,6 @@ from loopflow.maestro.agent import (
     TriggerKind,
 )
 from loopflow.maestro.agents import (
-    get_agent,
     get_agent_by_name,
     list_agents,
     register_agent,

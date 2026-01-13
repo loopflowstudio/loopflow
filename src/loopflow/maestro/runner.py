@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 from loopflow.config import load_config, parse_model
@@ -78,14 +78,6 @@ def _should_run(agent: RegisteredAgent, repo_root: Path, last_main_sha: str | No
         return False, last_main_sha
 
     return False, last_main_sha
-
-
-def _count_today_iterations(agent: RegisteredAgent) -> int:
-    """Count iterations run today for rate limiting."""
-    # For now, use the iteration counter. In a more complete implementation,
-    # we would track daily counts in the database.
-    # This is a simplification that resets on agent restart.
-    return 0
 
 
 def run_agent_continuous(

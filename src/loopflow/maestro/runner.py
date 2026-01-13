@@ -1,0 +1,361 @@
+"""Agent loop runner.
+
+Executes a registered agent's pipeline with prompt injection and outer loop handling.
+"""
+
+import os
+import signal
+import subprocess
+import sys
+import uuid
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
+
+from loopflow.config import load_config, parse_model
+from loopflow.context import build_prompt, PromptComponents, gather_prompt_components, format_prompt
+from loopflow.git import find_main_repo, get_current_branch, open_pr, autocommit
+from loopflow.launcher import build_model_command, get_runner
+from loopflow.llm_http import generate_pr_message
+from loopflow.logging import write_prompt_file
+from loopflow.maestro import Session, SessionStatus
+from loopflow.maestro.agent import (
+    AgentLoopSpec,
+    AgentStatus,
+    OuterLoopMode,
+    RegisteredAgent,
+)
+from loopflow.maestro.db import (
+    DEFAULT_DB_PATH,
+    increment_agent_iteration,
+    load_agent,
+    save_agent,
+    save_session,
+    update_agent_status,
+    update_session_status,
+)
+from loopflow.worktrees import WorktreeError, create as create_worktree
+
+
+def _read_agent_prompt(spec: AgentLoopSpec, repo_root: Path) -> str:
+    """Read the agent's prompt file, resolving relative to repo root."""
+    prompt_path = spec.prompt_path
+    if not prompt_path.is_absolute():
+        prompt_path = repo_root / prompt_path
+
+    if not prompt_path.exists():
+        raise FileNotFoundError(f"Agent prompt file not found: {prompt_path}")
+
+    return prompt_path.read_text()
+
+
+def _inject_agent_prompt(
+    components: PromptComponents,
+    agent_prompt: str,
+    spec: AgentLoopSpec,
+) -> PromptComponents:
+    """Inject agent prompt into the prompt components.
+
+    The agent prompt is prepended as a system directive before the task.
+    """
+    # Create a modified task that includes the agent prompt
+    original_task = components.task
+    if original_task:
+        task_name, task_content = original_task
+        combined_content = f"{agent_prompt}\n\n---\n\n{task_content}"
+        modified_task = (task_name, combined_content)
+    else:
+        # If no task, use agent prompt as the task
+        modified_task = (spec.name, agent_prompt)
+
+    return PromptComponents(
+        run_mode=components.run_mode,
+        docs=components.docs,
+        diff=components.diff,
+        task=modified_task,
+        context_files=components.context_files,
+        repo_root=components.repo_root,
+        clipboard=components.clipboard,
+    )
+
+
+def _generate_branch_name(agent: RegisteredAgent, iteration: int) -> str:
+    """Generate a branch name for an agent iteration."""
+    return f"agent/{agent.spec.name}/{iteration}"
+
+
+def run_agent_iteration(
+    agent: RegisteredAgent,
+    repo_root: Path,
+    foreground: bool = False,
+) -> int:
+    """Run one iteration of an agent loop.
+
+    Creates a worktree, runs the pipeline, and handles the outer loop.
+    Returns exit code (0 for success).
+    """
+    main_repo = find_main_repo(repo_root) or repo_root
+    config = load_config(main_repo)
+
+    # Read agent prompt
+    try:
+        agent_prompt = _read_agent_prompt(agent.spec, main_repo)
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        return 1
+
+    # Generate branch name and create worktree
+    iteration = agent.iteration + 1
+    branch_name = _generate_branch_name(agent, iteration)
+
+    # Determine base branch for PR chaining
+    base_branch = None
+    if agent.spec.outer_loop.mode == OuterLoopMode.PR_CHAIN and agent.current_branch:
+        base_branch = agent.current_branch
+
+    try:
+        worktree_path = create_worktree(main_repo, branch_name, base=base_branch)
+    except WorktreeError as e:
+        print(f"Error creating worktree: {e}")
+        return 1
+
+    # Update agent state
+    update_agent_status(
+        DEFAULT_DB_PATH,
+        agent.id,
+        AgentStatus.RUNNING,
+        pid=os.getpid(),
+        worktree=worktree_path,
+        branch=branch_name,
+    )
+
+    # Get model configuration
+    agent_model = config.agent_model if config else "claude:opus"
+    backend, model_variant = parse_model(agent_model)
+
+    runner = get_runner(backend)
+    if not runner.is_available():
+        print(f"Error: '{backend}' CLI not found")
+        update_agent_status(DEFAULT_DB_PATH, agent.id, AgentStatus.ERROR)
+        return 1
+
+    skip_permissions = config.yolo if config else False
+    exclude = list(config.exclude) if config and config.exclude else None
+
+    # Combine config context with agent context
+    all_context = list(config.context) if config and config.context else []
+    all_context.extend(agent.spec.context)
+
+    # Run each task in the pipeline
+    total = len(agent.spec.pipeline)
+    for i, task_name in enumerate(agent.spec.pipeline):
+        if foreground:
+            print(f"\n{'='*60}")
+            print(f"[{i+1}/{total}] {task_name}")
+            print(f"{'='*60}\n")
+
+        # Gather prompt components for this task
+        components = gather_prompt_components(
+            worktree_path,
+            task=task_name,
+            context=all_context or None,
+            exclude=exclude,
+            include_tests_for=config.include_tests_for if config else None,
+            run_mode="auto",
+        )
+
+        # Inject agent prompt
+        components = _inject_agent_prompt(components, agent_prompt, agent.spec)
+        prompt = format_prompt(components)
+        prompt_file = write_prompt_file(prompt)
+
+        # Create session for tracking
+        session = Session(
+            id=str(uuid.uuid4()),
+            task=f"{agent.spec.name}:{task_name}",
+            repo=main_repo,
+            worktree=worktree_path,
+            status=SessionStatus.RUNNING,
+            started_at=datetime.now(),
+            pid=None,
+            backend=backend,
+            run_mode="auto",
+        )
+        save_session(DEFAULT_DB_PATH, session)
+
+        # Build and run command
+        command = build_model_command(
+            backend,
+            auto=True,
+            stream=True,
+            skip_permissions=skip_permissions,
+            model_variant=model_variant,
+            sandbox_root=worktree_path.parent,
+            workdir=worktree_path,
+        )
+
+        collector_cmd = [
+            sys.executable,
+            "-m",
+            "loopflow.maestro.collector",
+            "--session-id",
+            session.id,
+            "--task",
+            f"{agent.spec.name}:{task_name}",
+            "--repo-root",
+            str(worktree_path),
+            "--prompt-file",
+            prompt_file,
+            "--autocommit",
+        ]
+        if foreground:
+            collector_cmd.append("--foreground")
+        collector_cmd.extend(["--", *command])
+
+        process = subprocess.Popen(collector_cmd, cwd=worktree_path)
+        session.pid = process.pid
+        save_session(DEFAULT_DB_PATH, session)
+        result_code = process.wait()
+
+        # Clean up prompt file
+        os.unlink(prompt_file)
+
+        status = SessionStatus.COMPLETED if result_code == 0 else SessionStatus.ERROR
+        update_session_status(DEFAULT_DB_PATH, session.id, status)
+
+        if result_code != 0:
+            print(f"\n[{task_name}] failed with exit code {result_code}")
+            update_agent_status(DEFAULT_DB_PATH, agent.id, AgentStatus.ERROR)
+            return result_code
+
+    # Handle outer loop
+    exit_code = _handle_outer_loop(agent, worktree_path, main_repo)
+
+    # Update agent state
+    increment_agent_iteration(DEFAULT_DB_PATH, agent.id)
+    update_agent_status(DEFAULT_DB_PATH, agent.id, AgentStatus.IDLE)
+
+    return exit_code
+
+
+def _handle_outer_loop(
+    agent: RegisteredAgent,
+    worktree_path: Path,
+    main_repo: Path,
+) -> int:
+    """Handle the outer loop strategy after pipeline completion."""
+    mode = agent.spec.outer_loop.mode
+
+    if mode == OuterLoopMode.PR_CHAIN:
+        return _handle_pr_chain(agent, worktree_path, main_repo)
+    elif mode == OuterLoopMode.LAND_COMMITS:
+        return _handle_land_commits(agent, worktree_path, main_repo)
+
+    return 0
+
+
+def _handle_pr_chain(
+    agent: RegisteredAgent,
+    worktree_path: Path,
+    main_repo: Path,
+) -> int:
+    """Create a PR for this iteration, chaining from previous if exists.
+
+    Following Graphite-like UX: each iteration's PR depends on the previous.
+    """
+    branch = get_current_branch(worktree_path)
+    if not branch:
+        return 1
+
+    # Push the branch
+    result = subprocess.run(
+        ["git", "push", "-u", "origin", branch],
+        cwd=worktree_path,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        print(f"Failed to push branch: {result.stderr.decode()}")
+        return 1
+
+    # Determine base branch for the PR
+    # If this is not the first iteration and the previous branch exists, use it as base
+    base_branch = "main"
+    if agent.current_branch and agent.iteration > 0:
+        # Check if previous branch exists on origin
+        check_result = subprocess.run(
+            ["git", "ls-remote", "--heads", "origin", agent.current_branch],
+            cwd=worktree_path,
+            capture_output=True,
+            text=True,
+        )
+        if check_result.returncode == 0 and check_result.stdout.strip():
+            base_branch = agent.current_branch
+
+    # Create PR
+    try:
+        message = generate_pr_message(worktree_path)
+        title = f"[{agent.spec.name}] {message.title}"
+        body = f"Agent: {agent.spec.name}\nIteration: {agent.iteration + 1}\n\n{message.body}"
+
+        # Use gh CLI to create PR with specific base
+        cmd = [
+            "gh", "pr", "create",
+            "--title", title,
+            "--body", body,
+            "--base", base_branch,
+        ]
+        result = subprocess.run(cmd, cwd=worktree_path, capture_output=True, text=True)
+
+        if result.returncode == 0:
+            print(f"PR created: {result.stdout.strip()}")
+        elif "already exists" in result.stderr:
+            print("PR already exists")
+        else:
+            print(f"Failed to create PR: {result.stderr}")
+            return 1
+    except Exception as e:
+        print(f"Failed to create PR: {e}")
+        return 1
+
+    return 0
+
+
+def _handle_land_commits(
+    agent: RegisteredAgent,
+    worktree_path: Path,
+    main_repo: Path,
+) -> int:
+    """Land commits directly to main using lf ops land."""
+    # Use worktrunk merge for landing
+    result = subprocess.run(
+        ["wt", "merge", "--no-squash"],
+        cwd=worktree_path,
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode != 0:
+        print(f"Failed to land commits: {result.stderr}")
+        return 1
+
+    print("Commits landed to main")
+    return 0
+
+
+def stop_agent(agent_id: str) -> bool:
+    """Stop a running agent by its ID."""
+    agent = load_agent(DEFAULT_DB_PATH, agent_id)
+    if not agent:
+        return False
+
+    if agent.status != AgentStatus.RUNNING:
+        return False
+
+    if agent.pid:
+        try:
+            os.kill(agent.pid, signal.SIGTERM)
+        except OSError:
+            pass
+
+    update_agent_status(DEFAULT_DB_PATH, agent_id, AgentStatus.IDLE)
+    return True

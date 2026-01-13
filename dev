@@ -1,0 +1,125 @@
+#!/bin/bash
+# Development commands for loopflow
+
+set -e
+
+usage() {
+    echo "Usage: ./dev <command>"
+    echo ""
+    echo "Commands:"
+    echo "  py         Run Python tests (uv run pytest tests/)"
+    echo "  swift      Build and test Swift app"
+    echo "  build      Build Swift app only"
+    echo "  test       Run all tests (Python + Swift)"
+    echo "  run        Run the Swift app (launches window directly)"
+    echo "  xcode      Open Swift app in Xcode (full IDE experience)"
+    echo "  release    Build release .app and .dmg"
+    echo "  help       Show this message"
+}
+
+cd "$(dirname "$0")"
+
+case "${1:-help}" in
+    py)
+        echo "Running Python tests..."
+        uv run pytest tests/ -v
+        ;;
+    swift)
+        echo "Building and testing Swift app..."
+        cd Maestro
+        swift build
+        swift test
+        ;;
+    build)
+        echo "Building Swift app..."
+        cd Maestro
+        swift build
+        ;;
+    test)
+        echo "Running all tests..."
+        echo ""
+        echo "=== Python tests ==="
+        uv run pytest tests/ -v
+        echo ""
+        echo "=== Swift tests ==="
+        cd Maestro
+        swift test
+        ;;
+    run)
+        echo "Building and running Maestro..."
+        cd Maestro
+        swift build
+
+        # Create proper .app bundle with Info.plist
+        APP_DIR=".build/debug/Maestro.app/Contents"
+        mkdir -p "$APP_DIR/MacOS"
+        cp .build/debug/Maestro "$APP_DIR/MacOS/"
+        cp Maestro/Info.plist "$APP_DIR/"
+
+        # Launch the app bundle
+        open .build/debug/Maestro.app
+        ;;
+    xcode)
+        echo "Opening in Xcode..."
+        open Maestro/Maestro.xcodeproj
+        ;;
+    release)
+        echo "Building Maestro release..."
+        cd Maestro
+
+        # Build release
+        swift build -c release
+
+        # Create .app bundle
+        APP_NAME="Loopflow Maestro"
+        APP_DIR="dist/$APP_NAME.app/Contents"
+        rm -rf dist
+        mkdir -p "$APP_DIR/MacOS"
+        mkdir -p "$APP_DIR/Resources"
+
+        # Copy binary and Info.plist
+        cp .build/release/Maestro "$APP_DIR/MacOS/"
+        cp Maestro/Info.plist "$APP_DIR/"
+
+        # Create PkgInfo
+        echo -n "APPL????" > "$APP_DIR/PkgInfo"
+
+        echo "Created dist/$APP_NAME.app"
+
+        # Create DMG
+        DMG_NAME="LoopflowMaestro"
+        DMG_PATH="dist/$DMG_NAME.dmg"
+        rm -f "$DMG_PATH"
+
+        # Create temporary DMG directory
+        DMG_TMP="dist/dmg_tmp"
+        rm -rf "$DMG_TMP"
+        mkdir -p "$DMG_TMP"
+        cp -r "dist/$APP_NAME.app" "$DMG_TMP/"
+
+        # Create symlink to Applications
+        ln -s /Applications "$DMG_TMP/Applications"
+
+        # Create DMG
+        hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_TMP" -ov -format UDZO "$DMG_PATH"
+
+        # Cleanup
+        rm -rf "$DMG_TMP"
+
+        echo ""
+        echo "Release built:"
+        echo "  App: dist/$APP_NAME.app"
+        echo "  DMG: $DMG_PATH"
+        echo ""
+        echo "To install: open $DMG_PATH and drag to Applications"
+        ;;
+    help|--help|-h)
+        usage
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo ""
+        usage
+        exit 1
+        ;;
+esac

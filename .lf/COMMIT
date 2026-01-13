@@ -1,3 +1,5 @@
-files: skip binary files when gathering context
+maestro: scaffold swift macos app
 
-Binary files (images, PDFs, compiled code) are now excluded from context gathering. Detection uses both extension matching (fast path) and null-byte content sniffing (fallback). Text formats like .json, .lock, and .svg continue to be included.
+Native macOS app for managing worktrees and launching LLM coding sessions.
+Provides a GUI for the wt (worktree sidebar) and lf (prompt launcher) CLI
+commands. Includes design docs, unit tests, and a dev script for building.

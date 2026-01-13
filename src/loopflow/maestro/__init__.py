@@ -11,6 +11,7 @@ from loopflow.maestro.agent import (
     TriggerKind,
 )
 from loopflow.maestro.agents import (
+    StartResult,
     get_agent,
     get_agent_by_name,
     list_agents,
@@ -33,6 +34,7 @@ __all__ = [
     "RegisteredAgent",
     "TriggerKind",
     # Agent API
+    "StartResult",
     "get_agent",
     "get_agent_by_name",
     "list_agents",

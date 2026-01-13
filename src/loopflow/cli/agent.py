@@ -6,16 +6,14 @@ import typer
 
 from loopflow.context import find_worktree_root
 from loopflow.git import find_main_repo
-from loopflow.maestro.agent import (
+from loopflow.maestro import (
     AgentLoopSpec,
     AgentStatus,
     AgentTrigger,
     OuterLoopConfig,
     OuterLoopMode,
-    TriggerKind,
-)
-from loopflow.maestro.agents import (
     StartResult,
+    TriggerKind,
     get_agent_by_name,
     list_agents,
     register_agent,

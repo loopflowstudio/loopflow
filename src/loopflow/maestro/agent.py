@@ -34,17 +34,13 @@ class AgentTrigger:
     """Condition that triggers an agent iteration."""
 
     kind: TriggerKind = TriggerKind.ALWAYS
-    config: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        return {"kind": self.kind.value, "config": self.config}
+        return {"kind": self.kind.value}
 
     @classmethod
     def from_dict(cls, data: dict) -> "AgentTrigger":
-        return cls(
-            kind=TriggerKind(data.get("kind", "always")),
-            config=data.get("config", {}),
-        )
+        return cls(kind=TriggerKind(data.get("kind", "always")))
 
 
 @dataclass

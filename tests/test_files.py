@@ -188,6 +188,16 @@ def test_gather_files_exclude_directory(temp_repo):
     assert temp_repo / "src" / "README.md" not in paths
 
 
+def test_gather_files_exclude_directory_name(temp_repo):
+    """Exclude patterns match directories without globbing."""
+    results = gather_files(["."], temp_repo, exclude=["src"])
+    paths = [p for p, _ in results]
+
+    assert temp_repo / "main.py" in paths
+    assert temp_repo / "src" / "app.py" not in paths
+    assert temp_repo / "src" / "README.md" not in paths
+
+
 def test_gather_files_exclude_glob_root_only(temp_repo):
     """Exclude *.md only matches root level (Path.glob semantics)."""
     results = gather_files(["."], temp_repo, exclude=["*.md"])

@@ -8,7 +8,7 @@ Draft a commit message for landing this branch.
    - First line: concise summary (50 chars or less)
    - Blank line
    - Body: what this branch accomplished and why
-4. Done. Tell the user to review `.lf/COMMIT` and run `lf land` when ready.
+4. Done. Tell the user to review `.lf/COMMIT` and run `lf ops land` when ready.
 
 ## Style
 

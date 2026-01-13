@@ -46,7 +46,7 @@ def _run_wt(args: list[str], repo_root: Path) -> str:
     try:
         result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)
     except FileNotFoundError:
-        raise WorktreeError("Worktree CLI not found. Run: lf meta install")
+        raise WorktreeError("Worktree CLI not found. Run: lf ops install")
 
     if result.returncode != 0:
         error = result.stderr.strip() or result.stdout.strip() or "Worktree operation failed"

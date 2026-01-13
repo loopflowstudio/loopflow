@@ -15,21 +15,14 @@ app = typer.Typer(
 
 # Import and register subcommands
 from loopflow.cli import run as run_module
-from loopflow.cli import pr, meta, maestro, status, compare as compare_module, land as land_module, sessions
+from loopflow.cli import ops
 
-app.add_typer(pr.app, name="pr")
-app.add_typer(meta.app, name="meta")
-app.add_typer(maestro.app, name="maestro")
+app.add_typer(ops.app, name="ops")
 
 # Register top-level commands
 app.command(context_settings={"allow_extra_args": True, "allow_interspersed_args": True})(run_module.run)
 app.command()(run_module.inline)
 app.command(name="pipeline")(run_module.pipeline)
-app.command()(status.status)
-app.command()(sessions.stop)
-app.command()(sessions.prune)
-app.command()(compare_module.compare)
-app.command()(land_module.land)
 
 
 def main():
@@ -38,14 +31,7 @@ def main():
         "run",
         "pipeline",
         "inline",
-        "pr",
-        "meta",
-        "maestro",
-        "status",
-        "compare",
-        "land",
-        "stop",
-        "prune",
+        "ops",
         "--help",
         "-h",
     }

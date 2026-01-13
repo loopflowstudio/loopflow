@@ -53,13 +53,13 @@ cd ../myrepo.feature-b
 lf ship &
 
 # Check status from anywhere
-lf status                 # shows running sessions
+lf ops status                 # shows running sessions
 ```
 
 With maestro running, you'll get notifications when tasks complete:
 
 ```bash
-lf maestro start          # start once, runs in background
+lf ops maestro start          # start once, runs in background
 ```
 
 ## Model comparison
@@ -178,20 +178,20 @@ wt remove feature-a      # remove a worktree + branch
 Open a PR from a worktree:
 
 ```bash
-lf pr create             # opens PR on GitHub
+lf ops pr create             # opens PR on GitHub
 ```
 
 Land a PR (squash-merge to main):
 
 ```bash
-lf pr land               # merges and cleans up
-lf pr land -a            # auto-merge when checks pass
+lf ops pr land               # merges and cleans up
+lf ops pr land -a            # auto-merge when checks pass
 ```
 
 Land locally (no PR required):
 
 ```bash
-lf land                  # squash + merge via worktrunk
+lf ops land                  # squash + merge via worktrunk
 ```
 
 ## Commit message generation

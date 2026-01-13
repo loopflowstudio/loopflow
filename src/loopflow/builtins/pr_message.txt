@@ -35,8 +35,8 @@ Example body:
 ## Usage
 
 \`\`\`bash
-lf pr create -a
-lf pr update -a
+lf ops pr create -a
+lf ops pr update -a
 \`\`\`
 
 PR create and update now generate title/body via Claude API instead of reading from .lf/COMMIT. The -a flag adds, commits, and pushes before creating/updating.

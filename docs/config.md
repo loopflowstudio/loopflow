@@ -117,7 +117,7 @@ exclude:
 
 ### ide
 
-Configure which IDEs loopflow installs (used by `lf meta install`).
+Configure which IDEs loopflow installs (used by `lf ops meta install`).
 
 ```yaml
 ide:

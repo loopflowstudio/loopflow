@@ -133,7 +133,7 @@ def land(
         raise typer.Exit(1)
 
     if not shutil.which("wt"):
-        typer.echo("Error: 'wt' CLI not found. Run: lf meta install", err=True)
+        typer.echo("Error: 'wt' CLI not found. Run: lf ops meta install", err=True)
         raise typer.Exit(1)
 
     main_repo = find_main_repo(repo_root) or repo_root
@@ -143,14 +143,14 @@ def land(
     pr_exists = _get_pr_status(repo_root)
     if pr_exists is True and not force:
         if pr_enabled:
-            typer.echo("Warning: PR exists, use 'lf pr land'", err=True)
+            typer.echo("Warning: PR exists, use 'lf ops pr land'", err=True)
         else:
-            typer.echo("Warning: PR exists, use 'lf pr land' or --force", err=True)
+            typer.echo("Warning: PR exists, use 'lf ops pr land' or --force", err=True)
         raise typer.Exit(1)
 
     if pr_exists is False and pr_enabled and not no_pr:
         typer.echo(
-            "Warning: PR workflow enabled, use 'lf pr create' first or --no-pr",
+            "Warning: PR workflow enabled, use 'lf ops pr create' first or --no-pr",
             err=True,
         )
         raise typer.Exit(1)

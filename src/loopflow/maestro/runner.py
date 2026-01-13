@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from loopflow.config import load_config, parse_model
@@ -102,6 +102,7 @@ def run_agent_continuous(
     iterations = 0
     consecutive_failures = 0
     last_main_sha = _get_main_head(main_repo)
+    today = date.today()
     today_iterations = 0
 
     print(f"Agent {agent.spec.name} starting in continuous mode")
@@ -111,6 +112,12 @@ def run_agent_continuous(
         print(f"  Max iterations: {max_iterations}")
 
     while not _shutdown_requested:
+        # Reset daily counter at midnight
+        current_date = date.today()
+        if current_date != today:
+            today = current_date
+            today_iterations = 0
+
         # Check daily rate limit
         if agent.spec.max_iterations_per_day:
             if today_iterations >= agent.spec.max_iterations_per_day:
@@ -195,15 +202,19 @@ def _inject_agent_prompt(
 
     The agent prompt is prepended as a system directive before the task.
     """
-    # Create a modified task that includes the agent prompt
+    parts = [agent_prompt]
+
     original_task = components.task
     if original_task:
         task_name, task_content = original_task
-        combined_content = f"{agent_prompt}\n\n---\n\n{task_content}"
+        parts.append("---")
+        parts.append(task_content)
+        combined_content = "\n\n".join(parts)
         modified_task = (task_name, combined_content)
     else:
         # If no task, use agent prompt as the task
-        modified_task = (spec.name, agent_prompt)
+        combined_content = "\n\n".join(parts)
+        modified_task = (spec.name, combined_content)
 
     return PromptComponents(
         run_mode=components.run_mode,
@@ -355,7 +366,10 @@ def run_agent_iteration(
         result_code = process.wait()
 
         # Clean up prompt file
-        os.unlink(prompt_file)
+        try:
+            os.unlink(prompt_file)
+        except OSError:
+            pass  # Best effort cleanup
 
         status = SessionStatus.COMPLETED if result_code == 0 else SessionStatus.ERROR
         update_session_status(DEFAULT_DB_PATH, session.id, status)

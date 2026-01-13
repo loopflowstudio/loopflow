@@ -209,7 +209,9 @@ def start(
         raise typer.Exit(1)
 
     if agent.status in (AgentStatus.RUNNING, AgentStatus.WAITING):
-        typer.echo(f"Agent {agent.spec.name} is already running", err=True)
+        status_desc = "running" if agent.status == AgentStatus.RUNNING else "waiting for trigger"
+        typer.echo(f"Agent {agent.spec.name} is already {status_desc}", err=True)
+        typer.echo(f"  Stop it first: lf ops agent stop {agent.spec.name}", err=True)
         raise typer.Exit(1)
 
     # Use agent's default continuous setting if not specified
@@ -321,3 +323,5 @@ def show(
         typer.echo(f"  Current branch: {agent.current_branch}")
     if agent.current_worktree:
         typer.echo(f"  Current worktree: {agent.current_worktree}")
+
+

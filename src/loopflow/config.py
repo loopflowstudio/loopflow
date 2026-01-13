@@ -25,12 +25,11 @@ def parse_model(model: str) -> tuple[str, str | None]:
 
     Applies smart defaults when no variant is specified:
     - claude -> opus (Claude Opus 4.5)
-    - codex -> o3 (latest reasoning model)
     - gemini -> 2.5-pro (Gemini 2.5 Pro)
+    - codex -> None (let Codex CLI pick its default)
     """
     defaults = {
         "claude": "opus",
-        "codex": "o3",
         "gemini": "2.5-pro",
     }
     parts = model.split(":", 1)

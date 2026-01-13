@@ -288,7 +288,7 @@ def test_parse_model_with_variant():
 def test_parse_model_default_variants():
     """parse_model applies smart defaults when no variant specified."""
     assert parse_model("claude") == ("claude", "opus")
-    assert parse_model("codex") == ("codex", "o3")
+    assert parse_model("codex") == ("codex", None)  # let Codex CLI pick
     assert parse_model("gemini") == ("gemini", "2.5-pro")
 
 

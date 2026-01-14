@@ -383,6 +383,64 @@ def inline(
     raise typer.Exit(result_code)
 
 
+def cp(
+    paths: list[str] = typer.Argument(
+        None, help="Files or directories to include (e.g., src tests)"
+    ),
+    exclude: list[str] = typer.Option(
+        None, "-e", "--exclude", help="Patterns to exclude"
+    ),
+    paste: bool = typer.Option(
+        False, "-v", "--paste", help="Include clipboard content"
+    ),
+    docs: bool = typer.Option(
+        True, "--docs/--no-docs", help="Include repo documentation (.md files)"
+    ),
+    diff: bool = typer.Option(
+        True, "--diff/--no-diff", help="Include branch diff"
+    ),
+):
+    """Copy file context to clipboard."""
+    repo_root = find_worktree_root()
+    if not repo_root:
+        typer.echo("Error: Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    config = load_config(repo_root)
+
+    # Merge positional paths and config context
+    all_context = list(paths or [])
+    if config and config.context:
+        all_context.extend(config.context)
+
+    # Merge exclude patterns
+    exclude_patterns = list(exclude or [])
+    if config and config.exclude:
+        exclude_patterns.extend(config.exclude)
+
+    components = gather_prompt_components(
+        repo_root,
+        task=None,
+        context=all_context or None,
+        exclude=exclude_patterns or None,
+        paste=paste,
+        run_mode=None,
+    )
+
+    # Apply docs/diff flags
+    if not docs:
+        components.docs = []
+    if not diff:
+        components.diff = None
+
+    prompt = format_prompt(components)
+    _copy_to_clipboard(prompt)
+
+    tree = analyze_components(components)
+    typer.echo(tree.format())
+    typer.echo("\nCopied to clipboard.")
+
+
 def pipeline(
     name: str = typer.Argument(help="Pipeline name from config.yaml"),
     context: list[str] = typer.Option(

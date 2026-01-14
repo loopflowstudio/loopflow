@@ -307,17 +307,29 @@ def land(
             subprocess.run(["git", "checkout", original_branch], cwd=main_repo, capture_output=True)
         raise typer.Exit(1)
 
-    subprocess.run(["git", "commit", "-m", commit_msg], cwd=main_repo, check=True)
-    subprocess.run(["git", "push"], cwd=main_repo, check=True)
+    # Abort the in-progress merge - we'll use gh pr merge instead
+    subprocess.run(["git", "reset", "--hard", f"origin/{base_branch}"], cwd=main_repo, check=True)
 
-    # Delete remote branch
+    # Use gh pr merge to properly merge the PR (marks it as merged, not closed)
+    merge_cmd = ["gh", "pr", "merge", branch, "--squash", "--subject", title]
+    if body:
+        merge_cmd.extend(["--body", body])
+    result = subprocess.run(merge_cmd, cwd=main_repo)
+    if result.returncode != 0:
+        typer.echo("Error: gh pr merge failed", err=True)
+        raise typer.Exit(1)
+
+    # Pull the merged changes
+    subprocess.run(["git", "pull", "--ff-only"], cwd=main_repo, check=True)
+
+    # Delete remote branch (gh pr merge doesn't always do this)
     subprocess.run(
         ["git", "push", "origin", "--delete", branch],
         cwd=main_repo,
         capture_output=True,
     )
 
-    # Clean up: remove worktree and branch
+    # Clean up: remove worktree and local branch
     was_in_worktree = repo_root != main_repo
     if was_in_worktree:
         remove(main_repo, branch)
@@ -325,7 +337,7 @@ def land(
         # If we landed from main repo, switch back before deleting branch
         if original_branch and original_branch != branch:
             subprocess.run(["git", "checkout", original_branch], cwd=main_repo, capture_output=True)
-        subprocess.run(["git", "branch", "-D", branch], cwd=main_repo, check=True)
+        subprocess.run(["git", "branch", "-D", branch], cwd=main_repo, capture_output=True)
 
     typer.echo(f"Landed {branch} onto {base_branch} and pushed.")
 

@@ -252,9 +252,10 @@ def land(
     merge_cmd = ["gh", "pr", "merge", branch, "--squash", "--delete-branch", "--subject", title]
     if body:
         merge_cmd.extend(["--body", body])
-    result = subprocess.run(merge_cmd, cwd=repo_root)
+    result = subprocess.run(merge_cmd, cwd=repo_root, capture_output=True, text=True)
     if result.returncode != 0:
-        typer.echo("Error: gh pr merge failed", err=True)
+        error_msg = result.stderr.strip() or result.stdout.strip() or "unknown error"
+        typer.echo(f"Error: {error_msg}", err=True)
         raise typer.Exit(1)
 
     # Clear design artifacts locally before pulling (they shouldn't be in the squash commit)

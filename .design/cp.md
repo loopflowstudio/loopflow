@@ -7,7 +7,7 @@ Copy file context to clipboard for use with external LLMs.
 ```bash
 lf cp                      # copy repo docs + diff
 lf cp src tests            # include specific paths
-lf cp -x schema.py         # add context files
+lf cp schema.py            # include a single file
 lf cp --no-docs            # exclude .md files
 lf cp --no-diff            # exclude git diff
 lf cp -e "*.test.ts"       # exclude patterns
@@ -19,7 +19,6 @@ Gathers prompt components using the same logic as `lf run`, then copies to clipb
 
 Options:
 - Positional args: paths to include as context
-- `-x, --context`: additional context files
 - `-e, --exclude`: patterns to exclude
 - `-v, --paste`: include clipboard content
 - `--no-docs`: exclude repo documentation (.md files)

@@ -1,52 +1,35 @@
 # UI Explorations
 
-Adds `lf ops commit` command, clipboard support for token analysis, improved test guidance in polish prompt, and reference documentation files on agent orchestration workflows.
+Bundle LOOPFLOW.md in the package, add `lf ops commit` command, improve `lf ops pr land`, and enhance Maestro UI with hover actions.
 
 ## Review
 
-**Verdict:** Needs work
-
-### Code issues
-
-1. **Merge conflict markers in working tree** (`src/loopflow/cli/commit.py`). The file contains unresolved `<<<<<<< HEAD` markers. The committed version is clean, but the working tree has conflicts that need resolution.
-
-2. **Test mismatch with implementation** (`tests/test_commit.py`). Tests expect behaviors that don't match the committed implementation:
-   - Tests check for "Staging changes" output, but committed code doesn't print that
-   - Tests use `-m` flag which doesn't exist in the committed implementation (which uses `-a/-A` for add/no-add instead)
-   - `test_commit_with_custom_message` asserts `mock_gen.assert_not_called()` but the mock is never assigned to `mock_gen` in that test path
-
-3. **Test uses unused pytest fixture** (`tests/test_commit.py:15-19`). The `mock_repo` fixture creates a temp directory but only `test_commit_with_no_changes` uses it. Other tests shadow it with `mock_repo = Path("/fake/repo")`.
-
-### Style notes
-
-- `tokens.py:52`: The docstring was simplified per style guide, which is correct.
-- New `files/*.md` documentation is extensive reference material. Not code, so no style concerns.
+**Verdict:** Ready to ship
 
 ## Design notes
 
-### Open question: Prompt frontmatter
+### Bundled LOOPFLOW.md
 
-The `debug` task currently requires users to pass `-v` to include clipboard content. A proposed alternative: frontmatter in prompt files to specify defaults:
-
-```markdown
----
-paste: true
----
-Debug an error using the stacktrace or error message from clipboard.
-```
-
-Questions to resolve:
-
-1. General frontmatter system for all options (`paste`, `interactive`, `context`, etc.) or just `paste`?
-2. Reuse existing YAML parser from `maestro/markdown.py` or keep prompts as plain markdown?
-3. How should frontmatter defaults interact with CLI flags? (CLI wins? Error?)
-
-**Current state:** Token profile includes clipboard when `-v` is passed. Frontmatter not implemented.
+Replaces repo-level `PROMPTS.md` with a package-bundled `LOOPFLOW.md`. The file is now included in prompts via `include_loopflow_doc` config option (default: true). This ensures agents always have context about loopflow's workflow conventions regardless of repo configuration.
 
 ### lf ops commit
 
-Adds standalone commit command with LLM-generated messages. Options:
-- `-p/--push`: Push after commit
+New command with LLM-generated commit messages. Options:
+- `-p/--push`: Push after commit (sets upstream if needed)
+- `-m/--message`: Override generated message
 - `-a/-A/--add/--no-add`: Stage all changes (default: yes)
 
-The committed implementation differs from what the diff shows in `<lf:diff>` (which appears to be from a different version). The README documents `-p` and `-m` flags, but committed code has `-p` and `-a/-A`.
+### lf ops pr land simplification
+
+Changed from manual squash-merge to `gh pr merge --squash --delete-branch`. Benefits:
+- PR shows as "merged" not "closed"
+- GitHub handles the merge remotely
+- Cleaner local state after merge
+
+### Maestro hover actions
+
+Worktree rows now show terminal/IDE quick-action buttons on hover, replacing the status badge. Context menu labels use configured app names (Warp, iTerm, etc.) instead of generic "Terminal".
+
+### Open question: Prompt frontmatter
+
+See `questions.md` for details on proposed task file frontmatter support.

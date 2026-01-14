@@ -173,6 +173,7 @@ def analyze_prompt_tokens(
     task: Optional[tuple[str, str]] = None,
     context_files: Optional[list[tuple[Path, str]]] = None,
     repo_root: Optional[Path] = None,
+    clipboard: Optional[str] = None,
 ) -> TokenTree:
     """Analyze token distribution in prompt components."""
     tree = TokenTree()
@@ -201,6 +202,10 @@ def analyze_prompt_tokens(
             except ValueError:
                 tree.add("context", file_path.name, tokens)
 
+    if clipboard:
+        tokens = count_tokens(clipboard)
+        tree.add("clipboard", "pasted text", tokens)
+
     return tree
 
 
@@ -212,4 +217,5 @@ def analyze_components(components) -> TokenTree:
         task=components.task,
         context_files=components.context_files,
         repo_root=components.repo_root,
+        clipboard=components.clipboard,
     )

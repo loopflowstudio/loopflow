@@ -159,3 +159,11 @@ def test_analyze_prompt_tokens_combined():
     assert "diff" in tree.root.children
     assert "task" in tree.root.children
     assert "context" in tree.root.children
+
+
+def test_analyze_prompt_tokens_clipboard():
+    """analyze_prompt_tokens handles clipboard content."""
+    tree = analyze_prompt_tokens(clipboard="error traceback from terminal")
+
+    assert tree.total() > 0
+    assert "clipboard" in tree.root.children

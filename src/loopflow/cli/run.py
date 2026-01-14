@@ -393,11 +393,11 @@ def cp(
     paste: bool = typer.Option(
         False, "-v", "--paste", help="Include clipboard content"
     ),
-    no_docs: bool = typer.Option(
-        False, "--no-docs", help="Exclude repo documentation (.md files)"
+    docs: bool = typer.Option(
+        True, "--docs/--no-docs", help="Include repo documentation (.md files)"
     ),
-    no_diff: bool = typer.Option(
-        False, "--no-diff", help="Exclude branch diff"
+    diff: bool = typer.Option(
+        True, "--diff/--no-diff", help="Include branch diff"
     ),
 ):
     """Copy file context to clipboard."""
@@ -427,10 +427,10 @@ def cp(
         run_mode=None,
     )
 
-    # Optionally strip docs/diff
-    if no_docs:
+    # Apply docs/diff flags
+    if not docs:
         components.docs = []
-    if no_diff:
+    if not diff:
         components.diff = None
 
     prompt = format_prompt(components)

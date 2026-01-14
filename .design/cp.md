@@ -21,7 +21,7 @@ Options:
 - Positional args: paths to include as context
 - `-e, --exclude`: patterns to exclude
 - `-v, --paste`: include clipboard content
-- `--no-docs`: exclude repo documentation (.md files)
-- `--no-diff`: exclude branch diff
+- `--docs/--no-docs`: include/exclude repo documentation (default: include)
+- `--diff/--no-diff`: include/exclude branch diff (default: include)
 
 Merges with config.yaml `context` and `exclude` settings.

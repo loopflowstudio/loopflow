@@ -50,14 +50,7 @@ class TokenTree:
     root: TokenNode = field(default_factory=lambda: TokenNode(name="root"))
 
     def add(self, category: str, name: str, tokens: int, path: Optional[list[str]] = None) -> None:
-        """Add tokens to the tree.
-
-        Args:
-            category: Top-level category (docs, diff, task, context, arg)
-            name: Display name for this item
-            tokens: Token count
-            path: Optional path within category (for nested file structure)
-        """
+        """Add tokens under category, optionally nested by path."""
         cat_node = self.root.add_child(category, 0)
         if path:
             cat_node.add_path(path + [name], tokens)

@@ -25,8 +25,6 @@ dependencies = [
     "pydantic>=2.12.5",
     "pydantic-ai-slim[anthropic]>=1.0.0",
     "tiktoken>=0.7.0",
-    "fastapi>=0.115.0",
-    "uvicorn>=0.30.0",
 ]
 
 [project.optional-dependencies]
@@ -36,6 +34,7 @@ dev = [
 
 [project.scripts]
 lf = "loopflow.cli:main"
+lfd = "loopflow.lfd:main"
 
 [build-system]
 requires = ["hatchling"]

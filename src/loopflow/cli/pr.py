@@ -247,99 +247,31 @@ def land(
         typer.echo(f"Error: Cannot land {branch} onto itself", err=True)
         raise typer.Exit(1)
 
-    commit_msg = title
-    if body:
-        commit_msg += f"\n\n{body}"
-
-    # Check main repo is clean before we modify it
-    result = subprocess.run(
-        ["git", "status", "--porcelain"],
-        cwd=main_repo,
-        capture_output=True,
-        text=True,
-    )
-    if result.stdout.strip():
-        typer.echo("Error: Main repo has uncommitted changes", err=True)
-        raise typer.Exit(1)
-
-    # Save current branch in main repo to restore later
-    result = subprocess.run(
-        ["git", "branch", "--show-current"],
-        cwd=main_repo,
-        capture_output=True,
-        text=True,
-    )
-    original_branch = result.stdout.strip()
-
-    # Fetch and checkout base branch
-    typer.echo(f"Checking out {base_branch}...")
-    subprocess.run(["git", "fetch", "origin", base_branch], cwd=main_repo, check=True)
-    subprocess.run(["git", "checkout", base_branch], cwd=main_repo, check=True)
-    subprocess.run(["git", "reset", "--hard", f"origin/{base_branch}"], cwd=main_repo, check=True)
-
-    # Fetch the branch we're landing and squash merge
-    subprocess.run(["git", "fetch", "origin", branch], cwd=main_repo, check=True)
-    result = subprocess.run(
-        ["git", "merge", "--squash", f"origin/{branch}"],
-        cwd=main_repo,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        typer.echo(f"Error: Merge failed. Resolve conflicts manually.\n{result.stderr}", err=True)
-        raise typer.Exit(1)
-
-    if clear_design_artifacts(main_repo):
-        design_dir = main_repo / ".design"
-        if design_dir.exists():
-            subprocess.run(["git", "add", "-A", str(design_dir)], cwd=main_repo, check=True)
-        typer.echo("Removed .design contents")
-
-    # Check if there are staged changes to commit
-    result = subprocess.run(
-        ["git", "diff", "--cached", "--quiet"],
-        cwd=main_repo,
-    )
-    if result.returncode == 0:
-        typer.echo(f"Nothing to land - {branch} has no changes relative to {base_branch}.", err=True)
-        # Restore original branch
-        if original_branch:
-            subprocess.run(["git", "checkout", original_branch], cwd=main_repo, capture_output=True)
-        raise typer.Exit(1)
-
-    # Abort the in-progress merge - we'll use gh pr merge instead
-    subprocess.run(["git", "reset", "--hard", f"origin/{base_branch}"], cwd=main_repo, check=True)
-
-    # Use gh pr merge to properly merge the PR (marks it as merged, not closed)
-    merge_cmd = ["gh", "pr", "merge", branch, "--squash", "--subject", title]
+    # Use gh pr merge to squash-merge the PR on GitHub
+    # This properly marks the PR as merged (not closed) and handles the merge remotely
+    merge_cmd = ["gh", "pr", "merge", branch, "--squash", "--delete-branch", "--subject", title]
     if body:
         merge_cmd.extend(["--body", body])
-    result = subprocess.run(merge_cmd, cwd=main_repo)
+    result = subprocess.run(merge_cmd, cwd=repo_root)
     if result.returncode != 0:
         typer.echo("Error: gh pr merge failed", err=True)
         raise typer.Exit(1)
 
-    # Pull the merged changes
+    # Clear design artifacts locally before pulling (they shouldn't be in the squash commit)
+    if clear_design_artifacts(main_repo):
+        typer.echo("Removed .design contents")
+
+    # Pull the merged changes to main repo
+    subprocess.run(["git", "fetch", "origin", base_branch], cwd=main_repo, check=True)
+    subprocess.run(["git", "checkout", base_branch], cwd=main_repo, check=True)
     subprocess.run(["git", "pull", "--ff-only"], cwd=main_repo, check=True)
 
-    # Delete remote branch (gh pr merge doesn't always do this)
-    subprocess.run(
-        ["git", "push", "origin", "--delete", branch],
-        cwd=main_repo,
-        capture_output=True,
-    )
-
-    # Clean up: remove worktree and local branch
+    # Clean up: remove worktree (--delete-branch already removed remote+local branch in main)
     was_in_worktree = repo_root != main_repo
     if was_in_worktree:
         remove(main_repo, branch)
-    else:
-        # If we landed from main repo, switch back before deleting branch
-        if original_branch and original_branch != branch:
-            subprocess.run(["git", "checkout", original_branch], cwd=main_repo, capture_output=True)
-        subprocess.run(["git", "branch", "-D", branch], cwd=main_repo, capture_output=True)
 
-    typer.echo(f"Landed {branch} onto {base_branch} and pushed.")
+    typer.echo(f"Landed {branch} onto {base_branch}.")
 
     # Output main repo path for shell cd integration when we removed a worktree
     if was_in_worktree:

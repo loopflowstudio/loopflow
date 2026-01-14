@@ -1,7 +1,6 @@
 """Commit with generated message."""
 
 import subprocess
-from pathlib import Path
 
 import typer
 

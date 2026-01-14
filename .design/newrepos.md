@@ -14,7 +14,7 @@ Fix `lf ops init` to work and improve first-run experience for new repositories.
 - `PROMPTS.md` - explains the prompt system for new repos
 - `commands/*.md` - the prompt files themselves
 
-**Starter prompts (6):** design, implement, review, debug, polish, iterate. Run `lf ops init --all` for additional prompts.
+**Starter prompts (6):** design, implement, review, debug, polish, iterate. The `--all` flag currently installs the same set but is ready for future expansion.
 
 **Better error messages:** When a task is not found in an uninitialized repo, suggests `lf ops init` instead of showing confusing hints about creating `.claude/commands/`.
 

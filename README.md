@@ -160,6 +160,7 @@ lf implement &         # background (shell handles it)
 | `lf <task>` | Run a task from `.lf/` |
 | `lf <pipeline>` | Run a pipeline |
 | `lf : "prompt"` | Inline prompt |
+| `lf ops commit [-p] [-m]` | Auto-commit with generated message |
 | `lf ops compare a b` | Compare two worktree implementations |
 | `wt <subcommand>` | Worktree management (worktrunk) |
 | `lf ops pr create` | Open GitHub PR |

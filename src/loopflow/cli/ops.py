@@ -3,6 +3,7 @@
 import typer
 
 from loopflow.cli import agent as agent_module
+from loopflow.cli import commit as commit_module
 from loopflow.cli import compare as compare_module
 from loopflow.cli import land as land_module
 from loopflow.cli import maestro, meta, pr, sessions, status
@@ -20,5 +21,6 @@ app.command()(meta.version)
 app.command()(status.status)
 app.command()(sessions.stop)
 app.command()(sessions.prune)
+app.command()(commit_module.commit)
 app.command()(compare_module.compare)
 app.command()(land_module.land)

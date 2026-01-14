@@ -11,21 +11,19 @@ import typer
 
 from loopflow.config import load_config
 from loopflow.context import find_worktree_root
+from loopflow.init_check import check_init_status
 from loopflow.launcher import check_claude_available, check_codex_available, check_gemini_available
 
 app = typer.Typer(help="Setup and diagnostics.")
 
-# Prompts installed by `lf ops init`
-_BUNDLED_PROMPTS = [
-    "review.md",
-    "implement.md",
+# Starter prompts installed by default
+_STARTER_PROMPTS = [
     "design.md",
-    "polish.md",
+    "implement.md",
+    "review.md",
     "debug.md",
-    "publish.md",
+    "polish.md",
     "iterate.md",
-    "expand.md",
-    "reduce.md",
 ]
 
 
@@ -57,6 +55,11 @@ def check_setup() -> SetupStatus:
         claude=shutil.which("claude") is not None,
         worktrunk=shutil.which("wt") is not None,
     )
+
+
+def _get_templates_dir() -> Path:
+    """Return path to bundled templates directory."""
+    return Path(__file__).parent.parent / "templates"
 
 
 def _install_node() -> bool:
@@ -152,34 +155,34 @@ def _install_missing(status: SetupStatus) -> None:
             raise typer.Exit(1)
 
 
-def _scaffold_repo(repo_root: Path) -> None:
+def _scaffold_repo(repo_root: Path, all_prompts: bool = False) -> None:
     """Create .lf/ config and .claude/commands/ prompts."""
-    bundled_dir = Path(__file__).parent.parent
-    commands_src = bundled_dir / "commands"
-    prompts_dir = bundled_dir / "prompts"
-    style_template = bundled_dir / "LOOPFLOW_STYLE.md"
-    config_template = bundled_dir / "config_template.yaml"
+    templates = _get_templates_dir()
+    prompts_dir = Path(__file__).parent.parent / "prompts"
 
     typer.echo("\nCreating .lf/...")
 
     # Config
     config_dir = repo_root / ".lf"
     config_dir.mkdir(exist_ok=True)
-    config_dst = config_dir / "config.yaml"
 
+    config_src = templates / "config.yaml"
+    config_dst = config_dir / "config.yaml"
     if config_dst.exists():
         typer.echo("  - .lf/config.yaml (already exists)")
     else:
-        shutil.copy(config_template, config_dst)
+        shutil.copy(config_src, config_dst)
         typer.echo("  ✓ .lf/config.yaml")
 
-    # Style guide
-    style_dst = config_dir / "LOOPFLOW_STYLE.md"
-    if style_dst.exists():
-        typer.echo("  - .lf/LOOPFLOW_STYLE.md (already exists)")
-    else:
-        shutil.copy(style_template, style_dst)
-        typer.echo("  ✓ .lf/LOOPFLOW_STYLE.md")
+    # Style guide and PROMPTS.md
+    for name in ["STYLE.md", "PROMPTS.md"]:
+        src = templates / name
+        dst = config_dir / name
+        if dst.exists():
+            typer.echo(f"  - .lf/{name} (already exists)")
+        else:
+            shutil.copy(src, dst)
+            typer.echo(f"  ✓ .lf/{name}")
 
     # Commit templates
     for template_name in ["COMMIT_MESSAGE.md", "CHECKPOINT_MESSAGE.md"]:
@@ -196,48 +199,57 @@ def _scaffold_repo(repo_root: Path) -> None:
     commands_dir.mkdir(parents=True, exist_ok=True)
     typer.echo("  ✓ .claude/commands/")
 
-    for prompt_name in _BUNDLED_PROMPTS:
-        src = commands_src / prompt_name
-        dst = commands_dir / prompt_name
+    if all_prompts:
+        prompt_files = list((templates / "commands").glob("*.md"))
+    else:
+        prompt_files = [templates / "commands" / name for name in _STARTER_PROMPTS]
+
+    for src in prompt_files:
+        dst = commands_dir / src.name
         if not dst.exists():
             shutil.copy(src, dst)
 
 
-def _install_subset(repo_root: Path, prompts: bool, style: bool) -> None:
+def _install_subset(repo_root: Path, prompts: bool, style: bool, all_prompts: bool = False) -> None:
     """Install just prompts or style guide (legacy behavior for --prompts/--style flags)."""
-    bundled_dir = Path(__file__).parent.parent
-    commands_src = bundled_dir / "commands"
-    style_template = bundled_dir / "LOOPFLOW_STYLE.md"
+    templates = _get_templates_dir()
 
     if prompts:
         commands_dir = repo_root / ".claude" / "commands"
         commands_dir.mkdir(parents=True, exist_ok=True)
 
-        for prompt_name in _BUNDLED_PROMPTS:
-            src = commands_src / prompt_name
-            dst = commands_dir / prompt_name
+        if all_prompts:
+            prompt_files = list((templates / "commands").glob("*.md"))
+        else:
+            prompt_files = [templates / "commands" / name for name in _STARTER_PROMPTS]
 
+        for src in prompt_files:
+            dst = commands_dir / src.name
             if dst.exists():
-                typer.echo(f"- .claude/commands/{prompt_name} (already exists)")
+                typer.echo(f"- .claude/commands/{src.name} (already exists)")
             else:
                 shutil.copy(src, dst)
-                typer.echo(f"✓ Created .claude/commands/{prompt_name}")
+                typer.echo(f"✓ Created .claude/commands/{src.name}")
 
     if style:
         lf_dir = repo_root / ".lf"
         lf_dir.mkdir(exist_ok=True)
-        style_dst = lf_dir / "LOOPFLOW_STYLE.md"
-        if style_dst.exists():
-            typer.echo("- .lf/LOOPFLOW_STYLE.md (already exists)")
-        else:
-            shutil.copy(style_template, style_dst)
-            typer.echo("✓ Created .lf/LOOPFLOW_STYLE.md")
+
+        for name in ["STYLE.md", "PROMPTS.md"]:
+            src = templates / name
+            dst = lf_dir / name
+            if dst.exists():
+                typer.echo(f"- .lf/{name} (already exists)")
+            else:
+                shutil.copy(src, dst)
+                typer.echo(f"✓ Created .lf/{name}")
 
 
 @app.command()
 def init(
     prompts_only: bool = typer.Option(False, "--prompts", help="Only install prompts"),
     style_only: bool = typer.Option(False, "--style", help="Only install style guide"),
+    all_prompts: bool = typer.Option(False, "--all", help="Install all prompts, not just starter set"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Auto-confirm prompts"),
 ):
     """Initialize repo with loopflow. Checks deps, installs missing, scaffolds config."""
@@ -253,7 +265,7 @@ def init(
 
     # If specific flags, use subset behavior
     if prompts_only or style_only:
-        _install_subset(repo_root, prompts=prompts_only, style=style_only)
+        _install_subset(repo_root, prompts=prompts_only, style=style_only, all_prompts=all_prompts)
         return
 
     # Full init flow
@@ -269,7 +281,7 @@ def init(
             raise typer.Exit(1)
 
     # Scaffold repo
-    _scaffold_repo(repo_root)
+    _scaffold_repo(repo_root, all_prompts=all_prompts)
 
     # Success message
     typer.echo("\n✓ Ready! Try 'lf review' or 'lf design'")
@@ -391,13 +403,23 @@ def install():
 
 @app.command()
 def doctor():
-    """Check loopflow dependencies based on config."""
+    """Check loopflow dependencies and repo status."""
     all_ok = True
 
     # Load config to check what's needed
     repo_root = find_worktree_root()
     config = load_config(repo_root) if repo_root else None
     ide = config.ide if config else None
+
+    # Repo status
+    if repo_root:
+        status = check_init_status(repo_root)
+        if status.has_commands:
+            typer.echo("✓ task files found")
+        else:
+            typer.echo("- no task files (run: lf ops init)")
+    else:
+        typer.echo("- not in a git repo")
 
     # Required
     if shutil.which("npm"):

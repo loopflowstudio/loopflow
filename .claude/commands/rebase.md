@@ -1,4 +1,5 @@
 ---
+interactive: true
 produces: rebased branch (or no-op if up-to-date)
 ---
 Rebase this branch onto main.

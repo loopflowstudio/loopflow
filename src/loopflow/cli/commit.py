@@ -14,6 +14,7 @@ def commit(
     add: bool = typer.Option(
         True, "-a/-A", "--add/--no-add", help="Stage all changes before committing"
     ),
+    message: str = typer.Option(None, "-m", "--message", help="Override commit message"),
 ) -> None:
     """Generate commit message from diff and commit."""
     repo_root = find_worktree_root()
@@ -45,18 +46,20 @@ def commit(
         typer.echo("Nothing staged to commit", err=True)
         raise typer.Exit(0)
 
-    # Generate commit message
-    typer.echo("Generating commit message...")
-    try:
-        message = generate_commit_message(repo_root)
-    except Exception as e:
-        typer.echo(f"Error generating commit message: {e}", err=True)
-        raise typer.Exit(1)
+    # Use provided message or generate one
+    if message:
+        commit_msg = message
+    else:
+        typer.echo("Generating commit message...")
+        try:
+            generated = generate_commit_message(repo_root)
+        except Exception as e:
+            typer.echo(f"Error generating commit message: {e}", err=True)
+            raise typer.Exit(1)
 
-    # Build full message
-    commit_msg = message.title
-    if message.body:
-        commit_msg += f"\n\n{message.body}"
+        commit_msg = generated.title
+        if generated.body:
+            commit_msg += f"\n\n{generated.body}"
 
     # Commit
     result = subprocess.run(
@@ -67,7 +70,7 @@ def commit(
         typer.echo("Commit failed", err=True)
         raise typer.Exit(1)
 
-    typer.echo(f"Committed: {message.title}")
+    typer.echo(f"Committed: {commit_msg.splitlines()[0]}")
 
     # Push if requested
     if push:
@@ -79,4 +82,21 @@ def commit(
                 typer.echo("Push failed", err=True)
                 raise typer.Exit(1)
         else:
-            typer.echo("No upstream branch, skipping push", err=True)
+            # Set upstream and push
+            result = subprocess.run(
+                ["git", "branch", "--show-current"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+            )
+            branch = result.stdout.strip()
+            typer.echo("Pushing (setting upstream)...")
+            result = subprocess.run(
+                ["git", "push", "-u", "origin", branch],
+                cwd=repo_root,
+            )
+            if result.returncode == 0:
+                typer.echo("Pushed to origin")
+            else:
+                typer.echo("Push failed", err=True)
+                raise typer.Exit(1)

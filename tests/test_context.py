@@ -159,6 +159,7 @@ def test_gather_prompt_components_returns_dataclass(temp_repo):
     assert isinstance(components, PromptComponents)
     assert components.repo_root == temp_repo
     assert len(components.docs) == 3  # .design/plan + README, STYLE
+    assert components.loopflow_doc is not None  # bundled system doc
     assert components.task == ("implement", "Implement the feature.\n")
 
 

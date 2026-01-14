@@ -1,18 +1,32 @@
 // Service for launching terminal sessions.
 
 import AppKit
+import ApplicationServices
 import Foundation
 
 struct TerminalLauncher {
     enum LaunchError: LocalizedError {
         case unsupportedTerminal(String)
         case launchFailed(String)
+        case accessibilityDenied
 
         var errorDescription: String? {
             switch self {
             case .unsupportedTerminal(let name): return "Unsupported terminal: \(name)"
             case .launchFailed(let msg): return "Failed to launch: \(msg)"
+            case .accessibilityDenied: return "Accessibility permission required. Please grant access in System Settings → Privacy & Security → Accessibility, then try again."
             }
+        }
+    }
+
+    /// Check if we have Accessibility permissions, prompting if not
+    private func ensureAccessibilityPermission() throws {
+        // Use the string key directly to avoid concurrency issues with the constant
+        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+        let trusted = AXIsProcessTrustedWithOptions(options)
+
+        if !trusted {
+            throw LaunchError.accessibilityDenied
         }
     }
 
@@ -51,18 +65,68 @@ struct TerminalLauncher {
     // MARK: - Terminal Launchers
 
     private func launchWarp(at path: URL, command: String?) throws {
-        var urlString = "warp://action/new_tab?path=\(path.path().addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path.path())"
+        // Warp requires UI scripting via Accessibility - check permission first
+        try ensureAccessibilityPermission()
+
+        // Warp doesn't have proper AppleScript support or a command URL parameter
+        // Use AppleScript UI scripting: open new tab, type command, press Enter
+        let script: String
 
         if let cmd = command {
-            let encodedCmd = cmd.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? cmd
-            urlString += "&command=\(encodedCmd)"
+            // Escape single quotes in the command for AppleScript
+            let escapedCmd = cmd.replacingOccurrences(of: "'", with: "'\\''")
+            let escapedPath = path.path().replacingOccurrences(of: "'", with: "'\\''")
+
+            script = """
+            tell application "Warp"
+                activate
+            end tell
+
+            delay 0.3
+
+            tell application "System Events"
+                tell process "Warp"
+                    keystroke "t" using command down
+                end tell
+            end tell
+
+            delay 0.5
+
+            tell application "System Events"
+                tell process "Warp"
+                    keystroke "cd '\(escapedPath)' && \(escapedCmd)"
+                    key code 36
+                end tell
+            end tell
+            """
+        } else {
+            let escapedPath = path.path().replacingOccurrences(of: "'", with: "'\\''")
+
+            script = """
+            tell application "Warp"
+                activate
+            end tell
+
+            delay 0.3
+
+            tell application "System Events"
+                tell process "Warp"
+                    keystroke "t" using command down
+                end tell
+            end tell
+
+            delay 0.5
+
+            tell application "System Events"
+                tell process "Warp"
+                    keystroke "cd '\(escapedPath)'"
+                    key code 36
+                end tell
+            end tell
+            """
         }
 
-        guard let url = URL(string: urlString) else {
-            throw LaunchError.launchFailed("Invalid Warp URL")
-        }
-
-        NSWorkspace.shared.open(url)
+        try runAppleScript(script)
     }
 
     private func launchITerm(at path: URL, command: String?) throws {

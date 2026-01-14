@@ -37,6 +37,9 @@ struct ConfigLoader {
         var push: Bool?
         var pr: Bool?
         var yolo: Bool?
+        var docs: Bool?
+        var diff: Bool?
+        var paste: Bool?
 
         let lines = contents.components(separatedBy: .newlines)
         var currentList: String?
@@ -95,6 +98,9 @@ struct ConfigLoader {
                 case "push": push = value == "true"
                 case "pr": pr = value == "true"
                 case "yolo": yolo = value == "true"
+                case "docs": docs = value == "true"
+                case "diff": diff = value == "true"
+                case "paste": paste = value == "true"
                 default: break
                 }
             }
@@ -110,7 +116,10 @@ struct ConfigLoader {
             exclude: exclude,
             push: push,
             pr: pr,
-            yolo: yolo
+            yolo: yolo,
+            docs: docs,
+            diff: diff,
+            paste: paste
         )
     }
 }

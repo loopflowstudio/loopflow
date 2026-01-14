@@ -170,8 +170,14 @@ def run(
     copy: bool = typer.Option(
         False, "-c", "--copy", help="Copy prompt to clipboard and show token breakdown"
     ),
-    paste: bool = typer.Option(
-        False, "-v", "--paste", help="Include clipboard content in prompt"
+    paste: Optional[bool] = typer.Option(
+        None, "-v", "--paste/--no-paste", help="Include clipboard content in prompt"
+    ),
+    docs: Optional[bool] = typer.Option(
+        None, "--docs/--no-docs", help="Include repo documentation (.md files)"
+    ),
+    diff: Optional[bool] = typer.Option(
+        None, "--diff/--no-diff", help="Include branch diff against main"
     ),
     model: ModelType = typer.Option(
         None, "-m", "--model", help="Model to use (backend or backend:variant)"
@@ -256,6 +262,11 @@ def run(
         if pattern in exclude_patterns:
             exclude_patterns.remove(pattern)
 
+    # Resolve paste/docs/diff flags (CLI overrides config)
+    include_paste = paste if paste is not None else (config.paste if config else False)
+    include_docs = docs if docs is not None else (config.docs if config else True)
+    include_diff = diff if diff is not None else (config.diff if config else True)
+
     args = ctx.args or None
     components = gather_prompt_components(
         repo_root,
@@ -263,9 +274,16 @@ def run(
         context=resolved.context or None,
         exclude=exclude_patterns or None,
         task_args=args,
-        paste=paste,
+        paste=include_paste,
         run_mode="interactive" if is_interactive else "auto",
+        include_loopflow_doc=config.include_loopflow_doc if config else True,
     )
+
+    # Apply docs/diff flags
+    if not include_docs:
+        components.docs = []
+    if not include_diff:
+        components.diff = None
 
     if copy:
         prompt = format_prompt(components)
@@ -305,8 +323,14 @@ def inline(
     copy: bool = typer.Option(
         False, "-c", "--copy", help="Copy prompt to clipboard and show token breakdown"
     ),
-    paste: bool = typer.Option(
-        False, "-v", "--paste", help="Include clipboard content in prompt"
+    paste: Optional[bool] = typer.Option(
+        None, "-v", "--paste/--no-paste", help="Include clipboard content in prompt"
+    ),
+    docs: Optional[bool] = typer.Option(
+        None, "--docs/--no-docs", help="Include repo documentation (.md files)"
+    ),
+    diff: Optional[bool] = typer.Option(
+        None, "--diff/--no-diff", help="Include branch diff against main"
     ),
     model: ModelType = typer.Option(
         None, "-m", "--model", help="Model to use (backend or backend:variant)"
@@ -352,15 +376,27 @@ def inline(
         if pattern in exclude_patterns:
             exclude_patterns.remove(pattern)
 
+    # Resolve paste/docs/diff flags (CLI overrides config)
+    include_paste = paste if paste is not None else (config.paste if config else False)
+    include_docs = docs if docs is not None else (config.docs if config else True)
+    include_diff = diff if diff is not None else (config.diff if config else True)
+
     components = gather_prompt_components(
         repo_root,
         task=None,
         inline=prompt,
         context=resolved.context or None,
         exclude=exclude_patterns or None,
-        paste=paste,
+        paste=include_paste,
         run_mode="interactive" if is_interactive else "auto",
+        include_loopflow_doc=config.include_loopflow_doc if config else True,
     )
+
+    # Apply docs/diff flags
+    if not include_docs:
+        components.docs = []
+    if not include_diff:
+        components.diff = None
 
     if copy:
         prompt_text = format_prompt(components)
@@ -425,6 +461,7 @@ def cp(
         exclude=exclude_patterns or None,
         paste=paste,
         run_mode=None,
+        include_loopflow_doc=config.include_loopflow_doc if config else True,
     )
 
     # Apply docs/diff flags
@@ -506,6 +543,7 @@ def pipeline(
             context=all_context or None,
             exclude=exclude,
             include_tests_for=config.include_tests_for if config else None,
+            include_loopflow_doc=config.include_loopflow_doc,
         )
         prompt = format_prompt(components)
         _copy_to_clipboard(prompt)

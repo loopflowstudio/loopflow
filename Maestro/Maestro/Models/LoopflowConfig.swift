@@ -21,10 +21,10 @@ struct LoopflowConfig: Codable {
 
     var terminalApp: TerminalApp {
         switch terminal?.lowercased() {
-        case "warp": return .warp
+        case "terminal": return .terminal
         case "iterm": return .iterm
         case "kitty": return .kitty
-        default: return .terminal
+        default: return .warp
         }
     }
 

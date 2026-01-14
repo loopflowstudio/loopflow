@@ -265,6 +265,7 @@ def run(
         task_args=args,
         paste=paste,
         run_mode="interactive" if is_interactive else "auto",
+        include_loopflow_doc=config.include_loopflow_doc if config else True,
     )
 
     if copy:
@@ -360,6 +361,7 @@ def inline(
         exclude=exclude_patterns or None,
         paste=paste,
         run_mode="interactive" if is_interactive else "auto",
+        include_loopflow_doc=config.include_loopflow_doc if config else True,
     )
 
     if copy:
@@ -425,6 +427,7 @@ def cp(
         exclude=exclude_patterns or None,
         paste=paste,
         run_mode=None,
+        include_loopflow_doc=config.include_loopflow_doc if config else True,
     )
 
     # Apply docs/diff flags
@@ -506,6 +509,7 @@ def pipeline(
             context=all_context or None,
             exclude=exclude,
             include_tests_for=config.include_tests_for if config else None,
+            include_loopflow_doc=config.include_loopflow_doc,
         )
         prompt = format_prompt(components)
         _copy_to_clipboard(prompt)

@@ -177,6 +177,7 @@ def compare(
         task_args=task_args,
         exclude=exclude,
         include_tests_for=config.include_tests_for if config else None,
+        include_loopflow_doc=config.include_loopflow_doc if config else True,
     )
     prompt = format_prompt(components)
 

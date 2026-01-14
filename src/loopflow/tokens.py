@@ -167,9 +167,14 @@ def analyze_prompt_tokens(
     context_files: Optional[list[tuple[Path, str]]] = None,
     repo_root: Optional[Path] = None,
     clipboard: Optional[str] = None,
+    loopflow_doc: Optional[str] = None,
 ) -> TokenTree:
     """Analyze token distribution in prompt components."""
     tree = TokenTree()
+
+    if loopflow_doc:
+        tokens = count_tokens(loopflow_doc)
+        tree.add("loopflow", "LOOPFLOW.md", tokens)
 
     if docs:
         for doc_path, content in docs:
@@ -211,4 +216,5 @@ def analyze_components(components) -> TokenTree:
         context_files=components.context_files,
         repo_root=components.repo_root,
         clipboard=components.clipboard,
+        loopflow_doc=components.loopflow_doc,
     )

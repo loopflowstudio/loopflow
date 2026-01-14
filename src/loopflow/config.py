@@ -50,6 +50,7 @@ class Config(BaseModel):
     include_tests_for: Optional[list[str]] = None
     ide: IdeConfig = Field(default_factory=IdeConfig)
     interactive: list[str] = Field(default_factory=list)  # Tasks that default to interactive
+    include_loopflow_doc: bool = True  # Include bundled LOOPFLOW.md in prompts
 
     @field_validator("context", mode="before")
     @classmethod

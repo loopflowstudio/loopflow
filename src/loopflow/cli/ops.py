@@ -2,17 +2,14 @@
 
 import typer
 
-from loopflow.cli import agent as agent_module
 from loopflow.cli import commit as commit_module
 from loopflow.cli import compare as compare_module
 from loopflow.cli import land as land_module
-from loopflow.cli import maestro, meta, pr, sessions, status
+from loopflow.cli import meta, pr, sessions, status
 
 app = typer.Typer(name="ops", help="Management and maintenance commands.")
 
 app.add_typer(pr.app, name="pr")
-app.add_typer(maestro.app, name="maestro")
-app.add_typer(agent_module.app, name="agent")
 
 app.command()(meta.init)
 app.command()(meta.install)

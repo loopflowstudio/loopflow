@@ -17,10 +17,8 @@ app = typer.Typer(
 # Import and register subcommands
 from loopflow.cli import run as run_module
 from loopflow.cli import ops
-from loopflow.cli import agent
 
 app.add_typer(ops.app, name="ops")
-app.add_typer(agent.app, name="agent")
 
 # Register top-level commands
 app.command(context_settings={"allow_extra_args": True, "allow_interspersed_args": True})(run_module.run)
@@ -37,7 +35,6 @@ def main():
         "inline",
         "cp",
         "ops",
-        "agent",
         "--help",
         "-h",
     }

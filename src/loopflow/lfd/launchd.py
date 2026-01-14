@@ -33,15 +33,13 @@ def _generate_plist() -> str:
         <string>{sys.executable}</string>
         <string>-m</string>
         <string>loopflow.lfd</string>
-        <string>start</string>
-        <string>--foreground</string>
+        <string>serve</string>
     </array>"""
     else:
         program_args = f"""    <key>ProgramArguments</key>
     <array>
         <string>{lfd_path}</string>
-        <string>start</string>
-        <string>--foreground</string>
+        <string>serve</string>
     </array>"""
 
     log_path = str(LOG_PATH)

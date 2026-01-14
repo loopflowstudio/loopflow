@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from loopflow.lfd.models import AgentSpec, AgentRun, AgentStatus, TriggerSpec, TriggerKind
+from loopflow.lfd.process import is_process_running
 
 AGENTS_DIR = Path.home() / ".lf" / "agents"
 _FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
@@ -133,7 +134,7 @@ async def start_agent(name: str) -> StartResult:
     # Check if already running
     latest = get_latest_run(name)
     if latest and latest.status == AgentStatus.RUNNING:
-        if latest.pid and _is_process_running(latest.pid):
+        if latest.pid and is_process_running(latest.pid):
             return StartResult(success=False, error=f"Agent already running (PID {latest.pid})")
 
     # Create run record
@@ -189,15 +190,6 @@ def stop_agent(name: str) -> bool:
 
     update_run_status(latest.id, AgentStatus.STOPPED)
     return True
-
-
-def _is_process_running(pid: int) -> bool:
-    """Check if a process is still running."""
-    try:
-        os.kill(pid, 0)
-        return True
-    except OSError:
-        return False
 
 
 async def check_and_run_triggers() -> None:

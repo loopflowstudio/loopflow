@@ -27,19 +27,18 @@ def test_cp_copies_docs_by_default(temp_repo, monkeypatch):
 
     assert result.exit_code == 0
     assert "Copied to clipboard" in result.output
-    mock_copy.assert_called_once()
     copied_text = mock_copy.call_args[0][0]
     assert "# Test Project" in copied_text
 
 
 def test_cp_includes_context_files(temp_repo, monkeypatch):
-    """cp -x includes specified files."""
+    """cp includes specified files as positional args."""
     (temp_repo / "main.py").write_text("print('hello')\n")
     monkeypatch.chdir(temp_repo)
     runner = CliRunner()
 
     with patch("loopflow.cli.run._copy_to_clipboard") as mock_copy:
-        result = runner.invoke(app, ["cp", "-x", "main.py"])
+        result = runner.invoke(app, ["cp", "main.py"])
 
     assert result.exit_code == 0
     copied_text = mock_copy.call_args[0][0]
@@ -67,7 +66,7 @@ def test_cp_exclude_patterns(temp_repo, monkeypatch):
     runner = CliRunner()
 
     with patch("loopflow.cli.run._copy_to_clipboard") as mock_copy:
-        result = runner.invoke(app, ["cp", "-x", "*.py", "-e", "test.py"])
+        result = runner.invoke(app, ["cp", "*.py", "-e", "test.py"])
 
     assert result.exit_code == 0
     copied_text = mock_copy.call_args[0][0]

@@ -387,9 +387,6 @@ def cp(
     paths: list[str] = typer.Argument(
         None, help="Files or directories to include (e.g., src tests)"
     ),
-    context: list[str] = typer.Option(
-        None, "-x", "--context", help="Additional files to include"
-    ),
     exclude: list[str] = typer.Option(
         None, "-e", "--exclude", help="Patterns to exclude"
     ),
@@ -411,10 +408,8 @@ def cp(
 
     config = load_config(repo_root)
 
-    # Merge positional paths, -x context, and config context
+    # Merge positional paths and config context
     all_context = list(paths or [])
-    if context:
-        all_context.extend(context)
     if config and config.context:
         all_context.extend(config.context)
 

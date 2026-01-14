@@ -35,8 +35,10 @@ def test_commit_with_changes():
                 call_count = [0]
                 def side_effect(*args, **kwargs):
                     call_count[0] += 1
-                    if call_count[0] == 1:  # git status
+                    if call_count[0] == 1:  # git status --porcelain
                         return MagicMock(returncode=0, stdout="M README.md\n")
+                    if call_count[0] == 3:  # git diff --cached --quiet (returncode 1 = has staged)
+                        return MagicMock(returncode=1)
                     return MagicMock(returncode=0)
 
                 mock_run.side_effect = side_effect
@@ -44,9 +46,8 @@ def test_commit_with_changes():
                 result = runner.invoke(app, ["ops", "commit"])
 
                 assert result.exit_code == 0
-                assert "Staging changes" in result.output
                 assert "Generating commit message" in result.output
-                assert "Committing: fix: typo" in result.output
+                assert "Committed: fix: typo" in result.output
 
 
 def test_commit_with_custom_message():
@@ -58,8 +59,10 @@ def test_commit_with_custom_message():
             call_count = [0]
             def side_effect(*args, **kwargs):
                 call_count[0] += 1
-                if call_count[0] == 1:  # git status
+                if call_count[0] == 1:  # git status --porcelain
                     return MagicMock(returncode=0, stdout="M README.md\n")
+                if call_count[0] == 3:  # git diff --cached --quiet (returncode 1 = has staged)
+                    return MagicMock(returncode=1)
                 return MagicMock(returncode=0)
 
             mock_run.side_effect = side_effect
@@ -67,7 +70,7 @@ def test_commit_with_custom_message():
             result = runner.invoke(app, ["ops", "commit", "-m", "my custom message"])
 
             assert result.exit_code == 0
-            assert "Committing: my custom message" in result.output
+            assert "Committed: my custom message" in result.output
             assert "Generating commit message" not in result.output
 
 
@@ -84,8 +87,10 @@ def test_commit_with_push():
                     call_count = [0]
                     def side_effect(*args, **kwargs):
                         call_count[0] += 1
-                        if call_count[0] == 1:  # git status
+                        if call_count[0] == 1:  # git status --porcelain
                             return MagicMock(returncode=0, stdout="M file.py\n")
+                        if call_count[0] == 3:  # git diff --cached --quiet (returncode 1 = has staged)
+                            return MagicMock(returncode=1)
                         return MagicMock(returncode=0)
 
                     mock_run.side_effect = side_effect
@@ -93,4 +98,4 @@ def test_commit_with_push():
                     result = runner.invoke(app, ["ops", "commit", "--push"])
 
                     assert result.exit_code == 0
-                    assert "Pushing" in result.output
+                    assert "Pushed to origin" in result.output

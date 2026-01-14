@@ -1,7 +1,10 @@
-# v0.5.1
+# v0.5.2
 
-Clarifies version bump semantics in the publish command documentation, making the default (patch) explicit.
+Adds the `lf cp` command for copying file context to clipboard, bundles task templates in the package, and improves the onboarding experience with better dependency checking.
 
 ## Changes
 
-- Update publish command to clarify version bump defaults (patch by default, minor for substantial releases)
+- Add `lf cp` command to copy file context to clipboard
+- Bundle task templates in package for `lf ops init`
+- Improve `lf ops init` with dependency checking
+- Add YAML frontmatter support for task file configuration

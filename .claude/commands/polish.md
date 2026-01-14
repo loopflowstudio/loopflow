@@ -25,8 +25,17 @@ The deliverable is working, clean code that passes tests.
    - Run the full test suite: `./dev test` (runs both Python and Swift tests)
    - If tests fail, determine: broken test or broken code?
    - Fix failures one by one, running single tests while debugging
-   - Add missing tests for key behavior changes
-   - Reduce or simplify existing tests according to new behavioral requirements.
+
+   Before adding or fixing tests, ask: **What behaviors matter?**
+   - What are the key user-visible behaviors this branch enables?
+   - Do existing tests actually verify those behaviors work?
+   - A test that passes but doesn't prove the feature works is useless
+   - A test that fails because the mock wiring changed is testing the wrong thing
+
+   Then:
+   - Add missing tests for behaviors that matter but aren't covered
+   - Delete or rewrite tests that verify mock calls instead of results
+   - Simplify tests that are complex but don't prove user value
 
    For component-specific testing:
    - Python only: `./dev py`

@@ -2,40 +2,22 @@
 
 Fix `lf ops init` to work and improve first-run experience for new repositories.
 
-## Review
+## Summary
 
-**Verdict:** Needs work
+`lf ops init` now works. Templates are bundled under `src/loopflow/templates/` and copied to the right places. Error messages detect uninitialized repos and suggest running `lf ops init`.
 
-### Issues
+## What changed
 
-**1. Files not deleted as specified**
+**Templates directory:** All templates now live in `src/loopflow/templates/`:
+- `config.yaml` - default loopflow config
+- `STYLE.md` - generic style guide (no loopflow-specific references)
+- `PROMPTS.md` - explains the prompt system for new repos
+- `commands/*.md` - the prompt files themselves
 
-The design doc says to delete `src/loopflow/config_template.yaml` and `src/loopflow/LOOPFLOW_STYLE.md` since they're superseded by the templates directory. Both still exist. This creates two sources of truth.
+**Starter prompts (6):** design, implement, review, debug, polish, iterate. Run `lf ops init --all` for additional prompts.
 
-**2. Starter set mismatch**
+**Better error messages:** When a task is not found in an uninitialized repo, suggests `lf ops init` instead of showing confusing hints about creating `.claude/commands/`.
 
-Design doc says 4 prompts (design, implement, review, debug). Implementation has 6 (adds polish, iterate). The `_STARTER_PROMPTS` constant in meta.py should match the design, or the design should be updated to reflect the intentional expansion.
+**`lf ops commit` command:** Generate commit message from diff and commit. Supports `-p` flag to push after commit.
 
-**3. Unrelated files in `files/` directory**
-
-6 large documentation files (AGENT_ORCHESTRATION_WORKFLOWS.md, etc.) totaling ~140KB were committed. These appear to be research notes, not part of the newrepos feature. They belong elsewhere or should be removed from this branch.
-
-**4. Duplicate file**
-
-`files/CLAUDE_CODEX_API_REFERENCE (1).md` is identical to `files/CLAUDE_CODEX_API_REFERENCE.md`. The duplicate should be removed.
-
-### Code quality notes
-
-The implementation follows the style guide well:
-- Imports at top of file
-- Private functions prefixed with `_`
-- No verbose docstrings
-- Clear data structures (InitStatus, SetupStatus)
-
-The error message logic in `cli/__init__.py` is clean—checks init status and suggests appropriate action.
-
-## Design notes
-
-**Starter set expansion:** The implementation includes 6 prompts instead of the designed 4. This seems intentional—polish and iterate form a natural loop with the other prompts. Worth keeping if that's the intent.
-
-**`lf ops commit` command:** Added as part of this branch. Not in the original design but documented in README. Should be noted as scope expansion.
+**`lf ops doctor` improvements:** Now checks for task files and reports repo initialization status.

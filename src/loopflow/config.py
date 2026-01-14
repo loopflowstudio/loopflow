@@ -51,6 +51,9 @@ class Config(BaseModel):
     ide: IdeConfig = Field(default_factory=IdeConfig)
     interactive: list[str] = Field(default_factory=list)  # Tasks that default to interactive
     include_loopflow_doc: bool = True  # Include bundled LOOPFLOW.md in prompts
+    docs: bool = True  # Include repo documentation (.md files)
+    diff: bool = True  # Include branch diff against main
+    paste: bool = False  # Include clipboard content by default
 
     @field_validator("context", mode="before")
     @classmethod

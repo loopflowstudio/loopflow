@@ -1,198 +1,639 @@
 // Main content view for composing and launching lf commands.
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct PromptLauncher: View {
     @Bindable var appState: AppState
 
+    @State private var inputText: String = ""
+    @State private var showingPromptPicker = false
+    @State private var highlightedPromptIndex = 0
     @State private var launchError: String?
     @State private var showingLaunchError = false
+    @FocusState private var isInputFocused: Bool
 
     private let terminalLauncher = TerminalLauncher()
 
+    // Parse input into prompt name and args
+    private var parsedInput: (prompt: String?, args: String) {
+        let trimmed = inputText.trimmingCharacters(in: .whitespaces)
+        if let colonIndex = trimmed.firstIndex(of: ":") {
+            let promptPart = String(trimmed[..<colonIndex]).trimmingCharacters(in: .whitespaces)
+            let argsPart = String(trimmed[trimmed.index(after: colonIndex)...]).trimmingCharacters(in: .whitespaces)
+            return (promptPart.isEmpty ? nil : promptPart, argsPart)
+        }
+        // Check if the entire input matches a prompt name
+        if appState.prompts.contains(where: { $0.name.lowercased() == trimmed.lowercased() }) {
+            return (trimmed, "")
+        }
+        return (nil, trimmed)
+    }
+
+    private var filteredPrompts: [PromptCard] {
+        let query = parsedInput.prompt?.lowercased() ?? inputText.lowercased()
+        if query.isEmpty { return appState.prompts }
+        return appState.prompts.filter { $0.name.lowercased().contains(query) }
+    }
+
+    private var selectedPrompt: PromptCard? {
+        guard let name = parsedInput.prompt else { return nil }
+        return appState.prompts.first { $0.name.lowercased() == name.lowercased() }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            promptInput
-
-            if !appState.prompts.isEmpty {
-                promptCards
-            }
-
-            contextSection
-
-            modeSection
-
+        VStack(spacing: 0) {
             Spacer()
 
-            launchButton
-        }
-        .padding(24)
-        .alert("Launch Failed", isPresented: $showingLaunchError) {
-            Button("OK") {
-                launchError = nil
+            // Main input area - centered and prominent
+            VStack(spacing: 12) {
+                taskSelector
+                mainInput
+                optionsBar
             }
+            .frame(maxWidth: 600)
+            .padding(.horizontal, 40)
+
+            Spacer()
+        }
+        .alert("Launch Failed", isPresented: $showingLaunchError) {
+            Button("OK") { launchError = nil }
         } message: {
             Text(launchError ?? "Failed to launch terminal")
         }
-    }
-
-    // MARK: - Prompt Input
-
-    private var promptInput: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("What do you want to build?")
-                .font(.headline)
-                .foregroundStyle(.secondary)
-
-            HStack {
-                TextField("Add dark mode toggle to settings", text: $appState.promptArgs)
-                    .textFieldStyle(.plain)
-                    .font(.title3)
-
-                Text("⌘↵")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(RoundedRectangle(cornerRadius: 4).fill(.quaternary))
-            }
-            .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(.background)
-                    .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(.quaternary, lineWidth: 1)
-            )
+        .onAppear {
+            isInputFocused = true
         }
     }
 
-    // MARK: - Prompt Cards
+    // MARK: - Task Selector
 
-    private var promptCards: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("PROMPTS")
+    @State private var taskSearchText: String = ""
+    @State private var isTaskSearchFocused: Bool = false
+    @State private var highlightedTaskIndex: Int = 0
+    @FocusState private var taskFieldFocused: Bool
+
+    private var filteredTasks: [PromptCard] {
+        if taskSearchText.isEmpty {
+            return appState.prompts
+        }
+        return appState.prompts.filter { $0.name.lowercased().contains(taskSearchText.lowercased()) }
+    }
+
+    private var taskSelector: some View {
+        HStack(spacing: 8) {
+            Text("Task")
                 .font(.caption)
-                .fontWeight(.semibold)
                 .foregroundStyle(.secondary)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(appState.prompts) { prompt in
-                        PromptCardView(
-                            prompt: prompt,
-                            isSelected: appState.selectedPrompt?.id == prompt.id
-                        ) {
-                            if appState.selectedPrompt?.id == prompt.id {
-                                appState.selectedPrompt = nil
-                            } else {
-                                appState.selectedPrompt = prompt
-                                appState.runMode = prompt.defaultMode
+            ZStack(alignment: .topLeading) {
+                // Typeahead input
+                HStack(spacing: 4) {
+                    TextField("None", text: $taskSearchText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13, weight: .medium))
+                        .focused($taskFieldFocused)
+                        .onChange(of: taskSearchText) { _, _ in
+                            isTaskSearchFocused = true
+                            highlightedTaskIndex = 0
+                        }
+                        .onChange(of: taskFieldFocused) { _, focused in
+                            isTaskSearchFocused = focused
+                            if focused {
+                                taskSearchText = ""
+                            }
+                        }
+                        .onKeyPress(.downArrow) {
+                            if isTaskSearchFocused && !filteredTasks.isEmpty {
+                                highlightedTaskIndex = min(highlightedTaskIndex + 1, filteredTasks.count - 1)
+                                return .handled
+                            }
+                            return .ignored
+                        }
+                        .onKeyPress(.upArrow) {
+                            if isTaskSearchFocused {
+                                highlightedTaskIndex = max(highlightedTaskIndex - 1, 0)
+                                return .handled
+                            }
+                            return .ignored
+                        }
+                        .onKeyPress(.return) {
+                            if isTaskSearchFocused && !filteredTasks.isEmpty {
+                                selectTask(filteredTasks[highlightedTaskIndex])
+                                return .handled
+                            } else if isTaskSearchFocused && taskSearchText.isEmpty {
+                                clearTaskSelection()
+                                return .handled
+                            }
+                            return .ignored
+                        }
+                        .onKeyPress(.escape) {
+                            if isTaskSearchFocused {
+                                taskFieldFocused = false
+                                isTaskSearchFocused = false
+                                taskSearchText = selectedPrompt?.displayName ?? ""
+                                return .handled
+                            }
+                            return .ignored
+                        }
+
+                    if selectedPrompt != nil {
+                        Button {
+                            clearTaskSelection()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.primary.opacity(0.05))
+                )
+                .frame(minWidth: 120)
+
+                // Dropdown results
+                if isTaskSearchFocused && !filteredTasks.isEmpty {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(filteredTasks.enumerated()), id: \.element.id) { index, prompt in
+                            Button {
+                                selectTask(prompt)
+                            } label: {
+                                HStack {
+                                    Text(prompt.displayName)
+                                        .fontWeight(.medium)
+                                    Spacer()
+                                    Text(prompt.defaultMode == .auto ? "auto" : "interactive")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(index == highlightedTaskIndex ? Color.accentColor.opacity(0.1) : Color.clear)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .background(Color(nsColor: .controlBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                    )
+                    .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
+                    .offset(y: 32)
+                    .zIndex(100)
+                }
+            }
+
+            Spacer()
+        }
+    }
+
+    private func selectTask(_ prompt: PromptCard) {
+        taskSearchText = prompt.displayName
+        isTaskSearchFocused = false
+        taskFieldFocused = false
+        selectPromptFromMenu(prompt)
+    }
+
+    private func clearTaskSelection() {
+        taskSearchText = ""
+        isTaskSearchFocused = false
+        taskFieldFocused = false
+        clearPromptSelection()
+    }
+
+    private func selectPromptFromMenu(_ prompt: PromptCard) {
+        // Update input to have prompt prefix
+        let currentArgs = parsedInput.args
+        inputText = "\(prompt.name): \(currentArgs)"
+        appState.runMode = prompt.defaultMode
+    }
+
+    private func clearPromptSelection() {
+        // Keep just the args part
+        inputText = parsedInput.args
+    }
+
+    // MARK: - Main Input
+
+    private var mainInput: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Prompt picker dropdown
+            if showingPromptPicker && !filteredPrompts.isEmpty {
+                promptPicker
+            }
+
+            // Text input
+            ZStack(alignment: .topLeading) {
+                // Placeholder
+                if inputText.isEmpty {
+                    Text("What do you want to build?")
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 12)
+                }
+
+                TextEditor(text: $inputText)
+                    .font(.title3)
+                    .scrollContentBackground(.hidden)
+                    .focused($isInputFocused)
+                    .frame(minHeight: 80, maxHeight: 200)
+                    .onChange(of: inputText) { _, newValue in
+                        // Show picker when typing potential prompt name (before colon)
+                        let hasColon = newValue.contains(":")
+                        let isTypingPrompt = !hasColon && !newValue.isEmpty
+                        showingPromptPicker = isTypingPrompt && !filteredPrompts.isEmpty
+                        highlightedPromptIndex = 0
+                    }
+                    .onKeyPress(.downArrow) {
+                        if showingPromptPicker {
+                            highlightedPromptIndex = min(highlightedPromptIndex + 1, filteredPrompts.count - 1)
+                            return .handled
+                        }
+                        return .ignored
+                    }
+                    .onKeyPress(.upArrow) {
+                        if showingPromptPicker {
+                            highlightedPromptIndex = max(highlightedPromptIndex - 1, 0)
+                            return .handled
+                        }
+                        return .ignored
+                    }
+                    .onKeyPress(.tab) {
+                        if showingPromptPicker, !filteredPrompts.isEmpty {
+                            selectPrompt(filteredPrompts[highlightedPromptIndex])
+                            return .handled
+                        }
+                        return .ignored
+                    }
+                    .onKeyPress(.return) {
+                        if showingPromptPicker, !filteredPrompts.isEmpty {
+                            selectPrompt(filteredPrompts[highlightedPromptIndex])
+                            return .handled
+                        }
+                        return .ignored
+                    }
+            }
+            .padding(16)
+
+            // Bottom bar with run button
+            HStack {
+                // Selected prompt badge
+                if let prompt = selectedPrompt {
+                    HStack(spacing: 4) {
+                        Text(prompt.displayName)
+                            .font(.caption)
+                            .fontWeight(.medium)
+                        Button {
+                            // Clear the prompt prefix
+                            if let colonIndex = inputText.firstIndex(of: ":") {
+                                inputText = String(inputText[inputText.index(after: colonIndex)...]).trimmingCharacters(in: .whitespaces)
+                            }
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.caption2)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                    .foregroundStyle(Color.accentColor)
+                }
+
+                Spacer()
+
+                // Token count
+                Text("\(appState.estimatedTokens.formatted()) tokens")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+
+                // Run button
+                Button {
+                    launchInTerminal()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "play.fill")
+                            .font(.caption)
+                        Text("Run")
+                        Text("⌘↵")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.return, modifiers: .command)
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(.background)
+                .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Prompt Picker
+
+    private var promptPicker: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(filteredPrompts.enumerated()), id: \.element.id) { index, prompt in
+                Button {
+                    selectPrompt(prompt)
+                } label: {
+                    HStack {
+                        Text(prompt.displayName)
+                            .fontWeight(.medium)
+                        Spacer()
+                        Text(prompt.defaultMode == .auto ? "auto" : "interactive")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(index == highlightedPromptIndex ? Color.accentColor.opacity(0.1) : Color.clear)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.vertical, 4)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+        )
+        .padding(.horizontal, 8)
+        .padding(.bottom, 8)
+    }
+
+    private func selectPrompt(_ prompt: PromptCard) {
+        inputText = "\(prompt.name): "
+        showingPromptPicker = false
+        appState.runMode = prompt.defaultMode
+    }
+
+    // MARK: - Options Bar
+
+    @State private var showContextOptions = false
+
+    private var optionsBar: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                // Mode segmented control
+                Picker("", selection: $appState.runMode) {
+                    Text("Auto").tag(RunMode.auto)
+                    Text("Interactive").tag(RunMode.interactive)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 160)
+
+                Spacer()
+
+                // Context toggle button
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showContextOptions.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "doc.text")
+                        Text("Context")
+                            .font(.caption)
+                        Image(systemName: showContextOptions ? "chevron.up" : "chevron.down")
+                            .font(.caption2)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.primary.opacity(0.05))
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+
+            // Collapsible context options
+            if showContextOptions {
+                contextOptionsSection
+            }
+        }
+        .onChange(of: appState.includeDocs) {
+            Task { await appState.estimateTokens() }
+        }
+        .onChange(of: appState.includeDiff) {
+            Task { await appState.estimateTokens() }
+        }
+        .onChange(of: appState.includePaste) {
+            Task { await appState.estimateTokens() }
+        }
+    }
+
+    @State private var isDraggingOver = false
+
+    private var contextOptionsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Context toggles
+            HStack(spacing: 16) {
+                Toggle(isOn: $appState.includeDocs) {
+                    Text("Docs")
+                        .font(.caption)
+                }
+                .toggleStyle(.checkbox)
+
+                Toggle(isOn: $appState.includeDiff) {
+                    Text("Diff")
+                        .font(.caption)
+                }
+                .toggleStyle(.checkbox)
+
+                Toggle(isOn: $appState.includePaste) {
+                    Text("Clipboard")
+                        .font(.caption)
+                }
+                .toggleStyle(.checkbox)
+
+                Spacer()
+            }
+            .foregroundStyle(.secondary)
+
+            // Attached files section
+            attachedFilesSection
+
+            // Token distribution preview
+            tokenDistributionPreview
+        }
+        .padding(.top, 8)
+        .padding(.horizontal, 4)
+    }
+
+    private var attachedFilesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Attached Files")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+
+            // Drop zone
+            ZStack {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(style: StrokeStyle(lineWidth: 2, dash: [6]))
+                    .fill(isDraggingOver ? Color.accentColor.opacity(0.1) : Color.clear)
+                    .foregroundStyle(isDraggingOver ? Color.accentColor : Color.secondary.opacity(0.5))
+
+                if appState.attachedFiles.isEmpty {
+                    VStack(spacing: 4) {
+                        Image(systemName: "doc.badge.plus")
+                            .font(.title2)
+                            .foregroundStyle(.tertiary)
+                        Text("Drop files here or ⌘V to paste")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(appState.attachedFiles, id: \.self) { file in
+                                attachedFileChip(file)
+                            }
+                        }
+                        .padding(.horizontal, 8)
+                    }
+                }
+            }
+            .frame(height: 60)
+            .onDrop(of: [.fileURL], isTargeted: $isDraggingOver) { providers in
+                handleFileDrop(providers)
+            }
+        }
+    }
+
+    private func attachedFileChip(_ file: URL) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: iconForFile(file))
+                .font(.caption)
+            Text(file.lastPathComponent)
+                .font(.caption)
+                .lineLimit(1)
+            Button {
+                appState.attachedFiles.removeAll { $0 == file }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption2)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Capsule().fill(Color.primary.opacity(0.1)))
+    }
+
+    private func iconForFile(_ file: URL) -> String {
+        let ext = file.pathExtension.lowercased()
+        switch ext {
+        case "png", "jpg", "jpeg", "gif", "webp", "heic":
+            return "photo"
+        case "pdf":
+            return "doc.richtext"
+        case "swift", "py", "js", "ts", "rs", "go":
+            return "chevron.left.forwardslash.chevron.right"
+        case "md", "txt":
+            return "doc.text"
+        default:
+            return "doc"
+        }
+    }
+
+    private func handleFileDrop(_ providers: [NSItemProvider]) -> Bool {
+        for provider in providers {
+            if provider.hasItemConformingToTypeIdentifier("public.file-url") {
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    if let url = url {
+                        DispatchQueue.main.async {
+                            if !appState.attachedFiles.contains(url) {
+                                appState.attachedFiles.append(url)
                             }
                         }
                     }
                 }
             }
         }
+        return true
     }
 
-    // MARK: - Context Section
-
-    private var contextSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("CONTEXT")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.secondary)
-
-                Spacer()
-
-                Text("\(appState.estimatedTokens.formatted()) tokens")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Toggle("Include diff against main", isOn: $appState.includeDiff)
-                    .toggleStyle(.checkbox)
-
-                Toggle("Repository docs (README, STYLE)", isOn: .constant(true))
-                    .toggleStyle(.checkbox)
-                    .disabled(true)
-
-                if let repo = appState.currentRepo {
-                    ContextPicker(
-                        repoURL: repo,
-                        excludePatterns: appState.config?.exclude ?? [],
-                        selectedFolders: $appState.selectedContextFolders
-                    )
-                }
-            }
-        }
-        .onChange(of: appState.includeDiff) {
-            Task { await appState.estimateTokens() }
-        }
-        .onChange(of: appState.selectedContextFolders) {
-            Task { await appState.estimateTokens() }
-        }
-    }
-
-    // MARK: - Mode Section
-
-    private var modeSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("MODE")
+    private var tokenDistributionPreview: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Token Distribution")
                 .font(.caption)
-                .fontWeight(.semibold)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.tertiary)
 
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Image(systemName: appState.runMode == .auto ? "largecircle.fill.circle" : "circle")
-                        .foregroundStyle(appState.runMode == .auto ? Color.accentColor : Color.secondary)
-                    Text("Auto (non-interactive, streams output)")
+            // Token bar
+            GeometryReader { geometry in
+                HStack(spacing: 1) {
+                    // Docs
+                    if appState.includeDocs {
+                        Rectangle()
+                            .fill(Color.blue.opacity(0.7))
+                            .frame(width: geometry.size.width * 0.3)
+                    }
+                    // Diff
+                    if appState.includeDiff {
+                        Rectangle()
+                            .fill(Color.green.opacity(0.7))
+                            .frame(width: geometry.size.width * 0.2)
+                    }
+                    // Context files
+                    if !appState.selectedContextFolders.isEmpty {
+                        Rectangle()
+                            .fill(Color.orange.opacity(0.7))
+                            .frame(width: geometry.size.width * 0.4)
+                    }
+                    // Clipboard
+                    if appState.includePaste {
+                        Rectangle()
+                            .fill(Color.purple.opacity(0.7))
+                            .frame(width: geometry.size.width * 0.1)
+                    }
+                    Spacer(minLength: 0)
                 }
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    appState.runMode = .auto
-                }
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+            .frame(height: 8)
 
-                HStack {
-                    Image(systemName: appState.runMode == .interactive ? "largecircle.fill.circle" : "circle")
-                        .foregroundStyle(appState.runMode == .interactive ? Color.accentColor : Color.secondary)
-                    Text("Interactive (full conversation)")
+            // Legend
+            HStack(spacing: 12) {
+                if appState.includeDocs {
+                    Label("Docs", systemImage: "circle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(Color.blue.opacity(0.7))
                 }
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    appState.runMode = .interactive
+                if appState.includeDiff {
+                    Label("Diff", systemImage: "circle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(Color.green.opacity(0.7))
+                }
+                if !appState.selectedContextFolders.isEmpty {
+                    Label("Files", systemImage: "circle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(Color.orange.opacity(0.7))
+                }
+                if appState.includePaste {
+                    Label("Clipboard", systemImage: "circle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(Color.purple.opacity(0.7))
                 }
             }
-        }
-    }
-
-    // MARK: - Launch Button
-
-    private var launchButton: some View {
-        HStack {
-            Spacer()
-
-            Button {
-                launchInTerminal()
-            } label: {
-                HStack {
-                    Text("Run in Terminal")
-                    Text("⌘↵")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 10)
-            }
-            .buttonStyle(.borderedProminent)
-            .keyboardShortcut(.return, modifiers: .command)
+            .foregroundStyle(.secondary)
         }
     }
 
@@ -201,10 +642,13 @@ struct PromptLauncher: View {
     private func launchInTerminal() {
         guard let repo = appState.currentRepo else { return }
 
+        // Update appState from parsed input
+        appState.selectedPrompt = selectedPrompt
+        appState.promptArgs = parsedInput.args
+
         let terminal = appState.config?.terminalApp ?? .warp
         let command = appState.buildCommand()
 
-        // Use selected worktree path if available, otherwise repo root
         let workPath: URL
         if let wt = appState.selectedWorktree {
             workPath = URL(fileURLWithPath: wt.path)
@@ -217,44 +661,6 @@ struct PromptLauncher: View {
         } catch {
             launchError = error.localizedDescription
             showingLaunchError = true
-        }
-    }
-}
-
-// MARK: - Prompt Card View
-
-struct PromptCardView: View {
-    let prompt: PromptCard
-    let isSelected: Bool
-    let onSelect: () -> Void
-
-    @State private var isHovering = false
-
-    var body: some View {
-        VStack(spacing: 8) {
-            Text(prompt.displayName)
-                .font(.subheadline)
-                .fontWeight(.medium)
-
-            Text(prompt.defaultMode == .auto ? "auto" : "interactive")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .frame(width: 90, height: 70)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(isSelected ? Color.accentColor.opacity(0.15) : (isHovering ? Color.primary.opacity(0.05) : Color.clear))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(isSelected ? Color.accentColor : Color.gray.opacity(0.3), lineWidth: 1)
-        )
-        .contentShape(Rectangle())
-        .onHover { hovering in
-            isHovering = hovering
-        }
-        .onTapGesture {
-            onSelect()
         }
     }
 }

@@ -13,10 +13,13 @@ struct LoopflowConfig: Codable {
     let push: Bool?
     let pr: Bool?
     let yolo: Bool?
+    let docs: Bool?
+    let diff: Bool?
+    let paste: Bool?
 
     enum CodingKeys: String, CodingKey {
         case agentModel = "agent_model"
-        case interactive, terminal, ide, workspace, context, exclude, push, pr, yolo
+        case interactive, terminal, ide, workspace, context, exclude, push, pr, yolo, docs, diff, paste
     }
 
     var terminalApp: TerminalApp {

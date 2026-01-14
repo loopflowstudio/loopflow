@@ -24,6 +24,10 @@
 		A000000F /* SetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000011; };
 		A0000012 /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000012; };
 		A0000013 /* AgentService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000013; };
+		A0000014 /* RecentsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000014; };
+		A0000015 /* RecentRepo.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000015; };
+		A0000016 /* WelcomeWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000016; };
+		A0000017 /* RepoWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000017; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -46,6 +50,10 @@
 		B0000011 /* SetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupView.swift; sourceTree = "<group>"; };
 		B0000012 /* Agent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Agent.swift; sourceTree = "<group>"; };
 		B0000013 /* AgentService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentService.swift; sourceTree = "<group>"; };
+		B0000014 /* RecentsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentsService.swift; sourceTree = "<group>"; };
+		B0000015 /* RecentRepo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentRepo.swift; sourceTree = "<group>"; };
+		B0000016 /* WelcomeWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeWindow.swift; sourceTree = "<group>"; };
+		B0000017 /* RepoWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoWindow.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -85,8 +93,10 @@
 			children = (
 				B0000003 /* ContentView.swift */,
 				B0000004 /* PromptLauncher.swift */,
-				B0000005 /* WorktreeSidebar.swift */,
+				B0000017 /* RepoWindow.swift */,
 				B0000011 /* SetupView.swift */,
+				B0000016 /* WelcomeWindow.swift */,
+				B0000005 /* WorktreeSidebar.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -97,6 +107,7 @@
 				B0000012 /* Agent.swift */,
 				B0000006 /* LoopflowConfig.swift */,
 				B0000007 /* PromptCard.swift */,
+				B0000015 /* RecentRepo.swift */,
 				B0000008 /* Worktree.swift */,
 			);
 			path = Models;
@@ -108,6 +119,7 @@
 				B0000013 /* AgentService.swift */,
 				B0000009 /* ConfigLoader.swift */,
 				B000000A /* PromptService.swift */,
+				B0000014 /* RecentsService.swift */,
 				B000000B /* TerminalLauncher.swift */,
 				B000000C /* TokenEstimator.swift */,
 				B000000D /* WorktreeService.swift */,
@@ -193,6 +205,10 @@
 				A000000F /* SetupView.swift in Sources */,
 				A0000012 /* Agent.swift in Sources */,
 				A0000013 /* AgentService.swift in Sources */,
+				A0000014 /* RecentsService.swift in Sources */,
+				A0000015 /* RecentRepo.swift in Sources */,
+				A0000016 /* WelcomeWindow.swift in Sources */,
+				A0000017 /* RepoWindow.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -310,6 +310,7 @@ def run_agent_iteration(
             exclude=exclude,
             include_tests_for=config.include_tests_for if config else None,
             run_mode="auto",
+            include_loopflow_doc=config.include_loopflow_doc if config else True,
         )
 
         # Inject agent prompt

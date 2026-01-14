@@ -13,6 +13,7 @@ The refined text is almost secondary. The real output is your ability to simulat
 ## Workflow
 
 1. **Identify the text to refine**
+   - If a file path was passed as an argument (e.g., `lf refine README.md`), read that file
    - If clipboard has content (-v flag), work on that
    - Otherwise, ask what file(s) or text to refine
 

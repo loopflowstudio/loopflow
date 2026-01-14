@@ -5,61 +5,21 @@ import SwiftUI
 
 @main
 struct MaestroApp: App {
-    @State private var appState = AppState()
-    @State private var setupComplete = false
-    @State private var hasCheckedSetup = false
-
-    private let setupService = SetupService()
+    @State private var recentsService = RecentsService()
 
     var body: some Scene {
+        // Welcome/main window - shown on launch
         WindowGroup {
-            if !hasCheckedSetup {
-                ProgressView("Loading...")
-                    .onAppear {
-                        checkSetup()
-                    }
-            } else if !setupComplete {
-                SetupView(isComplete: $setupComplete)
-            } else {
-                ContentView(appState: appState)
-            }
+            WelcomeWindow(recentsService: recentsService)
+        }
+        .windowStyle(.automatic)
+        .defaultSize(width: 500, height: 400)
+
+        // Repo windows - opened explicitly for each repository
+        WindowGroup(id: "repo", for: URL.self) { $repoURL in
+            RepoWindow(repoURL: repoURL, recentsService: recentsService)
         }
         .windowStyle(.automatic)
         .defaultSize(width: 900, height: 700)
-        .commands {
-            CommandGroup(replacing: .newItem) {
-                Button("Open Folder...") {
-                    openFolder()
-                }
-                .keyboardShortcut("o", modifiers: .command)
-            }
-
-            CommandGroup(after: .sidebar) {
-                Button("Refresh Worktrees") {
-                    Task { await appState.refreshWorktrees() }
-                }
-                .keyboardShortcut("r", modifiers: .command)
-            }
-        }
-    }
-
-    private func checkSetup() {
-        let status = setupService.checkDependencies()
-        setupComplete = status.allInstalled
-        hasCheckedSetup = true
-    }
-
-    private func openFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.message = "Choose a repository folder"
-
-        if panel.runModal() == .OK, let url = panel.url {
-            Task {
-                await appState.openRepo(url)
-            }
-        }
     }
 }

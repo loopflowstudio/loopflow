@@ -50,14 +50,7 @@ class TokenTree:
     root: TokenNode = field(default_factory=lambda: TokenNode(name="root"))
 
     def add(self, category: str, name: str, tokens: int, path: Optional[list[str]] = None) -> None:
-        """Add tokens to the tree.
-
-        Args:
-            category: Top-level category (docs, diff, task, context, arg)
-            name: Display name for this item
-            tokens: Token count
-            path: Optional path within category (for nested file structure)
-        """
+        """Add tokens under category, optionally nested by path."""
         cat_node = self.root.add_child(category, 0)
         if path:
             cat_node.add_path(path + [name], tokens)
@@ -173,9 +166,15 @@ def analyze_prompt_tokens(
     task: Optional[tuple[str, str]] = None,
     context_files: Optional[list[tuple[Path, str]]] = None,
     repo_root: Optional[Path] = None,
+    clipboard: Optional[str] = None,
+    loopflow_doc: Optional[str] = None,
 ) -> TokenTree:
     """Analyze token distribution in prompt components."""
     tree = TokenTree()
+
+    if loopflow_doc:
+        tokens = count_tokens(loopflow_doc)
+        tree.add("loopflow", "LOOPFLOW.md", tokens)
 
     if docs:
         for doc_path, content in docs:
@@ -201,6 +200,10 @@ def analyze_prompt_tokens(
             except ValueError:
                 tree.add("context", file_path.name, tokens)
 
+    if clipboard:
+        tokens = count_tokens(clipboard)
+        tree.add("clipboard", "pasted text", tokens)
+
     return tree
 
 
@@ -212,4 +215,6 @@ def analyze_components(components) -> TokenTree:
         task=components.task,
         context_files=components.context_files,
         repo_root=components.repo_root,
+        clipboard=components.clipboard,
+        loopflow_doc=components.loopflow_doc,
     )

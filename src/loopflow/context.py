@@ -2,6 +2,7 @@
 
 import subprocess
 from dataclasses import dataclass
+from importlib import resources
 from pathlib import Path
 from typing import Optional
 
@@ -21,6 +22,7 @@ class PromptComponents:
     context_files: list[tuple[Path, str]]
     repo_root: Path
     clipboard: str | None = None
+    loopflow_doc: str | None = None  # Bundled system documentation
 
 
 def find_worktree_root(start: Optional[Path] = None) -> Path | None:
@@ -145,6 +147,11 @@ def gather_diff(repo_root: Path, exclude: Optional[list[str]] = None) -> str | N
     return result.stdout
 
 
+def _load_loopflow_doc() -> str:
+    """Load LOOPFLOW.md from the package."""
+    return resources.files("loopflow").joinpath("LOOPFLOW.md").read_text()
+
+
 def gather_prompt_components(
     repo_root: Path,
     task: Optional[str] = None,
@@ -155,20 +162,18 @@ def gather_prompt_components(
     paste: bool = False,
     include_tests_for: Optional[list[str]] = None,
     run_mode: Optional[str] = None,
+    include_loopflow_doc: bool = True,
 ) -> PromptComponents:
     """Gather all prompt components without assembling them."""
     docs = gather_docs(repo_root, repo_root, exclude)
 
-    # Include loopflow style guide if present (only in lf sessions)
-    loopflow_style = repo_root / ".lf" / "LOOPFLOW_STYLE.md"
-    if loopflow_style.exists():
-        content = loopflow_style.read_text()
-        docs.insert(0, (loopflow_style, content))
+    # Load bundled LOOPFLOW.md (system documentation)
+    loopflow_doc = _load_loopflow_doc() if include_loopflow_doc else None
 
+    # Insert design docs before repo docs
     design_docs = gather_design_docs(repo_root)
     if design_docs:
-        insert_at = 1 if loopflow_style.exists() else 0
-        docs[insert_at:insert_at] = design_docs
+        docs[0:0] = design_docs
 
     diff = gather_diff(repo_root, exclude)
 
@@ -216,6 +221,7 @@ def gather_prompt_components(
         context_files=context_files,
         repo_root=repo_root,
         clipboard=clipboard,
+        loopflow_doc=loopflow_doc,
     )
 
 
@@ -229,6 +235,9 @@ def format_prompt(components: PromptComponents) -> str:
             "If you need clarification, make the best assumption you can and append "
             "any open questions to `.design/questions.md`."
         )
+
+    if components.loopflow_doc:
+        parts.append(f"<lf:loopflow>\n{components.loopflow_doc}\n</lf:loopflow>")
 
     if components.task:
         name, content = components.task
@@ -269,6 +278,7 @@ def build_prompt(
     exclude: Optional[list[str]] = None,
     include_tests_for: Optional[list[str]] = None,
     run_mode: Optional[str] = None,
+    include_loopflow_doc: bool = True,
 ) -> str:
     """Build the full prompt for an LLM session."""
     components = gather_prompt_components(
@@ -279,5 +289,6 @@ def build_prompt(
         exclude,
         include_tests_for=include_tests_for,
         run_mode=run_mode,
+        include_loopflow_doc=include_loopflow_doc,
     )
     return format_prompt(components)

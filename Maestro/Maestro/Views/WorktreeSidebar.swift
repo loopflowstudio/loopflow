@@ -94,6 +94,7 @@ struct WorktreeSidebar: View {
                     WorktreeRow(
                         worktree: worktree,
                         isSelected: appState.selectedWorktree?.id == worktree.id,
+                        terminalName: terminalDisplayName,
                         ideName: ideDisplayName,
                         onSelect: {
                             appState.selectedWorktree = worktree
@@ -145,6 +146,10 @@ struct WorktreeSidebar: View {
             actionError = "Failed to open \(ide.displayName): \(error.localizedDescription)"
             showingActionError = true
         }
+    }
+
+    private var terminalDisplayName: String {
+        appState.config?.terminalApp.displayName ?? "Warp"
     }
 
     private var ideDisplayName: String {
@@ -299,6 +304,7 @@ struct AgentRow: View {
 struct WorktreeRow: View {
     let worktree: Worktree
     let isSelected: Bool
+    let terminalName: String
     let ideName: String
     let onSelect: () -> Void
     let onDoubleClick: () -> Void
@@ -318,7 +324,11 @@ struct WorktreeRow: View {
 
                 Spacer()
 
-                statusBadge
+                if isHovering {
+                    hoverActions
+                } else {
+                    statusBadge
+                }
             }
 
             HStack(spacing: 4) {
@@ -348,7 +358,7 @@ struct WorktreeRow: View {
             onSelect()
         }
         .contextMenu {
-            Button("Open in Terminal") {
+            Button("Open in \(terminalName)") {
                 onOpenTerminal()
             }
             Button("Open in \(ideName)") {
@@ -370,6 +380,30 @@ struct WorktreeRow: View {
             Button("Delete", role: .destructive) {
                 onDelete()
             }
+        }
+    }
+
+    private var hoverActions: some View {
+        HStack(spacing: 8) {
+            Button {
+                onOpenTerminal()
+            } label: {
+                Image(systemName: "terminal")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Open in \(terminalName)")
+
+            Button {
+                onOpenIDE()
+            } label: {
+                Image(systemName: "curlybraces")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Open in \(ideName)")
         }
     }
 

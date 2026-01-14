@@ -15,8 +15,11 @@ final class AppState {
     // Prompt launcher state
     var selectedPrompt: PromptCard?
     var promptArgs: String = ""
+    var includeDocs: Bool = true
     var includeDiff: Bool = true
+    var includePaste: Bool = false
     var selectedContextFolders: Set<URL> = []
+    var attachedFiles: [URL] = []  // Files dropped or added via UI
     var runMode: RunMode = .auto
     var estimatedTokens: Int = 0
 
@@ -49,6 +52,11 @@ final class AppState {
 
         do {
             config = try configLoader.load(from: url)
+
+            // Initialize toggles from config
+            includeDocs = config?.docs ?? true
+            includeDiff = config?.diff ?? true
+            includePaste = config?.paste ?? false
 
             // Initialize context folders from config
             if let contextPaths = config?.context {
@@ -153,11 +161,39 @@ final class AppState {
             parts.append("-a")
         }
 
+        // Context folders
         for folder in selectedContextFolders {
             if let path = folder.path(percentEncoded: false).components(separatedBy: currentRepo?.path() ?? "").last {
                 parts.append("-x")
                 parts.append(path.hasPrefix("/") ? String(path.dropFirst()) : path)
             }
+        }
+
+        // Attached files (relative paths if inside repo, otherwise absolute)
+        for file in attachedFiles {
+            let filePath = file.path(percentEncoded: false)
+            if let repoPath = currentRepo?.path(),
+               filePath.hasPrefix(repoPath) {
+                // Relative path
+                let relativePath = String(filePath.dropFirst(repoPath.count))
+                parts.append("-x")
+                parts.append(relativePath.hasPrefix("/") ? String(relativePath.dropFirst()) : relativePath)
+            } else {
+                // Absolute path for files outside repo
+                parts.append("-x")
+                parts.append(filePath)
+            }
+        }
+
+        // Docs/diff/paste flags (only include if different from default)
+        if !includeDocs {
+            parts.append("--no-docs")
+        }
+        if !includeDiff {
+            parts.append("--no-diff")
+        }
+        if includePaste {
+            parts.append("--paste")
         }
 
         return parts.joined(separator: " ")

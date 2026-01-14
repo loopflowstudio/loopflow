@@ -17,7 +17,9 @@ struct ContentView: View {
             } else if appState.currentRepo != nil {
                 PromptLauncher(appState: appState)
             } else {
-                WelcomeView(appState: appState)
+                // No repo loaded yet - show loading placeholder
+                ProgressView("Opening repository...")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .onChange(of: appState.errorMessage) { _, newValue in
@@ -42,95 +44,11 @@ struct ContentView: View {
             }
 
             ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button("Open Folder...") {
-                        openFolder()
-                    }
-                    .keyboardShortcut("o", modifiers: .command)
-
-                    Divider()
-
-                    if let repo = appState.currentRepo {
-                        Text(repo.path())
-                            .font(.caption)
-                    }
-                } label: {
-                    Image(systemName: "gearshape")
+                if let repo = appState.currentRepo {
+                    Text(repo.lastPathComponent)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-            }
-        }
-        .onAppear {
-            // Try to open the current directory on launch
-            if appState.currentRepo == nil {
-                openCurrentDirectory()
-            }
-        }
-    }
-
-    private func openFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.message = "Choose a repository folder"
-
-        if panel.runModal() == .OK, let url = panel.url {
-            Task {
-                await appState.openRepo(url)
-            }
-        }
-    }
-
-    private func openCurrentDirectory() {
-        // Use current working directory or home
-        let cwd = FileManager.default.currentDirectoryPath
-        let url = URL(fileURLWithPath: cwd)
-
-        // Check if it's a git repo
-        if FileManager.default.fileExists(atPath: url.appendingPathComponent(".git").path()) {
-            Task {
-                await appState.openRepo(url)
-            }
-        }
-    }
-}
-
-struct WelcomeView: View {
-    @Bindable var appState: AppState
-
-    var body: some View {
-        VStack(spacing: 24) {
-            Image(systemName: "folder.badge.gearshape")
-                .font(.system(size: 64))
-                .foregroundStyle(.secondary)
-
-            VStack(spacing: 8) {
-                Text("Open a Repository")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-
-                Text("Select a folder with .lf/config.yaml to get started")
-                    .foregroundStyle(.secondary)
-            }
-
-            Button("Open Folder...") {
-                openFolder()
-            }
-            .buttonStyle(.borderedProminent)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func openFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.message = "Choose a repository folder"
-
-        if panel.runModal() == .OK, let url = panel.url {
-            Task {
-                await appState.openRepo(url)
             }
         }
     }

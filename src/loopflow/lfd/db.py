@@ -252,5 +252,3 @@ def _session_from_row(row: dict) -> Session:
         model=row.get("model", "claude-code"),
         run_mode=row.get("run_mode", "auto"),
     )
-
-

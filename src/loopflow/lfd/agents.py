@@ -9,8 +9,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from loopflow.lfd.db import get_latest_run, save_run, update_run_status
 from loopflow.lfd.models import AgentSpec, AgentRun, AgentStatus, TriggerSpec, TriggerKind
 from loopflow.lfd.process import is_process_running
+from loopflow.lfd.triggers import should_trigger
+from loopflow.logging import get_log_dir
+from loopflow.worktrees import WorktreeError, list_all
 
 AGENTS_DIR = Path.home() / ".lf" / "agents"
 _FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
@@ -115,6 +119,75 @@ def _parse_yaml_frontmatter(text: str) -> dict:
     return result
 
 
+def get_agent_file_path(name: str, agents_dir: Path | None = None) -> Path | None:
+    """Get the path to an agent file if it exists."""
+    if agents_dir is None:
+        agents_dir = AGENTS_DIR
+
+    path = agents_dir / f"{name}.md"
+    return path if path.exists() else None
+
+
+def create_agent_file(
+    name: str,
+    repo: Path,
+    pipeline: list[str],
+    trigger: str = "manual",
+    context: list[str] | None = None,
+    prompt: str = "",
+    interval_seconds: int | None = None,
+    agents_dir: Path | None = None,
+) -> Path:
+    """Create a new agent markdown file."""
+    if agents_dir is None:
+        agents_dir = AGENTS_DIR
+
+    agents_dir.mkdir(parents=True, exist_ok=True)
+    path = agents_dir / f"{name}.md"
+
+    lines = ["---"]
+    lines.append(f"repo: {repo}")
+    lines.append(f"pipeline: [{', '.join(pipeline)}]")
+    lines.append(f"trigger: {trigger}")
+    if interval_seconds and trigger == "interval":
+        lines.append(f"interval: {interval_seconds}")
+    if context:
+        lines.append(f"context: [{', '.join(context)}]")
+    lines.append("---")
+    lines.append("")
+    lines.append(prompt or "Describe what this agent should do.")
+
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+def delete_agent_file(name: str, agents_dir: Path | None = None) -> bool:
+    """Delete an agent markdown file."""
+    if agents_dir is None:
+        agents_dir = AGENTS_DIR
+
+    path = agents_dir / f"{name}.md"
+    if path.exists():
+        path.unlink()
+        return True
+    return False
+
+
+def get_worktree_path(agent: AgentSpec) -> Path | None:
+    """Get the path to an agent's worktree, if it exists."""
+    branch_name = f"agent-{agent.name}"
+
+    try:
+        existing = list_all(agent.repo)
+        for wt in existing:
+            if wt.branch == branch_name:
+                return wt.path
+    except WorktreeError:
+        pass
+
+    return None
+
+
 @dataclass
 class StartResult:
     success: bool
@@ -124,9 +197,6 @@ class StartResult:
 
 async def start_agent(name: str) -> StartResult:
     """Start an agent running."""
-    from loopflow.lfd.db import get_latest_run, save_run
-    from loopflow.logging import get_log_dir
-
     agent = get_agent(name)
     if not agent:
         return StartResult(success=False, error=f"Agent '{name}' not found")
@@ -176,8 +246,6 @@ async def start_agent(name: str) -> StartResult:
 
 def stop_agent(name: str) -> bool:
     """Stop a running agent."""
-    from loopflow.lfd.db import get_latest_run, update_run_status
-
     latest = get_latest_run(name)
     if not latest or latest.status != AgentStatus.RUNNING:
         return False
@@ -194,9 +262,6 @@ def stop_agent(name: str) -> bool:
 
 async def check_and_run_triggers() -> None:
     """Check all agents and run those whose triggers are met."""
-    from loopflow.lfd.db import get_latest_run
-    from loopflow.lfd.triggers import should_trigger
-
     for agent in list_agents():
         if agent.trigger.kind == TriggerKind.MANUAL:
             continue

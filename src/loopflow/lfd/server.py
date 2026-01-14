@@ -9,7 +9,14 @@ from asyncio import StreamReader, StreamWriter
 from pathlib import Path
 from typing import Any
 
-from loopflow.lfd.protocol import Request, Response, Event, success, error
+from loopflow.lfd.agents import (
+    check_and_run_triggers,
+    list_agents,
+    start_agent,
+    stop_agent,
+)
+from loopflow.lfd.db import load_agent_runs, load_sessions, update_dead_runs
+from loopflow.lfd.protocol import Event, Request, Response, error, success
 
 
 class Server:
@@ -92,9 +99,6 @@ class Server:
             return error(f"Unknown method: {method}", request.id)
 
     async def _handle_status(self) -> Response:
-        from loopflow.lfd.agents import list_agents
-        from loopflow.lfd.db import load_sessions, load_agent_runs
-
         agents = list_agents()
         sessions = load_sessions(active_only=True)
         runs = load_agent_runs(active_only=True)
@@ -107,9 +111,6 @@ class Server:
         })
 
     async def _handle_agents_list(self) -> Response:
-        from loopflow.lfd.agents import list_agents
-        from loopflow.lfd.db import load_agent_runs
-
         agents = list_agents()
         runs = {r.agent_name: r for r in load_agent_runs()}
 
@@ -129,8 +130,6 @@ class Server:
         return success(result)
 
     async def _handle_agents_start(self, params: dict) -> Response:
-        from loopflow.lfd.agents import start_agent
-
         name = params.get("name")
         if not name:
             return error("Missing 'name' parameter")
@@ -143,8 +142,6 @@ class Server:
         return success({"name": name, "pid": result.pid})
 
     async def _handle_agents_stop(self, params: dict) -> Response:
-        from loopflow.lfd.agents import stop_agent
-
         name = params.get("name")
         if not name:
             return error("Missing 'name' parameter")
@@ -156,8 +153,6 @@ class Server:
             return error(f"Agent '{name}' not running")
 
     async def _handle_sessions_list(self) -> Response:
-        from loopflow.lfd.db import load_sessions
-
         sessions = load_sessions()
         return success([s.to_dict() for s in sessions])
 
@@ -179,9 +174,6 @@ class Server:
 
     async def _periodic_check(self) -> None:
         """Periodically check agent triggers and update dead processes."""
-        from loopflow.lfd.agents import list_agents, check_and_run_triggers
-        from loopflow.lfd.db import update_dead_runs
-
         while self._running:
             try:
                 await asyncio.sleep(30)

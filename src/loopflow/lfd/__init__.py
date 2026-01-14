@@ -6,10 +6,24 @@ Unix socket daemon that owns agent lifecycle, trigger evaluation, and session tr
 import asyncio
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import typer
 
+from loopflow.context import find_worktree_root
+from loopflow.git import find_main_repo
+from loopflow.lfd.agents import (
+    create_agent_file,
+    delete_agent_file,
+    get_agent,
+    get_agent_file_path,
+    get_worktree_path,
+    list_agents,
+)
+from loopflow.lfd.client import DaemonClient
+from loopflow.lfd.db import get_latest_run
+from loopflow.lfd.launchd import install as launchd_install, is_running, uninstall as launchd_uninstall
 from loopflow.lfd.server import run_server
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
@@ -26,9 +40,6 @@ def serve():
 @app.command()
 def status():
     """Show daemon and agent status."""
-    from loopflow.lfd.launchd import is_running
-    from loopflow.lfd.client import DaemonClient
-
     if not is_running():
         typer.echo("lfd is not running")
         typer.echo("")
@@ -49,13 +60,11 @@ def status():
 @app.command()
 def install():
     """Install launchd plist for auto-start."""
-    from loopflow.lfd.launchd import install as do_install, is_running
-
     if is_running():
         typer.echo("lfd is already running")
         return
 
-    if do_install():
+    if launchd_install():
         typer.echo("lfd installed and started")
     else:
         typer.echo("Failed to install lfd")
@@ -65,9 +74,7 @@ def install():
 @app.command()
 def uninstall():
     """Remove launchd plist and stop daemon."""
-    from loopflow.lfd.launchd import uninstall as do_uninstall
-
-    if do_uninstall():
+    if launchd_uninstall():
         typer.echo("lfd uninstalled")
     else:
         typer.echo("Failed to uninstall lfd")
@@ -80,9 +87,6 @@ def uninstall():
 @app.command(name="list")
 def list_cmd():
     """List all agents."""
-    from loopflow.lfd.agents import list_agents
-    from loopflow.lfd.db import get_latest_run
-
     agents = list_agents()
 
     if not agents:
@@ -115,9 +119,6 @@ def start(
     name: str = typer.Argument(help="Agent name"),
 ):
     """Start an agent."""
-    from loopflow.lfd.launchd import is_running
-    from loopflow.lfd.client import DaemonClient
-
     if not is_running():
         typer.echo("lfd is not running. Start with: lfd install")
         raise typer.Exit(1)
@@ -136,9 +137,6 @@ def stop(
     name: str = typer.Argument(help="Agent name"),
 ):
     """Stop a running agent."""
-    from loopflow.lfd.launchd import is_running
-    from loopflow.lfd.client import DaemonClient
-
     if not is_running():
         typer.echo("lfd is not running")
         raise typer.Exit(1)
@@ -157,11 +155,6 @@ def show(
     name: str = typer.Argument(help="Agent name"),
 ):
     """Show details of an agent."""
-    from loopflow.lfd.agents import get_agent
-    from loopflow.lfd.db import get_latest_run
-    from loopflow.maestro.worktree import get_agent_worktree_path
-    from loopflow.maestro.markdown import get_agent_file
-
     agent = get_agent(name)
     if not agent:
         typer.echo(f"Agent '{name}' not found", err=True)
@@ -186,11 +179,9 @@ def show(
             typer.echo(f"  PID: {latest.pid}")
 
     # Show worktree status
-    agent_file = get_agent_file(name)
-    if agent_file:
-        worktree = get_agent_worktree_path(agent_file)
-        if worktree:
-            typer.echo(f"  Worktree: {worktree}")
+    worktree = get_worktree_path(agent)
+    if worktree:
+        typer.echo(f"  Worktree: {worktree}")
 
     typer.echo(f"  Prompt:")
     typer.echo("")
@@ -252,10 +243,6 @@ def new(
     ),
 ):
     """Create a new agent."""
-    from loopflow.context import find_worktree_root
-    from loopflow.git import find_main_repo
-    from loopflow.maestro.markdown import create_agent_file, get_agent_file
-
     repo_root = find_worktree_root()
     if not repo_root:
         typer.echo("Error: Not in a git repository", err=True)
@@ -263,9 +250,9 @@ def new(
 
     main_repo = find_main_repo(repo_root) or repo_root
 
-    existing = get_agent_file(name)
+    existing = get_agent_file_path(name)
     if existing:
-        typer.echo(f"Agent '{name}' already exists at {existing.path}", err=True)
+        typer.echo(f"Agent '{name}' already exists at {existing}", err=True)
         raise typer.Exit(1)
 
     pipeline_list = [t.strip() for t in pipeline.split(",") if t.strip()]
@@ -296,18 +283,16 @@ def edit(
     name: str = typer.Argument(help="Agent name"),
 ):
     """Open agent file in $EDITOR."""
-    from loopflow.maestro.markdown import get_agent_file, list_agent_files
-
-    agent = get_agent_file(name)
-    if not agent:
+    agent_path = get_agent_file_path(name)
+    if not agent_path:
         typer.echo(f"Agent '{name}' not found", err=True)
         typer.echo("Available agents:")
-        for a in list_agent_files():
+        for a in list_agents():
             typer.echo(f"  {a.name}")
         raise typer.Exit(1)
 
     editor = os.environ.get("EDITOR", "vi")
-    subprocess.run([editor, str(agent.path)])
+    subprocess.run([editor, str(agent_path)])
 
 
 @app.command()
@@ -316,10 +301,8 @@ def rm(
     force: bool = typer.Option(False, "-f", "--force", help="Skip confirmation"),
 ):
     """Remove an agent."""
-    from loopflow.maestro.markdown import delete_agent_file, get_agent_file
-
-    agent = get_agent_file(name)
-    if not agent:
+    agent_path = get_agent_file_path(name)
+    if not agent_path:
         typer.echo(f"Agent '{name}' not found", err=True)
         raise typer.Exit(1)
 
@@ -337,8 +320,6 @@ def rm(
 
 def main() -> None:
     """Entry point for lfd command."""
-    import sys
-
     if len(sys.argv) == 1:
         sys.argv.append("status")
 

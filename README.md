@@ -93,11 +93,10 @@ wt remove auth                # remove worktree + branch
 
 ## Session Tracking
 
-Track running tasks across multiple terminals (maestro is optional):
+Track running tasks across multiple terminals:
 
 ```bash
-lf ops maestro start              # optional web UI (tails logs)
-lf ops status                     # show running sessions (reads SQLite)
+lf ops status                     # show running sessions
 
 # In another terminal
 lf implement                  # auto mode task registers automatically
@@ -106,7 +105,21 @@ lf implement                  # auto mode task registers automatically
 lf ops status                     # see all running sessions
 ```
 
-Sessions write to SQLite in auto mode; the maestro UI reads the same database.
+Sessions write to SQLite in auto mode.
+
+## Background Agents
+
+The `lfd` daemon orchestrates background agents with triggers:
+
+```bash
+lfd install                       # install daemon (auto-starts at login)
+lfd new my-agent                  # create agent definition
+lfd list                          # list agents and status
+lfd start my-agent                # manually start an agent
+lfd stop my-agent                 # stop a running agent
+```
+
+Agents are defined as markdown files in `~/.lf/agents/` with YAML frontmatter.
 
 ## Configuration
 
@@ -169,6 +182,8 @@ lf implement &         # background (shell handles it)
 | `lf ops init` | Initialize repo with prompts and config |
 | `lf ops install` | Install Claude Code, Codex, Gemini CLI |
 | `lf ops doctor` | Check dependencies |
-| `lf ops maestro start` | Start session tracking daemon |
-| `lf ops maestro stop` | Stop session tracking daemon |
 | `lf ops status` | Show running sessions |
+| `lfd install` | Install and start agent daemon |
+| `lfd list` | List agents and their status |
+| `lfd start <name>` | Start an agent |
+| `lfd stop <name>` | Stop a running agent |

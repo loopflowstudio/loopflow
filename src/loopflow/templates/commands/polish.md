@@ -18,6 +18,7 @@ The deliverable is working, clean code that passes tests.
    - Fix bugs, style violations, and unnecessary complexity directly
    - Don't just note issues—fix them
    - Rewrite the primary design doc in `.design/` to match the implementation
+   - Update README and docs if the branch changes user-facing behavior or APIs
 
 2. **Test**
    - Run the project's test suite

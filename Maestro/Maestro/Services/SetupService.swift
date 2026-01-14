@@ -17,7 +17,7 @@ struct SetupService {
     }
 
     private let plistPath = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/LaunchAgents/com.loopflow.agents.plist")
+        .appendingPathComponent("Library/LaunchAgents/com.loopflow.lfd.plist")
 
     func checkDependencies() -> DependencyStatus {
         let lfPath = findExecutable("lf")
@@ -44,11 +44,11 @@ struct SetupService {
     }
 
     func installDaemon() async throws {
-        try await runCommand("/bin/zsh", args: ["-l", "-c", "lf agent daemon install"])
+        try await runCommand("/bin/zsh", args: ["-l", "-c", "lfd install"])
     }
 
     func uninstallDaemon() async throws {
-        try await runCommand("/bin/zsh", args: ["-l", "-c", "lf agent daemon uninstall"])
+        try await runCommand("/bin/zsh", args: ["-l", "-c", "lfd uninstall"])
     }
 
     func ensureDaemonRunning() async throws {
@@ -68,7 +68,7 @@ struct SetupService {
     private func isDaemonRunning() -> Bool {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        process.arguments = ["list", "com.loopflow.agents"]
+        process.arguments = ["list", "com.loopflow.lfd"]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
 

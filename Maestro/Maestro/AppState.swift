@@ -99,6 +99,18 @@ final class AppState {
         await refreshWorktrees()
     }
 
+    func createPR(for worktree: Worktree) async throws {
+        let worktreeURL = URL(fileURLWithPath: worktree.path)
+        try await worktreeService.createPR(in: worktreeURL)
+        await refreshWorktrees()
+    }
+
+    func landPR(for worktree: Worktree) async throws {
+        let worktreeURL = URL(fileURLWithPath: worktree.path)
+        try await worktreeService.landPR(in: worktreeURL)
+        await refreshWorktrees()
+    }
+
     func refreshAgents() async {
         do {
             agents = try await agentService.list()

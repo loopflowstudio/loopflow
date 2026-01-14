@@ -110,9 +110,29 @@ struct WorktreeSidebar: View {
                         onOpenFinder: {
                             terminalLauncher.openInFinder(at: URL(fileURLWithPath: worktree.path))
                         },
+                        onCreatePR: {
+                            Task {
+                                do {
+                                    try await appState.createPR(for: worktree)
+                                } catch {
+                                    actionError = error.localizedDescription
+                                    showingActionError = true
+                                }
+                            }
+                        },
                         onViewPR: {
                             if let url = worktree.prURL {
                                 terminalLauncher.openURL(url)
+                            }
+                        },
+                        onLandPR: {
+                            Task {
+                                do {
+                                    try await appState.landPR(for: worktree)
+                                } catch {
+                                    actionError = error.localizedDescription
+                                    showingActionError = true
+                                }
                             }
                         },
                         onDelete: {
@@ -305,7 +325,9 @@ struct WorktreeRow: View {
     let onOpenTerminal: () -> Void
     let onOpenIDE: () -> Void
     let onOpenFinder: () -> Void
+    let onCreatePR: () -> Void
     let onViewPR: () -> Void
+    let onLandPR: () -> Void
     let onDelete: () -> Void
 
     @State private var isHovering = false
@@ -358,10 +380,20 @@ struct WorktreeRow: View {
                 onOpenFinder()
             }
 
+            Divider()
+
             if worktree.prURL != nil {
-                Divider()
                 Button("View PR") {
                     onViewPR()
+                }
+                if worktree.prState == .open {
+                    Button("Land PR") {
+                        onLandPR()
+                    }
+                }
+            } else {
+                Button("Create PR") {
+                    onCreatePR()
                 }
             }
 

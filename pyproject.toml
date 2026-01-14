@@ -35,6 +35,9 @@ dev = [
 [project.scripts]
 lf = "loopflow.cli:main"
 lfd = "loopflow.lfd:main"
+lfwt = "loopflow.lfwt:main"
+lfpr = "loopflow.lfpr:main"
+lfops = "loopflow.lfops:main"
 
 [build-system]
 requires = ["hatchling"]

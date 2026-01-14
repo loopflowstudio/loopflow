@@ -383,6 +383,69 @@ def inline(
     raise typer.Exit(result_code)
 
 
+def cp(
+    paths: list[str] = typer.Argument(
+        None, help="Files or directories to include (e.g., src tests)"
+    ),
+    context: list[str] = typer.Option(
+        None, "-x", "--context", help="Additional files to include"
+    ),
+    exclude: list[str] = typer.Option(
+        None, "-e", "--exclude", help="Patterns to exclude"
+    ),
+    paste: bool = typer.Option(
+        False, "-v", "--paste", help="Include clipboard content"
+    ),
+    no_docs: bool = typer.Option(
+        False, "--no-docs", help="Exclude repo documentation (.md files)"
+    ),
+    no_diff: bool = typer.Option(
+        False, "--no-diff", help="Exclude branch diff"
+    ),
+):
+    """Copy file context to clipboard."""
+    repo_root = find_worktree_root()
+    if not repo_root:
+        typer.echo("Error: Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    config = load_config(repo_root)
+
+    # Merge positional paths, -x context, and config context
+    all_context = list(paths or [])
+    if context:
+        all_context.extend(context)
+    if config and config.context:
+        all_context.extend(config.context)
+
+    # Merge exclude patterns
+    exclude_patterns = list(exclude or [])
+    if config and config.exclude:
+        exclude_patterns.extend(config.exclude)
+
+    components = gather_prompt_components(
+        repo_root,
+        task=None,
+        context=all_context or None,
+        exclude=exclude_patterns or None,
+        paste=paste,
+        run_mode=None,
+    )
+
+    # Optionally strip docs/diff
+    if no_docs:
+        components.docs = []
+    if no_diff:
+        components.diff = None
+
+    prompt = format_prompt(components)
+    _copy_to_clipboard(prompt)
+
+    tree = analyze_components(components)
+    typer.echo(tree.format())
+    typer.echo("\nCopied to clipboard.")
+
+
 def pipeline(
     name: str = typer.Argument(help="Pipeline name from config.yaml"),
     context: list[str] = typer.Option(

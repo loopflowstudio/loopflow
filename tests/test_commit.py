@@ -3,7 +3,6 @@
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-import pytest
 from typer.testing import CliRunner
 
 from loopflow.cli import app
@@ -12,16 +11,9 @@ from loopflow.cli import app
 runner = CliRunner()
 
 
-@pytest.fixture
-def mock_repo(tmp_path):
-    """Create a minimal repo directory."""
-    (tmp_path / ".git").mkdir()
-    return tmp_path
-
-
-def test_commit_with_no_changes(mock_repo):
+def test_commit_with_no_changes():
     """commit exits cleanly when there's nothing to commit."""
-    with patch("loopflow.cli.commit.find_worktree_root", return_value=mock_repo):
+    with patch("loopflow.cli.commit.find_worktree_root", return_value=Path("/fake/repo")):
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="")
 

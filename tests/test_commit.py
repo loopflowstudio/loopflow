@@ -63,22 +63,20 @@ def test_commit_with_custom_message():
 
     with patch("loopflow.cli.commit.find_worktree_root", return_value=mock_repo):
         with patch("subprocess.run") as mock_run:
-            with patch("loopflow.cli.commit.generate_commit_message") as mock_gen:
-                call_count = [0]
-                def side_effect(*args, **kwargs):
-                    call_count[0] += 1
-                    if call_count[0] == 1:  # git status
-                        return MagicMock(returncode=0, stdout="M README.md\n")
-                    return MagicMock(returncode=0)
+            call_count = [0]
+            def side_effect(*args, **kwargs):
+                call_count[0] += 1
+                if call_count[0] == 1:  # git status
+                    return MagicMock(returncode=0, stdout="M README.md\n")
+                return MagicMock(returncode=0)
 
-                mock_run.side_effect = side_effect
+            mock_run.side_effect = side_effect
 
-                result = runner.invoke(app, ["ops", "commit", "-m", "my custom message"])
+            result = runner.invoke(app, ["ops", "commit", "-m", "my custom message"])
 
-                assert result.exit_code == 0
-                assert "Committing: my custom message" in result.output
-                # Should NOT call generate_commit_message
-                mock_gen.assert_not_called()
+            assert result.exit_code == 0
+            assert "Committing: my custom message" in result.output
+            assert "Generating commit message" not in result.output
 
 
 def test_commit_with_push():

@@ -27,6 +27,7 @@ class Worktree:
     is_dirty: bool
     pr_url: str | None
     pr_number: int | None
+    pr_state: str | None  # "open", "merged", "closed", "draft"
     ahead_main: int
     behind_main: int
     ahead_remote: int
@@ -60,6 +61,67 @@ def _parse_pr_number(pr_url: str | None) -> int | None:
         return None
     match = re.search(r"/pull/(\d+)", pr_url)
     return int(match.group(1)) if match else None
+
+
+def get_pr_state(repo_root: Path, branch: str) -> str | None:
+    """Return PR state using gh pr view --json state."""
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "view", branch, "--json", "state", "-q", ".state"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip().lower()
+    except FileNotFoundError:
+        pass
+    return None
+
+
+def diff_against(repo_root: Path, branch: str, base: str = "main") -> str:
+    """Get diff of branch against base."""
+    result = subprocess.run(
+        ["git", "diff", f"{base}...{branch}"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout if result.returncode == 0 else ""
+
+
+def diff_between(repo_root: Path, branch_a: str, branch_b: str) -> str:
+    """Get diff between two branches."""
+    result = subprocess.run(
+        ["git", "diff", f"{branch_a}...{branch_b}"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout if result.returncode == 0 else ""
+
+
+def get_github_compare_url(repo_root: Path, branch: str, base: str = "main") -> str | None:
+    """Get GitHub compare URL for branch vs base."""
+    result = subprocess.run(
+        ["git", "remote", "get-url", "origin"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+
+    remote_url = result.stdout.strip()
+    # Convert git@github.com:org/repo.git or https://github.com/org/repo.git to https://github.com/org/repo
+    if remote_url.startswith("git@github.com:"):
+        repo_path = remote_url[len("git@github.com:") :].removesuffix(".git")
+    elif "github.com" in remote_url:
+        repo_path = remote_url.split("github.com/")[-1].removesuffix(".git")
+    else:
+        return None
+
+    return f"https://github.com/{repo_path}/compare/{base}...{branch}"
 
 
 def get_path(repo_root: Path, name: str) -> Path:
@@ -110,6 +172,7 @@ def list_all(repo_root: Path) -> list[Worktree]:
         ci = item.get("ci") or {}
         pr_url = ci.get("url") if ci.get("source") == "pr" else None
         pr_number = _parse_pr_number(pr_url)
+        pr_state = ci.get("state", "").lower() if ci.get("source") == "pr" else None
 
         worktrees.append(
             Worktree(
@@ -121,6 +184,7 @@ def list_all(repo_root: Path) -> list[Worktree]:
                 is_dirty=is_dirty,
                 pr_url=pr_url,
                 pr_number=pr_number,
+                pr_state=pr_state if pr_state else None,
                 ahead_main=ahead_main,
                 behind_main=behind_main,
                 ahead_remote=ahead_remote,

@@ -26,6 +26,7 @@ app.add_typer(agent.app, name="agent")
 app.command(context_settings={"allow_extra_args": True, "allow_interspersed_args": True})(run_module.run)
 app.command()(run_module.inline)
 app.command(name="pipeline")(run_module.pipeline)
+app.command()(run_module.cp)
 
 
 def main():
@@ -34,6 +35,7 @@ def main():
         "run",
         "pipeline",
         "inline",
+        "cp",
         "ops",
         "agent",
         "--help",

@@ -52,6 +52,13 @@ struct WorktreeSidebar: View {
         } message: {
             Text(actionError ?? "An error occurred")
         }
+        .task {
+            // Poll for worktree changes every 2 seconds
+            while !Task.isCancelled {
+                await appState.refreshWorktrees()
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
     }
 
     private var header: some View {

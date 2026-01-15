@@ -12,6 +12,7 @@ struct PromptLauncher: View {
     @State private var launchError: String?
     @State private var showingLaunchError = false
     @FocusState private var isInputFocused: Bool
+    @State private var isCreatingWorktree = false
 
     private let terminalLauncher = TerminalLauncher()
 
@@ -646,15 +647,46 @@ struct PromptLauncher: View {
         appState.selectedPrompt = selectedPrompt
         appState.promptArgs = parsedInput.args
 
+        // Check if on main branch - if so, create new worktree first
+        let isMain = appState.selectedWorktree?.branch == "main"
+                  || appState.selectedWorktree == nil
+
+        if isMain {
+            isCreatingWorktree = true
+            Task {
+                await launchWithNewWorktree(repo: repo)
+                isCreatingWorktree = false
+            }
+        } else {
+            launchCommand(repo: repo, workPath: URL(fileURLWithPath: appState.selectedWorktree!.path))
+        }
+    }
+
+    private func launchWithNewWorktree(repo: URL) async {
+        let name = NameGenerator.generate()
+
+        do {
+            try await appState.createWorktree(name: name)
+            await appState.refreshWorktrees()
+
+            // Select the newly created worktree
+            if let newWorktree = appState.worktrees.first(where: { $0.branch == name }) {
+                appState.selectedWorktree = newWorktree
+                let workPath = URL(fileURLWithPath: newWorktree.path)
+                launchCommand(repo: repo, workPath: workPath)
+            } else {
+                launchError = "Failed to find newly created worktree"
+                showingLaunchError = true
+            }
+        } catch {
+            launchError = "Failed to create worktree: \(error.localizedDescription)"
+            showingLaunchError = true
+        }
+    }
+
+    private func launchCommand(repo: URL, workPath: URL) {
         let terminal = appState.config?.terminalApp ?? .warp
         let command = appState.buildCommand()
-
-        let workPath: URL
-        if let wt = appState.selectedWorktree {
-            workPath = URL(fileURLWithPath: wt.path)
-        } else {
-            workPath = repo
-        }
 
         do {
             try terminalLauncher.launchTerminal(terminal, at: workPath, command: command)

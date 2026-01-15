@@ -79,11 +79,11 @@ struct WorktreeService {
     }
 
     func createPR(in worktreePath: URL, title: String? = nil) async throws {
-        _ = try await runLfpr(["create"] + (title.map { ["-t", $0] } ?? []), in: worktreePath)
+        _ = try await runLfops(["pr"], in: worktreePath)
     }
 
     func landPR(in worktreePath: URL) async throws {
-        _ = try await runLfpr(["land"], in: worktreePath)
+        _ = try await runLfops(["land"], in: worktreePath)
     }
 
     func getDiff(_ spec: String, in repoURL: URL) async throws -> String {
@@ -158,16 +158,16 @@ struct WorktreeService {
         }
     }
 
-    private func runLfpr(_ args: [String], in directory: URL) async throws -> String {
-        guard let lfprURL = findCommand("lfpr") else {
-            throw WorktreeError.commandFailed("lfpr not found. Install loopflow.")
+    private func runLfops(_ args: [String], in directory: URL) async throws -> String {
+        guard let lfopsURL = findCommand("lfops") else {
+            throw WorktreeError.commandFailed("lfops not found. Install loopflow.")
         }
 
         return try await withCheckedThrowingContinuation { continuation in
             let process = Process()
             let pipe = Pipe()
 
-            process.executableURL = lfprURL
+            process.executableURL = lfopsURL
             process.arguments = args
             process.currentDirectoryURL = directory
             process.standardOutput = pipe

@@ -19,9 +19,8 @@ class PromptComponents:
     run_mode: str | None
     docs: list[tuple[Path, str]]
     diff: str | None
-    diff_files: list[tuple[Path, str]]
+    diff_files: list[tuple[Path, str]]  # Includes both diff files and explicit context
     task: tuple[str, str] | None  # (name, content)
-    context_files: list[tuple[Path, str]]
     repo_root: Path
     clipboard: str | None = None
     loopflow_doc: str | None = None  # Bundled system documentation
@@ -45,12 +44,6 @@ def find_worktree_root(start: Optional[Path] = None) -> Path | None:
 
     if (path / ".git").exists():
         return path
-    return None
-
-
-def _read_file_if_exists(path: Path) -> str | None:
-    if path.exists() and path.is_file():
-        return path.read_text()
     return None
 
 
@@ -250,13 +243,15 @@ def gather_prompt_components(
         if not include_tests and "tests/**" not in context_exclude:
             context_exclude.append("tests/**")
 
-    # Gather files touched by diff
+    # Gather file paths (not content yet)
     diff_file_paths = gather_diff_files(repo_root) if include_diff_files else []
-    diff_files_content = gather_files(diff_file_paths, repo_root, context_exclude) if diff_file_paths else []
+    context_paths = context or []
 
-    context_files = (
-        gather_files(context, repo_root, context_exclude) if context else []
-    )
+    # Merge: diff files first, then context paths not already in diff
+    diff_set = set(diff_file_paths)
+    all_file_paths = diff_file_paths + [p for p in context_paths if p not in diff_set]
+    all_files = gather_files(all_file_paths, repo_root, context_exclude)
+
     clipboard = _read_clipboard() if paste else None
 
     # Load voices if specified
@@ -266,9 +261,8 @@ def gather_prompt_components(
         run_mode=run_mode,
         docs=docs,
         diff=diff,
-        diff_files=diff_files_content,
+        diff_files=all_files,
         task=task_result,
-        context_files=context_files,
         repo_root=repo_root,
         clipboard=clipboard,
         loopflow_doc=loopflow_doc,
@@ -321,16 +315,9 @@ def format_prompt(components: PromptComponents) -> str:
     if components.diff:
         parts.append(f"Changes on this branch (diff against main).\n\n<lf:diff>\n{components.diff}\n</lf:diff>")
 
-    # Merge diff_files and context_files, deduplicating by path
-    all_files = list(components.diff_files)
-    seen_paths = {path for path, _ in all_files}
-    for path, content in components.context_files:
-        if path not in seen_paths:
-            all_files.append((path, content))
-            seen_paths.add(path)
-
-    if all_files:
-        parts.append(format_files(all_files, components.repo_root))
+    # diff_files now contains merged diff + context files (deduplicated at load time)
+    if components.diff_files:
+        parts.append(format_files(components.diff_files, components.repo_root))
 
     if components.clipboard:
         parts.append(f"Content from clipboard.\n\n<lf:clipboard>\n{components.clipboard}\n</lf:clipboard>")

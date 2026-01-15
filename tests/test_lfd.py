@@ -8,6 +8,7 @@ from loopflow.lfd.models import (
     AgentSpec,
     AgentRun,
     AgentStatus,
+    MergeStrategy,
     Session,
     SessionStatus,
     TriggerKind,
@@ -25,11 +26,20 @@ def test_trigger_spec_serialization():
     assert restored.interval_seconds == 300
 
 
+def test_trigger_spec_with_cron():
+    spec = TriggerSpec(kind=TriggerKind.CRON, cron="0 9 * * *", grace_minutes=120)
+    data = spec.to_dict()
+    restored = TriggerSpec.from_dict(data)
+    assert restored.kind == TriggerKind.CRON
+    assert restored.cron == "0 9 * * *"
+    assert restored.grace_minutes == 120
+
+
 def test_agent_spec_serialization():
     spec = AgentSpec(
         name="test-agent",
         repo=Path("/tmp/repo"),
-        pipeline=["implement", "polish"],
+        pipeline="ship",
         trigger=TriggerSpec(kind=TriggerKind.MAIN_CHANGED),
         context=["src/"],
         prompt="Test prompt",
@@ -37,8 +47,24 @@ def test_agent_spec_serialization():
     data = spec.to_dict()
     restored = AgentSpec.from_dict(data)
     assert restored.name == "test-agent"
-    assert restored.pipeline == ["implement", "polish"]
+    assert restored.pipeline == "ship"
     assert restored.trigger.kind == TriggerKind.MAIN_CHANGED
+
+
+def test_agent_spec_with_emoji_and_goal():
+    spec = AgentSpec(
+        name="security-bot",
+        repo=Path("/tmp/repo"),
+        pipeline="ship",
+        emoji="🔒",
+        goal=Path(".lf/goals/security.md"),
+        merge_strategy=MergeStrategy.AUTO,
+    )
+    data = spec.to_dict()
+    restored = AgentSpec.from_dict(data)
+    assert restored.emoji == "🔒"
+    assert restored.goal == Path(".lf/goals/security.md")
+    assert restored.merge_strategy == MergeStrategy.AUTO
 
 
 def test_agent_run_serialization():
@@ -55,6 +81,21 @@ def test_agent_run_serialization():
     assert restored.id == "run-1"
     assert restored.status == AgentStatus.RUNNING
     assert restored.iteration == 5
+
+
+def test_agent_run_with_emoji():
+    run = AgentRun(
+        id="run-1",
+        agent_name="security-bot",
+        status=AgentStatus.RUNNING,
+        started_at=datetime(2024, 1, 1, 12, 0, 0),
+        emoji="🔒",
+        iteration=1,
+    )
+    data = run.to_dict()
+    assert data["emoji"] == "🔒"
+    restored = AgentRun.from_dict(data)
+    assert restored.emoji == "🔒"
 
 
 def test_session_serialization():

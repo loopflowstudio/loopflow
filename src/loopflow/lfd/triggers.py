@@ -4,6 +4,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
+from loopflow.lfd.cron import parse_cron, should_run_cron
 from loopflow.lfd.models import AgentSpec, AgentRun, TriggerKind
 
 
@@ -11,6 +12,11 @@ def should_trigger(agent: AgentSpec, last_run: AgentRun | None) -> bool:
     """Check if an agent's trigger condition is met."""
     if agent.trigger.kind == TriggerKind.MANUAL:
         return False
+
+    if agent.trigger.kind == TriggerKind.LOOP:
+        # Loop trigger: run again immediately after previous run completes
+        # Only trigger if not currently running (caller checks this)
+        return True
 
     if agent.trigger.kind == TriggerKind.MAIN_CHANGED:
         last_sha = last_run.main_sha if last_run else None
@@ -20,6 +26,21 @@ def should_trigger(agent: AgentSpec, last_run: AgentRun | None) -> bool:
     if agent.trigger.kind == TriggerKind.INTERVAL:
         last_run_at = last_run.started_at if last_run else None
         return _interval_elapsed(agent.trigger.interval_seconds, last_run_at)
+
+    if agent.trigger.kind == TriggerKind.CRON:
+        if not agent.trigger.cron:
+            return False
+        try:
+            schedule = parse_cron(agent.trigger.cron)
+            last_run_at = last_run.started_at if last_run else None
+            return should_run_cron(
+                schedule,
+                last_run_at,
+                datetime.now(),
+                agent.trigger.grace_minutes,
+            )
+        except ValueError:
+            return False
 
     return False
 

@@ -153,6 +153,36 @@ lf design -a           # force auto
 lf implement &         # background (shell handles it)
 ```
 
+## Voices
+
+Voices are reusable personas (system prompts) that shape how the agent responds:
+
+```bash
+# Create a voice
+mkdir -p .lf/voices
+echo "Be concise. One sentence where possible." > .lf/voices/concise.md
+
+# Use it
+lf review --voice concise
+lf implement --voice architect,concise  # multiple voices
+```
+
+Configure a default voice in `.lf/config.yaml`:
+
+```yaml
+voice: architect
+```
+
+Or per-task in frontmatter:
+
+```yaml
+---
+voice: concise
+---
+```
+
+Priority: CLI > frontmatter > config > none.
+
 ## Options
 
 | Option | Description |
@@ -164,6 +194,7 @@ lf implement &         # background (shell handles it)
 | `-c, --copy` | Copy prompt to clipboard, show token breakdown |
 | `-v, --paste` | Include clipboard content in prompt |
 | `-m, --model` | Choose model (backend or backend:variant) |
+| `--voice` | Voice(s) to use (comma-separated) |
 | `--parallel` | Run with multiple models in parallel |
 
 ## Commands

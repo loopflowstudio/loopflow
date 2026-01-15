@@ -13,6 +13,7 @@ import typer
 from loopflow.config import load_config, parse_model
 from loopflow.context import find_worktree_root, gather_prompt_components, gather_task, format_prompt, PromptComponents
 from loopflow.frontmatter import resolve_task_config, TaskConfig
+from loopflow.voices import parse_voice_arg, VoiceNotFoundError
 from loopflow.git import find_main_repo
 from loopflow.launcher import (
     build_model_command,
@@ -182,6 +183,9 @@ def run(
     model: ModelType = typer.Option(
         None, "-m", "--model", help="Model to use (backend or backend:variant)"
     ),
+    voice: str = typer.Option(
+        None, "--voice", help="Voice(s) to use (comma-separated, e.g., 'architect,concise')"
+    ),
     parallel: str = typer.Option(
         None, "--parallel", help="Run in parallel with multiple models (e.g., 'claude,codex')"
     ),
@@ -229,6 +233,9 @@ def run(
     task_file = gather_task(repo_root, task)
     frontmatter = task_file.config if task_file else TaskConfig()
 
+    # Parse voice arg
+    cli_voices = parse_voice_arg(voice)
+
     # Resolve config: CLI > frontmatter > global > defaults
     resolved = resolve_task_config(
         task_name=task,
@@ -238,6 +245,7 @@ def run(
         cli_auto=True if auto else None,
         cli_model=model,
         cli_context=list(context) if context else None,
+        cli_voice=cli_voices or None,
     )
 
     is_interactive = resolved.interactive
@@ -268,16 +276,21 @@ def run(
     include_diff = diff if diff is not None else (config.diff if config else True)
 
     args = ctx.args or None
-    components = gather_prompt_components(
-        repo_root,
-        task,
-        context=resolved.context or None,
-        exclude=exclude_patterns or None,
-        task_args=args,
-        paste=include_paste,
-        run_mode="interactive" if is_interactive else "auto",
-        include_loopflow_doc=config.include_loopflow_doc if config else True,
-    )
+    try:
+        components = gather_prompt_components(
+            repo_root,
+            task,
+            context=resolved.context or None,
+            exclude=exclude_patterns or None,
+            task_args=args,
+            paste=include_paste,
+            run_mode="interactive" if is_interactive else "auto",
+            include_loopflow_doc=config.include_loopflow_doc if config else True,
+            voices=resolved.voice or None,
+        )
+    except VoiceNotFoundError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
 
     # Apply docs/diff flags
     if not include_docs:
@@ -335,6 +348,9 @@ def inline(
     model: ModelType = typer.Option(
         None, "-m", "--model", help="Model to use (backend or backend:variant)"
     ),
+    voice: str = typer.Option(
+        None, "--voice", help="Voice(s) to use (comma-separated, e.g., 'architect,concise')"
+    ),
 ):
     """Run an inline prompt with an LLM model."""
     repo_root = find_worktree_root()
@@ -343,6 +359,9 @@ def inline(
         raise typer.Exit(1)
 
     config = load_config(repo_root)
+
+    # Parse voice arg
+    cli_voices = parse_voice_arg(voice)
 
     # Resolve config for inline prompts (no frontmatter)
     resolved = resolve_task_config(
@@ -353,6 +372,7 @@ def inline(
         cli_auto=True if auto else None,
         cli_model=model,
         cli_context=list(context) if context else None,
+        cli_voice=cli_voices or None,
     )
 
     is_interactive = resolved.interactive
@@ -381,16 +401,21 @@ def inline(
     include_docs = docs if docs is not None else (config.docs if config else True)
     include_diff = diff if diff is not None else (config.diff if config else True)
 
-    components = gather_prompt_components(
-        repo_root,
-        task=None,
-        inline=prompt,
-        context=resolved.context or None,
-        exclude=exclude_patterns or None,
-        paste=include_paste,
-        run_mode="interactive" if is_interactive else "auto",
-        include_loopflow_doc=config.include_loopflow_doc if config else True,
-    )
+    try:
+        components = gather_prompt_components(
+            repo_root,
+            task=None,
+            inline=prompt,
+            context=resolved.context or None,
+            exclude=exclude_patterns or None,
+            paste=include_paste,
+            run_mode="interactive" if is_interactive else "auto",
+            include_loopflow_doc=config.include_loopflow_doc if config else True,
+            voices=resolved.voice or None,
+        )
+    except VoiceNotFoundError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
 
     # Apply docs/diff flags
     if not include_docs:

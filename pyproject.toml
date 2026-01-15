@@ -62,3 +62,8 @@ include = [
 
 [tool.hatch.version]
 path = "src/loopflow/__init__.py"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

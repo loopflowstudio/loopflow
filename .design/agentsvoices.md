@@ -38,13 +38,13 @@ struct VoiceService {
 
 ### UI: Voice Picker in PromptLauncher
 
-Add voice selection between the Task selector and main input. Multi-select via checkboxes.
+Add voice selection between the Task selector and main input. Click to open popover with available voices.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Task   [ implement ▼ ]                                     │
 │                                                             │
-│  Voice  [ architect ] [ concise ] [ + ]                     │
+│  Voice  [ architect ] [ concise ]              (click to add)│
 │                                                             │
 │  ┌───────────────────────────────────────────────────────┐  │
 │  │ What do you want to build?                            │  │
@@ -55,7 +55,7 @@ Add voice selection between the Task selector and main input. Multi-select via c
 └─────────────────────────────────────────────────────────────┘
 ```
 
-Selected voices appear as dismissable chips. The `[+]` opens a popover to select from available voices.
+Selected voices appear as dismissable chips. Clicking the row opens a popover listing available voices from `.lf/voices/`. No creation flow—voices must exist on disk.
 
 ### Key Functions
 
@@ -81,7 +81,7 @@ func buildCommand() -> String {
 
 ### Starter Voices (3)
 
-Create `.lf/voices/` with:
+Already created in `.lf/voices/`:
 
 **architect.md**
 ```
@@ -264,8 +264,8 @@ Could show pipelines as a third view or inline in both Voices and Agents views. 
    - Start/stop via context menu or buttons
    - Shows status, iteration count, last run
 
-3. **Starter voices created**
-   - `architect.md`, `concise.md`, `thorough.md` in `.lf/voices/`
+3. **Starter voices created** ✓
+   - `architect.md`, `concise.md`, `thorough.md` already in `.lf/voices/`
 
 ```bash
 # Verification

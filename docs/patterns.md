@@ -178,7 +178,7 @@ wt remove feature-a      # remove a worktree + branch
 Open a PR from a worktree:
 
 ```bash
-lfops pr create              # opens PR on GitHub
+lfops pr                     # opens PR on GitHub
 ```
 
 Land a PR (squash-merge to main):

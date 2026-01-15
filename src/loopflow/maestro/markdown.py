@@ -32,6 +32,8 @@ class AgentFile:
     prompt: str
     interval_seconds: int | None = None
     fresh: bool = False  # force fresh worktree each run
+    diff: bool = False  # include raw branch diff
+    diff_files: bool = True  # include files touched by branch
 
 
 _FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
@@ -64,6 +66,8 @@ def parse_agent_file(path: Path) -> AgentFile | None:
         prompt=prompt,
         interval_seconds=config.get("interval"),
         fresh=config.get("fresh", False),
+        diff=config.get("diff", False),
+        diff_files=config.get("diff_files", True),
     )
 
 
@@ -149,6 +153,8 @@ def create_agent_file(
     prompt: str = "",
     interval_seconds: int | None = None,
     agents_dir: Path | None = None,
+    diff: bool = False,
+    diff_files: bool = True,
 ) -> Path:
     """Create a new agent markdown file."""
     if agents_dir is None:
@@ -165,6 +171,10 @@ def create_agent_file(
         lines.append(f"interval: {interval_seconds}")
     if context:
         lines.append(f"context: [{', '.join(context)}]")
+    if diff:
+        lines.append("diff: true")
+    if not diff_files:
+        lines.append("diff_files: false")
     lines.append("---")
     lines.append("")
     lines.append(prompt or "Describe what this agent should do.")

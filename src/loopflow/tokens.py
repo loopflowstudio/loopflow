@@ -163,6 +163,7 @@ class TokenTree:
 def analyze_prompt_tokens(
     docs: Optional[list[tuple[Path, str]]] = None,
     diff: Optional[str] = None,
+    diff_files: Optional[list[tuple[Path, str]]] = None,
     task: Optional[tuple[str, str]] = None,
     context_files: Optional[list[tuple[Path, str]]] = None,
     repo_root: Optional[Path] = None,
@@ -184,6 +185,16 @@ def analyze_prompt_tokens(
     if diff:
         tokens = count_tokens(diff)
         tree.add("diff", "branch diff", tokens)
+
+    if diff_files and repo_root:
+        for file_path, content in diff_files:
+            tokens = count_tokens(content)
+            try:
+                rel = file_path.relative_to(repo_root)
+                parts = list(rel.parts[:-1])  # directory parts
+                tree.add("diff_files", rel.name, tokens, path=parts)
+            except ValueError:
+                tree.add("diff_files", file_path.name, tokens)
 
     if task:
         name, content = task
@@ -212,6 +223,7 @@ def analyze_components(components) -> TokenTree:
     return analyze_prompt_tokens(
         docs=components.docs,
         diff=components.diff,
+        diff_files=components.diff_files,
         task=components.task,
         context_files=components.context_files,
         repo_root=components.repo_root,

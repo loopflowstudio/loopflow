@@ -178,7 +178,10 @@ def run(
         None, "--docs/--no-docs", help="Include repo documentation (.md files)"
     ),
     diff: Optional[bool] = typer.Option(
-        None, "--diff/--no-diff", help="Include branch diff against main"
+        None, "--diff/--no-diff", help="Include raw branch diff against main"
+    ),
+    diff_files: Optional[bool] = typer.Option(
+        None, "--diff-files/--no-diff-files", help="Include files touched by branch"
     ),
     model: ModelType = typer.Option(
         None, "-m", "--model", help="Model to use (backend or backend:variant)"
@@ -270,10 +273,11 @@ def run(
         if pattern in exclude_patterns:
             exclude_patterns.remove(pattern)
 
-    # Resolve paste/docs/diff flags (CLI overrides config)
+    # Resolve paste/docs/diff/diff_files flags (CLI overrides config)
     include_paste = paste if paste is not None else (config.paste if config else False)
     include_docs = docs if docs is not None else (config.docs if config else True)
-    include_diff = diff if diff is not None else (config.diff if config else True)
+    include_diff = diff if diff is not None else (config.diff if config else False)
+    include_diff_files = diff_files if diff_files is not None else (config.diff_files if config else True)
 
     args = ctx.args or None
     try:
@@ -287,16 +291,16 @@ def run(
             run_mode="interactive" if is_interactive else "auto",
             include_loopflow_doc=config.include_loopflow_doc if config else True,
             voices=resolved.voice or None,
+            include_diff=include_diff,
+            include_diff_files=include_diff_files,
         )
     except VoiceNotFoundError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
-    # Apply docs/diff flags
+    # Apply docs flag
     if not include_docs:
         components.docs = []
-    if not include_diff:
-        components.diff = None
 
     if copy:
         prompt = format_prompt(components)
@@ -343,7 +347,10 @@ def inline(
         None, "--docs/--no-docs", help="Include repo documentation (.md files)"
     ),
     diff: Optional[bool] = typer.Option(
-        None, "--diff/--no-diff", help="Include branch diff against main"
+        None, "--diff/--no-diff", help="Include raw branch diff against main"
+    ),
+    diff_files: Optional[bool] = typer.Option(
+        None, "--diff-files/--no-diff-files", help="Include files touched by branch"
     ),
     model: ModelType = typer.Option(
         None, "-m", "--model", help="Model to use (backend or backend:variant)"
@@ -396,10 +403,11 @@ def inline(
         if pattern in exclude_patterns:
             exclude_patterns.remove(pattern)
 
-    # Resolve paste/docs/diff flags (CLI overrides config)
+    # Resolve paste/docs/diff/diff_files flags (CLI overrides config)
     include_paste = paste if paste is not None else (config.paste if config else False)
     include_docs = docs if docs is not None else (config.docs if config else True)
-    include_diff = diff if diff is not None else (config.diff if config else True)
+    include_diff = diff if diff is not None else (config.diff if config else False)
+    include_diff_files = diff_files if diff_files is not None else (config.diff_files if config else True)
 
     try:
         components = gather_prompt_components(
@@ -412,16 +420,16 @@ def inline(
             run_mode="interactive" if is_interactive else "auto",
             include_loopflow_doc=config.include_loopflow_doc if config else True,
             voices=resolved.voice or None,
+            include_diff=include_diff,
+            include_diff_files=include_diff_files,
         )
     except VoiceNotFoundError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
-    # Apply docs/diff flags
+    # Apply docs flag
     if not include_docs:
         components.docs = []
-    if not include_diff:
-        components.diff = None
 
     if copy:
         prompt_text = format_prompt(components)
@@ -454,11 +462,14 @@ def cp(
     paste: bool = typer.Option(
         False, "-v", "--paste", help="Include clipboard content"
     ),
-    docs: bool = typer.Option(
-        True, "--docs/--no-docs", help="Include repo documentation (.md files)"
+    docs: Optional[bool] = typer.Option(
+        None, "--docs/--no-docs", help="Include repo documentation (.md files)"
     ),
-    diff: bool = typer.Option(
-        True, "--diff/--no-diff", help="Include branch diff"
+    diff: Optional[bool] = typer.Option(
+        None, "--diff/--no-diff", help="Include raw branch diff"
+    ),
+    diff_files: Optional[bool] = typer.Option(
+        None, "--diff-files/--no-diff-files", help="Include files touched by branch"
     ),
 ):
     """Copy file context to clipboard."""
@@ -479,6 +490,11 @@ def cp(
     if config and config.exclude:
         exclude_patterns.extend(config.exclude)
 
+    # Resolve flags (CLI overrides config)
+    include_docs = docs if docs is not None else (config.docs if config else True)
+    include_diff = diff if diff is not None else (config.diff if config else False)
+    include_diff_files = diff_files if diff_files is not None else (config.diff_files if config else True)
+
     components = gather_prompt_components(
         repo_root,
         task=None,
@@ -487,13 +503,13 @@ def cp(
         paste=paste,
         run_mode=None,
         include_loopflow_doc=config.include_loopflow_doc if config else True,
+        include_diff=include_diff,
+        include_diff_files=include_diff_files,
     )
 
-    # Apply docs/diff flags
-    if not docs:
+    # Apply docs flag
+    if not include_docs:
         components.docs = []
-    if not diff:
-        components.diff = None
 
     prompt = format_prompt(components)
     _copy_to_clipboard(prompt)
@@ -569,6 +585,8 @@ def pipeline(
             exclude=exclude,
             include_tests_for=config.include_tests_for if config else None,
             include_loopflow_doc=config.include_loopflow_doc,
+            include_diff=config.diff,
+            include_diff_files=config.diff_files,
         )
         prompt = format_prompt(components)
         _copy_to_clipboard(prompt)

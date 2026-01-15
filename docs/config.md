@@ -118,6 +118,39 @@ exclude:
   - dist
 ```
 
+### diff_files
+
+Include the full content of files touched by the current branch. Default: `true`.
+
+```yaml
+diff_files: true
+```
+
+This is the primary way agents see what's changed on the branch. Instead of just seeing the diff output, the agent gets the complete file content for every modified file.
+
+Override per-run with `--diff-files/--no-diff-files`:
+
+```bash
+lf review --no-diff-files     # skip loading changed files
+```
+
+### diff
+
+Include raw `git diff main...HEAD` output. Default: `false`.
+
+```yaml
+diff: false
+```
+
+The raw diff shows exactly what lines changed but lacks context. Most tasks work better with `diff_files` enabled instead.
+
+Override per-run with `--diff/--no-diff`:
+
+```bash
+lf review --diff              # include raw diff
+lf review --diff --diff-files # both: files + diff
+```
+
 ### ide
 
 Configure which IDEs loopflow installs (used by `lf ops install`).
@@ -248,6 +281,8 @@ No environment variable overrides are supported yet.
 Every task automatically includes:
 
 1. All `.md` files at repository root (README, STYLE, etc.)
-2. Current git diff (staged and unstaged)
+2. Files touched by the current branch (if `diff_files: true`, the default)
 3. Files specified in `context` config
 4. Files passed with `-x` flag
+
+Raw diff output is not included by default. Enable with `diff: true` or `--diff` flag.

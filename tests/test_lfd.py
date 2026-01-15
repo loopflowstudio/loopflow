@@ -15,7 +15,16 @@ from loopflow.lfd.models import (
     TriggerSpec,
 )
 from loopflow.lfd.protocol import Request, Response, Event, success, error
-from loopflow.lfd.db import save_run, load_agent_runs, get_latest_run, save_session, load_sessions
+from loopflow.lfd.db import (
+    save_run,
+    load_agent_runs,
+    get_latest_run,
+    save_session,
+    load_sessions,
+    load_sessions_for_worktree,
+    load_sessions_for_repo,
+    update_session_status,
+)
 
 
 def test_trigger_spec_serialization():
@@ -204,3 +213,113 @@ def test_db_save_and_load_session():
         sessions = load_sessions(db_path=db_path)
         assert len(sessions) == 1
         assert sessions[0].task == "implement"
+
+
+def test_db_load_sessions_for_worktree():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+
+        session1 = Session(
+            id="sess-1",
+            task="implement",
+            repo="/tmp/repo",
+            worktree="/tmp/repo.feature-a",
+            status=SessionStatus.COMPLETED,
+            started_at=datetime(2024, 1, 1, 12, 0, 0),
+        )
+        session2 = Session(
+            id="sess-2",
+            task="review",
+            repo="/tmp/repo",
+            worktree="/tmp/repo.feature-a",
+            status=SessionStatus.COMPLETED,
+            started_at=datetime(2024, 1, 2, 12, 0, 0),
+        )
+        session3 = Session(
+            id="sess-3",
+            task="implement",
+            repo="/tmp/repo",
+            worktree="/tmp/repo.feature-b",
+            status=SessionStatus.COMPLETED,
+            started_at=datetime.now(),
+        )
+
+        save_session(session1, db_path)
+        save_session(session2, db_path)
+        save_session(session3, db_path)
+
+        sessions = load_sessions_for_worktree("/tmp/repo.feature-a", db_path=db_path)
+        assert len(sessions) == 2
+        # Should be ordered by started_at DESC
+        assert sessions[0].id == "sess-2"
+        assert sessions[1].id == "sess-1"
+
+
+def test_db_load_sessions_for_repo():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+
+        session1 = Session(
+            id="sess-1",
+            task="implement",
+            repo="/tmp/repo-a",
+            worktree="/tmp/repo-a.feature",
+            status=SessionStatus.COMPLETED,
+            started_at=datetime.now(),
+        )
+        session2 = Session(
+            id="sess-2",
+            task="review",
+            repo="/tmp/repo-b",
+            worktree="/tmp/repo-b.feature",
+            status=SessionStatus.COMPLETED,
+            started_at=datetime.now(),
+        )
+
+        save_session(session1, db_path)
+        save_session(session2, db_path)
+
+        sessions = load_sessions_for_repo("/tmp/repo-a", db_path=db_path)
+        assert len(sessions) == 1
+        assert sessions[0].id == "sess-1"
+
+
+def test_db_update_session_status():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+
+        session = Session(
+            id="sess-1",
+            task="implement",
+            repo="/tmp/repo",
+            worktree="/tmp/repo.feature",
+            status=SessionStatus.RUNNING,
+            started_at=datetime.now(),
+        )
+        save_session(session, db_path)
+
+        updated = update_session_status("sess-1", SessionStatus.COMPLETED, db_path)
+        assert updated is True
+
+        sessions = load_sessions_for_worktree("/tmp/repo.feature", db_path=db_path)
+        assert len(sessions) == 1
+        assert sessions[0].status == SessionStatus.COMPLETED
+        assert sessions[0].ended_at is not None
+
+
+def test_db_update_session_status_nonexistent():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        # Initialize DB by saving and then checking update
+        session = Session(
+            id="sess-1",
+            task="implement",
+            repo="/tmp/repo",
+            worktree="/tmp/repo.feature",
+            status=SessionStatus.RUNNING,
+            started_at=datetime.now(),
+        )
+        save_session(session, db_path)
+
+        updated = update_session_status("nonexistent", SessionStatus.COMPLETED, db_path)
+        assert updated is False

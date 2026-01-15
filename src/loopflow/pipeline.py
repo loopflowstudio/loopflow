@@ -15,8 +15,8 @@ from loopflow.git import GitError, find_main_repo, open_pr
 from loopflow.launcher import build_model_command, get_runner
 from loopflow.llm_http import generate_pr_message
 from loopflow.logging import write_prompt_file
-from loopflow.maestro import Session, SessionStatus
-from loopflow.maestro.db import DEFAULT_DB_PATH, save_session, update_session_status
+from loopflow.lfd.client import log_session_start, log_session_end
+from loopflow.lfd.models import Session, SessionStatus
 
 
 def run_pipeline(
@@ -67,15 +67,15 @@ def run_pipeline(
         session = Session(
             id=str(uuid.uuid4()),
             task=task_name,
-            repo=main_repo,
-            worktree=repo_root,
+            repo=str(main_repo),
+            worktree=str(repo_root),
             status=SessionStatus.RUNNING,
             started_at=datetime.now(),
             pid=None,
-            backend=backend,
+            model=backend,
             run_mode="auto",
         )
-        save_session(DEFAULT_DB_PATH, session)
+        log_session_start(session)
 
         command = build_model_command(
             backend,
@@ -106,15 +106,13 @@ def run_pipeline(
         collector_cmd.extend(["--", *command])
         # Don't strip API keys from collector env - it needs them for commit message generation
         process = subprocess.Popen(collector_cmd, cwd=repo_root)
-        session.pid = process.pid
-        save_session(DEFAULT_DB_PATH, session)
         result_code = process.wait()
 
         # Clean up prompt file
         os.unlink(prompt_file)
 
         status = SessionStatus.COMPLETED if result_code == 0 else SessionStatus.ERROR
-        update_session_status(DEFAULT_DB_PATH, session.id, status)
+        log_session_end(session.id, status)
 
         if result_code != 0:
             print(f"\n[{task_name}] failed with exit code {result_code}")

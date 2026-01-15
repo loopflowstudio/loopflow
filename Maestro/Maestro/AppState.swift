@@ -76,6 +76,12 @@ final class AppState {
             }
 
             await refreshWorktrees()
+
+            // Auto-select first worktree so launch button always has a target
+            if selectedWorktree == nil {
+                selectedWorktree = worktrees.first
+            }
+
             prompts = try promptService.loadPrompts(from: url, config: config)
             await estimateTokens()
             await refreshAgents()

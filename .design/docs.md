@@ -1,339 +1,62 @@
-# Documentation Audit and Update
+# Docs
 
-A documentation refresh to cover the Maestro app, lfd service layer, and internal API boundaries. Make the product vision from `.research/` accessible to users, and ensure developers have clear API reference for lf ↔ lfd ↔ Maestro communication.
+Documentation refresh: added public docs for Maestro, lfd, API reference, and philosophy. Added internal READMEs for lfd and Maestro modules.
 
-## What to build
+## Review
 
-Update `docs/` with Maestro-focused user documentation, create internal API reference for lfd protocol, and distill `.research/` insights into public-facing "why" documentation.
+**Verdict:** Needs work
 
-## Current State
+### Issues
 
-**Public docs (docs/):**
-- `index.md` — Quick start, CLI usage
-- `config.md` — `.lf/config.yaml` options
-- `patterns.md` — Workflow recipes
+**1. Uncommitted code changes mixed with docs**
 
-**Missing:**
-- Maestro app documentation (what it is, how to use it)
-- lfd daemon documentation (agent orchestration, session tracking)
-- API reference for lfd socket protocol
-- Vision/philosophy content from `.research/`
+The uncommitted diff includes significant code changes that go beyond documentation:
+- Deletes entire `loopflow/maestro` Python module (~15 files)
+- Adds new files to `loopflow/lfd`: `agent_runner.py`, `collector.py`, `runner.py`
+- Changes `lfops.py` imports from `maestro.db` to `lfd.db`
+- Updates Swift files to read from `lfd.db` instead of `maestro.db`
 
-**.research/ (internal):**
-- `maestro-vision.md` — Core product vision, market positioning
-- `target-customer.md` — User persona and values
-- `landscape.md` — Competitive analysis, pain points
-- `technical-reference.md` — Claude Code/Codex APIs
-- `agents-future.md` — Roadmap items
+This is code reorganization, not documentation. The design doc explicitly flags this as "Out of Scope" for follow-up. Either commit these code changes separately or revert them before landing the docs branch.
 
-## Data Structures
+**2. New Python files not committed**
 
+`git status` shows untracked files:
+- `src/loopflow/lfd/agent_runner.py`
+- `src/loopflow/lfd/collector.py`
+- `src/loopflow/lfd/runner.py`
+
+These are presumably copies/moves from the deleted `maestro` module but they're not staged. The branch won't work without them.
+
+**3. Test file imports from deleted module**
+
+`tests/test_collector.py:6` imports:
 ```python
-# lfd socket protocol (from src/loopflow/lfd/protocol.py)
-@dataclass
-class Request:
-    method: str
-    params: dict[str, Any]
-    id: str | None = None
-
-@dataclass
-class Response:
-    ok: bool
-    result: Any = None
-    error: str | None = None
-
-@dataclass
-class Event:
-    event: str
-    data: dict[str, Any]
+from loopflow.lfd.collector import _format_stream_line
 ```
 
-```python
-# Key models (from src/loopflow/lfd/models.py)
-@dataclass
-class Session:
-    id: str
-    task: str
-    repo: str
-    worktree: str
-    status: SessionStatus  # running, waiting, completed, error
-    started_at: datetime
-    model: str = "claude-code"
-    run_mode: Literal["auto", "interactive"] = "auto"
+This will fail if `collector.py` isn't committed. Many other tests are deleted (`test_agent.py`, `test_daemon.py`, `test_maestro.py`, etc.) - verify that remaining tests pass.
 
-@dataclass
-class AgentSpec:
-    name: str
-    repo: Path
-    pipeline: str
-    trigger: TriggerSpec  # manual, main-changed, interval, loop, cron
-    context: list[str]
-    prompt: str
-```
+### Documentation quality
 
-## Key Documentation Structure
+The documentation itself is well-written:
 
-```
-docs/
-├── index.md              # Update: add Maestro as primary interface
-├── config.md             # Existing: config options (current)
-├── patterns.md           # Existing: workflow recipes (current)
-├── maestro.md            # NEW: Maestro app guide
-├── lfd.md                # NEW: daemon and agents reference
-├── api.md                # NEW: lfd socket protocol reference
-└── vision.md             # NEW: philosophy distilled from .research/
-```
+- **docs/maestro.md** - Clear user guide covering installation, prompt launcher, worktree sidebar, agents panel
+- **docs/lfd.md** - Good coverage of daemon installation, session tracking, agents, database schema
+- **docs/api.md** - Comprehensive protocol reference with examples in Python, Swift, and shell
+- **docs/vision.md** - Effective distillation of `.research/` content into public-facing philosophy
+- **src/loopflow/lfd/README.md** and **Maestro/README.md** - Useful internal docs per STYLE.md
 
-## Internal Module READMEs (developer-facing)
+The navigation header in `docs/_config.yml` is updated correctly.
 
-Per STYLE.md: "Put documentation next to code."
+### Recommendation
 
-### src/loopflow/lfd/README.md
+1. Separate code changes from docs - create a new branch for the `maestro` → `lfd` consolidation
+2. Commit the untracked lfd files
+3. Run tests to verify nothing is broken
+4. Land docs-only changes first, then land code reorganization
 
-```markdown
-# lfd — Loopflow Daemon
+## Design notes
 
-Background service for session tracking and agent orchestration.
+**Why both socket and direct DB reads in Maestro**: Direct DB reads let Maestro show history even if lfd crashed. Socket events provide real-time updates. This is documented in `Maestro/README.md` and is the correct architecture.
 
-## Database
-
-SQLite at `~/.lf/lfd.db` (WAL mode).
-
-### sessions table
-| Column | Type | Description |
-|--------|------|-------------|
-| id | TEXT PK | UUID |
-| task | TEXT | Task name (design, implement, etc.) |
-| repo | TEXT | Repository path |
-| worktree | TEXT | Worktree path |
-| status | TEXT | running, waiting, completed, error |
-| started_at | TEXT | ISO8601 |
-| ended_at | TEXT | ISO8601 or NULL |
-| pid | INTEGER | Process ID |
-| model | TEXT | claude-code, codex, etc. |
-| run_mode | TEXT | auto or interactive |
-
-### agent_runs table
-| Column | Type | Description |
-|--------|------|-------------|
-| id | TEXT PK | UUID |
-| agent_name | TEXT | Agent definition name |
-| status | TEXT | idle, running, waiting, error, stopped |
-| started_at | TEXT | ISO8601 |
-| ended_at | TEXT | ISO8601 or NULL |
-| pid | INTEGER | Process ID |
-| worktree | TEXT | Current worktree path |
-| iteration | INTEGER | Run count |
-| error | TEXT | Error message or NULL |
-| main_sha | TEXT | Main branch SHA at start |
-
-## Protocol
-
-JSON-over-newline on Unix socket at `~/.lf/lfd.sock`.
-
-See protocol.py for Request/Response/Event dataclasses.
-
-## Fire-and-Forget Pattern
-
-Session logging uses `_send_fire_and_forget()` — synchronous socket with
-0.5s timeout, fails silently. This prevents lfd availability from blocking
-task execution. If daemon is down, sessions aren't logged but tasks still run.
-
-## Client Patterns
-
-- Async client: `DaemonClient` for CLI/tests (connect, call, subscribe)
-- Sync fire-and-forget: `log_session_start()`, `log_session_end()` for lf runner
-```
-
-### Maestro/README.md
-
-```markdown
-# Maestro — macOS App
-
-Visual interface for loopflow. SwiftUI, requires macOS 15+.
-
-## Architecture
-
-- AppState.swift — Central observable state
-- Services/ — Data loading, no UI
-- Views/ — SwiftUI views
-- Models/ — Swift structs mirroring Python dataclasses
-
-## Communication with lfd
-
-Two patterns, intentionally different:
-
-1. **Direct DB reads** (SessionService.swift)
-   - Reads ~/.lf/lfd.db directly via SQLite
-   - Used for history queries
-   - Works even if daemon isn't running
-   - Simpler than socket for read-only data
-
-2. **Socket subscription** (LFDEventService.swift)
-   - Connects to ~/.lf/lfd.sock
-   - Subscribes to events (session.*, agent.*, worktree.*)
-   - Used for live UI updates
-   - Reconnects on failure
-
-## Why Both?
-
-Direct DB reads mean Maestro can show history even if lfd crashed.
-Socket events provide real-time updates without polling.
-
-## Build
-
-Open Maestro.xcodeproj in Xcode, build and run.
-Distribution build: Archive → export as App.
-```
-
-### docs/maestro.md structure
-
-```markdown
-# Maestro
-
-Visual interface for loopflow. Launch prompts, manage worktrees, track sessions.
-
-## Getting Started
-- Download/install
-- Open a repo
-
-## Prompt Launcher
-- Task selector
-- Args input
-- Context options (docs, diff, clipboard, attached files)
-- Auto vs interactive mode
-- Token estimation
-
-## Worktree Sidebar
-- Create/delete worktrees
-- Status badges (design, implement, review, polish)
-- Open in terminal/IDE
-- PR actions (create, view, land)
-
-## Agents Panel
-- View running agents
-- Start/stop agents
-- Iteration count, trigger status
-
-## Keyboard Shortcuts
-- Cmd+Enter: Launch prompt
-- (others as implemented)
-```
-
-### docs/lfd.md structure
-
-```markdown
-# Daemon (lfd)
-
-Background service for session tracking and agent orchestration.
-
-## Installation
-lfd install
-
-## Session Tracking
-- Auto-registered in auto mode
-- Query via socket or direct DB read
-
-## Agents
-- Define agents as markdown in ~/.lf/agents/
-- Trigger types: manual, main-changed, interval, loop, cron
-- Pipeline execution
-
-## Socket API
-See api.md for protocol details.
-```
-
-### docs/api.md structure
-
-```markdown
-# API Reference
-
-## Protocol
-JSON-over-newline on Unix socket at ~/.lf/lfd.sock
-
-## Methods
-
-### status
-Returns daemon health: pid, agent count, session count.
-
-### agents.list
-Returns all agent definitions with runtime status.
-
-### agents.start
-Start an agent by name.
-
-### agents.stop
-Stop a running agent.
-
-### sessions.list
-Active sessions.
-
-### sessions.history
-Session history filtered by worktree or repo.
-
-### subscribe
-Subscribe to events (session.*, agent.*, worktree.*).
-
-### notify
-Broadcast custom events.
-
-## Events
-- session.started
-- session.ended
-- agent.started
-- agent.stopped
-```
-
-### docs/vision.md structure
-
-```markdown
-# Philosophy
-
-Distill from .research/maestro-vision.md:
-
-## The Problem
-- Context management overwhelms agents
-- Design intent lost between sessions
-- Parallel work requires manual juggling
-- Quality degrades without discipline
-
-## The Loopflow Approach
-- Prompts as versioned artifacts
-- Pipelines with quality gates
-- Backend-agnostic (Claude, Codex, Gemini)
-- Worktrees for parallel isolation
-- Maestro for visual orchestration
-
-## Target User
-(Brief version of target-customer.md - the "maestro" persona)
-```
-
-## Constraints
-
-1. **Don't duplicate code** — Reference files, don't inline implementations
-2. **Keep `.research/` internal** — Distill for public docs, don't copy wholesale
-3. **User-facing first** — API docs are secondary to "how do I use this"
-4. **Match existing tone** — Follow STYLE.md, no Args:/Returns: docstrings
-
-## Out of Scope (flag for follow-up)
-
-**Consolidate `loopflow/maestro` into `loopflow/lfd`** — The `maestro` Python module duplicates lfd structure (agents, db, triggers, launchd). "Maestro" should only refer to the Swift app. This is code reorganization, not docs work.
-
-## Done When
-
-```bash
-# All new docs exist and render
-ls docs/maestro.md docs/lfd.md docs/api.md docs/vision.md
-
-# Jekyll builds clean
-cd docs && bundle exec jekyll build 2>&1 | grep -i error || echo "No errors"
-
-# Links in index.md point to new pages
-grep -E "maestro|lfd|api|vision" docs/index.md
-```
-
-Manual verification:
-1. Run `bundle exec jekyll serve` in docs/
-2. Navigate to each new page
-3. Verify navigation header includes new pages
-4. Check that code examples match current implementation
+**Fire-and-forget session logging**: Session logging uses synchronous socket calls with 0.5s timeout that fail silently. Correct tradeoff—lfd availability shouldn't block task execution.

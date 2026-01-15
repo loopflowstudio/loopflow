@@ -225,16 +225,26 @@ def save_session(session: Session, db_path: Path | None = None) -> None:
     conn.close()
 
 
-def load_sessions(active_only: bool = False, db_path: Path | None = None) -> list[Session]:
-    """Load sessions."""
+def load_sessions(
+    repo: str | None = None,
+    include_completed: bool = False,
+    db_path: Path | None = None,
+) -> list[Session]:
+    """Load sessions, optionally filtered by repo."""
     conn = _get_db(db_path)
 
-    if active_only:
-        cursor = conn.execute(
-            "SELECT * FROM sessions WHERE status IN ('running', 'waiting')"
-        )
-    else:
-        cursor = conn.execute("SELECT * FROM sessions")
+    conditions = []
+    params: list = []
+
+    if repo:
+        conditions.append("repo = ?")
+        params.append(repo)
+
+    if not include_completed:
+        conditions.append("status IN ('running', 'waiting')")
+
+    where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+    cursor = conn.execute(f"SELECT * FROM sessions{where} ORDER BY started_at DESC", params)
 
     sessions = [_session_from_row(dict(row)) for row in cursor]
     conn.close()
@@ -286,6 +296,18 @@ def update_session_status(session_id: str, status: SessionStatus, db_path: Path 
     updated = cursor.rowcount > 0
     conn.close()
     return updated
+
+
+def delete_session(session_id: str, db_path: Path | None = None) -> bool:
+    """Delete a session from database."""
+    conn = _get_db(db_path)
+
+    cursor = conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+
+    conn.commit()
+    deleted = cursor.rowcount > 0
+    conn.close()
+    return deleted
 
 
 def _session_from_row(row: dict) -> Session:

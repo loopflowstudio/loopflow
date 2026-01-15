@@ -3,7 +3,7 @@
 import json
 
 from loopflow.launcher import normalize_claude_event, normalize_codex_event
-from loopflow.maestro.collector import _format_stream_line
+from loopflow.lfd.collector import _format_stream_line
 
 
 def test_normalize_claude_event_single_block():

@@ -21,13 +21,8 @@ from loopflow.init_check import check_init_status
 from loopflow.launcher import check_claude_available, check_codex_available, check_gemini_available
 from loopflow.llm_http import generate_commit_message, generate_commit_message_from_diff, generate_pr_message
 from loopflow.logging import get_log_dir
-from loopflow.maestro.db import (
-    DEFAULT_DB_PATH,
-    delete_session,
-    load_sessions,
-    update_session_status,
-)
-from loopflow.maestro.session import SessionStatus
+from loopflow.lfd.db import delete_session, load_sessions, update_session_status
+from loopflow.lfd.models import SessionStatus
 from loopflow.worktrees import get_path
 
 app = typer.Typer(help="Loopflow operations")
@@ -512,7 +507,7 @@ def status(
 ) -> None:
     """Show running sessions."""
     repo = None if all_repos else find_worktree_root()
-    sessions = load_sessions(DEFAULT_DB_PATH, repo=repo)
+    sessions = load_sessions(repo=str(repo) if repo else None)
 
     if not sessions:
         typer.echo("No running sessions")
@@ -550,7 +545,7 @@ def stop(
 ) -> None:
     """Stop a running session."""
     repo = None if all_repos else find_worktree_root()
-    sessions = load_sessions(DEFAULT_DB_PATH, repo=repo, include_completed=True)
+    sessions = load_sessions(repo=str(repo) if repo else None, include_completed=True)
     session = _resolve_session(sessions, session_id)
 
     if session.status not in (SessionStatus.RUNNING, SessionStatus.WAITING):
@@ -567,7 +562,7 @@ def stop(
         typer.echo(f"Error: Failed to stop session {session.id[:8]}: {e}", err=True)
         raise typer.Exit(1)
 
-    update_session_status(DEFAULT_DB_PATH, session.id, SessionStatus.ERROR)
+    update_session_status(session.id, SessionStatus.ERROR)
     typer.echo(f"Stopped session {session.id[:8]}")
 
 
@@ -577,7 +572,7 @@ def prune(
 ) -> None:
     """Remove completed sessions and their logs."""
     repo = None if all_repos else find_worktree_root()
-    sessions = load_sessions(DEFAULT_DB_PATH, repo=repo, include_completed=True)
+    sessions = load_sessions(repo=str(repo) if repo else None, include_completed=True)
 
     removed = 0
     for session in sessions:
@@ -593,7 +588,7 @@ def prune(
                 except OSError:
                     pass
 
-        if delete_session(DEFAULT_DB_PATH, session.id):
+        if delete_session(session.id):
             removed += 1
 
     typer.echo(f"Pruned {removed} sessions")

@@ -87,7 +87,13 @@ final class AppState {
         guard let repo = currentRepo else { return }
 
         do {
+            let previousSelection = selectedWorktree?.branch
             worktrees = try await worktreeService.list(in: repo)
+
+            // Preserve selection by matching on branch name
+            if let branch = previousSelection {
+                selectedWorktree = worktrees.first { $0.branch == branch }
+            }
         } catch {
             errorMessage = error.localizedDescription
         }

@@ -64,12 +64,6 @@ def test_commit_with_changes():
                 assert "Committed: fix: typo" in result.output
 
 
-def test_commit_with_custom_message_skips_generation():
-    """commit uses provided message instead of calling LLM."""
-    # Note: lfpr commit doesn't have a -m flag, this test is now obsolete
-    pass
-
-
 def test_commit_with_push_includes_push_output():
     """commit --push pushes and reports success."""
     with patch("loopflow.lfpr.find_worktree_root", return_value=Path("/fake/repo")):

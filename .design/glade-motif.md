@@ -22,6 +22,71 @@ Per-step configuration (voice, model, context) lets users customize behavior wit
 
 **Deferred:** Branching/merging pipelines. The user mentioned wanting to "try things with two voices and then integrate both"—this is real but secondary. Get the sequential UI right first.
 
+## Research: How other libraries handle DAG creation
+
+Researched Prefect, Airflow, Dagster, n8n, Temporal, and LangChain to identify patterns for reusable modules and per-step configuration. Key takeaways for loopflow:
+
+### Inner pipelines (reusable modules)
+
+**Airflow TaskGroups** ([docs](https://www.astronomer.io/docs/learn/task-groups)): Groups of tasks that can be extracted into reusable modules. You can create a custom TaskGroup class that defines tasks internally, then instantiate it in multiple DAGs. Tasks live in the parent DAG—it's purely organizational. Best feature: "Convert to sub-workflow" to extract selected nodes into a reusable component.
+
+**n8n sub-workflows** ([docs](https://docs.n8n.io/flow-logic/subworkflows/)): Call one workflow from another via `Execute Workflow` node. Right-click selected nodes → "Convert to sub-workflow" automatically creates a new workflow and wires up the connection. Input schema can be defined with typed fields or inferred from example JSON.
+
+**Temporal child workflows** ([docs](https://docs.temporal.io/child-workflows)): Spawn workflows from within workflows. Child workflows are independently monitored and versioned. Key insight: "Don't use child workflows just for code organization—use language features for that. Child workflows add overhead; use them when you need independent execution histories."
+
+**Dagster graph_asset** ([docs](https://docs.dagster.io/guides/build/assets/defining-assets)): Encapsulate a sequence of operations as a single asset. Multiple internal steps, one external output. Useful for "inner pipelines" that produce a single deliverable.
+
+**Recommendation for loopflow:** The existing `pipeline:` field in `PipelineStep` already supports this pattern. A step can reference another pipeline by name:
+
+```yaml
+steps:
+  - task: design
+  - pipeline: quality-pass    # runs .lf/pipelines/quality-pass.yaml inline
+  - task: ship
+```
+
+The inline expansion happens at resolve time (already implemented in `resolve_pipeline`). No new structures needed—just make it easy to create and reference inner pipelines from the UI.
+
+### Per-step configuration
+
+**Prefect** ([blog](https://medium.com/@shouke.wei/prefect-in-python-i-modern-workflow-orchestration-for-data-and-ai-pipelines-70a6add21b7a)): Tasks accept any Python kwargs. Override defaults at call site. No special syntax—just function parameters.
+
+**Airflow** ([docs](https://airflow.apache.org/docs/apache-airflow/stable/tutorial/taskflow.html)): `default_args` at DAG level, overrideable per-task. TaskGroups also support `default_args` that override the DAG-level defaults.
+
+**LangChain LCEL** ([docs](https://python.langchain.com/docs/concepts/lcel/)): Chains compose via pipe operator. Each step gets its input from the previous output. Configuration happens through `RunnableLambda` wrappers or by binding config at chain definition time.
+
+**Recommendation for loopflow:** The inheritance model should be:
+
+```
+global config → pipeline config → step config
+```
+
+Where each level can override the previous. Current `StepConfig` only has `model`. Extend to include `voice` and `context` (as already planned):
+
+```yaml
+steps:
+  - task: implement
+    config:
+      model: claude:opus
+      voice: architect
+      context:
+        - src/schema.py
+```
+
+This matches the user's requirement: "mutating arbitrary conditions of it, things like context and voice per-task."
+
+### Visual editor patterns
+
+**React Flow** ([reactflow.dev](https://reactflow.dev/)): The dominant library for visual DAG editors. Nodes are React components. Edges connect ports. Drag-and-drop from sidebar. Used by n8n, many workflow builders.
+
+**n8n visual editor** ([features](https://n8n.io/features/)): Click to add nodes, drag to connect. Right-click for context menu. Config panel appears when node selected. Key UX: "Convert to sub-workflow" from selected nodes.
+
+**Recommendation for loopflow:** Maestro uses SwiftUI, not React. The chip-based horizontal flow from the current design is simpler than a full node graph—appropriate for sequential pipelines. Key features to prioritize:
+
+1. **Click step chip → popover with config fields** (already in design)
+2. **Drag to reorder** (defer, use up/down buttons first)
+3. **"Save as pipeline" from selection** (nice to have for inner pipelines)
+
 ## Existing code context
 
 The codebase already has pipeline support in `src/loopflow/lfd/pipelines.py`:

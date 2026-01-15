@@ -15,10 +15,12 @@ struct LoopflowConfig: Codable {
     let yolo: Bool?
     let docs: Bool?
     let diff: Bool?
+    let diffFiles: Bool?
     let paste: Bool?
 
     enum CodingKeys: String, CodingKey {
         case agentModel = "agent_model"
+        case diffFiles = "diff_files"
         case interactive, terminal, ide, workspace, context, exclude, push, pr, yolo, docs, diff, paste
     }
 

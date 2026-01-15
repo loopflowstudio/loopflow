@@ -16,7 +16,8 @@ final class AppState {
     var selectedPrompt: PromptCard?
     var promptArgs: String = ""
     var includeDocs: Bool = true
-    var includeDiff: Bool = true
+    var includeDiff: Bool = false
+    var includeDiffFiles: Bool = true
     var includePaste: Bool = false
     var selectedContextFolders: Set<URL> = []
     var attachedFiles: [URL] = []  // Files dropped or added via UI
@@ -58,7 +59,8 @@ final class AppState {
 
             // Initialize toggles from config
             includeDocs = config?.docs ?? true
-            includeDiff = config?.diff ?? true
+            includeDiff = config?.diff ?? false
+            includeDiffFiles = config?.diffFiles ?? true
             includePaste = config?.paste ?? false
 
             // Initialize context folders from config
@@ -177,6 +179,7 @@ final class AppState {
             args: promptArgs,
             context: Array(selectedContextFolders),
             includeDiff: includeDiff,
+            includeDiffFiles: includeDiffFiles,
             in: repo
         )
     }
@@ -228,8 +231,11 @@ final class AppState {
         if !includeDocs {
             parts.append("--no-docs")
         }
-        if !includeDiff {
-            parts.append("--no-diff")
+        if includeDiff {
+            parts.append("--diff")
+        }
+        if !includeDiffFiles {
+            parts.append("--no-diff-files")
         }
         if includePaste {
             parts.append("--paste")

@@ -19,12 +19,11 @@ struct WorktreeService {
         }
     }
 
-    private func findWt() -> URL? {
-        // Use login shell to resolve PATH properly
+    private func findCommand(_ name: String) -> URL? {
         let process = Process()
         let pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-l", "-c", "which wt"]
+        process.arguments = ["-l", "-c", "which \(name)"]
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
 
@@ -155,32 +154,8 @@ struct WorktreeService {
         }
     }
 
-    private func findLfpr() -> URL? {
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-l", "-c", "which lfpr"]
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            if process.terminationStatus == 0 {
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                if let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-                   !path.isEmpty {
-                    return URL(fileURLWithPath: path)
-                }
-            }
-        } catch {
-            // Fall through
-        }
-        return nil
-    }
-
     private func runLfpr(_ args: [String], in directory: URL) async throws -> String {
-        guard let lfprURL = findLfpr() else {
+        guard let lfprURL = findCommand("lfpr") else {
             throw WorktreeError.commandFailed("lfpr not found. Install loopflow.")
         }
 
@@ -213,7 +188,7 @@ struct WorktreeService {
     }
 
     private func run(_ args: [String], in directory: URL) async throws -> String {
-        guard let wtURL = findWt() else {
+        guard let wtURL = findCommand("wt") else {
             throw WorktreeError.wtNotInstalled
         }
 

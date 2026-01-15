@@ -886,7 +886,7 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
 
     # Get PR info (or create PR if --create-pr)
     result = subprocess.run(
-        ["gh", "pr", "view", "--json", "title,body,baseRefName"],
+        ["gh", "pr", "view", "--json", "number,title,body,baseRefName"],
         cwd=repo_root,
         capture_output=True,
         text=True,
@@ -901,6 +901,18 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
                 typer.echo(f"Error creating PR: {e}", err=True)
                 raise typer.Exit(1)
             typer.echo(f"Created: {pr_url}")
+            # Re-fetch to get the PR number
+            result = subprocess.run(
+                ["gh", "pr", "view", "--json", "number,title,body,baseRefName"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                typer.echo("Error: Could not get PR info after creation", err=True)
+                raise typer.Exit(1)
+            pr_data = json.loads(result.stdout)
+            pr_number = pr_data.get("number")
             title = message.title
             body = message.body
             base_branch = _get_default_branch(main_repo)
@@ -909,6 +921,7 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
             raise typer.Exit(1)
     else:
         pr_data = json.loads(result.stdout)
+        pr_number = pr_data.get("number")
         title = pr_data.get("title", "").strip()
         body = pr_data.get("body", "").strip()
         base_branch = pr_data.get("baseRefName", "main").strip()
@@ -932,6 +945,21 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
         typer.echo(f"Error: {error_msg}", err=True)
         raise typer.Exit(1)
 
+    # Verify the PR was actually merged (not just closed)
+    # Use PR number since branch may have been deleted by --delete-branch
+    if pr_number:
+        result = subprocess.run(
+            ["gh", "pr", "view", str(pr_number), "--json", "state", "-q", ".state"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+        )
+        pr_state = result.stdout.strip().upper() if result.returncode == 0 else ""
+        if pr_state and pr_state != "MERGED":
+            typer.echo(f"Warning: PR state is '{pr_state}' (expected 'MERGED')", err=True)
+            typer.echo("The PR may have been closed without merging. Check GitHub.", err=True)
+            raise typer.Exit(1)
+
     # Clear .design artifacts in main repo
     if clear_design_artifacts(main_repo):
         typer.echo("Removed .design contents")
@@ -941,10 +969,13 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
     subprocess.run(["git", "checkout", base_branch], cwd=main_repo, check=True)
     subprocess.run(["git", "pull", "--ff-only"], cwd=main_repo, check=True)
 
-    # Clean up worktree if applicable
+    # Clean up worktree or local branch
     was_in_worktree = repo_root != main_repo
     if was_in_worktree:
         remove(main_repo, branch)
+    else:
+        # Delete local branch when landing from main repo (we're now on base_branch)
+        subprocess.run(["git", "branch", "-D", branch], cwd=main_repo, capture_output=True)
 
     typer.echo(f"Landed {branch} onto {base_branch}.")
 

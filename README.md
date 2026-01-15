@@ -16,7 +16,7 @@ macOS only. Supports Claude Code, OpenAI Codex, and Google Gemini CLI via config
 
 ```bash
 pip install loopflow
-lf ops install    # installs Claude Code, Codex, Gemini CLI, worktrunk
+lfops install    # installs Claude Code, Codex, Gemini CLI, worktrunk
 ```
 
 ## Why Worktrees?
@@ -96,13 +96,13 @@ wt remove auth                # remove worktree + branch
 Track running tasks across multiple terminals:
 
 ```bash
-lf ops status                     # show running sessions
+lfops status                  # show running sessions
 
 # In another terminal
 lf implement                  # auto mode task registers automatically
 
 # Check from anywhere
-lf ops status                     # see all running sessions
+lfops status                  # see all running sessions
 ```
 
 Sessions write to SQLite in auto mode.
@@ -173,17 +173,17 @@ lf implement &         # background (shell handles it)
 | `lf <task>` | Run a task from `.lf/` |
 | `lf <pipeline>` | Run a pipeline |
 | `lf : "prompt"` | Inline prompt |
-| `lf ops commit [-p] [-m]` | Auto-commit with generated message |
-| `lf ops compare a b` | Compare two worktree implementations |
 | `wt <subcommand>` | Worktree management (worktrunk) |
-| `lf ops pr create` | Open GitHub PR |
-| `lf ops pr land [-a]` | Squash-merge to main |
-| `lf ops land [--no-pr] [--force] [--base]` | Land locally via worktrunk |
-| `lf ops commit [-p]` | Generate commit message and commit |
-| `lf ops init` | Initialize repo with prompts and config |
-| `lf ops install` | Install Claude Code, Codex, Gemini CLI |
-| `lf ops doctor` | Check dependencies |
-| `lf ops status` | Show running sessions |
+| `lfwt list` | Show all worktrees with status |
+| `lfwt diff <branch>` | Show diff for a worktree |
+| `lfwt compare a b` | Compare two worktree implementations |
+| `lfpr create` | Open GitHub PR |
+| `lfpr land` | Squash-merge to main |
+| `lfpr commit [-p]` | Generate commit message and commit |
+| `lfops init` | Initialize repo with prompts and config |
+| `lfops install` | Install Claude Code, Codex, Gemini CLI |
+| `lfops doctor` | Check dependencies |
+| `lfops status` | Show running sessions |
 | `lfd install` | Install and start agent daemon |
 | `lfd list` | List agents and their status |
 | `lfd start <name>` | Start an agent |

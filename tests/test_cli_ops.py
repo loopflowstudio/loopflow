@@ -1,8 +1,9 @@
-"""Tests for ops subcommand wiring."""
+"""Tests for CLI structure after ops removal."""
 
 from typer.testing import CliRunner
 
 from loopflow.cli import app
+from loopflow.lfops import app as lfops_app
 
 
 def _get_command_names(output: str) -> list[str]:
@@ -36,38 +37,31 @@ def _get_command_names(output: str) -> list[str]:
     return commands
 
 
-def test_top_level_help_lists_ops_only():
+def test_top_level_help_no_ops():
+    """Verify ops subcommand was removed from lf."""
     runner = CliRunner()
 
     result = runner.invoke(app, ["--help"])
 
     assert result.exit_code == 0
     commands = _get_command_names(result.output)
-    assert "ops" in commands
-    assert "pr" not in commands
-    assert "meta" not in commands
-    assert "maestro" not in commands
-    assert "status" not in commands
-    assert "compare" not in commands
-    assert "land" not in commands
-    assert "stop" not in commands
-    assert "prune" not in commands
+    assert "ops" not in commands
+    assert "run" in commands
+    assert "pipeline" in commands
 
 
-def test_ops_help_lists_management_commands():
+def test_lfops_help_lists_management_commands():
+    """Verify lfops has the expected commands."""
     runner = CliRunner()
 
-    result = runner.invoke(app, ["ops", "--help"])
+    result = runner.invoke(lfops_app, ["--help"])
 
     assert result.exit_code == 0
     commands = _get_command_names(result.output)
-    assert "pr" in commands
-    assert "status" in commands
-    assert "stop" in commands
-    assert "prune" in commands
-    assert "compare" in commands
-    assert "land" in commands
     assert "init" in commands
     assert "install" in commands
     assert "doctor" in commands
     assert "version" in commands
+    assert "status" in commands
+    assert "stop" in commands
+    assert "prune" in commands

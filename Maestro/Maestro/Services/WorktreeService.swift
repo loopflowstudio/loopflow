@@ -19,12 +19,11 @@ struct WorktreeService {
         }
     }
 
-    private func findWt() -> URL? {
-        // Use login shell to resolve PATH properly
+    private func findCommand(_ name: String) -> URL? {
         let process = Process()
         let pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-l", "-c", "which wt"]
+        process.arguments = ["-l", "-c", "which \(name)"]
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
 
@@ -87,32 +86,80 @@ struct WorktreeService {
         _ = try await runLfpr(["land"], in: worktreePath)
     }
 
-    private func findLfpr() -> URL? {
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-l", "-c", "which lfpr"]
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
+    func getDiff(_ spec: String, in repoURL: URL) async throws -> String {
+        try await runGit(["diff", spec], in: repoURL)
+    }
 
-        do {
-            try process.run()
-            process.waitUntilExit()
-            if process.terminationStatus == 0 {
+    private func runGit(_ args: [String], in directory: URL) async throws -> String {
+        return try await withCheckedThrowingContinuation { continuation in
+            let process = Process()
+            let pipe = Pipe()
+
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            process.arguments = args
+            process.currentDirectoryURL = directory
+            process.standardOutput = pipe
+            process.standardError = pipe
+
+            do {
+                try process.run()
+                process.waitUntilExit()
+
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                if let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-                   !path.isEmpty {
-                    return URL(fileURLWithPath: path)
+                let output = String(data: data, encoding: .utf8) ?? ""
+
+                if process.terminationStatus == 0 {
+                    continuation.resume(returning: output)
+                } else {
+                    continuation.resume(throwing: WorktreeError.commandFailed(output))
                 }
+            } catch {
+                continuation.resume(throwing: error)
             }
-        } catch {
-            // Fall through
         }
-        return nil
+    }
+
+    func getGitHubCompareURL(branch: String, in repoURL: URL, base: String = "main") async throws -> URL? {
+        return try await withCheckedThrowingContinuation { continuation in
+            let process = Process()
+            let pipe = Pipe()
+
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            process.arguments = ["remote", "get-url", "origin"]
+            process.currentDirectoryURL = repoURL
+            process.standardOutput = pipe
+            process.standardError = FileHandle.nullDevice
+
+            do {
+                try process.run()
+                process.waitUntilExit()
+
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let remoteURL = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+                var repoPath: String?
+                if remoteURL.hasPrefix("git@github.com:") {
+                    repoPath = String(remoteURL.dropFirst("git@github.com:".count)).replacingOccurrences(of: ".git", with: "")
+                } else if remoteURL.contains("github.com") {
+                    if let range = remoteURL.range(of: "github.com/") {
+                        repoPath = String(remoteURL[range.upperBound...]).replacingOccurrences(of: ".git", with: "")
+                    }
+                }
+
+                if let path = repoPath {
+                    let url = URL(string: "https://github.com/\(path)/compare/\(base)...\(branch)")
+                    continuation.resume(returning: url)
+                } else {
+                    continuation.resume(returning: nil)
+                }
+            } catch {
+                continuation.resume(throwing: error)
+            }
+        }
     }
 
     private func runLfpr(_ args: [String], in directory: URL) async throws -> String {
-        guard let lfprURL = findLfpr() else {
+        guard let lfprURL = findCommand("lfpr") else {
             throw WorktreeError.commandFailed("lfpr not found. Install loopflow.")
         }
 
@@ -145,7 +192,7 @@ struct WorktreeService {
     }
 
     private func run(_ args: [String], in directory: URL) async throws -> String {
-        guard let wtURL = findWt() else {
+        guard let wtURL = findCommand("wt") else {
             throw WorktreeError.wtNotInstalled
         }
 

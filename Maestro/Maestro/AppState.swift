@@ -138,17 +138,11 @@ final class AppState {
         eventService = LFDEventService()
 
         Task {
-            try? await eventService?.subscribe(to: ["worktree.*"]) { [weak self] event in
+            try? await eventService?.subscribe(to: ["worktree.*"]) { [weak self] _ in
                 Task { @MainActor in
-                    self?.handleWorktreeEvent(event)
+                    await self?.refreshWorktrees()
                 }
             }
-        }
-    }
-
-    private func handleWorktreeEvent(_ event: WorktreeEvent) {
-        Task {
-            await refreshWorktrees()
         }
     }
 

@@ -87,42 +87,21 @@ struct WorktreeService {
     }
 
     func getDiff(for branch: String, in repoURL: URL, base: String = "main") async throws -> String {
-        return try await withCheckedThrowingContinuation { continuation in
-            let process = Process()
-            let pipe = Pipe()
-
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-            process.arguments = ["diff", "\(base)...\(branch)"]
-            process.currentDirectoryURL = repoURL
-            process.standardOutput = pipe
-            process.standardError = pipe
-
-            do {
-                try process.run()
-                process.waitUntilExit()
-
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                let output = String(data: data, encoding: .utf8) ?? ""
-
-                if process.terminationStatus == 0 {
-                    continuation.resume(returning: output.isEmpty ? "No changes" : output)
-                } else {
-                    continuation.resume(throwing: WorktreeError.commandFailed(output))
-                }
-            } catch {
-                continuation.resume(throwing: error)
-            }
-        }
+        try await runGit(["diff", "\(base)...\(branch)"], in: repoURL, emptyMessage: "No changes")
     }
 
     func getDiffBetween(branchA: String, branchB: String, in repoURL: URL) async throws -> String {
+        try await runGit(["diff", "\(branchA)...\(branchB)"], in: repoURL, emptyMessage: "No differences")
+    }
+
+    private func runGit(_ args: [String], in directory: URL, emptyMessage: String) async throws -> String {
         return try await withCheckedThrowingContinuation { continuation in
             let process = Process()
             let pipe = Pipe()
 
             process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-            process.arguments = ["diff", "\(branchA)...\(branchB)"]
-            process.currentDirectoryURL = repoURL
+            process.arguments = args
+            process.currentDirectoryURL = directory
             process.standardOutput = pipe
             process.standardError = pipe
 
@@ -134,7 +113,7 @@ struct WorktreeService {
                 let output = String(data: data, encoding: .utf8) ?? ""
 
                 if process.terminationStatus == 0 {
-                    continuation.resume(returning: output.isEmpty ? "No differences" : output)
+                    continuation.resume(returning: output.isEmpty ? emptyMessage : output)
                 } else {
                     continuation.resume(throwing: WorktreeError.commandFailed(output))
                 }

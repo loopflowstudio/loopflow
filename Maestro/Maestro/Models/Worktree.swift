@@ -19,7 +19,7 @@ enum PRState: String, Codable {
     }
 }
 
-struct Worktree: Identifiable, Hashable {
+struct Worktree: Identifiable, Hashable, Codable {
     var id: String { branch }
 
     let path: String
@@ -37,6 +37,12 @@ struct Worktree: Identifiable, Hashable {
     let isRebasing: Bool
     let isMerging: Bool
     var recentTasks: [TaskSession] = []
+
+    enum CodingKeys: String, CodingKey {
+        case path, branch, baseBranch, isDirty, aheadMain, behindMain
+        case aheadRemote, behindRemote, prURL, prNumber, prState
+        case hasCodeWorkspace, isRebasing, isMerging, recentTasks
+    }
 
     var statusText: String {
         if isDirty {

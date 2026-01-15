@@ -6,7 +6,6 @@ struct AgentWindow: View {
     @State private var agents: [Agent] = []
     @State private var selectedAgent: Agent?
     @State private var showingNewAgent = false
-    @State private var isLoading = false
     @State private var errorMessage: String?
 
     private let agentService = AgentService()
@@ -61,7 +60,6 @@ struct AgentWindow: View {
     }
 
     private func refresh() async {
-        isLoading = true
         do {
             agents = try await agentService.list()
             // Update selection if still valid
@@ -71,7 +69,6 @@ struct AgentWindow: View {
         } catch {
             errorMessage = error.localizedDescription
         }
-        isLoading = false
     }
 
     private func create(name: String, emoji: String, repo: URL) async {

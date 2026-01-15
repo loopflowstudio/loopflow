@@ -251,7 +251,7 @@ final class AppState {
         }
 
         if !promptArgs.isEmpty {
-            parts.append(promptArgs)
+            parts.append(shellEscape(promptArgs))
         }
 
         if runMode == .interactive {
@@ -334,5 +334,21 @@ final class AppState {
             let isDir = (try? item.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
             return isDir
         }
+    }
+
+    private func shellEscape(_ string: String) -> String {
+        // If string contains any shell metacharacters, wrap in single quotes
+        // and escape any single quotes within
+        let needsQuoting = string.contains { char in
+            " \t\n'\"\\$`!*?[]{}()<>|&;#~".contains(char)
+        }
+
+        if needsQuoting {
+            // Use single quotes, escaping embedded single quotes as '\''
+            let escaped = string.replacingOccurrences(of: "'", with: "'\\''")
+            return "'\(escaped)'"
+        }
+
+        return string
     }
 }

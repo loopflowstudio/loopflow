@@ -1,6 +1,8 @@
 agent_model: claude:opus
 yolo: true
-context: "docs"
+context:
+  - docs
+  - .design
 exclude: "uv.lock"
 push: true
 

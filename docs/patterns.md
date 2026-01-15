@@ -178,20 +178,19 @@ wt remove feature-a      # remove a worktree + branch
 Open a PR from a worktree:
 
 ```bash
-lf ops pr create             # opens PR on GitHub
+lfops pr create              # opens PR on GitHub
 ```
 
 Land a PR (squash-merge to main):
 
 ```bash
-lf ops pr land               # merges and cleans up
-lf ops pr land -a            # auto-merge when checks pass
+lfops land                   # merges and cleans up
 ```
 
 Land locally (no PR required):
 
 ```bash
-lf ops land                  # squash + merge via worktrunk
+lfops land --local           # squash + merge locally (no PR)
 ```
 
 ## Commit message generation

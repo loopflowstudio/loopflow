@@ -208,9 +208,9 @@ Priority: CLI > frontmatter > config > none.
 | `lfwt list` | Show all worktrees with status |
 | `lfwt diff <branch>` | Show diff for a worktree |
 | `lfwt compare a b` | Compare two worktree implementations |
-| `lfpr create` | Open GitHub PR |
-| `lfpr land` | Squash-merge to main |
-| `lfpr commit [-p]` | Generate commit message and commit |
+| `lfops pr create` | Open GitHub PR |
+| `lfops land` | Squash-merge to main |
+| `lfops commit [-p]` | Generate commit message and commit |
 | `lfops init` | Initialize repo with prompts and config |
 | `lfops install` | Install Claude Code, Codex, Gemini CLI |
 | `lfops doctor` | Check dependencies |

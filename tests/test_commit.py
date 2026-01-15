@@ -1,11 +1,11 @@
-"""Tests for lfpr commit command."""
+"""Tests for lfops commit command."""
 
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from typer.testing import CliRunner
 
-from loopflow.lfpr import app
+from loopflow.lfops import app
 
 
 runner = CliRunner()
@@ -43,7 +43,7 @@ def _git_mock(status_output="", has_staged=False, commit_ok=True, push_ok=True):
 
 def test_commit_with_no_changes():
     """commit exits cleanly when there's nothing to commit."""
-    with patch("loopflow.lfpr.find_worktree_root", return_value=Path("/fake/repo")):
+    with patch("loopflow.lfops.find_worktree_root", return_value=Path("/fake/repo")):
         with patch("subprocess.run", side_effect=_git_mock(status_output="")):
             result = runner.invoke(app, ["commit"])
 
@@ -53,9 +53,9 @@ def test_commit_with_no_changes():
 
 def test_commit_with_changes():
     """commit generates message and commits when there are changes."""
-    with patch("loopflow.lfpr.find_worktree_root", return_value=Path("/fake/repo")):
+    with patch("loopflow.lfops.find_worktree_root", return_value=Path("/fake/repo")):
         with patch("subprocess.run", side_effect=_git_mock(status_output="M README.md\n", has_staged=True)):
-            with patch("loopflow.lfpr.generate_commit_message") as mock_gen:
+            with patch("loopflow.lfops.generate_commit_message") as mock_gen:
                 mock_gen.return_value = MagicMock(title="fix: typo", body="Fixed typo")
 
                 result = runner.invoke(app, ["commit"])
@@ -66,10 +66,10 @@ def test_commit_with_changes():
 
 def test_commit_with_push_includes_push_output():
     """commit --push pushes and reports success."""
-    with patch("loopflow.lfpr.find_worktree_root", return_value=Path("/fake/repo")):
-        with patch("loopflow.lfpr.has_upstream", return_value=True):
+    with patch("loopflow.lfops.find_worktree_root", return_value=Path("/fake/repo")):
+        with patch("loopflow.lfops.has_upstream", return_value=True):
             with patch("subprocess.run", side_effect=_git_mock(status_output="M file.py\n", has_staged=True)):
-                with patch("loopflow.lfpr.generate_commit_message") as mock_gen:
+                with patch("loopflow.lfops.generate_commit_message") as mock_gen:
                     mock_gen.return_value = MagicMock(title="fix: bug", body=None)
 
                     result = runner.invoke(app, ["commit", "--push"])

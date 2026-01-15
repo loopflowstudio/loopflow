@@ -1,4 +1,5 @@
 """Publishing utilities for loopflow releases."""
+import os
 import re
 import subprocess
 import sys
@@ -8,6 +9,10 @@ from pathlib import Path
 
 class PublishError(Exception):
     """Publishing operation failed."""
+
+
+# R2 configuration
+R2_PUBLIC_URL = "https://downloads.loopflow.studio"
 
 
 @dataclass
@@ -151,6 +156,93 @@ def install_locally(repo_root: Path | None = None) -> tuple[bool, str]:
     success = result.returncode == 0
     output = result.stdout + result.stderr
     return success, output
+
+
+# DMG publishing functions
+
+
+def build_dmg(repo_root: Path | None = None) -> tuple[bool, str]:
+    """Build Maestro DMG. Returns (success, output)."""
+    cwd = repo_root or Path.cwd()
+    maestro_dir = cwd / "Maestro"
+
+    if not maestro_dir.exists():
+        return False, f"Maestro directory not found: {maestro_dir}"
+
+    result = _run(["./dev", "release"], cwd=maestro_dir)
+    success = result.returncode == 0
+    output = result.stdout + result.stderr
+    return success, output
+
+
+def get_dmg_path(repo_root: Path | None = None) -> Path:
+    """Get path to built DMG."""
+    cwd = repo_root or Path.cwd()
+    return cwd / "Maestro" / "dist" / "LoopflowMaestro.dmg"
+
+
+def _get_r2_client():
+    """Create boto3 S3 client configured for Cloudflare R2."""
+    try:
+        import boto3
+    except ImportError:
+        raise PublishError("boto3 required for DMG upload: pip install boto3")
+
+    account_id = os.environ.get("R2_ACCOUNT_ID")
+    access_key = os.environ.get("R2_ACCESS_KEY_ID")
+    secret_key = os.environ.get("R2_SECRET_ACCESS_KEY")
+
+    if not all([account_id, access_key, secret_key]):
+        raise PublishError(
+            "R2 credentials not set. Required environment variables:\n"
+            "  R2_ACCOUNT_ID\n"
+            "  R2_ACCESS_KEY_ID\n"
+            "  R2_SECRET_ACCESS_KEY"
+        )
+
+    return boto3.client(
+        "s3",
+        endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+    )
+
+
+def upload_dmg(dmg_path: Path, version: str) -> tuple[bool, str]:
+    """Upload DMG to Cloudflare R2. Returns (success, output)."""
+    bucket = os.environ.get("R2_BUCKET_NAME", "loopflow-downloads")
+
+    if not dmg_path.exists():
+        return False, f"DMG not found: {dmg_path}"
+
+    try:
+        client = _get_r2_client()
+    except PublishError as e:
+        return False, str(e)
+
+    versioned_key = f"LoopflowMaestro-{version}.dmg"
+    latest_key = "LoopflowMaestro-latest.dmg"
+
+    try:
+        # Upload versioned file
+        client.upload_file(
+            str(dmg_path),
+            bucket,
+            versioned_key,
+            ExtraArgs={"ContentType": "application/x-apple-diskimage"},
+        )
+
+        # Upload as latest
+        client.upload_file(
+            str(dmg_path),
+            bucket,
+            latest_key,
+            ExtraArgs={"ContentType": "application/x-apple-diskimage"},
+        )
+
+        return True, f"Uploaded to {R2_PUBLIC_URL}/{versioned_key} and {R2_PUBLIC_URL}/{latest_key}"
+    except Exception as e:
+        return False, f"Upload failed: {e}"
 
 
 def main() -> int:

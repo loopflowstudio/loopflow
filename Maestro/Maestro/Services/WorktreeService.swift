@@ -115,6 +115,35 @@ struct WorktreeService {
         }
     }
 
+    func getDiffBetween(branchA: String, branchB: String, in repoURL: URL) async throws -> String {
+        return try await withCheckedThrowingContinuation { continuation in
+            let process = Process()
+            let pipe = Pipe()
+
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            process.arguments = ["diff", "\(branchA)...\(branchB)"]
+            process.currentDirectoryURL = repoURL
+            process.standardOutput = pipe
+            process.standardError = pipe
+
+            do {
+                try process.run()
+                process.waitUntilExit()
+
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: data, encoding: .utf8) ?? ""
+
+                if process.terminationStatus == 0 {
+                    continuation.resume(returning: output.isEmpty ? "No differences" : output)
+                } else {
+                    continuation.resume(throwing: WorktreeError.commandFailed(output))
+                }
+            } catch {
+                continuation.resume(throwing: error)
+            }
+        }
+    }
+
     func getGitHubCompareURL(branch: String, in repoURL: URL, base: String = "main") async throws -> URL? {
         return try await withCheckedThrowingContinuation { continuation in
             let process = Process()

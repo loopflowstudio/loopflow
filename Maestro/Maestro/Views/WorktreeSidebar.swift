@@ -13,6 +13,10 @@ struct WorktreeSidebar: View {
     @State private var diffWorktree: Worktree?
     @State private var diffContent: String?
     @State private var diffLoading = false
+    @State private var showingCompareSheet = false
+    @State private var compareWorktrees: (Worktree, Worktree)?
+    @State private var compareContent: String?
+    @State private var compareLoading = false
 
     private let terminalLauncher = TerminalLauncher()
 
@@ -75,6 +79,16 @@ struct WorktreeSidebar: View {
                 )
             }
         }
+        .sheet(isPresented: $showingCompareSheet) {
+            if let (worktreeA, worktreeB) = compareWorktrees {
+                CompareSheet(
+                    worktreeA: worktreeA,
+                    worktreeB: worktreeB,
+                    diffContent: compareContent,
+                    isLoading: compareLoading
+                )
+            }
+        }
     }
 
     private func viewDiff(_ worktree: Worktree) {
@@ -96,6 +110,32 @@ struct WorktreeSidebar: View {
                 diffContent = "Error loading diff: \(error.localizedDescription)"
             }
             diffLoading = false
+        }
+    }
+
+    private func compareWith(_ worktreeA: Worktree, _ worktreeB: Worktree) {
+        compareWorktrees = (worktreeA, worktreeB)
+        compareContent = nil
+        compareLoading = true
+        showingCompareSheet = true
+
+        Task {
+            guard let repoURL = appState.currentRepo else {
+                compareLoading = false
+                return
+            }
+            let service = WorktreeService()
+            do {
+                let diff = try await service.getDiffBetween(
+                    branchA: worktreeA.branch,
+                    branchB: worktreeB.branch,
+                    in: repoURL
+                )
+                compareContent = diff
+            } catch {
+                compareContent = "Error loading diff: \(error.localizedDescription)"
+            }
+            compareLoading = false
         }
     }
 
@@ -141,6 +181,7 @@ struct WorktreeSidebar: View {
                         isSelected: appState.selectedWorktree?.id == worktree.id,
                         terminalName: terminalDisplayName,
                         ideName: ideDisplayName,
+                        otherWorktrees: appState.worktrees.filter { $0.id != worktree.id },
                         onSelect: {
                             appState.selectedWorktree = worktree
                         },
@@ -158,6 +199,9 @@ struct WorktreeSidebar: View {
                         },
                         onViewDiff: {
                             viewDiff(worktree)
+                        },
+                        onCompareWith: { other in
+                            compareWith(worktree, other)
                         },
                         onCreatePR: {
                             Task {
@@ -359,12 +403,14 @@ struct WorktreeRow: View {
     let isSelected: Bool
     let terminalName: String
     let ideName: String
+    let otherWorktrees: [Worktree]
     let onSelect: () -> Void
     let onDoubleClick: () -> Void
     let onOpenTerminal: () -> Void
     let onOpenIDE: () -> Void
     let onOpenFinder: () -> Void
     let onViewDiff: () -> Void
+    let onCompareWith: (Worktree) -> Void
     let onCreatePR: () -> Void
     let onViewPR: () -> Void
     let onLandPR: () -> Void
@@ -422,6 +468,22 @@ struct WorktreeRow: View {
             }
             Button("Reveal in Finder") {
                 onOpenFinder()
+            }
+
+            Divider()
+
+            Button("View Diff") {
+                onViewDiff()
+            }
+
+            if !otherWorktrees.isEmpty {
+                Menu("Compare with...") {
+                    ForEach(otherWorktrees) { other in
+                        Button(other.branch) {
+                            onCompareWith(other)
+                        }
+                    }
+                }
             }
 
             Divider()
@@ -728,6 +790,66 @@ struct DiffContentView: View {
             return .red.opacity(0.1)
         }
         return .clear
+    }
+}
+
+struct CompareSheet: View {
+    let worktreeA: Worktree
+    let worktreeB: Worktree
+    let diffContent: String?
+    let isLoading: Bool
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(worktreeA.branch) vs \(worktreeB.branch)")
+                        .font(.headline)
+                    Text("Comparison")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding()
+
+            Divider()
+
+            // Content
+            if isLoading {
+                VStack {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                    Text("Loading comparison...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let content = diffContent {
+                ScrollView {
+                    DiffContentView(content: content)
+                        .padding()
+                }
+            } else {
+                Text("No differences")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .frame(minWidth: 600, minHeight: 400)
+        .frame(idealWidth: 800, idealHeight: 600)
     }
 }
 

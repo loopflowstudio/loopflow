@@ -145,31 +145,6 @@ task execution. If daemon is down, sessions aren't logged but tasks still run.
 - Sync fire-and-forget: `log_session_start()`, `log_session_end()` for lf runner
 ```
 
-### src/loopflow/maestro/README.md
-
-```markdown
-# maestro — Python Agent Support
-
-Agent execution and state management. Called by lfd when running agents.
-
-## Relationship to lfd
-
-- lfd owns the daemon process and socket server
-- maestro provides AgentRunner, triggers, and collector logic
-- lfd imports from maestro to run agents
-
-## Relationship to Swift Maestro
-
-The Swift app (Maestro/) is the UI. This Python module is backend support.
-They share the lfd.db database but don't communicate directly.
-
-## Session Model Note
-
-This module has its own Session dataclass for backwards compatibility.
-The canonical Session is in loopflow.lfd.models. Don't create new code
-using loopflow.maestro.session.Session.
-```
-
 ### Maestro/README.md
 
 ```markdown
@@ -339,6 +314,10 @@ Distill from .research/maestro-vision.md:
 2. **Keep `.research/` internal** — Distill for public docs, don't copy wholesale
 3. **User-facing first** — API docs are secondary to "how do I use this"
 4. **Match existing tone** — Follow STYLE.md, no Args:/Returns: docstrings
+
+## Out of Scope (flag for follow-up)
+
+**Consolidate `loopflow/maestro` into `loopflow/lfd`** — The `maestro` Python module duplicates lfd structure (agents, db, triggers, launchd). "Maestro" should only refer to the Swift app. This is code reorganization, not docs work.
 
 ## Done When
 

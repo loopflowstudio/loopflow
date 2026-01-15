@@ -3,6 +3,7 @@
 // and runtime state from ~/.lf/maestro.db
 
 import Foundation
+import SwiftUI
 
 enum AgentStatus: String, Codable {
     case idle
@@ -11,6 +12,17 @@ enum AgentStatus: String, Codable {
     case completed
     case error
     case stopped
+
+    var color: Color {
+        switch self {
+        case .running: return .green
+        case .waiting: return .blue
+        case .idle: return .gray
+        case .completed: return .green
+        case .error: return .red
+        case .stopped: return .orange
+        }
+    }
 }
 
 enum TriggerKind: String, Codable, CaseIterable {

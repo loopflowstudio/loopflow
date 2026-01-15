@@ -62,18 +62,7 @@ struct AgentSidebar: View {
 
     private func statusDot(_ status: AgentStatus) -> some View {
         Circle()
-            .fill(colorForStatus(status))
+            .fill(status.color)
             .frame(width: 6, height: 6)
-    }
-
-    private func colorForStatus(_ status: AgentStatus) -> Color {
-        switch status {
-        case .running: return .green
-        case .waiting: return .blue
-        case .idle: return .gray
-        case .completed: return .green
-        case .error: return .red
-        case .stopped: return .orange
-        }
     }
 }

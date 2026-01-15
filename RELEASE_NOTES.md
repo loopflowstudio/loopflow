@@ -1,10 +1,15 @@
-# v0.5.2
+# v0.6.0
 
-Adds the `lf cp` command for copying file context to clipboard, bundles task templates in the package, and improves the onboarding experience with better dependency checking.
+Adds the lfd daemon for background agent orchestration, voices for reusable personas, and a redesigned CLI with separate commands for worktree and PR operations.
 
 ## Changes
 
-- Add `lf cp` command to copy file context to clipboard
-- Bundle task templates in package for `lf ops init`
-- Improve `lf ops init` with dependency checking
-- Add YAML frontmatter support for task file configuration
+- Add `lfd` daemon for session tracking and background agent orchestration
+- Add voices: reusable personas that shape agent responses
+- Split CLI into `lf`, `lfwt`, `lfops` commands for clearer separation
+- Add `diff_files` context source: load full content of files changed on branch (now default)
+- Add `lfops land --local` for squash-merging without a PR
+- Add `lfops recover` command for worktree recovery
+- Add `wtdoctor` to detect and fix squash-merged worktrees
+- Improve `lfops land` reliability with better merge verification and cleanup
+- Add Maestro UI enhancements: context chips, file drops, live worktree updates

@@ -1,11 +1,8 @@
-# v0.6.1
+# v0.6.2
 
-This patch release adds automated PyPI publishing capabilities and improves the publishing workflow. The new `lfops publish` command streamlines package releases with automatic release notes generation.
+This release adds automated PyPI publishing capabilities to streamline the package release process. The new publishing workflow includes automatic generation of release notes, making it easier to maintain and distribute updates.
 
 ## Changes
 
-- Add `lfops publish` command for automated PyPI releases
-- Generate release notes automatically using LLM during publishing
-- Add dedicated publishing script with PyPI integration
-- Fix worktree deletion issue in `lfops land` command
-- Improve PyPI documentation and publishing workflow
+- Add automated PyPI publishing workflow for streamlined releases
+- Include automatic release notes generation in publishing process

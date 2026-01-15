@@ -84,6 +84,133 @@ docs/
 └── vision.md             # NEW: philosophy distilled from .research/
 ```
 
+## Internal Module READMEs (developer-facing)
+
+Per STYLE.md: "Put documentation next to code."
+
+### src/loopflow/lfd/README.md
+
+```markdown
+# lfd — Loopflow Daemon
+
+Background service for session tracking and agent orchestration.
+
+## Database
+
+SQLite at `~/.lf/lfd.db` (WAL mode).
+
+### sessions table
+| Column | Type | Description |
+|--------|------|-------------|
+| id | TEXT PK | UUID |
+| task | TEXT | Task name (design, implement, etc.) |
+| repo | TEXT | Repository path |
+| worktree | TEXT | Worktree path |
+| status | TEXT | running, waiting, completed, error |
+| started_at | TEXT | ISO8601 |
+| ended_at | TEXT | ISO8601 or NULL |
+| pid | INTEGER | Process ID |
+| model | TEXT | claude-code, codex, etc. |
+| run_mode | TEXT | auto or interactive |
+
+### agent_runs table
+| Column | Type | Description |
+|--------|------|-------------|
+| id | TEXT PK | UUID |
+| agent_name | TEXT | Agent definition name |
+| status | TEXT | idle, running, waiting, error, stopped |
+| started_at | TEXT | ISO8601 |
+| ended_at | TEXT | ISO8601 or NULL |
+| pid | INTEGER | Process ID |
+| worktree | TEXT | Current worktree path |
+| iteration | INTEGER | Run count |
+| error | TEXT | Error message or NULL |
+| main_sha | TEXT | Main branch SHA at start |
+
+## Protocol
+
+JSON-over-newline on Unix socket at `~/.lf/lfd.sock`.
+
+See protocol.py for Request/Response/Event dataclasses.
+
+## Fire-and-Forget Pattern
+
+Session logging uses `_send_fire_and_forget()` — synchronous socket with
+0.5s timeout, fails silently. This prevents lfd availability from blocking
+task execution. If daemon is down, sessions aren't logged but tasks still run.
+
+## Client Patterns
+
+- Async client: `DaemonClient` for CLI/tests (connect, call, subscribe)
+- Sync fire-and-forget: `log_session_start()`, `log_session_end()` for lf runner
+```
+
+### src/loopflow/maestro/README.md
+
+```markdown
+# maestro — Python Agent Support
+
+Agent execution and state management. Called by lfd when running agents.
+
+## Relationship to lfd
+
+- lfd owns the daemon process and socket server
+- maestro provides AgentRunner, triggers, and collector logic
+- lfd imports from maestro to run agents
+
+## Relationship to Swift Maestro
+
+The Swift app (Maestro/) is the UI. This Python module is backend support.
+They share the lfd.db database but don't communicate directly.
+
+## Session Model Note
+
+This module has its own Session dataclass for backwards compatibility.
+The canonical Session is in loopflow.lfd.models. Don't create new code
+using loopflow.maestro.session.Session.
+```
+
+### Maestro/README.md
+
+```markdown
+# Maestro — macOS App
+
+Visual interface for loopflow. SwiftUI, requires macOS 15+.
+
+## Architecture
+
+- AppState.swift — Central observable state
+- Services/ — Data loading, no UI
+- Views/ — SwiftUI views
+- Models/ — Swift structs mirroring Python dataclasses
+
+## Communication with lfd
+
+Two patterns, intentionally different:
+
+1. **Direct DB reads** (SessionService.swift)
+   - Reads ~/.lf/lfd.db directly via SQLite
+   - Used for history queries
+   - Works even if daemon isn't running
+   - Simpler than socket for read-only data
+
+2. **Socket subscription** (LFDEventService.swift)
+   - Connects to ~/.lf/lfd.sock
+   - Subscribes to events (session.*, agent.*, worktree.*)
+   - Used for live UI updates
+   - Reconnects on failure
+
+## Why Both?
+
+Direct DB reads mean Maestro can show history even if lfd crashed.
+Socket events provide real-time updates without polling.
+
+## Build
+
+Open Maestro.xcodeproj in Xcode, build and run.
+Distribution build: Archive → export as App.
+```
+
 ### docs/maestro.md structure
 
 ```markdown

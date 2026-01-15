@@ -8,7 +8,7 @@ Adds diff viewing and worktree comparison to Maestro's sidebar.
 
 Clean implementation. The code adds useful features without over-engineering:
 
-- `getDiff` and `getDiffBetween` for fetching git diffs
+- `getDiff` for fetching git diffs (handles both single-branch and comparison cases)
 - `getGitHubCompareURL` for opening comparisons in browser
 - `DiffSheet` and `CompareSheet` modals with syntax-highlighted rendering
 - Context menu integration for "Compare with..." submenu

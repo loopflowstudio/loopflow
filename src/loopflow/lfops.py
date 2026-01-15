@@ -28,7 +28,7 @@ from loopflow.maestro.db import (
     update_session_status,
 )
 from loopflow.maestro.session import SessionStatus
-from loopflow.worktrees import get_path, remove
+from loopflow.worktrees import get_path
 
 app = typer.Typer(help="Loopflow operations")
 
@@ -672,6 +672,82 @@ def _get_diff(repo_root: Path, base_ref: str) -> str:
     return result.stdout if result.returncode == 0 else ""
 
 
+def _clear_design_and_push(repo_root: Path) -> bool:
+    """Delete .design/* contents, commit, push. Returns True if changes made."""
+    design_dir = repo_root / ".design"
+    if not design_dir.exists():
+        return False
+
+    files = list(design_dir.glob("*"))
+    if not files:
+        return False
+
+    for f in files:
+        if f.is_file():
+            f.unlink()
+        else:
+            shutil.rmtree(f)
+
+    subprocess.run(["git", "add", "-A", str(design_dir)], cwd=repo_root, check=True)
+    subprocess.run(["git", "commit", "-m", "clear .design/"], cwd=repo_root, check=True)
+    subprocess.run(["git", "push"], cwd=repo_root, check=True)
+    return True
+
+
+def _sync_main_repo(main_repo: Path, base_branch: str) -> None:
+    """Sync main repo to latest. Handles checkout gracefully."""
+    result = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=main_repo,
+        capture_output=True,
+        text=True,
+    )
+    current = result.stdout.strip()
+
+    subprocess.run(["git", "fetch", "origin", base_branch], cwd=main_repo, check=True)
+
+    if current == base_branch:
+        subprocess.run(["git", "pull", "--ff-only"], cwd=main_repo, check=True)
+    else:
+        result = subprocess.run(
+            ["git", "checkout", base_branch],
+            cwd=main_repo,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            typer.echo(f"Note: Could not checkout {base_branch} in main repo")
+            typer.echo(f"  {result.stderr.strip()}")
+            typer.echo(f"Run 'cd {main_repo} && git checkout {base_branch}' manually")
+            return
+        subprocess.run(["git", "pull", "--ff-only"], cwd=main_repo, check=True)
+
+
+def _remove_worktree(main_repo: Path, branch: str, worktree_path: Path) -> None:
+    """Remove worktree and branch. Uses wt for events, falls back to git if needed."""
+    # Try wt first (emits events for Maestro)
+    result = subprocess.run(
+        ["wt", "-C", str(main_repo), "remove", branch],
+        cwd=main_repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        return
+
+    # wt failed - fall back to git directly (handles "main already used" errors)
+    subprocess.run(
+        ["git", "worktree", "remove", "--force", str(worktree_path)],
+        cwd=main_repo,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "branch", "-D", branch],
+        cwd=main_repo,
+        capture_output=True,
+    )
+
+
 def _squash_commits(repo_root: Path, base_ref: str, commit_msg: str) -> None:
     original_head = subprocess.run(
         ["git", "rev-parse", "HEAD"],
@@ -934,6 +1010,10 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
         typer.echo(f"Error: Cannot land {branch} onto itself", err=True)
         raise typer.Exit(1)
 
+    # Clear .design before merge so it never touches main
+    if _clear_design_and_push(repo_root):
+        typer.echo("Cleared .design/")
+
     # Use gh pr merge to squash-merge on GitHub (marks PR as merged, not closed)
     typer.echo(f"Merging PR: {title}")
     merge_cmd = ["gh", "pr", "merge", branch, "--squash", "--delete-branch", "--subject", title]
@@ -960,19 +1040,13 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
             typer.echo("The PR may have been closed without merging. Check GitHub.", err=True)
             raise typer.Exit(1)
 
-    # Clear .design artifacts in main repo
-    if clear_design_artifacts(main_repo):
-        typer.echo("Removed .design contents")
-
     # Sync main repo to get the merged changes
-    subprocess.run(["git", "fetch", "origin", base_branch], cwd=main_repo, check=True)
-    subprocess.run(["git", "checkout", base_branch], cwd=main_repo, check=True)
-    subprocess.run(["git", "pull", "--ff-only"], cwd=main_repo, check=True)
+    _sync_main_repo(main_repo, base_branch)
 
     # Clean up worktree or local branch
     was_in_worktree = repo_root != main_repo
     if was_in_worktree:
-        remove(main_repo, branch)
+        _remove_worktree(main_repo, branch, repo_root)
     else:
         # Delete local branch when landing from main repo (we're now on base_branch)
         subprocess.run(["git", "branch", "-D", branch], cwd=main_repo, capture_output=True)
@@ -1060,7 +1134,26 @@ def _land_local(strict: bool, worktree: str | None) -> None:
 
     # Checkout and reset main to origin
     typer.echo(f"Checking out {base_branch}...")
-    subprocess.run(["git", "checkout", base_branch], cwd=main_repo, check=True)
+    result = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=main_repo,
+        capture_output=True,
+        text=True,
+    )
+    current_branch = result.stdout.strip()
+
+    if current_branch != base_branch:
+        result = subprocess.run(
+            ["git", "checkout", base_branch],
+            cwd=main_repo,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            typer.echo(f"Error: Could not checkout {base_branch} in main repo", err=True)
+            typer.echo(f"  {result.stderr.strip()}", err=True)
+            raise typer.Exit(1)
+
     subprocess.run(["git", "reset", "--hard", f"origin/{base_branch}"], cwd=main_repo, check=True)
 
     # Fetch and merge the branch
@@ -1122,7 +1215,7 @@ def _land_local(strict: bool, worktree: str | None) -> None:
     # Clean up worktree/branch
     was_in_worktree = repo_root != main_repo
     if was_in_worktree:
-        remove(main_repo, branch)
+        _remove_worktree(main_repo, branch, repo_root)
     else:
         subprocess.run(["git", "branch", "-D", branch], cwd=main_repo, check=True)
 

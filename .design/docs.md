@@ -23,7 +23,18 @@ Documentation refresh and code consolidation: added public docs for Maestro, lfd
 
 - All 312 Python tests pass
 - Swift build succeeds
-- Working tree is clean
+
+## Expansion: Output Streaming
+
+Added `output.line` event for live task output streaming. See `.design/output-streaming.md` for details.
+
+**What's implemented:**
+- `server.py`: `output.line` handler broadcasts to subscribers
+- `collector.py`: Streams each formatted line via fire-and-forget
+- `api.md`: Documented new method and event
+
+**What's left:**
+- Maestro Swift UI to display streaming output
 
 ## Design notes
 

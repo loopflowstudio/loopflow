@@ -277,6 +277,25 @@ Broadcast a custom event to subscribers.
 }
 ```
 
+### output.line
+
+Stream a line of task output to subscribers. Used internally by the collector.
+
+**Request:**
+```json
+{"method": "output.line", "params": {"session_id": "uuid", "text": "→ Read: src/config.py"}}
+```
+
+**Response:**
+```json
+{
+  "ok": true,
+  "result": {}
+}
+```
+
+This broadcasts an `output.line` event to all subscribers.
+
 ## Events
 
 Events are broadcast to subscribed clients.
@@ -285,6 +304,7 @@ Events are broadcast to subscribed clients.
 |-------|------|-------------|
 | `session.started` | `{id, task}` | Task session began |
 | `session.ended` | `{id, status}` | Task session completed |
+| `output.line` | `{session_id, text, timestamp}` | Live output line from running task |
 | `agent.started` | `{name, pid}` | Agent started running |
 | `agent.stopped` | `{name}` | Agent stopped |
 | `worktree.created` | `{branch, path}` | New worktree created |

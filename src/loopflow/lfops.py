@@ -59,6 +59,15 @@ class SetupStatus:
         return missing
 
 
+@dataclass
+class Issue:
+    """A repository inconsistency that can be fixed."""
+
+    kind: str
+    description: str
+    fix_cmd: str
+
+
 def _check_setup() -> SetupStatus:
     """Check required dependencies. Fast (no network)."""
     return SetupStatus(
@@ -689,8 +698,8 @@ def _clear_design_and_push(repo_root: Path) -> bool:
     return True
 
 
-def _sync_main_repo(main_repo: Path, base_branch: str) -> None:
-    """Sync main repo to latest. Handles checkout gracefully."""
+def _sync_main_repo(main_repo: Path, base_branch: str) -> bool:
+    """Sync main repo to latest. Returns False if sync failed."""
     result = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
         cwd=main_repo,
@@ -699,10 +708,21 @@ def _sync_main_repo(main_repo: Path, base_branch: str) -> None:
     )
     current = result.stdout.strip()
 
-    subprocess.run(["git", "fetch", "origin", base_branch], cwd=main_repo, check=True)
+    result = subprocess.run(
+        ["git", "fetch", "origin", base_branch],
+        cwd=main_repo,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        return False
 
     if current == base_branch:
-        subprocess.run(["git", "pull", "--ff-only"], cwd=main_repo, check=True)
+        result = subprocess.run(
+            ["git", "pull", "--ff-only"],
+            cwd=main_repo,
+            capture_output=True,
+        )
+        return result.returncode == 0
     else:
         result = subprocess.run(
             ["git", "checkout", base_branch],
@@ -711,11 +731,13 @@ def _sync_main_repo(main_repo: Path, base_branch: str) -> None:
             text=True,
         )
         if result.returncode != 0:
-            typer.echo(f"Note: Could not checkout {base_branch} in main repo")
-            typer.echo(f"  {result.stderr.strip()}")
-            typer.echo(f"Run 'cd {main_repo} && git checkout {base_branch}' manually")
-            return
-        subprocess.run(["git", "pull", "--ff-only"], cwd=main_repo, check=True)
+            return False
+        result = subprocess.run(
+            ["git", "pull", "--ff-only"],
+            cwd=main_repo,
+            capture_output=True,
+        )
+        return result.returncode == 0
 
 
 def _remove_worktree(main_repo: Path, branch: str, worktree_path: Path) -> None:
@@ -1035,15 +1057,20 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
             typer.echo("The PR may have been closed without merging. Check GitHub.", err=True)
             raise typer.Exit(1)
 
-    # Sync main repo to get the merged changes
-    _sync_main_repo(main_repo, base_branch)
+    # Sync main repo to get the merged changes (best-effort after merge)
+    if not _sync_main_repo(main_repo, base_branch):
+        typer.echo(f"Warning: Could not sync {base_branch}. Run manually:", err=True)
+        typer.echo(f"  cd {main_repo} && git fetch origin && git checkout {base_branch} && git pull", err=True)
 
-    # Clean up worktree or local branch
+    # Clean up worktree or local branch (best-effort)
     was_in_worktree = repo_root != main_repo
     if was_in_worktree:
-        _remove_worktree(main_repo, branch, repo_root)
+        try:
+            _remove_worktree(main_repo, branch, repo_root)
+        except Exception:
+            typer.echo(f"Warning: Could not remove worktree. Run manually:", err=True)
+            typer.echo(f"  wt remove {branch}", err=True)
     else:
-        # Delete local branch when landing from main repo (we're now on base_branch)
         subprocess.run(["git", "branch", "-D", branch], cwd=main_repo, capture_output=True)
 
     typer.echo(f"Landed {branch} onto {base_branch}.")
@@ -1207,12 +1234,16 @@ def _land_local(strict: bool, worktree: str | None) -> None:
         capture_output=True,
     )
 
-    # Clean up worktree/branch
+    # Clean up worktree/branch (best-effort after push)
     was_in_worktree = repo_root != main_repo
     if was_in_worktree:
-        _remove_worktree(main_repo, branch, repo_root)
+        try:
+            _remove_worktree(main_repo, branch, repo_root)
+        except Exception:
+            typer.echo(f"Warning: Could not remove worktree. Run manually:", err=True)
+            typer.echo(f"  wt remove {branch}", err=True)
     else:
-        subprocess.run(["git", "branch", "-D", branch], cwd=main_repo, check=True)
+        subprocess.run(["git", "branch", "-D", branch], cwd=main_repo, capture_output=True)
 
     typer.echo(f"Landed {branch} onto {base_branch}.")
 
@@ -1283,6 +1314,184 @@ def commit(
                 raise typer.Exit(1)
         else:
             typer.echo("No upstream branch, skipping push", err=True)
+
+
+def _detect_issues(repo: Path) -> list[Issue]:
+    """Find inconsistencies in repo state."""
+    issues = []
+
+    # Get default branch first (needed for all checks)
+    result = subprocess.run(
+        ["git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    default_branch = result.stdout.strip().split("/")[-1] if result.returncode == 0 else "main"
+
+    # 1. Stale local default branch - check if origin is ahead
+    result = subprocess.run(
+        ["git", "rev-list", f"{default_branch}..origin/{default_branch}", "--count"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        behind = int(result.stdout.strip() or "0")
+        if behind > 0:
+            s = "s" if behind > 1 else ""
+            issues.append(Issue(
+                kind="stale_main",
+                description=f"{default_branch} is {behind} commit{s} behind origin/{default_branch}",
+                fix_cmd=f"git checkout {default_branch} && git pull --ff-only",
+            ))
+
+    # 2. Orphaned local branches - local branch with no remote and no worktree
+    result = subprocess.run(
+        ["git", "branch", "--format=%(refname:short)"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    local_branches = [b.strip() for b in result.stdout.strip().split("\n") if b.strip()]
+
+    # Get worktree branches
+    result = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    worktree_branches = set()
+    for line in result.stdout.split("\n"):
+        if line.startswith("branch refs/heads/"):
+            worktree_branches.add(line.split("/")[-1])
+
+    for branch in local_branches:
+        if branch == default_branch:
+            continue
+        if branch in worktree_branches:
+            continue
+
+        # Check if remote exists
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", f"origin/{branch}"],
+            cwd=repo,
+            capture_output=True,
+        )
+        has_remote = result.returncode == 0
+
+        if not has_remote:
+            # Check if merged into default branch
+            result = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", branch, default_branch],
+                cwd=repo,
+                capture_output=True,
+            )
+            is_merged = result.returncode == 0
+
+            if is_merged:
+                issues.append(Issue(
+                    kind="orphan_branch",
+                    description=f"'{branch}' has no remote and no worktree (merged)",
+                    fix_cmd=f"git branch -D {branch}",
+                ))
+
+    # 3. Orphaned worktrees - git worktree prune --dry-run
+    result = subprocess.run(
+        ["git", "worktree", "prune", "--dry-run"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.stdout.strip():
+        issues.append(Issue(
+            kind="orphan_worktree",
+            description="stale worktree entries in .git/worktrees",
+            fix_cmd="git worktree prune",
+        ))
+
+    # 4. Stale remote refs - git remote prune origin --dry-run
+    result = subprocess.run(
+        ["git", "remote", "prune", "origin", "--dry-run"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.stdout.strip() and "would prune" in result.stdout:
+        # Count prunable refs
+        prune_count = result.stdout.count("would prune")
+        s = "s" if prune_count > 1 else ""
+        issues.append(Issue(
+            kind="stale_ref",
+            description=f"{prune_count} stale remote tracking ref{s}",
+            fix_cmd="git remote prune origin",
+        ))
+
+    return issues
+
+
+def _fix_issue(repo: Path, issue: Issue) -> bool:
+    """Apply fix. Returns True if successful."""
+    if issue.kind == "stale_main":
+        # Parse branch from fix_cmd: "git checkout <branch> && git pull --ff-only"
+        branch = issue.fix_cmd.split()[2]
+        result = subprocess.run(["git", "checkout", branch], cwd=repo, capture_output=True)
+        if result.returncode != 0:
+            return False
+        result = subprocess.run(["git", "pull", "--ff-only"], cwd=repo, capture_output=True)
+        return result.returncode == 0
+
+    elif issue.kind == "orphan_branch":
+        branch = issue.fix_cmd.split()[-1]
+        result = subprocess.run(["git", "branch", "-D", branch], cwd=repo, capture_output=True)
+        return result.returncode == 0
+
+    elif issue.kind == "orphan_worktree":
+        result = subprocess.run(["git", "worktree", "prune"], cwd=repo, capture_output=True)
+        return result.returncode == 0
+
+    elif issue.kind == "stale_ref":
+        result = subprocess.run(["git", "remote", "prune", "origin"], cwd=repo, capture_output=True)
+        return result.returncode == 0
+
+    return False
+
+
+@app.command()
+def recover(
+    fix: bool = typer.Option(False, "--fix", "-f", help="Apply fixes (default: dry-run)"),
+) -> None:
+    """Detect and fix repository inconsistencies."""
+    repo = find_main_repo()
+    if not repo:
+        typer.echo("Error: Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    # Fetch to get latest remote state
+    subprocess.run(["git", "fetch", "origin"], cwd=repo, capture_output=True)
+
+    issues = _detect_issues(repo)
+
+    if not issues:
+        typer.echo("No issues found")
+        raise typer.Exit(0)
+
+    if fix:
+        fixed = 0
+        for issue in issues:
+            typer.echo(f"Fixing {issue.kind}: {issue.description}")
+            if _fix_issue(repo, issue):
+                fixed += 1
+            else:
+                typer.echo(f"  Failed: {issue.fix_cmd}", err=True)
+        typer.echo(f"\nFixed {fixed}/{len(issues)} issues")
+    else:
+        typer.echo(f"Found {len(issues)} issue{'s' if len(issues) > 1 else ''}:\n")
+        for issue in issues:
+            typer.echo(f"  {issue.kind}: {issue.description}")
+            typer.echo(f"    fix: {issue.fix_cmd}\n")
+        typer.echo("Run 'lfops recover --fix' to apply fixes.")
 
 
 def main() -> None:

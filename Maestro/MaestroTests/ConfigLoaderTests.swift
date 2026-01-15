@@ -48,7 +48,7 @@ struct ConfigLoaderTests {
             agentModel: nil, interactive: nil, terminal: "warp",
             ide: nil, workspace: nil, context: nil, exclude: nil,
             push: nil, pr: nil, yolo: nil,
-            docs: nil, diff: nil, diffFiles: nil, paste: nil
+            docs: nil, diff: nil, diffFiles: nil, paste: nil, voice: nil
         )
         #expect(warpConfig.terminalApp == .warp)
 
@@ -56,7 +56,7 @@ struct ConfigLoaderTests {
             agentModel: nil, interactive: nil, terminal: "iterm",
             ide: nil, workspace: nil, context: nil, exclude: nil,
             push: nil, pr: nil, yolo: nil,
-            docs: nil, diff: nil, diffFiles: nil, paste: nil
+            docs: nil, diff: nil, diffFiles: nil, paste: nil, voice: nil
         )
         #expect(itermConfig.terminalApp == .iterm)
 
@@ -64,7 +64,7 @@ struct ConfigLoaderTests {
             agentModel: nil, interactive: nil, terminal: nil,
             ide: nil, workspace: nil, context: nil, exclude: nil,
             push: nil, pr: nil, yolo: nil,
-            docs: nil, diff: nil, diffFiles: nil, paste: nil
+            docs: nil, diff: nil, diffFiles: nil, paste: nil, voice: nil
         )
         #expect(defaultConfig.terminalApp == .warp)
     }
@@ -75,7 +75,7 @@ struct ConfigLoaderTests {
             agentModel: nil, interactive: ["design", "iterate"],
             terminal: nil, ide: nil, workspace: nil, context: nil,
             exclude: nil, push: nil, pr: nil, yolo: nil,
-            docs: nil, diff: nil, diffFiles: nil, paste: nil
+            docs: nil, diff: nil, diffFiles: nil, paste: nil, voice: nil
         )
 
         #expect(config.isInteractive("design") == true)

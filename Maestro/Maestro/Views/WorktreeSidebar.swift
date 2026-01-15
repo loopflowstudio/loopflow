@@ -9,6 +9,10 @@ struct WorktreeSidebar: View {
     @State private var worktreeToDelete: Worktree?
     @State private var actionError: String?
     @State private var showingActionError = false
+    @State private var showingDiffSheet = false
+    @State private var diffWorktree: Worktree?
+    @State private var diffContent: String?
+    @State private var diffLoading = false
 
     private let terminalLauncher = TerminalLauncher()
 
@@ -51,6 +55,47 @@ struct WorktreeSidebar: View {
             }
         } message: {
             Text(actionError ?? "An error occurred")
+        }
+        .sheet(isPresented: $showingDiffSheet) {
+            if let worktree = diffWorktree {
+                DiffSheet(
+                    worktree: worktree,
+                    diffContent: diffContent,
+                    isLoading: diffLoading,
+                    onOpenWeb: {
+                        if let repoURL = appState.currentRepo {
+                            let service = WorktreeService()
+                            Task {
+                                if let url = try? await service.getGitHubCompareURL(branch: worktree.branch, in: repoURL) {
+                                    terminalLauncher.openURL(url)
+                                }
+                            }
+                        }
+                    }
+                )
+            }
+        }
+    }
+
+    private func viewDiff(_ worktree: Worktree) {
+        diffWorktree = worktree
+        diffContent = nil
+        diffLoading = true
+        showingDiffSheet = true
+
+        Task {
+            guard let repoURL = appState.currentRepo else {
+                diffLoading = false
+                return
+            }
+            let service = WorktreeService()
+            do {
+                let diff = try await service.getDiff(for: worktree.branch, in: repoURL)
+                diffContent = diff
+            } catch {
+                diffContent = "Error loading diff: \(error.localizedDescription)"
+            }
+            diffLoading = false
         }
     }
 
@@ -110,6 +155,9 @@ struct WorktreeSidebar: View {
                         },
                         onOpenFinder: {
                             terminalLauncher.openInFinder(at: URL(fileURLWithPath: worktree.path))
+                        },
+                        onViewDiff: {
+                            viewDiff(worktree)
                         },
                         onCreatePR: {
                             Task {
@@ -316,6 +364,7 @@ struct WorktreeRow: View {
     let onOpenTerminal: () -> Void
     let onOpenIDE: () -> Void
     let onOpenFinder: () -> Void
+    let onViewDiff: () -> Void
     let onCreatePR: () -> Void
     let onViewPR: () -> Void
     let onLandPR: () -> Void
@@ -402,6 +451,39 @@ struct WorktreeRow: View {
 
     private var hoverActions: some View {
         HStack(spacing: 8) {
+            Button {
+                onViewDiff()
+            } label: {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("View diff against main")
+
+            // PR button: create or view based on current state
+            if worktree.prURL != nil {
+                Button {
+                    onViewPR()
+                } label: {
+                    Image(systemName: "arrow.up.right.square")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                }
+                .buttonStyle(.plain)
+                .help("View PR #\(worktree.prNumber ?? 0)")
+            } else {
+                Button {
+                    onCreatePR()
+                } label: {
+                    Image(systemName: "plus.rectangle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Create PR")
+            }
+
             Button {
                 onOpenTerminal()
             } label: {
@@ -537,6 +619,115 @@ struct NewWorktreeSheet: View {
             }
             isCreating = false
         }
+    }
+}
+
+struct DiffSheet: View {
+    let worktree: Worktree
+    let diffContent: String?
+    let isLoading: Bool
+    let onOpenWeb: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(worktree.branch)
+                        .font(.headline)
+                    Text("Diff against main")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button {
+                    onOpenWeb()
+                } label: {
+                    Image(systemName: "safari")
+                }
+                .buttonStyle(.plain)
+                .help("Open in GitHub")
+
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding()
+
+            Divider()
+
+            // Content
+            if isLoading {
+                VStack {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                    Text("Loading diff...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let content = diffContent {
+                ScrollView {
+                    DiffContentView(content: content)
+                        .padding()
+                }
+            } else {
+                Text("No diff available")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .frame(minWidth: 600, minHeight: 400)
+        .frame(idealWidth: 800, idealHeight: 600)
+    }
+}
+
+struct DiffContentView: View {
+    let content: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(content.split(separator: "\n", omittingEmptySubsequences: false).enumerated()), id: \.offset) { _, line in
+                let lineStr = String(line)
+                Text(lineStr)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(colorForLine(lineStr))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(backgroundForLine(lineStr))
+            }
+        }
+    }
+
+    private func colorForLine(_ line: String) -> Color {
+        if line.hasPrefix("+++") || line.hasPrefix("---") {
+            return .secondary
+        } else if line.hasPrefix("+") {
+            return .green
+        } else if line.hasPrefix("-") {
+            return .red
+        } else if line.hasPrefix("@@") {
+            return .cyan
+        } else if line.hasPrefix("diff ") {
+            return .blue
+        }
+        return .primary
+    }
+
+    private func backgroundForLine(_ line: String) -> Color {
+        if line.hasPrefix("+") && !line.hasPrefix("+++") {
+            return .green.opacity(0.1)
+        } else if line.hasPrefix("-") && !line.hasPrefix("---") {
+            return .red.opacity(0.1)
+        }
+        return .clear
     }
 }
 

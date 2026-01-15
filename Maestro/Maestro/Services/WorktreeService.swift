@@ -87,6 +87,74 @@ struct WorktreeService {
         _ = try await runLfpr(["land"], in: worktreePath)
     }
 
+    func getDiff(for branch: String, in repoURL: URL, base: String = "main") async throws -> String {
+        return try await withCheckedThrowingContinuation { continuation in
+            let process = Process()
+            let pipe = Pipe()
+
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            process.arguments = ["diff", "\(base)...\(branch)"]
+            process.currentDirectoryURL = repoURL
+            process.standardOutput = pipe
+            process.standardError = pipe
+
+            do {
+                try process.run()
+                process.waitUntilExit()
+
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: data, encoding: .utf8) ?? ""
+
+                if process.terminationStatus == 0 {
+                    continuation.resume(returning: output.isEmpty ? "No changes" : output)
+                } else {
+                    continuation.resume(throwing: WorktreeError.commandFailed(output))
+                }
+            } catch {
+                continuation.resume(throwing: error)
+            }
+        }
+    }
+
+    func getGitHubCompareURL(branch: String, in repoURL: URL, base: String = "main") async throws -> URL? {
+        return try await withCheckedThrowingContinuation { continuation in
+            let process = Process()
+            let pipe = Pipe()
+
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            process.arguments = ["remote", "get-url", "origin"]
+            process.currentDirectoryURL = repoURL
+            process.standardOutput = pipe
+            process.standardError = FileHandle.nullDevice
+
+            do {
+                try process.run()
+                process.waitUntilExit()
+
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let remoteURL = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+                var repoPath: String?
+                if remoteURL.hasPrefix("git@github.com:") {
+                    repoPath = String(remoteURL.dropFirst("git@github.com:".count)).replacingOccurrences(of: ".git", with: "")
+                } else if remoteURL.contains("github.com") {
+                    if let range = remoteURL.range(of: "github.com/") {
+                        repoPath = String(remoteURL[range.upperBound...]).replacingOccurrences(of: ".git", with: "")
+                    }
+                }
+
+                if let path = repoPath {
+                    let url = URL(string: "https://github.com/\(path)/compare/\(base)...\(branch)")
+                    continuation.resume(returning: url)
+                } else {
+                    continuation.resume(returning: nil)
+                }
+            } catch {
+                continuation.resume(throwing: error)
+            }
+        }
+    }
+
     private func findLfpr() -> URL? {
         let process = Process()
         let pipe = Pipe()

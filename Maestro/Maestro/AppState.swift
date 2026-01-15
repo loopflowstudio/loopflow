@@ -36,6 +36,7 @@ final class AppState {
     private let configLoader = ConfigLoader()
     private let promptService = PromptService()
     private let agentService = AgentService()
+    private var eventService: LFDEventService?
 
     func openRepo(_ url: URL) async {
         currentRepo = url
@@ -46,6 +47,8 @@ final class AppState {
         let setupService = SetupService()
         do {
             try await setupService.ensureDaemonRunning()
+            // Start event subscription after daemon is running
+            startEventSubscription()
         } catch {
             // Non-fatal - daemon setup failed but app can still work
         }
@@ -73,6 +76,12 @@ final class AppState {
             }
 
             await refreshWorktrees()
+
+            // Auto-select first worktree so launch button always has a target
+            if selectedWorktree == nil {
+                selectedWorktree = worktrees.first
+            }
+
             prompts = try promptService.loadPrompts(from: url, config: config)
             await estimateTokens()
             await refreshAgents()
@@ -87,7 +96,13 @@ final class AppState {
         guard let repo = currentRepo else { return }
 
         do {
+            let previousSelection = selectedWorktree?.branch
             worktrees = try await worktreeService.list(in: repo)
+
+            // Preserve selection by matching on branch name
+            if let branch = previousSelection {
+                selectedWorktree = worktrees.first { $0.branch == branch }
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -117,6 +132,18 @@ final class AppState {
         let worktreeURL = URL(fileURLWithPath: worktree.path)
         try await worktreeService.landPR(in: worktreeURL)
         await refreshWorktrees()
+    }
+
+    func startEventSubscription() {
+        eventService = LFDEventService()
+
+        Task {
+            try? await eventService?.subscribe(to: ["worktree.*"]) { [weak self] _ in
+                Task { @MainActor in
+                    await self?.refreshWorktrees()
+                }
+            }
+        }
     }
 
     func refreshAgents() async {

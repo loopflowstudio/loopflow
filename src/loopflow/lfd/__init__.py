@@ -81,6 +81,29 @@ def uninstall():
         raise typer.Exit(1)
 
 
+@app.command()
+def notify(
+    event: str = typer.Argument(help="Event name (e.g. worktree.created)"),
+    branch: str = typer.Option(None, "--branch", "-b", help="Branch name"),
+    path: str = typer.Option(None, "--path", "-p", help="Worktree path"),
+):
+    """Send an event to lfd for broadcast to subscribers."""
+    if not is_running():
+        return  # Silently fail if daemon not running
+
+    data = {}
+    if branch:
+        data["branch"] = branch
+    if path:
+        data["path"] = path
+
+    client = DaemonClient()
+    try:
+        asyncio.run(client.call("notify", {"event": event, "data": data}))
+    except Exception:
+        pass  # Best effort - don't fail hooks
+
+
 # Agent commands
 
 

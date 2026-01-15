@@ -89,23 +89,6 @@ struct Agent: Identifiable, Hashable {
         }
     }
 
-    var statusColor: String {
-        switch status {
-        case .running:
-            return "green"
-        case .waiting:
-            return "blue"
-        case .idle:
-            return "gray"
-        case .completed:
-            return "green"
-        case .error:
-            return "red"
-        case .stopped:
-            return "orange"
-        }
-    }
-
     var triggerText: String {
         switch triggerKind {
         case .cron:

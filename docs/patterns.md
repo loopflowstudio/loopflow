@@ -56,10 +56,10 @@ lf ship &
 lf ops status                 # shows running sessions
 ```
 
-With maestro running, you'll get notifications when tasks complete:
+With lfd running, you'll get notifications when tasks complete:
 
 ```bash
-lf ops maestro start          # start once, runs in background
+lfd install          # start once, runs in background
 ```
 
 ## Model comparison

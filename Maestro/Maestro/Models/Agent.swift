@@ -1,6 +1,6 @@
 // Agent model for background agent loops.
 // Reads definitions from ~/.lf/agents/*.md (markdown with YAML frontmatter)
-// and runtime state from ~/.lf/maestro.db
+// and runtime state from ~/.lf/lfd.db
 
 import Foundation
 import SwiftUI

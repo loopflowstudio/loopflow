@@ -47,21 +47,24 @@ struct ConfigLoaderTests {
         let warpConfig = LoopflowConfig(
             agentModel: nil, interactive: nil, terminal: "warp",
             ide: nil, workspace: nil, context: nil, exclude: nil,
-            push: nil, pr: nil, yolo: nil, docs: nil, diff: nil, paste: nil
+            push: nil, pr: nil, yolo: nil,
+            docs: nil, diff: nil, diffFiles: nil, paste: nil
         )
         #expect(warpConfig.terminalApp == .warp)
 
         let itermConfig = LoopflowConfig(
             agentModel: nil, interactive: nil, terminal: "iterm",
             ide: nil, workspace: nil, context: nil, exclude: nil,
-            push: nil, pr: nil, yolo: nil, docs: nil, diff: nil, paste: nil
+            push: nil, pr: nil, yolo: nil,
+            docs: nil, diff: nil, diffFiles: nil, paste: nil
         )
         #expect(itermConfig.terminalApp == .iterm)
 
         let defaultConfig = LoopflowConfig(
             agentModel: nil, interactive: nil, terminal: nil,
             ide: nil, workspace: nil, context: nil, exclude: nil,
-            push: nil, pr: nil, yolo: nil, docs: nil, diff: nil, paste: nil
+            push: nil, pr: nil, yolo: nil,
+            docs: nil, diff: nil, diffFiles: nil, paste: nil
         )
         #expect(defaultConfig.terminalApp == .warp)
     }
@@ -72,7 +75,7 @@ struct ConfigLoaderTests {
             agentModel: nil, interactive: ["design", "iterate"],
             terminal: nil, ide: nil, workspace: nil, context: nil,
             exclude: nil, push: nil, pr: nil, yolo: nil,
-            docs: nil, diff: nil, paste: nil
+            docs: nil, diff: nil, diffFiles: nil, paste: nil
         )
 
         #expect(config.isInteractive("design") == true)

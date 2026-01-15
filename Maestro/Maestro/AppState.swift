@@ -3,6 +3,12 @@
 import Foundation
 import SwiftUI
 
+struct OutputLine: Identifiable {
+    let id = UUID()
+    let text: String
+    let timestamp: Date
+}
+
 @MainActor
 @Observable
 final class AppState {
@@ -28,6 +34,10 @@ final class AppState {
 
     // Sidebar state
     var selectedWorktree: Worktree?
+
+    // Live output state
+    var liveOutputBySession: [String: [OutputLine]] = [:]
+    var activeSessionIds: Set<String> = []
 
     // Loading state
     var isLoading: Bool = false
@@ -144,9 +154,18 @@ final class AppState {
         eventService = LFDEventService()
 
         Task {
-            try? await eventService?.subscribe(to: ["worktree.*"]) { [weak self] _ in
+            try? await eventService?.subscribe(
+                to: ["worktree.*", "session.*", "output.line"]
+            ) { [weak self] event in
                 Task { @MainActor in
-                    await self?.refreshWorktrees()
+                    switch event {
+                    case .worktree:
+                        await self?.refreshWorktrees()
+                    case .session(let sessionEvent):
+                        self?.handleSessionEvent(sessionEvent)
+                    case .output(let outputEvent):
+                        self?.handleOutputEvent(outputEvent)
+                    }
                 }
             }
         }
@@ -155,6 +174,27 @@ final class AppState {
     func refreshVoices() {
         guard let repo = currentRepo else { return }
         voices = voiceService.loadVoices(from: repo)
+    }
+
+    private func handleSessionEvent(_ event: SessionEvent) {
+        if event.status == "running" {
+            activeSessionIds.insert(event.id)
+            liveOutputBySession[event.id] = []
+        } else if event.status == "completed" || event.status == "error" {
+            activeSessionIds.remove(event.id)
+        }
+    }
+
+    private func handleOutputEvent(_ event: OutputEvent) {
+        guard activeSessionIds.contains(event.sessionId) else { return }
+
+        let line = OutputLine(text: event.text, timestamp: event.timestamp)
+        liveOutputBySession[event.sessionId, default: []].append(line)
+
+        // Cap buffer at 1000 lines to prevent memory bloat
+        if liveOutputBySession[event.sessionId]?.count ?? 0 > 1000 {
+            liveOutputBySession[event.sessionId]?.removeFirst()
+        }
     }
 
     func refreshAgents() async {

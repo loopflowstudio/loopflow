@@ -117,20 +117,3 @@ def log_session_start(session: Session) -> None:
 def log_session_end(session_id: str, status: SessionStatus) -> None:
     """Tell lfd a session ended. Fire-and-forget."""
     _send_fire_and_forget("sessions.end", {"session_id": session_id, "status": status.value})
-
-
-def get_worktree_history(worktree: str, limit: int = 20) -> list[Session]:
-    """Get session history for a worktree. Returns empty list on failure."""
-    try:
-        return asyncio.run(_get_worktree_history(worktree, limit))
-    except Exception:
-        return []
-
-
-async def _get_worktree_history(worktree: str, limit: int) -> list[Session]:
-    client = DaemonClient()
-    try:
-        result = await client.call("sessions.history", {"worktree": worktree, "limit": limit})
-        return [Session.from_dict(s) for s in result]
-    finally:
-        await client.close()

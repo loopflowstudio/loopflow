@@ -2,26 +2,28 @@
 
 Split loopflow into focused CLIs (`lfwt`, `lfpr`, `lfops`) and add worktree helper functions.
 
-## Review
+## Implementation
 
-**Verdict:** Needs work
+### New CLIs
 
-### Issues
+- **lfwt**: Worktree operations (`list`, `diff`, `compare`, `cd`)
+- **lfpr**: PR and landing operations (`create`, `view`, `update`, `land`, `commit`)
+- **lfops**: Meta operations (`init`, `install`, `doctor`, `version`, `status`, `stop`, `prune`)
 
-1. **`get_pr_state` is imported but unused.** lfwt.py imports `get_pr_state` from worktrees.py (line 18) but never calls it. The function exists for direct lookups, but `list_all` extracts PR state from `wt list --format json` instead. Either use `get_pr_state` to fill gaps when `ci.state` is missing, or remove the import.
+### Key changes
 
-2. **`_get_diff_for_target` duplicates `diff_against`.** lfwt.py:58 reimplements branch diff logic that `diff_against` in worktrees.py already handles. The lfwt version adds worktree path resolution and branch ref fallbacks, but the core diff command is the same. Consider extending `diff_against` or clarifying why both exist.
+1. Removed `ops` subcommand from `lf` - operations now in separate `lfops` CLI
+2. Added PR state tracking to worktree models (Python and Swift)
+3. Added `diff_against`, `diff_between`, `get_github_compare_url`, `get_pr_state` to worktrees.py
+4. Swift UI gains Create PR and Land PR actions
 
-3. **Temp file cleanup missing.** `_open_in_ide` writes `.diff-temp.diff` and `.diff-{target}.diff` files but never removes them. These accumulate in the repo root. Either use `tempfile` or add cleanup logic.
+### Design decisions
 
-4. **`lfpr commit` flag semantics.** `-a/-A` is `--add/--no-add` (stage before commit). This differs from other loopflow CLIs where `-a` means `--auto` mode. Not a bug, but worth noting if you want consistent flag conventions.
+**`_get_diff_for_target` vs `diff_against`**: The `_get_diff_for_target` function in lfwt.py handles additional complexity needed by the `compare` command: it first looks up worktree paths and runs the diff inside the worktree directory (for accurate HEAD resolution), then falls back to branch refs. `diff_against` is simpler and operates purely on branch names.
 
-### Style compliance
+**Temp files**: Changed to use `tempfile.mkstemp` with descriptive suffixes. Files are written to system temp directory and cleaned up by the OS.
 
-- Imports at top of file
-- Private functions prefixed with `_`
-- No `Args:`/`Returns:` docstrings
-- No backwards-compatibility shims
+**Flag semantics**: `lfpr commit -a` means `--add` (stage changes), not `--auto` mode. This is intentional since `lfpr` commands don't have auto/interactive modes.
 
 ## Design notes
 

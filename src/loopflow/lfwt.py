@@ -3,6 +3,7 @@
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -179,7 +180,8 @@ def diff(
             typer.echo(diff_output)
         else:
             # Write to temp file and open in IDE
-            diff_file = main_repo / ".diff-temp.diff"
+            fd, temp_path = tempfile.mkstemp(suffix=f"-{target}-vs-{other}.diff", prefix="lfwt-")
+            diff_file = Path(temp_path)
             diff_file.write_text(diff_output)
             _open_in_ide(diff_file, config)
             typer.echo(f"Opened diff in IDE: {diff_file}")
@@ -209,7 +211,8 @@ def diff(
                 # Fall back to generating diff file
                 diff_output = diff_against(main_repo, target, base)
                 if diff_output:
-                    diff_file = main_repo / f".diff-{target}.diff"
+                    fd, temp_path = tempfile.mkstemp(suffix=f"-{target}.diff", prefix="lfwt-")
+                    diff_file = Path(temp_path)
                     diff_file.write_text(diff_output)
                     _open_in_ide(diff_file, config)
                     typer.echo(f"Opened diff in IDE: {diff_file}")

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish loopflow to PyPI."""
+"""Publish loopflow to PyPI and/or DMG to R2."""
 
 import argparse
 import subprocess
@@ -10,24 +10,74 @@ ROOT = Path(__file__).parent.parent
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Publish loopflow to PyPI")
-    parser.add_argument("bump", nargs="?", default="patch", choices=["patch", "minor", "major"])
+    parser = argparse.ArgumentParser(description="Publish loopflow to PyPI and DMG to R2")
+    parser.add_argument("bump", nargs="?", choices=["patch", "minor", "major"])
     parser.add_argument("-n", "--dry-run", action="store_true", help="Show what would be done")
     parser.add_argument("--skip-tests", action="store_true", help="Skip test run")
     parser.add_argument("-f", "--force", action="store_true", help="Skip main branch check")
+    parser.add_argument("--dmg-only", action="store_true", help="Only build and upload DMG (no PyPI)")
+    parser.add_argument("--skip-dmg", action="store_true", help="Skip DMG build/upload")
     args = parser.parse_args()
+
+    # Validate args
+    if args.dmg_only and args.bump:
+        print("Error: --dmg-only cannot be used with version bump", file=sys.stderr)
+        return 1
+    if args.dmg_only and args.skip_dmg:
+        print("Error: --dmg-only and --skip-dmg are mutually exclusive", file=sys.stderr)
+        return 1
 
     # Import here so --help works without dependencies
     from loopflow.llm_http import generate_release_notes
     from loopflow.publish import (
+        build_dmg,
         bump_version,
         build_package,
         check_publish_ready,
+        get_dmg_path,
+        get_version,
         install_locally,
         publish_package,
         run_tests,
+        upload_dmg,
         write_version,
+        R2_PUBLIC_URL,
     )
+
+    # Handle DMG-only mode
+    if args.dmg_only:
+        version = get_version()
+        print(f"Current version: {version}")
+
+        if args.dry_run:
+            print("Would build Maestro DMG")
+            print(f"Would upload DMG to {R2_PUBLIC_URL}/LoopflowMaestro-{version}.dmg")
+            print(f"Would upload DMG to {R2_PUBLIC_URL}/LoopflowMaestro-latest.dmg")
+            return 0
+
+        print("Building Maestro DMG...")
+        success, output = build_dmg(ROOT)
+        if not success:
+            print("DMG build failed:", file=sys.stderr)
+            print(output, file=sys.stderr)
+            return 1
+        print("DMG built.")
+
+        print("Uploading DMG...")
+        dmg_path = get_dmg_path(ROOT)
+        success, output = upload_dmg(dmg_path, version)
+        if not success:
+            print("DMG upload failed:", file=sys.stderr)
+            print(output, file=sys.stderr)
+            return 1
+        print(output)
+
+        print(f"\nDMG published: {R2_PUBLIC_URL}/LoopflowMaestro-{version}.dmg")
+        return 0
+
+    # Full release flow
+    if not args.bump:
+        args.bump = "patch"
 
     # Step 1: Preflight checks
     print("Checking publish readiness...")
@@ -51,6 +101,9 @@ def main() -> int:
         print(f"Would tag: v{new_version}")
         print("Would build package")
         print("Would publish to PyPI")
+        if not args.skip_dmg:
+            print("Would build Maestro DMG")
+            print(f"Would upload DMG to {R2_PUBLIC_URL}/LoopflowMaestro-{new_version}.dmg")
         print("Would install locally")
         return 0
 
@@ -136,7 +189,25 @@ def main() -> int:
         return 1
     print("Published to PyPI.")
 
-    # Step 8: Install locally from the built wheel
+    # Step 8: Build and upload DMG
+    if not args.skip_dmg:
+        print("Building Maestro DMG...")
+        success, output = build_dmg(ROOT)
+        if not success:
+            print("DMG build failed (continuing):", file=sys.stderr)
+            print(output, file=sys.stderr)
+        else:
+            print("DMG built.")
+            print("Uploading DMG...")
+            dmg_path = get_dmg_path(ROOT)
+            success, output = upload_dmg(dmg_path, new_version)
+            if not success:
+                print("DMG upload failed (continuing):", file=sys.stderr)
+                print(output, file=sys.stderr)
+            else:
+                print(output)
+
+    # Step 9: Install locally from the built wheel
     print("Installing locally...")
     success, output = install_locally(ROOT)
     if not success:
@@ -147,6 +218,8 @@ def main() -> int:
 
     print(f"\nReleased v{new_version}")
     print("https://pypi.org/project/loopflow/")
+    if not args.skip_dmg:
+        print(f"{R2_PUBLIC_URL}/LoopflowMaestro-{new_version}.dmg")
     return 0
 
 

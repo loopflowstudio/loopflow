@@ -740,8 +740,17 @@ def _sync_main_repo(main_repo: Path, base_branch: str) -> bool:
         return result.returncode == 0
 
 
-def _remove_worktree(main_repo: Path, branch: str, worktree_path: Path) -> None:
+def _remove_worktree(main_repo: Path, branch: str, worktree_path: Path, base_branch: str = "main") -> None:
     """Remove worktree and branch. Uses wt for events, falls back to git if needed."""
+    # Update local base branch to match origin (without checkout) so wt correctly
+    # detects squash-merged branches. This handles the case where local main is
+    # behind origin after PR merge.
+    subprocess.run(
+        ["git", "fetch", "origin", f"{base_branch}:{base_branch}"],
+        cwd=main_repo,
+        capture_output=True,
+    )
+
     # Try wt first (emits events for Maestro)
     result = subprocess.run(
         ["wt", "-C", str(main_repo), "remove", branch],
@@ -1066,7 +1075,7 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
     was_in_worktree = repo_root != main_repo
     if was_in_worktree:
         try:
-            _remove_worktree(main_repo, branch, repo_root)
+            _remove_worktree(main_repo, branch, repo_root, base_branch)
         except Exception:
             typer.echo(f"Warning: Could not remove worktree. Run manually:", err=True)
             typer.echo(f"  wt remove {branch}", err=True)
@@ -1238,7 +1247,7 @@ def _land_local(strict: bool, worktree: str | None) -> None:
     was_in_worktree = repo_root != main_repo
     if was_in_worktree:
         try:
-            _remove_worktree(main_repo, branch, repo_root)
+            _remove_worktree(main_repo, branch, repo_root, base_branch)
         except Exception:
             typer.echo(f"Warning: Could not remove worktree. Run manually:", err=True)
             typer.echo(f"  wt remove {branch}", err=True)
@@ -1428,6 +1437,46 @@ def _detect_issues(repo: Path) -> list[Issue]:
             fix_cmd="git remote prune origin",
         ))
 
+    # 5. Squash-merged worktrees - worktrees whose content matches origin/main
+    # (work was squash-merged so git doesn't see it as merged)
+    result = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    worktree_info: list[dict[str, str]] = []
+    current_worktree: dict[str, str] = {}
+    for line in result.stdout.split("\n"):
+        if line.startswith("worktree "):
+            if current_worktree:
+                worktree_info.append(current_worktree)
+            current_worktree = {"path": line.split(" ", 1)[1]}
+        elif line.startswith("branch refs/heads/"):
+            current_worktree["branch"] = line.split("/")[-1]
+    if current_worktree:
+        worktree_info.append(current_worktree)
+
+    for wt in worktree_info:
+        branch = wt.get("branch")
+        path = wt.get("path")
+        if not branch or branch == default_branch or not path:
+            continue
+
+        # Check if content matches origin/main (two-dot diff = actual difference)
+        result = subprocess.run(
+            ["git", "diff", f"origin/{default_branch}..{branch}", "--stat"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0 and not result.stdout.strip():
+            issues.append(Issue(
+                kind="squash_merged",
+                description=f"worktree '{branch}' content matches {default_branch} (likely squash-merged)",
+                fix_cmd=f"git worktree remove {path} && git branch -D {branch}",
+            ))
+
     return issues
 
 
@@ -1453,6 +1502,25 @@ def _fix_issue(repo: Path, issue: Issue) -> bool:
 
     elif issue.kind == "stale_ref":
         result = subprocess.run(["git", "remote", "prune", "origin"], cwd=repo, capture_output=True)
+        return result.returncode == 0
+
+    elif issue.kind == "squash_merged":
+        # Parse: "git worktree remove <path> && git branch -D <branch>"
+        parts = issue.fix_cmd.split(" && ")
+        path = parts[0].split()[-1]
+        branch = parts[1].split()[-1]
+        result = subprocess.run(
+            ["git", "worktree", "remove", path],
+            cwd=repo,
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            return False
+        result = subprocess.run(
+            ["git", "branch", "-D", branch],
+            cwd=repo,
+            capture_output=True,
+        )
         return result.returncode == 0
 
     return False

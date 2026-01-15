@@ -14,6 +14,8 @@ Implementation is clean and complete. All touched files follow the existing patt
 - Token analysis shows `diff_files` as separate category
 - Files merge with `context_files` in `<lf:files>` section, deduplicated by path
 - `docs/config.md` updated with new options
+- **Maestro UI updated:** `LoopflowConfig.swift`, `AppState.swift`, `PromptLauncher.swift`, `TokenEstimator.swift` all support `diff_files`
+- Design/implement prompts updated with end-to-end guidance
 
 No issues found.
 

@@ -53,6 +53,7 @@ def create_worktree(name: str) -> Worktree:
 
 When designing for this codebase:
 
+- **End-to-end changes.** Features should be complete from CLI to UI. If you add a config option or context flag, include corresponding Maestro UI updates (under `Maestro/`). Infrastructure-only changes are okay when explicitly spec'd as prep for future product work.
 - **Worktrees are first-class.** Features should work across isolated worktrees. Don't assume a single working directory.
 - **Prompts are files, not config.** Task definitions live in `.claude/commands/` or `.lf/`. Don't design template systems or prompt builders.
 - **Design for auto mode.** Most tasks run headless. Don't require interactive confirmation for core flows.

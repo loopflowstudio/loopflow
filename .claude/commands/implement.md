@@ -44,6 +44,7 @@ These are specific to this codebase:
 - **Return `None` for "not found"**, raise exceptions for "shouldn't happen"
 - **Prefer functions over classes** when you don't need state
 - **No backwards-compatibility shims** unless explicitly required
+- **End-to-end changes.** If you add CLI flags or config options, update the Maestro UI too (under `Maestro/`). Check `Maestro/Maestro/Models/LoopflowConfig.swift` for config parsing, `AppState.swift` for state, and `Views/PromptLauncher.swift` for the launch UI.
 
 ## If something's wrong
 

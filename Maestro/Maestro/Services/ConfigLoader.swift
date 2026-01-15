@@ -39,6 +39,7 @@ struct ConfigLoader {
         var yolo: Bool?
         var docs: Bool?
         var diff: Bool?
+        var diffFiles: Bool?
         var paste: Bool?
 
         let lines = contents.components(separatedBy: .newlines)
@@ -100,6 +101,7 @@ struct ConfigLoader {
                 case "yolo": yolo = value == "true"
                 case "docs": docs = value == "true"
                 case "diff": diff = value == "true"
+                case "diff_files": diffFiles = value == "true"
                 case "paste": paste = value == "true"
                 default: break
                 }
@@ -119,6 +121,7 @@ struct ConfigLoader {
             yolo: yolo,
             docs: docs,
             diff: diff,
+            diffFiles: diffFiles,
             paste: paste
         )
     }

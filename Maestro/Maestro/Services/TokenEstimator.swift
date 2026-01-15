@@ -8,6 +8,7 @@ struct TokenEstimator {
         args: String,
         context: [URL],
         includeDiff: Bool,
+        includeDiffFiles: Bool,
         in repoURL: URL
     ) async -> Int {
         var cmdArgs = ["lf"]
@@ -28,8 +29,15 @@ struct TokenEstimator {
             cmdArgs.append(relativePath)
         }
 
+        // Include diff flags to match actual command
+        if includeDiff {
+            cmdArgs.append("--diff")
+        }
+        if !includeDiffFiles {
+            cmdArgs.append("--no-diff-files")
+        }
+
         cmdArgs.append("-c")
-        cmdArgs.append("--json")
 
         do {
             let output = try await run(cmdArgs, in: repoURL)

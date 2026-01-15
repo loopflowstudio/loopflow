@@ -53,7 +53,8 @@ class Config(BaseModel):
     interactive: list[str] = Field(default_factory=list)  # Tasks that default to interactive
     include_loopflow_doc: bool = True  # Include bundled LOOPFLOW.md in prompts
     docs: bool = True  # Include repo documentation (.md files)
-    diff: bool = True  # Include branch diff against main
+    diff: bool = False  # Include raw branch diff against main
+    diff_files: bool = True  # Include full content of files touched by branch
     paste: bool = False  # Include clipboard content by default
     voice: Optional[list[str]] = None  # Default voices for all tasks
 

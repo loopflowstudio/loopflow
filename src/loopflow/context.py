@@ -19,6 +19,7 @@ class PromptComponents:
     run_mode: str | None
     docs: list[tuple[Path, str]]
     diff: str | None
+    diff_files: list[tuple[Path, str]]
     task: tuple[str, str] | None  # (name, content)
     context_files: list[tuple[Path, str]]
     repo_root: Path
@@ -149,6 +150,42 @@ def gather_diff(repo_root: Path, exclude: Optional[list[str]] = None) -> str | N
     return result.stdout
 
 
+def gather_diff_files(repo_root: Path) -> list[str]:
+    """Return file paths touched by this branch vs main.
+
+    Filters out deleted files (can't load those).
+    Exclude patterns are applied later when files are loaded via gather_files().
+    """
+    # Get current branch
+    result = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    branch = result.stdout.strip()
+    if not branch or branch == "main":
+        return []
+
+    result = subprocess.run(
+        ["git", "diff", "--name-only", "main...HEAD"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return []
+
+    paths = []
+    for line in result.stdout.strip().split("\n"):
+        if not line:
+            continue
+        path = repo_root / line
+        if path.exists():  # filter deleted files
+            paths.append(line)
+    return paths
+
+
 def _load_loopflow_doc() -> str:
     """Load LOOPFLOW.md from the package."""
     return resources.files("loopflow").joinpath("LOOPFLOW.md").read_text()
@@ -166,6 +203,8 @@ def gather_prompt_components(
     run_mode: Optional[str] = None,
     include_loopflow_doc: bool = True,
     voices: Optional[list[str]] = None,
+    include_diff: bool = False,
+    include_diff_files: bool = True,
 ) -> PromptComponents:
     """Gather all prompt components without assembling them."""
     docs = gather_docs(repo_root, repo_root, exclude)
@@ -178,7 +217,7 @@ def gather_prompt_components(
     if design_docs:
         docs[0:0] = design_docs
 
-    diff = gather_diff(repo_root, exclude)
+    diff = gather_diff(repo_root, exclude) if include_diff else None
 
     task_result = None
     if inline:
@@ -211,6 +250,10 @@ def gather_prompt_components(
         if not include_tests and "tests/**" not in context_exclude:
             context_exclude.append("tests/**")
 
+    # Gather files touched by diff
+    diff_file_paths = gather_diff_files(repo_root) if include_diff_files else []
+    diff_files_content = gather_files(diff_file_paths, repo_root, context_exclude) if diff_file_paths else []
+
     context_files = (
         gather_files(context, repo_root, context_exclude) if context else []
     )
@@ -223,6 +266,7 @@ def gather_prompt_components(
         run_mode=run_mode,
         docs=docs,
         diff=diff,
+        diff_files=diff_files_content,
         task=task_result,
         context_files=context_files,
         repo_root=repo_root,
@@ -277,8 +321,16 @@ def format_prompt(components: PromptComponents) -> str:
     if components.diff:
         parts.append(f"Changes on this branch (diff against main).\n\n<lf:diff>\n{components.diff}\n</lf:diff>")
 
-    if components.context_files:
-        parts.append(format_files(components.context_files, components.repo_root))
+    # Merge diff_files and context_files, deduplicating by path
+    all_files = list(components.diff_files)
+    seen_paths = {path for path, _ in all_files}
+    for path, content in components.context_files:
+        if path not in seen_paths:
+            all_files.append((path, content))
+            seen_paths.add(path)
+
+    if all_files:
+        parts.append(format_files(all_files, components.repo_root))
 
     if components.clipboard:
         parts.append(f"Content from clipboard.\n\n<lf:clipboard>\n{components.clipboard}\n</lf:clipboard>")

@@ -436,6 +436,9 @@ struct PromptLauncher: View {
         .onChange(of: appState.includeDiff) {
             Task { await appState.estimateTokens() }
         }
+        .onChange(of: appState.includeDiffFiles) {
+            Task { await appState.estimateTokens() }
+        }
         .onChange(of: appState.includePaste) {
             Task { await appState.estimateTokens() }
         }
@@ -453,11 +456,19 @@ struct PromptLauncher: View {
                 }
                 .toggleStyle(.checkbox)
 
+                Toggle(isOn: $appState.includeDiffFiles) {
+                    Text("Files")
+                        .font(.caption)
+                }
+                .toggleStyle(.checkbox)
+                .help("Include full content of files touched by this branch")
+
                 Toggle(isOn: $appState.includeDiff) {
                     Text("Diff")
                         .font(.caption)
                 }
                 .toggleStyle(.checkbox)
+                .help("Include raw diff output")
 
                 Toggle(isOn: $appState.includePaste) {
                     Text("Clipboard")
@@ -585,19 +596,25 @@ struct PromptLauncher: View {
                     if appState.includeDocs {
                         Rectangle()
                             .fill(Color.blue.opacity(0.7))
+                            .frame(width: geometry.size.width * 0.25)
+                    }
+                    // Diff files
+                    if appState.includeDiffFiles {
+                        Rectangle()
+                            .fill(Color.teal.opacity(0.7))
                             .frame(width: geometry.size.width * 0.3)
                     }
                     // Diff
                     if appState.includeDiff {
                         Rectangle()
                             .fill(Color.green.opacity(0.7))
-                            .frame(width: geometry.size.width * 0.2)
+                            .frame(width: geometry.size.width * 0.15)
                     }
                     // Context files
                     if !appState.selectedContextFolders.isEmpty {
                         Rectangle()
                             .fill(Color.orange.opacity(0.7))
-                            .frame(width: geometry.size.width * 0.4)
+                            .frame(width: geometry.size.width * 0.2)
                     }
                     // Clipboard
                     if appState.includePaste {
@@ -618,13 +635,18 @@ struct PromptLauncher: View {
                         .font(.caption2)
                         .foregroundStyle(Color.blue.opacity(0.7))
                 }
+                if appState.includeDiffFiles {
+                    Label("Files", systemImage: "circle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(Color.teal.opacity(0.7))
+                }
                 if appState.includeDiff {
                     Label("Diff", systemImage: "circle.fill")
                         .font(.caption2)
                         .foregroundStyle(Color.green.opacity(0.7))
                 }
                 if !appState.selectedContextFolders.isEmpty {
-                    Label("Files", systemImage: "circle.fill")
+                    Label("Context", systemImage: "circle.fill")
                         .font(.caption2)
                         .foregroundStyle(Color.orange.opacity(0.7))
                 }

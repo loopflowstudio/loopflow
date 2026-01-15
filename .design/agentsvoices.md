@@ -138,34 +138,41 @@ enum TriggerKind: String {
 
 ### UI: Agent Window
 
-New top-level window (not inside repo window). Lists all agents with status, actions, history.
+NavigationSplitView like repo window. Sidebar lists agents, main panel shows selected agent's config.
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│ Agents                                                    [+] New    │
-├──────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  🎯 refine-ui                          ● Running                     │
-│     loopflow • ship • main-changed                                   │
-│     Iteration 3 • 2 min ago                                          │
-│                                                        [Stop] [View] │
-│                                                                      │
-│  ──────────────────────────────────────────────────────────────────  │
-│                                                                      │
-│  📊 daily-review                       ○ Idle                        │
-│     myapp • review • cron(0 9 * * *)                                 │
-│     Last run: 22h ago                                                │
-│                                                       [Start] [Edit] │
-│                                                                      │
-│  ──────────────────────────────────────────────────────────────────  │
-│                                                                      │
-│  🔄 continuous-test                    ○ Idle                        │
-│     myapp • test • loop                                              │
-│     Not run yet                                                      │
-│                                                       [Start] [Edit] │
-│                                                                      │
-└──────────────────────────────────────────────────────────────────────┘
+┌────────────────────────┬────────────────────────────────────────────────┐
+│ AGENTS            [+]  │                                                │
+├────────────────────────┤  Goal                                          │
+│                        │  ┌────────────────────────────────────────────┐│
+│ 🎯 refine-ui      ●    │  │ Improve conversion on the signup flow.     ││
+│    loopflow            │  │ Focus on reducing friction...              ││
+│                        │  └────────────────────────────────────────────┘│
+│ 📊 daily-review   ○    │                                                │
+│    myapp               │  Pipeline   [ ship ▼ ]                         │
+│                        │                                                │
+│ 🔄 continuous     ○    │  Trigger    [ main-changed ▼ ]                 │
+│    myapp               │                                                │
+│                        │  Context    [ src/components ] [ src/auth ]    │
+│                        │                                                │
+│                        │  Merge      ◉ Open PR   ○ Auto-merge           │
+│                        │                                                │
+│                        │  ────────────────────────────────────────────  │
+│                        │                                                │
+│                        │  Status     ● Running (iteration 3)            │
+│                        │  Worktree   loopflow.🎯-refine-ui-003          │
+│                        │  Last run   2 min ago                          │
+│                        │                                                │
+│                        │              [ Stop ]  [ Open Worktree ]       │
+│                        │                                                │
+└────────────────────────┴────────────────────────────────────────────────┘
 ```
+
+**Sidebar** - Compact rows: emoji + name + status dot + repo name. Click to select.
+
+**Main Panel** - Two sections:
+1. **Config** (top) - Editable fields: Goal, Pipeline, Trigger, Context, Merge strategy
+2. **Status** (bottom) - Runtime info: current status, worktree path, last run, actions
 
 ### Key Functions
 
@@ -173,26 +180,66 @@ New top-level window (not inside repo window). Lists all agents with status, act
 // Views/AgentWindow.swift
 struct AgentWindow: View {
     @State private var agents: [Agent] = []
+    @State private var selectedAgent: Agent?
     @State private var showingNewAgent = false
 
-    var body: some View { ... }
+    private let agentService = AgentService()
+
+    var body: some View {
+        NavigationSplitView {
+            AgentSidebar(agents: agents, selected: $selectedAgent, onAdd: { ... })
+        } detail: {
+            if let agent = selectedAgent {
+                AgentDetailPanel(agent: agent, onSave: { ... }, onStart: { ... }, onStop: { ... })
+            } else {
+                Text("Select an agent")
+            }
+        }
+    }
+}
+```
+
+```swift
+// Views/AgentSidebar.swift
+struct AgentSidebar: View {
+    let agents: [Agent]
+    @Binding var selected: Agent?
+    let onAdd: () -> Void
+
     private func agentRow(_ agent: Agent) -> some View { ... }
 }
 ```
 
 ```swift
-// Views/AgentEditorSheet.swift
-struct AgentEditorSheet: View {
-    // Create/edit agent definition
-    @State private var name: String
-    @State private var emoji: String
-    @State private var repo: URL?
-    @State private var pipeline: String
-    @State private var triggerKind: TriggerKind
-    @State private var cronExpression: String
-    @State private var mergeStrategy: String
-    @State private var goal: String
-    @State private var prompt: String
+// Views/AgentDetailPanel.swift
+struct AgentDetailPanel: View {
+    let agent: Agent
+    let onSave: (Agent) -> Void
+    let onStart: () -> Void
+    let onStop: () -> Void
+
+    // Editable state (copied from agent on appear)
+    @State private var goal: String = ""
+    @State private var pipeline: String = ""
+    @State private var triggerKind: TriggerKind = .manual
+    @State private var cronExpression: String = ""
+    @State private var contextPaths: [String] = []
+    @State private var mergeStrategy: MergeStrategy = .pr
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                configSection
+                Divider()
+                statusSection
+            }
+            .padding()
+        }
+    }
+
+    private var configSection: some View { ... }
+    private var statusSection: some View { ... }
+    private var triggerPicker: some View { ... }  // Shows cron input when trigger==cron
 }
 ```
 
@@ -202,19 +249,94 @@ WindowGroup(id: "agents") {
     AgentWindow()
 }
 .windowStyle(.automatic)
-.defaultSize(width: 600, height: 500)
+.defaultSize(width: 800, height: 600)
+```
+
+### Trigger-Specific UI
+
+The trigger picker shows additional fields based on selection:
+
+| Trigger | Additional Fields |
+|---------|------------------|
+| manual | None |
+| main-changed | None |
+| loop | None |
+| cron | Cron expression text field, grace period stepper |
+
+```swift
+private var triggerPicker: some View {
+    VStack(alignment: .leading, spacing: 8) {
+        Picker("Trigger", selection: $triggerKind) {
+            Text("Manual").tag(TriggerKind.manual)
+            Text("On main change").tag(TriggerKind.mainChanged)
+            Text("Loop").tag(TriggerKind.loop)
+            Text("Cron").tag(TriggerKind.cron)
+        }
+
+        if triggerKind == .cron {
+            TextField("0 9 * * *", text: $cronExpression)
+                .textFieldStyle(.roundedBorder)
+            Text("Runs daily at 9am")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
 ```
 
 ### Menu Bar Access
 
 Add menu item: **Window > Agents** (⌘⇧A) to open the agents window from any context.
 
-### Agent Detail / History View
+### Status Section Actions
 
-Click "View" on a running/completed agent to see:
-- Current worktree (if running)
-- Run history with timestamps
-- Link to open worktree / view PR
+| Status | Available Actions |
+|--------|------------------|
+| Idle | Start |
+| Running | Stop, Open Worktree |
+| Waiting | Stop |
+| Error | Start (retry), View Log |
+| Stopped | Start |
+
+When running, show link to open worktree in terminal/IDE (same pattern as repo window).
+
+### Creating a New Agent
+
+Click [+] in sidebar → Sheet with minimal required fields:
+
+```
+┌─────────────────────────────────────────────┐
+│ New Agent                                   │
+│                                             │
+│ Name      [ my-agent          ]             │
+│ Emoji     [ 🎯 ]  (picker or text)          │
+│ Repo      [ ~/src/myapp       ] [Browse]    │
+│                                             │
+│           [Cancel]        [Create]          │
+└─────────────────────────────────────────────┘
+```
+
+Creates `~/.lf/agents/my-agent.md` with defaults (manual trigger, ship pipeline). User configures the rest in the main panel after creation.
+
+### Goal Field
+
+The Goal is the agent's purpose—free-form text that gets injected into each pipeline step. It's stored in the agent's markdown file body (after frontmatter).
+
+```markdown
+---
+emoji: 🎯
+repo: ~/src/myapp
+pipeline: ship
+trigger: main-changed
+---
+
+Improve conversion on the signup flow. Focus on:
+- Reducing form fields
+- Clearer error messages
+- Faster validation feedback
+```
+
+The Goal textarea in the UI edits this body text. Changes auto-save to the `.md` file (debounced).
 
 ### Backend Work (Deferred)
 

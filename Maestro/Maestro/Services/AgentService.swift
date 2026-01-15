@@ -35,6 +35,7 @@ struct AgentService {
                 agents[i].lastRunAt = state.lastRunAt
                 agents[i].iteration = state.iteration
                 agents[i].pid = state.pid
+                agents[i].worktree = state.worktree
             }
         }
 
@@ -47,6 +48,55 @@ struct AgentService {
 
     func stop(agentId: String) async throws {
         try await runLfCommand(["agent", "stop", agentId])
+    }
+
+    func create(name: String, emoji: String, repo: URL) throws {
+        let fm = FileManager.default
+        try fm.createDirectory(at: agentsDir, withIntermediateDirectories: true)
+
+        let path = agentsDir.appendingPathComponent("\(name).md")
+        let content = """
+        ---
+        emoji: \(emoji)
+        repo: \(repo.path)
+        pipeline: ship
+        trigger: manual
+        merge: pr
+        ---
+
+        Describe what this agent should do.
+        """
+        try content.write(to: path, atomically: true, encoding: .utf8)
+    }
+
+    func save(_ agent: Agent) throws {
+        let path = agentsDir.appendingPathComponent("\(agent.id).md")
+
+        var lines = ["---"]
+        if !agent.emoji.isEmpty {
+            lines.append("emoji: \(agent.emoji)")
+        }
+        lines.append("repo: \(agent.repo)")
+        lines.append("pipeline: \(agent.pipeline)")
+        lines.append("trigger: \(agent.triggerKind.rawValue)")
+        if agent.triggerKind == .cron, let cron = agent.cron {
+            lines.append("cron: \(cron)")
+        }
+        lines.append("merge: \(agent.mergeStrategy.rawValue)")
+        if !agent.context.isEmpty {
+            lines.append("context: [\(agent.context.joined(separator: ", "))]")
+        }
+        lines.append("---")
+        lines.append("")
+        lines.append(agent.prompt)
+
+        let content = lines.joined(separator: "\n")
+        try content.write(to: path, atomically: true, encoding: .utf8)
+    }
+
+    func delete(_ agent: Agent) throws {
+        let path = agentsDir.appendingPathComponent("\(agent.id).md")
+        try FileManager.default.removeItem(at: path)
     }
 
     private func parseAgentFile(_ url: URL) -> Agent? {
@@ -63,26 +113,53 @@ struct AgentService {
         }
 
         let frontmatter = String(content[frontmatterRange])
-        let prompt = String(content[content.index(after: content.index(frontmatterRange.upperBound, offsetBy: 3))...]).trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Get prompt (body after frontmatter)
+        let endIndex = content.index(frontmatterRange.upperBound, offsetBy: 3, limitedBy: content.endIndex) ?? content.endIndex
+        let prompt: String
+        if endIndex < content.endIndex {
+            prompt = String(content[content.index(after: endIndex)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            prompt = ""
+        }
 
         let config = parseYamlFrontmatter(frontmatter)
 
-        guard let repo = config["repo"] as? String,
-              let pipeline = config["pipeline"] as? [String] else {
+        guard let repo = config["repo"] as? String else {
             return nil
         }
 
+        // Pipeline can be string or array
+        let pipeline: String
+        if let pipelineStr = config["pipeline"] as? String {
+            pipeline = pipelineStr
+        } else if let pipelineArr = config["pipeline"] as? [String] {
+            pipeline = pipelineArr.joined(separator: ",")
+        } else {
+            pipeline = "ship"
+        }
+
         let name = url.deletingPathExtension().lastPathComponent
+
+        // Parse trigger
+        let triggerStr = config["trigger"] as? String ?? "manual"
+        let triggerKind = TriggerKind(rawValue: triggerStr) ?? .manual
+
+        // Parse merge strategy
+        let mergeStr = config["merge"] as? String ?? "pr"
+        let mergeStrategy = MergeStrategy(rawValue: mergeStr) ?? .pr
 
         return Agent(
             id: name,
             name: name,
             repo: repo,
             pipeline: pipeline,
-            trigger: config["trigger"] as? String ?? "manual",
+            triggerKind: triggerKind,
             context: config["context"] as? [String] ?? [],
             prompt: prompt,
-            intervalSeconds: config["interval"] as? Int
+            emoji: config["emoji"] as? String ?? "",
+            cron: config["cron"] as? String,
+            mergeStrategy: mergeStrategy
         )
     }
 
@@ -119,6 +196,7 @@ struct AgentService {
         var lastRunAt: Date?
         var iteration: Int
         var pid: Int?
+        var worktree: String?
     }
 
     private func loadRuntimeState() -> [String: RuntimeState] {
@@ -132,7 +210,7 @@ struct AgentService {
 
         // Query agent_runs table for latest run per agent
         let query = """
-            SELECT agent_name, status, started_at, pid,
+            SELECT agent_name, status, started_at, pid, worktree,
                    (SELECT COUNT(*) FROM agent_runs r2 WHERE r2.agent_name = r1.agent_name) as iteration
             FROM agent_runs r1
             WHERE started_at = (SELECT MAX(started_at) FROM agent_runs r2 WHERE r2.agent_name = r1.agent_name)
@@ -163,12 +241,19 @@ struct AgentService {
             }
 
             let pid = sqlite3_column_type(stmt, 3) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 3)) : nil
-            let iteration = Int(sqlite3_column_int(stmt, 4))
+
+            var worktree: String?
+            if let worktreePtr = sqlite3_column_text(stmt, 4) {
+                worktree = String(cString: worktreePtr)
+            }
+
+            let iteration = Int(sqlite3_column_int(stmt, 5))
 
             let status: AgentStatus
             switch statusStr {
             case "running": status = .running
             case "waiting": status = .waiting
+            case "completed": status = .completed
             case "error": status = .error
             case "stopped": status = .stopped
             default: status = .idle
@@ -178,7 +263,8 @@ struct AgentService {
                 status: status,
                 lastRunAt: lastRunAt,
                 iteration: iteration,
-                pid: pid
+                pid: pid,
+                worktree: worktree
             )
         }
 

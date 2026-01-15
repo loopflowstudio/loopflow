@@ -245,7 +245,7 @@ struct AgentRow: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Circle()
-                    .fill(statusColor)
+                    .fill(agent.status.color)
                     .frame(width: 8, height: 8)
 
                 Text(agent.name)
@@ -302,21 +302,6 @@ struct AgentRow: View {
                     onStart()
                 }
             }
-        }
-    }
-
-    private var statusColor: Color {
-        switch agent.status {
-        case .running:
-            return .green
-        case .waiting:
-            return .blue
-        case .idle:
-            return .gray
-        case .error:
-            return .red
-        case .stopped:
-            return .orange
         }
     }
 }

@@ -2,8 +2,10 @@
 
 Triggers determine when an agent should run:
 - manual: Only runs when explicitly started
+- loop: Runs again immediately after previous run completes
 - main-changed: Runs when origin/main has new commits since last run
 - interval: Runs every N seconds
+- cron: Runs on a schedule (minute hour day month weekday)
 """
 
 import subprocess
@@ -21,6 +23,13 @@ def should_trigger(
     """Check if an agent's trigger condition is met."""
     if agent.trigger == "manual":
         return False
+
+    if agent.trigger == "loop":
+        # Loop trigger: run again immediately after previous run completes
+        return True
+
+    if agent.trigger == "cron":
+        return _cron_matches(agent.cron, last_run_at)
 
     if agent.trigger == "main-changed":
         return _main_changed(agent.repo, last_main_sha)
@@ -89,3 +98,51 @@ def _interval_elapsed(interval_seconds: int | None, last_run_at: datetime | None
 def get_main_sha(repo: Path) -> str | None:
     """Get the current SHA of origin/main. Public API for storing state."""
     return _get_main_sha(repo)
+
+
+def _cron_matches(cron_expr: str | None, last_run_at: datetime | None) -> bool:
+    """Check if current time matches cron expression.
+
+    Format: minute hour day month weekday
+    Supports: numbers, *, */N (every N)
+    """
+    if not cron_expr:
+        return False
+
+    now = datetime.now()
+
+    # Don't trigger if we already ran this minute
+    if last_run_at and (now - last_run_at).total_seconds() < 60:
+        return False
+
+    parts = cron_expr.split()
+    if len(parts) != 5:
+        return False
+
+    minute, hour, day, month, weekday = parts
+
+    return (
+        _matches_field(minute, now.minute)
+        and _matches_field(hour, now.hour)
+        and _matches_field(day, now.day)
+        and _matches_field(month, now.month)
+        and _matches_field(weekday, now.weekday())  # 0=Monday
+    )
+
+
+def _matches_field(pattern: str, value: int) -> bool:
+    """Check if a cron field matches a value."""
+    if pattern == "*":
+        return True
+
+    if pattern.startswith("*/"):
+        try:
+            step = int(pattern[2:])
+            return value % step == 0
+        except ValueError:
+            return False
+
+    try:
+        return int(pattern) == value
+    except ValueError:
+        return False

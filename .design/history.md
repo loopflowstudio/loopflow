@@ -1,164 +1,67 @@
-# Task History for Worktrees
+# History
 
-Surface task history per worktree so users can see what stage each branch is in (design → implement → review → etc).
+Migrate session logging from `maestro.db` to `lfd` daemon, enabling worktree-based history queries and live UI updates in Maestro.
 
-## What to build
+## Review
 
-A history system where `lf` logs task executions to `lfd`, and Maestro queries that history to show each worktree's progression through tasks.
+**Verdict:** Needs work
 
-## Architecture
+### Duplicate Session models
 
-```
-┌─────────┐        ┌─────────┐        ┌─────────┐
-│  lf     │──log──▶│  lfd    │◀─query─│ Maestro │
-│ (CLI)   │        │(daemon) │        │ (macOS) │
-└─────────┘        └─────────┘        └─────────┘
-```
+Two `Session` classes now exist:
+- `loopflow.maestro.session.Session` with `backend` field and `Path` types
+- `loopflow.lfd.models.Session` with `model` field and `str` types
 
-Currently `lf` logs to `maestro.db` directly. This changes to:
-1. `lf` sends session events to `lfd` via Unix socket
-2. `lfd` stores in `lfd.db` (already has a `sessions` table)
-3. Maestro queries `lfd` for session history per worktree
+The old maestro module still exports `Session` and `SessionStatus` via `__init__.py` and remains used by `lfops.py`, `cli/sessions.py`, and other files. The migration is incomplete—either remove the old model and update all consumers, or keep one source of truth.
 
-## Data structures
+### Incomplete migration
 
-`lfd.db` already has a `sessions` table. Add history querying:
+Several files still import from the old location:
+- `src/loopflow/lfops.py` uses `maestro.db` functions directly
+- `src/loopflow/cli/sessions.py` imports `from loopflow.maestro`
+- `src/loopflow/maestro/collector.py`, `runner.py` still use old paths
 
-```python
-# src/loopflow/lfd/db.py
+The diff migrates `cli/run.py` and `pipeline.py` but leaves these others. Either complete the migration or revert to a consistent state.
 
-def load_sessions_for_worktree(worktree: str, limit: int = 20) -> list[Session]:
-    """Load recent sessions for a worktree path."""
-    ...
+### Memory safety in Swift sqlite binding
 
-def load_sessions_for_repo(repo: str, limit: int = 50) -> list[Session]:
-    """Load recent sessions across all worktrees in a repo."""
-    ...
-```
-
-Add methods to `lfd` server:
-
-```python
-# src/loopflow/lfd/server.py
-
-# New method: sessions.history
-async def _handle_sessions_history(self, params: dict) -> Response:
-    """Return session history for a worktree or repo.
-
-    params:
-        worktree: str (optional) - filter to specific worktree
-        repo: str (optional) - filter to repo
-        limit: int (default 20) - max sessions to return
-    """
-    ...
-```
-
-## Key functions
-
-```python
-# src/loopflow/lfd/client.py
-
-def log_session_start(session: Session) -> None:
-    """Tell lfd a session started. Fire-and-forget."""
-    ...
-
-def log_session_end(session_id: str, status: SessionStatus) -> None:
-    """Tell lfd a session ended."""
-    ...
-
-def get_worktree_history(worktree: str, limit: int = 20) -> list[Session]:
-    """Get session history for a worktree."""
-    ...
-```
-
-```python
-# src/loopflow/cli/run.py changes
-
-# In _execute_task, replace direct maestro.db writes:
-# Before: save_session(DEFAULT_DB_PATH, session)
-# After:  lfd_client.log_session_start(session)
-```
-
-Swift side (Maestro):
-
+In `SessionService.swift:64`:
 ```swift
-// Maestro/Models/Session.swift (new file)
-
-struct TaskSession: Identifiable, Codable {
-    let id: String
-    let task: String
-    let status: String  // running, completed, error
-    let startedAt: Date
-    let endedAt: Date?
-    let model: String
-}
+sqlite3_bind_text(stmt, 1, value, -1, nil)
 ```
 
+Passing `nil` as the destructor tells SQLite the string is static and won't be freed. Swift strings are not static—they can be deallocated while SQLite still references them. Use `SQLITE_TRANSIENT` to make SQLite copy the string:
 ```swift
-// Maestro/Services/SessionService.swift (new file)
-
-struct SessionService {
-    func history(for worktree: String, limit: Int = 20) async throws -> [TaskSession]
-}
+sqlite3_bind_text(stmt, 1, value, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
 ```
 
+Or use the common pattern of binding within a `value.withCString` block.
+
+### Worktree removed Codable conformance
+
+`Worktree.swift:22` changed from:
 ```swift
-// Maestro/Models/Worktree.swift - extend
-
-struct Worktree {
-    // existing fields...
-    var recentTasks: [TaskSession] = []
-
-    var lastTask: String? {
-        recentTasks.first?.task
-    }
-
-    var lastCompletedTask: String? {
-        recentTasks.first(where: { $0.isCompleted })?.task
-    }
-}
+struct Worktree: Identifiable, Codable, Hashable
 ```
-
-## UI changes
-
-WorktreeRow shows stage indicator:
-
+to:
 ```swift
-// Before: statusBadge shows "clean" / "modified"
-// After:  also show last task as stage indicator
-
-private var stageBadge: some View {
-    if let task = worktree.lastTask {
-        Text(task)
-            .font(.caption2)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(stageColor(task).opacity(0.2))
-            .foregroundStyle(stageColor(task))
-            .clipShape(Capsule())
-    }
-}
-
-private func stageColor(_ task: String) -> Color {
-    switch task {
-    case "design": return .blue
-    case "implement": return .purple
-    case "review": return .orange
-    case "polish": return .green
-    default: return .gray
-    }
-}
+struct Worktree: Identifiable, Hashable
 ```
 
-## Constraints
+This breaks any code that serializes `Worktree` (caching, etc). If `Codable` was removed intentionally because `TaskSession` isn't synthesizable, add manual `Codable` conformance or reconsider the design.
 
-- **lfd must be running** for history to work. If not running, `lf` falls back to direct file logging (no-op to lfd).
-- **Fire-and-forget logging** - task execution shouldn't block on lfd communication.
-- **Keep maestro.db for Maestro's own state** (agents, etc). Sessions move to lfd.db.
+### Missing tests
 
-## Done when
+No tests for:
+- `sessions.start`, `sessions.end`, `sessions.history` server methods
+- Fire-and-forget client functions
+- Swift `SessionService` queries
 
-1. Run a task: `lf review`
-2. Query lfd: `echo '{"method": "sessions.history", "params": {"limit": 5}}' | nc -U ~/.lf/lfd.sock`
-3. See the session in output with task name, worktree, status, timestamps
-4. In Maestro, worktree row shows the task name as a stage badge
+The existing `test_maestro_db.py` tests the old path. Add tests for the new lfd session functions.
+
+## Design notes
+
+The architecture (lf -> lfd -> Maestro) is sound. Key constraints:
+- Fire-and-forget logging so task execution never blocks on daemon
+- lfd must be running for history; graceful fallback if not
+- Maestro reads directly from `lfd.db` rather than querying the socket (simpler for read-only queries)

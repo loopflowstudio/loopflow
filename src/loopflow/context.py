@@ -9,6 +9,7 @@ from typing import Optional
 from loopflow.design import gather_design_docs
 from loopflow.files import gather_docs, gather_files, format_files
 from loopflow.frontmatter import TaskFile, parse_task_file
+from loopflow.voices import Voice, load_voice
 
 
 @dataclass
@@ -23,6 +24,7 @@ class PromptComponents:
     repo_root: Path
     clipboard: str | None = None
     loopflow_doc: str | None = None  # Bundled system documentation
+    voices: list[Voice] | None = None
 
 
 def find_worktree_root(start: Optional[Path] = None) -> Path | None:
@@ -163,6 +165,7 @@ def gather_prompt_components(
     include_tests_for: Optional[list[str]] = None,
     run_mode: Optional[str] = None,
     include_loopflow_doc: bool = True,
+    voices: Optional[list[str]] = None,
 ) -> PromptComponents:
     """Gather all prompt components without assembling them."""
     docs = gather_docs(repo_root, repo_root, exclude)
@@ -213,6 +216,9 @@ def gather_prompt_components(
     )
     clipboard = _read_clipboard() if paste else None
 
+    # Load voices if specified
+    loaded_voices = [load_voice(name, repo_root) for name in voices] if voices else None
+
     return PromptComponents(
         run_mode=run_mode,
         docs=docs,
@@ -222,6 +228,7 @@ def gather_prompt_components(
         repo_root=repo_root,
         clipboard=clipboard,
         loopflow_doc=loopflow_doc,
+        voices=loaded_voices,
     )
 
 
@@ -241,10 +248,19 @@ def format_prompt(components: PromptComponents) -> str:
 
     if components.task:
         name, content = components.task
-        if name == "inline":
-            parts.append(f"The task.\n\n<lf:task>\n{content}\n</lf:task>")
+        task_tag = f"<lf:task>\n{content}\n</lf:task>" if name == "inline" else f"<lf:task:{name}>\n{content}\n</lf:task:{name}>"
+
+        # Voices go between "The task." header and the actual task content
+        if components.voices:
+            if len(components.voices) == 1:
+                v = components.voices[0]
+                voice_section = f"<lf:voice:{v.name}>\n{v.content}\n</lf:voice:{v.name}>"
+            else:
+                voice_parts = [f"<lf:voice:{v.name}>\n{v.content}\n</lf:voice:{v.name}>" for v in components.voices]
+                voice_section = f"<lf:voices>\n{chr(10).join(voice_parts)}\n</lf:voices>"
+            parts.append(f"The task.\n\n{voice_section}\n\n{task_tag}")
         else:
-            parts.append(f"The task.\n\n<lf:task:{name}>\n{content}\n</lf:task:{name}>")
+            parts.append(f"The task.\n\n{task_tag}")
 
     if components.docs:
         doc_parts = []

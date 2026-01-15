@@ -54,6 +54,7 @@ class Config(BaseModel):
     docs: bool = True  # Include repo documentation (.md files)
     diff: bool = True  # Include branch diff against main
     paste: bool = False  # Include clipboard content by default
+    voice: Optional[list[str]] = None  # Default voices for all tasks
 
     @field_validator("context", mode="before")
     @classmethod
@@ -75,6 +76,15 @@ class Config(BaseModel):
         if isinstance(v, str):
             return v.split()
         return v
+
+    @field_validator("voice", mode="before")
+    @classmethod
+    def normalize_voice(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            return [v] if v else None
+        return v if v else None
 
     @field_validator("pipelines", mode="before")
     @classmethod

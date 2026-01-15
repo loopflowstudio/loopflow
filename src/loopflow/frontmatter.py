@@ -15,6 +15,7 @@ class TaskConfig:
     include: list[str] | None = None
     exclude: list[str] | None = None
     model: str | None = None
+    voice: list[str] | None = None
 
 
 @dataclass
@@ -35,6 +36,7 @@ class ResolvedTaskConfig:
     exclude: list[str]
     model: str
     context: list[str]
+    voice: list[str]
 
 
 def parse_task_file(name: str, text: str) -> TaskFile:
@@ -47,6 +49,13 @@ def parse_task_file(name: str, text: str) -> TaskFile:
     content = text[match.end() :]
     config_dict = _parse_yaml_frontmatter(frontmatter)
 
+    # Normalize voice: can be string or list
+    voice_raw = config_dict.get("voice")
+    if isinstance(voice_raw, str):
+        voice = [voice_raw] if voice_raw else None
+    else:
+        voice = voice_raw if voice_raw else None
+
     return TaskFile(
         name=name,
         content=content,
@@ -55,6 +64,7 @@ def parse_task_file(name: str, text: str) -> TaskFile:
             include=config_dict.get("include"),
             exclude=config_dict.get("exclude"),
             model=config_dict.get("model"),
+            voice=voice,
         ),
     )
 
@@ -150,6 +160,7 @@ def resolve_task_config(
     cli_auto: bool | None,
     cli_model: str | None,
     cli_context: list[str] | None,
+    cli_voice: list[str] | None = None,
 ) -> ResolvedTaskConfig:
     """Merge configs: CLI > frontmatter > global > defaults."""
     defaults = get_defaults()
@@ -207,10 +218,21 @@ def resolve_task_config(
     if cli_context:
         context.extend(cli_context)
 
+    # Resolve voice: CLI > frontmatter > global > none
+    if cli_voice:
+        voice = list(cli_voice)
+    elif frontmatter.voice:
+        voice = list(frontmatter.voice)
+    elif global_config and global_config.voice:
+        voice = list(global_config.voice)
+    else:
+        voice = []
+
     return ResolvedTaskConfig(
         interactive=interactive,
         include=include,
         exclude=exclude,
         model=model,
         context=context,
+        voice=voice,
     )

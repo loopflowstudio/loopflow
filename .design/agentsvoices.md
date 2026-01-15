@@ -2,17 +2,15 @@
 
 Voice picker in repo window + dedicated Agents window for background agent management.
 
-## Review
+## What shipped
 
-**Verdict:** Ready to ship
+**Voice picker in PromptLauncher** — Select voices from `.lf/voices/` via chip UI. Multiple voices combine. Voices pass to CLI via `--voice name1,name2`.
 
-Code is clean, matches design doc intent, no bugs found. A few minor style observations that aren't blockers.
+**Agents window** — Cmd+Shift+A opens global agent management. Sidebar lists agents from `~/.lf/agents/*.md`. Detail panel shows/edits goal, pipeline, trigger, merge strategy. Start/stop agents directly.
 
-### Minor items
+**Agent CRUD** — Create, edit, delete agents via UI. Changes write back to markdown files with YAML frontmatter.
 
-**pyproject.toml adds duplicate dev deps** (`pyproject.toml:66-70`) — `[dependency-groups] dev` adds `fastapi>=0.128.0` and `pytest>=9.0.2`, but `[project.optional-dependencies] dev` already has `pytest>=7.0.0`. The `fastapi` dep appears unused—nothing imports it. Delete the `[dependency-groups]` section unless there's a reason for it.
-
-**Context paths UI has no way to add** (`AgentDetailPanel.swift:172-204`) — You can remove context paths but not add new ones. The design doc shows chips with a way to add. Not blocking since agents can still define context in the markdown file directly.
+**Runtime state from DB** — Agent status, iteration count, worktree path, and last run time come from `~/.lf/maestro.db`. UI refreshes on demand.
 
 ## Design notes
 
@@ -23,13 +21,17 @@ Code is clean, matches design doc intent, no bugs found. A few minor style obser
 **Trigger types:**
 - `manual` — only runs when explicitly started
 - `main-changed` — runs when origin/main has new commits
-- `loop` — runs again immediately after completion (backend stub added in `triggers.py`)
+- `loop` — runs again immediately after completion (backend stub in `triggers.py`)
 - `cron` — scheduled runs (UI ready, backend not implemented)
 
-**Deferred work** (captured in `.design/questions.md`):
+**Merge strategies:**
+- `pr` — open PR for human review
+- `auto` — auto-merge when pipeline succeeds
+
+## Deferred work
+
 1. Loop trigger execution logic
-2. Pipeline storage for agents
+2. Cron trigger backend
 3. Auto-close worktrees after PR merge
-4. Goal file watching for re-triggers
-5. Voice creation UI
-6. Pipeline visualization
+4. Voice creation UI (currently: create `.md` files directly)
+5. Context paths add button (currently: edit markdown file directly)

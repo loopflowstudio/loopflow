@@ -62,9 +62,3 @@ include = [
 
 [tool.hatch.version]
 path = "src/loopflow/__init__.py"
-
-[dependency-groups]
-dev = [
-    "fastapi>=0.128.0",
-    "pytest>=9.0.2",
-]

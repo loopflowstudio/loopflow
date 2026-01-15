@@ -31,11 +31,6 @@ def load_voice(name: str, repo_root: Path) -> Voice:
     return Voice(name=name, content=voice_path.read_text().strip())
 
 
-def load_voices(names: list[str], repo_root: Path) -> list[Voice]:
-    """Load multiple voices. Raise if any not found."""
-    return [load_voice(name, repo_root) for name in names]
-
-
 def parse_voice_arg(voice_arg: str | None) -> list[str]:
     """Parse 'a,b,c' into ['a', 'b', 'c']. Returns [] if None or empty."""
     if not voice_arg:

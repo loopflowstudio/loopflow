@@ -779,14 +779,17 @@ def pr(
 
 @app.command()
 def land(
-    add: bool = typer.Option(False, "-a", "--add", help="Commit and push changes first"),
     worktree: str = typer.Option(None, "-w", "--worktree", help="Target worktree by name"),
     local: bool = typer.Option(None, "-l", "--local/--gh", help="Local merge (no PR) vs GitHub PR merge"),
     create_pr: bool = typer.Option(False, "-c", "--create-pr", help="Create PR and merge in one step"),
+    strict: bool = typer.Option(False, "-s", "--strict", help="Error if uncommitted/unpushed changes exist"),
 ) -> None:
     """Squash-merge branch to main and clean up.
 
-    Default: uses gh pr merge (requires PR via lfops pr create).
+    By default, stages, commits, and pushes any pending changes before landing.
+    Use --strict to require clean state (error if uncommitted/unpushed).
+
+    Default: uses gh pr merge (requires PR via lfops pr).
     With --local: local merge + push (no PR needed).
     With --create-pr: create PR and immediately merge.
     Config: set `land: local` in .lf/config.yaml to default to --local.
@@ -796,12 +799,12 @@ def land(
     use_local = local if local is not None else (config and config.land == "local")
 
     if use_local:
-        _land_local(add, worktree)
+        _land_local(strict, worktree)
     else:
-        _land_pr(add, worktree, create_pr=create_pr)
+        _land_pr(strict, worktree, create_pr=create_pr)
 
 
-def _land_pr(add: bool, worktree: str | None, create_pr: bool = False) -> None:
+def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> None:
     """Land via GitHub PR merge."""
     if worktree:
         main_repo = find_main_repo()
@@ -846,11 +849,10 @@ def _land_pr(add: bool, worktree: str | None, create_pr: bool = False) -> None:
         text=True,
     )
     if result.stdout.strip():
-        if add:
-            _add_commit_push(repo_root, push=False)
-        else:
-            typer.echo("Error: Uncommitted changes. Use --add or commit manually.", err=True)
+        if strict:
+            typer.echo("Error: Uncommitted changes (use without --strict to auto-commit)", err=True)
             raise typer.Exit(1)
+        _add_commit_push(repo_root, push=False)
 
     # Ensure branch is pushed
     result = subprocess.run(
@@ -870,19 +872,17 @@ def _land_pr(add: bool, worktree: str | None, create_pr: bool = False) -> None:
         )
         unpushed = int(result.stdout.strip()) if result.returncode == 0 else 0
         if unpushed > 0:
-            if add:
-                typer.echo("Pushing to origin...")
-                subprocess.run(["git", "push"], cwd=repo_root, check=True)
-            else:
-                typer.echo("Error: Unpushed commits. Use --add or push manually.", err=True)
+            if strict:
+                typer.echo("Error: Unpushed commits (use without --strict to auto-push)", err=True)
                 raise typer.Exit(1)
-    else:
-        if add:
             typer.echo("Pushing to origin...")
-            subprocess.run(["git", "push", "-u", "origin", branch], cwd=repo_root, check=True)
-        else:
-            typer.echo("Error: Branch not pushed. Use --add or push manually.", err=True)
+            subprocess.run(["git", "push"], cwd=repo_root, check=True)
+    else:
+        if strict:
+            typer.echo("Error: Branch not pushed (use without --strict to auto-push)", err=True)
             raise typer.Exit(1)
+        typer.echo("Pushing to origin...")
+        subprocess.run(["git", "push", "-u", "origin", branch], cwd=repo_root, check=True)
 
     # Get PR info (or create PR if --create-pr)
     result = subprocess.run(
@@ -952,7 +952,7 @@ def _land_pr(add: bool, worktree: str | None, create_pr: bool = False) -> None:
         typer.echo(str(main_repo))
 
 
-def _land_local(add: bool, worktree: str | None) -> None:
+def _land_local(strict: bool, worktree: str | None) -> None:
     """Land locally without PR (squash-merge + push)."""
     if worktree:
         main_repo = find_main_repo()
@@ -978,11 +978,10 @@ def _land_local(add: bool, worktree: str | None) -> None:
         text=True,
     )
     if result.stdout.strip():
-        if add:
-            _add_commit_push(repo_root, push=False)
-        else:
-            typer.echo("Error: Uncommitted changes. Use --add or commit manually.", err=True)
+        if strict:
+            typer.echo("Error: Uncommitted changes (use without --strict to auto-commit)", err=True)
             raise typer.Exit(1)
+        _add_commit_push(repo_root, push=False)
 
     branch = get_current_branch(repo_root)
     if not branch:

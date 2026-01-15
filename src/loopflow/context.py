@@ -47,12 +47,6 @@ def find_worktree_root(start: Optional[Path] = None) -> Path | None:
     return None
 
 
-def _read_file_if_exists(path: Path) -> str | None:
-    if path.exists() and path.is_file():
-        return path.read_text()
-    return None
-
-
 def _read_file_if_named(dir_path: Path, filename: str) -> str | None:
     """Read file only if an exact name match exists in the directory."""
     if not dir_path.exists():
@@ -254,10 +248,9 @@ def gather_prompt_components(
     context_paths = context or []
 
     # Merge: diff files first, then context paths not already in diff
-    # This avoids loading the same file twice
     diff_set = set(diff_file_paths)
     all_file_paths = diff_file_paths + [p for p in context_paths if p not in diff_set]
-    all_files = gather_files(all_file_paths, repo_root, context_exclude) if all_file_paths else []
+    all_files = gather_files(all_file_paths, repo_root, context_exclude)
 
     clipboard = _read_clipboard() if paste else None
 

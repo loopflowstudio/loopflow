@@ -1527,10 +1527,10 @@ def _fix_issue(repo: Path, issue: Issue) -> bool:
 
 
 @app.command()
-def recover(
+def wtdoctor(
     fix: bool = typer.Option(False, "--fix", "-f", help="Apply fixes (default: dry-run)"),
 ) -> None:
-    """Detect and fix repository inconsistencies."""
+    """Detect and fix worktree inconsistencies."""
     repo = find_main_repo()
     if not repo:
         typer.echo("Error: Not in a git repository", err=True)
@@ -1559,7 +1559,7 @@ def recover(
         for issue in issues:
             typer.echo(f"  {issue.kind}: {issue.description}")
             typer.echo(f"    fix: {issue.fix_cmd}\n")
-        typer.echo("Run 'lfops recover --fix' to apply fixes.")
+        typer.echo("Run 'lfops wtdoctor --fix' to apply fixes.")
 
 
 def main() -> None:

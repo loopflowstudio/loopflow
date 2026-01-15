@@ -227,7 +227,7 @@ def save_session(session: Session, db_path: Path | None = None) -> None:
 
 def load_sessions(
     repo: str | None = None,
-    include_completed: bool = False,
+    active_only: bool = False,
     db_path: Path | None = None,
 ) -> list[Session]:
     """Load sessions, optionally filtered by repo."""
@@ -240,7 +240,7 @@ def load_sessions(
         conditions.append("repo = ?")
         params.append(repo)
 
-    if not include_completed:
+    if active_only:
         conditions.append("status IN ('running', 'waiting')")
 
     where = f" WHERE {' AND '.join(conditions)}" if conditions else ""

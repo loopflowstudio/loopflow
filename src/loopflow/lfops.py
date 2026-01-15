@@ -545,7 +545,7 @@ def stop(
 ) -> None:
     """Stop a running session."""
     repo = None if all_repos else find_worktree_root()
-    sessions = load_sessions(repo=str(repo) if repo else None, include_completed=True)
+    sessions = load_sessions(repo=str(repo) if repo else None)
     session = _resolve_session(sessions, session_id)
 
     if session.status not in (SessionStatus.RUNNING, SessionStatus.WAITING):
@@ -572,7 +572,7 @@ def prune(
 ) -> None:
     """Remove completed sessions and their logs."""
     repo = None if all_repos else find_worktree_root()
-    sessions = load_sessions(repo=str(repo) if repo else None, include_completed=True)
+    sessions = load_sessions(repo=str(repo) if repo else None)
 
     removed = 0
     for session in sessions:

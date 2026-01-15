@@ -16,9 +16,6 @@ app = typer.Typer(
 
 # Import and register subcommands
 from loopflow.cli import run as run_module
-from loopflow.cli import ops
-
-app.add_typer(ops.app, name="ops")
 
 # Register top-level commands
 app.command(context_settings={"allow_extra_args": True, "allow_interspersed_args": True})(run_module.run)
@@ -34,7 +31,6 @@ def main():
         "pipeline",
         "inline",
         "cp",
-        "ops",
         "--help",
         "-h",
     }
@@ -77,7 +73,7 @@ def main():
                         typer.echo(f"No task named '{name}' found.", err=True)
                         typer.echo("", err=True)
                         typer.echo("This repo hasn't been set up for loopflow yet.", err=True)
-                        typer.echo("Run: lf ops init", err=True)
+                        typer.echo("Run: lfops init", err=True)
                     else:
                         # Initialized but task missing - suggest creating it
                         typer.echo(f"No task or pipeline named '{name}'", err=True)

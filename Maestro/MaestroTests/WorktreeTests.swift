@@ -20,6 +20,7 @@ struct WorktreeModelTests {
             behindRemote: 0,
             prURL: nil,
             prNumber: nil,
+            prState: nil,
             hasCodeWorkspace: false,
             isRebasing: false,
             isMerging: false
@@ -41,6 +42,7 @@ struct WorktreeModelTests {
             behindRemote: 0,
             prURL: nil,
             prNumber: nil,
+            prState: nil,
             hasCodeWorkspace: false,
             isRebasing: false,
             isMerging: false
@@ -62,6 +64,7 @@ struct WorktreeModelTests {
             behindRemote: 0,
             prURL: URL(string: "https://github.com/org/repo/pull/42"),
             prNumber: 42,
+            prState: .open,
             hasCodeWorkspace: false,
             isRebasing: false,
             isMerging: false
@@ -84,6 +87,7 @@ struct WorktreeModelTests {
             behindRemote: 0,
             prURL: nil,
             prNumber: nil,
+            prState: nil,
             hasCodeWorkspace: false,
             isRebasing: false,
             isMerging: false
@@ -107,6 +111,7 @@ struct WorktreeModelTests {
             behindRemote: 0,
             prURL: nil,
             prNumber: nil,
+            prState: nil,
             hasCodeWorkspace: false,
             isRebasing: false,
             isMerging: false

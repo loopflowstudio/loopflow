@@ -76,6 +76,71 @@ struct WorktreeService {
         _ = try await run(["-C", repoURL.path(), "remove", name], in: repoURL)
     }
 
+    func createPR(in worktreePath: URL, title: String? = nil) async throws {
+        _ = try await runLfpr(["create"] + (title.map { ["-t", $0] } ?? []), in: worktreePath)
+    }
+
+    func landPR(in worktreePath: URL) async throws {
+        _ = try await runLfpr(["land"], in: worktreePath)
+    }
+
+    private func findLfpr() -> URL? {
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = ["-l", "-c", "which lfpr"]
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+            if process.terminationStatus == 0 {
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                if let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !path.isEmpty {
+                    return URL(fileURLWithPath: path)
+                }
+            }
+        } catch {
+            // Fall through
+        }
+        return nil
+    }
+
+    private func runLfpr(_ args: [String], in directory: URL) async throws -> String {
+        guard let lfprURL = findLfpr() else {
+            throw WorktreeError.commandFailed("lfpr not found. Install loopflow.")
+        }
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let process = Process()
+            let pipe = Pipe()
+
+            process.executableURL = lfprURL
+            process.arguments = args
+            process.currentDirectoryURL = directory
+            process.standardOutput = pipe
+            process.standardError = pipe
+
+            do {
+                try process.run()
+                process.waitUntilExit()
+
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: data, encoding: .utf8) ?? ""
+
+                if process.terminationStatus == 0 {
+                    continuation.resume(returning: output)
+                } else {
+                    continuation.resume(throwing: WorktreeError.commandFailed(output))
+                }
+            } catch {
+                continuation.resume(throwing: error)
+            }
+        }
+    }
+
     private func run(_ args: [String], in directory: URL) async throws -> String {
         guard let wtURL = findWt() else {
             throw WorktreeError.wtNotInstalled

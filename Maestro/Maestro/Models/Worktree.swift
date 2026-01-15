@@ -3,6 +3,22 @@
 
 import Foundation
 
+enum PRState: String, Codable {
+    case open
+    case merged
+    case closed
+    case draft
+
+    var displayText: String {
+        switch self {
+        case .open: return "Open"
+        case .merged: return "Merged"
+        case .closed: return "Closed"
+        case .draft: return "Draft"
+        }
+    }
+}
+
 struct Worktree: Identifiable, Codable, Hashable {
     var id: String { branch }
 
@@ -16,6 +32,7 @@ struct Worktree: Identifiable, Codable, Hashable {
     let behindRemote: Int
     let prURL: URL?
     let prNumber: Int?
+    let prState: PRState?
     let hasCodeWorkspace: Bool
     let isRebasing: Bool
     let isMerging: Bool
@@ -30,7 +47,11 @@ struct Worktree: Identifiable, Codable, Hashable {
     var commitsText: String {
         var parts: [String] = []
         if let pr = prNumber {
-            parts.append("PR #\(pr)")
+            var prText = "PR #\(pr)"
+            if let state = prState {
+                prText += " (\(state.displayText))"
+            }
+            parts.append(prText)
         } else {
             parts.append("no PR")
         }
@@ -98,6 +119,7 @@ struct RemoteStatusJSON: Codable {
 struct CIJSON: Codable {
     let source: String?
     let url: String?
+    let state: String?
 }
 
 extension Worktree {
@@ -123,9 +145,16 @@ extension Worktree {
             } else {
                 self.prNumber = nil
             }
+            // Parse PR state
+            if let stateString = json.ci?.state?.lowercased() {
+                self.prState = PRState(rawValue: stateString)
+            } else {
+                self.prState = nil
+            }
         } else {
             self.prURL = nil
             self.prNumber = nil
+            self.prState = nil
         }
 
         self.hasCodeWorkspace = hasCodeWorkspace

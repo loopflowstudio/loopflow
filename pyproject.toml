@@ -31,6 +31,7 @@ dependencies = [
     "pydantic>=2.12.5",
     "pydantic-ai-slim[anthropic]>=1.0.0",
     "tiktoken>=0.7.0",
+    "pyobjc-framework-Quartz>=10.0; sys_platform == 'darwin'",
 ]
 
 [project.urls]

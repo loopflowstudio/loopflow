@@ -1,6 +1,7 @@
 """Loopflow CLI: Arrange LLMs to code in harmony."""
 
 import sys
+from typing import Optional
 
 import typer
 
@@ -24,6 +25,59 @@ app.command(name="pipeline")(run_module.pipeline)
 app.command()(run_module.cp)
 
 
+@app.command()
+def capture(
+    window: Optional[str] = typer.Argument(None, help="Window name to capture (fuzzy match)"),
+    name: Optional[str] = typer.Option(None, "--name", "-n", help="Output filename (without extension)"),
+    list_windows: bool = typer.Option(False, "--list", "-l", help="List visible windows"),
+):
+    """Capture a window screenshot to .design/screenshots/."""
+    from loopflow.capture import (
+        list_windows as get_windows,
+        find_window,
+        capture_window,
+        generate_screenshot_path,
+        ScreenCaptureError,
+    )
+
+    if list_windows:
+        windows = get_windows()
+        if not windows:
+            typer.echo("No windows found")
+            raise typer.Exit(0)
+
+        typer.echo("Visible windows:\n")
+        for win in windows:
+            title_part = f" - {win.title}" if win.title else ""
+            typer.echo(f"  {win.app_name}{title_part}")
+        raise typer.Exit(0)
+
+    if not window:
+        typer.echo("Error: Specify a window name or use --list to see available windows", err=True)
+        raise typer.Exit(1)
+
+    repo_root = find_worktree_root()
+    if not repo_root:
+        typer.echo("Error: Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    win = find_window(window)
+    if not win:
+        typer.echo(f"Error: No window matching '{window}'", err=True)
+        typer.echo("Use --list to see available windows", err=True)
+        raise typer.Exit(1)
+
+    output_path = generate_screenshot_path(name, repo_root)
+    try:
+        capture_window(win, output_path)
+    except ScreenCaptureError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    rel_path = output_path.relative_to(repo_root)
+    typer.echo(f"Captured {win.app_name} → {rel_path}")
+
+
 def main():
     """Entry point that supports 'lf <task>' and 'lf <pipeline>' shorthand."""
     known_commands = {
@@ -31,6 +85,7 @@ def main():
         "pipeline",
         "inline",
         "cp",
+        "capture",
         "--help",
         "-h",
     }

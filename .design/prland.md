@@ -2,122 +2,182 @@
 
 ## What to build
 
-Fix `lfpr land` to use `gh pr merge` instead of local squash-merge, so GitHub shows PRs as "merged" rather than "closed". Also consolidate the two implementations and improve error handling for common issues like dirty main branch.
+Consolidate landing into `lfpr land` with two modes:
 
-## Root cause
+1. **`lfpr land`** (default): Requires a PR. Uses `gh pr merge --squash` so GitHub shows it as merged.
+2. **`lfpr land --local`**: No PR required. Local squash-merge + push to origin. For quick work that skipped PR workflow.
 
-The current `lfpr land` implementation in `src/loopflow/lfpr.py` does:
-1. Fetch branch from origin
-2. `git merge --squash` locally in main repo
-3. `git push` to main
-4. `git push origin --delete {branch}`
+Config option to set default:
+```yaml
+# .lf/config.yaml
+pr: gh      # default - lfpr land uses GitHub PR merge
+pr: local   # lfpr land defaults to --local behavior
+```
 
-This causes GitHub to mark the PR as **closed** (not merged) because GitHub never sees a merge commit - it just sees the branch deleted after commits appeared on main.
+Also delete the old `lf ops land` and `lf ops pr land` - everything goes through `lfpr land`.
 
-The fix exists in `src/loopflow/cli/pr.py` which uses `gh pr merge --squash --delete-branch`. This properly marks PRs as merged. But `lfpr` (the actual CLI entry point) calls the broken implementation.
+## Root cause (current bug)
+
+Current `lfpr land` does local `git merge --squash` then `git push`, which makes GitHub mark PRs as "closed" not "merged" - GitHub never sees a merge.
 
 ## Data structures
 
-No new data structures needed. Existing types are sufficient.
+Update `Config` dataclass to support `pr` field:
+
+```python
+@dataclass
+class Config:
+    # ... existing fields ...
+    pr: str = "gh"  # "gh" or "local"
+```
 
 ## Key functions
 
 ```python
-# In src/loopflow/lfpr.py, replace _land_pr with:
+@app.command()
+def land(
+    add: bool = typer.Option(False, "-a", "--add", help="Commit and push changes first"),
+    worktree: str = typer.Option(None, "-w", "--worktree", help="Target worktree by name"),
+    local: bool = typer.Option(None, "-l", "--local/--gh", help="Local merge vs GitHub PR merge"),
+) -> None:
+    """Squash-merge branch to main and clean up.
 
-def _land_pr(add: bool, worktree: str | None, require_clean_design: bool) -> None:
-    """PR-based landing using gh pr merge."""
-    # ... validation and setup (keep existing) ...
+    Default: uses gh pr merge (requires PR via lfpr create).
+    With --local: local merge + push (no PR needed).
+    Config: set `pr: local` to default to --local.
+    """
+    config = load_config(find_main_repo())
+    use_local = local if local is not None else (config and config.pr == "local")
 
-    # NEW: use gh pr merge instead of local merge
-    merge_cmd = ["gh", "pr", "merge", branch, "--squash", "--delete-branch", "--subject", title]
-    if body:
-        merge_cmd.extend(["--body", body])
-    result = subprocess.run(merge_cmd, cwd=repo_root, capture_output=True, text=True)
+    if use_local:
+        _land_local(add, worktree)
+    else:
+        _land_pr(add, worktree)
 
-    # ... sync main repo, cleanup worktree ...
+
+def _land_pr(add: bool, worktree: str | None) -> None:
+    """Land via GitHub PR merge."""
+    # 1. Resolve repo_root and main_repo
+    # 2. Validate: clean working tree, branch pushed
+    # 3. Get PR info (title, body, baseRefName) via gh pr view
+    # 4. gh pr merge --squash --delete-branch --subject {title} --body {body}
+    # 5. Clear .design artifacts in main_repo
+    # 6. git fetch + checkout + pull --ff-only in main_repo
+    # 7. Remove worktree if applicable
+    ...
+
+
+def _land_local(add: bool, worktree: str | None) -> None:
+    """Land locally without PR."""
+    # 1. Resolve repo_root and main_repo
+    # 2. Validate: clean working tree
+    # 3. Generate commit message from diff (LLM)
+    # 4. Squash commits on branch
+    # 5. In main_repo: fetch origin/main, checkout main, reset --hard origin/main
+    # 6. git merge --squash origin/{branch}
+    # 7. Clear .design artifacts
+    # 8. git commit, git push
+    # 9. Delete remote branch, remove worktree
+    ...
 ```
-
-The `cli/pr.py` implementation can be deleted since `lfpr.py` is the canonical one (it's what `lfpr` command invokes).
 
 ## Changes required
 
-### 1. Fix `_land_pr` in `src/loopflow/lfpr.py`
-
-Replace lines 410-443 (local merge) with `gh pr merge`:
+### 1. Rewrite `_land_pr` in `lfpr.py` to use `gh pr merge`
 
 ```python
-# BEFORE (broken):
-subprocess.run(["git", "fetch", "origin", branch], cwd=main_repo, check=True)
-result = subprocess.run(
-    ["git", "merge", "--squash", f"origin/{branch}"],
-    cwd=main_repo, ...
-)
-subprocess.run(["git", "commit", "-m", commit_msg], cwd=main_repo, check=True)
-subprocess.run(["git", "push"], cwd=main_repo, check=True)
-
-# AFTER (fixed):
+# Use gh pr merge instead of local merge
 merge_cmd = ["gh", "pr", "merge", branch, "--squash", "--delete-branch", "--subject", title]
 if body:
     merge_cmd.extend(["--body", body])
 result = subprocess.run(merge_cmd, cwd=repo_root, capture_output=True, text=True)
 if result.returncode != 0:
-    error_msg = result.stderr.strip() or result.stdout.strip() or "unknown error"
-    typer.echo(f"Error: gh pr merge failed: {error_msg}", err=True)
+    typer.echo(f"Error: {result.stderr.strip() or 'merge failed'}", err=True)
     raise typer.Exit(1)
-```
 
-### 2. After merge, sync main repo
-
-```python
-# Fetch and fast-forward main repo to get merged changes
+# Sync main repo
 subprocess.run(["git", "fetch", "origin", base_branch], cwd=main_repo, check=True)
 subprocess.run(["git", "checkout", base_branch], cwd=main_repo, check=True)
 subprocess.run(["git", "pull", "--ff-only"], cwd=main_repo, check=True)
 ```
 
-### 3. Remove the local branch delete
+### 2. Keep `_land_local` for `--local` mode
 
-`--delete-branch` flag already deletes the remote branch. Just need to clean up local worktree/branch.
+The existing `_land_local` function (lines 465-557) is mostly correct. Clean up:
+- Remove `--force` and `--no-pr` flags (no longer needed)
+- Remove worktrunk dependency - do the merge directly
+- Ensure .design cleanup happens
 
-### 4. Delete duplicate code in `cli/pr.py`
+### 3. Simplify the `land` command signature
 
-The `land` command in `cli/pr.py` is dead code - `lfpr land` invokes `lfpr.py`, not `cli/pr.py`. Remove the duplicate to avoid confusion.
+Remove flags that are no longer relevant:
+- `--force` (was for overriding PR warning)
+- `--no-pr` (replaced by `--local`)
+- `--require-clean-design` (always clean .design on land)
+- `--base` (read from PR or default to main)
 
-### 5. Improve error handling
+### 4. Delete dead code
 
-The user mentioned "errors due to dirty main or other things". Current checks are reasonable but messages could be clearer. Add:
+Remove these files/functions:
+- `src/loopflow/cli/pr.py` - duplicate of lfpr.py, not used
+- `src/loopflow/cli/land.py` - old `lf ops land`, replaced by `lfpr land --local`
+- Any `lf ops pr` subcommand registration
 
-- Before merge: check main repo is clean and on correct branch
-- Explain recovery steps in error messages
-- Handle case where main is behind origin
+### 5. Add `pr` field to Config
+
+In `src/loopflow/config.py`:
+```python
+@dataclass
+class Config:
+    # ... existing ...
+    pr: str = "gh"  # "gh" or "local"
+```
+
+### 6. Update pyproject.toml
+
+Entry points should be:
+```toml
+[project.scripts]
+lf = "loopflow.cli:main"
+lfpr = "loopflow.lfpr:main"
+lfops = "loopflow.lfops:main"
+lfwt = "loopflow.lfwt:main"
+```
+
+Remove any `lf ops land` or `lf ops pr` subcommand registrations.
 
 ## Constraints
 
-- Must use `gh pr merge` - this is the only way GitHub marks PRs as merged
-- The `--delete-branch` flag is essential - handles both remote and local branch deletion
-- Must work from worktrees (the common case)
-- Must pull merged changes into main repo so user has current state
+- `lfpr land` (no --local) must use `gh pr merge` - only way GitHub marks as merged
+- `--local` mode must not require gh CLI or a PR
+- Both modes must work from worktrees
+- Both modes must sync main repo after merge
+- Always clear .design contents on land
 
 ## Done when
 
 ```bash
-# Create test branch and PR
-git checkout -b test-prland-fix
-echo "test" >> /tmp/testfile && git add -A && git commit -m "test commit"
-git push -u origin test-prland-fix
-gh pr create --title "Test PR" --body "Testing land"
-
-# Land should work and PR should show as merged
+# Test PR mode (default)
+wt switch --create test-pr
+echo "test" > test.txt && git add -A && git commit -m "test"
+git push -u origin test-pr
+lfpr create
 lfpr land
+gh pr view test-pr --json state -q '.state'  # => MERGED
 
-# Verify
-gh pr view test-prland-fix --json state -q '.state'
-# Expected: MERGED (not CLOSED)
+# Test local mode (explicit flag)
+wt switch --create test-local
+echo "test" > test.txt && git add -A && git commit -m "test"
+lfpr land --local  # works without PR
+
+# Test config default
+# Set pr: local in .lf/config.yaml
+wt switch --create test-config
+echo "test" > test.txt && git add -A && git commit -m "test"
+lfpr land  # uses local mode because of config
+lfpr land --gh  # override config, use GitHub
+
+# Old commands should not exist
+lf ops land  # => error: no such command
+lf ops pr land  # => error: no such command
 ```
-
-Also verify:
-- `lfpr land -a` handles uncommitted changes
-- Landing from worktree removes worktree
-- Landing from main repo removes local branch
-- Error message is clear when main has uncommitted changes

@@ -1,23 +1,29 @@
 [project]
 name = "loopflow"
 dynamic = ["version"]
-description = "Arrange LLMs to code in harmony"
+description = "Run LLM coding agents from reusable prompt files"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [{ name = "Jack" }]
-keywords = ["llm", "claude", "ai", "coding", "cli"]
+keywords = [
+    "llm", "claude", "codex", "gemini", "ai", "coding", "cli",
+    "agents", "automation", "workflow", "prompts"
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development",
+    "Typing :: Typed",
 ]
+
 dependencies = [
     "typer>=0.9.0",
     "pathspec>=0.11.0",
@@ -26,6 +32,13 @@ dependencies = [
     "pydantic-ai-slim[anthropic]>=1.0.0",
     "tiktoken>=0.7.0",
 ]
+
+[project.urls]
+Homepage = "https://loopflowstudio.github.io/loopflow/"
+Repository = "https://github.com/loopflowstudio/loopflow"
+Documentation = "https://loopflowstudio.github.io/loopflow/"
+Issues = "https://github.com/loopflowstudio/loopflow/issues"
+Changelog = "https://github.com/loopflowstudio/loopflow/releases"
 
 [project.optional-dependencies]
 dev = [

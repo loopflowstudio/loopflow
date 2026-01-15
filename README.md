@@ -1,16 +1,15 @@
 # Loopflow
 
-## Usage
+Run LLM coding agents from reusable prompt files.
 
 ```bash
-lf review
-lf implement: add auth
-lf ship
+lf review          # run .lf/review.lf
+lf ship            # pipeline: implement → review → test → commit → PR
 ```
 
-Run LLM coding tasks from reusable prompt files.
+Write prompts as markdown files. Chain them into pipelines. Run them across isolated worktrees while you work on something else.
 
-macOS only. Supports Claude Code, OpenAI Codex, and Google Gemini CLI via configuration.
+macOS only. Supports Claude Code, OpenAI Codex, and Google Gemini CLI.
 
 ## Install
 

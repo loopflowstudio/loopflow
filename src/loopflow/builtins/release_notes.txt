@@ -1,0 +1,25 @@
+Generate release notes for a version bump.
+
+You're writing for someone scanning PyPI or GitHub releases to decide if they should upgrade. Outcome over process. What's new, not how it was built.
+
+Do not ask questions. If anything is unclear, make the best assumption and proceed.
+
+## Output format
+
+Return a structured response with:
+- **summary**: 2-3 sentences explaining what this release adds or fixes
+- **changes**: bullet list of notable changes (3-8 items)
+
+## Style
+
+Lead with what users get, not what changed internally.
+
+Good:
+- "Add `lfops publish` command for automated PyPI releases"
+- "Fix session tracking when daemon isn't running"
+
+Bad:
+- "Refactored publish.py to use new pattern"
+- "Updated llm_http.py with release notes generation"
+
+Skip internal refactors unless they affect behavior. Focus on user-visible changes.

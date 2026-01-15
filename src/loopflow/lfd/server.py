@@ -95,6 +95,8 @@ class Server:
             return await self._handle_sessions_list()
         elif method == "subscribe":
             return await self._handle_subscribe(params, writer)
+        elif method == "notify":
+            return await self._handle_notify(params)
         else:
             return error(f"Unknown method: {method}", request.id)
 
@@ -160,6 +162,17 @@ class Server:
         events = params.get("events", [])
         self.subscriptions[writer] = events
         return success({"subscribed": events})
+
+    async def _handle_notify(self, params: dict) -> Response:
+        """Accept external events and broadcast to subscribers."""
+        event_name = params.get("event")
+        event_data = params.get("data", {})
+
+        if not event_name:
+            return error("Missing 'event' parameter")
+
+        await self._broadcast(Event(event_name, event_data))
+        return success({"event": event_name})
 
     async def _broadcast(self, event: Event) -> None:
         message = (event.serialize() + "\n").encode()

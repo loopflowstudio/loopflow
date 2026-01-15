@@ -36,6 +36,7 @@ final class AppState {
     private let configLoader = ConfigLoader()
     private let promptService = PromptService()
     private let agentService = AgentService()
+    private var eventService: LFDEventService?
 
     func openRepo(_ url: URL) async {
         currentRepo = url
@@ -46,6 +47,8 @@ final class AppState {
         let setupService = SetupService()
         do {
             try await setupService.ensureDaemonRunning()
+            // Start event subscription after daemon is running
+            startEventSubscription()
         } catch {
             // Non-fatal - daemon setup failed but app can still work
         }
@@ -123,6 +126,24 @@ final class AppState {
         let worktreeURL = URL(fileURLWithPath: worktree.path)
         try await worktreeService.landPR(in: worktreeURL)
         await refreshWorktrees()
+    }
+
+    func startEventSubscription() {
+        eventService = LFDEventService()
+
+        Task {
+            try? await eventService?.subscribe(to: ["worktree.*"]) { [weak self] event in
+                Task { @MainActor in
+                    self?.handleWorktreeEvent(event)
+                }
+            }
+        }
+    }
+
+    private func handleWorktreeEvent(_ event: WorktreeEvent) {
+        Task {
+            await refreshWorktrees()
+        }
     }
 
     func refreshAgents() async {

@@ -1,0 +1,234 @@
+"""Tests for voice loading and prompt integration."""
+
+import pytest
+
+from loopflow.voices import Voice, VoiceNotFoundError, load_voice, parse_voice_arg
+from loopflow.context import gather_prompt_components, format_prompt
+from loopflow.frontmatter import parse_task_file, resolve_task_config, TaskConfig
+from loopflow.config import Config
+
+
+@pytest.fixture
+def temp_repo(tmp_path):
+    """Create a repo with voices directory."""
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "README.md").write_text("# Test Project\n")
+
+    lf = tmp_path / ".lf"
+    lf.mkdir()
+    (lf / "implement.lf").write_text("Implement the feature.\n")
+
+    voices = lf / "voices"
+    voices.mkdir()
+    (voices / "architect.md").write_text(
+        "Bring an architect's perspective.\n\nFocus on system design."
+    )
+    (voices / "concise.md").write_text("Be concise. One sentence where possible.")
+
+    return tmp_path
+
+
+# load_voice tests
+
+
+def test_load_voice_returns_voice_dataclass(temp_repo):
+    voice = load_voice("architect", temp_repo)
+    assert isinstance(voice, Voice)
+    assert voice.name == "architect"
+    assert "architect's perspective" in voice.content
+
+
+def test_load_voice_strips_whitespace(temp_repo):
+    voice = load_voice("concise", temp_repo)
+    assert voice.content == "Be concise. One sentence where possible."
+
+
+def test_load_voice_raises_when_not_found(temp_repo):
+    with pytest.raises(VoiceNotFoundError) as exc_info:
+        load_voice("nonexistent", temp_repo)
+    assert "nonexistent" in str(exc_info.value)
+    assert "Available:" in str(exc_info.value)
+    assert "architect" in str(exc_info.value)
+
+
+def test_load_voice_suggests_path_when_no_voices_exist(tmp_path):
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".lf").mkdir()
+
+    with pytest.raises(VoiceNotFoundError) as exc_info:
+        load_voice("test", tmp_path)
+    assert "Create it at:" in str(exc_info.value)
+
+
+# parse_voice_arg tests
+
+
+def test_parse_voice_arg_single():
+    assert parse_voice_arg("architect") == ["architect"]
+
+
+def test_parse_voice_arg_multiple():
+    assert parse_voice_arg("architect,concise") == ["architect", "concise"]
+
+
+def test_parse_voice_arg_strips_whitespace():
+    assert parse_voice_arg(" architect , concise ") == ["architect", "concise"]
+
+
+def test_parse_voice_arg_empty_string():
+    assert parse_voice_arg("") == []
+
+
+def test_parse_voice_arg_none():
+    assert parse_voice_arg(None) == []
+
+
+def test_parse_voice_arg_filters_empty_items():
+    assert parse_voice_arg("architect,,concise") == ["architect", "concise"]
+
+
+# Frontmatter parsing tests
+
+
+def test_parse_task_file_with_voice_string():
+    content = """---
+voice: architect
+---
+Task content"""
+    result = parse_task_file("test", content)
+    assert result.config.voice == ["architect"]
+
+
+def test_parse_task_file_with_voice_list():
+    content = """---
+voice: [architect, concise]
+---
+Task content"""
+    result = parse_task_file("test", content)
+    assert result.config.voice == ["architect", "concise"]
+
+
+def test_parse_task_file_with_voice_multiline_list():
+    content = """---
+voice:
+  - architect
+  - concise
+---
+Task content"""
+    result = parse_task_file("test", content)
+    assert result.config.voice == ["architect", "concise"]
+
+
+def test_parse_task_file_no_voice():
+    content = """---
+interactive: true
+---
+Task content"""
+    result = parse_task_file("test", content)
+    assert result.config.voice is None
+
+
+# Config voice resolution tests
+
+
+def test_resolve_task_config_cli_voice_wins():
+    config = Config(voice=["architect"])
+    resolved = resolve_task_config(
+        task_name="test",
+        global_config=config,
+        frontmatter=TaskConfig(voice=["concise"]),
+        cli_interactive=None,
+        cli_auto=None,
+        cli_model=None,
+        cli_context=None,
+        cli_voice=["reviewer"],
+    )
+    assert resolved.voice == ["reviewer"]
+
+
+def test_resolve_task_config_frontmatter_voice_over_global():
+    config = Config(voice=["architect"])
+    resolved = resolve_task_config(
+        task_name="test",
+        global_config=config,
+        frontmatter=TaskConfig(voice=["concise"]),
+        cli_interactive=None,
+        cli_auto=None,
+        cli_model=None,
+        cli_context=None,
+    )
+    assert resolved.voice == ["concise"]
+
+
+def test_resolve_task_config_global_voice():
+    config = Config(voice=["architect"])
+    resolved = resolve_task_config(
+        task_name="test",
+        global_config=config,
+        frontmatter=TaskConfig(),
+        cli_interactive=None,
+        cli_auto=None,
+        cli_model=None,
+        cli_context=None,
+    )
+    assert resolved.voice == ["architect"]
+
+
+def test_resolve_task_config_no_voice():
+    resolved = resolve_task_config(
+        task_name="test",
+        global_config=None,
+        frontmatter=TaskConfig(),
+        cli_interactive=None,
+        cli_auto=None,
+        cli_model=None,
+        cli_context=None,
+    )
+    assert resolved.voice == []
+
+
+# Prompt formatting tests
+
+
+def test_format_prompt_single_voice(temp_repo):
+    components = gather_prompt_components(
+        temp_repo, "implement", voices=["architect"]
+    )
+    formatted = format_prompt(components)
+
+    assert "<lf:voice:architect>" in formatted
+    assert "architect's perspective" in formatted
+    assert "</lf:voice:architect>" in formatted
+    # Single voice should not have wrapper
+    assert "<lf:voices>" not in formatted
+
+
+def test_format_prompt_multiple_voices(temp_repo):
+    components = gather_prompt_components(
+        temp_repo, "implement", voices=["architect", "concise"]
+    )
+    formatted = format_prompt(components)
+
+    assert "<lf:voices>" in formatted
+    assert "<lf:voice:architect>" in formatted
+    assert "<lf:voice:concise>" in formatted
+    assert "</lf:voices>" in formatted
+
+
+def test_format_prompt_voice_before_task(temp_repo):
+    components = gather_prompt_components(
+        temp_repo, "implement", voices=["architect"]
+    )
+    formatted = format_prompt(components)
+
+    voice_pos = formatted.find("<lf:voice:architect>")
+    task_pos = formatted.find("<lf:task:implement>")
+    assert voice_pos < task_pos, "Voice should appear before task"
+
+
+def test_format_prompt_no_voices(temp_repo):
+    components = gather_prompt_components(temp_repo, "implement")
+    formatted = format_prompt(components)
+
+    assert "<lf:voice" not in formatted
+    assert "<lf:voices>" not in formatted

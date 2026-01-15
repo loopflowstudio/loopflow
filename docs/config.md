@@ -19,6 +19,9 @@ interactive:
   - design
   - iterate
 
+# Default voice for all tasks
+voice: architect
+
 context:
   - src/schema.py
   - docs/api.md
@@ -124,6 +127,36 @@ ide:
   warp: true           # open Warp terminal
   cursor: true         # open Cursor editor
   workspace: app.code-workspace  # optional: open this workspace file
+```
+
+### voice
+
+Default voice(s) for all tasks. Voices are reusable personas that shape agent responses.
+
+```yaml
+voice: architect
+```
+
+Multiple voices:
+
+```yaml
+voice:
+  - architect
+  - concise
+```
+
+Override per-run with `--voice`:
+
+```bash
+lf review --voice concise
+lf implement --voice architect,concise
+```
+
+Voice files live in `.lf/voices/` as plain markdown:
+
+```
+.lf/voices/architect.md
+.lf/voices/concise.md
 ```
 
 ## Run Modes

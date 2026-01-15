@@ -75,13 +75,13 @@ Multiple voices are concatenated in order, separated by blank lines.
 ```python
 # voices.py
 def load_voice(name: str, repo_root: Path) -> Voice:
-    """Load voice from .lf/voices/{name}.md. Raise if not found."""
-
-def load_voices(names: list[str], repo_root: Path) -> list[Voice]:
-    """Load multiple voices. Raise if any not found."""
+    """Load voice from .lf/voices/{name}.md. Raise VoiceNotFoundError if not found."""
 
 def parse_voice_arg(voice_arg: str | None) -> list[str]:
-    """Parse 'a,b,c' into ['a', 'b', 'c']. Returns [] if None."""
+    """Parse 'a,b,c' into ['a', 'b', 'c']. Returns [] if None or empty."""
+
+class VoiceNotFoundError(Exception):
+    """Raised when a voice file doesn't exist."""
 ```
 
 ```python

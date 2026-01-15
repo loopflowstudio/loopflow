@@ -2,36 +2,29 @@
 
 Voice picker in repo window + dedicated Agents window for background agent management.
 
-## What shipped
+## Review
 
-**Voice picker in PromptLauncher** — Select voices from `.lf/voices/` via chip UI. Multiple voices combine. Voices pass to CLI via `--voice name1,name2`.
+**Verdict:** Ready to ship
 
-**Agents window** — Cmd+Shift+A opens global agent management. Sidebar lists agents from `~/.lf/agents/*.md`. Detail panel shows/edits goal, pipeline, trigger, merge strategy. Start/stop agents directly.
-
-**Agent CRUD** — Create, edit, delete agents via UI. Changes write back to markdown files with YAML frontmatter.
-
-**Runtime state from DB** — Agent status, iteration count, worktree path, and last run time come from `~/.lf/maestro.db`. UI refreshes on demand.
+No blocking issues. Implementation follows existing patterns. Tests cover cron trigger logic.
 
 ## Design notes
 
-**Voices are worktree-scoped.** They live in `.lf/voices/{name}.md` and get passed via `--voice name1,name2`.
+**Voices are worktree-scoped.** Live in `.lf/voices/{name}.md`, passed via `--voice name1,name2`.
 
-**Agents are global.** They live in `~/.lf/agents/*.md` with YAML frontmatter. Runtime state comes from `~/.lf/maestro.db`.
+**Agents are global.** Live in `~/.lf/agents/*.md` with YAML frontmatter. Runtime state from `~/.lf/maestro.db`.
 
 **Trigger types:**
 - `manual` — only runs when explicitly started
 - `main-changed` — runs when origin/main has new commits
-- `loop` — runs again immediately after completion (backend stub in `triggers.py`)
-- `cron` — scheduled runs (UI ready, backend not implemented)
+- `loop` — runs again immediately after completion
+- `cron` — scheduled runs (5-field: minute hour day month weekday)
 
 **Merge strategies:**
 - `pr` — open PR for human review
 - `auto` — auto-merge when pipeline succeeds
 
-## Deferred work
+## Deferred
 
-1. Loop trigger execution logic
-2. Cron trigger backend
-3. Auto-close worktrees after PR merge
-4. Voice creation UI (currently: create `.md` files directly)
-5. Context paths add button (currently: edit markdown file directly)
+1. Auto-close worktrees after PR merge
+2. Voice creation UI

@@ -19,6 +19,8 @@ struct AgentDetailPanel: View {
 
     @State private var hasChanges = false
     @State private var showingDeleteConfirm = false
+    @State private var showingContextPicker = false
+    @State private var newContextPath = ""
 
     var body: some View {
         ScrollView {
@@ -171,9 +173,24 @@ struct AgentDetailPanel: View {
 
             // Context
             VStack(alignment: .leading, spacing: 6) {
-                Text("Context")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack {
+                    Text("Context")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    Button {
+                        showingContextPicker = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.borderless)
+                    .popover(isPresented: $showingContextPicker) {
+                        contextPickerPopover()
+                    }
+                }
 
                 if contextPaths.isEmpty {
                     Text("No context files configured")
@@ -307,6 +324,37 @@ struct AgentDetailPanel: View {
         case .error: return .red
         case .stopped: return .orange
         }
+    }
+
+    // MARK: - Context Picker
+
+    private func contextPickerPopover() -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Add Context Path")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                TextField("src/schema.py", text: $newContextPath)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 200)
+
+                Button("Add") {
+                    if !newContextPath.isEmpty {
+                        contextPaths.append(newContextPath)
+                        hasChanges = true
+                        newContextPath = ""
+                        showingContextPicker = false
+                    }
+                }
+                .disabled(newContextPath.isEmpty)
+            }
+
+            Text("Relative to repo root")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(12)
     }
 
     // MARK: - Actions

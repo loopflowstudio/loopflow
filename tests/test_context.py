@@ -164,13 +164,13 @@ def test_gather_prompt_components_returns_dataclass(temp_repo):
 
 
 def test_gather_prompt_components_includes_context(temp_repo):
-    """gather_prompt_components captures context files as list of tuples."""
+    """gather_prompt_components captures context files in diff_files (merged)."""
     (temp_repo / "main.py").write_text("print('hello')")
 
     components = gather_prompt_components(temp_repo, "implement", context=["main.py"])
 
-    # context_files includes main.py (may also include parent docs)
-    main_files = [(p, c) for p, c in components.context_files if p.name == "main.py"]
+    # Context files are merged into diff_files (deduped at load time)
+    main_files = [(p, c) for p, c in components.diff_files if p.name == "main.py"]
     assert len(main_files) == 1
     path, content = main_files[0]
     assert "print('hello')" in content
@@ -214,3 +214,27 @@ def test_format_prompt_with_all_components(temp_repo):
     assert "<lf:docs>" in formatted
     assert "<lf:task:implement>" in formatted
     assert "<lf:files>" in formatted
+
+
+def test_gather_prompt_components_deduplicates_diff_and_context(temp_repo):
+    """Files in both diff_files and context are only loaded once."""
+    (temp_repo / "shared.py").write_text("# shared file")
+    (temp_repo / "context_only.py").write_text("# context only")
+
+    # Simulate: shared.py is in diff, both shared.py and context_only.py in context
+    # We can't mock git diff easily, but we can verify the merge logic by
+    # checking that diff_files contains merged result
+    components = gather_prompt_components(
+        temp_repo,
+        "implement",
+        context=["shared.py", "context_only.py"],
+        include_diff_files=False,  # disable actual git diff
+    )
+
+    # With include_diff_files=False, only context files should appear in diff_files
+    paths = [p.name for p, _ in components.diff_files]
+    assert "shared.py" in paths
+    assert "context_only.py" in paths
+    # Each file appears exactly once (no duplicates)
+    assert paths.count("shared.py") == 1
+    assert paths.count("context_only.py") == 1

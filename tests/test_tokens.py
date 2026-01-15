@@ -130,18 +130,18 @@ def test_analyze_prompt_tokens_task():
     assert "task" in tree.root.children
 
 
-def test_analyze_prompt_tokens_context_files():
-    """analyze_prompt_tokens handles context files with repo_root."""
+def test_analyze_prompt_tokens_files():
+    """analyze_prompt_tokens handles files (diff_files) with repo_root."""
     repo_root = Path("/project")
-    context_files = [
+    diff_files = [
         (Path("/project/src/main.py"), "print('hello')"),
         (Path("/project/tests/test_main.py"), "def test_main(): pass"),
     ]
 
-    tree = analyze_prompt_tokens(context_files=context_files, repo_root=repo_root)
+    tree = analyze_prompt_tokens(diff_files=diff_files, repo_root=repo_root)
 
     assert tree.total() > 0
-    assert "context" in tree.root.children
+    assert "files" in tree.root.children
 
 
 def test_analyze_prompt_tokens_combined():
@@ -150,7 +150,7 @@ def test_analyze_prompt_tokens_combined():
         docs=[(Path("README.md"), "# Readme")],
         diff="+ line",
         task=("implement", "task content"),
-        context_files=[(Path("/p/main.py"), "code")],
+        diff_files=[(Path("/p/main.py"), "code")],
         repo_root=Path("/p"),
     )
 
@@ -158,7 +158,7 @@ def test_analyze_prompt_tokens_combined():
     assert "docs" in tree.root.children
     assert "diff" in tree.root.children
     assert "task" in tree.root.children
-    assert "context" in tree.root.children
+    assert "files" in tree.root.children
 
 
 def test_analyze_prompt_tokens_clipboard():

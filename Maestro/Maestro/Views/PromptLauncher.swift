@@ -430,11 +430,6 @@ struct PromptLauncher: View {
 
                 Spacer()
 
-                // Token count
-                Text("\(appState.estimatedTokens.formatted()) tokens")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-
                 // Run button
                 Button {
                     launchInTerminal()
@@ -505,14 +500,15 @@ struct PromptLauncher: View {
         appState.runMode = prompt.defaultMode
     }
 
-    // MARK: - Options Bar
+    // MARK: - Context Bar (always visible)
 
-    @State private var showContextOptions = false
+    @State private var isDraggingOver = false
+    @State private var showingFilePicker = false
 
     private var optionsBar: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
+            // Mode picker row
             HStack(spacing: 12) {
-                // Mode segmented control
                 Picker("", selection: $appState.runMode) {
                     Text("Auto").tag(RunMode.auto)
                     Text("Interactive").tag(RunMode.interactive)
@@ -521,34 +517,10 @@ struct PromptLauncher: View {
                 .frame(width: 160)
 
                 Spacer()
-
-                // Context toggle button
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        showContextOptions.toggle()
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "doc.text")
-                        Text("Context")
-                            .font(.caption)
-                        Image(systemName: showContextOptions ? "chevron.up" : "chevron.down")
-                            .font(.caption2)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color.primary.opacity(0.05))
-                    )
-                }
-                .buttonStyle(.plain)
             }
 
-            // Collapsible context options
-            if showContextOptions {
-                contextOptionsSection
-            }
+            // Context bar - always visible
+            contextBar
         }
         .onChange(of: appState.includeDocs) {
             Task { await appState.estimateTokens() }
@@ -562,112 +534,86 @@ struct PromptLauncher: View {
         .onChange(of: appState.includePaste) {
             Task { await appState.estimateTokens() }
         }
+        .onChange(of: appState.attachedFiles) {
+            Task { await appState.estimateTokens() }
+        }
     }
 
-    @State private var isDraggingOver = false
-
-    private var contextOptionsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Context toggles
-            HStack(spacing: 16) {
-                Toggle(isOn: $appState.includeDocs) {
-                    Text("Docs")
-                        .font(.caption)
-                }
-                .toggleStyle(.checkbox)
-
-                Toggle(isOn: $appState.includeDiffFiles) {
-                    Text("Files")
-                        .font(.caption)
-                }
-                .toggleStyle(.checkbox)
-                .help("Include full content of files touched by this branch")
-
-                Toggle(isOn: $appState.includeDiff) {
-                    Text("Diff")
-                        .font(.caption)
-                }
-                .toggleStyle(.checkbox)
+    private var contextBar: some View {
+        HStack(spacing: 6) {
+            // Context chips
+            ContextChip(label: "Docs", isOn: $appState.includeDocs, color: .blue)
+                .help("Include README, STYLE, and other docs")
+            ContextChip(label: "Files", isOn: $appState.includeDiffFiles, color: .teal)
+                .help("Include files touched by this branch")
+            ContextChip(label: "Diff", isOn: $appState.includeDiff, color: .green)
                 .help("Include raw diff output")
+            ContextChip(label: "Clipboard", isOn: $appState.includePaste, color: .purple)
+                .help("Include clipboard content")
 
-                Toggle(isOn: $appState.includePaste) {
-                    Text("Clipboard")
-                        .font(.caption)
-                }
-                .toggleStyle(.checkbox)
-
-                Spacer()
+            // Separator if there are attached files
+            if !appState.attachedFiles.isEmpty {
+                Divider()
+                    .frame(height: 16)
+                    .padding(.horizontal, 2)
             }
-            .foregroundStyle(.secondary)
 
-            // Attached files section
-            attachedFilesSection
+            // Attached file chips
+            ForEach(appState.attachedFiles, id: \.self) { file in
+                FileChip(
+                    name: file.lastPathComponent,
+                    icon: iconForFile(file)
+                ) {
+                    appState.attachedFiles.removeAll { $0 == file }
+                }
+            }
 
-            // Token distribution preview
-            tokenDistributionPreview
-        }
-        .padding(.top, 8)
-        .padding(.horizontal, 4)
-    }
-
-    private var attachedFilesSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Attached Files")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-
-            // Drop zone
-            ZStack {
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(style: StrokeStyle(lineWidth: 2, dash: [6]))
-                    .fill(isDraggingOver ? Color.accentColor.opacity(0.1) : Color.clear)
-                    .foregroundStyle(isDraggingOver ? Color.accentColor : Color.secondary.opacity(0.5))
-
-                if appState.attachedFiles.isEmpty {
-                    VStack(spacing: 4) {
-                        Image(systemName: "doc.badge.plus")
-                            .font(.title2)
-                            .foregroundStyle(.tertiary)
-                        Text("Drop files here or ⌘V to paste")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(appState.attachedFiles, id: \.self) { file in
-                                attachedFileChip(file)
-                            }
+            // Add file button
+            AddFileButton {
+                showingFilePicker = true
+            }
+            .fileImporter(
+                isPresented: $showingFilePicker,
+                allowedContentTypes: [.item],
+                allowsMultipleSelection: true
+            ) { result in
+                if case .success(let urls) = result {
+                    for url in urls {
+                        if !appState.attachedFiles.contains(url) {
+                            appState.attachedFiles.append(url)
                         }
-                        .padding(.horizontal, 8)
                     }
                 }
             }
-            .frame(height: 60)
-            .onDrop(of: [.fileURL], isTargeted: $isDraggingOver) { providers in
-                handleFileDrop(providers)
-            }
+
+            Spacer()
+
+            // Token count
+            Text(formatTokenCount(appState.estimatedTokens))
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundStyle(.secondary)
         }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color.primary.opacity(0.03))
+        )
+        .onDrop(of: [.fileURL], isTargeted: $isDraggingOver) { providers in
+            handleFileDrop(providers)
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(isDraggingOver ? Color.accentColor : Color.clear, lineWidth: 2)
+        )
     }
 
-    private func attachedFileChip(_ file: URL) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: iconForFile(file))
-                .font(.caption)
-            Text(file.lastPathComponent)
-                .font(.caption)
-                .lineLimit(1)
-            Button {
-                appState.attachedFiles.removeAll { $0 == file }
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.caption2)
-            }
-            .buttonStyle(.plain)
+    private func formatTokenCount(_ count: Int) -> String {
+        if count >= 1000 {
+            let k = Double(count) / 1000.0
+            return String(format: "%.1fk", k)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(Capsule().fill(Color.primary.opacity(0.1)))
+        return "\(count)"
     }
 
     private func iconForFile(_ file: URL) -> String {
@@ -701,83 +647,6 @@ struct PromptLauncher: View {
             }
         }
         return true
-    }
-
-    private var tokenDistributionPreview: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Token Distribution")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-
-            // Token bar
-            GeometryReader { geometry in
-                HStack(spacing: 1) {
-                    // Docs
-                    if appState.includeDocs {
-                        Rectangle()
-                            .fill(Color.blue.opacity(0.7))
-                            .frame(width: geometry.size.width * 0.25)
-                    }
-                    // Diff files
-                    if appState.includeDiffFiles {
-                        Rectangle()
-                            .fill(Color.teal.opacity(0.7))
-                            .frame(width: geometry.size.width * 0.3)
-                    }
-                    // Diff
-                    if appState.includeDiff {
-                        Rectangle()
-                            .fill(Color.green.opacity(0.7))
-                            .frame(width: geometry.size.width * 0.15)
-                    }
-                    // Context files
-                    if !appState.selectedContextFolders.isEmpty {
-                        Rectangle()
-                            .fill(Color.orange.opacity(0.7))
-                            .frame(width: geometry.size.width * 0.2)
-                    }
-                    // Clipboard
-                    if appState.includePaste {
-                        Rectangle()
-                            .fill(Color.purple.opacity(0.7))
-                            .frame(width: geometry.size.width * 0.1)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-            }
-            .frame(height: 8)
-
-            // Legend
-            HStack(spacing: 12) {
-                if appState.includeDocs {
-                    Label("Docs", systemImage: "circle.fill")
-                        .font(.caption2)
-                        .foregroundStyle(Color.blue.opacity(0.7))
-                }
-                if appState.includeDiffFiles {
-                    Label("Files", systemImage: "circle.fill")
-                        .font(.caption2)
-                        .foregroundStyle(Color.teal.opacity(0.7))
-                }
-                if appState.includeDiff {
-                    Label("Diff", systemImage: "circle.fill")
-                        .font(.caption2)
-                        .foregroundStyle(Color.green.opacity(0.7))
-                }
-                if !appState.selectedContextFolders.isEmpty {
-                    Label("Context", systemImage: "circle.fill")
-                        .font(.caption2)
-                        .foregroundStyle(Color.orange.opacity(0.7))
-                }
-                if appState.includePaste {
-                    Label("Clipboard", systemImage: "circle.fill")
-                        .font(.caption2)
-                        .foregroundStyle(Color.purple.opacity(0.7))
-                }
-            }
-            .foregroundStyle(.secondary)
-        }
     }
 
     // MARK: - Actions

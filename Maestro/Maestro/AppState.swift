@@ -99,6 +99,12 @@ final class AppState {
 
             prompts = try promptService.loadPrompts(from: url, config: config)
             refreshVoices()
+
+            // Initialize selected voices from config
+            if let voiceNames = config?.voiceNames, !voiceNames.isEmpty {
+                selectedVoices = voices.filter { voiceNames.contains($0.name) }
+            }
+
             await estimateTokens()
             await refreshAgents()
         } catch {
@@ -227,8 +233,10 @@ final class AppState {
             prompt: selectedPrompt?.name,
             args: promptArgs,
             context: Array(selectedContextFolders),
+            includeDocs: includeDocs,
             includeDiff: includeDiff,
             includeDiffFiles: includeDiffFiles,
+            includePaste: includePaste,
             in: repo
         )
     }

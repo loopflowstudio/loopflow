@@ -2,6 +2,43 @@
 
 import Foundation
 
+/// Voice config that handles both single string and array formats in YAML.
+enum VoiceConfig: Codable {
+    case single(String)
+    case multiple([String])
+
+    var names: [String] {
+        switch self {
+        case .single(let name): return [name]
+        case .multiple(let names): return names
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let single = try? container.decode(String.self) {
+            self = .single(single)
+        } else if let multiple = try? container.decode([String].self) {
+            self = .multiple(multiple)
+        } else {
+            throw DecodingError.typeMismatch(
+                VoiceConfig.self,
+                DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Expected string or array of strings")
+            )
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .single(let name):
+            try container.encode(name)
+        case .multiple(let names):
+            try container.encode(names)
+        }
+    }
+}
+
 struct LoopflowConfig: Codable {
     let agentModel: String?
     let interactive: [String]?
@@ -17,11 +54,17 @@ struct LoopflowConfig: Codable {
     let diff: Bool?
     let diffFiles: Bool?
     let paste: Bool?
+    let voice: VoiceConfig?
 
     enum CodingKeys: String, CodingKey {
         case agentModel = "agent_model"
         case diffFiles = "diff_files"
-        case interactive, terminal, ide, workspace, context, exclude, push, pr, yolo, docs, diff, paste
+        case interactive, terminal, ide, workspace, context, exclude, push, pr, yolo, docs, diff, paste, voice
+    }
+
+    /// Voice config can be a single string or array of strings in YAML.
+    var voiceNames: [String] {
+        voice?.names ?? []
     }
 
     var terminalApp: TerminalApp {

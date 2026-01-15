@@ -241,6 +241,53 @@ def load_sessions(active_only: bool = False, db_path: Path | None = None) -> lis
     return sessions
 
 
+def load_sessions_for_worktree(worktree: str, limit: int = 20, db_path: Path | None = None) -> list[Session]:
+    """Load recent sessions for a worktree path."""
+    conn = _get_db(db_path)
+
+    cursor = conn.execute(
+        "SELECT * FROM sessions WHERE worktree = ? ORDER BY started_at DESC LIMIT ?",
+        (worktree, limit),
+    )
+
+    sessions = [_session_from_row(dict(row)) for row in cursor]
+    conn.close()
+    return sessions
+
+
+def load_sessions_for_repo(repo: str, limit: int = 50, db_path: Path | None = None) -> list[Session]:
+    """Load recent sessions across all worktrees in a repo."""
+    conn = _get_db(db_path)
+
+    cursor = conn.execute(
+        "SELECT * FROM sessions WHERE repo = ? ORDER BY started_at DESC LIMIT ?",
+        (repo, limit),
+    )
+
+    sessions = [_session_from_row(dict(row)) for row in cursor]
+    conn.close()
+    return sessions
+
+
+def update_session_status(session_id: str, status: SessionStatus, db_path: Path | None = None) -> bool:
+    """Update session status."""
+    conn = _get_db(db_path)
+
+    ended_at = None
+    if status in (SessionStatus.COMPLETED, SessionStatus.ERROR):
+        ended_at = datetime.now().isoformat()
+
+    cursor = conn.execute(
+        "UPDATE sessions SET status = ?, ended_at = COALESCE(?, ended_at) WHERE id = ?",
+        (status.value, ended_at, session_id),
+    )
+
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    return updated
+
+
 def _session_from_row(row: dict) -> Session:
     """Convert database row to Session."""
     return Session(

@@ -107,14 +107,14 @@ struct SessionService {
 
 struct Worktree {
     // existing fields...
-    var recentTasks: [TaskSession]  // populated from lfd
+    var recentTasks: [TaskSession] = []
 
     var lastTask: String? {
         recentTasks.first?.task
     }
 
-    var stageText: String {
-        // "design" / "implement" / "review" based on last completed task
+    var lastCompletedTask: String? {
+        recentTasks.first(where: { $0.isCompleted })?.task
     }
 }
 ```
@@ -148,13 +148,6 @@ private func stageColor(_ task: String) -> Color {
     default: return .gray
     }
 }
-```
-
-Add history popover on click:
-
-```swift
-// Click worktree row -> show history popover with recent tasks
-// Each entry shows: task name, status icon, relative time
 ```
 
 ## Constraints

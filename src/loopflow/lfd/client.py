@@ -2,8 +2,11 @@
 
 import asyncio
 import json
+import socket
 from pathlib import Path
 from typing import Any, AsyncIterator
+
+from loopflow.lfd.models import Session, SessionStatus
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 
@@ -86,5 +89,48 @@ async def _check_daemon() -> bool:
         return True
     except Exception:
         return False
+    finally:
+        await client.close()
+
+
+# Fire-and-forget session logging (synchronous, non-blocking)
+
+
+def _send_fire_and_forget(method: str, params: dict[str, Any]) -> None:
+    """Send a request to lfd without waiting for response. Fails silently."""
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(0.5)
+        sock.connect(str(SOCKET_PATH))
+        request = json.dumps({"method": method, "params": params}) + "\n"
+        sock.sendall(request.encode())
+        sock.close()
+    except Exception:
+        pass  # Fire-and-forget: don't block on errors
+
+
+def log_session_start(session: Session) -> None:
+    """Tell lfd a session started. Fire-and-forget."""
+    _send_fire_and_forget("sessions.start", {"session": session.to_dict()})
+
+
+def log_session_end(session_id: str, status: SessionStatus) -> None:
+    """Tell lfd a session ended. Fire-and-forget."""
+    _send_fire_and_forget("sessions.end", {"session_id": session_id, "status": status.value})
+
+
+def get_worktree_history(worktree: str, limit: int = 20) -> list[Session]:
+    """Get session history for a worktree. Returns empty list on failure."""
+    try:
+        return asyncio.run(_get_worktree_history(worktree, limit))
+    except Exception:
+        return []
+
+
+async def _get_worktree_history(worktree: str, limit: int) -> list[Session]:
+    client = DaemonClient()
+    try:
+        result = await client.call("sessions.history", {"worktree": worktree, "limit": limit})
+        return [Session.from_dict(s) for s in result]
     finally:
         await client.close()

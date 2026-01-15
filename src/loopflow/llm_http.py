@@ -26,6 +26,13 @@ class CommitMessage(BaseModel):
     body: str
 
 
+class ReleaseNotes(BaseModel):
+    """Release notes for a version bump."""
+
+    summary: str
+    changes: list[str]
+
+
 def _get_staged_diff(repo_root: Path) -> str | None:
     """Get diff of staged changes (against HEAD)."""
     result = subprocess.run(
@@ -201,3 +208,37 @@ def generate_pr_message(repo_root: Path) -> CommitMessage:
     task_prompt = _load_prompt(repo_root, "CHECKPOINT_MESSAGE.md", "pr_message")
     prompt = _build_message_prompt(repo_root, diff, task_prompt)
     return _generate_message(repo_root, prompt, "pr message")
+
+
+def _get_commits_since_tag(repo_root: Path, tag: str) -> str | None:
+    """Get commit log since a tag."""
+    result = subprocess.run(
+        ["git", "log", f"{tag}..HEAD", "--oneline"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    return result.stdout
+
+
+def generate_release_notes(repo_root: Path, old_version: str, new_version: str) -> ReleaseNotes:
+    """Generate release notes from commits since last tag via API."""
+    commits = _get_commits_since_tag(repo_root, f"v{old_version}")
+    task_prompt = _load_prompt(repo_root, "RELEASE_NOTES.md", "release_notes")
+
+    parts = [f"Version bump: {old_version} → {new_version}"]
+    if commits:
+        parts.append(f"<commits>\n{commits}\n</commits>")
+    parts.append(f"<task>\n{task_prompt}\n</task>")
+    prompt = "\n\n".join(parts)
+
+    agent = Agent(_COMMIT_MODEL, output_type=ReleaseNotes)
+    try:
+        result = agent.run_sync(prompt)
+        _log_success("release notes", "API")
+        return result.output
+    except Exception as e:
+        _log_api_failure("release notes", e)
+        raise

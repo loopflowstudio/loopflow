@@ -7,8 +7,10 @@ struct TokenEstimator {
         prompt: String?,
         args: String,
         context: [URL],
+        includeDocs: Bool,
         includeDiff: Bool,
         includeDiffFiles: Bool,
+        includePaste: Bool,
         in repoURL: URL
     ) async -> Int {
         var cmdArgs = ["lf"]
@@ -29,12 +31,18 @@ struct TokenEstimator {
             cmdArgs.append(relativePath)
         }
 
-        // Include diff flags to match actual command
+        // Include context flags to match actual command
         if includeDiff {
             cmdArgs.append("--diff")
         }
         if !includeDiffFiles {
             cmdArgs.append("--no-diff-files")
+        }
+        if !includeDocs {
+            cmdArgs.append("--no-docs")
+        }
+        if includePaste {
+            cmdArgs.append("--paste")
         }
 
         cmdArgs.append("-c")

@@ -165,7 +165,6 @@ def analyze_prompt_tokens(
     diff: Optional[str] = None,
     diff_files: Optional[list[tuple[Path, str]]] = None,
     task: Optional[tuple[str, str]] = None,
-    context_files: Optional[list[tuple[Path, str]]] = None,
     repo_root: Optional[Path] = None,
     clipboard: Optional[str] = None,
     loopflow_doc: Optional[str] = None,
@@ -192,24 +191,14 @@ def analyze_prompt_tokens(
             try:
                 rel = file_path.relative_to(repo_root)
                 parts = list(rel.parts[:-1])  # directory parts
-                tree.add("diff_files", rel.name, tokens, path=parts)
+                tree.add("files", rel.name, tokens, path=parts)
             except ValueError:
-                tree.add("diff_files", file_path.name, tokens)
+                tree.add("files", file_path.name, tokens)
 
     if task:
         name, content = task
         tokens = count_tokens(content)
         tree.add("task", name or "inline", tokens)
-
-    if context_files and repo_root:
-        for file_path, content in context_files:
-            tokens = count_tokens(content)
-            try:
-                rel = file_path.relative_to(repo_root)
-                parts = list(rel.parts[:-1])  # directory parts
-                tree.add("context", rel.name, tokens, path=parts)
-            except ValueError:
-                tree.add("context", file_path.name, tokens)
 
     if clipboard:
         tokens = count_tokens(clipboard)
@@ -225,7 +214,6 @@ def analyze_components(components) -> TokenTree:
         diff=components.diff,
         diff_files=components.diff_files,
         task=components.task,
-        context_files=components.context_files,
         repo_root=components.repo_root,
         clipboard=components.clipboard,
         loopflow_doc=components.loopflow_doc,

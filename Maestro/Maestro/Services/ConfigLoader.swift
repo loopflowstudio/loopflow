@@ -41,6 +41,7 @@ struct ConfigLoader {
         var diff: Bool?
         var diffFiles: Bool?
         var paste: Bool?
+        var voice: VoiceConfig?
 
         let lines = contents.components(separatedBy: .newlines)
         var currentList: String?
@@ -64,6 +65,7 @@ struct ConfigLoader {
                     case "interactive": interactive = listItems
                     case "context": context = listItems
                     case "exclude": exclude = listItems
+                    case "voice": voice = .multiple(listItems)
                     default: break
                     }
                 }
@@ -103,6 +105,7 @@ struct ConfigLoader {
                 case "diff": diff = value == "true"
                 case "diff_files": diffFiles = value == "true"
                 case "paste": paste = value == "true"
+                case "voice": voice = .single(value)
                 default: break
                 }
             }
@@ -122,7 +125,8 @@ struct ConfigLoader {
             docs: docs,
             diff: diff,
             diffFiles: diffFiles,
-            paste: paste
+            paste: paste,
+            voice: voice
         )
     }
 }

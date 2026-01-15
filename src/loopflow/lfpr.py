@@ -110,7 +110,11 @@ def _ensure_clean(repo_root: Path) -> None:
         capture_output=True,
         text=True,
     )
-    if result.stdout.strip():
+    # Filter out untracked files (??) - only block on tracked changes
+    tracked_changes = [
+        line for line in result.stdout.strip().split("\n") if line and not line.startswith("??")
+    ]
+    if tracked_changes:
         typer.echo("Error: Working tree has uncommitted changes", err=True)
         raise typer.Exit(1)
 
@@ -387,7 +391,11 @@ def _land_pr(
         capture_output=True,
         text=True,
     )
-    if result.stdout.strip():
+    # Filter out untracked files (??) - only block on tracked changes
+    tracked_changes = [
+        line for line in result.stdout.strip().split("\n") if line and not line.startswith("??")
+    ]
+    if tracked_changes:
         typer.echo("Error: Main repo has uncommitted changes", err=True)
         raise typer.Exit(1)
 

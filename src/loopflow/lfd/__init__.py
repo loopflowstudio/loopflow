@@ -95,23 +95,28 @@ def list_cmd():
         typer.echo("Create one with: lfd new <name>")
         return
 
-    typer.echo(f"{'NAME':<20} {'STATUS':<12} {'TRIGGER':<15} {'PIPELINE':<30}")
-    typer.echo("-" * 77)
+    typer.echo(f"{'EMOJI':<6} {'NAME':<18} {'STATUS':<10} {'TRIGGER':<12} {'PIPELINE':<25}")
+    typer.echo("-" * 75)
 
     for agent in agents:
-        pipeline_str = " → ".join(agent.pipeline)
-        if len(pipeline_str) > 28:
-            pipeline_str = pipeline_str[:25] + "..."
+        pipeline_str = agent.pipeline
+        if len(pipeline_str) > 23:
+            pipeline_str = pipeline_str[:20] + "..."
 
         trigger_str = agent.trigger.kind.value
         if agent.trigger.kind.value == "interval" and agent.trigger.interval_seconds:
-            trigger_str = f"interval ({agent.trigger.interval_seconds}s)"
+            trigger_str = f"int({agent.trigger.interval_seconds}s)"
+        elif agent.trigger.kind.value == "cron" and agent.trigger.cron:
+            trigger_str = f"cron"
 
         # Get status from latest run
         latest = get_latest_run(agent.name)
         status_str = latest.status.value if latest else "idle"
 
-        typer.echo(f"{agent.name:<20} {status_str:<12} {trigger_str:<15} {pipeline_str:<30}")
+        emoji_str = agent.emoji if agent.emoji else "-"
+        name_str = agent.name[:18] if len(agent.name) > 18 else agent.name
+
+        typer.echo(f"{emoji_str:<6} {name_str:<18} {status_str:<10} {trigger_str:<12} {pipeline_str:<25}")
 
 
 @app.command()
@@ -161,9 +166,17 @@ def show(
         raise typer.Exit(1)
 
     typer.echo(f"Agent: {agent.name}")
+    if agent.emoji:
+        typer.echo(f"  Emoji: {agent.emoji}")
     typer.echo(f"  Repo: {agent.repo}")
-    typer.echo(f"  Pipeline: {' → '.join(agent.pipeline)}")
+    if agent.goal:
+        typer.echo(f"  Goal: {agent.goal}")
+    typer.echo(f"  Pipeline: {agent.pipeline}")
+    typer.echo(f"  Merge: {agent.merge_strategy.value}")
     typer.echo(f"  Trigger: {agent.trigger.kind.value}")
+    if agent.trigger.cron:
+        typer.echo(f"  Cron: {agent.trigger.cron}")
+        typer.echo(f"  Grace: {agent.trigger.grace_minutes}m")
     if agent.trigger.interval_seconds:
         typer.echo(f"  Interval: {agent.trigger.interval_seconds}s")
     if agent.context:
@@ -217,23 +230,51 @@ def logs(
 @app.command()
 def new(
     name: str = typer.Argument(help="Agent name"),
+    emoji: str = typer.Option(
+        "",
+        "-e",
+        "--emoji",
+        help="Emoji identifier for visual tracking (e.g., 🔧)",
+    ),
+    goal: str = typer.Option(
+        None,
+        "-g",
+        "--goal",
+        help="Path to goal file (relative to repo, e.g., .lf/goals/security.md)",
+    ),
     pipeline: str = typer.Option(
-        "implement,polish,land",
+        "ship",
         "-p",
         "--pipeline",
-        help="Comma-separated pipeline tasks",
+        help="Pipeline name to run (from .lf/pipelines/)",
     ),
     trigger: str = typer.Option(
         "manual",
         "-t",
         "--trigger",
-        help="Trigger: manual, main-changed, or interval",
+        help="Trigger: manual, loop, cron, main-changed, or interval",
+    ),
+    merge: str = typer.Option(
+        "pr",
+        "-m",
+        "--merge",
+        help="Merge strategy: auto or pr",
     ),
     interval: int = typer.Option(
         None,
         "-i",
         "--interval",
         help="Interval in seconds (for interval trigger)",
+    ),
+    cron: str = typer.Option(
+        None,
+        "--cron",
+        help="Cron expression (for cron trigger, e.g., '0 9 * * *')",
+    ),
+    grace: int = typer.Option(
+        60,
+        "--grace",
+        help="Grace period in minutes for missed cron schedules",
     ),
     context: str = typer.Option(
         None,
@@ -255,25 +296,41 @@ def new(
         typer.echo(f"Agent '{name}' already exists at {existing}", err=True)
         raise typer.Exit(1)
 
-    pipeline_list = [t.strip() for t in pipeline.split(",") if t.strip()]
     context_list = [c.strip() for c in context.split(",")] if context else None
+    goal_path = Path(goal) if goal else None
 
     if trigger == "interval" and not interval:
         typer.echo("Error: --interval required for interval trigger", err=True)
         raise typer.Exit(1)
 
+    if trigger == "cron" and not cron:
+        typer.echo("Error: --cron required for cron trigger", err=True)
+        raise typer.Exit(1)
+
+    if merge not in ("auto", "pr"):
+        typer.echo("Error: --merge must be 'auto' or 'pr'", err=True)
+        raise typer.Exit(1)
+
     path = create_agent_file(
         name=name,
         repo=main_repo,
-        pipeline=pipeline_list,
+        pipeline=pipeline,
         trigger=trigger,
         context=context_list,
         interval_seconds=interval,
+        emoji=emoji,
+        goal=goal_path,
+        merge=merge,
+        cron=cron,
+        grace_minutes=grace if grace != 60 else None,
     )
 
     typer.echo(f"Created agent: {path}")
-    typer.echo(f"  Pipeline: {' → '.join(pipeline_list)}")
+    if emoji:
+        typer.echo(f"  Emoji: {emoji}")
+    typer.echo(f"  Pipeline: {pipeline}")
     typer.echo(f"  Trigger: {trigger}")
+    typer.echo(f"  Merge: {merge}")
     typer.echo("")
     typer.echo(f"Edit the prompt: lfd edit {name}")
 

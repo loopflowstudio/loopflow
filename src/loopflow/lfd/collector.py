@@ -259,6 +259,14 @@ def _run_interactive(command: list[str], log_file, json_log, foreground: bool, p
     return exit_code
 
 
+def _format_tool_line(tool: str, input_data: dict | None) -> str:
+    """Format a tool invocation line with optional path."""
+    path = ""
+    if isinstance(input_data, dict) and input_data.get("path"):
+        path = f": {input_data['path']}"
+    return f"→ {tool}{path}"
+
+
 def _format_stream_line(line: str) -> list[str]:
     """Format a stream line, parsing JSON if present.
 
@@ -289,10 +297,7 @@ def _format_stream_line(line: str) -> list[str]:
         lines = []
         for block in content:
             if block.get("type") == "tool_use":
-                tool = block.get("name", "unknown")
-                input_data = block.get("input") or {}
-                path = f": {input_data.get('path')}" if isinstance(input_data, dict) and input_data.get("path") else ""
-                lines.append(f"→ {tool}{path}")
+                lines.append(_format_tool_line(block.get("name", "unknown"), block.get("input")))
             if block.get("type") == "text":
                 text = block.get("text", "")
                 if text:
@@ -306,10 +311,7 @@ def _format_stream_line(line: str) -> list[str]:
 
     # Codex-style events
     if event_type == "tool_use":
-        tool = event.get("tool", "unknown")
-        input_data = event.get("input") or {}
-        path = f": {input_data.get('path')}" if isinstance(input_data, dict) and input_data.get("path") else ""
-        return [f"→ {tool}{path}"]
+        return [_format_tool_line(event.get("tool", "unknown"), event.get("input"))]
     if event_type == "text":
         content = event.get("content", "")
         return [content] if content else []

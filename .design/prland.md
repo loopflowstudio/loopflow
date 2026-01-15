@@ -1,13 +1,13 @@
 # prland
 
 Consolidated `lfpr` into `lfops`. Commands are now:
-- `lfops pr` (was `lfpr create`)
-- `lfops land` (was `lfpr land`)
-- `lfops commit` (was `lfpr commit`)
-
-Also fixed `lfops land` to use `gh pr merge` so PRs show as merged (not closed) on GitHub. Added `--local` mode for landing without a PR, and `--create-pr` for creating and merging in one step.
+- `lfops pr` - unified create/update/view
+- `lfops land` - squash-merge to main
+- `lfops commit` - commit with generated message
 
 ## Design notes
+
+**`lfops pr` (unified):** Single command that creates a PR if none exists, updates the title/body if one does, and always opens it in the browser. Idempotent - run it any time to sync PR state with current branch.
 
 **Config option:** `land: gh | local` in `.lf/config.yaml` controls default. Flag `--local/--gh` overrides at runtime.
 

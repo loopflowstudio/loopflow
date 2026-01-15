@@ -178,8 +178,10 @@ wt remove feature-a      # remove a worktree + branch
 Open a PR from a worktree:
 
 ```bash
-lfops pr                     # opens PR on GitHub
+lfops pr                     # create or update PR, open in browser
 ```
+
+The `pr` command is idempotent: run it to create a PR, or run it again to update the title/body after more commits. Either way, it opens the PR in your browser.
 
 Land a PR (squash-merge to main):
 

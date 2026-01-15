@@ -698,11 +698,42 @@ def _squash_commits(repo_root: Path, base_ref: str, commit_msg: str) -> None:
     subprocess.run(["git", "commit", "-m", commit_msg], cwd=repo_root, check=True)
 
 
+def _get_existing_pr_url(repo_root: Path) -> str | None:
+    """Check if a PR exists for current branch. Returns URL if exists, None otherwise."""
+    result = subprocess.run(
+        ["gh", "pr", "view", "--json", "url", "-q", ".url"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout.strip()
+    return None
+
+
+def _update_pr(repo_root: Path, title: str, body: str) -> str:
+    """Update existing PR title and body. Returns URL."""
+    subprocess.run(
+        ["git", "push"],
+        cwd=repo_root,
+        capture_output=True,
+    )
+    result = subprocess.run(
+        ["gh", "pr", "edit", "--title", title, "--body", body],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise GitError(result.stderr.strip() or "Failed to update PR")
+    return _get_existing_pr_url(repo_root) or ""
+
+
 @app.command("pr")
 def pr(
     add: bool = typer.Option(False, "-a", "--add", help="Add, commit, and push changes first"),
 ) -> None:
-    """Create a GitHub PR for this branch with generated title/body."""
+    """Create or update a GitHub PR, then open it in browser."""
     repo_root = find_worktree_root()
     if not repo_root:
         typer.echo("Error: Not in a git repository", err=True)
@@ -715,19 +746,34 @@ def pr(
     if add:
         _add_commit_push(repo_root)
 
-    typer.echo("Generating PR title and body...")
-    message = generate_pr_message(repo_root)
+    # Check if PR already exists
+    existing_url = _get_existing_pr_url(repo_root)
 
-    typer.echo(f"\n{message.title}\n")
-    typer.echo(message.body)
-    typer.echo("")
+    if existing_url:
+        typer.echo("Updating existing PR...")
+        message = generate_pr_message(repo_root)
+        typer.echo(f"\n{message.title}\n")
+        typer.echo(message.body)
+        typer.echo("")
+        try:
+            pr_url = _update_pr(repo_root, title=message.title, body=message.body)
+        except GitError as e:
+            typer.echo(f"Error: {e}", err=True)
+            raise typer.Exit(1)
+        typer.echo(f"Updated: {pr_url}")
+    else:
+        typer.echo("Creating PR...")
+        message = generate_pr_message(repo_root)
+        typer.echo(f"\n{message.title}\n")
+        typer.echo(message.body)
+        typer.echo("")
+        try:
+            pr_url = open_pr(repo_root, title=message.title, body=message.body)
+        except GitError as e:
+            typer.echo(f"Error: {e}", err=True)
+            raise typer.Exit(1)
+        typer.echo(f"Created: {pr_url}")
 
-    try:
-        pr_url = open_pr(repo_root, title=message.title, body=message.body)
-    except GitError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
-    typer.echo(pr_url)
     subprocess.run(["open", pr_url])
 
 

@@ -208,7 +208,7 @@ Priority: CLI > frontmatter > config > none.
 | `lfwt list` | Show all worktrees with status |
 | `lfwt diff <branch>` | Show diff for a worktree |
 | `lfwt compare a b` | Compare two worktree implementations |
-| `lfops pr` | Open GitHub PR |
+| `lfops pr` | Create/update PR, open in browser |
 | `lfops land` | Squash-merge to main |
 | `lfops commit [-p]` | Generate commit message and commit |
 | `lfops init` | Initialize repo with prompts and config |

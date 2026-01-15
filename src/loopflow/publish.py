@@ -36,7 +36,10 @@ def bump_version(version: str, bump_type: str) -> str:
     parts = version.split(".")
     if len(parts) != 3:
         raise PublishError(f"Invalid version format: {version}")
-    major, minor, patch = map(int, parts)
+    try:
+        major, minor, patch = map(int, parts)
+    except ValueError:
+        raise PublishError(f"Invalid version format: {version}")
 
     if bump_type == "major":
         return f"{major + 1}.0.0"
@@ -133,9 +136,18 @@ def publish_package(repo_root: Path | None = None) -> tuple[bool, str]:
     return success, output
 
 
-def install_locally() -> tuple[bool, str]:
-    """Install loopflow locally with uv tool. Returns (success, output)."""
-    result = _run(["uv", "tool", "install", "--force", "loopflow"])
+def install_locally(repo_root: Path | None = None) -> tuple[bool, str]:
+    """Install loopflow locally from the built wheel. Returns (success, output)."""
+    cwd = repo_root or Path.cwd()
+    dist_dir = cwd / "dist"
+
+    # Find the wheel file (most recent)
+    wheels = sorted(dist_dir.glob("loopflow-*.whl"))
+    if not wheels:
+        return False, "No wheel found in dist/"
+
+    wheel_path = wheels[-1]
+    result = _run(["uv", "tool", "install", "--force", str(wheel_path)])
     success = result.returncode == 0
     output = result.stdout + result.stderr
     return success, output

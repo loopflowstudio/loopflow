@@ -136,9 +136,9 @@ def main() -> int:
         return 1
     print("Published to PyPI.")
 
-    # Step 8: Install locally
+    # Step 8: Install locally from the built wheel
     print("Installing locally...")
-    success, output = install_locally()
+    success, output = install_locally(ROOT)
     if not success:
         print("Local install failed:", file=sys.stderr)
         print(output, file=sys.stderr)

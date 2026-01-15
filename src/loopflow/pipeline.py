@@ -5,6 +5,7 @@ import platform
 import subprocess
 import sys
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -20,6 +21,126 @@ from loopflow.lfd.client import log_session_start, log_session_end
 from loopflow.lfd.models import Session, SessionStatus
 
 
+@dataclass
+class _StepParams:
+    """Parameters for executing a single pipeline step."""
+    task: str
+    backend: str
+    model_variant: str | None
+    context: list[str] | None
+    voices: list[str] | None
+
+
+def _run_step(
+    params: _StepParams,
+    repo_root: Path,
+    main_repo: Path,
+    exclude: list[str] | None,
+    skip_permissions: bool,
+    should_push: bool,
+    step_num: int,
+    total_steps: int,
+) -> int:
+    """Execute a single pipeline step. Returns exit code."""
+    print(f"\n{'='*60}")
+    print(f"[{step_num}/{total_steps}] {params.task}")
+    print(f"{'='*60}\n")
+
+    prompt = build_prompt(
+        repo_root,
+        params.task,
+        context=params.context,
+        exclude=exclude,
+        run_mode="auto",
+        voices=params.voices,
+    )
+    prompt_file = write_prompt_file(prompt)
+
+    session = Session(
+        id=str(uuid.uuid4()),
+        task=params.task,
+        repo=str(main_repo),
+        worktree=str(repo_root),
+        status=SessionStatus.RUNNING,
+        started_at=datetime.now(),
+        pid=None,
+        model=params.backend,
+        run_mode="auto",
+    )
+    log_session_start(session)
+
+    command = build_model_command(
+        params.backend,
+        auto=True,
+        stream=True,
+        skip_permissions=skip_permissions,
+        model_variant=params.model_variant,
+        sandbox_root=repo_root.parent,
+        workdir=repo_root,
+    )
+    collector_cmd = [
+        sys.executable,
+        "-m",
+        "loopflow.lfd.collector",
+        "--session-id",
+        session.id,
+        "--task",
+        params.task,
+        "--repo-root",
+        str(repo_root),
+        "--prompt-file",
+        prompt_file,
+        "--autocommit",
+        "--foreground",
+    ]
+    if should_push:
+        collector_cmd.append("--push")
+    collector_cmd.extend(["--", *command])
+
+    process = subprocess.Popen(collector_cmd, cwd=repo_root)
+    result_code = process.wait()
+
+    os.unlink(prompt_file)
+
+    status = SessionStatus.COMPLETED if result_code == 0 else SessionStatus.ERROR
+    log_session_end(session.id, status)
+
+    if result_code != 0:
+        print(f"\n[{params.task}] failed with exit code {result_code}")
+
+    return result_code
+
+
+def _finalize_pipeline(
+    pipeline_name: str,
+    repo_root: Path,
+    should_pr: bool,
+) -> None:
+    """Handle post-pipeline tasks: PR creation and notification."""
+    if should_pr:
+        try:
+            message = generate_pr_message(repo_root)
+            pr_url = open_pr(repo_root, title=message.title, body=message.body)
+            print(f"\nPR created: {pr_url}")
+        except GitError as e:
+            print(f"\nPR creation failed: {e}")
+
+    _notify_done(pipeline_name)
+
+
+def _notify_done(pipeline_name: str) -> None:
+    """Show macOS notification. No-op on other platforms."""
+    if platform.system() != "Darwin":
+        return
+    try:
+        subprocess.run(
+            ["osascript", "-e", f'display notification "Pipeline complete" with title "lf {pipeline_name}"'],
+            capture_output=True,
+        )
+    except FileNotFoundError:
+        pass
+
+
 def run_pipeline(
     pipeline: PipelineConfig,
     repo_root: Path,
@@ -33,11 +154,8 @@ def run_pipeline(
     model_variant: str | None = "opus",
 ) -> int:
     """Run each task in sequence. Returns first non-zero exit code, or 0."""
-    # Pipeline settings override globals
     should_push = pipeline.push if pipeline.push is not None else push_enabled
     should_pr = pipeline.pr if pipeline.pr is not None else pr_enabled
-
-    # PR implies push
     if should_pr:
         should_push = True
 
@@ -47,101 +165,25 @@ def run_pipeline(
         return 1
 
     main_repo = find_main_repo(repo_root) or repo_root
-
     total = len(pipeline.tasks)
+
     for i, task_name in enumerate(pipeline.tasks):
-        # Task header
-        print(f"\n{'='*60}")
-        print(f"[{i+1}/{total}] {task_name}")
-        print(f"{'='*60}\n")
-
-        prompt = build_prompt(
-            repo_root,
-            task_name,
-            context=context,
-            exclude=exclude,
-            include_tests_for=include_tests_for,
-            run_mode="auto",
-        )
-        prompt_file = write_prompt_file(prompt)
-
-        session = Session(
-            id=str(uuid.uuid4()),
+        params = _StepParams(
             task=task_name,
-            repo=str(main_repo),
-            worktree=str(repo_root),
-            status=SessionStatus.RUNNING,
-            started_at=datetime.now(),
-            pid=None,
-            model=backend,
-            run_mode="auto",
-        )
-        log_session_start(session)
-
-        command = build_model_command(
-            backend,
-            auto=True,
-            stream=True,
-            skip_permissions=skip_permissions,
+            backend=backend,
             model_variant=model_variant,
-            sandbox_root=repo_root.parent,
-            workdir=repo_root,
+            context=context,
+            voices=None,
         )
-        collector_cmd = [
-            sys.executable,
-            "-m",
-            "loopflow.lfd.collector",
-            "--session-id",
-            session.id,
-            "--task",
-            task_name,
-            "--repo-root",
-            str(repo_root),
-            "--prompt-file",
-            prompt_file,
-            "--autocommit",
-            "--foreground",
-        ]
-        if should_push:
-            collector_cmd.append("--push")
-        collector_cmd.extend(["--", *command])
-        # Don't strip API keys from collector env - it needs them for commit message generation
-        process = subprocess.Popen(collector_cmd, cwd=repo_root)
-        result_code = process.wait()
-
-        # Clean up prompt file
-        os.unlink(prompt_file)
-
-        status = SessionStatus.COMPLETED if result_code == 0 else SessionStatus.ERROR
-        log_session_end(session.id, status)
-
+        result_code = _run_step(
+            params, repo_root, main_repo, exclude,
+            skip_permissions, should_push, i + 1, total,
+        )
         if result_code != 0:
-            print(f"\n[{task_name}] failed with exit code {result_code}")
             return result_code
 
-    if should_pr:
-        try:
-            message = generate_pr_message(repo_root)
-            pr_url = open_pr(repo_root, title=message.title, body=message.body)
-            print(f"\nPR created: {pr_url}")
-        except GitError as e:
-            print(f"\nPR creation failed: {e}")
-
-    _notify_done(pipeline.name)
+    _finalize_pipeline(pipeline.name, repo_root, should_pr)
     return 0
-
-
-def _notify_done(pipeline_name: str) -> None:
-    """Show macOS notification. No-op on other platforms."""
-    if platform.system() != "Darwin":
-        return
-    try:
-        subprocess.run(
-            ["osascript", "-e", f'display notification "Pipeline complete" with title "lf {pipeline_name}"'],
-            capture_output=True,
-        )
-    except FileNotFoundError:
-        pass  # osascript not available
 
 
 def run_pipeline_def(
@@ -158,7 +200,6 @@ def run_pipeline_def(
     """Run a PipelineDef (from .lf/pipelines/). Returns first non-zero exit code, or 0."""
     should_push = push_enabled
     should_pr = pr_enabled
-
     if should_pr:
         should_push = True
 
@@ -168,14 +209,10 @@ def run_pipeline_def(
         return 1
 
     main_repo = find_main_repo(repo_root) or repo_root
-
-    # Resolve pipeline to flat list of steps
     resolved = resolve_pipeline(pipeline, repo_root)
     total = len(resolved)
 
     for i, step in enumerate(resolved):
-        task_name = step.task
-
         # Per-step config can override model/voice/context
         step_backend = backend
         step_variant = model_variant
@@ -190,80 +227,19 @@ def run_pipeline_def(
             if step.config.voice:
                 step_voices = [step.config.voice]
 
-        # Task header
-        print(f"\n{'='*60}")
-        print(f"[{i+1}/{total}] {task_name}")
-        print(f"{'='*60}\n")
-
-        prompt = build_prompt(
-            repo_root,
-            task_name,
+        params = _StepParams(
+            task=step.task,
+            backend=step_backend,
+            model_variant=step_variant,
             context=step_context or None,
-            exclude=exclude,
-            run_mode="auto",
             voices=step_voices,
         )
-        prompt_file = write_prompt_file(prompt)
-
-        session = Session(
-            id=str(uuid.uuid4()),
-            task=task_name,
-            repo=str(main_repo),
-            worktree=str(repo_root),
-            status=SessionStatus.RUNNING,
-            started_at=datetime.now(),
-            pid=None,
-            model=step_backend,
-            run_mode="auto",
+        result_code = _run_step(
+            params, repo_root, main_repo, exclude,
+            skip_permissions, should_push, i + 1, total,
         )
-        log_session_start(session)
-
-        command = build_model_command(
-            step_backend,
-            auto=True,
-            stream=True,
-            skip_permissions=skip_permissions,
-            model_variant=step_variant,
-            sandbox_root=repo_root.parent,
-            workdir=repo_root,
-        )
-        collector_cmd = [
-            sys.executable,
-            "-m",
-            "loopflow.lfd.collector",
-            "--session-id",
-            session.id,
-            "--task",
-            task_name,
-            "--repo-root",
-            str(repo_root),
-            "--prompt-file",
-            prompt_file,
-            "--autocommit",
-            "--foreground",
-        ]
-        if should_push:
-            collector_cmd.append("--push")
-        collector_cmd.extend(["--", *command])
-        process = subprocess.Popen(collector_cmd, cwd=repo_root)
-        result_code = process.wait()
-
-        os.unlink(prompt_file)
-
-        status = SessionStatus.COMPLETED if result_code == 0 else SessionStatus.ERROR
-        log_session_end(session.id, status)
-
         if result_code != 0:
-            print(f"\n[{task_name}] failed with exit code {result_code}")
             return result_code
 
-    if should_pr:
-        try:
-            message = generate_pr_message(repo_root)
-            pr_url = open_pr(repo_root, title=message.title, body=message.body)
-            print(f"\nPR created: {pr_url}")
-        except GitError as e:
-            print(f"\nPR creation failed: {e}")
-
-    _notify_done(pipeline.name)
+    _finalize_pipeline(pipeline.name, repo_root, should_pr)
     return 0

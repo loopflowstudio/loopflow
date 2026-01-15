@@ -6,9 +6,11 @@ Simplify code touched by this branch while preserving user behavior.
 
 ## Goal
 
-One focused simplification, then stop. The human can run you again (`reduce → reduce → reduce`) until the code is clean. Delete or simplify, verify tests pass. The best reduction is code that doesn't exist anymore.
+Find places where things don't fit together cleanly. Special cases, conditionals, and adapters are signs the underlying data structures or APIs could be reshaped so the pieces just slot in.
 
-Focus on trimming complexity within files this branch has already modified. Don't refactor unrelated code.
+The best reduction isn't deleting a function—it's reshaping a structure so three special cases become one, or rearranging an API so callers don't need conditionals.
+
+One focused change, then stop. Verify tests pass. Focus on files this branch has already modified.
 
 ## Workflow
 
@@ -20,20 +22,20 @@ Focus on trimming complexity within files this branch has already modified. Don'
 
 ## Priority order
 
-1. **Delete dead code.** Unused functions, unreachable branches, obsolete options. If it's not called, delete it.
-2. **Collapse duplication.** Repeated patterns within the changed files. Don't create new abstractions—inline the common code or pick one location.
-3. **Simplify logic.** Replace nested conditionals with early returns. Replace clever code with obvious code.
-4. **Tighten APIs.** Remove optional parameters that are never used. Remove public functions that should be private.
+1. **Reshape data structures.** Can a different representation eliminate special cases? Can fields be combined, split, or retyped so code that consumes them gets simpler?
+2. **Rearrange APIs.** Can the interface change so callers don't need conditionals? Can two similar functions become one with a better signature?
+3. **Delete dead code.** Unused functions, unreachable branches, obsolete options.
+4. **Collapse duplication.** If the same pattern appears twice, inline it or pick one location.
 
 ## Guardrails
 
 **Preserve user behavior.** CLI flags, outputs, and workflows must stay the same. If behavior must change to simplify, document the tradeoff in `.design/questions.md`.
 
-**Prefer deletion over rewriting.** The best refactor is code that doesn't exist anymore.
+**Reshape, don't layer.** Restructuring data or APIs is good. Adding adapters, wrappers, or compatibility shims is not. The goal is fewer moving parts, not different ones.
 
 **Stay in scope.** Only simplify code this branch touched. "While I'm here" refactoring belongs in a separate branch.
 
-**No new abstractions.** If you're tempted to extract a helper, base class, or utility—don't. Reduce means less code, not different code.
+**No new abstractions.** Don't extract helpers, base classes, or utilities. Reshaping a data structure to eliminate special cases is different from adding a layer to hide them.
 
 ## Loopflow's simplicity principles
 
@@ -45,4 +47,3 @@ Focus on trimming complexity within files this branch has already modified. Don'
 ## Output
 
 Make the simplification directly. Run tests to verify. Note any assumptions in `.design/questions.md`.
-

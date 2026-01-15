@@ -779,10 +779,6 @@ struct ContextItemView: View {
         expandedFolders.contains(url)
     }
 
-    private var relativePath: String {
-        url.path().replacingOccurrences(of: repoURL.path() + "/", with: "")
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {

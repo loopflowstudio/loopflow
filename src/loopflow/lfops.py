@@ -946,13 +946,21 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
         subprocess.run(["git", "push", "-u", "origin", branch], cwd=repo_root, check=True)
 
     # Get PR info (or create PR if --create-pr)
+    # Use --state open to avoid finding old closed/merged PRs with the same branch name
     result = subprocess.run(
-        ["gh", "pr", "view", "--json", "number,title,body,baseRefName"],
+        ["gh", "pr", "view", "--json", "number,title,body,baseRefName,state"],
         cwd=repo_root,
         capture_output=True,
         text=True,
     )
-    if result.returncode != 0:
+    pr_data = None
+    if result.returncode == 0:
+        pr_data = json.loads(result.stdout)
+        # Ignore closed/merged PRs - we need an open one
+        if pr_data.get("state", "").upper() != "OPEN":
+            pr_data = None
+
+    if pr_data is None:
         if create_pr:
             typer.echo("Creating PR...")
             message = generate_pr_message(repo_root)
@@ -978,10 +986,9 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
             body = message.body
             base_branch = _get_default_branch(main_repo)
         else:
-            typer.echo("Error: No PR found. Run 'lfops pr create' first, or use --local or --create-pr.", err=True)
+            typer.echo("Error: No open PR found. Run 'lfops pr' first, or use --local or --create-pr.", err=True)
             raise typer.Exit(1)
     else:
-        pr_data = json.loads(result.stdout)
         pr_number = pr_data.get("number")
         title = pr_data.get("title", "").strip()
         body = pr_data.get("body", "").strip()
@@ -1001,8 +1008,9 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
 
     # Use gh pr merge to squash-merge on GitHub (marks PR as merged, not closed)
     # Don't use --delete-branch: it tries to sync local main which fails in worktrees
-    typer.echo(f"Merging PR: {title}")
-    merge_cmd = ["gh", "pr", "merge", branch, "--squash", "--subject", title]
+    # Use PR number (not branch name) to avoid operating on old closed PRs
+    typer.echo(f"Merging PR #{pr_number}: {title}")
+    merge_cmd = ["gh", "pr", "merge", str(pr_number), "--squash", "--subject", title]
     if body:
         merge_cmd.extend(["--body", body])
     result = subprocess.run(merge_cmd, cwd=repo_root, capture_output=True, text=True)
@@ -1012,18 +1020,22 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
         raise typer.Exit(1)
 
     # Verify the PR was actually merged (not just closed)
-    if pr_number:
-        result = subprocess.run(
-            ["gh", "pr", "view", str(pr_number), "--json", "state", "-q", ".state"],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-        )
-        pr_state = result.stdout.strip().upper() if result.returncode == 0 else ""
-        if pr_state and pr_state != "MERGED":
-            typer.echo(f"Warning: PR state is '{pr_state}' (expected 'MERGED')", err=True)
-            typer.echo("The PR may have been closed without merging. Check GitHub.", err=True)
-            raise typer.Exit(1)
+    # Use PR number to verify the specific PR we just merged
+    result = subprocess.run(
+        ["gh", "pr", "view", str(pr_number), "--json", "state", "-q", ".state"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        typer.echo("Error: Could not verify PR state after merge command", err=True)
+        typer.echo("Check GitHub to confirm the PR was merged before cleaning up.", err=True)
+        raise typer.Exit(1)
+    pr_state = result.stdout.strip().upper()
+    if pr_state != "MERGED":
+        typer.echo(f"Error: PR state is '{pr_state}' (expected 'MERGED')", err=True)
+        typer.echo("The PR was not merged. Check GitHub for details.", err=True)
+        raise typer.Exit(1)
 
     # Delete remote branch (we handle this ourselves since we don't use --delete-branch)
     subprocess.run(

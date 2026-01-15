@@ -3,6 +3,9 @@
 import Foundation
 import SQLite3
 
+// SQLITE_TRANSIENT tells SQLite to copy the string immediately
+private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
 struct SessionService {
     private let dbPath = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".lf/lfd.db").path
@@ -61,7 +64,7 @@ struct SessionService {
         defer { sqlite3_finalize(stmt) }
 
         if let value = bindValue {
-            sqlite3_bind_text(stmt, 1, value, -1, nil)
+            sqlite3_bind_text(stmt, 1, value, -1, SQLITE_TRANSIENT)
         }
 
         let dateFormatter = ISO8601DateFormatter()

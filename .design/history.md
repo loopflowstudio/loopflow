@@ -2,43 +2,22 @@
 
 Migrate session logging from `maestro.db` to `lfd` daemon, enabling worktree-based history queries and live UI updates in Maestro.
 
-## Implementation
+## Review
 
-Session logging now flows through lfd:
-- `cli/run.py`, `pipeline.py`, and `maestro/runner.py` use fire-and-forget calls to lfd via `log_session_start()` and `log_session_end()`
-- lfd server handles `sessions.start`, `sessions.end`, `sessions.history` methods
-- Maestro reads session history directly from `lfd.db` via `SessionService.swift`
+**Verdict:** Ready to ship
 
-The `loopflow.lfd.models.Session` is the canonical session model:
-- Uses `str` for `repo` and `worktree` (cleaner for JSON/SQLite)
-- Uses `model` field instead of `backend`
-- The old `maestro.session.Session` remains for backwards compatibility with agent-related code
+The implementation is clean and well-structured. Session logging migrated from direct `maestro.db` writes to fire-and-forget calls through `lfd`, with appropriate tests added. The Swift side reads `lfd.db` directly for history queries.
 
-## Components
+## Design notes
 
-### Python (lfd)
-- `loopflow/lfd/models.py` - Session model with serialization
-- `loopflow/lfd/client.py` - Fire-and-forget functions: `log_session_start()`, `log_session_end()`
-- `loopflow/lfd/server.py` - Handles `sessions.*` methods, broadcasts events
-- `loopflow/lfd/db.py` - SQLite storage with history queries by worktree/repo
+**Fire-and-forget pattern**: Session logging uses synchronous socket calls with 0.5s timeout that fail silently. This prevents lfd availability from blocking task execution—correct tradeoff for logging.
 
-### Swift (Maestro)
-- `Models/Session.swift` - TaskSession model matching lfd schema
-- `Models/Worktree.swift` - Extended with `recentTasks: [TaskSession]`
-- `Services/SessionService.swift` - Reads from `~/.lf/lfd.db`
-- `Views/WorktreeSidebar.swift` - Shows stage badges from last completed task
+**Direct DB reads in Swift**: `SessionService.swift` reads `lfd.db` directly rather than querying the lfd socket. Simpler for read-only queries and avoids needing the daemon running for Maestro to show history.
 
-## Decisions
+**Dual Session models**: Two `Session` types exist:
+- `loopflow.lfd.models.Session` - canonical for task execution (str paths, `model` field)
+- `loopflow.maestro.session.Session` - kept for backwards compatibility in agent code (Path types, `backend` field)
 
-- **Fire-and-forget**: Session logging never blocks task execution. If lfd isn't running, logging fails silently.
-- **Direct DB reads**: Maestro reads `lfd.db` directly rather than querying lfd socket. Simpler for read-only queries.
-- **Dual Session models**: The old `maestro.session.Session` is kept for backwards compatibility in agent-related code (`maestro/__init__.py` exports it). Task execution uses the new `lfd.models.Session`.
+This is intentional—agent state management still uses `maestro.db`, only session history migrated to `lfd.db`.
 
-## Not migrated
-
-These still use `maestro.db` directly for agent state (not session history):
-- `cli/status.py`, `cli/sessions.py` - Display running sessions
-- `lfops.py` - Session status display
-- `maestro/agents.py`, `maestro/agent_runner.py` - Agent state management
-
-This is intentional - agent state lives in maestro.db, session history lives in lfd.db.
+**Worktree sidebar badges**: Shows last completed task (design/implement/review/polish) as a colored badge. Falls back to any last task if none completed yet.

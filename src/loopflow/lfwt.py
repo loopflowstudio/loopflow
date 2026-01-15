@@ -18,7 +18,6 @@ from loopflow.worktrees import (
     diff_between,
     get_github_compare_url,
     get_path,
-    get_pr_state,
     list_all,
 )
 

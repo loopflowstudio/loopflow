@@ -975,9 +975,6 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
 
     if pr_data is None:
         if create_pr:
-            # Clear .design before creating PR to avoid race condition on merge
-            if _clear_design_and_push(repo_root):
-                typer.echo("Cleared .design/")
             typer.echo("Creating PR...")
             message = generate_pr_message(repo_root)
             try:
@@ -1019,8 +1016,14 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
         raise typer.Exit(1)
 
     # Clear .design before merge so it never touches main
+    # Then update PR so it points to the new HEAD
     if _clear_design_and_push(repo_root):
         typer.echo("Cleared .design/")
+        subprocess.run(
+            ["gh", "pr", "edit", str(pr_number), "--title", title, "--body", body],
+            cwd=repo_root,
+            capture_output=True,
+        )
 
     # Use gh pr merge to squash-merge on GitHub (marks PR as merged, not closed)
     # Don't use --delete-branch: it tries to sync local main which fails in worktrees

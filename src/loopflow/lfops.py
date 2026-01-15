@@ -975,6 +975,9 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
 
     if pr_data is None:
         if create_pr:
+            # Clear .design before creating PR to avoid race condition on merge
+            if _clear_design_and_push(repo_root):
+                typer.echo("Cleared .design/")
             typer.echo("Creating PR...")
             message = generate_pr_message(repo_root)
             try:

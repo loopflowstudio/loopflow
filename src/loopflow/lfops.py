@@ -1325,9 +1325,18 @@ def _detect_issues(repo: Path) -> list[Issue]:
     """Find inconsistencies in repo state."""
     issues = []
 
-    # 1. Stale local main - check if origin/main is ahead
+    # Get default branch first (needed for all checks)
     result = subprocess.run(
-        ["git", "rev-list", "HEAD..origin/main", "--count"],
+        ["git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    default_branch = result.stdout.strip().split("/")[-1] if result.returncode == 0 else "main"
+
+    # 1. Stale local default branch - check if origin is ahead
+    result = subprocess.run(
+        ["git", "rev-list", f"{default_branch}..origin/{default_branch}", "--count"],
         cwd=repo,
         capture_output=True,
         text=True,
@@ -1338,8 +1347,8 @@ def _detect_issues(repo: Path) -> list[Issue]:
             s = "s" if behind > 1 else ""
             issues.append(Issue(
                 kind="stale_main",
-                description=f"main is {behind} commit{s} behind origin/main",
-                fix_cmd="git checkout main && git pull --ff-only",
+                description=f"{default_branch} is {behind} commit{s} behind origin/{default_branch}",
+                fix_cmd=f"git checkout {default_branch} && git pull --ff-only",
             ))
 
     # 2. Orphaned local branches - local branch with no remote and no worktree
@@ -1362,15 +1371,6 @@ def _detect_issues(repo: Path) -> list[Issue]:
     for line in result.stdout.split("\n"):
         if line.startswith("branch refs/heads/"):
             worktree_branches.add(line.split("/")[-1])
-
-    # Get default branch
-    result = subprocess.run(
-        ["git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-    )
-    default_branch = result.stdout.strip().split("/")[-1] if result.returncode == 0 else "main"
 
     for branch in local_branches:
         if branch == default_branch:
@@ -1439,7 +1439,9 @@ def _detect_issues(repo: Path) -> list[Issue]:
 def _fix_issue(repo: Path, issue: Issue) -> bool:
     """Apply fix. Returns True if successful."""
     if issue.kind == "stale_main":
-        result = subprocess.run(["git", "checkout", "main"], cwd=repo, capture_output=True)
+        # Parse branch from fix_cmd: "git checkout <branch> && git pull --ff-only"
+        branch = issue.fix_cmd.split()[2]
+        result = subprocess.run(["git", "checkout", branch], cwd=repo, capture_output=True)
         if result.returncode != 0:
             return False
         result = subprocess.run(["git", "pull", "--ff-only"], cwd=repo, capture_output=True)

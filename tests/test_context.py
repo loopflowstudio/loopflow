@@ -216,25 +216,31 @@ def test_format_prompt_with_all_components(temp_repo):
     assert "<lf:files>" in formatted
 
 
-def test_gather_prompt_components_deduplicates_diff_and_context(temp_repo):
+def test_gather_prompt_components_deduplicates_diff_and_context(temp_repo, monkeypatch):
     """Files in both diff_files and context are only loaded once."""
     (temp_repo / "shared.py").write_text("# shared file")
     (temp_repo / "context_only.py").write_text("# context only")
+    (temp_repo / "diff_only.py").write_text("# diff only")
 
-    # Simulate: shared.py is in diff, both shared.py and context_only.py in context
-    # We can't mock git diff easily, but we can verify the merge logic by
-    # checking that diff_files contains merged result
+    # Mock gather_diff_files to return shared.py and diff_only.py
+    monkeypatch.setattr(
+        "loopflow.context.gather_diff_files",
+        lambda repo_root: ["shared.py", "diff_only.py"],
+    )
+
     components = gather_prompt_components(
         temp_repo,
         "implement",
-        context=["shared.py", "context_only.py"],
-        include_diff_files=False,  # disable actual git diff
+        context=["shared.py", "context_only.py"],  # shared.py overlaps with diff
+        include_diff_files=True,
     )
 
-    # With include_diff_files=False, only context files should appear in diff_files
+    # All three files should appear, each exactly once
     paths = [p.name for p, _ in components.diff_files]
     assert "shared.py" in paths
     assert "context_only.py" in paths
-    # Each file appears exactly once (no duplicates)
+    assert "diff_only.py" in paths
+    # Deduplication: shared.py appears only once despite being in both lists
     assert paths.count("shared.py") == 1
     assert paths.count("context_only.py") == 1
+    assert paths.count("diff_only.py") == 1

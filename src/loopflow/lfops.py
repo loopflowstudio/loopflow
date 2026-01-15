@@ -31,8 +31,6 @@ from loopflow.maestro.session import SessionStatus
 from loopflow.worktrees import get_path, remove
 
 app = typer.Typer(help="Loopflow operations")
-pr_app = typer.Typer(help="Pull request operations")
-app.add_typer(pr_app, name="pr")
 
 # Starter prompts installed by default
 _STARTER_PROMPTS = [
@@ -798,11 +796,13 @@ def land(
     add: bool = typer.Option(False, "-a", "--add", help="Commit and push changes first"),
     worktree: str = typer.Option(None, "-w", "--worktree", help="Target worktree by name"),
     local: bool = typer.Option(None, "-l", "--local/--gh", help="Local merge (no PR) vs GitHub PR merge"),
+    create_pr: bool = typer.Option(False, "-c", "--create-pr", help="Create PR and merge in one step"),
 ) -> None:
     """Squash-merge branch to main and clean up.
 
     Default: uses gh pr merge (requires PR via lfops pr create).
     With --local: local merge + push (no PR needed).
+    With --create-pr: create PR and immediately merge.
     Config: set `land: local` in .lf/config.yaml to default to --local.
     """
     main_repo = find_main_repo()
@@ -812,10 +812,10 @@ def land(
     if use_local:
         _land_local(add, worktree)
     else:
-        _land_pr(add, worktree)
+        _land_pr(add, worktree, create_pr=create_pr)
 
 
-def _land_pr(add: bool, worktree: str | None) -> None:
+def _land_pr(add: bool, worktree: str | None, create_pr: bool = False) -> None:
     """Land via GitHub PR merge."""
     if worktree:
         main_repo = find_main_repo()
@@ -898,7 +898,7 @@ def _land_pr(add: bool, worktree: str | None) -> None:
             typer.echo("Error: Branch not pushed. Use --add or push manually.", err=True)
             raise typer.Exit(1)
 
-    # Get PR info
+    # Get PR info (or create PR if --create-pr)
     result = subprocess.run(
         ["gh", "pr", "view", "--json", "title,body,baseRefName"],
         cwd=repo_root,
@@ -906,13 +906,26 @@ def _land_pr(add: bool, worktree: str | None) -> None:
         text=True,
     )
     if result.returncode != 0:
-        typer.echo("Error: No PR found. Run 'lfops pr create' first, or use --local.", err=True)
-        raise typer.Exit(1)
-
-    pr_data = json.loads(result.stdout)
-    title = pr_data.get("title", "").strip()
-    body = pr_data.get("body", "").strip()
-    base_branch = pr_data.get("baseRefName", "main").strip()
+        if create_pr:
+            typer.echo("Creating PR...")
+            message = generate_pr_message(repo_root)
+            try:
+                pr_url = open_pr(repo_root, title=message.title, body=message.body)
+            except GitError as e:
+                typer.echo(f"Error creating PR: {e}", err=True)
+                raise typer.Exit(1)
+            typer.echo(f"Created: {pr_url}")
+            title = message.title
+            body = message.body
+            base_branch = _get_default_branch(main_repo)
+        else:
+            typer.echo("Error: No PR found. Run 'lfops pr create' first, or use --local or --create-pr.", err=True)
+            raise typer.Exit(1)
+    else:
+        pr_data = json.loads(result.stdout)
+        title = pr_data.get("title", "").strip()
+        body = pr_data.get("body", "").strip()
+        base_branch = pr_data.get("baseRefName", "main").strip()
 
     if not title:
         typer.echo("Error: PR has no title", err=True)

@@ -176,3 +176,89 @@ steps:
         assert resolved[1].task == "test"
         assert resolved[2].task == "lint"
         assert resolved[3].task == "land"
+
+
+def test_step_config_voice():
+    """StepConfig supports voice field."""
+    config = StepConfig(model="claude:opus", voice="architect")
+    data = config.to_dict()
+
+    assert data["model"] == "claude:opus"
+    assert data["voice"] == "architect"
+
+    restored = StepConfig.from_dict(data)
+    assert restored.voice == "architect"
+
+
+def test_step_config_context():
+    """StepConfig supports context field."""
+    config = StepConfig(context=["src/schema.py", "docs/api.md"])
+    data = config.to_dict()
+
+    assert data["context"] == ["src/schema.py", "docs/api.md"]
+
+    restored = StepConfig.from_dict(data)
+    assert restored.context == ["src/schema.py", "docs/api.md"]
+
+
+def test_pipeline_step_with_full_config():
+    """PipelineStep preserves voice and context in config."""
+    step = PipelineStep.from_dict({
+        "task": "implement",
+        "config": {
+            "model": "claude:opus",
+            "voice": "architect",
+            "context": ["src/models.py"],
+        }
+    })
+
+    assert step.task == "implement"
+    assert step.config is not None
+    assert step.config.model == "claude:opus"
+    assert step.config.voice == "architect"
+    assert step.config.context == ["src/models.py"]
+
+    # Round-trip
+    data = step.to_dict()
+    restored = PipelineStep.from_dict(data)
+    assert restored.config.voice == "architect"
+    assert restored.config.context == ["src/models.py"]
+
+
+def test_load_pipeline_with_config():
+    """Load pipeline with per-step config from YAML."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        repo = Path(tmpdir)
+        pipelines_dir = repo / ".lf" / "pipelines"
+        pipelines_dir.mkdir(parents=True)
+
+        (pipelines_dir / "ship.yaml").write_text("""
+steps:
+  - task: design
+  - task: implement
+    config:
+      model: claude:opus
+      voice: architect
+      context:
+        - src/schema.py
+  - task: review
+""")
+
+        pipeline = load_pipeline("ship", repo)
+        assert pipeline is not None
+        assert len(pipeline.steps) == 3
+
+        # First step has no config
+        assert pipeline.steps[0].task == "design"
+        assert pipeline.steps[0].config is None
+
+        # Second step has full config
+        assert pipeline.steps[1].task == "implement"
+        assert pipeline.steps[1].config is not None
+        assert pipeline.steps[1].config.model == "claude:opus"
+        assert pipeline.steps[1].config.voice == "architect"
+        assert pipeline.steps[1].config.context == ["src/schema.py"]
+
+        # Third step has no config
+        assert pipeline.steps[2].task == "review"
+        assert pipeline.steps[2].config is None

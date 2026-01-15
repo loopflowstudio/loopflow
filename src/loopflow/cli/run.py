@@ -23,7 +23,8 @@ from loopflow.launcher import (
 from loopflow.logging import get_model_env, write_prompt_file
 from loopflow.lfd.client import log_session_start, log_session_end
 from loopflow.lfd.models import Session, SessionStatus
-from loopflow.pipeline import run_pipeline
+from loopflow.lfd.pipelines import load_pipeline as load_pipeline_file
+from loopflow.pipeline import run_pipeline, run_pipeline_def
 from loopflow.tokens import analyze_components
 from loopflow.worktrees import WorktreeError, create
 
@@ -518,7 +519,7 @@ def cp(
 
 
 def pipeline(
-    name: str = typer.Argument(help="Pipeline name from config.yaml"),
+    name: str = typer.Argument(help="Pipeline name from config.yaml or .lf/pipelines/"),
     context: list[str] = typer.Option(
         None, "-x", "--context", help="Context files for all tasks"
     ),
@@ -542,11 +543,16 @@ def pipeline(
         raise typer.Exit(1)
 
     config = load_config(repo_root)
-    if not config or name not in config.pipelines:
-        typer.echo(f"Error: Pipeline '{name}' not found in .lf/config.yaml", err=True)
+
+    # Check for pipeline in .lf/pipelines/ first, then config.yaml
+    pipeline_def = load_pipeline_file(name, repo_root)
+    config_pipeline = config.pipelines.get(name) if config else None
+
+    if not pipeline_def and not config_pipeline:
+        typer.echo(f"Error: Pipeline '{name}' not found in .lf/pipelines/ or .lf/config.yaml", err=True)
         raise typer.Exit(1)
 
-    agent_model = model or config.agent_model
+    agent_model = model or (config.agent_model if config else "claude:opus")
     backend, model_variant = parse_model(agent_model)
 
     try:
@@ -567,24 +573,32 @@ def pipeline(
             raise typer.Exit(1)
         repo_root = worktree_path
 
-    all_context = list(config.context) if config.context else []
+    all_context = list(config.context) if config and config.context else []
     if context:
         all_context.extend(context)
 
-    exclude = list(config.exclude) if config.exclude else None
+    exclude = list(config.exclude) if config and config.exclude else None
 
     if copy:
         # Show tokens for first task in pipeline
-        first_task = config.pipelines[name].tasks[0]
+        if pipeline_def:
+            first_task = pipeline_def.steps[0].task if pipeline_def.steps else None
+        else:
+            first_task = config_pipeline.tasks[0] if config_pipeline.tasks else None
+
+        if not first_task:
+            typer.echo("Error: Pipeline has no tasks", err=True)
+            raise typer.Exit(1)
+
         components = gather_prompt_components(
             repo_root,
             first_task,
             context=all_context or None,
             exclude=exclude,
             include_tests_for=config.include_tests_for if config else None,
-            include_loopflow_doc=config.include_loopflow_doc,
-            include_diff=config.diff,
-            include_diff_files=config.diff_files,
+            include_loopflow_doc=config.include_loopflow_doc if config else True,
+            include_diff=config.diff if config else False,
+            include_diff_files=config.diff_files if config else True,
         )
         prompt = format_prompt(components)
         _copy_to_clipboard(prompt)
@@ -594,19 +608,34 @@ def pipeline(
         typer.echo("\nCopied to clipboard.")
         raise typer.Exit(0)
 
-    push_enabled = config.push
-    pr_enabled = pr if pr is not None else config.pr
+    push_enabled = config.push if config else False
+    pr_enabled = pr if pr is not None else (config.pr if config else False)
+    skip_permissions = config.yolo if config else False
 
-    exit_code = run_pipeline(
-        config.pipelines[name],
-        repo_root,
-        context=all_context or None,
-        exclude=exclude,
-        include_tests_for=config.include_tests_for if config else None,
-        skip_permissions=config.yolo,
-        push_enabled=push_enabled,
-        pr_enabled=pr_enabled,
-        backend=backend,
-        model_variant=model_variant,
-    )
+    # Run the pipeline (prefer .lf/pipelines/ format if available)
+    if pipeline_def:
+        exit_code = run_pipeline_def(
+            pipeline_def,
+            repo_root,
+            context=all_context or None,
+            exclude=exclude,
+            skip_permissions=skip_permissions,
+            push_enabled=push_enabled,
+            pr_enabled=pr_enabled,
+            backend=backend,
+            model_variant=model_variant,
+        )
+    else:
+        exit_code = run_pipeline(
+            config_pipeline,
+            repo_root,
+            context=all_context or None,
+            exclude=exclude,
+            include_tests_for=config.include_tests_for if config else None,
+            skip_permissions=skip_permissions,
+            push_enabled=push_enabled,
+            pr_enabled=pr_enabled,
+            backend=backend,
+            model_variant=model_variant,
+        )
     raise typer.Exit(exit_code)

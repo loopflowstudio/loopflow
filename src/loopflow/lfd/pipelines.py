@@ -10,16 +10,26 @@ import yaml
 @dataclass
 class StepConfig:
     model: str | None = None
+    voice: str | None = None
+    context: list[str] | None = None
 
     def to_dict(self) -> dict:
         result = {}
         if self.model:
             result["model"] = self.model
+        if self.voice:
+            result["voice"] = self.voice
+        if self.context:
+            result["context"] = self.context
         return result
 
     @classmethod
     def from_dict(cls, data: dict) -> "StepConfig":
-        return cls(model=data.get("model"))
+        return cls(
+            model=data.get("model"),
+            voice=data.get("voice"),
+            context=data.get("context"),
+        )
 
 
 @dataclass
@@ -89,6 +99,34 @@ def load_pipeline(name: str, repo: Path) -> PipelineDef | None:
         return None
 
     return PipelineDef.from_dict(name, data)
+
+
+def save_pipeline(pipeline: PipelineDef, repo: Path) -> Path:
+    """Save pipeline to .lf/pipelines/{name}.yaml. Returns the path."""
+    pipelines_dir = repo / ".lf" / "pipelines"
+    pipelines_dir.mkdir(parents=True, exist_ok=True)
+
+    pipeline_path = pipelines_dir / f"{pipeline.name}.yaml"
+    data = {"steps": [s.to_dict() for s in pipeline.steps]}
+    pipeline_path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False))
+
+    return pipeline_path
+
+
+def list_pipelines(repo: Path) -> list[PipelineDef]:
+    """List all pipelines in .lf/pipelines/."""
+    pipelines_dir = repo / ".lf" / "pipelines"
+    if not pipelines_dir.exists():
+        return []
+
+    pipelines = []
+    for path in pipelines_dir.glob("*.yaml"):
+        name = path.stem
+        pipeline = load_pipeline(name, repo)
+        if pipeline:
+            pipelines.append(pipeline)
+
+    return pipelines
 
 
 @dataclass

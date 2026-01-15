@@ -16,6 +16,7 @@ final class AppState {
     var config: LoopflowConfig?
     var worktrees: [Worktree] = []
     var prompts: [PromptCard] = []
+    var pipelines: [PipelineDef] = []
     var agents: [Agent] = []
     var voices: [Voice] = []
 
@@ -34,6 +35,7 @@ final class AppState {
 
     // Sidebar state
     var selectedWorktree: Worktree?
+    var selectedPipeline: PipelineDef?
 
     // Live output state
     var liveOutputBySession: [String: [OutputLine]] = [:]
@@ -48,6 +50,7 @@ final class AppState {
     private let worktreeService = WorktreeService()
     private let configLoader = ConfigLoader()
     private let promptService = PromptService()
+    private let pipelineService = PipelineService()
     private let agentService = AgentService()
     private var eventService: LFDEventService?
     private let voiceService = VoiceService()
@@ -98,6 +101,7 @@ final class AppState {
             }
 
             prompts = try promptService.loadPrompts(from: url, config: config)
+            pipelines = pipelineService.loadPipelines(from: url)
             refreshVoices()
 
             // Initialize selected voices from config
@@ -182,6 +186,46 @@ final class AppState {
         voices = voiceService.loadVoices(from: repo)
     }
 
+    func refreshPipelines() {
+        guard let repo = currentRepo else { return }
+        pipelines = pipelineService.loadPipelines(from: repo)
+    }
+
+    func createPipeline(name: String) {
+        guard let repo = currentRepo else { return }
+        let newPipeline = PipelineDef(name: name, steps: [])
+        do {
+            try pipelineService.savePipeline(newPipeline, in: repo)
+            refreshPipelines()
+            selectedPipeline = pipelines.first { $0.name == name }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func savePipeline(_ pipeline: PipelineDef) {
+        guard let repo = currentRepo else { return }
+        do {
+            try pipelineService.savePipeline(pipeline, in: repo)
+            refreshPipelines()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func deletePipeline(_ pipeline: PipelineDef) {
+        guard let repo = currentRepo else { return }
+        do {
+            try pipelineService.deletePipeline(named: pipeline.name, in: repo)
+            if selectedPipeline?.name == pipeline.name {
+                selectedPipeline = nil
+            }
+            refreshPipelines()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     private func handleSessionEvent(_ event: SessionEvent) {
         if event.status == "running" {
             activeSessionIds.insert(event.id)
@@ -241,8 +285,15 @@ final class AppState {
         )
     }
 
-    func buildCommand() -> String {
+    func buildCommand(pipeline: PipelineDef? = nil) -> String {
         var parts = ["lf"]
+
+        // If running a pipeline, just use the pipeline name
+        if let pipeline = pipeline {
+            parts.append(pipeline.name)
+            // Pipelines don't take args or many of the flags
+            return parts.joined(separator: " ")
+        }
 
         if let prompt = selectedPrompt {
             parts.append(prompt.name)

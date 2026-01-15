@@ -5,6 +5,7 @@ import SwiftUI
 struct WorktreeSidebar: View {
     @Bindable var appState: AppState
     @State private var showingNewWorktreeSheet = false
+    @State private var showingNewPipelineSheet = false
     @State private var showingDeleteConfirmation = false
     @State private var worktreeToDelete: Worktree?
     @State private var actionError: String?
@@ -21,6 +22,8 @@ struct WorktreeSidebar: View {
             } else {
                 worktreeList
             }
+
+            pipelinesSection
 
             agentsSection
         }
@@ -174,6 +177,59 @@ struct WorktreeSidebar: View {
 
     private var ideDisplayName: String {
         appState.config?.ideApp.displayName ?? "Cursor"
+    }
+
+    private var pipelinesSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("PIPELINES")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Button {
+                    showingNewPipelineSheet = true
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+                .help("New Pipeline")
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .padding(.top, 8)
+
+            if appState.pipelines.isEmpty {
+                VStack(spacing: 4) {
+                    Text("No pipelines")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 12)
+            } else {
+                LazyVStack(spacing: 4) {
+                    ForEach(appState.pipelines) { pipeline in
+                        PipelineRow(
+                            pipeline: pipeline,
+                            isSelected: appState.selectedPipeline?.name == pipeline.name,
+                            onSelect: {
+                                appState.selectedPipeline = pipeline
+                            }
+                        )
+                    }
+                }
+                .padding(.horizontal, 8)
+            }
+        }
+        .sheet(isPresented: $showingNewPipelineSheet) {
+            NewPipelineSheet(isPresented: $showingNewPipelineSheet) { name in
+                appState.createPipeline(name: name)
+            }
+        }
     }
 
     private var agentsSection: some View {

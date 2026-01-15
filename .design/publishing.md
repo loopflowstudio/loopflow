@@ -1,40 +1,14 @@
 # scripts/publish.py
 
-## What to build
+Publish loopflow to PyPI from main branch.
 
-A repo-local script to build, publish to PyPI, and update the local installation—mostly deterministic Python with one LLM call for release notes.
+## Files
 
-## Implementation notes
-
-Changed from `lfops publish` to `scripts/publish.py` since publishing is repo-specific, not a general loopflow feature. Also reorganized dev scripts:
-
-- `scripts/publish.py` — publish loopflow to PyPI
-- `Maestro/dev` — Swift build commands (build, test, run, xcode, release)
-
-## Data structures
-
-```python
-# In llm_http.py
-class ReleaseNotes(BaseModel):
-    summary: str      # 2-3 sentences
-    changes: list[str]  # bullet points
-```
-
-## Key functions
-
-```python
-# In llm_http.py
-def generate_release_notes(repo_root: Path, old_version: str, new_version: str) -> ReleaseNotes:
-    """Generate release notes from commits since last tag via API."""
-
-# In scripts/publish.py
-def main() -> int:
-    # argparse: bump (patch/minor/major), --dry-run, --skip-tests, --force
-```
-
-## Release notes prompt
-
-Added `src/loopflow/builtins/release_notes.txt` — outcome-focused style like draft_commit.
+- `scripts/publish.py` — CLI entrypoint for publishing
+- `src/loopflow/publish.py` — publishing utilities (version handling, build, test)
+- `src/loopflow/llm_http.py` — added `generate_release_notes()` and `ReleaseNotes` model
+- `src/loopflow/builtins/release_notes.txt` — prompt for generating release notes
+- `Maestro/dev` — moved from repo root (Swift-only now)
 
 ## Usage
 
@@ -42,16 +16,17 @@ Added `src/loopflow/builtins/release_notes.txt` — outcome-focused style like d
 ./scripts/publish.py                    # patch bump (default)
 ./scripts/publish.py minor              # minor bump
 ./scripts/publish.py --dry-run          # preview without executing
-./scripts/publish.py --force            # bypass main branch check (for testing)
+./scripts/publish.py --force            # bypass main branch check
 ./scripts/publish.py --skip-tests       # skip test run
 ```
 
-## Done when
+## Workflow
 
-```bash
-# Help shows options
-./scripts/publish.py --help
-
-# Dry run works
-./scripts/publish.py --dry-run --force
-```
+1. Preflight: check on main, synced with origin, no uncommitted changes
+2. Run tests (unless `--skip-tests`)
+3. Generate release notes via LLM from commits since last tag
+4. Bump version in `__init__.py`, validate with build
+5. Write RELEASE_NOTES.md, commit, push
+6. Tag and push tag
+7. Publish to PyPI
+8. Install locally via `uv tool install`

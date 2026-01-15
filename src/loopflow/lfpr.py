@@ -86,39 +86,6 @@ def _get_diff(repo_root: Path, base_ref: str) -> str:
     return result.stdout if result.returncode == 0 else ""
 
 
-def _get_pr_status(repo_root: Path) -> bool | None:
-    if not shutil.which("gh"):
-        return None
-
-    result = subprocess.run(
-        ["gh", "pr", "view", "--json", "url", "-q", ".url"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode == 0:
-        return True
-    if "no pull requests" in (result.stderr or "").lower():
-        return False
-    return None
-
-
-def _ensure_clean(repo_root: Path) -> None:
-    result = subprocess.run(
-        ["git", "status", "--porcelain"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-    )
-    # Filter out untracked files (??) - only block on tracked changes
-    tracked_changes = [
-        line for line in result.stdout.strip().split("\n") if line and not line.startswith("??")
-    ]
-    if tracked_changes:
-        typer.echo("Error: Working tree has uncommitted changes", err=True)
-        raise typer.Exit(1)
-
-
 def _squash_commits(repo_root: Path, base_ref: str, commit_msg: str) -> None:
     original_head = subprocess.run(
         ["git", "rev-parse", "HEAD"],

@@ -7,7 +7,7 @@ struct AgentService {
     private let agentsDir = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".lf/agents")
     private let dbPath = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".lf/maestro.db").path
+        .appendingPathComponent(".lf/lfd.db").path
 
     func list() async throws -> [Agent] {
         var agents: [Agent] = []

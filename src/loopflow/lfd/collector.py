@@ -13,12 +13,18 @@ import time
 from pathlib import Path
 
 from loopflow.git import autocommit as git_autocommit
+from loopflow.lfd.client import _send_fire_and_forget
 from loopflow.logging import (
     get_model_env,
     open_json_log,
     open_log_file,
     write_log_line,
 )
+
+
+def _send_output_line(session_id: str, text: str) -> None:
+    """Send output line to lfd for live streaming. Fire-and-forget."""
+    _send_fire_and_forget("output.line", {"session_id": session_id, "text": text})
 
 
 def collect_output(
@@ -42,9 +48,9 @@ def collect_output(
         _print_startup_header(task, token_summary)
 
     if interactive:
-        exit_code = _run_interactive(command, log_file, json_log, foreground, prompt)
+        exit_code = _run_interactive(command, log_file, json_log, foreground, prompt, session_id)
     else:
-        exit_code = _run_streaming(command, log_file, json_log, foreground, prompt)
+        exit_code = _run_streaming(command, log_file, json_log, foreground, prompt, session_id)
 
     # Session status is updated by the parent process via lfd client
 
@@ -151,7 +157,7 @@ class _Spinner:
             time.sleep(0.1)
 
 
-def _run_streaming(command: list[str], log_file, json_log, foreground: bool, prompt: str | None = None) -> int:
+def _run_streaming(command: list[str], log_file, json_log, foreground: bool, prompt: str | None = None, session_id: str | None = None) -> int:
     """Run a non-interactive command and stream output to logs.
 
     Prompt is passed as a CLI argument.
@@ -204,6 +210,8 @@ def _run_streaming(command: list[str], log_file, json_log, foreground: bool, pro
             write_log_line(log_file, formatted)
             if foreground:
                 print(formatted, flush=True)
+            if session_id:
+                _send_output_line(session_id, formatted)
 
     # Stop spinner if no output was received
     if spinner and first_output:
@@ -212,7 +220,7 @@ def _run_streaming(command: list[str], log_file, json_log, foreground: bool, pro
     return process.wait()
 
 
-def _run_interactive(command: list[str], log_file, json_log, foreground: bool, prompt: str | None = None) -> int:
+def _run_interactive(command: list[str], log_file, json_log, foreground: bool, prompt: str | None = None, session_id: str | None = None) -> int:
     """Run an interactive command using pty.spawn.
 
     Prompt is passed as a CLI argument.
@@ -232,6 +240,8 @@ def _run_interactive(command: list[str], log_file, json_log, foreground: bool, p
             if log_file:
                 for line in decoded.splitlines():
                     write_log_line(log_file, line)
+                    if session_id:
+                        _send_output_line(session_id, line)
         return data
 
     # Remove API keys so CLIs use subscriptions instead of API credits
@@ -247,6 +257,14 @@ def _run_interactive(command: list[str], log_file, json_log, foreground: bool, p
             os.environ["OPENAI_API_KEY"] = old_openai_key
 
     return exit_code
+
+
+def _format_tool_line(tool: str, input_data: dict | None) -> str:
+    """Format a tool invocation line with optional path."""
+    path = ""
+    if isinstance(input_data, dict) and input_data.get("path"):
+        path = f": {input_data['path']}"
+    return f"→ {tool}{path}"
 
 
 def _format_stream_line(line: str) -> list[str]:
@@ -279,10 +297,7 @@ def _format_stream_line(line: str) -> list[str]:
         lines = []
         for block in content:
             if block.get("type") == "tool_use":
-                tool = block.get("name", "unknown")
-                input_data = block.get("input") or {}
-                path = f": {input_data.get('path')}" if isinstance(input_data, dict) and input_data.get("path") else ""
-                lines.append(f"→ {tool}{path}")
+                lines.append(_format_tool_line(block.get("name", "unknown"), block.get("input")))
             if block.get("type") == "text":
                 text = block.get("text", "")
                 if text:
@@ -296,10 +311,7 @@ def _format_stream_line(line: str) -> list[str]:
 
     # Codex-style events
     if event_type == "tool_use":
-        tool = event.get("tool", "unknown")
-        input_data = event.get("input") or {}
-        path = f": {input_data.get('path')}" if isinstance(input_data, dict) and input_data.get("path") else ""
-        return [f"→ {tool}{path}"]
+        return [_format_tool_line(event.get("tool", "unknown"), event.get("input"))]
     if event_type == "text":
         content = event.get("content", "")
         return [content] if content else []

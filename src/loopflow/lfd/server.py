@@ -6,6 +6,7 @@ import json
 import os
 import signal
 from asyncio import StreamReader, StreamWriter
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -112,6 +113,8 @@ class Server:
             return await self._handle_subscribe(params, writer)
         elif method == "notify":
             return await self._handle_notify(params)
+        elif method == "output.line":
+            return await self._handle_output_line(params)
         else:
             return error(f"Unknown method: {method}", request.id)
 
@@ -227,6 +230,21 @@ class Server:
 
         await self._broadcast(Event(event_name, event_data))
         return success({"event": event_name})
+
+    async def _handle_output_line(self, params: dict) -> Response:
+        """Accept output lines from collector and broadcast to subscribers."""
+        session_id = params.get("session_id")
+        text = params.get("text")
+
+        if not session_id or text is None:
+            return error("Missing 'session_id' or 'text' parameter")
+
+        await self._broadcast(Event("output.line", {
+            "session_id": session_id,
+            "text": text,
+            "timestamp": datetime.now().isoformat(),
+        }))
+        return success({})
 
     async def _broadcast(self, event: Event) -> None:
         message = (event.serialize() + "\n").encode()

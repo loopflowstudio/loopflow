@@ -89,7 +89,7 @@ def run_pipeline(
         collector_cmd = [
             sys.executable,
             "-m",
-            "loopflow.maestro.collector",
+            "loopflow.lfd.collector",
             "--session-id",
             session.id,
             "--task",

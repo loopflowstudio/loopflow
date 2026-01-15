@@ -15,7 +15,10 @@ struct ContentView: View {
                 ProgressView("Loading...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if appState.currentRepo != nil {
-                PromptLauncher(appState: appState)
+                VStack(spacing: 0) {
+                    PromptLauncher(appState: appState)
+                    OutputPanel(appState: appState)
+                }
             } else {
                 // No repo loaded yet - show loading placeholder
                 ProgressView("Opening repository...")

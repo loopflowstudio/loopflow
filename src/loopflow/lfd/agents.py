@@ -316,9 +316,11 @@ async def start_agent(name: str) -> StartResult:
     cmd = [
         sys.executable,
         "-m",
-        "loopflow.maestro.agent_runner",
-        "--agent-id",
+        "loopflow.lfd.agent_runner",
+        "--agent-name",
         name,
+        "--run-id",
+        run.id,
         "--repo-root",
         str(agent.repo),
     ]

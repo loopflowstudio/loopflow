@@ -323,3 +323,105 @@ def test_db_update_session_status_nonexistent():
 
         updated = update_session_status("nonexistent", SessionStatus.COMPLETED, db_path)
         assert updated is False
+
+
+# Server handler tests
+
+
+def test_server_handle_output_line_broadcasts_event():
+    """output.line handler broadcasts event to subscribers."""
+    import asyncio
+    from loopflow.lfd.server import Server
+
+    async def run_test():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = Path(tmpdir) / "test.sock"
+            server = Server(socket_path)
+
+            # Create mock writers to track broadcasts
+            broadcast_events = []
+
+            async def mock_broadcast(event):
+                broadcast_events.append(event)
+
+            server._broadcast = mock_broadcast
+
+            # Call the handler
+            params = {"session_id": "test-session-123", "text": "→ Read: foo.py"}
+            response = await server._handle_output_line(params)
+
+            # Check response
+            assert response.ok is True
+            assert response.result == {}
+
+            # Check event was broadcast
+            assert len(broadcast_events) == 1
+            event = broadcast_events[0]
+            assert event.event == "output.line"
+            assert event.data["session_id"] == "test-session-123"
+            assert event.data["text"] == "→ Read: foo.py"
+            assert "timestamp" in event.data
+
+    asyncio.run(run_test())
+
+
+def test_server_handle_output_line_missing_session_id():
+    """output.line handler returns error for missing session_id."""
+    import asyncio
+    from loopflow.lfd.server import Server
+
+    async def run_test():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = Path(tmpdir) / "test.sock"
+            server = Server(socket_path)
+
+            params = {"text": "→ Read: foo.py"}
+            response = await server._handle_output_line(params)
+
+            assert response.ok is False
+            assert "session_id" in response.error
+
+    asyncio.run(run_test())
+
+
+def test_server_handle_output_line_missing_text():
+    """output.line handler returns error for missing text."""
+    import asyncio
+    from loopflow.lfd.server import Server
+
+    async def run_test():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = Path(tmpdir) / "test.sock"
+            server = Server(socket_path)
+
+            params = {"session_id": "test-session-123"}
+            response = await server._handle_output_line(params)
+
+            assert response.ok is False
+            assert "text" in response.error
+
+    asyncio.run(run_test())
+
+
+def test_server_handle_output_line_allows_empty_text():
+    """output.line handler accepts empty string for text (allows blank lines)."""
+    import asyncio
+    from loopflow.lfd.server import Server
+
+    async def run_test():
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = Path(tmpdir) / "test.sock"
+            server = Server(socket_path)
+
+            broadcast_events = []
+            server._broadcast = lambda e: broadcast_events.append(e) or asyncio.sleep(0)
+
+            # Empty string should be allowed (it's a blank line in output)
+            params = {"session_id": "test-session-123", "text": ""}
+            response = await server._handle_output_line(params)
+
+            assert response.ok is True
+            assert len(broadcast_events) == 1
+            assert broadcast_events[0].data["text"] == ""
+
+    asyncio.run(run_test())

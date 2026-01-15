@@ -97,5 +97,9 @@ Compare results with `git diff` or your editor.
 
 ## Next steps
 
+- [Maestro](maestro.md) - visual interface for loopflow
 - [Configuration](config.md) - all options and settings
 - [Patterns](patterns.md) - workflows and recipes
+- [Daemon (lfd)](lfd.md) - background service and agents
+- [API Reference](api.md) - socket protocol for integrations
+- [Philosophy](vision.md) - why loopflow exists

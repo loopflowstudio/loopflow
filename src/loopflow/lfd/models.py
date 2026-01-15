@@ -11,6 +11,8 @@ class TriggerKind(Enum):
     MANUAL = "manual"
     MAIN_CHANGED = "main-changed"
     INTERVAL = "interval"
+    LOOP = "loop"
+    CRON = "cron"
 
 
 class AgentStatus(Enum):
@@ -32,11 +34,17 @@ class SessionStatus(Enum):
 class TriggerSpec:
     kind: TriggerKind = TriggerKind.MANUAL
     interval_seconds: int | None = None
+    cron: str | None = None
+    grace_minutes: int = 60
 
     def to_dict(self) -> dict:
         result = {"kind": self.kind.value}
         if self.interval_seconds is not None:
             result["interval_seconds"] = self.interval_seconds
+        if self.cron is not None:
+            result["cron"] = self.cron
+        if self.grace_minutes != 60:
+            result["grace_minutes"] = self.grace_minutes
         return result
 
     @classmethod
@@ -44,20 +52,30 @@ class TriggerSpec:
         return cls(
             kind=TriggerKind(data.get("kind", "manual")),
             interval_seconds=data.get("interval_seconds"),
+            cron=data.get("cron"),
+            grace_minutes=data.get("grace_minutes", 60),
         )
+
+
+class MergeStrategy(Enum):
+    AUTO = "auto"
+    PR = "pr"
 
 
 @dataclass
 class AgentSpec:
     name: str
     repo: Path
-    pipeline: list[str]
+    pipeline: str  # Pipeline name to run
     trigger: TriggerSpec = field(default_factory=TriggerSpec)
     context: list[str] = field(default_factory=list)
     prompt: str = ""
+    emoji: str = ""
+    goal: Path | None = None
+    merge_strategy: MergeStrategy = MergeStrategy.PR
 
     def to_dict(self) -> dict:
-        return {
+        result = {
             "name": self.name,
             "repo": str(self.repo),
             "pipeline": self.pipeline,
@@ -65,10 +83,19 @@ class AgentSpec:
             "context": self.context,
             "prompt": self.prompt,
         }
+        if self.emoji:
+            result["emoji"] = self.emoji
+        if self.goal:
+            result["goal"] = str(self.goal)
+        if self.merge_strategy != MergeStrategy.PR:
+            result["merge_strategy"] = self.merge_strategy.value
+        return result
 
     @classmethod
     def from_dict(cls, data: dict) -> "AgentSpec":
         trigger_data = data.get("trigger", {})
+        goal = Path(data["goal"]) if data.get("goal") else None
+        merge = data.get("merge_strategy", "pr")
         return cls(
             name=data["name"],
             repo=Path(data["repo"]),
@@ -76,6 +103,9 @@ class AgentSpec:
             trigger=TriggerSpec.from_dict(trigger_data) if trigger_data else TriggerSpec(),
             context=data.get("context", []),
             prompt=data.get("prompt", ""),
+            emoji=data.get("emoji", ""),
+            goal=goal,
+            merge_strategy=MergeStrategy(merge),
         )
 
 
@@ -91,9 +121,10 @@ class AgentRun:
     iteration: int = 0
     error: str | None = None
     main_sha: str | None = None
+    emoji: str = ""
 
     def to_dict(self) -> dict:
-        return {
+        result = {
             "id": self.id,
             "agent_name": self.agent_name,
             "status": self.status.value,
@@ -105,6 +136,9 @@ class AgentRun:
             "error": self.error,
             "main_sha": self.main_sha,
         }
+        if self.emoji:
+            result["emoji"] = self.emoji
+        return result
 
     @classmethod
     def from_dict(cls, data: dict) -> "AgentRun":
@@ -119,6 +153,7 @@ class AgentRun:
             iteration=data.get("iteration", 0),
             error=data.get("error"),
             main_sha=data.get("main_sha"),
+            emoji=data.get("emoji", ""),
         )
 
 

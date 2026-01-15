@@ -28,7 +28,8 @@ def _init_db(db_path: Path) -> None:
             worktree TEXT,
             iteration INTEGER DEFAULT 0,
             error TEXT,
-            main_sha TEXT
+            main_sha TEXT,
+            emoji TEXT DEFAULT ''
         );
 
         CREATE INDEX IF NOT EXISTS idx_agent_runs_name ON agent_runs(agent_name);
@@ -76,8 +77,8 @@ def save_run(run: AgentRun, db_path: Path | None = None) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO agent_runs
-        (id, agent_name, status, started_at, ended_at, pid, worktree, iteration, error, main_sha)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, agent_name, status, started_at, ended_at, pid, worktree, iteration, error, main_sha, emoji)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             run.id,
@@ -90,6 +91,7 @@ def save_run(run: AgentRun, db_path: Path | None = None) -> None:
             run.iteration,
             run.error,
             run.main_sha,
+            run.emoji,
         ),
     )
 
@@ -189,6 +191,7 @@ def _run_from_row(row: dict) -> AgentRun:
         iteration=row.get("iteration", 0),
         error=row.get("error"),
         main_sha=row.get("main_sha"),
+        emoji=row.get("emoji", ""),
     )
 
 

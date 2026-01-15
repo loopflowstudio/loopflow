@@ -46,6 +46,12 @@ def bump_version(version: str, bump_type: str) -> str:
         return f"{major}.{minor}.{patch + 1}"
 
 
+def write_version(version: str) -> None:
+    """Write version to __init__.py."""
+    init_path = Path(__file__).parent / "__init__.py"
+    init_path.write_text(f'__version__ = "{version}"\n')
+
+
 def _run(cmd: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
     """Run a command and return result."""
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
@@ -133,44 +139,6 @@ def install_locally() -> tuple[bool, str]:
     success = result.returncode == 0
     output = result.stdout + result.stderr
     return success, output
-
-
-def create_release_commit(
-    repo_root: Path,
-    version: str,
-) -> tuple[bool, str]:
-    """Create release commit and tag. Returns (success, output)."""
-    # Stage files
-    result = _run(
-        ["git", "add", "src/loopflow/__init__.py", "RELEASE_NOTES.md"],
-        repo_root,
-    )
-    if result.returncode != 0:
-        return False, result.stderr
-
-    # Commit
-    result = _run(
-        ["git", "commit", "-m", f"release: v{version}"],
-        repo_root,
-    )
-    if result.returncode != 0:
-        return False, result.stderr
-
-    # Tag
-    result = _run(["git", "tag", f"v{version}"], repo_root)
-    if result.returncode != 0:
-        return False, result.stderr
-
-    # Push commit and tags
-    result = _run(["git", "push"], repo_root)
-    if result.returncode != 0:
-        return False, f"Push failed: {result.stderr}"
-
-    result = _run(["git", "push", "--tags"], repo_root)
-    if result.returncode != 0:
-        return False, f"Tag push failed: {result.stderr}"
-
-    return True, f"Released v{version}"
 
 
 def main() -> int:

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Development commands for loopflow
+# Development commands for Maestro (Swift app)
 
 set -e
 
@@ -7,12 +7,10 @@ usage() {
     echo "Usage: ./dev <command>"
     echo ""
     echo "Commands:"
-    echo "  py         Run Python tests (uv run pytest tests/)"
-    echo "  swift      Build and test Swift app"
-    echo "  build      Build Swift app only"
-    echo "  test       Run all tests (Python + Swift)"
-    echo "  run        Run the Swift app (launches window directly)"
-    echo "  xcode      Open Swift app in Xcode (full IDE experience)"
+    echo "  build      Build the app"
+    echo "  test       Build and run tests"
+    echo "  run        Build and launch the app"
+    echo "  xcode      Open in Xcode"
     echo "  release    Build release .app and .dmg"
     echo "  help       Show this message"
 }
@@ -20,34 +18,17 @@ usage() {
 cd "$(dirname "$0")"
 
 case "${1:-help}" in
-    py)
-        echo "Running Python tests..."
-        uv run pytest tests/ -v
-        ;;
-    swift)
-        echo "Building and testing Swift app..."
-        cd Maestro
-        swift build
-        swift test
-        ;;
     build)
-        echo "Building Swift app..."
-        cd Maestro
+        echo "Building Maestro..."
         swift build
         ;;
     test)
-        echo "Running all tests..."
-        echo ""
-        echo "=== Python tests ==="
-        uv run pytest tests/ -v
-        echo ""
-        echo "=== Swift tests ==="
-        cd Maestro
+        echo "Building and testing..."
+        swift build
         swift test
         ;;
     run)
         echo "Building and running Maestro..."
-        cd Maestro
         swift build
 
         # Create proper .app bundle with Info.plist
@@ -61,11 +42,10 @@ case "${1:-help}" in
         ;;
     xcode)
         echo "Opening in Xcode..."
-        open Maestro/Maestro.xcodeproj
+        open Maestro.xcodeproj
         ;;
     release)
         echo "Building Maestro release..."
-        cd Maestro
 
         # Build release
         swift build -c release

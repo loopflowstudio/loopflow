@@ -21,8 +21,8 @@ Documentation refresh and code consolidation: added public docs for Maestro, lfd
 
 ## Status
 
-- All 312 Python tests pass
-- Swift build succeeds
+- All 318 Python tests pass
+- All 11 Swift tests pass
 
 ## Expansion: Output Streaming
 

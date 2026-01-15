@@ -88,12 +88,12 @@ In `server.py`, add a pass-through handler:
 
 ```python
 async def _handle_output_line(self, params: dict) -> Response:
-    """Accept output lines and broadcast to subscribers."""
+    """Accept output lines from collector and broadcast to subscribers."""
     session_id = params.get("session_id")
     text = params.get("text")
 
-    if not session_id or not text:
-        return error("Missing parameters")
+    if not session_id or text is None:
+        return error("Missing 'session_id' or 'text' parameter")
 
     await self._broadcast(Event("output.line", {
         "session_id": session_id,

@@ -34,7 +34,7 @@ Added `output.line` event for live task output streaming. See `.design/output-st
 - `api.md`: Documented new method and event
 
 **What's left:**
-- Maestro Swift UI to display streaming output
+- Nothing - output streaming is complete
 
 ## Design notes
 

@@ -4,13 +4,18 @@ Stream live task output through lfd to Maestro and other subscribers.
 
 ## Status
 
-Python implementation complete:
+Complete. Both Python and Swift implementations done.
+
+**Python:**
 - `server.py`: Added `output.line` handler that broadcasts to subscribers
 - `collector.py`: Added `_send_output_line()` that streams each formatted line
 - `api.md`: Documented the new method and event
 
-Remaining for full feature:
-- Maestro Swift changes to subscribe and display streaming output
+**Swift (Maestro):**
+- `LFDEventService.swift`: Extended to parse `session.*` and `output.line` events
+- `AppState.swift`: Added `liveOutputBySession` and `activeSessionIds` state
+- `OutputPanel.swift`: New collapsible panel showing live task output
+- `ContentView.swift`: Integrated panel below PromptLauncher
 
 ## Why this matters
 

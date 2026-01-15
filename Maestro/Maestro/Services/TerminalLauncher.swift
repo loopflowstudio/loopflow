@@ -73,9 +73,8 @@ struct TerminalLauncher {
         let script: String
 
         if let cmd = command {
-            // Escape single quotes in the command for AppleScript
-            let escapedCmd = cmd.replacingOccurrences(of: "'", with: "'\\''")
-            let escapedPath = path.path().replacingOccurrences(of: "'", with: "'\\''")
+            let fullCommand = "cd '\(escapeShellSingleQuotes(path.path()))' && \(cmd)"
+            let escapedForAppleScript = escapeForAppleScriptString(fullCommand)
 
             script = """
             tell application "Warp"
@@ -94,13 +93,14 @@ struct TerminalLauncher {
 
             tell application "System Events"
                 tell process "Warp"
-                    keystroke "cd '\(escapedPath)' && \(escapedCmd)"
+                    keystroke "\(escapedForAppleScript)"
                     key code 36
                 end tell
             end tell
             """
         } else {
-            let escapedPath = path.path().replacingOccurrences(of: "'", with: "'\\''")
+            let fullCommand = "cd '\(escapeShellSingleQuotes(path.path()))'"
+            let escapedForAppleScript = escapeForAppleScriptString(fullCommand)
 
             script = """
             tell application "Warp"
@@ -119,7 +119,7 @@ struct TerminalLauncher {
 
             tell application "System Events"
                 tell process "Warp"
-                    keystroke "cd '\(escapedPath)'"
+                    keystroke "\(escapedForAppleScript)"
                     key code 36
                 end tell
             end tell
@@ -132,22 +132,26 @@ struct TerminalLauncher {
     private func launchITerm(at path: URL, command: String?) throws {
         let script: String
         if let cmd = command {
+            let fullCommand = "cd '\(escapeShellSingleQuotes(path.path()))' && \(cmd)"
+            let escaped = escapeForAppleScriptString(fullCommand)
             script = """
             tell application "iTerm"
                 activate
                 create window with default profile
                 tell current session of current window
-                    write text "cd '\(path.path())' && \(cmd)"
+                    write text "\(escaped)"
                 end tell
             end tell
             """
         } else {
+            let fullCommand = "cd '\(escapeShellSingleQuotes(path.path()))'"
+            let escaped = escapeForAppleScriptString(fullCommand)
             script = """
             tell application "iTerm"
                 activate
                 create window with default profile
                 tell current session of current window
-                    write text "cd '\(path.path())'"
+                    write text "\(escaped)"
                 end tell
             end tell
             """
@@ -159,17 +163,21 @@ struct TerminalLauncher {
     private func launchTerminalApp(at path: URL, command: String?) throws {
         let script: String
         if let cmd = command {
+            let fullCommand = "cd '\(escapeShellSingleQuotes(path.path()))' && \(cmd)"
+            let escaped = escapeForAppleScriptString(fullCommand)
             script = """
             tell application "Terminal"
                 activate
-                do script "cd '\(path.path())' && \(cmd)"
+                do script "\(escaped)"
             end tell
             """
         } else {
+            let fullCommand = "cd '\(escapeShellSingleQuotes(path.path()))'"
+            let escaped = escapeForAppleScriptString(fullCommand)
             script = """
             tell application "Terminal"
                 activate
-                do script "cd '\(path.path())'"
+                do script "\(escaped)"
             end tell
             """
         }
@@ -296,5 +304,17 @@ struct TerminalLauncher {
             // Fall through to return nil
         }
         return nil
+    }
+
+    /// Escape single quotes for shell: ' becomes '\''
+    private func escapeShellSingleQuotes(_ string: String) -> String {
+        string.replacingOccurrences(of: "'", with: "'\\''")
+    }
+
+    /// Escape for AppleScript double-quoted string: \ becomes \\, " becomes \"
+    private func escapeForAppleScriptString(_ string: String) -> String {
+        string
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
     }
 }

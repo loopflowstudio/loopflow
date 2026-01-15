@@ -3,13 +3,16 @@
 
 set -e
 
+DEV_APP="$HOME/Applications/Maestro Dev.app"
+
 usage() {
     echo "Usage: ./dev <command>"
     echo ""
     echo "Commands:"
     echo "  build      Build the app"
     echo "  test       Build and run tests"
-    echo "  run        Build and launch the app"
+    echo "  run        Build and launch the app (installs to ~/Applications)"
+    echo "  clean      Remove dev app and reset permissions"
     echo "  xcode      Open in Xcode"
     echo "  release    Build release .app and .dmg"
     echo "  help       Show this message"
@@ -31,14 +34,25 @@ case "${1:-help}" in
         echo "Building and running Maestro..."
         swift build
 
-        # Create proper .app bundle with Info.plist
-        APP_DIR=".build/debug/Maestro.app/Contents"
+        # Install to stable location to preserve macOS permissions across rebuilds.
+        # TCC ties permissions to app bundle path - using a fixed path means you only
+        # grant Accessibility/Automation permissions once.
+        APP_DIR="$DEV_APP/Contents"
         mkdir -p "$APP_DIR/MacOS"
         cp .build/debug/Maestro "$APP_DIR/MacOS/"
         cp Maestro/Info.plist "$APP_DIR/"
 
-        # Launch the app bundle
-        open .build/debug/Maestro.app
+        # Launch from stable location
+        open "$DEV_APP"
+        ;;
+    clean)
+        echo "Removing dev app..."
+        rm -rf "$DEV_APP"
+        echo "Resetting Accessibility permissions..."
+        tccutil reset Accessibility com.loopflow.maestro 2>/dev/null || true
+        echo "Resetting Automation permissions..."
+        tccutil reset AppleEvents com.loopflow.maestro 2>/dev/null || true
+        echo "Done. Next ./dev run will require re-granting permissions."
         ;;
     xcode)
         echo "Opening in Xcode..."

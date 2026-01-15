@@ -45,6 +45,7 @@ class Config(BaseModel):
     yolo: bool = False  # Skip all permission prompts
     push: bool = False
     pr: bool = False
+    land: str = "gh"  # "gh" (GitHub PR merge) or "local" (local squash-merge)
     context: list[str] = Field(default_factory=list)
     exclude: list[str] = Field(default_factory=list)
     include_tests_for: Optional[list[str]] = None

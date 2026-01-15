@@ -3,270 +3,480 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 56;
+	objectVersion = 77;
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A0000001 /* MaestroApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000001; };
-		A0000002 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000002; };
-		A0000003 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000003; };
-		A0000004 /* PromptLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000004; };
-		A0000005 /* WorktreeSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000005; };
-		A0000006 /* LoopflowConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000006; };
-		A0000007 /* PromptCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000007; };
-		A0000008 /* Worktree.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000008; };
-		A0000009 /* ConfigLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000009; };
-		A000000A /* PromptService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B000000A; };
-		A000000B /* TerminalLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = B000000B; };
-		A000000C /* TokenEstimator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B000000C; };
-		A000000D /* WorktreeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B000000D; };
-		A000000E /* SetupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000010; };
-		A000000F /* SetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000011; };
-		A0000012 /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000012; };
-		A0000013 /* AgentService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000013; };
-		A0000014 /* RecentsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000014; };
-		A0000015 /* RecentRepo.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000015; };
-		A0000016 /* WelcomeWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000016; };
-		A0000017 /* RepoWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000017; };
-		A0000018 /* NameGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000018; };
-		A0000019 /* LFDEventService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000019; };
-		A000001A /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = B000001A; };
-		A000001B /* SessionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B000001B; };
+		1D17429EA6209D489C35D408 /* AgentWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF82835434C36D193B4C4BE6 /* AgentWindow.swift */; };
+		209B725A3B91C1F303252D31 /* AgentSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 342609995930AFEDB06E23DE /* AgentSidebar.swift */; };
+		420450A59C74B4477BB4233F /* RecentsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C7E2881D1F8B5951361860A /* RecentsService.swift */; };
+		47C2B19B95D769DF8F98D10A /* PromptLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93E0AB6F8D9D5E3B606B5AC5 /* PromptLauncher.swift */; };
+		48A17F236B31EDA78F60FD73 /* WorktreeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3924517B0C5CA802E5C7EFA2 /* WorktreeTests.swift */; };
+		60BCAF2FD222D4591EB8F36E /* TerminalLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B43947A915D4BCEF26FA7CE /* TerminalLauncher.swift */; };
+		66FE03E9FA1B1AC68956A14E /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6C72282F4106932B5C9865F /* ContentView.swift */; };
+		683E003C979DFE7A60F8AFBB /* RepoWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF19EF1535EA341D1BAAC933 /* RepoWindow.swift */; };
+		6AEA9D49F271E1E531204279 /* SetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B925F8F9649E09C03865E158 /* SetupView.swift */; };
+		6B4E3977D9CC4923D39D5A85 /* Worktree.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DF910591A776EB8BD1A91B6 /* Worktree.swift */; };
+		6E1EC6EFB0682A45415A4294 /* PromptService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 825DF1A1EB8C61BC9DD3F687 /* PromptService.swift */; };
+		73A3AD510E3DAF20A47FABBA /* Voice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AF610DD2EE0591765DAB82 /* Voice.swift */; };
+		79C6BC4C7DF8F9498707FD7E /* MaestroApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9892AFAEEA1B9B5BF63A2AF /* MaestroApp.swift */; };
+		7E2FC7EABDDB84D0D33B798A /* PromptCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A47AEDFC6AE52BB1D19A806C /* PromptCard.swift */; };
+		7EF58913A2F3A3B175BDCAF8 /* WorktreeSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC9C3D47012D67D6E493BC5D /* WorktreeSidebar.swift */; };
+		803AAFEAB31DD87E7276B6A9 /* AgentDetailPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E0056B3A071668888AA9213 /* AgentDetailPanel.swift */; };
+		81B5BD08907FAEE07641FB74 /* LoopflowConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CBE9FF9AFCBBAD00971648A /* LoopflowConfig.swift */; };
+		82700718A8F92EB87D1D680E /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7ABC750D8701D24F4D552B8 /* AppState.swift */; };
+		873D8420F5A8F1B9280B200A /* ConfigLoaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31414CB2CFD9DC9368D740FC /* ConfigLoaderTests.swift */; };
+		8DEDD1704CFA2C18CC5EF764 /* WorktreeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63476A1EB1C16AB11B0A35FB /* WorktreeService.swift */; };
+		92CD325A3BB863AB86161864 /* SetupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96D2C998462786BC0A04FD4 /* SetupService.swift */; };
+		93DA9888812076D6503416A2 /* WelcomeWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 938B29A8052372137F1D0A8A /* WelcomeWindow.swift */; };
+		96E430F37D2F67372A067673 /* RecentRepo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90CA353B0FB30EA63EF603F3 /* RecentRepo.swift */; };
+		9E345788E6B3960DA050CD1D /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78D6CC66F3DC28093A753D4A /* Session.swift */; };
+		B63070089DBF463224C9B88C /* LFDEventService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0B439E4B8769E5DF895EC96 /* LFDEventService.swift */; };
+		CAFCF01BD60040BD66627CCE /* NewAgentSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18D08ECBB113DBBAB84FEF0F /* NewAgentSheet.swift */; };
+		CE93C187FF6FEBEF55312969 /* TokenEstimator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21F801963365AF05516C1527 /* TokenEstimator.swift */; };
+		DBAF0012C4449F02304C894B /* ConfigLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A0998821228F7FE72A81038 /* ConfigLoader.swift */; };
+		E111440A742561CF3DA2327A /* NameGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B260C63F7203E155CD7740F /* NameGenerator.swift */; };
+		EB9FA34C97A2E9F27CDEC70C /* SessionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0FCE29A9B07AFFE918F06F7 /* SessionService.swift */; };
+		F2375092392B95CE31E8AB29 /* AgentService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60201812A1FCA70692E59550 /* AgentService.swift */; };
+		F5C4FD4B8EAD78C49D730EEF /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABF30B962247377AA7C202B8 /* Agent.swift */; };
+		F7C2BE2268DDD3049C51C9BD /* VoiceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F3ED7C3018F4486AFD158AA /* VoiceService.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		6E70DD56C85665506E3030FD /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 947BF46DA442257C7E34EAAB /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 18D8774E114076BC54C5F2DF;
+			remoteInfo = Maestro;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
-		B0000001 /* MaestroApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaestroApp.swift; sourceTree = "<group>"; };
-		B0000002 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
-		B0000003 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		B0000004 /* PromptLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptLauncher.swift; sourceTree = "<group>"; };
-		B0000005 /* WorktreeSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeSidebar.swift; sourceTree = "<group>"; };
-		B0000006 /* LoopflowConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoopflowConfig.swift; sourceTree = "<group>"; };
-		B0000007 /* PromptCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptCard.swift; sourceTree = "<group>"; };
-		B0000008 /* Worktree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Worktree.swift; sourceTree = "<group>"; };
-		B0000009 /* ConfigLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigLoader.swift; sourceTree = "<group>"; };
-		B000000A /* PromptService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptService.swift; sourceTree = "<group>"; };
-		B000000B /* TerminalLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalLauncher.swift; sourceTree = "<group>"; };
-		B000000C /* TokenEstimator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenEstimator.swift; sourceTree = "<group>"; };
-		B000000D /* WorktreeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeService.swift; sourceTree = "<group>"; };
-		B000000E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		B000000F /* Maestro.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Maestro.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		B0000010 /* SetupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupService.swift; sourceTree = "<group>"; };
-		B0000011 /* SetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupView.swift; sourceTree = "<group>"; };
-		B0000012 /* Agent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Agent.swift; sourceTree = "<group>"; };
-		B0000013 /* AgentService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentService.swift; sourceTree = "<group>"; };
-		B0000014 /* RecentsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentsService.swift; sourceTree = "<group>"; };
-		B0000015 /* RecentRepo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentRepo.swift; sourceTree = "<group>"; };
-		B0000016 /* WelcomeWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeWindow.swift; sourceTree = "<group>"; };
-		B0000017 /* RepoWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoWindow.swift; sourceTree = "<group>"; };
-		B0000018 /* NameGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NameGenerator.swift; sourceTree = "<group>"; };
-		B0000019 /* LFDEventService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LFDEventService.swift; sourceTree = "<group>"; };
-		B000001A /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
-		B000001B /* SessionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionService.swift; sourceTree = "<group>"; };
+		0CBE9FF9AFCBBAD00971648A /* LoopflowConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoopflowConfig.swift; sourceTree = "<group>"; };
+		18D08ECBB113DBBAB84FEF0F /* NewAgentSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewAgentSheet.swift; sourceTree = "<group>"; };
+		1C7E2881D1F8B5951361860A /* RecentsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentsService.swift; sourceTree = "<group>"; };
+		21F801963365AF05516C1527 /* TokenEstimator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenEstimator.swift; sourceTree = "<group>"; };
+		2B260C63F7203E155CD7740F /* NameGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NameGenerator.swift; sourceTree = "<group>"; };
+		31414CB2CFD9DC9368D740FC /* ConfigLoaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigLoaderTests.swift; sourceTree = "<group>"; };
+		342609995930AFEDB06E23DE /* AgentSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSidebar.swift; sourceTree = "<group>"; };
+		3924517B0C5CA802E5C7EFA2 /* WorktreeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeTests.swift; sourceTree = "<group>"; };
+		3A0998821228F7FE72A81038 /* ConfigLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigLoader.swift; sourceTree = "<group>"; };
+		4B43947A915D4BCEF26FA7CE /* TerminalLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalLauncher.swift; sourceTree = "<group>"; };
+		5D89E2FA8A82D88218732BE6 /* Maestro.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Maestro.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		60201812A1FCA70692E59550 /* AgentService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentService.swift; sourceTree = "<group>"; };
+		63476A1EB1C16AB11B0A35FB /* WorktreeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeService.swift; sourceTree = "<group>"; };
+		6E0056B3A071668888AA9213 /* AgentDetailPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDetailPanel.swift; sourceTree = "<group>"; };
+		77AF610DD2EE0591765DAB82 /* Voice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Voice.swift; sourceTree = "<group>"; };
+		78D6CC66F3DC28093A753D4A /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
+		7F3ED7C3018F4486AFD158AA /* VoiceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceService.swift; sourceTree = "<group>"; };
+		825DF1A1EB8C61BC9DD3F687 /* PromptService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptService.swift; sourceTree = "<group>"; };
+		90CA353B0FB30EA63EF603F3 /* RecentRepo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentRepo.swift; sourceTree = "<group>"; };
+		938B29A8052372137F1D0A8A /* WelcomeWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeWindow.swift; sourceTree = "<group>"; };
+		93E0AB6F8D9D5E3B606B5AC5 /* PromptLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptLauncher.swift; sourceTree = "<group>"; };
+		9DF910591A776EB8BD1A91B6 /* Worktree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Worktree.swift; sourceTree = "<group>"; };
+		A47AEDFC6AE52BB1D19A806C /* PromptCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptCard.swift; sourceTree = "<group>"; };
+		AAFDA0B4A6E491B651F6B41A /* MaestroTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MaestroTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		ABF30B962247377AA7C202B8 /* Agent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Agent.swift; sourceTree = "<group>"; };
+		B0FCE29A9B07AFFE918F06F7 /* SessionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionService.swift; sourceTree = "<group>"; };
+		B925F8F9649E09C03865E158 /* SetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupView.swift; sourceTree = "<group>"; };
+		B9892AFAEEA1B9B5BF63A2AF /* MaestroApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaestroApp.swift; sourceTree = "<group>"; };
+		BC9C3D47012D67D6E493BC5D /* WorktreeSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeSidebar.swift; sourceTree = "<group>"; };
+		CF19EF1535EA341D1BAAC933 /* RepoWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoWindow.swift; sourceTree = "<group>"; };
+		CF82835434C36D193B4C4BE6 /* AgentWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentWindow.swift; sourceTree = "<group>"; };
+		D7ABC750D8701D24F4D552B8 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		E6C72282F4106932B5C9865F /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		F0B439E4B8769E5DF895EC96 /* LFDEventService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LFDEventService.swift; sourceTree = "<group>"; };
+		F96D2C998462786BC0A04FD4 /* SetupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
-/* Begin PBXFrameworksBuildPhase section */
-		C0000001 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXFrameworksBuildPhase section */
-
 /* Begin PBXGroup section */
-		D0000001 = {
+		19C5971DF7335AFC8CD29B6C /* Models */ = {
 			isa = PBXGroup;
 			children = (
-				D0000002 /* Maestro */,
-				D0000006 /* Products */,
-			);
-			sourceTree = "<group>";
-		};
-		D0000002 /* Maestro */ = {
-			isa = PBXGroup;
-			children = (
-				B0000001 /* MaestroApp.swift */,
-				B0000002 /* AppState.swift */,
-				D0000003 /* Views */,
-				D0000004 /* Models */,
-				D0000005 /* Services */,
-				B000000E /* Info.plist */,
-			);
-			path = Maestro;
-			sourceTree = "<group>";
-		};
-		D0000003 /* Views */ = {
-			isa = PBXGroup;
-			children = (
-				B0000003 /* ContentView.swift */,
-				B0000004 /* PromptLauncher.swift */,
-				B0000017 /* RepoWindow.swift */,
-				B0000011 /* SetupView.swift */,
-				B0000016 /* WelcomeWindow.swift */,
-				B0000005 /* WorktreeSidebar.swift */,
-			);
-			path = Views;
-			sourceTree = "<group>";
-		};
-		D0000004 /* Models */ = {
-			isa = PBXGroup;
-			children = (
-				B0000012 /* Agent.swift */,
-				B0000006 /* LoopflowConfig.swift */,
-				B0000007 /* PromptCard.swift */,
-				B0000015 /* RecentRepo.swift */,
-				B000001A /* Session.swift */,
-				B0000008 /* Worktree.swift */,
+				ABF30B962247377AA7C202B8 /* Agent.swift */,
+				0CBE9FF9AFCBBAD00971648A /* LoopflowConfig.swift */,
+				A47AEDFC6AE52BB1D19A806C /* PromptCard.swift */,
+				90CA353B0FB30EA63EF603F3 /* RecentRepo.swift */,
+				78D6CC66F3DC28093A753D4A /* Session.swift */,
+				77AF610DD2EE0591765DAB82 /* Voice.swift */,
+				9DF910591A776EB8BD1A91B6 /* Worktree.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
 		};
-		D0000005 /* Services */ = {
+		1EBC46D6BD907252546FEABC /* Services */ = {
 			isa = PBXGroup;
 			children = (
-				B0000013 /* AgentService.swift */,
-				B0000009 /* ConfigLoader.swift */,
-				B0000019 /* LFDEventService.swift */,
-				B0000018 /* NameGenerator.swift */,
-				B000000A /* PromptService.swift */,
-				B0000014 /* RecentsService.swift */,
-				B000001B /* SessionService.swift */,
-				B000000B /* TerminalLauncher.swift */,
-				B000000C /* TokenEstimator.swift */,
-				B000000D /* WorktreeService.swift */,
-				B0000010 /* SetupService.swift */,
+				60201812A1FCA70692E59550 /* AgentService.swift */,
+				3A0998821228F7FE72A81038 /* ConfigLoader.swift */,
+				F0B439E4B8769E5DF895EC96 /* LFDEventService.swift */,
+				2B260C63F7203E155CD7740F /* NameGenerator.swift */,
+				825DF1A1EB8C61BC9DD3F687 /* PromptService.swift */,
+				1C7E2881D1F8B5951361860A /* RecentsService.swift */,
+				B0FCE29A9B07AFFE918F06F7 /* SessionService.swift */,
+				F96D2C998462786BC0A04FD4 /* SetupService.swift */,
+				4B43947A915D4BCEF26FA7CE /* TerminalLauncher.swift */,
+				21F801963365AF05516C1527 /* TokenEstimator.swift */,
+				7F3ED7C3018F4486AFD158AA /* VoiceService.swift */,
+				63476A1EB1C16AB11B0A35FB /* WorktreeService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
 		};
-		D0000006 /* Products */ = {
+		2A294FD6D91689925C867894 /* Maestro */ = {
 			isa = PBXGroup;
 			children = (
-				B000000F /* Maestro.app */,
+				D7ABC750D8701D24F4D552B8 /* AppState.swift */,
+				B9892AFAEEA1B9B5BF63A2AF /* MaestroApp.swift */,
+				19C5971DF7335AFC8CD29B6C /* Models */,
+				1EBC46D6BD907252546FEABC /* Services */,
+				EBFB8972365B2EB9973681AB /* Views */,
+			);
+			path = Maestro;
+			sourceTree = "<group>";
+		};
+		6FBBD558C470D01D87456D2C /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				5D89E2FA8A82D88218732BE6 /* Maestro.app */,
+				AAFDA0B4A6E491B651F6B41A /* MaestroTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		75313B8D2872F4347710E9B6 = {
+			isa = PBXGroup;
+			children = (
+				2A294FD6D91689925C867894 /* Maestro */,
+				FAD759E58E0A872D2FD9F8BD /* MaestroTests */,
+				6FBBD558C470D01D87456D2C /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		EBFB8972365B2EB9973681AB /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				6E0056B3A071668888AA9213 /* AgentDetailPanel.swift */,
+				342609995930AFEDB06E23DE /* AgentSidebar.swift */,
+				CF82835434C36D193B4C4BE6 /* AgentWindow.swift */,
+				E6C72282F4106932B5C9865F /* ContentView.swift */,
+				18D08ECBB113DBBAB84FEF0F /* NewAgentSheet.swift */,
+				93E0AB6F8D9D5E3B606B5AC5 /* PromptLauncher.swift */,
+				CF19EF1535EA341D1BAAC933 /* RepoWindow.swift */,
+				B925F8F9649E09C03865E158 /* SetupView.swift */,
+				938B29A8052372137F1D0A8A /* WelcomeWindow.swift */,
+				BC9C3D47012D67D6E493BC5D /* WorktreeSidebar.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		FAD759E58E0A872D2FD9F8BD /* MaestroTests */ = {
+			isa = PBXGroup;
+			children = (
+				31414CB2CFD9DC9368D740FC /* ConfigLoaderTests.swift */,
+				3924517B0C5CA802E5C7EFA2 /* WorktreeTests.swift */,
+			);
+			path = MaestroTests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		E0000001 /* Maestro */ = {
+		18D8774E114076BC54C5F2DF /* Maestro */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = F0000003 /* Build configuration list for PBXNativeTarget "Maestro" */;
+			buildConfigurationList = 095129749B5EB1F38DB4A090 /* Build configuration list for PBXNativeTarget "Maestro" */;
 			buildPhases = (
-				E0000002 /* Sources */,
-				C0000001 /* Frameworks */,
+				D0BBD679BD76D09FDE4CD0C0 /* Sources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			name = Maestro;
+			packageProductDependencies = (
+			);
 			productName = Maestro;
-			productReference = B000000F /* Maestro.app */;
+			productReference = 5D89E2FA8A82D88218732BE6 /* Maestro.app */;
 			productType = "com.apple.product-type.application";
+		};
+		82ECF05ED6F0BC0B1B4DE990 /* MaestroTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F0D5C7C6410F9E1EC6C728E5 /* Build configuration list for PBXNativeTarget "MaestroTests" */;
+			buildPhases = (
+				A478D5810244B220F4CC5B75 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				CF511396FE853F2588B69E97 /* PBXTargetDependency */,
+			);
+			name = MaestroTests;
+			packageProductDependencies = (
+			);
+			productName = MaestroTests;
+			productReference = AAFDA0B4A6E491B651F6B41A /* MaestroTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
 		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		E0000003 /* Project object */ = {
+		947BF46DA442257C7E34EAAB /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 1500;
+				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					18D8774E114076BC54C5F2DF = {
+						ProvisioningStyle = Automatic;
+					};
+				};
 			};
-			buildConfigurationList = F0000001 /* Build configuration list for PBXProject "Maestro" */;
+			buildConfigurationList = 9DD24BAA2C74F6B45661D816 /* Build configuration list for PBXProject "Maestro" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
-				en,
 				Base,
+				en,
 			);
-			mainGroup = D0000001;
-			productRefGroup = D0000006 /* Products */;
+			mainGroup = 75313B8D2872F4347710E9B6;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				E0000001 /* Maestro */,
+				18D8774E114076BC54C5F2DF /* Maestro */,
+				82ECF05ED6F0BC0B1B4DE990 /* MaestroTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXSourcesBuildPhase section */
-		E0000002 /* Sources */ = {
+		A478D5810244B220F4CC5B75 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A0000001 /* MaestroApp.swift in Sources */,
-				A0000002 /* AppState.swift in Sources */,
-				A0000003 /* ContentView.swift in Sources */,
-				A0000004 /* PromptLauncher.swift in Sources */,
-				A0000005 /* WorktreeSidebar.swift in Sources */,
-				A0000006 /* LoopflowConfig.swift in Sources */,
-				A0000007 /* PromptCard.swift in Sources */,
-				A0000008 /* Worktree.swift in Sources */,
-				A0000009 /* ConfigLoader.swift in Sources */,
-				A000000A /* PromptService.swift in Sources */,
-				A000000B /* TerminalLauncher.swift in Sources */,
-				A000000C /* TokenEstimator.swift in Sources */,
-				A000000D /* WorktreeService.swift in Sources */,
-				A000000E /* SetupService.swift in Sources */,
-				A000000F /* SetupView.swift in Sources */,
-				A0000012 /* Agent.swift in Sources */,
-				A0000013 /* AgentService.swift in Sources */,
-				A0000014 /* RecentsService.swift in Sources */,
-				A0000015 /* RecentRepo.swift in Sources */,
-				A0000016 /* WelcomeWindow.swift in Sources */,
-				A0000017 /* RepoWindow.swift in Sources */,
-				A0000018 /* NameGenerator.swift in Sources */,
-				A0000019 /* LFDEventService.swift in Sources */,
-				A000001A /* Session.swift in Sources */,
-				A000001B /* SessionService.swift in Sources */,
+				873D8420F5A8F1B9280B200A /* ConfigLoaderTests.swift in Sources */,
+				48A17F236B31EDA78F60FD73 /* WorktreeTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D0BBD679BD76D09FDE4CD0C0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F5C4FD4B8EAD78C49D730EEF /* Agent.swift in Sources */,
+				803AAFEAB31DD87E7276B6A9 /* AgentDetailPanel.swift in Sources */,
+				F2375092392B95CE31E8AB29 /* AgentService.swift in Sources */,
+				209B725A3B91C1F303252D31 /* AgentSidebar.swift in Sources */,
+				1D17429EA6209D489C35D408 /* AgentWindow.swift in Sources */,
+				82700718A8F92EB87D1D680E /* AppState.swift in Sources */,
+				DBAF0012C4449F02304C894B /* ConfigLoader.swift in Sources */,
+				66FE03E9FA1B1AC68956A14E /* ContentView.swift in Sources */,
+				B63070089DBF463224C9B88C /* LFDEventService.swift in Sources */,
+				81B5BD08907FAEE07641FB74 /* LoopflowConfig.swift in Sources */,
+				79C6BC4C7DF8F9498707FD7E /* MaestroApp.swift in Sources */,
+				E111440A742561CF3DA2327A /* NameGenerator.swift in Sources */,
+				CAFCF01BD60040BD66627CCE /* NewAgentSheet.swift in Sources */,
+				7E2FC7EABDDB84D0D33B798A /* PromptCard.swift in Sources */,
+				47C2B19B95D769DF8F98D10A /* PromptLauncher.swift in Sources */,
+				6E1EC6EFB0682A45415A4294 /* PromptService.swift in Sources */,
+				96E430F37D2F67372A067673 /* RecentRepo.swift in Sources */,
+				420450A59C74B4477BB4233F /* RecentsService.swift in Sources */,
+				683E003C979DFE7A60F8AFBB /* RepoWindow.swift in Sources */,
+				9E345788E6B3960DA050CD1D /* Session.swift in Sources */,
+				EB9FA34C97A2E9F27CDEC70C /* SessionService.swift in Sources */,
+				92CD325A3BB863AB86161864 /* SetupService.swift in Sources */,
+				6AEA9D49F271E1E531204279 /* SetupView.swift in Sources */,
+				60BCAF2FD222D4591EB8F36E /* TerminalLauncher.swift in Sources */,
+				CE93C187FF6FEBEF55312969 /* TokenEstimator.swift in Sources */,
+				73A3AD510E3DAF20A47FABBA /* Voice.swift in Sources */,
+				F7C2BE2268DDD3049C51C9BD /* VoiceService.swift in Sources */,
+				93DA9888812076D6503416A2 /* WelcomeWindow.swift in Sources */,
+				6B4E3977D9CC4923D39D5A85 /* Worktree.swift in Sources */,
+				8DEDD1704CFA2C18CC5EF764 /* WorktreeService.swift in Sources */,
+				7EF58913A2F3A3B175BDCAF8 /* WorktreeSidebar.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		CF511396FE853F2588B69E97 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 18D8774E114076BC54C5F2DF /* Maestro */;
+			targetProxy = 6E70DD56C85665506E3030FD /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
-		F0000004 /* Debug */ = {
+		024BB48E6097C014E4230E80 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.loopflow.MaestroTests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Maestro.app/Contents/MacOS/Maestro";
+			};
+			name = Debug;
+		};
+		162CC723B75A1E9F82DE695A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Maestro/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.loopflow.maestro;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		6359B2DE2A48ADD85329BE4E /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
-				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_COMMA = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
 				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
 				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
 				CLANG_WARN_EMPTY_BODY = YES;
 				CLANG_WARN_ENUM_CONVERSION = YES;
 				CLANG_WARN_INFINITE_RECURSION = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
 				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
 				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
 				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
 				CLANG_WARN_STRICT_PROTOTYPES = YES;
 				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		674E35166CD90394FFE12862 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.loopflow.MaestroTests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Maestro.app/Contents/MacOS/Maestro";
+			};
+			name = Release;
+		};
+		AA7A36D1310F1E07F11F67CE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Maestro/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.loopflow.maestro;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		BF595D840419FA1A6BA2BCE1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_OPTIMIZATION_LEVEL = 0;
 				GCC_PREPROCESSOR_DEFINITIONS = (
-					"DEBUG=1",
 					"$(inherited)",
+					"DEBUG=1",
 				);
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
 				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
@@ -278,131 +488,45 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
 		};
-		F0000005 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
-				CLANG_ANALYZER_NONNULL = YES;
-				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
-				CLANG_ENABLE_MODULES = YES;
-				CLANG_ENABLE_OBJC_ARC = YES;
-				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
-				CLANG_WARN_BOOL_CONVERSION = YES;
-				CLANG_WARN_COMMA = YES;
-				CLANG_WARN_CONSTANT_CONVERSION = YES;
-				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
-				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
-				CLANG_WARN_EMPTY_BODY = YES;
-				CLANG_WARN_ENUM_CONVERSION = YES;
-				CLANG_WARN_INFINITE_RECURSION = YES;
-				CLANG_WARN_INT_CONVERSION = YES;
-				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
-				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
-				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
-				CLANG_WARN_STRICT_PROTOTYPES = YES;
-				CLANG_WARN_SUSPICIOUS_MOVE = YES;
-				CLANG_WARN_UNREACHABLE_CODE = YES;
-				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-				COPY_PHASE_STRIP = NO;
-				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				ENABLE_NS_ASSERTIONS = NO;
-				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				GCC_NO_COMMON_BLOCKS = YES;
-				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
-				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
-				GCC_WARN_UNDECLARED_SELECTOR = YES;
-				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
-				GCC_WARN_UNUSED_FUNCTION = YES;
-				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MTL_ENABLE_DEBUG_INFO = NO;
-				MTL_FAST_MATH = YES;
-				SDKROOT = macosx;
-				SWIFT_COMPILATION_MODE = wholemodule;
-				SWIFT_VERSION = 6.0;
-			};
-			name = Release;
-		};
-		F0000006 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = "";
-				CODE_SIGN_STYLE = Automatic;
-				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = Maestro/Info.plist;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright 2024 Loopflow";
-				INFOPLIST_KEY_NSMainNibFile = "";
-				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/../Frameworks",
-				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.loopflow.maestro;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 6.0;
-			};
-			name = Debug;
-		};
-		F0000007 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = "";
-				CODE_SIGN_STYLE = Automatic;
-				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = Maestro/Info.plist;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright 2024 Loopflow";
-				INFOPLIST_KEY_NSMainNibFile = "";
-				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/../Frameworks",
-				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.loopflow.maestro;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 6.0;
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		F0000001 /* Build configuration list for PBXProject "Maestro" */ = {
+		095129749B5EB1F38DB4A090 /* Build configuration list for PBXNativeTarget "Maestro" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				F0000004 /* Debug */,
-				F0000005 /* Release */,
+				162CC723B75A1E9F82DE695A /* Debug */,
+				AA7A36D1310F1E07F11F67CE /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
+			defaultConfigurationName = Debug;
 		};
-		F0000003 /* Build configuration list for PBXNativeTarget "Maestro" */ = {
+		9DD24BAA2C74F6B45661D816 /* Build configuration list for PBXProject "Maestro" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				F0000006 /* Debug */,
-				F0000007 /* Release */,
+				BF595D840419FA1A6BA2BCE1 /* Debug */,
+				6359B2DE2A48ADD85329BE4E /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
+			defaultConfigurationName = Debug;
+		};
+		F0D5C7C6410F9E1EC6C728E5 /* Build configuration list for PBXNativeTarget "MaestroTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				024BB48E6097C014E4230E80 /* Debug */,
+				674E35166CD90394FFE12862 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
 	};
-	rootObject = E0000003 /* Project object */;
+	rootObject = 947BF46DA442257C7E34EAAB /* Project object */;
 }

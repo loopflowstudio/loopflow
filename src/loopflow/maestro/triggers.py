@@ -2,6 +2,7 @@
 
 Triggers determine when an agent should run:
 - manual: Only runs when explicitly started
+- loop: Runs again immediately after previous run completes
 - main-changed: Runs when origin/main has new commits since last run
 - interval: Runs every N seconds
 """
@@ -21,6 +22,10 @@ def should_trigger(
     """Check if an agent's trigger condition is met."""
     if agent.trigger == "manual":
         return False
+
+    if agent.trigger == "loop":
+        # Loop trigger: run again immediately after previous run completes
+        return True
 
     if agent.trigger == "main-changed":
         return _main_changed(agent.repo, last_main_sha)

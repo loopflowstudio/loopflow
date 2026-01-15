@@ -313,6 +313,8 @@ struct AgentRow: View {
             return .blue
         case .idle:
             return .gray
+        case .completed:
+            return .green
         case .error:
             return .red
         case .stopped:

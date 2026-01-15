@@ -11,9 +11,11 @@ final class AppState {
     var worktrees: [Worktree] = []
     var prompts: [PromptCard] = []
     var agents: [Agent] = []
+    var voices: [Voice] = []
 
     // Prompt launcher state
     var selectedPrompt: PromptCard?
+    var selectedVoices: [Voice] = []
     var promptArgs: String = ""
     var includeDocs: Bool = true
     var includeDiff: Bool = false
@@ -38,6 +40,7 @@ final class AppState {
     private let promptService = PromptService()
     private let agentService = AgentService()
     private var eventService: LFDEventService?
+    private let voiceService = VoiceService()
 
     func openRepo(_ url: URL) async {
         currentRepo = url
@@ -85,6 +88,7 @@ final class AppState {
             }
 
             prompts = try promptService.loadPrompts(from: url, config: config)
+            refreshVoices()
             await estimateTokens()
             await refreshAgents()
         } catch {
@@ -146,6 +150,11 @@ final class AppState {
                 }
             }
         }
+    }
+
+    func refreshVoices() {
+        guard let repo = currentRepo else { return }
+        voices = voiceService.loadVoices(from: repo)
     }
 
     func refreshAgents() async {
@@ -225,6 +234,13 @@ final class AppState {
                 parts.append("-x")
                 parts.append(filePath)
             }
+        }
+
+        // Voices
+        if !selectedVoices.isEmpty {
+            let voiceNames = selectedVoices.map { $0.name }.joined(separator: ",")
+            parts.append("--voice")
+            parts.append(voiceNames)
         }
 
         // Docs/diff/paste flags (only include if different from default)

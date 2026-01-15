@@ -440,22 +440,40 @@ struct WorktreeRow: View {
     }
 
     private var statusBadge: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
+            if let task = worktree.lastCompletedTask ?? worktree.lastTask {
+                stageBadge(task)
+            }
+
             if worktree.isDirty {
                 Circle()
                     .fill(.orange)
                     .frame(width: 6, height: 6)
-                Text(worktree.statusText)
-                    .font(.caption)
-                    .foregroundStyle(.orange)
             } else {
                 Image(systemName: "checkmark")
                     .font(.caption2)
                     .foregroundStyle(.green)
-                Text("clean")
-                    .font(.caption)
-                    .foregroundStyle(.green)
             }
+        }
+    }
+
+    private func stageBadge(_ task: String) -> some View {
+        Text(task)
+            .font(.caption2)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(stageColor(task).opacity(0.2))
+            .foregroundStyle(stageColor(task))
+            .clipShape(Capsule())
+    }
+
+    private func stageColor(_ task: String) -> Color {
+        switch task {
+        case "design": return .blue
+        case "implement": return .purple
+        case "review": return .orange
+        case "polish": return .green
+        default: return .gray
         }
     }
 }

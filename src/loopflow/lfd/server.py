@@ -15,7 +15,16 @@ from loopflow.lfd.agents import (
     start_agent,
     stop_agent,
 )
-from loopflow.lfd.db import load_agent_runs, load_sessions, update_dead_runs
+from loopflow.lfd.db import (
+    load_agent_runs,
+    load_sessions,
+    load_sessions_for_repo,
+    load_sessions_for_worktree,
+    save_session,
+    update_dead_runs,
+    update_session_status,
+)
+from loopflow.lfd.models import Session, SessionStatus
 from loopflow.lfd.protocol import Event, Request, Response, error, success
 
 
@@ -93,6 +102,12 @@ class Server:
             return await self._handle_agents_stop(params)
         elif method == "sessions.list":
             return await self._handle_sessions_list()
+        elif method == "sessions.history":
+            return await self._handle_sessions_history(params)
+        elif method == "sessions.start":
+            return await self._handle_sessions_start(params)
+        elif method == "sessions.end":
+            return await self._handle_sessions_end(params)
         elif method == "subscribe":
             return await self._handle_subscribe(params, writer)
         elif method == "notify":
@@ -157,6 +172,45 @@ class Server:
     async def _handle_sessions_list(self) -> Response:
         sessions = load_sessions()
         return success([s.to_dict() for s in sessions])
+
+    async def _handle_sessions_history(self, params: dict) -> Response:
+        """Return session history for a worktree or repo."""
+        worktree = params.get("worktree")
+        repo = params.get("repo")
+        limit = params.get("limit", 20)
+
+        if worktree:
+            sessions = load_sessions_for_worktree(worktree, limit)
+        elif repo:
+            sessions = load_sessions_for_repo(repo, limit)
+        else:
+            sessions = load_sessions()[:limit]
+
+        return success([s.to_dict() for s in sessions])
+
+    async def _handle_sessions_start(self, params: dict) -> Response:
+        """Record a session start."""
+        session_data = params.get("session")
+        if not session_data:
+            return error("Missing 'session' parameter")
+
+        session = Session.from_dict(session_data)
+        save_session(session)
+        await self._broadcast(Event("session.started", {"id": session.id, "task": session.task}))
+        return success({"id": session.id})
+
+    async def _handle_sessions_end(self, params: dict) -> Response:
+        """Record a session end."""
+        session_id = params.get("session_id")
+        status_str = params.get("status")
+
+        if not session_id or not status_str:
+            return error("Missing 'session_id' or 'status' parameter")
+
+        status = SessionStatus(status_str)
+        update_session_status(session_id, status)
+        await self._broadcast(Event("session.ended", {"id": session_id, "status": status_str}))
+        return success({"id": session_id})
 
     async def _handle_subscribe(self, params: dict, writer: StreamWriter) -> Response:
         events = params.get("events", [])

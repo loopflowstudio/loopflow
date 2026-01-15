@@ -19,8 +19,6 @@ from loopflow.logging import (
     open_log_file,
     write_log_line,
 )
-from loopflow.maestro.db import DEFAULT_DB_PATH, update_session_status
-from loopflow.maestro.session import SessionStatus
 
 
 def collect_output(
@@ -48,8 +46,7 @@ def collect_output(
     else:
         exit_code = _run_streaming(command, log_file, json_log, foreground, prompt)
 
-    status = SessionStatus.COMPLETED if exit_code == 0 else SessionStatus.ERROR
-    update_session_status(DEFAULT_DB_PATH, session_id, status)
+    # Session status is updated by the parent process via lfd client
 
     if autocommit and exit_code == 0 and task and repo_root:
         git_autocommit(repo_root, task, push=push)

@@ -17,9 +17,10 @@ from loopflow.config import load_config, parse_model
 from loopflow.context import PromptComponents, gather_prompt_components, format_prompt
 from loopflow.git import find_main_repo, get_current_branch
 from loopflow.launcher import build_model_command, get_runner
+from loopflow.lfd.client import log_session_start, log_session_end
+from loopflow.lfd.models import Session, SessionStatus
 from loopflow.llm_http import generate_pr_message
 from loopflow.logging import write_prompt_file
-from loopflow.maestro import Session, SessionStatus
 from loopflow.maestro.agent import (
     AgentLoopSpec,
     AgentStatus,
@@ -31,9 +32,7 @@ from loopflow.maestro.db import (
     DEFAULT_DB_PATH,
     increment_agent_iteration,
     load_agent,
-    save_session,
     update_agent_status,
-    update_session_status,
 )
 from loopflow.worktrees import WorktreeError, create as create_worktree
 
@@ -322,15 +321,15 @@ def run_agent_iteration(
         session = Session(
             id=str(uuid.uuid4()),
             task=f"{agent.spec.name}:{task_name}",
-            repo=main_repo,
-            worktree=worktree_path,
+            repo=str(main_repo),
+            worktree=str(worktree_path),
             status=SessionStatus.RUNNING,
             started_at=datetime.now(),
             pid=None,
-            backend=backend,
+            model=backend,
             run_mode="auto",
         )
-        save_session(DEFAULT_DB_PATH, session)
+        log_session_start(session)
 
         # Build and run command
         command = build_model_command(
@@ -362,8 +361,6 @@ def run_agent_iteration(
         collector_cmd.extend(["--", *command])
 
         process = subprocess.Popen(collector_cmd, cwd=worktree_path)
-        session.pid = process.pid
-        save_session(DEFAULT_DB_PATH, session)
         result_code = process.wait()
 
         # Clean up prompt file
@@ -373,7 +370,7 @@ def run_agent_iteration(
             pass  # Best effort cleanup
 
         status = SessionStatus.COMPLETED if result_code == 0 else SessionStatus.ERROR
-        update_session_status(DEFAULT_DB_PATH, session.id, status)
+        log_session_end(session.id, status)
 
         if result_code != 0:
             print(f"\n[{task_name}] failed with exit code {result_code}")

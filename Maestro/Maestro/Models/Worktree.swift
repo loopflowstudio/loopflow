@@ -19,7 +19,7 @@ enum PRState: String, Codable {
     }
 }
 
-struct Worktree: Identifiable, Codable, Hashable {
+struct Worktree: Identifiable, Hashable, Codable {
     var id: String { branch }
 
     let path: String
@@ -36,6 +36,13 @@ struct Worktree: Identifiable, Codable, Hashable {
     let hasCodeWorkspace: Bool
     let isRebasing: Bool
     let isMerging: Bool
+    var recentTasks: [TaskSession] = []
+
+    enum CodingKeys: String, CodingKey {
+        case path, branch, baseBranch, isDirty, aheadMain, behindMain
+        case aheadRemote, behindRemote, prURL, prNumber, prState
+        case hasCodeWorkspace, isRebasing, isMerging, recentTasks
+    }
 
     var statusText: String {
         if isDirty {
@@ -62,6 +69,14 @@ struct Worktree: Identifiable, Codable, Hashable {
             parts.append("\(behindMain) behind")
         }
         return parts.joined(separator: " · ")
+    }
+
+    var lastTask: String? {
+        recentTasks.first?.task
+    }
+
+    var lastCompletedTask: String? {
+        recentTasks.first(where: { $0.isCompleted })?.task
     }
 }
 
@@ -123,7 +138,7 @@ struct CIJSON: Codable {
 }
 
 extension Worktree {
-    init(from json: WorktreeJSON, hasCodeWorkspace: Bool = false) {
+    init(from json: WorktreeJSON, hasCodeWorkspace: Bool = false, recentTasks: [TaskSession] = []) {
         self.path = json.path
         self.branch = json.branch
         self.baseBranch = json.baseBranch
@@ -160,5 +175,6 @@ extension Worktree {
         self.hasCodeWorkspace = hasCodeWorkspace
         self.isRebasing = json.operationState == "rebase"
         self.isMerging = json.operationState == "merge"
+        self.recentTasks = recentTasks
     }
 }

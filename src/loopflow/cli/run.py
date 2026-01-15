@@ -21,8 +21,8 @@ from loopflow.launcher import (
     get_runner,
 )
 from loopflow.logging import get_model_env, write_prompt_file
-from loopflow.maestro import Session, SessionStatus
-from loopflow.maestro.db import DEFAULT_DB_PATH, save_session, update_session_status
+from loopflow.lfd.client import log_session_start, log_session_end
+from loopflow.lfd.models import Session, SessionStatus
 from loopflow.pipeline import run_pipeline
 from loopflow.tokens import analyze_components
 from loopflow.worktrees import WorktreeError, create
@@ -61,15 +61,15 @@ def _execute_task(
     session = Session(
         id=str(uuid.uuid4()),
         task=task_name,
-        repo=main_repo,
-        worktree=repo_root,
+        repo=str(main_repo),
+        worktree=str(repo_root),
         status=SessionStatus.RUNNING,
         started_at=datetime.now(),
         pid=os.getpid() if not is_interactive else None,
-        backend=backend,
+        model=backend,
         run_mode=run_mode,
     )
-    save_session(DEFAULT_DB_PATH, session)
+    log_session_start(session)
 
     if is_interactive:
         command = build_model_interactive_command(
@@ -137,8 +137,6 @@ def _execute_task(
     # Don't strip API keys from collector env - it needs them for commit message generation.
     # The collector strips keys when spawning the actual agent CLI.
     process = subprocess.Popen(collector_cmd, cwd=repo_root)
-    session.pid = process.pid
-    save_session(DEFAULT_DB_PATH, session)
     result_code = process.wait()
 
     # Clean up prompt file
@@ -148,7 +146,7 @@ def _execute_task(
         pass  # Best effort cleanup
 
     status = SessionStatus.COMPLETED if result_code == 0 else SessionStatus.ERROR
-    update_session_status(DEFAULT_DB_PATH, session.id, status)
+    log_session_end(session.id, status)
 
     return result_code
 

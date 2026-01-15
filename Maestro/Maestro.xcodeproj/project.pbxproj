@@ -30,6 +30,8 @@
 		A0000017 /* RepoWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000017; };
 		A0000018 /* NameGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000018; };
 		A0000019 /* LFDEventService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000019; };
+		A000001A /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = B000001A; };
+		A000001B /* SessionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B000001B; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -58,6 +60,8 @@
 		B0000017 /* RepoWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoWindow.swift; sourceTree = "<group>"; };
 		B0000018 /* NameGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NameGenerator.swift; sourceTree = "<group>"; };
 		B0000019 /* LFDEventService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LFDEventService.swift; sourceTree = "<group>"; };
+		B000001A /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
+		B000001B /* SessionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -112,6 +116,7 @@
 				B0000006 /* LoopflowConfig.swift */,
 				B0000007 /* PromptCard.swift */,
 				B0000015 /* RecentRepo.swift */,
+				B000001A /* Session.swift */,
 				B0000008 /* Worktree.swift */,
 			);
 			path = Models;
@@ -126,6 +131,7 @@
 				B0000018 /* NameGenerator.swift */,
 				B000000A /* PromptService.swift */,
 				B0000014 /* RecentsService.swift */,
+				B000001B /* SessionService.swift */,
 				B000000B /* TerminalLauncher.swift */,
 				B000000C /* TokenEstimator.swift */,
 				B000000D /* WorktreeService.swift */,
@@ -217,6 +223,8 @@
 				A0000017 /* RepoWindow.swift in Sources */,
 				A0000018 /* NameGenerator.swift in Sources */,
 				A0000019 /* LFDEventService.swift in Sources */,
+				A000001A /* Session.swift in Sources */,
+				A000001B /* SessionService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

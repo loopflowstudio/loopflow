@@ -44,6 +44,8 @@ struct WorktreeService {
         return nil
     }
 
+    private let sessionService = SessionService()
+
     func list(in repoURL: URL) async throws -> [Worktree] {
         let output = try await run(["-C", repoURL.path(), "list", "--format", "json", "--full"], in: repoURL)
 
@@ -55,12 +57,13 @@ struct WorktreeService {
         let items = try decoder.decode([WorktreeJSON].self, from: data)
 
         // Filter to actual worktrees (not just branches)
-        return items
-            .filter { $0.kind != "branch" }
-            .map { json in
-                let hasWorkspace = checkForCodeWorkspace(at: URL(fileURLWithPath: json.path))
-                return Worktree(from: json, hasCodeWorkspace: hasWorkspace)
-            }
+        var worktrees: [Worktree] = []
+        for json in items where json.kind != "branch" {
+            let hasWorkspace = checkForCodeWorkspace(at: URL(fileURLWithPath: json.path))
+            let sessions = (try? await sessionService.history(for: json.path, limit: 10)) ?? []
+            worktrees.append(Worktree(from: json, hasCodeWorkspace: hasWorkspace, recentTasks: sessions))
+        }
+        return worktrees
     }
 
     func create(name: String, in repoURL: URL, baseBranch: String? = nil) async throws {

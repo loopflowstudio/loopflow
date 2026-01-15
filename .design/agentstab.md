@@ -29,19 +29,25 @@ Pipelines are DAGs of tasks. Tasks are tactical ("implement", "review"); goals a
 
 ### Agent Definition
 
+Implemented in `lfd/models.py`:
+
 ```python
 @dataclass
-class AgentDef:
+class AgentSpec:
     name: str
-    emoji: str                              # Visual identifier, e.g. "🔧"
-    goal: Path                              # Path to goal.md prompt
+    repo: Path                              # Repository path
     pipeline: str                           # Pipeline name to run
-    merge_strategy: Literal["auto", "pr"]   # How to land work
-    trigger: TriggerDef                     # When to run
+    trigger: TriggerSpec                    # When to run
+    context: list[str]                      # Additional context paths
+    prompt: str = ""                        # Inline prompt from agent file
+    emoji: str = ""                         # Visual identifier, e.g. "🔧"
+    goal: Path | None = None                # Path to goal.md prompt
+    merge_strategy: MergeStrategy = PR      # How to land work (auto or pr)
 
 @dataclass
-class TriggerDef:
-    kind: Literal["manual", "loop", "cron"]
+class TriggerSpec:
+    kind: TriggerKind                       # manual, loop, cron, interval, main-changed
+    interval_seconds: int | None = None     # For interval trigger
     cron: str | None = None                 # Cron expression if kind=cron
     grace_minutes: int = 60                 # Window for missed schedules
 ```
@@ -150,44 +156,45 @@ The emoji makes it easy to:
 
 ## Key Functions
 
+Implemented across `lfd/pipelines.py`, `lfd/cron.py`, `lfd/naming.py`, and `lfd/triggers.py`.
+
 ```python
-# Pipeline loading
-def load_pipeline(name: str, repo: Path) -> PipelineDef:
-    """Load from .lf/pipelines/{name}.yaml or inline in config.yaml"""
+# Pipeline loading (lfd/pipelines.py)
+def load_pipeline(name: str, repo: Path) -> PipelineDef | None:
+    """Load from .lf/pipelines/{name}.yaml"""
 
 def resolve_pipeline(pipeline: PipelineDef, repo: Path) -> list[ResolvedStep]:
-    """Expand nested pipelines, return flat DAG with dependencies"""
+    """Expand nested pipelines, return flat list with parallel groups marked"""
 
-# Pipeline execution
-def execute_pipeline(pipeline: PipelineDef, worktree: Path, goal: str) -> PipelineResult:
+# Pipeline execution (lfd/pipelines.py)
+async def execute_pipeline(pipeline, repo, worktree, goal, run_step) -> PipelineResult:
     """Run DAG in worktree, injecting goal as context for each step"""
 
-def run_parallel_steps(steps: list[PipelineStep], worktree: Path) -> list[StepResult]:
-    """Run steps concurrently using asyncio, same worktree"""
+async def _run_parallel_steps(steps, worktree, goal, run_step) -> list[StepResult]:
+    """Run steps concurrently using asyncio"""
 
-# Agent lifecycle
-def agent_iteration(agent: AgentDef) -> IterationResult:
-    """One iteration: create worktree → run pipeline → merge → cleanup"""
-
-def agent_loop(agent: AgentDef) -> None:
-    """Main loop for continuous agents"""
-
-# Scheduling
+# Scheduling (lfd/cron.py)
 def parse_cron(expr: str) -> CronSchedule:
     """Parse cron expression (standard 5-field format)"""
 
-def should_run_cron(schedule: CronSchedule, last_run: datetime, grace: int) -> bool:
+def should_run_cron(schedule, last_run, now, grace_minutes) -> bool:
     """Check if scheduled time passed (with grace period for laptop sleep)"""
 
 def next_run_time(schedule: CronSchedule, after: datetime) -> datetime:
     """Calculate next scheduled run time"""
 
-# Naming
-def agent_branch_name(agent: AgentDef, iteration: int) -> str:
+# Naming (lfd/naming.py)
+def agent_branch_name(agent: AgentSpec, iteration: int) -> str:
     """Generate branch name: {emoji}/{agent}/{iteration:03d}"""
 
-def agent_worktree_path(repo: Path, agent: AgentDef, iteration: int) -> Path:
-    """Generate worktree path: {repo}.{emoji}-{agent}-{iteration:03d}"""
+def agent_worktree_path(repo: Path, agent: AgentSpec, iteration: int) -> Path:
+    """Generate worktree path as sibling to repo"""
+
+def agent_pr_title(agent: AgentSpec, summary: str) -> str:
+    """Generate PR title with emoji prefix"""
+
+def parse_agent_branch(branch: str) -> tuple[str, str, int] | None:
+    """Parse branch name to extract (emoji, agent_name, iteration)"""
 ```
 
 ## Constraints
@@ -233,10 +240,12 @@ This enables cross-agent communication. A refactoring agent might notice a secur
   security-notes.md   # Left by agents with security goals
 ```
 
-## Open Questions
+## Implementation Decisions
 
-1. **Goal file format.** Pure markdown prompt, or structured sections (objectives, constraints, out-of-scope)?
-2. **`.research/` structure.** Free-form files, or convention like `{agent-emoji}-notes.md`?
+These questions from the design phase were resolved during implementation (see `.design/questions.md` for details):
+
+1. **Goal file format.** Pure markdown prompt. The goal path is stored in `AgentSpec.goal` and read as context when running tasks.
+2. **`.research/` structure.** Not enforced by code. Agents can write freely; convention can be added later.
 
 ## Done When
 

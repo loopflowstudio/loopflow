@@ -100,7 +100,6 @@ def _parse_trigger(config: dict) -> TriggerSpec:
 
     # Handle cron syntax: cron("0 9 * * *", grace: 120)
     if isinstance(trigger_val, str) and trigger_val.startswith("cron("):
-        import re
         cron_match = re.match(r'cron\("([^"]+)"(?:,\s*grace:\s*(\d+))?\)', trigger_val)
         if cron_match:
             cron_expr = cron_match.group(1)

@@ -1,7 +1,7 @@
 """Cron expression parsing and scheduling."""
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 @dataclass
@@ -96,7 +96,6 @@ def should_run_cron(
     grace_start = now.replace(second=0, microsecond=0)
 
     # Don't look back more than grace_minutes
-    from datetime import timedelta
     earliest = now - timedelta(minutes=grace_minutes)
     if current < earliest:
         current = earliest
@@ -112,8 +111,6 @@ def should_run_cron(
 
 def next_run_time(schedule: CronSchedule, after: datetime) -> datetime:
     """Calculate next scheduled run time."""
-    from datetime import timedelta
-
     current = after.replace(second=0, microsecond=0) + timedelta(minutes=1)
 
     # Limit search to prevent infinite loop

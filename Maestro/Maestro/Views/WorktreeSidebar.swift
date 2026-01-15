@@ -104,7 +104,7 @@ struct WorktreeSidebar: View {
             }
             let service = WorktreeService()
             do {
-                let diff = try await service.getDiff(for: worktree.branch, in: repoURL)
+                let diff = try await service.getDiff("main...\(worktree.branch)", in: repoURL)
                 diffContent = diff
             } catch {
                 diffContent = "Error loading diff: \(error.localizedDescription)"
@@ -126,9 +126,8 @@ struct WorktreeSidebar: View {
             }
             let service = WorktreeService()
             do {
-                let diff = try await service.getDiffBetween(
-                    branchA: worktreeA.branch,
-                    branchB: worktreeB.branch,
+                let diff = try await service.getDiff(
+                    "\(worktreeA.branch)...\(worktreeB.branch)",
                     in: repoURL
                 )
                 compareContent = diff

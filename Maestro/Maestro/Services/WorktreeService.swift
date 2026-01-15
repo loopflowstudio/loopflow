@@ -86,15 +86,11 @@ struct WorktreeService {
         _ = try await runLfpr(["land"], in: worktreePath)
     }
 
-    func getDiff(for branch: String, in repoURL: URL, base: String = "main") async throws -> String {
-        try await runGit(["diff", "\(base)...\(branch)"], in: repoURL, emptyMessage: "No changes")
+    func getDiff(_ spec: String, in repoURL: URL) async throws -> String {
+        try await runGit(["diff", spec], in: repoURL)
     }
 
-    func getDiffBetween(branchA: String, branchB: String, in repoURL: URL) async throws -> String {
-        try await runGit(["diff", "\(branchA)...\(branchB)"], in: repoURL, emptyMessage: "No differences")
-    }
-
-    private func runGit(_ args: [String], in directory: URL, emptyMessage: String) async throws -> String {
+    private func runGit(_ args: [String], in directory: URL) async throws -> String {
         return try await withCheckedThrowingContinuation { continuation in
             let process = Process()
             let pipe = Pipe()
@@ -113,7 +109,7 @@ struct WorktreeService {
                 let output = String(data: data, encoding: .utf8) ?? ""
 
                 if process.terminationStatus == 0 {
-                    continuation.resume(returning: output.isEmpty ? emptyMessage : output)
+                    continuation.resume(returning: output)
                 } else {
                     continuation.resume(throwing: WorktreeError.commandFailed(output))
                 }

@@ -92,13 +92,18 @@ def _is_agent_running(agent_name: str) -> bool:
         return False
 
 
-def _update_completed_runs() -> None:
-    """Check all running agents and mark completed ones."""
+def _update_completed_runs() -> list[str]:
+    """Check all running agents and mark completed ones.
+
+    Returns list of agent names that just completed (for loop trigger re-spawn).
+    """
     conn = get_db(DEFAULT_DB_PATH)
     cursor = conn.execute(
         "SELECT id, agent_name, pid FROM agent_runs WHERE status = 'running'"
     )
     rows = cursor.fetchall()
+
+    completed_agents: list[str] = []
 
     for row in rows:
         pid = row["pid"]
@@ -118,9 +123,12 @@ def _update_completed_runs() -> None:
                 (datetime.now().isoformat(), row["id"]),
             )
             _log(f"Agent {row['agent_name']} completed (was PID {pid})")
+            completed_agents.append(row["agent_name"])
 
     conn.commit()
     conn.close()
+
+    return completed_agents
 
 
 def _record_run_start(agent: AgentFile, pid: int, worktree: Path | None, main_sha: str | None) -> str:
@@ -176,7 +184,7 @@ def run_daemon(check_interval: int = 30) -> None:
     while True:
         try:
             # Update status of any finished runs
-            _update_completed_runs()
+            completed_agents = _update_completed_runs()
 
             agents = list_agent_files()
 
@@ -187,6 +195,16 @@ def run_daemon(check_interval: int = 30) -> None:
 
                 # Skip if already running
                 if _is_agent_running(agent.name):
+                    continue
+
+                # Loop trigger: re-spawn immediately if just completed
+                if agent.trigger == "loop" and agent.name in completed_agents:
+                    _log(f"Loop re-triggering agent: {agent.name}")
+                    pid = _spawn_agent_run(agent)
+                    if pid:
+                        worktree = get_agent_worktree_path(agent)
+                        _record_run_start(agent, pid, worktree, None)
+                        _log(f"Started agent {agent.name} (PID {pid})")
                     continue
 
                 last_run, last_sha = _get_last_run(agent.name)

@@ -49,6 +49,7 @@ struct PromptLauncher: View {
             // Main input area - centered and prominent
             VStack(spacing: 12) {
                 taskSelector
+                voiceSelector
                 mainInput
                 optionsBar
             }
@@ -219,6 +220,125 @@ struct PromptLauncher: View {
     private func clearPromptSelection() {
         // Keep just the args part
         inputText = parsedInput.args
+    }
+
+    // MARK: - Voice Selector
+
+    @State private var showingVoicePicker = false
+
+    private var voiceSelector: some View {
+        HStack(spacing: 8) {
+            Text("Voice")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            // Selected voice chips
+            if appState.selectedVoices.isEmpty {
+                Button {
+                    showingVoicePicker = true
+                } label: {
+                    Text("None")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(Color.primary.opacity(0.05))
+                        )
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: $showingVoicePicker) {
+                    voicePickerPopover()
+                }
+            } else {
+                HStack(spacing: 6) {
+                    ForEach(appState.selectedVoices) { voice in
+                        voiceChip(voice)
+                    }
+
+                    if appState.voices.count > appState.selectedVoices.count {
+                        Button {
+                            showingVoicePicker = true
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .padding(6)
+                                .background(Circle().fill(Color.primary.opacity(0.05)))
+                        }
+                        .buttonStyle(.plain)
+                        .popover(isPresented: $showingVoicePicker) {
+                            voicePickerPopover()
+                        }
+                    }
+                }
+            }
+
+            Spacer()
+        }
+    }
+
+    private func voiceChip(_ voice: Voice) -> some View {
+        HStack(spacing: 4) {
+            Text(voice.displayName)
+                .font(.caption)
+                .fontWeight(.medium)
+            Button {
+                appState.selectedVoices.removeAll { $0.id == voice.id }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption2)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Capsule().fill(Color.purple.opacity(0.15)))
+        .foregroundStyle(Color.purple)
+    }
+
+    private func voicePickerPopover() -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Available Voices")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+
+            if appState.voices.isEmpty {
+                Text("No voices in .lf/voices/")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
+            } else {
+                ForEach(appState.voices) { voice in
+                    let isSelected = appState.selectedVoices.contains(voice)
+                    Button {
+                        if isSelected {
+                            appState.selectedVoices.removeAll { $0.id == voice.id }
+                        } else {
+                            appState.selectedVoices.append(voice)
+                        }
+                    } label: {
+                        HStack {
+                            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(isSelected ? Color.purple : Color.secondary)
+                            Text(voice.displayName)
+                                .fontWeight(.medium)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .frame(minWidth: 200)
     }
 
     // MARK: - Main Input

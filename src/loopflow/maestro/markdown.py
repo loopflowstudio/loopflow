@@ -31,6 +31,7 @@ class AgentFile:
     context: list[str]
     prompt: str
     interval_seconds: int | None = None
+    cron: str | None = None
     fresh: bool = False  # force fresh worktree each run
     diff: bool = False  # include raw branch diff
     diff_files: bool = True  # include files touched by branch
@@ -65,6 +66,7 @@ def parse_agent_file(path: Path) -> AgentFile | None:
         context=config.get("context", []),
         prompt=prompt,
         interval_seconds=config.get("interval"),
+        cron=config.get("cron"),
         fresh=config.get("fresh", False),
         diff=config.get("diff", False),
         diff_files=config.get("diff_files", True),
@@ -152,6 +154,7 @@ def create_agent_file(
     context: list[str] | None = None,
     prompt: str = "",
     interval_seconds: int | None = None,
+    cron: str | None = None,
     agents_dir: Path | None = None,
     diff: bool = False,
     diff_files: bool = True,
@@ -169,6 +172,8 @@ def create_agent_file(
     lines.append(f"trigger: {trigger}")
     if interval_seconds and trigger == "interval":
         lines.append(f"interval: {interval_seconds}")
+    if cron and trigger == "cron":
+        lines.append(f"cron: {cron}")
     if context:
         lines.append(f"context: [{', '.join(context)}]")
     if diff:

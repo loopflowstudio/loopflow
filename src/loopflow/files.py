@@ -17,13 +17,11 @@ class GatherResult:
 
 # Image extensions (tracked separately, not embedded in text)
 _IMAGE_EXTENSIONS: set[str] = {
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff",
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".ico",
 }
 
 # Known binary extensions (skip without reading)
-_BINARY_EXTENSIONS: set[str] = {
-    # Images (also in _IMAGE_EXTENSIONS, but kept here for is_binary check)
-    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".bmp", ".tiff",
+_BINARY_EXTENSIONS: set[str] = _IMAGE_EXTENSIONS | {
     # Archives
     ".zip", ".tar", ".gz", ".bz2", ".7z", ".rar",
     # Executables/libraries

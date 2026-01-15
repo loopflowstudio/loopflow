@@ -78,6 +78,7 @@ def _execute_task(
             model_variant=model_variant,
             sandbox_root=repo_root.parent,
             workdir=repo_root,
+            images=components.image_files,
         )
     else:
         command = build_model_command(
@@ -88,6 +89,7 @@ def _execute_task(
             model_variant=model_variant,
             sandbox_root=repo_root.parent,
             workdir=repo_root,
+            images=components.image_files,
         )
 
     # For interactive mode, run CLI directly to preserve terminal

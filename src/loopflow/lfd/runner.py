@@ -122,6 +122,7 @@ def run_agent_iteration(
             model_variant=model_variant,
             sandbox_root=worktree_path.parent,
             workdir=worktree_path,
+            images=components.image_files,
         )
 
         collector_cmd = [

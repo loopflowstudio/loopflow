@@ -1,5 +1,6 @@
 """File library gathering for LLM context."""
 
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
@@ -7,9 +8,21 @@ from typing import Optional
 import pathspec
 
 
+@dataclass
+class GatherResult:
+    """Result of gathering files for context."""
+    text_files: list[tuple[Path, str]] = field(default_factory=list)
+    image_files: list[Path] = field(default_factory=list)
+
+
+# Image extensions (tracked separately, not embedded in text)
+_IMAGE_EXTENSIONS: set[str] = {
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff",
+}
+
 # Known binary extensions (skip without reading)
 _BINARY_EXTENSIONS: set[str] = {
-    # Images
+    # Images (also in _IMAGE_EXTENSIONS, but kept here for is_binary check)
     ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".bmp", ".tiff",
     # Archives
     ".zip", ".tar", ".gz", ".bz2", ".7z", ".rar",
@@ -24,6 +37,11 @@ _BINARY_EXTENSIONS: set[str] = {
     # Other
     ".pyc", ".class", ".sqlite", ".db",
 }
+
+
+def is_image(path: Path) -> bool:
+    """Check if file is an image by extension."""
+    return path.suffix.lower() in _IMAGE_EXTENSIONS
 
 
 def is_binary(path: Path) -> bool:
@@ -198,13 +216,15 @@ def _expand_path(path_str: str, repo_root: Path) -> list[Path]:
     return []
 
 
-def gather_files(paths: list[str], repo_root: Path, exclude: Optional[list[str]] = None) -> list[tuple[Path, str]]:
+def gather_files(paths: list[str], repo_root: Path, exclude: Optional[list[str]] = None) -> GatherResult:
     """Gather files and their parent READMEs.
 
-    Returns list of (path, content) tuples, deduplicated and ordered.
+    Returns GatherResult with text files (path, content) and image file paths.
+    Images are tracked separately since they can't be embedded in text prompts.
     """
     seen: set[Path] = set()
-    results: list[tuple[Path, str]] = []
+    text_files: list[tuple[Path, str]] = []
+    image_files: list[Path] = []
 
     # Pre-compile exclude patterns once for the entire gather operation
     excluded_paths = _compile_exclude_patterns(exclude, repo_root) if exclude else None
@@ -213,19 +233,28 @@ def gather_files(paths: list[str], repo_root: Path, exclude: Optional[list[str]]
         expanded = _expand_path(path_str, repo_root)
 
         for path in expanded:
+            if path in seen:
+                continue
+
+            # Check if this is an image
+            if path.is_file() and is_image(path) and not _is_ignored(path, repo_root, excluded_paths):
+                seen.add(path)
+                image_files.append(path)
+                continue
+
             # Gather parent documentation first
             for doc_path, content in _gather_docs(path, repo_root, excluded_paths):
                 if doc_path not in seen:
                     seen.add(doc_path)
-                    results.append((doc_path, content))
+                    text_files.append((doc_path, content))
 
-            # Gather the file itself
+            # Gather the file itself (skips binary including images)
             file_result = _gather_file(path, repo_root, excluded_paths)
             if file_result and file_result[0] not in seen:
                 seen.add(file_result[0])
-                results.append(file_result)
+                text_files.append(file_result)
 
-    return results
+    return GatherResult(text_files=text_files, image_files=image_files)
 
 
 def format_files(files: list[tuple[Path, str]], repo_root: Path) -> str:
@@ -240,3 +269,20 @@ def format_files(files: list[tuple[Path, str]], repo_root: Path) -> str:
 
     body = "\n\n".join(parts)
     return f"Reference files for this task. Includes parent documentation for context.\n\n<lf:files>\n{body}\n</lf:files>"
+
+
+def format_image_references(images: list[Path], repo_root: Path) -> str:
+    """Format image file references for the prompt.
+
+    Images can't be embedded in text, but we tell the agent where they are
+    so it can read them using its file tools.
+    """
+    if not images:
+        return ""
+
+    lines = ["The following images are available. Use your Read tool to view them:"]
+    for img in images:
+        rel = img.relative_to(repo_root)
+        lines.append(f"- {rel}")
+
+    return "<lf:images>\n" + "\n".join(lines) + "\n</lf:images>"

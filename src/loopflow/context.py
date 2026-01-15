@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from loopflow.design import gather_design_docs
-from loopflow.files import gather_docs, gather_files, format_files
+from loopflow.files import gather_docs, gather_files, format_files, format_image_references
 from loopflow.frontmatter import TaskFile, parse_task_file
 from loopflow.voices import Voice, load_voice
 
@@ -25,6 +25,7 @@ class PromptComponents:
     clipboard: str | None = None
     loopflow_doc: str | None = None  # Bundled system documentation
     voices: list[Voice] | None = None
+    image_files: list[Path] | None = None  # Images for visual context
 
 
 def find_worktree_root(start: Optional[Path] = None) -> Path | None:
@@ -250,7 +251,7 @@ def gather_prompt_components(
     # Merge: diff files first, then context paths not already in diff
     diff_set = set(diff_file_paths)
     all_file_paths = diff_file_paths + [p for p in context_paths if p not in diff_set]
-    all_files = gather_files(all_file_paths, repo_root, context_exclude)
+    gather_result = gather_files(all_file_paths, repo_root, context_exclude)
 
     clipboard = _read_clipboard() if paste else None
 
@@ -261,12 +262,13 @@ def gather_prompt_components(
         run_mode=run_mode,
         docs=docs,
         diff=diff,
-        diff_files=all_files,
+        diff_files=gather_result.text_files,
         task=task_result,
         repo_root=repo_root,
         clipboard=clipboard,
         loopflow_doc=loopflow_doc,
         voices=loaded_voices,
+        image_files=gather_result.image_files or None,
     )
 
 
@@ -321,6 +323,9 @@ def format_prompt(components: PromptComponents) -> str:
 
     if components.clipboard:
         parts.append(f"Content from clipboard.\n\n<lf:clipboard>\n{components.clipboard}\n</lf:clipboard>")
+
+    if components.image_files:
+        parts.append(format_image_references(components.image_files, components.repo_root))
 
     return "\n\n".join(parts)
 

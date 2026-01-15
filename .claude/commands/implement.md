@@ -44,7 +44,18 @@ These are specific to this codebase:
 - **Return `None` for "not found"**, raise exceptions for "shouldn't happen"
 - **Prefer functions over classes** when you don't need state
 - **No backwards-compatibility shims** unless explicitly required
-- **End-to-end changes.** If you add CLI flags or config options, update the Maestro UI too (under `Maestro/`). Check `Maestro/Maestro/Models/LoopflowConfig.swift` for config parsing, `AppState.swift` for state, and `Views/PromptLauncher.swift` for the launch UI.
+
+## End-to-end implementation
+
+If the design adds config options, CLI flags, or context sources, the implementation is incomplete without Maestro UI updates. Check the design doc for a "UI changes" section.
+
+Key Maestro files:
+- `Maestro/Maestro/Models/LoopflowConfig.swift` — Config model and YAML parsing
+- `Maestro/Maestro/AppState.swift` — App state, including toggle defaults
+- `Maestro/Maestro/Views/PromptLauncher.swift` — Launch UI with toggles and options
+- `Maestro/Maestro/Services/TokenEstimator.swift` — Token counting (if new context sources)
+
+If the design doc explicitly marks the feature as infrastructure-only, skip UI updates.
 
 ## If something's wrong
 

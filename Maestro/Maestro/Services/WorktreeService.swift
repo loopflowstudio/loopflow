@@ -78,7 +78,7 @@ struct WorktreeService {
         _ = try await run(["-C", repoURL.path(), "remove", name], in: repoURL)
     }
 
-    func createPR(in worktreePath: URL, title: String? = nil) async throws {
+    func createPR(in worktreePath: URL) async throws {
         _ = try await runLfops(["pr"], in: worktreePath)
     }
 

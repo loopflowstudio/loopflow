@@ -4,7 +4,6 @@ Executes an agent's pipeline with prompt injection and merge handling.
 """
 
 import os
-import signal
 import subprocess
 import sys
 import uuid
@@ -16,7 +15,7 @@ from loopflow.context import PromptComponents, gather_prompt_components, format_
 from loopflow.git import find_main_repo, get_current_branch
 from loopflow.launcher import build_model_command, get_runner
 from loopflow.lfd.client import log_session_start, log_session_end
-from loopflow.lfd.db import DB_PATH, get_latest_run, update_run_status
+from loopflow.lfd.db import _get_db, update_run_status
 from loopflow.lfd.models import AgentSpec, AgentStatus, MergeStrategy, Session, SessionStatus
 from loopflow.llm_http import generate_pr_message
 from loopflow.logging import write_prompt_file
@@ -48,7 +47,6 @@ def run_agent_iteration(
         return 1
 
     # Update run with worktree info
-    from loopflow.lfd.db import _get_db
     conn = _get_db()
     conn.execute(
         "UPDATE agent_runs SET worktree = ? WHERE id = ?",

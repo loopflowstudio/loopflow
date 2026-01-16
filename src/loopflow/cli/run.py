@@ -23,8 +23,8 @@ from loopflow.launcher import (
 from loopflow.logging import get_model_env, write_prompt_file
 from loopflow.lfd.client import log_session_start, log_session_end
 from loopflow.lfd.models import Session, SessionStatus
-from loopflow.lfd.pipelines import load_pipeline as load_pipeline_file, PipelineDef, PipelineStep
-from loopflow.pipeline import run_pipeline_def
+from loopflow.lfd.pipelines import load_pipeline as load_pipeline_file, PipelineDef, PipelineStep, RaceConfig
+from loopflow.pipeline import run_pipeline_def, _run_race_step
 from loopflow.tokens import analyze_components
 from loopflow.worktrees import WorktreeError, create
 
@@ -203,10 +203,6 @@ def run(
 
     # Handle race execution
     if race:
-        from loopflow.git import find_main_repo
-        from loopflow.lfd.pipelines import RaceConfig
-        from loopflow.pipeline import _run_race_step
-
         models = [m.strip() for m in race.split(",")]
         config = load_config(repo_root)
         main_repo = find_main_repo(repo_root) or repo_root

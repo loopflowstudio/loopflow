@@ -122,6 +122,7 @@ def run_agent_iteration(
             model_variant=model_variant,
             sandbox_root=worktree_path.parent,
             workdir=worktree_path,
+            images=components.image_files,
         )
 
         collector_cmd = [
@@ -207,10 +208,13 @@ def _inject_agent_prompt(
         run_mode=components.run_mode,
         docs=components.docs,
         diff=components.diff,
+        diff_files=components.diff_files,
         task=modified_task,
-        context_files=components.context_files,
         repo_root=components.repo_root,
         clipboard=components.clipboard,
+        loopflow_doc=components.loopflow_doc,
+        voices=components.voices,
+        image_files=components.image_files,
     )
 
 

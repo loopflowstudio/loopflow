@@ -230,6 +230,7 @@ def build_codex_command(
     model_variant: str | None = None,
     sandbox_root: Path | None = None,
     workdir: Path | None = None,
+    images: list[Path] | None = None,
 ) -> list[str]:
     """Build Codex CLI command for the requested run mode.
 
@@ -249,6 +250,11 @@ def build_codex_command(
     cmd.extend(["--sandbox", "workspace-write"])
     if sandbox_root:
         cmd.extend(["--add-dir", str(sandbox_root)])
+
+    # Attach images via -i flag
+    if images:
+        for img in images:
+            cmd.extend(["-i", str(img)])
 
     if skip_permissions:
         # Keep sandboxing but avoid approval prompts in exec mode.
@@ -282,6 +288,7 @@ def build_codex_interactive_command(
     model_variant: str | None = None,
     sandbox_root: Path | None = None,
     workdir: Path | None = None,
+    images: list[Path] | None = None,
 ) -> list[str]:
     """Build Codex CLI command for interactive mode.
 
@@ -297,6 +304,10 @@ def build_codex_interactive_command(
     cmd.extend(["--sandbox", "workspace-write"])
     if sandbox_root:
         cmd.extend(["--add-dir", str(sandbox_root)])
+    # Attach images via -i flag
+    if images:
+        for img in images:
+            cmd.extend(["-i", str(img)])
     return cmd
 
 
@@ -368,10 +379,12 @@ def build_model_command(
     model_variant: str | None = None,
     sandbox_root: Path | None = None,
     workdir: Path | None = None,
+    images: list[Path] | None = None,
 ) -> list[str]:
     """Build a model command for auto/background execution.
 
     Prompt should be appended as a CLI argument.
+    Images are passed to Codex via -i flag; Claude/Gemini read from filesystem.
     """
     if model == "claude":
         return build_claude_command(auto=auto, stream=stream, skip_permissions=skip_permissions, model_variant=model_variant)
@@ -391,6 +404,7 @@ def build_model_command(
         model_variant=model_variant,
         sandbox_root=sandbox_root,
         workdir=workdir,
+        images=images,
     )
 
 
@@ -400,10 +414,12 @@ def build_model_interactive_command(
     model_variant: str | None = None,
     sandbox_root: Path | None = None,
     workdir: Path | None = None,
+    images: list[Path] | None = None,
 ) -> list[str]:
     """Build a model command for interactive execution.
 
     Prompt should be appended as a CLI argument.
+    Images are passed to Codex via -i flag; Claude/Gemini read from filesystem.
     """
     if model == "claude":
         return build_claude_command(auto=False, stream=False, skip_permissions=skip_permissions, model_variant=model_variant)
@@ -419,6 +435,7 @@ def build_model_interactive_command(
         model_variant=model_variant,
         sandbox_root=sandbox_root,
         workdir=workdir,
+        images=images,
     )
 
 

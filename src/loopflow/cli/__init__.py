@@ -1,6 +1,7 @@
 """Loopflow CLI: Arrange LLMs to code in harmony."""
 
 import sys
+from typing import Optional
 
 import typer
 

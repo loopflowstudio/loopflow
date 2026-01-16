@@ -30,8 +30,11 @@ def capture(
     window: Optional[str] = typer.Argument(None, help="Window name to capture (fuzzy match)"),
     name: Optional[str] = typer.Option(None, "--name", "-n", help="Output filename (without extension)"),
     list_windows: bool = typer.Option(False, "--list", "-l", help="List visible windows"),
+    open_file: bool = typer.Option(False, "--open", "-o", help="Open screenshot after capture"),
 ):
     """Capture a window screenshot to .design/screenshots/."""
+    import subprocess
+
     from loopflow.capture import (
         list_windows as get_windows,
         find_window,
@@ -76,6 +79,9 @@ def capture(
 
     rel_path = output_path.relative_to(repo_root)
     typer.echo(f"Captured {win.app_name} → {rel_path}")
+
+    if open_file:
+        subprocess.run(["open", str(output_path)], check=False)
 
 
 def main():

@@ -14,10 +14,13 @@ What's missing: there's no easy way to **capture** screenshots. The spark-tune d
 
 ```bash
 # Capture a window by name (fuzzy match)
-lf capture Maestro                  # → .design/screenshots/maestro-<timestamp>.png
+lf capture Maestro                  # → .design/screenshots/capture-<timestamp>.png
 
 # Capture with a custom name
 lf capture Maestro --name main-view # → .design/screenshots/main-view.png
+
+# Capture and open for verification
+lf capture Maestro --open           # opens screenshot in Preview after capture
 
 # List windows (help choosing)
 lf capture --list

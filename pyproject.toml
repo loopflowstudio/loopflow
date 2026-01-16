@@ -31,6 +31,7 @@ dependencies = [
     "pydantic>=2.12.5",
     "pydantic-ai-slim[anthropic]>=1.0.0",
     "tiktoken>=0.7.0",
+    "asana>=5.0.0",
 ]
 
 [project.urls]
@@ -50,6 +51,7 @@ lf = "loopflow.cli:main"
 lfd = "loopflow.lfd:main"
 lfwt = "loopflow.lfwt:main"
 lfops = "loopflow.lfops:main"
+lfwork = "loopflow.lfwork:main"
 
 [build-system]
 requires = ["hatchling"]

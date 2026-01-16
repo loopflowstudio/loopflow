@@ -14,6 +14,17 @@ class IdeConfig(BaseModel):
     workspace: Optional[str] = None
 
 
+class AsanaConfig(BaseModel):
+    project_id: str
+
+
+class WorkConfig(BaseModel):
+    backend: str = "file"  # "file" or "asana"
+    asana: Optional[AsanaConfig] = None
+    auto_rebase: bool = True
+    auto_land: bool = False
+
+
 class PipelineConfig(BaseModel):
     name: str = ""
     tasks: list[str]
@@ -66,6 +77,7 @@ class Config(BaseModel):
     paste: bool = False  # Include clipboard content by default
     voice: Optional[list[str]] = None  # Default voices for all tasks
     summaries: list[SummaryConfig] = Field(default_factory=list)  # Summaries to include
+    work: Optional[WorkConfig] = None  # Work queue configuration
 
     @field_validator("context", mode="before")
     @classmethod

@@ -12,6 +12,10 @@ from loopflow.frontmatter import TaskFile, parse_task_file
 from loopflow.voices import Voice, load_voice
 
 
+# Path to bundled builtin templates
+_TEMPLATES_DIR = Path(__file__).parent / "templates" / "commands"
+
+
 @dataclass
 class PromptComponents:
     """Raw components of a prompt before assembly."""
@@ -66,6 +70,63 @@ def _read_clipboard() -> str | None:
     return None
 
 
+def _get_builtin_task(name: str) -> Path | None:
+    """Return path to bundled template if it exists."""
+    builtin = _TEMPLATES_DIR / f"{name}.md"
+    return builtin if builtin.exists() else None
+
+
+def list_builtin_tasks() -> list[str]:
+    """Return names of all builtin tasks."""
+    if not _TEMPLATES_DIR.exists():
+        return []
+    return sorted(p.stem for p in _TEMPLATES_DIR.glob("*.md"))
+
+
+def list_user_tasks(repo_root: Path) -> list[str]:
+    """Return names of user-defined tasks in the repo."""
+    tasks = set()
+
+    # .claude/commands/*.md
+    claude_dir = repo_root / ".claude" / "commands"
+    if claude_dir.exists():
+        for p in claude_dir.glob("*.md"):
+            tasks.add(p.stem)
+
+    # .lf/*
+    lf_dir = repo_root / ".lf"
+    if lf_dir.exists():
+        for p in lf_dir.iterdir():
+            if not p.is_file():
+                continue
+            # Skip config files
+            if p.name in ("config.yaml", "config.yml"):
+                continue
+            # Task name is filename without extension
+            if p.suffix:
+                tasks.add(p.stem)
+            else:
+                tasks.add(p.name)
+
+    return sorted(tasks)
+
+
+def list_all_tasks(repo_root: Path | None) -> tuple[list[str], list[str]]:
+    """Return (user_tasks, builtin_only_tasks) for discoverability.
+
+    User tasks include any that override builtins.
+    Builtin-only tasks are builtins not overridden by user tasks.
+    """
+    builtins = set(list_builtin_tasks())
+    if repo_root:
+        user = set(list_user_tasks(repo_root))
+    else:
+        user = set()
+
+    builtin_only = builtins - user
+    return sorted(user), sorted(builtin_only)
+
+
 def gather_task(repo_root: Path, name: str) -> TaskFile | None:
     """Gather and parse task file with frontmatter.
 
@@ -75,6 +136,7 @@ def gather_task(repo_root: Path, name: str) -> TaskFile | None:
     3. .lf/{name}.md
     4. .lf/{name}.* (any other extension)
     5. .lf/{name} (bare name)
+    6. templates/commands/{name}.md (builtin fallback)
 
     Returns TaskFile with parsed config, or None if not found.
     """
@@ -110,6 +172,13 @@ def gather_task(repo_root: Path, name: str) -> TaskFile | None:
     content = _read_file_if_named(lf_dir, name)
     if content:
         return parse_task_file(name, content)
+
+    # Fall back to builtin templates
+    builtin_path = _get_builtin_task(name)
+    if builtin_path:
+        content = builtin_path.read_text()
+        return parse_task_file(name, content)
+
     return None
 
 

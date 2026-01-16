@@ -182,15 +182,6 @@ def _gather_file(
     return (path, path.read_text())
 
 
-def gather_file(
-    path: Path,
-    repo_root: Path,
-    exclude: Optional[list[str]] = None,
-) -> tuple[Path, str] | None:
-    excluded_paths = _compile_exclude_patterns(exclude, repo_root) if exclude else None
-    return _gather_file(path, repo_root, excluded_paths)
-
-
 def _expand_path(path_str: str, repo_root: Path) -> list[Path]:
     """Expand a path string to a list of file paths.
 

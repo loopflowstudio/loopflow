@@ -84,6 +84,24 @@ def _save_metadata(repo_root: Path, metadata: dict[str, SummaryMetadata]) -> Non
     path.write_text(json.dumps(data, indent=2) + "\n")
 
 
+def _ensure_gitignored(repo_root: Path) -> None:
+    """Ensure .lf/summaries/ is in .gitignore."""
+    gitignore = repo_root / ".gitignore"
+    pattern = ".lf/summaries/"
+
+    if gitignore.exists():
+        content = gitignore.read_text()
+        if pattern in content:
+            return
+        # Append with newline if file doesn't end with one
+        if content and not content.endswith("\n"):
+            content += "\n"
+        content += pattern + "\n"
+        gitignore.write_text(content)
+    else:
+        gitignore.write_text(pattern + "\n")
+
+
 def load_summary(path: Path, repo_root: Path) -> Summary | None:
     """Load cached summary from .lf/summaries/."""
     filename = _path_to_filename(path)
@@ -110,6 +128,8 @@ def load_summary(path: Path, repo_root: Path) -> Summary | None:
 
 def save_summary(summary: Summary, repo_root: Path) -> None:
     """Save summary to .lf/summaries/."""
+    _ensure_gitignored(repo_root)
+
     summaries_dir = _summaries_dir(repo_root)
     summaries_dir.mkdir(parents=True, exist_ok=True)
 

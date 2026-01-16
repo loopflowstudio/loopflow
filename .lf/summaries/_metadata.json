@@ -1,8 +1,0 @@
-{
-  "src/loopflow": {
-    "source_hash": "956dca46e5aead65",
-    "token_budget": 8000,
-    "created_at": "2026-01-16T15:20:51.459478",
-    "model": "claude:sonnet"
-  }
-}

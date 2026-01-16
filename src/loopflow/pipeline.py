@@ -198,7 +198,8 @@ def _run_parallel_group(
             # Clean up any already-started processes
             for p in processes:
                 p.process.terminate()
-                remove_worktree(repo_root, p.worktree.name)
+                branch_name = p.worktree.name.split(".")[-1]
+                remove_worktree(repo_root, branch_name)
             return [1]  # Signal failure
 
         prompt = build_prompt(

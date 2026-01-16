@@ -32,6 +32,36 @@ class _StepParams:
     voices: list[str] | None
 
 
+def _build_step_params(
+    task: str,
+    config: StepConfig | None,
+    backend: str,
+    model_variant: str | None,
+    context: list[str] | None,
+) -> _StepParams:
+    """Build step params by applying config overrides to defaults."""
+    step_backend = backend
+    step_variant = model_variant
+    step_context = list(context) if context else []
+    step_voices = None
+
+    if config:
+        if config.model:
+            step_backend, step_variant = parse_model(config.model)
+        if config.context:
+            step_context.extend(config.context)
+        if config.voice:
+            step_voices = [config.voice]
+
+    return _StepParams(
+        task=task,
+        backend=step_backend,
+        model_variant=step_variant,
+        context=step_context or None,
+        voices=step_voices,
+    )
+
+
 def _run_step(
     params: _StepParams,
     repo_root: Path,
@@ -281,30 +311,17 @@ def _run_parallel_group(
     print(f"[{group_num}/{total_groups}] Parallel: {', '.join(task_names)}")
     print(f"{'='*60}\n")
 
-    # Build worktree tasks from steps
     wt_tasks = []
     for step in steps:
-        step_backend = backend
-        step_variant = model_variant
-        step_context = list(context) if context else []
-        step_voices = None
-
-        if step.config:
-            if step.config.model:
-                step_backend, step_variant = parse_model(step.config.model)
-            if step.config.context:
-                step_context.extend(step.config.context)
-            if step.config.voice:
-                step_voices = [step.config.voice]
-
+        params = _build_step_params(step.task, step.config, backend, model_variant, context)
         wt_tasks.append(_WorktreeTask(
-            task=step.task,
-            label=step.task,
+            task=params.task,
+            label=params.task,
             wt_prefix="_parallel",
-            backend=step_backend,
-            model_variant=step_variant,
-            context=step_context or None,
-            voices=step_voices,
+            backend=params.backend,
+            model_variant=params.model_variant,
+            context=params.context,
+            voices=params.voices,
         ))
 
     results = _run_worktree_tasks(wt_tasks, repo_root, main_repo, exclude, skip_permissions)
@@ -329,19 +346,16 @@ def _run_race_step(
     print(f"[{step_num}/{total_steps}] Race: {task} ({', '.join(models)})")
     print(f"{'='*60}\n")
 
-    # Build worktree tasks from models
     wt_tasks = []
     for model in models:
         backend, model_variant = parse_model(model)
-        step_context = list(context) if context else []
-
         wt_tasks.append(_WorktreeTask(
             task=task,
             label=model,
             wt_prefix=f"_race-{task}",
             backend=backend,
             model_variant=model_variant,
-            context=step_context or None,
+            context=list(context) if context else None,
             voices=None,
         ))
 
@@ -601,26 +615,7 @@ def run_pipeline_def(
             i += 1
         else:
             # Sequential step
-            step_backend = backend
-            step_variant = model_variant
-            step_context = list(context) if context else []
-            step_voices = None
-
-            if step.config:
-                if step.config.model:
-                    step_backend, step_variant = parse_model(step.config.model)
-                if step.config.context:
-                    step_context.extend(step.config.context)
-                if step.config.voice:
-                    step_voices = [step.config.voice]
-
-            params = _StepParams(
-                task=step.task,
-                backend=step_backend,
-                model_variant=step_variant,
-                context=step_context or None,
-                voices=step_voices,
-            )
+            params = _build_step_params(step.task, step.config, backend, model_variant, context)
             result_code = _run_step(
                 params, repo_root, main_repo, exclude,
                 skip_permissions, should_push, step_num, total,

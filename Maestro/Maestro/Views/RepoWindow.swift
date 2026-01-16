@@ -23,6 +23,7 @@ struct RepoWindow: View {
                 ContentView(appState: appState)
             }
         }
+        .background(WindowAccessor(repoURL: repoURL))
         .task {
             // Check setup first
             let status = setupService.checkDependencies()
@@ -45,6 +46,25 @@ struct RepoWindow: View {
                     recentsService.addRecent(url)
                 }
             }
+        }
+    }
+}
+
+/// Helper to set representedURL on the hosting window for capture service.
+private struct WindowAccessor: NSViewRepresentable {
+    let repoURL: URL?
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            view.window?.representedURL = repoURL
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            nsView.window?.representedURL = repoURL
         }
     }
 }

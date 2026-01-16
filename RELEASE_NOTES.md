@@ -1,8 +1,14 @@
-# v0.6.2
+# v0.6.3
 
-This release adds automated PyPI publishing capabilities to streamline the package release process. The new publishing workflow includes automatic generation of release notes, making it easier to maintain and distribute updates.
+This release adds screenshot capture for LLM context, improves Maestro with a visual pipeline editor and diff viewer, and includes various quality-of-life improvements.
 
 ## Changes
 
-- Add automated PyPI publishing workflow for streamlined releases
-- Include automatic release notes generation in publishing process
+- Add screenshot capture and image context support for LLM tasks
+- Add visual pipeline editor and model racing in Maestro
+- Add diff viewer and worktree comparison in Maestro
+- Add fallback to bundled templates for builtin commands
+- Migrate from lfpr to lfops commands in Maestro
+- Simplify lfops init by removing style guide and prompts scaffolding
+- Hide advanced features behind beta flag for new users in Maestro
+- Fix shell escaping for paths and commands with special characters

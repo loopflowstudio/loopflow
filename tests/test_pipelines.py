@@ -8,6 +8,7 @@ from loopflow.lfd.pipelines import (
     PipelineStep,
     StepConfig,
     load_pipeline,
+    save_pipeline,
     resolve_pipeline,
 )
 
@@ -262,3 +263,34 @@ steps:
         # Third step has no config
         assert pipeline.steps[2].task == "review"
         assert pipeline.steps[2].config is None
+
+
+def test_save_pipeline():
+    """Save pipeline writes correct YAML."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        repo = Path(tmpdir)
+
+        pipeline = PipelineDef(
+            name="test",
+            steps=[
+                PipelineStep(task="design"),
+                PipelineStep(task="implement", config=StepConfig(
+                    model="claude:opus",
+                    voice="architect",
+                    context=["src/main.py"],
+                )),
+                PipelineStep(task="review"),
+            ],
+        )
+
+        path = save_pipeline(pipeline, repo)
+        assert path.exists()
+        assert path.name == "test.yaml"
+
+        # Load it back and verify
+        loaded = load_pipeline("test", repo)
+        assert loaded is not None
+        assert len(loaded.steps) == 3
+        assert loaded.steps[1].config.model == "claude:opus"
+        assert loaded.steps[1].config.voice == "architect"
+        assert loaded.steps[1].config.context == ["src/main.py"]

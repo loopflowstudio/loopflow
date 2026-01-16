@@ -9,6 +9,10 @@ from loopflow.context import (
     gather_prompt_components,
     format_prompt,
     PromptComponents,
+    list_builtin_tasks,
+    list_user_tasks,
+    list_all_tasks,
+    _get_builtin_task,
 )
 
 
@@ -244,3 +248,113 @@ def test_gather_prompt_components_deduplicates_diff_and_context(temp_repo, monke
     assert paths.count("shared.py") == 1
     assert paths.count("context_only.py") == 1
     assert paths.count("diff_only.py") == 1
+
+
+# =============================================================================
+# Builtin task tests
+# =============================================================================
+
+
+def test_list_builtin_tasks_returns_known_builtins():
+    """Builtin tasks list includes expected tasks."""
+    builtins = list_builtin_tasks()
+    assert "design" in builtins
+    assert "implement" in builtins
+    assert "review" in builtins
+    assert "reduce" in builtins
+    assert "expand" in builtins
+    assert "explore" in builtins
+
+
+def test_get_builtin_task_returns_path_for_known_builtin():
+    """_get_builtin_task returns path for existing builtin."""
+    path = _get_builtin_task("design")
+    assert path is not None
+    assert path.exists()
+    assert path.name == "design.md"
+
+
+def test_get_builtin_task_returns_none_for_unknown():
+    """_get_builtin_task returns None for non-existent task."""
+    path = _get_builtin_task("nonexistent_task_xyz")
+    assert path is None
+
+
+def test_gather_task_falls_back_to_builtin(tmp_path):
+    """gather_task returns builtin when no user task exists."""
+    # Create empty repo
+    (tmp_path / ".git").mkdir()
+
+    # No .lf/ or .claude/commands/ - should fall back to builtin
+    result = gather_task(tmp_path, "design")
+    assert result is not None
+    assert result.name == "design"
+    assert "implementation spec" in result.content.lower()
+
+
+def test_gather_task_user_overrides_builtin(tmp_path):
+    """User task file takes precedence over builtin."""
+    (tmp_path / ".git").mkdir()
+    lf = tmp_path / ".lf"
+    lf.mkdir()
+    (lf / "design.md").write_text("My custom design task\n")
+
+    result = gather_task(tmp_path, "design")
+    assert result is not None
+    assert "My custom design task" in result.content
+
+
+def test_list_user_tasks_returns_user_tasks(tmp_path):
+    """list_user_tasks returns tasks from .lf/ and .claude/commands/."""
+    (tmp_path / ".git").mkdir()
+
+    # .lf/ tasks
+    lf = tmp_path / ".lf"
+    lf.mkdir()
+    (lf / "custom.lf").write_text("custom task")
+    (lf / "another.md").write_text("another task")
+    (lf / "config.yaml").write_text("not a task")
+
+    # .claude/commands/ tasks
+    claude = tmp_path / ".claude" / "commands"
+    claude.mkdir(parents=True)
+    (claude / "third.md").write_text("third task")
+
+    tasks = list_user_tasks(tmp_path)
+    assert "custom" in tasks
+    assert "another" in tasks
+    assert "third" in tasks
+    assert "config" not in tasks  # config.yaml should be excluded
+
+
+def test_list_all_tasks_separates_user_and_builtin(tmp_path):
+    """list_all_tasks returns user tasks and builtin-only tasks separately."""
+    (tmp_path / ".git").mkdir()
+
+    # Override one builtin
+    lf = tmp_path / ".lf"
+    lf.mkdir()
+    (lf / "design.md").write_text("custom design")
+    (lf / "custom.lf").write_text("custom task")
+
+    user_tasks, builtin_only = list_all_tasks(tmp_path)
+
+    # design is overridden, so it's in user_tasks
+    assert "design" in user_tasks
+    assert "custom" in user_tasks
+
+    # Other builtins like implement, review should be in builtin_only
+    assert "implement" in builtin_only
+    assert "review" in builtin_only
+
+    # design should NOT be in builtin_only (it's overridden)
+    assert "design" not in builtin_only
+
+
+def test_list_all_tasks_without_repo():
+    """list_all_tasks works without a repo root (returns only builtins)."""
+    user_tasks, builtin_only = list_all_tasks(None)
+
+    assert user_tasks == []
+    assert "design" in builtin_only
+    assert "implement" in builtin_only

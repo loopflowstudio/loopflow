@@ -143,13 +143,123 @@ def _notify_done(pipeline_name: str) -> None:
 
 
 @dataclass
-class _ParallelProcess:
-    """Tracks a parallel step execution."""
+class _WorktreeTask:
+    """A task to run in a temporary worktree."""
     task: str
-    process: subprocess.Popen
+    label: str  # Display label (task name or model name)
+    wt_prefix: str  # Worktree name prefix (e.g., "_parallel" or "_race")
+    backend: str
+    model_variant: str | None
+    context: list[str] | None
+    voices: list[str] | None
+
+
+@dataclass
+class _WorktreeResult:
+    """Result from running a task in a temporary worktree."""
+    label: str
     worktree: Path
-    prompt_file: str
+    exit_code: int
     session_id: str
+
+
+def _run_worktree_tasks(
+    tasks: list[_WorktreeTask],
+    repo_root: Path,
+    main_repo: Path,
+    exclude: list[str] | None,
+    skip_permissions: bool,
+) -> list[_WorktreeResult]:
+    """Run tasks in parallel temporary worktrees. Returns results for all tasks."""
+    processes: list[tuple[_WorktreeTask, subprocess.Popen, Path, str, str]] = []
+
+    for wt_task in tasks:
+        label_short = wt_task.label.replace(":", "-")
+        wt_name = f"{wt_task.wt_prefix}-{label_short}-{uuid.uuid4().hex[:8]}"
+        try:
+            wt_path = create_worktree(repo_root, wt_name)
+        except Exception as e:
+            print(f"[{wt_task.label}] Failed to create worktree: {e}")
+            for _, proc, wt, _, _ in processes:
+                proc.terminate()
+                remove_worktree(repo_root, wt.name.split(".")[-1])
+            return [_WorktreeResult(wt_task.label, repo_root, 1, "")]
+
+        prompt = build_prompt(
+            wt_path,
+            wt_task.task,
+            context=wt_task.context,
+            exclude=exclude,
+            run_mode="auto",
+            voices=wt_task.voices,
+        )
+        prompt_file = write_prompt_file(prompt)
+
+        session = Session(
+            id=str(uuid.uuid4()),
+            task=wt_task.task,
+            repo=str(main_repo),
+            worktree=str(wt_path),
+            status=SessionStatus.RUNNING,
+            started_at=datetime.now(),
+            pid=None,
+            model=wt_task.backend,
+            run_mode="auto",
+        )
+        log_session_start(session)
+
+        command = build_model_command(
+            wt_task.backend,
+            auto=True,
+            stream=True,
+            skip_permissions=skip_permissions,
+            model_variant=wt_task.model_variant,
+            sandbox_root=wt_path.parent,
+            workdir=wt_path,
+        )
+        collector_cmd = [
+            sys.executable, "-m", "loopflow.lfd.collector",
+            "--session-id", session.id,
+            "--task", wt_task.task,
+            "--repo-root", str(wt_path),
+            "--prompt-file", prompt_file,
+            "--foreground",
+            "--prefix", f"[{wt_task.label}] ",
+            "--", *command,
+        ]
+
+        print(f"[{wt_task.label}] Starting in {wt_path.name}...")
+        process = subprocess.Popen(collector_cmd, cwd=wt_path)
+        processes.append((wt_task, process, wt_path, prompt_file, session.id))
+
+    # Wait for all to complete
+    results: list[_WorktreeResult] = []
+    for wt_task, process, wt_path, prompt_file, session_id in processes:
+        exit_code = process.wait()
+
+        try:
+            os.unlink(prompt_file)
+        except OSError:
+            pass
+
+        status = SessionStatus.COMPLETED if exit_code == 0 else SessionStatus.ERROR
+        log_session_end(session_id, status)
+
+        results.append(_WorktreeResult(wt_task.label, wt_path, exit_code, session_id))
+
+        if exit_code != 0:
+            print(f"[{wt_task.label}] failed with exit code {exit_code}")
+        else:
+            print(f"[{wt_task.label}] completed successfully")
+
+    return results
+
+
+def _cleanup_worktrees(repo_root: Path, results: list[_WorktreeResult]) -> None:
+    """Remove temporary worktrees from results."""
+    for r in results:
+        wt_name = r.worktree.name.split(".")[-1]
+        remove_worktree(repo_root, wt_name)
 
 
 def _run_parallel_group(
@@ -171,11 +281,9 @@ def _run_parallel_group(
     print(f"[{group_num}/{total_groups}] Parallel: {', '.join(task_names)}")
     print(f"{'='*60}\n")
 
-    processes: list[_ParallelProcess] = []
-
-    # Start all processes
+    # Build worktree tasks from steps
+    wt_tasks = []
     for step in steps:
-        # Per-step config overrides
         step_backend = backend
         step_variant = model_variant
         step_context = list(context) if context else []
@@ -189,116 +297,19 @@ def _run_parallel_group(
             if step.config.voice:
                 step_voices = [step.config.voice]
 
-        # Create temporary worktree
-        wt_name = f"_parallel-{step.task}-{uuid.uuid4().hex[:8]}"
-        try:
-            wt_path = create_worktree(repo_root, wt_name)
-        except Exception as e:
-            print(f"[{step.task}] Failed to create worktree: {e}")
-            # Clean up any already-started processes
-            for p in processes:
-                p.process.terminate()
-                branch_name = p.worktree.name.split(".")[-1]
-                remove_worktree(repo_root, branch_name)
-            return [1]  # Signal failure
-
-        prompt = build_prompt(
-            wt_path,
-            step.task,
-            context=step_context or None,
-            exclude=exclude,
-            run_mode="auto",
-            voices=step_voices,
-        )
-        prompt_file = write_prompt_file(prompt)
-
-        session = Session(
-            id=str(uuid.uuid4()),
+        wt_tasks.append(_WorktreeTask(
             task=step.task,
-            repo=str(main_repo),
-            worktree=str(wt_path),
-            status=SessionStatus.RUNNING,
-            started_at=datetime.now(),
-            pid=None,
-            model=step_backend,
-            run_mode="auto",
-        )
-        log_session_start(session)
-
-        command = build_model_command(
-            step_backend,
-            auto=True,
-            stream=True,
-            skip_permissions=skip_permissions,
+            label=step.task,
+            wt_prefix="_parallel",
+            backend=step_backend,
             model_variant=step_variant,
-            sandbox_root=wt_path.parent,
-            workdir=wt_path,
-        )
-        collector_cmd = [
-            sys.executable,
-            "-m",
-            "loopflow.lfd.collector",
-            "--session-id",
-            session.id,
-            "--task",
-            step.task,
-            "--repo-root",
-            str(wt_path),
-            "--prompt-file",
-            prompt_file,
-            "--foreground",
-            "--prefix",
-            f"[{step.task}] ",
-            "--",
-            *command,
-        ]
-        # Note: no --autocommit or --push for parallel verification steps
-
-        print(f"[{step.task}] Starting in {wt_path.name}...")
-        process = subprocess.Popen(collector_cmd, cwd=wt_path)
-
-        processes.append(_ParallelProcess(
-            task=step.task,
-            process=process,
-            worktree=wt_path,
-            prompt_file=prompt_file,
-            session_id=session.id,
+            context=step_context or None,
+            voices=step_voices,
         ))
 
-    # Wait for all to complete
-    exit_codes = []
-    for p in processes:
-        result_code = p.process.wait()
-        exit_codes.append(result_code)
-
-        # Clean up
-        try:
-            os.unlink(p.prompt_file)
-        except OSError:
-            pass
-
-        status = SessionStatus.COMPLETED if result_code == 0 else SessionStatus.ERROR
-        log_session_end(p.session_id, status)
-
-        if result_code != 0:
-            print(f"\n[{p.task}] failed with exit code {result_code}")
-        else:
-            print(f"[{p.task}] completed successfully")
-
-        # Remove temporary worktree
-        wt_name = p.worktree.name.split(".")[-1]  # Get branch name from path
-        remove_worktree(repo_root, wt_name)
-
-    return exit_codes
-
-
-@dataclass
-class _RaceResult:
-    """Result from a single model in a race."""
-    model: str
-    worktree: Path
-    exit_code: int
-    session_id: str
+    results = _run_worktree_tasks(wt_tasks, repo_root, main_repo, exclude, skip_permissions)
+    _cleanup_worktrees(repo_root, results)
+    return [r.exit_code for r in results]
 
 
 def _run_race_step(
@@ -318,129 +329,35 @@ def _run_race_step(
     print(f"[{step_num}/{total_steps}] Race: {task} ({', '.join(models)})")
     print(f"{'='*60}\n")
 
-    processes: list[_ParallelProcess] = []
-    model_map: dict[str, str] = {}  # session_id -> model name
-
-    # Start all processes
+    # Build worktree tasks from models
+    wt_tasks = []
     for model in models:
         backend, model_variant = parse_model(model)
-
-        # Create temporary worktree
-        model_short = model.replace(":", "-")
-        wt_name = f"_race-{task}-{model_short}-{uuid.uuid4().hex[:8]}"
-        try:
-            wt_path = create_worktree(repo_root, wt_name)
-        except Exception as e:
-            print(f"[{model}] Failed to create worktree: {e}")
-            for p in processes:
-                p.process.terminate()
-                branch_name = p.worktree.name.split(".")[-1]
-                remove_worktree(repo_root, branch_name)
-            return 1
-
         step_context = list(context) if context else []
 
-        prompt = build_prompt(
-            wt_path,
-            task,
-            context=step_context or None,
-            exclude=exclude,
-            run_mode="auto",
-        )
-        prompt_file = write_prompt_file(prompt)
-
-        session = Session(
-            id=str(uuid.uuid4()),
+        wt_tasks.append(_WorktreeTask(
             task=task,
-            repo=str(main_repo),
-            worktree=str(wt_path),
-            status=SessionStatus.RUNNING,
-            started_at=datetime.now(),
-            pid=None,
-            model=backend,
-            run_mode="auto",
-        )
-        log_session_start(session)
-        model_map[session.id] = model
-
-        command = build_model_command(
-            backend,
-            auto=True,
-            stream=True,
-            skip_permissions=skip_permissions,
+            label=model,
+            wt_prefix=f"_race-{task}",
+            backend=backend,
             model_variant=model_variant,
-            sandbox_root=wt_path.parent,
-            workdir=wt_path,
-        )
-        collector_cmd = [
-            sys.executable,
-            "-m",
-            "loopflow.lfd.collector",
-            "--session-id",
-            session.id,
-            "--task",
-            task,
-            "--repo-root",
-            str(wt_path),
-            "--prompt-file",
-            prompt_file,
-            "--foreground",
-            "--prefix",
-            f"[{model}] ",
-            "--",
-            *command,
-        ]
-
-        print(f"[{model}] Starting in {wt_path.name}...")
-        process = subprocess.Popen(collector_cmd, cwd=wt_path)
-
-        processes.append(_ParallelProcess(
-            task=task,
-            process=process,
-            worktree=wt_path,
-            prompt_file=prompt_file,
-            session_id=session.id,
+            context=step_context or None,
+            voices=None,
         ))
 
-    # Wait for all to complete
-    results: list[_RaceResult] = []
-    for p in processes:
-        result_code = p.process.wait()
-        model = model_map[p.session_id]
-
-        try:
-            os.unlink(p.prompt_file)
-        except OSError:
-            pass
-
-        status = SessionStatus.COMPLETED if result_code == 0 else SessionStatus.ERROR
-        log_session_end(p.session_id, status)
-
-        results.append(_RaceResult(
-            model=model,
-            worktree=p.worktree,
-            exit_code=result_code,
-            session_id=p.session_id,
-        ))
-
-        if result_code != 0:
-            print(f"[{model}] failed with exit code {result_code}")
-        else:
-            print(f"[{model}] completed successfully")
+    results = _run_worktree_tasks(wt_tasks, repo_root, main_repo, exclude, skip_permissions)
 
     # Filter to successful results
     successes = [r for r in results if r.exit_code == 0]
 
     if not successes:
         print("\nAll models failed, no winner to merge")
-        for r in results:
-            wt_name = r.worktree.name.split(".")[-1]
-            remove_worktree(repo_root, wt_name)
+        _cleanup_worktrees(repo_root, results)
         return 1
 
     if len(successes) == 1:
         winner = successes[0]
-        print(f"\nOnly {winner.model} succeeded, using it as winner")
+        print(f"\nOnly {winner.label} succeeded, using it as winner")
     else:
         # Run judge to pick winner
         print(f"\n{len(successes)} models succeeded, running judge...")
@@ -449,27 +366,24 @@ def _run_race_step(
             print("Judge failed to pick winner, using first successful model")
             winner = successes[0]
         else:
-            print(f"Judge picked: {winner.model}")
+            print(f"Judge picked: {winner.label}")
 
     # Merge winner's changes into main worktree
     _merge_race_winner(repo_root, winner)
 
     # Clean up all temp worktrees
-    for r in results:
-        wt_name = r.worktree.name.split(".")[-1]
-        remove_worktree(repo_root, wt_name)
+    _cleanup_worktrees(repo_root, results)
 
     return 0
 
 
 def _judge_race(
-    results: list[_RaceResult],
+    results: list[_WorktreeResult],
     repo_root: Path,
     judge_task: str,
     skip_permissions: bool,
-) -> _RaceResult | None:
-    """Run judge task to pick winner from race results."""
-    # Build diff summaries for each result
+) -> _WorktreeResult | None:
+    """Run judge to pick winner from race results."""
     diffs = []
     for r in results:
         diff_result = subprocess.run(
@@ -480,7 +394,6 @@ def _judge_race(
         )
         diff_text = diff_result.stdout if diff_result.returncode == 0 else "(no diff)"
 
-        # Get full diff for comparison
         full_diff = subprocess.run(
             ["git", "diff", "HEAD~1"],
             cwd=r.worktree,
@@ -488,16 +401,14 @@ def _judge_race(
             text=True,
         )
         diffs.append({
-            "model": r.model,
+            "model": r.label,
             "worktree": str(r.worktree),
             "summary": diff_text,
             "diff": full_diff.stdout if full_diff.returncode == 0 else "",
         })
 
-    # Build judge prompt
     judge_prompt = _build_judge_prompt(diffs)
 
-    # Run judge inline (no task file needed)
     from loopflow.launcher import get_runner
     backend, variant = parse_model("claude:opus")
     runner = get_runner(backend)
@@ -513,10 +424,9 @@ def _judge_race(
     if result.exit_code != 0:
         return None
 
-    # Parse winner from output
     output = result.output or ""
     for r in results:
-        if r.model in output:
+        if r.label in output:
             return r
 
     return None
@@ -568,9 +478,8 @@ def _build_judge_prompt(diffs: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _merge_race_winner(repo_root: Path, winner: _RaceResult) -> None:
+def _merge_race_winner(repo_root: Path, winner: _WorktreeResult) -> None:
     """Merge winner's changes into main worktree."""
-    # Get list of changed files in winner worktree
     result = subprocess.run(
         ["git", "diff", "--name-only", "HEAD~1"],
         cwd=winner.worktree,
@@ -578,12 +487,11 @@ def _merge_race_winner(repo_root: Path, winner: _RaceResult) -> None:
         text=True,
     )
     if result.returncode != 0:
-        print(f"Warning: Could not get changed files from {winner.model}")
+        print(f"Warning: Could not get changed files from {winner.label}")
         return
 
     changed_files = [f.strip() for f in result.stdout.strip().split("\n") if f.strip()]
 
-    # Copy each changed file to main worktree
     for file_path in changed_files:
         src = winner.worktree / file_path
         dst = repo_root / file_path
@@ -593,12 +501,11 @@ def _merge_race_winner(repo_root: Path, winner: _RaceResult) -> None:
             dst.write_bytes(src.read_bytes())
             print(f"  Copied: {file_path}")
         else:
-            # File was deleted
             if dst.exists():
                 dst.unlink()
                 print(f"  Deleted: {file_path}")
 
-    print(f"\nMerged {len(changed_files)} files from {winner.model}")
+    print(f"\nMerged {len(changed_files)} files from {winner.label}")
 
 
 def _count_logical_steps(resolved: list[ResolvedStep]) -> int:

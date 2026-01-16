@@ -1,7 +1,6 @@
 """Pipeline DAG loading and execution for agents."""
 
-import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -166,82 +165,3 @@ def resolve_pipeline(pipeline: PipelineDef, repo: Path) -> list[ResolvedStep]:
         _resolve_step(step)
 
     return resolved
-
-
-@dataclass
-class StepResult:
-    task: str
-    success: bool
-    error: str | None = None
-
-
-@dataclass
-class PipelineResult:
-    success: bool
-    steps: list[StepResult] = field(default_factory=list)
-
-
-async def execute_pipeline(
-    pipeline: PipelineDef,
-    repo: Path,
-    worktree: Path,
-    goal: str,
-    run_step: callable,
-) -> PipelineResult:
-    """Run pipeline DAG in worktree, injecting goal as context for each step.
-
-    run_step is a callable (task: str, worktree: Path, goal: str, config: StepConfig | None) -> bool
-    that executes a single task and returns True on success.
-    """
-    resolved = resolve_pipeline(pipeline, repo)
-    results: list[StepResult] = []
-
-    i = 0
-    while i < len(resolved):
-        step = resolved[i]
-
-        if step.parallel_group is not None:
-            # Collect all steps in this parallel group
-            parallel_steps = []
-            group = step.parallel_group
-            while i < len(resolved) and resolved[i].parallel_group == group:
-                parallel_steps.append(resolved[i])
-                i += 1
-
-            # Run parallel steps concurrently
-            step_results = await _run_parallel_steps(parallel_steps, worktree, goal, run_step)
-            results.extend(step_results)
-
-            if any(not r.success for r in step_results):
-                return PipelineResult(success=False, steps=results)
-        else:
-            # Run sequential step
-            success = await asyncio.to_thread(run_step, step.task, worktree, goal, step.config)
-            result = StepResult(task=step.task, success=success)
-            results.append(result)
-
-            if not success:
-                return PipelineResult(success=False, steps=results)
-
-            i += 1
-
-    return PipelineResult(success=True, steps=results)
-
-
-async def _run_parallel_steps(
-    steps: list[ResolvedStep],
-    worktree: Path,
-    goal: str,
-    run_step: callable,
-) -> list[StepResult]:
-    """Run steps concurrently using asyncio."""
-
-    async def run_one(step: ResolvedStep) -> StepResult:
-        try:
-            success = await asyncio.to_thread(run_step, step.task, worktree, goal, step.config)
-            return StepResult(task=step.task, success=success)
-        except Exception as e:
-            return StepResult(task=step.task, success=False, error=str(e))
-
-    results = await asyncio.gather(*[run_one(step) for step in steps])
-    return list(results)

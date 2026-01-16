@@ -185,16 +185,6 @@ def _scaffold_repo(repo_root: Path, all_prompts: bool = False) -> None:
         shutil.copy(config_src, config_dst)
         typer.echo("  ✓ .lf/config.yaml")
 
-    # Style guide and PROMPTS.md
-    for name in ["STYLE.md", "PROMPTS.md"]:
-        src = templates / name
-        dst = config_dir / name
-        if dst.exists():
-            typer.echo(f"  - .lf/{name} (already exists)")
-        else:
-            shutil.copy(src, dst)
-            typer.echo(f"  ✓ .lf/{name}")
-
     # Commit templates
     for template_name in ["COMMIT_MESSAGE.md", "CHECKPOINT_MESSAGE.md"]:
         src = prompts_dir / template_name

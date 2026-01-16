@@ -7,6 +7,8 @@ import SwiftUI
 struct MaestroApp: App {
     @State private var recentsService = RecentsService()
     @Environment(\.openWindow) private var openWindow
+    @State private var captureError: String?
+    @State private var showCaptureError = false
 
     var body: some Scene {
         // Welcome/main window - shown on launch
@@ -36,6 +38,32 @@ struct MaestroApp: App {
                 }
                 .keyboardShortcut("a", modifiers: [.command, .shift])
             }
+
+            CommandGroup(after: .saveItem) {
+                Button("Capture for Review") {
+                    captureCurrentWindow()
+                }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
+            }
+        }
+    }
+
+    @MainActor
+    private func captureCurrentWindow() {
+        let captureService = CaptureService()
+
+        // Try to find the repo root from the current window's represented URL
+        let repoRoot = NSApp.keyWindow?.representedURL
+
+        do {
+            let outputURL = try captureService.captureKeyWindow(repoRoot: repoRoot)
+            // Play sound feedback
+            NSSound.beep()
+            // Show in Finder
+            NSWorkspace.shared.activateFileViewerSelecting([outputURL])
+        } catch {
+            captureError = error.localizedDescription
+            showCaptureError = true
         }
     }
 }

@@ -1274,6 +1274,87 @@ def commit(
             typer.echo("No upstream branch, skipping push", err=True)
 
 
+@app.command()
+def summarize(
+    path: str = typer.Argument(".", help="Path to summarize (relative to repo root)"),
+    tokens: int = typer.Option(4000, "-t", "--tokens", help="Token budget"),
+    model: str = typer.Option("gemini", "-m", "--model", help="Model to use"),
+    force: bool = typer.Option(False, "-f", "--force", help="Regenerate even if cached"),
+    all_configured: bool = typer.Option(False, "-a", "--all", help="Regenerate all configured summaries"),
+) -> None:
+    """Generate a codebase summary."""
+    from loopflow.summarize import load_summary, is_stale, refresh_if_stale
+
+    repo_root = find_worktree_root()
+    if not repo_root:
+        typer.echo("Error: Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    config = load_config(repo_root)
+
+    if all_configured:
+        if not config or not config.summaries:
+            typer.echo("No summaries configured in .lf/config.yaml")
+            raise typer.Exit(0)
+
+        for summary_config in config.summaries:
+            summary_path = Path(summary_config.path)
+            existing = load_summary(summary_path, repo_root)
+
+            if existing and not force and not is_stale(existing, repo_root):
+                typer.echo(f"  {summary_config.path}: up to date")
+                continue
+
+            typer.echo(f"  {summary_config.path}: regenerating...")
+            try:
+                summary, _ = refresh_if_stale(
+                    summary_path,
+                    repo_root,
+                    summary_config.tokens,
+                    summary_config.model,
+                    config.exclude if config else None,
+                    force=force,
+                )
+                typer.echo(f"  {summary_config.path}: done ({len(summary.content)} chars)")
+            except Exception as e:
+                typer.echo(f"  {summary_config.path}: error - {e}", err=True)
+        return
+
+    summary_path = Path(path)
+    existing = load_summary(summary_path, repo_root)
+
+    if existing and not force:
+        if is_stale(existing, repo_root):
+            typer.echo("Summary stale, regenerating...")
+        else:
+            typer.echo(f"Summary up to date (use -f to force regenerate)")
+            typer.echo(f"  Path: {path}")
+            typer.echo(f"  Tokens: {existing.token_budget}")
+            typer.echo(f"  Model: {existing.model}")
+            typer.echo(f"  Created: {existing.created_at.isoformat()}")
+            raise typer.Exit(0)
+    else:
+        typer.echo(f"Generating summary for {path}...")
+
+    try:
+        summary, regenerated = refresh_if_stale(
+            summary_path,
+            repo_root,
+            tokens,
+            model,
+            config.exclude if config else None,
+            force=force,
+        )
+    except Exception as e:
+        typer.echo(f"Error generating summary: {e}", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"Summary saved to .lf/summaries/{summary_path}")
+    typer.echo(f"  Tokens: {tokens}")
+    typer.echo(f"  Model: {model}")
+    typer.echo(f"  Length: {len(summary.content)} chars")
+
+
 def main() -> None:
     """Entry point for lfops command."""
     if len(sys.argv) == 1:

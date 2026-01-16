@@ -319,6 +319,7 @@ def run(
             voices=resolved.voice or None,
             include_diff=include_diff,
             include_diff_files=include_diff_files,
+            config=config,
         )
     except VoiceNotFoundError as e:
         typer.echo(f"Error: {e}", err=True)
@@ -448,6 +449,7 @@ def inline(
             voices=resolved.voice or None,
             include_diff=include_diff,
             include_diff_files=include_diff_files,
+            config=config,
         )
     except VoiceNotFoundError as e:
         typer.echo(f"Error: {e}", err=True)
@@ -531,6 +533,7 @@ def cp(
         include_loopflow_doc=config.include_loopflow_doc if config else True,
         include_diff=include_diff,
         include_diff_files=include_diff_files,
+        config=config,
     )
 
     # Apply docs flag
@@ -626,6 +629,7 @@ def pipeline(
             include_loopflow_doc=config.include_loopflow_doc if config else True,
             include_diff=config.diff if config else False,
             include_diff_files=config.diff_files if config else True,
+            config=config,
         )
         prompt = format_prompt(components)
         _copy_to_clipboard(prompt)

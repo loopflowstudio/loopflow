@@ -30,6 +30,7 @@ class PromptComponents:
     loopflow_doc: str | None = None  # Bundled system documentation
     voices: list[Voice] | None = None
     image_files: list[Path] | None = None  # Images for visual context
+    summaries: list[tuple[Path, str]] | None = None  # Pre-generated summaries
 
 
 def find_worktree_root(start: Optional[Path] = None) -> Path | None:
@@ -254,6 +255,25 @@ def _load_loopflow_doc() -> str:
     return resources.files("loopflow").joinpath("LOOPFLOW.md").read_text()
 
 
+def gather_summaries(repo_root: Path, config) -> list[tuple[Path, str]]:
+    """Load all configured summaries for context inclusion.
+
+    Summaries must exist in .lf/summaries/. If a configured summary doesn't exist,
+    it's skipped (use `lfops summarize --all` to generate missing summaries).
+    """
+    from loopflow.summarize import load_summary
+
+    if not config or not config.summaries:
+        return []
+
+    results = []
+    for summary_config in config.summaries:
+        summary = load_summary(Path(summary_config.path), repo_root)
+        if summary:
+            results.append((Path(summary_config.path), summary.content))
+    return results
+
+
 def gather_prompt_components(
     repo_root: Path,
     task: Optional[str] = None,
@@ -268,6 +288,8 @@ def gather_prompt_components(
     voices: Optional[list[str]] = None,
     include_diff: bool = False,
     include_diff_files: bool = True,
+    include_summaries: bool = True,
+    config=None,
 ) -> PromptComponents:
     """Gather all prompt components without assembling them."""
     docs = gather_docs(repo_root, repo_root, exclude)
@@ -327,6 +349,9 @@ def gather_prompt_components(
     # Load voices if specified
     loaded_voices = [load_voice(name, repo_root) for name in voices] if voices else None
 
+    # Load configured summaries
+    summaries = gather_summaries(repo_root, config) if include_summaries else None
+
     return PromptComponents(
         run_mode=run_mode,
         docs=docs,
@@ -338,6 +363,7 @@ def gather_prompt_components(
         loopflow_doc=loopflow_doc,
         voices=loaded_voices,
         image_files=gather_result.image_files or None,
+        summaries=summaries,
     )
 
 
@@ -381,6 +407,16 @@ def format_prompt(components: PromptComponents) -> str:
             "Repository documentation. Follow STYLE carefully. "
             "May include design artifacts under .design/.\n\n"
             f"<lf:docs>\n{docs_body}\n</lf:docs>"
+        )
+
+    if components.summaries:
+        summary_parts = []
+        for summary_path, content in components.summaries:
+            summary_parts.append(f"<lf:summary path=\"{summary_path}\">\n{content}\n</lf:summary>")
+        summaries_body = "\n\n".join(summary_parts)
+        parts.append(
+            "Pre-generated codebase summaries.\n\n"
+            f"<lf:summaries>\n{summaries_body}\n</lf:summaries>"
         )
 
     if components.diff:

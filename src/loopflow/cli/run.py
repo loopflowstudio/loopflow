@@ -189,7 +189,10 @@ def run(
         None, "--voice", help="Voice(s) to use (comma-separated, e.g., 'architect,concise')"
     ),
     parallel: str = typer.Option(
-        None, "--parallel", help="Run in parallel with multiple models (e.g., 'claude,codex')"
+        None, "--parallel", help="Run in parallel with multiple models, keep worktrees (e.g., 'claude,codex')"
+    ),
+    race: str = typer.Option(
+        None, "--race", help="Race multiple models, auto-judge winner (e.g., 'claude,codex,gemini')"
     ),
 ):
     """Run a task with an LLM model."""
@@ -198,7 +201,33 @@ def run(
         typer.echo("Error: Not in a git repository", err=True)
         raise typer.Exit(1)
 
-    # Handle parallel execution
+    # Handle race execution
+    if race:
+        from loopflow.git import find_main_repo
+        from loopflow.lfd.pipelines import RaceConfig
+        from loopflow.pipeline import _run_race_step
+
+        models = [m.strip() for m in race.split(",")]
+        config = load_config(repo_root)
+        main_repo = find_main_repo(repo_root) or repo_root
+        skip_permissions = config.yolo if config else False
+        exclude = list(config.exclude) if config and config.exclude else None
+
+        race_config = RaceConfig(models=models)
+        result_code = _run_race_step(
+            task,
+            race_config,
+            repo_root,
+            main_repo,
+            exclude,
+            skip_permissions,
+            list(context) if context else None,
+            1,  # step_num
+            1,  # total_steps
+        )
+        raise typer.Exit(result_code)
+
+    # Handle parallel execution (creates persistent worktrees)
     if parallel:
         models = [m.strip() for m in parallel.split(",")]
         for model_name in models:

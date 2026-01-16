@@ -14,13 +14,13 @@ Visual pipeline editor in Maestro for creating, editing, and running pipelines w
 - Per-step config overrides applied during pipeline execution
 - Tests for `StepConfig` voice/context serialization
 - **Parallel step execution** via temporary worktrees
+- **Model racing**: `--race` flag and pipeline `race:` syntax for running same task with multiple models
 
 **Deferred:**
 - Branching/merging pipelines
 - Drag-and-drop step reordering
 - Live execution visualization
 - "Save as pipeline" from task selection
-- Parallel mutation steps (merge back)
 
 ## Data structures
 
@@ -34,10 +34,16 @@ class StepConfig:
     context: list[str] | None = None
 
 @dataclass
+class RaceConfig:
+    models: list[str]
+    judge: str = "compare"
+
+@dataclass
 class PipelineStep:
     task: str | None = None
     pipeline: str | None = None
     parallel: list["PipelineStep"] | None = None
+    race: RaceConfig | None = None
     config: StepConfig | None = None
 ```
 
@@ -78,13 +84,27 @@ steps:
 
 Parallel steps run concurrently in temporary worktrees (`_parallel-{task}-{uuid}`), then clean up.
 
+Race steps run the same task with multiple models:
+
+```yaml
+steps:
+  - task: implement
+    race:
+      - claude:opus
+      - codex:o3
+      - gemini:2.5-pro
+  - review
+```
+
+CLI equivalent: `lf implement --race claude:opus,codex:o3,gemini:2.5-pro`
+
 ## Key files
 
 **Python:**
 - `src/loopflow/lfd/pipelines.py` - data structures, load/save, resolve
-- `src/loopflow/pipeline.py` - execution with `_run_step()`, `_run_parallel_group()` helpers
+- `src/loopflow/pipeline.py` - execution with `_run_step()`, `_run_parallel_group()`, `_run_race_step()` helpers
 - `src/loopflow/lfd/collector.py` - output collection with `--prefix` for parallel tasks
-- `src/loopflow/cli/run.py` - `pipeline` command routing
+- `src/loopflow/cli/run.py` - `pipeline` command routing, `--race` flag
 
 **Swift:**
 - `Maestro/Models/Pipeline.swift` - Swift models

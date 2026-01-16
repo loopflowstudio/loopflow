@@ -14,7 +14,7 @@ from loopflow.config import parse_model
 from loopflow.context import build_prompt
 from loopflow.git import GitError, find_main_repo, open_pr
 from loopflow.launcher import build_model_command, get_runner
-from loopflow.lfd.pipelines import PipelineDef, ResolvedStep, resolve_pipeline, StepConfig
+from loopflow.lfd.pipelines import PipelineDef, RaceConfig, ResolvedStep, resolve_pipeline, StepConfig
 from loopflow.llm_http import generate_pr_message
 from loopflow.logging import write_prompt_file
 from loopflow.lfd.client import log_session_start, log_session_end
@@ -292,6 +292,315 @@ def _run_parallel_group(
     return exit_codes
 
 
+@dataclass
+class _RaceResult:
+    """Result from a single model in a race."""
+    model: str
+    worktree: Path
+    exit_code: int
+    session_id: str
+
+
+def _run_race_step(
+    task: str,
+    race: RaceConfig,
+    repo_root: Path,
+    main_repo: Path,
+    exclude: list[str] | None,
+    skip_permissions: bool,
+    context: list[str] | None,
+    step_num: int,
+    total_steps: int,
+) -> int:
+    """Run task with multiple models in parallel, judge and merge winner."""
+    models = race.models
+    print(f"\n{'='*60}")
+    print(f"[{step_num}/{total_steps}] Race: {task} ({', '.join(models)})")
+    print(f"{'='*60}\n")
+
+    processes: list[_ParallelProcess] = []
+    model_map: dict[str, str] = {}  # session_id -> model name
+
+    # Start all processes
+    for model in models:
+        backend, model_variant = parse_model(model)
+
+        # Create temporary worktree
+        model_short = model.replace(":", "-")
+        wt_name = f"_race-{task}-{model_short}-{uuid.uuid4().hex[:8]}"
+        try:
+            wt_path = create_worktree(repo_root, wt_name)
+        except Exception as e:
+            print(f"[{model}] Failed to create worktree: {e}")
+            for p in processes:
+                p.process.terminate()
+                branch_name = p.worktree.name.split(".")[-1]
+                remove_worktree(repo_root, branch_name)
+            return 1
+
+        step_context = list(context) if context else []
+
+        prompt = build_prompt(
+            wt_path,
+            task,
+            context=step_context or None,
+            exclude=exclude,
+            run_mode="auto",
+        )
+        prompt_file = write_prompt_file(prompt)
+
+        session = Session(
+            id=str(uuid.uuid4()),
+            task=task,
+            repo=str(main_repo),
+            worktree=str(wt_path),
+            status=SessionStatus.RUNNING,
+            started_at=datetime.now(),
+            pid=None,
+            model=backend,
+            run_mode="auto",
+        )
+        log_session_start(session)
+        model_map[session.id] = model
+
+        command = build_model_command(
+            backend,
+            auto=True,
+            stream=True,
+            skip_permissions=skip_permissions,
+            model_variant=model_variant,
+            sandbox_root=wt_path.parent,
+            workdir=wt_path,
+        )
+        collector_cmd = [
+            sys.executable,
+            "-m",
+            "loopflow.lfd.collector",
+            "--session-id",
+            session.id,
+            "--task",
+            task,
+            "--repo-root",
+            str(wt_path),
+            "--prompt-file",
+            prompt_file,
+            "--foreground",
+            "--prefix",
+            f"[{model}] ",
+            "--",
+            *command,
+        ]
+
+        print(f"[{model}] Starting in {wt_path.name}...")
+        process = subprocess.Popen(collector_cmd, cwd=wt_path)
+
+        processes.append(_ParallelProcess(
+            task=task,
+            process=process,
+            worktree=wt_path,
+            prompt_file=prompt_file,
+            session_id=session.id,
+        ))
+
+    # Wait for all to complete
+    results: list[_RaceResult] = []
+    for p in processes:
+        result_code = p.process.wait()
+        model = model_map[p.session_id]
+
+        try:
+            os.unlink(p.prompt_file)
+        except OSError:
+            pass
+
+        status = SessionStatus.COMPLETED if result_code == 0 else SessionStatus.ERROR
+        log_session_end(p.session_id, status)
+
+        results.append(_RaceResult(
+            model=model,
+            worktree=p.worktree,
+            exit_code=result_code,
+            session_id=p.session_id,
+        ))
+
+        if result_code != 0:
+            print(f"[{model}] failed with exit code {result_code}")
+        else:
+            print(f"[{model}] completed successfully")
+
+    # Filter to successful results
+    successes = [r for r in results if r.exit_code == 0]
+
+    if not successes:
+        print("\nAll models failed, no winner to merge")
+        for r in results:
+            wt_name = r.worktree.name.split(".")[-1]
+            remove_worktree(repo_root, wt_name)
+        return 1
+
+    if len(successes) == 1:
+        winner = successes[0]
+        print(f"\nOnly {winner.model} succeeded, using it as winner")
+    else:
+        # Run judge to pick winner
+        print(f"\n{len(successes)} models succeeded, running judge...")
+        winner = _judge_race(successes, repo_root, race.judge, skip_permissions)
+        if not winner:
+            print("Judge failed to pick winner, using first successful model")
+            winner = successes[0]
+        else:
+            print(f"Judge picked: {winner.model}")
+
+    # Merge winner's changes into main worktree
+    _merge_race_winner(repo_root, winner)
+
+    # Clean up all temp worktrees
+    for r in results:
+        wt_name = r.worktree.name.split(".")[-1]
+        remove_worktree(repo_root, wt_name)
+
+    return 0
+
+
+def _judge_race(
+    results: list[_RaceResult],
+    repo_root: Path,
+    judge_task: str,
+    skip_permissions: bool,
+) -> _RaceResult | None:
+    """Run judge task to pick winner from race results."""
+    # Build diff summaries for each result
+    diffs = []
+    for r in results:
+        diff_result = subprocess.run(
+            ["git", "diff", "HEAD~1", "--stat"],
+            cwd=r.worktree,
+            capture_output=True,
+            text=True,
+        )
+        diff_text = diff_result.stdout if diff_result.returncode == 0 else "(no diff)"
+
+        # Get full diff for comparison
+        full_diff = subprocess.run(
+            ["git", "diff", "HEAD~1"],
+            cwd=r.worktree,
+            capture_output=True,
+            text=True,
+        )
+        diffs.append({
+            "model": r.model,
+            "worktree": str(r.worktree),
+            "summary": diff_text,
+            "diff": full_diff.stdout if full_diff.returncode == 0 else "",
+        })
+
+    # Build judge prompt
+    judge_prompt = _build_judge_prompt(diffs)
+
+    # Run judge inline (no task file needed)
+    from loopflow.launcher import get_runner
+    backend, variant = parse_model("claude:opus")
+    runner = get_runner(backend)
+
+    result = runner.launch(
+        judge_prompt,
+        auto=True,
+        stream=False,
+        skip_permissions=skip_permissions,
+        cwd=repo_root,
+    )
+
+    if result.exit_code != 0:
+        return None
+
+    # Parse winner from output
+    output = result.output or ""
+    for r in results:
+        if r.model in output:
+            return r
+
+    return None
+
+
+def _build_judge_prompt(diffs: list[dict]) -> str:
+    """Build prompt for judge to pick race winner."""
+    lines = [
+        "You are judging a model race. Multiple models attempted the same coding task.",
+        "Compare their outputs and pick the best one.",
+        "",
+        "Criteria:",
+        "- Correctness: Does the solution actually work?",
+        "- Completeness: Did it address the full task?",
+        "- Code quality: Is it clean, readable, well-structured?",
+        "- Simplicity: Does it avoid over-engineering?",
+        "",
+        "Here are the submissions:",
+        "",
+    ]
+
+    for i, d in enumerate(diffs, 1):
+        lines.append(f"## Submission {i}: {d['model']}")
+        lines.append("")
+        lines.append("Summary of changes:")
+        lines.append("```")
+        lines.append(d["summary"])
+        lines.append("```")
+        lines.append("")
+        lines.append("Full diff:")
+        lines.append("```diff")
+        # Truncate long diffs
+        diff_lines = d["diff"].split("\n")
+        if len(diff_lines) > 200:
+            lines.extend(diff_lines[:200])
+            lines.append(f"... ({len(diff_lines) - 200} more lines)")
+        else:
+            lines.append(d["diff"])
+        lines.append("```")
+        lines.append("")
+
+    lines.extend([
+        "## Your verdict",
+        "",
+        "Reply with ONLY the model name of the winner (e.g., 'claude:opus' or 'codex:o3').",
+        "Do not explain your reasoning.",
+    ])
+
+    return "\n".join(lines)
+
+
+def _merge_race_winner(repo_root: Path, winner: _RaceResult) -> None:
+    """Merge winner's changes into main worktree."""
+    # Get list of changed files in winner worktree
+    result = subprocess.run(
+        ["git", "diff", "--name-only", "HEAD~1"],
+        cwd=winner.worktree,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"Warning: Could not get changed files from {winner.model}")
+        return
+
+    changed_files = [f.strip() for f in result.stdout.strip().split("\n") if f.strip()]
+
+    # Copy each changed file to main worktree
+    for file_path in changed_files:
+        src = winner.worktree / file_path
+        dst = repo_root / file_path
+
+        if src.exists():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_bytes(src.read_bytes())
+            print(f"  Copied: {file_path}")
+        else:
+            # File was deleted
+            if dst.exists():
+                dst.unlink()
+                print(f"  Deleted: {file_path}")
+
+    print(f"\nMerged {len(changed_files)} files from {winner.model}")
+
+
 def _count_logical_steps(resolved: list[ResolvedStep]) -> int:
     """Count logical steps (parallel groups count as 1)."""
     count = 0
@@ -362,6 +671,27 @@ def run_pipeline_def(
             )
             if any(code != 0 for code in exit_codes):
                 return max(exit_codes)
+        elif step.race is not None:
+            # Race step: run task with multiple models
+            step_context = list(context) if context else []
+            if step.config and step.config.context:
+                step_context.extend(step.config.context)
+
+            result_code = _run_race_step(
+                step.task,
+                step.race,
+                repo_root,
+                main_repo,
+                exclude,
+                skip_permissions,
+                step_context or None,
+                step_num,
+                total,
+            )
+            if result_code != 0:
+                return result_code
+
+            i += 1
         else:
             # Sequential step
             step_backend = backend

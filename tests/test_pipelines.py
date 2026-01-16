@@ -6,6 +6,7 @@ from pathlib import Path
 from loopflow.lfd.pipelines import (
     PipelineDef,
     PipelineStep,
+    RaceConfig,
     StepConfig,
     load_pipeline,
     save_pipeline,
@@ -402,3 +403,119 @@ steps:
         assert resolved[1].parallel_group == 0
         assert resolved[2].parallel_group == 0
         assert resolved[3].parallel_group is None
+
+
+# Race configuration tests
+
+def test_race_config_from_list():
+    """RaceConfig parses simple list of models."""
+    race = RaceConfig.from_dict(["claude:opus", "codex:o3"])
+    assert race.models == ["claude:opus", "codex:o3"]
+    assert race.judge == "compare"
+
+
+def test_race_config_from_dict():
+    """RaceConfig parses full dict with custom judge."""
+    race = RaceConfig.from_dict({
+        "models": ["claude:opus", "codex:o3"],
+        "judge": "custom-judge",
+    })
+    assert race.models == ["claude:opus", "codex:o3"]
+    assert race.judge == "custom-judge"
+
+
+def test_race_config_from_model_objects():
+    """RaceConfig parses list of model objects."""
+    race = RaceConfig.from_dict([
+        {"model": "claude:opus"},
+        {"model": "codex:o3"},
+    ])
+    assert race.models == ["claude:opus", "codex:o3"]
+
+
+def test_race_config_serialization():
+    """RaceConfig round-trips through to_dict."""
+    race = RaceConfig(models=["claude:opus", "codex:o3"], judge="custom")
+    data = race.to_dict()
+    restored = RaceConfig.from_dict(data)
+    assert restored.models == ["claude:opus", "codex:o3"]
+    assert restored.judge == "custom"
+
+
+def test_pipeline_step_with_race():
+    """PipelineStep parses race configuration."""
+    step = PipelineStep.from_dict({
+        "task": "implement",
+        "race": ["claude:opus", "codex:o3"],
+    })
+    assert step.task == "implement"
+    assert step.race is not None
+    assert step.race.models == ["claude:opus", "codex:o3"]
+
+
+def test_pipeline_step_race_serialization():
+    """PipelineStep with race round-trips."""
+    step = PipelineStep(
+        task="implement",
+        race=RaceConfig(models=["claude:opus", "codex:o3"]),
+    )
+    data = step.to_dict()
+    restored = PipelineStep.from_dict(data)
+    assert restored.race is not None
+    assert restored.race.models == ["claude:opus", "codex:o3"]
+
+
+def test_load_pipeline_with_race():
+    """Load pipeline with race step from YAML."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        repo = Path(tmpdir)
+        pipelines_dir = repo / ".lf" / "pipelines"
+        pipelines_dir.mkdir(parents=True)
+
+        (pipelines_dir / "raceship.yaml").write_text("""
+steps:
+  - design
+  - task: implement
+    race:
+      - claude:opus
+      - codex:o3
+  - review
+""")
+
+        pipeline = load_pipeline("raceship", repo)
+        assert pipeline is not None
+        assert len(pipeline.steps) == 3
+
+        # First step is simple
+        assert pipeline.steps[0].task == "design"
+        assert pipeline.steps[0].race is None
+
+        # Second step has race
+        assert pipeline.steps[1].task == "implement"
+        assert pipeline.steps[1].race is not None
+        assert pipeline.steps[1].race.models == ["claude:opus", "codex:o3"]
+
+        # Third step is simple
+        assert pipeline.steps[2].task == "review"
+        assert pipeline.steps[2].race is None
+
+
+def test_resolve_pipeline_with_race():
+    """Resolved steps preserve race configuration."""
+    pipeline = PipelineDef(
+        name="raceship",
+        steps=[
+            PipelineStep(task="design"),
+            PipelineStep(task="implement", race=RaceConfig(models=["claude", "codex"])),
+            PipelineStep(task="review"),
+        ],
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        resolved = resolve_pipeline(pipeline, Path(tmpdir))
+
+    assert len(resolved) == 3
+    assert resolved[0].race is None
+    assert resolved[1].race is not None
+    assert resolved[1].race.models == ["claude", "codex"]
+    assert resolved[2].race is None

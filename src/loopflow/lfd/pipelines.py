@@ -32,10 +32,40 @@ class StepConfig:
 
 
 @dataclass
+class RaceConfig:
+    """Configuration for model racing—run same task with multiple models."""
+    models: list[str]
+    judge: str = "compare"
+
+    def to_dict(self) -> dict:
+        result = {"models": self.models}
+        if self.judge != "compare":
+            result["judge"] = self.judge
+        return result
+
+    @classmethod
+    def from_dict(cls, data: list | dict) -> "RaceConfig":
+        if isinstance(data, list):
+            # Simple list of models: race: [claude:opus, codex:o3]
+            models = []
+            for item in data:
+                if isinstance(item, str):
+                    models.append(item)
+                elif isinstance(item, dict) and "model" in item:
+                    models.append(item["model"])
+            return cls(models=models)
+        # Full config: race: {models: [...], judge: "..."}
+        models = data.get("models", [])
+        judge = data.get("judge", "compare")
+        return cls(models=models, judge=judge)
+
+
+@dataclass
 class PipelineStep:
     task: str | None = None
     pipeline: str | None = None
     parallel: list["PipelineStep"] | None = None
+    race: RaceConfig | None = None
     config: StepConfig | None = None
 
     def to_dict(self) -> dict:
@@ -46,6 +76,8 @@ class PipelineStep:
             result["pipeline"] = self.pipeline
         if self.parallel:
             result["parallel"] = [s.to_dict() for s in self.parallel]
+        if self.race:
+            result["race"] = self.race.to_dict()
         if self.config:
             result["config"] = self.config.to_dict()
         return result
@@ -58,6 +90,9 @@ class PipelineStep:
         parallel_data = data.get("parallel")
         parallel = [cls.from_dict(s) for s in parallel_data] if parallel_data else None
 
+        race_data = data.get("race")
+        race = RaceConfig.from_dict(race_data) if race_data else None
+
         config_data = data.get("config")
         config = StepConfig.from_dict(config_data) if config_data else None
 
@@ -65,6 +100,7 @@ class PipelineStep:
             task=data.get("task"),
             pipeline=data.get("pipeline"),
             parallel=parallel,
+            race=race,
             config=config,
         )
 
@@ -134,6 +170,7 @@ class ResolvedStep:
     task: str
     config: StepConfig | None = None
     parallel_group: int | None = None
+    race: RaceConfig | None = None
 
 
 def resolve_pipeline(pipeline: PipelineDef, repo: Path) -> list[ResolvedStep]:
@@ -149,6 +186,7 @@ def resolve_pipeline(pipeline: PipelineDef, repo: Path) -> list[ResolvedStep]:
                 task=step.task,
                 config=step.config,
                 parallel_group=group,
+                race=step.race,
             ))
         elif step.pipeline:
             nested = load_pipeline(step.pipeline, repo)

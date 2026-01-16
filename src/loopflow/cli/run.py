@@ -184,6 +184,9 @@ def run(
     diff_files: Optional[bool] = typer.Option(
         None, "--diff-files/--no-diff-files", help="Include files touched by branch"
     ),
+    summaries: Optional[bool] = typer.Option(
+        None, "--summaries/--no-summaries", help="Include pre-generated codebase summaries"
+    ),
     model: ModelType = typer.Option(
         None, "-m", "--model", help="Model to use (backend or backend:variant)"
     ),
@@ -299,11 +302,12 @@ def run(
         if pattern in exclude_patterns:
             exclude_patterns.remove(pattern)
 
-    # Resolve paste/docs/diff/diff_files flags (CLI overrides config)
+    # Resolve paste/docs/diff/diff_files/summaries flags (CLI overrides config)
     include_paste = paste if paste is not None else (config.paste if config else False)
     include_docs = docs if docs is not None else (config.docs if config else True)
     include_diff = diff if diff is not None else (config.diff if config else False)
     include_diff_files = diff_files if diff_files is not None else (config.diff_files if config else True)
+    include_summaries = summaries if summaries is not None else bool(config and config.summaries)
 
     args = ctx.args or None
     try:
@@ -319,6 +323,7 @@ def run(
             voices=resolved.voice or None,
             include_diff=include_diff,
             include_diff_files=include_diff_files,
+            include_summaries=include_summaries,
             config=config,
         )
     except VoiceNotFoundError as e:
@@ -379,6 +384,9 @@ def inline(
     diff_files: Optional[bool] = typer.Option(
         None, "--diff-files/--no-diff-files", help="Include files touched by branch"
     ),
+    summaries: Optional[bool] = typer.Option(
+        None, "--summaries/--no-summaries", help="Include pre-generated codebase summaries"
+    ),
     model: ModelType = typer.Option(
         None, "-m", "--model", help="Model to use (backend or backend:variant)"
     ),
@@ -430,11 +438,12 @@ def inline(
         if pattern in exclude_patterns:
             exclude_patterns.remove(pattern)
 
-    # Resolve paste/docs/diff/diff_files flags (CLI overrides config)
+    # Resolve paste/docs/diff/diff_files/summaries flags (CLI overrides config)
     include_paste = paste if paste is not None else (config.paste if config else False)
     include_docs = docs if docs is not None else (config.docs if config else True)
     include_diff = diff if diff is not None else (config.diff if config else False)
     include_diff_files = diff_files if diff_files is not None else (config.diff_files if config else True)
+    include_summaries = summaries if summaries is not None else bool(config and config.summaries)
 
     try:
         components = gather_prompt_components(
@@ -449,6 +458,7 @@ def inline(
             voices=resolved.voice or None,
             include_diff=include_diff,
             include_diff_files=include_diff_files,
+            include_summaries=include_summaries,
             config=config,
         )
     except VoiceNotFoundError as e:
@@ -499,6 +509,9 @@ def cp(
     diff_files: Optional[bool] = typer.Option(
         None, "--diff-files/--no-diff-files", help="Include files touched by branch"
     ),
+    summaries: Optional[bool] = typer.Option(
+        None, "--summaries/--no-summaries", help="Include pre-generated codebase summaries"
+    ),
 ):
     """Copy file context to clipboard."""
     repo_root = find_worktree_root()
@@ -522,6 +535,7 @@ def cp(
     include_docs = docs if docs is not None else (config.docs if config else True)
     include_diff = diff if diff is not None else (config.diff if config else False)
     include_diff_files = diff_files if diff_files is not None else (config.diff_files if config else True)
+    include_summaries = summaries if summaries is not None else bool(config and config.summaries)
 
     components = gather_prompt_components(
         repo_root,
@@ -533,6 +547,7 @@ def cp(
         include_loopflow_doc=config.include_loopflow_doc if config else True,
         include_diff=include_diff,
         include_diff_files=include_diff_files,
+        include_summaries=include_summaries,
         config=config,
     )
 

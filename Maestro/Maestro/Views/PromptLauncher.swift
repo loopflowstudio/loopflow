@@ -16,6 +16,9 @@ struct PromptLauncher: View {
 
     private let terminalLauncher = TerminalLauncher()
 
+    // Track whether a pipeline is selected (vs a task)
+    @State private var selectedPipeline: PipelineDef?
+
     // Parse input into prompt name and args
     private var parsedInput: (prompt: String?, args: String) {
         let trimmed = inputText.trimmingCharacters(in: .whitespaces)
@@ -80,6 +83,13 @@ struct PromptLauncher: View {
             return appState.prompts
         }
         return appState.prompts.filter { $0.name.lowercased().contains(taskSearchText.lowercased()) }
+    }
+
+    private var filteredPipelines: [PipelineDef] {
+        if taskSearchText.isEmpty {
+            return appState.pipelines
+        }
+        return appState.pipelines.filter { $0.name.lowercased().contains(taskSearchText.lowercased()) }
     }
 
     private var taskSelector: some View {
@@ -159,25 +169,68 @@ struct PromptLauncher: View {
                 .frame(minWidth: 120)
 
                 // Dropdown results
-                if isTaskSearchFocused && !filteredTasks.isEmpty {
+                if isTaskSearchFocused && (!filteredTasks.isEmpty || !filteredPipelines.isEmpty) {
                     VStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(filteredTasks.enumerated()), id: \.element.id) { index, prompt in
-                            Button {
-                                selectTask(prompt)
-                            } label: {
-                                HStack {
-                                    Text(prompt.displayName)
-                                        .fontWeight(.medium)
-                                    Spacer()
-                                    Text(prompt.defaultMode == .auto ? "auto" : "interactive")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
+                        // Tasks section
+                        if !filteredTasks.isEmpty {
+                            Text("Tasks")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
                                 .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(index == highlightedTaskIndex ? Color.accentColor.opacity(0.1) : Color.clear)
+                                .padding(.top, 6)
+                                .padding(.bottom, 2)
+
+                            ForEach(Array(filteredTasks.enumerated()), id: \.element.id) { index, prompt in
+                                Button {
+                                    selectTask(prompt)
+                                } label: {
+                                    HStack {
+                                        Text(prompt.displayName)
+                                            .fontWeight(.medium)
+                                        Spacer()
+                                        Text(prompt.defaultMode == .auto ? "auto" : "interactive")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(index == highlightedTaskIndex ? Color.accentColor.opacity(0.1) : Color.clear)
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
+                        }
+
+                        // Pipelines section
+                        if !filteredPipelines.isEmpty {
+                            Text("Pipelines")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                                .padding(.horizontal, 10)
+                                .padding(.top, 6)
+                                .padding(.bottom, 2)
+
+                            ForEach(Array(filteredPipelines.enumerated()), id: \.element.id) { index, pipeline in
+                                let adjustedIndex = filteredTasks.count + index
+                                Button {
+                                    selectPipelineFromDropdown(pipeline)
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "arrow.triangle.branch")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Text(pipeline.name)
+                                            .fontWeight(.medium)
+                                        Spacer()
+                                        Text("\(pipeline.stepCount) steps")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(adjustedIndex == highlightedTaskIndex ? Color.accentColor.opacity(0.1) : Color.clear)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                     }
                     .background(Color(nsColor: .controlBackgroundColor))
@@ -200,13 +253,25 @@ struct PromptLauncher: View {
         taskSearchText = prompt.displayName
         isTaskSearchFocused = false
         taskFieldFocused = false
+        selectedPipeline = nil  // Clear pipeline selection
         selectPromptFromMenu(prompt)
+    }
+
+    private func selectPipelineFromDropdown(_ pipeline: PipelineDef) {
+        taskSearchText = pipeline.name
+        isTaskSearchFocused = false
+        taskFieldFocused = false
+        selectedPipeline = pipeline
+        // Clear task input when selecting a pipeline
+        inputText = ""
+        appState.runMode = .auto  // Pipelines always run in auto mode
     }
 
     private func clearTaskSelection() {
         taskSearchText = ""
         isTaskSearchFocused = false
         taskFieldFocused = false
+        selectedPipeline = nil
         clearPromptSelection()
     }
 
@@ -697,7 +762,7 @@ struct PromptLauncher: View {
 
     private func launchCommand(repo: URL, workPath: URL) {
         let terminal = appState.config?.terminalApp ?? .warp
-        let command = appState.buildCommand()
+        let command = appState.buildCommand(pipeline: selectedPipeline)
 
         do {
             try terminalLauncher.launchTerminal(terminal, at: workPath, command: command)

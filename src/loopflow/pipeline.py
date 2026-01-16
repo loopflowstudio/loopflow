@@ -153,6 +153,7 @@ def _finalize_pipeline(
             message = generate_pr_message(repo_root)
             pr_url = open_pr(repo_root, title=message.title, body=message.body)
             print(f"\nPR created: {pr_url}")
+            subprocess.run(["open", pr_url])
         except GitError as e:
             print(f"\nPR creation failed: {e}")
 

@@ -40,7 +40,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if appState.currentRepo != nil {
                 VStack(spacing: 0) {
-                    if let pipeline = appState.selectedPipeline {
+                    if Flags.beta, let pipeline = appState.selectedPipeline {
                         pipelineEditorBinding(pipeline)
                     } else {
                         PromptLauncher(appState: appState)

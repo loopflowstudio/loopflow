@@ -1,72 +1,41 @@
 # spark-tune: LLM-Assisted UX Iteration for Maestro
 
-**What to build**: Infrastructure for LLMs to see, understand, and iterate on the Maestro app UX—including screenshots, simulated user research, and minimal automated UI testing.
+**Status**: Phase 1 Complete
 
-## Vision
+Infrastructure for LLMs to see, understand, and iterate on the Maestro app UX—including screenshots, simulated user research, and minimal automated UI testing.
 
-The user wants a "debug loop" for UX iteration:
+## What's Done
 
-> "(1) we make sure to build the infra necessary for LLMs like claude code and codex to easily 'use' and 'see' our app to understand the ux issues with it
-> (2) we define a pipeline that involves doing:
->   (a) looking at the state of the app and the stated vision and identifying the biggest gaps
->   (b) simulating those 'users' and conducting user research
->   (c) brainstorming and designing new UXes to test
->   (d) building those etc..."
+### Screenshot Capture (`lf capture`)
 
-## Data Structures
+A CLI command captures application windows and saves them as context for LLM tasks.
 
-```python
-@dataclass
-class UISnapshot:
-    """Captured state of the Maestro app for LLM analysis."""
-    screenshot_path: Path          # PNG screenshot
-    view_hierarchy: dict           # Accessibility tree (optional)
-    app_state: dict               # Serialized AppState
-    timestamp: datetime
-
-@dataclass
-class UserPersona:
-    """Simulated user for UX research."""
-    name: str                      # e.g., "power-user", "newcomer"
-    description: str               # Goals, pain points, experience level
-    tasks: list[str]              # What they're trying to accomplish
-
-@dataclass
-class UXQuestion:
-    """Research question to test with simulated users."""
-    question: str                  # "Can the user find how to create a worktree?"
-    persona: str                   # Which persona to test with
-    success_criteria: str          # What would success look like?
+```bash
+lf capture Maestro                  # capture window → .design/screenshots/capture-<timestamp>.png
+lf capture Maestro --name main-view # custom filename → .design/screenshots/main-view.png
+lf capture Maestro --open           # capture and open in Preview
+lf capture --list                   # list available windows
 ```
 
-## Key Functions
+See `.design/capture.md` for implementation details.
 
-### Screenshot Capture
+### Image Context Support
 
-```python
-def capture_maestro_screenshot(window_title: str = "Maestro") -> Path:
-    """Take screenshot of Maestro window, save to .design/screenshots/."""
+Images are now first-class context in loopflow tasks. When you include screenshots via `-x`, they're tracked separately and passed to agents:
 
-def capture_with_state(app_state_json: Path) -> UISnapshot:
-    """Capture screenshot + dump current AppState for context."""
+```bash
+lf review -x .design/screenshots/   # include all screenshots as context
 ```
 
-Implementation: Use macOS `screencapture` CLI with window selection. The Maestro app can export its state via a debug endpoint or file dump.
+The prompt includes an `<lf:images>` section telling agents where to find the images. Codex receives images via `-i` flag; Claude and Gemini read them from the filesystem.
 
-### State Export (Swift side)
+See `.design/image-context.md` for implementation details.
 
-```swift
-extension AppState {
-    func exportDebugState() -> String {
-        """JSON dump of current state for LLM analysis."""
-    }
-}
+## What's Left
 
-// Add menu item: Debug > Export State (⌘⇧D)
-// Writes to .design/state.json in repo root
-```
+### UX Analysis Pipeline
 
-### UX Analysis Pipeline (`.lf/ux-*.lf`)
+The vision is a pipeline of prompts for UX iteration:
 
 ```
 .lf/
@@ -76,139 +45,39 @@ extension AppState {
   ux-build.lf       # Implement proposed changes
 ```
 
-## Pipeline Design
+These prompt files haven't been created yet.
 
-### 1. `lf ux-audit`
+### State Export (Maestro Swift side)
 
-Input:
-- Screenshots in `.design/screenshots/`
-- `docs/vision.md` and `docs/maestro.md`
-- Current state export
+Adding a Debug menu to Maestro to export app state as JSON for LLM analysis. Not yet implemented.
 
-Output: `.design/ux-audit.md` containing:
-- List of gaps between vision and reality
-- Prioritized UX issues
-- User research questions to investigate
+### UI Testing
 
-### 2. `lf ux-research`
+Minimal smoke tests that catch obvious regressions. Not yet implemented.
 
-Input:
-- `.design/ux-audit.md` (issues and questions)
-- Persona definitions in `.design/personas/`
-- Screenshots
+## Usage
 
-Output: `.design/ux-research.md` containing:
-- Simulated user walkthrough notes
-- Pain points discovered
-- Severity ratings
-
-### 3. `lf ux-design`
-
-Input:
-- `.design/ux-research.md`
-- Current SwiftUI code
-
-Output: `.design/ux-proposal.md` containing:
-- Proposed UI changes (with sketches in prose)
-- SwiftUI code snippets showing approach
-- Before/after comparisons
-
-### 4. `lf ux-build`
-
-Input:
-- `.design/ux-proposal.md`
-- Maestro codebase
-
-Output: Working code implementing the proposal
-
-## UI Testing (Pre-commit Hook)
-
-Minimal smoke tests that catch obvious regressions:
-
-```swift
-// MaestroTests/UISnapshotTests.swift
-
-@Test("App launches without crash")
-func launchTest() {
-    let app = AppState()
-    #expect(app.worktrees.isEmpty)  // Initial state
-}
-
-@Test("PromptLauncher renders with all controls")
-func promptLauncherControls() {
-    let state = AppState()
-    let view = PromptLauncher(appState: state)
-    // SwiftUI Preview rendering test
-}
-```
-
-For actual visual regression testing, use reference screenshots:
+With the current implementation, UX iteration workflow is:
 
 ```bash
-# .lf/hooks/pre-commit
-#!/bin/bash
-# Capture current screenshots and compare to reference
-maestro-test screenshot --compare .design/reference/
+# 1. Capture current state
+lf capture Maestro --name before
+
+# 2. Run UX audit with screenshots
+lf review -x .design/screenshots/ "Analyze this UI for usability issues"
+
+# 3. Make changes...
+
+# 4. Capture after
+lf capture Maestro --name after
 ```
 
-## Implementation Plan
+## Files Changed
 
-### Phase 1: Screenshot Infrastructure
-
-1. Add `capture_screenshot.py` CLI tool:
-   - Uses `screencapture -l <window_id>` for window-specific capture
-   - Finds Maestro window via `osascript` or window title
-   - Saves to `.design/screenshots/<timestamp>.png`
-
-2. Add Debug menu to Maestro app:
-   - `Export State` (⌘⇧D) → writes JSON to `.design/state.json`
-   - `Capture Screenshot` → triggers capture + state export together
-
-### Phase 2: UX Prompts
-
-Create the four `.lf/ux-*.lf` files with prompts that:
-- Load screenshots as context (via `-x .design/screenshots/`)
-- Reference vision docs for gap analysis
-- Output structured findings to `.design/`
-
-### Phase 3: Automated Testing
-
-1. Add SwiftUI preview tests using Swift Testing framework
-2. Create reference screenshots for regression comparison
-3. Wire up pre-commit hook for UI smoke tests
-
-## Constraints
-
-- **Screenshots are primary context.** LLMs can see and reason about screenshots. The infrastructure must make it trivial to capture and include them.
-
-- **State export must be opt-in.** Debug menus, not automatic. Users shouldn't wonder why JSON files appear.
-
-- **UI tests must be fast.** Pre-commit hooks need to finish in <5 seconds. Visual regression is optional/manual.
-
-- **Personas are text files.** No complex persona engine. Just markdown files in `.design/personas/` that prompts can read.
-
-## Done When
-
-1. Running `screencapture-maestro` produces a PNG in `.design/screenshots/`
-2. Maestro Debug > Export State writes `.design/state.json`
-3. `lf ux-audit` reads screenshots and outputs gap analysis
-4. `swift test` passes with UI smoke tests
-5. Pre-commit hook runs UI tests automatically
-
-Verification:
-```bash
-# Capture screenshot
-screencapture-maestro
-
-# Export state (manual in app)
-# Debug > Export State
-
-# Run audit
-lf ux-audit
-
-# Check tests
-cd Maestro && swift test
-
-# Verify hook
-git commit --dry-run  # should run UI tests
-```
+- `src/loopflow/capture.py`: Window discovery and screenshot capture
+- `src/loopflow/files.py`: `GatherResult` dataclass, `is_image()`, `format_image_references()`
+- `src/loopflow/context.py`: `image_files` field in `PromptComponents`
+- `src/loopflow/launcher.py`: Image passing to Codex via `-i` flag
+- `src/loopflow/cli/__init__.py`: `lf capture` command
+- `tests/test_capture.py`: Window matching tests
+- `tests/test_files.py`: Image handling tests

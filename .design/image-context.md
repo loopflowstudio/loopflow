@@ -15,7 +15,7 @@ class GatherResult:
     text_files: list[tuple[Path, str]]
     image_files: list[Path]
 
-_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff"}
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".ico"}
 
 def is_image(path: Path) -> bool:
     return path.suffix.lower() in _IMAGE_EXTENSIONS

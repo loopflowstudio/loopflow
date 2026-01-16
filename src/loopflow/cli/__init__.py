@@ -1,10 +1,18 @@
 """Loopflow CLI: Arrange LLMs to code in harmony."""
 
+import subprocess
 import sys
 from typing import Optional
 
 import typer
 
+from loopflow.capture import (
+    ScreenCaptureError,
+    capture_window,
+    find_window,
+    generate_screenshot_path,
+    list_windows as get_windows,
+)
 from loopflow.config import ConfigError, load_config
 from loopflow.context import find_worktree_root, gather_task
 from loopflow.init_check import check_init_status
@@ -33,16 +41,6 @@ def capture(
     open_file: bool = typer.Option(False, "--open", "-o", help="Open screenshot after capture"),
 ):
     """Capture a window screenshot to .design/screenshots/."""
-    import subprocess
-
-    from loopflow.capture import (
-        list_windows as get_windows,
-        find_window,
-        capture_window,
-        generate_screenshot_path,
-        ScreenCaptureError,
-    )
-
     if list_windows:
         windows = get_windows()
         if not windows:

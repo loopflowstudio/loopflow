@@ -23,18 +23,29 @@ struct MaestroApp: App {
         .windowStyle(.automatic)
         .defaultSize(width: 900, height: 700)
 
-        // Agents window - global agent management
+        // Agents window - global agent management (beta only)
         WindowGroup(id: "agents") {
             AgentWindow()
         }
         .windowStyle(.automatic)
         .defaultSize(width: 800, height: 600)
         .commands {
-            CommandGroup(after: .windowArrangement) {
-                Button("Agents") {
-                    openWindow(id: "agents")
+            // Beta features menu
+            CommandGroup(after: .appSettings) {
+                Toggle("Beta Features", isOn: Binding(
+                    get: { Flags.beta },
+                    set: { Flags.setBeta($0) }
+                ))
+            }
+
+            // Agents menu item (beta only)
+            if Flags.beta {
+                CommandGroup(after: .windowArrangement) {
+                    Button("Agents") {
+                        openWindow(id: "agents")
+                    }
+                    .keyboardShortcut("a", modifiers: [.command, .shift])
                 }
-                .keyboardShortcut("a", modifiers: [.command, .shift])
             }
         }
     }

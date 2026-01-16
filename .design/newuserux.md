@@ -48,13 +48,13 @@ Current layout shows everything at once. Change to:
 - Task selector dropdown (tasks only, no pipelines)
 - Big text input
 - Auto / Interactive mode toggle
+- Token count (immediate feedback on context size)
 - Run button
 
-**Collapsed by default** (disclosure chevron):
+**Collapsed by default** ("Options" disclosure):
 - Voices selector
 - Context toggles (Docs, Files, Diff, Clipboard)
 - File attachment drop zone
-- Token count
 
 ### Enable beta mode
 

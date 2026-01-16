@@ -804,10 +804,11 @@ def _update_pr(repo_root: Path, title: str, body: str) -> str:
 
 
 @app.command("pr")
-def pr(
-    add: bool = typer.Option(False, "-a", "--add", help="Add, commit, and push changes first"),
-) -> None:
-    """Create or update a GitHub PR, then open it in browser."""
+def pr() -> None:
+    """Create or update a GitHub PR, then open it in browser.
+
+    Auto-commits any uncommitted changes before creating/updating the PR.
+    """
     repo_root = find_worktree_root()
     if not repo_root:
         typer.echo("Error: Not in a git repository", err=True)
@@ -817,8 +818,8 @@ def pr(
         typer.echo("Error: 'gh' CLI not found. Install with: brew install gh", err=True)
         raise typer.Exit(1)
 
-    if add:
-        _add_commit_push(repo_root)
+    # Always auto-commit and push any pending changes
+    _add_commit_push(repo_root)
 
     # Check if PR already exists
     existing_url = _get_existing_pr_url(repo_root)

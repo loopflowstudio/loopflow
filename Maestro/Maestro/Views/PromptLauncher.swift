@@ -13,6 +13,7 @@ struct PromptLauncher: View {
     @State private var showingLaunchError = false
     @FocusState private var isInputFocused: Bool
     @State private var isCreatingWorktree = false
+    @State private var showAdvancedOptions = false
 
     private let terminalLauncher = TerminalLauncher()
 
@@ -52,9 +53,12 @@ struct PromptLauncher: View {
             // Main input area - centered and prominent
             VStack(spacing: 12) {
                 taskSelector
-                voiceSelector
                 mainInput
-                optionsBar
+                modeAndAdvancedRow
+                if showAdvancedOptions {
+                    voiceSelector
+                    contextBar
+                }
             }
             .frame(maxWidth: 600)
             .padding(.horizontal, 40)
@@ -86,6 +90,7 @@ struct PromptLauncher: View {
     }
 
     private var filteredPipelines: [PipelineDef] {
+        guard Flags.beta else { return [] }
         if taskSearchText.isEmpty {
             return appState.pipelines
         }
@@ -565,44 +570,45 @@ struct PromptLauncher: View {
         appState.runMode = prompt.defaultMode
     }
 
-    // MARK: - Context Bar (always visible)
+    // MARK: - Mode and Advanced Options Row
+
+    private var modeAndAdvancedRow: some View {
+        HStack(spacing: 12) {
+            Picker("", selection: $appState.runMode) {
+                Text("Auto").tag(RunMode.auto)
+                Text("Interactive").tag(RunMode.interactive)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 160)
+
+            Spacer()
+
+            // Token count - always visible
+            Text(formatTokenCount(appState.estimatedTokens))
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundStyle(.secondary)
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showAdvancedOptions.toggle()
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text("Options")
+                        .font(.caption)
+                    Image(systemName: showAdvancedOptions ? "chevron.up" : "chevron.down")
+                        .font(.caption2)
+                }
+                .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: - Context Bar
 
     @State private var isDraggingOver = false
     @State private var showingFilePicker = false
-
-    private var optionsBar: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            // Mode picker row
-            HStack(spacing: 12) {
-                Picker("", selection: $appState.runMode) {
-                    Text("Auto").tag(RunMode.auto)
-                    Text("Interactive").tag(RunMode.interactive)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 160)
-
-                Spacer()
-            }
-
-            // Context bar - always visible
-            contextBar
-        }
-        .onChange(of: appState.includeDocs) {
-            Task { await appState.estimateTokens() }
-        }
-        .onChange(of: appState.includeDiff) {
-            Task { await appState.estimateTokens() }
-        }
-        .onChange(of: appState.includeDiffFiles) {
-            Task { await appState.estimateTokens() }
-        }
-        .onChange(of: appState.includePaste) {
-            Task { await appState.estimateTokens() }
-        }
-        .onChange(of: appState.attachedFiles) {
-            Task { await appState.estimateTokens() }
-        }
-    }
 
     private var contextBar: some View {
         HStack(spacing: 6) {
@@ -650,13 +656,6 @@ struct PromptLauncher: View {
                     }
                 }
             }
-
-            Spacer()
-
-            // Token count
-            Text(formatTokenCount(appState.estimatedTokens))
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                .foregroundStyle(.secondary)
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 12)
@@ -671,6 +670,21 @@ struct PromptLauncher: View {
             RoundedRectangle(cornerRadius: 10)
                 .stroke(isDraggingOver ? Color.accentColor : Color.clear, lineWidth: 2)
         )
+        .onChange(of: appState.includeDocs) {
+            Task { await appState.estimateTokens() }
+        }
+        .onChange(of: appState.includeDiff) {
+            Task { await appState.estimateTokens() }
+        }
+        .onChange(of: appState.includeDiffFiles) {
+            Task { await appState.estimateTokens() }
+        }
+        .onChange(of: appState.includePaste) {
+            Task { await appState.estimateTokens() }
+        }
+        .onChange(of: appState.attachedFiles) {
+            Task { await appState.estimateTokens() }
+        }
     }
 
     private func formatTokenCount(_ count: Int) -> String {

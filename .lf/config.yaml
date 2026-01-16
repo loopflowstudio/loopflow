@@ -6,6 +6,11 @@ context:
 exclude: "uv.lock"
 push: true
 
+summaries:
+  - path: src/loopflow
+    tokens: 30000
+    model: claude:sonnet
+
 pipelines:
   ship:
     tasks:

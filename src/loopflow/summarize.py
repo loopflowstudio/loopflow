@@ -132,11 +132,35 @@ def hash_content(content: str) -> str:
     return hashlib.sha256(content.encode()).hexdigest()[:16]
 
 
-def _hash_directory_git(path: Path, repo_root: Path) -> str | None:
-    """Hash directory contents using git ls-files."""
-    target = repo_root if path == Path(".") else repo_root / path
+def _get_merge_base(repo_root: Path) -> str | None:
+    """Get the merge-base between HEAD and main."""
     result = subprocess.run(
-        ["git", "ls-files", "-s", str(target)],
+        ["git", "merge-base", "main", "HEAD"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def _hash_directory_git(path: Path, repo_root: Path) -> str | None:
+    """Hash directory contents at the merge-base with main.
+
+    Uses the diff base so summaries only refresh when main advances,
+    not on local branch modifications (which are already visible via diff_files).
+    """
+    base = _get_merge_base(repo_root)
+    if not base:
+        return None
+
+    target = str(path) if path != Path(".") else ""
+    cmd = ["git", "ls-tree", "-r", base]
+    if target:
+        cmd.extend(["--", target])
+    result = subprocess.run(
+        cmd,
         cwd=repo_root,
         capture_output=True,
         text=True,
@@ -172,8 +196,67 @@ def is_stale(summary: Summary, repo_root: Path) -> bool:
     return current_hash != summary.source_hash
 
 
+def _list_files_at_commit(commit: str, path: Path, repo_root: Path) -> list[str]:
+    """List files under path at a specific commit."""
+    target = str(path) if path != Path(".") else ""
+    cmd = ["git", "ls-tree", "-r", "--name-only", commit]
+    if target:
+        cmd.extend(["--", target])
+    result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)
+    if result.returncode != 0:
+        return []
+    return [f for f in result.stdout.strip().split("\n") if f]
+
+
+def _read_file_at_commit(commit: str, filepath: str, repo_root: Path) -> str | None:
+    """Read file content at a specific commit."""
+    result = subprocess.run(
+        ["git", "show", f"{commit}:{filepath}"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
 def gather_source_content(path: Path, repo_root: Path, exclude: list[str] | None = None) -> str:
-    """Collect all file contents under path for summarization."""
+    """Collect file contents under path at merge-base for summarization.
+
+    Reads from merge-base so summary reflects the base codebase state,
+    not local branch changes (which are visible via diff_files).
+    """
+    base = _get_merge_base(repo_root)
+    if not base:
+        # Fallback to working directory if no merge-base (e.g., on main)
+        return _gather_source_content_working_dir(path, repo_root, exclude)
+
+    excluded_paths = _compile_exclude_patterns(exclude or [], repo_root) if exclude else None
+    files = _list_files_at_commit(base, path, repo_root)
+
+    parts = []
+    for filepath in sorted(files):
+        file_path = repo_root / filepath
+        if excluded_paths and _is_ignored(file_path, repo_root, excluded_paths):
+            continue
+        if ".lf/summaries" in filepath:
+            continue
+        # Skip binary files by extension
+        if is_binary(file_path):
+            continue
+
+        content = _read_file_at_commit(base, filepath, repo_root)
+        if content is None:
+            continue
+
+        parts.append(f"# {filepath}\n\n```\n{content}\n```")
+
+    return "\n\n".join(parts)
+
+
+def _gather_source_content_working_dir(path: Path, repo_root: Path, exclude: list[str] | None = None) -> str:
+    """Fallback: collect file contents from working directory."""
     full_path = repo_root if path == Path(".") else repo_root / path
     excluded_paths = _compile_exclude_patterns(exclude or [], repo_root) if exclude else None
 
@@ -185,7 +268,6 @@ def gather_source_content(path: Path, repo_root: Path, exclude: list[str] | None
             parts.append(f"# {rel}\n\n```\n{full_path.read_text()}\n```")
         return "\n\n".join(parts)
 
-    # Directory: collect all files
     for p in sorted(full_path.rglob("*")):
         if not p.is_file():
             continue
@@ -199,7 +281,6 @@ def gather_source_content(path: Path, repo_root: Path, exclude: list[str] | None
             continue
 
         rel = p.relative_to(repo_root)
-        # Skip .lf/summaries to avoid circular inclusion
         if ".lf/summaries" in str(rel):
             continue
         parts.append(f"# {rel}\n\n```\n{content}\n```")
@@ -228,6 +309,11 @@ def _get_model_name(model: str) -> str:
     return model_map.get(model, model)
 
 
+def _estimate_tokens(text: str) -> int:
+    """Rough token estimate (~4 chars per token)."""
+    return len(text) // 4
+
+
 def generate_summary(
     path: Path,
     repo_root: Path,
@@ -235,9 +321,24 @@ def generate_summary(
     model: str = "gemini",
     exclude: list[str] | None = None,
 ) -> Summary:
-    """Generate summary via LLM, respecting token budget."""
+    """Generate summary via LLM, respecting token budget.
+
+    If source content fits within budget, returns it directly without LLM call.
+    """
     source_content = gather_source_content(path, repo_root, exclude)
     source_hash = compute_source_hash(path, repo_root)
+
+    # If source fits in budget, use it directly
+    estimated_tokens = _estimate_tokens(source_content)
+    if estimated_tokens <= token_budget:
+        return Summary(
+            path=path,
+            content=source_content,
+            token_budget=token_budget,
+            source_hash=source_hash,
+            created_at=datetime.now(),
+            model="raw",  # No summarization needed
+        )
 
     prompt_template = _load_summarize_prompt(repo_root)
     prompt = prompt_template.format(token_budget=token_budget, content=source_content)

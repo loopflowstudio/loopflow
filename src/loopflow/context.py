@@ -1,6 +1,8 @@
 """Context gathering for LLM sessions."""
 
+import os
 import subprocess
+import sys
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
@@ -9,6 +11,7 @@ from typing import Optional
 from loopflow.design import gather_design_docs
 from loopflow.files import gather_docs, gather_files, format_files, format_image_references
 from loopflow.frontmatter import TaskFile, parse_task_file
+from loopflow.summarize import is_stale, load_summary
 from loopflow.voices import Voice, load_voice
 
 
@@ -255,22 +258,60 @@ def _load_loopflow_doc() -> str:
     return resources.files("loopflow").joinpath("LOOPFLOW.md").read_text()
 
 
+def _trigger_background_refresh(repo_root: Path) -> None:
+    """Spawn background process to refresh stale summaries.
+
+    Uses a lock file to prevent concurrent refresh attempts.
+    """
+    lock_file = repo_root / ".lf" / "summaries" / ".refresh.lock"
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Check if refresh already in progress
+    if lock_file.exists():
+        try:
+            pid = int(lock_file.read_text().strip())
+            # Check if process still running
+            os.kill(pid, 0)
+            return  # Refresh already in progress
+        except (ValueError, OSError, ProcessLookupError):
+            # Stale lock or process dead, remove it
+            lock_file.unlink(missing_ok=True)
+
+    # Fork and write lock
+    process = subprocess.Popen(
+        [sys.executable, "-m", "loopflow.lfops", "summarize", "--all"],
+        cwd=repo_root,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    lock_file.write_text(str(process.pid))
+
+
 def gather_summaries(repo_root: Path, config) -> list[tuple[Path, str]]:
     """Load all configured summaries for context inclusion.
 
-    Summaries must exist in .lf/summaries/. If a configured summary doesn't exist,
-    it's skipped (use `lfops summarize --all` to generate missing summaries).
+    Returns cached summaries immediately. If any are stale or missing,
+    triggers background refresh for next run.
     """
-    from loopflow.summarize import load_summary
-
     if not config or not config.summaries:
         return []
 
     results = []
+    needs_refresh = False
+
     for summary_config in config.summaries:
         summary = load_summary(Path(summary_config.path), repo_root)
         if summary:
             results.append((Path(summary_config.path), summary.content))
+            if is_stale(summary, repo_root):
+                needs_refresh = True
+        else:
+            needs_refresh = True
+
+    if needs_refresh:
+        _trigger_background_refresh(repo_root)
+
     return results
 
 

@@ -66,10 +66,10 @@ def is_stale(summary: Summary, repo_root: Path) -> bool:
     """Check if source content changed since summary was generated."""
 
 def gather_source_content(path: Path, repo_root: Path, exclude: list[str] | None) -> str:
-    """Collect all file contents under path for summarization."""
+    """Collect file contents at merge-base for summarization."""
 
 def generate_summary(path, repo_root, token_budget, model, exclude) -> Summary:
-    """Generate summary via LLM, respecting token budget."""
+    """Generate summary via LLM. Returns raw content if it fits in budget."""
 
 def refresh_if_stale(path, repo_root, token_budget, model, exclude, force) -> tuple[Summary, bool]:
     """Load cached summary or regenerate if stale. Returns (summary, was_regenerated)."""
@@ -79,7 +79,9 @@ def refresh_if_stale(path, repo_root, token_budget, model, exclude, force) -> tu
 # src/loopflow/context.py
 
 def gather_summaries(repo_root: Path, config) -> list[tuple[Path, str]]:
-    """Load all configured summaries for context inclusion."""
+    """Load all configured summaries for context inclusion.
+
+    Triggers background refresh if any summaries are stale or missing."""
 ```
 
 ### CLI
@@ -137,7 +139,7 @@ CLI flags: `--summaries/--no-summaries` to override config.
 
 ### Staleness detection
 
-Source hash computed via `git ls-files -s` for directories (tracks staged file content). When source hash changes, summary is regenerated on next access.
+Source hash computed via `git ls-tree` at the merge-base with main. This means summaries only refresh when main advances, not on local branch modifications (which are already visible via diff_files). Background refresh is triggered automatically when stale summaries are detected during context gathering.
 
 ### Swift/Maestro
 
@@ -148,9 +150,11 @@ Source hash computed via `git ls-files -s` for directories (tracks staged file c
 - `TokenEstimator.swift` passes `--no-summaries` flag when disabled
 - `AppState.swift` tracks `includeSummaries` state
 
-## Not implemented
+## Implementation notes
 
-- Background refresh agent (can be built with existing lfd infrastructure)
+- **Token budget bypass**: If source content fits within the token budget, it's returned directly without LLM summarization (model set to "raw")
+- **Merge-base aware**: Summaries are generated from content at the merge-base with main, so they represent the base codebase state, not local branch changes
+- **Background refresh**: Stale or missing summaries trigger a background `lfops summarize --all` process, using a lock file to prevent concurrent refreshes
 
 ## Usage
 

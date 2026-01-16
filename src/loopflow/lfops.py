@@ -1297,27 +1297,31 @@ def summarize(
             typer.echo("No summaries configured in .lf/config.yaml")
             raise typer.Exit(0)
 
-        for summary_config in config.summaries:
-            summary_path = Path(summary_config.path)
-            existing = load_summary(summary_path, repo_root)
+        lock_file = repo_root / ".lf" / "summaries" / ".refresh.lock"
+        try:
+            for summary_config in config.summaries:
+                summary_path = Path(summary_config.path)
+                existing = load_summary(summary_path, repo_root)
 
-            if existing and not force and not is_stale(existing, repo_root):
-                typer.echo(f"  {summary_config.path}: up to date")
-                continue
+                if existing and not force and not is_stale(existing, repo_root):
+                    typer.echo(f"  {summary_config.path}: up to date")
+                    continue
 
-            typer.echo(f"  {summary_config.path}: regenerating...")
-            try:
-                summary, _ = refresh_if_stale(
-                    summary_path,
-                    repo_root,
-                    summary_config.tokens,
-                    summary_config.model,
-                    config.exclude if config else None,
-                    force=force,
-                )
-                typer.echo(f"  {summary_config.path}: done ({len(summary.content)} chars)")
-            except Exception as e:
-                typer.echo(f"  {summary_config.path}: error - {e}", err=True)
+                typer.echo(f"  {summary_config.path}: regenerating...")
+                try:
+                    summary, _ = refresh_if_stale(
+                        summary_path,
+                        repo_root,
+                        summary_config.tokens,
+                        summary_config.model,
+                        config.exclude if config else None,
+                        force=force,
+                    )
+                    typer.echo(f"  {summary_config.path}: done ({len(summary.content)} chars)")
+                except Exception as e:
+                    typer.echo(f"  {summary_config.path}: error - {e}", err=True)
+        finally:
+            lock_file.unlink(missing_ok=True)
         return
 
     summary_path = Path(path)

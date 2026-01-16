@@ -983,6 +983,7 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
                 typer.echo(f"Error creating PR: {e}", err=True)
                 raise typer.Exit(1)
             typer.echo(f"Created: {pr_url}")
+            subprocess.run(["open", pr_url])
             # Re-fetch to get the PR number
             result = subprocess.run(
                 ["gh", "pr", "view", "--json", "number,title,body,baseRefName"],

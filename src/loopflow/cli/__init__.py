@@ -5,14 +5,14 @@ import sys
 import typer
 
 from loopflow.config import ConfigError, load_config
-from loopflow.context import find_worktree_root, gather_task
+from loopflow.context import find_worktree_root, gather_task, list_all_tasks
 from loopflow.init_check import check_init_status
 from loopflow.lfd.pipelines import load_pipeline
 
 app = typer.Typer(
     name="lf",
     help="Arrange LLMs to code in harmony.",
-    no_args_is_help=True,
+    no_args_is_help=False,
 )
 
 # Import and register subcommands
@@ -23,6 +23,33 @@ app.command(context_settings={"allow_extra_args": True, "allow_interspersed_args
 app.command()(run_module.inline)
 app.command(name="pipeline")(run_module.pipeline)
 app.command()(run_module.cp)
+
+
+def _list_tasks() -> None:
+    """List available tasks and pipelines."""
+    repo_root = find_worktree_root()
+    config = load_config(repo_root) if repo_root else None
+
+    user_tasks, builtin_only = list_all_tasks(repo_root)
+    pipelines = list(config.pipelines.keys()) if config else []
+
+    # Show pipelines
+    if pipelines:
+        typer.echo("Pipelines:")
+        for name in sorted(pipelines):
+            typer.echo(f"  {name}")
+        typer.echo()
+
+    # Show tasks
+    if user_tasks or builtin_only:
+        typer.echo("Tasks:")
+        for name in user_tasks:
+            typer.echo(f"  {name}")
+        for name in builtin_only:
+            typer.echo(f"  {name} (builtin)")
+    else:
+        typer.echo("No tasks found.")
+        typer.echo("Run: lfops init")
 
 
 def main():
@@ -37,6 +64,11 @@ def main():
     }
 
     try:
+        # Handle 'lf' with no arguments: list available tasks
+        if len(sys.argv) == 1:
+            _list_tasks()
+            raise SystemExit(0)
+
         if len(sys.argv) > 1:
             first_arg = sys.argv[1]
 
@@ -56,7 +88,13 @@ def main():
                 has_config_pipeline = config and name in config.pipelines
                 has_file_pipeline = repo_root and load_pipeline(name, repo_root) is not None
                 has_pipeline = has_config_pipeline or has_file_pipeline
-                has_task = repo_root and gather_task(repo_root, name) is not None
+
+                # gather_task now includes builtins
+                has_task = gather_task(repo_root, name) is not None if repo_root else False
+                # Also check builtin even without repo_root
+                if not has_task and not repo_root:
+                    from loopflow.context import _get_builtin_task
+                    has_task = _get_builtin_task(name) is not None
 
                 if has_pipeline and has_task:
                     typer.echo(f"Error: '{name}' exists as both a pipeline and a task", err=True)
@@ -70,18 +108,9 @@ def main():
                 elif has_task:
                     sys.argv.insert(1, "run")
                 else:
-                    # Check if repo is initialized
-                    status = check_init_status(repo_root) if repo_root else None
-                    if status and not status.has_commands and not status.has_lf_dir:
-                        # Uninitialized repo - suggest init
-                        typer.echo(f"No task named '{name}' found.", err=True)
-                        typer.echo("", err=True)
-                        typer.echo("This repo hasn't been set up for loopflow yet.", err=True)
-                        typer.echo("Run: lfops init", err=True)
-                    else:
-                        # Initialized but task missing - suggest creating it
-                        typer.echo(f"No task or pipeline named '{name}'", err=True)
-                        typer.echo(f"Create: .claude/commands/{name}.md", err=True)
+                    # Task not found
+                    typer.echo(f"No task or pipeline named '{name}'", err=True)
+                    typer.echo(f"Run 'lf' to see available tasks.", err=True)
                     raise SystemExit(1)
 
         app()

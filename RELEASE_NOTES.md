@@ -10,4 +10,5 @@ This release adds screenshot capture for LLM context, improves Maestro with a vi
 - Add fallback to bundled templates for builtin commands
 - Migrate from lfpr to lfops commands in Maestro
 - Simplify lfops init by removing style guide and prompts scaffolding
+- Hide advanced features behind beta flag for new users in Maestro
 - Fix shell escaping for paths and commands with special characters

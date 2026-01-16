@@ -48,25 +48,25 @@ struct ConfigLoaderTests {
             agentModel: nil, interactive: nil, terminal: "warp",
             ide: nil, workspace: nil, context: nil, exclude: nil,
             push: nil, pr: nil, yolo: nil,
-            docs: nil, diff: nil, diffFiles: nil, paste: nil, voice: nil, summaries: nil
+            docs: nil, diff: nil, diffFiles: nil, paste: nil, voice: nil, summaries: nil, work: nil
         )
-        #expect(warpConfig.terminalApp == .warp)
+        #expect(warpConfig.terminalApp == TerminalApp.warp)
 
         let itermConfig = LoopflowConfig(
             agentModel: nil, interactive: nil, terminal: "iterm",
             ide: nil, workspace: nil, context: nil, exclude: nil,
             push: nil, pr: nil, yolo: nil,
-            docs: nil, diff: nil, diffFiles: nil, paste: nil, voice: nil, summaries: nil
+            docs: nil, diff: nil, diffFiles: nil, paste: nil, voice: nil, summaries: nil, work: nil
         )
-        #expect(itermConfig.terminalApp == .iterm)
+        #expect(itermConfig.terminalApp == TerminalApp.iterm)
 
         let defaultConfig = LoopflowConfig(
             agentModel: nil, interactive: nil, terminal: nil,
             ide: nil, workspace: nil, context: nil, exclude: nil,
             push: nil, pr: nil, yolo: nil,
-            docs: nil, diff: nil, diffFiles: nil, paste: nil, voice: nil, summaries: nil
+            docs: nil, diff: nil, diffFiles: nil, paste: nil, voice: nil, summaries: nil, work: nil
         )
-        #expect(defaultConfig.terminalApp == .warp)
+        #expect(defaultConfig.terminalApp == TerminalApp.warp)
     }
 
     @Test("isInteractive checks list correctly")
@@ -75,7 +75,7 @@ struct ConfigLoaderTests {
             agentModel: nil, interactive: ["design", "iterate"],
             terminal: nil, ide: nil, workspace: nil, context: nil,
             exclude: nil, push: nil, pr: nil, yolo: nil,
-            docs: nil, diff: nil, diffFiles: nil, paste: nil, voice: nil, summaries: nil
+            docs: nil, diff: nil, diffFiles: nil, paste: nil, voice: nil, summaries: nil, work: nil
         )
 
         #expect(config.isInteractive("design") == true)

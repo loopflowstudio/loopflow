@@ -4,6 +4,8 @@ import logging
 import os
 from typing import Any
 
+import asana
+
 from loopflow.work.models import WorkItem, Status, Confidence
 
 logger = logging.getLogger(__name__)
@@ -34,7 +36,6 @@ class AsanaBackend:
             if not self.access_token:
                 raise RuntimeError("ASANA_ACCESS_TOKEN not set")
 
-            import asana
             self._client = asana.Client.access_token(self.access_token)
         return self._client
 

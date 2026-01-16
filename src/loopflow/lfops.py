@@ -28,7 +28,6 @@ from loopflow.worktrees import get_path
 app = typer.Typer(help="Loopflow operations")
 
 
-
 @dataclass
 class SetupStatus:
     """What's installed and what's missing."""

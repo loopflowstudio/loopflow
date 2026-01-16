@@ -5,7 +5,7 @@ import sys
 import typer
 
 from loopflow.config import ConfigError, load_config
-from loopflow.context import find_worktree_root, gather_task, list_all_tasks
+from loopflow.context import find_worktree_root, gather_task, list_all_tasks, _get_builtin_task
 from loopflow.init_check import check_init_status
 from loopflow.lfd.pipelines import load_pipeline
 
@@ -93,7 +93,6 @@ def main():
                 has_task = gather_task(repo_root, name) is not None if repo_root else False
                 # Also check builtin even without repo_root
                 if not has_task and not repo_root:
-                    from loopflow.context import _get_builtin_task
                     has_task = _get_builtin_task(name) is not None
 
                 if has_pipeline and has_task:

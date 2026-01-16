@@ -23,8 +23,8 @@ from loopflow.launcher import (
 from loopflow.logging import get_model_env, write_prompt_file
 from loopflow.lfd.client import log_session_start, log_session_end
 from loopflow.lfd.models import Session, SessionStatus
-from loopflow.lfd.pipelines import load_pipeline as load_pipeline_file
-from loopflow.pipeline import run_pipeline, run_pipeline_def
+from loopflow.lfd.pipelines import load_pipeline as load_pipeline_file, PipelineDef, PipelineStep
+from loopflow.pipeline import run_pipeline_def
 from loopflow.tokens import analyze_components
 from loopflow.worktrees import WorktreeError, create
 
@@ -612,30 +612,25 @@ def pipeline(
     pr_enabled = pr if pr is not None else (config.pr if config else False)
     skip_permissions = config.yolo if config else False
 
-    # Run the pipeline (prefer .lf/pipelines/ format if available)
-    if pipeline_def:
-        exit_code = run_pipeline_def(
-            pipeline_def,
-            repo_root,
-            context=all_context or None,
-            exclude=exclude,
-            skip_permissions=skip_permissions,
-            push_enabled=push_enabled,
-            pr_enabled=pr_enabled,
-            backend=backend,
-            model_variant=model_variant,
+    # Convert config.yaml pipeline to PipelineDef if needed
+    if not pipeline_def:
+        # PipelineConfig.push/pr override global settings
+        push_enabled = config_pipeline.push if config_pipeline.push is not None else push_enabled
+        pr_enabled = config_pipeline.pr if config_pipeline.pr is not None else pr_enabled
+        pipeline_def = PipelineDef(
+            name=name,
+            steps=[PipelineStep(task=t) for t in config_pipeline.tasks],
         )
-    else:
-        exit_code = run_pipeline(
-            config_pipeline,
-            repo_root,
-            context=all_context or None,
-            exclude=exclude,
-            include_tests_for=config.include_tests_for if config else None,
-            skip_permissions=skip_permissions,
-            push_enabled=push_enabled,
-            pr_enabled=pr_enabled,
-            backend=backend,
-            model_variant=model_variant,
-        )
+
+    exit_code = run_pipeline_def(
+        pipeline_def,
+        repo_root,
+        context=all_context or None,
+        exclude=exclude,
+        skip_permissions=skip_permissions,
+        push_enabled=push_enabled,
+        pr_enabled=pr_enabled,
+        backend=backend,
+        model_variant=model_variant,
+    )
     raise typer.Exit(exit_code)

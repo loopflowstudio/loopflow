@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from loopflow.config import PipelineConfig, parse_model
+from loopflow.config import parse_model
 from loopflow.context import build_prompt
 from loopflow.git import GitError, find_main_repo, open_pr
 from loopflow.launcher import build_model_command, get_runner
@@ -139,51 +139,6 @@ def _notify_done(pipeline_name: str) -> None:
         )
     except FileNotFoundError:
         pass
-
-
-def run_pipeline(
-    pipeline: PipelineConfig,
-    repo_root: Path,
-    context: Optional[list[str]] = None,
-    exclude: Optional[list[str]] = None,
-    include_tests_for: Optional[list[str]] = None,
-    skip_permissions: bool = False,
-    push_enabled: bool = False,
-    pr_enabled: bool = False,
-    backend: str = "claude",
-    model_variant: str | None = "opus",
-) -> int:
-    """Run each task in sequence. Returns first non-zero exit code, or 0."""
-    should_push = pipeline.push if pipeline.push is not None else push_enabled
-    should_pr = pipeline.pr if pipeline.pr is not None else pr_enabled
-    if should_pr:
-        should_push = True
-
-    runner = get_runner(backend)
-    if not runner.is_available():
-        print(f"Error: '{backend}' CLI not found")
-        return 1
-
-    main_repo = find_main_repo(repo_root) or repo_root
-    total = len(pipeline.tasks)
-
-    for i, task_name in enumerate(pipeline.tasks):
-        params = _StepParams(
-            task=task_name,
-            backend=backend,
-            model_variant=model_variant,
-            context=context,
-            voices=None,
-        )
-        result_code = _run_step(
-            params, repo_root, main_repo, exclude,
-            skip_permissions, should_push, i + 1, total,
-        )
-        if result_code != 0:
-            return result_code
-
-    _finalize_pipeline(pipeline.name, repo_root, should_pr)
-    return 0
 
 
 def run_pipeline_def(

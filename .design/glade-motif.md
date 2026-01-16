@@ -1,6 +1,6 @@
 # Pipeline Editor for Maestro
 
-Visual pipeline editor in Maestro for creating, editing, and running sequential pipelines with per-step configuration.
+Visual pipeline editor in Maestro for creating, editing, and running pipelines with per-step configuration and parallel execution.
 
 ## Implementation status
 
@@ -13,12 +13,14 @@ Visual pipeline editor in Maestro for creating, editing, and running sequential 
 - CLI support: `lf <pipeline>` runs from `.lf/pipelines/` or `config.yaml`
 - Per-step config overrides applied during pipeline execution
 - Tests for `StepConfig` voice/context serialization
+- **Parallel step execution** via temporary worktrees
 
 **Deferred:**
 - Branching/merging pipelines
 - Drag-and-drop step reordering
 - Live execution visualization
 - "Save as pipeline" from task selection
+- Parallel mutation steps (merge back)
 
 ## Data structures
 
@@ -67,15 +69,21 @@ steps:
       voice: architect
       context:
         - src/schema.py
+  - parallel:
+      - test
+      - lint
   - review
   - polish
 ```
+
+Parallel steps run concurrently in temporary worktrees (`_parallel-{task}-{uuid}`), then clean up.
 
 ## Key files
 
 **Python:**
 - `src/loopflow/lfd/pipelines.py` - data structures, load/save, resolve
-- `src/loopflow/pipeline.py` - execution with `_run_step()` helper
+- `src/loopflow/pipeline.py` - execution with `_run_step()`, `_run_parallel_group()` helpers
+- `src/loopflow/lfd/collector.py` - output collection with `--prefix` for parallel tasks
 - `src/loopflow/cli/run.py` - `pipeline` command routing
 
 **Swift:**

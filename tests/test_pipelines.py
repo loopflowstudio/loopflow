@@ -11,6 +11,7 @@ from loopflow.lfd.pipelines import (
     save_pipeline,
     resolve_pipeline,
 )
+from loopflow.pipeline import _count_logical_steps
 
 
 def test_pipeline_step_from_string():
@@ -294,3 +295,110 @@ def test_save_pipeline():
         assert loaded.steps[1].config.model == "claude:opus"
         assert loaded.steps[1].config.voice == "architect"
         assert loaded.steps[1].config.context == ["src/main.py"]
+
+
+def test_count_logical_steps_sequential():
+    """Sequential steps each count as 1."""
+    pipeline = PipelineDef(
+        name="simple",
+        steps=[
+            PipelineStep(task="a"),
+            PipelineStep(task="b"),
+            PipelineStep(task="c"),
+        ],
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        resolved = resolve_pipeline(pipeline, Path(tmpdir))
+        count = _count_logical_steps(resolved)
+
+    assert count == 3
+
+
+def test_count_logical_steps_with_parallel():
+    """Parallel groups count as 1 logical step."""
+    pipeline = PipelineDef(
+        name="parallel",
+        steps=[
+            PipelineStep(task="a"),
+            PipelineStep(parallel=[
+                PipelineStep(task="b"),
+                PipelineStep(task="c"),
+            ]),
+            PipelineStep(task="d"),
+        ],
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        resolved = resolve_pipeline(pipeline, Path(tmpdir))
+        count = _count_logical_steps(resolved)
+
+    # a, parallel(b+c), d = 3 logical steps
+    assert count == 3
+
+
+def test_count_logical_steps_multiple_parallel_groups():
+    """Multiple parallel groups each count as 1."""
+    pipeline = PipelineDef(
+        name="multi-parallel",
+        steps=[
+            PipelineStep(parallel=[
+                PipelineStep(task="a"),
+                PipelineStep(task="b"),
+            ]),
+            PipelineStep(task="c"),
+            PipelineStep(parallel=[
+                PipelineStep(task="d"),
+                PipelineStep(task="e"),
+            ]),
+        ],
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        resolved = resolve_pipeline(pipeline, Path(tmpdir))
+        count = _count_logical_steps(resolved)
+
+    # parallel(a+b), c, parallel(d+e) = 3 logical steps
+    assert count == 3
+
+
+def test_load_pipeline_with_parallel():
+    """Load pipeline with parallel steps from YAML."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        repo = Path(tmpdir)
+        pipelines_dir = repo / ".lf" / "pipelines"
+        pipelines_dir.mkdir(parents=True)
+
+        (pipelines_dir / "verify.yaml").write_text("""
+steps:
+  - implement
+  - parallel:
+      - task: test
+      - task: lint
+  - commit
+""")
+
+        pipeline = load_pipeline("verify", repo)
+        assert pipeline is not None
+        assert len(pipeline.steps) == 3
+
+        # First is sequential
+        assert pipeline.steps[0].task == "implement"
+
+        # Second is parallel group
+        assert pipeline.steps[1].parallel is not None
+        assert len(pipeline.steps[1].parallel) == 2
+        assert pipeline.steps[1].parallel[0].task == "test"
+        assert pipeline.steps[1].parallel[1].task == "lint"
+
+        # Third is sequential
+        assert pipeline.steps[2].task == "commit"
+
+        # Resolve and check groups
+        resolved = resolve_pipeline(pipeline, repo)
+        assert len(resolved) == 4  # implement, test, lint, commit
+
+        assert resolved[0].parallel_group is None
+        assert resolved[1].parallel_group == 0
+        assert resolved[2].parallel_group == 0
+        assert resolved[3].parallel_group is None

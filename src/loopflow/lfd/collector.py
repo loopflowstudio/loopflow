@@ -38,6 +38,7 @@ def collect_output(
     foreground: bool,
     prompt: str | None = None,
     token_summary: str | None = None,
+    prefix: str | None = None,
 ) -> int:
     """Run command and collect output to log files."""
     log_file = open_log_file(repo_root, session_id)
@@ -48,9 +49,9 @@ def collect_output(
         _print_startup_header(task, token_summary)
 
     if interactive:
-        exit_code = _run_interactive(command, log_file, json_log, foreground, prompt, session_id)
+        exit_code = _run_interactive(command, log_file, json_log, foreground, prompt, session_id, prefix)
     else:
-        exit_code = _run_streaming(command, log_file, json_log, foreground, prompt, session_id)
+        exit_code = _run_streaming(command, log_file, json_log, foreground, prompt, session_id, prefix)
 
     # Session status is updated by the parent process via lfd client
 
@@ -77,6 +78,7 @@ def main():
     parser.add_argument("--foreground", action="store_true")
     parser.add_argument("--prompt-file", default=None, help="File containing prompt (or - for stdin)")
     parser.add_argument("--token-summary", default=None, help="Token breakdown summary to display at startup")
+    parser.add_argument("--prefix", default=None, help="Prefix for output lines (for parallel execution)")
     parser.add_argument("command", nargs=argparse.REMAINDER)
 
     args = parser.parse_args()
@@ -110,6 +112,7 @@ def main():
         args.foreground,
         prompt,
         args.token_summary,
+        args.prefix,
     )
     sys.exit(exit_code)
 
@@ -157,7 +160,7 @@ class _Spinner:
             time.sleep(0.1)
 
 
-def _run_streaming(command: list[str], log_file, json_log, foreground: bool, prompt: str | None = None, session_id: str | None = None) -> int:
+def _run_streaming(command: list[str], log_file, json_log, foreground: bool, prompt: str | None = None, session_id: str | None = None, prefix: str | None = None) -> int:
     """Run a non-interactive command and stream output to logs.
 
     Prompt is passed as a CLI argument.
@@ -207,11 +210,13 @@ def _run_streaming(command: list[str], log_file, json_log, foreground: bool, pro
         # Format for plain text log and console
         formatted_lines = _format_stream_line(raw_line)
         for formatted in formatted_lines:
-            write_log_line(log_file, formatted)
+            # Apply prefix for parallel execution
+            display_line = f"{prefix}{formatted}" if prefix else formatted
+            write_log_line(log_file, display_line)
             if foreground:
-                print(formatted, flush=True)
+                print(display_line, flush=True)
             if session_id:
-                _send_output_line(session_id, formatted)
+                _send_output_line(session_id, display_line)
 
     # Stop spinner if no output was received
     if spinner and first_output:
@@ -220,10 +225,10 @@ def _run_streaming(command: list[str], log_file, json_log, foreground: bool, pro
     return process.wait()
 
 
-def _run_interactive(command: list[str], log_file, json_log, foreground: bool, prompt: str | None = None, session_id: str | None = None) -> int:
+def _run_interactive(command: list[str], log_file, json_log, foreground: bool, prompt: str | None = None, session_id: str | None = None, prefix: str | None = None) -> int:
     """Run an interactive command using pty.spawn.
 
-    Prompt is passed as a CLI argument.
+    Prompt is passed as a CLI argument. Prefix is ignored for interactive mode.
     """
     cmd = command + [prompt] if prompt else command
 

@@ -31,9 +31,10 @@ struct WorktreeSidebar: View {
                 worktreeList
             }
 
-            pipelinesSection
-
-            agentsSection
+            if Flags.beta {
+                pipelinesSection
+                agentsSection
+            }
         }
         .sheet(isPresented: $showingNewWorktreeSheet) {
             NewWorktreeSheet(appState: appState)

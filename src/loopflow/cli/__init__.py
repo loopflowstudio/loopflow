@@ -7,6 +7,7 @@ import typer
 from loopflow.config import ConfigError, load_config
 from loopflow.context import find_worktree_root, gather_task
 from loopflow.init_check import check_init_status
+from loopflow.lfd.pipelines import load_pipeline
 
 app = typer.Typer(
     name="lf",
@@ -51,7 +52,10 @@ def main():
                 repo_root = find_worktree_root()
                 config = load_config(repo_root) if repo_root else None
 
-                has_pipeline = config and name in config.pipelines
+                # Check for pipeline in config.yaml or .lf/pipelines/
+                has_config_pipeline = config and name in config.pipelines
+                has_file_pipeline = repo_root and load_pipeline(name, repo_root) is not None
+                has_pipeline = has_config_pipeline or has_file_pipeline
                 has_task = repo_root and gather_task(repo_root, name) is not None
 
                 if has_pipeline and has_task:

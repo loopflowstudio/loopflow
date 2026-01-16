@@ -1,7 +1,6 @@
 """Pipeline DAG loading and execution for agents."""
 
-import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -10,16 +9,55 @@ import yaml
 @dataclass
 class StepConfig:
     model: str | None = None
+    voice: str | None = None
+    context: list[str] | None = None
 
     def to_dict(self) -> dict:
         result = {}
         if self.model:
             result["model"] = self.model
+        if self.voice:
+            result["voice"] = self.voice
+        if self.context:
+            result["context"] = self.context
         return result
 
     @classmethod
     def from_dict(cls, data: dict) -> "StepConfig":
-        return cls(model=data.get("model"))
+        return cls(
+            model=data.get("model"),
+            voice=data.get("voice"),
+            context=data.get("context"),
+        )
+
+
+@dataclass
+class RaceConfig:
+    """Configuration for model racing—run same task with multiple models."""
+    models: list[str]
+    judge: str = "compare"
+
+    def to_dict(self) -> dict:
+        result = {"models": self.models}
+        if self.judge != "compare":
+            result["judge"] = self.judge
+        return result
+
+    @classmethod
+    def from_dict(cls, data: list | dict) -> "RaceConfig":
+        if isinstance(data, list):
+            # Simple list of models: race: [claude:opus, codex:o3]
+            models = []
+            for item in data:
+                if isinstance(item, str):
+                    models.append(item)
+                elif isinstance(item, dict) and "model" in item:
+                    models.append(item["model"])
+            return cls(models=models)
+        # Full config: race: {models: [...], judge: "..."}
+        models = data.get("models", [])
+        judge = data.get("judge", "compare")
+        return cls(models=models, judge=judge)
 
 
 @dataclass
@@ -27,6 +65,7 @@ class PipelineStep:
     task: str | None = None
     pipeline: str | None = None
     parallel: list["PipelineStep"] | None = None
+    race: RaceConfig | None = None
     config: StepConfig | None = None
 
     def to_dict(self) -> dict:
@@ -37,6 +76,8 @@ class PipelineStep:
             result["pipeline"] = self.pipeline
         if self.parallel:
             result["parallel"] = [s.to_dict() for s in self.parallel]
+        if self.race:
+            result["race"] = self.race.to_dict()
         if self.config:
             result["config"] = self.config.to_dict()
         return result
@@ -49,6 +90,9 @@ class PipelineStep:
         parallel_data = data.get("parallel")
         parallel = [cls.from_dict(s) for s in parallel_data] if parallel_data else None
 
+        race_data = data.get("race")
+        race = RaceConfig.from_dict(race_data) if race_data else None
+
         config_data = data.get("config")
         config = StepConfig.from_dict(config_data) if config_data else None
 
@@ -56,6 +100,7 @@ class PipelineStep:
             task=data.get("task"),
             pipeline=data.get("pipeline"),
             parallel=parallel,
+            race=race,
             config=config,
         )
 
@@ -91,12 +136,41 @@ def load_pipeline(name: str, repo: Path) -> PipelineDef | None:
     return PipelineDef.from_dict(name, data)
 
 
+def save_pipeline(pipeline: PipelineDef, repo: Path) -> Path:
+    """Save pipeline to .lf/pipelines/{name}.yaml. Returns the path."""
+    pipelines_dir = repo / ".lf" / "pipelines"
+    pipelines_dir.mkdir(parents=True, exist_ok=True)
+
+    pipeline_path = pipelines_dir / f"{pipeline.name}.yaml"
+    data = {"steps": [s.to_dict() for s in pipeline.steps]}
+    pipeline_path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False))
+
+    return pipeline_path
+
+
+def list_pipelines(repo: Path) -> list[PipelineDef]:
+    """List all pipelines in .lf/pipelines/."""
+    pipelines_dir = repo / ".lf" / "pipelines"
+    if not pipelines_dir.exists():
+        return []
+
+    pipelines = []
+    for path in pipelines_dir.glob("*.yaml"):
+        name = path.stem
+        pipeline = load_pipeline(name, repo)
+        if pipeline:
+            pipelines.append(pipeline)
+
+    return pipelines
+
+
 @dataclass
 class ResolvedStep:
     """A step ready for execution with dependencies resolved."""
     task: str
     config: StepConfig | None = None
     parallel_group: int | None = None
+    race: RaceConfig | None = None
 
 
 def resolve_pipeline(pipeline: PipelineDef, repo: Path) -> list[ResolvedStep]:
@@ -112,6 +186,7 @@ def resolve_pipeline(pipeline: PipelineDef, repo: Path) -> list[ResolvedStep]:
                 task=step.task,
                 config=step.config,
                 parallel_group=group,
+                race=step.race,
             ))
         elif step.pipeline:
             nested = load_pipeline(step.pipeline, repo)
@@ -128,82 +203,3 @@ def resolve_pipeline(pipeline: PipelineDef, repo: Path) -> list[ResolvedStep]:
         _resolve_step(step)
 
     return resolved
-
-
-@dataclass
-class StepResult:
-    task: str
-    success: bool
-    error: str | None = None
-
-
-@dataclass
-class PipelineResult:
-    success: bool
-    steps: list[StepResult] = field(default_factory=list)
-
-
-async def execute_pipeline(
-    pipeline: PipelineDef,
-    repo: Path,
-    worktree: Path,
-    goal: str,
-    run_step: callable,
-) -> PipelineResult:
-    """Run pipeline DAG in worktree, injecting goal as context for each step.
-
-    run_step is a callable (task: str, worktree: Path, goal: str, config: StepConfig | None) -> bool
-    that executes a single task and returns True on success.
-    """
-    resolved = resolve_pipeline(pipeline, repo)
-    results: list[StepResult] = []
-
-    i = 0
-    while i < len(resolved):
-        step = resolved[i]
-
-        if step.parallel_group is not None:
-            # Collect all steps in this parallel group
-            parallel_steps = []
-            group = step.parallel_group
-            while i < len(resolved) and resolved[i].parallel_group == group:
-                parallel_steps.append(resolved[i])
-                i += 1
-
-            # Run parallel steps concurrently
-            step_results = await _run_parallel_steps(parallel_steps, worktree, goal, run_step)
-            results.extend(step_results)
-
-            if any(not r.success for r in step_results):
-                return PipelineResult(success=False, steps=results)
-        else:
-            # Run sequential step
-            success = await asyncio.to_thread(run_step, step.task, worktree, goal, step.config)
-            result = StepResult(task=step.task, success=success)
-            results.append(result)
-
-            if not success:
-                return PipelineResult(success=False, steps=results)
-
-            i += 1
-
-    return PipelineResult(success=True, steps=results)
-
-
-async def _run_parallel_steps(
-    steps: list[ResolvedStep],
-    worktree: Path,
-    goal: str,
-    run_step: callable,
-) -> list[StepResult]:
-    """Run steps concurrently using asyncio."""
-
-    async def run_one(step: ResolvedStep) -> StepResult:
-        try:
-            success = await asyncio.to_thread(run_step, step.task, worktree, goal, step.config)
-            return StepResult(task=step.task, success=success)
-        except Exception as e:
-            return StepResult(task=step.task, success=False, error=str(e))
-
-    results = await asyncio.gather(*[run_one(step) for step in steps])
-    return list(results)

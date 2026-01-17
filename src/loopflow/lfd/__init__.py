@@ -195,7 +195,9 @@ def show(
     if agent.goal:
         typer.echo(f"  Goal: {agent.goal}")
     typer.echo(f"  Pipeline: {agent.pipeline}")
-    typer.echo(f"  Merge: {agent.merge_strategy.value}")
+    typer.echo(f"  Merge: {agent.merge_mode.value}")
+    if agent.personal_main:
+        typer.echo(f"  Personal main: {agent.personal_main}")
     typer.echo(f"  Trigger: {agent.trigger.kind.value}")
     if agent.trigger.cron:
         typer.echo(f"  Cron: {agent.trigger.cron}")
@@ -278,10 +280,10 @@ def new(
         help="Trigger: manual, loop, cron, main-changed, or interval",
     ),
     merge: str = typer.Option(
-        "pr",
+        "auto",
         "-m",
         "--merge",
-        help="Merge strategy: auto or pr",
+        help="Merge mode: auto, pr, or silent",
     ),
     interval: int = typer.Option(
         None,
@@ -330,8 +332,8 @@ def new(
         typer.echo("Error: --cron required for cron trigger", err=True)
         raise typer.Exit(1)
 
-    if merge not in ("auto", "pr"):
-        typer.echo("Error: --merge must be 'auto' or 'pr'", err=True)
+    if merge not in ("auto", "pr", "silent"):
+        typer.echo("Error: --merge must be 'auto', 'pr', or 'silent'", err=True)
         raise typer.Exit(1)
 
     path = create_agent_file(

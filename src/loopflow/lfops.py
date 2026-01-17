@@ -791,6 +791,7 @@ def land(
     local: bool = typer.Option(None, "-l", "--local/--gh", help="Local merge (no PR) vs GitHub PR merge"),
     create_pr: bool = typer.Option(False, "-c", "--create-pr", help="Create PR and merge in one step"),
     strict: bool = typer.Option(False, "-s", "--strict", help="Error if uncommitted/unpushed changes exist"),
+    squash: bool = typer.Option(False, "--squash", help="Squash-merge personal-main to origin/main"),
 ) -> None:
     """Squash-merge branch to main and clean up.
 
@@ -801,10 +802,16 @@ def land(
     Default: uses gh pr merge (requires PR via lfops pr).
     With --local: local merge + push (no PR needed).
     With --create-pr: create PR and immediately merge.
+    With --squash: squash-merge entire personal-main branch to main (for agents).
     Config: set `land: local` in .lf/config.yaml to default to --local.
     """
     main_repo = find_main_repo()
     config = load_config(main_repo) if main_repo else None
+
+    if squash:
+        _land_squash_personal_main(strict, worktree)
+        return
+
     use_local = local if local is not None else (config and config.land == "local")
 
     if use_local:
@@ -1287,6 +1294,134 @@ def _land_local(strict: bool, worktree: str | None) -> None:
         typer.echo(str(main_repo))
 
 
+def _land_squash_personal_main(strict: bool, worktree: str | None) -> None:
+    """Squash-merge personal-main to origin/main via PR."""
+    if worktree:
+        main_repo = find_main_repo()
+        if not main_repo:
+            typer.echo("Error: Not in a git repository", err=True)
+            raise typer.Exit(1)
+        repo_root = get_path(main_repo, worktree)
+        if not repo_root.exists():
+            typer.echo(f"Error: Worktree '{worktree}' not found", err=True)
+            raise typer.Exit(1)
+    else:
+        repo_root = find_worktree_root()
+        if not repo_root:
+            typer.echo("Error: Not in a git repository", err=True)
+            raise typer.Exit(1)
+        main_repo = find_main_repo(repo_root) or repo_root
+
+    if not shutil.which("gh"):
+        typer.echo("Error: 'gh' CLI not found. Install with: brew install gh", err=True)
+        raise typer.Exit(1)
+
+    branch = get_current_branch(repo_root)
+    if not branch:
+        typer.echo("Error: Detached HEAD", err=True)
+        raise typer.Exit(1)
+
+    # Verify this is a personal-main branch
+    if not branch.endswith("-main"):
+        typer.echo(f"Error: --squash is for personal-main branches (got '{branch}')", err=True)
+        typer.echo("Run this from a personal-main worktree like 'agent-name-main'", err=True)
+        raise typer.Exit(1)
+
+    # Handle uncommitted changes
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.stdout.strip():
+        if strict:
+            typer.echo("Error: Uncommitted changes (use without --strict to auto-commit)", err=True)
+            raise typer.Exit(1)
+        _add_commit_push(repo_root, push=False)
+
+    # Ensure branch is pushed
+    result = subprocess.run(
+        ["git", "rev-parse", "@{u}"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    has_upstream_branch = result.returncode == 0
+
+    if has_upstream_branch:
+        result = subprocess.run(
+            ["git", "rev-list", "@{u}..HEAD", "--count"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+        )
+        unpushed = int(result.stdout.strip()) if result.returncode == 0 else 0
+        if unpushed > 0:
+            if strict:
+                typer.echo("Error: Unpushed commits (use without --strict to auto-push)", err=True)
+                raise typer.Exit(1)
+            typer.echo("Pushing to origin...")
+            subprocess.run(["git", "push"], cwd=repo_root, check=True)
+    else:
+        if strict:
+            typer.echo("Error: Branch not pushed (use without --strict to auto-push)", err=True)
+            raise typer.Exit(1)
+        typer.echo("Pushing to origin...")
+        subprocess.run(["git", "push", "-u", "origin", branch], cwd=repo_root, check=True)
+
+    # Generate PR message from full diff against main
+    typer.echo("Generating PR message...")
+    message = generate_pr_message(repo_root)
+
+    # Create PR from personal-main to main
+    typer.echo(f"Creating PR: {branch} → main")
+    cmd = [
+        "gh", "pr", "create",
+        "--base", "main",
+        "--head", branch,
+        "--title", message.title,
+        "--body", message.body,
+    ]
+    result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)
+
+    if result.returncode != 0:
+        if "already exists" in result.stderr.lower():
+            typer.echo("PR already exists, updating...")
+            subprocess.run(
+                ["gh", "pr", "edit", "--title", message.title, "--body", message.body],
+                cwd=repo_root,
+                capture_output=True,
+            )
+        else:
+            typer.echo(f"Error creating PR: {result.stderr}", err=True)
+            raise typer.Exit(1)
+
+    # Get PR info
+    result = subprocess.run(
+        ["gh", "pr", "view", "--json", "number,url"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        typer.echo("Error: Could not get PR info", err=True)
+        raise typer.Exit(1)
+
+    pr_data = json.loads(result.stdout)
+    pr_number = pr_data.get("number")
+    pr_url = pr_data.get("url")
+
+    typer.echo(f"PR #{pr_number}: {pr_url}")
+    typer.echo("")
+    typer.echo(f"{message.title}")
+    if message.body:
+        typer.echo("")
+        typer.echo(message.body[:500] + "..." if len(message.body) > 500 else message.body)
+
+    subprocess.run(["open", pr_url])
+
+
 @app.command()
 def commit(
     push: bool = typer.Option(False, "-p", "--push", help="Push after committing"),
@@ -1350,6 +1485,124 @@ def commit(
                 raise typer.Exit(1)
         else:
             typer.echo("No upstream branch, skipping push", err=True)
+
+
+@app.command()
+def rebase(
+    worktree: str = typer.Option(None, "-w", "--worktree", help="Target worktree by name"),
+) -> None:
+    """Rebase personal-main onto origin/main.
+
+    If in a personal-main worktree, rebases that branch.
+    If in an iteration worktree, rebases its base (personal-main).
+    """
+    if worktree:
+        main_repo = find_main_repo()
+        if not main_repo:
+            typer.echo("Error: Not in a git repository", err=True)
+            raise typer.Exit(1)
+        repo_root = get_path(main_repo, worktree)
+        if not repo_root.exists():
+            typer.echo(f"Error: Worktree '{worktree}' not found", err=True)
+            raise typer.Exit(1)
+    else:
+        repo_root = find_worktree_root()
+        if not repo_root:
+            typer.echo("Error: Not in a git repository", err=True)
+            raise typer.Exit(1)
+        main_repo = find_main_repo(repo_root) or repo_root
+
+    branch = get_current_branch(repo_root)
+    if not branch:
+        typer.echo("Error: Detached HEAD", err=True)
+        raise typer.Exit(1)
+
+    # Determine if this is a personal-main branch (ends with -main)
+    if branch.endswith("-main"):
+        target_branch = branch
+    else:
+        # Try to find the personal-main for this iteration branch
+        # Iteration branches are named like: agent-name-suffix
+        # Personal-main would be: agent-name-main
+        parts = branch.rsplit("-", 1)
+        if len(parts) == 2:
+            potential_main = f"{parts[0]}-main"
+            # Check if it exists
+            result = subprocess.run(
+                ["git", "rev-parse", "--verify", potential_main],
+                cwd=main_repo,
+                capture_output=True,
+            )
+            if result.returncode == 0:
+                target_branch = potential_main
+            else:
+                typer.echo(f"Error: Could not determine personal-main branch for '{branch}'", err=True)
+                typer.echo("Run this command from a personal-main worktree, or specify -w <personal-main-branch>", err=True)
+                raise typer.Exit(1)
+        else:
+            typer.echo(f"Error: Could not determine personal-main branch for '{branch}'", err=True)
+            raise typer.Exit(1)
+
+    typer.echo(f"Rebasing {target_branch} onto origin/main...")
+
+    # Fetch origin/main
+    result = subprocess.run(
+        ["git", "fetch", "origin", "main"],
+        cwd=main_repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        typer.echo(f"Error fetching origin/main: {result.stderr}", err=True)
+        raise typer.Exit(1)
+
+    # Checkout the target branch if not already there
+    current = get_current_branch(main_repo) if main_repo != repo_root else branch
+    if current != target_branch:
+        # Need to checkout in main repo
+        result = subprocess.run(
+            ["git", "checkout", target_branch],
+            cwd=main_repo,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            typer.echo(f"Error checking out {target_branch}: {result.stderr}", err=True)
+            raise typer.Exit(1)
+
+    # Rebase onto origin/main
+    result = subprocess.run(
+        ["git", "rebase", "origin/main"],
+        cwd=main_repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        # Abort rebase on conflict
+        subprocess.run(["git", "rebase", "--abort"], cwd=main_repo, capture_output=True)
+        typer.echo("Rebase failed due to conflicts.", err=True)
+        typer.echo("", err=True)
+        typer.echo("To resolve manually:", err=True)
+        typer.echo(f"  cd {main_repo}", err=True)
+        typer.echo(f"  git checkout {target_branch}", err=True)
+        typer.echo("  git rebase origin/main", err=True)
+        typer.echo("  # resolve conflicts", err=True)
+        typer.echo("  git rebase --continue", err=True)
+        typer.echo(f"  git push --force-with-lease origin {target_branch}", err=True)
+        raise typer.Exit(1)
+
+    # Force push with lease
+    result = subprocess.run(
+        ["git", "push", "--force-with-lease", "origin", target_branch],
+        cwd=main_repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        typer.echo(f"Warning: Push failed: {result.stderr}", err=True)
+        typer.echo(f"Run manually: git push --force-with-lease origin {target_branch}", err=True)
+    else:
+        typer.echo(f"Rebased and pushed {target_branch}")
 
 
 @app.command()

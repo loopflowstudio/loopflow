@@ -36,3 +36,31 @@ Questions captured during auto-mode runs that need human input.
    - Currently: prominent mode toggle before running
    - Alternative: infer from prompt, or select after seeing preview
    - Impacts whether users think in "loopflow vocabulary" or natural language
+
+6. **Should output stay in external terminal or move into Maestro?**
+   - External terminal: simpler architecture, users already know terminals
+   - Inline output: more integrated "workspace" feeling, like Cursor
+   - Hybrid: summary in Maestro, full output available externally
+   - This is the difference between "launcher" and "workspace"
+
+### Three Modes Problem
+
+7. **Should Maestro serve one interface or three distinct modes?**
+   - Quick Command: "Run review on this branch" (speed-optimized)
+   - Exploration: "Help me figure out what to build" (conversational)
+   - Orchestration: "Run ship pipeline across three worktrees" (visibility)
+   - One interface serving all three = mediocre at each?
+
+### Language & Naming
+
+8. **Should we rename "worktrees" to something less technical?**
+   - "Worktree" is git plumbing; users care about "work"
+   - Alternatives: "parallel features", "branches", "work items"
+   - Same question for "voices" → "tone" or "style"?
+
+### Platform Strategy
+
+9. **What's the iOS/iPad story?**
+   - Native macOS patterns may not translate to touch
+   - Patterns we pick now constrain future platforms
+   - Is Maestro desktop-only forever, or cross-platform eventually?

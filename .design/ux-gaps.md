@@ -1,359 +1,379 @@
 # UX Gap Analysis
 
-Analysis of Maestro against best-in-class tools: Figma, Cursor, and Notion.
-
-This revision questions fundamental assumptions and proposes more radical improvements.
+Fresh analysis of Maestro against Figma, Cursor, and Notion—this time questioning whether we're solving the right problems.
 
 ---
 
-## The Core Problem
+## The Real Question
 
-Maestro is a GUI wrapped around a CLI. The design assumes users already understand loopflow's concepts (worktrees, tasks, pipelines, voices) and just want buttons instead of commands. This is backwards.
+The previous analysis asked "How do we make Maestro more like Figma?"
 
-**What if Maestro wasn't a CLI GUI?**
+The better question: **What job is someone hiring Maestro to do?**
 
-Figma doesn't teach you design theory before letting you draw. Notion doesn't explain databases before giving you a page. Cursor doesn't require understanding of context windows before you can ask a question.
+When I open Figma, I want to *design something*. When I open Notion, I want to *write or organize*. When I open Cursor, I want to *write code with AI help*.
 
-The most delightful tools let you *do something useful immediately*, then reveal depth as you need it.
+When I open Maestro, I want to... what? "Manage worktrees and launch LLM coding sessions" is the current tagline. But that's implementation, not outcome.
 
----
+**The job to be done**: "Make progress on my codebase while I do something else."
 
-## Welcome/Setup
-
-**Current**: SetupView shows a progress stepper installing dependencies. WelcomeWindow shows recent repos with a generic tagline about worktrees and coding sessions.
-
-**Why does it have to be this way?**
-
-It doesn't. The setup flow assumes:
-1. Users must install CLI tools before using Maestro
-2. Users care about seeing what's being installed
-3. The first experience should be configuration, not value
-
-**Radical alternative: Demo-first onboarding**
-
-What if the welcome screen showed a *live demo repository* with fake worktrees, example prompts, and simulated output? Not a tutorial video—an interactive sandbox you can click around in.
-
-*Figma* lets you play with a template before signing up. *Notion* gives you example pages to edit immediately. *Cursor* opens your code and lets you ask questions within seconds.
-
-**Pattern to steal: Notion's template gallery**
-
-Instead of "Open Folder...", the welcome screen should be a gallery:
-- "Start from scratch" → open folder picker
-- "Try with example repo" → opens bundled demo
-- Recent repos below, not above—they're for returning users, not first impressions
-
-**Unanswered question**: What if Maestro could run without the lf CLI for basic operations? A bundled mini-runtime that degrades gracefully?
+This reframing changes everything.
 
 ---
 
-## Prompt Input
+## Where Best-in-Class Tools Excel
 
-**Current**: Task selector dropdown + large TextEditor + Run button. Context options hidden behind "Options" toggle.
+### Figma: Collaborative Creation
 
-**Why does it have to be this way?**
+Figma understood that design is social. The magic isn't the vector tools—it's watching a cursor named "Sarah" move across your canvas in real-time. Figma made design *observable*.
 
-The current design treats task selection and prompt writing as separate steps. But they're not—they're one continuous act of expressing intent.
+**What Maestro could learn**: The value of loopflow is running AI agents in parallel. But Maestro hides this. You launch a task, it opens a terminal, you wait. Where's the observability? Where's the "Sarah's cursor" moment where you watch Claude read files and make decisions?
 
-**What's the wildly different approach?**
+### Cursor: AI as Pair Programmer
 
-Imagine if the entire input was just a single text field that understood everything:
+Cursor's insight: the AI response should appear *where you're looking*. Inline suggestions. Chat that scrolls with your code. The AI is your colleague, sitting next to you, pointing at lines.
+
+Maestro does the opposite. Click Run → terminal window opens → Claude is now somewhere else. The spatial separation breaks the "pair programming" illusion.
+
+**What Maestro could learn**: The agent should be *present* in Maestro, not launched from it.
+
+### Notion: Starting is Free
+
+Notion's blank page feels inviting, not intimidating. "Press / for commands" is the entire onboarding. You learn by typing, not by reading instructions.
+
+Maestro's blank state feels like a form. Select a task. Configure context. Choose a mode. Set voices. *Then* type. The structure precedes the intent.
+
+**What Maestro could learn**: Let people type first. Infer structure from intent, not the reverse.
+
+---
+
+## The Three Modes Problem
+
+Maestro tries to serve three different interaction modes with one interface:
+
+### 1. Quick Command Mode
+"Run review on this branch"
+- User knows exactly what they want
+- Fastest path: type command, hit enter
+- Current UX: Too many clicks (task dropdown, mode picker, etc.)
+
+### 2. Exploration Mode
+"Help me figure out what to build"
+- User doesn't know what they want
+- Needs conversation, not configuration
+- Current UX: No conversational path—just forms
+
+### 3. Orchestration Mode
+"Run ship pipeline across three worktrees"
+- Power user managing parallel work
+- Needs visibility into multiple agents
+- Current UX: Launches to external terminal, loses track
+
+One interface trying to serve all three = mediocre at each.
+
+**Radical idea**: Three distinct entry points:
 
 ```
-/implement add user authentication @src/auth.py --voice architect
+┌─────────────────────────────────────────────────┐
+│                                                 │
+│   ⚡ Quick Command          💭 Explore          │
+│   "lf review"               Chat with Claude    │
+│                             about this repo     │
+│                                                 │
+│                 🎭 Orchestrate                  │
+│                 Manage running agents           │
+│                                                 │
+└─────────────────────────────────────────────────┘
 ```
 
-Type `/` → task suggestions appear. Type `@` → file picker appears. Type `--` → flag completions appear. The grammar *is* the interface.
-
-This is how Notion's slash commands work. This is how Cursor's @ mentions work. The text field adapts to what you're typing.
-
-**Radical alternative: Conversational prompt builder**
-
-What if there was no task selector at all? You just describe what you want:
-
-> "Review my changes and fix any style issues"
-
-Maestro figures out:
-- Task: review
-- Mode: auto (it can fix things)
-- Context: diff + style guide
-
-The task dropdown becomes a *suggestion* after you type, not a *requirement* before.
-
-**The real gap**: Maestro asks you to translate your intent into loopflow's vocabulary. The best tools translate *for* you.
+Not tabs—modes. Each optimized for its job.
 
 ---
 
-## Context Controls
+## Gap Analysis by Area
 
-**Current**: Toggle chips (Docs, Files, Diff, Clipboard) + drag-and-drop zone + token counter.
+### Welcome/Setup
 
-**Why does it have to be this way?**
+**Current**: Recent repos list + "Open Folder..." button. Setup installs dependencies.
 
-The toggle model assumes:
-1. Users understand what each toggle includes
-2. Categories are the right abstraction
-3. Token counts are meaningful information
+**The real problem**: The app has nothing to show until you give it a repo. This is the opposite of every consumer app pattern.
 
-None of these are obviously true.
+**What Figma does**: Community templates visible before login. You can browse, preview, and be inspired without commitment.
 
-**What would make this delightful?**
+**What Notion does**: Interactive demo embedded in marketing site. You're already using it before you "start."
 
-*Direct manipulation*. Instead of toggling "Files" on/off, what if you saw a minimap of your codebase and could *click* on files to include them? The spatial representation makes context concrete.
+**What Cursor does**: Opens immediately when you open a file. Zero configuration before value.
 
-Figma's component panel doesn't say "Include components (on/off)". It shows you the actual components you can use.
+**Radical alternative**: Ship Maestro with a bundled demo repo. First launch = you're already inside a working project with fake worktrees, example prompts, and simulated (pre-recorded) agent output. The "Open your own repo" is a *second* step, not first.
 
-**Pattern to steal: Cursor's context pills**
-
-In Cursor, when you @ mention a file, it appears as a pill in your message. You can see *exactly* what you're including. Remove a pill → file is excluded. The context is the message.
-
-What if Maestro showed the assembled context in a collapsible preview? Click to expand → see every file, every doc, the exact prompt that will be sent. Make the invisible visible.
-
-**Radical alternative: No explicit context controls**
-
-What if context was entirely automatic? Maestro watches what you type and infers context:
-- Mention "auth"? Include files with "auth" in the name.
-- Say "fix the bug in"? Wait for a file mention or use recent edits.
-- Reference "the style guide"? Automatically include STYLE.md.
-
-The toggle chips become a power-user override, not the primary interface.
+**Even more radical**: What if Maestro could do something useful without a repo at all? A conversational Claude interface for quick questions, code snippets, explanations. The repo workflow becomes a feature you grow into, not a prerequisite.
 
 ---
 
-## Worktree Sidebar
+### Prompt Input
 
-**Current**: Flat list of branch names with status badges and hover actions.
+**Current**: Task selector dropdown + TextEditor + context toggles + Run button.
 
-**Why does it have to be this way?**
+**The real problem**: This is a command builder, not an input. The mental model is "configure then execute" rather than "express then refine."
 
-The sidebar treats worktrees as a list to manage. But worktrees are *work in progress*—they have state, history, and momentum.
+**What Cursor does**: One text field. Type `@` for files, `/` for commands. The input is intelligent.
 
-**What would make this delightful?**
+**What ChatGPT does**: Just a text field. Everything is natural language. The system figures out intent.
 
-*Kanban view*. Instead of a flat list, organize by state:
+**Gap**: Maestro asks users to speak "loopflow" (tasks, voices, context flags). The best AI products let you speak *human* and translate for you.
 
-```
-┌─────────────┬─────────────┬─────────────┐
-│ In Progress │ Ready       │ Shipped     │
-├─────────────┼─────────────┼─────────────┤
-│ auth-feature│ cleanup-pr  │ v0.6.3      │
-│ (implement) │ (reviewed)  │             │
-│             │             │             │
-└─────────────┴─────────────┴─────────────┘
-```
+**Concrete improvements**:
 
-You can *see* your workflow at a glance. Drag a card to a new column to change its state.
+1. **Natural language first**: Type "review my changes and fix style issues" → Maestro suggests task=review, mode=auto, context=diff+style guide. User confirms or adjusts.
 
-**Pattern to steal: Linear's issue views**
+2. **Inline mentions**: Type `@` → file picker appears inline. Type `/` → task picker appears inline. No separate controls.
 
-Linear lets you switch between list, board, and table views of the same data. The worktree list is just one view—what about a timeline view showing when each branch was last active?
+3. **Preview what will run**: Before clicking Run, show the assembled prompt. "Here's what Claude will see: [expandable preview]". Build trust through transparency.
 
-**Radical alternative: No explicit worktree management**
-
-What if worktrees were entirely implicit? You describe what you want to build:
-
-> "Add OAuth login"
-
-Maestro creates a worktree automatically, runs the task, and surfaces the result. You only see worktrees when you want to—most of the time, you just see your *work*.
-
-The git plumbing disappears. You're left with features in various states of completion.
+4. **Remember preferences**: If I always use `--voice architect` with review, default it. Learn from usage.
 
 ---
 
-## Running State
+### Context Controls
 
-**Current**: OutputPanel at the bottom with collapsible streaming output. Green dot for running.
+**Current**: Toggle chips (Docs, Files, Diff, Clipboard) + drag-drop zone.
 
-**Why does it have to be this way?**
+**The real problem**: Categories are abstractions. Users don't think "include the Diff category"—they think "include the changes I made to auth.py."
 
-The output panel assumes:
-1. Users want to see raw CLI output
-2. Spatial separation (input at top, output at bottom) is helpful
-3. Text streaming is the right feedback model
+**What's actually confusing**:
+- "Files" means "files touched by this branch"—not obvious
+- "Diff" vs "Files"—what's the difference? (Answer: raw diff output vs full file contents)
+- Token count with no reference point—is 14k a lot?
 
-**What would make this delightful?**
+**Patterns to steal**:
 
-*Inline progress*. When you click Run, the input transforms:
+1. **Cursor's explicit pills**: When you add context, you see exactly what's included as removable pills. No categories—just files.
+
+2. **Notion's progressive disclosure**: Start simple (just the text input). Power controls appear when you need them.
+
+3. **Figma's direct manipulation**: Don't toggle "components on/off"—show the actual component panel and drag what you want.
+
+**Concrete improvement**: Replace toggles with a collapsible "Context preview" that shows exactly what will be sent:
+
+```
+Context: 14.2k tokens  [Expand ▼]
+
+Files (3):
+  README.md (420 tokens)
+  STYLE.md (1.2k tokens)
+  src/auth.py (890 tokens)  [×]
+
+Diff:
+  +47 -12 lines across 2 files  [×]
+
+[+ Add file]  [+ Add clipboard]
+```
+
+Make the invisible visible.
+
+---
+
+### Worktree Sidebar
+
+**Current**: Flat list of branches with status badges.
+
+**The real problem**: Worktrees are git plumbing. Users care about *work*, not branches.
+
+**What Linear does**: Shows issues by status (Todo, In Progress, Done), not by branch name. The work is front and center.
+
+**What GitHub Projects does**: Kanban view of work items. Drag to change status.
+
+**Radical reframe**: What if the sidebar showed "Work" not "Worktrees"?
+
+```
+WORK
+
+In Progress
+  ┌─────────────────────────────┐
+  │ 🔨 Adding user auth         │
+  │    implement → review       │
+  │    Claude working...  🟢    │
+  └─────────────────────────────┘
+
+Ready to Ship
+  ┌─────────────────────────────┐
+  │ ✅ Fix login bug            │
+  │    Reviewed • 4 files       │
+  │    [Create PR]              │
+  └─────────────────────────────┘
+
+Shipped
+  ┌─────────────────────────────┐
+  │ 🚀 Refactor DB layer        │
+  │    Merged Jan 14            │
+  └─────────────────────────────┘
+```
+
+The branch names exist somewhere (tooltip, detail view) but aren't primary. The *work* is primary.
+
+---
+
+### Running State & Output
+
+**Current**: OutputPanel at bottom with collapsible streaming text. Green dot for running.
+
+**The real problem**: Output happens in an external terminal. The OutputPanel only shows daemon events, not the actual Claude session. Spatial disconnect between "start here" and "watch here."
+
+**What Cursor does**: Responses appear inline, in the chat flow. Your eye never leaves the conversation.
+
+**What would be magical**: Watch Claude think inside Maestro.
 
 ```
 ┌─────────────────────────────────────┐
-│ ◉ Running: implement auth-feature   │
+│ 🤖 Claude is working on auth-feature │
 │                                     │
-│ → Reading: src/auth.py              │
-│ → Editing: src/routes/login.py      │
-│ → Writing tests...                  │
+│ ▸ Read: src/auth.py                 │
+│ ▸ Read: src/routes/login.py         │
+│ ▸ Planning changes...               │
 │                                     │
-│ [Stop] [View full output]           │
+│ ● Live  [Stop] [View Full Output]   │
 └─────────────────────────────────────┘
 ```
 
-The output is *in place*. Your eye doesn't need to move. This is how Cursor shows AI responses—in the chat flow, not a separate panel.
+The activity is *in the app*, not in a terminal window you have to find.
 
-**Pattern to steal: Figma's multiplayer cursors**
-
-What if running tasks showed a presence indicator *in the worktree row*?
-
-```
-  auth-feature  [Claude is editing...]  🟢
-```
-
-The agent becomes a collaborator you can see working, not a background process.
-
-**Radical alternative: No streaming output by default**
-
-What if the default was to show *nothing* during execution? Just:
-
-> "Claude is working on auth-feature. Estimated: 2-3 minutes."
-
-When it's done:
-
-> "✓ auth-feature ready for review. 4 files changed."
-
-The raw output becomes an optional "show work" mode for debugging. Most users don't need to watch the sausage being made.
+**Implementation reality**: This requires the lf CLI to stream output back to Maestro, not just launch a terminal. Non-trivial architectural change. But it's the gap between "launcher" and "workspace."
 
 ---
 
-## Errors/Empty States
+### Error States
 
-**Current**: Modal alerts with OK buttons. Empty states show minimal text ("No worktrees").
+**Current**: Modal alerts with OK button. Setup errors have recovery hints.
 
-**What would make this delightful?**
+**The real problem**: Errors are dead ends. "Failed to create worktree" → OK → now what?
 
-Every empty state should answer: "What should I do?"
+**Pattern from Notion**: Errors are inline, contextual, and suggest next actions.
 
-**Empty repo state**:
-```
-┌─────────────────────────────────────┐
-│                                     │
-│     🌱 Fresh start                  │
-│                                     │
-│  This repo has no worktrees yet.    │
-│                                     │
-│  [Start a feature]                  │
-│                                     │
-│  "add user auth"                    │
-│  "refactor database layer"          │
-│  "fix the login bug"                │
-│                                     │
-│  ↑ Try one of these, or type your   │
-│    own in the prompt above          │
-│                                     │
-└─────────────────────────────────────┘
-```
+**Pattern from Stripe**: Error messages explain *why* and *how to fix*, not just what failed.
 
-The empty state *teaches* by example. No jargon, no explanations of git concepts.
+**Concrete improvements**:
 
-**Pattern to steal: Notion's empty page**
+1. **Inline errors**: Instead of modal, show error below the control that failed. Red text, suggested action.
 
-Notion's empty page says "Press Enter to start writing, or choose a template below." The empty state is the onboarding.
+2. **Recovery flows**: "Branch 'auth' already exists" → [Switch to existing branch] [Use different name: ____]
 
-**Error recovery**:
-
-Instead of:
-> "Error: Failed to create worktree"
-> [OK]
-
-Show:
-> "Couldn't create worktree. The branch name 'main' is reserved."
-> [Try a different name] [Learn about worktrees]
-
-Errors should offer next actions, not dead ends.
+3. **Graceful degradation**: If lf CLI isn't installed, don't block. Show what you can (file browser, prompts) and CTA to install.
 
 ---
 
-## Summary: Priority Gaps
+## Priority Gaps (Revised)
 
-1. **No zero-config value demonstration** - Impact: Critical
-   - Users must configure before experiencing. Demo repo/sandbox would flip this.
+### Critical
 
-2. **Prompt input doesn't understand intent** - Impact: High
-   - Separate task selector + args fragments the mental model. Unified intelligent input would feel magical.
+1. **No value without setup** — Users must install CLI + open repo before seeing anything useful. Flip this: demo mode first, real projects second.
 
-3. **Context is invisible until executed** - Impact: High
-   - Users toggle categories, not files. Preview of assembled context would build trust.
+2. **Output happens elsewhere** — Running a task opens an external terminal. The disconnect breaks the "workspace" feeling. Bringing output inline would transform the experience.
 
-4. **Output is spatially disconnected** - Impact: High
-   - Input at top, output at bottom breaks flow. Inline progress keeps attention focused.
+### High
 
-5. **Worktrees are a list, not a workflow** - Impact: Medium
-   - Flat list doesn't show progress. Kanban/timeline would reveal work state.
+3. **Configuration before expression** — Task selector, mode picker, context toggles—all before typing. Let users type first, configure second.
 
-6. **Empty states don't teach** - Impact: Medium
-   - "No worktrees" says nothing about what to do. Example prompts would bootstrap understanding.
+4. **Context is categorical, not concrete** — Toggle "Files" on/off vs. see exactly which files will be included. Make the invisible visible.
 
-7. **No stop button** - Impact: Medium
-   - Can't cancel a running task from the UI. Prominent stop affordance needed.
+5. **Worktrees are plumbing, not work** — Show progress on features, not branch names.
+
+### Medium
+
+6. **No stop affordance** — Can't cancel a running task from Maestro UI.
+
+7. **No model selector** — CLI's `-m` flag has no GUI equivalent.
+
+8. **No command preview** — Can't see what will execute before running.
 
 ---
 
-## Patterns to Steal
+## Patterns Worth Stealing
 
 ### From Cursor
-1. **@ mentions for inline context** → Type `@file.py` in prompt, file appears as pill
-2. **Chat-style output** → Response appears inline, not in separate panel
-3. **Model selector as afterthought** → Subtle dropdown, not prominent control
+- **@ mentions**: Inline context references in the text field
+- **Inline responses**: Output appears where you're looking
+- **Model selector as dropdown**: Present but not prominent
 
 ### From Notion
-1. **Slash commands** → `/review` types in prompt, shows matching tasks
-2. **Empty page as onboarding** → "Type / for commands" teaches through doing
-3. **Template gallery** → Welcome screen shows what's possible
+- **Slash commands**: `/review` in the input triggers task picker
+- **Blank page that teaches**: "Press / for commands"
+- **Progressive complexity**: Simple by default, powerful when needed
 
 ### From Figma
-1. **Presence indicators** → Show "Claude working on..." in worktree row
-2. **Playground before commitment** → Demo canvas before creating project
-3. **Direct selection** → Click files to include, not toggle categories
+- **Community-first welcome**: Templates and examples before blank canvas
+- **Presence indicators**: See collaborators (agents) working in real-time
+- **Direct manipulation**: Click to include, not toggle categories
 
 ### From Linear
-1. **Multiple views of same data** → List/board/timeline for worktrees
-2. **Keyboard-first design** → Power users never touch mouse
-3. **Progressive disclosure** → Simple by default, complex when needed
+- **Work, not branches**: Issues by status, not implementation detail
+- **Multiple views**: List/board/timeline of the same data
+- **Keyboard shortcuts everywhere**: Power users never touch mouse
+
+### From Arc Browser
+- **Spaces**: Different contexts for different work modes
+- **Command bar**: ⌘K for everything—universal quick action
+- **Boosts**: Remember my preferences and apply them automatically
 
 ---
 
-## Design Principles Revisited
+## The Heretical Questions (Revisited)
 
-### Bret Victor: "Create by reacting"
+1. **Does Maestro need to be an app, or a mode?**
+   - What if it was a VS Code extension that added loopflow commands?
+   - What if it was a CLI with a built-in TUI (like lazygit)?
 
-The current flow: think about what task → select task → configure context → type args → run → wait → see result
+2. **Is worktree management the core value, or a side effect?**
+   - Power users value worktrees for isolation
+   - New users don't know what worktrees are
+   - Could worktrees be invisible until you need them?
 
-The reactive flow: type what you want → system suggests task → shows preview → run → see result inline
+3. **Should the output be in Maestro, or is external terminal fine?**
+   - Keeping output in terminal = simpler architecture
+   - Bringing output in = more integrated experience
+   - Hybrid: summary in Maestro, full output available externally?
 
-**Gap**: Too much planning required before seeing any feedback.
+4. **What if Maestro worked without lf CLI installed?**
+   - Bundled minimal runtime for basic operations
+   - Graceful degradation vs. hard dependency
+   - Trade-off: distribution complexity vs. first-run friction
+
+---
+
+## Design Principles Applied
+
+### Bret Victor: Immediate Feedback
+
+**Gap**: Click Run → wait → see result eventually, somewhere else.
+
+**Fix**: Show estimated time. Show progress steps. Show output inline. Every action has visible, immediate feedback.
 
 ### Norman: Affordances
 
-**Problem**: The TextEditor for prompt input has no border, no placeholder examples, no indication of the grammar it accepts. It looks like a display field, not an input.
+**Gap**: TextEditor looks like display, not input. Context chips don't indicate click-to-toggle.
 
-**Fix**: Syntax highlighting as you type. `/implement` turns blue. `@file.py` becomes a clickable pill. The input *shows* what it understands.
+**Fix**: Visual affordances that scream "interact with me." Border on focused input. Hover states on everything interactive. Cursor changes appropriately.
 
-### Ive: Simplicity through removal
+### Ive: Simplicity Through Removal
 
-**Problem**: Task selector, mode picker, voice selector, context toggles, token count, options toggle, run button—seven controls before you can type your prompt.
+**Gap**: Task selector + mode picker + voice selector + context toggles + token count + options toggle + Run button. Seven controls before typing.
 
-**Fix**: Start with just the text input and run button. Other controls appear when you demonstrate need (type `--voice`) or can be inferred from context.
+**Fix**: Start with text input + Run. Everything else appears when needed or can be inferred. The first run should require zero configuration.
 
----
+### Krug: Don't Make Me Think
 
-## The Heretical Question
+**Gap**: "Worktrees"—a git concept most users don't know. "Voices"—a loopflow concept that needs explanation.
 
-Why does Maestro need to be a macOS app at all?
-
-A VS Code extension or web app would:
-- Have zero installation friction
-- Live where developers already work
-- Integrate with file trees, terminals, and diff views natively
-
-The macOS app makes sense if the value proposition is *orchestration across multiple editors/terminals*. But current Maestro mostly launches things in external apps anyway.
-
-This isn't a suggestion to rebuild—it's a prompt to clarify: what does the native app uniquely enable? The answer should shape every design decision.
+**Fix**: Use plain language. "Parallel features" not "worktrees." "Tone" or "style" not "voices." If you need a tooltip to explain it, the name is wrong.
 
 ---
 
 ## Open Questions
 
-Captured for `.design/questions.md`:
+1. What would a demo/sandbox repo contain? Fake worktrees, example prompts, pre-recorded agent output?
 
-1. Could Maestro work without the lf CLI for basic operations?
-2. What would a demo/sandbox repo contain to demonstrate value?
-3. Is the worktree abstraction necessary for first-time users, or could it be hidden entirely?
-4. Should model selection happen before, during, or after prompt composition?
-5. What's the core value of a native macOS app vs. extension/web app?
+2. How much of lf CLI could be bundled in Maestro to enable standalone operation?
+
+3. Should "Quick Command," "Explore," and "Orchestrate" be three apps, three modes, or one interface?
+
+4. Is bringing agent output into Maestro (instead of external terminal) worth the architectural complexity?
+
+5. What's the iOS/iPad story? The patterns we pick now constrain future platforms.

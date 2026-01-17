@@ -1,15 +1,16 @@
 # Loopflow
 
-Run LLM coding agents from reusable prompt files.
+Arrange agents to code in harmony.
 
 ```bash
-lf review          # run .claude/commands/review.md
-lf ship            # pipeline: implement → review → test → commit → PR
+lf debug -v        # paste error, watch it fix
+lf design          # write spec interactively
+lf ship            # pipeline: implement → polish → review → PR
 ```
 
-Write prompts as markdown files. Chain them into pipelines. Run them across isolated worktrees while you work on something else.
+Store prompts in git. Chain them into pipelines. Run them across isolated worktrees while you work on something else.
 
-macOS only. Supports Claude Code, OpenAI Codex, and Google Gemini CLI.
+macOS. Works with Claude Code, Codex CLI, and Gemini CLI.
 
 ## Install
 

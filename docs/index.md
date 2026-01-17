@@ -5,7 +5,9 @@ title: Home
 
 # Loopflow
 
-Run LLM coding agents from reusable prompt files.
+Arrange agents to code in harmony.
+
+Store prompts in git. Chain them into pipelines. Run them across isolated worktrees while you work on something else.
 
 ## Quick Debug
 
@@ -111,9 +113,14 @@ lf review -m codex              # use Codex
 lf implement --race claude,codex   # race them, pick winner
 ```
 
+---
+
+*Craft and throughput. Not either/or.*
+
 ## Next Steps
 
 - [Configuration](config.md) — all options for `.lf/config.yaml`
 - [Patterns](patterns.md) — workflows and recipes
 - [Maestro](maestro.md) — native Mac app for visual control
 - [Daemon](lfd.md) — background agents
+- [Philosophy](vision.md) — the maestro mindset

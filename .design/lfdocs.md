@@ -137,4 +137,5 @@ vhs docs/design-demo.tape
 2. VHS tape files record both workflows
 3. docs/index.md leads with the two demo GIFs
 4. Other docs updated for current features
-5. `uv run pytest tests/` passes
+5. Framing matches website/research: "Arrange agents to code in harmony", maestro mindset, "Craft and throughput. Not either/or."
+6. `uv run pytest tests/` passes

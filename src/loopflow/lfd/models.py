@@ -69,10 +69,6 @@ class MergeMode(Enum):
     SILENT = "silent"
 
 
-# Legacy alias for backwards compatibility during migration
-MergeStrategy = MergeMode
-
-
 @dataclass
 class AgentSpec:
     name: str

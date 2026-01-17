@@ -1,9 +1,7 @@
 """Agent loading and spawning for lfd daemon."""
 
 import os
-import random
 import re
-import string
 import subprocess
 import sys
 import uuid
@@ -228,12 +226,6 @@ def _create_personal_main_branch(repo: Path, branch: str) -> None:
             cwd=repo,
             capture_output=True,
         )
-
-
-def generate_temp_branch_name(agent_name: str) -> str:
-    """Generate a temporary branch name like 'agent-name-x7k2m'."""
-    suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=5))
-    return f"{agent_name}-{suffix}"
 
 
 def ensure_personal_main(agent: AgentSpec) -> str:

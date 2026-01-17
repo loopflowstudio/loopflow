@@ -276,10 +276,22 @@ class Server:
 
 async def run_server(socket_path: Path) -> None:
     """Main daemon entry point. Runs until terminated."""
+    from loopflow.lfd.launchd import write_pid, remove_pid
+
     server = Server(socket_path)
+
+    # Write PID file for process tracking
+    write_pid()
+
+    async def shutdown():
+        await server.stop()
+        remove_pid()
 
     loop = asyncio.get_event_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, lambda: asyncio.create_task(server.stop()))
+        loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown()))
 
-    await server.start()
+    try:
+        await server.start()
+    finally:
+        remove_pid()

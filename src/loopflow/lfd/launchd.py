@@ -4,27 +4,54 @@ The daemon is managed by launchd so it:
 - Starts automatically at login
 - Restarts if it crashes
 - Survives app quit and computer restart
+
+Uses modern launchctl APIs (bootstrap/bootout/kickstart) for proper
+service lifecycle management.
 """
 
+import os
 import subprocess
-import sys
 from pathlib import Path
 
 LABEL = "com.loopflow.lfd"
 PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
 LOG_PATH = Path.home() / ".lf" / "logs" / "lfd.log"
+PID_PATH = Path.home() / ".lf" / "lfd.pid"
+
+
+def _get_gui_domain() -> str:
+    """Get the launchd GUI domain for current user."""
+    return f"gui/{os.getuid()}"
+
+
+def _get_service_target() -> str:
+    """Get the full service target for launchctl commands."""
+    return f"{_get_gui_domain()}/{LABEL}"
 
 
 def _find_lfd_executable() -> str:
-    """Find the lfd executable path."""
+    """Find the lfd executable path.
+
+    Always prefer the global installation (~/.local/bin/lfd) over any
+    virtualenv or dev installation. This ensures the daemon survives
+    worktree switches and dev environment changes.
+    """
+    global_path = Path.home() / ".local" / "bin" / "lfd"
+    if global_path.exists():
+        return str(global_path)
+
+    # Fall back to whatever is in PATH (may be a venv)
     result = subprocess.run(["which", "lfd"], capture_output=True, text=True)
     if result.returncode == 0:
         return result.stdout.strip()
+
+    import sys
     return sys.executable
 
 
 def _generate_plist() -> str:
     """Generate the launchd plist XML."""
+    import sys
     lfd_path = _find_lfd_executable()
 
     if lfd_path == sys.executable:
@@ -70,55 +97,135 @@ def is_installed() -> bool:
 
 
 def is_running() -> bool:
-    """Check if the daemon is currently running."""
+    """Check if the daemon is currently running via launchctl."""
     result = subprocess.run(
-        ["launchctl", "list", LABEL],
+        ["launchctl", "print", _get_service_target()],
         capture_output=True,
     )
     return result.returncode == 0
+
+
+def get_pid() -> int | None:
+    """Get daemon PID from PID file, verifying process is alive."""
+    if not PID_PATH.exists():
+        return None
+
+    try:
+        pid = int(PID_PATH.read_text().strip())
+        # Check if process is actually running
+        os.kill(pid, 0)
+        return pid
+    except (ValueError, ProcessLookupError, PermissionError):
+        # Stale PID file - clean it up
+        PID_PATH.unlink(missing_ok=True)
+        return None
+
+
+def write_pid() -> None:
+    """Write current process PID to file. Called by daemon on startup."""
+    PID_PATH.parent.mkdir(parents=True, exist_ok=True)
+    PID_PATH.write_text(str(os.getpid()))
+
+
+def remove_pid() -> None:
+    """Remove PID file. Called by daemon on shutdown."""
+    PID_PATH.unlink(missing_ok=True)
 
 
 def install() -> bool:
-    """Install the launchd plist and start the daemon."""
+    """Install the launchd plist and start the daemon.
+
+    Uses bootout/bootstrap for proper service lifecycle.
+    If already installed, unloads first to pick up any plist changes.
+    """
+    import time
+
     PLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
+    # Always bootout first to ensure clean state (ignores errors if not loaded)
+    subprocess.run(
+        ["launchctl", "bootout", _get_service_target()],
+        capture_output=True,
+    )
+
+    # Wait for launchd to fully unload the service
+    time.sleep(0.5)
+
+    # Write new plist
     plist_content = _generate_plist()
     PLIST_PATH.write_text(plist_content)
 
+    # Bootstrap the service
     result = subprocess.run(
-        ["launchctl", "load", str(PLIST_PATH)],
+        ["launchctl", "bootstrap", _get_gui_domain(), str(PLIST_PATH)],
         capture_output=True,
     )
-    return result.returncode == 0
+
+    if result.returncode != 0:
+        return False
+
+    # Wait for service to start (may take a moment to register)
+    for i in range(20):  # Increased from 10 to 20
+        time.sleep(0.2)  # Increased from 0.1 to 0.2
+        if is_running():
+            return True
+
+    return False
 
 
 def uninstall() -> bool:
     """Stop the daemon and remove the launchd plist."""
-    if not PLIST_PATH.exists():
-        return True
+    import time
 
+    # Get PID before bootout (for fallback kill)
+    pid = get_pid()
+    if not pid:
+        # Try to get PID from launchctl
+        result = subprocess.run(["launchctl", "list"], capture_output=True, text=True)
+        for line in result.stdout.split("\n"):
+            if LABEL in line:
+                try:
+                    pid = int(line.split()[0])
+                except (ValueError, IndexError):
+                    pass
+                break
+
+    # Bootout from launchd (sends SIGTERM)
     subprocess.run(
-        ["launchctl", "unload", str(PLIST_PATH)],
+        ["launchctl", "bootout", _get_service_target()],
         capture_output=True,
     )
 
+    # Wait for graceful shutdown
+    time.sleep(1.0)
+
+    # If process still running, send SIGKILL as fallback
+    if pid:
+        try:
+            os.kill(pid, 0)  # Check if still running
+            os.kill(pid, 9)  # SIGKILL
+            time.sleep(0.2)
+        except ProcessLookupError:
+            pass  # Already dead
+
     PLIST_PATH.unlink(missing_ok=True)
+    PID_PATH.unlink(missing_ok=True)
     return True
 
 
 def restart() -> bool:
-    """Restart the daemon."""
+    """Restart the daemon with a clean shutdown.
+
+    Uses kickstart -k for a proper restart that sends SIGTERM,
+    waits for graceful shutdown, then starts fresh.
+    """
     if not is_installed():
         return install()
 
-    subprocess.run(
-        ["launchctl", "unload", str(PLIST_PATH)],
-        capture_output=True,
-    )
-
+    # kickstart -k kills the existing process and starts a new one
     result = subprocess.run(
-        ["launchctl", "load", str(PLIST_PATH)],
+        ["launchctl", "kickstart", "-k", _get_service_target()],
         capture_output=True,
     )
     return result.returncode == 0

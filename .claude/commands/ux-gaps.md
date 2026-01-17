@@ -1,11 +1,14 @@
 ---
 context:
   - Maestro/DESIGN.md
-  - .design/screenshots/
+  - /tmp/maestro-*.png
   - .design/ux-research.md
   - Maestro/Maestro/Views/
 voice: artist
 ---
+> **Screenshots**: If running standalone, capture with Cmd+Shift+S first.
+> In the `ux` pipeline, uses screenshots from the ux-research step.
+
 Compare Maestro against best-in-class tools and identify UX gaps.
 
 Read `Maestro/DESIGN.md` first—it contains comprehensive research on the tools and thinkers we're learning from.
@@ -54,7 +57,19 @@ See `Maestro/DESIGN.md` for full research. Key principles:
 9. **Remove Barriers** (fast.ai, Paper) — accessibility without patronizing
 10. **Craft Signals Care** (Collison, Ive) — beauty implies care
 
-## Analysis
+## Visual Audit
+
+Before analyzing gaps, audit the screenshots for craft issues:
+
+- Alignment and spacing inconsistencies
+- Typography hierarchy problems
+- Color contrast and accessibility
+- Visual clutter or unclear affordances
+- macOS platform conventions (HIG compliance)
+
+These fall under principle #10: "Craft Signals Care."
+
+## Gap Analysis
 
 For each area of Maestro, identify gaps:
 
@@ -72,6 +87,10 @@ Write analysis to `.design/ux-gaps.md`:
 ```markdown
 # UX Gap Analysis
 
+## Visual Issues
+- [ ] Issue and location (from visual audit)
+- [ ] ...
+
 ## Welcome/Setup
 **Current**: Description of what Maestro does
 **Inspiration**: What Figma/Cursor/Notion do better
@@ -84,7 +103,6 @@ Write analysis to `.design/ux-gaps.md`:
 ## Summary: Priority Gaps
 1. [Gap] - Impact: High/Medium/Low
 2. ...
-3. ...
 
 ## Patterns to Steal
 1. [Pattern from X] - Apply to [area]

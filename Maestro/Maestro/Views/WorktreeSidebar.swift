@@ -144,10 +144,11 @@ struct WorktreeSidebar: View {
 
     private var header: some View {
         HStack {
-            Text("WORKTREES")
+            Text("BRANCHES")
                 .font(.caption)
                 .fontWeight(.semibold)
                 .foregroundStyle(.secondary)
+                .help("Worktrees: isolated folders for each feature branch")
 
             Spacer()
 
@@ -158,7 +159,7 @@ struct WorktreeSidebar: View {
                     .font(.caption)
             }
             .buttonStyle(.plain)
-            .help("New Worktree")
+            .help("Create a new branch in its own folder")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -167,18 +168,19 @@ struct WorktreeSidebar: View {
     private var emptyState: some View {
         VStack(spacing: 12) {
             Image(systemName: "arrow.triangle.branch")
-                .font(.system(size: 24))
+                .font(.system(size: 28))
                 .foregroundStyle(.tertiary)
 
-            Text("No worktrees yet")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            Text("Worktrees let you run tasks on isolated branches while keeping your main work untouched.")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 24)
+            VStack(spacing: 4) {
+                Text("No worktrees yet")
+                    .fontWeight(.medium)
+                    .foregroundStyle(.secondary)
+                Text("Each worktree is an isolated folder where AI can work without affecting your main code.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 16)
+            }
 
             Button {
                 showingNewWorktreeSheet = true
@@ -188,10 +190,9 @@ struct WorktreeSidebar: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
-            .padding(.top, 4)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
     }
 
     private var worktreeList: some View {
@@ -201,6 +202,7 @@ struct WorktreeSidebar: View {
                     WorktreeRow(
                         worktree: worktree,
                         isSelected: appState.selectedWorktree?.id == worktree.id,
+                        isRunning: appState.isWorktreeRunning(worktree),
                         terminalName: terminalDisplayName,
                         ideName: ideDisplayName,
                         otherWorktrees: appState.worktrees.filter { $0.id != worktree.id },
@@ -476,6 +478,7 @@ struct AgentRow: View {
 struct WorktreeRow: View {
     let worktree: Worktree
     let isSelected: Bool
+    let isRunning: Bool
     let terminalName: String
     let ideName: String
     let otherWorktrees: [Worktree]
@@ -492,6 +495,7 @@ struct WorktreeRow: View {
     let onDelete: () -> Void
 
     @State private var isHovering = false
+    @State private var pulseAnimation = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -649,7 +653,17 @@ struct WorktreeRow: View {
                 stageBadge(task)
             }
 
-            if worktree.isDirty {
+            if isRunning {
+                // Pulsing dot for running state
+                Circle()
+                    .fill(.blue)
+                    .frame(width: 8, height: 8)
+                    .scaleEffect(pulseAnimation ? 1.2 : 0.8)
+                    .opacity(pulseAnimation ? 1.0 : 0.6)
+                    .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: pulseAnimation)
+                    .onAppear { pulseAnimation = true }
+                    .onDisappear { pulseAnimation = false }
+            } else if worktree.isDirty {
                 Circle()
                     .fill(.orange)
                     .frame(width: 6, height: 6)

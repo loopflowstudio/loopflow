@@ -3,11 +3,14 @@ context:
   - Maestro/DESIGN.md
   - .design/ux-research.md
   - .design/ux-gaps.md
-  - .design/screenshots/
+  - /tmp/maestro-*.png
   - Maestro/Maestro/Views/
   - Maestro/Maestro/Services/
 voice: architect
 ---
+> **Screenshots**: If running standalone, capture with Cmd+Shift+S first.
+> In the `ux` pipeline, uses screenshots from the ux-research step.
+
 Implement high-priority UX improvements based on research and gap analysis.
 
 Read `Maestro/DESIGN.md` for the design philosophy guiding these changes.

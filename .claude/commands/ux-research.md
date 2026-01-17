@@ -1,11 +1,14 @@
 ---
 context:
   - Maestro/DESIGN.md
-  - .design/screenshots/
+  - /tmp/maestro-*.png
   - Maestro/Maestro/Views/
 voice: customer
 ---
-Conduct UX research on Maestro by capturing screenshots, reviewing the UI, and simulating user profiles.
+> **Before running**: Open Maestro, navigate to each screen you want reviewed,
+> and press Cmd+Shift+S to capture. Screenshots save to `/tmp/maestro-<timestamp>.png`.
+
+Conduct user research by simulating three user profiles experiencing Maestro for the first time.
 
 ## Part 1: Screenshot Capture
 

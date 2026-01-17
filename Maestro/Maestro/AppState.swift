@@ -35,6 +35,10 @@ final class AppState {
     var runMode: RunMode = .auto
     var estimatedTokens: Int = 0
 
+    // Context preview state
+    var contextPreview: ContextPreview = .empty
+    var excludedFiles: Set<String> = []  // Files excluded via preview panel
+
     // Sidebar state
     var selectedWorktree: Worktree?
     var selectedPipeline: PipelineDef?
@@ -42,6 +46,15 @@ final class AppState {
     // Live output state
     var liveOutputBySession: [String: [OutputLine]] = [:]
     var activeSessionIds: Set<String> = []
+    var activeWorktreePaths: Set<String> = []  // Worktree paths with running sessions
+    private var sessionWorktreeMap: [String: String] = [:]  // session ID → worktree path
+
+    // Results panel state
+    var sessionBaselines: [String: SessionBaseline] = [:]  // session ID → baseline
+    var sessionResults: [String: SessionResult] = [:]  // session ID → result
+    var showResultsLog: Bool = false  // Toggle for streaming log view
+    private var sessionTaskMap: [String: String] = [:]  // session ID → task name
+    private var sessionStartMap: [String: Date] = [:]  // session ID → start time
 
     // Loading state
     var isLoading: Bool = false
@@ -56,6 +69,8 @@ final class AppState {
     private let agentService = AgentService()
     private var eventService: LFDEventService?
     private let voiceService = VoiceService()
+    private let contextPreviewService = ContextPreviewService()
+    private let resultsService = ResultsService()
 
     func openRepo(_ url: URL) async {
         currentRepo = url
@@ -230,11 +245,75 @@ final class AppState {
     }
 
     private func handleSessionEvent(_ event: SessionEvent) {
-        if event.status == "running" {
+        // session.started events don't have status, just id/task/worktree
+        if event.status == nil {
+            // This is a session.started event
             activeSessionIds.insert(event.id)
             liveOutputBySession[event.id] = []
+            if let worktree = event.worktree {
+                activeWorktreePaths.insert(worktree)
+                sessionWorktreeMap[event.id] = worktree
+            }
+
+            // Track task name and start time for results
+            if let task = event.task {
+                sessionTaskMap[event.id] = task
+            }
+            sessionStartMap[event.id] = Date()
+
+            // Capture baseline for results computation
+            if let worktree = event.worktree {
+                Task {
+                    let baseline = await resultsService.captureBaseline(
+                        sessionId: event.id,
+                        worktree: URL(fileURLWithPath: worktree)
+                    )
+                    await MainActor.run {
+                        sessionBaselines[event.id] = baseline
+                        // Create running result entry
+                        sessionResults[event.id] = SessionResult.running(
+                            sessionId: event.id,
+                            task: event.task ?? "task",
+                            worktree: worktree,
+                            startedAt: sessionStartMap[event.id] ?? Date()
+                        )
+                    }
+                }
+            }
         } else if event.status == "completed" || event.status == "error" {
             activeSessionIds.remove(event.id)
+            // Remove worktree from active set
+            if let worktree = sessionWorktreeMap.removeValue(forKey: event.id) {
+                // Only remove if no other sessions running in same worktree
+                let otherSessionsInWorktree = sessionWorktreeMap.values.contains(worktree)
+                if !otherSessionsInWorktree {
+                    activeWorktreePaths.remove(worktree)
+                }
+            }
+
+            // Compute results
+            if let baseline = sessionBaselines[event.id] {
+                let task = sessionTaskMap[event.id] ?? "task"
+                let startedAt = sessionStartMap[event.id] ?? Date()
+                let status: SessionResultStatus = event.status == "completed" ? .completed : .error
+
+                Task {
+                    let result = await resultsService.computeResults(
+                        baseline: baseline,
+                        task: task,
+                        status: status,
+                        startedAt: startedAt,
+                        endedAt: Date()
+                    )
+                    await MainActor.run {
+                        sessionResults[event.id] = result
+                    }
+                }
+            }
+
+            // Clean up tracking maps
+            sessionTaskMap.removeValue(forKey: event.id)
+            sessionStartMap.removeValue(forKey: event.id)
         }
     }
 
@@ -248,6 +327,49 @@ final class AppState {
         if liveOutputBySession[event.sessionId]?.count ?? 0 > 1000 {
             liveOutputBySession[event.sessionId]?.removeFirst()
         }
+    }
+
+    func isWorktreeRunning(_ worktree: Worktree) -> Bool {
+        activeWorktreePaths.contains(worktree.path)
+    }
+
+    // MARK: - Results Panel
+
+    func loadDiffPreview(for sessionId: String, fileIndex: Int) async {
+        guard var result = sessionResults[sessionId],
+              fileIndex < result.filesChanged.count,
+              result.filesChanged[fileIndex].diffPreview == nil,
+              let baseline = sessionBaselines[sessionId] else { return }
+
+        let file = result.filesChanged[fileIndex]
+        let worktree = URL(fileURLWithPath: result.worktree)
+
+        let preview = await resultsService.loadDiffPreview(
+            for: file,
+            baselineSHA: baseline.headSHA,
+            in: worktree
+        )
+
+        result.filesChanged[fileIndex].diffPreview = preview
+        sessionResults[sessionId] = result
+    }
+
+    func clearCompletedResults() {
+        // Clear results for sessions that are complete (keep running ones)
+        for sessionId in sessionResults.keys {
+            if let result = sessionResults[sessionId], result.status != .running {
+                sessionResults.removeValue(forKey: sessionId)
+                sessionBaselines.removeValue(forKey: sessionId)
+                liveOutputBySession.removeValue(forKey: sessionId)
+            }
+        }
+    }
+
+    var currentSessionResult: SessionResult? {
+        // Return the most recent result (running or completed)
+        sessionResults.values
+            .sorted { $0.startedAt > $1.startedAt }
+            .first
     }
 
     func refreshAgents() async {
@@ -286,6 +408,48 @@ final class AppState {
             includePaste: includePaste,
             includeSummaries: includeSummaries,
             in: repo
+        )
+    }
+
+    func refreshContextPreview() async {
+        guard let options = buildContextOptions() else { return }
+        contextPreview = await contextPreviewService.assemblePreview(options)
+    }
+
+    func removeContextItem(_ item: ContextItem, from section: ContextSection) {
+        guard let path = item.path else { return }
+
+        if section.kind == .attached {
+            attachedFiles.removeAll { $0.path() == path }
+        } else {
+            excludedFiles.insert(path)
+        }
+
+        Task {
+            await refreshContextPreview()
+            await estimateTokens()
+        }
+    }
+
+    func copyAssembledContext() async -> String? {
+        guard let options = buildContextOptions() else { return nil }
+        return await contextPreviewService.copyAssembledContext(options)
+    }
+
+    private func buildContextOptions() -> ContextOptions? {
+        guard let repo = currentRepo else { return nil }
+        let filteredAttached = attachedFiles.filter { !excludedFiles.contains($0.path()) }
+        return ContextOptions(
+            prompt: selectedPrompt?.name,
+            args: promptArgs,
+            contextFolders: Array(selectedContextFolders),
+            attachedFiles: filteredAttached,
+            includeDocs: includeDocs,
+            includeDiff: includeDiff,
+            includeDiffFiles: includeDiffFiles,
+            includePaste: includePaste,
+            includeSummaries: includeSummaries,
+            repoURL: repo
         )
     }
 

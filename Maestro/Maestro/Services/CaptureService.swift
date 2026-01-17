@@ -19,31 +19,18 @@ struct CaptureService {
         }
     }
 
-    /// Capture the key window and save to .design/screenshots/
-    func captureKeyWindow(repoRoot: URL?) throws -> URL {
+    /// Capture the key window and save to /tmp/maestro-<timestamp>.png
+    func captureKeyWindow() throws -> URL {
         guard let window = NSApp.keyWindow else {
             throw CaptureError.noWindow
         }
-        return try captureWindow(window, repoRoot: repoRoot)
+        return try captureWindow(window)
     }
 
-    /// Capture any visible Maestro window (works when not frontmost).
-    func captureWindow(repoRoot: URL?) throws -> URL {
-        guard let window = NSApp.windows.first(where: { $0.isVisible }) else {
-            throw CaptureError.noWindow
-        }
-        return try captureWindow(window, repoRoot: repoRoot)
-    }
-
-    private func captureWindow(_ window: NSWindow, repoRoot: URL?) throws -> URL {
+    private func captureWindow(_ window: NSWindow) throws -> URL {
         let windowID = window.windowNumber
-        let outputURL = screenshotURL(repoRoot: repoRoot)
+        let outputURL = screenshotURL()
 
-        // Ensure directory exists
-        let dir = outputURL.deletingLastPathComponent()
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-
-        // Use screencapture CLI - more reliable than deprecated CGWindowListCreateImage
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         process.arguments = ["-l", String(windowID), "-x", outputURL.path()]
@@ -68,19 +55,11 @@ struct CaptureService {
         return outputURL
     }
 
-    private func screenshotURL(repoRoot: URL?) -> URL {
-        let dir: URL
-        if let repo = repoRoot {
-            dir = repo.appendingPathComponent(".design/screenshots")
-        } else {
-            dir = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("Desktop")
-        }
-
+    private func screenshotURL() -> URL {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd-HHmmss"
         let timestamp = formatter.string(from: Date())
 
-        return dir.appendingPathComponent("maestro-\(timestamp).png")
+        return URL(fileURLWithPath: "/tmp/maestro-\(timestamp).png")
     }
 }

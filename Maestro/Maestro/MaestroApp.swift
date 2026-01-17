@@ -56,6 +56,14 @@ struct MaestroApp: App {
                 }
                 .keyboardShortcut("4", modifiers: [.command])
             }
+
+            // Edit menu shortcut for prompt focus (handled by PromptLauncher)
+            CommandGroup(after: .textEditing) {
+                Button("Focus Prompt") {
+                    // Handled by hidden button in PromptLauncher
+                }
+                .keyboardShortcut("l", modifiers: .command)
+            }
         }
     }
 
@@ -63,14 +71,9 @@ struct MaestroApp: App {
     private func captureCurrentWindow() {
         let captureService = CaptureService()
 
-        // Try to find the repo root from the current window's represented URL
-        let repoRoot = NSApp.keyWindow?.representedURL
-
         do {
-            let outputURL = try captureService.captureKeyWindow(repoRoot: repoRoot)
-            // Play sound feedback
+            let outputURL = try captureService.captureKeyWindow()
             NSSound.beep()
-            // Show in Finder
             NSWorkspace.shared.activateFileViewerSelecting([outputURL])
         } catch {
             captureError = error.localizedDescription

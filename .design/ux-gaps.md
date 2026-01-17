@@ -102,21 +102,18 @@ A task is just a prompt file. The user is saying either "use this prompt" or "us
 
 ---
 
-### 4. Output Panel Redundant - Impact: **Medium**
+### ~~4. Output Panel Redundant~~ - **FIXED**
 
-**Current**: OutputPanel streams lines from running sessions. But the user is already watching the terminal—two views of the same data.
+~~**Current**: OutputPanel streams lines from running sessions. But the user is already watching the terminal—two views of the same data.~~
 
-**Question**: What would make this panel worth keeping?
+**Implemented**: Replaced OutputPanel with ResultsPanel:
+- While running: minimal indicator showing task name and elapsed time
+- When complete: files changed with +/- counts, expandable inline diff previews
+- New commits listed with messages
+- "Open Terminal" and "View Full Diff" action buttons
+- Toggle to switch back to streaming log view if needed
 
-**Ideas**:
-1. **Summarize, don't stream**: "Reading 5 files... Planning... Writing src/auth.py..."
-2. **Results view**: Show diff preview, test results, what changed. Not a log—an outcome.
-3. **Delete it**: If Maestro is a launcher, output belongs in the terminal.
-
-**Recommendation**: Transform into results panel. After task completes, show:
-- Files changed (clickable to view diff)
-- Tests run (pass/fail count)
-- "Open in Terminal" button for full logs
+This addresses the mental model gap by showing *outcomes* (what changed) instead of *process* (streaming logs).
 
 ---
 
@@ -265,7 +262,7 @@ No window, no sidebar, no options. Just: what do you want to build?
 
 **Should fix** (significant improvement):
 2. Unify input with `/` commands, remove task selector dropdown
-3. Results summary panel instead of streaming log
+3. ~~Results summary panel instead of streaming log~~ ✓ Done
 4. ~~Basic keyboard shortcuts~~ ✓ Cmd+L implemented; sidebar nav still needed
 
 **Nice to have**:
@@ -280,5 +277,5 @@ No window, no sidebar, no options. Just: what do you want to build?
 1. ~~Build context preview panel~~ Done
 2. ~~Add running state to worktree rows~~ Done
 3. Prototype slash command input (replace task selector)
-4. Design results panel (replace OutputPanel)
+4. ~~Design results panel (replace OutputPanel)~~ Done
 5. Add keyboard navigation to sidebar

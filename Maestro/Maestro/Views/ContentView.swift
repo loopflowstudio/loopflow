@@ -45,7 +45,7 @@ struct ContentView: View {
                     } else {
                         PromptLauncher(appState: appState)
                     }
-                    OutputPanel(appState: appState)
+                    ResultsPanel(appState: appState)
                 }
             } else {
                 // No repo loaded yet - show loading placeholder

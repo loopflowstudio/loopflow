@@ -160,6 +160,27 @@ Based on research from `.design/ux-research.md` and `.design/ux-gaps.md`.
 
 ---
 
+## Results Panel
+
+**Problem**: OutputPanel streams raw terminal output, duplicating what users see in their terminal. Users want to know what changed, not see a scrolling log.
+
+**Change**: Replaced OutputPanel with ResultsPanel:
+- Shows minimal running indicator while task executes ("Running design... 1:23")
+- When complete, shows files changed with +/- line counts
+- Expandable inline diff previews for each file
+- New commits listed with messages
+- "Open Terminal" and "View Full Diff" action buttons
+- Toggle to switch back to streaming log view if needed
+
+**Files**:
+- `Maestro/Maestro/Views/ResultsPanel.swift` (new view)
+- `Maestro/Maestro/Views/ContentView.swift` (use ResultsPanel)
+- `Maestro/Maestro/Models/SessionResult.swift` (data models)
+- `Maestro/Maestro/Services/ResultsService.swift` (git state capture)
+- `Maestro/Maestro/AppState.swift` (results tracking state)
+
+---
+
 ## Remaining
 
 Issues identified but not yet fixed:
@@ -171,8 +192,8 @@ Issues identified but not yet fixed:
 
 ### Medium Priority
 
-- [ ] **Mental model gap**: Users expect in-app responses; Maestro launches terminal sessions. Proposal: Transform OutputPanel into results summary view.
-- [ ] **Output panel redundant**: Streaming panel duplicates terminal output. Should become results view showing "what changed."
+- [x] ~~**Mental model gap**: Users expect in-app responses; Maestro launches terminal sessions.~~ Addressed by ResultsPanel showing outcome summary.
+- [x] ~~**Output panel redundant**: Streaming panel duplicates terminal output.~~ Replaced with ResultsPanel.
 - [ ] **Sidebar keyboard nav**: Arrow keys to navigate worktrees, Enter to select
 
 ### Lower Priority

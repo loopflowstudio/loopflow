@@ -1,11 +1,14 @@
 ---
 context:
   - Maestro/DESIGN.md
-  - .design/screenshots/
+  - /tmp/maestro-*.png
   - .design/ux-research.md
   - Maestro/Maestro/Views/
 voice: artist
 ---
+> **Screenshots**: If running standalone, capture with Cmd+Shift+S first.
+> In the `ux` pipeline, uses screenshots from the ux-research step.
+
 Compare Maestro against best-in-class tools and identify UX gaps.
 
 Read `Maestro/DESIGN.md` first—it contains comprehensive research on the tools and thinkers we're learning from.

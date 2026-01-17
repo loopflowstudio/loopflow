@@ -298,38 +298,21 @@ struct ResultsPanel: View {
     }
 
     private func diffPreview(_ content: String) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(content.split(separator: "\n", omittingEmptySubsequences: false).prefix(20).enumerated()), id: \.offset) { _, line in
-                let lineStr = String(line)
-                Text(lineStr)
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(diffLineColor(lineStr))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 4)
-                    .background(diffLineBackground(lineStr))
-            }
-        }
-        .padding(8)
-        .background(Color(.textBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 4))
-        .overlay(
-            RoundedRectangle(cornerRadius: 4)
-                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
-        )
-        .padding(.leading, 16)
-    }
+        // Truncate to first 20 lines for preview
+        let truncated = content.split(separator: "\n", omittingEmptySubsequences: false)
+            .prefix(20)
+            .joined(separator: "\n")
 
-    private func diffLineColor(_ line: String) -> Color {
-        if line.hasPrefix("+") && !line.hasPrefix("+++") { return .green }
-        if line.hasPrefix("-") && !line.hasPrefix("---") { return .red }
-        if line.hasPrefix("@@") { return .cyan }
-        return .primary.opacity(0.7)
-    }
-
-    private func diffLineBackground(_ line: String) -> Color {
-        if line.hasPrefix("+") && !line.hasPrefix("+++") { return .green.opacity(0.1) }
-        if line.hasPrefix("-") && !line.hasPrefix("---") { return .red.opacity(0.1) }
-        return .clear
+        return DiffContentView(content: truncated)
+            .font(.system(.caption2, design: .monospaced))
+            .padding(8)
+            .background(Color(.textBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .overlay(
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+            )
+            .padding(.leading, 16)
     }
 
     // MARK: - Commits Section
@@ -616,7 +599,7 @@ struct ResultsDiffSheet: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let content = diffContent, !content.isEmpty {
                 ScrollView {
-                    resultsDiffContent(content)
+                    DiffContentView(content: content)
                         .padding()
                 }
             } else {
@@ -632,34 +615,6 @@ struct ResultsDiffSheet: View {
         }
         .frame(minWidth: 600, minHeight: 400)
         .frame(idealWidth: 800, idealHeight: 600)
-    }
-
-    private func resultsDiffContent(_ content: String) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(content.split(separator: "\n", omittingEmptySubsequences: false).enumerated()), id: \.offset) { _, line in
-                let lineStr = String(line)
-                Text(lineStr)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(colorForDiffLine(lineStr))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(backgroundForDiffLine(lineStr))
-            }
-        }
-    }
-
-    private func colorForDiffLine(_ line: String) -> Color {
-        if line.hasPrefix("+++") || line.hasPrefix("---") { return .secondary }
-        if line.hasPrefix("+") { return .green }
-        if line.hasPrefix("-") { return .red }
-        if line.hasPrefix("@@") { return .cyan }
-        if line.hasPrefix("diff ") { return .blue }
-        return .primary
-    }
-
-    private func backgroundForDiffLine(_ line: String) -> Color {
-        if line.hasPrefix("+") && !line.hasPrefix("+++") { return .green.opacity(0.1) }
-        if line.hasPrefix("-") && !line.hasPrefix("---") { return .red.opacity(0.1) }
-        return .clear
     }
 }
 

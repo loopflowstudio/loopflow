@@ -12,6 +12,52 @@ from loopflow.context import find_worktree_root, gather_task, list_all_tasks, _g
 from loopflow.init_check import check_init_status
 from loopflow.lfd.pipelines import load_pipeline
 
+
+# =============================================================================
+# Built-in task metadata for formatted listing
+# =============================================================================
+
+BUILTIN_CATEGORIES: dict[str, list[str]] = {
+    "Planning & Design": ["design", "explore", "refine"],
+    "Implementation": ["implement", "iterate", "expand", "reduce"],
+    "Quality": ["review", "polish", "debug"],
+    "Git": ["commit", "rebase"],
+}
+
+BUILTIN_DESCRIPTIONS: dict[str, str] = {
+    "design": "Plan what to build",
+    "explore": "Investigate current diff",
+    "implement": "Build from design doc",
+    "iterate": "Improve code on branch",
+    "expand": "Explore ambitious extensions",
+    "reduce": "Simplify while preserving behavior",
+    "review": "Assess code, write verdict",
+    "polish": "Fix issues, run tests",
+    "debug": "Fix errors from clipboard",
+    "commit": "Commit with generated message",
+    "rebase": "Rebase onto main",
+    "refine": "Iteratively refine text",
+}
+
+
+def _use_color() -> bool:
+    """Check if we should use colored output."""
+    return sys.stdout.isatty()
+
+
+# ANSI color codes
+def _colors() -> dict[str, str]:
+    if not _use_color():
+        return {"cyan": "", "bold": "", "dim": "", "yellow": "", "green": "", "reset": ""}
+    return {
+        "cyan": "\033[36m",
+        "bold": "\033[1m",
+        "dim": "\033[90m",
+        "yellow": "\033[33m",
+        "green": "\033[32m",
+        "reset": "\033[0m",
+    }
+
 app = typer.Typer(
     name="lf",
     help="Arrange LLMs to code in harmony.",
@@ -85,71 +131,69 @@ def _get_task_info(repo_root: Path | None, name: str) -> dict:
     return info
 
 
-def _list_tasks() -> None:
-    """List available tasks and pipelines."""
+def _format_task_list() -> str:
+    """Format tasks and pipelines with colors and categories."""
+    c = _colors()
     repo_root = find_worktree_root()
     config = load_config(repo_root) if repo_root else None
 
     user_tasks, builtin_only = list_all_tasks(repo_root)
-    pipelines = list(config.pipelines.keys()) if config else []
+    user_task_set = set(user_tasks)
+    all_known_tasks = user_task_set | set(builtin_only)
 
-    # Show pipelines
-    if pipelines:
-        typer.echo("Pipelines (defined in .lf/config.yaml):")
-        for name in sorted(pipelines):
+    lines = []
+
+    # Pipelines section
+    if config and config.pipelines:
+        lines.append(f"{c['cyan']}{c['bold']}PIPELINES{c['reset']}")
+        for name in sorted(config.pipelines.keys()):
             p = config.pipelines[name]
-            tasks_str = " → ".join(p.tasks) if p.tasks else ""
-            typer.echo(f"  {name:<16} {tasks_str}")
-        typer.echo()
+            chain = f" {c['dim']}→{c['reset']} ".join(p.tasks) if p.tasks else ""
+            lines.append(f"  {c['bold']}{name:<14}{c['reset']} {c['dim']}{chain}{c['reset']}")
+        lines.append("")
 
-    # Gather task info
-    all_tasks = []
-    for name in user_tasks:
-        info = _get_task_info(repo_root, name)
-        info["builtin"] = False
-        all_tasks.append(info)
-    for name in builtin_only:
-        info = _get_task_info(repo_root, name)
-        info["builtin"] = True
-        all_tasks.append(info)
+    # Tasks section
+    lines.append(f"{c['cyan']}{c['bold']}TASKS{c['reset']}")
+    lines.append("")
 
-    if not all_tasks:
-        typer.echo("No tasks found.")
-        typer.echo("Run: lfops init")
-        return
+    # Built-ins by category
+    for category, task_names in BUILTIN_CATEGORIES.items():
+        category_tasks = [t for t in task_names if t in all_known_tasks]
+        if not category_tasks:
+            continue
 
-    def format_task(t: dict, show_source: bool = False) -> str:
-        """Format a task for display."""
-        parts = [f"  {t['name']:<14}"]
-        if show_source:
-            parts.append(f" {t['source']:<8}")
+        lines.append(f"{c['dim']}{category}{c['reset']}")
+        for name in category_tasks:
+            desc = BUILTIN_DESCRIPTIONS.get(name, "")
+            info = _get_task_info(repo_root, name)
+            badge = f"  {c['yellow']}interactive{c['reset']}" if info.get("interactive") else ""
+            customized = f" {c['dim']}(customized){c['reset']}" if name in user_task_set else ""
+            lines.append(f"  {c['bold']}{name:<14}{c['reset']} {c['dim']}{desc:<34}{c['reset']}{badge}{customized}")
+        lines.append("")
 
-        meta = []
-        if t.get("interactive"):
-            meta.append("i")
-        if t.get("requires"):
-            meta.append(f"← {t['requires']}")
-        if t.get("produces"):
-            meta.append(f"→ {t['produces']}")
-
-        if meta:
-            parts.append(f"  {' '.join(meta)}")
-        return "".join(parts)
-
-    # Display custom tasks
-    custom = [t for t in all_tasks if not t["builtin"]]
+    # Custom tasks (user-defined, not overriding builtins)
+    custom = [t for t in user_tasks if t not in BUILTIN_DESCRIPTIONS]
     if custom:
-        typer.echo("Tasks (repo-specific, override built-ins):")
-        for t in custom:
-            typer.echo(format_task(t, show_source=True))
-        typer.echo()
+        lines.append(f"{c['green']}Custom{c['reset']}")
+        for name in sorted(custom):
+            info = _get_task_info(repo_root, name)
+            # Try to get a description from produces or just leave blank
+            desc = ""
+            if info.get("produces"):
+                desc = str(info["produces"])[:34]
+            badge = f"  {c['yellow']}interactive{c['reset']}" if info.get("interactive") else ""
+            lines.append(f"  {c['bold']}{name:<14}{c['reset']} {c['dim']}{desc:<34}{c['reset']}{badge}")
+        lines.append("")
 
-    # Display builtins
-    builtins = [t for t in all_tasks if t["builtin"]]
-    if builtins:
-        typer.echo("Built-in (bundled defaults, work in any repo):")
-        for t in builtins:
-            typer.echo(format_task(t, show_source=False))
+    # Footer
+    lines.append(f"{c['dim']}Built-ins work anywhere. Run lf <task> or lf <task>: args{c['reset']}")
+
+    return "\n".join(lines)
+
+
+def _list_tasks() -> None:
+    """Print formatted task list."""
+    typer.echo(_format_task_list())
 
 
 def main():
@@ -164,10 +208,14 @@ def main():
     }
 
     try:
-        # Handle 'lf' with no arguments: list available tasks
-        if len(sys.argv) == 1:
+        # Handle --list / -l flag: show formatted task list
+        if "--list" in sys.argv or "-l" in sys.argv:
             _list_tasks()
             raise SystemExit(0)
+
+        # Handle 'lf' with no arguments: launch interactive claude
+        if len(sys.argv) == 1:
+            sys.argv = ["lf", "run", "--interactive"]
 
         if len(sys.argv) > 1:
             first_arg = sys.argv[1]
@@ -209,7 +257,7 @@ def main():
                 else:
                     # Task not found
                     typer.echo(f"No task or pipeline named '{name}'", err=True)
-                    typer.echo(f"Run 'lf' to see available tasks.", err=True)
+                    typer.echo(f"Run 'lf --list' to see available tasks.", err=True)
                     raise SystemExit(1)
 
         app()

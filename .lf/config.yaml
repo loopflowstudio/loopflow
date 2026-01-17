@@ -8,8 +8,8 @@ push: true
 
 summaries:
   - path: src/loopflow
-    tokens: 30000
-    model: claude:sonnet
+    tokens: 16000
+    model: gemini
 
 pipelines:
   ship:

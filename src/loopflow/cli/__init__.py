@@ -1,9 +1,11 @@
 """Loopflow CLI: Arrange LLMs to code in harmony."""
 
 import sys
+from pathlib import Path
 from typing import Optional
 
 import typer
+import yaml
 
 from loopflow.config import ConfigError, load_config
 from loopflow.context import find_worktree_root, gather_task, list_all_tasks, _get_builtin_task
@@ -26,6 +28,63 @@ app.command(name="pipeline")(run_module.pipeline)
 app.command()(run_module.cp)
 
 
+def _get_task_source(repo_root: Path | None, name: str) -> str:
+    """Return source location: .claude, .lf, or builtin."""
+    if repo_root:
+        if (repo_root / ".claude" / "commands" / f"{name}.md").exists():
+            return ".claude"
+        lf_dir = repo_root / ".lf"
+        if lf_dir.exists():
+            for p in lf_dir.iterdir():
+                if p.is_file() and (p.stem == name or p.name == name):
+                    return ".lf"
+    return "builtin"
+
+
+def _parse_frontmatter(content: str) -> dict:
+    """Extract frontmatter fields from task content."""
+    if not content.startswith("---"):
+        return {}
+    try:
+        _, fm, _ = content.split("---", 2)
+        return yaml.safe_load(fm) or {}
+    except Exception:
+        return {}
+
+
+def _get_task_info(repo_root: Path | None, name: str) -> dict:
+    """Get task metadata for display."""
+    info = {"name": name, "source": _get_task_source(repo_root, name)}
+
+    # Find the actual file to read frontmatter
+    content = None
+    if repo_root:
+        # Check .claude/commands first
+        claude_path = repo_root / ".claude" / "commands" / f"{name}.md"
+        if claude_path.exists():
+            content = claude_path.read_text()
+        else:
+            # Check .lf
+            lf_dir = repo_root / ".lf"
+            if lf_dir.exists():
+                for p in lf_dir.iterdir():
+                    if p.is_file() and (p.stem == name or p.name == name):
+                        content = p.read_text()
+                        break
+
+    # Fall back to builtin
+    if content is None:
+        builtin = _get_builtin_task(name)
+        if builtin:
+            content = builtin.read_text()
+
+    if content:
+        fm = _parse_frontmatter(content)
+        info.update(fm)
+
+    return info
+
+
 def _list_tasks() -> None:
     """List available tasks and pipelines."""
     repo_root = find_worktree_root()
@@ -36,21 +95,61 @@ def _list_tasks() -> None:
 
     # Show pipelines
     if pipelines:
-        typer.echo("Pipelines:")
+        typer.echo("Pipelines (defined in .lf/config.yaml):")
         for name in sorted(pipelines):
-            typer.echo(f"  {name}")
+            p = config.pipelines[name]
+            tasks_str = " → ".join(p.tasks) if p.tasks else ""
+            typer.echo(f"  {name:<16} {tasks_str}")
         typer.echo()
 
-    # Show tasks
-    if user_tasks or builtin_only:
-        typer.echo("Tasks:")
-        for name in user_tasks:
-            typer.echo(f"  {name}")
-        for name in builtin_only:
-            typer.echo(f"  {name} (builtin)")
-    else:
+    # Gather task info
+    all_tasks = []
+    for name in user_tasks:
+        info = _get_task_info(repo_root, name)
+        info["builtin"] = False
+        all_tasks.append(info)
+    for name in builtin_only:
+        info = _get_task_info(repo_root, name)
+        info["builtin"] = True
+        all_tasks.append(info)
+
+    if not all_tasks:
         typer.echo("No tasks found.")
         typer.echo("Run: lfops init")
+        return
+
+    def format_task(t: dict, show_source: bool = False) -> str:
+        """Format a task for display."""
+        parts = [f"  {t['name']:<14}"]
+        if show_source:
+            parts.append(f" {t['source']:<8}")
+
+        meta = []
+        if t.get("interactive"):
+            meta.append("i")
+        if t.get("requires"):
+            meta.append(f"← {t['requires']}")
+        if t.get("produces"):
+            meta.append(f"→ {t['produces']}")
+
+        if meta:
+            parts.append(f"  {' '.join(meta)}")
+        return "".join(parts)
+
+    # Display custom tasks
+    custom = [t for t in all_tasks if not t["builtin"]]
+    if custom:
+        typer.echo("Tasks (repo-specific, override built-ins):")
+        for t in custom:
+            typer.echo(format_task(t, show_source=True))
+        typer.echo()
+
+    # Display builtins
+    builtins = [t for t in all_tasks if t["builtin"]]
+    if builtins:
+        typer.echo("Built-in (bundled defaults, work in any repo):")
+        for t in builtins:
+            typer.echo(format_task(t, show_source=False))
 
 
 def main():

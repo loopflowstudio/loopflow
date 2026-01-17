@@ -1,6 +1,6 @@
 ---
 context:
-  - .design/designprinciples.md
+  - Maestro/DESIGN.md
   - .design/screenshots/
   - .design/ux-research.md
   - Maestro/Maestro/Views/
@@ -8,7 +8,7 @@ voice: artist
 ---
 Compare Maestro against best-in-class tools and identify UX gaps.
 
-Read `.design/designprinciples.md` first—it contains comprehensive research on the tools and thinkers we're learning from.
+Read `Maestro/DESIGN.md` first—it contains comprehensive research on the tools and thinkers we're learning from.
 
 ## Inspiration Sources
 
@@ -41,7 +41,7 @@ Study these products for patterns Maestro should adopt (detailed analysis in des
 
 ## Design Principles to Apply
 
-See `.design/designprinciples.md` for full research. Key principles:
+See `Maestro/DESIGN.md` for full research. Key principles:
 
 1. **Immediate Connection** (Bret Victor) — real-time feedback, no delays
 2. **Progressive Disclosure** (Notion, Stripe) — simple surface, infinite depth

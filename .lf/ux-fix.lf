@@ -1,6 +1,6 @@
 ---
 context:
-  - .design/designprinciples.md
+  - Maestro/DESIGN.md
   - .design/ux-research.md
   - .design/ux-gaps.md
   - .design/screenshots/
@@ -10,7 +10,7 @@ voice: architect
 ---
 Implement high-priority UX improvements based on research and gap analysis.
 
-Read `.design/designprinciples.md` for the design philosophy guiding these changes.
+Read `Maestro/DESIGN.md` for the design philosophy guiding these changes.
 
 ## Input
 

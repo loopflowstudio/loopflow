@@ -167,3 +167,16 @@ def test_analyze_prompt_tokens_clipboard():
 
     assert tree.total() > 0
     assert "clipboard" in tree.root.children
+
+
+def test_analyze_prompt_tokens_summaries():
+    """analyze_prompt_tokens handles summaries."""
+    summaries = [
+        (Path("src/loopflow"), "Summary of loopflow source code."),
+        (Path("src/utils"), "Summary of utilities."),
+    ]
+    tree = analyze_prompt_tokens(summaries=summaries)
+
+    assert tree.total() > 0
+    assert "summaries" in tree.root.children
+    assert len(tree.root.children["summaries"].children) == 2

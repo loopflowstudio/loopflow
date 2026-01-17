@@ -351,3 +351,45 @@ def test_list_all_tasks_without_repo():
     assert user_tasks == []
     assert "design" in builtin_only
     assert "implement" in builtin_only
+
+
+# =============================================================================
+# Summaries tests
+# =============================================================================
+
+
+def test_trigger_background_refresh_creates_log_file(tmp_path, monkeypatch):
+    """Background refresh writes output to log file instead of DEVNULL."""
+    from loopflow.context import _trigger_background_refresh
+    import subprocess
+
+    (tmp_path / ".git").mkdir()
+    summaries_dir = tmp_path / ".lf" / "summaries"
+
+    # Mock Popen to avoid actually running the subprocess
+    popen_calls = []
+
+    class MockPopen:
+        pid = 12345
+
+        def __init__(self, *args, **kwargs):
+            popen_calls.append((args, kwargs))
+
+    monkeypatch.setattr(subprocess, "Popen", MockPopen)
+
+    _trigger_background_refresh(tmp_path)
+
+    # Should have created summaries dir
+    assert summaries_dir.exists()
+
+    # Should have written lock file
+    lock_file = summaries_dir / ".refresh.lock"
+    assert lock_file.exists()
+    assert lock_file.read_text() == "12345"
+
+    # Should have been called with log file, not DEVNULL
+    assert len(popen_calls) == 1
+    _, kwargs = popen_calls[0]
+    assert "stdout" in kwargs
+    # stdout should be a file object (not DEVNULL)
+    assert kwargs["stdout"] is not subprocess.DEVNULL

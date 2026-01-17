@@ -29,7 +29,7 @@ dependencies = [
     "pathspec>=0.11.0",
     "pyyaml>=6.0",
     "pydantic>=2.12.5",
-    "pydantic-ai-slim[anthropic]>=1.0.0",
+    "pydantic-ai-slim[anthropic,google]>=1.0.0",
     "tiktoken>=0.7.0",
     "asana>=5.0.0",
 ]

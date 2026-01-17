@@ -248,9 +248,12 @@ def _trigger_background_refresh(repo_root: Path) -> None:
     """Spawn background process to refresh stale summaries.
 
     Uses a lock file to prevent concurrent refresh attempts.
+    Logs output to .lf/summaries/refresh.log for debugging.
     """
-    lock_file = repo_root / ".lf" / "summaries" / ".refresh.lock"
-    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    summaries_dir = repo_root / ".lf" / "summaries"
+    summaries_dir.mkdir(parents=True, exist_ok=True)
+    lock_file = summaries_dir / ".refresh.lock"
+    log_file = summaries_dir / "refresh.log"
 
     # Check if refresh already in progress
     if lock_file.exists():
@@ -263,14 +266,15 @@ def _trigger_background_refresh(repo_root: Path) -> None:
             # Stale lock or process dead, remove it
             lock_file.unlink(missing_ok=True)
 
-    # Fork and write lock
-    process = subprocess.Popen(
-        [sys.executable, "-m", "loopflow.lfops", "summarize", "--all"],
-        cwd=repo_root,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    # Fork and write lock, logging output for debugging
+    with open(log_file, "w") as log:
+        process = subprocess.Popen(
+            [sys.executable, "-m", "loopflow.lfops", "summarize", "--all"],
+            cwd=repo_root,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
     lock_file.write_text(str(process.pid))
 
 

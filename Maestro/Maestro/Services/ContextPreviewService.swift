@@ -17,57 +17,18 @@ struct ContextPreviewService {
         includeSummaries: Bool,
         in repoURL: URL
     ) async -> ContextPreview {
-        // Build command args matching buildCommand() logic
-        var cmdArgs = ["lf"]
-
-        if let p = prompt, !p.isEmpty {
-            cmdArgs.append(p)
-        } else {
-            cmdArgs.append(":")
-        }
-
-        if !args.isEmpty {
-            cmdArgs.append(args)
-        }
-
-        // Context folders
-        for url in context {
-            let relativePath = url.path().replacingOccurrences(of: repoURL.path() + "/", with: "")
-            cmdArgs.append("-x")
-            cmdArgs.append(relativePath)
-        }
-
-        // Attached files
-        for url in attachedFiles {
-            let filePath = url.path(percentEncoded: false)
-            if filePath.hasPrefix(repoURL.path()) {
-                let relativePath = String(filePath.dropFirst(repoURL.path().count))
-                cmdArgs.append("-x")
-                cmdArgs.append(relativePath.hasPrefix("/") ? String(relativePath.dropFirst()) : relativePath)
-            } else {
-                cmdArgs.append("-x")
-                cmdArgs.append(filePath)
-            }
-        }
-
-        // Context flags
-        if includeDiff {
-            cmdArgs.append("--diff")
-        }
-        if !includeDiffFiles {
-            cmdArgs.append("--no-diff-files")
-        }
-        if !includeDocs {
-            cmdArgs.append("--no-docs")
-        }
-        if includePaste {
-            cmdArgs.append("--paste")
-        }
-        if !includeSummaries {
-            cmdArgs.append("--no-summaries")
-        }
-
-        cmdArgs.append("-c")
+        let cmdArgs = buildCommandArgs(
+            prompt: prompt,
+            args: args,
+            context: context,
+            attachedFiles: attachedFiles,
+            includeDocs: includeDocs,
+            includeDiff: includeDiff,
+            includeDiffFiles: includeDiffFiles,
+            includePaste: includePaste,
+            includeSummaries: includeSummaries,
+            repoURL: repoURL
+        )
 
         do {
             let output = try await run(cmdArgs, in: repoURL)
@@ -97,7 +58,41 @@ struct ContextPreviewService {
         includeSummaries: Bool,
         in repoURL: URL
     ) async -> String? {
-        // The `-c` flag already copies to clipboard, so just call it
+        let cmdArgs = buildCommandArgs(
+            prompt: prompt,
+            args: args,
+            context: context,
+            attachedFiles: attachedFiles,
+            includeDocs: includeDocs,
+            includeDiff: includeDiff,
+            includeDiffFiles: includeDiffFiles,
+            includePaste: includePaste,
+            includeSummaries: includeSummaries,
+            repoURL: repoURL
+        )
+
+        do {
+            _ = try await run(cmdArgs, in: repoURL)
+            return NSPasteboard.general.string(forType: .string)
+        } catch {
+            return nil
+        }
+    }
+
+    // MARK: - Private
+
+    private func buildCommandArgs(
+        prompt: String?,
+        args: String,
+        context: [URL],
+        attachedFiles: [URL],
+        includeDocs: Bool,
+        includeDiff: Bool,
+        includeDiffFiles: Bool,
+        includePaste: Bool,
+        includeSummaries: Bool,
+        repoURL: URL
+    ) -> [String] {
         var cmdArgs = ["lf"]
 
         if let p = prompt, !p.isEmpty {
@@ -128,31 +123,14 @@ struct ContextPreviewService {
             }
         }
 
-        if includeDiff {
-            cmdArgs.append("--diff")
-        }
-        if !includeDiffFiles {
-            cmdArgs.append("--no-diff-files")
-        }
-        if !includeDocs {
-            cmdArgs.append("--no-docs")
-        }
-        if includePaste {
-            cmdArgs.append("--paste")
-        }
-        if !includeSummaries {
-            cmdArgs.append("--no-summaries")
-        }
+        if includeDiff { cmdArgs.append("--diff") }
+        if !includeDiffFiles { cmdArgs.append("--no-diff-files") }
+        if !includeDocs { cmdArgs.append("--no-docs") }
+        if includePaste { cmdArgs.append("--paste") }
+        if !includeSummaries { cmdArgs.append("--no-summaries") }
 
         cmdArgs.append("-c")
-
-        do {
-            _ = try await run(cmdArgs, in: repoURL)
-            // Return clipboard contents
-            return NSPasteboard.general.string(forType: .string)
-        } catch {
-            return nil
-        }
+        return cmdArgs
     }
 
     private func run(_ args: [String], in directory: URL) async throws -> String {
@@ -205,7 +183,6 @@ struct ContextPreviewService {
 
         var currentCategory: String?
         var currentItems: [ContextItem] = []
-        var currentTokens: Int = 0
 
         for line in lines {
             // Skip empty lines and total line
@@ -230,9 +207,7 @@ struct ContextPreviewService {
                 }
 
                 // Parse new category
-                let parts = parseTokenLine(trimmed)
-                currentCategory = parts.name
-                currentTokens = parts.tokens
+                currentCategory = parseTokenLine(trimmed).name
                 currentItems = []
             } else if leadingSpaces == 2 && currentCategory != nil {
                 // Top-level item within category

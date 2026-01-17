@@ -1632,14 +1632,14 @@ def summarize(
         try:
             for summary_config in config.summaries:
                 summary_path = Path(summary_config.path)
-                existing = load_summary(summary_path, repo_root)
+                token_budget = summary_config.tokens or config.summary_tokens
+                existing = load_summary(summary_path, repo_root, token_budget)
 
                 if existing and not force and not is_stale(existing, repo_root):
                     typer.echo(f"  {summary_config.path}: up to date")
                     continue
 
                 typer.echo(f"  {summary_config.path}: regenerating...")
-                token_budget = summary_config.tokens or config.summary_tokens
                 try:
                     summary, _ = refresh_if_stale(
                         summary_path,
@@ -1657,7 +1657,7 @@ def summarize(
         return
 
     summary_path = Path(path)
-    existing = load_summary(summary_path, repo_root)
+    existing = load_summary(summary_path, repo_root, tokens)
 
     if existing and not force:
         if is_stale(existing, repo_root):
@@ -1685,7 +1685,9 @@ def summarize(
         typer.echo(f"Error generating summary: {e}", err=True)
         raise typer.Exit(1)
 
-    typer.echo(f"Summary saved to .lf/summaries/{summary_path}")
+    from loopflow.summarize import _path_to_filename
+    filename = _path_to_filename(summary_path, tokens)
+    typer.echo(f"Summary saved to .lf/summaries/{filename}")
     typer.echo(f"  Tokens: {tokens}")
     typer.echo(f"  Model: {model}")
     typer.echo(f"  Length: {len(summary.content)} chars")

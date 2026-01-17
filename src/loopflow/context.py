@@ -291,7 +291,8 @@ def gather_summaries(repo_root: Path, config) -> list[tuple[Path, str]]:
     needs_refresh = False
 
     for summary_config in config.summaries:
-        summary = load_summary(Path(summary_config.path), repo_root)
+        token_budget = summary_config.tokens or config.summary_tokens
+        summary = load_summary(Path(summary_config.path), repo_root, token_budget)
         if summary:
             results.append((Path(summary_config.path), summary.content))
             if is_stale(summary, repo_root):

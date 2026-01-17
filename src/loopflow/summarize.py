@@ -35,11 +35,10 @@ class SummaryMetadata:
     model: str
 
 
-def _path_to_filename(path: Path) -> str:
-    """Convert path to summary filename."""
-    if path == Path("."):
-        return "root.md"
-    return str(path).replace("/", "-").replace("\\", "-") + ".md"
+def _path_to_filename(path: Path, token_budget: int) -> str:
+    """Convert path and token budget to summary filename."""
+    base = "root" if path == Path(".") else str(path).replace("/", "-").replace("\\", "-")
+    return f"{base}-{token_budget}.md"
 
 
 def _summaries_dir(repo_root: Path) -> Path:
@@ -102,16 +101,19 @@ def _ensure_gitignored(repo_root: Path) -> None:
         gitignore.write_text(pattern + "\n")
 
 
-def load_summary(path: Path, repo_root: Path) -> Summary | None:
-    """Load cached summary from .lf/summaries/."""
-    filename = _path_to_filename(path)
+def load_summary(path: Path, repo_root: Path, token_budget: int) -> Summary | None:
+    """Load cached summary from .lf/summaries/.
+
+    Returns None if no summary exists for this path and token budget.
+    """
+    filename = _path_to_filename(path, token_budget)
     summary_path = _summaries_dir(repo_root) / filename
 
     if not summary_path.exists():
         return None
 
     metadata = _load_metadata(repo_root)
-    key = str(path)
+    key = f"{path}:{token_budget}"
     if key not in metadata:
         return None
 
@@ -133,12 +135,13 @@ def save_summary(summary: Summary, repo_root: Path) -> None:
     summaries_dir = _summaries_dir(repo_root)
     summaries_dir.mkdir(parents=True, exist_ok=True)
 
-    filename = _path_to_filename(summary.path)
+    filename = _path_to_filename(summary.path, summary.token_budget)
     summary_path = summaries_dir / filename
     summary_path.write_text(summary.content)
 
     metadata = _load_metadata(repo_root)
-    metadata[str(summary.path)] = SummaryMetadata(
+    key = f"{summary.path}:{summary.token_budget}"
+    metadata[key] = SummaryMetadata(
         source_hash=summary.source_hash,
         token_budget=summary.token_budget,
         created_at=summary.created_at.isoformat(),
@@ -390,7 +393,7 @@ def refresh_if_stale(
     Returns (summary, was_regenerated).
     """
     if not force:
-        existing = load_summary(path, repo_root)
+        existing = load_summary(path, repo_root, token_budget)
         if existing and not is_stale(existing, repo_root):
             return existing, False
 

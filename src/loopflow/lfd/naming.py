@@ -1,6 +1,5 @@
 """Emoji-based naming for agent worktrees and branches."""
 
-import shutil
 import subprocess
 from pathlib import Path
 

@@ -14,7 +14,7 @@ let package = Package(
         .executableTarget(
             name: "Maestro",
             path: "Maestro",
-            exclude: ["Info.plist"]
+            exclude: ["Info.plist", "Maestro.sdef"]
         ),
         .testTarget(
             name: "MaestroTests",

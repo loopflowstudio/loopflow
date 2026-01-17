@@ -39,8 +39,10 @@ case "${1:-help}" in
         # grant Accessibility/Automation permissions once.
         APP_DIR="$DEV_APP/Contents"
         mkdir -p "$APP_DIR/MacOS"
+        mkdir -p "$APP_DIR/Resources"
         cp .build/debug/Maestro "$APP_DIR/MacOS/"
         cp Maestro/Info.plist "$APP_DIR/"
+        cp Maestro/Maestro.sdef "$APP_DIR/Resources/"
 
         # Launch from stable location
         open "$DEV_APP"
@@ -71,9 +73,10 @@ case "${1:-help}" in
         mkdir -p "$APP_DIR/MacOS"
         mkdir -p "$APP_DIR/Resources"
 
-        # Copy binary and Info.plist
+        # Copy binary, Info.plist, and sdef
         cp .build/release/Maestro "$APP_DIR/MacOS/"
         cp Maestro/Info.plist "$APP_DIR/"
+        cp Maestro/Maestro.sdef "$APP_DIR/Resources/"
 
         # Create PkgInfo
         echo -n "APPL????" > "$APP_DIR/PkgInfo"

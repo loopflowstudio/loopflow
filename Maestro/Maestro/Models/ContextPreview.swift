@@ -72,3 +72,17 @@ struct ContextPreview {
 
     static let empty = ContextPreview(sections: [])
 }
+
+// Bundles context-related options to reduce parameter passing
+struct ContextOptions {
+    let prompt: String?
+    let args: String
+    let contextFolders: [URL]
+    let attachedFiles: [URL]
+    let includeDocs: Bool
+    let includeDiff: Bool
+    let includeDiffFiles: Bool
+    let includePaste: Bool
+    let includeSummaries: Bool
+    let repoURL: URL
+}

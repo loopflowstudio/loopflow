@@ -315,37 +315,19 @@ final class AppState {
     }
 
     func refreshContextPreview() async {
-        guard let repo = currentRepo else { return }
-
-        // Filter out excluded files from attached files
-        let filteredAttached = attachedFiles.filter { !excludedFiles.contains($0.path()) }
-
-        contextPreview = await contextPreviewService.assemblePreview(
-            prompt: selectedPrompt?.name,
-            args: promptArgs,
-            context: Array(selectedContextFolders),
-            attachedFiles: filteredAttached,
-            includeDocs: includeDocs,
-            includeDiff: includeDiff,
-            includeDiffFiles: includeDiffFiles,
-            includePaste: includePaste,
-            includeSummaries: includeSummaries,
-            in: repo
-        )
+        guard let options = buildContextOptions() else { return }
+        contextPreview = await contextPreviewService.assemblePreview(options)
     }
 
     func removeContextItem(_ item: ContextItem, from section: ContextSection) {
         guard let path = item.path else { return }
 
         if section.kind == .attached {
-            // Remove from attached files
             attachedFiles.removeAll { $0.path() == path }
         } else {
-            // Add to excluded files set
             excludedFiles.insert(path)
         }
 
-        // Refresh preview
         Task {
             await refreshContextPreview()
             await estimateTokens()
@@ -353,21 +335,24 @@ final class AppState {
     }
 
     func copyAssembledContext() async -> String? {
+        guard let options = buildContextOptions() else { return nil }
+        return await contextPreviewService.copyAssembledContext(options)
+    }
+
+    private func buildContextOptions() -> ContextOptions? {
         guard let repo = currentRepo else { return nil }
-
         let filteredAttached = attachedFiles.filter { !excludedFiles.contains($0.path()) }
-
-        return await contextPreviewService.copyAssembledContext(
+        return ContextOptions(
             prompt: selectedPrompt?.name,
             args: promptArgs,
-            context: Array(selectedContextFolders),
+            contextFolders: Array(selectedContextFolders),
             attachedFiles: filteredAttached,
             includeDocs: includeDocs,
             includeDiff: includeDiff,
             includeDiffFiles: includeDiffFiles,
             includePaste: includePaste,
             includeSummaries: includeSummaries,
-            in: repo
+            repoURL: repo
         )
     }
 

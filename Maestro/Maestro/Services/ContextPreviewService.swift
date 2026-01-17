@@ -5,74 +5,22 @@ import AppKit
 
 struct ContextPreviewService {
 
-    func assemblePreview(
-        prompt: String?,
-        args: String,
-        context: [URL],
-        attachedFiles: [URL],
-        includeDocs: Bool,
-        includeDiff: Bool,
-        includeDiffFiles: Bool,
-        includePaste: Bool,
-        includeSummaries: Bool,
-        in repoURL: URL
-    ) async -> ContextPreview {
-        let cmdArgs = buildCommandArgs(
-            prompt: prompt,
-            args: args,
-            context: context,
-            attachedFiles: attachedFiles,
-            includeDocs: includeDocs,
-            includeDiff: includeDiff,
-            includeDiffFiles: includeDiffFiles,
-            includePaste: includePaste,
-            includeSummaries: includeSummaries,
-            repoURL: repoURL
-        )
+    func assemblePreview(_ options: ContextOptions) async -> ContextPreview {
+        let cmdArgs = buildCommandArgs(options)
 
         do {
-            let output = try await run(cmdArgs, in: repoURL)
-            return parseOutput(
-                output,
-                includeDocs: includeDocs,
-                includeDiff: includeDiff,
-                includeDiffFiles: includeDiffFiles,
-                includePaste: includePaste,
-                attachedFiles: attachedFiles,
-                repoURL: repoURL
-            )
+            let output = try await run(cmdArgs, in: options.repoURL)
+            return parseOutput(output, options: options)
         } catch {
             return .empty
         }
     }
 
-    func copyAssembledContext(
-        prompt: String?,
-        args: String,
-        context: [URL],
-        attachedFiles: [URL],
-        includeDocs: Bool,
-        includeDiff: Bool,
-        includeDiffFiles: Bool,
-        includePaste: Bool,
-        includeSummaries: Bool,
-        in repoURL: URL
-    ) async -> String? {
-        let cmdArgs = buildCommandArgs(
-            prompt: prompt,
-            args: args,
-            context: context,
-            attachedFiles: attachedFiles,
-            includeDocs: includeDocs,
-            includeDiff: includeDiff,
-            includeDiffFiles: includeDiffFiles,
-            includePaste: includePaste,
-            includeSummaries: includeSummaries,
-            repoURL: repoURL
-        )
+    func copyAssembledContext(_ options: ContextOptions) async -> String? {
+        let cmdArgs = buildCommandArgs(options)
 
         do {
-            _ = try await run(cmdArgs, in: repoURL)
+            _ = try await run(cmdArgs, in: options.repoURL)
             return NSPasteboard.general.string(forType: .string)
         } catch {
             return nil
@@ -81,40 +29,30 @@ struct ContextPreviewService {
 
     // MARK: - Private
 
-    private func buildCommandArgs(
-        prompt: String?,
-        args: String,
-        context: [URL],
-        attachedFiles: [URL],
-        includeDocs: Bool,
-        includeDiff: Bool,
-        includeDiffFiles: Bool,
-        includePaste: Bool,
-        includeSummaries: Bool,
-        repoURL: URL
-    ) -> [String] {
+    private func buildCommandArgs(_ options: ContextOptions) -> [String] {
         var cmdArgs = ["lf"]
 
-        if let p = prompt, !p.isEmpty {
+        if let p = options.prompt, !p.isEmpty {
             cmdArgs.append(p)
         } else {
             cmdArgs.append(":")
         }
 
-        if !args.isEmpty {
-            cmdArgs.append(args)
+        if !options.args.isEmpty {
+            cmdArgs.append(options.args)
         }
 
-        for url in context {
-            let relativePath = url.path().replacingOccurrences(of: repoURL.path() + "/", with: "")
+        let repoPath = options.repoURL.path()
+        for url in options.contextFolders {
+            let relativePath = url.path().replacingOccurrences(of: repoPath + "/", with: "")
             cmdArgs.append("-x")
             cmdArgs.append(relativePath)
         }
 
-        for url in attachedFiles {
+        for url in options.attachedFiles {
             let filePath = url.path(percentEncoded: false)
-            if filePath.hasPrefix(repoURL.path()) {
-                let relativePath = String(filePath.dropFirst(repoURL.path().count))
+            if filePath.hasPrefix(repoPath) {
+                let relativePath = String(filePath.dropFirst(repoPath.count))
                 cmdArgs.append("-x")
                 cmdArgs.append(relativePath.hasPrefix("/") ? String(relativePath.dropFirst()) : relativePath)
             } else {
@@ -123,11 +61,11 @@ struct ContextPreviewService {
             }
         }
 
-        if includeDiff { cmdArgs.append("--diff") }
-        if !includeDiffFiles { cmdArgs.append("--no-diff-files") }
-        if !includeDocs { cmdArgs.append("--no-docs") }
-        if includePaste { cmdArgs.append("--paste") }
-        if !includeSummaries { cmdArgs.append("--no-summaries") }
+        if options.includeDiff { cmdArgs.append("--diff") }
+        if !options.includeDiffFiles { cmdArgs.append("--no-diff-files") }
+        if !options.includeDocs { cmdArgs.append("--no-docs") }
+        if options.includePaste { cmdArgs.append("--paste") }
+        if !options.includeSummaries { cmdArgs.append("--no-summaries") }
 
         cmdArgs.append("-c")
         return cmdArgs
@@ -157,15 +95,7 @@ struct ContextPreviewService {
         }
     }
 
-    private func parseOutput(
-        _ output: String,
-        includeDocs: Bool,
-        includeDiff: Bool,
-        includeDiffFiles: Bool,
-        includePaste: Bool,
-        attachedFiles: [URL],
-        repoURL: URL
-    ) -> ContextPreview {
+    private func parseOutput(_ output: String, options: ContextOptions) -> ContextPreview {
         // Parse output like:
         // Tokens: 54,963
         //
@@ -198,7 +128,7 @@ struct ContextPreviewService {
                 // Save previous category if any
                 if let cat = currentCategory {
                     let kind = mapCategoryToKind(cat)
-                    let isEnabled = isSectionEnabled(kind, includeDocs: includeDocs, includeDiff: includeDiff, includeDiffFiles: includeDiffFiles, includePaste: includePaste)
+                    let isEnabled = isSectionEnabled(kind, options: options)
                     sections.append(ContextSection(
                         kind: kind,
                         items: currentItems,
@@ -226,7 +156,7 @@ struct ContextPreviewService {
         // Save last category
         if let cat = currentCategory {
             let kind = mapCategoryToKind(cat)
-            let isEnabled = isSectionEnabled(kind, includeDocs: includeDocs, includeDiff: includeDiff, includeDiffFiles: includeDiffFiles, includePaste: includePaste)
+            let isEnabled = isSectionEnabled(kind, options: options)
             sections.append(ContextSection(
                 kind: kind,
                 items: currentItems,
@@ -235,8 +165,8 @@ struct ContextPreviewService {
         }
 
         // Add attached files section if there are any
-        if !attachedFiles.isEmpty {
-            let attachedItems = attachedFiles.map { url in
+        if !options.attachedFiles.isEmpty {
+            let attachedItems = options.attachedFiles.map { url in
                 ContextItem(
                     name: url.lastPathComponent,
                     preview: nil,
@@ -288,18 +218,12 @@ struct ContextPreviewService {
         }
     }
 
-    private func isSectionEnabled(
-        _ kind: ContextKind,
-        includeDocs: Bool,
-        includeDiff: Bool,
-        includeDiffFiles: Bool,
-        includePaste: Bool
-    ) -> Bool {
+    private func isSectionEnabled(_ kind: ContextKind, options: ContextOptions) -> Bool {
         switch kind {
-        case .docs: return includeDocs
-        case .files: return includeDiffFiles
-        case .diff: return includeDiff
-        case .clipboard: return includePaste
+        case .docs: return options.includeDocs
+        case .files: return options.includeDiffFiles
+        case .diff: return options.includeDiff
+        case .clipboard: return options.includePaste
         case .attached: return true
         }
     }

@@ -18,7 +18,15 @@
 
 ## Open
 
-8. **In-app terminal embedding**: Can Maestro embed Ghostty or Warp rather than launching external? This would eliminate context-switching without competing with terminal products. See `.design/terminal-embedding.md` for research.
+8. **In-app terminal embedding**: Can Maestro embed Ghostty or Warp rather than launching external? This would eliminate context-switching without competing with terminal products. See `.design/terminal-embedding.md` for research. SwiftTerm is recommended for short-term implementation.
+
+10. **Onboarding flow scope**: What should a first-time user walkthrough cover? Current candidates: (1) What Maestro does, (2) How workspaces isolate work, (3) Running your first task, (4) Where to see results. Should this be skippable?
+
+11. **Mode picker explanation**: "Auto" vs "Interactive" is meaningless to new users. Options: (a) Add tooltips, (b) Add inline description, (c) Rename to "Run to completion" vs "Chat mode"?
+
+12. **Context chips progressive disclosure**: Five chips (Docs, Files, Diff, Clipboard, Summaries) visible by default is overwhelming. Should these collapse to "Context: 14.2k" and expand on click?
+
+13. **Whimsical worktree names**: NameGenerator produces names like "floral-tiger" which confuse new users. Keep for power users? Or use task-based names like "implement-auth"?
 
 ## Not Pursuing
 

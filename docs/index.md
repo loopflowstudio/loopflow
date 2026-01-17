@@ -5,109 +5,122 @@ title: Home
 
 # Loopflow
 
-Run LLM coding agents from reusable prompt files.
+Arrange agents to code in harmony.
+
+Store prompts in git. Chain them into pipelines. Run them across isolated worktrees while you work on something else.
+
+## Quick Debug
+
+Copy an error, run one command, watch it fix.
+
+![Debug demo](debug-demo.gif)
 
 ```bash
-lf review          # run .claude/commands/review.md
-lf ship            # pipeline: implement → review → test → commit → PR
+# Run tests, copy the error to clipboard
+lf debug -v
 ```
 
-![Loopflow demo](demo.gif)
+The `-v` flag pastes your clipboard. Loopflow reads the stacktrace, finds the bug, fixes it.
 
-## What it is
+## Full Workflow
 
-Loopflow treats prompts as artifacts. They live in your repo, versioned with git, not scattered across chat logs and clipboards.
+Design a feature interactively, then let agents implement it.
 
+![Design demo](design-demo.gif)
+
+```bash
+wt switch --create add-divide           # create a worktree
+lf design: add division to calculator   # interactive design session
+lf implement && lf polish && lf review  # autonomous pipeline
 ```
-.lf/
-├── review.lf      # your code review standards
-├── implement.lf   # how you want features built
-├── ship.yaml      # pipeline: implement → review → test → commit
-└── config.yaml    # settings
-```
 
-Each `.lf` file is markdown. `git log` shows prompt history. `git diff` shows what changed. When something works, you can find it again.
-
-## Why this matters
-
-**Prompts accumulate knowledge.** "Include error handling." "Follow our naming conventions." "Check for the bugs we always make." These belong in version control, not your head.
-
-**Structure makes it robust.** Vibing produces slop. A pipeline that reviews before committing doesn't. `lf ship` means "implement, then review, then test, then commit" — every time.
-
-**Tools change fast.** Your prompts should survive. Same task file runs on Claude, Codex, or Gemini. Switch with `-m codex`.
+Each task reads what the previous one wrote. Design produces a spec, implement builds it, polish runs tests, review gives a verdict.
 
 ## Install
 
 ```bash
-# With uv (recommended)
-uv tool install loopflow
-
-# Or pip
 pip install loopflow
-
-# Install Claude Code + worktrunk if needed
-lf ops install
+lfops install    # installs Claude Code, worktrunk
 ```
 
-## Quick start
+## Try It
 
-Initialize a repo with example tasks:
+Clone the demo repo and follow along:
 
 ```bash
-cd your-repo
-lf ops init
+git clone https://github.com/loopflowstudio/loopflow-demos
+cd loopflow-demos/calculator
+python -m pytest test_calc.py    # see the bug
+# copy error to clipboard
+lf debug -v                       # fix it
 ```
 
-This creates `.lf/` with starter prompts and config.
+## How It Works
 
-Run a task:
+Tasks are markdown files in `.claude/commands/` or `.lf/`:
 
-```bash
-lf review                # review the current branch
-lf implement: add auth   # inline args after the colon
-lf : "fix the typo"      # one-off inline prompt
+```markdown
+# .claude/commands/review.md
+
+Review the diff on this branch. Fix any issues.
+
+## What to look for
+- Bugs and edge cases
+- Style guide violations
+- Missing tests
 ```
 
-Run a pipeline:
+Run by name:
 
 ```bash
-lf ship                  # runs: implement → review → test → commit
+lf review                     # run .claude/commands/review.md
+lf implement: add auth        # pass arguments after colon
+lf : "fix the typo"           # inline prompt, no file
+```
+
+## Pipelines
+
+Chain tasks in `.lf/config.yaml`:
+
+```yaml
+pipelines:
+  ship:
+    tasks: [implement, review, polish, commit]
+    pr: true
+```
+
+```bash
+lf ship    # runs each task, commits between steps
 ```
 
 ## Worktrees
 
-Loopflow works best with git worktrees. Each feature gets its own directory, so agents don't conflict with your active work.
+Loopflow works best with git worktrees. Each feature gets its own directory.
 
 ```bash
-wt switch --create my-feature --execute pwd
-cd ../yourrepo.my-feature
-
-lf ship                  # agents work here
-# meanwhile, you work in the main repo
+wt switch --create my-feature    # create worktree
+lf ship                          # agents work here
+lfops pr                         # open PR
+lfops land                       # merge and cleanup
 ```
 
-When done:
+## Multi-Model
+
+Same task, different models:
 
 ```bash
-lf ops pr create             # open PR from worktree
-lf ops land                  # local merge via worktrunk
-wt remove my-feature     # remove worktree + branch
+lf review -m codex              # use Codex
+lf implement --race claude,codex   # race them, pick winner
 ```
 
-## Multi-model
+---
 
-Run with different models:
+*Craft and throughput. Not either/or.*
 
-```bash
-lf review -m codex       # use Codex instead of Claude
-lf implement --parallel claude,codex  # race them
-```
+## Next Steps
 
-Compare results with `git diff` or your editor.
-
-## Next steps
-
-- [Maestro](maestro.md) — prefer a GUI? Native Mac app for visual prompt launching
 - [Configuration](config.md) — all options for `.lf/config.yaml`
-- [Patterns](patterns.md) — real workflows and recipes from production use
-- [Philosophy](vision.md) — why loopflow exists, what we're betting on
+- [Patterns](patterns.md) — workflows and recipes
+- [Maestro](maestro.md) — native Mac app for visual control
+- [Daemon](lfd.md) — background agents
+- [Philosophy](vision.md) — the maestro mindset

@@ -5,7 +5,9 @@ title: Daemon
 
 # Daemon (lfd)
 
-Background service for session tracking and agent orchestration.
+The orchestra: background loops, autonomous work. Agents that run while you sleep.
+
+The `lfd` daemon tracks sessions and orchestrates background agents. Define agents as markdown files—what they do, when they trigger, how they merge. They run in the background, each in its own worktree. You review the PRs.
 
 ## Installation
 
@@ -81,6 +83,8 @@ Optional prompt or instructions for the agent.
 | `trigger.grace_minutes` | Cooldown between runs (default: 60) |
 | `context` | Additional context files |
 | `emoji` | Display emoji for UI |
+| `merge_mode` | How to merge work: `auto`, `pr`, `silent` |
+| `personal_main` | Branch for agent's work (auto-allocated if not set) |
 
 ### Trigger Types
 
@@ -127,6 +131,32 @@ emoji: 🧹
 ---
 
 Run polish pipeline every morning at 9am.
+```
+
+### Personal Main Branches
+
+Each agent gets its own "personal main" branch to accumulate work without polluting the real main branch. This is auto-allocated when the agent first runs.
+
+```markdown
+---
+repo: /Users/me/myproject
+pipeline: ship
+trigger:
+  kind: loop
+merge_mode: auto
+personal_main: review-agent-main
+---
+```
+
+Merge modes:
+- `auto` — Create PR to personal-main, auto-merge
+- `pr` — Create PR, wait for human approval
+- `silent` — Direct merge to personal-main (no PR)
+
+To land agent work to real main:
+
+```bash
+lfops land --squash     # Squash personal-main to main
 ```
 
 ## Database

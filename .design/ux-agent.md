@@ -85,14 +85,12 @@ func copyAssembledContext() -> String
 ```swift
 // In PromptLauncher.swift
 
-@State private var contextPreview: ContextPreview?
 @State private var isPreviewExpanded: Bool = false
-@State private var selectedPreviewItem: ContextItem?
+@State private var expandedSections: Set<ContextKind> = [.docs, .files]
 
 var contextPreviewPanel: some View
 /// Collapsible panel showing sections and items.
 /// Each section has a header with icon, name, and token count.
-/// Items within sections are clickable for preview.
 ```
 
 ## UI changes
@@ -139,9 +137,7 @@ Clicking the bar or the number expands the preview panel.
 
 - Sections are collapsible (▼/▸)
 - Items in Files/Attached sections have ✕ to remove
-- Hover on item shows preview popover
-- Click on item shows full content in sheet
-- [Copy] button copies full assembled prompt
+- [Copy] button copies full assembled context to clipboard
 
 ### Integration with existing context bar
 
@@ -182,5 +178,7 @@ cd Maestro && xcodebuild -scheme Maestro -configuration Debug
 - Drag to reorder context priority
 - Token limit warnings
 - Minimap visualization
+- Hover preview popover on items
+- Click to view full content in sheet
 
 These are good ideas but each deserves its own design pass.

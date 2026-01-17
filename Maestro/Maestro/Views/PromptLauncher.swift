@@ -16,8 +16,6 @@ struct PromptLauncher: View {
     @State private var showAdvancedOptions = false
     @State private var isPreviewExpanded = false
     @State private var expandedSections: Set<ContextKind> = [.docs, .files]
-    @State private var selectedPreviewItem: ContextItem?
-    @State private var showingItemPreview = false
 
     private let terminalLauncher = TerminalLauncher()
 

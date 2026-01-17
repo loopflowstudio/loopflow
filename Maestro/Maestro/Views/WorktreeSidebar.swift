@@ -144,10 +144,11 @@ struct WorktreeSidebar: View {
 
     private var header: some View {
         HStack {
-            Text("WORKTREES")
+            Text("BRANCHES")
                 .font(.caption)
                 .fontWeight(.semibold)
                 .foregroundStyle(.secondary)
+                .help("Worktrees: isolated folders for each feature branch")
 
             Spacer()
 
@@ -158,7 +159,7 @@ struct WorktreeSidebar: View {
                     .font(.caption)
             }
             .buttonStyle(.plain)
-            .help("New Worktree")
+            .help("Create a new branch in its own folder")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -167,18 +168,19 @@ struct WorktreeSidebar: View {
     private var emptyState: some View {
         VStack(spacing: 12) {
             Image(systemName: "arrow.triangle.branch")
-                .font(.system(size: 24))
+                .font(.system(size: 28))
                 .foregroundStyle(.tertiary)
 
-            Text("No worktrees yet")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            Text("Worktrees let you run tasks on isolated branches while keeping your main work untouched.")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 24)
+            VStack(spacing: 4) {
+                Text("No worktrees yet")
+                    .fontWeight(.medium)
+                    .foregroundStyle(.secondary)
+                Text("Each worktree is an isolated folder where AI can work without affecting your main code.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 16)
+            }
 
             Button {
                 showingNewWorktreeSheet = true
@@ -188,10 +190,9 @@ struct WorktreeSidebar: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
-            .padding(.top, 4)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
     }
 
     private var worktreeList: some View {

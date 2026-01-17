@@ -58,14 +58,14 @@ struct SetupView: View {
             VStack(spacing: 24) {
                 statusRow(
                     title: "Loopflow CLI",
-                    description: "Core command-line tool",
+                    description: "Runs AI coding tasks from your terminal",
                     isInstalled: status?.lfInstalled ?? false,
                     isInstalling: installStep == .installingLf
                 )
 
                 statusRow(
                     title: "Worktrunk (wt)",
-                    description: "Git worktree manager",
+                    description: "Keeps each feature in its own folder",
                     isInstalled: status?.wtInstalled ?? false,
                     isInstalling: installStep == .installingWt
                 )

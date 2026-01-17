@@ -19,7 +19,7 @@ struct WelcomeWindow: View {
                     .font(.title)
                     .fontWeight(.semibold)
 
-                Text("Manage worktrees and launch LLM coding sessions")
+                Text("AI coding assistant for your projects")
                     .foregroundStyle(.secondary)
             }
 

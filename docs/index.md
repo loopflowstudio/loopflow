@@ -24,7 +24,9 @@ Loopflow is a workflow for running AI coding agents like Claude Code and Codex. 
 - **Pipelines** chain tasks together
 - **Worktrees** keep parallel work isolated
 
-If you're experimenting with AI coding tools, this is one way to structure it.
+## Why it helps
+
+The loop is the thing. Write a prompt, run it, see what's off, fix it, run again. Each pass catches what the last one missed. The prompt gets sharper. The output gets cleaner. Rough edges smooth out through repetition.
 
 ## Install
 

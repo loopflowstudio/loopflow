@@ -8,13 +8,19 @@ struct WorktreeService {
         case parseError(String)
         case notFound
         case wtNotInstalled
+        case branchExists(String)
 
         var errorDescription: String? {
             switch self {
-            case .commandFailed(let msg): return "Worktree command failed: \(msg)"
-            case .parseError(let msg): return "Failed to parse worktree data: \(msg)"
-            case .notFound: return "Worktree not found"
-            case .wtNotInstalled: return "wt not found. Install from https://github.com/anthropics/worktrunk"
+            case .commandFailed(let msg):
+                if msg.contains("already exists") {
+                    return "A branch with this name already exists. Try a different name."
+                }
+                return msg.trimmingCharacters(in: .whitespacesAndNewlines)
+            case .parseError(let msg): return "Couldn't read worktree data: \(msg)"
+            case .notFound: return "This worktree no longer exists. Try refreshing."
+            case .wtNotInstalled: return "Worktrunk not installed. Click retry to install it."
+            case .branchExists(let name): return "'\(name)' already exists. Choose a different name or open the existing branch."
             }
         }
     }

@@ -67,10 +67,10 @@ struct PromptLauncher: View {
 
             Spacer()
         }
-        .alert("Launch Failed", isPresented: $showingLaunchError) {
+        .alert("Couldn't Start", isPresented: $showingLaunchError) {
             Button("OK") { launchError = nil }
         } message: {
-            Text(launchError ?? "Failed to launch terminal")
+            Text(launchError ?? "Something went wrong. Try again.")
         }
         .onAppear {
             isInputFocused = true
@@ -712,7 +712,9 @@ struct PromptLauncher: View {
             }
             .pickerStyle(.segmented)
             .frame(width: 160)
-            .help("Auto: runs to completion without input. Interactive: opens a chat session you can guide.")
+            .help(appState.runMode == .auto
+                ? "Auto: Runs to completion without interruption"
+                : "Interactive: Chat with the AI, can interrupt and redirect")
 
             Spacer()
 
@@ -965,11 +967,11 @@ struct PromptLauncher: View {
                 let workPath = URL(fileURLWithPath: newWorktree.path)
                 launchCommand(repo: repo, workPath: workPath)
             } else {
-                launchError = "Failed to find newly created worktree"
+                launchError = "Created the branch but couldn't find it. Try refreshing the sidebar."
                 showingLaunchError = true
             }
         } catch {
-            launchError = "Failed to create worktree: \(error.localizedDescription)"
+            launchError = error.localizedDescription
             showingLaunchError = true
         }
     }

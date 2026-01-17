@@ -1,101 +1,19 @@
-# UX Improvement Loop
+# newux
 
-**What to build**: Three prompts that chain together to continuously improve Maestro's new user experience through simulated user research, competitive analysis, and targeted redesigns. Plus a `--with` CLI option to append project context.
+Adds `--prompt`/`-p` CLI option to chain prompt files, plus four UX improvement prompts for Maestro research and iteration.
 
-## Data Structures
+## Review
 
-Four prompt files:
+**Verdict:** Ready to ship
 
-```
-.lf/nux.lf            # Project context (first-time prompter experience)
-.lf/ux-research.lf    # Simulate user profiles
-.lf/ux-gaps.lf        # Compare against inspiration
-.lf/ux-fix.lf         # Implement high-priority improvements
-```
+Clean implementation. Two commits: design doc, then the feature. The `--prompt` flag works as specified—appends additional `.lf/*.lf` content to the task prompt with `---` separator. Case-insensitive short flags (`-p`/`-P`, `-a`/`-A`, etc.) added consistently across `run`, `inline`, `cp`, and `pipeline` commands.
 
-Pipeline config:
+The UX prompts (nux, ux-research, ux-gaps, ux-fix) are well-structured with clear outputs and appropriate constraints. The pipeline config ties them together correctly.
 
-```yaml
-pipelines:
-  ux:
-    tasks: [ux-research, ux-gaps, ux-fix]
-```
+## Design notes
 
-## CLI Addition
+**Prompt chaining**: Multiple `-p` flags accumulate. Content appends in order with `---` separator. If a prompt file isn't found, it's silently skipped (no error)—worth noting if someone typos a prompt name.
 
-New `--prompt` / `-p` option to append prompt files:
+**Context inheritance**: The `with_prompts` parameter passes through `gather_prompt_components` → `gather_task`. Frontmatter from chained prompts is ignored; only their content is appended. This is the right call—frontmatter config should come from the main task.
 
-```bash
-lf ux-research --prompt nux    # Appends .lf/nux.lf content to ux-research
-lf ux-research -p nux          # Short form (case insensitive: -p or -P)
-```
-
-Multiple prompts can be chained:
-
-```bash
-lf implement -p nux -p constraints
-```
-
-All short flags are now case-insensitive (`-a`/`-A`, `-i`/`-I`, `-x`/`-X`, etc.).
-
-## Key Functions (Prompts)
-
-### 1. ux-research.lf
-
-Simulates 3 user profiles interacting with Maestro:
-- **New developer**: First time using AI coding tools
-- **Claude Code power user**: Familiar with CLI, trying Maestro
-- **Designer/PM**: Non-engineer exploring AI assistance
-
-For each profile, walks through first-run experience using screenshots. Documents friction points, confusion, and unmet expectations.
-
-Output: `.design/ux-research.md` with persona narratives and pain points.
-
-### 2. ux-gaps.lf
-
-Compares Maestro against:
-- **Figma**: Onboarding, contextual help, progressive disclosure
-- **Cursor**: AI integration UX, prompt input, context management
-- **Notion**: New user flow, empty states, templates
-
-References design principles:
-- Bret Victor: Direct manipulation, immediate feedback
-- Don Norman: Affordances, signifiers, mapping
-- Jony Ive: Simplicity, clarity, deference to content
-
-Output: `.design/ux-gaps.md` with specific gaps and patterns to adopt.
-
-### 3. ux-fix.lf
-
-Takes research and gaps, implements highest-impact improvements. Focuses on:
-- First-run experience
-- Prompt input flow
-- Configuration defaults
-- Error states and recovery
-
-Makes actual code changes. One commit per improvement.
-
-## Constraints
-
-- **Screenshots required**: ux-research needs screenshots in `.design/screenshots/`. Capture with Cmd+Shift+S in Maestro.
-- **Read-only research**: First two prompts research only, no code changes.
-- **Incremental**: ux-fix makes small, testable changes—not wholesale redesigns.
-- **Maestro-only**: Focus on the macOS app, not CLI or daemon.
-
-## Done When
-
-```bash
-# Pipeline runs end-to-end
-lf ux
-
-# Artifacts exist
-cat .design/ux-research.md  # Has 3 persona narratives
-cat .design/ux-gaps.md      # Has competitive analysis
-git log --oneline -5        # Shows UX fix commits
-```
-
-## Open Questions
-
-1. Should ux-research use web search to study Figma/Cursor/Notion, or rely on LLM knowledge?
-2. Should ux-fix auto-run after gaps, or require human review between steps?
-3. How to capture "before/after" screenshots for verification?
+**UX workflow dependency**: ux-research and ux-gaps require screenshots in `.design/screenshots/`. The prompts note this, but first-time users won't have screenshots. Consider adding a check or clearer guidance in ux-research.lf about capturing screenshots first.

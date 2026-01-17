@@ -93,24 +93,59 @@ Based on research from `.design/ux-research.md` and `.design/ux-gaps.md`.
 
 ---
 
+## Context Preview Panel
+
+**Problem**: Users can't see what context is being assembled. Token count is a single number with no breakdown. No way to preview the assembled prompt (CLI's `-c` flag has no GUI equivalent).
+
+**Change**: Implemented expandable context preview panel:
+- Token count is now clickable → expands preview panel below
+- Preview shows sections: Docs, Files, Diff, Clipboard, Attached
+- Each section shows item-level breakdown with token counts
+- Files and attached items can be removed via ✕ button
+- Copy button exports full assembled context to clipboard
+- Toggles real-time update the preview
+
+**Files**:
+- `Maestro/Maestro/Views/PromptLauncher.swift` (UI)
+- `Maestro/Maestro/Services/ContextPreviewService.swift` (data)
+- `Maestro/Maestro/Models/ContextPreview.swift` (models)
+- `Maestro/Maestro/AppState.swift` (state management)
+
+---
+
+## Task Typeahead Search
+
+**Problem**: Task selector required knowing task names upfront or scrolling through a list.
+
+**Change**: Task selector now has searchable typeahead:
+- Type to filter tasks
+- Keyboard navigation (↑/↓) in dropdown
+- Shows both tasks and pipelines (pipelines in separate section)
+- Mode badges visible in dropdown
+
+**Files**: `Maestro/Maestro/Views/PromptLauncher.swift`
+
+---
+
 ## Remaining
 
 Issues identified but not yet fixed:
 
 ### High Priority
 
-- [ ] **Dual input confusion**: Task selector + colon syntax in text field compete; prompt picker interrupts typing
-- [ ] **Context opacity**: Users can't see what context is being assembled; toggle blindly
-- [ ] **No keyboard-first navigation**: Missing Cmd+K command palette
+- [ ] **Dual input confusion**: Task selector + colon syntax in text field still compete. Proposal: Replace with single input using `/` prefix (Notion-style).
+- [ ] **No keyboard-first navigation**: Missing Cmd+K command palette and sidebar keyboard nav
+- [ ] **Running state invisible**: Worktree rows don't show active sessions
 
 ### Medium Priority
 
-- [ ] **Mental model gap**: Users expect in-app responses; Maestro launches terminal sessions
-- [ ] **Output panel value**: Streaming output panel duplicates terminal output but offers no unique value
-- [ ] **Token count meaningless**: Single number with no breakdown
+- [ ] **Mental model gap**: Users expect in-app responses; Maestro launches terminal sessions. Proposal: Transform OutputPanel into results summary view.
+- [ ] **Output panel redundant**: Streaming panel duplicates terminal output. Should become results view showing "what changed."
 
 ### Lower Priority
 
-- [ ] **No onboarding flow**: No first-run guidance or progressive disclosure of concepts
-- [ ] **Worktree auto-creation message**: When auto-creating, show brief message explaining what happened
-- [ ] **Running state invisible**: Worktree rows don't show active sessions
+- [ ] **Silent dependency install**: Setup still uses blocking wizard instead of background install
+- [ ] **Template gallery**: No starter tasks for repos without `.lf/` config
+- [ ] **Worktree auto-creation message**: No notification when auto-creating from main
+- [ ] **@ mentions**: No way to add specific files via typing `@filename` in prompt
+- [ ] **Inline validation**: Branch name availability not checked while typing

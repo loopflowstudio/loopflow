@@ -2,235 +2,287 @@
 
 Comparing Maestro against best-in-class tools: Figma, Cursor, Notion, Linear, and Stripe.
 
+**Last updated**: After context preview panel implementation
+
 ---
 
-## Welcome/Setup
+## What's Been Fixed
 
-**Current**: WelcomeWindow shows "Loopflow Maestro" with subtitle "Manage worktrees and launch LLM coding sessions." Recent repos list and "Open Folder" button. SetupView requires sequential installation of "Loopflow CLI" and "Worktrunk (wt)" with minimal explanation.
+Since initial research:
+
+- **Welcome screen jargon** → Now says "AI coding assistant for your projects"
+- **Setup explanations** → Descriptions explain benefits, not just tool names
+- **Empty worktree state** → Explains isolation concept with visual icon
+- **Sidebar header** → Changed to "BRANCHES" with tooltip
+- **Mode picker** → Has tooltip explaining Auto vs Interactive
+- **Prompt placeholder** → "Describe what you want to build or change..."
+- **Error messages** → More actionable with recovery suggestions
+- **Context preview panel** → Implemented with expandable sections, file removal, copy button
+- **Task typeahead** → Task selector now has search with dropdown
+
+---
+
+## Remaining Priority Gaps
+
+### 1. Mental Model Mismatch - Impact: **Critical**
+
+**Current**: User types prompt in Maestro, clicks Run, terminal window opens. Results appear in terminal and worktree folder. The app that received input is not the app that shows output.
+
+**Why it matters**: This is the fundamental architectural tension. Users expect ChatGPT-style: type here, response appears here. Instead, Maestro is a launcher that opens a different app.
 
 **Inspiration**:
-- **Figma**: Opens directly to work. No tutorial dialogs. Professional trust.
-- **Notion**: Templates gallery—start with something useful, not a blank slate.
-- **Cursor**: Just works. Dependencies handled silently or explained in context.
+- **Cursor**: Response streams inline, in the editor where you typed
+- **Warp**: Commands and outputs live in the same scrollable view
+- **Claude web**: Response appears directly below your input
 
-**Gap**: Maestro front-loads jargon ("worktrees", "LLM coding sessions") and requires understanding of dependencies before showing value. First-time users see barriers before benefits.
+**The honest question**: Should Maestro compete with terminals, or embrace being a launcher?
 
-**Patterns to adopt**:
-1. **Show, don't tell**: Instead of "Manage worktrees and launch LLM coding sessions", show what that *looks like*—a visual of the workflow or a 3-second animation.
-2. **Dependency invisibility** (fast.ai): Check/install dependencies silently during first repo open, not as a blocking wizard. Show progress inline, not as a separate view.
-3. **Template gallery** (Notion): For repos without `.lf/`, offer starter templates: "Review existing code", "Implement a feature", "Quick fix". One click to first task.
-4. **Immediate success path** (fast.ai): A new user should complete their first task within 60 seconds of opening the app.
+**Options**:
+1. **Embrace launcher role**: Make the handoff explicit and elegant. Show "Your request is running in Terminal" with a live status badge on the worktree row. Add a notification when complete.
+2. **Embed terminal**: Use SwiftTerm or similar to show output inline. Risk: competing with Warp/Ghostty.
+3. **Show results summary**: Don't stream the whole output—just show "3 files changed, 1 test added" with a diff preview when done.
+
+**Recommendation**: Option 3. Don't try to be a terminal. Show what matters: what changed, whether it worked, what to do next. The OutputPanel should become a results panel, not a log viewer.
 
 ---
 
-## Prompt Input
+### 2. Dual Input Still Confusing - Impact: **High**
 
-**Current**: Task selector (searchable dropdown) + large TextEditor with "What do you want to build?" placeholder. Two entry points: (1) select task from dropdown, (2) type `task: args` in text field. Prompt picker appears when typing matches task names, creating interference between the two patterns.
+**Current**: Task selector dropdown + text field with `task: args` colon syntax. Typeahead search helps, but two paths to the same destination with different behaviors.
+
+**What happens**:
+1. User types in text field
+2. If text matches a task name, prompt picker appears
+3. User can also use task selector dropdown
+4. Not clear which one "wins" or how they combine
 
 **Inspiration**:
-- **Cursor**: Three distinct tiers—Tab (autocomplete), Cmd+K (inline edit), Agent (chat). Each surface is purpose-built.
-- **Notion**: Slash commands (`/`) in a single text field. One entry point, infinite extensibility.
-- **Linear**: Cmd+K command palette searches everything. Input → action is a single gesture.
+- **Notion**: Single text field. Type `/` for commands, otherwise it's content. One field, one mental model.
+- **Linear**: Cmd+K is the only input. Type what you want, it figures out the rest.
 
-**Gap**: Dual input paths (task selector + colon syntax) create confusion. The prompt picker interrupts natural typing. No command palette for keyboard-first navigation. The "Run" button requires mouse targeting.
+**The real question**: What are we actually selecting?
 
-**Patterns to adopt**:
-1. **Single input, slash commands** (Notion): Remove the Task selector. Use `/` prefix for tasks: `/implement`, `/review`. Text without slash = inline prompt. One field, one mental model.
-2. **Cmd+K everywhere** (Linear): Global shortcut opens prompt input focused, ready to type. Same shortcut dismisses. No separate "Task" dropdown.
-3. **Typeahead as guidance** (Cursor): When user types `/`, show filterable task list below. When they type freely, show "Will run as inline prompt" confirmation.
-4. **Keyboard-first run** (Linear): ⌘↵ already exists, but make it feel *instant*—optimistic UI update, not button press + wait.
+A task is just a prompt file. The user is saying either "use this prompt" or "use my words directly." Two modes, not two inputs.
+
+**Proposal**: Remove the dropdown. Make the text field the only input.
+- Default: Your words become the prompt
+- Type `/` at start: Shows task picker inline (Notion-style)
+- Selected task appears as a pill/chip above the text field
+- Everything else stays the same
 
 ---
 
-## Context Controls
+### 3. No Keyboard-First Navigation - Impact: **High**
 
-**Current**: "Options" expand button reveals context toggles (Docs, Files, Diff, Clipboard) as colored chips. Attached files via drag-drop or file picker. Token count shows single number (e.g., "2.1k") with no breakdown.
+**Current**: No Cmd+K command palette. Sidebar requires mouse. Focus switching requires clicking.
+
+**What power users expect**:
+- `Cmd+K` → Command palette (run task, open worktree, create PR, show diff)
+- `Cmd+1/2/3` → Switch focus (sidebar, prompt, output)
+- `↑/↓` in sidebar → Navigate worktrees
+- `Enter` on worktree → Open in terminal
+- `D` → Show diff
+- `P` → PR actions
 
 **Inspiration**:
-- **Cursor**: Context is automatic via codebase indexing. Override with `@file` mentions. Visual token budget shows what's included.
-- **Stripe**: Three-column layout—content is visible alongside code examples. Progressive disclosure of complexity.
-- **Figma**: Component panel shows exactly what's selected. No hidden state.
+- **Linear**: Everything searchable from Cmd+K. Shortcuts shown in menus.
+- **Figma**: Cmd+/ opens command palette. Every menu shows shortcuts.
 
-**Gap**: Context is opaque. Users toggle blindly—no visibility into what's actually included. Token count is meaningless without breakdown. No way to preview assembled prompt (CLI's `-c` flag has no GUI equivalent). No `@` mentions for surgical file inclusion.
-
-**Patterns to adopt**:
-1. **Context preview panel** (Cursor): Expand arrow shows exactly what will be sent—file names, character counts, truncation warnings. Make the invisible visible.
-2. **@ mentions** (Cursor): Type `@` in the prompt text to fuzzy-search files/folders. Selected items appear as inline chips. Surgical override without leaving the input.
-3. **Token budget visualization** (Cursor): Replace single number with segmented bar: Docs (blue, 1.2k), Files (teal, 3.4k), Diff (green, 0.5k). Tap segments to see contents.
-4. **Copy assembled prompt** (CLI parity): Button to copy full assembled context to clipboard for inspection. Power user escape hatch.
+**Simpler alternative**: Maybe Maestro doesn't need a full command palette—just excellent shortcuts. The app has ~20 actions, not hundreds.
 
 ---
 
-## Worktree Sidebar
+### 4. Running State Invisible - Impact: **Medium**
 
-**Current**: Header "WORKTREES" + list. Each row shows branch name, commit count, and status badge (last completed task). Hover reveals action buttons (diff, PR, terminal, IDE). Right-click context menu for Create PR, View PR, Land, Delete.
+**Current**: Worktree rows show static status badge from last task. No indication when a task is actively running.
+
+**What should happen**: Worktree row pulses/animates when its task is running. "electric-penguin" shows a pulsing dot, not just the last completed task badge.
 
 **Inspiration**:
-- **Notion**: Page tree with drag-to-reorder, expand/collapse, inline rename.
-- **Figma**: Layers panel shows hierarchy with visibility toggles, selection highlighting, and contextual actions.
-- **Linear**: Issues list with inline status changes, keyboard navigation, and batch operations.
+- **Figma**: Multiplayer cursors show who's active
+- **GitHub**: PR checks show spinner while running
 
-**Gap**: No visual hierarchy—flat list doesn't communicate relationships. No running state indicator (which worktrees have active tasks?). Hover actions require mouse precision. No keyboard navigation. "WORKTREES" header uses jargon without explanation.
-
-**Patterns to adopt**:
-1. **Running state indicator** (Figma presence): Show animated spinner or pulsing dot on worktree rows with active sessions. "electric-penguin ●" for running vs. "electric-penguin ✓" for idle.
-2. **Keyboard navigation** (Linear): ↑/↓ to navigate, Enter to open terminal, Space to toggle selection, D for diff, P for PR actions.
-3. **Inline status changes** (Linear): Click status badge to cycle: design → implement → review → polish. Visual workflow progression.
-4. **Contextual explanation** (Progressive disclosure): First-time empty state says "Worktrees isolate your work—each feature gets its own folder" instead of "No worktrees / Click + to create one."
-5. **Drag to reorder** (Notion): Let users organize worktrees by priority/workflow stage. Persist order.
+**Simple fix**: Add `isRunning` boolean to Worktree model. Show pulsing dot. Subscribe to session events.
 
 ---
 
-## Running State
+### 5. Output Panel Redundant - Impact: **Medium**
 
-**Current**: OutputPanel shows streaming lines with session picker (if multiple). Green dot + "N running" indicator. Fixed 200px height. Expandable/collapsible. Auto-scrolls to bottom.
+**Current**: OutputPanel streams lines from running sessions. But the user is already watching the terminal—two views of the same data.
 
-**Inspiration**:
-- **Cursor**: Streaming response appears inline, in the editor, where the user's attention already is. Plan mode shows what will happen before it happens.
-- **Figma**: Multiplayer cursors and selection highlights—presence is visible without dedicated UI.
-- **Linear**: Progress indicators are subtle—counts update in place, no separate "running" panel.
+**Question**: What would make this panel worth keeping?
 
-**Gap**: Output panel competes with terminal for attention. Users watch terminal anyway, making the panel redundant. No plan preview before execution. No integration with the prompt launcher—output feels disconnected from input. Running sessions don't update worktree rows.
+**Ideas**:
+1. **Summarize, don't stream**: "Reading 5 files... Planning... Writing src/auth.py..."
+2. **Results view**: Show diff preview, test results, what changed. Not a log—an outcome.
+3. **Delete it**: If Maestro is a launcher, output belongs in the terminal.
 
-**Patterns to adopt**:
-1. **Plan before execute** (Cursor): Before running, show a preview: "Will read: 3 files, Write: src/auth.py, Run: tests". User confirms or edits. Transparency builds trust.
-2. **Progress in context** (Figma): Instead of separate OutputPanel, show progress *on the worktree row*: subtle animation, percentage, or stage indicator. The sidebar becomes the status dashboard.
-3. **Inline streaming** (Cursor): Option to show agent output *in the prompt launcher area* after clicking Run. The response appears where the prompt was typed—immediate connection.
-4. **Terminal as escape hatch**: Keep terminal integration, but make it feel like "advanced mode"—not the default destination. Power users can still double-click to open Warp.
-
----
-
-## Errors/Empty States
-
-**Current**: Errors shown via `alert()` dialogs. Empty worktrees state: "No worktrees / Click + to create one". SetupView errors show red text with "Retry" button. Launch failures show modal alert.
-
-**Inspiration**:
-- **Notion**: Empty pages invite action—"Press / for commands" with subtle animation.
-- **Figma**: Placeholders are helpful, not apologetic. "Create your first design" with template options.
-- **Stripe**: Error states include specific remediation. "API key invalid. Generate a new key →"
-
-**Gap**: Error messages are technical, not actionable. Empty states are uninviting. Modal alerts break flow—user must dismiss before continuing. No inline validation or prevention.
-
-**Patterns to adopt**:
-1. **Actionable errors** (Stripe): "Failed to create worktree: branch already exists" → "Failed to create 'auth-feature'—it already exists. Open existing? / Choose different name?"
-2. **Inline errors** (Notion): Show errors *where* they occurred—red border on input field, tooltip with explanation. No modal interruption.
-3. **Inviting empty states** (Figma): "No worktrees yet" + visual illustration + "Create your first worktree" button + "What are worktrees?" expandable explanation.
-4. **Preventative validation**: If branch name already exists, show warning *while typing*, before user clicks Create.
-5. **Recovery-oriented design** (Don Norman): Every error should suggest at least one path forward. Never leave users stuck.
+**Recommendation**: Transform into results panel. After task completes, show:
+- Files changed (clickable to view diff)
+- Tests run (pass/fail count)
+- "Open in Terminal" button for full logs
 
 ---
 
-## Design Principle Violations
+## Gaps by Area
 
-| Principle | Current State | Remediation |
-|-----------|--------------|-------------|
-| **Immediate Connection** (Bret Victor) | Response happens in terminal, not where typed | Inline streaming option; plan preview before execution |
-| **Progressive Disclosure** (Notion, Stripe) | Advanced concepts (pipelines, voices, tokens) visible immediately | Hide behind "Options"; reveal on hover/expand |
-| **Speed as Feature** (Linear, Figma) | Mode picker, token count, Options button add visual weight | Remove friction from happy path; keyboard-first |
-| **Keyboard-First** (Linear) | Task selector requires mouse; no Cmd+K | Global command palette; keyboard nav in sidebar |
-| **Transparency** (Cursor) | Context assembly opaque; token count is single number | Context preview; segmented token bar; @ mentions |
-| **Remove Barriers** (fast.ai) | Setup requires understanding dependencies | Silent install; inline progress; immediate success |
-| **Opinionated Defaults** (Linear) | Mode picker asks Auto vs Interactive without context | Default to Auto; explain only when user hovers/expands |
-| **Design Should Disappear** (Jony Ive) | UI chrome visible before content; Options section adds bulk | Minimize visible elements until needed |
-| **Craft Signals Care** (Ive, Collison) | Functional but utilitarian; no visual delight | Micro-animations; considered typography; polish |
+### Welcome/Setup
 
----
+**Status**: Mostly fixed. Descriptions are helpful.
 
-## Summary: Priority Gaps
+**Remaining**:
+- [ ] Silent background install instead of blocking wizard
+- [ ] Template gallery for repos without `.lf/` config
 
-1. **Mental model mismatch** - Impact: **Critical**
-   - Users expect in-app responses; Maestro launches terminal sessions
-   - Remediation: Inline streaming option + plan preview before execution
+### Prompt Input
 
-2. **Context opacity** - Impact: **High**
-   - Users can't see what context is assembled; toggle blindly
-   - Remediation: Context preview panel + @ mentions + segmented token bar
+**Status**: Improved with typeahead. Dual-input confusion remains.
 
-3. **Dual input confusion** - Impact: **High**
-   - Task selector + colon syntax compete; prompt picker interrupts typing
-   - Remediation: Single input with slash commands; remove Task selector
+**Remaining**:
+- [ ] Single input with `/` commands (remove task selector)
+- [ ] Keyboard shortcut to focus prompt (Cmd+L or similar)
 
-4. **No keyboard-first navigation** - Impact: **High**
-   - Power users slowed by mouse targeting
-   - Remediation: Cmd+K command palette; keyboard nav in sidebar
+### Context Controls
 
-5. **Jargon barrier** - Impact: **Medium**
-   - "Worktrees", "LLM coding sessions" assume prior knowledge
-   - Remediation: Show-don't-tell; contextual explanations on hover
+**Status**: Context preview panel implemented and working.
 
-6. **Setup friction** - Impact: **Medium**
-   - Blocking dependency wizard before showing value
-   - Remediation: Silent background installation; inline progress
+**Remaining**:
+- [ ] @ mentions in prompt text for surgical file inclusion
+- [ ] Segmented token bar showing breakdown visually
 
-7. **Running state invisible** - Impact: **Medium**
-   - Worktree rows don't show active sessions; OutputPanel redundant with terminal
-   - Remediation: Progress indicators on sidebar rows; plan preview
+### Worktree Sidebar
 
----
+**Status**: Header changed, empty state improved, actions work.
 
-## Patterns to Steal
+**Remaining**:
+- [ ] Running state indicator (pulsing dot)
+- [ ] Keyboard navigation (↑/↓, Enter, D for diff)
+- [ ] Drag to reorder
 
-1. **Slash commands** (Notion) → Apply to prompt input. `/implement`, `/review`. One field, one model.
+### Running State
 
-2. **@ mentions for files** (Cursor) → Apply to context controls. Type `@src/auth.py` to add surgical context.
+**Status**: OutputPanel exists but duplicates terminal.
 
-3. **Cmd+K command palette** (Linear, Cursor) → Apply globally. One shortcut to do anything.
+**Remaining**:
+- [ ] Progress indicator on worktree rows
+- [ ] Results summary view instead of streaming log
 
-4. **Plan before execute** (Cursor) → Apply before Run. Show what will happen, let user confirm/edit.
+### Errors/Empty States
 
-5. **Progress on entity rows** (Figma presence) → Apply to worktree sidebar. Show running state inline, not in separate panel.
+**Status**: Error messages improved.
 
-6. **Silent dependency handling** (fast.ai) → Apply to setup. Check/install in background, not blocking wizard.
-
-7. **Segmented progress bar** (Cursor token budget) → Apply to token count. Show breakdown by context type.
-
-8. **Templates for cold start** (Notion) → Apply to first-run. Offer starter tasks for repos without `.lf/`.
-
-9. **Actionable error messages** (Stripe) → Apply everywhere. Every error suggests a path forward.
-
-10. **Keyboard shortcuts displayed** (Linear) → Apply to menus and tooltips. Learning mechanism built-in.
+**Remaining**:
+- [ ] Inline validation (branch name availability while typing)
+- [ ] Toast for auto-worktree creation
 
 ---
 
-## Wild Ideas (Question the Constraints)
+## Design Principle Scorecard (Updated)
+
+| Principle | Before | After | Notes |
+|-----------|--------|-------|-------|
+| **Immediate Connection** | Gap | Gap | Still sends to terminal |
+| **Progressive Disclosure** | Gap | Fixed | Options collapse, preview expands |
+| **Speed as Feature** | OK | OK | Feels responsive |
+| **Keyboard-First** | Gap | Gap | Still needs work |
+| **Transparency** | Gap | Fixed | Context preview shows what's included |
+| **Remove Barriers** | Gap | Improved | Setup clearer, still blocking |
+| **Opinionated Defaults** | OK | OK | Auto mode default |
+| **Design Should Disappear** | Gap | Improved | Options collapse |
+
+---
+
+## Patterns to Steal (Priority Order)
+
+1. **Slash commands** (Notion) → Replace task selector with `/` prefix
+2. **Results summary** (GitHub PR checks) → Replace streaming panel with outcome view
+3. **Running state on rows** (Figma) → Pulsing indicator on active worktrees
+4. **Keyboard shortcuts shown** (Linear) → Display in menus, tooltips
+5. **Toast notifications** (Notion) → Auto-worktree creation, task completion
+
+---
+
+## Wild Ideas (Questioning Constraints)
+
+Previous wild ideas and responses preserved:
 
 ### What if Maestro wasn't a launcher?
 
-The current architecture—prompt in GUI, output in terminal—creates a mental model mismatch. What if Maestro *was* the terminal? Embed a terminal emulator directly. The prompt launcher becomes the input line. Streaming output appears inline. The worktree sidebar persists. No context switching.
+Embed terminal directly. Prompt launcher becomes input line. Streaming output inline.
 
-> This is interesting. Id love to have a terminal inside Maestro, but i would love to just literally embed the user's favorite terminal. I think it's scope creep to compete with warp and ghostty, at least for now.
+> "This is interesting. Id love to have a terminal inside Maestro, but i would love to just literally embed the user's favorite terminal. I think it's scope creep to compete with warp and ghostty, at least for now."
 
 ### What if worktrees were invisible?
 
-Worktrees are an implementation detail. Users want "work on this idea in isolation"—not "create a git worktree." What if Maestro auto-created worktrees silently and showed them as "Ideas" or "Experiments"? The git mechanics disappear; the creative metaphor remains.
+Auto-create silently, show as "Ideas" or "Experiments" instead of git terminology.
 
-> Yes, this is progressive disclosure that you're explaining. I dont think obfuscating worktrees with a new term helps -- dont invent new terms if we dont need to.
+> "Yes, this is progressive disclosure that you're explaining. I dont think obfuscating worktrees with a new term helps -- dont invent new terms if we dont need to."
 
 ### What if context was visual?
 
-Token counts and toggles are abstract. What if context was *visual*? A minimap of included files. Highlighted snippets showing what the agent will see. Drag to reorder priority. Direct manipulation instead of toggles.
+Minimap of included files. Highlighted snippets. Drag to reorder priority.
 
-> Yeah, we definitely need more iteration on how the context is represented.
-
-### What if the prompt wrote itself?
-
-The "What do you want to build?" prompt is intimidating. What if Maestro suggested prompts based on recent git activity? "Looks like you're working on auth—want to implement password reset?" The system infers intent from context.
-
-> Nah Dont liek this
+> "Yeah, we definitely need more iteration on how the context is represented."
 
 ### What if errors were impossible?
 
-Instead of error messages, prevent errors entirely. Branch name field auto-suggests available names. Context toggles show warnings before you exceed limits. The Run button only enables when the prompt is valid. Error handling as design constraint, not afterthought.
+Prevent errors entirely. Auto-suggest available branch names. Show warnings before limits exceeded.
 
-> I mean, avoiding errors is good ,yes. 
+> "I mean, avoiding errors is good, yes."
+
+---
+
+## New Wild Ideas
+
+### What if Maestro was a menubar app?
+
+The prompt launcher doesn't need a full window. Click menubar icon → prompt field appears → type → Enter → window opens only to show results.
+
+**Benefits**: Always accessible. Doesn't compete for screen space. Feels lightweight.
+
+### What if there was no Run button?
+
+Cursor doesn't have Run buttons. You type, it acts. What if pressing Enter runs immediately? No separate "compose then run" step.
+
+**Risk**: Accidental runs. **Mitigation**: Cmd+Enter, or require prompt to end with question mark to distinguish from typing.
+
+### What if the sidebar was just tabs?
+
+Browser model: Each worktree is a tab at the top. Click tab → see that worktree's context. No sidebar.
+
+**Benefits**: More horizontal space for prompt. Familiar metaphor.
+
+### What if Maestro was a Spotlight clone?
+
+Cmd+Space opens floating bar. Type task, hit Enter, it runs. Bar disappears. Notification when done.
+
+No window, no sidebar, no options. Just: what do you want to build?
+
+**This is the ultimate "design should disappear" implementation.**
+
+---
+
+## Summary: What to Build Next
+
+**Must fix** (blocks core flow):
+1. Running state indicator on worktree rows
+
+**Should fix** (significant improvement):
+2. Unify input with `/` commands, remove task selector dropdown
+3. Results summary panel instead of streaming log
+4. Basic keyboard shortcuts (Cmd+1/2 focus, sidebar nav)
+
+**Nice to have**:
+5. @ mentions for files in prompt
+6. Toast notifications for background events
+7. Command palette (Cmd+K)
 
 ---
 
 ## Next Steps
 
-1. Prototype slash command input (replace Task selector)
-2. Build context preview panel
-3. Add running state to worktree rows
-4. Design Cmd+K command palette
-5. User test with Curious Beginner profile
-
+1. ~~Build context preview panel~~ Done
+2. Add running state to worktree rows
+3. Prototype slash command input (replace task selector)
+4. Design results panel (replace OutputPanel)
+5. Add keyboard navigation to sidebar

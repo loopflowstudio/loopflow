@@ -45,6 +45,7 @@ def _execute_task(
     backend: str,
     model_variant: str | None,
     skip_permissions: bool,
+    chrome: bool = False,
 ) -> int:
     """Execute a task (run or inline) and return exit code.
 
@@ -80,6 +81,7 @@ def _execute_task(
             sandbox_root=repo_root.parent,
             workdir=repo_root,
             images=components.image_files,
+            chrome=chrome,
         )
     else:
         command = build_model_command(
@@ -91,6 +93,7 @@ def _execute_task(
             sandbox_root=repo_root.parent,
             workdir=repo_root,
             images=components.image_files,
+            chrome=chrome,
         )
 
     # For interactive mode, run CLI directly to preserve terminal
@@ -270,6 +273,9 @@ def run(
     with_prompt: list[str] = typer.Option(
         None, "-p", "-P", "--prompt", help="Append additional prompt files (e.g., -p nux)"
     ),
+    chrome: Optional[bool] = typer.Option(
+        None, "--chrome/--no-chrome", help="Enable Chrome integration for Claude Code (browser automation)"
+    ),
 ):
     """Run a task with an LLM model."""
     repo_root = find_worktree_root()
@@ -438,6 +444,16 @@ def run(
         typer.echo("\nCopied to clipboard.")
         raise typer.Exit(0)
 
+    # Resolve chrome: CLI > frontmatter > config > default
+    if chrome is not None:
+        chrome_enabled = chrome
+    elif frontmatter.chrome is not None:
+        chrome_enabled = frontmatter.chrome
+    elif config:
+        chrome_enabled = config.chrome
+    else:
+        chrome_enabled = False
+
     result_code = _execute_task(
         task,
         repo_root,
@@ -446,6 +462,7 @@ def run(
         backend,
         model_variant,
         skip_permissions,
+        chrome=chrome_enabled,
     )
 
     if worktree:
@@ -488,6 +505,9 @@ def inline(
     ),
     voice: str = typer.Option(
         None, "--voice", help="Voice(s) to use (comma-separated, e.g., 'architect,concise')"
+    ),
+    chrome: Optional[bool] = typer.Option(
+        None, "--chrome/--no-chrome", help="Enable Chrome integration for Claude Code (browser automation)"
     ),
 ):
     """Run an inline prompt with an LLM model."""
@@ -573,6 +593,14 @@ def inline(
         typer.echo("\nCopied to clipboard.")
         raise typer.Exit(0)
 
+    # Resolve chrome: CLI > config > default
+    if chrome is not None:
+        chrome_enabled = chrome
+    elif config:
+        chrome_enabled = config.chrome
+    else:
+        chrome_enabled = False
+
     result_code = _execute_task(
         "inline",
         repo_root,
@@ -581,6 +609,7 @@ def inline(
         backend,
         model_variant,
         skip_permissions,
+        chrome=chrome_enabled,
     )
 
     raise typer.Exit(result_code)
@@ -759,6 +788,7 @@ def pipeline(
     push_enabled = config.push if config else False
     pr_enabled = pr if pr is not None else (config.pr if config else False)
     skip_permissions = config.yolo if config else False
+    chrome_enabled = config.chrome if config else False
 
     # Convert config.yaml pipeline to PipelineDef if needed
     if not pipeline_def:
@@ -780,5 +810,6 @@ def pipeline(
         pr_enabled=pr_enabled,
         backend=backend,
         model_variant=model_variant,
+        chrome=chrome_enabled,
     )
     raise typer.Exit(exit_code)

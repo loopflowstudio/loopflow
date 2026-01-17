@@ -82,6 +82,7 @@ struct LoopflowConfig: Codable {
     let push: Bool?
     let pr: Bool?
     let yolo: Bool?
+    let chrome: Bool?
     let docs: Bool?
     let diff: Bool?
     let diffFiles: Bool?
@@ -93,7 +94,7 @@ struct LoopflowConfig: Codable {
     enum CodingKeys: String, CodingKey {
         case agentModel = "agent_model"
         case diffFiles = "diff_files"
-        case interactive, terminal, ide, workspace, context, exclude, push, pr, yolo, docs, diff, paste, voice, summaries, work
+        case interactive, terminal, ide, workspace, context, exclude, push, pr, yolo, chrome, docs, diff, paste, voice, summaries, work
     }
 
     /// Voice config can be a single string or array of strings in YAML.

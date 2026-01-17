@@ -1,15 +1,11 @@
 ---
-context:
-  - Maestro/DESIGN.md
-  - .design/ux-research.md
-  - .design/ux-gaps.md
-  - /tmp/maestro-*.png
-  - Maestro/Maestro/Views/
-  - Maestro/Maestro/Services/
 voice: architect
 ---
 > **Screenshots**: If running standalone, capture with Cmd+Shift+S first.
 > In the `ux` pipeline, uses screenshots from the ux-research step.
+>
+> **Build from this branch**: Run `cd Maestro && ./dev run` to build and launch
+> Maestro from the current branch. Don't use the installed app—it won't have your changes.
 
 Implement high-priority UX improvements based on research and gap analysis.
 
@@ -58,7 +54,7 @@ For each improvement:
 
 1. Identify the specific file(s) to change
 2. Make the minimal edit
-3. Build: `cd Maestro && xcodebuild -scheme Maestro -configuration Debug build`
+3. Build and run: `cd Maestro && ./dev run`
 4. Describe the before/after behavior
 5. Commit with message: `maestro: [area] short description`
 

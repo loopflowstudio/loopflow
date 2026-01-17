@@ -95,6 +95,16 @@ yolo: true
 
 Use with caution. Best for trusted pipelines in worktrees.
 
+### chrome
+
+Enable Chrome browser automation for Claude Code. Requires the [Chrome extension](https://chromewebstore.google.com/detail/claude-browser-tool/gfbkicmkbhdjacjmfjffcldkdopkfjgk) (v1.0.36+) and a paid Claude plan.
+
+```yaml
+chrome: true
+```
+
+When enabled, Claude can interact with web pages—clicking, typing, reading content, and taking screenshots.
+
 ### context
 
 Files always included as context for every task.

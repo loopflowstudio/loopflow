@@ -1,5 +1,6 @@
 agent_model: claude:opus
 yolo: true
+chrome: true
 context:
   - docs
   - .design

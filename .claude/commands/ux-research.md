@@ -1,12 +1,11 @@
 ---
-context:
-  - Maestro/DESIGN.md
-  - /tmp/maestro-*.png
-  - Maestro/Maestro/Views/
 voice: customer
 ---
 > **Before running**: Open Maestro, navigate to each screen you want reviewed,
 > and press Cmd+Shift+S to capture. Screenshots save to `/tmp/maestro-<timestamp>.png`.
+>
+> **Build from this branch**: Run `cd Maestro && ./dev run` to build and launch
+> Maestro from the current branch. Don't use the installed app—it won't have your changes.
 
 Conduct user research by simulating three user profiles experiencing Maestro for the first time.
 

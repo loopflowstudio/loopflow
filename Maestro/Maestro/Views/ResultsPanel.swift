@@ -1,6 +1,7 @@
-// Results panel showing session outcomes instead of streaming logs.
+// Results panel showing session outcomes and embedded terminal.
 
 import SwiftUI
+import SwiftTerm
 
 struct ResultsPanel: View {
     @Bindable var appState: AppState
@@ -11,16 +12,26 @@ struct ResultsPanel: View {
     @State private var showingDiffSheet = false
     @State private var diffContent: String?
     @State private var diffLoading = false
+    @AppStorage("useEmbeddedTerminal") private var useEmbeddedTerminal = true
 
     private let terminalLauncher = TerminalLauncher()
 
     var body: some View {
         VStack(spacing: 0) {
-            if let result = appState.currentSessionResult {
+            // Show embedded terminal when task is running via TaskRunner
+            if appState.taskRunner.isRunning,
+               useEmbeddedTerminal,
+               let command = appState.taskRunner.currentCommand,
+               let workDir = appState.taskRunner.currentWorkingDirectory {
+                embeddedTerminalView(command: command, workDir: workDir)
+            } else if let result = appState.currentSessionResult {
                 resultView(result)
             } else if !appState.liveOutputBySession.isEmpty && appState.showResultsLog {
                 // Fallback to legacy output view if toggled
                 legacyOutputView
+            } else {
+                // Empty state when no tasks have been run
+                emptyStateView
             }
         }
         .sheet(isPresented: $showingDiffSheet) {
@@ -79,44 +90,77 @@ struct ResultsPanel: View {
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
 
-            // Toggle for log view (when not running)
-            if result.status != .running {
+            // Stop button (when running)
+            if result.status == .running {
                 Button {
-                    appState.showResultsLog.toggle()
+                    // TODO: Implement stop action
                 } label: {
-                    Image(systemName: appState.showResultsLog ? "list.bullet.rectangle" : "doc.text")
+                    Image(systemName: "stop.fill")
                         .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .help(appState.showResultsLog ? "Show results" : "Show log")
+                .help("Stop task")
             }
 
-            // Clear button
-            if result.status != .running {
-                Button {
-                    appState.clearCompletedResults()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.caption)
+            // Overflow menu
+            Menu {
+                if result.status != .running {
+                    Button {
+                        appState.showResultsLog.toggle()
+                    } label: {
+                        Label(
+                            appState.showResultsLog ? "Show Results" : "Show Log",
+                            systemImage: appState.showResultsLog ? "list.bullet.rectangle" : "doc.text"
+                        )
+                    }
+
+                    Button {
+                        copyOutput(result)
+                    } label: {
+                        Label("Copy Output", systemImage: "doc.on.doc")
+                    }
+
+                    Divider()
+
+                    Button {
+                        appState.clearCompletedResults()
+                    } label: {
+                        Label("Clear", systemImage: "xmark")
+                    }
                 }
-                .buttonStyle(.plain)
-                .help("Clear results")
-            }
 
-            // Expand/collapse
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isExpanded.toggle()
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    Label(isExpanded ? "Collapse" : "Expand", systemImage: isExpanded ? "chevron.up" : "chevron.down")
                 }
             } label: {
-                Image(systemName: isExpanded ? "chevron.down" : "chevron.up")
+                Image(systemName: "ellipsis")
                     .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20, height: 20)
             }
-            .buttonStyle(.plain)
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(.bar)
+    }
+
+    private func copyOutput(_ result: SessionResult) {
+        var output = ""
+        if let lines = appState.liveOutputBySession[result.id] {
+            output = lines.map { $0.text }.joined(separator: "\n")
+        }
+        if !output.isEmpty {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(output, forType: .string)
+        }
     }
 
     @ViewBuilder
@@ -339,6 +383,27 @@ struct ResultsPanel: View {
 
     // MARK: - States
 
+    private var emptyStateView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "terminal.fill")
+                .font(.system(size: 28))
+                .foregroundStyle(.tertiary)
+
+            VStack(spacing: 4) {
+                Text("Ready to run")
+                    .fontWeight(.medium)
+                    .foregroundStyle(.secondary)
+                Text("Results will appear here after you run a task.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 32)
+        .padding(.horizontal, 16)
+    }
+
     private var noChangesView: some View {
         VStack(spacing: 8) {
             Image(systemName: "checkmark.circle")
@@ -525,19 +590,89 @@ struct ResultsPanel: View {
         }
     }
 
-    private func logLineColor(_ text: String) -> Color {
+    private func logLineColor(_ text: String) -> SwiftUI.Color {
         if text.hasPrefix("→") { return .blue }
         if text.hasPrefix("✓") { return .green }
         if text.hasPrefix("✗") { return .red }
         return .primary
     }
 
+    // MARK: - Embedded Terminal
+
+    @ViewBuilder
+    private func embeddedTerminalView(command: String, workDir: URL) -> some View {
+        VStack(spacing: 0) {
+            // Header with running status
+            HStack(spacing: 8) {
+                ProgressView()
+                    .scaleEffect(0.5)
+                    .frame(width: 16, height: 16)
+
+                Text("Running \(command.components(separatedBy: " ").dropFirst().first ?? "task")...")
+                    .font(.caption)
+                    .fontWeight(.medium)
+
+                Spacer()
+
+                Text(formatDuration(elapsedTime))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+
+                // Stop button
+                Button {
+                    appState.taskRunner.cancelTask()
+                } label: {
+                    Image(systemName: "stop.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+                .buttonStyle(.plain)
+                .help("Stop task")
+
+                // Expand/collapse
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.up")
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.bar)
+
+            // Terminal view
+            if isExpanded {
+                EmbeddedTerminalView(
+                    command: command,
+                    workingDirectory: workDir,
+                    onTerminate: {
+                        appState.taskRunner.handleTermination()
+                    }
+                )
+                .frame(minHeight: 200, maxHeight: 400)
+            }
+        }
+        .onAppear {
+            startTimer(from: Date())
+        }
+        .onDisappear {
+            stopTimer()
+        }
+    }
+
     // MARK: - Timer
 
     private func startTimer(from startDate: Date) {
         elapsedTime = Date().timeIntervalSince(startDate)
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
-            elapsedTime = Date().timeIntervalSince(startDate)
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [self] _ in
+            Task { @MainActor in
+                self.elapsedTime = Date().timeIntervalSince(startDate)
+            }
         }
     }
 
@@ -562,59 +697,12 @@ struct ResultsDiffSheet: View {
     let onDismiss: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Header
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Full Diff")
-                        .font(.headline)
-                    Text("Changes from \(task)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Button {
-                    onDismiss()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding()
-
-            Divider()
-
-            // Content
-            if isLoading {
-                VStack {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                    Text("Loading diff...")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let content = diffContent, !content.isEmpty {
-                ScrollView {
-                    DiffContentView(content: content)
-                        .padding()
-                }
-            } else {
-                VStack(spacing: 8) {
-                    Image(systemName: "doc.text")
-                        .font(.title2)
-                        .foregroundStyle(.tertiary)
-                    Text("No diff available")
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-        .frame(minWidth: 600, minHeight: 400)
-        .frame(idealWidth: 800, idealHeight: 600)
+        DiffSheetView(
+            title: "Full Diff",
+            subtitle: "Changes from \(task)",
+            diffContent: diffContent,
+            isLoading: isLoading
+        )
     }
 }
 

@@ -119,10 +119,11 @@ uv publish
 
 Requires `UV_PUBLISH_TOKEN` env var or `~/.pypirc` credentials.
 
-### 9. Install locally
+### 9. Install locally and restart daemon
 
 ```bash
 uv tool install --force loopflow
+lfd install  # reinstalls and restarts the daemon with new binary
 ```
 
 ### 10. Tag and push

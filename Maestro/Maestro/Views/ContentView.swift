@@ -71,15 +71,7 @@ struct ContentView: View {
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
-                .help("Refresh")
-            }
-
-            ToolbarItem(placement: .primaryAction) {
-                if let repo = appState.currentRepo {
-                    Text(repo.lastPathComponent)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                .help("Refresh workspaces and tasks")
             }
         }
     }

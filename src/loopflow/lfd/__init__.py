@@ -59,13 +59,17 @@ def status():
 
 @app.command()
 def install():
-    """Install launchd plist for auto-start."""
-    if is_running():
-        typer.echo("lfd is already running")
-        return
+    """Install launchd plist for auto-start.
+
+    If already running, restarts with the new configuration.
+    """
+    was_running = is_running()
 
     if launchd_install():
-        typer.echo("lfd installed and started")
+        if was_running:
+            typer.echo("lfd reinstalled and restarted")
+        else:
+            typer.echo("lfd installed and started")
     else:
         typer.echo("Failed to install lfd")
         raise typer.Exit(1)

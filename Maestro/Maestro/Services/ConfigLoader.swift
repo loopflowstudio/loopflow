@@ -123,6 +123,7 @@ struct ConfigLoader {
             push: push,
             pr: pr,
             yolo: yolo,
+            chrome: nil,
             docs: docs,
             diff: diff,
             diffFiles: diffFiles,

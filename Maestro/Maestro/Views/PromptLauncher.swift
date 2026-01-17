@@ -16,6 +16,7 @@ struct PromptLauncher: View {
     @State private var showAdvancedOptions = false
     @State private var isPreviewExpanded = false
     @State private var expandedSections: Set<ContextKind> = [.docs, .files]
+    @AppStorage("useEmbeddedTerminal") private var useEmbeddedTerminal = true
 
     private let terminalLauncher = TerminalLauncher()
 
@@ -61,6 +62,7 @@ struct PromptLauncher: View {
                     modelSelector
                     voiceSelector
                     contextBar
+                    embeddedTerminalToggle
                     commandPreview
                 }
             }
@@ -77,6 +79,15 @@ struct PromptLauncher: View {
         .onAppear {
             isInputFocused = true
         }
+        .onChange(of: appState.prompts) { _, prompts in
+            // Auto-select "implement" task on first load if available
+            if !hasInitializedTask && !prompts.isEmpty {
+                hasInitializedTask = true
+                if let implementTask = prompts.first(where: { $0.name.lowercased() == "implement" }) {
+                    selectTask(implementTask)
+                }
+            }
+        }
         .background {
             // Hidden button for Cmd+L keyboard shortcut to focus prompt
             Button("") {
@@ -89,10 +100,11 @@ struct PromptLauncher: View {
 
     // MARK: - Task Selector
 
-    @State private var taskSearchText: String = ""
+    @State private var taskSearchText: String = "implement"
     @State private var isTaskSearchFocused: Bool = false
     @State private var highlightedTaskIndex: Int = 0
     @FocusState private var taskFieldFocused: Bool
+    @State private var hasInitializedTask: Bool = false
 
     private var filteredTasks: [PromptCard] {
         if taskSearchText.isEmpty {
@@ -201,7 +213,7 @@ struct PromptLauncher: View {
                                 Button {
                                     selectTask(prompt)
                                 } label: {
-                                    VStack(alignment: .leading, spacing: 2) {
+                                    VStack(alignment: .leading, spacing: 3) {
                                         HStack {
                                             Text(prompt.displayName)
                                                 .fontWeight(.medium)
@@ -212,13 +224,14 @@ struct PromptLauncher: View {
                                         }
                                         if let description = prompt.shortDescription {
                                             Text(description)
-                                                .font(.caption2)
-                                                .foregroundStyle(.tertiary)
-                                                .lineLimit(1)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(2)
+                                                .fixedSize(horizontal: false, vertical: true)
                                         }
                                     }
                                     .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
+                                    .padding(.vertical, 8)
                                     .background(index == highlightedTaskIndex ? Color.accentColor.opacity(0.1) : Color.clear)
                                 }
                                 .buttonStyle(.plain)
@@ -561,12 +574,12 @@ struct PromptLauncher: View {
             ZStack(alignment: .topLeading) {
                 // Placeholder with examples
                 if inputText.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Describe what you want to build...")
-                            .foregroundStyle(.tertiary)
-                        Text("e.g. \"add user authentication\" or \"fix the login bug\"")
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("What should the AI build?")
+                            .foregroundStyle(.secondary)
+                        Text("Try: \"add user authentication\" or \"refactor the API to use async/await\"")
                             .font(.caption)
-                            .foregroundStyle(.quaternary)
+                            .foregroundStyle(.tertiary)
                     }
                     .padding(.horizontal, 4)
                     .padding(.vertical, 12)
@@ -717,15 +730,24 @@ struct PromptLauncher: View {
     private var modeAndAdvancedRow: some View {
         VStack(spacing: 8) {
             HStack(spacing: 12) {
-                Picker("", selection: $appState.runMode) {
-                    Text("Auto").tag(RunMode.auto)
-                    Text("Interactive").tag(RunMode.interactive)
+                VStack(alignment: .leading, spacing: 2) {
+                    Picker("", selection: $appState.runMode) {
+                        Text("Auto").tag(RunMode.auto)
+                        Text("Interactive").tag(RunMode.interactive)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 160)
+
+                    // Inline description of current mode
+                    Text(appState.runMode == .auto
+                        ? "Runs to completion"
+                        : "Chat with the AI")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 160)
                 .help(appState.runMode == .auto
-                    ? "Auto: Runs to completion without interruption"
-                    : "Interactive: Chat with the AI, can interrupt and redirect")
+                    ? "Auto: Runs to completion without interruption. Best for most tasks."
+                    : "Interactive: Chat with the AI, can interrupt and redirect. Use for exploration.")
 
                 Spacer()
 
@@ -761,7 +783,7 @@ struct PromptLauncher: View {
                     }
                 } label: {
                     HStack(spacing: 4) {
-                        Text("Options")
+                        Text(showAdvancedOptions ? "Options" : "More options")
                             .font(.caption)
                         Image(systemName: showAdvancedOptions ? "chevron.up" : "chevron.down")
                             .font(.caption2)
@@ -769,6 +791,7 @@ struct PromptLauncher: View {
                     .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
+                .help("Model, voice, context toggles, and command preview")
             }
 
             // Context preview panel
@@ -940,53 +963,77 @@ struct PromptLauncher: View {
 
     @State private var isDraggingOver = false
     @State private var showingFilePicker = false
+    @AppStorage("contextBarExpanded") private var contextBarExpanded = false
 
     private var contextBar: some View {
-        HStack(spacing: 6) {
-            // Context chips
-            ContextChip(label: "Docs", isOn: $appState.includeDocs, color: .blue)
-                .help("Include README, STYLE, and other docs")
-            ContextChip(label: "Files", isOn: $appState.includeDiffFiles, color: .teal)
-                .help("Include files touched by this branch")
-            ContextChip(label: "Diff", isOn: $appState.includeDiff, color: .green)
-                .help("Include raw diff output")
-            ContextChip(label: "Clipboard", isOn: $appState.includePaste, color: .purple)
-                .help("Include clipboard content")
-            if appState.config?.hasSummaries == true {
-                ContextChip(label: "Summaries", isOn: $appState.includeSummaries, color: .orange)
-                    .help("Include pre-generated codebase summaries")
-            }
-
-            // Separator if there are attached files
-            if !appState.attachedFiles.isEmpty {
-                Divider()
-                    .frame(height: 16)
-                    .padding(.horizontal, 2)
-            }
-
-            // Attached file chips
-            ForEach(appState.attachedFiles, id: \.self) { file in
-                FileChip(
-                    name: file.lastPathComponent,
-                    icon: iconForFile(file)
-                ) {
-                    appState.attachedFiles.removeAll { $0 == file }
+        VStack(alignment: .leading, spacing: 8) {
+            // Collapsible header - always visible
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    contextBarExpanded.toggle()
                 }
+            } label: {
+                HStack(spacing: 6) {
+                    Text("Context")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                    Text(formatTokenCount(appState.estimatedTokens))
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                    Image(systemName: contextBarExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption2)
+                }
+                .foregroundStyle(.secondary)
             }
+            .buttonStyle(.plain)
 
-            // Add file button
-            AddFileButton {
-                showingFilePicker = true
-            }
-            .fileImporter(
-                isPresented: $showingFilePicker,
-                allowedContentTypes: [.item],
-                allowsMultipleSelection: true
-            ) { result in
-                if case .success(let urls) = result {
-                    for url in urls {
-                        if !appState.attachedFiles.contains(url) {
-                            appState.attachedFiles.append(url)
+            // Expanded content
+            if contextBarExpanded {
+                HStack(spacing: 6) {
+                    // Context chips
+                    ContextChip(label: "Docs", isOn: $appState.includeDocs, color: .blue)
+                        .help("AI sees: README, STYLE guide, and project docs. Helps it follow your conventions.")
+                    ContextChip(label: "Files", isOn: $appState.includeDiffFiles, color: .teal)
+                        .help("AI sees: Files you've changed on this branch. Helps it understand your work in progress.")
+                    ContextChip(label: "Diff", isOn: $appState.includeDiff, color: .green)
+                        .help("AI sees: Exact line-by-line changes. Useful for reviews and understanding what changed.")
+                    ContextChip(label: "Clipboard", isOn: $appState.includePaste, color: .purple)
+                        .help("AI sees: Whatever you copied. Paste code, errors, or docs for reference.")
+                    ContextChip(label: "Chrome", isOn: $appState.includeChrome, color: .indigo)
+                        .help("AI can control Chrome browser for web testing and automation.")
+                    if appState.config?.hasSummaries == true {
+                        ContextChip(label: "Summaries", isOn: $appState.includeSummaries, color: .orange)
+                            .help("AI sees: Architecture overview of your codebase. Pre-generated for faster responses.")
+                    }
+                }
+
+                // Attached files row
+                HStack(spacing: 6) {
+                    ForEach(appState.attachedFiles, id: \.self) { file in
+                        FileChip(
+                            name: file.lastPathComponent,
+                            icon: iconForFile(file)
+                        ) {
+                            appState.attachedFiles.removeAll { $0 == file }
+                        }
+                    }
+
+                    // Add file button
+                    AddFileButton {
+                        showingFilePicker = true
+                    }
+                    .fileImporter(
+                        isPresented: $showingFilePicker,
+                        allowedContentTypes: [.item],
+                        allowsMultipleSelection: true
+                    ) { result in
+                        if case .success(let urls) = result {
+                            for url in urls {
+                                if !appState.attachedFiles.contains(url) {
+                                    appState.attachedFiles.append(url)
+                                }
+                            }
                         }
                     }
                 }
@@ -1043,9 +1090,29 @@ struct PromptLauncher: View {
         }
     }
 
+    // MARK: - Embedded Terminal Toggle
+
+    private var embeddedTerminalToggle: some View {
+        HStack(spacing: 8) {
+            Toggle(isOn: $useEmbeddedTerminal) {
+                HStack(spacing: 6) {
+                    Image(systemName: "terminal.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("Show output in app")
+                        .font(.caption)
+                }
+            }
+            .toggleStyle(.checkbox)
+            .help("When enabled, task output appears in the results panel instead of opening an external terminal")
+
+            Spacer()
+        }
+    }
+
     // MARK: - Command Preview
 
-    @State private var showCommandPreview = false
+    @AppStorage("showCommandPreview") private var showCommandPreview = false
 
     private var commandPreview: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1189,9 +1256,22 @@ struct PromptLauncher: View {
     }
 
     private func launchCommand(repo: URL, workPath: URL) {
-        let terminal = appState.config?.terminalApp ?? .warp
         let command = appState.buildCommand(pipeline: selectedPipeline)
 
+        print("[PromptLauncher] launchCommand: useEmbeddedTerminal=\(useEmbeddedTerminal), runMode=\(appState.runMode), command=\(command.prefix(50))...")
+
+        // Use embedded terminal for auto mode when enabled
+        if useEmbeddedTerminal && appState.runMode == .auto {
+            print("[PromptLauncher] Starting embedded terminal task")
+            appState.taskRunner.startTask(command: command, workingDirectory: workPath) {
+                print("[PromptLauncher] Task completed")
+            }
+            return
+        }
+        print("[PromptLauncher] Falling back to external terminal")
+
+        // Fall back to external terminal
+        let terminal = appState.config?.terminalApp ?? .warp
         do {
             try terminalLauncher.launchTerminal(terminal, at: workPath, command: command)
         } catch {

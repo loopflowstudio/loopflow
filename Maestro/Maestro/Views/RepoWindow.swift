@@ -27,7 +27,7 @@ struct RepoWindow: View {
         .task {
             // Check setup first
             let status = setupService.checkDependencies()
-            setupComplete = status.allInstalled
+            setupComplete = status.lfInstalled
             hasCheckedSetup = true
 
             // Then open repo if setup is complete

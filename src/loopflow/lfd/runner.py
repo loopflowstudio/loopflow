@@ -126,6 +126,7 @@ def run_agent_iteration(
         log_session_start(session)
 
         # Build and run command
+        chrome_enabled = config.chrome if config else False
         command = build_model_command(
             backend,
             auto=True,
@@ -135,6 +136,7 @@ def run_agent_iteration(
             sandbox_root=worktree_path.parent,
             workdir=worktree_path,
             images=components.image_files,
+            chrome=chrome_enabled,
         )
 
         collector_cmd = [

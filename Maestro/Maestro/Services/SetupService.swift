@@ -1,67 +1,106 @@
-// Service for checking and installing dependencies and daemon.
+// Service for checking and installing loopflow and its dependencies.
 
 import Foundation
+import os.log
+
+private let logger = Logger(subsystem: "com.loopflow.maestro", category: "setup")
 
 struct SetupService {
     struct DependencyStatus {
         var lfInstalled: Bool
-        var wtInstalled: Bool
-        var daemonInstalled: Bool
-        var daemonRunning: Bool
         var lfPath: String?
-        var wtPath: String?
+    }
 
-        var allInstalled: Bool {
-            lfInstalled && wtInstalled
+    private let logFile: URL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".lf/logs/maestro-setup.log")
+
+    private func log(_ message: String) {
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let line = "[\(timestamp)] \(message)\n"
+
+        // Log to system log
+        logger.info("\(message)")
+
+        // Also append to file for easy access
+        try? FileManager.default.createDirectory(
+            at: logFile.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        if let data = line.data(using: .utf8) {
+            if FileManager.default.fileExists(atPath: logFile.path) {
+                if let handle = try? FileHandle(forWritingTo: logFile) {
+                    handle.seekToEndOfFile()
+                    handle.write(data)
+                    handle.closeFile()
+                }
+            } else {
+                try? data.write(to: logFile)
+            }
         }
     }
 
-    private let plistPath = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/LaunchAgents/com.loopflow.lfd.plist")
-
     func checkDependencies() -> DependencyStatus {
+        log("checkDependencies: searching for lf")
         let lfPath = findExecutable("lf")
-        let wtPath = findExecutable("wt")
-        let daemonInstalled = FileManager.default.fileExists(atPath: plistPath.path)
-        let daemonRunning = isDaemonRunning()
-
+        log("checkDependencies: lf path = \(lfPath ?? "not found")")
         return DependencyStatus(
             lfInstalled: lfPath != nil,
-            wtInstalled: wtPath != nil,
-            daemonInstalled: daemonInstalled,
-            daemonRunning: daemonRunning,
-            lfPath: lfPath,
-            wtPath: wtPath
+            lfPath: lfPath
         )
     }
 
-    func installLoopflow() async throws {
-        try await runCommand("/bin/zsh", args: ["-l", "-c", "pip install loopflow"])
+    /// Install loopflow and all its dependencies
+    func install() async throws {
+        log("install: starting")
+
+        // Install uv if needed
+        let existingUv = findExecutable("uv")
+        log("install: existing uv = \(existingUv ?? "not found")")
+
+        if existingUv == nil {
+            log("install: installing uv...")
+            try await installUv()
+        }
+
+        guard let uvPath = findExecutable("uv") else {
+            log("install: ERROR - uv not found after install attempt")
+            throw SetupError.uvInstallFailed
+        }
+        log("install: uv path = \(uvPath)")
+
+        // Install loopflow via uv
+        log("install: running uv tool install loopflow...")
+        try await runCommand(uvPath, args: ["tool", "install", "loopflow"])
+        log("install: uv tool install completed")
+
+        // Run lfops install to set up all dependencies
+        let lfopsPath = findExecutable("lfops")
+        log("install: lfops path = \(lfopsPath ?? "not found")")
+
+        guard let lfopsPath else {
+            log("install: ERROR - lfops not found after installing loopflow")
+            throw SetupError.commandFailed("lfops not found after installing loopflow")
+        }
+
+        log("install: running lfops install...")
+        try await runCommand(lfopsPath, args: ["install"])
+        log("install: completed successfully")
     }
 
-    func installWt() async throws {
-        try await runCommand("/bin/zsh", args: ["-l", "-c", "lf ops install"])
-    }
-
-    func installDaemon() async throws {
-        try await runCommand("/bin/zsh", args: ["-l", "-c", "lfd install"])
-    }
-
-    func uninstallDaemon() async throws {
-        try await runCommand("/bin/zsh", args: ["-l", "-c", "lfd uninstall"])
-    }
-
+    /// Ensure the loopflow daemon is running
     func ensureDaemonRunning() async throws {
-        let status = checkDependencies()
+        // Skip if lfd not installed
+        guard let lfdPath = findExecutable("lfd") else { return }
 
-        // Skip if lf not installed
-        guard status.lfInstalled else { return }
+        let plistPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents/com.loopflow.lfd.plist")
 
-        if !status.daemonInstalled {
-            try await installDaemon()
-        } else if !status.daemonRunning {
-            // Restart daemon if installed but not running
-            try await runCommand("launchctl", args: ["load", plistPath.path])
+        if !FileManager.default.fileExists(atPath: plistPath.path) {
+            // Install daemon if plist doesn't exist
+            try await runCommand(lfdPath, args: ["install"])
+        } else if !isDaemonRunning() {
+            // Load daemon if installed but not running
+            try await runCommand("/bin/launchctl", args: ["load", plistPath.path])
         }
     }
 
@@ -81,31 +120,38 @@ struct SetupService {
         }
     }
 
-    private func findExecutable(_ name: String) -> String? {
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-l", "-c", "which \(name)"]
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
+    private func installUv() async throws {
+        try await runCommand("/bin/sh", args: [
+            "-c",
+            "curl -LsSf https://astral.sh/uv/install.sh | sh"
+        ])
+    }
 
-        do {
-            try process.run()
-            process.waitUntilExit()
-            if process.terminationStatus == 0 {
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                if let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-                   !path.isEmpty {
-                    return path
-                }
+    private func findExecutable(_ name: String) -> String? {
+        for dir in binDirectories {
+            let path = (dir as NSString).appendingPathComponent(name)
+            if FileManager.default.isExecutableFile(atPath: path) {
+                return path
             }
-        } catch {
-            // Fall through
         }
         return nil
     }
 
+    private var binDirectories: [String] {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return [
+            "\(home)/.local/bin",
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "/usr/bin",
+            "\(home)/.cargo/bin",
+        ]
+    }
+
     private func runCommand(_ executable: String, args: [String]) async throws {
+        let cmdString = "\(executable) \(args.joined(separator: " "))"
+        log("runCommand: \(cmdString)")
+
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let process = Process()
             let pipe = Pipe()
@@ -119,14 +165,21 @@ struct SetupService {
                 try process.run()
                 process.waitUntilExit()
 
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: data, encoding: .utf8) ?? ""
+
+                log("runCommand: exit code \(process.terminationStatus)")
+                if !output.isEmpty {
+                    log("runCommand: output = \(output.prefix(500))")
+                }
+
                 if process.terminationStatus == 0 {
                     continuation.resume()
                 } else {
-                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                    let output = String(data: data, encoding: .utf8) ?? "Unknown error"
-                    continuation.resume(throwing: SetupError.commandFailed(output))
+                    continuation.resume(throwing: SetupError.commandFailed(output.isEmpty ? "Exit code \(process.terminationStatus)" : output))
                 }
             } catch {
+                log("runCommand: exception = \(error)")
                 continuation.resume(throwing: error)
             }
         }
@@ -134,10 +187,13 @@ struct SetupService {
 
     enum SetupError: LocalizedError {
         case commandFailed(String)
+        case uvInstallFailed
 
         var errorDescription: String? {
             switch self {
             case .commandFailed(let msg): return msg
+            case .uvInstallFailed:
+                return "Failed to install uv. Please install manually:\n\ncurl -LsSf https://astral.sh/uv/install.sh | sh"
             }
         }
     }

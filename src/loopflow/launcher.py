@@ -202,12 +202,16 @@ def build_claude_command(
     stream: bool,
     skip_permissions: bool,
     model_variant: str | None = None,
+    chrome: bool = False,
 ) -> list[str]:
     """Build Claude CLI command for the requested run mode.
 
     Prompt should be appended as a CLI argument.
     """
     cmd = ["claude"]
+
+    if chrome:
+        cmd.append("--chrome")
 
     if model_variant:
         cmd.extend(["--model", model_variant])
@@ -380,6 +384,7 @@ def build_model_command(
     sandbox_root: Path | None = None,
     workdir: Path | None = None,
     images: list[Path] | None = None,
+    chrome: bool = False,
 ) -> list[str]:
     """Build a model command for auto/background execution.
 
@@ -387,7 +392,7 @@ def build_model_command(
     Images are passed to Codex via -i flag; Claude/Gemini read from filesystem.
     """
     if model == "claude":
-        return build_claude_command(auto=auto, stream=stream, skip_permissions=skip_permissions, model_variant=model_variant)
+        return build_claude_command(auto=auto, stream=stream, skip_permissions=skip_permissions, model_variant=model_variant, chrome=chrome)
     if model == "gemini":
         return build_gemini_command(
             auto=auto,
@@ -415,6 +420,7 @@ def build_model_interactive_command(
     sandbox_root: Path | None = None,
     workdir: Path | None = None,
     images: list[Path] | None = None,
+    chrome: bool = False,
 ) -> list[str]:
     """Build a model command for interactive execution.
 
@@ -422,7 +428,7 @@ def build_model_interactive_command(
     Images are passed to Codex via -i flag; Claude/Gemini read from filesystem.
     """
     if model == "claude":
-        return build_claude_command(auto=False, stream=False, skip_permissions=skip_permissions, model_variant=model_variant)
+        return build_claude_command(auto=False, stream=False, skip_permissions=skip_permissions, model_variant=model_variant, chrome=chrome)
     if model == "gemini":
         return build_gemini_interactive_command(
             skip_permissions=skip_permissions,

@@ -40,9 +40,13 @@ struct EmbeddedTerminalView: NSViewRepresentable {
 
     private func startProcess(in terminal: LocalProcessTerminalView) {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        // Must cd to working directory first since startProcess doesn't support currentDirectory
+        let escapedPath = workingDirectory.path.replacingOccurrences(of: "'", with: "'\\''")
+        // Source zshrc to get user's PATH, then run command
+        let fullCommand = "source ~/.zshrc 2>/dev/null; cd '\(escapedPath)' && \(command)"
         terminal.startProcess(
             executable: shell,
-            args: ["-l", "-c", command],
+            args: ["-c", fullCommand],
             environment: buildEnvironment(),
             execName: "shell"
         )
@@ -55,6 +59,17 @@ struct EmbeddedTerminalView: NSViewRepresentable {
         // Remove TERM_PROGRAM to avoid confusing the shell
         env.removeValue(forKey: "TERM_PROGRAM")
         env.removeValue(forKey: "TERM_PROGRAM_VERSION")
+
+        // Ensure common bin paths are in PATH (GUI apps may not have shell PATH)
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let commonPaths = [
+            "\(home)/.local/bin",
+            "/opt/homebrew/bin",
+            "/usr/local/bin"
+        ]
+        let existingPath = env["PATH"] ?? "/usr/bin:/bin"
+        let newPath = (commonPaths + [existingPath]).joined(separator: ":")
+        env["PATH"] = newPath
 
         return env.map { "\($0.key)=\($0.value)" }
     }

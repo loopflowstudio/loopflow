@@ -11,6 +11,8 @@ service lifecycle management.
 
 import os
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 LABEL = "com.loopflow.lfd"
@@ -45,13 +47,11 @@ def _find_lfd_executable() -> str:
     if result.returncode == 0:
         return result.stdout.strip()
 
-    import sys
     return sys.executable
 
 
 def _generate_plist() -> str:
     """Generate the launchd plist XML."""
-    import sys
     lfd_path = _find_lfd_executable()
 
     if lfd_path == sys.executable:
@@ -138,8 +138,6 @@ def install() -> bool:
     Uses bootout/bootstrap for proper service lifecycle.
     If already installed, unloads first to pick up any plist changes.
     """
-    import time
-
     PLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
@@ -176,8 +174,6 @@ def install() -> bool:
 
 def uninstall() -> bool:
     """Stop the daemon and remove the launchd plist."""
-    import time
-
     # Get PID before bootout (for fallback kill)
     pid = get_pid()
     if not pid:

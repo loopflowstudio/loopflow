@@ -96,7 +96,7 @@ voice: customer
 
 ## Part 1: Screenshot Capture
 
-Use Maestro's debug capture (⌘⇧C) to generate screenshots of key states:
+Use Maestro's debug capture (⌘4) to generate screenshots of key states:
 - Welcome/setup screen
 - Empty repo state
 - Prompt input with various toggle states

@@ -1000,6 +1000,8 @@ struct PromptLauncher: View {
                         .help("AI sees: Exact line-by-line changes. Useful for reviews and understanding what changed.")
                     ContextChip(label: "Clipboard", isOn: $appState.includePaste, color: .purple)
                         .help("AI sees: Whatever you copied. Paste code, errors, or docs for reference.")
+                    ContextChip(label: "Chrome", isOn: $appState.includeChrome, color: .indigo)
+                        .help("AI can control Chrome browser for web testing and automation.")
                     if appState.config?.hasSummaries == true {
                         ContextChip(label: "Summaries", isOn: $appState.includeSummaries, color: .orange)
                             .help("AI sees: Architecture overview of your codebase. Pre-generated for faster responses.")
@@ -1256,13 +1258,17 @@ struct PromptLauncher: View {
     private func launchCommand(repo: URL, workPath: URL) {
         let command = appState.buildCommand(pipeline: selectedPipeline)
 
+        print("[PromptLauncher] launchCommand: useEmbeddedTerminal=\(useEmbeddedTerminal), runMode=\(appState.runMode), command=\(command.prefix(50))...")
+
         // Use embedded terminal for auto mode when enabled
         if useEmbeddedTerminal && appState.runMode == .auto {
+            print("[PromptLauncher] Starting embedded terminal task")
             appState.taskRunner.startTask(command: command, workingDirectory: workPath) {
-                // Task completed - could show notification or update UI
+                print("[PromptLauncher] Task completed")
             }
             return
         }
+        print("[PromptLauncher] Falling back to external terminal")
 
         // Fall back to external terminal
         let terminal = appState.config?.terminalApp ?? .warp

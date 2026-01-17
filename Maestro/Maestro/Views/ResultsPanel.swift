@@ -17,6 +17,8 @@ struct ResultsPanel: View {
     private let terminalLauncher = TerminalLauncher()
 
     var body: some View {
+        let _ = print("[ResultsPanel] isRunning=\(appState.taskRunner.isRunning), useEmbeddedTerminal=\(useEmbeddedTerminal), command=\(appState.taskRunner.currentCommand ?? "nil"), sessionResult=\(appState.currentSessionResult?.id ?? "nil")")
+
         VStack(spacing: 0) {
             // Show embedded terminal when task is running via TaskRunner
             if appState.taskRunner.isRunning,

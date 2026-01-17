@@ -30,6 +30,7 @@ final class AppState {
     var includeDiffFiles: Bool = true
     var includePaste: Bool = false
     var includeSummaries: Bool = true
+    var includeChrome: Bool = false
     var selectedContextFolders: Set<URL> = []
     var attachedFiles: [URL] = []  // Files dropped or added via UI
     var runMode: RunMode = .auto
@@ -99,6 +100,7 @@ final class AppState {
             includeDiffFiles = config?.diffFiles ?? true
             includePaste = config?.paste ?? false
             includeSummaries = config?.hasSummaries ?? false
+            includeChrome = config?.chrome ?? false
 
             // Initialize context folders from config
             if let contextPaths = config?.context {
@@ -369,8 +371,18 @@ final class AppState {
     }
 
     var currentSessionResult: SessionResult? {
-        // Return the most recent result (running or completed)
-        sessionResults.values
+        // Filter by selected worktree if one is selected
+        let results = sessionResults.values
+        let filtered: [SessionResult]
+
+        if let selectedPath = selectedWorktree?.path {
+            filtered = results.filter { $0.worktree == selectedPath }
+        } else {
+            filtered = Array(results)
+        }
+
+        // Return the most recent result for this worktree
+        return filtered
             .sorted { $0.startedAt > $1.startedAt }
             .first
     }
@@ -537,6 +549,12 @@ final class AppState {
         }
         if !includeSummaries {
             parts.append("--no-summaries")
+        }
+
+        // Chrome flag (only include if different from config default)
+        let configChrome = config?.chrome ?? false
+        if includeChrome != configChrome {
+            parts.append(includeChrome ? "--chrome" : "--no-chrome")
         }
 
         return parts.joined(separator: " ")

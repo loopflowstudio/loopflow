@@ -62,6 +62,7 @@ class Config(BaseModel):
     agent_model: str = "claude:opus"  # Format: backend:variant (e.g., claude:opus, claude:sonnet, codex)
     pipelines: dict[str, PipelineConfig] = Field(default_factory=dict)
     yolo: bool = False  # Skip all permission prompts
+    chrome: bool = False  # Enable Chrome integration for Claude Code (browser automation)
     push: bool = False
     pr: bool = False
     land: str = "gh"  # "gh" (GitHub PR merge) or "local" (local squash-merge)

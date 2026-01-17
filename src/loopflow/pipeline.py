@@ -71,6 +71,7 @@ def _run_step(
     should_push: bool,
     step_num: int,
     total_steps: int,
+    chrome: bool = False,
 ) -> int:
     """Execute a single pipeline step. Returns exit code."""
     print(f"\n{'='*60}")
@@ -108,6 +109,7 @@ def _run_step(
         model_variant=params.model_variant,
         sandbox_root=repo_root.parent,
         workdir=repo_root,
+        chrome=chrome,
     )
     collector_cmd = [
         sys.executable,
@@ -200,6 +202,7 @@ def _run_worktree_tasks(
     main_repo: Path,
     exclude: list[str] | None,
     skip_permissions: bool,
+    chrome: bool = False,
 ) -> list[_WorktreeResult]:
     """Run tasks in parallel temporary worktrees. Returns results for all tasks."""
     processes: list[tuple[_WorktreeTask, subprocess.Popen, Path, str, str]] = []
@@ -247,6 +250,7 @@ def _run_worktree_tasks(
             model_variant=wt_task.model_variant,
             sandbox_root=wt_path.parent,
             workdir=wt_path,
+            chrome=chrome,
         )
         collector_cmd = [
             sys.executable, "-m", "loopflow.lfd.collector",
@@ -305,6 +309,7 @@ def _run_parallel_group(
     context: list[str] | None,
     group_num: int,
     total_groups: int,
+    chrome: bool = False,
 ) -> list[int]:
     """Run parallel steps in temporary worktrees. Returns list of exit codes."""
     task_names = [s.task for s in steps]
@@ -325,7 +330,7 @@ def _run_parallel_group(
             voices=params.voices,
         ))
 
-    results = _run_worktree_tasks(wt_tasks, repo_root, main_repo, exclude, skip_permissions)
+    results = _run_worktree_tasks(wt_tasks, repo_root, main_repo, exclude, skip_permissions, chrome=chrome)
     _cleanup_worktrees(repo_root, results)
     return [r.exit_code for r in results]
 
@@ -340,6 +345,7 @@ def _run_race_step(
     context: list[str] | None,
     step_num: int,
     total_steps: int,
+    chrome: bool = False,
 ) -> int:
     """Run task with multiple models in parallel, judge and merge winner."""
     models = race.models
@@ -360,7 +366,7 @@ def _run_race_step(
             voices=None,
         ))
 
-    results = _run_worktree_tasks(wt_tasks, repo_root, main_repo, exclude, skip_permissions)
+    results = _run_worktree_tasks(wt_tasks, repo_root, main_repo, exclude, skip_permissions, chrome=chrome)
 
     # Filter to successful results
     successes = [r for r in results if r.exit_code == 0]
@@ -547,6 +553,7 @@ def run_pipeline_def(
     pr_enabled: bool = False,
     backend: str = "claude",
     model_variant: str | None = "opus",
+    chrome: bool = False,
 ) -> int:
     """Run a PipelineDef (from .lf/pipelines/). Returns first non-zero exit code, or 0."""
     should_push = push_enabled
@@ -590,6 +597,7 @@ def run_pipeline_def(
                 context,
                 step_num,
                 total,
+                chrome=chrome,
             )
             if any(code != 0 for code in exit_codes):
                 return max(exit_codes)
@@ -609,6 +617,7 @@ def run_pipeline_def(
                 step_context or None,
                 step_num,
                 total,
+                chrome=chrome,
             )
             if result_code != 0:
                 return result_code
@@ -620,6 +629,7 @@ def run_pipeline_def(
             result_code = _run_step(
                 params, repo_root, main_repo, exclude,
                 skip_permissions, should_push, step_num, total,
+                chrome=chrome,
             )
             if result_code != 0:
                 return result_code

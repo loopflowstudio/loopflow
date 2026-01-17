@@ -16,6 +16,7 @@ class TaskConfig:
     exclude: list[str] | None = None
     model: str | None = None
     voice: list[str] | None = None
+    chrome: bool | None = None  # Enable Chrome integration for Claude Code
 
 
 @dataclass
@@ -65,6 +66,7 @@ def parse_task_file(name: str, text: str) -> TaskFile:
             exclude=config_dict.get("exclude"),
             model=config_dict.get("model"),
             voice=voice,
+            chrome=config_dict.get("chrome"),
         ),
     )
 

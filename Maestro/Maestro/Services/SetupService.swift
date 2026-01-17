@@ -1,6 +1,9 @@
 // Service for checking and installing loopflow and its dependencies.
 
 import Foundation
+import os.log
+
+private let logger = Logger(subsystem: "com.loopflow.maestro", category: "setup")
 
 struct SetupService {
     struct DependencyStatus {
@@ -8,8 +11,38 @@ struct SetupService {
         var lfPath: String?
     }
 
+    private let logFile: URL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".lf/logs/maestro-setup.log")
+
+    private func log(_ message: String) {
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let line = "[\(timestamp)] \(message)\n"
+
+        // Log to system log
+        logger.info("\(message)")
+
+        // Also append to file for easy access
+        try? FileManager.default.createDirectory(
+            at: logFile.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        if let data = line.data(using: .utf8) {
+            if FileManager.default.fileExists(atPath: logFile.path) {
+                if let handle = try? FileHandle(forWritingTo: logFile) {
+                    handle.seekToEndOfFile()
+                    handle.write(data)
+                    handle.closeFile()
+                }
+            } else {
+                try? data.write(to: logFile)
+            }
+        }
+    }
+
     func checkDependencies() -> DependencyStatus {
+        log("checkDependencies: searching for lf")
         let lfPath = findExecutable("lf")
+        log("checkDependencies: lf path = \(lfPath ?? "not found")")
         return DependencyStatus(
             lfInstalled: lfPath != nil,
             lfPath: lfPath
@@ -18,24 +51,40 @@ struct SetupService {
 
     /// Install loopflow and all its dependencies
     func install() async throws {
+        log("install: starting")
+
         // Install uv if needed
-        if findExecutable("uv") == nil {
+        let existingUv = findExecutable("uv")
+        log("install: existing uv = \(existingUv ?? "not found")")
+
+        if existingUv == nil {
+            log("install: installing uv...")
             try await installUv()
         }
 
         guard let uvPath = findExecutable("uv") else {
+            log("install: ERROR - uv not found after install attempt")
             throw SetupError.uvInstallFailed
         }
+        log("install: uv path = \(uvPath)")
 
         // Install loopflow via uv
+        log("install: running uv tool install loopflow...")
         try await runCommand(uvPath, args: ["tool", "install", "loopflow"])
+        log("install: uv tool install completed")
 
         // Run lfops install to set up all dependencies
-        guard let lfopsPath = findExecutable("lfops") else {
+        let lfopsPath = findExecutable("lfops")
+        log("install: lfops path = \(lfopsPath ?? "not found")")
+
+        guard let lfopsPath else {
+            log("install: ERROR - lfops not found after installing loopflow")
             throw SetupError.commandFailed("lfops not found after installing loopflow")
         }
 
+        log("install: running lfops install...")
         try await runCommand(lfopsPath, args: ["install"])
+        log("install: completed successfully")
     }
 
     /// Ensure the loopflow daemon is running
@@ -100,6 +149,9 @@ struct SetupService {
     }
 
     private func runCommand(_ executable: String, args: [String]) async throws {
+        let cmdString = "\(executable) \(args.joined(separator: " "))"
+        log("runCommand: \(cmdString)")
+
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let process = Process()
             let pipe = Pipe()
@@ -113,14 +165,21 @@ struct SetupService {
                 try process.run()
                 process.waitUntilExit()
 
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: data, encoding: .utf8) ?? ""
+
+                log("runCommand: exit code \(process.terminationStatus)")
+                if !output.isEmpty {
+                    log("runCommand: output = \(output.prefix(500))")
+                }
+
                 if process.terminationStatus == 0 {
                     continuation.resume()
                 } else {
-                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                    let output = String(data: data, encoding: .utf8) ?? "Unknown error"
-                    continuation.resume(throwing: SetupError.commandFailed(output))
+                    continuation.resume(throwing: SetupError.commandFailed(output.isEmpty ? "Exit code \(process.terminationStatus)" : output))
                 }
             } catch {
+                log("runCommand: exception = \(error)")
                 continuation.resume(throwing: error)
             }
         }

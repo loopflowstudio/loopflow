@@ -8,7 +8,6 @@ struct WorktreeService {
         case parseError(String)
         case notFound
         case wtNotInstalled
-        case branchExists(String)
 
         var errorDescription: String? {
             switch self {
@@ -20,7 +19,6 @@ struct WorktreeService {
             case .parseError(let msg): return "Couldn't read worktree data: \(msg)"
             case .notFound: return "This worktree no longer exists. Try refreshing."
             case .wtNotInstalled: return "Worktrunk not installed. Click retry to install it."
-            case .branchExists(let name): return "'\(name)' already exists. Choose a different name or open the existing branch."
             }
         }
     }
@@ -93,120 +91,44 @@ struct WorktreeService {
     }
 
     func getDiff(_ spec: String, in repoURL: URL) async throws -> String {
-        try await runGit(["diff", spec], in: repoURL)
-    }
-
-    private func runGit(_ args: [String], in directory: URL) async throws -> String {
-        return try await withCheckedThrowingContinuation { continuation in
-            let process = Process()
-            let pipe = Pipe()
-
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-            process.arguments = args
-            process.currentDirectoryURL = directory
-            process.standardOutput = pipe
-            process.standardError = pipe
-
-            do {
-                try process.run()
-                process.waitUntilExit()
-
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                let output = String(data: data, encoding: .utf8) ?? ""
-
-                if process.terminationStatus == 0 {
-                    continuation.resume(returning: output)
-                } else {
-                    continuation.resume(throwing: WorktreeError.commandFailed(output))
-                }
-            } catch {
-                continuation.resume(throwing: error)
-            }
-        }
+        try await runProcess(URL(fileURLWithPath: "/usr/bin/git"), ["diff", spec], in: repoURL)
     }
 
     func getGitHubCompareURL(branch: String, in repoURL: URL, base: String = "main") async throws -> URL? {
-        return try await withCheckedThrowingContinuation { continuation in
-            let process = Process()
-            let pipe = Pipe()
+        let remoteURL = try await runProcess(URL(fileURLWithPath: "/usr/bin/git"), ["remote", "get-url", "origin"], in: repoURL)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
 
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-            process.arguments = ["remote", "get-url", "origin"]
-            process.currentDirectoryURL = repoURL
-            process.standardOutput = pipe
-            process.standardError = FileHandle.nullDevice
-
-            do {
-                try process.run()
-                process.waitUntilExit()
-
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                let remoteURL = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-                var repoPath: String?
-                if remoteURL.hasPrefix("git@github.com:") {
-                    repoPath = String(remoteURL.dropFirst("git@github.com:".count)).replacingOccurrences(of: ".git", with: "")
-                } else if remoteURL.contains("github.com") {
-                    if let range = remoteURL.range(of: "github.com/") {
-                        repoPath = String(remoteURL[range.upperBound...]).replacingOccurrences(of: ".git", with: "")
-                    }
-                }
-
-                if let path = repoPath {
-                    let url = URL(string: "https://github.com/\(path)/compare/\(base)...\(branch)")
-                    continuation.resume(returning: url)
-                } else {
-                    continuation.resume(returning: nil)
-                }
-            } catch {
-                continuation.resume(throwing: error)
-            }
-        }
-    }
-
-    private func runLfops(_ args: [String], in directory: URL) async throws -> String {
-        guard let lfopsURL = findCommand("lfops") else {
-            throw WorktreeError.commandFailed("lfops not found. Install loopflow.")
+        var repoPath: String?
+        if remoteURL.hasPrefix("git@github.com:") {
+            repoPath = String(remoteURL.dropFirst("git@github.com:".count)).replacingOccurrences(of: ".git", with: "")
+        } else if remoteURL.contains("github.com"), let range = remoteURL.range(of: "github.com/") {
+            repoPath = String(remoteURL[range.upperBound...]).replacingOccurrences(of: ".git", with: "")
         }
 
-        return try await withCheckedThrowingContinuation { continuation in
-            let process = Process()
-            let pipe = Pipe()
-
-            process.executableURL = lfopsURL
-            process.arguments = args
-            process.currentDirectoryURL = directory
-            process.standardOutput = pipe
-            process.standardError = pipe
-
-            do {
-                try process.run()
-                process.waitUntilExit()
-
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                let output = String(data: data, encoding: .utf8) ?? ""
-
-                if process.terminationStatus == 0 {
-                    continuation.resume(returning: output)
-                } else {
-                    continuation.resume(throwing: WorktreeError.commandFailed(output))
-                }
-            } catch {
-                continuation.resume(throwing: error)
-            }
-        }
+        guard let path = repoPath else { return nil }
+        return URL(string: "https://github.com/\(path)/compare/\(base)...\(branch)")
     }
 
     private func run(_ args: [String], in directory: URL) async throws -> String {
         guard let wtURL = findCommand("wt") else {
             throw WorktreeError.wtNotInstalled
         }
+        return try await runProcess(wtURL, args, in: directory)
+    }
 
-        return try await withCheckedThrowingContinuation { continuation in
+    private func runLfops(_ args: [String], in directory: URL) async throws -> String {
+        guard let lfopsURL = findCommand("lfops") else {
+            throw WorktreeError.commandFailed("lfops not found. Install loopflow.")
+        }
+        return try await runProcess(lfopsURL, args, in: directory)
+    }
+
+    private func runProcess(_ executable: URL, _ args: [String], in directory: URL) async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
             let process = Process()
             let pipe = Pipe()
 
-            process.executableURL = wtURL
+            process.executableURL = executable
             process.arguments = args
             process.currentDirectoryURL = directory
             process.standardOutput = pipe

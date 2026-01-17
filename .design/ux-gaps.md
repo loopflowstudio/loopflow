@@ -198,21 +198,31 @@ Comparing Maestro against best-in-class tools: Figma, Cursor, Notion, Linear, an
 
 The current architecture—prompt in GUI, output in terminal—creates a mental model mismatch. What if Maestro *was* the terminal? Embed a terminal emulator directly. The prompt launcher becomes the input line. Streaming output appears inline. The worktree sidebar persists. No context switching.
 
+> This is interesting. Id love to have a terminal inside Maestro, but i would love to just literally embed the user's favorite terminal. I think it's scope creep to compete with warp and ghostty, at least for now.
+
 ### What if worktrees were invisible?
 
 Worktrees are an implementation detail. Users want "work on this idea in isolation"—not "create a git worktree." What if Maestro auto-created worktrees silently and showed them as "Ideas" or "Experiments"? The git mechanics disappear; the creative metaphor remains.
+
+> Yes, this is progressive disclosure that you're explaining. I dont think obfuscating worktrees with a new term helps -- dont invent new terms if we dont need to.
 
 ### What if context was visual?
 
 Token counts and toggles are abstract. What if context was *visual*? A minimap of included files. Highlighted snippets showing what the agent will see. Drag to reorder priority. Direct manipulation instead of toggles.
 
+> Yeah, we definitely need more iteration on how the context is represented.
+
 ### What if the prompt wrote itself?
 
 The "What do you want to build?" prompt is intimidating. What if Maestro suggested prompts based on recent git activity? "Looks like you're working on auth—want to implement password reset?" The system infers intent from context.
 
+> Nah Dont liek this
+
 ### What if errors were impossible?
 
 Instead of error messages, prevent errors entirely. Branch name field auto-suggests available names. Context toggles show warnings before you exceed limits. The Run button only enables when the prompt is valid. Error handling as design constraint, not afterthought.
+
+> I mean, avoiding errors is good ,yes. 
 
 ---
 

@@ -1608,7 +1608,7 @@ def rebase(
 @app.command()
 def summarize(
     path: str = typer.Argument(".", help="Path to summarize (relative to repo root)"),
-    tokens: int = typer.Option(4000, "-t", "--tokens", help="Token budget"),
+    tokens: int = typer.Option(10000, "-t", "--tokens", help="Token budget"),
     model: str = typer.Option("gemini", "-m", "--model", help="Model to use"),
     force: bool = typer.Option(False, "-f", "--force", help="Regenerate even if cached"),
     all_configured: bool = typer.Option(False, "-a", "--all", help="Regenerate all configured summaries"),
@@ -1639,11 +1639,12 @@ def summarize(
                     continue
 
                 typer.echo(f"  {summary_config.path}: regenerating...")
+                token_budget = summary_config.tokens or config.summary_tokens
                 try:
                     summary, _ = refresh_if_stale(
                         summary_path,
                         repo_root,
-                        summary_config.tokens,
+                        token_budget,
                         summary_config.model,
                         config.exclude if config else None,
                         force=force,

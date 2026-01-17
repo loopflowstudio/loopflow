@@ -6,9 +6,10 @@ context:
 exclude: "uv.lock"
 push: true
 
+summary_tokens: 25000
+
 summaries:
   - path: src/loopflow
-    tokens: 16000
     model: claude
 
 pipelines:

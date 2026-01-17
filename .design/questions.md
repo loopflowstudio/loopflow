@@ -18,13 +18,13 @@
 
 ## Open
 
-8. **In-app terminal embedding**: Can Maestro embed Ghostty or Warp rather than launching external? This would eliminate context-switching without competing with terminal products. See `.design/terminal-embedding.md` for research. SwiftTerm is recommended for short-term implementation.
+8. **In-app terminal embedding**: SwiftTerm is implemented and works for auto mode. Should it be the default? Current: toggle is buried in "More options". Users who don't find it experience jarring context-switch to external terminal.
 
-10. **Onboarding flow scope**: What should a first-time user walkthrough cover? Current candidates: (1) What Maestro does, (2) How workspaces isolate work, (3) Running your first task, (4) Where to see results. Should this be skippable?
+10. **Onboarding flow scope**: What should a first-time user walkthrough cover? Current candidates: (1) What Maestro does, (2) How workspaces isolate work, (3) Running your first task, (4) Where to see results. Should it be skippable?
 
-11. **Mode picker explanation**: "Auto" vs "Interactive" is meaningless to new users. Options: (a) Add tooltips, (b) Add inline description, (c) Rename to "Run to completion" vs "Chat mode", (d) Hide mode picker entirely—default to auto, let task frontmatter control.
+11. **Mode picker explanation**: "Auto" vs "Interactive" is meaningless to new users. Options: (a) Add tooltips (already implemented but requires hover), (b) Add inline description, (c) Rename to "Run to completion" vs "Chat mode", (d) Hide mode picker entirely—default to auto, let task frontmatter control.
 
-12. **Context chips progressive disclosure**: Five chips (Docs, Files, Diff, Clipboard, Summaries) visible by default is overwhelming. Should these collapse to "Context: 14.2k" and expand on click?
+12. **Context chips progressive disclosure**: Context bar collapses by default (implemented via @AppStorage). But when expanded, five chips appear with no explanation. Add descriptions? Help links?
 
 13. **Whimsical worktree names**: NameGenerator produces names like "floral-tiger" which confuse new users. Keep for power users? Or use task-based names like "implement-auth"?
 
@@ -37,6 +37,12 @@
 17. **Work-state grouping**: Should the sidebar organize workspaces by work state (In Progress / Ready / Blocked) rather than flat list? This surfaces what needs attention.
 
 18. **Permission dialog identity**: The screen recording permission shows "MaestroU0.2026.01.14.08.16.sta-9kc_042" which looks like malware. Can we control the bundle identifier shown in system dialogs?
+
+19. **Command preview prominence**: Power users want to see the exact command before running. Currently requires expanding "More options" then "Command Preview". Should remember expansion state? Add keyboard shortcut?
+
+20. **Non-developer tasks**: Should Maestro support "explain" or "summarize" tasks for non-code users (Designer/PM profile)? Or is this out of scope for a developer tool?
+
+21. **Help integration**: No "?" buttons or links to documentation in the interface. Add contextual help? In-app help panel? "Learn more" links in tooltips?
 
 ## Not Pursuing
 

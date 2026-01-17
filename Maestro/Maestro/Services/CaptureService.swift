@@ -24,7 +24,18 @@ struct CaptureService {
         guard let window = NSApp.keyWindow else {
             throw CaptureError.noWindow
         }
+        return try captureWindow(window, repoRoot: repoRoot)
+    }
 
+    /// Capture any visible Maestro window (works when not frontmost).
+    func captureWindow(repoRoot: URL?) throws -> URL {
+        guard let window = NSApp.windows.first(where: { $0.isVisible }) else {
+            throw CaptureError.noWindow
+        }
+        return try captureWindow(window, repoRoot: repoRoot)
+    }
+
+    private func captureWindow(_ window: NSWindow, repoRoot: URL?) throws -> URL {
         let windowID = window.windowNumber
         let outputURL = screenshotURL(repoRoot: repoRoot)
 

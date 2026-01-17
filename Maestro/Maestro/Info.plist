@@ -24,5 +24,9 @@
     <false/>
     <key>NSAppleEventsUsageDescription</key>
     <string>Maestro needs to control terminal applications to open worktrees and run commands.</string>
+    <key>NSAppleScriptEnabled</key>
+    <true/>
+    <key>OSAScriptingDefinition</key>
+    <string>Maestro.sdef</string>
 </dict>
 </plist>

@@ -1,63 +1,84 @@
 ---
 interactive: true
-requires: text to refine
-produces: improved text
+produces: refined text
 ---
 Iteratively refine text through structured feedback.
 
 ## Goal
 
-Improve written content—documentation, design docs, README files, prose—through conversation. Each round: read, give specific feedback, revise. The human guides priority; you execute revisions and surface issues they might have missed.
+The point of iteration is to learn. Each option you present, each preference they express, helps you build a model of their goals and style. Explore in ways that maximize this learning—present options that differ meaningfully, not just wordsmithing. Once you understand how they think, you can apply it broadly.
 
-This is collaborative editing, not autonomous rewriting. Wait for direction between passes.
+The refined text is almost secondary. The real output is your ability to simulate their voice.
 
 ## Workflow
 
-1. Read the text to refine (from clipboard with `-v`, or ask what to refine)
-2. Identify 3-5 specific issues, ranked by impact
-3. Present issues to the human, ask which to address
-4. Make targeted revisions based on their direction
-5. Show the revised text and wait for next round
+1. **Identify the text to refine**
+   - If a file path was passed as an argument (e.g., `lf refine README.md`), read that file
+   - If clipboard has content (-v flag), work on that
+   - Otherwise, ask what file(s) or text to refine
 
-Repeat until the human is satisfied or says to stop.
+2. **Diagnose the axis of refinement**
 
-## What to look for
+   Before presenting options, figure out what KIND of improvement the text needs:
 
-**Clarity.** Sentences that require re-reading. Jargon without context. Ambiguous pronouns. Paragraphs that bury the point.
+   - **Structure**: Is content in the right order? Should sections be split, merged, reordered?
+   - **Voice**: Too formal? Too casual? Inconsistent tone?
+   - **Ideas**: Missing points? Wrong emphasis? Unclear purpose?
+   - **Positioning**: Wrong audience? Unclear value prop?
+   - **Density**: Too verbose? Too terse?
 
-**Structure.** Missing sections. Wrong order (background before context, details before overview). Headers that don't match content.
+   State your diagnosis: "This feels like a structure problem—the intro repeats what comes later" or "The ideas are right but the voice is too formal for a README."
 
-**Audience fit.** Too technical for the reader. Too basic for experts. Assumptions that aren't stated.
+   The axis determines what kind of options to present. Don't offer A/B/C word choices when the real problem is section ordering.
 
-**Completeness.** Missing examples. Unanswered "how" or "why" questions. Gaps the reader would notice.
+3. **Work section by section**
+   - Break text into chunks: a paragraph, a heading block, or 3-5 sentences
+   - Present 2-3 options that differ along the identified axis
+   - Ask which you prefer and why
+   - Record concrete preferences, not vague sentiment
 
-**Concision.** Redundant sentences. Filler phrases. Sections that could be half the length.
+4. **Transfer preferences**
+   - After 3-5 sections, state what you've learned explicitly
+   - Example: "You prefer leading with insight over describing the document. You cut redundant sections rather than keeping structure for its own sake."
+   - Let the user validate before applying broadly
 
-## How to give feedback
+5. **Full editing pass**
+   - Apply learned preferences to remaining sections
+   - Present complete result for holistic feedback
 
-Be specific and actionable:
+## Presenting options
 
-- "The third paragraph explains X before Y is introduced" (not "confusing flow")
-- "The setup section assumes familiarity with Z" (not "needs more context")
-- "'It' in line 4 could refer to A or B" (not "unclear reference")
+Each option should represent a different approach, not just wordsmithing:
 
-Rank by impact. Lead with what would help most.
+```
+**Original:**
+The system processes requests by evaluating them against the configured rules.
 
-## How to revise
+**Option A:** (more specific)
+When a request arrives, the system checks it against each rule in config.yaml, rejecting on first match.
 
-When making changes:
+**Option B:** (more conversational)
+Requests get filtered through your rules—first match wins, and anything that passes goes through.
+```
 
-- Show the before and after clearly
-- Explain what changed and why (one sentence)
-- Preserve the author's voice—don't impose your style
-- Ask before making large structural changes
+If the problem is structure, show restructured versions. If it's voice, show the same content in different tones. Match the options to the diagnosed axis.
 
-## What to avoid
+## Questions to ask
 
-**Autonomous rewriting.** Don't rewrite entire sections without direction. Present issues, wait for the human to decide.
+- "Which feels closer to what you want? What specifically makes it better?"
+- "Is this too formal/casual? Too detailed/vague?"
+- "What's missing? What would you cut?"
 
-**Style imposition.** The text should sound like the author, not like you. Fix problems, don't "improve" working prose.
+"I like B" isn't useful. "I like B because it shows the flow" gives you something to work with.
 
-**Scope creep.** Refine the text you're given. Don't expand into related topics or add new sections unless asked.
+## When to stop
 
-**Premature polish.** Get the structure and content right before wordsmithing. Don't perfect sentences that might get cut.
+- When the user says it's good enough
+- After one full editing pass with only minor tweaks
+- If preferences conflict—note the tension, let the user choose
+
+## Output
+
+Refined text in the original file(s), or copied to clipboard if working on pasted content.
+
+Don't over-polish. Match the user's voice, not generic "good writing."

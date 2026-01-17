@@ -8,6 +8,9 @@ struct ResultsPanel: View {
     @State private var expandedFiles: Set<Int> = []
     @State private var elapsedTime: TimeInterval = 0
     @State private var timer: Timer?
+    @State private var showingDiffSheet = false
+    @State private var diffContent: String?
+    @State private var diffLoading = false
 
     private let terminalLauncher = TerminalLauncher()
 
@@ -18,6 +21,16 @@ struct ResultsPanel: View {
             } else if !appState.liveOutputBySession.isEmpty && appState.showResultsLog {
                 // Fallback to legacy output view if toggled
                 legacyOutputView
+            }
+        }
+        .sheet(isPresented: $showingDiffSheet) {
+            if let result = appState.currentSessionResult {
+                ResultsDiffSheet(
+                    task: result.task,
+                    diffContent: diffContent,
+                    isLoading: diffLoading,
+                    onDismiss: { showingDiffSheet = false }
+                )
             }
         }
     }
@@ -403,8 +416,49 @@ struct ResultsPanel: View {
     }
 
     private func viewFullDiff(_ result: SessionResult) {
-        // This would open the diff sheet - for now just opens terminal
-        openInTerminal(result.worktree)
+        diffContent = nil
+        diffLoading = true
+        showingDiffSheet = true
+
+        Task {
+            let worktreeURL = URL(fileURLWithPath: result.worktree)
+            let content = await loadFullDiff(from: result.baselineSHA, in: worktreeURL)
+            await MainActor.run {
+                diffContent = content
+                diffLoading = false
+            }
+        }
+    }
+
+    private func loadFullDiff(from baselineSHA: String, in worktree: URL) async -> String? {
+        guard !baselineSHA.isEmpty else { return nil }
+
+        return await withCheckedContinuation { continuation in
+            let process = Process()
+            let pipe = Pipe()
+
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            process.arguments = ["diff", "\(baselineSHA)..HEAD"]
+            process.currentDirectoryURL = worktree
+            process.standardOutput = pipe
+            process.standardError = FileHandle.nullDevice
+
+            do {
+                try process.run()
+                process.waitUntilExit()
+
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: data, encoding: .utf8)
+
+                if process.terminationStatus == 0 {
+                    continuation.resume(returning: output)
+                } else {
+                    continuation.resume(returning: nil)
+                }
+            } catch {
+                continuation.resume(returning: nil)
+            }
+        }
     }
 
     // MARK: - Legacy Log View
@@ -513,6 +567,99 @@ struct ResultsPanel: View {
         let minutes = Int(interval) / 60
         let seconds = Int(interval) % 60
         return String(format: "%d:%02d", minutes, seconds)
+    }
+}
+
+// MARK: - Diff Sheet
+
+struct ResultsDiffSheet: View {
+    let task: String
+    let diffContent: String?
+    let isLoading: Bool
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Full Diff")
+                        .font(.headline)
+                    Text("Changes from \(task)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button {
+                    onDismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding()
+
+            Divider()
+
+            // Content
+            if isLoading {
+                VStack {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                    Text("Loading diff...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let content = diffContent, !content.isEmpty {
+                ScrollView {
+                    resultsDiffContent(content)
+                        .padding()
+                }
+            } else {
+                VStack(spacing: 8) {
+                    Image(systemName: "doc.text")
+                        .font(.title2)
+                        .foregroundStyle(.tertiary)
+                    Text("No diff available")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .frame(minWidth: 600, minHeight: 400)
+        .frame(idealWidth: 800, idealHeight: 600)
+    }
+
+    private func resultsDiffContent(_ content: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(content.split(separator: "\n", omittingEmptySubsequences: false).enumerated()), id: \.offset) { _, line in
+                let lineStr = String(line)
+                Text(lineStr)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(colorForDiffLine(lineStr))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(backgroundForDiffLine(lineStr))
+            }
+        }
+    }
+
+    private func colorForDiffLine(_ line: String) -> Color {
+        if line.hasPrefix("+++") || line.hasPrefix("---") { return .secondary }
+        if line.hasPrefix("+") { return .green }
+        if line.hasPrefix("-") { return .red }
+        if line.hasPrefix("@@") { return .cyan }
+        if line.hasPrefix("diff ") { return .blue }
+        return .primary
+    }
+
+    private func backgroundForDiffLine(_ line: String) -> Color {
+        if line.hasPrefix("+") && !line.hasPrefix("+++") { return .green.opacity(0.1) }
+        if line.hasPrefix("-") && !line.hasPrefix("---") { return .red.opacity(0.1) }
+        return .clear
     }
 }
 

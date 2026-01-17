@@ -169,7 +169,8 @@ Based on research from `.design/ux-research.md` and `.design/ux-gaps.md`.
 - When complete, shows files changed with +/- line counts
 - Expandable inline diff previews for each file
 - New commits listed with messages
-- "Open Terminal" and "View Full Diff" action buttons
+- "Open Terminal" button opens worktree in configured terminal
+- "View Full Diff" button opens a diff sheet with syntax-highlighted full diff
 - Toggle to switch back to streaming log view if needed
 
 **Files**:

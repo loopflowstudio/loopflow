@@ -7,79 +7,93 @@ title: Patterns
 
 Workflows and recipes for common scenarios.
 
-## Design-first development
+## Quick Debug
+
+Copy an error, paste it to loopflow:
+
+```bash
+# Run something, get an error, copy it
+lf debug -v    # -v pastes clipboard
+```
+
+The debug task reads the stacktrace, finds the file, fixes the bug. No context-gathering required.
+
+## Design-First Development
 
 Start with a design task that explores the problem before writing code.
 
 ```bash
-wt switch --create auth-feature --execute pwd
-cd ../myrepo.auth-feature
-
+wt switch --create auth-feature
 lf design: add OAuth login    # interactive: discuss approach
-lf implement                  # now implement what you designed
-lf review
+lf implement                  # builds what you designed
+lf polish                     # runs tests, fixes issues
+lf review                     # produces verdict
 ```
 
-The design task can write notes to a file that implement reads:
+The built-in design task writes to `.design/<branch>.md`. Implement reads it automatically.
 
-```markdown
-# .claude/commands/design.md
-
-Explore how to implement:
-
-{args}
-
-Write a brief implementation plan to PLAN.md. Consider:
-- What files need to change
-- What dependencies are needed
-- Edge cases to handle
-
-Don't write code yet.
-```
-
-## Parallel features
+## Parallel Features
 
 Run multiple features simultaneously in separate worktrees:
 
 ```bash
 # Terminal 1
-wt switch --create feature-a --execute pwd
-cd ../myrepo.feature-a
-lf ship &                 # runs in background
-
-# Terminal 2
-wt switch --create feature-b --execute pwd
-cd ../myrepo.feature-b
+wt switch --create feature-a
 lf ship &
 
-# Check status from anywhere
-lf ops status                 # shows running sessions
+# Terminal 2
+wt switch --create feature-b
+lf ship &
+
+# Check status
+lfops status
 ```
 
-With lfd running, you'll get notifications when tasks complete:
+## Model Racing
+
+Race models against each other, pick the winner:
 
 ```bash
-lfd install          # start once, runs in background
+lf implement --race claude,codex: add caching layer
 ```
 
-## Model comparison
+This runs both models in parallel worktrees, then uses a judge prompt to pick the better implementation.
 
-Race Claude and Codex on the same task:
+For parallel without judging:
 
 ```bash
-lf implement --parallel claude,codex: add caching layer
+lf implement --parallel claude,codex: add caching
 ```
 
-This creates two worktrees (`implement-claude`, `implement-codex`) and runs both in parallel.
+Compare results manually with `lfwt compare`.
 
-Compare results with `git diff` or your editor.
+## Summarization
 
-## Autonomous pipeline
+For large codebases, pre-generate summaries so agents have context without loading all files:
+
+```bash
+lfops summarize src/           # Generate summary for src/
+lfops summarize -a             # Regenerate all configured summaries
+```
+
+Configure in `.lf/config.yaml`:
+
+```yaml
+summary_tokens: 25000
+summaries:
+  - path: src
+  - path: lib
+    tokens: 5000
+```
+
+Summaries auto-refresh when source files change on main.
+
+## Autonomous Pipeline
 
 Run a full pipeline non-interactively:
 
 ```bash
-lf ship                   # auto mode by default
+lf ship
 ```
 
 In autonomous mode:
@@ -88,48 +102,29 @@ In autonomous mode:
 - Pushes if `push: true` in config
 - Opens PR if `pr: true`
 
-## Review-only workflow
+## Context Options
 
-Just run review without implementation:
-
-```bash
-lf review                 # finds issues
-lf review -a              # finds and fixes issues automatically
-```
-
-A review task might look like:
-
-```markdown
-# .claude/commands/review.md
-
-Review the diff on the current branch against `main`.
-
-Fix any issues you find. The deliverable is the fixes, not a written review.
-
-Check for:
-- Style guide violations (see STYLE.md)
-- Bugs and edge cases
-- Unnecessary complexity
-- Missing tests for new code
-```
-
-## Context-heavy tasks
-
-For tasks that need specific files:
+Add specific files to context:
 
 ```bash
 lf implement -x src/models.py -x src/api.py: add user endpoints
 ```
 
-Or set default context in config:
+Paste clipboard content:
+
+```bash
+lf debug -v              # -v pastes clipboard
+```
+
+Set default context in config:
 
 ```yaml
 context:
   - src/schema.py
-  - src/types.ts
+  - docs/api.md
 ```
 
-## Inline prompts
+## Inline Prompts
 
 Quick one-off tasks without a task file:
 
@@ -139,15 +134,14 @@ lf : "add type hints to utils.py"
 lf : "rename getUserById to findUserById everywhere"
 ```
 
-## Custom pipelines
+## Custom Pipelines
 
 Define pipelines for different workflows:
 
 ```yaml
-# .lf/config.yaml
 pipelines:
   ship:
-    tasks: [implement, review, test, commit]
+    tasks: [implement, review, polish, commit]
     pr: true
 
   quick:
@@ -155,7 +149,7 @@ pipelines:
     push: true
 
   polish:
-    tasks: [review, test]
+    tasks: [review, polish]
 ```
 
 ```bash
@@ -164,54 +158,34 @@ lf quick     # fast iteration
 lf polish    # cleanup pass
 ```
 
-## Worktree cleanup
-
-Remove worktrees for merged branches:
+## PR Workflow
 
 ```bash
-wt list                  # see worktrees
-wt remove feature-a      # remove a worktree + branch
+lfops pr      # create or update PR, open in browser
+lfops land    # merge and cleanup worktree
 ```
 
-## PR workflow
+The `pr` command is idempotent: run it to create, or again to update after more commits.
 
-Open a PR from a worktree:
+## Work Queue
+
+Manage tasks with the work queue:
 
 ```bash
-lfops pr                     # create or update PR, open in browser
+lfwork add "Implement dark mode"    # propose work
+lfwork approve <id>                  # approve for work
+lfwork next                          # show next item for agents
 ```
 
-The `pr` command is idempotent: run it to create a PR, or run it again to update the title/body after more commits. Either way, it opens the PR in your browser.
+Configure backend in `.lf/config.yaml`:
 
-Land a PR (squash-merge to main):
-
-```bash
-lfops land                   # merges and cleans up
+```yaml
+work:
+  backend: file      # or "asana"
+  auto_rebase: true
 ```
 
-Land locally (no PR required):
-
-```bash
-lfops land --local           # squash + merge locally (no PR)
-```
-
-## Commit message generation
-
-The `commit` task can generate commit messages:
-
-```markdown
-# .claude/commands/commit.md
-
-Review the staged changes and create a commit.
-
-Write a clear commit message that explains WHY the change was made,
-not just what changed. Follow conventional commits format if the
-repo uses it.
-
-Stage all changes and commit.
-```
-
-## Yolo mode
+## Yolo Mode
 
 For trusted pipelines, skip all permission prompts:
 
@@ -219,9 +193,7 @@ For trusted pipelines, skip all permission prompts:
 yolo: true
 ```
 
-This is useful when:
-- Running in a worktree (isolated from your main work)
-- The pipeline is well-tested
+Use when:
+- Running in an isolated worktree
+- Pipeline is well-tested
 - You want fully autonomous operation
-
-Use with caution on untrusted code.

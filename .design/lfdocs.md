@@ -69,7 +69,7 @@ lf : "fix the typo in README"
 
 ## Demo Setup
 
-**Separate repo:** `loopflow-studio/loopflow-demos` (private). Users clone it to try loopflow.
+**Separate repo:** `loopflowstudio/loopflow-demos` (private). Users clone it to try loopflow.
 
 **Structure:**
 ```
@@ -133,7 +133,7 @@ vhs docs/design-demo.tape
 
 ## Done when
 
-1. `loopflow-studio/loopflow-demos` repo exists with broken calculator
+1. `loopflowstudio/loopflow-demos` repo exists with broken calculator
 2. VHS tape files record both workflows
 3. docs/index.md leads with the two demo GIFs
 4. Other docs updated for current features

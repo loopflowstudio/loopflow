@@ -1,8 +1,8 @@
 # AppleScript-Triggered Screenshot Capture
 
-Make Maestro scriptable so agents can trigger self-screenshots and get the path back.
+Maestro is now scriptable - agents can trigger self-screenshots via AppleScript and get the path back.
 
-## What to build
+## What it does
 
 Agents running in auto mode execute `osascript` to tell Maestro to capture its own window. Maestro returns the screenshot path.
 
@@ -48,57 +48,19 @@ Agent then reads the screenshot at that exact path.
 <string>Maestro.sdef</string>
 ```
 
-## Key functions
+## Implementation
 
-### CaptureService.swift fix
+### CaptureService.swift
 
-Current code uses `NSApp.keyWindow` which is nil when Maestro isn't frontmost:
+Added `captureWindow(repoRoot:)` method that finds any visible window (not just keyWindow), so capture works when Maestro isn't frontmost. Uses `screencapture -l <windowID>` CLI under the hood.
 
-```swift
-// Current (broken when not frontmost)
-guard let window = NSApp.keyWindow else { ... }
+### ScriptCommands.swift (new)
 
-// Fixed (works regardless of focus)
-guard let window = NSApp.windows.first(where: { $0.isVisible }) else { ... }
-```
+AppleScript command handler that receives the repo path, calls CaptureService, and returns the screenshot path. Reports errors via AppleScript's scriptErrorNumber/scriptErrorString.
 
-### Script command handler (new file: ScriptCommands.swift)
+### Maestro.sdef (new)
 
-```swift
-import Cocoa
-
-class CaptureScreenshotCommand: NSScriptCommand {
-    override func performDefaultImplementation() -> Any? {
-        guard let repoPath = directParameter as? String else {
-            scriptErrorNumber = NSRequiredArgumentsMissingScriptError
-            scriptErrorString = "Repository path required"
-            return nil
-        }
-
-        let repoURL = URL(fileURLWithPath: repoPath)
-        let service = CaptureService()
-
-        do {
-            let screenshotURL = try service.captureWindow(repoRoot: repoURL)
-            return screenshotURL.path
-        } catch {
-            scriptErrorNumber = NSInternalScriptError
-            scriptErrorString = error.localizedDescription
-            return nil
-        }
-    }
-}
-```
-
-### Maestro.sdef command binding
-
-```xml
-<command name="capture screenshot" code="MSTRcapt" description="Capture Maestro window">
-    <cocoa class="Maestro.CaptureScreenshotCommand"/>
-    <direct-parameter type="text" description="Repository path"/>
-    <result type="text" description="Screenshot path"/>
-</command>
-```
+AppleScript dictionary defining the `capture screenshot` command with the `MSTRcapt` code. Binds to `CaptureScreenshotCommand` class.
 
 ## Constraints
 
@@ -110,28 +72,15 @@ class CaptureScreenshotCommand: NSScriptCommand {
 
 None - this is infrastructure for agent automation.
 
-## Done when
-
-```bash
-# From terminal (simulating what agent would do)
-osascript -e 'tell application "Maestro" to capture screenshot to "/Users/jack/src/loopflow"'
-# → /Users/jack/src/loopflow/.design/screenshots/maestro-20260116-150000.png
-
-# Verify file exists
-ls /Users/jack/src/loopflow/.design/screenshots/
-# → maestro-20260116-150000.png
-
-# Agent reads the screenshot
-lf ux-research -x .design/screenshots/
-```
-
-## Files to change
+## Files changed
 
 ```
 Maestro/Maestro/Maestro.sdef                    # New: AppleScript dictionary
-Maestro/Maestro/Info.plist                      # Add NSAppleScriptEnabled, OSAScriptingDefinition
+Maestro/Maestro/Info.plist                      # Added NSAppleScriptEnabled, OSAScriptingDefinition
 Maestro/Maestro/ScriptCommands.swift            # New: command handler
-Maestro/Maestro/Services/CaptureService.swift   # Fix to work when not frontmost
+Maestro/Maestro/Services/CaptureService.swift   # Added captureWindow() for non-frontmost capture
+Maestro/Package.swift                           # Exclude .sdef from build
+Maestro/dev                                     # Copy .sdef to app bundle
 ```
 
 ## Not in scope

@@ -44,7 +44,7 @@ def _format_item(item: WorkItem, verbose: bool = False) -> str:
     line = f"{icon} {item.id:<20} {item.title}{claimed}{blocked}"
 
     if verbose:
-        line += f"\n    status={item.status} confidence={item.confidence}"
+        line += f"\n    status={item.status}"
         if item.worktree:
             line += f" worktree={item.worktree}"
 
@@ -93,7 +93,6 @@ def show(
     typer.echo(f"# {item.title}")
     typer.echo(f"ID: {item.id}")
     typer.echo(f"Status: {item.status}")
-    typer.echo(f"Confidence: {item.confidence}")
     if item.claimed_by:
         typer.echo(f"Claimed by: {item.claimed_by}")
     if item.blocked_on:
@@ -111,16 +110,11 @@ def show(
 def add(
     title: str = typer.Argument(help="Work item title"),
     description: str = typer.Option("", "--description", "-d", help="Description"),
-    confidence: str = typer.Option("medium", "--confidence", "-c", help="Confidence level"),
 ) -> None:
     """Add a new work item (status=proposed)."""
     repo_root = find_worktree_root()
     if not repo_root:
         typer.echo("Error: Not in a git repository", err=True)
-        raise typer.Exit(1)
-
-    if confidence not in ("high", "medium", "low"):
-        typer.echo(f"Error: Invalid confidence '{confidence}'. Use: high, medium, low", err=True)
         raise typer.Exit(1)
 
     backend = _get_backend(repo_root)
@@ -129,7 +123,6 @@ def add(
         title=title,
         description=description,
         status="proposed",
-        confidence=confidence,  # type: ignore
     )
     created = backend.create_item(item)
     typer.echo(f"Created: {created.id}")

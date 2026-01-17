@@ -129,7 +129,6 @@ struct WorkItemRow: View {
                 Text(item.title)
                     .fontWeight(.medium)
                 Spacer()
-                confidenceBadge
             }
 
             if item.isBlocked {
@@ -215,24 +214,6 @@ struct WorkItemRow: View {
         }
     }
 
-    @ViewBuilder
-    private var confidenceBadge: some View {
-        let (color, label): (Color, String) = {
-            switch item.confidence {
-            case .high: return (.green, "High")
-            case .medium: return (.orange, "Med")
-            case .low: return (.red, "Low")
-            }
-        }()
-
-        Text(label)
-            .font(.caption2)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.2))
-            .foregroundColor(color)
-            .cornerRadius(4)
-    }
 }
 
 struct TabButton: View {

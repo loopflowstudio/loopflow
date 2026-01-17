@@ -5,7 +5,7 @@ Backend-agnostic work queue that stores proposals, tracks status, and lets agent
 ## Implementation Status
 
 **Done:**
-- WorkItem data model with status, confidence, claimed_by, blocked_on fields
+- WorkItem data model with status, claimed_by, blocked_on fields
 - FileBackend: reads/writes `.todo/*.md` with YAML frontmatter
 - AsanaBackend: maps to Asana tasks via API
 - `lfwork` CLI: list, show, add, approve, reject, claim, release, blocked, next
@@ -29,7 +29,6 @@ class WorkItem:
     status: Literal["proposed", "approved", "active", "done"]
     claimed_by: Literal["human", "agent"] | None
     blocked_on: str | None
-    confidence: Literal["high", "medium", "low"]
     worktree: str | None
     notes: str
 ```
@@ -41,7 +40,6 @@ class WorkItem:
 status: proposed
 claimed_by: null
 blocked_on: null
-confidence: medium
 worktree: null
 ---
 # Add OAuth login
@@ -70,7 +68,7 @@ Two implementations:
 
 ## Prioritization Logic
 
-`get_next_work()` picks work biased toward high-confidence, non-blocked items:
+`get_next_work()` picks non-blocked work items:
 
 ```python
 def get_next_work(items: list[WorkItem]) -> WorkItem | None:
@@ -79,11 +77,8 @@ def get_next_work(items: list[WorkItem]) -> WorkItem | None:
         if c.status in ("approved", "active")
         and c.claimed_by != "human"
     ]
-    # Sort: non-blocked first, then by confidence
-    candidates.sort(key=lambda c: (
-        c.blocked_on is not None,
-        {"high": 0, "medium": 1, "low": 2}[c.confidence],
-    ))
+    # Sort: non-blocked first
+    candidates.sort(key=lambda c: c.blocked_on is not None)
     return candidates[0] if candidates else None
 ```
 
@@ -123,7 +118,6 @@ work:
 | status | Section (Proposed / Approved / Active / Done) |
 | claimed_by | Tag: "human" or untagged |
 | blocked_on | Custom field (text) |
-| confidence | Custom field (dropdown: high/medium/low) |
 | worktree | Custom field (text) |
 | notes | Task comments |
 

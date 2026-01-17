@@ -10,7 +10,6 @@ from loopflow.work.file_backend import FileBackend
 def test_work_item_defaults():
     item = WorkItem(id="test", title="Test", description="A test item")
     assert item.status == "proposed"
-    assert item.confidence == "medium"
     assert item.claimed_by is None
     assert item.blocked_on is None
 
@@ -30,17 +29,6 @@ def test_get_next_work_skips_human_claimed():
     items = [
         WorkItem(id="a", title="A", description="", status="approved", claimed_by="human"),
         WorkItem(id="b", title="B", description="", status="approved"),
-    ]
-    result = get_next_work(items)
-    assert result is not None
-    assert result.id == "b"
-
-
-def test_get_next_work_prefers_high_confidence():
-    items = [
-        WorkItem(id="a", title="A", description="", status="approved", confidence="low"),
-        WorkItem(id="b", title="B", description="", status="approved", confidence="high"),
-        WorkItem(id="c", title="C", description="", status="approved", confidence="medium"),
     ]
     result = get_next_work(items)
     assert result is not None

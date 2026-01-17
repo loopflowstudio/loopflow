@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from loopflow.work.models import WorkItem, Status, ClaimedBy, Confidence
+from loopflow.work.models import WorkItem
 
 
 _FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
@@ -61,7 +61,6 @@ def _format_frontmatter(item: WorkItem) -> str:
         f"status: {item.status}",
         f"claimed_by: {fmt(item.claimed_by)}",
         f"blocked_on: {fmt(item.blocked_on)}",
-        f"confidence: {item.confidence}",
         f"worktree: {fmt(item.worktree)}",
         "---",
         f"# {item.title}",
@@ -109,7 +108,6 @@ def _parse_work_item(file_path: Path) -> WorkItem | None:
         status=metadata.get("status", "proposed"),
         claimed_by=metadata.get("claimed_by"),
         blocked_on=metadata.get("blocked_on"),
-        confidence=metadata.get("confidence", "medium"),
         worktree=metadata.get("worktree"),
         notes=notes,
     )

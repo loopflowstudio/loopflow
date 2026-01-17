@@ -6,7 +6,7 @@ from typing import Any
 
 import asana
 
-from loopflow.work.models import WorkItem, Status, Confidence
+from loopflow.work.models import WorkItem, Status
 
 logger = logging.getLogger(__name__)
 
@@ -77,18 +77,11 @@ class AsanaBackend:
 
         # Get custom fields
         blocked_on = None
-        confidence: Confidence = "medium"
         worktree = None
         for cf in task.get("custom_fields", []):
             name = cf.get("name", "").lower()
             if name == "blocked_on":
                 blocked_on = cf.get("text_value")
-            elif name == "confidence":
-                enum_value = cf.get("enum_value")
-                if enum_value:
-                    conf_name = enum_value.get("name", "").lower()
-                    if conf_name in ("high", "medium", "low"):
-                        confidence = conf_name  # type: ignore
             elif name == "worktree":
                 worktree = cf.get("text_value")
 
@@ -109,7 +102,6 @@ class AsanaBackend:
             status=status,
             claimed_by=claimed_by,
             blocked_on=blocked_on,
-            confidence=confidence,
             worktree=worktree,
             notes=notes,
         )

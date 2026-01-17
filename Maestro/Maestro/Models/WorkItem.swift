@@ -9,12 +9,6 @@ enum WorkStatus: String, Codable, CaseIterable {
     case done
 }
 
-enum WorkConfidence: String, Codable, CaseIterable {
-    case high
-    case medium
-    case low
-}
-
 struct WorkItem: Identifiable, Codable {
     let id: String
     var title: String
@@ -22,7 +16,6 @@ struct WorkItem: Identifiable, Codable {
     var status: WorkStatus
     var claimedBy: String?
     var blockedOn: String?
-    var confidence: WorkConfidence
     var worktree: String?
     var notes: String
 
@@ -30,7 +23,7 @@ struct WorkItem: Identifiable, Codable {
         case id, title, description, status
         case claimedBy = "claimed_by"
         case blockedOn = "blocked_on"
-        case confidence, worktree, notes
+        case worktree, notes
     }
 
     init(
@@ -40,7 +33,6 @@ struct WorkItem: Identifiable, Codable {
         status: WorkStatus = .proposed,
         claimedBy: String? = nil,
         blockedOn: String? = nil,
-        confidence: WorkConfidence = .medium,
         worktree: String? = nil,
         notes: String = ""
     ) {
@@ -50,7 +42,6 @@ struct WorkItem: Identifiable, Codable {
         self.status = status
         self.claimedBy = claimedBy
         self.blockedOn = blockedOn
-        self.confidence = confidence
         self.worktree = worktree
         self.notes = notes
     }

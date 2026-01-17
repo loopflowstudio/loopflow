@@ -69,7 +69,7 @@ actor WorkService {
         var items: [WorkItem] = []
 
         let lines = output.split(separator: "\n", omittingEmptySubsequences: false)
-        var currentItem: (id: String, title: String, status: WorkStatus, confidence: WorkConfidence, claimed: String?, blocked: String?, worktree: String?)?
+        var currentItem: (id: String, title: String, status: WorkStatus, claimed: String?, blocked: String?, worktree: String?)?
 
         for line in lines {
             let trimmed = String(line).trimmingCharacters(in: .whitespaces)
@@ -84,7 +84,6 @@ actor WorkService {
                         status: prev.status,
                         claimedBy: prev.claimed,
                         blockedOn: prev.blocked,
-                        confidence: prev.confidence,
                         worktree: prev.worktree
                     ))
                 }
@@ -120,18 +119,13 @@ actor WorkService {
                     title = title.replacingCharacters(in: blockedRange, with: "").trimmingCharacters(in: .whitespaces)
                 }
 
-                currentItem = (id: id, title: title, status: status, confidence: .medium, claimed: claimed, blocked: blocked, worktree: nil)
+                currentItem = (id: id, title: title, status: status, claimed: claimed, blocked: blocked, worktree: nil)
             }
-            // Parse detail line: "    status=approved confidence=high worktree=feature-x"
+            // Parse detail line: "    status=approved worktree=feature-x"
             else if trimmed.hasPrefix("status="), var item = currentItem {
                 let parts = trimmed.split(separator: " ")
                 for part in parts {
-                    if part.hasPrefix("confidence=") {
-                        let value = String(part.dropFirst(11))
-                        if let conf = WorkConfidence(rawValue: value) {
-                            item.confidence = conf
-                        }
-                    } else if part.hasPrefix("worktree=") {
+                    if part.hasPrefix("worktree=") {
                         item.worktree = String(part.dropFirst(9))
                     }
                 }
@@ -147,7 +141,6 @@ actor WorkService {
                 status: prev.status,
                 claimedBy: prev.claimed,
                 blockedOn: prev.blocked,
-                confidence: prev.confidence,
                 worktree: prev.worktree
             ))
         }

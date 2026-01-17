@@ -158,22 +158,22 @@ def run(
     ctx: typer.Context,
     task: str = typer.Argument(help="Task name (e.g., 'review', 'implement')"),
     auto: bool = typer.Option(
-        False, "-a", "--auto", help="Override to run in auto mode"
+        False, "-a", "-A", "--auto", help="Override to run in auto mode"
     ),
     interactive: bool = typer.Option(
-        False, "-i", "--interactive", help="Override to run in interactive mode"
+        False, "-i", "-I", "--interactive", help="Override to run in interactive mode"
     ),
     context: list[str] = typer.Option(
-        None, "-x", "--context", help="Additional files for context"
+        None, "-x", "-X", "--context", help="Additional files for context"
     ),
     worktree: str = typer.Option(
-        None, "-w", "--worktree", help="Create worktree and run task there"
+        None, "-w", "-W", "--worktree", help="Create worktree and run task there"
     ),
     copy: bool = typer.Option(
-        False, "-c", "--copy", help="Copy prompt to clipboard and show token breakdown"
+        False, "-c", "-C", "--copy", help="Copy prompt to clipboard and show token breakdown"
     ),
     paste: Optional[bool] = typer.Option(
-        None, "-v", "--paste/--no-paste", help="Include clipboard content in prompt"
+        None, "-v", "-V", "--paste/--no-paste", help="Include clipboard content in prompt"
     ),
     docs: Optional[bool] = typer.Option(
         None, "--docs/--no-docs", help="Include repo documentation (.md files)"
@@ -188,7 +188,7 @@ def run(
         None, "--summaries/--no-summaries", help="Include pre-generated codebase summaries"
     ),
     model: ModelType = typer.Option(
-        None, "-m", "--model", help="Model to use (backend or backend:variant)"
+        None, "-m", "-M", "--model", help="Model to use (backend or backend:variant)"
     ),
     voice: str = typer.Option(
         None, "--voice", help="Voice(s) to use (comma-separated, e.g., 'architect,concise')"
@@ -198,6 +198,9 @@ def run(
     ),
     race: str = typer.Option(
         None, "--race", help="Race multiple models, auto-judge winner (e.g., 'claude,codex,gemini')"
+    ),
+    with_prompt: list[str] = typer.Option(
+        None, "-p", "-P", "--prompt", help="Append additional prompt files (e.g., -p nux)"
     ),
 ):
     """Run a task with an LLM model."""
@@ -325,6 +328,7 @@ def run(
             include_diff_files=include_diff_files,
             include_summaries=include_summaries,
             config=config,
+            with_prompts=list(with_prompt) if with_prompt else None,
         )
     except VoiceNotFoundError as e:
         typer.echo(f"Error: {e}", err=True)
@@ -361,19 +365,19 @@ def run(
 def inline(
     prompt: str = typer.Argument(help="Inline prompt to run"),
     auto: bool = typer.Option(
-        False, "-a", "--auto", help="Override to run in auto mode"
+        False, "-a", "-A", "--auto", help="Override to run in auto mode"
     ),
     interactive: bool = typer.Option(
-        False, "-i", "--interactive", help="Override to run in interactive mode"
+        False, "-i", "-I", "--interactive", help="Override to run in interactive mode"
     ),
     context: list[str] = typer.Option(
-        None, "-x", "--context", help="Additional files for context"
+        None, "-x", "-X", "--context", help="Additional files for context"
     ),
     copy: bool = typer.Option(
-        False, "-c", "--copy", help="Copy prompt to clipboard and show token breakdown"
+        False, "-c", "-C", "--copy", help="Copy prompt to clipboard and show token breakdown"
     ),
     paste: Optional[bool] = typer.Option(
-        None, "-v", "--paste/--no-paste", help="Include clipboard content in prompt"
+        None, "-v", "-V", "--paste/--no-paste", help="Include clipboard content in prompt"
     ),
     docs: Optional[bool] = typer.Option(
         None, "--docs/--no-docs", help="Include repo documentation (.md files)"
@@ -388,7 +392,7 @@ def inline(
         None, "--summaries/--no-summaries", help="Include pre-generated codebase summaries"
     ),
     model: ModelType = typer.Option(
-        None, "-m", "--model", help="Model to use (backend or backend:variant)"
+        None, "-m", "-M", "--model", help="Model to use (backend or backend:variant)"
     ),
     voice: str = typer.Option(
         None, "--voice", help="Voice(s) to use (comma-separated, e.g., 'architect,concise')"
@@ -495,10 +499,10 @@ def cp(
         None, help="Files or directories to include (e.g., src tests)"
     ),
     exclude: list[str] = typer.Option(
-        None, "-e", "--exclude", help="Patterns to exclude"
+        None, "-e", "-E", "--exclude", help="Patterns to exclude"
     ),
     paste: bool = typer.Option(
-        False, "-v", "--paste", help="Include clipboard content"
+        False, "-v", "-V", "--paste", help="Include clipboard content"
     ),
     docs: Optional[bool] = typer.Option(
         None, "--docs/--no-docs", help="Include repo documentation (.md files)"
@@ -566,19 +570,19 @@ def cp(
 def pipeline(
     name: str = typer.Argument(help="Pipeline name from config.yaml or .lf/pipelines/"),
     context: list[str] = typer.Option(
-        None, "-x", "--context", help="Context files for all tasks"
+        None, "-x", "-X", "--context", help="Context files for all tasks"
     ),
     worktree: str = typer.Option(
-        None, "-w", "--worktree", help="Create worktree and run pipeline there"
+        None, "-w", "-W", "--worktree", help="Create worktree and run pipeline there"
     ),
     pr: bool = typer.Option(
         None, "--pr", help="Open PR when done"
     ),
     copy: bool = typer.Option(
-        False, "-c", "--copy", help="Copy first task prompt to clipboard and show token breakdown"
+        False, "-c", "-C", "--copy", help="Copy first task prompt to clipboard and show token breakdown"
     ),
     model: ModelType = typer.Option(
-        None, "-m", "--model", help="Model to use (backend or backend:variant)"
+        None, "-m", "-M", "--model", help="Model to use (backend or backend:variant)"
     ),
 ):
     """Run a named pipeline."""

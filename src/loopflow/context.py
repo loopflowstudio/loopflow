@@ -331,6 +331,7 @@ def gather_prompt_components(
     include_diff_files: bool = True,
     include_summaries: bool = True,
     config=None,
+    with_prompts: Optional[list[str]] = None,
 ) -> PromptComponents:
     """Gather all prompt components without assembling them."""
     docs = gather_docs(repo_root, repo_root, exclude)
@@ -365,6 +366,12 @@ def gather_prompt_components(
                 # Append plain args to task content
                 if plain_args:
                     task_content = task_content.rstrip() + "\n\n" + " ".join(plain_args)
+            # Append additional prompts if provided
+            if with_prompts:
+                for prompt_name in with_prompts:
+                    prompt_file = gather_task(repo_root, prompt_name)
+                    if prompt_file:
+                        task_content = task_content.rstrip() + "\n\n---\n\n" + prompt_file.content
             task_result = (task, task_content)
         else:
             task_result = (task, f"No task file found for '{task}'.")

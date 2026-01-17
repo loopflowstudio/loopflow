@@ -1,12 +1,13 @@
 # UX Improvement Loop
 
-**What to build**: Three prompts that chain together to continuously improve Maestro's new user experience through simulated user research, competitive analysis, and targeted redesigns.
+**What to build**: Three prompts that chain together to continuously improve Maestro's new user experience through simulated user research, competitive analysis, and targeted redesigns. Plus a `--with` CLI option to append project context.
 
 ## Data Structures
 
-No new code. Three prompt files:
+Four prompt files:
 
 ```
+.lf/nux.lf            # Project context (first-time prompter experience)
 .lf/ux-research.lf    # Simulate user profiles
 .lf/ux-gaps.lf        # Compare against inspiration
 .lf/ux-fix.lf         # Implement high-priority improvements
@@ -19,6 +20,23 @@ pipelines:
   ux:
     tasks: [ux-research, ux-gaps, ux-fix]
 ```
+
+## CLI Addition
+
+New `--prompt` / `-p` option to append prompt files:
+
+```bash
+lf ux-research --prompt nux    # Appends .lf/nux.lf content to ux-research
+lf ux-research -p nux          # Short form (case insensitive: -p or -P)
+```
+
+Multiple prompts can be chained:
+
+```bash
+lf implement -p nux -p constraints
+```
+
+All short flags are now case-insensitive (`-a`/`-A`, `-i`/`-I`, `-x`/`-X`, etc.).
 
 ## Key Functions (Prompts)
 

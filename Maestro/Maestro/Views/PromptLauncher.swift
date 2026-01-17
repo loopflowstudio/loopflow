@@ -79,6 +79,14 @@ struct PromptLauncher: View {
         .onAppear {
             isInputFocused = true
         }
+        .background {
+            // Hidden button for Cmd+L keyboard shortcut to focus prompt
+            Button("") {
+                isInputFocused = true
+            }
+            .keyboardShortcut("l", modifiers: .command)
+            .opacity(0)
+        }
     }
 
     // MARK: - Task Selector

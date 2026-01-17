@@ -46,6 +46,8 @@ final class AppState {
     // Live output state
     var liveOutputBySession: [String: [OutputLine]] = [:]
     var activeSessionIds: Set<String> = []
+    var activeWorktreePaths: Set<String> = []  // Worktree paths with running sessions
+    private var sessionWorktreeMap: [String: String] = [:]  // session ID → worktree path
 
     // Loading state
     var isLoading: Bool = false
@@ -235,11 +237,25 @@ final class AppState {
     }
 
     private func handleSessionEvent(_ event: SessionEvent) {
-        if event.status == "running" {
+        // session.started events don't have status, just id/task/worktree
+        if event.status == nil {
+            // This is a session.started event
             activeSessionIds.insert(event.id)
             liveOutputBySession[event.id] = []
+            if let worktree = event.worktree {
+                activeWorktreePaths.insert(worktree)
+                sessionWorktreeMap[event.id] = worktree
+            }
         } else if event.status == "completed" || event.status == "error" {
             activeSessionIds.remove(event.id)
+            // Remove worktree from active set
+            if let worktree = sessionWorktreeMap.removeValue(forKey: event.id) {
+                // Only remove if no other sessions running in same worktree
+                let otherSessionsInWorktree = sessionWorktreeMap.values.contains(worktree)
+                if !otherSessionsInWorktree {
+                    activeWorktreePaths.remove(worktree)
+                }
+            }
         }
     }
 
@@ -253,6 +269,10 @@ final class AppState {
         if liveOutputBySession[event.sessionId]?.count ?? 0 > 1000 {
             liveOutputBySession[event.sessionId]?.removeFirst()
         }
+    }
+
+    func isWorktreeRunning(_ worktree: Worktree) -> Bool {
+        activeWorktreePaths.contains(worktree.path)
     }
 
     func refreshAgents() async {

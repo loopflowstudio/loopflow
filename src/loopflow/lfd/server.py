@@ -199,7 +199,11 @@ class Server:
 
         session = Session.from_dict(session_data)
         save_session(session)
-        await self._broadcast(Event("session.started", {"id": session.id, "task": session.task}))
+        await self._broadcast(Event("session.started", {
+            "id": session.id,
+            "task": session.task,
+            "worktree": session.worktree,
+        }))
         return success({"id": session.id})
 
     async def _handle_sessions_end(self, params: dict) -> Response:

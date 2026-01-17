@@ -2,7 +2,7 @@
 
 Comparing Maestro against best-in-class tools: Figma, Cursor, Notion, Linear, and Stripe.
 
-**Last updated**: After context preview panel implementation
+**Last updated**: After running state and keyboard shortcuts implementation
 
 ---
 
@@ -19,6 +19,8 @@ Since initial research:
 - **Error messages** → More actionable with recovery suggestions
 - **Context preview panel** → Implemented with expandable sections, file removal, copy button
 - **Task typeahead** → Task selector now has search with dropdown
+- **Running state indicator** → Worktree rows show pulsing blue dot when task is running
+- **Keyboard shortcut** → Cmd+L focuses prompt input (visible in Edit menu)
 
 ---
 
@@ -92,21 +94,15 @@ A task is just a prompt file. The user is saying either "use this prompt" or "us
 
 ---
 
-### 4. Running State Invisible - Impact: **Medium**
+### ~~4. Running State Invisible~~ - **FIXED**
 
-**Current**: Worktree rows show static status badge from last task. No indication when a task is actively running.
+~~**Current**: Worktree rows show static status badge from last task. No indication when a task is actively running.~~
 
-**What should happen**: Worktree row pulses/animates when its task is running. "electric-penguin" shows a pulsing dot, not just the last completed task badge.
-
-**Inspiration**:
-- **Figma**: Multiplayer cursors show who's active
-- **GitHub**: PR checks show spinner while running
-
-**Simple fix**: Add `isRunning` boolean to Worktree model. Show pulsing dot. Subscribe to session events.
+**Implemented**: Worktree rows now show a pulsing blue dot when a session is running. Session events include worktree path, and AppState tracks active worktree paths. The animation uses scale and opacity for a subtle attention-grabbing effect.
 
 ---
 
-### 5. Output Panel Redundant - Impact: **Medium**
+### 4. Output Panel Redundant - Impact: **Medium**
 
 **Current**: OutputPanel streams lines from running sessions. But the user is already watching the terminal—two views of the same data.
 
@@ -196,8 +192,8 @@ A task is just a prompt file. The user is saying either "use this prompt" or "us
 
 1. **Slash commands** (Notion) → Replace task selector with `/` prefix
 2. **Results summary** (GitHub PR checks) → Replace streaming panel with outcome view
-3. **Running state on rows** (Figma) → Pulsing indicator on active worktrees
-4. **Keyboard shortcuts shown** (Linear) → Display in menus, tooltips
+3. ~~**Running state on rows** (Figma) → Pulsing indicator on active worktrees~~ ✓ Done
+4. ~~**Keyboard shortcuts shown** (Linear) → Display in menus, tooltips~~ ✓ Started (Cmd+L)
 5. **Toast notifications** (Notion) → Auto-worktree creation, task completion
 
 ---
@@ -265,12 +261,12 @@ No window, no sidebar, no options. Just: what do you want to build?
 ## Summary: What to Build Next
 
 **Must fix** (blocks core flow):
-1. Running state indicator on worktree rows
+1. ~~Running state indicator on worktree rows~~ ✓ Done
 
 **Should fix** (significant improvement):
 2. Unify input with `/` commands, remove task selector dropdown
 3. Results summary panel instead of streaming log
-4. Basic keyboard shortcuts (Cmd+1/2 focus, sidebar nav)
+4. ~~Basic keyboard shortcuts~~ ✓ Cmd+L implemented; sidebar nav still needed
 
 **Nice to have**:
 5. @ mentions for files in prompt
@@ -282,7 +278,7 @@ No window, no sidebar, no options. Just: what do you want to build?
 ## Next Steps
 
 1. ~~Build context preview panel~~ Done
-2. Add running state to worktree rows
+2. ~~Add running state to worktree rows~~ Done
 3. Prototype slash command input (replace task selector)
 4. Design results panel (replace OutputPanel)
 5. Add keyboard navigation to sidebar

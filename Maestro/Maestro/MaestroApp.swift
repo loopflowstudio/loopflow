@@ -56,6 +56,14 @@ struct MaestroApp: App {
                 }
                 .keyboardShortcut("4", modifiers: [.command])
             }
+
+            // Edit menu shortcut for prompt focus (handled by PromptLauncher)
+            CommandGroup(after: .textEditing) {
+                Button("Focus Prompt") {
+                    // Handled by hidden button in PromptLauncher
+                }
+                .keyboardShortcut("l", modifiers: .command)
+            }
         }
     }
 

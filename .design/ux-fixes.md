@@ -127,6 +127,39 @@ Based on research from `.design/ux-research.md` and `.design/ux-gaps.md`.
 
 ---
 
+## Running State Indicator
+
+**Problem**: Worktree rows don't show when a task is actively running. Research finding: "Running state not visible on worktree rows—no spinner or indicator."
+
+**Change**: Worktree rows now show a pulsing blue dot when a session is running in that worktree:
+- Session events include worktree path for tracking
+- AppState tracks `activeWorktreePaths` set
+- WorktreeRow shows animated pulsing indicator when `isRunning` is true
+- Animation uses scale and opacity for subtle attention-grabbing effect
+
+**Files**:
+- `src/loopflow/lfd/server.py` (added worktree to session.started event)
+- `Maestro/Maestro/Services/LFDEventService.swift` (parse worktree from event)
+- `Maestro/Maestro/AppState.swift` (track active worktree paths)
+- `Maestro/Maestro/Views/WorktreeSidebar.swift` (pulsing indicator in WorktreeRow)
+
+---
+
+## Keyboard Shortcut: Focus Prompt
+
+**Problem**: No keyboard shortcut to quickly focus the prompt input. Research finding: "No Cmd+K command palette—keyboard navigation slower than CLI."
+
+**Change**: Added Cmd+L keyboard shortcut to focus the prompt input:
+- Cmd+L focuses the main text editor in PromptLauncher
+- Menu item in Edit menu for discoverability
+- Consistent with browser URL bar pattern
+
+**Files**:
+- `Maestro/Maestro/Views/PromptLauncher.swift` (hidden button with shortcut)
+- `Maestro/Maestro/MaestroApp.swift` (menu item for discoverability)
+
+---
+
 ## Remaining
 
 Issues identified but not yet fixed:
@@ -134,13 +167,13 @@ Issues identified but not yet fixed:
 ### High Priority
 
 - [ ] **Dual input confusion**: Task selector + colon syntax in text field still compete. Proposal: Replace with single input using `/` prefix (Notion-style).
-- [ ] **No keyboard-first navigation**: Missing Cmd+K command palette and sidebar keyboard nav
-- [ ] **Running state invisible**: Worktree rows don't show active sessions
+- [ ] **Full command palette**: Cmd+K for all actions (current: only Cmd+L for prompt focus)
 
 ### Medium Priority
 
 - [ ] **Mental model gap**: Users expect in-app responses; Maestro launches terminal sessions. Proposal: Transform OutputPanel into results summary view.
 - [ ] **Output panel redundant**: Streaming panel duplicates terminal output. Should become results view showing "what changed."
+- [ ] **Sidebar keyboard nav**: Arrow keys to navigate worktrees, Enter to select
 
 ### Lower Priority
 

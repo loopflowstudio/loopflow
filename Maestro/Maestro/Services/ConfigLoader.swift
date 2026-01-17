@@ -128,7 +128,8 @@ struct ConfigLoader {
             diffFiles: diffFiles,
             paste: paste,
             voice: voice,
-            summaries: summaries
+            summaries: summaries,
+            work: nil
         )
     }
 }

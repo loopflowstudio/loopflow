@@ -46,6 +46,31 @@ struct SummaryConfig: Codable {
     let model: String?
 }
 
+struct AsanaConfig: Codable {
+    let projectId: String
+
+    enum CodingKeys: String, CodingKey {
+        case projectId = "project_id"
+    }
+}
+
+struct WorkConfig: Codable {
+    let backend: String?
+    let asana: AsanaConfig?
+    let autoRebase: Bool?
+    let autoLand: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case backend, asana
+        case autoRebase = "auto_rebase"
+        case autoLand = "auto_land"
+    }
+
+    var isAsana: Bool {
+        backend?.lowercased() == "asana"
+    }
+}
+
 struct LoopflowConfig: Codable {
     let agentModel: String?
     let interactive: [String]?
@@ -63,11 +88,12 @@ struct LoopflowConfig: Codable {
     let paste: Bool?
     let voice: VoiceConfig?
     let summaries: [SummaryConfig]?
+    let work: WorkConfig?
 
     enum CodingKeys: String, CodingKey {
         case agentModel = "agent_model"
         case diffFiles = "diff_files"
-        case interactive, terminal, ide, workspace, context, exclude, push, pr, yolo, docs, diff, paste, voice, summaries
+        case interactive, terminal, ide, workspace, context, exclude, push, pr, yolo, docs, diff, paste, voice, summaries, work
     }
 
     /// Voice config can be a single string or array of strings in YAML.

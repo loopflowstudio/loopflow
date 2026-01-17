@@ -794,6 +794,7 @@ def land(
 ) -> None:
     """Squash-merge branch to main and clean up.
 
+    Automatically rebases onto main before merging to ensure clean merge.
     By default, stages, commits, and pushes any pending changes before landing.
     Use --strict to require clean state (error if uncommitted/unpushed).
 
@@ -810,6 +811,84 @@ def land(
         _land_local(strict, worktree)
     else:
         _land_pr(strict, worktree, create_pr=create_pr)
+
+
+def _rebase_onto_main(repo_root: Path, base_branch: str) -> bool:
+    """Rebase branch onto base_branch. Returns True if successful.
+
+    If conflicts occur, launches Claude with the rebase task to resolve them.
+    Handles force-push after rebase if the branch has an upstream.
+    """
+    from loopflow.context import gather_task
+
+    # Fetch latest main
+    subprocess.run(["git", "fetch", "origin", base_branch], cwd=repo_root, check=False)
+
+    # Check if rebase is needed
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", f"origin/{base_branch}", "HEAD"],
+        cwd=repo_root,
+        capture_output=True,
+    )
+    if result.returncode == 0:
+        # Already up-to-date
+        return True
+
+    typer.echo(f"Rebasing onto {base_branch}...")
+    result = subprocess.run(
+        ["git", "rebase", f"origin/{base_branch}"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        # Conflicts - abort and hand off to Claude
+        typer.echo("Conflicts detected, launching rebase assistant...")
+        subprocess.run(["git", "rebase", "--abort"], cwd=repo_root, capture_output=True)
+
+        # Get rebase prompt (custom or built-in)
+        task = gather_task(repo_root, "rebase")
+        if not task:
+            typer.echo("Error: No rebase task found", err=True)
+            return False
+
+        # Run Claude with the rebase task
+        rebase_result = subprocess.run(["claude", task.content], cwd=repo_root)
+        if rebase_result.returncode != 0:
+            typer.echo("Rebase assistant failed", err=True)
+            return False
+
+        # Verify rebase completed (branch should now be ahead of main)
+        result = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", f"origin/{base_branch}", "HEAD"],
+            cwd=repo_root,
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            typer.echo("Error: Rebase did not complete successfully", err=True)
+            return False
+
+        return True
+
+    # Force-push if branch has upstream (rebase rewrites history)
+    result = subprocess.run(
+        ["git", "rev-parse", "@{u}"],
+        cwd=repo_root,
+        capture_output=True,
+    )
+    if result.returncode == 0:
+        typer.echo("Force-pushing rebased branch...")
+        result = subprocess.run(
+            ["git", "push", "--force-with-lease"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            typer.echo("Error: Force-push failed after rebase.", err=True)
+            return False
+
+    return True
 
 
 def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> None:
@@ -861,6 +940,11 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
             typer.echo("Error: Uncommitted changes (use without --strict to auto-commit)", err=True)
             raise typer.Exit(1)
         _add_commit_push(repo_root, push=False)
+
+    # Rebase onto base branch before pushing
+    base_branch = _get_default_branch(main_repo)
+    if not _rebase_onto_main(repo_root, base_branch):
+        raise typer.Exit(1)
 
     # Ensure branch is pushed
     result = subprocess.run(
@@ -1061,8 +1145,9 @@ def _land_local(strict: bool, worktree: str | None) -> None:
         typer.echo(f"Error: Cannot land {branch} onto itself", err=True)
         raise typer.Exit(1)
 
-    # Fetch base branch
-    subprocess.run(["git", "fetch", "origin", base_branch], cwd=repo_root, check=False)
+    # Rebase onto base branch before merging
+    if not _rebase_onto_main(repo_root, base_branch):
+        raise typer.Exit(1)
 
     # Check for changes
     base_ref = _resolve_base_ref(repo_root, base_branch)

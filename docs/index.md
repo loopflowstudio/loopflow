@@ -7,8 +7,6 @@ title: Home
 
 Run LLM coding agents from reusable prompt files.
 
-Write a task once, run it on any branch:
-
 ```bash
 lf review          # run .claude/commands/review.md
 lf ship            # pipeline: implement → review → test → commit → PR
@@ -18,15 +16,25 @@ lf ship            # pipeline: implement → review → test → commit → PR
 
 ## What it is
 
-Loopflow is a workflow for running AI coding agents like Claude Code and Codex. You write prompts as files, chain them into pipelines, and run them across isolated worktrees.
+Loopflow treats prompts as artifacts. They live in your repo, versioned with git, not scattered across chat logs and clipboards.
 
-- **Tasks** are prompt files in `.claude/commands/` or `.lf/`
-- **Pipelines** chain tasks together
-- **Worktrees** keep parallel work isolated
+```
+.lf/
+├── review.lf      # your code review standards
+├── implement.lf   # how you want features built
+├── ship.yaml      # pipeline: implement → review → test → commit
+└── config.yaml    # settings
+```
 
-## Why it helps
+Each `.lf` file is markdown. `git log` shows prompt history. `git diff` shows what changed. When something works, you can find it again.
 
-The loop is the thing. Write a prompt, run it, see what's off, fix it, run again. Each pass catches what the last one missed. The prompt gets sharper. The output gets cleaner. Rough edges smooth out through repetition.
+## Why this matters
+
+**Prompts accumulate knowledge.** "Include error handling." "Follow our naming conventions." "Check for the bugs we always make." These belong in version control, not your head.
+
+**Structure makes it robust.** Vibing produces slop. A pipeline that reviews before committing doesn't. `lf ship` means "implement, then review, then test, then commit" — every time.
+
+**Tools change fast.** Your prompts should survive. Same task file runs on Claude, Codex, or Gemini. Switch with `-m codex`.
 
 ## Install
 
@@ -99,9 +107,7 @@ Compare results with `git diff` or your editor.
 
 ## Next steps
 
-- [Maestro](maestro.md) - visual interface for loopflow
-- [Configuration](config.md) - all options and settings
-- [Patterns](patterns.md) - workflows and recipes
-- [Daemon (lfd)](lfd.md) - background service and agents
-- [API Reference](api.md) - socket protocol for integrations
-- [Philosophy](vision.md) - why loopflow exists
+- [Maestro](maestro.md) — prefer a GUI? Native Mac app for visual prompt launching
+- [Configuration](config.md) — all options for `.lf/config.yaml`
+- [Patterns](patterns.md) — real workflows and recipes from production use
+- [Philosophy](vision.md) — why loopflow exists, what we're betting on

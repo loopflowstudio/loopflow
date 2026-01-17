@@ -5,7 +5,9 @@ title: Maestro
 
 # Maestro
 
-Visual interface for loopflow. Launch prompts, manage worktrees, track sessions.
+A native Mac app for running loopflow tasks. See your worktrees, pick a prompt, hit run.
+
+If you prefer a GUI to the terminal, or want to see your prompts and context before launching, Maestro is the visual layer on top of `lf`.
 
 ## Getting Started
 

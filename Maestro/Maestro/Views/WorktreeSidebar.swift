@@ -166,32 +166,44 @@ struct WorktreeSidebar: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "square.stack.3d.up")
-                .font(.system(size: 28))
-                .foregroundStyle(.tertiary)
+        VStack(spacing: 0) {
+            // Optical centering: 40% space above, 60% below
+            Spacer()
+                .frame(maxHeight: .infinity)
 
-            VStack(spacing: 4) {
-                Text("No workspaces yet")
-                    .fontWeight(.medium)
-                    .foregroundStyle(.secondary)
-                Text("Create a workspace to let AI work on a feature without affecting your main code.")
-                    .font(.caption)
+            VStack(spacing: 12) {
+                Image(systemName: "square.stack.3d.up")
+                    .font(.system(size: 28))
                     .foregroundStyle(.tertiary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 16)
+
+                VStack(spacing: 4) {
+                    Text("No workspaces yet")
+                        .fontWeight(.medium)
+                        .foregroundStyle(.secondary)
+                    Text("Create a workspace to let AI work on a feature without affecting your main code.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 16)
+                }
+
+                Button {
+                    showingNewWorktreeSheet = true
+                } label: {
+                    Label("Create Workspace", systemImage: "plus")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
             }
 
-            Button {
-                showingNewWorktreeSheet = true
-            } label: {
-                Label("Create Workspace", systemImage: "plus")
-                    .font(.caption)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
+            // More space below for optical centering
+            Spacer()
+                .frame(maxHeight: .infinity)
+            Spacer()
+                .frame(maxHeight: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity)
         .padding()
     }
 
@@ -526,7 +538,7 @@ struct WorktreeRow: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(isSelected ? Color.accentColor.opacity(0.15) : (isHovering ? Color.primary.opacity(0.05) : Color.clear))
+                .fill(isSelected ? Color.accentColor.opacity(0.25) : (isHovering ? Color.primary.opacity(0.05) : Color.clear))
         )
         .contentShape(Rectangle())
         .onHover { hovering in
@@ -654,15 +666,7 @@ struct WorktreeRow: View {
             }
 
             if isRunning {
-                // Pulsing dot for running state
-                Circle()
-                    .fill(.blue)
-                    .frame(width: 8, height: 8)
-                    .scaleEffect(pulseAnimation ? 1.2 : 0.8)
-                    .opacity(pulseAnimation ? 1.0 : 0.6)
-                    .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: pulseAnimation)
-                    .onAppear { pulseAnimation = true }
-                    .onDisappear { pulseAnimation = false }
+                RunningIndicator(pulseAnimation: $pulseAnimation)
             } else if worktree.isDirty {
                 Circle()
                     .fill(.orange)
@@ -695,6 +699,35 @@ struct WorktreeRow: View {
         .background(style.color.opacity(0.2))
         .foregroundStyle(style.color)
         .clipShape(Capsule())
+    }
+}
+
+/// Running state indicator with accessibility support.
+/// Shows pulsing dot with animation, or static "Running" text for reduced motion.
+struct RunningIndicator: View {
+    @Binding var pulseAnimation: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        if reduceMotion {
+            // Static text label for users with reduced motion
+            Text("Running")
+                .font(.caption2)
+                .fontWeight(.medium)
+                .foregroundStyle(.blue)
+                .accessibilityLabel("Task running")
+        } else {
+            // Pulsing dot for standard users
+            Circle()
+                .fill(.blue)
+                .frame(width: 8, height: 8)
+                .scaleEffect(pulseAnimation ? 1.2 : 0.8)
+                .opacity(pulseAnimation ? 1.0 : 0.6)
+                .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: pulseAnimation)
+                .onAppear { pulseAnimation = true }
+                .onDisappear { pulseAnimation = false }
+                .accessibilityLabel("Task running")
+        }
     }
 }
 
@@ -775,73 +808,7 @@ struct NewWorktreeSheet: View {
     }
 }
 
-struct DiffSheet: View {
-    let worktree: Worktree
-    let diffContent: String?
-    let isLoading: Bool
-    let onOpenWeb: () -> Void
-
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(spacing: 0) {
-            // Header
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(worktree.branch)
-                        .font(.headline)
-                    Text("Diff against main")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Button {
-                    onOpenWeb()
-                } label: {
-                    Image(systemName: "safari")
-                }
-                .buttonStyle(.plain)
-                .help("Open in GitHub")
-
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding()
-
-            Divider()
-
-            // Content
-            if isLoading {
-                VStack {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                    Text("Loading diff...")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let content = diffContent {
-                ScrollView {
-                    DiffContentView(content: content)
-                        .padding()
-                }
-            } else {
-                Text("No diff available")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-        .frame(minWidth: 600, minHeight: 400)
-        .frame(idealWidth: 800, idealHeight: 600)
-    }
-}
+// MARK: - Diff Views
 
 struct DiffContentView: View {
     let content: String
@@ -884,27 +851,31 @@ struct DiffContentView: View {
     }
 }
 
-struct CompareSheet: View {
-    let worktreeA: Worktree
-    let worktreeB: Worktree
+struct DiffSheetView: View {
+    let title: String
+    let subtitle: String
     let diffContent: String?
     let isLoading: Bool
+    var action: AnyView? = nil
 
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("\(worktreeA.branch) vs \(worktreeB.branch)")
+                    Text(title)
                         .font(.headline)
-                    Text("Comparison")
+                    Text(subtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
                 Spacer()
+
+                if let action = action {
+                    action
+                }
 
                 Button {
                     dismiss()
@@ -918,29 +889,74 @@ struct CompareSheet: View {
 
             Divider()
 
-            // Content
             if isLoading {
                 VStack {
                     ProgressView()
                         .scaleEffect(0.8)
-                    Text("Loading comparison...")
+                    Text("Loading...")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let content = diffContent {
+            } else if let content = diffContent, !content.isEmpty {
                 ScrollView {
                     DiffContentView(content: content)
                         .padding()
                 }
             } else {
-                Text("No differences")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(spacing: 8) {
+                    Image(systemName: "doc.text")
+                        .font(.title2)
+                        .foregroundStyle(.tertiary)
+                    Text("No diff available")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .frame(minWidth: 600, minHeight: 400)
         .frame(idealWidth: 800, idealHeight: 600)
+    }
+}
+
+struct DiffSheet: View {
+    let worktree: Worktree
+    let diffContent: String?
+    let isLoading: Bool
+    let onOpenWeb: () -> Void
+
+    var body: some View {
+        DiffSheetView(
+            title: worktree.branch,
+            subtitle: "Diff against main",
+            diffContent: diffContent,
+            isLoading: isLoading,
+            action: AnyView(
+                Button {
+                    onOpenWeb()
+                } label: {
+                    Image(systemName: "safari")
+                }
+                .buttonStyle(.plain)
+                .help("Open in GitHub")
+            )
+        )
+    }
+}
+
+struct CompareSheet: View {
+    let worktreeA: Worktree
+    let worktreeB: Worktree
+    let diffContent: String?
+    let isLoading: Bool
+
+    var body: some View {
+        DiffSheetView(
+            title: "\(worktreeA.branch) vs \(worktreeB.branch)",
+            subtitle: "Comparison",
+            diffContent: diffContent,
+            isLoading: isLoading
+        )
     }
 }
 

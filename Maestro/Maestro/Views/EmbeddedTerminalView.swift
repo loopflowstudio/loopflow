@@ -15,17 +15,18 @@ struct EmbeddedTerminalView: NSViewRepresentable {
         let terminal = LocalProcessTerminalView(frame: .zero)
         terminal.getTerminal().silentLog = true
 
-        // Configure terminal appearance
-        let colors = terminal.getTerminal().installColors(
-            Pty15Colors
-        )
+        // Configure terminal appearance using native colors
         terminal.nativeBackgroundColor = NSColor.textBackgroundColor
         terminal.nativeForegroundColor = NSColor.textColor
+        terminal.configureNativeColors()
 
         // Set terminal font
         if let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular) as NSFont? {
             terminal.font = font
         }
+
+        // Set process delegate to receive termination notification
+        terminal.processDelegate = context.coordinator
 
         context.coordinator.terminal = terminal
         return terminal
@@ -61,9 +62,6 @@ struct EmbeddedTerminalView: NSViewRepresentable {
             self.process = processRef
             self.isRunning = true
         }
-
-        // Monitor for termination
-        context.coordinator.monitorTermination(terminal)
     }
 
     private func buildEnvironment() -> [String] {
@@ -78,55 +76,35 @@ struct EmbeddedTerminalView: NSViewRepresentable {
     }
 
     @MainActor
-    class Coordinator: NSObject {
+    class Coordinator: NSObject, LocalProcessTerminalViewDelegate {
         var parent: EmbeddedTerminalView
         var terminal: LocalProcessTerminalView?
         var hasStarted = false
-        private var terminationTask: Task<Void, Never>?
 
         init(_ parent: EmbeddedTerminalView) {
             self.parent = parent
         }
 
-        func monitorTermination(_ terminal: LocalProcessTerminalView) {
-            terminationTask = Task { @MainActor in
-                // Poll for process completion (SwiftTerm doesn't expose a delegate for this)
-                while !Task.isCancelled {
-                    try? await Task.sleep(for: .milliseconds(500))
+        // MARK: - LocalProcessTerminalViewDelegate
 
-                    // Check if terminal process has exited
-                    if !terminal.running {
-                        parent.isRunning = false
-                        parent.process = nil
-                        parent.onTerminate()
-                        break
-                    }
-                }
-            }
+        nonisolated func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {
+            // Terminal resized - nothing to do
         }
 
-        deinit {
-            terminationTask?.cancel()
+        nonisolated func setTerminalTitle(source: LocalProcessTerminalView, title: String) {
+            // Title changed - nothing to do
+        }
+
+        nonisolated func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
+            // Directory changed - nothing to do
+        }
+
+        nonisolated func processTerminated(source: TerminalView, exitCode: Int32?) {
+            Task { @MainActor [weak self] in
+                self?.parent.isRunning = false
+                self?.parent.process = nil
+                self?.parent.onTerminate()
+            }
         }
     }
 }
-
-// Standard 16-color palette for terminal
-private let Pty15Colors: [Color] = [
-    Color(red: 0, green: 0, blue: 0),           // black
-    Color(red: 0.8, green: 0, blue: 0),         // red
-    Color(red: 0, green: 0.8, blue: 0),         // green
-    Color(red: 0.8, green: 0.8, blue: 0),       // yellow
-    Color(red: 0, green: 0, blue: 0.8),         // blue
-    Color(red: 0.8, green: 0, blue: 0.8),       // magenta
-    Color(red: 0, green: 0.8, blue: 0.8),       // cyan
-    Color(red: 0.8, green: 0.8, blue: 0.8),     // white
-    Color(red: 0.4, green: 0.4, blue: 0.4),     // bright black
-    Color(red: 1, green: 0.4, blue: 0.4),       // bright red
-    Color(red: 0.4, green: 1, blue: 0.4),       // bright green
-    Color(red: 1, green: 1, blue: 0.4),         // bright yellow
-    Color(red: 0.4, green: 0.4, blue: 1),       // bright blue
-    Color(red: 1, green: 0.4, blue: 1),         // bright magenta
-    Color(red: 0.4, green: 1, blue: 1),         // bright cyan
-    Color(red: 1, green: 1, blue: 1),           // bright white
-]

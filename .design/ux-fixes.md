@@ -40,6 +40,26 @@
 **Change**: Changed to "Tell it what to build. It writes the code." - concrete, action-oriented. Updated icon to `wand.and.sparkles`.
 **Files**: `Maestro/Maestro/Views/WelcomeWindow.swift`
 
+## Sidebar: Optical centering for empty state
+**Problem**: Empty state floated low in tall windows due to geometric centering with `maxHeight: .infinity`.
+**Change**: Used Spacer layout with 1:2 ratio (40% above, 60% below) for optical centering - content appears slightly above center, which is more visually pleasing.
+**Files**: `Maestro/Maestro/Views/WorktreeSidebar.swift`
+
+## Sidebar: Running state accessibility
+**Problem**: Pulsing blue dot for running state relied on animation alone - accessibility concern for users with reduced motion enabled.
+**Change**: Added `RunningIndicator` component that shows static "Running" text label when `accessibilityReduceMotion` is enabled. Both variants have proper accessibility labels.
+**Files**: `Maestro/Maestro/Views/WorktreeSidebar.swift`
+
+## Sidebar: Selected worktree highlight
+**Problem**: Blue accent at 15% opacity was too subtle for primary selection state.
+**Change**: Increased opacity from 0.15 to 0.25 for better visibility while maintaining the macOS aesthetic.
+**Files**: `Maestro/Maestro/Views/WorktreeSidebar.swift`
+
+## Results panel: Empty state
+**Problem**: Results panel showed nothing when no tasks had been run - users didn't know what to expect.
+**Change**: Added "Ready to run" empty state with terminal icon and explanatory text "Results will appear here after you run a task."
+**Files**: `Maestro/Maestro/Views/ResultsPanel.swift`
+
 ## Remaining
 Issues identified but not yet fixed:
 
@@ -52,4 +72,3 @@ Issues identified but not yet fixed:
 - [ ] No Cmd+K command palette
 - [ ] No notification when background task completes
 - [ ] Hover actions crowd four icons (could reduce to 2 + context menu)
-- [ ] Running state pulsing dot may be missed by motion-sensitive users

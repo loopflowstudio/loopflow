@@ -1,6 +1,5 @@
 """Work backend protocol and implementations."""
 
-from pathlib import Path
 from typing import Protocol
 
 from loopflow.work.models import WorkItem

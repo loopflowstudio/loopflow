@@ -1,0 +1,80 @@
+---
+context:
+  - .design/ux-research.md
+  - .design/ux-gaps.md
+  - .design/screenshots/
+  - Maestro/Maestro/Views/
+  - Maestro/Maestro/Services/
+voice: architect
+---
+Implement high-priority UX improvements based on research and gap analysis.
+
+## Input
+
+Read the research artifacts:
+- `.design/ux-research.md` - User pain points by profile
+- `.design/ux-gaps.md` - Gaps vs Figma/Cursor/Notion
+
+## Focus Areas
+
+Prioritize improvements in this order:
+
+### 1. First-Run Experience
+- Setup clarity and progress
+- What users see before any action
+- Empty states that guide
+
+### 2. Prompt Input Flow
+- Input affordances (what can I type?)
+- Feedback (what will happen?)
+- Recovery (how do I fix mistakes?)
+
+### 3. Defaults and Configuration
+- Sensible defaults that work out of box
+- Progressive disclosure of advanced options
+- Reduce decisions for new users
+
+### 4. Error States
+- Clear error messages
+- Recovery paths
+- Graceful degradation
+
+## Constraints
+
+- **Small changes**: Each fix should be one commit's worth
+- **No redesigns**: Improve what exists, don't rebuild
+- **Test in Maestro**: Build and verify each change works
+- **macOS conventions**: Follow platform patterns
+
+## Process
+
+For each improvement:
+
+1. Identify the specific file(s) to change
+2. Make the minimal edit
+3. Build: `cd Maestro && xcodebuild -scheme Maestro -configuration Debug build`
+4. Describe the before/after behavior
+5. Commit with message: `maestro: [area] short description`
+
+## Output
+
+After making changes, update `.design/ux-fixes.md`:
+
+```markdown
+# UX Fixes Applied
+
+## [Area]: [Short description]
+**Problem**: From research/gaps
+**Change**: What was modified
+**Files**: List of files
+**Commit**: Hash
+
+## ...
+
+## Remaining
+Issues identified but not yet fixed:
+- [ ] Issue
+- [ ] ...
+```
+
+Make real code changes. Build and verify.

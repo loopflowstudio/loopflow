@@ -1,0 +1,72 @@
+---
+context:
+  - .design/screenshots/
+  - Maestro/Maestro/Views/
+voice: customer
+---
+Conduct user research by simulating three user profiles experiencing Maestro for the first time.
+
+## Profiles
+
+### 1. New Developer
+- Just heard about "AI coding assistants"
+- Has never used Claude Code, Cursor, or Copilot
+- Comfortable with git but not power user
+- Wants to understand: "What can this do for me?"
+
+### 2. Claude Code Power User
+- Uses `claude` CLI daily
+- Knows prompts, context management, worktrees
+- Trying Maestro to see if GUI is faster
+- Expects: feature parity with CLI, plus visual benefits
+
+### 3. Designer or PM
+- Non-engineer, curious about AI assistance
+- Might use for docs, specs, or light scripting
+- Low tolerance for jargon or complexity
+- Needs: clear affordances, forgiving errors
+
+## For Each Profile
+
+Walk through the first-run experience using the screenshots. Narrate their internal monologue:
+
+1. **First impression** (0-5 seconds): What do they see? What do they think this does?
+2. **First action**: What do they try to do? Can they figure out how?
+3. **First obstacle**: Where do they get stuck or confused?
+4. **Recovery**: Can they recover? Do they give up?
+5. **Verdict**: Would they come back tomorrow?
+
+Be specific. Quote what they see. Note exact UI elements that confuse or delight.
+
+## Output
+
+Write findings to `.design/ux-research.md`:
+
+```markdown
+# UX Research: User Profiles
+
+## New Developer
+**First impression**: ...
+**First action**: ...
+**First obstacle**: ...
+**Recovery**: ...
+**Verdict**: ...
+
+### Pain Points
+- [ ] Specific issue and location
+- [ ] ...
+
+## Claude Code Power User
+...
+
+## Designer/PM
+...
+
+## Summary
+Top 3 issues across all profiles:
+1. ...
+2. ...
+3. ...
+```
+
+Do not write code. Research only.

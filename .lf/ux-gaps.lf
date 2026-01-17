@@ -1,0 +1,87 @@
+---
+context:
+  - .design/screenshots/
+  - .design/ux-research.md
+  - Maestro/Maestro/Views/
+voice: artist
+---
+Compare Maestro against best-in-class tools and identify UX gaps.
+
+## Inspiration Sources
+
+Study these products for patterns Maestro should adopt:
+
+### Figma
+- Onboarding: How do they teach without blocking?
+- Empty states: What do new files show?
+- Progressive disclosure: How do they hide complexity?
+- Contextual help: Tooltips, hints, guided tours
+
+### Cursor
+- Prompt input: How do they handle the AI chat/command interface?
+- Context management: How do users control what the AI sees?
+- Feedback loops: How do they show what the AI is doing?
+- Error recovery: What happens when things go wrong?
+
+### Notion
+- First-run flow: How do they onboard?
+- Templates: How do they help users start?
+- Empty states: What does a blank page feel like?
+- Gentle defaults: How do they reduce decisions?
+
+## Design Principles to Apply
+
+### Bret Victor
+- Direct manipulation over configuration
+- Immediate feedback, visible state
+- "Create by reacting" not "create by planning"
+
+### Don Norman (Design of Everyday Things)
+- Affordances: Does the UI suggest what's possible?
+- Signifiers: Do controls look interactive?
+- Mapping: Do controls relate spatially to effects?
+- Feedback: Does every action have visible result?
+
+### Jony Ive
+- Simplicity through removal, not addition
+- Content over chrome
+- Deference: UI recedes, work advances
+
+## Analysis
+
+For each area of Maestro, identify gaps:
+
+1. **Welcome/Setup**: vs Figma onboarding, Notion templates
+2. **Prompt Input**: vs Cursor chat, Notion slash commands
+3. **Context Controls**: vs Cursor's @ mentions, Figma's component panel
+4. **Worktree Sidebar**: vs Notion's page tree, Figma's layers
+5. **Running State**: vs Cursor's streaming, Figma's presence indicators
+6. **Errors/Empty States**: vs Notion's empty pages, Figma's placeholders
+
+## Output
+
+Write analysis to `.design/ux-gaps.md`:
+
+```markdown
+# UX Gap Analysis
+
+## Welcome/Setup
+**Current**: Description of what Maestro does
+**Inspiration**: What Figma/Cursor/Notion do better
+**Gap**: Specific missing capability
+**Pattern to adopt**: Concrete suggestion
+
+## Prompt Input
+...
+
+## Summary: Priority Gaps
+1. [Gap] - Impact: High/Medium/Low
+2. ...
+3. ...
+
+## Patterns to Steal
+1. [Pattern from X] - Apply to [area]
+2. ...
+```
+
+Do not write code. Analysis only.

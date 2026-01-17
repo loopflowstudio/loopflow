@@ -1,0 +1,76 @@
+# Project: First-Time Prompter Experience
+
+## Focus
+
+People encountering Maestro for the first time and using the prompter to create LLM requests in worktrees.
+
+This is about the **vibecoding moment**: user has an idea, opens the app, and wants to get an AI agent working on it. We're studying how different people approach this and where they get stuck.
+
+## User Profiles
+
+### The Curious Beginner
+- Heard about "vibe coding" or AI assistants
+- Never used Claude Code, Cursor, or Copilot
+- Might not fully understand what's possible
+- Needs: "What can I even ask for?"
+
+### The CLI Convert
+- Uses `claude` or similar from terminal daily
+- Trying GUI to see if it's faster/better
+- Has muscle memory and expectations
+- Needs: feature parity, clear mappings to CLI concepts
+
+### The Prompt Explorer
+- Has used ChatGPT/Claude web for coding help
+- Understands prompting but not git worktrees
+- Wants to experiment, iterate quickly
+- Needs: low friction between idea and execution
+
+### The Skeptic
+- Experienced engineer, skeptical of AI hype
+- Trying it because everyone else is
+- Low patience for jank or hand-holding
+- Needs: get out of the way, show value fast
+
+## The Core Loop
+
+```
+Open app → See prompt field → Type something → Run → See result
+```
+
+Every friction point in this loop costs us users.
+
+## Key Questions
+
+1. When they see the prompt field, do they know what to type?
+2. Do they understand worktrees, or is it confusing?
+3. Do the context toggles help or overwhelm?
+4. What happens when they hit Run? Is it clear?
+5. Can they recover when something goes wrong?
+
+## What We're Studying
+
+- First 60 seconds after opening a repo
+- The moment before typing (what do they look at?)
+- The moment after typing (do they hesitate before Run?)
+- What they do when results aren't what they expected
+
+## Files
+
+```
+Maestro/Maestro/Views/
+├── PromptLauncher.swift     # Main prompter interface
+├── WorktreeSidebar.swift    # Worktree selection/creation
+├── WelcomeWindow.swift      # Entry point
+└── SetupView.swift          # Dependency handling
+```
+
+## Scope
+
+**In scope**: The prompter experience in Maestro—what users see, type, and do.
+
+**Out of scope**: Agents feature in Maestro (marked beta, not the focus). We're *using* the lfd agent infrastructure to run these improvement loops, not building agent UI.
+
+## Success
+
+A first-time user can go from "I want to try this" to "it's working on my request" without confusion, hesitation, or needing to read docs.

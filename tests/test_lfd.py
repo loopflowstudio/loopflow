@@ -8,7 +8,7 @@ from loopflow.lfd.models import (
     AgentSpec,
     AgentRun,
     AgentStatus,
-    MergeStrategy,
+    MergeMode,
     Session,
     SessionStatus,
     TriggerKind,
@@ -67,13 +67,27 @@ def test_agent_spec_with_emoji_and_goal():
         pipeline="ship",
         emoji="🔒",
         goal=Path(".lf/goals/security.md"),
-        merge_strategy=MergeStrategy.AUTO,
+        merge_mode=MergeMode.AUTO,
     )
     data = spec.to_dict()
     restored = AgentSpec.from_dict(data)
     assert restored.emoji == "🔒"
     assert restored.goal == Path(".lf/goals/security.md")
-    assert restored.merge_strategy == MergeStrategy.AUTO
+    assert restored.merge_mode == MergeMode.AUTO
+
+
+def test_agent_spec_with_personal_main():
+    spec = AgentSpec(
+        name="my-agent",
+        repo=Path("/tmp/repo"),
+        pipeline="ship",
+        merge_mode=MergeMode.SILENT,
+        personal_main="my-agent-main",
+    )
+    data = spec.to_dict()
+    restored = AgentSpec.from_dict(data)
+    assert restored.personal_main == "my-agent-main"
+    assert restored.merge_mode == MergeMode.SILENT
 
 
 def test_agent_run_serialization():

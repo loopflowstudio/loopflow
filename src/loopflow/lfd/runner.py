@@ -4,6 +4,7 @@ Executes an agent's pipeline with prompt injection and merge handling.
 """
 
 import os
+import secrets
 import subprocess
 import sys
 import uuid
@@ -16,10 +17,15 @@ from loopflow.git import find_main_repo, get_current_branch
 from loopflow.launcher import build_model_command, get_runner
 from loopflow.lfd.client import log_session_start, log_session_end
 from loopflow.lfd.db import _get_db, update_run_status
-from loopflow.lfd.models import AgentSpec, AgentStatus, MergeStrategy, Session, SessionStatus
+from loopflow.lfd.models import AgentSpec, AgentStatus, MergeMode, Session, SessionStatus
 from loopflow.llm_http import generate_pr_message
 from loopflow.logging import write_prompt_file
 from loopflow.worktrees import WorktreeError, create as create_worktree
+
+
+def _random_suffix() -> str:
+    """Generate a short random suffix for temp branch names."""
+    return secrets.token_hex(3)  # e.g. "x7k2m3"
 
 
 def run_agent_iteration(
@@ -31,17 +37,23 @@ def run_agent_iteration(
 ) -> int:
     """Run one iteration of an agent's pipeline.
 
-    Creates a worktree, runs the pipeline tasks, handles merging.
+    Creates a worktree from personal-main, runs the pipeline tasks, handles merging.
     Returns exit code (0 for success).
     """
     main_repo = find_main_repo(repo_root) or repo_root
     config = load_config(main_repo)
 
-    # Generate branch name and create worktree
-    branch_name = _generate_branch_name(agent, iteration)
+    # Generate temp branch name from personal-main
+    temp_branch = f"{agent.name}-{_random_suffix()}"
+    base_branch = agent.personal_main
+
+    # If no personal_main assigned, fall back to old behavior
+    if not base_branch:
+        temp_branch = _generate_branch_name(agent, iteration)
+        base_branch = None
 
     try:
-        worktree_path = create_worktree(main_repo, branch_name)
+        worktree_path = create_worktree(main_repo, temp_branch, base=base_branch)
     except WorktreeError as e:
         print(f"Error creating worktree: {e}")
         return 1
@@ -219,16 +231,179 @@ def _inject_agent_prompt(
 
 
 def _handle_merge(agent: AgentSpec, worktree_path: Path) -> int:
-    """Handle merge strategy after pipeline completion."""
-    if agent.merge_strategy == MergeStrategy.AUTO:
-        return _handle_auto_merge(worktree_path)
-    elif agent.merge_strategy == MergeStrategy.PR:
-        return _handle_pr_merge(agent, worktree_path)
+    """Handle merge mode after pipeline completion.
+
+    With personal-main workflow:
+    - AUTO: Create PR to personal-main, auto-merge
+    - PR: Create PR to personal-main, wait for approval
+    - SILENT: Merge directly to personal-main without PR
+    """
+    branch = get_current_branch(worktree_path)
+    if not branch:
+        return 1
+
+    # If no personal_main, fall back to legacy behavior
+    if not agent.personal_main:
+        if agent.merge_mode == MergeMode.AUTO:
+            return _handle_auto_merge_legacy(worktree_path)
+        elif agent.merge_mode == MergeMode.PR:
+            return _handle_pr_merge_legacy(agent, worktree_path, branch)
+        return 0
+
+    # Personal-main workflow
+    if agent.merge_mode == MergeMode.SILENT:
+        return _handle_silent_merge(agent, worktree_path, branch)
+    elif agent.merge_mode == MergeMode.AUTO:
+        return _handle_auto_merge(agent, worktree_path, branch)
+    elif agent.merge_mode == MergeMode.PR:
+        return _handle_pr_merge(agent, worktree_path, branch)
     return 0
 
 
-def _handle_auto_merge(worktree_path: Path) -> int:
-    """Land commits directly to main."""
+def _handle_silent_merge(agent: AgentSpec, worktree_path: Path, branch: str) -> int:
+    """Merge directly to personal-main without creating a PR."""
+    main_repo = find_main_repo(worktree_path) or worktree_path.parent
+
+    # Checkout personal-main and merge the iteration branch
+    result = subprocess.run(
+        ["git", "checkout", agent.personal_main],
+        cwd=main_repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"Failed to checkout {agent.personal_main}: {result.stderr}")
+        return 1
+
+    # Merge the iteration branch
+    result = subprocess.run(
+        ["git", "merge", "--no-ff", branch, "-m", f"Merge {branch}"],
+        cwd=main_repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"Failed to merge {branch}: {result.stderr}")
+        return 1
+
+    # Push personal-main
+    result = subprocess.run(
+        ["git", "push", "origin", agent.personal_main],
+        cwd=main_repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"Failed to push {agent.personal_main}: {result.stderr}")
+        # Continue anyway, push can be done later
+
+    # Delete iteration branch
+    subprocess.run(["git", "branch", "-D", branch], cwd=main_repo, capture_output=True)
+
+    print(f"Merged {branch} to {agent.personal_main}")
+    return 0
+
+
+def _handle_auto_merge(agent: AgentSpec, worktree_path: Path, branch: str) -> int:
+    """Create PR to personal-main and auto-merge it."""
+    # Push the iteration branch
+    result = subprocess.run(
+        ["git", "push", "-u", "origin", branch],
+        cwd=worktree_path,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"Failed to push branch: {result.stderr}")
+        return 1
+
+    # Create PR targeting personal-main
+    try:
+        message = generate_pr_message(worktree_path)
+        title = f"[{agent.name}] {message.title}"
+        body = f"Agent: {agent.name}\n\n{message.body}"
+
+        cmd = [
+            "gh", "pr", "create",
+            "--title", title,
+            "--body", body,
+            "--base", agent.personal_main,
+        ]
+        result = subprocess.run(cmd, cwd=worktree_path, capture_output=True, text=True)
+
+        if result.returncode == 0:
+            pr_url = result.stdout.strip()
+            print(f"PR created: {pr_url}")
+
+            # Auto-merge the PR
+            merge_result = subprocess.run(
+                ["gh", "pr", "merge", "--squash", "--delete-branch"],
+                cwd=worktree_path,
+                capture_output=True,
+                text=True,
+            )
+            if merge_result.returncode == 0:
+                print(f"PR merged to {agent.personal_main}")
+            else:
+                print(f"PR created but auto-merge failed: {merge_result.stderr}")
+                # Not a failure - PR exists for manual review
+        elif "already exists" in result.stderr:
+            print("PR already exists")
+        else:
+            print(f"Failed to create PR: {result.stderr}")
+            return 1
+    except Exception as e:
+        print(f"Failed to create PR: {e}")
+        return 1
+
+    return 0
+
+
+def _handle_pr_merge(agent: AgentSpec, worktree_path: Path, branch: str) -> int:
+    """Create PR to personal-main and wait for approval."""
+    # Push the iteration branch
+    result = subprocess.run(
+        ["git", "push", "-u", "origin", branch],
+        cwd=worktree_path,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"Failed to push branch: {result.stderr}")
+        return 1
+
+    # Create PR targeting personal-main
+    try:
+        message = generate_pr_message(worktree_path)
+        title = f"[{agent.name}] {message.title}"
+        body = f"Agent: {agent.name}\n\n{message.body}"
+
+        cmd = [
+            "gh", "pr", "create",
+            "--title", title,
+            "--body", body,
+            "--base", agent.personal_main,
+        ]
+        result = subprocess.run(cmd, cwd=worktree_path, capture_output=True, text=True)
+
+        if result.returncode == 0:
+            print(f"PR created: {result.stdout.strip()}")
+        elif "already exists" in result.stderr:
+            print("PR already exists")
+        else:
+            print(f"Failed to create PR: {result.stderr}")
+            return 1
+    except Exception as e:
+        print(f"Failed to create PR: {e}")
+        return 1
+
+    return 0
+
+
+# Legacy handlers for agents without personal-main
+
+def _handle_auto_merge_legacy(worktree_path: Path) -> int:
+    """Land commits directly to main (legacy behavior)."""
     result = subprocess.run(
         ["wt", "merge", "--no-squash"],
         cwd=worktree_path,
@@ -244,12 +419,8 @@ def _handle_auto_merge(worktree_path: Path) -> int:
     return 0
 
 
-def _handle_pr_merge(agent: AgentSpec, worktree_path: Path) -> int:
-    """Create a PR for this iteration."""
-    branch = get_current_branch(worktree_path)
-    if not branch:
-        return 1
-
+def _handle_pr_merge_legacy(agent: AgentSpec, worktree_path: Path, branch: str) -> int:
+    """Create a PR for this iteration (legacy behavior)."""
     # Push the branch
     result = subprocess.run(
         ["git", "push", "-u", "origin", branch],

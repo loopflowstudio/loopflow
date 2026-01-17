@@ -1,7 +1,9 @@
 """Agent loading and spawning for lfd daemon."""
 
 import os
+import random
 import re
+import string
 import subprocess
 import sys
 import uuid
@@ -10,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from loopflow.lfd.db import get_latest_run, save_run, update_run_status
-from loopflow.lfd.models import AgentSpec, AgentRun, AgentStatus, TriggerSpec, TriggerKind, MergeStrategy
+from loopflow.lfd.models import AgentSpec, AgentRun, AgentStatus, TriggerSpec, TriggerKind, MergeMode
 from loopflow.lfd.naming import agent_branch_name, agent_worktree_path
 from loopflow.lfd.process import is_process_running
 from loopflow.lfd.triggers import should_trigger
@@ -71,9 +73,9 @@ def _parse_agent_file(path: Path) -> AgentSpec | None:
     if config.get("goal"):
         goal = Path(config["goal"])
 
-    # Parse merge strategy
-    merge_str = config.get("merge", "pr")
-    merge_strategy = MergeStrategy(merge_str)
+    # Parse merge mode
+    merge_str = config.get("merge", "auto")
+    merge_mode = MergeMode(merge_str)
 
     # Pipeline can be a string (name) or list (inline tasks)
     pipeline = config["pipeline"]
@@ -90,7 +92,8 @@ def _parse_agent_file(path: Path) -> AgentSpec | None:
         prompt=prompt,
         emoji=config.get("emoji", ""),
         goal=goal,
-        merge_strategy=merge_strategy,
+        merge_mode=merge_mode,
+        personal_main=config.get("personal_main"),
     )
 
 
@@ -175,6 +178,126 @@ def get_agent_file_path(name: str, agents_dir: Path | None = None) -> Path | Non
     return path if path.exists() else None
 
 
+def _branch_exists(repo: Path, branch: str) -> bool:
+    """Check if a branch exists locally or on origin."""
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", f"refs/heads/{branch}"],
+        cwd=repo,
+        capture_output=True,
+    )
+    if result.returncode == 0:
+        return True
+    # Also check remote
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", f"refs/remotes/origin/{branch}"],
+        cwd=repo,
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def _allocate_personal_main(repo: Path, agent_name: str) -> str:
+    """Return available branch name: agent-main, agent-1-main, etc."""
+    candidate = f"{agent_name}-main"
+    if not _branch_exists(repo, candidate):
+        return candidate
+    for i in range(1, 100):
+        candidate = f"{agent_name}-{i}-main"
+        if not _branch_exists(repo, candidate):
+            return candidate
+    raise ValueError(f"Could not allocate personal-main branch for {agent_name}")
+
+
+def _create_personal_main_branch(repo: Path, branch: str) -> None:
+    """Create personal-main branch from origin/main if it doesn't exist."""
+    if _branch_exists(repo, branch):
+        return
+    # Fetch first to make sure we have origin/main
+    subprocess.run(["git", "fetch", "origin", "main"], cwd=repo, capture_output=True)
+    # Create branch from origin/main
+    result = subprocess.run(
+        ["git", "branch", branch, "origin/main"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        # Try creating from local main
+        subprocess.run(
+            ["git", "branch", branch, "main"],
+            cwd=repo,
+            capture_output=True,
+        )
+
+
+def generate_temp_branch_name(agent_name: str) -> str:
+    """Generate a temporary branch name like 'agent-name-x7k2m'."""
+    suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=5))
+    return f"{agent_name}-{suffix}"
+
+
+def ensure_personal_main(agent: AgentSpec) -> str:
+    """Ensure agent has a personal-main branch, creating one if needed.
+
+    Returns the personal-main branch name. Also updates the agent file
+    if personal_main was not set.
+    """
+    if agent.personal_main:
+        # Ensure the branch exists (may have been deleted)
+        _create_personal_main_branch(agent.repo, agent.personal_main)
+        return agent.personal_main
+
+    # Agent doesn't have personal_main set - allocate and persist
+    personal_main = _allocate_personal_main(agent.repo, agent.name)
+    _create_personal_main_branch(agent.repo, personal_main)
+
+    # Update agent file with the new personal_main
+    _update_agent_personal_main(agent.name, personal_main)
+    agent.personal_main = personal_main
+
+    return personal_main
+
+
+def _update_agent_personal_main(agent_name: str, personal_main: str, agents_dir: Path | None = None) -> None:
+    """Update an agent file to add/update personal_main field."""
+    if agents_dir is None:
+        agents_dir = AGENTS_DIR
+
+    path = agents_dir / f"{agent_name}.md"
+    if not path.exists():
+        return
+
+    text = path.read_text()
+    match = _FRONTMATTER_PATTERN.match(text)
+    if not match:
+        return
+
+    frontmatter = match.group(1)
+    body = text[match.end():]
+
+    # Check if personal_main already in frontmatter
+    lines = frontmatter.split("\n")
+    updated = False
+    for i, line in enumerate(lines):
+        if line.startswith("personal_main:"):
+            lines[i] = f"personal_main: {personal_main}"
+            updated = True
+            break
+
+    if not updated:
+        # Add after merge line if present, otherwise at end
+        insert_idx = len(lines)
+        for i, line in enumerate(lines):
+            if line.startswith("merge:"):
+                insert_idx = i + 1
+                break
+        lines.insert(insert_idx, f"personal_main: {personal_main}")
+
+    new_frontmatter = "\n".join(lines)
+    new_text = f"---\n{new_frontmatter}\n---\n{body}"
+    path.write_text(new_text)
+
+
 def create_agent_file(
     name: str,
     repo: Path,
@@ -185,17 +308,21 @@ def create_agent_file(
     interval_seconds: int | None = None,
     emoji: str = "",
     goal: Path | None = None,
-    merge: str = "pr",
+    merge: str = "auto",
     cron: str | None = None,
     grace_minutes: int | None = None,
     agents_dir: Path | None = None,
 ) -> Path:
-    """Create a new agent markdown file."""
+    """Create a new agent markdown file and allocate personal-main branch."""
     if agents_dir is None:
         agents_dir = AGENTS_DIR
 
     agents_dir.mkdir(parents=True, exist_ok=True)
     path = agents_dir / f"{name}.md"
+
+    # Allocate and create personal-main branch
+    personal_main = _allocate_personal_main(repo, name)
+    _create_personal_main_branch(repo, personal_main)
 
     lines = ["---"]
     if emoji:
@@ -205,6 +332,7 @@ def create_agent_file(
         lines.append(f"goal: {goal}")
     lines.append(f"pipeline: {pipeline}")
     lines.append(f"merge: {merge}")
+    lines.append(f"personal_main: {personal_main}")
 
     # Build trigger line
     if trigger == "cron" and cron:

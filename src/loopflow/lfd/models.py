@@ -57,9 +57,20 @@ class TriggerSpec:
         )
 
 
-class MergeStrategy(Enum):
+class MergeMode(Enum):
+    """How iteration branches merge to personal-main.
+
+    AUTO: Create PR per iteration, auto-merge to personal-main
+    PR: Create PR per iteration, wait for manual approval
+    SILENT: No PRs, merge directly to personal-main
+    """
     AUTO = "auto"
     PR = "pr"
+    SILENT = "silent"
+
+
+# Legacy alias for backwards compatibility during migration
+MergeStrategy = MergeMode
 
 
 @dataclass
@@ -72,7 +83,8 @@ class AgentSpec:
     prompt: str = ""
     emoji: str = ""
     goal: Path | None = None
-    merge_strategy: MergeStrategy = MergeStrategy.PR
+    merge_mode: MergeMode = MergeMode.AUTO
+    personal_main: str | None = None  # e.g. "myagent-main" or "myagent-1-main"
 
     def to_dict(self) -> dict:
         result = {
@@ -87,15 +99,17 @@ class AgentSpec:
             result["emoji"] = self.emoji
         if self.goal:
             result["goal"] = str(self.goal)
-        if self.merge_strategy != MergeStrategy.PR:
-            result["merge_strategy"] = self.merge_strategy.value
+        if self.merge_mode != MergeMode.AUTO:
+            result["merge_mode"] = self.merge_mode.value
+        if self.personal_main:
+            result["personal_main"] = self.personal_main
         return result
 
     @classmethod
     def from_dict(cls, data: dict) -> "AgentSpec":
         trigger_data = data.get("trigger", {})
         goal = Path(data["goal"]) if data.get("goal") else None
-        merge = data.get("merge_strategy", "pr")
+        merge = data.get("merge_mode", "auto")
         return cls(
             name=data["name"],
             repo=Path(data["repo"]),
@@ -105,7 +119,8 @@ class AgentSpec:
             prompt=data.get("prompt", ""),
             emoji=data.get("emoji", ""),
             goal=goal,
-            merge_strategy=MergeStrategy(merge),
+            merge_mode=MergeMode(merge),
+            personal_main=data.get("personal_main"),
         )
 
 

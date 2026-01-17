@@ -2,7 +2,7 @@
 
 ## Resolved (2026-01-16)
 
-1. **Target audience priority**: Power users for now. But progressive disclosure still matters—don't overwhelm with everything at once. The distinction: call things what they are (worktrees, not "workspaces"), but reveal complexity gradually.
+1. **Target audience priority**: Power users for now. But progressive disclosure still matters—don't overwhelm with everything at once. Reveal complexity gradually while keeping the UI approachable.
 
 2. **Results in terminal vs in-app**: Explore embedding an existing terminal (Ghostty, Warp) rather than building a competing terminal. Don't reimplement—integrate.
 
@@ -10,11 +10,11 @@
 
 4. **Screenshot capture permissions**: Developer-only feature. Permissions will persist after initial grant—acceptable friction for developers.
 
-5. **Worktree terminology**: Keep "worktree". It's pre-existing git terminology that Claude Code users already understand. Don't invent new language.
+5. **Worktree terminology**: Use "Workspaces" in the UI for approachability. The underlying git concept is worktrees, but "workspace" is more intuitive for users who aren't git experts. Code and CLI can still use "worktree" terminology.
 
 6. **Configuration vs opinionation**: Progressive disclosure, not dumbing down. Keep advanced options but reveal them gradually. Don't hide context toggles—but maybe collapse them initially. Use real terminology (worktrees, diff, tokens) but don't require understanding everything upfront.
 
-9. **Sidebar identity**: Keep git-centric "branches" terminology. Power users think in git terms.
+9. **Sidebar identity**: Changed from "BRANCHES" to "Workspaces" for friendlier tone. The all-caps semibold was visually aggressive; medium weight title case is more approachable.
 
 ## Open
 

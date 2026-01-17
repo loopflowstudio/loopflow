@@ -1,28 +1,38 @@
 # UX Agent
 
-Adds build instructions to UX prompt files and conducts comprehensive UX research on Maestro.
+Improves Maestro first-run UX and accessibility based on comprehensive user research.
 
-## Changes
+## Summary
 
-- Added build instructions to `ux-fix.md`, `ux-gaps.md`, `ux-research.md` prompts
-- Conducted UX research with three user profiles (New Developer, Power User, Designer/PM)
-- Documented visual issues, pain points, and priority improvements
-- Captured open questions for future product decisions
+- Conducted UX research simulating three user profiles (New Developer, Power User, Designer/PM)
+- Implemented 8 targeted fixes addressing first-run experience and accessibility
+- Added terminal embedding research for future in-app output streaming
+- Updated UX prompts with build instructions
+
+## UX Fixes Applied
+
+1. **Default task to "implement"** - Most common case; users don't have to choose
+2. **Improved placeholder text** - More prominent, with concrete examples
+3. **Renamed "BRANCHES" to "Workspaces"** - Friendlier, less git-jargon
+4. **Added icons to stage badges** - Accessibility fix for color-blind users
+5. **Better task descriptions** - 2-line limit with proper wrapping
+6. **Better collapse indicator** - "More options" when collapsed, with tooltip
+7. **Removed redundant repo name** - Was in both title and toolbar
+8. **Concrete welcome tagline** - "Tell it what to build. It writes the code."
+
+## Remaining Work
+
+High-complexity items deferred for future:
+- In-app terminal embedding (see `.design/terminal-embedding.md`)
+- Onboarding flow for first-time users
+- Cmd+K command palette
+- Slash commands for task selection
+- @ mentions for context
 
 ## Artifacts
 
-- `.design/ux-research.md` - Detailed UX research findings
-- `.design/questions.md` - Open product questions
-- `.design/screenshots/maestro-main.png` - Reference screenshot
-
-## Key Findings
-
-Top 5 priority issues from UX research:
-
-1. No onboarding flow for new users
-2. Results appear in external terminal, not in-app
-3. Task selector doesn't explain what tasks do
-4. Worktree concept introduced without explanation
-5. Too many options visible by default
-
-See `.design/ux-research.md` for detailed analysis including user journey simulations and specific UI element citations.
+- `.design/ux-research.md` - User profile simulations and pain points
+- `.design/ux-gaps.md` - Gap analysis vs Figma/Cursor/Notion
+- `.design/ux-fixes.md` - Detailed changelog of fixes
+- `.design/terminal-embedding.md` - Research on SwiftTerm/Ghostty
+- `.design/questions.md` - Product decisions

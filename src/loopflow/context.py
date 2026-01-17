@@ -141,27 +141,28 @@ def list_all_tasks(repo_root: Path | None) -> tuple[list[str], list[str]]:
     return sorted(user), sorted(builtin_only)
 
 
-def gather_task(repo_root: Path, name: str) -> TaskFile | None:
+def gather_task(repo_root: Path | None, name: str) -> TaskFile | None:
     """Gather and parse task file with frontmatter.
 
     Search order:
-    1. .claude/commands/{name}.md
-    2. .lf/{name}.md
+    1. .claude/commands/{name}.md (if repo_root provided)
+    2. .lf/{name}.md (if repo_root provided)
     3. templates/commands/{name}.md (builtin fallback)
 
     Returns TaskFile with parsed config, or None if not found.
     """
-    # Check .claude/commands first (portable format)
-    claude_dir = repo_root / ".claude" / "commands"
-    content = _read_file_if_named(claude_dir, f"{name}.md")
-    if content:
-        return parse_task_file(name, content)
+    if repo_root:
+        # Check .claude/commands first (portable format)
+        claude_dir = repo_root / ".claude" / "commands"
+        content = _read_file_if_named(claude_dir, f"{name}.md")
+        if content:
+            return parse_task_file(name, content)
 
-    # Fall back to .lf directory
-    lf_dir = repo_root / ".lf"
-    content = _read_file_if_named(lf_dir, f"{name}.md")
-    if content:
-        return parse_task_file(name, content)
+        # Fall back to .lf directory
+        lf_dir = repo_root / ".lf"
+        content = _read_file_if_named(lf_dir, f"{name}.md")
+        if content:
+            return parse_task_file(name, content)
 
     # Fall back to builtin templates
     builtin_path = _get_builtin_task(name)

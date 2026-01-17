@@ -353,6 +353,20 @@ def test_list_all_tasks_without_repo():
     assert "implement" in builtin_only
 
 
+def test_gather_task_works_without_repo():
+    """gather_task returns builtin tasks even without repo_root."""
+    result = gather_task(None, "design")
+    assert result is not None
+    assert result.name == "design"
+    assert "implementation spec" in result.content.lower()
+
+
+def test_gather_task_returns_none_for_unknown_without_repo():
+    """gather_task returns None for unknown tasks without repo_root."""
+    result = gather_task(None, "nonexistent_task_xyz")
+    assert result is None
+
+
 # =============================================================================
 # Summaries tests
 # =============================================================================

@@ -205,9 +205,20 @@ def run(
 ):
     """Run a task with an LLM model."""
     repo_root = find_worktree_root()
+
+    # Some features require a git repo
     if not repo_root:
-        typer.echo("Error: Not in a git repository", err=True)
-        raise typer.Exit(1)
+        if worktree:
+            typer.echo("Error: --worktree requires a git repository", err=True)
+            raise typer.Exit(1)
+        if parallel:
+            typer.echo("Error: --parallel requires a git repository", err=True)
+            raise typer.Exit(1)
+        if race:
+            typer.echo("Error: --race requires a git repository", err=True)
+            raise typer.Exit(1)
+        # Use cwd as fallback for non-git usage
+        repo_root = Path.cwd()
 
     # Handle race execution
     if race:
@@ -401,10 +412,10 @@ def inline(
     """Run an inline prompt with an LLM model."""
     repo_root = find_worktree_root()
     if not repo_root:
-        typer.echo("Error: Not in a git repository", err=True)
-        raise typer.Exit(1)
+        # Use cwd as fallback for non-git usage
+        repo_root = Path.cwd()
 
-    config = load_config(repo_root)
+    config = load_config(repo_root) if (repo_root / ".lf" / "config.yaml").exists() else None
 
     # Parse voice arg
     cli_voices = parse_voice_arg(voice)
@@ -520,10 +531,10 @@ def cp(
     """Copy file context to clipboard."""
     repo_root = find_worktree_root()
     if not repo_root:
-        typer.echo("Error: Not in a git repository", err=True)
-        raise typer.Exit(1)
+        # Use cwd as fallback for non-git usage
+        repo_root = Path.cwd()
 
-    config = load_config(repo_root)
+    config = load_config(repo_root) if (repo_root / ".lf" / "config.yaml").exists() else None
 
     # Merge positional paths and config context
     all_context = list(paths or [])
@@ -588,7 +599,7 @@ def pipeline(
     """Run a named pipeline."""
     repo_root = find_worktree_root()
     if not repo_root:
-        typer.echo("Error: Not in a git repository", err=True)
+        typer.echo("Error: Pipelines require a git repository", err=True)
         raise typer.Exit(1)
 
     config = load_config(repo_root)

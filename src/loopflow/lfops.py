@@ -816,8 +816,11 @@ def land(
 def _rebase_onto_main(repo_root: Path, base_branch: str) -> bool:
     """Rebase branch onto base_branch. Returns True if successful.
 
+    If conflicts occur, launches Claude with the rebase task to resolve them.
     Handles force-push after rebase if the branch has an upstream.
     """
+    from loopflow.context import gather_task
+
     # Fetch latest main
     subprocess.run(["git", "fetch", "origin", base_branch], cwd=repo_root, check=False)
 
@@ -839,12 +842,33 @@ def _rebase_onto_main(repo_root: Path, base_branch: str) -> bool:
         text=True,
     )
     if result.returncode != 0:
-        # Abort failed rebase
+        # Conflicts - abort and hand off to Claude
+        typer.echo("Conflicts detected, launching rebase assistant...")
         subprocess.run(["git", "rebase", "--abort"], cwd=repo_root, capture_output=True)
-        typer.echo("Error: Rebase failed. Resolve conflicts manually.", err=True)
-        typer.echo(f"  git fetch origin {base_branch}", err=True)
-        typer.echo(f"  git rebase origin/{base_branch}", err=True)
-        return False
+
+        # Get rebase prompt (custom or built-in)
+        task = gather_task(repo_root, "rebase")
+        if not task:
+            typer.echo("Error: No rebase task found", err=True)
+            return False
+
+        # Run Claude with the rebase task
+        rebase_result = subprocess.run(["claude", task.content], cwd=repo_root)
+        if rebase_result.returncode != 0:
+            typer.echo("Rebase assistant failed", err=True)
+            return False
+
+        # Verify rebase completed (branch should now be ahead of main)
+        result = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", f"origin/{base_branch}", "HEAD"],
+            cwd=repo_root,
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            typer.echo("Error: Rebase did not complete successfully", err=True)
+            return False
+
+        return True
 
     # Force-push if branch has upstream (rebase rewrites history)
     result = subprocess.run(

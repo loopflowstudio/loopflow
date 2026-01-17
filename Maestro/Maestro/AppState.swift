@@ -35,6 +35,10 @@ final class AppState {
     var runMode: RunMode = .auto
     var estimatedTokens: Int = 0
 
+    // Context preview state
+    var contextPreview: ContextPreview = .empty
+    var excludedFiles: Set<String> = []  // Files excluded via preview panel
+
     // Sidebar state
     var selectedWorktree: Worktree?
     var selectedPipeline: PipelineDef?
@@ -56,6 +60,7 @@ final class AppState {
     private let agentService = AgentService()
     private var eventService: LFDEventService?
     private let voiceService = VoiceService()
+    private let contextPreviewService = ContextPreviewService()
 
     func openRepo(_ url: URL) async {
         currentRepo = url
@@ -280,6 +285,63 @@ final class AppState {
             prompt: selectedPrompt?.name,
             args: promptArgs,
             context: Array(selectedContextFolders),
+            includeDocs: includeDocs,
+            includeDiff: includeDiff,
+            includeDiffFiles: includeDiffFiles,
+            includePaste: includePaste,
+            includeSummaries: includeSummaries,
+            in: repo
+        )
+    }
+
+    func refreshContextPreview() async {
+        guard let repo = currentRepo else { return }
+
+        // Filter out excluded files from attached files
+        let filteredAttached = attachedFiles.filter { !excludedFiles.contains($0.path()) }
+
+        contextPreview = await contextPreviewService.assemblePreview(
+            prompt: selectedPrompt?.name,
+            args: promptArgs,
+            context: Array(selectedContextFolders),
+            attachedFiles: filteredAttached,
+            includeDocs: includeDocs,
+            includeDiff: includeDiff,
+            includeDiffFiles: includeDiffFiles,
+            includePaste: includePaste,
+            includeSummaries: includeSummaries,
+            in: repo
+        )
+    }
+
+    func removeContextItem(_ item: ContextItem, from section: ContextSection) {
+        guard let path = item.path else { return }
+
+        if section.kind == .attached {
+            // Remove from attached files
+            attachedFiles.removeAll { $0.path() == path }
+        } else {
+            // Add to excluded files set
+            excludedFiles.insert(path)
+        }
+
+        // Refresh preview
+        Task {
+            await refreshContextPreview()
+            await estimateTokens()
+        }
+    }
+
+    func copyAssembledContext() async -> String? {
+        guard let repo = currentRepo else { return nil }
+
+        let filteredAttached = attachedFiles.filter { !excludedFiles.contains($0.path()) }
+
+        return await contextPreviewService.copyAssembledContext(
+            prompt: selectedPrompt?.name,
+            args: promptArgs,
+            context: Array(selectedContextFolders),
+            attachedFiles: filteredAttached,
             includeDocs: includeDocs,
             includeDiff: includeDiff,
             includeDiffFiles: includeDiffFiles,

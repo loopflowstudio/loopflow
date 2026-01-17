@@ -14,6 +14,10 @@ struct PromptLauncher: View {
     @FocusState private var isInputFocused: Bool
     @State private var isCreatingWorktree = false
     @State private var showAdvancedOptions = false
+    @State private var isPreviewExpanded = false
+    @State private var expandedSections: Set<ContextKind> = [.docs, .files]
+    @State private var selectedPreviewItem: ContextItem?
+    @State private var showingItemPreview = false
 
     private let terminalLauncher = TerminalLauncher()
 
@@ -705,44 +709,225 @@ struct PromptLauncher: View {
     // MARK: - Mode and Advanced Options Row
 
     private var modeAndAdvancedRow: some View {
-        HStack(spacing: 12) {
-            Picker("", selection: $appState.runMode) {
-                Text("Auto").tag(RunMode.auto)
-                Text("Interactive").tag(RunMode.interactive)
+        VStack(spacing: 8) {
+            HStack(spacing: 12) {
+                Picker("", selection: $appState.runMode) {
+                    Text("Auto").tag(RunMode.auto)
+                    Text("Interactive").tag(RunMode.interactive)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 160)
+                .help(appState.runMode == .auto
+                    ? "Auto: Runs to completion without interruption"
+                    : "Interactive: Chat with the AI, can interrupt and redirect")
+
+                Spacer()
+
+                // Token count - clickable to expand preview
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isPreviewExpanded.toggle()
+                        if isPreviewExpanded {
+                            Task { await appState.refreshContextPreview() }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: isPreviewExpanded ? "chevron.down" : "chevron.right")
+                            .font(.caption2)
+                        Text(formatTokenCount(appState.estimatedTokens))
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(isPreviewExpanded ? Color.primary.opacity(0.08) : Color.primary.opacity(0.03))
+                    )
+                }
+                .buttonStyle(.plain)
+                .help("Click to see context breakdown")
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showAdvancedOptions.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("Options")
+                            .font(.caption)
+                        Image(systemName: showAdvancedOptions ? "chevron.up" : "chevron.down")
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
             }
-            .pickerStyle(.segmented)
-            .frame(width: 160)
-            .help(appState.runMode == .auto
-                ? "Auto: Runs to completion without interruption"
-                : "Interactive: Chat with the AI, can interrupt and redirect")
+
+            // Context preview panel
+            if isPreviewExpanded {
+                contextPreviewPanel
+            }
+        }
+    }
+
+    // MARK: - Context Preview Panel
+
+    private var contextPreviewPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack {
+                Text("Context Preview")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Button {
+                    Task {
+                        if let _ = await appState.copyAssembledContext() {
+                            // Could show a confirmation toast
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "doc.on.doc")
+                            .font(.caption2)
+                        Text("Copy")
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Copy full assembled context to clipboard")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+
+            Divider()
+
+            // Sections
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(appState.contextPreview.sections) { section in
+                        contextSectionView(section)
+                    }
+
+                    if appState.contextPreview.sections.isEmpty {
+                        HStack {
+                            Spacer()
+                            Text("Loading context...")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                            Spacer()
+                        }
+                        .padding(.vertical, 20)
+                    }
+                }
+                .padding(8)
+            }
+            .frame(maxHeight: 250)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+        )
+    }
+
+    private func contextSectionView(_ section: ContextSection) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            // Section header - clickable to expand/collapse
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    if expandedSections.contains(section.kind) {
+                        expandedSections.remove(section.kind)
+                    } else {
+                        expandedSections.insert(section.kind)
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: expandedSections.contains(section.kind) ? "chevron.down" : "chevron.right")
+                        .font(.caption2)
+                        .frame(width: 10)
+
+                    Image(systemName: section.kind.icon)
+                        .font(.caption)
+                        .foregroundStyle(section.isEnabled ? section.kind.color : .secondary)
+
+                    Text(section.kind.displayName)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundStyle(section.isEnabled ? .primary : .secondary)
+
+                    Text("(\(formatTokenCount(section.tokens)))")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+
+                    Spacer()
+                }
+                .padding(.vertical, 4)
+                .padding(.horizontal, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .opacity(section.isEnabled ? 1.0 : 0.5)
+
+            // Section items (when expanded)
+            if expandedSections.contains(section.kind) && section.isEnabled {
+                ForEach(section.items) { item in
+                    contextItemView(item, section: section)
+                }
+            }
+        }
+    }
+
+    private func contextItemView(_ item: ContextItem, section: ContextSection) -> some View {
+        HStack(spacing: 6) {
+            Spacer()
+                .frame(width: 16)
+
+            Image(systemName: "doc")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+
+            Text(item.name)
+                .font(.caption)
+                .lineLimit(1)
+                .truncationMode(.middle)
 
             Spacer()
 
-            // Token count - always visible
-            HStack(spacing: 4) {
-                Image(systemName: "doc.text")
-                    .font(.caption2)
-                Text(formatTokenCount(appState.estimatedTokens))
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+            // Remove button for files and attached
+            if section.kind == .files || section.kind == .attached {
+                Button {
+                    appState.removeContextItem(item, from: section)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Remove from context")
             }
-            .foregroundStyle(.secondary)
-            .help("Estimated context size in tokens. Includes docs, files, and other context you've enabled.")
 
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    showAdvancedOptions.toggle()
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Text("Options")
-                        .font(.caption)
-                    Image(systemName: showAdvancedOptions ? "chevron.up" : "chevron.down")
-                        .font(.caption2)
-                }
-                .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
+            Text(formatTokenCount(item.tokens))
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .frame(width: 40, alignment: .trailing)
         }
+        .padding(.vertical, 2)
+        .padding(.horizontal, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color.primary.opacity(0.02))
+        )
     }
 
     // MARK: - Context Bar
@@ -815,19 +1000,40 @@ struct PromptLauncher: View {
                 .stroke(isDraggingOver ? Color.accentColor : Color.clear, lineWidth: 2)
         )
         .onChange(of: appState.includeDocs) {
-            Task { await appState.estimateTokens() }
+            Task {
+                await appState.estimateTokens()
+                if isPreviewExpanded { await appState.refreshContextPreview() }
+            }
         }
         .onChange(of: appState.includeDiff) {
-            Task { await appState.estimateTokens() }
+            Task {
+                await appState.estimateTokens()
+                if isPreviewExpanded { await appState.refreshContextPreview() }
+            }
         }
         .onChange(of: appState.includeDiffFiles) {
-            Task { await appState.estimateTokens() }
+            Task {
+                await appState.estimateTokens()
+                if isPreviewExpanded { await appState.refreshContextPreview() }
+            }
         }
         .onChange(of: appState.includePaste) {
-            Task { await appState.estimateTokens() }
+            Task {
+                await appState.estimateTokens()
+                if isPreviewExpanded { await appState.refreshContextPreview() }
+            }
         }
         .onChange(of: appState.attachedFiles) {
-            Task { await appState.estimateTokens() }
+            Task {
+                await appState.estimateTokens()
+                if isPreviewExpanded { await appState.refreshContextPreview() }
+            }
+        }
+        .onChange(of: appState.includeSummaries) {
+            Task {
+                await appState.estimateTokens()
+                if isPreviewExpanded { await appState.refreshContextPreview() }
+            }
         }
     }
 

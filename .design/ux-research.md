@@ -1,334 +1,306 @@
-# UX Research: First-Time Prompter Experience
+# UX Research: User Profiles
 
-User research for the Maestro first-run experience, focusing on the prompter and worktree flow.
+User research for the Maestro first-run experience, simulating three user profiles experiencing the prompter and worktree flow.
 
 ---
 
-## The Curious Beginner
+## New Developer
 
-*Heard about "vibe coding" or AI assistants. Never used Claude Code, Cursor, or Copilot.*
+*Just heard about "AI coding assistants". Has never used Claude Code, Cursor, or Copilot. Comfortable with git but not a power user. Wants to understand: "What can this do for me?"*
 
 ### First Impression (0-5 seconds)
 
 Opens Maestro for the first time. Sees `WelcomeWindow`:
 
 - A branch icon and "Loopflow Maestro"
-- Subtitle: "Manage worktrees and launch LLM coding sessions"
-- Recent Repositories list (if any)
+- Subtitle: "AI coding assistant for your projects"
+- Recent Repositories list (empty on first run)
 - "Open Folder..." button
 
-**Internal monologue**: "Okay, 'worktrees'... what's a worktree? And 'LLM coding sessions'—I guess that's the AI stuff. The UI looks clean enough. Let me open my project folder."
+**Internal monologue**: "AI coding assistant—that's what I've been hearing about. Clean interface, not overwhelming. Let me open my project and see what it can do."
 
-The welcome screen is minimalist, which is good (principle: Design Should Disappear), but the terminology assumes familiarity. "Worktrees" and "LLM coding sessions" are insider jargon.
+The welcome screen is clear. "AI coding assistant for your projects" is immediately understandable without jargon. The branch icon hints at git integration without requiring expertise.
 
 ### First Action
 
-Clicks "Open Folder..." and selects their project. If dependencies aren't installed, they hit `SetupView`:
+Clicks "Open Folder..." and selects their project. Since this is first run, dependencies aren't installed. They see `SetupView`:
 
-- "First-time setup"
-- Two items: "Loopflow CLI" and "Worktrunk (wt)"
+- "Loopflow Maestro" header
+- "First-time setup" subtitle
+- Two items:
+  - "Loopflow CLI" — "Runs AI coding tasks from your terminal"
+  - "Worktrunk (wt)" — "Keeps each feature in its own folder"
 - "Install Loopflow" button
 
-**Internal monologue**: "First-time setup, okay. What's Loopflow CLI? What's Worktrunk? Do I need these? The button says 'Install Loopflow'—I guess I should click it?"
+**Internal monologue**: "Setup required. 'Runs AI coding tasks from your terminal'—so it uses the command line. 'Keeps each feature in its own folder'—that's like branches? Makes sense for keeping things organized."
 
-They click Install. Progress spinner appears. Then "Install Worktrunk" button.
+They click Install. Progress spinner. Then "Install Worktrunk" button. They click that too.
 
-**Friction point**: The Beginner has no idea what these tools do. The descriptions ("Core command-line tool", "Git worktree manager") are accurate but not helpful. They don't explain *why* these are needed or what they enable.
+**Assessment**: The benefit-focused descriptions help. They understand *why* without needing to know the technical details. The sequential install feels a bit slow but acceptable for first-time setup.
 
 ### First Obstacle
 
 After setup, they see the main `ContentView`:
 
-- Left sidebar: "WORKTREES" header, empty state "No worktrees / Click + to create one"
-- Center: The prompt launcher with:
-  - "Task" selector (shows "None")
-  - Big text field with placeholder "What do you want to build?"
-  - Mode picker: "Auto" / "Interactive"
-  - "Options" expand button
-  - Token count (shows some number like "2.1k")
+- Left sidebar: "BRANCHES" header with tooltip "Worktrees: isolated folders for each feature branch"
+- Empty state with branch icon: "No worktrees yet"
+- Explanation: "Each worktree is an isolated folder where AI can work without affecting your main code."
+- "Create Worktree" button
+- Center: The prompt launcher:
+  - "Task" selector showing "None"
+  - Text field: "Describe what you want to build or change..."
+  - Mode picker: "Auto" / "Interactive" with tooltip
+  - "Options" button
+  - Token count: "2.1k"
 
-**Internal monologue**: "Okay, there's a text box. 'What do you want to build?'—that's clear. But wait, I need to pick a 'Task' first? What tasks are there? Let me click the dropdown..."
+**Internal monologue**: "The sidebar says 'BRANCHES' and explains worktrees. So the AI works in a separate folder—that makes sense, it won't mess up my main code. The text field says 'Describe what you want to build or change'—I'll try typing something."
 
-Clicks the Task field. Sees dropdown with:
-- "Tasks" section (empty or showing items like "design", "implement", "review")
-- "Pipelines" section (hidden if not beta, but if visible: items with step counts)
+The empty state explanation is helpful. They understand the isolation concept before creating anything.
 
-**Confusion**: "What's a task? What's a pipeline? If I just want the AI to help me code, which do I pick? The placeholder says 'What do you want to build?'—can I just type there without selecting a task?"
+They type: "add a user login page with email and password"
 
-They try typing in the main text area: "add a login page"
+**Confusion point**: The Task selector says "None" at the top. Is that a problem? Should they select something first?
 
-The prompt picker appears, filtering for matching task names. If there's no "add" or "login" task, the picker disappears.
+**Internal monologue**: "Wait, 'Task: None'—do I need to pick a task? Let me check the dropdown..."
 
-**Key confusion**: The relationship between the Task selector and the main text input is unclear. Are they independent? Does selecting a task change what you can type? Can you just type freely?
+Clicks Task selector. Sees:
+- "Tasks" section (might be empty or show "design", "implement", "review")
+- Mode badges showing "auto" or "interactive"
+
+**Internal monologue**: "These look like preset prompts? 'implement' sounds right for building a feature. But I already typed my request... does selecting this replace what I typed?"
+
+They select "implement". The task name appears in the selector. Their typed text remains.
+
+**Remaining confusion**: The relationship between selecting a task and typing freely isn't clear. They don't know if both matter or just one.
 
 ### Recovery
 
-The Beginner muddles through. They type their request, see no task matches, and click "Run" (⌘↵).
+They click "Run" (⌘↵).
 
-**What happens**: Since they're on main branch and have no worktrees, Maestro auto-creates a worktree with a generated name. A terminal opens (Warp by default) and the command runs.
+**What happens**: Since they're on main branch with no worktrees, Maestro auto-creates a worktree with a generated name like "curious-dolphin". A terminal window (Warp) opens and shows the Claude agent starting.
 
-**Internal monologue**: "Wait, it opened a terminal window? And something called 'electric-penguin' appeared in the sidebar? Did my thing work? What's happening?"
+**Internal monologue**: "Terminal opened. 'curious-dolphin' appeared in the sidebar—that must be the isolated folder it mentioned. The AI is thinking... this is actually working!"
 
-The worktree auto-creation is **good**—it removes a barrier. But the Beginner doesn't understand:
-1. Why a separate folder was created
-2. What the terminal is doing
-3. How to see results
+They watch the terminal. Claude is reading files, making a plan, writing code.
+
+**Internal monologue**: "It's reading my files and writing code. Cool! But why is this happening in a separate terminal window instead of in the app?"
+
+The auto-worktree creation worked smoothly. The terminal transition is jarring but they understand something is happening.
 
 ### Verdict
 
-**Would they come back tomorrow?** Maybe, but they're not confident they know what happened. The experience was "mysterious" rather than "magical."
+**Would they come back tomorrow?** Yes, with curiosity. The experience worked—AI wrote code and put it in an isolated folder. The terminal output was unexpected but they can see the value.
+
+**What they still don't understand**:
+- Why output is in terminal instead of the app
+- What the token count means
+- When to use tasks vs. just typing
+- How to see what the AI actually did (they'd need to open the worktree folder)
 
 ### Pain Points
 
-- [ ] Welcome screen uses jargon ("worktrees", "LLM coding sessions") without explanation
-- [ ] Setup screen doesn't explain why dependencies are needed
-- [ ] Task vs. prompt text relationship is confusing—which matters?
-- [ ] Auto-created worktree appears without explanation
-- [ ] Terminal output happens "somewhere else"—no immediate connection to what they typed
-- [ ] Token count visible but meaningless to newcomers
-- [ ] Mode picker ("Auto" vs "Interactive") has no explanation
-- [ ] No onboarding flow or tooltip explaining the core loop
+- [ ] Task selector relationship to typed prompt unclear—users don't know if they need both
+- [ ] No feedback when worktree is auto-created—appears silently in sidebar
+- [ ] Terminal output disconnected from app—unexpected mental model shift
+- [ ] No way to see results summary in Maestro—have to open terminal or folder
+- [ ] Token count displayed but not explained
+- [ ] Can't see what files/context will be included before running
 
 ---
 
-## The CLI Convert
+## Claude Code Power User
 
-*Uses `claude` from terminal daily. Trying GUI to see if it's faster/better.*
+*Uses `claude` CLI daily. Knows prompts, context management, worktrees. Trying Maestro to see if GUI is faster. Expects: feature parity with CLI, plus visual benefits.*
 
 ### First Impression (0-5 seconds)
 
-Opens Maestro, already has CLI tools installed. Sees the main ContentView immediately:
+Opens Maestro. Dependencies already installed—sees main `ContentView` immediately:
 
-- Worktree sidebar (recognizes this—they use `wt` commands)
+- Worktree sidebar showing their existing worktrees
 - Prompt launcher with Task selector
+- Token count in the corner
 
-**Internal monologue**: "Okay, there's my worktrees. Good. And a prompt input. This is basically `lf <task>: <args>` in GUI form. Let me see what tasks I have..."
+**Internal monologue**: "There's my worktrees from `wt list`. Tasks from my `.lf/` folder. Token count visible. This is the CLI in GUI form—let's see if it's actually faster."
 
-Clicks Task selector. Sees their tasks from `.lf/`.
+Clicks Task selector. Sees their custom tasks with mode badges.
 
-**Internal monologue**: "Nice, it found my task files. Shows 'auto' vs 'interactive' mode badges—that maps to my config. The 'ship' pipeline is there too."
+**Internal monologue**: "My tasks loaded correctly. Shows auto vs interactive badges matching my config. Good start."
 
 ### First Action
 
-Selects "implement" task. Sees it populate the taskSearchText field.
+Selects "implement" task. Task name appears in selector field.
 
-**Internal monologue**: "Okay, so the task is selected. Now I type my args in the big text box... but wait."
+**Internal monologue**: "Task selected. Now I'll add my args..."
 
-They start typing in the main text field. As they type, a prompt picker appears showing matching tasks.
+Types in the main text field: "add rate limiting to the API endpoints"
 
-**Confusion**: "I already selected a task up top. Why is it showing me the picker again when I type? Is it overriding my selection?"
+A prompt picker dropdown appears, trying to match their text to task names.
 
-They type "implement: add authentication". The prompt picker tries to match "implement" again.
+**Friction**: "I already selected the task! Why is it showing me this picker? It's interrupting my typing."
 
-**Friction**: The dual entry points (Task selector AND prompt text with colon syntax) create confusion. CLI users know `task: args` format, but the GUI seems to support both approaches—and they interfere with each other.
+The picker disappears since "add" doesn't match any tasks.
+
+**Internal monologue**: "The GUI supports `task: args` colon syntax AND the task selector. They interfere. In CLI I just type `lf implement 'add rate limiting'`—one clear pattern. Here there are two entry points that conflict."
 
 ### First Obstacle
 
-They want to add context files. In CLI: `lf implement -x src/auth.py`
+They want to verify context before running. In CLI: `lf implement -c 'add rate limiting'` shows everything.
 
 Clicks "Options" to expand. Sees:
-- Voice selector
-- Context bar with toggles: Docs, Files, Diff, Clipboard
+- Voice selector with current selection
+- Context toggles: Docs (blue, on), Files (teal, on), Diff (green, off), Clipboard (purple, off)
 - Attached files area with "+" button
+- Token count updates as toggles change
 
-**Internal monologue**: "Docs, Files, Diff—these map to `--diff-files`, `--diff`. Good. But where's my `-x` equivalent? Oh, the '+' button for attached files. Let me drag a file..."
+**Internal monologue**: "Context toggles map to CLI flags. But I can't see *what files* are included. The token count jumped from 2k to 14k when I toggled Files—what's actually in there? In CLI I'd see the full prompt with `-c`."
 
-They drag a file onto the context bar. File chip appears.
+They look for a "Preview" or "Copy" button. Nothing.
 
-**Internal monologue**: "Okay, that works. But I can't see what context is actually being included. In CLI I could use `-c` to copy and inspect. Where's that here?"
+**Missing feature**: No way to inspect assembled context. The CLI's `-c` flag has no GUI equivalent.
 
-They look for a way to preview the assembled context. The token count updates (e.g., "14.2k") but there's no breakdown or inspection.
-
-**Missing feature**: No "copy to clipboard" or "inspect context" equivalent. The CLI's `-c` flag shows exactly what's being sent. In Maestro, you trust the toggles blindly.
+**Internal monologue**: "I'm flying blind. I can see token *count* but not token *content*. For a complex task I need to verify the context is right before burning API calls."
 
 ### Recovery
 
-They proceed with imperfect visibility. Select task, type args, ensure mode is "Auto", click Run.
+They select a worktree from the sidebar, ensure their context toggles are correct, and click Run.
 
-The terminal opens in the worktree they had selected.
+Terminal opens. Claude starts working.
 
-**Internal monologue**: "Good, it ran in my selected worktree. But I still have to watch the terminal—the output panel at the bottom doesn't show anything useful yet. Why have the GUI if I'm still watching terminal output?"
+**Internal monologue**: "Terminal output—same as CLI. The output panel in Maestro shows streaming lines too, but it's just duplicating the terminal. Not useful."
+
+They check the worktree row in the sidebar while the task runs.
+
+**Internal monologue**: "The worktree row looks the same as before. No spinner, no indication it's running. If I had three tasks running on different worktrees, I couldn't tell which are active."
 
 ### Verdict
 
-**Would they come back tomorrow?** Probably not for daily work. The GUI adds friction vs. CLI for their workflow. They'd use it for:
-- Quick worktree overview (the sidebar is nice)
-- Maybe creating PRs with context menu actions
-
-But for the core loop (write prompt, run task), CLI is faster for power users.
-
-### Pain Points
-
-- [ ] Two entry points for task selection (Task selector + colon syntax in text) cause interference
-- [ ] No keyboard shortcut to jump directly to text input (like Cmd+K)
-- [ ] No way to preview/inspect assembled context before run
-- [ ] Token count is a number with no breakdown—can't see what's eating tokens
-- [ ] Output panel shows streaming but they're watching terminal anyway
-- [ ] No way to see the actual command being constructed
-- [ ] Voice selector requires popover instead of quick entry
-- [ ] Missing CLI flags: `--parallel`, model racing, `-c` copy mode
-
----
-
-## The Prompt Explorer
-
-*Has used ChatGPT/Claude web for coding help. Understands prompting but not git worktrees.*
-
-### First Impression (0-5 seconds)
-
-Opens Maestro. Sees welcome screen with "Loopflow Maestro" and "Manage worktrees and launch LLM coding sessions."
-
-**Internal monologue**: "I've used Claude before for coding. This looks like a macOS app for it. 'Worktrees'—I think that's a git thing? Whatever, let me open my project."
-
-Opens their project folder. If setup needed, they install without much concern.
-
-### First Action
-
-Sees the main interface. Left sidebar shows "WORKTREES" with nothing or just one entry.
-
-**Internal monologue**: "The sidebar is mostly empty. There's a big text box in the middle asking 'What do you want to build?' That's familiar—like ChatGPT's input."
-
-They start typing: "help me refactor this function to be more efficient"
-
-**Problem**: The prompt picker appears, trying to match their text to tasks. No matches, picker disappears.
-
-**Internal monologue**: "What was that dropdown? It went away. Okay, I'll just keep typing... but wait, where do I paste my code? In ChatGPT I just paste code into the text field."
-
-They look for a way to add code context. See the "Options" section with context toggles:
-- Docs (blue, enabled)
-- Files (teal, enabled)
-- Diff (green, disabled)
-- Clipboard (purple, disabled)
-
-**Internal monologue**: "Clipboard! I'll copy my code and enable that toggle."
-
-They copy their code, enable "Clipboard" toggle. But there's no indication that it worked.
-
-**Confusion**: "Did it include my clipboard? How do I know? The token count changed from 2.1k to 3.4k—maybe that's my code?"
-
-### First Obstacle
-
-They click Run. Nothing visible happens in the app. Then a terminal window opens.
-
-**Internal monologue**: "A terminal? I didn't want a terminal. I wanted to see the response here, like in ChatGPT. Where's the AI's response?"
-
-They stare at the terminal, which shows the claude CLI running with streaming output.
-
-**Fundamental mismatch**: The Prompt Explorer expected an in-app conversation. Maestro is a *launcher* that opens terminal sessions. The mental model is completely different from chat UIs.
-
-### Recovery
-
-They watch the terminal output. The AI is working on their request. The output panel at the bottom of Maestro shows some streaming lines, but it's a secondary view—the real action is in the terminal.
-
-**Internal monologue**: "Oh, so Maestro just starts the AI session and the actual work happens in the terminal? That's... not what I expected. But the AI is responding, so I guess it's working?"
-
-After the task completes, they see a new worktree appeared in the sidebar. The Prompt Explorer doesn't understand what that means.
-
-### Verdict
-
-**Would they come back tomorrow?** Probably not. The mental model mismatch is too large. They expected:
-- In-app conversation
-- Paste code, get response
-- Iterate in place
-
-Instead they got:
-- Terminal-based sessions
-- Automatic worktree creation
-- Git-centric workflow
-
-This isn't what they were looking for. They'll go back to ChatGPT/Claude web unless they specifically want to learn the worktree workflow.
-
-### Pain Points
-
-- [ ] No explanation that this is a launcher, not a chat UI
-- [ ] Clipboard inclusion has no visual confirmation
-- [ ] Response appears in terminal, not in-app
-- [ ] Worktrees created without understanding
-- [ ] No way to iterate/continue conversation from Maestro
-- [ ] Output panel is secondary to terminal—doesn't feel "immediate"
-- [ ] No "paste code here" affordance like chat UIs have
-
----
-
-## The Skeptic
-
-*Experienced engineer, skeptical of AI hype. Low patience for jank or hand-holding.*
-
-### First Impression (0-5 seconds)
-
-Opens Maestro. Sees welcome screen.
-
-**Internal monologue**: "Another AI coding tool. Let's see if this is actually useful or just fancy chrome."
-
-Opens their project. Dependency check passes (they already have everything installed for other reasons).
-
-Sees main interface:
-- Worktree sidebar with their existing worktrees
-- Central prompt launcher
-
-**Internal monologue**: "Clean UI. No tutorial popups, no onboarding wizard. Good—respect my time."
-
-### First Action
-
-Scans the interface to understand the data model:
-- Sidebar: "WORKTREES" section lists branches they recognize
-- Each worktree row shows: branch name, commit count, status badge
-- Central area: Task selector, prompt text, mode picker, options
-
-**Internal monologue**: "Okay, worktrees are just my git worktrees. The task selector has my `.lf/` tasks. This is a GUI for the `lf` CLI. Makes sense."
-
-They select a worktree from the sidebar. The prompt launcher targets it.
-
-**Internal monologue**: "Selected worktree updates the context. Good mental model. Now let me run something real."
-
-### First Obstacle
-
-They select "review" task, leave text empty (review doesn't need args), click Run.
-
-Terminal opens. Claude starts reviewing their branch.
-
-**Internal monologue**: "Fine. But I'm still watching a terminal. What does the GUI add? Let me see..."
-
-They look at output panel in Maestro. Shows streaming lines from the task.
-
-**Internal monologue**: "Streaming output is duplicated from terminal. Not particularly useful—I could just watch the terminal."
-
-They look at worktree sidebar. The worktree row hasn't changed during execution.
-
-**Internal monologue**: "No progress indicator on the worktree row. How do I know which worktrees have running tasks at a glance?"
-
-### Recovery
-
-The Skeptic understands the system quickly—it's a GUI wrapper for CLI tools they know. But they're evaluating whether the GUI adds value.
+**Would they come back tomorrow?** For worktree management, yes. For prompt launching, no—CLI is faster and gives them more control.
 
 **Value assessment**:
-- Worktree overview: Useful. Seeing all branches with status in one place.
-- Quick actions on hover (diff, terminal, IDE buttons): Useful.
-- Context menu (Create PR, View PR, Land): Very useful—PR management in one click.
-- Prompt launcher: Marginally useful. Typing `lf review` in terminal is equally fast.
-- Output panel: Not useful—terminal is primary.
-
-### Verdict
-
-**Would they come back tomorrow?** Selectively. They'll use Maestro for:
-- Worktree management (the sidebar is genuinely faster than `wt list` + mental tracking)
-- PR operations (right-click → Create PR is convenient)
-- Maybe when they want the visual overview
-
-They won't use it for:
-- Prompt launching (CLI is faster)
-- Watching task output (terminal is better)
-- Complex prompts with many context options (CLI flags are more precise)
+- Worktree sidebar: **Useful**. Visual overview beats `wt list`.
+- Hover actions (diff, terminal, IDE buttons): **Useful**. Saves typing.
+- Context menu (Create PR, View PR, Land): **Very useful**. One-click PR workflow.
+- Diff viewer sheet: **Useful**. Better than terminal diff.
+- Prompt launcher: **Friction**. Dual entry points, no context preview, slower than `lf implement`.
+- Output panel: **Not useful**. Duplicates terminal.
+- Token count: **Partially useful**. Need breakdown by section, not just total.
 
 ### Pain Points
 
-- [ ] No visual indication of which worktrees have running tasks
-- [ ] Output panel is redundant with terminal—offers no unique value
-- [ ] Task selector adds latency vs. just typing `lf <task>`
-- [ ] Options panel is mouse-heavy; CLI is keyboard-only
-- [ ] Token count is opaque—can't see what's included
-- [ ] No diff viewer integrated with prompt launcher (have to right-click worktree separately)
-- [ ] Performance feels acceptable but not "sub-100ms" fast per design principles
+- [ ] Dual task entry (selector + colon syntax) interfere—pick one pattern
+- [ ] No context preview—can't see what files/content will be sent (CLI `-c` equivalent)
+- [ ] Token count is single number—need breakdown: Docs 1.2k, Files 5.5k, Diff 0.3k
+- [ ] Running state not visible on worktree rows—no spinner or indicator
+- [ ] Output panel duplicates terminal without adding value
+- [ ] No Cmd+K command palette—keyboard navigation slower than CLI
+- [ ] Can't see the actual command being constructed
+- [ ] Missing `--parallel` flag for model racing
+
+---
+
+## Designer or PM
+
+*Non-engineer, curious about AI assistance. Might use for docs, specs, or light scripting. Low tolerance for jargon or complexity. Needs: clear affordances, forgiving errors.*
+
+### First Impression (0-5 seconds)
+
+Opens Maestro. Sees `WelcomeWindow`:
+
+- Branch icon and "Loopflow Maestro"
+- "AI coding assistant for your projects"
+- "Open Folder..." button
+
+**Internal monologue**: "'AI coding assistant'—I've used ChatGPT for writing specs. This looks more serious, maybe for actual code? Let me try it with the project I'm managing."
+
+Opens a project folder. First-time setup appears:
+
+- "Loopflow CLI" — "Runs AI coding tasks from your terminal"
+- "Worktrunk (wt)" — "Keeps each feature in its own folder"
+
+**Internal monologue**: "'Terminal'... I don't really use the terminal. But it says 'Install' so I'll click it. 'Keeps each feature in its own folder'—like organizing files?"
+
+They complete setup without fully understanding what they installed.
+
+### First Action
+
+Sees the main interface:
+
+- Sidebar: "BRANCHES" with empty state
+- Empty state message: "Each worktree is an isolated folder where AI can work without affecting your main code."
+- Center: Big text field "Describe what you want to build or change..."
+- Task selector, Mode picker, Options, token count
+
+**Internal monologue**: "The sidebar talks about 'isolated folders' and 'main code'—I'm not sure what that means but okay. The text field is clear: 'Describe what you want'—that's like ChatGPT."
+
+They type: "write a product requirements doc for the new onboarding flow"
+
+**Confusion**: What about the Task selector showing "None"? The mode picker showing "Auto"? What are these?
+
+**Internal monologue**: "Task says 'None'—should I pick something? Let me look..."
+
+Clicks Task selector. Sees items like "design", "implement", "review".
+
+**Internal monologue**: "'design' sounds right for writing a doc. But these seem more like coding tasks? I'll try 'design'."
+
+Selects "design". Then looks at mode picker: Auto vs Interactive.
+
+**Internal monologue**: "'Auto' vs 'Interactive'—what's the difference?"
+
+Hovers over the mode picker. Tooltip appears: "Auto: Runs to completion without interruption"
+
+**Internal monologue**: "Okay, Auto runs by itself. Interactive probably lets me chat. I'll leave it on Auto."
+
+### First Obstacle
+
+Clicks Run.
+
+A terminal window opens. Text starts streaming: `→ Read: README.md`, `→ Read: STYLE.md`, then paragraphs of output.
+
+**Internal monologue**: "What's this black window? Is this the AI? Why didn't it just show me the result in the app?"
+
+They don't know how to interact with the terminal. The AI is writing to a file but they don't see that.
+
+**Confusion**: The output in terminal is mostly code-related operations (reading files, writing code) even though they asked for a document. The interface doesn't explain what's happening.
+
+**Internal monologue**: "I just wanted a document. Why is it reading all these code files? Did I do something wrong?"
+
+### Recovery
+
+They wait. The task completes. A new item "gentle-falcon" appears in the sidebar.
+
+**Internal monologue**: "'gentle-falcon'? What's that? Is that where my document is?"
+
+They don't know how to access it. They try:
+1. Clicking on "gentle-falcon" in the sidebar → selects it but doesn't open anything visible
+2. Right-clicking → sees options including "Reveal in Finder"
+3. Clicks "Reveal in Finder" → Finder opens to a folder
+
+**Internal monologue**: "Oh, there's a folder. Let me look inside..."
+
+They navigate the folder. Eventually find a new markdown file with their requirements doc.
+
+**Assessment**: The task worked but the path to results was obscure. They expected ChatGPT-style inline results. Instead they got a terminal process that wrote to a hidden folder.
+
+### Verdict
+
+**Would they come back tomorrow?** Unlikely. The tool is too developer-centric:
+- Terminal output is intimidating
+- Results are buried in folder structures
+- No inline preview of what was created
+- The "worktree" concept doesn't map to their mental model
+
+They might try again if a developer colleague walks them through it. Otherwise, they'll stick to ChatGPT/Claude web for their needs.
+
+### Pain Points
+
+- [ ] Terminal output intimidating for non-engineers—no explanation of what's happening
+- [ ] Results not shown in app—have to navigate to folder to find them
+- [ ] "Worktree" concept unclear—what's a branch? what's isolation mean for docs?
+- [ ] Task selector options seem code-focused ("implement", "review")—where's "write doc"?
+- [ ] No preview of created content before closing
+- [ ] Can't iterate or refine in place—would need to run again
+- [ ] Auto-generated name "gentle-falcon" is cute but doesn't help identify content
+- [ ] Output panel shows streaming text but doesn't explain what AI is doing
 
 ---
 
@@ -336,34 +308,77 @@ They won't use it for:
 
 ### Top 3 Issues Across All Profiles
 
-1. **Mental Model Gap**: Maestro is a launcher, not a chat UI. The Prompt Explorer and Curious Beginner expect in-app responses. The transition to terminal feels like "something went wrong" rather than "working as designed."
+1. **Context Opacity**
+   - Users can't see what context is being assembled
+   - Token count is a single number with no breakdown
+   - No CLI `-c` equivalent to inspect the full prompt
+   - Power User: "I'm flying blind"
+   - New Developer: Doesn't even know context is a concept
+   - **Impact**: Critical for Power User, moderate for others
 
-2. **Context Opacity**: Users can't see what context is being assembled. Token count is a single number with no breakdown. The CLI's `-c` flag (copy and inspect) has no equivalent. Users toggle options blindly.
+2. **Mental Model Gap**
+   - Maestro is a launcher that opens terminal sessions
+   - Results appear in terminal and worktree folders, not in-app
+   - Designer/PM expected ChatGPT-style inline responses
+   - New Developer surprised by terminal transition
+   - **Impact**: Critical for Designer/PM, significant for New Developer
 
-3. **Dual Input Confusion**: The Task selector and the colon syntax in the text field compete. Users don't know which input matters. The prompt picker appearing while typing adds noise.
+3. **Dual Input Confusion**
+   - Task selector and typed prompt compete
+   - Prompt picker appears while typing, interrupting flow
+   - Users don't know if they need to select a task first
+   - Power User: "Two entry points that conflict"
+   - New Developer: Unsure which input matters
+   - **Impact**: High for Power User, moderate for New Developer
 
-### Secondary Issues
+### Pain Points by Profile
 
-4. **Worktree Jargon**: "Worktrees" appears without explanation. First-time users don't understand why their request created a folder called "electric-penguin".
+| Issue | New Developer | Power User | Designer/PM |
+|-------|--------------|------------|-------------|
+| Context opacity | Doesn't know to check | Critical blocker | N/A |
+| Dual input confusion | Moderate confusion | Significant friction | Mild confusion |
+| Terminal output | Unexpected but okay | Expected but redundant | Intimidating |
+| Results visibility | Wants summary | Wants context preview | Wants inline results |
+| Running state invisible | Minor | Significant | N/A |
+| Worktree concept | Understands basics | Already knows | Doesn't map |
+| Task selector purpose | Unclear | Clear but redundant | Seems code-focused |
 
-5. **Output Panel Value**: The streaming output panel duplicates terminal output but offers no unique value. It's not faster, not more detailed, not actionable.
+### What Each Profile Values
 
-6. **No Onboarding**: No tooltips, no first-run guidance, no progressive disclosure of concepts. Users are dropped into a specialized tool without orientation.
+| Profile | Primary Value | Would Use For |
+|---------|--------------|---------------|
+| New Developer | "AI writes code in safe folder" | Learning, small features |
+| Power User | Worktree overview, PR actions | Management, not launching |
+| Designer/PM | (Low value currently) | Would use for docs if inline |
 
-### Design Principle Violations
+### Recommendations
 
-| Principle | Violation |
-|-----------|-----------|
-| **Immediate Connection** (Bret Victor) | Response happens in terminal, not where user typed. No immediate feedback in the main UI. |
-| **Progressive Disclosure** (Notion, Stripe) | Advanced concepts (worktrees, pipelines, voices) visible immediately without context. No layered reveal. |
-| **Transparency** (Cursor, Matuschak) | Context assembly is opaque. Token count is a number, not a breakdown. Can't see what will be sent. |
-| **Remove Barriers** (fast.ai) | Setup requires understanding dependencies. Worktrees require git knowledge. No immediate success path. |
-| **Opinionated Defaults** (Linear) | Mode picker asks users to choose Auto vs Interactive without explaining implications. Context options are toggles without guidance. |
+**For New Developer**:
+1. Show toast when worktree is auto-created: "Created 'curious-dolphin' for this task"
+2. Add "View Results" button after task completes—opens diff or folder
+3. Explain token count on hover: "How much context the AI will see"
 
-### Recommendations for Next Phase
+**For Power User**:
+1. Add context preview panel—show exactly what will be sent
+2. Remove dual input—either Task selector OR slash commands, not both
+3. Show running state on worktree rows—spinner during execution
+4. Add Cmd+K command palette for keyboard-first navigation
 
-1. **Add context preview**: Button to show exactly what will be sent (like `-c` in CLI)
-2. **Consolidate task input**: Either Task selector OR colon syntax, not both simultaneously
-3. **In-app output parity**: Make output panel valuable—maybe show structured progress, not raw terminal streams
-4. **First-run orientation**: Brief explanation of the Maestro model (launcher → terminal) when worktrees sidebar is empty
-5. **Worktree explainer**: When auto-creating a worktree, show a brief message: "Created worktree 'electric-penguin' to isolate this work"
+**For Designer/PM**:
+1. Consider in-app result preview for document-focused tasks
+2. Add task presets for non-code use cases ("write spec", "review doc")
+3. Show what AI created before closing—inline preview
+4. Reduce terminal exposure—or explain what's happening in plain language
+
+### Context Preview Priority
+
+The context preview panel (currently in `.design/ux-agent.md`) addresses the #1 issue across all profiles. Implementation should:
+
+1. Make token count clickable → expands preview panel
+2. Show breakdown by section: Docs (1.2k), Files (5.5k), Diff (0.3k)
+3. List individual files in each section
+4. Allow removal via ✕ button
+5. Include Copy button (CLI `-c` parity)
+6. Update in real-time when toggles change
+
+This directly addresses Power User's "flying blind" complaint and helps New Developer understand what context means.

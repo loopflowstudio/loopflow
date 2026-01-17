@@ -1098,6 +1098,16 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
     else:
         subprocess.run(["git", "branch", "-D", branch], cwd=main_repo, capture_output=True)
 
+    # Open merged PR in browser
+    result = subprocess.run(
+        ["gh", "pr", "view", str(pr_number), "--json", "url", "-q", ".url"],
+        cwd=main_repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        subprocess.run(["open", result.stdout.strip()])
+
     typer.echo(f"Landed {branch} onto {base_branch}.")
 
     if was_in_worktree:

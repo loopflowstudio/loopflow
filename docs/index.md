@@ -10,7 +10,7 @@ Run LLM coding agents from reusable prompt files.
 Write a task once, run it on any branch:
 
 ```bash
-lf review          # run .lf/review.lf
+lf review          # run .claude/commands/review.md
 lf ship            # pipeline: implement → review → test → commit → PR
 ```
 
@@ -20,7 +20,7 @@ lf ship            # pipeline: implement → review → test → commit → PR
 
 Loopflow is a workflow for running AI coding agents like Claude Code and Codex. You write prompts as files, chain them into pipelines, and run them across isolated worktrees.
 
-- **Tasks** are prompt files in `.lf/`
+- **Tasks** are prompt files in `.claude/commands/` or `.lf/`
 - **Pipelines** chain tasks together
 - **Worktrees** keep parallel work isolated
 

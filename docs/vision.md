@@ -34,10 +34,10 @@ Vibing produces slop. Without review passes and quality gates, code degrades. Pr
 Prompts are markdown files in your repository. They're versioned with git, reviewed in PRs, and shared across your team. When something works, you can find it again. When something breaks, you can trace it back.
 
 ```
-.lf/
-  review.lf
-  implement.lf
-  design.lf
+.claude/commands/
+  review.md
+  implement.md
+  design.md
 ```
 
 ### Pipelines with Quality Gates

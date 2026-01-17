@@ -32,7 +32,7 @@ The prompt launcher is the main interface for running tasks.
 
 ### Task Selector
 
-Select a task from the dropdown or type to search. Tasks are loaded from `.lf/` in your repository. The mode badge shows whether the task defaults to auto or interactive.
+Select a task from the dropdown or type to search. Tasks are loaded from `.claude/commands/` or `.lf/` in your repository. The mode badge shows whether the task defaults to auto or interactive.
 
 ### Args Input
 

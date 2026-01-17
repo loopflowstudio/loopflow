@@ -234,22 +234,21 @@ lf ship
 
 ## Task files
 
-Tasks are markdown files in `.lf/`. The filename (minus extension) is the task name.
+Tasks are markdown files in `.claude/commands/` (preferred) or `.lf/`. The filename (minus extension) is the task name.
 
 ```
-.lf/
-  config.yaml
-  review.lf
-  implement.lf
-  test.lf
-  commit.lf
+.claude/commands/
+  review.md
+  implement.md
+  test.md
+  commit.md
 ```
 
 Run by name:
 
 ```bash
-lf review      # runs .lf/review.lf
-lf implement   # runs .lf/implement.lf
+lf review      # runs .claude/commands/review.md
+lf implement   # runs .claude/commands/implement.md
 ```
 
 ### Task arguments
@@ -263,7 +262,7 @@ lf implement: add user authentication
 Inside the task file, use `{args}` as a placeholder:
 
 ```markdown
-# .lf/implement.lf
+# .claude/commands/implement.md
 
 Implement the following feature:
 

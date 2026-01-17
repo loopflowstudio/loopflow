@@ -35,6 +35,23 @@ struct SetupView: View {
                     .foregroundStyle(.secondary)
             }
 
+            // Progress indicator
+            HStack(spacing: 0) {
+                ForEach(0..<3, id: \.self) { index in
+                    Circle()
+                        .fill(stepFillColor(for: index))
+                        .frame(width: 10, height: 10)
+
+                    if index < 2 {
+                        Rectangle()
+                            .fill(index < currentStepIndex ? Color.accentColor : Color.secondary.opacity(0.3))
+                            .frame(height: 2)
+                            .frame(maxWidth: 40)
+                    }
+                }
+            }
+            .padding(.top, 8)
+
             Spacer()
 
             // Status
@@ -66,8 +83,20 @@ struct SetupView: View {
                     .padding(.horizontal)
             }
 
-            // Action button
-            actionButton
+            // Action buttons
+            VStack(spacing: 12) {
+                actionButton
+
+                // Skip option for manual installation
+                if installStep != .complete && installStep != .checking {
+                    Button("Skip, I'll install manually") {
+                        isComplete = true
+                    }
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
         }
         .padding(40)
         .frame(width: 500, height: 400)
@@ -158,6 +187,35 @@ struct SetupView: View {
         }
     }
 
+    private var currentStepIndex: Int {
+        switch installStep {
+        case .checking, .needsLf, .installingLf:
+            return 0
+        case .needsWt, .installingWt:
+            return 1
+        case .complete:
+            return 2
+        case .failed:
+            return status?.lfInstalled == true ? 1 : 0
+        }
+    }
+
+    private func stepFillColor(for index: Int) -> Color {
+        if index < currentStepIndex {
+            return .accentColor
+        } else if index == currentStepIndex {
+            switch installStep {
+            case .installingLf, .installingWt:
+                return .accentColor.opacity(0.5)
+            case .failed:
+                return .red
+            default:
+                return .accentColor
+            }
+        }
+        return .secondary.opacity(0.3)
+    }
+
     private func checkStatus() {
         installStep = .checking
         errorMessage = nil
@@ -192,11 +250,11 @@ struct SetupView: View {
                     installStep = .needsWt
                 }
             } else {
-                errorMessage = "Installation completed but lf not found. Try running: pip install loopflow"
+                errorMessage = "Installation completed but lf not found.\n\nTry opening Terminal and running:\n  pip install loopflow\n\nThen click Retry."
                 installStep = .failed
             }
         } catch {
-            errorMessage = "Failed to install: \(error.localizedDescription)"
+            errorMessage = "Failed to install Loopflow.\n\n\(error.localizedDescription)\n\nMake sure Python and pip are installed, then click Retry."
             installStep = .failed
         }
     }
@@ -212,11 +270,11 @@ struct SetupView: View {
             if status?.wtInstalled == true {
                 installStep = .complete
             } else {
-                errorMessage = "Installation completed but wt not found. Try running: lf ops install"
+                errorMessage = "Installation completed but wt not found.\n\nTry opening Terminal and running:\n  lfops install\n\nThen click Retry."
                 installStep = .failed
             }
         } catch {
-            errorMessage = "Failed to install: \(error.localizedDescription)"
+            errorMessage = "Failed to install worktrunk.\n\n\(error.localizedDescription)\n\nMake sure Loopflow is installed correctly, then click Retry."
             installStep = .failed
         }
     }

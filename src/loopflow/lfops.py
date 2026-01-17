@@ -157,36 +157,19 @@ def _install_missing(status: SetupStatus) -> None:
 
 
 def _scaffold_repo(repo_root: Path) -> None:
-    """Create .lf/ config and optional style guides.
-
-    Commands are now built-in and don't need to be copied.
-    """
+    """Create .lf/config.yaml. Commands are built-in and don't need to be copied."""
     templates = _get_templates_dir()
-    prompts_dir = Path(__file__).parent / "prompts"
 
-    typer.echo("\nCreating .lf/...")
-
-    # Config
     config_dir = repo_root / ".lf"
     config_dir.mkdir(exist_ok=True)
 
     config_src = templates / "config.yaml"
     config_dst = config_dir / "config.yaml"
     if config_dst.exists():
-        typer.echo("  - .lf/config.yaml (already exists)")
+        typer.echo("- .lf/config.yaml (already exists)")
     else:
         shutil.copy(config_src, config_dst)
-        typer.echo("  ✓ .lf/config.yaml")
-
-    # Commit templates
-    for template_name in ["COMMIT_MESSAGE.md", "CHECKPOINT_MESSAGE.md"]:
-        src = prompts_dir / template_name
-        dst = config_dir / template_name
-        if dst.exists():
-            typer.echo(f"  - .lf/{template_name} (already exists)")
-        else:
-            shutil.copy(src, dst)
-            typer.echo(f"  ✓ .lf/{template_name}")
+        typer.echo("✓ .lf/config.yaml")
 
 
 def _install_style(repo_root: Path) -> None:
@@ -1214,7 +1197,7 @@ def commit(
     push: bool = typer.Option(False, "-p", "--push", help="Push after committing"),
     add: bool = typer.Option(True, "-a/-A", "--add/--no-add", help="Stage all changes before committing"),
 ) -> None:
-    """Generate commit message from diff and commit."""
+    """Commit with automatic message."""
     repo_root = find_worktree_root()
     if not repo_root:
         typer.echo("Error: Not in a git repository", err=True)
@@ -1357,6 +1340,56 @@ def summarize(
     typer.echo(f"  Tokens: {tokens}")
     typer.echo(f"  Model: {model}")
     typer.echo(f"  Length: {len(summary.content)} chars")
+
+
+@app.command()
+def rebase() -> None:
+    """Rebase onto main, or launch assistant if conflicts."""
+    from loopflow.context import gather_task
+
+    repo_root = find_worktree_root()
+    if not repo_root:
+        typer.echo("Error: Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    # Fetch latest main
+    typer.echo("Fetching origin/main...")
+    subprocess.run(["git", "fetch", "origin", "main"], cwd=repo_root, check=False)
+
+    # Attempt rebase
+    typer.echo("Rebasing onto origin/main...")
+    result = subprocess.run(
+        ["git", "rebase", "origin/main"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode == 0:
+        # Success - push
+        typer.echo("Rebase succeeded, pushing...")
+        push_result = subprocess.run(
+            ["git", "push", "--force-with-lease"],
+            cwd=repo_root,
+        )
+        if push_result.returncode == 0:
+            typer.echo("Done")
+        else:
+            typer.echo("Push failed", err=True)
+            raise typer.Exit(1)
+    else:
+        # Conflicts - abort and hand off to Claude
+        typer.echo("Conflicts detected, aborting rebase...")
+        subprocess.run(["git", "rebase", "--abort"], cwd=repo_root)
+
+        # Get rebase prompt (custom or built-in)
+        task = gather_task(repo_root, "rebase")
+        if not task:
+            typer.echo("Error: No rebase command found", err=True)
+            raise typer.Exit(1)
+
+        typer.echo("Launching rebase assistant...")
+        subprocess.run(["claude", task.content], cwd=repo_root)
 
 
 def main() -> None:

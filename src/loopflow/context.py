@@ -87,6 +87,15 @@ def list_builtin_tasks() -> list[str]:
     return sorted(p.stem for p in _TEMPLATES_DIR.glob("*.md"))
 
 
+# Files in .lf/ that aren't tasks (prompts, docs, etc)
+_LF_NON_TASK_FILES = {
+    "config.yaml",
+    "config.yml",
+    "COMMIT_MESSAGE.md",
+    "CHECKPOINT_MESSAGE.md",
+}
+
+
 def list_user_tasks(repo_root: Path) -> list[str]:
     """Return names of user-defined tasks in the repo."""
     tasks = set()
@@ -103,8 +112,10 @@ def list_user_tasks(repo_root: Path) -> list[str]:
         for p in lf_dir.iterdir():
             if not p.is_file():
                 continue
-            # Skip config files
-            if p.name in ("config.yaml", "config.yml"):
+            if p.name in _LF_NON_TASK_FILES:
+                continue
+            # Skip uppercase files (likely docs/prompts, not tasks)
+            if p.stem.isupper():
                 continue
             # Task name is filename without extension
             if p.suffix:

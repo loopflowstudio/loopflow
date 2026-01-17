@@ -748,43 +748,6 @@ struct PromptLauncher: View {
     @State private var isDraggingOver = false
     @State private var showingFilePicker = false
 
-    private var optionsBar: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            // Mode picker row
-            HStack(spacing: 12) {
-                Picker("", selection: $appState.runMode) {
-                    Text("Auto").tag(RunMode.auto)
-                    Text("Interactive").tag(RunMode.interactive)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 160)
-
-                Spacer()
-            }
-
-            // Context bar - always visible
-            contextBar
-        }
-        .onChange(of: appState.includeDocs) {
-            Task { await appState.estimateTokens() }
-        }
-        .onChange(of: appState.includeDiff) {
-            Task { await appState.estimateTokens() }
-        }
-        .onChange(of: appState.includeDiffFiles) {
-            Task { await appState.estimateTokens() }
-        }
-        .onChange(of: appState.includePaste) {
-            Task { await appState.estimateTokens() }
-        }
-        .onChange(of: appState.includeSummaries) {
-            Task { await appState.estimateTokens() }
-        }
-        .onChange(of: appState.attachedFiles) {
-            Task { await appState.estimateTokens() }
-        }
-    }
-
     private var contextBar: some View {
         HStack(spacing: 6) {
             // Context chips

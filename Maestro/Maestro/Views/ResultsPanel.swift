@@ -648,14 +648,6 @@ struct ResultsPanel: View {
             // Terminal view
             if isExpanded {
                 EmbeddedTerminalView(
-                    process: Binding(
-                        get: { appState.taskRunner.currentProcess },
-                        set: { appState.taskRunner.currentProcess = $0 }
-                    ),
-                    isRunning: Binding(
-                        get: { appState.taskRunner.isRunning },
-                        set: { appState.taskRunner.isRunning = $0 }
-                    ),
                     command: command,
                     workingDirectory: workDir,
                     onTerminate: {

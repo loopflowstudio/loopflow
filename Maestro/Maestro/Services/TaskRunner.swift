@@ -7,7 +7,6 @@ import SwiftUI
 @Observable
 final class TaskRunner {
     var isRunning = false
-    var currentProcess: Process?
     var currentCommand: String?
     var currentWorkingDirectory: URL?
 
@@ -21,16 +20,12 @@ final class TaskRunner {
     }
 
     func cancelTask() {
-        // The terminal view manages the actual process
-        // Setting isRunning = false will trigger cleanup
         isRunning = false
-        currentProcess = nil
         currentCommand = nil
     }
 
     func handleTermination() {
         isRunning = false
-        currentProcess = nil
         onComplete?()
         onComplete = nil
     }

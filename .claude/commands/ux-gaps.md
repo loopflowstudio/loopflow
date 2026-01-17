@@ -1,9 +1,4 @@
 ---
-context:
-  - Maestro/DESIGN.md
-  - /tmp/maestro-*.png
-  - .design/ux-research.md
-  - Maestro/Maestro/Views/
 voice: artist
 ---
 > **Screenshots**: If running standalone, capture with Cmd+Shift+S first.

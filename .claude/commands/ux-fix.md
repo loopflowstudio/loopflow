@@ -1,11 +1,4 @@
 ---
-context:
-  - Maestro/DESIGN.md
-  - .design/ux-research.md
-  - .design/ux-gaps.md
-  - /tmp/maestro-*.png
-  - Maestro/Maestro/Views/
-  - Maestro/Maestro/Services/
 voice: architect
 ---
 > **Screenshots**: If running standalone, capture with Cmd+Shift+S first.

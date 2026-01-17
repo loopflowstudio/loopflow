@@ -1,8 +1,4 @@
 ---
-context:
-  - Maestro/DESIGN.md
-  - /tmp/maestro-*.png
-  - Maestro/Maestro/Views/
 voice: customer
 ---
 > **Before running**: Open Maestro, navigate to each screen you want reviewed,

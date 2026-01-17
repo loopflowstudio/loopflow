@@ -77,6 +77,15 @@ struct PromptLauncher: View {
         .onAppear {
             isInputFocused = true
         }
+        .onChange(of: appState.prompts) { _, prompts in
+            // Auto-select "implement" task on first load if available
+            if !hasInitializedTask && !prompts.isEmpty {
+                hasInitializedTask = true
+                if let implementTask = prompts.first(where: { $0.name.lowercased() == "implement" }) {
+                    selectTask(implementTask)
+                }
+            }
+        }
         .background {
             // Hidden button for Cmd+L keyboard shortcut to focus prompt
             Button("") {
@@ -89,10 +98,11 @@ struct PromptLauncher: View {
 
     // MARK: - Task Selector
 
-    @State private var taskSearchText: String = ""
+    @State private var taskSearchText: String = "implement"
     @State private var isTaskSearchFocused: Bool = false
     @State private var highlightedTaskIndex: Int = 0
     @FocusState private var taskFieldFocused: Bool
+    @State private var hasInitializedTask: Bool = false
 
     private var filteredTasks: [PromptCard] {
         if taskSearchText.isEmpty {
@@ -201,7 +211,7 @@ struct PromptLauncher: View {
                                 Button {
                                     selectTask(prompt)
                                 } label: {
-                                    VStack(alignment: .leading, spacing: 2) {
+                                    VStack(alignment: .leading, spacing: 3) {
                                         HStack {
                                             Text(prompt.displayName)
                                                 .fontWeight(.medium)
@@ -212,13 +222,14 @@ struct PromptLauncher: View {
                                         }
                                         if let description = prompt.shortDescription {
                                             Text(description)
-                                                .font(.caption2)
-                                                .foregroundStyle(.tertiary)
-                                                .lineLimit(1)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(2)
+                                                .fixedSize(horizontal: false, vertical: true)
                                         }
                                     }
                                     .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
+                                    .padding(.vertical, 8)
                                     .background(index == highlightedTaskIndex ? Color.accentColor.opacity(0.1) : Color.clear)
                                 }
                                 .buttonStyle(.plain)
@@ -561,12 +572,12 @@ struct PromptLauncher: View {
             ZStack(alignment: .topLeading) {
                 // Placeholder with examples
                 if inputText.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Describe what you want to build...")
-                            .foregroundStyle(.tertiary)
-                        Text("e.g. \"add user authentication\" or \"fix the login bug\"")
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("What should the AI build?")
+                            .foregroundStyle(.secondary)
+                        Text("Try: \"add user authentication\" or \"refactor the API to use async/await\"")
                             .font(.caption)
-                            .foregroundStyle(.quaternary)
+                            .foregroundStyle(.tertiary)
                     }
                     .padding(.horizontal, 4)
                     .padding(.vertical, 12)
@@ -761,7 +772,7 @@ struct PromptLauncher: View {
                     }
                 } label: {
                     HStack(spacing: 4) {
-                        Text("Options")
+                        Text(showAdvancedOptions ? "Options" : "More options")
                             .font(.caption)
                         Image(systemName: showAdvancedOptions ? "chevron.up" : "chevron.down")
                             .font(.caption2)
@@ -769,6 +780,7 @@ struct PromptLauncher: View {
                     .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
+                .help("Model, voice, context toggles, and command preview")
             }
 
             // Context preview panel

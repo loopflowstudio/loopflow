@@ -11,7 +11,7 @@ struct WelcomeWindow: View {
         VStack(spacing: 32) {
             // Header
             VStack(spacing: 12) {
-                Image(systemName: "arrow.triangle.branch")
+                Image(systemName: "wand.and.sparkles")
                     .font(.system(size: 48))
                     .foregroundStyle(.tint)
 
@@ -19,7 +19,7 @@ struct WelcomeWindow: View {
                     .font(.title)
                     .fontWeight(.semibold)
 
-                Text("AI coding assistant for your projects")
+                Text("Tell it what to build. It writes the code.")
                     .foregroundStyle(.secondary)
             }
 

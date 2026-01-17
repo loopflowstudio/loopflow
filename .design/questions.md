@@ -1,23 +1,25 @@
 # Open Questions
 
-## UX Research (2026-01-16)
+## Resolved (2026-01-16)
 
-1. **Target audience priority**: Is Maestro primarily for power users who want a dashboard, or should it be accessible to non-technical users (designers, PMs)? The current design serves power users well but alienates newcomers.
+1. **Target audience priority**: Power users for now. Maestro is a dashboard for people who already understand loopflow/Claude Code. Non-technical accessibility is not a priority.
 
-2. **Results in terminal vs in-app**: Is there a technical reason results must appear in an external terminal? Would embedded PTY or websocket output streaming be feasible?
+2. **Results in terminal vs in-app**: Explore embedding an existing terminal (Ghostty, Warp) rather than building a competing terminal. Don't reimplement—integrate.
 
-3. **Beta flag discoverability**: How are users expected to discover the Pipelines and Agents features hidden behind `Flags.beta`? Is there a preference panel or menu item planned?
+3. **Beta flag discoverability**: No discovery path needed. Beta features are in development; users won't see them until they're ready.
 
-4. **Screenshot capture permissions**: The Cmd+Shift+S debug capture triggers a system permission dialog. Is this the intended mechanism for users, or should there be a fallback that doesn't require screen recording permission?
+4. **Screenshot capture permissions**: Developer-only feature. Permissions will persist after initial grant—acceptable friction for developers.
 
-5. **Worktree terminology**: The app uses "worktree" throughout, but this is git jargon. Would "workspace", "branch folder", or "isolated copy" be clearer for non-git-experts?
+5. **Worktree terminology**: Keep "worktree". It's pre-existing git terminology that Claude Code users already understand. Don't invent new language.
 
-## UX Gap Analysis (2026-01-16)
+6. **Configuration vs opinionation**: Option (b)—accept Maestro is a power-user tool and optimize for that. Keep explicit context control visible.
 
-6. **Configuration vs opinionation**: The gap analysis suggests hiding context toggles and defaulting to "implement" task. But loopflow's power comes from explicit context control. Is the right answer: (a) hide complexity for new users and reveal after first success, (b) accept that Maestro is a power-user tool and optimize for that, or (c) build two modes (simple/advanced)?
+9. **Sidebar identity**: Keep git-centric "branches" terminology. Power users think in git terms.
 
-7. **Task inference viability**: Could Maestro infer task from prompt content (e.g., "review the auth" -> review task)? This would require NLP or pattern matching. Is this worth the complexity, or should we just default to "implement"?
+## Open
 
-8. **In-app streaming technical feasibility**: The gap analysis heavily emphasizes streaming results in-app. What's the technical path? Options: embedded PTY (complex), websocket from lfd (requires daemon changes), poll log files (simple but not real-time). Which is worth pursuing?
+8. **In-app terminal embedding**: Can Maestro embed Ghostty or Warp rather than launching external? This would eliminate context-switching without competing with terminal products. See `.design/terminal-embedding.md` for research.
 
-9. **Sidebar identity**: Should the sidebar show "branches" (git-centric) or "features in progress" (work-centric)? The latter is more accessible but loses precision for power users who think in git terms.
+## Not Pursuing
+
+7. **Task inference**: Decided against. Not worth the complexity—users can select tasks explicitly.

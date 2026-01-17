@@ -144,11 +144,11 @@ struct WorktreeSidebar: View {
 
     private var header: some View {
         HStack {
-            Text("BRANCHES")
+            Text("Workspaces")
                 .font(.caption)
-                .fontWeight(.semibold)
+                .fontWeight(.medium)
                 .foregroundStyle(.secondary)
-                .help("Worktrees: isolated folders for each feature branch")
+                .help("Each workspace is an isolated folder where AI works without affecting your main code")
 
             Spacer()
 
@@ -159,7 +159,7 @@ struct WorktreeSidebar: View {
                     .font(.caption)
             }
             .buttonStyle(.plain)
-            .help("Create a new branch in its own folder")
+            .help("Create a new workspace")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -167,15 +167,15 @@ struct WorktreeSidebar: View {
 
     private var emptyState: some View {
         VStack(spacing: 12) {
-            Image(systemName: "arrow.triangle.branch")
+            Image(systemName: "square.stack.3d.up")
                 .font(.system(size: 28))
                 .foregroundStyle(.tertiary)
 
             VStack(spacing: 4) {
-                Text("No worktrees yet")
+                Text("No workspaces yet")
                     .fontWeight(.medium)
                     .foregroundStyle(.secondary)
-                Text("Each worktree is an isolated folder where AI can work without affecting your main code.")
+                Text("Create a workspace to let AI work on a feature without affecting your main code.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.center)
@@ -185,7 +185,7 @@ struct WorktreeSidebar: View {
             Button {
                 showingNewWorktreeSheet = true
             } label: {
-                Label("Create Worktree", systemImage: "plus")
+                Label("Create Workspace", systemImage: "plus")
                     .font(.caption)
             }
             .buttonStyle(.borderedProminent)
@@ -676,13 +676,27 @@ struct WorktreeRow: View {
     }
 
     private func stageBadge(_ task: String) -> some View {
-        Text(task)
-            .font(.caption2)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(stageColor(task).opacity(0.2))
-            .foregroundStyle(stageColor(task))
-            .clipShape(Capsule())
+        HStack(spacing: 3) {
+            Image(systemName: stageIcon(task))
+                .font(.system(size: 8))
+            Text(task)
+                .font(.caption2)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(stageColor(task).opacity(0.2))
+        .foregroundStyle(stageColor(task))
+        .clipShape(Capsule())
+    }
+
+    private func stageIcon(_ task: String) -> String {
+        switch task {
+        case "design": return "lightbulb"
+        case "implement": return "hammer"
+        case "review": return "magnifyingglass"
+        case "polish": return "sparkles"
+        default: return "circle"
+        }
     }
 
     private func stageColor(_ task: String) -> Color {

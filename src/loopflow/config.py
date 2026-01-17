@@ -21,6 +21,14 @@ class PipelineConfig(BaseModel):
     pr: Optional[bool] = None
 
 
+class SummaryConfig(BaseModel):
+    """Per-path summary configuration."""
+
+    path: str
+    tokens: int
+    model: str = "gemini"
+
+
 def parse_model(model: str) -> tuple[str, str | None]:
     """Parse model string like 'claude:opus' into (backend, variant).
 
@@ -57,6 +65,7 @@ class Config(BaseModel):
     diff_files: bool = True  # Include full content of files touched by branch
     paste: bool = False  # Include clipboard content by default
     voice: Optional[list[str]] = None  # Default voices for all tasks
+    summaries: list[SummaryConfig] = Field(default_factory=list)  # Summaries to include
 
     @field_validator("context", mode="before")
     @classmethod

@@ -39,6 +39,13 @@ enum VoiceConfig: Codable {
     }
 }
 
+/// Per-path summary configuration.
+struct SummaryConfig: Codable {
+    let path: String
+    let tokens: Int
+    let model: String?
+}
+
 struct LoopflowConfig: Codable {
     let agentModel: String?
     let interactive: [String]?
@@ -55,11 +62,12 @@ struct LoopflowConfig: Codable {
     let diffFiles: Bool?
     let paste: Bool?
     let voice: VoiceConfig?
+    let summaries: [SummaryConfig]?
 
     enum CodingKeys: String, CodingKey {
         case agentModel = "agent_model"
         case diffFiles = "diff_files"
-        case interactive, terminal, ide, workspace, context, exclude, push, pr, yolo, docs, diff, paste, voice
+        case interactive, terminal, ide, workspace, context, exclude, push, pr, yolo, docs, diff, paste, voice, summaries
     }
 
     /// Voice config can be a single string or array of strings in YAML.
@@ -86,6 +94,10 @@ struct LoopflowConfig: Codable {
 
     func isInteractive(_ promptName: String) -> Bool {
         interactive?.contains(promptName) ?? false
+    }
+
+    var hasSummaries: Bool {
+        !(summaries?.isEmpty ?? true)
     }
 }
 

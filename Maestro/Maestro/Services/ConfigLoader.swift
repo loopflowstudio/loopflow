@@ -42,6 +42,7 @@ struct ConfigLoader {
         var diffFiles: Bool?
         var paste: Bool?
         var voice: VoiceConfig?
+        var summaries: [SummaryConfig]?
 
         let lines = contents.components(separatedBy: .newlines)
         var currentList: String?
@@ -126,7 +127,8 @@ struct ConfigLoader {
             diff: diff,
             diffFiles: diffFiles,
             paste: paste,
-            voice: voice
+            voice: voice,
+            summaries: summaries
         )
     }
 }

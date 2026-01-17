@@ -1,10 +1,12 @@
-# Consolidate UX Pipeline
+# Consolidate UX Pipeline + Standardize on .md
 
-A clean 3-task pipeline for UX improvement: `ux-research` → `ux-gaps` → `ux-fix`.
+Two changes:
+1. Clean 3-task pipeline: `ux-research` → `ux-gaps` → `ux-fix`
+2. Standardize on `.md` extension everywhere (remove `.lf` extension)
 
 ## What to build
 
-Merge `ux-review` into `ux-research` so research generates and reviews screenshots inline, then delete `ux-review`. The result is a streamlined pipeline where each task has a clear input/output handoff.
+Merge `ux-review` into `ux-research`, delete `ux-review`, and rename all `.lf` files to `.md`. Update loopflow to stop looking for `.lf` extension.
 
 ## Pipeline Design
 
@@ -23,21 +25,65 @@ screenshots/
 
 ## Data structures
 
-No new code. This is prompt file restructuring.
+No new types. Code changes in `context.py` to simplify lookup.
 
-Files to modify:
+## Key functions
+
+### `gather_task()` in context.py
+
+Current search order:
+```python
+1. .claude/commands/{name}.md
+2. .lf/{name}.lf           # Remove
+3. .lf/{name}.md
+4. .lf/{name}.*            # Remove
+5. .lf/{name}              # Remove
+6. templates/commands/{name}.md
 ```
-.claude/commands/ux-research.lf   # Merge in screenshot review
-.claude/commands/ux-review.lf     # Delete
-.claude/commands/ux-gaps.lf       # Adjust to depend on ux-research.md
-.claude/commands/ux-fix.lf        # No change needed
+
+New search order:
+```python
+def gather_task(repo_root: Path, name: str) -> TaskFile | None:
+    """Search order:
+    1. .claude/commands/{name}.md
+    2. .lf/{name}.md
+    3. templates/commands/{name}.md (builtin fallback)
+    """
 ```
 
-## Key changes
+### `list_tasks()` in context.py
 
-### ux-research.lf
+Update to only find `.md` files, not `.lf`.
 
-Merge screenshot review into user research. New structure:
+## Files to change
+
+### Prompt files (rename .lf → .md)
+
+```
+.claude/commands/ux-research.lf  → ux-research.md  (+ merge ux-review content)
+.claude/commands/ux-review.lf    → DELETE
+.claude/commands/ux-gaps.lf      → ux-gaps.md
+.claude/commands/ux-fix.lf       → ux-fix.md
+.lf/nux.lf                       → DELETE or move to .claude/commands/nux.md
+```
+
+### Python code
+
+```
+src/loopflow/context.py    # Simplify gather_task(), list_tasks()
+```
+
+### Documentation
+
+```
+README.md           # Update examples from .lf extension to .md
+docs/config.md      # Update task file references
+docs/patterns.md    # Update examples
+```
+
+## ux-research.md content
+
+Merge screenshot review into user research:
 
 ```markdown
 ---
@@ -50,7 +96,7 @@ voice: customer
 
 ## Part 1: Screenshot Capture
 
-Use Maestro's debug capture (⌘⇧C or menu) to generate screenshots of key states:
+Use Maestro's debug capture (⌘⇧C) to generate screenshots of key states:
 - Welcome/setup screen
 - Empty repo state
 - Prompt input with various toggle states
@@ -86,36 +132,16 @@ Write to .design/ux-research.md:
 - Top 5 priority issues
 ```
 
-### ux-gaps.lf
-
-Adjust context to read from ux-research.md:
-
-```markdown
----
-context:
-  - .design/ux-research.md    # Input from previous step
-  - .design/screenshots/
-  - Maestro/Maestro/Views/
-voice: artist
----
-```
-
-Body stays largely the same—compare against Figma/Cursor/Notion, apply design principles, identify gaps.
-
-### ux-review.lf
-
-Delete. Its content is now in ux-research.
-
 ## Constraints
 
-- **Screenshot capture is manual**: The agent prompts the user to use ⌘⇧C in Maestro. It can't programmatically trigger captures.
-- **Screenshots must exist**: ux-gaps and ux-fix expect .design/screenshots/ to be populated by ux-research.
-- **Clean handoffs**: Each task reads the previous task's .design/*.md output.
+- **Backwards compatibility**: Not required. This is an internal tool; just migrate everything.
+- **`.lf/` directory stays**: It holds `config.yaml`, `voices/`, `summaries/`. Only task file extension changes.
+- **`.claude/commands/` is primary**: Tasks go there for Claude Code compatibility.
 
 ## Done when
 
-1. `ux-review.lf` is deleted
-2. `ux-research.lf` includes screenshot generation + visual review sections
-3. `ux-gaps.lf` context includes `.design/ux-research.md`
-4. Running `lf ux-research` followed by `lf ux-gaps` followed by `lf ux-fix` works as a coherent pipeline
-5. No references to `ux-review` remain
+1. `lf ux-research` finds `.claude/commands/ux-research.md` and runs
+2. `lf ux-gaps` and `lf ux-fix` work the same way
+3. No `.lf` extension files remain in `.claude/commands/` or `.lf/`
+4. `gather_task()` no longer searches for `.lf` extension
+5. Docs updated to show `.md` examples only

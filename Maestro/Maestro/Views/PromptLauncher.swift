@@ -16,6 +16,7 @@ struct PromptLauncher: View {
     @State private var showAdvancedOptions = false
     @State private var isPreviewExpanded = false
     @State private var expandedSections: Set<ContextKind> = [.docs, .files]
+    @AppStorage("useEmbeddedTerminal") private var useEmbeddedTerminal = true
 
     private let terminalLauncher = TerminalLauncher()
 
@@ -61,6 +62,7 @@ struct PromptLauncher: View {
                     modelSelector
                     voiceSelector
                     contextBar
+                    embeddedTerminalToggle
                     commandPreview
                 }
             }
@@ -952,53 +954,77 @@ struct PromptLauncher: View {
 
     @State private var isDraggingOver = false
     @State private var showingFilePicker = false
+    @AppStorage("contextBarExpanded") private var contextBarExpanded = false
 
     private var contextBar: some View {
-        HStack(spacing: 6) {
-            // Context chips
-            ContextChip(label: "Docs", isOn: $appState.includeDocs, color: .blue)
-                .help("Include README, STYLE, and other docs")
-            ContextChip(label: "Files", isOn: $appState.includeDiffFiles, color: .teal)
-                .help("Include files touched by this branch")
-            ContextChip(label: "Diff", isOn: $appState.includeDiff, color: .green)
-                .help("Include raw diff output")
-            ContextChip(label: "Clipboard", isOn: $appState.includePaste, color: .purple)
-                .help("Include clipboard content")
-            if appState.config?.hasSummaries == true {
-                ContextChip(label: "Summaries", isOn: $appState.includeSummaries, color: .orange)
-                    .help("Include pre-generated codebase summaries")
-            }
-
-            // Separator if there are attached files
-            if !appState.attachedFiles.isEmpty {
-                Divider()
-                    .frame(height: 16)
-                    .padding(.horizontal, 2)
-            }
-
-            // Attached file chips
-            ForEach(appState.attachedFiles, id: \.self) { file in
-                FileChip(
-                    name: file.lastPathComponent,
-                    icon: iconForFile(file)
-                ) {
-                    appState.attachedFiles.removeAll { $0 == file }
+        VStack(alignment: .leading, spacing: 8) {
+            // Collapsible header - always visible
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    contextBarExpanded.toggle()
                 }
+            } label: {
+                HStack(spacing: 6) {
+                    Text("Context")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                    Text(formatTokenCount(appState.estimatedTokens))
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                    Image(systemName: contextBarExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption2)
+                }
+                .foregroundStyle(.secondary)
             }
+            .buttonStyle(.plain)
 
-            // Add file button
-            AddFileButton {
-                showingFilePicker = true
-            }
-            .fileImporter(
-                isPresented: $showingFilePicker,
-                allowedContentTypes: [.item],
-                allowsMultipleSelection: true
-            ) { result in
-                if case .success(let urls) = result {
-                    for url in urls {
-                        if !appState.attachedFiles.contains(url) {
-                            appState.attachedFiles.append(url)
+            // Expanded content
+            if contextBarExpanded {
+                HStack(spacing: 6) {
+                    // Context chips
+                    ContextChip(label: "Docs", isOn: $appState.includeDocs, color: .blue)
+                        .help("Include README, STYLE, and other docs")
+                    ContextChip(label: "Files", isOn: $appState.includeDiffFiles, color: .teal)
+                        .help("Include files touched by this branch")
+                    ContextChip(label: "Diff", isOn: $appState.includeDiff, color: .green)
+                        .help("Include raw diff output")
+                    ContextChip(label: "Clipboard", isOn: $appState.includePaste, color: .purple)
+                        .help("Include clipboard content")
+                    if appState.config?.hasSummaries == true {
+                        ContextChip(label: "Summaries", isOn: $appState.includeSummaries, color: .orange)
+                            .help("Include pre-generated codebase summaries")
+                    }
+                }
+
+                // Attached files row (if any)
+                if !appState.attachedFiles.isEmpty || true {  // Always show add button
+                    HStack(spacing: 6) {
+                        ForEach(appState.attachedFiles, id: \.self) { file in
+                            FileChip(
+                                name: file.lastPathComponent,
+                                icon: iconForFile(file)
+                            ) {
+                                appState.attachedFiles.removeAll { $0 == file }
+                            }
+                        }
+
+                        // Add file button
+                        AddFileButton {
+                            showingFilePicker = true
+                        }
+                        .fileImporter(
+                            isPresented: $showingFilePicker,
+                            allowedContentTypes: [.item],
+                            allowsMultipleSelection: true
+                        ) { result in
+                            if case .success(let urls) = result {
+                                for url in urls {
+                                    if !appState.attachedFiles.contains(url) {
+                                        appState.attachedFiles.append(url)
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1052,6 +1078,26 @@ struct PromptLauncher: View {
                 await appState.estimateTokens()
                 if isPreviewExpanded { await appState.refreshContextPreview() }
             }
+        }
+    }
+
+    // MARK: - Embedded Terminal Toggle
+
+    private var embeddedTerminalToggle: some View {
+        HStack(spacing: 8) {
+            Toggle(isOn: $useEmbeddedTerminal) {
+                HStack(spacing: 6) {
+                    Image(systemName: "terminal.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("Show output in app")
+                        .font(.caption)
+                }
+            }
+            .toggleStyle(.checkbox)
+            .help("When enabled, task output appears in the results panel instead of opening an external terminal")
+
+            Spacer()
         }
     }
 
@@ -1201,9 +1247,18 @@ struct PromptLauncher: View {
     }
 
     private func launchCommand(repo: URL, workPath: URL) {
-        let terminal = appState.config?.terminalApp ?? .warp
         let command = appState.buildCommand(pipeline: selectedPipeline)
 
+        // Use embedded terminal for auto mode when enabled
+        if useEmbeddedTerminal && appState.runMode == .auto {
+            appState.taskRunner.startTask(command: command, workingDirectory: workPath) {
+                // Task completed - could show notification or update UI
+            }
+            return
+        }
+
+        // Fall back to external terminal
+        let terminal = appState.config?.terminalApp ?? .warp
         do {
             try terminalLauncher.launchTerminal(terminal, at: workPath, command: command)
         } catch {

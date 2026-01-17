@@ -22,11 +22,21 @@
 
 10. **Onboarding flow scope**: What should a first-time user walkthrough cover? Current candidates: (1) What Maestro does, (2) How workspaces isolate work, (3) Running your first task, (4) Where to see results. Should this be skippable?
 
-11. **Mode picker explanation**: "Auto" vs "Interactive" is meaningless to new users. Options: (a) Add tooltips, (b) Add inline description, (c) Rename to "Run to completion" vs "Chat mode"?
+11. **Mode picker explanation**: "Auto" vs "Interactive" is meaningless to new users. Options: (a) Add tooltips, (b) Add inline description, (c) Rename to "Run to completion" vs "Chat mode", (d) Hide mode picker entirely—default to auto, let task frontmatter control.
 
 12. **Context chips progressive disclosure**: Five chips (Docs, Files, Diff, Clipboard, Summaries) visible by default is overwhelming. Should these collapse to "Context: 14.2k" and expand on click?
 
 13. **Whimsical worktree names**: NameGenerator produces names like "floral-tiger" which confuse new users. Keep for power users? Or use task-based names like "implement-auth"?
+
+14. **Demo mode**: Should Maestro include a bundled demo project so users can experience the full workflow before opening their own repo? This would demonstrate value before commitment.
+
+15. **Slash commands**: Should the prompt input support `/design`, `/review` etc. as an alternative to the task dropdown? This aligns with Notion-style discoverable commands.
+
+16. **@ mentions for context**: Should users be able to type `@src/auth.ts` in the prompt to add specific files to context? This is the Cursor pattern for surgical context override.
+
+17. **Work-state grouping**: Should the sidebar organize workspaces by work state (In Progress / Ready / Blocked) rather than flat list? This surfaces what needs attention.
+
+18. **Permission dialog identity**: The screen recording permission shows "MaestroU0.2026.01.14.08.16.sta-9kc_042" which looks like malware. Can we control the bundle identifier shown in system dialogs?
 
 ## Not Pursuing
 

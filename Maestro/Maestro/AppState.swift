@@ -56,6 +56,9 @@ final class AppState {
     private var sessionTaskMap: [String: String] = [:]  // session ID → task name
     private var sessionStartMap: [String: Date] = [:]  // session ID → start time
 
+    // Embedded terminal state
+    let taskRunner = TaskRunner()
+
     // Loading state
     var isLoading: Bool = false
     var errorMessage: String?

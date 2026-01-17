@@ -261,13 +261,42 @@ def _handle_merge(agent: AgentSpec, worktree_path: Path) -> int:
 
 
 def _handle_silent_merge(agent: AgentSpec, worktree_path: Path, branch: str) -> int:
-    """Merge directly to personal-main without creating a PR."""
-    main_repo = find_main_repo(worktree_path) or worktree_path.parent
+    """Merge directly to personal-main without creating a PR.
 
-    # Checkout personal-main and merge the iteration branch
+    Uses git fetch/push to merge without disrupting main repo's checkout state.
+    """
+    # Push the iteration branch first
+    result = subprocess.run(
+        ["git", "push", "-u", "origin", branch],
+        cwd=worktree_path,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"Failed to push branch: {result.stderr}")
+        return 1
+
+    # Fetch to ensure we have latest personal-main
+    subprocess.run(
+        ["git", "fetch", "origin", agent.personal_main],
+        cwd=worktree_path,
+        capture_output=True,
+    )
+
+    # Merge iteration branch into personal-main locally in the worktree
+    # First, create a local tracking branch for personal-main if needed
+    result = subprocess.run(
+        ["git", "branch", "--track", agent.personal_main, f"origin/{agent.personal_main}"],
+        cwd=worktree_path,
+        capture_output=True,
+    )
+    # Ignore errors - branch may already exist
+
+    # Do the merge using git merge-base and git commit-tree for a fast-forward or merge
+    # Simpler approach: checkout personal-main in the worktree, merge, push
     result = subprocess.run(
         ["git", "checkout", agent.personal_main],
-        cwd=main_repo,
+        cwd=worktree_path,
         capture_output=True,
         text=True,
     )
@@ -278,7 +307,7 @@ def _handle_silent_merge(agent: AgentSpec, worktree_path: Path, branch: str) -> 
     # Merge the iteration branch
     result = subprocess.run(
         ["git", "merge", "--no-ff", branch, "-m", f"Merge {branch}"],
-        cwd=main_repo,
+        cwd=worktree_path,
         capture_output=True,
         text=True,
     )
@@ -289,7 +318,7 @@ def _handle_silent_merge(agent: AgentSpec, worktree_path: Path, branch: str) -> 
     # Push personal-main
     result = subprocess.run(
         ["git", "push", "origin", agent.personal_main],
-        cwd=main_repo,
+        cwd=worktree_path,
         capture_output=True,
         text=True,
     )
@@ -297,8 +326,9 @@ def _handle_silent_merge(agent: AgentSpec, worktree_path: Path, branch: str) -> 
         print(f"Failed to push {agent.personal_main}: {result.stderr}")
         # Continue anyway, push can be done later
 
-    # Delete iteration branch
-    subprocess.run(["git", "branch", "-D", branch], cwd=main_repo, capture_output=True)
+    # Delete iteration branch (local and remote)
+    subprocess.run(["git", "branch", "-D", branch], cwd=worktree_path, capture_output=True)
+    subprocess.run(["git", "push", "origin", "--delete", branch], cwd=worktree_path, capture_output=True)
 
     print(f"Merged {branch} to {agent.personal_main}")
     return 0

@@ -23,6 +23,7 @@ final class AppState {
     // Prompt launcher state
     var selectedPrompt: PromptCard?
     var selectedVoices: [Voice] = []
+    var selectedModel: AgentModel?  // nil means use config default
     var promptArgs: String = ""
     var includeDocs: Bool = true
     var includeDiff: Bool = false
@@ -343,6 +344,15 @@ final class AppState {
             let voiceNames = selectedVoices.map { $0.name }.joined(separator: ",")
             parts.append("--voice")
             parts.append(voiceNames)
+        }
+
+        // Model (only include if different from config default)
+        if let model = selectedModel {
+            let configDefault = config?.agentModel
+            if model.cliValue != configDefault {
+                parts.append("-m")
+                parts.append(model.cliValue)
+            }
         }
 
         // Docs/diff/paste/summaries flags (only include if different from default)

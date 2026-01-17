@@ -107,6 +107,35 @@ Examples:
 - `Maestro/Maestro/Models/PromptCard.swift`
 - `Maestro/Maestro/Views/PromptLauncher.swift`
 
+## Model Selector: Add model picker to Options
+
+**Problem**: CLI's `-m` flag has no GUI equivalent. Power users can't select claude:opus vs codex:o3 from the UI, forcing them back to CLI for model selection.
+
+**Change**: Added model selector in the Options area:
+- Dropdown showing "Default" option (uses config's agent_model) plus common models
+- Common models: Claude, Claude Opus, Claude Sonnet, Codex, Codex O3, Codex O4-Mini, Gemini
+- Selected model shown with chevron indicator
+- When non-default model selected, `-m` flag added to command
+
+**Files**:
+- `Maestro/Maestro/Models/LoopflowConfig.swift` - Added `AgentModel` struct
+- `Maestro/Maestro/AppState.swift` - Added `selectedModel` state and updated `buildCommand()`
+- `Maestro/Maestro/Views/PromptLauncher.swift` - Added model selector UI
+
+## Command Preview: Show what will execute
+
+**Problem**: The buildCommand() function exists but the assembled command isn't shown to users. They can't learn the CLI by seeing what the GUI generates, debug when things go wrong, or verify the right options are set.
+
+**Change**: Added collapsible command preview in Options area:
+- "Command Preview" toggle with terminal icon
+- Shows the full `lf` command that will execute
+- Monospaced font, selectable text
+- Copy-to-clipboard button
+- Updates live as options change
+
+**Files**:
+- `Maestro/Maestro/Views/PromptLauncher.swift` - Added `commandPreview` view
+
 ---
 
 ## Remaining
@@ -118,5 +147,3 @@ Issues identified but not yet fixed:
 - [ ] Improve diff viewer with file navigation
 - [ ] Add confirmation when closing window with running task
 - [ ] Voice selector could show preview of voice content on hover
-- [ ] No model selector visible in UI (CLI's -m flag has no GUI equivalent)
-- [ ] No command preview showing what will execute

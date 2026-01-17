@@ -25,7 +25,7 @@ from loopflow.launcher import (
     build_claude_command,
     get_runner,
 )
-from loopflow.llm_http import generate_commit_message_from_diff, generate_pr_message
+from loopflow.llm_http import generate_commit_message, generate_commit_message_from_diff, generate_pr_message
 from loopflow.logging import get_log_dir, get_model_env
 from loopflow.lfd.db import delete_session, load_sessions, update_session_status
 from loopflow.lfd.models import SessionStatus

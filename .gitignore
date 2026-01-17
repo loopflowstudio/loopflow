@@ -11,3 +11,6 @@ Maestro/dist/
 
 # Claude Code (personal state)
 .claude/settings.local.json
+
+# Loopflow (generated cache)
+.lf/summaries/

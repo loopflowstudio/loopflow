@@ -28,6 +28,7 @@ final class AppState {
     var includeDiff: Bool = false
     var includeDiffFiles: Bool = true
     var includePaste: Bool = false
+    var includeSummaries: Bool = true
     var selectedContextFolders: Set<URL> = []
     var attachedFiles: [URL] = []  // Files dropped or added via UI
     var runMode: RunMode = .auto
@@ -78,6 +79,7 @@ final class AppState {
             includeDiff = config?.diff ?? false
             includeDiffFiles = config?.diffFiles ?? true
             includePaste = config?.paste ?? false
+            includeSummaries = config?.hasSummaries ?? false
 
             // Initialize context folders from config
             if let contextPaths = config?.context {
@@ -281,6 +283,7 @@ final class AppState {
             includeDiff: includeDiff,
             includeDiffFiles: includeDiffFiles,
             includePaste: includePaste,
+            includeSummaries: includeSummaries,
             in: repo
         )
     }
@@ -342,7 +345,7 @@ final class AppState {
             parts.append(voiceNames)
         }
 
-        // Docs/diff/paste flags (only include if different from default)
+        // Docs/diff/paste/summaries flags (only include if different from default)
         if !includeDocs {
             parts.append("--no-docs")
         }
@@ -354,6 +357,9 @@ final class AppState {
         }
         if includePaste {
             parts.append("--paste")
+        }
+        if !includeSummaries {
+            parts.append("--no-summaries")
         }
 
         return parts.joined(separator: " ")

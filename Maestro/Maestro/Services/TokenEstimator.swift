@@ -11,6 +11,7 @@ struct TokenEstimator {
         includeDiff: Bool,
         includeDiffFiles: Bool,
         includePaste: Bool,
+        includeSummaries: Bool,
         in repoURL: URL
     ) async -> Int {
         var cmdArgs = ["lf"]
@@ -43,6 +44,9 @@ struct TokenEstimator {
         }
         if includePaste {
             cmdArgs.append("--paste")
+        }
+        if !includeSummaries {
+            cmdArgs.append("--no-summaries")
         }
 
         cmdArgs.append("-c")

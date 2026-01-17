@@ -1,6 +1,8 @@
 """Context gathering for LLM sessions."""
 
+import os
 import subprocess
+import sys
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
@@ -9,6 +11,7 @@ from typing import Optional
 from loopflow.design import gather_design_docs
 from loopflow.files import gather_docs, gather_files, format_files, format_image_references
 from loopflow.frontmatter import TaskFile, parse_task_file
+from loopflow.summarize import is_stale, load_summary
 from loopflow.voices import Voice, load_voice
 
 
@@ -30,6 +33,7 @@ class PromptComponents:
     loopflow_doc: str | None = None  # Bundled system documentation
     voices: list[Voice] | None = None
     image_files: list[Path] | None = None  # Images for visual context
+    summaries: list[tuple[Path, str]] | None = None  # Pre-generated summaries
 
 
 def find_worktree_root(start: Optional[Path] = None) -> Path | None:
@@ -254,6 +258,63 @@ def _load_loopflow_doc() -> str:
     return resources.files("loopflow").joinpath("LOOPFLOW.md").read_text()
 
 
+def _trigger_background_refresh(repo_root: Path) -> None:
+    """Spawn background process to refresh stale summaries.
+
+    Uses a lock file to prevent concurrent refresh attempts.
+    """
+    lock_file = repo_root / ".lf" / "summaries" / ".refresh.lock"
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Check if refresh already in progress
+    if lock_file.exists():
+        try:
+            pid = int(lock_file.read_text().strip())
+            # Check if process still running
+            os.kill(pid, 0)
+            return  # Refresh already in progress
+        except (ValueError, OSError, ProcessLookupError):
+            # Stale lock or process dead, remove it
+            lock_file.unlink(missing_ok=True)
+
+    # Fork and write lock
+    process = subprocess.Popen(
+        [sys.executable, "-m", "loopflow.lfops", "summarize", "--all"],
+        cwd=repo_root,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    lock_file.write_text(str(process.pid))
+
+
+def gather_summaries(repo_root: Path, config) -> list[tuple[Path, str]]:
+    """Load all configured summaries for context inclusion.
+
+    Returns cached summaries immediately. If any are stale or missing,
+    triggers background refresh for next run.
+    """
+    if not config or not config.summaries:
+        return []
+
+    results = []
+    needs_refresh = False
+
+    for summary_config in config.summaries:
+        summary = load_summary(Path(summary_config.path), repo_root)
+        if summary:
+            results.append((Path(summary_config.path), summary.content))
+            if is_stale(summary, repo_root):
+                needs_refresh = True
+        else:
+            needs_refresh = True
+
+    if needs_refresh:
+        _trigger_background_refresh(repo_root)
+
+    return results
+
+
 def gather_prompt_components(
     repo_root: Path,
     task: Optional[str] = None,
@@ -268,6 +329,8 @@ def gather_prompt_components(
     voices: Optional[list[str]] = None,
     include_diff: bool = False,
     include_diff_files: bool = True,
+    include_summaries: bool = True,
+    config=None,
 ) -> PromptComponents:
     """Gather all prompt components without assembling them."""
     docs = gather_docs(repo_root, repo_root, exclude)
@@ -327,6 +390,9 @@ def gather_prompt_components(
     # Load voices if specified
     loaded_voices = [load_voice(name, repo_root) for name in voices] if voices else None
 
+    # Load configured summaries
+    summaries = gather_summaries(repo_root, config) if include_summaries else None
+
     return PromptComponents(
         run_mode=run_mode,
         docs=docs,
@@ -338,6 +404,7 @@ def gather_prompt_components(
         loopflow_doc=loopflow_doc,
         voices=loaded_voices,
         image_files=gather_result.image_files or None,
+        summaries=summaries,
     )
 
 
@@ -381,6 +448,16 @@ def format_prompt(components: PromptComponents) -> str:
             "Repository documentation. Follow STYLE carefully. "
             "May include design artifacts under .design/.\n\n"
             f"<lf:docs>\n{docs_body}\n</lf:docs>"
+        )
+
+    if components.summaries:
+        summary_parts = []
+        for summary_path, content in components.summaries:
+            summary_parts.append(f"<lf:summary path=\"{summary_path}\">\n{content}\n</lf:summary>")
+        summaries_body = "\n\n".join(summary_parts)
+        parts.append(
+            "Pre-generated codebase summaries.\n\n"
+            f"<lf:summaries>\n{summaries_body}\n</lf:summaries>"
         )
 
     if components.diff:

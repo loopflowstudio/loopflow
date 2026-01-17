@@ -189,13 +189,21 @@ struct PromptLauncher: View {
                                 Button {
                                     selectTask(prompt)
                                 } label: {
-                                    HStack {
-                                        Text(prompt.displayName)
-                                            .fontWeight(.medium)
-                                        Spacer()
-                                        Text(prompt.defaultMode == .auto ? "auto" : "interactive")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack {
+                                            Text(prompt.displayName)
+                                                .fontWeight(.medium)
+                                            Spacer()
+                                            Text(prompt.defaultMode == .auto ? "auto" : "interactive")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        if let description = prompt.shortDescription {
+                                            Text(description)
+                                                .font(.caption2)
+                                                .foregroundStyle(.tertiary)
+                                                .lineLimit(1)
+                                        }
                                     }
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 6)
@@ -378,11 +386,18 @@ struct PromptLauncher: View {
                 .padding(.bottom, 8)
 
             if appState.voices.isEmpty {
-                Text("No voices in .lf/voices/")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 12)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("No voices configured")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("Add .md files to .lf/voices/ to create personas that shape how the agent responds.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
+                .frame(maxWidth: 220)
             } else {
                 ForEach(appState.voices) { voice in
                     let isSelected = appState.selectedVoices.contains(voice)
@@ -585,13 +600,19 @@ struct PromptLauncher: View {
             }
             .pickerStyle(.segmented)
             .frame(width: 160)
+            .help("Auto: runs to completion without input. Interactive: opens a chat session you can guide.")
 
             Spacer()
 
             // Token count - always visible
-            Text(formatTokenCount(appState.estimatedTokens))
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                .foregroundStyle(.secondary)
+            HStack(spacing: 4) {
+                Image(systemName: "doc.text")
+                    .font(.caption2)
+                Text(formatTokenCount(appState.estimatedTokens))
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+            }
+            .foregroundStyle(.secondary)
+            .help("Estimated context size in tokens. Includes docs, files, and other context you've enabled.")
 
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {

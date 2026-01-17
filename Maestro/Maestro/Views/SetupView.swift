@@ -83,8 +83,20 @@ struct SetupView: View {
                     .padding(.horizontal)
             }
 
-            // Action button
-            actionButton
+            // Action buttons
+            VStack(spacing: 12) {
+                actionButton
+
+                // Skip option for manual installation
+                if installStep != .complete && installStep != .checking {
+                    Button("Skip, I'll install manually") {
+                        isComplete = true
+                    }
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
         }
         .padding(40)
         .frame(width: 500, height: 400)

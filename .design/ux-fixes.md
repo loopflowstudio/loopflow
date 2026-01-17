@@ -57,6 +57,56 @@ Examples:
 
 **Files**: `Maestro/Maestro/Views/SetupView.swift`
 
+## Mode Toggle: Add explanatory tooltip
+
+**Problem**: "Auto" vs "Interactive" modes have no visible explanation; users must guess what these mean.
+
+**Change**: Added tooltip on the mode segmented picker explaining:
+- Auto: runs to completion without input
+- Interactive: opens a chat session you can guide
+
+**Files**: `Maestro/Maestro/Views/PromptLauncher.swift`
+
+## Token Count: Add icon and tooltip
+
+**Problem**: Token count "14.2k" shown without label—users won't know this is estimated context tokens.
+
+**Change**: Added:
+- Document icon prefix to provide visual context
+- Tooltip explaining: "Estimated context size in tokens. Includes docs, files, and other context you've enabled."
+
+**Files**: `Maestro/Maestro/Views/PromptLauncher.swift`
+
+## Voices: Improve empty state message
+
+**Problem**: Empty voices message "No voices in .lf/voices/" assumes knowledge of file system structure.
+
+**Change**: Redesigned empty state with:
+- Clearer heading: "No voices configured"
+- Explanatory text: "Add .md files to .lf/voices/ to create personas that shape how the agent responds."
+
+**Files**: `Maestro/Maestro/Views/PromptLauncher.swift`
+
+## Setup: Add skip option
+
+**Problem**: Setup flow not skippable—users can't dismiss setup if they want to manually install dependencies.
+
+**Change**: Added "Skip, I'll install manually" link below the main action button that allows users to proceed without automatic installation.
+
+**Files**: `Maestro/Maestro/Views/SetupView.swift`
+
+## Task Dropdown: Add descriptions
+
+**Problem**: Task selector dropdown shows names but no descriptions—users can't make informed choices about what each task does.
+
+**Change**: Added:
+- `shortDescription` computed property on PromptCard that extracts the first content line (after frontmatter and headers)
+- Description shown below task name in dropdown, truncated to 60 chars
+
+**Files**:
+- `Maestro/Maestro/Models/PromptCard.swift`
+- `Maestro/Maestro/Views/PromptLauncher.swift`
+
 ---
 
 ## Remaining
@@ -65,7 +115,8 @@ Issues identified but not yet fixed:
 
 - [ ] Add keyboard shortcut hints in context menus
 - [ ] Show loading state when creating worktrees
-- [ ] Add tooltip explaining token count meaning
 - [ ] Improve diff viewer with file navigation
 - [ ] Add confirmation when closing window with running task
 - [ ] Voice selector could show preview of voice content on hover
+- [ ] No model selector visible in UI (CLI's -m flag has no GUI equivalent)
+- [ ] No command preview showing what will execute

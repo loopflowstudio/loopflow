@@ -4,14 +4,15 @@
 
 Note: Screenshots could not be interactively captured in auto mode. Screenshot capture is available via:
 - Debug menu: "Capture for Review"
-- Keyboard shortcut: Cmd+Shift+S
+- Keyboard shortcut: Cmd+4
 - Saves to `.design/screenshots/` with timestamp
 
 Key states to capture manually:
 - `.design/screenshots/welcome.png` - Welcome window with recent repos
-- `.design/screenshots/setup.png` - First-run dependency installation
-- `.design/screenshots/empty-repo.png` - Repo with no worktrees
+- `.design/screenshots/setup.png` - First-run dependency installation with progress stepper
+- `.design/screenshots/empty-repo.png` - Repo with no worktrees (shows improved empty state)
 - `.design/screenshots/prompt-launcher.png` - Main prompt input interface
+- `.design/screenshots/task-dropdown.png` - Task selector with descriptions visible
 - `.design/screenshots/worktree-list.png` - Sidebar with multiple worktrees
 - `.design/screenshots/running-task.png` - Output panel during task execution
 - `.design/screenshots/context-options.png` - Expanded context bar with chips
@@ -20,10 +21,10 @@ Key states to capture manually:
 
 ### Typography and Hierarchy
 
-- [ ] **Task selector label too subtle**: "Task" label at `.font(.caption).foregroundStyle(.secondary)` is easy to miss; new users may not understand this is a dropdown (PromptLauncher.swift:102-104)
-- [ ] **"None" placeholder ambiguous**: Task selector shows "None" when empty—unclear if this means "no task selected" or "no tasks available" (PromptLauncher.swift:109)
-- [ ] **Mode toggle lacks explanation**: "Auto" vs "Interactive" modes have no visible explanation; users must guess what these mean (PromptLauncher.swift:577-582)
-- [ ] **Token count cryptic**: "14.2k" shown without label—users won't know this is estimated context tokens (PromptLauncher.swift:587-589)
+- [x] **Task selector label too subtle**: Fixed - task selector is now a typeahead field with clearer "Select task..." placeholder (PromptLauncher.swift:129)
+- [x] **"None" placeholder ambiguous**: Fixed - changed to "Select task..." (PromptLauncher.swift:129)
+- [x] **Mode toggle lacks explanation**: Fixed - tooltip added explaining Auto vs Interactive (PromptLauncher.swift:577-582)
+- [x] **Token count cryptic**: Fixed - document icon and tooltip added (PromptLauncher.swift:587-600)
 
 ### Spacing and Alignment
 
@@ -39,21 +40,21 @@ Key states to capture manually:
 
 ### Unclear Affordances
 
-- [ ] **Main input looks like display, not input**: The TextEditor has minimal visual chrome—no border until focused (PromptLauncher.swift:522-530)
+- [ ] **Main input looks like display, not input**: The TextEditor has minimal visual chrome—no border until focused, though placeholder examples now help (PromptLauncher.swift:478-491)
 - [ ] **Hover actions hidden by default**: Worktree row actions (diff, PR, terminal, IDE) only appear on hover—users may never discover them (WorktreeSidebar.swift:485-489)
 - [ ] **Plus button for files tiny**: 10pt plus icon with 6pt padding is a small touch target (ContextChip.swift:64-71)
-- [ ] **Dropdown appears below, obscured**: Task selector dropdown appears at fixed y-offset and may be clipped by window bounds (PromptLauncher.swift:248)
+- [ ] **Task dropdown z-index issue**: Dropdown appears with `zIndex(100)` but may still be clipped at window edges (PromptLauncher.swift:202)
 
 ### macOS Convention Violations
 
-- [ ] **No standard menu bar File > Open**: Opening repos requires clicking "Open Folder" button in welcome window
+- [ ] **No standard menu bar File > Open**: Opening repos requires clicking "Open Folder" button in welcome window (WelcomeWindow.swift:70-76)
 - [ ] **Window title duplicates toolbar**: Repo name appears in both navigation title and toolbar item (ContentView.swift:66, 78-82)
-- [ ] **Setup flow not skippable**: Users can't dismiss setup if they want to manually install dependencies
+- [x] **Setup flow not skippable**: Fixed - "Skip, I'll install manually" link added (SetupView.swift)
 
 ### Empty States
 
-- [ ] **Empty worktree message unhelpful**: "No worktrees" / "Click + to create one" doesn't explain what a worktree is (WorktreeSidebar.swift:167-176)
-- [ ] **Empty voices message cryptic**: "No voices in .lf/voices/" assumes knowledge of file system structure (PromptLauncher.swift:381-385)
+- [x] **Empty worktree message unhelpful**: Fixed - redesigned with icon, heading, explanatory text, and "Create Worktree" button (WorktreeSidebar.swift:167-193)
+- [x] **Empty voices message cryptic**: Fixed - now shows "No voices configured" with explanation (PromptLauncher.swift:381-393)
 
 ## User Profile Findings
 
@@ -65,135 +66,207 @@ User sees WelcomeWindow with "Loopflow Maestro" title and subtitle "Manage workt
 *Reaction*: "This is something about git branches and AI? What's a worktree? What's a coding session?"
 
 **First action**:
-User clicks "Open Folder..." and selects a project directory. SetupView appears showing "First-time setup" with "Loopflow CLI" and "Worktrunk (wt)" dependencies.
+User clicks "Open Folder..." and selects a project directory. SetupView appears showing "First-time setup" with a 3-step progress indicator and "Loopflow CLI" / "Worktrunk (wt)" dependencies.
 
-*Reaction*: "What is Worktrunk? Why do I need to install things? I just wanted to try the app."
+*Improvement*: The progress stepper now shows where you are in setup. The "Skip, I'll install manually" option gives users an escape hatch if they want to configure things themselves.
+
+*Remaining friction*: "What is Worktrunk? Why do I need to install things? I just wanted to try the app."
 
 **First obstacle**:
-After setup completes, user sees ContentView with empty WorktreeSidebar showing "No worktrees" and PromptLauncher with a big empty text field asking "What do you want to build?"
+After setup completes, user sees ContentView with WorktreeSidebar. The empty state now shows:
+- Branch icon
+- "No worktrees yet" heading
+- "Worktrees let you run tasks on isolated branches while keeping your main work untouched."
+- "Create Worktree" button
 
-*Confusion points*:
-- "What's a worktree and why do I have none?"
-- "The Task dropdown shows various tasks like 'review', 'implement', 'design'—what do these do?"
-- "What is 'Auto' vs 'Interactive' mode?"
-- "What do Docs/Files/Diff/Clipboard toggles mean?"
+*Improvement*: The explanation of worktrees is better than before, but still assumes the user knows why isolated branches matter.
+
+The PromptLauncher shows:
+- "Select task..." placeholder (clearer than "None")
+- Placeholder with examples: "Describe what you want to build..." and `e.g. "add user authentication" or "fix the login bug"`
+- Task dropdown now shows short descriptions extracted from task files
+
+*Improvement*: The placeholder examples and task descriptions help users understand the expected input format.
 
 **Recovery**:
-User might type something in the input and press Run (Cmd+Enter). A worktree gets auto-created with a random name. Terminal opens and something happens. User has no idea what's going on.
+User types something in the input and presses Run (Cmd+Enter). A worktree is auto-created with a name like "aurora-melody" (from NameGenerator). Terminal opens.
 
-**Verdict**: Would not come back. Too much unexplained jargon. No onboarding, no tooltips on key concepts, no "getting started" guide visible in the app.
+*Remaining friction*: The random poetic names (magical + musical words) are charming but confusing for new users who don't understand they're branch names.
 
-#### Pain Points
-- [ ] No explanation of what "worktrees" are or why they matter
-- [ ] No description of what each task (review, implement, design) does
-- [ ] No explanation of Auto vs Interactive modes
-- [ ] No guidance on what to type in the main input field
-- [ ] Random worktree names (NameGenerator.generate()) are confusing
+**Verdict**: Would maybe try again, but still confused. Improvements help with immediate friction, but core concepts (worktrees, tasks, pipelines) remain unexplained. Missing:
+- What is a worktree and why do I need one?
+- What do these tasks actually do?
+- Why did a terminal open instead of showing results in the app?
+
+#### Pain Points (Updated)
+- [ ] No explanation of core workflow: prompt -> worktree -> terminal
+- [x] Task descriptions now visible in dropdown
+- [x] Mode toggle now has tooltip explanation
+- [ ] Random worktree names (e.g., "aurora-melody") are confusing for beginners
+- [ ] No onboarding walkthrough or first-run tutorial
+- [ ] Output happens in external terminal, not in-app
 
 ---
 
 ### Claude Code Power User
 
 **First impression (0-5 seconds)**:
-User sees a clean native macOS app with a familiar sidebar-detail pattern. Recognizes the Task selector with prompt names. Notices token count display.
+User sees a clean native macOS app with a familiar sidebar-detail pattern. Recognizes the Task selector with prompt names. Notices token count display with document icon.
 
-*Reaction*: "Okay, this is a GUI for `lf` commands. Task selector = prompt files. Token count = context estimation. Makes sense."
+*Reaction*: "Okay, this is a GUI for `lf` commands. Task selector = prompt files. Token count = context estimation. The doc icon and tooltip clarify what that number means."
 
 **First action**:
-User clicks Task dropdown, sees familiar task names (implement, review, design). Selects "implement", types args in the main input, and expects to see the full command being built.
+User clicks Task dropdown, sees familiar task names (implement, review, design). The dropdown now shows:
+- Task name with mode badge (auto/interactive)
+- Short description extracted from task file content
 
-*Issue*: Can't see the actual `lf` command that will be executed. No preview of what will run.
+*Improvement*: Can now see what each task does before selecting it. This matches expectations from CLI where you'd read the task file.
+
+User selects "implement", types args in the main input. Hovers over mode picker and sees tooltip: "Auto: runs to completion without input. Interactive: opens a chat session you can guide."
 
 **First obstacle**:
 User wants to run with specific flags (`-m codex`, `--voice architect`) but finds:
-- Voice selector is hidden under "Options" toggle
-- Model selection is not visible in the UI at all
-- No way to pass custom flags
+- Voice selector is accessible under "Options" toggle
+- Model selection is still not visible in the UI
+- No way to pass custom flags or see the command being built
 
-*Frustration*: "Where's the model selector? I want to use `-m codex:o3`. The CLI has `--parallel` for model racing—where's that?"
+*Frustration*: "I can see voices now, but where's the model selector? I want to use `-m codex:o3`. And I still can't see what command will actually run."
 
 **Recovery**:
-User clicks "Options" to reveal Voice selector and Context bar. Finds voices but no model picker. Realizes some features from CLI aren't exposed in GUI.
+User clicks "Options" to reveal Voice selector and Context bar. Finds voices with improved empty state message. Still no model picker.
 
-**Verdict**: Might use occasionally for visual worktree management, but will fall back to CLI for real work. GUI is missing CLI parity on:
-- Model selection
+Power user might open terminal and use `lf` directly for full control. The GUI is useful for:
+- Visual worktree management
+- Quick launches with common settings
+- Tracking multiple running sessions via OutputPanel
+
+**Verdict**: More useful than before for quick operations. Still falls back to CLI for:
+- Model selection (critical gap)
 - Custom flags
+- Command preview/debugging
 - Parallel model execution
-- Pipeline editing (unless beta flag enabled)
 
-#### Pain Points
-- [ ] No model selector visible (buried or missing)
-- [ ] No way to pass custom CLI flags
-- [ ] No command preview showing what will execute
+The buildCommand() function in AppState.swift (lines 291-366) shows the command is being built—just not displayed to the user.
+
+#### Pain Points (Updated)
+- [ ] **No model selector visible** - still missing, critical for power users
+- [ ] **No command preview** - buildCommand() exists but isn't shown before execution
+- [x] Task descriptions now visible in dropdown
+- [x] Token count has icon and tooltip
+- [x] Mode toggle has tooltip explanation
 - [ ] No `--parallel` model racing support visible
-- [ ] Can't edit pipeline definitions without beta flag
-- [ ] No session history view (mentioned in docs but not obvious in UI)
+- [ ] Pipeline editor hidden behind beta flag
 
 ---
 
 ### Designer/PM
 
 **First impression (0-5 seconds)**:
-User sees WelcomeWindow. Clean design, subtle colors. "Manage worktrees" is confusing—sounds like forestry. Clicks through to SetupView.
+User sees WelcomeWindow. Clean design, subtle colors. "Manage worktrees" is confusing—sounds like forestry. Clicks through.
 
 *Reaction*: "Install Loopflow? Worktrunk? What are these? I just wanted to try AI coding help."
 
-**First action**:
-After setup, user sees the main interface. Types a question like "help me write a product spec for user authentication" in the main input.
+*Improvement*: Setup now has skip option and clearer error recovery messages. But the dependency names are still jargon.
 
-*Issue*: Task selector shows technical names (implement, review, polish). No "write docs" or "help me plan" visible.
+**First action**:
+After setup, user sees the main interface. The placeholder now says "Describe what you want to build..." with examples like "add user authentication" or "fix the login bug".
+
+*Improvement*: The examples are developer-focused but give some idea of the input format.
+
+User types "help me write a product spec for user authentication" and looks at Task dropdown. Sees tasks like:
+- "design" - "Produce a short implementation spec that another LLM session can use..."
+- "implement" - "Turn the design doc into working code."
+- "review" - "Review the diff on this branch..."
+
+*Partial improvement*: Descriptions help, but they're still developer-focused. No clear "write docs" or "brainstorm" option.
 
 **First obstacle**:
-User types their request and hits Run. A terminal window opens with scrolling text. It's running `claude` commands. User has no idea what's happening or how to interact.
+User hits Run. A terminal window opens with scrolling text. It's running `claude` commands.
 
 *Confusion points*:
 - "Why did a black terminal window open?"
 - "What is all this scrolling text?"
 - "How do I talk to it? Where do I type?"
-- "It says 'Auto' mode—what does that mean?"
 
 **Recovery**:
-User might notice "Interactive" mode toggle and try that. But still don't understand what a "worktree" is or why one was created.
+User might try "Interactive" mode (tooltip now explains it). The terminal becomes interactive, but it's still a terminal—not a chat UI the PM would expect from ChatGPT or Notion AI.
 
-**Verdict**: Would not come back. The app assumes deep familiarity with:
-- Git worktrees
-- Command-line interfaces
-- Claude Code / LLM coding assistants
+**Verdict**: Would not come back. The app assumes familiarity with:
+- Git and branches (worktrees are git concepts)
+- Command-line interfaces (output is in terminal)
+- Developer workflows (tasks are code-focused)
 
-No explanation of these concepts. No friendly onboarding for non-engineers.
+The core interaction model—launching external terminal processes—is fundamentally intimidating for non-technical users.
 
-#### Pain Points
+#### Pain Points (Updated)
 - [ ] Jargon-heavy: "worktrees", "prompts", "pipelines", "voices"
-- [ ] No task descriptions—what does "polish" do vs "review"?
-- [ ] Terminal output frightening for non-technical users
+- [x] Task descriptions now visible, but still developer-focused
+- [ ] Terminal output is frightening for non-technical users
 - [ ] No visual feedback in the app itself—everything happens in external terminal
 - [ ] No templates or examples for non-code tasks (docs, specs, planning)
+- [ ] Core value proposition unclear for non-developers
 
 ---
 
 ## Top 5 Priority Issues
 
-1. **No onboarding or explanation of core concepts**
-   - Worktrees, tasks, modes, and context options are unexplained
-   - New users are lost immediately
-   - Fix: Add first-run tutorial or tooltips on hover
+### 1. **No model selector in UI** (Power User Blocker)
+CLI's `-m` flag has no GUI equivalent. Power users can't select claude:opus vs codex:o3 from the UI. This forces them back to the CLI for any serious work.
+- **Impact**: High - power users are the primary audience
+- **Fix**: Add model picker to the options bar or as a dropdown next to the Run button
 
-2. **Missing model selector in UI**
-   - CLI's `-m` flag has no GUI equivalent
-   - Power users can't select claude:opus vs codex:o3
-   - Fix: Add model picker to the options bar
+### 2. **No command preview before execution** (Trust & Learning)
+The buildCommand() function exists (AppState.swift:291-366) but the assembled command isn't shown to users. They can't:
+- Learn the CLI by seeing what the GUI generates
+- Debug when things go wrong
+- Verify the right options are set
+- **Impact**: High - prevents learning and debugging
+- **Fix**: Show a collapsible "Command preview" row showing the `lf` command
 
-3. **Task selector doesn't explain what tasks do**
-   - Dropdown shows names but no descriptions
-   - Users can't make informed choices
-   - Fix: Add short descriptions in dropdown, or a "?" icon linking to docs
+### 3. **Output happens in external terminal** (Friction for All Users)
+Every run launches Warp/Terminal externally. This:
+- Breaks the user's focus
+- Requires terminal familiarity
+- Loses the spatial connection between input and output
+- **Impact**: High - affects all personas
+- **Fix**: Consider inline output option (OutputPanel exists but only shows daemon events, not the actual task output)
 
-4. **No command preview before execution**
-   - Users can't see what will actually run
-   - Prevents learning and debugging
-   - Fix: Show the `lf` command that will execute
+### 4. **No onboarding or workflow explanation** (New User Blocker)
+Users land in the main UI without understanding:
+- What worktrees are and why they matter
+- What each task does (descriptions help but aren't enough)
+- The prompt -> worktree -> terminal workflow
+- **Impact**: Medium-High - new users bounce immediately
+- **Fix**: First-run walkthrough or contextual tooltips on key elements
 
-5. **Empty states are unhelpful**
-   - "No worktrees" doesn't explain what to do
-   - "No voices in .lf/voices/" assumes file system knowledge
-   - Fix: Add actionable guidance and links to documentation
+### 5. **Random worktree names are confusing** (New User Confusion)
+NameGenerator creates poetic names like "aurora-melody" which are:
+- Charming for power users who get the convention
+- Confusing for new users who don't realize these are branch names
+- **Impact**: Medium - adds cognitive load during first run
+- **Fix**: Ask for a worktree name or derive from prompt ("auth-feature" from "add user authentication")
+
+---
+
+## Issues Fixed Since Last Research
+
+These issues from previous research have been addressed:
+
+1. **Task selector placeholder "None" was ambiguous** -> Now "Select task..."
+2. **Mode toggle had no explanation** -> Tooltip added
+3. **Token count was cryptic** -> Icon and tooltip added
+4. **Empty worktree state was unhelpful** -> Redesigned with explanation
+5. **Empty voices message assumed file system knowledge** -> Better explanation
+6. **Setup flow was not skippable** -> "Skip, I'll install manually" added
+7. **Task dropdown showed no descriptions** -> Now extracts first content line
+8. **Error messages had no recovery guidance** -> Terminal commands suggested
+
+## Remaining Visual/Interaction Issues
+
+- [ ] Hover actions on worktree rows are hidden until hover (discoverability)
+- [ ] Plus button for adding files is tiny (6pt padding)
+- [ ] Context bar doesn't scroll when many files attached
+- [ ] Stage badges may have insufficient contrast in light mode
+- [ ] Tertiary text (.foregroundStyle(.tertiary)) is too faint
+- [ ] Window title duplicates toolbar item
+- [ ] No File > Open in menu bar

@@ -5,9 +5,9 @@ title: Maestro
 
 # Maestro
 
-A native Mac app for running loopflow tasks. See your worktrees, pick a prompt, hit run.
+The podium: visual control, real-time feedback. See your agents at work.
 
-If you prefer a GUI to the terminal, or want to see your prompts and context before launching, Maestro is the visual layer on top of `lf`.
+Maestro is a native Mac app that wraps the CLI. Point-and-click prompt selection, live streaming output, worktree management in a sidebar. Start with the CLI to learn the system; add Maestro when you're managing multiple agents.
 
 ## Getting Started
 

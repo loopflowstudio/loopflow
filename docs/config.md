@@ -216,6 +216,35 @@ lfops summarize -a              # Regenerate all configured summaries
 
 Summaries are cached in `.lf/summaries/` and auto-refreshed when source files change on main.
 
+### work
+
+Work queue configuration for task management. Integrates with `lfwork` CLI.
+
+```yaml
+work:
+  backend: file              # "file" or "asana"
+  auto_rebase: true          # Rebase before starting work
+  auto_land: false           # Auto-land completed work
+```
+
+With Asana backend:
+
+```yaml
+work:
+  backend: asana
+  asana:
+    project_id: "1234567890"
+```
+
+Work items live in `.todo/` (file backend) or sync with Asana. Use `lfwork` to manage:
+
+```bash
+lfwork list                  # Show work items
+lfwork add "Fix bug"         # Add item
+lfwork approve <id>          # Approve for work
+lfwork next                  # Show next available item
+```
+
 ## Run Modes
 
 By default, tasks run in **auto mode**: non-interactive with streaming output. This is ideal for most coding tasks and background execution. All runs append logs under `~/.lf/logs/<worktree>/`.

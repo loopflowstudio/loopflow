@@ -8,6 +8,9 @@ voice: artist
 ---
 > **Screenshots**: If running standalone, capture with Cmd+Shift+S first.
 > In the `ux` pipeline, uses screenshots from the ux-research step.
+>
+> **Build from this branch**: Run `cd Maestro && ./dev run` to build and launch
+> Maestro from the current branch. Don't use the installed app—it won't have your changes.
 
 Compare Maestro against best-in-class tools and identify UX gaps.
 

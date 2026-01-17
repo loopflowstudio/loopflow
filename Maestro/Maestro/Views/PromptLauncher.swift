@@ -730,15 +730,24 @@ struct PromptLauncher: View {
     private var modeAndAdvancedRow: some View {
         VStack(spacing: 8) {
             HStack(spacing: 12) {
-                Picker("", selection: $appState.runMode) {
-                    Text("Auto").tag(RunMode.auto)
-                    Text("Interactive").tag(RunMode.interactive)
+                VStack(alignment: .leading, spacing: 2) {
+                    Picker("", selection: $appState.runMode) {
+                        Text("Auto").tag(RunMode.auto)
+                        Text("Interactive").tag(RunMode.interactive)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 160)
+
+                    // Inline description of current mode
+                    Text(appState.runMode == .auto
+                        ? "Runs to completion"
+                        : "Chat with the AI")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 160)
                 .help(appState.runMode == .auto
-                    ? "Auto: Runs to completion without interruption"
-                    : "Interactive: Chat with the AI, can interrupt and redirect")
+                    ? "Auto: Runs to completion without interruption. Best for most tasks."
+                    : "Interactive: Chat with the AI, can interrupt and redirect. Use for exploration.")
 
                 Spacer()
 
@@ -984,16 +993,16 @@ struct PromptLauncher: View {
                 HStack(spacing: 6) {
                     // Context chips
                     ContextChip(label: "Docs", isOn: $appState.includeDocs, color: .blue)
-                        .help("Include README, STYLE, and other docs")
+                        .help("AI sees: README, STYLE guide, and project docs. Helps it follow your conventions.")
                     ContextChip(label: "Files", isOn: $appState.includeDiffFiles, color: .teal)
-                        .help("Include files touched by this branch")
+                        .help("AI sees: Files you've changed on this branch. Helps it understand your work in progress.")
                     ContextChip(label: "Diff", isOn: $appState.includeDiff, color: .green)
-                        .help("Include raw diff output")
+                        .help("AI sees: Exact line-by-line changes. Useful for reviews and understanding what changed.")
                     ContextChip(label: "Clipboard", isOn: $appState.includePaste, color: .purple)
-                        .help("Include clipboard content")
+                        .help("AI sees: Whatever you copied. Paste code, errors, or docs for reference.")
                     if appState.config?.hasSummaries == true {
                         ContextChip(label: "Summaries", isOn: $appState.includeSummaries, color: .orange)
-                            .help("Include pre-generated codebase summaries")
+                            .help("AI sees: Architecture overview of your codebase. Pre-generated for faster responses.")
                     }
                 }
 
@@ -1103,7 +1112,7 @@ struct PromptLauncher: View {
 
     // MARK: - Command Preview
 
-    @State private var showCommandPreview = false
+    @AppStorage("showCommandPreview") private var showCommandPreview = false
 
     private var commandPreview: some View {
         VStack(alignment: .leading, spacing: 8) {

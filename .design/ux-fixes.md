@@ -60,13 +60,26 @@
 **Change**: Added "Ready to run" empty state with terminal icon and explanatory text "Results will appear here after you run a task."
 **Files**: `Maestro/Maestro/Views/ResultsPanel.swift`
 
+## Mode picker: Inline description
+**Problem**: "Auto" vs "Interactive" labels were meaningless to new users. Had to hover for tooltip to understand difference.
+**Change**: Added inline caption below the picker showing current mode's purpose: "Runs to completion" for Auto, "Chat with the AI" for Interactive. Improved tooltip to explain when to use each.
+**Files**: `Maestro/Maestro/Views/PromptLauncher.swift`
+
+## Command preview: Persistent expansion state
+**Problem**: Power users who want to see the command preview had to re-expand it every time they opened the app.
+**Change**: Changed `showCommandPreview` from `@State` to `@AppStorage` so the preference persists across sessions.
+**Files**: `Maestro/Maestro/Views/PromptLauncher.swift`
+
+## Context chips: Descriptive tooltips
+**Problem**: Context chip tooltips were terse ("Include README, STYLE, and other docs"). New users didn't understand what context meant or why it mattered.
+**Change**: Rewrote all tooltips to start with "AI sees:" and explain both what's included and why it helps. Example: "AI sees: README, STYLE guide, and project docs. Helps it follow your conventions."
+**Files**: `Maestro/Maestro/Views/PromptLauncher.swift`
+
 ## Remaining
 Issues identified but not yet fixed:
 
-- [ ] Results appear in external terminal, not in-app (high complexity - requires embedded PTY)
 - [ ] No onboarding flow for first-time users (needs new OnboardingView.swift)
 - [ ] Context chips all visible by default (needs progressive disclosure)
-- [ ] Command preview hidden by default (power users want transparency)
 - [ ] No slash commands for task selection (/design, /review)
 - [ ] No @ mentions for context (@file.ts)
 - [ ] No Cmd+K command palette

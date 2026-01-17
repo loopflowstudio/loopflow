@@ -13,14 +13,20 @@ from pathlib import Path
 
 import typer
 
-from loopflow.config import load_config
-from loopflow.context import find_worktree_root
+from loopflow.config import load_config, parse_model
+from loopflow.context import find_worktree_root, gather_task, gather_prompt_components, format_prompt
 from loopflow.design import clear_design_artifacts
 from loopflow.git import GitError, find_main_repo, get_current_branch, has_upstream, open_pr
 from loopflow.init_check import check_init_status
-from loopflow.launcher import check_claude_available, check_codex_available, check_gemini_available
+from loopflow.launcher import (
+    check_claude_available,
+    check_codex_available,
+    check_gemini_available,
+    build_claude_command,
+    get_runner,
+)
 from loopflow.llm_http import generate_commit_message, generate_commit_message_from_diff, generate_pr_message
-from loopflow.logging import get_log_dir
+from loopflow.logging import get_log_dir, get_model_env
 from loopflow.lfd.db import delete_session, load_sessions, update_session_status
 from loopflow.lfd.models import SessionStatus
 from loopflow.worktrees import get_path
@@ -1427,7 +1433,11 @@ def commit(
     push: bool = typer.Option(False, "-p", "--push", help="Push after committing"),
     add: bool = typer.Option(True, "-a/-A", "--add/--no-add", help="Stage all changes before committing"),
 ) -> None:
-    """Commit with automatic message."""
+    """Commit with automatic message via agent.
+
+    Runs the commit task which stages changes (if needed), generates a
+    commit message, and commits. Use -p to push after committing.
+    """
     repo_root = find_worktree_root()
     if not repo_root:
         typer.echo("Error: Not in a git repository", err=True)
@@ -1454,26 +1464,41 @@ def commit(
         typer.echo("Nothing staged to commit", err=True)
         raise typer.Exit(0)
 
-    typer.echo("Generating commit message...")
-    try:
-        message = generate_commit_message(repo_root)
-    except Exception as e:
-        typer.echo(f"Error generating commit message: {e}", err=True)
+    # Get the commit task prompt
+    task = gather_task(repo_root, "commit")
+    if not task:
+        typer.echo("Error: No commit task found", err=True)
         raise typer.Exit(1)
 
-    commit_msg = message.title
-    if message.body:
-        commit_msg += f"\n\n{message.body}"
+    # Build prompt with diff context
+    components = gather_prompt_components(
+        repo_root,
+        task="commit",
+        include_diff=True,
+        include_diff_files=False,
+        include_loopflow_doc=False,
+        include_summaries=False,
+    )
+    prompt = format_prompt(components)
 
-    result = subprocess.run(
-        ["git", "commit", "-m", commit_msg],
+    # Run the agent to generate message and commit
+    config = load_config(repo_root)
+    agent_model = config.agent_model if config else "claude:opus"
+    backend, model_variant = parse_model(agent_model)
+
+    runner = get_runner(backend)
+    typer.echo("Committing...")
+    result = runner.launch(
+        prompt,
+        auto=True,
+        stream=True,
+        skip_permissions=True,
         cwd=repo_root,
     )
-    if result.returncode != 0:
+
+    if result.exit_code != 0:
         typer.echo("Commit failed", err=True)
         raise typer.Exit(1)
-
-    typer.echo(f"Committed: {message.title}")
 
     if push:
         if has_upstream(repo_root):
@@ -1608,7 +1633,7 @@ def rebase(
 @app.command()
 def summarize(
     path: str = typer.Argument(".", help="Path to summarize (relative to repo root)"),
-    tokens: int = typer.Option(4000, "-t", "--tokens", help="Token budget"),
+    tokens: int = typer.Option(10000, "-t", "--tokens", help="Token budget"),
     model: str = typer.Option("gemini", "-m", "--model", help="Model to use"),
     force: bool = typer.Option(False, "-f", "--force", help="Regenerate even if cached"),
     all_configured: bool = typer.Option(False, "-a", "--all", help="Regenerate all configured summaries"),
@@ -1632,7 +1657,8 @@ def summarize(
         try:
             for summary_config in config.summaries:
                 summary_path = Path(summary_config.path)
-                existing = load_summary(summary_path, repo_root)
+                token_budget = summary_config.tokens or config.summary_tokens
+                existing = load_summary(summary_path, repo_root, token_budget)
 
                 if existing and not force and not is_stale(existing, repo_root):
                     typer.echo(f"  {summary_config.path}: up to date")
@@ -1643,7 +1669,7 @@ def summarize(
                     summary, _ = refresh_if_stale(
                         summary_path,
                         repo_root,
-                        summary_config.tokens,
+                        token_budget,
                         summary_config.model,
                         config.exclude if config else None,
                         force=force,
@@ -1656,7 +1682,7 @@ def summarize(
         return
 
     summary_path = Path(path)
-    existing = load_summary(summary_path, repo_root)
+    existing = load_summary(summary_path, repo_root, tokens)
 
     if existing and not force:
         if is_stale(existing, repo_root):
@@ -1684,7 +1710,9 @@ def summarize(
         typer.echo(f"Error generating summary: {e}", err=True)
         raise typer.Exit(1)
 
-    typer.echo(f"Summary saved to .lf/summaries/{summary_path}")
+    from loopflow.summarize import _path_to_filename
+    filename = _path_to_filename(summary_path, tokens)
+    typer.echo(f"Summary saved to .lf/summaries/{filename}")
     typer.echo(f"  Tokens: {tokens}")
     typer.echo(f"  Model: {model}")
     typer.echo(f"  Length: {len(summary.content)} chars")

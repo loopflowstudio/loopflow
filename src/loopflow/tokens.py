@@ -168,6 +168,7 @@ def analyze_prompt_tokens(
     repo_root: Optional[Path] = None,
     clipboard: Optional[str] = None,
     loopflow_doc: Optional[str] = None,
+    summaries: Optional[list[tuple[Path, str]]] = None,
 ) -> TokenTree:
     """Analyze token distribution in prompt components."""
     tree = TokenTree()
@@ -195,6 +196,11 @@ def analyze_prompt_tokens(
             except ValueError:
                 tree.add("files", file_path.name, tokens)
 
+    if summaries:
+        for summary_path, content in summaries:
+            tokens = count_tokens(content)
+            tree.add("summaries", str(summary_path), tokens)
+
     if task:
         name, content = task
         tokens = count_tokens(content)
@@ -217,4 +223,5 @@ def analyze_components(components) -> TokenTree:
         repo_root=components.repo_root,
         clipboard=components.clipboard,
         loopflow_doc=components.loopflow_doc,
+        summaries=components.summaries,
     )

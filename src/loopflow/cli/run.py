@@ -154,9 +154,77 @@ def _execute_task(
     return result_code
 
 
+def _launch_interactive_default(
+    repo_root: Path,
+    config,
+    context: list[str] | None = None,
+    model: str | None = None,
+    voice: str | None = None,
+    paste: bool | None = None,
+    docs: bool | None = None,
+    summaries: bool | None = None,
+) -> None:
+    """Launch interactive claude with docs context (no task)."""
+    agent_model = model or (config.agent_model if config else "claude:opus")
+    backend, model_variant = parse_model(agent_model)
+
+    try:
+        runner = get_runner(backend)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    if not runner.is_available():
+        typer.echo(f"Error: '{backend}' CLI not found", err=True)
+        raise typer.Exit(1)
+
+    skip_permissions = config.yolo if config else False
+    cli_voices = parse_voice_arg(voice)
+
+    # Resolve flags
+    include_paste = paste if paste is not None else (config.paste if config else False)
+    include_docs = docs if docs is not None else (config.docs if config else True)
+    include_summaries = summaries if summaries is not None else bool(config and config.summaries)
+
+    try:
+        components = gather_prompt_components(
+            repo_root,
+            task=None,
+            inline=None,
+            context=context,
+            exclude=list(config.exclude) if config and config.exclude else None,
+            paste=include_paste,
+            run_mode="interactive",
+            include_loopflow_doc=config.include_loopflow_doc if config else True,
+            voices=cli_voices or (config.voice if config else None),
+            include_diff=False,        # No diff without explicit task
+            include_diff_files=False,  # No diff files without task
+            include_summaries=include_summaries,
+            config=config,
+        )
+    except VoiceNotFoundError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    # Apply docs flag
+    if not include_docs:
+        components.docs = []
+
+    result_code = _execute_task(
+        "chat",  # Task name for session tracking
+        repo_root,
+        components,
+        is_interactive=True,
+        backend=backend,
+        model_variant=model_variant,
+        skip_permissions=skip_permissions,
+    )
+    raise typer.Exit(result_code)
+
+
 def run(
     ctx: typer.Context,
-    task: str = typer.Argument(help="Task name (e.g., 'review', 'implement')"),
+    task: Optional[str] = typer.Argument(None, help="Task name (e.g., 'review', 'implement')"),
     auto: bool = typer.Option(
         False, "-a", "-A", "--auto", help="Override to run in auto mode"
     ),
@@ -205,9 +273,20 @@ def run(
 ):
     """Run a task with an LLM model."""
     repo_root = find_worktree_root()
+
+    # Some features require a git repo
     if not repo_root:
-        typer.echo("Error: Not in a git repository", err=True)
-        raise typer.Exit(1)
+        if worktree:
+            typer.echo("Error: --worktree requires a git repository", err=True)
+            raise typer.Exit(1)
+        if parallel:
+            typer.echo("Error: --parallel requires a git repository", err=True)
+            raise typer.Exit(1)
+        if race:
+            typer.echo("Error: --race requires a git repository", err=True)
+            raise typer.Exit(1)
+        # Use cwd as fallback for non-git usage
+        repo_root = Path.cwd()
 
     # Handle race execution
     if race:
@@ -263,6 +342,19 @@ def run(
             raise typer.Exit(1)
         repo_root = worktree_path
         config = load_config(repo_root)
+
+    # Handle no task: launch interactive claude with docs context
+    if task is None:
+        return _launch_interactive_default(
+            repo_root,
+            config,
+            context=list(context) if context else None,
+            model=model,
+            voice=voice,
+            paste=paste,
+            docs=docs,
+            summaries=summaries,
+        )
 
     # Gather task file to get frontmatter config
     task_file = gather_task(repo_root, task)
@@ -401,10 +493,10 @@ def inline(
     """Run an inline prompt with an LLM model."""
     repo_root = find_worktree_root()
     if not repo_root:
-        typer.echo("Error: Not in a git repository", err=True)
-        raise typer.Exit(1)
+        # Use cwd as fallback for non-git usage
+        repo_root = Path.cwd()
 
-    config = load_config(repo_root)
+    config = load_config(repo_root) if (repo_root / ".lf" / "config.yaml").exists() else None
 
     # Parse voice arg
     cli_voices = parse_voice_arg(voice)
@@ -520,10 +612,10 @@ def cp(
     """Copy file context to clipboard."""
     repo_root = find_worktree_root()
     if not repo_root:
-        typer.echo("Error: Not in a git repository", err=True)
-        raise typer.Exit(1)
+        # Use cwd as fallback for non-git usage
+        repo_root = Path.cwd()
 
-    config = load_config(repo_root)
+    config = load_config(repo_root) if (repo_root / ".lf" / "config.yaml").exists() else None
 
     # Merge positional paths and config context
     all_context = list(paths or [])
@@ -587,9 +679,15 @@ def pipeline(
 ):
     """Run a named pipeline."""
     repo_root = find_worktree_root()
-    if not repo_root:
-        typer.echo("Error: Not in a git repository", err=True)
+
+    # Worktree creation still requires git
+    if not repo_root and worktree:
+        typer.echo("Error: --worktree requires a git repository", err=True)
         raise typer.Exit(1)
+
+    # Use cwd as fallback for non-git usage
+    if not repo_root:
+        repo_root = Path.cwd()
 
     config = load_config(repo_root)
 

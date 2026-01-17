@@ -192,6 +192,30 @@ Voice files live in `.lf/voices/` as plain markdown:
 .lf/voices/concise.md
 ```
 
+### summaries
+
+Pre-generated codebase summaries included in every prompt. Useful for giving agents context about large codebases without loading all files.
+
+```yaml
+summary_tokens: 25000  # Default token budget for summaries
+
+summaries:
+  - path: src
+    model: claude       # Model to use for generation
+  - path: lib
+    tokens: 5000        # Override default for this path
+```
+
+Generate summaries with:
+
+```bash
+lfops summarize src             # Generate summary for src/
+lfops summarize -t 20000 src    # With specific token budget
+lfops summarize -a              # Regenerate all configured summaries
+```
+
+Summaries are cached in `.lf/summaries/` and auto-refreshed when source files change on main.
+
 ## Run Modes
 
 By default, tasks run in **auto mode**: non-interactive with streaming output. This is ideal for most coding tasks and background execution. All runs append logs under `~/.lf/logs/<worktree>/`.

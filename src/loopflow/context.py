@@ -141,27 +141,28 @@ def list_all_tasks(repo_root: Path | None) -> tuple[list[str], list[str]]:
     return sorted(user), sorted(builtin_only)
 
 
-def gather_task(repo_root: Path, name: str) -> TaskFile | None:
+def gather_task(repo_root: Path | None, name: str) -> TaskFile | None:
     """Gather and parse task file with frontmatter.
 
     Search order:
-    1. .claude/commands/{name}.md
-    2. .lf/{name}.md
+    1. .claude/commands/{name}.md (if repo_root provided)
+    2. .lf/{name}.md (if repo_root provided)
     3. templates/commands/{name}.md (builtin fallback)
 
     Returns TaskFile with parsed config, or None if not found.
     """
-    # Check .claude/commands first (portable format)
-    claude_dir = repo_root / ".claude" / "commands"
-    content = _read_file_if_named(claude_dir, f"{name}.md")
-    if content:
-        return parse_task_file(name, content)
+    if repo_root:
+        # Check .claude/commands first (portable format)
+        claude_dir = repo_root / ".claude" / "commands"
+        content = _read_file_if_named(claude_dir, f"{name}.md")
+        if content:
+            return parse_task_file(name, content)
 
-    # Fall back to .lf directory
-    lf_dir = repo_root / ".lf"
-    content = _read_file_if_named(lf_dir, f"{name}.md")
-    if content:
-        return parse_task_file(name, content)
+        # Fall back to .lf directory
+        lf_dir = repo_root / ".lf"
+        content = _read_file_if_named(lf_dir, f"{name}.md")
+        if content:
+            return parse_task_file(name, content)
 
     # Fall back to builtin templates
     builtin_path = _get_builtin_task(name)
@@ -248,9 +249,12 @@ def _trigger_background_refresh(repo_root: Path) -> None:
     """Spawn background process to refresh stale summaries.
 
     Uses a lock file to prevent concurrent refresh attempts.
+    Logs output to .lf/summaries/refresh.log for debugging.
     """
-    lock_file = repo_root / ".lf" / "summaries" / ".refresh.lock"
-    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    summaries_dir = repo_root / ".lf" / "summaries"
+    summaries_dir.mkdir(parents=True, exist_ok=True)
+    lock_file = summaries_dir / ".refresh.lock"
+    log_file = summaries_dir / "refresh.log"
 
     # Check if refresh already in progress
     if lock_file.exists():
@@ -263,14 +267,15 @@ def _trigger_background_refresh(repo_root: Path) -> None:
             # Stale lock or process dead, remove it
             lock_file.unlink(missing_ok=True)
 
-    # Fork and write lock
-    process = subprocess.Popen(
-        [sys.executable, "-m", "loopflow.lfops", "summarize", "--all"],
-        cwd=repo_root,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    # Fork and write lock, logging output for debugging
+    with open(log_file, "w") as log:
+        process = subprocess.Popen(
+            [sys.executable, "-m", "loopflow.lfops", "summarize", "--all"],
+            cwd=repo_root,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
     lock_file.write_text(str(process.pid))
 
 
@@ -287,7 +292,8 @@ def gather_summaries(repo_root: Path, config) -> list[tuple[Path, str]]:
     needs_refresh = False
 
     for summary_config in config.summaries:
-        summary = load_summary(Path(summary_config.path), repo_root)
+        token_budget = summary_config.tokens or config.summary_tokens
+        summary = load_summary(Path(summary_config.path), repo_root, token_budget)
         if summary:
             results.append((Path(summary_config.path), summary.content))
             if is_stale(summary, repo_root):

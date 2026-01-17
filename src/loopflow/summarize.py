@@ -7,10 +7,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from pydantic_ai import Agent
-
 from loopflow.builtins import get_builtin_prompt
+from loopflow.config import load_config, parse_model
 from loopflow.files import _compile_exclude_patterns, _is_ignored, is_binary
+from loopflow.launcher import build_claude_command, build_codex_command, build_gemini_command
+from loopflow.logging import get_model_env
 
 
 @dataclass
@@ -35,11 +36,10 @@ class SummaryMetadata:
     model: str
 
 
-def _path_to_filename(path: Path) -> str:
-    """Convert path to summary filename."""
-    if path == Path("."):
-        return "root.md"
-    return str(path).replace("/", "-").replace("\\", "-") + ".md"
+def _path_to_filename(path: Path, token_budget: int) -> str:
+    """Convert path and token budget to summary filename."""
+    base = "root" if path == Path(".") else str(path).replace("/", "-").replace("\\", "-")
+    return f"{base}-{token_budget}.md"
 
 
 def _summaries_dir(repo_root: Path) -> Path:
@@ -102,16 +102,19 @@ def _ensure_gitignored(repo_root: Path) -> None:
         gitignore.write_text(pattern + "\n")
 
 
-def load_summary(path: Path, repo_root: Path) -> Summary | None:
-    """Load cached summary from .lf/summaries/."""
-    filename = _path_to_filename(path)
+def load_summary(path: Path, repo_root: Path, token_budget: int) -> Summary | None:
+    """Load cached summary from .lf/summaries/.
+
+    Returns None if no summary exists for this path and token budget.
+    """
+    filename = _path_to_filename(path, token_budget)
     summary_path = _summaries_dir(repo_root) / filename
 
     if not summary_path.exists():
         return None
 
     metadata = _load_metadata(repo_root)
-    key = str(path)
+    key = f"{path}:{token_budget}"
     if key not in metadata:
         return None
 
@@ -133,12 +136,13 @@ def save_summary(summary: Summary, repo_root: Path) -> None:
     summaries_dir = _summaries_dir(repo_root)
     summaries_dir.mkdir(parents=True, exist_ok=True)
 
-    filename = _path_to_filename(summary.path)
+    filename = _path_to_filename(summary.path, summary.token_budget)
     summary_path = summaries_dir / filename
     summary_path.write_text(summary.content)
 
     metadata = _load_metadata(repo_root)
-    metadata[str(summary.path)] = SummaryMetadata(
+    key = f"{summary.path}:{summary.token_budget}"
+    metadata[key] = SummaryMetadata(
         source_hash=summary.source_hash,
         token_budget=summary.token_budget,
         created_at=summary.created_at.isoformat(),
@@ -316,22 +320,74 @@ def _load_summarize_prompt(repo_root: Path) -> str:
     return get_builtin_prompt("summarize")
 
 
-def _get_model_name(model: str) -> str:
-    """Convert short model name to pydantic_ai model identifier."""
-    model_map = {
-        "gemini": "google-gla:gemini-2.0-flash",
-        "gemini:flash": "google-gla:gemini-2.0-flash",
-        "gemini:pro": "google-gla:gemini-2.5-pro",
-        "claude": "anthropic:claude-sonnet-4-20250514",
-        "claude:sonnet": "anthropic:claude-sonnet-4-20250514",
-        "claude:opus": "anthropic:claude-opus-4-20250514",
-    }
-    return model_map.get(model, model)
-
-
 def _estimate_tokens(text: str) -> int:
     """Rough token estimate (~4 chars per token)."""
     return len(text) // 4
+
+
+def _run_summarize_cli(prompt: str, model: str, repo_root: Path) -> str:
+    """Run CLI agent to generate summary."""
+    config = load_config(repo_root)
+    agent_model = config.agent_model if config else "claude:opus"
+
+    # Use specified model or fall back to config
+    if model in ("gemini", "gemini:flash", "gemini:pro"):
+        model_variant = "2.5-pro" if model == "gemini:pro" else "2.0-flash"
+        cmd = build_gemini_command(
+            auto=True,
+            stream=False,
+            skip_permissions=True,
+            model_variant=model_variant,
+        )
+    elif model in ("claude", "claude:sonnet", "claude:opus"):
+        model_variant = "opus" if model == "claude:opus" else "sonnet"
+        cmd = build_claude_command(
+            auto=True,
+            stream=False,
+            skip_permissions=True,
+            model_variant=model_variant,
+        )
+    else:
+        # Default to config model
+        backend, model_variant = parse_model(agent_model)
+        if backend == "codex":
+            cmd = build_codex_command(
+                auto=True,
+                stream=False,
+                skip_permissions=True,
+                model_variant=model_variant,
+                sandbox_root=repo_root.parent,
+                workdir=repo_root,
+            )
+        elif backend == "gemini":
+            cmd = build_gemini_command(
+                auto=True,
+                stream=False,
+                skip_permissions=True,
+                model_variant=model_variant,
+            )
+        else:
+            cmd = build_claude_command(
+                auto=True,
+                stream=False,
+                skip_permissions=True,
+                model_variant=model_variant,
+            )
+
+    cmd_with_prompt = cmd + [prompt]
+    result = subprocess.run(
+        cmd_with_prompt,
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        env=get_model_env(),
+    )
+
+    if result.returncode != 0:
+        detail = result.stderr.strip() if result.stderr else "CLI failed"
+        raise RuntimeError(f"Summary generation failed: {detail}")
+
+    return result.stdout.strip()
 
 
 def generate_summary(
@@ -363,13 +419,11 @@ def generate_summary(
     prompt_template = _load_summarize_prompt(repo_root)
     prompt = prompt_template.format(token_budget=token_budget, content=source_content)
 
-    model_name = _get_model_name(model)
-    agent = Agent(model_name, output_type=str)
-    result = agent.run_sync(prompt)
+    summary_content = _run_summarize_cli(prompt, model, repo_root)
 
     return Summary(
         path=path,
-        content=result.output,
+        content=summary_content,
         token_budget=token_budget,
         source_hash=source_hash,
         created_at=datetime.now(),
@@ -390,7 +444,7 @@ def refresh_if_stale(
     Returns (summary, was_regenerated).
     """
     if not force:
-        existing = load_summary(path, repo_root)
+        existing = load_summary(path, repo_root, token_budget)
         if existing and not is_stale(existing, repo_root):
             return existing, False
 

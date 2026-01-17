@@ -36,7 +36,7 @@ class SummaryConfig(BaseModel):
     """Per-path summary configuration."""
 
     path: str
-    tokens: int
+    tokens: int | None = None  # Falls back to summary_tokens if not set
     model: str = "gemini"
 
 
@@ -77,6 +77,7 @@ class Config(BaseModel):
     paste: bool = False  # Include clipboard content by default
     voice: Optional[list[str]] = None  # Default voices for all tasks
     summaries: list[SummaryConfig] = Field(default_factory=list)  # Summaries to include
+    summary_tokens: int = 10000  # Default token budget for summaries
     work: Optional[WorkConfig] = None  # Work queue configuration
 
     @field_validator("context", mode="before")

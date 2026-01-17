@@ -74,15 +74,19 @@ def test_cp_exclude_patterns(temp_repo, monkeypatch):
     assert "print('test')" not in copied_text
 
 
-def test_cp_requires_git_repo(tmp_path, monkeypatch):
-    """cp fails outside a git repo."""
+def test_cp_works_outside_git_repo(tmp_path, monkeypatch):
+    """cp works outside a git repo (uses cwd as fallback)."""
+    (tmp_path / "README.md").write_text("# No Git Here\n")
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
 
-    result = runner.invoke(app, ["cp"])
+    with patch("loopflow.cli.run._copy_to_clipboard") as mock_copy:
+        result = runner.invoke(app, ["cp"])
 
-    assert result.exit_code == 1
-    assert "Not in a git repository" in result.output
+    assert result.exit_code == 0
+    assert "Copied to clipboard" in result.output
+    copied_text = mock_copy.call_args[0][0]
+    assert "# No Git Here" in copied_text
 
 
 def test_cp_positional_args_as_context(temp_repo, monkeypatch):

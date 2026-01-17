@@ -15,6 +15,7 @@ struct SessionEvent: Sendable {
     let id: String
     let task: String?
     let status: String?
+    let worktree: String?
 }
 
 struct OutputEvent: Sendable {
@@ -104,7 +105,8 @@ actor LFDEventService {
             return .session(SessionEvent(
                 id: data["id"] as? String ?? "",
                 task: data["task"] as? String,
-                status: data["status"] as? String
+                status: data["status"] as? String,
+                worktree: data["worktree"] as? String
             ))
         }
 

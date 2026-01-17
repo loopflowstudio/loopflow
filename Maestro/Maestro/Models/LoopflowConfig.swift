@@ -156,3 +156,45 @@ enum IDEApp: String, CaseIterable {
         }
     }
 }
+
+/// Available models for the lf CLI.
+struct AgentModel: Identifiable, Hashable {
+    let id: String  // e.g., "claude:opus", "codex:o3"
+    let backend: String
+    let variant: String?
+
+    var displayName: String {
+        if let variant = variant {
+            return "\(backend.capitalized) \(variant.capitalized)"
+        }
+        return backend.capitalized
+    }
+
+    var cliValue: String { id }
+
+    init(_ value: String) {
+        self.id = value
+        let parts = value.split(separator: ":", maxSplits: 1)
+        self.backend = String(parts[0])
+        self.variant = parts.count > 1 ? String(parts[1]) : nil
+    }
+
+    static let claude = AgentModel("claude")
+    static let claudeOpus = AgentModel("claude:opus")
+    static let claudeSonnet = AgentModel("claude:sonnet")
+    static let codex = AgentModel("codex")
+    static let codexO3 = AgentModel("codex:o3")
+    static let codexO4Mini = AgentModel("codex:o4-mini")
+    static let gemini = AgentModel("gemini")
+
+    /// Common models shown in the picker.
+    static let commonModels: [AgentModel] = [
+        .claude,
+        .claudeOpus,
+        .claudeSonnet,
+        .codex,
+        .codexO3,
+        .codexO4Mini,
+        .gemini
+    ]
+}

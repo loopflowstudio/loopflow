@@ -54,7 +54,7 @@ struct MaestroApp: App {
                 Button("Capture for Review") {
                     captureCurrentWindow()
                 }
-                .keyboardShortcut("s", modifiers: [.command, .shift])
+                .keyboardShortcut("4", modifiers: [.command])
             }
         }
     }

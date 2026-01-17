@@ -706,9 +706,9 @@ def _squash_commits(repo_root: Path, base_ref: str, commit_msg: str) -> None:
 
 
 def _get_existing_pr_url(repo_root: Path) -> str | None:
-    """Check if a PR exists for current branch. Returns URL if exists, None otherwise."""
+    """Check if an open PR exists for current branch. Returns URL if exists, None otherwise."""
     result = subprocess.run(
-        ["gh", "pr", "view", "--json", "url", "-q", ".url"],
+        ["gh", "pr", "view", "--json", "url,state", "-q", 'select(.state == "OPEN") | .url'],
         cwd=repo_root,
         capture_output=True,
         text=True,

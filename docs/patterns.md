@@ -23,7 +23,7 @@ lf review
 The design task can write notes to a file that implement reads:
 
 ```markdown
-# .lf/design.lf
+# .claude/commands/design.md
 
 Explore how to implement:
 
@@ -100,7 +100,7 @@ lf review -a              # finds and fixes issues automatically
 A review task might look like:
 
 ```markdown
-# .lf/review.lf
+# .claude/commands/review.md
 
 Review the diff on the current branch against `main`.
 
@@ -200,7 +200,7 @@ lfops land --local           # squash + merge locally (no PR)
 The `commit` task can generate commit messages:
 
 ```markdown
-# .lf/commit.lf
+# .claude/commands/commit.md
 
 Review the staged changes and create a commit.
 

@@ -3,7 +3,7 @@
 Run LLM coding agents from reusable prompt files.
 
 ```bash
-lf review          # run .lf/review.lf
+lf review          # run .claude/commands/review.md
 lf ship            # pipeline: implement → review → test → commit → PR
 ```
 
@@ -34,14 +34,14 @@ lf design                     # interactive: figure out what to build
 lf ship                       # batch: implement, review, test, commit, open PR
 ```
 
-`lf design` runs `.lf/design.lf`. `lf ship` runs the `ship` pipeline from `.lf/config.yaml`.
+`lf design` runs `.claude/commands/design.md`. `lf ship` runs the `ship` pipeline from `.lf/config.yaml`.
 
 ## Tasks
 
-Tasks are prompt files in `.lf/`. Here's an example:
+Tasks are markdown files in `.claude/commands/` or `.lf/`. Here's an example:
 
 ```markdown
-# .lf/review.lf
+# .claude/commands/review.md
 
 Review the diff on the current branch against `main` and fix any issues found.
 
@@ -58,7 +58,7 @@ The deliverable is the fixes themselves, not a written review.
 Run tasks by name:
 
 ```bash
-lf review                     # run .lf/review.lf
+lf review                     # run .claude/commands/review.md
 lf review -x src/utils.py     # add context files
 lf : "fix the typo"           # inline prompt, no task file
 ```
@@ -200,7 +200,7 @@ Priority: CLI > frontmatter > config > none.
 
 | Command | Description |
 |---------|-------------|
-| `lf <task>` | Run a task from `.lf/` |
+| `lf <task>` | Run a task from `.claude/commands/` or `.lf/` |
 | `lf <pipeline>` | Run a pipeline |
 | `lf : "prompt"` | Inline prompt |
 | `wt <subcommand>` | Worktree management (worktrunk) |

@@ -28,7 +28,7 @@ def temp_repo(tmp_path):
 
     lf = tmp_path / ".lf"
     lf.mkdir()
-    (lf / "implement.lf").write_text("Implement the feature.\n")
+    (lf / "implement.md").write_text("Implement the feature.\n")
 
     return tmp_path
 
@@ -111,43 +111,36 @@ def test_build_prompt_inline_with_context(temp_repo):
     assert "print('hello')" in result
 
 
-def test_gather_task_prefers_lf_extension(temp_repo):
-    """Task file with .lf extension is preferred."""
+def test_gather_task_prefers_claude_commands(temp_repo):
+    """Task file in .claude/commands/ is preferred over .lf/."""
+    claude_dir = temp_repo / ".claude" / "commands"
+    claude_dir.mkdir(parents=True)
+    (claude_dir / "test.md").write_text("Task from .claude/commands/\n")
+
+    lf = temp_repo / ".lf"
+    (lf / "test.md").write_text("Task from .lf/\n")
+
+    result = gather_task(temp_repo, "test")
+    assert result.content == "Task from .claude/commands/\n"
+
+
+def test_gather_task_finds_md_in_lf(temp_repo):
+    """Task file with .md extension in .lf/ works."""
+    lf = temp_repo / ".lf"
+    (lf / "test.md").write_text("Task from .lf/ md file\n")
+
+    result = gather_task(temp_repo, "test")
+    assert result.content == "Task from .lf/ md file\n"
+
+
+def test_gather_task_ignores_non_md_extensions(temp_repo):
+    """Task files with non-.md extensions are not found."""
     lf = temp_repo / ".lf"
     (lf / "test.lf").write_text("Task from .lf file\n")
-    (lf / "test.md").write_text("Task from .md file\n")
     (lf / "test.txt").write_text("Task from .txt file\n")
 
     result = gather_task(temp_repo, "test")
-    assert result.content == "Task from .lf file\n"
-
-
-def test_gather_task_prefers_md_over_other_extensions(temp_repo):
-    """Task file with .md extension preferred over others."""
-    lf = temp_repo / ".lf"
-    (lf / "test.md").write_text("Task from .md file\n")
-    (lf / "test.txt").write_text("Task from .txt file\n")
-
-    result = gather_task(temp_repo, "test")
-    assert result.content == "Task from .md file\n"
-
-
-def test_gather_task_accepts_other_extensions(temp_repo):
-    """Task file with other extension works when .lf/.md absent."""
-    lf = temp_repo / ".lf"
-    (lf / "test.txt").write_text("Task from .txt file\n")
-
-    result = gather_task(temp_repo, "test")
-    assert result.content == "Task from .txt file\n"
-
-
-def test_gather_task_accepts_bare_name(temp_repo):
-    """Task file with no extension works as fallback."""
-    lf = temp_repo / ".lf"
-    (lf / "test").write_text("Task from bare file\n")
-
-    result = gather_task(temp_repo, "test")
-    assert result.content == "Task from bare file\n"
+    assert result is None  # Only .md is supported
 
 
 def test_gather_task_returns_none_when_missing(temp_repo):
@@ -311,7 +304,7 @@ def test_list_user_tasks_returns_user_tasks(tmp_path):
     # .lf/ tasks
     lf = tmp_path / ".lf"
     lf.mkdir()
-    (lf / "custom.lf").write_text("custom task")
+    (lf / "custom.md").write_text("custom task")
     (lf / "another.md").write_text("another task")
     (lf / "config.yaml").write_text("not a task")
 
@@ -335,7 +328,7 @@ def test_list_all_tasks_separates_user_and_builtin(tmp_path):
     lf = tmp_path / ".lf"
     lf.mkdir()
     (lf / "design.md").write_text("custom design")
-    (lf / "custom.lf").write_text("custom task")
+    (lf / "custom.md").write_text("custom task")
 
     user_tasks, builtin_only = list_all_tasks(tmp_path)
 

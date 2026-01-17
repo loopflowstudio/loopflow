@@ -56,8 +56,10 @@ struct PromptLauncher: View {
                 mainInput
                 modeAndAdvancedRow
                 if showAdvancedOptions {
+                    modelSelector
                     voiceSelector
                     contextBar
+                    commandPreview
                 }
             }
             .frame(maxWidth: 600)
@@ -106,7 +108,7 @@ struct PromptLauncher: View {
             ZStack(alignment: .topLeading) {
                 // Typeahead input
                 HStack(spacing: 4) {
-                    TextField("None", text: $taskSearchText)
+                    TextField("Select task...", text: $taskSearchText)
                         .textFieldStyle(.plain)
                         .font(.system(size: 13, weight: .medium))
                         .focused($taskFieldFocused)
@@ -189,13 +191,21 @@ struct PromptLauncher: View {
                                 Button {
                                     selectTask(prompt)
                                 } label: {
-                                    HStack {
-                                        Text(prompt.displayName)
-                                            .fontWeight(.medium)
-                                        Spacer()
-                                        Text(prompt.defaultMode == .auto ? "auto" : "interactive")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack {
+                                            Text(prompt.displayName)
+                                                .fontWeight(.medium)
+                                            Spacer()
+                                            Text(prompt.defaultMode == .auto ? "auto" : "interactive")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        if let description = prompt.shortDescription {
+                                            Text(description)
+                                                .font(.caption2)
+                                                .foregroundStyle(.tertiary)
+                                                .lineLimit(1)
+                                        }
                                     }
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 6)
@@ -292,6 +302,116 @@ struct PromptLauncher: View {
         inputText = parsedInput.args
     }
 
+    // MARK: - Model Selector
+
+    @State private var showingModelPicker = false
+
+    private var modelSelector: some View {
+        HStack(spacing: 8) {
+            Text("Model")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Button {
+                showingModelPicker = true
+            } label: {
+                HStack(spacing: 4) {
+                    Text(modelDisplayText)
+                        .font(.system(size: 13, weight: .medium))
+                    Image(systemName: "chevron.down")
+                        .font(.caption2)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.primary.opacity(0.05))
+                )
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showingModelPicker) {
+                modelPickerPopover()
+            }
+
+            Spacer()
+        }
+    }
+
+    private var modelDisplayText: String {
+        if let model = appState.selectedModel {
+            return model.displayName
+        }
+        if let configModel = appState.config?.agentModel {
+            return AgentModel(configModel).displayName + " (default)"
+        }
+        return "Default"
+    }
+
+    private func modelPickerPopover() -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Select Model")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+
+            // Default option (uses config)
+            Button {
+                appState.selectedModel = nil
+                showingModelPicker = false
+            } label: {
+                HStack {
+                    Image(systemName: appState.selectedModel == nil ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(appState.selectedModel == nil ? Color.accentColor : Color.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Default")
+                            .fontWeight(.medium)
+                        if let configModel = appState.config?.agentModel {
+                            Text(AgentModel(configModel).displayName)
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Divider()
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+
+            // Common models
+            ForEach(AgentModel.commonModels) { model in
+                let isSelected = appState.selectedModel?.id == model.id
+                Button {
+                    appState.selectedModel = model
+                    showingModelPicker = false
+                } label: {
+                    HStack {
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                        Text(model.displayName)
+                            .fontWeight(.medium)
+                        Spacer()
+                        Text(model.cliValue)
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(minWidth: 220)
+    }
+
     // MARK: - Voice Selector
 
     @State private var showingVoicePicker = false
@@ -378,11 +498,18 @@ struct PromptLauncher: View {
                 .padding(.bottom, 8)
 
             if appState.voices.isEmpty {
-                Text("No voices in .lf/voices/")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 12)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("No voices configured")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("Add .md files to .lf/voices/ to create personas that shape how the agent responds.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
+                .frame(maxWidth: 220)
             } else {
                 ForEach(appState.voices) { voice in
                     let isSelected = appState.selectedVoices.contains(voice)
@@ -422,12 +549,17 @@ struct PromptLauncher: View {
 
             // Text input
             ZStack(alignment: .topLeading) {
-                // Placeholder
+                // Placeholder with examples
                 if inputText.isEmpty {
-                    Text("What do you want to build?")
-                        .foregroundStyle(.tertiary)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 12)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Describe what you want to build...")
+                            .foregroundStyle(.tertiary)
+                        Text("e.g. \"add user authentication\" or \"fix the login bug\"")
+                            .font(.caption)
+                            .foregroundStyle(.quaternary)
+                    }
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 12)
                 }
 
                 TextEditor(text: $inputText)
@@ -580,13 +712,19 @@ struct PromptLauncher: View {
             }
             .pickerStyle(.segmented)
             .frame(width: 160)
+            .help("Auto: runs to completion without input. Interactive: opens a chat session you can guide.")
 
             Spacer()
 
             // Token count - always visible
-            Text(formatTokenCount(appState.estimatedTokens))
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                .foregroundStyle(.secondary)
+            HStack(spacing: 4) {
+                Image(systemName: "doc.text")
+                    .font(.caption2)
+                Text(formatTokenCount(appState.estimatedTokens))
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+            }
+            .foregroundStyle(.secondary)
+            .help("Estimated context size in tokens. Includes docs, files, and other context you've enabled.")
 
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -609,43 +747,6 @@ struct PromptLauncher: View {
 
     @State private var isDraggingOver = false
     @State private var showingFilePicker = false
-
-    private var optionsBar: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            // Mode picker row
-            HStack(spacing: 12) {
-                Picker("", selection: $appState.runMode) {
-                    Text("Auto").tag(RunMode.auto)
-                    Text("Interactive").tag(RunMode.interactive)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 160)
-
-                Spacer()
-            }
-
-            // Context bar - always visible
-            contextBar
-        }
-        .onChange(of: appState.includeDocs) {
-            Task { await appState.estimateTokens() }
-        }
-        .onChange(of: appState.includeDiff) {
-            Task { await appState.estimateTokens() }
-        }
-        .onChange(of: appState.includeDiffFiles) {
-            Task { await appState.estimateTokens() }
-        }
-        .onChange(of: appState.includePaste) {
-            Task { await appState.estimateTokens() }
-        }
-        .onChange(of: appState.includeSummaries) {
-            Task { await appState.estimateTokens() }
-        }
-        .onChange(of: appState.attachedFiles) {
-            Task { await appState.estimateTokens() }
-        }
-    }
 
     private var contextBar: some View {
         HStack(spacing: 6) {
@@ -726,6 +827,64 @@ struct PromptLauncher: View {
         .onChange(of: appState.attachedFiles) {
             Task { await appState.estimateTokens() }
         }
+    }
+
+    // MARK: - Command Preview
+
+    @State private var showCommandPreview = false
+
+    private var commandPreview: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    showCommandPreview.toggle()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "terminal")
+                        .font(.caption)
+                    Text("Command Preview")
+                        .font(.caption)
+                    Spacer()
+                    Image(systemName: showCommandPreview ? "chevron.up" : "chevron.down")
+                        .font(.caption2)
+                }
+                .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+
+            if showCommandPreview {
+                HStack {
+                    Text(previewCommand)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.primary)
+                        .textSelection(.enabled)
+                        .lineLimit(3)
+                    Spacer()
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(previewCommand, forType: .string)
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Copy command to clipboard")
+                }
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.primary.opacity(0.05))
+                )
+            }
+        }
+    }
+
+    private var previewCommand: String {
+        // Build command from current state
+        appState.selectedPrompt = selectedPrompt
+        appState.promptArgs = parsedInput.args
+        return appState.buildCommand(pipeline: selectedPipeline)
     }
 
     private func formatTokenCount(_ count: Int) -> String {

@@ -111,22 +111,16 @@ def list_user_tasks(repo_root: Path) -> list[str]:
         for p in claude_dir.glob("*.md"):
             tasks.add(p.stem)
 
-    # .lf/*
+    # .lf/*.md
     lf_dir = repo_root / ".lf"
     if lf_dir.exists():
-        for p in lf_dir.iterdir():
-            if not p.is_file():
-                continue
+        for p in lf_dir.glob("*.md"):
             if p.name in _LF_NON_TASK_FILES:
                 continue
             # Skip uppercase files (likely docs/prompts, not tasks)
             if p.stem.isupper():
                 continue
-            # Task name is filename without extension
-            if p.suffix:
-                tasks.add(p.stem)
-            else:
-                tasks.add(p.name)
+            tasks.add(p.stem)
 
     return sorted(tasks)
 
@@ -151,12 +145,9 @@ def gather_task(repo_root: Path, name: str) -> TaskFile | None:
     """Gather and parse task file with frontmatter.
 
     Search order:
-    1. .claude/commands/{name}.md (Claude Code compatible)
-    2. .lf/{name}.lf
-    3. .lf/{name}.md
-    4. .lf/{name}.* (any other extension)
-    5. .lf/{name} (bare name)
-    6. templates/commands/{name}.md (builtin fallback)
+    1. .claude/commands/{name}.md
+    2. .lf/{name}.md
+    3. templates/commands/{name}.md (builtin fallback)
 
     Returns TaskFile with parsed config, or None if not found.
     """
@@ -168,28 +159,7 @@ def gather_task(repo_root: Path, name: str) -> TaskFile | None:
 
     # Fall back to .lf directory
     lf_dir = repo_root / ".lf"
-
-    # Preferred extensions first
-    for ext in [".lf", ".md"]:
-        content = _read_file_if_named(lf_dir, f"{name}{ext}")
-        if content:
-            return parse_task_file(name, content)
-
-    # Any other extension
-    if lf_dir.exists():
-        for path in sorted(lf_dir.iterdir()):
-            if not path.is_file():
-                continue
-            if not path.name.startswith(f"{name}."):
-                continue
-            if path.suffix in [".lf", ".md"]:
-                continue
-            content = path.read_text()
-            if content:
-                return parse_task_file(name, content)
-
-    # Bare name (no extension)
-    content = _read_file_if_named(lf_dir, name)
+    content = _read_file_if_named(lf_dir, f"{name}.md")
     if content:
         return parse_task_file(name, content)
 

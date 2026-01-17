@@ -165,14 +165,33 @@ struct WorktreeSidebar: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 8) {
-            Text("No worktrees")
+        VStack(spacing: 12) {
+            Image(systemName: "arrow.triangle.branch")
+                .font(.system(size: 24))
+                .foregroundStyle(.tertiary)
+
+            Text("No worktrees yet")
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
-            Text("Click + to create one")
+
+            Text("Worktrees let you run tasks on isolated branches while keeping your main work untouched.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+
+            Button {
+                showingNewWorktreeSheet = true
+            } label: {
+                Label("Create Worktree", systemImage: "plus")
+                    .font(.caption)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .padding(.top, 4)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
     }
 
     private var worktreeList: some View {

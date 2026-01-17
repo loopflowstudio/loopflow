@@ -1,4 +1,10 @@
+---
+context:
+  - Maestro/DESIGN.md
+---
 # Project: First-Time Prompter Experience
+
+Read `Maestro/DESIGN.md` for the design philosophy guiding this work.
 
 ## Focus
 

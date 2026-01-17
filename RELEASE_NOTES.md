@@ -1,14 +1,15 @@
-# v0.6.3
+# v0.6.4
 
-This release adds screenshot capture for LLM context, improves Maestro with a visual pipeline editor and diff viewer, and includes various quality-of-life improvements.
+This release adds UX agent tooling, work queue infrastructure, and improves prompt organization and task management.
 
 ## Changes
 
-- Add screenshot capture and image context support for LLM tasks
-- Add visual pipeline editor and model racing in Maestro
-- Add diff viewer and worktree comparison in Maestro
-- Add fallback to bundled templates for builtin commands
-- Migrate from lfpr to lfops commands in Maestro
-- Simplify lfops init by removing style guide and prompts scaffolding
-- Hide advanced features behind beta flag for new users in Maestro
-- Fix shell escaping for paths and commands with special characters
+- Add lfwork CLI and work queue backend for task scheduling
+- Add lfops rebase command for easier branch rebasing
+- Add codebase summarization for pre-generated LLM context
+- Add personal-main branches for background agent isolation
+- Improve Maestro discoverability and standardize task file organization
+- Add AppleScript screenshot capture for agents
+- Add comprehensive design principles to Maestro
+- Fix prompt launchers and preview panels in UX agent
+- Open merged PR in browser after lfops land

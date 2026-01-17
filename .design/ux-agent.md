@@ -1,38 +1,115 @@
-# UX Agent
+# Review: ux-agent
 
-Improves Maestro first-run UX and accessibility based on comprehensive user research.
+**Verdict: Ready to ship**
+
+This branch delivers substantial UX improvements to Maestro with 13 focused commits. The changes address first-run experience, accessibility, and progressive disclosure without over-engineering.
 
 ## Summary
 
-- Conducted UX research simulating three user profiles (New Developer, Power User, Designer/PM)
-- Implemented 8 targeted fixes addressing first-run experience and accessibility
-- Added terminal embedding research for future in-app output streaming
-- Updated UX prompts with build instructions
+The branch adds:
+1. **Embedded terminal via SwiftTerm** — Output streams in-app instead of context-switching to external Terminal
+2. **Progressive disclosure** — Context bar and options collapse by default, expand on demand
+3. **Accessibility fixes** — Stage badges have icons (not just colors), running state has text fallback for reduced motion
+4. **First-run improvements** — Default task, better placeholder, friendlier terminology
+5. **Persistence** — User preferences saved via @AppStorage
 
-## UX Fixes Applied
+## What Changed
 
-1. **Default task to "implement"** - Most common case; users don't have to choose
-2. **Improved placeholder text** - More prominent, with concrete examples
-3. **Renamed "BRANCHES" to "Workspaces"** - Friendlier, less git-jargon
-4. **Added icons to stage badges** - Accessibility fix for color-blind users
-5. **Better task descriptions** - 2-line limit with proper wrapping
-6. **Better collapse indicator** - "More options" when collapsed, with tooltip
-7. **Removed redundant repo name** - Was in both title and toolbar
-8. **Concrete welcome tagline** - "Tell it what to build. It writes the code."
+### New Files
+- `TaskRunner.swift` — Lightweight service for embedded terminal state
+- `EmbeddedTerminalView.swift` — NSViewRepresentable wrapper for SwiftTerm
 
-## Remaining Work
+### Modified Files
+- `Package.swift` — Added SwiftTerm dependency
+- `AppState.swift` — Added TaskRunner to environment
+- `PromptLauncher.swift` — Default task, collapsible context/options, mode descriptions, embedded terminal toggle
+- `ResultsPanel.swift` — Empty state, embedded terminal view, overflow menu
+- `WorktreeSidebar.swift` — "Workspaces" header, stage icons, optical centering, selection highlight
+- `ContentView.swift` — Removed redundant toolbar item
+- `WelcomeWindow.swift` — Concrete tagline
 
-High-complexity items deferred for future:
-- In-app terminal embedding (see `.design/terminal-embedding.md`)
-- Onboarding flow for first-time users
-- Cmd+K command palette
-- Slash commands for task selection
-- @ mentions for context
+### Design Documents Created
+Research and specs that informed the implementation:
+- Terminal embedding options (SwiftTerm vs Ghostty vs Warp)
+- User profile simulations (New Developer, Power User, Designer/PM)
+- Gap analysis comparing to Figma/Cursor/Notion patterns
+- Progressive disclosure audit
 
-## Artifacts
+## Issues Found
 
-- `.design/ux-research.md` - User profile simulations and pain points
-- `.design/ux-gaps.md` - Gap analysis vs Figma/Cursor/Notion
-- `.design/ux-fixes.md` - Detailed changelog of fixes
-- `.design/terminal-embedding.md` - Research on SwiftTerm/Ghostty
-- `.design/questions.md` - Product decisions
+### Minor: Typography inconsistency
+Mixed use of `.caption` vs `.caption2` across views. Not blocking—the UI is readable and functional.
+
+### Minor: Context bar can overflow
+With many attachments, the five chips can extend beyond viewport. Edge case.
+
+### Minor: Token count orphaned
+Neither prominent nor hidden. Floating in UI without clear purpose for new users.
+
+### Not blocking but noted
+- Embedded terminal toggle is in "More options" — users may not discover it
+- No onboarding flow for first-time users (documented as future work)
+- Interactive mode still launches external terminal (documented constraint)
+
+## Style Compliance
+
+- No `Args:`/`Returns:` docstrings added
+- Imports at top of files
+- No backwards-compatibility shims
+- Mocks not introduced (no new tests in this branch)
+- Private functions use `_` prefix where appropriate
+
+## Code Quality
+
+The implementation is clean:
+
+```swift
+// EmbeddedTerminalView.swift — Simple wrapper, no over-engineering
+struct EmbeddedTerminalView: NSViewRepresentable {
+    let command: String
+    let workingDirectory: URL
+    let onTerminate: () -> Void
+    // ... 83 lines total
+}
+
+// TaskRunner.swift — Minimal state management
+@Observable
+final class TaskRunner {
+    var isRunning = false
+    var currentCommand: String?
+    // ... 32 lines total
+}
+```
+
+The SwiftTerm integration is straightforward:
+- Uses `LocalProcessTerminalView` for PTY handling
+- Proper process termination via delegate
+- Environment configured for 256-color support
+
+## Open Questions
+
+Consolidated from research, for future consideration:
+
+1. **Embedded terminal default** — Should it be on by default for auto mode? Currently requires discovery.
+
+2. **Onboarding** — What should a first-time walkthrough cover? Candidates: purpose, workspaces, first task, results.
+
+3. **Permission dialog** — Bundle identifier shows gibberish. Developer-only feature, but erodes trust.
+
+4. **Slash commands** — `/design`, `/review` as alternative to dropdown. Aligns with Notion patterns.
+
+5. **@ mentions** — `@src/auth.ts` in prompt to add context. Cursor pattern.
+
+6. **Work-state grouping** — Organize sidebar by In Progress / Ready / Blocked.
+
+7. **Whimsical names** — "floral-tiger" confuses newcomers. Consider task-based naming.
+
+## Recommendation
+
+Ship as-is. The branch improves the baseline experience significantly:
+- New users get sensible defaults
+- Power users get command preview persistence
+- Accessibility users get text fallbacks
+- Everyone gets in-app output streaming (when enabled)
+
+The remaining gaps (onboarding, slash commands, @ mentions) are documented and can be addressed in follow-up work. Nothing in this branch introduces regressions or technical debt.

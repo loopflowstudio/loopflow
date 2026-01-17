@@ -1006,32 +1006,30 @@ struct PromptLauncher: View {
                     }
                 }
 
-                // Attached files row (if any)
-                if !appState.attachedFiles.isEmpty || true {  // Always show add button
-                    HStack(spacing: 6) {
-                        ForEach(appState.attachedFiles, id: \.self) { file in
-                            FileChip(
-                                name: file.lastPathComponent,
-                                icon: iconForFile(file)
-                            ) {
-                                appState.attachedFiles.removeAll { $0 == file }
-                            }
+                // Attached files row
+                HStack(spacing: 6) {
+                    ForEach(appState.attachedFiles, id: \.self) { file in
+                        FileChip(
+                            name: file.lastPathComponent,
+                            icon: iconForFile(file)
+                        ) {
+                            appState.attachedFiles.removeAll { $0 == file }
                         }
+                    }
 
-                        // Add file button
-                        AddFileButton {
-                            showingFilePicker = true
-                        }
-                        .fileImporter(
-                            isPresented: $showingFilePicker,
-                            allowedContentTypes: [.item],
-                            allowsMultipleSelection: true
-                        ) { result in
-                            if case .success(let urls) = result {
-                                for url in urls {
-                                    if !appState.attachedFiles.contains(url) {
-                                        appState.attachedFiles.append(url)
-                                    }
+                    // Add file button
+                    AddFileButton {
+                        showingFilePicker = true
+                    }
+                    .fileImporter(
+                        isPresented: $showingFilePicker,
+                        allowedContentTypes: [.item],
+                        allowsMultipleSelection: true
+                    ) { result in
+                        if case .success(let urls) = result {
+                            for url in urls {
+                                if !appState.attachedFiles.contains(url) {
+                                    appState.attachedFiles.append(url)
                                 }
                             }
                         }

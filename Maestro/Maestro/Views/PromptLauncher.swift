@@ -106,7 +106,7 @@ struct PromptLauncher: View {
             ZStack(alignment: .topLeading) {
                 // Typeahead input
                 HStack(spacing: 4) {
-                    TextField("None", text: $taskSearchText)
+                    TextField("Select task...", text: $taskSearchText)
                         .textFieldStyle(.plain)
                         .font(.system(size: 13, weight: .medium))
                         .focused($taskFieldFocused)
@@ -422,12 +422,17 @@ struct PromptLauncher: View {
 
             // Text input
             ZStack(alignment: .topLeading) {
-                // Placeholder
+                // Placeholder with examples
                 if inputText.isEmpty {
-                    Text("What do you want to build?")
-                        .foregroundStyle(.tertiary)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 12)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Describe what you want to build...")
+                            .foregroundStyle(.tertiary)
+                        Text("e.g. \"add user authentication\" or \"fix the login bug\"")
+                            .font(.caption)
+                            .foregroundStyle(.quaternary)
+                    }
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 12)
                 }
 
                 TextEditor(text: $inputText)

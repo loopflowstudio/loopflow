@@ -5,11 +5,31 @@ context:
   - Maestro/Maestro/Views/
 voice: customer
 ---
-Conduct user research by simulating three user profiles experiencing Maestro for the first time.
+Conduct UX research on Maestro by capturing screenshots, reviewing the UI, and simulating user profiles.
 
-Read `Maestro/DESIGN.md` for the design principles to evaluate against.
+## Part 1: Screenshot Capture
 
-## Profiles
+Use Maestro's debug capture (Debug menu or keyboard shortcut) to generate screenshots of key states:
+- Welcome/setup screen
+- Empty repo state (no worktrees)
+- Prompt input with various toggle states
+- Running state
+- Error states
+
+Save to `.design/screenshots/` with descriptive names.
+
+## Part 2: Visual Audit
+
+For each screenshot, review:
+- Alignment and spacing inconsistencies
+- Typography hierarchy problems
+- Color contrast and accessibility
+- Visual clutter or unclear affordances
+- macOS platform conventions
+
+## Part 3: User Profile Simulation
+
+Walk through as three personas:
 
 ### 1. New Developer
 - Just heard about "AI coding assistants"
@@ -29,10 +49,7 @@ Read `Maestro/DESIGN.md` for the design principles to evaluate against.
 - Low tolerance for jargon or complexity
 - Needs: clear affordances, forgiving errors
 
-## For Each Profile
-
-Walk through the first-run experience using the screenshots. Narrate their internal monologue:
-
+For each profile, narrate their experience:
 1. **First impression** (0-5 seconds): What do they see? What do they think this does?
 2. **First action**: What do they try to do? Can they figure out how?
 3. **First obstacle**: Where do they get stuck or confused?
@@ -46,30 +63,39 @@ Be specific. Quote what they see. Note exact UI elements that confuse or delight
 Write findings to `.design/ux-research.md`:
 
 ```markdown
-# UX Research: User Profiles
+# UX Research
 
-## New Developer
+## Screenshots Captured
+- [list of screenshot paths]
+
+## Visual Issues
+- [ ] Issue and location
+- [ ] ...
+
+## User Profile Findings
+
+### New Developer
 **First impression**: ...
 **First action**: ...
 **First obstacle**: ...
 **Recovery**: ...
 **Verdict**: ...
 
-### Pain Points
+#### Pain Points
 - [ ] Specific issue and location
-- [ ] ...
 
-## Claude Code Power User
+### Claude Code Power User
 ...
 
-## Designer/PM
+### Designer/PM
 ...
 
-## Summary
-Top 3 issues across all profiles:
+## Top 5 Priority Issues
 1. ...
 2. ...
 3. ...
+4. ...
+5. ...
 ```
 
 Do not write code. Research only.

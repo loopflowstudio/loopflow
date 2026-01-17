@@ -24,3 +24,8 @@ pipelines:
       - polish
       - draft_commit
     pr: true
+  ux:
+    tasks:
+      - ux-research
+      - ux-gaps
+      - ux-fix

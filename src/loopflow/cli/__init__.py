@@ -95,7 +95,7 @@ def _list_tasks() -> None:
 
     # Show pipelines
     if pipelines:
-        typer.echo("Pipelines:")
+        typer.echo("Pipelines (defined in .lf/config.yaml):")
         for name in sorted(pipelines):
             p = config.pipelines[name]
             tasks_str = " → ".join(p.tasks) if p.tasks else ""
@@ -139,7 +139,7 @@ def _list_tasks() -> None:
     # Display custom tasks
     custom = [t for t in all_tasks if not t["builtin"]]
     if custom:
-        typer.echo("Tasks:")
+        typer.echo("Tasks (repo-specific, override built-ins):")
         for t in custom:
             typer.echo(format_task(t, show_source=True))
         typer.echo()
@@ -147,7 +147,7 @@ def _list_tasks() -> None:
     # Display builtins
     builtins = [t for t in all_tasks if t["builtin"]]
     if builtins:
-        typer.echo("Built-in:")
+        typer.echo("Built-in (bundled defaults, work in any repo):")
         for t in builtins:
             typer.echo(format_task(t, show_source=False))
 

@@ -1,9 +1,12 @@
 ---
 context:
+  - .design/designprinciples.md
   - .design/screenshots/
   - Maestro/Maestro/Views/
 ---
 Review the Maestro UI screenshots and propose improvements.
+
+Read `.design/designprinciples.md` first—evaluate against the 10 core principles.
 
 ## Part 1: Visual Audit
 

@@ -1,4 +1,10 @@
+---
+context:
+  - .design/designprinciples.md
+---
 # Project: First-Time Prompter Experience
+
+Read `.design/designprinciples.md` for the design philosophy guiding this work.
 
 ## Focus
 

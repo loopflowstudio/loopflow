@@ -1,10 +1,13 @@
 ---
 context:
+  - .design/designprinciples.md
   - .design/screenshots/
   - Maestro/Maestro/Views/
 voice: customer
 ---
 Conduct user research by simulating three user profiles experiencing Maestro for the first time.
+
+Read `.design/designprinciples.md` for the design principles to evaluate against.
 
 ## Profiles
 

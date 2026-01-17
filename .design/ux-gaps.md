@@ -1,435 +1,429 @@
 # UX Gap Analysis
 
-## Visual Issues
+*Artist voice: Question the constraints. What's the wildly different approach nobody's considering?*
 
-### From Screenshot Audit
+---
 
-The captured screenshot reveals Maestro running alongside Cursor with a macOS "Screen & System Audio Recording" permission dialog blocking the interface. Key observations:
+## Visual Audit
 
-- [ ] **Permission dialog app identifier** — Shows "MaestroU0.2026.01.14.08.16.sta-9kc_042" which looks like gibberish to users. This erodes trust immediately—the first system interaction resembles malware.
-- [ ] **Output streams in external terminal** — The visible IDE pane shows Claude Code streaming output in Cursor's integrated terminal, not in Maestro. Users launch from Maestro but watch results elsewhere.
-- [ ] **Window management burden** — Screenshot shows multiple overlapping windows (Maestro, permission dialog, IDE). The workflow requires juggling windows rather than focusing on work.
+### The Screenshot Tells a Story
 
-### Alignment and Spacing
-- [ ] **Context chip overflow** (`PromptLauncher.swift:947-1007`): Five chips have no max-width constraint. With many attachments, they extend beyond viewport.
-- [ ] **Empty state vertical drift** (`WorktreeSidebar.swift:168-196`): Content floats low in tall windows due to `maxHeight: .infinity` instead of optical centering.
-- [ ] **Results panel header density** (`ResultsPanel.swift:64-120`): Five controls compete in one row. Hierarchy is flat—status, text, duration, toggle, clear, expand all at equal visual weight.
-- [ ] **Options section lacks grouping** (`PromptLauncher.swift:60-66`): Model selector, voice selector, context bar, command preview run together without visual separation or hierarchy.
+The captured screenshot reveals a fundamental architectural problem, not just visual issues.
 
-### Typography Hierarchy
-- [ ] **Mixed caption sizes**: Inconsistent use of `.caption` vs `.caption2` throughout. No clear typographic scale—some secondary text is `.caption2`, some is `.caption` with `.tertiary` color.
-- [ ] **Token count placement** (`PromptLauncher.swift:740-756`): Embedded in crowded row with mode picker and options button. Neither prominent enough to matter nor hidden enough to ignore.
+What we see:
+1. A macOS permission dialog blocking the interface
+2. The dialog identifies the app as **"MaestroU0.2026.01.14.08.16.sta-9kc_042"**—gibberish
+3. Maestro running alongside Cursor
+4. Claude Code streaming in Cursor's terminal, not in Maestro
 
-### Color and Contrast
-- [ ] **Disabled state opacity** (`PromptLauncher.swift:886`): Context sections at `opacity(0.5)` may fail WCAG AA 4.5:1 contrast requirements.
-- [ ] **Running state indicator** (`WorktreeRow.swift:659-664`): Pulsing blue dot relies on animation alone—accessibility concern for users with reduced motion enabled.
-- [ ] **Selected worktree** (`WorktreeRow.swift:527-530`): Blue accent at 15% opacity is too subtle for primary selection state. Compare to Notion's bolder selection highlight.
+The first moment a user encounters Maestro, they see a system dialog that looks like malware asking for permissions. Behind it, they discover that the "output" lives somewhere else entirely.
 
-### Visual Clutter
-- [ ] **Five context chips always visible** (`PromptLauncher.swift:947-958`): Docs, Files, Diff, Clipboard, Summaries shown immediately. Overwhelming cognitive load for new users who don't understand what these mean.
-- [ ] **Four hover actions on worktrees** (`WorktreeRow.swift:593-647`): Diff, PR, Terminal, IDE all appear on hover with similar small icons—hard to distinguish at a glance.
+**This isn't a visual polish issue. It's an identity crisis.**
 
-### macOS Platform Conventions
-- [ ] **Sheet sizing** (`NewWorktreeSheet.swift:756`): Fixed 320pt width feels cramped on larger displays; should scale or have sensible minimum.
-- [ ] **No File > Open Recent**: Recent repos only accessible from welcome window. Working users can't quickly switch repos without returning to welcome.
+### Visual Issues Worth Noting
+
+- [ ] **Permission dialog app name** — Auto-generated bundle identifier shown to users. Trust dies here.
+- [ ] **Split attention** — Output in Terminal, controls in Maestro. The workflow is fragmented.
+- [ ] **Typography inconsistency** — `.caption` vs `.caption2` mixed without system. Pick one.
+- [ ] **Context chips overflow** — Five chips can exceed viewport with no constraint.
+- [ ] **Token count orphaned** — Neither prominent nor hidden. Floating in uncertainty.
+- [ ] **Disabled states at 0.5 opacity** — Potentially fails WCAG contrast requirements.
+- [ ] **Results header density** — Five controls fighting for one row.
 
 ---
 
 ## Welcome/Setup
 
-**Current**: `WelcomeWindow.swift` shows icon (`wand.and.sparkles`), "Loopflow Maestro" title, "Tell it what to build. It writes the code." subtitle, recent repos list, and "Open Folder" button. This is improved from the previous "AI coding assistant" abstraction.
+### Current State
 
-**Inspiration—Figma**: You're drawing in under 10 seconds. No "here's what this is" preamble. The interface teaches through interaction.
+Icon, "Loopflow Maestro", "Tell it what to build. It writes the code.", recent repos, "Open Folder" button.
 
-**Inspiration—Notion**: Empty states offer templates demonstrating value. "Press / for commands" teaches the core interaction. Productive before understanding.
+### The Gap
 
-**Gap**: The welcome screen is a repo picker, not an introduction to what happens after picking one. Users must already understand they want to "open a repo" before seeing any value demonstration.
+It's a file picker with marketing copy. Users must already intend to "open a repo" before seeing any evidence the tool works.
 
-**Why does it have to be this way?**
+### Why does it have to be this way?
 
-What if the welcome screen was proof?
+**What if the welcome screen WAS the product running?**
 
-1. **Playable demo**: Bundled sample project users can run tasks on. See the full loop—prompt → agent runs → code changes → diff review—before committing their own code.
+Imagine: You launch Maestro. A bundled sample project is already loaded. A task is running. You watch code appear, tests run, files change. The welcome screen isn't a gate—it's proof.
 
-2. **Auto-playing video**: 15-second loop showing the workflow. No sound, just visual proof. "Tell it what to build. It writes the code." becomes undeniable when you watch it happen.
+"Want to try with your own code? [Open a repo]" appears after you've seen magic happen.
 
-3. **Clipboard mode**: Paste code, describe a change, see results. Zero commitment, immediate value.
+Or: **Clipboard mode**. The welcome screen has a paste zone. Drop code, describe a change, watch results. No repo. No git. No commitment. Value delivered before commitment requested.
 
-The current design assumes intent. What if we created intent by showing undeniable proof?
+Or: **Video proof**. A 10-second loop showing the workflow, muted, autoplaying. "Tell it what to build" becomes undeniable when you watch it happen.
 
-**Patterns to adopt**:
-1. **Demo-first**: Let users experience before committing
-2. **Visual proof**: Show, don't claim. Video > tagline.
-3. **Graceful degradation**: Work without a repo for simple tasks
+### Patterns to adopt
+
+1. **Demo-first** (Figma) — You're drawing in 10 seconds
+2. **Zero-commitment entry** (Paper) — Creativity shouldn't require setup
+3. **Show, don't tell** — Video > tagline
 
 ---
 
 ## Prompt Input
 
-**Current**: Task typeahead selector (with "implement" pre-selected), large text area with placeholder "What should the AI build?" and example text, mode picker (Auto/Interactive), Run button. Context chips below. Command preview behind "More options" toggle.
+### Current State
 
-**Inspiration—Cursor**: Chat is immediate. Context is automatic. `@` mentions for surgical override. The prompt adapts to what you're doing—no mode switches.
+Task dropdown with typeahead. Large text field. Mode picker (Auto/Interactive). Run button. "implement" pre-selected.
 
-**Inspiration—Notion**: `/` commands discoverable as you type. Feels like writing, not operating software.
+### The Gap
 
-**Gap**: The task selector, while improved with typeahead, still requires knowing tasks exist and which one you want. Mode picker ("Auto"/"Interactive") remains meaningless to newcomers. The interaction is: select task → configure mode → type → run. Four conceptual steps.
+Four conceptual steps: select task → configure mode → type → run.
 
-**Why does it have to be this way?**
+The task dropdown is an admission: "We don't know what you want." The mode picker is another: "We can't decide which is better."
 
-What if you just typed?
+### Why does it have to be this way?
 
-1. **Intent inference**: "add auth to the login page" → infers "implement". "review the changes" → infers "review". Suggestion appears, Tab to accept.
+**What if there was just a text field?**
 
-2. **Slash commands as escape hatch**: `/design` explicit override. But default is inference, not selection.
+```
+┌──────────────────────────────────────────────────────┐
+│ add authentication to the login page                 │
+│                                    implement ⌘↵     │
+└──────────────────────────────────────────────────────┘
+```
 
-3. **No visible mode picker**: Default to auto. Task frontmatter controls mode. Most users never need to know modes exist.
+- **No task selector**. Type "add auth" → AI infers `implement`. Type "review the changes" → infers `review`. Ghost text shows inference. Tab confirms. Wrong? Type `/design` explicitly.
+- **No mode picker**. Default: auto. Task frontmatter controls exceptions. The 95% who never change it never see it exists.
+- **No Run button taking space**. Cmd+Enter runs. The button is training wheels.
 
-4. **Context automatic per task**: `design` → include docs. `review` → include diff. `implement` → include design doc. No chips to understand.
+### Even wilder
 
-The dropdown exists because we're uncertain about intent. A confident tool infers intent and lets users correct it.
+What if the prompt input was ALSO a command palette? Start typing, and suggestions include:
+- Tasks that match ("implement: add auth...")
+- Recent prompts
+- Slash commands ("/design", "/review")
+- Files ("@src/auth.ts")
 
-**Patterns to adopt**:
-1. **Ghost completion**: Show inferred task as user types
-2. **Slash commands**: Explicit override, not default interaction
-3. **Automatic context**: Smart defaults per task type
-4. **Mode hidden**: Surface only when task requires it
+One unified input that does everything.
+
+### Patterns to adopt
+
+1. **Intent inference** — Confident tools infer, uncertain tools ask
+2. **Ghost completion** (Copilot) — Show inference, Tab confirms
+3. **Slash commands** (Notion) — Explicit override, not default
+4. **Unified input** (Raycast) — One box for everything
 
 ---
 
 ## Context Controls
 
-**Current**: Five toggle chips (Docs, Files, Diff, Clipboard, Summaries), drag-and-drop file attachment, expandable token count breakdown. No `@` mentions.
+### Current State
 
-**Inspiration—Cursor**: Context is automatic. You don't toggle "include files"—it knows. Override is surgical: `@file.ts`.
+Five toggle chips: Docs, Files, Diff, Clipboard, Summaries. Drag-and-drop attachments. Token count breakdown.
 
-**Inspiration—Figma**: Component panel shows what's relevant to selection. No searching required.
+### The Gap
 
-**Gap**: Five toggles demand understanding of token economics before first run. "What are tokens? Why 14.2k? Is that good?" Users make decisions about things they don't understand.
+Five decisions before first run. "What are tokens? Why 14.2k? Is that good?"
 
-**Why does it have to be this way?**
+The toggles serve power users. Power users are 10%. Default UX optimizes for the wrong 10%.
 
-What if context was invisible?
+### Why does it have to be this way?
 
-- **Smart defaults**: Each task knows what it needs. User never sees toggles unless they ask.
-- **@ mentions for override**: `@src/auth.ts @README.md` in the prompt. Typing, not toggling.
-- **Collapsed by default**: Show "14.2k tokens" only. Expand reveals breakdown. Most won't expand.
-- **Learn once**: If user expands, remember preference. But start collapsed.
+**What if context was invisible?**
 
-The toggles serve power users. But power users are 20%. The default experience should serve the 80% who want results, not configuration.
+- **Smart defaults per task**: `design` → docs. `review` → diff. `implement` → design doc + touched files. Users never configure.
+- **@ mentions for override**: Type `@src/auth.ts` in the prompt. Typing beats toggling.
+- **Token budget as progress bar**: Thin bar under input. Green → yellow → red. Numbers on hover only.
+- **No chips visible by default**: Context is there. It's working. You don't need to see it unless you ask.
 
-**Patterns to adopt**:
-1. **Per-task defaults**: design → docs. review → diff. implement → design doc + files.
-2. **@ mentions**: Inline file references
-3. **Collapsed by default**: Token count summary, details on demand
-4. **Remember preferences**: Once expanded, stay expanded
+Power users expand "Context" to see what's included. Everyone else never knows this section exists.
+
+### Patterns to adopt
+
+1. **Automatic context** (Cursor) — It just knows
+2. **@ mentions** (Cursor) — Surgical override
+3. **Visual budgets** — Progress bars beat numbers
+4. **Hide until asked** — Real progressive disclosure
 
 ---
 
 ## Worktree Sidebar
 
-**Current**: "Workspaces" header (improved from "BRANCHES"), list with branch names, commit counts, stage badges with icons (lightbulb/hammer/magnifyingglass/sparkles—accessibility fix applied), hover actions. Empty state explains workspaces clearly.
+### Current State
 
-**Inspiration—Notion**: Page tree is effortlessly navigable. Icons show type at glance. Drag to reorder.
+"Workspaces" header. Branch names. Commit counts. Stage badges. Hover actions.
 
-**Inspiration—Figma**: Layers panel mirrors canvas. Hover reveals actions without demanding attention.
+### The Gap
 
-**Gap**: Still organized around git primitives. Users see branch names, not work intent. Stage badges show last task—not what's running now or what needs attention next.
-
-**Why does it have to be this way?**
-
-Users care about work state, not git state:
+The sidebar shows git primitives. Users don't care about git. They care about work:
 - "What am I building?"
-- "What's the agent doing?"
-- "What needs my attention?"
+- "What's running?"
+- "What needs attention?"
 
-**Wild idea**: Organize by work state.
+### Why does it have to be this way?
+
+**What if the sidebar showed intent, not implementation?**
 
 ```
 IN PROGRESS
-  auth-feature        implement running... 2:34
-  refactor-api        needs review
+  "add authentication"      implementing... 2:34 ●
+  "api refactor"            needs review
 
-READY TO MERGE
-  fix-typo            1 commit, clean
+READY
+  "fix typos"               1 commit, clean
 
 BLOCKED
-  new-ui              conflicts with main
+  "new UI"                  conflicts with main
 ```
 
-Primary view: work-centric. Git details (branch, SHA) available on expand or hover.
+The initial prompt becomes the workspace name. Branch names appear on hover for those who care. Work state groups items naturally.
 
-**Patterns to adopt**:
-1. **Work state grouping**: In Progress / Ready / Blocked
-2. **Running tasks prominent**: Elapsed time, current status
-3. **Next action visible**: "needs review" clickable
-4. **Git details on demand**: Expand for technical info
+### Even wilder
+
+What if there was no sidebar?
+
+Maestro could be **single-pane**. The current workspace is "wherever you last ran a task." Switch workspaces via Cmd+K. The sidebar appears when you invoke it, not permanently.
+
+Most sessions involve one workspace. Why show a list of N workspaces when you're using 1?
+
+### Patterns to adopt
+
+1. **Work state grouping** (Linear) — In Progress / Ready / Blocked
+2. **Intent as identity** — Prompt text > branch name
+3. **Minimize chrome** (Ive) — Maybe no sidebar at all
+4. **Cmd+K for switching** (Linear) — Search > browse
 
 ---
 
 ## Running State
 
-**Current**: Task launches external terminal. Sidebar shows pulsing blue dot. `ResultsPanel.swift` shows "Running {task}..." with spinner and elapsed time. Log output toggleable but defaults to result summary.
+### Current State
 
-**Inspiration—Cursor**: Streams output inline. You see the agent working. Feels like watching someone type.
+Task launches external terminal. Sidebar shows pulsing dot. ResultsPanel shows "Running..." with spinner. Embedded terminal exists but toggle is buried.
 
-**Inspiration—Figma**: Presence indicators show system state at glance.
+### The Gap
 
-**Gap**: Results stream to external terminal, not Maestro. Users launch from Maestro → find Terminal → watch output → return to Maestro. Three context switches per task.
+Launch in Maestro → watch in Terminal → return to Maestro. Three context switches per task.
 
-**Why does it have to be this way?**
+SwiftTerm is implemented. It works. But the toggle is in "More options" → scroll → find it. Users who don't discover it experience the broken flow.
 
-External terminal exists because Claude Code is a CLI. But that's implementation, not user need. Users need to see their code change—they don't care how.
+### Why does it have to be this way?
 
-**Wild ideas**:
+**What if there was no external terminal for auto mode?**
 
-1. **In-app terminal via SwiftTerm**: Embed terminal in ResultsPanel. PTY attached, VT100 rendering, no context switch. SwiftTerm is production-ready (researched in `.design/terminal-embedding.md`).
+Make embedded terminal the default. No toggle. No choice. Output appears in Maestro. Period.
 
-2. **Progress phases instead of raw output**:
-   ```
-   implement: add authentication
+But go further: **What if raw terminal wasn't the interface at all?**
 
-   [====      ] Writing code...
-               → src/auth.py
-               → src/routes.py
+```
+implement: add authentication            2:34 ●
 
-   Step 2 of 4: Creating files
-   ```
-   High-level status, terminal available as escape hatch.
+Reading codebase...
+  Found auth patterns in src/middleware
 
-3. **Background with notification**: Task runs silently. System notification when done: "auth-feature complete. 5 files changed." Click → Maestro with results.
+Planning changes...
+  ✓ Create src/auth.py
+  ✓ Update src/routes.py
+  → Writing tests...
 
-4. **Picture-in-picture**: Small floating terminal stays visible while working elsewhere.
+[Show Terminal] [Stop]
+```
 
-SwiftTerm makes option 1 tractable. The UX cost of external terminal—context switches, lost windows, no completion notification—justifies the implementation effort.
+Structured phases. Progress indication. Current file. Raw terminal as escape hatch for debugging.
 
-**Patterns to adopt**:
-1. **In-app streaming**: Embedded terminal via SwiftTerm
-2. **Progress phases**: High-level status visible
-3. **Completion notification**: System notification for background tasks
-4. **Escape to full terminal**: Button for those who want raw output
+### Even wilder
+
+What if running tasks were **invisible by default**?
+
+You type, hit Cmd+Enter, and the prompt clears. In the corner: "Implementing... ●". That's it.
+
+System notification when done: "auth-feature complete. 3 files changed." Click → see results.
+
+Background by default. Foreground on demand. The tool gets out of the way.
+
+### Patterns to adopt
+
+1. **No choice** — Embedded terminal is the only option for auto mode
+2. **Structured progress** — Phases beat firehose
+3. **Background by default** — Notification on completion
+4. **Minimal chrome** — The less visible while running, the better
 
 ---
 
 ## Errors/Empty States
 
-**Current**: Worktree empty state is solid—icon, explanation, action button. Other areas lack empty states. Errors use generic SwiftUI alerts.
+### Current State
 
-**Inspiration—Notion**: Empty pages feel like opportunities. "Press Enter to continue..."
+Worktree empty state is decent. Other areas: blank or generic SwiftUI alerts.
 
-**Inspiration—Figma**: Errors are specific and actionable. "Can't connect—use local fonts?"
+### The Gap
 
-**Gap**: Empty states elsewhere are missing or minimal. Errors say "An error occurred" with OK button.
+Voids are missed opportunities. Errors are dead ends.
 
-**Why does it have to be this way?**
+### Why does it have to be this way?
 
-Every void is an opportunity for guidance:
+**Every empty state is a chance to teach.**
 
-- **Empty prompt area**: "Try: 'add user authentication' or 'fix the failing tests'" with clickable examples
-- **Empty results panel**: "Your results will appear here after running a task."
-- **On main branch**: "Create a workspace to let AI make changes safely. [Create]"
-- **Worktree creation failed**: "Branch 'auth' exists. Try: auth-v2 [Create auth-v2]"
+Empty prompt area:
+> What should AI build for you?
+> [add auth] [fix bugs] [write tests] ← clickable
 
-Errors should be conversations:
-- "Couldn't start terminal—Warp not found. [Install Warp] [Use Terminal.app]"
-- "Task failed. [View logs] [Try again] [Report issue]"
+Empty results:
+> Your code is waiting. Run a task above.
 
-**Patterns to adopt**:
-1. **Contextual empty states**: Different message based on app state
-2. **Actionable errors**: Fix included, not just problem
-3. **Recovery buttons**: Remediation in the error
-4. **Clickable examples**: Empty states that teach by doing
+On main branch:
+> You're on main. Create a workspace so AI changes don't affect your code.
+> [Create workspace]
+
+**Every error is a conversation.**
+
+Worktree exists:
+> 'auth' already exists.
+> [Open auth] [Create auth-v2]
+
+Can't find Warp:
+> Warp not found.
+> [Install Warp] [Use Terminal.app] [Use embedded terminal]
+
+### Patterns to adopt
+
+1. **Clickable examples** — Empty states that run on click
+2. **Actionable errors** — Buttons, not just text
+3. **Conversation** — Errors are dialogue, not walls
 
 ---
 
 ## Summary: Priority Gaps
 
-1. **Results stream to external terminal** — Impact: **Critical**
-   - Every task requires context switch
-   - New users don't know to check Terminal
-   - No completion notification
-   - SwiftTerm makes in-app solution viable
-
-2. **No demo mode or onboarding** — Impact: **High**
-   - Users must understand workflow before seeing value
-   - "Tell it what to build" is promise, not proof
-   - No way to try before committing a repo
-
-3. **Context controls demand expertise** — Impact: **High**
-   - Five toggles visible before first run
-   - Token count unexplained
-   - No smart defaults per task
-   - No @ mentions for power users
-
-4. **Mode picker meaningless** — Impact: **Medium**
-   - "Auto"/"Interactive" unexplained
-   - Users guess or ignore
-   - Could be hidden entirely
-
-5. **Permission dialog shows gibberish identifier** — Impact: **Medium**
-   - First system interaction looks suspicious
-   - Erodes trust before app is used
-
-6. **Task selector still requires knowledge** — Impact: **Medium**
-   - Improved with typeahead and default
-   - But no intent inference from prompt
-   - No slash commands
+| Gap | Impact | Design Principle Violated |
+|-----|--------|--------------------------|
+| **Output in external terminal** | Critical | Immediate Connection (Bret Victor) |
+| **No demo/onboarding** | High | Remove Barriers (fast.ai) |
+| **Context requires expertise** | High | Progressive Disclosure (Notion) |
+| **Task selector over-engineered** | Medium | Opinionated Defaults (Linear) |
+| **Permission dialog gibberish** | Medium | Craft Signals Care (Ive) |
+| **Mode picker meaningless** | Medium | Design Should Disappear (Ive) |
 
 ---
 
 ## Patterns to Steal
 
-1. **From Cursor—Inline streaming output**
-   - Apply to: ResultsPanel
-   - Show output live via embedded terminal
-   - Eliminates context switch
+### From Cursor
+1. **Inline streaming** — Output where you launched
+2. **@ mentions** — `@file.ts` beats toggles
+3. **Automatic context** — Per-task defaults
 
-2. **From Cursor—@ mentions for context**
-   - Apply to: Prompt input
-   - `@file.ts` adds context inline
-   - Faster than toggles, discoverable
+### From Notion
+4. **Slash commands** — `/design` as override
+5. **Empty states as opportunities** — Clickable examples
+6. **Progressive disclosure** — Simple surface, depth available
 
-3. **From Notion—Slash commands**
-   - Apply to: Prompt input
-   - `/design`, `/review` as explicit override
-   - Typing beats dropdown
+### From Linear
+7. **Cmd+K everywhere** — Searchable actions
+8. **Work state grouping** — In Progress / Ready / Blocked
+9. **Opinionated defaults** — One way, done well
 
-4. **From Notion—Empty states as opportunity**
-   - Apply everywhere
-   - Clickable examples that teach
-
-5. **From Linear—Cmd+K command palette**
-   - Apply globally
-   - Every action searchable
-   - Shortcuts visible
-
-6. **From Figma—Demo before commitment**
-   - Apply to welcome
-   - Show value, then ask for repo
-
-7. **From Linear—Opinionated defaults**
-   - Apply to context
-   - Smart defaults per task
-   - Config as escape hatch
-
-8. **From Stripe—Progressive disclosure**
-   - Apply to context bar
-   - Token count only visible
-   - Expand for breakdown
+### From Figma
+10. **Demo before commitment** — Show value first
+11. **Performance obsession** — Sub-100ms
+12. **Remove friction before features**
 
 ---
 
-## Wild Ideas (Artist Mode)
+## Wild Ideas
 
-### Question: Why is Maestro a separate app?
+### Why is Maestro an app?
 
 What if it wasn't?
 
-1. **Raycast extension**: Cmd+Space, "lf implement: add auth". Workspaces in sidebar. Full app optional.
+- **Raycast extension**: Cmd+Space → "lf implement: add auth" → done
+- **Menu bar**: Click → running tasks. Right-click → quick launch
+- **VS Code sidebar**: Panel in the IDE you already use
+- **Notifications only**: Tasks run silently, notify on complete
 
-2. **Menu bar agent**: Click → running tasks. Right-click → quick launch. Full window only when needed.
+The app exists for visual orchestration. Maybe visual orchestration is a panel, not a window.
 
-3. **VS Code extension**: Sidebar in the IDE you're already using. No window management.
+### Why select a task at all?
 
-4. **Pure CLI with notifications**: `lf implement` runs silently. System notification when done. No app.
+What if intent was inferred?
 
-The app exists for visual orchestration. Maybe visual orchestration is a sidebar, not a window.
+- "add authentication" → implement
+- "review the changes" → review
+- "what does this do" → explain
+- "fix the bug" → debug
 
-### Question: Why select a task at all?
+Ghost text shows inference. Tab confirms. `/task` for explicit override.
 
-What if there was just a prompt?
+### Why show branch names?
 
-- "add user authentication" → AI infers implement
-- "review the changes" → AI infers review
-- "what does this code do" → AI explains without changing
-
-Tasks exist because loopflow is structured. Structure can be inferred, not demanded.
-
-### Question: Why show branches?
-
-What if the sidebar showed intentions?
+What if it showed prompts?
 
 ```
 IN FLIGHT
   "add authentication"      implementing...
   "fix login bug"           ready for review
 
-COMPLETED TODAY
+DONE TODAY
   "update readme"           merged 2h ago
 ```
 
-Users care about what they asked for, not the git branch name.
+Users remember what they asked for, not the branch.
 
-### Question: Why stream raw terminal output?
-
-What if output was structured?
-
-```
-implement: add authentication
-
-Reading codebase...
-  Found patterns in src/middleware
-
-Planning changes...
-  1. Create src/auth.py
-  2. Update src/routes.py
-  3. Add tests/test_auth.py
-
-Writing code... ████████░░ 80%
-
-[Show Terminal] [Stop]
-```
-
-Progress, not firehose. Terminal as escape hatch.
-
-### Question: Why require a repo?
+### Why require a repo?
 
 What if you didn't?
 
-- **Clipboard mode**: Paste code, describe change, get result
-- **Demo project**: Bundled sample for learning
-- **Standalone prompts**: `lf --prompt review.md --input file.py`
+- **Clipboard mode**: Paste code, describe change, see result
+- **Template starters**: "New CLI tool" → creates repo, runs first task
+- **URL mode**: Point at a GitHub repo without cloning
 
-The repo requirement assumes full git workflow. Not every use needs it.
+The repo requirement assumes git expertise. Not everyone has it.
 
 ---
 
 ## The Core Insight
 
-Current design optimizes for power users who understand:
+Maestro optimizes for users who understand:
 - Git and worktrees
 - LLM context and tokens
 - Loopflow's task model
-- Terminal-based workflows
+- Terminal workflows
 
-What if Maestro optimized for someone who knows none of that?
+What if it optimized for someone who knows **none** of that?
 
-They want to:
-1. Tell a computer what to build
-2. Watch it build
-3. Review the result
+They want:
+1. Tell computer what to build
+2. Watch it happen
+3. Review result
 4. Keep or reject
 
-That's the 80% case. Tasks, toggles, modes, branches—that's configuration for the 20%.
+That's the 80% case.
 
-**Progressive disclosure: the 80% case shows 20% of the UI.**
+**Ideal Maestro**:
 
-Ideal Maestro:
-1. Single text field: "What do you want?"
-2. Run button
-3. Inline streaming output
-4. "Keep?" / "Try again?"
+```
+┌──────────────────────────────────────────────────────┐
+│ add authentication                           ⌘↵     │
+└──────────────────────────────────────────────────────┘
 
-Everything else exists but is hidden until needed.
+┌──────────────────────────────────────────────────────┐
+│ Writing code...                              2:34 ● │
+│                                                      │
+│ ✓ Created src/auth.py                               │
+│ ✓ Updated src/routes.py                             │
+│ → Writing tests...                                   │
+└──────────────────────────────────────────────────────┘
 
-**The tool should work without configuration. Configuration is for depth, not prerequisite.**
+              [Keep changes]  [Try again]
+```
 
-Linear refused Jira complexity. fast.ai embedded best practices. Figma removed friction before features.
+One text field. Progress. Two buttons.
+
+Everything else exists—but hidden.
+
+**The goal: make the 80% case require zero decisions.**
+
+Linear refused Jira. fast.ai embedded best practices. Paper gave five brushes. Figma removed friction first.
 
 Maestro should:
-1. Default to implement
-2. Auto-select context per task
-3. Stream results in-app
-4. Hide advanced options until requested
-5. Replace git jargon with work language
+1. Default to implement ✓ (done)
+2. Auto-select context per task ✗ (gap)
+3. Stream results in-app ✗ (toggle buried)
+4. Hide advanced options ✗ (partial)
+5. Infer task from prompt ✗ (gap)
+6. Use work language, not git ✗ (partial)
 
-The goal: **make the 80% case require zero decisions.**
+**The tool should work without configuration. Configuration is depth, not prerequisite.**

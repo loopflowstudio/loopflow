@@ -675,38 +675,26 @@ struct WorktreeRow: View {
         }
     }
 
+    private static let stageStyles: [String: (icon: String, color: Color)] = [
+        "design": ("lightbulb", .blue),
+        "implement": ("hammer", .purple),
+        "review": ("magnifyingglass", .orange),
+        "polish": ("sparkles", .green),
+    ]
+
     private func stageBadge(_ task: String) -> some View {
-        HStack(spacing: 3) {
-            Image(systemName: stageIcon(task))
+        let style = Self.stageStyles[task] ?? ("circle", .gray)
+        return HStack(spacing: 3) {
+            Image(systemName: style.icon)
                 .font(.system(size: 8))
             Text(task)
                 .font(.caption2)
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
-        .background(stageColor(task).opacity(0.2))
-        .foregroundStyle(stageColor(task))
+        .background(style.color.opacity(0.2))
+        .foregroundStyle(style.color)
         .clipShape(Capsule())
-    }
-
-    private func stageIcon(_ task: String) -> String {
-        switch task {
-        case "design": return "lightbulb"
-        case "implement": return "hammer"
-        case "review": return "magnifyingglass"
-        case "polish": return "sparkles"
-        default: return "circle"
-        }
-    }
-
-    private func stageColor(_ task: String) -> Color {
-        switch task {
-        case "design": return .blue
-        case "implement": return .purple
-        case "review": return .orange
-        case "polish": return .green
-        default: return .gray
-        }
     }
 }
 

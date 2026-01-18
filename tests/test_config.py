@@ -339,3 +339,73 @@ def test_load_config_voice_empty_string(temp_repo):
 
     assert config is not None
     assert config.voice is None
+
+
+# =============================================================================
+# Interactive mode configuration tests
+# =============================================================================
+
+
+def test_config_interactive_list():
+    """Config supports interactive task list."""
+    from loopflow.lf.config import Config
+
+    config = Config(interactive=["design", "iterate"])
+
+    assert "design" in config.interactive
+    assert "iterate" in config.interactive
+    assert "implement" not in config.interactive
+
+
+def test_config_interactive_defaults_empty():
+    """Config interactive list defaults to empty."""
+    from loopflow.lf.config import Config
+
+    config = Config()
+
+    assert config.interactive == []
+
+
+def test_load_config_interactive_list(temp_repo):
+    """interactive list is loaded from config.yaml."""
+    config_yaml = temp_repo / ".lf" / "config.yaml"
+    config_yaml.write_text("""
+interactive:
+  - design
+  - iterate
+""")
+
+    config = load_config(temp_repo)
+
+    assert config is not None
+    assert "design" in config.interactive
+    assert "iterate" in config.interactive
+
+
+# =============================================================================
+# PipelineConfig tests
+# =============================================================================
+
+
+def test_pipeline_config():
+    """PipelineConfig holds name and task list."""
+    p = PipelineConfig(name="ship", tasks=["implement", "review"])
+
+    assert p.name == "ship"
+    assert p.tasks == ["implement", "review"]
+
+
+def test_pipeline_config_with_push_pr():
+    """PipelineConfig can override push/pr settings."""
+    p = PipelineConfig(name="ship", tasks=["implement"], push=True, pr=True)
+
+    assert p.push is True
+    assert p.pr is True
+
+
+def test_pipeline_config_defaults_none():
+    """PipelineConfig push/pr default to None."""
+    p = PipelineConfig(name="ship", tasks=["implement"])
+
+    assert p.push is None
+    assert p.pr is None

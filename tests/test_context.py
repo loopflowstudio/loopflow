@@ -407,3 +407,148 @@ def test_trigger_background_refresh_creates_log_file(tmp_path, monkeypatch):
     assert "stdout" in kwargs
     # stdout should be a file object (not DEVNULL)
     assert kwargs["stdout"] is not subprocess.DEVNULL
+
+
+# =============================================================================
+# Task argument substitution tests
+# =============================================================================
+
+
+def test_task_args_replace_template_variables(tmp_path):
+    """Task args replace {{key}} template variables in task content."""
+    _setup_task_template(tmp_path)
+    task_args = [
+        "name_a=impl-claude",
+        "name_b=impl-codex",
+        "diff_a=+ added feature",
+        "diff_b=- removed feature",
+    ]
+
+    components = gather_prompt_components(
+        tmp_path,
+        task="compare",
+        task_args=task_args,
+    )
+
+    assert components.task is not None
+    _, content = components.task
+
+    assert "impl-claude" in content
+    assert "impl-codex" in content
+    assert "+ added feature" in content
+    assert "- removed feature" in content
+    assert "{{" not in content  # No template vars left
+
+
+def test_task_args_in_formatted_prompt(tmp_path):
+    """Task args work through full prompt formatting pipeline."""
+    _setup_task_template(tmp_path)
+    task_args = [
+        "name_a=version-1",
+        "name_b=version-2",
+        "diff_a=diff content a",
+        "diff_b=diff content b",
+    ]
+
+    components = gather_prompt_components(
+        tmp_path,
+        task="compare",
+        task_args=task_args,
+    )
+    prompt = format_prompt(components)
+
+    assert "version-1" in prompt
+    assert "version-2" in prompt
+    assert "diff content a" in prompt
+    assert "diff content b" in prompt
+
+
+def test_task_args_no_args_leaves_templates(tmp_path):
+    """Without task_args, template variables remain unchanged."""
+    _setup_task_template(tmp_path)
+    components = gather_prompt_components(
+        tmp_path,
+        task="compare",
+    )
+
+    assert components.task is not None
+    _, content = components.task
+
+    # Template variables still present
+    assert "{{name_a}}" in content
+    assert "{{name_b}}" in content
+
+
+def test_task_args_partial_substitution(tmp_path):
+    """Task args only replace specified variables, leave others."""
+    _setup_task_template(tmp_path)
+    task_args = ["name_a=version-1"]
+
+    components = gather_prompt_components(
+        tmp_path,
+        task="compare",
+        task_args=task_args,
+    )
+
+    assert components.task is not None
+    _, content = components.task
+
+    assert "version-1" in content
+    assert "{{name_a}}" not in content
+    # Others still templated
+    assert "{{name_b}}" in content
+    assert "{{diff_a}}" in content
+
+
+def test_task_args_with_equals_in_value(tmp_path):
+    """Task args handle values containing '=' character."""
+    _setup_task_template(tmp_path)
+    task_args = ["diff_a=x=1, y=2"]
+
+    components = gather_prompt_components(
+        tmp_path,
+        task="compare",
+        task_args=task_args,
+    )
+
+    assert components.task is not None
+    _, content = components.task
+
+    # Should preserve the = in the value
+    assert "x=1, y=2" in content
+
+
+def test_task_args_with_multiline_value(tmp_path):
+    """Task args support multiline values."""
+    _setup_task_template(tmp_path)
+    diff_value = """+ def new_function():
++     return 42
+- old_code()"""
+
+    task_args = [f"diff_a={diff_value}"]
+
+    components = gather_prompt_components(
+        tmp_path,
+        task="compare",
+        task_args=task_args,
+    )
+
+    assert components.task is not None
+    _, content = components.task
+
+    assert "def new_function():" in content
+    assert "return 42" in content
+    assert "old_code()" in content
+
+
+def _setup_task_template(tmp_path):
+    """Helper to set up a repo with a task template."""
+    (tmp_path / ".git").mkdir(exist_ok=True)
+    (tmp_path / "README.md").write_text("# Test\n")
+    lf = tmp_path / ".lf"
+    lf.mkdir(exist_ok=True)
+    (lf / "compare.md").write_text(
+        "Compare {{name_a}} and {{name_b}}.\n\n"
+        "Diff A:\n{{diff_a}}\n\n"
+        "Diff B:\n{{diff_b}}\n"
+    )

@@ -51,17 +51,16 @@ docs/
 
 ### getting-started.md
 
-1. Install: `pip install loopflow && lfops install`
-2. Try it: clone demo repo, copy error, `lf debug -v`
-3. Full workflow:
-   ```bash
-   wt switch --create my-feature
-   lf design: add auth
-   lf implement
-   lf polish
-   lfops pr
-   ```
-4. Next: read about `lf` command, built-in tasks, or `lfops`
+1. What loopflow does: assembles context + prompt, passes to coding agent
+2. Install: `pip install loopflow && lfops install`
+3. Try it: clone demo repo, copy error, `lf debug -v`
+4. How it works:
+   - `lf` gathers context (repo docs, diff, files)
+   - Adds your prompt (from a file or inline)
+   - Passes everything to Claude/Codex/Gemini
+5. Write your own prompts: `.claude/commands/my-task.md`
+6. Ship with `lfops pr`
+7. Next: `lf` reference, built-in tasks, config
 
 ### lf.md
 

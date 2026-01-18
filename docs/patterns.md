@@ -39,33 +39,15 @@ Run multiple features simultaneously in separate worktrees:
 ```bash
 # Terminal 1
 wt switch --create feature-a
-lf ship &
+lf implement: add caching &
 
 # Terminal 2
 wt switch --create feature-b
-lf ship &
+lf implement: add auth &
 
 # Check status
 lfops status
 ```
-
-## Model Racing
-
-Race models against each other, pick the winner:
-
-```bash
-lf implement --race claude,codex: add caching layer
-```
-
-This runs both models in parallel worktrees, then uses a judge prompt to pick the better implementation.
-
-For parallel without judging:
-
-```bash
-lf implement --parallel claude,codex: add caching
-```
-
-Compare results manually with `lfwt compare`.
 
 ## Summarization
 
@@ -87,20 +69,6 @@ summaries:
 ```
 
 Summaries auto-refresh when source files change on main.
-
-## Autonomous Pipeline
-
-Run a full pipeline non-interactively:
-
-```bash
-lf ship
-```
-
-In autonomous mode:
-- No interactive prompts
-- Auto-commits between tasks
-- Pushes if `push: true` in config
-- Opens PR if `pr: true`
 
 ## Context Options
 
@@ -134,30 +102,6 @@ lf : "add type hints to utils.py"
 lf : "rename getUserById to findUserById everywhere"
 ```
 
-## Custom Pipelines
-
-Define pipelines for different workflows:
-
-```yaml
-pipelines:
-  ship:
-    tasks: [implement, review, polish, commit]
-    pr: true
-
-  quick:
-    tasks: [implement, commit]
-    push: true
-
-  polish:
-    tasks: [review, polish]
-```
-
-```bash
-lf ship      # full workflow
-lf quick     # fast iteration
-lf polish    # cleanup pass
-```
-
 ## PR Workflow
 
 ```bash
@@ -167,33 +111,77 @@ lfops land    # merge and cleanup worktree
 
 The `pr` command is idempotent: run it to create, or again to update after more commits.
 
-## Work Queue
+## Full Feature Workflow
 
-Manage tasks with the work queue:
+A typical workflow from start to ship:
 
 ```bash
-lfwork add "Implement dark mode"    # propose work
-lfwork approve <id>                  # approve for work
-lfwork next                          # show next item for agents
+wt switch --create my-feature       # create worktree
+lf design: describe the feature     # interactive design session
+lf implement                        # build from design
+lf polish                           # run tests, fix issues
+lf review                           # final quality check
+lfops commit                        # commit with generated message
+lfops pr                            # create PR
+lfops land                          # merge when approved
 ```
 
-Configure backend in `.lf/config.yaml`:
+## Different Models
 
-```yaml
-work:
-  backend: file      # or "asana"
-  auto_rebase: true
+Override the default model per-task:
+
+```bash
+lf review -m codex              # use Codex
+lf implement -m gemini          # use Gemini
+lf debug -m claude:opus         # use Claude Opus
 ```
 
-## Yolo Mode
+## Voices
 
-For trusted pipelines, skip all permission prompts:
+Apply personas to shape agent responses:
 
-```yaml
-yolo: true
+```bash
+lf review --voice concise
+lf implement --voice architect,concise  # multiple voices
 ```
 
-Use when:
-- Running in an isolated worktree
-- Pipeline is well-tested
-- You want fully autonomous operation
+Create voices as markdown files in `.lf/voices/`:
+
+```markdown
+# .lf/voices/concise.md
+
+Be concise. One sentence where possible. Skip obvious explanations.
+```
+
+## Custom Tasks
+
+Create your own tasks in `.claude/commands/`:
+
+```markdown
+# .claude/commands/test.md
+
+Run the test suite. Fix any failures.
+
+## Rules
+- Run `pytest tests/`
+- Fix failing tests
+- Don't skip or delete tests
+```
+
+Then run:
+
+```bash
+lf test
+```
+
+## Worktrees
+
+Use git worktrees to keep features isolated:
+
+```bash
+wt switch --create feature       # create worktree
+wt list                          # show all worktrees
+wt remove feature                # delete worktree + branch
+```
+
+See [worktrunk](https://github.com/loopflowstudio/worktrunk) for the full `wt` command reference.

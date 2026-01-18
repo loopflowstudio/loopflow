@@ -12,7 +12,6 @@ Loopflow configuration lives in `.lf/config.yaml` at the root of your repository
 ```yaml
 agent_model: claude:opus
 push: true
-pr: false
 
 # Tasks that default to interactive mode
 interactive:
@@ -34,11 +33,6 @@ ide:
   warp: true
   cursor: true
   workspace: myproject.code-workspace
-
-pipelines:
-  ship:
-    tasks: [implement, review, test, commit]
-    pr: true
 ```
 
 ## Options
@@ -77,14 +71,6 @@ Auto-push after commits in auto mode.
 push: true
 ```
 
-### pr
-
-Open a PR after pipelines complete.
-
-```yaml
-pr: true
-```
-
 ### yolo
 
 Skip all permission prompts. Passes `--dangerously-skip-permissions` to Claude Code.
@@ -93,7 +79,7 @@ Skip all permission prompts. Passes `--dangerously-skip-permissions` to Claude C
 yolo: true
 ```
 
-Use with caution. Best for trusted pipelines in worktrees.
+Use with caution.
 
 ### chrome
 
@@ -163,7 +149,7 @@ lf review --diff --diff-files # both: files + diff
 
 ### ide
 
-Configure which IDEs loopflow installs (used by `lf ops install`).
+Configure which IDEs loopflow opens.
 
 ```yaml
 ide:
@@ -226,38 +212,9 @@ lfops summarize -a              # Regenerate all configured summaries
 
 Summaries are cached in `.lf/summaries/` and auto-refreshed when source files change on main.
 
-### work
-
-Work queue configuration for task management. Integrates with `lfwork` CLI.
-
-```yaml
-work:
-  backend: file              # "file" or "asana"
-  auto_rebase: true          # Rebase before starting work
-  auto_land: false           # Auto-land completed work
-```
-
-With Asana backend:
-
-```yaml
-work:
-  backend: asana
-  asana:
-    project_id: "1234567890"
-```
-
-Work items live in `.todo/` (file backend) or sync with Asana. Use `lfwork` to manage:
-
-```bash
-lfwork list                  # Show work items
-lfwork add "Fix bug"         # Add item
-lfwork approve <id>          # Approve for work
-lfwork next                  # Show next available item
-```
-
 ## Run Modes
 
-By default, tasks run in **auto mode**: non-interactive with streaming output. This is ideal for most coding tasks and background execution. All runs append logs under `~/.lf/logs/<worktree>/`.
+By default, tasks run in **auto mode**: non-interactive with streaming output. This is ideal for most coding tasks.
 
 Tasks listed in the `interactive` config default to interactive mode instead. You can override the default for any task:
 
@@ -266,34 +223,7 @@ lf implement           # auto mode (default)
 lf design              # interactive (if in config.interactive list)
 lf implement -i        # force interactive
 lf design -a           # force auto
-lf implement &         # background (shell handles it)
 ```
-
-## Pipelines
-
-Pipelines chain tasks together. Each task runs in auto mode, with auto-commits between steps.
-
-```yaml
-pipelines:
-  ship:
-    tasks: [implement, review, test, commit]
-    push: true   # override global push setting
-    pr: true     # open PR when done
-```
-
-Run a pipeline:
-
-```bash
-lf ship
-```
-
-### Pipeline options
-
-| Option | Description |
-|--------|-------------|
-| `tasks` | List of task names to run in order |
-| `push` | Override global `push` setting for this pipeline |
-| `pr` | Open PR after pipeline completes |
 
 ## Task files
 
@@ -333,10 +263,6 @@ Implement the following feature:
 
 Follow the existing code style.
 ```
-
-## Environment variables
-
-No environment variable overrides are supported yet.
 
 ## Auto-included context
 

@@ -5,6 +5,8 @@ title: API Reference
 
 # API Reference
 
+*Coming soon.*
+
 The lfd daemon exposes a JSON-over-newline protocol on a Unix socket.
 
 ## Protocol

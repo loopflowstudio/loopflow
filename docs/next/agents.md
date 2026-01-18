@@ -1,11 +1,11 @@
 ---
 layout: default
-title: Daemon
+title: Background Agents
 ---
 
-# Daemon (lfd)
+# Background Agents
 
-The orchestra: background loops, autonomous work. Agents that run while you sleep.
+*Coming soon.*
 
 The `lfd` daemon tracks sessions and orchestrates background agents. Define agents as markdown files—what they do, when they trigger, how they merge. They run in the background, each in its own worktree. You review the PRs.
 

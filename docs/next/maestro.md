@@ -5,6 +5,8 @@ title: Maestro
 
 # Maestro
 
+*Coming soon.*
+
 The podium: visual control, real-time feedback. See your agents at work.
 
 Maestro is a native Mac app that wraps the CLI. Point-and-click prompt selection, live streaming output, worktree management in a sidebar. Start with the CLI to learn the system; add Maestro when you're managing multiple agents.
@@ -155,4 +157,4 @@ interactive:
   - design        # These tasks default to interactive
 ```
 
-See [Configuration](config.md) for all options.
+See [Configuration](../config.md) for all options.

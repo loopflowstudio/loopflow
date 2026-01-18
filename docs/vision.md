@@ -7,7 +7,7 @@ title: Philosophy
 
 Loopflow is a workflow layer for people who care about craft.
 
-## The Maestro Mindset
+## The Loopflow Mindset
 
 Engineers at scrappy AI labs, ML startups, and research-adjacent teams. High standards for craft. Skeptical of "just scale it" solutions. Want to work *with* agents—co-creation and delegation, not either/or.
 
@@ -23,7 +23,7 @@ Engineers at scrappy AI labs, ML startups, and research-adjacent teams. High sta
 - Prompts as artifacts, not chat logs
 - Quality gates, not vibes
 
-## What Maestros Reject
+## What We Reject
 
 Not specific practices, but single-sided mentalities:
 
@@ -32,7 +32,7 @@ Not specific practices, but single-sided mentalities:
 - **Pure delegation:** "Let the agent figure it out" without quality gates
 - **Pure control:** Micromanaging every token instead of trusting the workflow
 
-Maestros reject the false choice. They want the speed of automation *and* the quality of craft.
+We reject the false choice. We want the speed of automation *and* the quality of craft.
 
 ## The Hard Problems
 
@@ -59,14 +59,12 @@ Prompts are markdown files in your repository. Versioned with git, reviewed in P
   design.md
 ```
 
-### Pipelines with Quality Gates
+### Chained Tasks
 
 Chain tasks together with review steps between them. Each pass builds on the previous one.
 
-```yaml
-pipelines:
-  ship:
-    tasks: [implement, review, polish, commit]
+```bash
+lf implement && lf review && lf polish && lfops commit
 ```
 
 ### Backend-Agnostic

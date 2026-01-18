@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator
 
 # Re-export session logging functions for backwards compatibility
-from loopflow.lf.session import log_session_start, log_session_end, SOCKET_PATH
+from loopflow.lf.models import log_session_start, log_session_end, SOCKET_PATH
 
 
 class DaemonClient:

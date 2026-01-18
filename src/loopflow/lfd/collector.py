@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 
 from loopflow.lf.git import autocommit as git_autocommit
-from loopflow.lf.session import _send_fire_and_forget
+from loopflow.lf.models import _send_fire_and_forget
 from loopflow.lf.logging import (
     get_model_env,
     open_json_log,

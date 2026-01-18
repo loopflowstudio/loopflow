@@ -17,6 +17,7 @@ class TaskConfig:
     model: str | None = None
     voice: list[str] | None = None
     chrome: bool | None = None  # Enable Chrome integration for Claude Code
+    diff_files: bool | None = None  # Include files changed on branch
 
 
 @dataclass
@@ -67,6 +68,7 @@ def parse_task_file(name: str, text: str) -> TaskFile:
             model=config_dict.get("model"),
             voice=voice,
             chrome=config_dict.get("chrome"),
+            diff_files=config_dict.get("diff_files"),
         ),
     )
 

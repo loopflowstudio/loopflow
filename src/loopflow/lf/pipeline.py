@@ -17,8 +17,7 @@ from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lf.pipelines import PipelineDef, RaceConfig, ResolvedStep, resolve_pipeline, StepConfig
 from loopflow.lf.messages import generate_pr_message
 from loopflow.lf.logging import write_prompt_file
-from loopflow.lf.session import log_session_start, log_session_end
-from loopflow.lf.models import Session, SessionStatus
+from loopflow.lf.models import Session, SessionStatus, log_session_start, log_session_end
 from loopflow.lf.worktrees import create as create_worktree, remove as remove_worktree
 
 

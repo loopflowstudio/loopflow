@@ -103,16 +103,28 @@ Follow the existing code style.
 | `--chrome` | Enable Chrome browser automation |
 | `--no-chrome` | Disable Chrome automation |
 
-## Context Assembly
+## What's Included by Default
 
 Every task automatically includes:
 
-1. **Repo docs** — all `.md` files at repository root (README, STYLE, etc.)
-2. **Branch files** — full content of files touched by the current branch
-3. **Config context** — files listed in `.lf/config.yaml` context section
-4. **Extra files** — files passed with `-x` flag
-5. **Clipboard** — if `-v` flag is set
-6. **Summaries** — pre-generated LLM summaries (if configured)
+| Context | Default | How to disable |
+|---------|---------|----------------|
+| **Repo docs** (README, STYLE, etc.) | ✓ included | `--no-docs` |
+| **Branch files** (files you've changed) | ✓ included | `--no-diff-files` |
+
+## What's Opt-In
+
+These require explicit flags or config:
+
+| Context | How to enable |
+|---------|---------------|
+| **Raw diff** (line-by-line changes) | `--diff` |
+| **Clipboard** | `-v` / `--paste` |
+| **Extra files** | `-x FILE` |
+| **Summaries** | Configure in `.lf/config.yaml` |
+| **Chrome automation** | `--chrome` |
+
+See [Configuration](config.md) for setting defaults via config file.
 
 ## Examples
 

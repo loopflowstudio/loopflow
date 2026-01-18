@@ -17,35 +17,38 @@ Loopflow is a system for storing prompts in git and chaining them into workflows
 
 The tagline stays. The subtitle grounds it for people who don't know what that means yet.
 
-### What stays
+### What stays (Level 1)
 
 - Prompts as markdown files in `.claude/commands/` or `.lf/`
-- Pipelines in `.lf/config.yaml`
-- Worktrees via `wt` (worktrunk)
 - `lf <task>`, `lf : "inline"`, context flags
+- `lfops pr`, `lfops land`, `lfops commit` — git workflow
+- Worktrees via `wt` (worktrunk)
+- Manual chaining: `lf implement; lf polish; lfops pr`
 
-### What gets de-emphasized
+### What gets de-emphasized (Level 2 / Beta)
 
-- `lfd` daemon and background agents → "Level 2" / beta docs section
+- Pipelines in `.lf/config.yaml` → power feature, not intro material
+- `lfd` daemon and background agents
+- Session tracking / SQLite → internal detail
+- Multi-model racing
 - Maestro → "Coming soon" teaser
-- Session tracking / SQLite → internal detail, not user-facing
-- Multi-model racing → advanced feature in Level 2
 
 ### New docs structure
 
 **Level 1: Core (main navigation)**
 ```
 docs/
-  index.md          # Quick start: install, run a task, create a pipeline
+  index.md          # Quick start: install, run a task, ship with lfops
   tasks.md          # Writing and organizing prompts
-  pipelines.md      # Chaining tasks, auto-commit between steps
+  workflow.md       # lfops pr, lfops land, lfops commit
   config.md         # .lf/config.yaml reference (trimmed to L1 features)
-  patterns.md       # Recipes (debug, design-first, etc.)
+  patterns.md       # Recipes (debug, design-first, manual chaining)
 ```
 
 **Level 2: Advanced/Beta (separate section)**
 ```
 docs/advanced/
+  pipelines.md      # Declarative task chaining, auto-commit
   agents.md         # lfd daemon, background agents
   multi-model.md    # Racing, parallel execution
   api.md            # Socket protocol for integrations
@@ -57,9 +60,28 @@ docs/
   roadmap.md        # Maestro GUI, future vision
 ```
 
+### The Level 1 workflow story
+
+```bash
+# Debug an error
+lf debug -v                      # paste error, watch it fix
+
+# Build a feature
+wt switch --create my-feature    # worktree for isolation
+lf design: add auth              # interactive design
+lf implement                     # build it
+lf polish                        # run tests, fix issues
+lfops pr                         # open PR
+
+# Land it
+lfops land                       # squash-merge, cleanup
+```
+
+No pipelines. No daemon. Just tasks and git workflow.
+
 ### Key quotes to preserve
 
-> "Store prompts in git. Chain them into pipelines."
+> "Store prompts in git."
 
 > "Tasks are markdown files."
 
@@ -225,12 +247,16 @@ Supported terminals: Warp, Ghostty, iTerm2, Terminal.app
 
 ### Docs
 ```bash
-# Main docs focus on CLI only
-grep -r "lfd\|daemon" docs/*.md  # only in docs/advanced/
+# Main docs focus on tasks + lfops workflow
+grep -r "lfd\|daemon" docs/*.md   # only in docs/advanced/
+grep -r "pipeline" docs/*.md      # only in docs/advanced/
 grep -r "Maestro" docs/*.md       # only in docs/roadmap.md
 
 # README has new subtitle
 head -5 README.md | grep "Reusable prompts"
+
+# Quick start shows manual chaining, not pipelines
+grep "lf implement" docs/index.md | grep -v "lf ship"
 ```
 
 ### Maestro
@@ -249,6 +275,8 @@ Manual verification:
 ## Decisions made
 
 - **Tagline:** Keep "Arrange agents to code in harmony" + subtitle "Reusable prompts. Composable workflows."
-- **lfd:** Keep in codebase, document in Level 2/beta section
+- **Level 1:** Tasks (`lf`) + git workflow (`lfops`) + worktrees (`wt`)
+- **Level 2:** Pipelines, lfd daemon, multi-model, session tracking
+- **Coming soon:** Maestro
 - **Live output:** Maestro requires lfd daemon for streaming (connects via socket)
 - **Terminal:** Require explicit config (`terminal: warp`), no auto-detection magic

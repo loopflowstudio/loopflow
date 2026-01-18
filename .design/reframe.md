@@ -2,7 +2,7 @@
 
 ## What to build
 
-Rewrite docs for someone installing loopflow CLI today. No agents, no Maestro, no pipelines in the main flow. Those go in "under development."
+Rewrite docs to teach the building blocks first: prompts, tasks, git workflow. Orchestration features (pipelines, agents, Maestro) move to "under development" — still available, just not the entry point.
 
 ---
 

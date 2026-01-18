@@ -1,8 +1,8 @@
-# Maestro: Dashboard, Not Terminal
+# Maestro: The Podium
 
 ## What to build
 
-Rebuild Maestro as a monitoring dashboard. Users who want interactive sessions use their preferred terminal. Maestro shows what's happening across worktrees.
+Rebuild Maestro as the place you conduct from — launch tasks, watch progress, ship when ready. Interactive sessions happen in your terminal; Maestro is where you see everything and direct the work.
 
 **Design principle:** Play nice with existing tools. Don't compete with terminals.
 

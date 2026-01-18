@@ -1,8 +1,12 @@
-# Target Customer
+# Target Customer: Softwarists
+
+**Softwarists** — software artists who love making software.
 
 Engineers and researchers at scrappy AI labs, ML startups, and research-adjacent teams. High standards for craft. Skeptical of "just scale it" solutions. Want to work *with* agents—co-creation and delegation, not either/or.
 
 Loves vibe coding, uses Claude Code constantly, but regularly hits situations where code goes off the rails or lacks judgment. Has deeply challenging technical problems at the core of their job. Still coding because they want to be, not because they have to be.
+
+Writing software is like writing music. Yes, it produces something valuable. But the craft has merit as an experience for the creator. Softwarists want to reach their fullest potential with AI support—not just ship faster, but create better.
 
 ---
 
@@ -41,7 +45,7 @@ The "loop" in Loopflow is literal. Composition, harmony, timing, listening—the
 
 *Prompts as artifacts.* Prompts live in the repo, not chat logs. `git log` shows prompt history. `git diff` shows what changed. When something works, you can find it again. When something breaks, you can trace it back.
 
-*Quality gates, not vibes.* Review before shipping. Tests before commit. Not because they don't trust the model—because they've seen what happens when you skip it. The goal is production-quality output, not "it works on my machine."
+*Craft, not vibes.* Review before shipping. Tests before commit. Not because they don't trust the model—because they've seen what happens when you skip it. The goal is production-quality output, not "it works on my machine."
 
 *Actionable over comprehensive.* A clear recommendation you can disagree with beats a balanced analysis you have to interpret. Specific enough to act on. Vague observations are useless.
 
@@ -53,7 +57,7 @@ Not specific practices, but single-sided mentalities:
 
 - **Pure throughput:** 10 parallel agents producing slop nobody reviews
 - **Pure craft:** Refusing to use AI because it might make mistakes
-- **Pure delegation:** "Let the agent figure it out" without quality gates
+- **Pure delegation:** "Let the agent figure it out" without review or structure
 - **Pure control:** Micromanaging every token instead of trusting the workflow
 
 Maestros reject the false choice. They want the speed of automation *and* the quality of craft. They trust the agent *and* verify the output.
@@ -71,16 +75,28 @@ Maestros reject the false choice. They want the speed of automation *and* the qu
 
 ## How Loopflow fits
 
-Loopflow is the workflow layer for people who want both. Fast iteration *and* quality gates. Autonomous agents *and* human review. Focused sessions *and* parallel execution when you need it.
+Loopflow solves one problem well: **prompt and context construction**. Like worktrunk solves worktree management.
+
+### What's ready today
+
+- `lf <task>` — assemble context, run prompt, pass to agent
+- `lfops pr/land/commit` — git workflow
+- Tasks as markdown files — versioned, reusable, shareable
+
+### What's coming next
+
+- Pipelines — chain tasks with clear structure
+- Background agents — autonomous work via `lfd`
+- Maestro — the podium for conducting agents
 
 ### Feature mapping
 
 | They value | Loopflow provides |
 |------------|-------------------|
-| Human in the loop | Prompts you can read, edit, and re-run. Transparent state. |
-| Unblock first | Working drafts fast, refinement loops, easy re-invocation |
-| Prompts as artifacts | Tasks as markdown files in `.claude/commands/`, versioned with git |
-| Quality gates | Pipelines with review steps, tests before commit |
+| Human in the loop | Prompts you can read, edit, and re-run |
+| Unblock first | `lf debug -v` — paste error, watch it fix |
+| Prompts as artifacts | Tasks in `.claude/commands/`, versioned with git |
+| Craft over vibes | Built-in review task, structured workflows |
 | Reproducible workflows | Same prompt runs on Claude, Codex, or Gemini |
 
 ---

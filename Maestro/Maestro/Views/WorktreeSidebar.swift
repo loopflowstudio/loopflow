@@ -665,16 +665,26 @@ struct WorktreeRow: View {
                 stageBadge(task)
             }
 
+            // Status indicator: ● running, ◐ dirty, ○ clean
             if isRunning {
-                RunningIndicator(pulseAnimation: $pulseAnimation)
+                Text("●")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.blue)
+                    .scaleEffect(pulseAnimation ? 1.1 : 0.9)
+                    .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: pulseAnimation)
+                    .onAppear { pulseAnimation = true }
+                    .onDisappear { pulseAnimation = false }
+                    .accessibilityLabel("Task running")
             } else if worktree.isDirty {
-                Circle()
-                    .fill(.orange)
-                    .frame(width: 6, height: 6)
+                Text("◐")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.orange)
+                    .accessibilityLabel("Has uncommitted changes")
             } else {
-                Image(systemName: "checkmark")
-                    .font(.caption2)
+                Text("○")
+                    .font(.system(size: 10))
                     .foregroundStyle(.green)
+                    .accessibilityLabel("Clean")
             }
         }
     }
@@ -699,35 +709,6 @@ struct WorktreeRow: View {
         .background(style.color.opacity(0.2))
         .foregroundStyle(style.color)
         .clipShape(Capsule())
-    }
-}
-
-/// Running state indicator with accessibility support.
-/// Shows pulsing dot with animation, or static "Running" text for reduced motion.
-struct RunningIndicator: View {
-    @Binding var pulseAnimation: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        if reduceMotion {
-            // Static text label for users with reduced motion
-            Text("Running")
-                .font(.caption2)
-                .fontWeight(.medium)
-                .foregroundStyle(.blue)
-                .accessibilityLabel("Task running")
-        } else {
-            // Pulsing dot for standard users
-            Circle()
-                .fill(.blue)
-                .frame(width: 8, height: 8)
-                .scaleEffect(pulseAnimation ? 1.2 : 0.8)
-                .opacity(pulseAnimation ? 1.0 : 0.6)
-                .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: pulseAnimation)
-                .onAppear { pulseAnimation = true }
-                .onDisappear { pulseAnimation = false }
-                .accessibilityLabel("Task running")
-        }
     }
 }
 

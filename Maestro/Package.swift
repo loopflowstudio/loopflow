@@ -10,13 +10,11 @@ let package = Package(
     products: [
         .executable(name: "Maestro", targets: ["Maestro"])
     ],
-    dependencies: [
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm", from: "1.2.0")
-    ],
+    dependencies: [],
     targets: [
         .executableTarget(
             name: "Maestro",
-            dependencies: ["SwiftTerm"],
+            dependencies: [],
             path: "Maestro",
             exclude: ["Info.plist", "Maestro.sdef"]
         ),

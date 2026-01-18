@@ -7,7 +7,7 @@ title: Home
 
 Arrange agents to code in harmony.
 
-Store prompts in git. Chain them into pipelines. Run them across isolated worktrees while you work on something else.
+Reusable prompts. Composable workflows.
 
 ## Quick Debug
 
@@ -31,7 +31,7 @@ Design a feature interactively, then let agents implement it.
 ```bash
 wt switch --create add-divide           # create a worktree
 lf design: add division to calculator   # interactive design session
-lf implement && lf polish && lf review  # autonomous pipeline
+lf implement && lf polish && lf review  # chain tasks
 ```
 
 Each task reads what the previous one wrote. Design produces a spec, implement builds it, polish runs tests, review gives a verdict.
@@ -78,28 +78,13 @@ lf implement: add auth        # pass arguments after colon
 lf : "fix the typo"           # inline prompt, no file
 ```
 
-## Pipelines
-
-Chain tasks in `.lf/config.yaml`:
-
-```yaml
-pipelines:
-  ship:
-    tasks: [implement, review, polish, commit]
-    pr: true
-```
-
-```bash
-lf ship    # runs each task, commits between steps
-```
-
 ## Worktrees
 
 Loopflow works best with git worktrees. Each feature gets its own directory.
 
 ```bash
 wt switch --create my-feature    # create worktree
-lf ship                          # agents work here
+lf implement: add auth           # agents work here
 lfops pr                         # open PR
 lfops land                       # merge and cleanup
 ```
@@ -110,7 +95,7 @@ Same task, different models:
 
 ```bash
 lf review -m codex              # use Codex
-lf implement --race claude,codex   # race them, pick winner
+lf implement -m gemini          # use Gemini
 ```
 
 ---
@@ -119,8 +104,10 @@ lf implement --race claude,codex   # race them, pick winner
 
 ## Next Steps
 
-- [Configuration](config.md) — all options for `.lf/config.yaml`
+- [Getting Started](getting-started.md) — install, run the demo, write your first task
+- [`lf` command reference](lf.md) — all flags and options
+- [Built-in tasks](builtins.md) — debug, design, implement, polish, review
+- [`lfops` commands](lfops.md) — pr, land, commit, init, install
+- [Configuration](config.md) — `.lf/config.yaml` options
 - [Patterns](patterns.md) — workflows and recipes
-- [Maestro](maestro.md) — native Mac app for visual control
-- [Daemon](lfd.md) — background agents
-- [Philosophy](vision.md) — the maestro mindset
+- [Philosophy](vision.md) — the loopflow mindset

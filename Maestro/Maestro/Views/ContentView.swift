@@ -1,4 +1,4 @@
-// Main content view with sidebar and prompt launcher.
+// Main content view with sidebar and worktree detail panel.
 
 import SwiftUI
 
@@ -39,14 +39,7 @@ struct ContentView: View {
                 ProgressView("Loading...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if appState.currentRepo != nil {
-                VStack(spacing: 0) {
-                    if Flags.beta, let pipeline = appState.selectedPipeline {
-                        pipelineEditorBinding(pipeline)
-                    } else {
-                        PromptLauncher(appState: appState)
-                    }
-                    ResultsPanel(appState: appState)
-                }
+                detailContent
             } else {
                 // No repo loaded yet - show loading placeholder
                 ProgressView("Opening repository...")
@@ -73,6 +66,19 @@ struct ContentView: View {
                 }
                 .help("Refresh workspaces and tasks")
             }
+        }
+    }
+
+    @ViewBuilder
+    private var detailContent: some View {
+        if Flags.beta, let pipeline = appState.selectedPipeline {
+            pipelineEditorBinding(pipeline)
+        } else if let worktree = appState.selectedWorktree {
+            // Show worktree detail panel when a worktree is selected
+            WorktreeDetailPanel(appState: appState, worktree: worktree)
+        } else {
+            // No worktree selected - show prompt launcher centered
+            PromptLauncher(appState: appState)
         }
     }
 }

@@ -1,0 +1,126 @@
+---
+layout: default
+title: lfops Commands
+---
+
+# lfops Commands
+
+Git workflow commands for shipping code.
+
+## lfops pr
+
+Create or update a PR, open in browser.
+
+```bash
+lfops pr
+```
+
+Generates a PR description based on the branch diff, creates the PR (or updates if one exists), and opens it in your browser.
+
+Idempotent: run it to create, or again to update after more commits.
+
+## lfops land
+
+Squash-merge to main, cleanup worktree.
+
+```bash
+lfops land
+```
+
+Merges your PR to main, deletes the remote branch, and removes the local worktree. One command to ship.
+
+## lfops commit
+
+Generate commit message and commit.
+
+```bash
+lfops commit
+```
+
+Stages changes, generates a commit message based on the diff, and commits.
+
+Options:
+
+| Flag | Description |
+|------|-------------|
+| `-p, --push` | Push after committing |
+
+## lfops init
+
+Scaffold `.lf/config.yaml`.
+
+```bash
+lfops init
+```
+
+Creates a starter config file in your repo.
+
+## lfops install
+
+Install dependencies.
+
+```bash
+lfops install
+```
+
+Installs Claude Code, Codex CLI, Gemini CLI, and worktrunk.
+
+## lfops doctor
+
+Check dependencies.
+
+```bash
+lfops doctor
+```
+
+Verifies that required tools are installed and working.
+
+## lfops status
+
+Show running sessions.
+
+```bash
+lfops status
+```
+
+Lists any tasks currently running in auto mode.
+
+## lfops summarize
+
+Generate codebase summaries.
+
+```bash
+lfops summarize src/           # Generate summary for src/
+lfops summarize -t 20000 src   # With specific token budget
+lfops summarize -a             # Regenerate all configured summaries
+```
+
+Creates pre-generated LLM summaries for large codebases. Summaries are cached in `.lf/summaries/` and included in context when configured.
+
+## lfops rebase
+
+Rebase current branch onto main.
+
+```bash
+lfops rebase
+```
+
+Fetches main and rebases. If conflicts occur, launches an assistant to help resolve them.
+
+## Typical Workflow
+
+```bash
+wt switch --create my-feature    # create worktree
+# ... work on feature ...
+lfops commit                     # commit with generated message
+lfops pr                         # open PR
+# ... address review feedback ...
+lfops commit -p                  # commit and push
+lfops land                       # merge and cleanup
+```
+
+## See Also
+
+- [`lf` command reference](lf.md) — running tasks
+- [Built-in tasks](builtins.md) — debug, design, implement, polish, review
+- [Configuration](config.md) — `.lf/config.yaml` options

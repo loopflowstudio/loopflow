@@ -37,7 +37,7 @@ docs/
   lfops.md              # lfops pr, land, commit, init, install
   config.md             # .lf/config.yaml options
 
-  under-development/
+  dev/
     pipelines.md        # Declarative task chaining
     agents.md           # lfd daemon, background agents
     maestro.md          # GUI app
@@ -111,8 +111,8 @@ docs/
 # Main docs have no daemon/pipeline/Maestro references
 grep -r "lfd\|daemon\|pipeline\|Maestro" docs/*.md  # empty
 
-# Under-development contains the advanced features
-ls docs/under-development/  # pipelines.md, agents.md, maestro.md, etc.
+# dev/ contains the advanced features
+ls docs/dev/  # pipelines.md, agents.md, maestro.md, etc.
 
 # Getting started shows the demo workflow
 grep "lf debug -v" docs/getting-started.md

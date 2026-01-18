@@ -1,5 +1,5 @@
 # VHS Demo for Loopflow
-Output docs/demo.gif
+Output demo.gif
 
 Set FontSize 14
 Set Width 900

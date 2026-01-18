@@ -2,62 +2,95 @@
 
 Package reorganization: `cli/` → `lf/`, `lfops.py` → `lfops/` with submodules, move shared types to `lf/models.py`.
 
-## Review
+## Summary
 
-**Verdict:** Needs work
+This branch reorganizes the loopflow package structure for better separation of concerns.
 
-### Uncommitted changes are incomplete
+## Changes
 
-The uncommitted diff shows a partially-complete split of `lfops/commands.py` into submodules (`init.py`, `pr.py`, `land.py`, `commit.py`, `rebase.py`, `summarize.py`). The new `commands.py` imports these modules and calls `register_commands(app)`, but the submodule files don't exist yet:
+### Package structure
+
+```
+src/loopflow/
+├── lf/                    # Core task execution (was cli/)
+│   ├── __init__.py        # CLI entry point
+│   ├── run.py             # Task execution logic
+│   ├── context.py         # Prompt assembly
+│   ├── config.py          # Configuration loading
+│   ├── files.py           # File gathering
+│   ├── git.py             # Git operations
+│   ├── launcher.py        # Agent launchers (Claude, Codex, Gemini)
+│   ├── pipeline.py        # Pipeline execution
+│   ├── pipelines.py       # Pipeline definitions
+│   ├── models.py          # Session/SessionStatus (shared with lfd)
+│   ├── messages.py        # LLM HTTP integration (was llm_http.py)
+│   ├── frontmatter.py     # Task frontmatter parsing
+│   ├── tokens.py          # Token counting
+│   ├── voices.py          # Voice/persona loading
+│   ├── worktrees.py       # Worktree management
+│   ├── design.py          # Design doc gathering
+│   ├── logging.py         # Log file management
+│   └── builtins/          # Built-in prompts and templates
+│
+├── lfops/                 # Git workflow commands (was lfops.py)
+│   ├── __init__.py        # Lazy entry point
+│   ├── commands.py        # Typer app, registers submodules
+│   ├── _helpers.py        # Shared utilities
+│   ├── init.py            # lfops init, install, doctor, version
+│   ├── pr.py              # lfops pr
+│   ├── land.py            # lfops land
+│   ├── commit.py          # lfops commit
+│   ├── rebase.py          # lfops rebase
+│   └── summarize.py       # lfops summarize, summary loading
+│
+├── lfd/                   # Daemon and agents
+│   ├── client.py          # Daemon client (re-exports session logging)
+│   ├── work/              # Work queue (moved from root)
+│   └── ...                # Agent management, server, triggers
+│
+├── lfwork.py              # Work queue CLI
+└── publish.py             # PyPI publishing
+```
+
+### Key moves
+
+| From | To |
+|------|-----|
+| `cli/` | `lf/` |
+| `cli/run.py` | `lf/run.py` |
+| `llm_http.py` | `lf/messages.py` |
+| `lfops.py` (monolith) | `lfops/` (submodules) |
+| `summarize.py` | `lfops/summarize.py` |
+| `work/` | `lfd/work/` |
+| `lfd/pipelines.py` | `lf/pipelines.py` |
+
+### Circular import fix
+
+Session and SessionStatus were in `lfd/client.py`, but `lf/run.py` needed them. Moving to `lf/models.py` breaks the cycle:
+
+- `lf/models.py` — defines Session, SessionStatus, fire-and-forget logging
+- `lfd/client.py` — re-exports for backwards compatibility
+
+### lfops split pattern
+
+Each submodule exports `register_commands(app)`:
 
 ```python
+# lfops/commands.py
 from loopflow.lfops import init as init_module
-from loopflow.lfops import pr as pr_module
-# ...
 init_module.register_commands(app)
 ```
 
-Files referenced but missing:
-- `src/loopflow/lfops/init.py`
-- `src/loopflow/lfops/pr.py`
-- `src/loopflow/lfops/land.py`
-- `src/loopflow/lfops/commit.py`
-- `src/loopflow/lfops/rebase.py`
-- `src/loopflow/lfops/summarize.py`
+This keeps the Typer app clean and allows lazy loading.
 
-Also references a moved `summarize` module that needs to exist:
-- `from loopflow.lfops.summarize import is_stale, load_summary` in `context.py`
+### Removed
 
-The branch is in a broken state: `summarize.py` was deleted but `lfops/summarize.py` doesn't exist yet.
+- `work_queue` field from `PromptComponents` (caused circular import; work queue now accessed directly)
+- `lfwt.py` (commands moved or removed)
+- `test_automode.py`, `test_backend.py`, `test_task_args.py`, `test_pipeline.py` (obsolete tests)
 
-### Work queue removed from context without replacement
+## Decisions
 
-The committed changes remove `gather_work_queue()` and the `work_queue` field from `PromptComponents`. This was intentional (fixing a circular import), but the format_prompt logic that output `<lf:work>` is also gone. If work queue context is still wanted, it needs a new home.
-
-### Lazy import in lfops/__init__.py
-
-The uncommitted changes add lazy imports to avoid circular imports:
-
-```python
-def main() -> None:
-    from loopflow.lfops.commands import main as _main
-    _main()
-```
-
-This is fine for the entrypoint, but `get_app()` being lazy means tests that import `from loopflow.lfops import get_app` will work differently than those importing `app` directly. The test changes handle this, but it's a subtle API change.
-
-### No _helpers.py visible
-
-The git status shows `src/loopflow/lfops/_helpers.py` as untracked, but it's not in the diff. If this contains shared code (like `_add_commit_push`, `_get_default_branch`, etc.), it should be reviewed to confirm the lfops split is complete.
-
-## Design notes
-
-**Package boundaries:**
-- `lf/` — core task execution, shared infrastructure (config, git, files, logging)
-- `lf/models.py` — Session/SessionStatus shared between lf and lfd
-- `lfops/` — git workflow commands (pr, land, commit, init, etc.)
-- `lfd/` — daemon, agents, work queue
-
-**Circular import fix:** Moved Session and fire-and-forget logging from `lfd/client.py` to `lf/models.py`. The lfd modules re-export for backwards compatibility.
-
-**lfops split pattern:** Each submodule has a `register_commands(app)` function that adds its commands to the Typer app. Keeps the split clean without complex imports.
+- **Lazy imports in lfops/__init__.py**: Avoids loading all submodules at import time. Tests use `get_app()` instead of importing `app` directly.
+- **Re-exports in lfd/client.py**: Backwards compatibility for code importing `log_session_start` from there.
+- **work/ under lfd/**: Work queue is daemon-related functionality, not core lf.

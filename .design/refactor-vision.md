@@ -10,45 +10,51 @@
 src/loopflow/
 ├── __init__.py          # version only
 │
-├── lf/                  # Task runner (core)
+├── lf/                  # Task runner (core) + shared infrastructure
 │   ├── __init__.py      # Typer app, --list, routing
 │   ├── run.py           # Task execution, inline prompts
 │   ├── context.py       # Prompt assembly
 │   ├── launcher.py      # Claude/Codex/Gemini execution
 │   ├── pipeline.py      # Pipeline execution
+│   ├── pipelines.py     # Pipeline definition data structures
 │   ├── design.py        # Design doc helpers
+│   ├── config.py        # .lf/config.yaml loading
+│   ├── git.py           # Git operations
+│   ├── files.py         # File gathering, binary detection
+│   ├── tokens.py        # Token counting
+│   ├── frontmatter.py   # YAML frontmatter parsing
+│   ├── logging.py       # Session logging
+│   ├── worktrees.py     # Worktree utilities
+│   ├── messages.py      # LLM message generation (commit, PR)
+│   ├── models.py        # Session data structures
+│   ├── voices.py        # Voice loading
 │   └── builtins/        # Built-in prompt templates
 │
 ├── lfops/               # Git workflow
 │   ├── __init__.py      # Re-exports main, app
 │   └── commands.py      # All commands (pr, land, commit, etc.)
 │
-├── lfd/                 # Agent daemon (already structured)
+├── lfd/                 # Agent daemon
 │   ├── work/            # Work queue (moved from top-level)
 │   └── ...
 │
-└── lib/                 # Shared infrastructure
-    ├── config.py        # .lf/config.yaml loading
-    ├── git.py           # Git operations
-    ├── files.py         # File gathering, binary detection
-    ├── tokens.py        # Token counting
-    ├── frontmatter.py   # YAML frontmatter parsing
-    ├── logging.py       # Session logging
-    ├── worktrees.py     # Worktree utilities
-    ├── llm_http.py      # LLM API calls
-    └── voices.py        # Voice loading
+├── lfwork.py            # Work queue CLI (standalone)
+├── summarize.py         # Codebase summarization
+└── publish.py           # PyPI publishing
 ```
 
 ## Changes Made
 
-1. Created `lib/` for shared infrastructure
-2. Renamed `cli/` to `lf/`, moved `context.py`, `launcher.py`, `pipeline.py`, `design.py`, `builtins/`
-3. Created `lfops/` package from `lfops.py`
-4. Moved `work/` under `lfd/`
-5. Deleted `lfwt.py` (redundant with `wt`)
-6. Updated all imports (src + tests)
-7. Fixed circular import (lfd → lf.context → lfd.work)
-8. Updated pyproject.toml entrypoints
+1. Renamed `cli/` to `lf/`, consolidating all core functionality
+2. Created `lfops/` package from `lfops.py`
+3. Moved `work/` under `lfd/`
+4. Moved `pipelines.py` from `lfd/` to `lf/` (used by core, not daemon-specific)
+5. Renamed `llm_http.py` to `messages.py`
+6. Created `lf/models.py` for Session and fire-and-forget session logging
+7. Deleted `lfwt.py` (redundant with `wt`)
+8. Updated all imports (src + tests)
+9. Fixed circular import (lfd → lf.context → lfd.work)
+10. Updated pyproject.toml entrypoints
 
 ## Test Consolidation
 
@@ -64,7 +70,11 @@ Result: 22 test files, 381 tests (was 25 files, 387 tests).
 
 ## Open Questions
 
-1. **lfops splitting** — commands.py is still 1779 lines. Could split into `pr.py`, `land.py`, `commit.py`, etc.
-2. **lfwork** — Still a top-level file. Design said make it `lfd work` subcommand.
-3. **summarize.py** — Still at top level. Could move to `lfops/` or `lib/`.
+1. **lfops splitting** — commands.py is ~1550 lines. Could split into `pr.py`, `land.py`, `commit.py`, etc.
+2. **lfwork** — Still a top-level file. Could become `lfd work` subcommand.
+3. **summarize.py** — Still at top level. Could move to `lfops/`.
 4. **publish.py** — Still at top level. Used for PyPI publishing.
+
+## Polish Notes
+
+- Fixed: Removed duplicate `rebase` command definition (shadowed by later definition)

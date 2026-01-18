@@ -429,7 +429,6 @@ def _judge_race(
 
     judge_prompt = _build_judge_prompt(diffs)
 
-    from loopflow.lf.launcher import get_runner
     backend, variant = parse_model("claude:opus")
     runner = get_runner(backend)
 

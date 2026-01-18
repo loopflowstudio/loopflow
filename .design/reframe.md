@@ -2,7 +2,20 @@
 
 ## What to build
 
-Rewrite docs around what's ready to use today: the CLI (`lf`, `lfops`, `wt`). Pipelines, agents, and Maestro are coming soon — move them to "under development."
+Rewrite docs around `lf` as a tight, focused tool — like worktrunk solves worktree management, `lf` solves **prompt and context construction**.
+
+What's ready today: the CLI (`lf`, `lfops`, `wt`). Pipelines, agents, and Maestro are coming soon.
+
+---
+
+## The core problem `lf` solves
+
+Prompt construction for coding agents:
+- Assemble context (repo docs, diff, files, clipboard)
+- Store prompts as reusable files
+- Pass it all to Claude/Codex/Gemini
+
+That's it. One problem, solved well.
 
 ---
 

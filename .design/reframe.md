@@ -2,7 +2,7 @@
 
 ## What to build
 
-Rewrite docs to teach the building blocks first: prompts, tasks, git workflow. Orchestration features (pipelines, agents, Maestro) move to "under development" — still available, just not the entry point.
+Rewrite docs around what's ready to use today: the CLI (`lf`, `lfops`, `wt`). Pipelines, agents, and Maestro are coming soon — move them to "under development."
 
 ---
 

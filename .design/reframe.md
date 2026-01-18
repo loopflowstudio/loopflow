@@ -1,41 +1,14 @@
-# Reframe: Prompts + Git Workflow
+# Reframe: CLI-First Docs
 
 ## What to build
 
-Rewrite docs to position loopflow as a CLI tool for prompt reuse. The core is simpler than current docs suggest:
-
-- Store prompts as files
-- Run them with `lf <task>`
-- Ship with `lfops pr`
-
-Everything else—pipelines, daemon, Maestro—moves to "advanced" or "coming soon."
-
----
-
-## The new story
-
-```bash
-# Debug an error
-lf debug -v                      # paste error, watch it fix
-
-# Build a feature
-wt switch --create my-feature    # worktree for isolation
-lf design: add auth              # interactive design
-lf implement                     # build it
-lf polish                        # run tests, fix issues
-lfops pr                         # open PR
-
-# Land it
-lfops land                       # squash-merge, cleanup
-```
-
-No pipelines. No daemon. Just tasks and git workflow.
+Rewrite docs for someone installing loopflow CLI today. No agents, no Maestro, no pipelines in the main flow. Those go in "under development."
 
 ---
 
 ## Tagline
 
-**Keep:** "Arrange agents to code in harmony" (poetic, aspirational)
+**Keep:** "Arrange agents to code in harmony"
 
 **Add subtitle:** "Reusable prompts. Composable workflows."
 
@@ -43,69 +16,86 @@ No pipelines. No daemon. Just tasks and git workflow.
 
 ## Docs structure
 
-**Level 1: Core**
 ```
 docs/
-  index.md          # Quick start: install, run a task, ship with lfops
-  tasks.md          # Writing and organizing prompts
-  workflow.md       # lfops pr, lfops land, lfops commit
-  config.md         # .lf/config.yaml (trimmed to L1 features)
-  patterns.md       # Recipes (debug, design-first, manual chaining)
-```
+  getting-started.md    # Install, run demo, see it work
+  lf.md                 # lf command reference (flags, :, args)
+  builtins.md           # Built-in tasks: debug, design, implement, polish, review
+  lfops.md              # lfops pr, land, commit, init, install
+  config.md             # .lf/config.yaml options
 
-**Level 2: Advanced**
-```
-docs/advanced/
-  pipelines.md      # Declarative task chaining, auto-commit
-  agents.md         # lfd daemon, background agents
-  multi-model.md    # Racing, parallel execution
-  api.md            # Socket protocol
-```
-
-**Coming Soon**
-```
-docs/
-  roadmap.md        # Maestro GUI, future vision
+  under-development/
+    pipelines.md        # Declarative task chaining
+    agents.md           # lfd daemon, background agents
+    maestro.md          # GUI app
+    multi-model.md      # Racing, parallel execution
+    api.md              # Socket protocol
 ```
 
 ---
 
-## What moves where
+## Page outlines
 
-| Feature | Current | New |
-|---------|---------|-----|
-| `lf <task>` | Level 1 | Level 1 |
-| `lfops pr/land/commit` | Mentioned | Level 1 (prominent) |
-| Worktrees (`wt`) | Level 1 | Level 1 |
-| Pipelines | Level 1 | Level 2 |
-| `lfd` daemon | Level 1 | Level 2 |
-| Multi-model | Level 1 | Level 2 |
-| Session tracking | Level 1 | Internal detail |
-| Maestro | Level 1 | Coming soon |
+### getting-started.md
 
----
+1. Install: `pip install loopflow && lfops install`
+2. Try it: clone demo repo, copy error, `lf debug -v`
+3. Full workflow:
+   ```bash
+   wt switch --create my-feature
+   lf design: add auth
+   lf implement
+   lf polish
+   lfops pr
+   ```
+4. Next: read about `lf` command, built-in tasks, or `lfops`
 
-## Key quotes to preserve
+### lf.md
 
-> "Store prompts in git."
+- `lf <task>` — run a task file
+- `lf <task>: args` — pass arguments
+- `lf : "inline prompt"` — no task file
+- Flags: `-i`, `-a`, `-x`, `-v`, `-c`, `-m`, `--voice`
+- Task file locations: `.claude/commands/`, `.lf/`
+- Context: what gets included automatically
 
-> "Tasks are markdown files."
+### builtins.md
 
-> "Tight loops. Do one thing, hand off cleanly."
+- `debug` — paste error, fix it
+- `design` — interactive spec writing
+- `implement` — build from design doc
+- `polish` — run tests, fix issues
+- `review` — assess code quality
+- `commit` — generate commit message
+
+### lfops.md
+
+- `lfops pr` — create/update PR
+- `lfops land` — squash-merge, cleanup worktree
+- `lfops commit` — generate commit message and commit
+- `lfops init` — scaffold config
+- `lfops install` — install dependencies
+
+### config.md
+
+- `agent_model` — default model
+- `context` — files always included
+- `exclude` — patterns to skip
+- `interactive` — tasks that default to interactive
+- `terminal` — for Maestro (under development)
+- `voice` — default voice
 
 ---
 
 ## Done when
 
 ```bash
-# Main docs focus on tasks + lfops workflow
-grep -r "lfd\|daemon" docs/*.md   # only in docs/advanced/
-grep -r "pipeline" docs/*.md      # only in docs/advanced/
-grep -r "Maestro" docs/*.md       # only in docs/roadmap.md
+# Main docs have no daemon/pipeline/Maestro references
+grep -r "lfd\|daemon\|pipeline\|Maestro" docs/*.md  # empty
 
-# README has new subtitle
-head -5 README.md | grep "Reusable prompts"
+# Under-development contains the advanced features
+ls docs/under-development/  # pipelines.md, agents.md, maestro.md, etc.
 
-# Quick start shows manual chaining, not pipelines
-grep "lf implement" docs/index.md | grep -v "lf ship"
+# Getting started shows the demo workflow
+grep "lf debug -v" docs/getting-started.md
 ```

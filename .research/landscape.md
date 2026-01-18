@@ -117,11 +117,12 @@ What people want: launch agents → background processing → smart notification
 
 ## Takeaways for Loopflow
 
-1. **Two valid philosophies**—Orchestrators (parallel agents, verify everything) and Factory Operators (queue tasks, trust the model). Support both.
-2. **Context is the hard problem**—better context management = competitive advantage
-3. **Worktrees are contested**—some power users avoid them. Support both workflows.
-4. **Status visibility is a gap**—no unified "what are my agents doing?" dashboard
-5. **Build carefully**—Claude Code changes weekly. Wrapper tools risk obsolescence.
+1. **Solve one problem well** — `lf` is for prompt/context construction. Like worktrunk for worktrees.
+2. **Context is the hard problem** — better context management = competitive advantage
+3. **Don't compete with terminals** — Warp, Ghostty, iTerm are great. Let people use what they like.
+4. **Prompts as artifacts** — the gap is reusable, versioned prompts. Own that.
+5. **CLI first, GUI later** — "start with the model and a CLI first" (steipete). Maestro comes after CLI is solid.
+6. **Build carefully** — Claude Code changes weekly. Stay portable, don't depend on internals.
 
 ---
 

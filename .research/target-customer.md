@@ -71,16 +71,28 @@ Maestros reject the false choice. They want the speed of automation *and* the qu
 
 ## How Loopflow fits
 
-Loopflow is the workflow layer for people who want both. Fast iteration *and* quality gates. Autonomous agents *and* human review. Focused sessions *and* parallel execution when you need it.
+Loopflow solves one problem well: **prompt and context construction**. Like worktrunk solves worktree management.
+
+### What's ready today
+
+- `lf <task>` — assemble context, run prompt, pass to agent
+- `lfops pr/land/commit` — git workflow
+- Tasks as markdown files — versioned, reusable, shareable
+
+### What's coming next
+
+- Pipelines — chain tasks with quality gates
+- Background agents — autonomous work via `lfd`
+- Maestro — the podium for conducting agents
 
 ### Feature mapping
 
 | They value | Loopflow provides |
 |------------|-------------------|
-| Human in the loop | Prompts you can read, edit, and re-run. Transparent state. |
-| Unblock first | Working drafts fast, refinement loops, easy re-invocation |
-| Prompts as artifacts | Tasks as markdown files in `.claude/commands/`, versioned with git |
-| Quality gates | Pipelines with review steps, tests before commit |
+| Human in the loop | Prompts you can read, edit, and re-run |
+| Unblock first | `lf debug -v` — paste error, watch it fix |
+| Prompts as artifacts | Tasks in `.claude/commands/`, versioned with git |
+| Quality gates | Built-in review task, pipelines coming soon |
 | Reproducible workflows | Same prompt runs on Claude, Codex, or Gemini |
 
 ---

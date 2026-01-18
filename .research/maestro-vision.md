@@ -4,6 +4,14 @@ Arrange agents to code in harmony. Reusable prompts. Composable workflows.
 
 ---
 
+## Software as Craft
+
+Writing software is like writing music. Yes, it produces something valuable. But we also believe in software as an art—a craft that has merit as an experience for the creator.
+
+Loopflow is for **softwarists**: software artists who love making software and want to reach their fullest potential with AI support. Not just shipping faster, but creating better. The joy is in the making.
+
+---
+
 ## What Loopflow Is
 
 A tight, focused tool for **prompt and context construction**. Like worktrunk solves worktree management, `lf` solves assembling context and prompts for coding agents.
@@ -74,7 +82,7 @@ Maestro is where you conduct from—launch tasks, watch progress, ship when read
 
 3. **Backend portability** — tools change fast. Same prompt runs on Claude, Codex, or Gemini.
 
-4. **Quality gates** — vibing produces slop. Review tasks and pipelines enforce discipline.
+4. **Craft over vibes** — vibing produces slop. Review tasks and clear workflows enforce discipline.
 
 ---
 

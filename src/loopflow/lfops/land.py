@@ -23,6 +23,44 @@ from loopflow.lfops._helpers import (
 )
 
 
+def _resolve_repos(worktree: str | None, strict: bool) -> tuple[Path, Path]:
+    """Resolve repo_root and main_repo from worktree param or cwd.
+
+    Also handles uncommitted changes: commits them unless strict mode.
+    Returns (repo_root, main_repo).
+    """
+    if worktree:
+        main_repo = find_main_repo()
+        if not main_repo:
+            typer.echo("Error: Not in a git repository", err=True)
+            raise typer.Exit(1)
+        repo_root = get_path(main_repo, worktree)
+        if not repo_root.exists():
+            typer.echo(f"Error: Worktree '{worktree}' not found", err=True)
+            raise typer.Exit(1)
+    else:
+        repo_root = find_worktree_root()
+        if not repo_root:
+            typer.echo("Error: Not in a git repository", err=True)
+            raise typer.Exit(1)
+        main_repo = find_main_repo(repo_root) or repo_root
+
+    # Handle uncommitted changes
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.stdout.strip():
+        if strict:
+            typer.echo("Error: Uncommitted changes (use without --strict to auto-commit)", err=True)
+            raise typer.Exit(1)
+        add_commit_push(repo_root, push=False)
+
+    return repo_root, main_repo
+
+
 def _clear_design_and_push(repo_root: Path) -> bool:
     """Delete .design/* contents, commit, push. Returns True if changes made."""
     design_dir = repo_root / ".design"
@@ -151,24 +189,7 @@ def _rebase_onto_main(repo_root: Path, base_branch: str) -> bool:
 
 def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> None:
     """Land via GitHub PR merge."""
-    if worktree:
-        main_repo = find_main_repo()
-        if not main_repo:
-            typer.echo("Error: Not in a git repository", err=True)
-            raise typer.Exit(1)
-        repo_root = get_path(main_repo, worktree)
-        if not repo_root.exists():
-            typer.echo(f"Error: Worktree '{worktree}' not found", err=True)
-            raise typer.Exit(1)
-    else:
-        repo_root = find_worktree_root()
-        if not repo_root:
-            typer.echo("Error: Not in a git repository", err=True)
-            raise typer.Exit(1)
-        main_repo = find_main_repo(repo_root)
-        if not main_repo:
-            typer.echo("Error: Could not find main repository", err=True)
-            raise typer.Exit(1)
+    repo_root, main_repo = _resolve_repos(worktree, strict)
 
     if not shutil.which("gh"):
         typer.echo("Error: 'gh' CLI not found. Install with: brew install gh", err=True)
@@ -185,19 +206,6 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
     if not branch:
         typer.echo("Error: Detached HEAD", err=True)
         raise typer.Exit(1)
-
-    # Handle uncommitted changes
-    result = subprocess.run(
-        ["git", "status", "--porcelain"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-    )
-    if result.stdout.strip():
-        if strict:
-            typer.echo("Error: Uncommitted changes (use without --strict to auto-commit)", err=True)
-            raise typer.Exit(1)
-        add_commit_push(repo_root, push=False)
 
     # Rebase onto base branch before pushing
     base_branch = get_default_branch(main_repo)
@@ -374,34 +382,7 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
 
 def _land_local(strict: bool, worktree: str | None) -> None:
     """Land locally without PR (squash-merge + push)."""
-    if worktree:
-        main_repo = find_main_repo()
-        if not main_repo:
-            typer.echo("Error: Not in a git repository", err=True)
-            raise typer.Exit(1)
-        repo_root = get_path(main_repo, worktree)
-        if not repo_root.exists():
-            typer.echo(f"Error: Worktree '{worktree}' not found", err=True)
-            raise typer.Exit(1)
-    else:
-        repo_root = find_worktree_root()
-        if not repo_root:
-            typer.echo("Error: Not in a git repository", err=True)
-            raise typer.Exit(1)
-        main_repo = find_main_repo(repo_root) or repo_root
-
-    # Handle uncommitted changes
-    result = subprocess.run(
-        ["git", "status", "--porcelain"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-    )
-    if result.stdout.strip():
-        if strict:
-            typer.echo("Error: Uncommitted changes (use without --strict to auto-commit)", err=True)
-            raise typer.Exit(1)
-        add_commit_push(repo_root, push=False)
+    repo_root, main_repo = _resolve_repos(worktree, strict)
 
     branch = get_current_branch(repo_root)
     if not branch:
@@ -547,21 +528,7 @@ def _land_local(strict: bool, worktree: str | None) -> None:
 
 def _land_squash_personal_main(strict: bool, worktree: str | None) -> None:
     """Squash-merge personal-main to origin/main via PR."""
-    if worktree:
-        main_repo = find_main_repo()
-        if not main_repo:
-            typer.echo("Error: Not in a git repository", err=True)
-            raise typer.Exit(1)
-        repo_root = get_path(main_repo, worktree)
-        if not repo_root.exists():
-            typer.echo(f"Error: Worktree '{worktree}' not found", err=True)
-            raise typer.Exit(1)
-    else:
-        repo_root = find_worktree_root()
-        if not repo_root:
-            typer.echo("Error: Not in a git repository", err=True)
-            raise typer.Exit(1)
-        main_repo = find_main_repo(repo_root) or repo_root
+    repo_root, _ = _resolve_repos(worktree, strict)
 
     if not shutil.which("gh"):
         typer.echo("Error: 'gh' CLI not found. Install with: brew install gh", err=True)
@@ -577,19 +544,6 @@ def _land_squash_personal_main(strict: bool, worktree: str | None) -> None:
         typer.echo(f"Error: --squash is for personal-main branches (got '{branch}')", err=True)
         typer.echo("Run this from a personal-main worktree like 'agent-name-main'", err=True)
         raise typer.Exit(1)
-
-    # Handle uncommitted changes
-    result = subprocess.run(
-        ["git", "status", "--porcelain"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-    )
-    if result.stdout.strip():
-        if strict:
-            typer.echo("Error: Uncommitted changes (use without --strict to auto-commit)", err=True)
-            raise typer.Exit(1)
-        add_commit_push(repo_root, push=False)
 
     # Ensure branch is pushed
     result = subprocess.run(

@@ -97,6 +97,12 @@ docs/
 - `terminal` — for Maestro (under development)
 - `voice` — default voice
 
+### patterns.md (or tips section)
+
+- Worktrees: mention `wt` for branch isolation, link to worktrunk
+- Debug workflow: `lf debug -v`
+- Design-first: `lf design` then `lf implement`
+
 ---
 
 ## Done when

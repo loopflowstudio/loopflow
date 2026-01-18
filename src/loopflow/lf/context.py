@@ -12,7 +12,7 @@ from loopflow.lf.config import load_config
 from loopflow.lf.design import gather_design_docs
 from loopflow.lf.files import gather_docs, gather_files, format_files, format_image_references
 from loopflow.lf.frontmatter import TaskFile, parse_task_file
-from loopflow.summarize import is_stale, load_summary
+from loopflow.lfops.summarize import is_stale, load_summary
 from loopflow.lf.voices import Voice, load_voice
 
 

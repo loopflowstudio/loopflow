@@ -3,7 +3,7 @@
 from typer.testing import CliRunner
 
 from loopflow.lf import app
-from loopflow.lfops import app as lfops_app
+from loopflow.lfops import get_app
 
 
 def _get_command_names(output: str) -> list[str]:
@@ -53,6 +53,7 @@ def test_top_level_help_no_ops():
 def test_lfops_help_lists_management_commands():
     """Verify lfops has the expected commands."""
     runner = CliRunner()
+    lfops_app = get_app()
 
     result = runner.invoke(lfops_app, ["--help"])
 

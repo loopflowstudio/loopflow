@@ -16,7 +16,6 @@ struct PromptLauncher: View {
     @State private var showAdvancedOptions = false
     @State private var isPreviewExpanded = false
     @State private var expandedSections: Set<ContextKind> = [.docs, .files]
-    @AppStorage("useEmbeddedTerminal") private var useEmbeddedTerminal = true
 
     private let terminalLauncher = TerminalLauncher()
 
@@ -62,7 +61,6 @@ struct PromptLauncher: View {
                     modelSelector
                     voiceSelector
                     contextBar
-                    embeddedTerminalToggle
                     commandPreview
                 }
             }
@@ -1090,26 +1088,6 @@ struct PromptLauncher: View {
         }
     }
 
-    // MARK: - Embedded Terminal Toggle
-
-    private var embeddedTerminalToggle: some View {
-        HStack(spacing: 8) {
-            Toggle(isOn: $useEmbeddedTerminal) {
-                HStack(spacing: 6) {
-                    Image(systemName: "terminal.fill")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("Show output in app")
-                        .font(.caption)
-                }
-            }
-            .toggleStyle(.checkbox)
-            .help("When enabled, task output appears in the results panel instead of opening an external terminal")
-
-            Spacer()
-        }
-    }
-
     // MARK: - Command Preview
 
     @AppStorage("showCommandPreview") private var showCommandPreview = false
@@ -1258,19 +1236,7 @@ struct PromptLauncher: View {
     private func launchCommand(repo: URL, workPath: URL) {
         let command = appState.buildCommand(pipeline: selectedPipeline)
 
-        print("[PromptLauncher] launchCommand: useEmbeddedTerminal=\(useEmbeddedTerminal), runMode=\(appState.runMode), command=\(command.prefix(50))...")
-
-        // Use embedded terminal for auto mode when enabled
-        if useEmbeddedTerminal && appState.runMode == .auto {
-            print("[PromptLauncher] Starting embedded terminal task")
-            appState.taskRunner.startTask(command: command, workingDirectory: workPath) {
-                print("[PromptLauncher] Task completed")
-            }
-            return
-        }
-        print("[PromptLauncher] Falling back to external terminal")
-
-        // Fall back to external terminal
+        // Launch in external terminal
         let terminal = appState.config?.terminalApp ?? .warp
         do {
             try terminalLauncher.launchTerminal(terminal, at: workPath, command: command)

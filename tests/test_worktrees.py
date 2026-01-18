@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from loopflow.worktrees import (
+from loopflow.lf.worktrees import (
     WorktreeError,
     create,
     list_all,
@@ -72,7 +72,7 @@ def test_create_worktree_returns_existing_path(tmp_path):
     repo_root.mkdir()
     existing_path = tmp_path / "repo.feature"
 
-    with patch("loopflow.worktrees.list_all") as mock_list:
+    with patch("loopflow.lf.worktrees.list_all") as mock_list:
         mock_list.return_value = [MagicMock(branch="feature")]
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout=f"{existing_path}\n", stderr="")
@@ -87,7 +87,7 @@ def test_create_worktree_creates_new_path(tmp_path):
     repo_root.mkdir()
     new_path = tmp_path / "repo.new"
 
-    with patch("loopflow.worktrees.list_all") as mock_list:
+    with patch("loopflow.lf.worktrees.list_all") as mock_list:
         mock_list.return_value = []
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout=f"{new_path}\n", stderr="")
@@ -101,7 +101,7 @@ def test_create_worktree_missing_wt_raises(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
 
-    with patch("loopflow.worktrees.list_all") as mock_list:
+    with patch("loopflow.lf.worktrees.list_all") as mock_list:
         mock_list.return_value = []
         with patch("subprocess.run", side_effect=FileNotFoundError()):
             with pytest.raises(WorktreeError, match="lf ops install"):

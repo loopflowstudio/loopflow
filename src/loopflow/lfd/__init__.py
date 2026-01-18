@@ -11,8 +11,7 @@ from pathlib import Path
 
 import typer
 
-from loopflow.context import find_worktree_root
-from loopflow.git import find_main_repo
+from loopflow.lf.git import find_main_repo
 from loopflow.lfd.agents import (
     create_agent_file,
     delete_agent_file,
@@ -313,6 +312,7 @@ def new(
     ),
 ):
     """Create a new agent."""
+    from loopflow.lf.context import find_worktree_root
     repo_root = find_worktree_root()
     if not repo_root:
         typer.echo("Error: Not in a git repository", err=True)

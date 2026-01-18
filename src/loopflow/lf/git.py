@@ -54,7 +54,7 @@ def autocommit(
     verbose: bool = False,
 ) -> bool:
     """Commit changes with task name + generated message. Returns True if committed."""
-    from loopflow.llm_http import generate_commit_message
+    from loopflow.lf.messages import generate_commit_message
 
     result = subprocess.run(
         ["git", "status", "--porcelain"],

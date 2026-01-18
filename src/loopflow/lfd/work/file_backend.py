@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from loopflow.work.models import WorkItem
+from loopflow.lfd.work.models import WorkItem
 
 
 _FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)

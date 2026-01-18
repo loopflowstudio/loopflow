@@ -10,26 +10,39 @@ from typing import Optional
 
 import typer
 
-from loopflow.config import load_config, parse_model
-from loopflow.context import find_worktree_root, gather_prompt_components, gather_task, format_prompt, PromptComponents
-from loopflow.frontmatter import resolve_task_config, TaskConfig
-from loopflow.voices import parse_voice_arg, VoiceNotFoundError
-from loopflow.git import find_main_repo
-from loopflow.launcher import (
+from loopflow.lf.config import load_config, parse_model
+from loopflow.lf.context import find_worktree_root, gather_prompt_components, gather_task, format_prompt, PromptComponents
+from loopflow.lf.frontmatter import resolve_task_config, TaskConfig
+from loopflow.lf.voices import parse_voice_arg, VoiceNotFoundError
+from loopflow.lf.git import find_main_repo
+from loopflow.lf.launcher import (
     build_model_command,
     build_model_interactive_command,
     get_runner,
 )
-from loopflow.logging import get_model_env, write_prompt_file
-from loopflow.lfd.client import log_session_start, log_session_end
-from loopflow.lfd.models import Session, SessionStatus
-from loopflow.lfd.pipelines import load_pipeline as load_pipeline_file, PipelineDef, PipelineStep, RaceConfig
-from loopflow.pipeline import run_pipeline_def, _run_race_step
-from loopflow.tokens import analyze_components
-from loopflow.worktrees import WorktreeError, create
+from loopflow.lf.logging import get_model_env, write_prompt_file
+from loopflow.lf.models import Session, SessionStatus, log_session_start, log_session_end
+from loopflow.lf.pipelines import load_pipeline as load_pipeline_file, PipelineDef, PipelineStep, RaceConfig
+from loopflow.lf.pipeline import run_pipeline_def, _run_race_step
+from loopflow.lf.tokens import analyze_components
+from loopflow.lf.worktrees import WorktreeError, create
 
 
 ModelType = Optional[str]
+
+# Context limit: 120k leaves room for model response
+MAX_SAFE_TOKENS = 120_000
+
+
+def _warn_if_context_too_large(tree) -> None:
+    """Warn user if prompt exceeds safe token limit."""
+    total_tokens = tree.total()
+    if total_tokens > MAX_SAFE_TOKENS:
+        typer.echo(f"\033[33m⚠ Prompt is {total_tokens:,} tokens (limit ~{MAX_SAFE_TOKENS:,})\033[0m", err=True)
+        files_node = tree.root.children.get("files")
+        if files_node and files_node.total_tokens() > MAX_SAFE_TOKENS * 0.5:
+            typer.echo("\033[33m  Large branch - try: --no-diff-files or -x <specific files>\033[0m", err=True)
+        typer.echo(err=True)
 
 
 def _copy_to_clipboard(text: str) -> None:
@@ -57,6 +70,8 @@ def _execute_task(
 
     tree = analyze_components(components)
     token_summary = tree.format()
+
+    _warn_if_context_too_large(tree)
 
     main_repo = find_main_repo(repo_root) or repo_root
     run_mode = "interactive" if is_interactive else "auto"
@@ -403,11 +418,19 @@ def run(
         if pattern in exclude_patterns:
             exclude_patterns.remove(pattern)
 
-    # Resolve paste/docs/diff/diff_files/summaries flags (CLI overrides config)
+    # Resolve paste/docs/diff/diff_files/summaries flags (CLI > frontmatter > config > default)
     include_paste = paste if paste is not None else (config.paste if config else False)
     include_docs = docs if docs is not None else (config.docs if config else True)
     include_diff = diff if diff is not None else (config.diff if config else False)
-    include_diff_files = diff_files if diff_files is not None else (config.diff_files if config else True)
+    # diff_files: CLI > frontmatter > config > default
+    if diff_files is not None:
+        include_diff_files = diff_files
+    elif frontmatter.diff_files is not None:
+        include_diff_files = frontmatter.diff_files
+    elif config:
+        include_diff_files = config.diff_files
+    else:
+        include_diff_files = True
     include_summaries = summaries if summaries is not None else bool(config and config.summaries)
 
     args = ctx.args or None
@@ -441,6 +464,7 @@ def run(
         _copy_to_clipboard(prompt)
         tree = analyze_components(components)
         typer.echo(tree.format())
+        _warn_if_context_too_large(tree)
         typer.echo("\nCopied to clipboard.")
         raise typer.Exit(0)
 
@@ -590,6 +614,7 @@ def inline(
         _copy_to_clipboard(prompt_text)
         tree = analyze_components(components)
         typer.echo(tree.format())
+        _warn_if_context_too_large(tree)
         typer.echo("\nCopied to clipboard.")
         raise typer.Exit(0)
 
@@ -685,6 +710,7 @@ def cp(
 
     tree = analyze_components(components)
     typer.echo(tree.format())
+    _warn_if_context_too_large(tree)
     typer.echo("\nCopied to clipboard.")
 
 
@@ -782,6 +808,7 @@ def pipeline(
         tree = analyze_components(components)
         typer.echo(f"Pipeline '{name}' first task: {first_task}\n")
         typer.echo(tree.format())
+        _warn_if_context_too_large(tree)
         typer.echo("\nCopied to clipboard.")
         raise typer.Exit(0)
 

@@ -1,0 +1,58 @@
+"""Rebase command for rebasing onto main."""
+
+import subprocess
+
+import typer
+
+from loopflow.lf.context import find_worktree_root, gather_task
+
+
+def register_commands(app: typer.Typer) -> None:
+    """Register rebase command on the app."""
+
+    @app.command()
+    def rebase() -> None:
+        """Rebase onto main, or launch assistant if conflicts."""
+        repo_root = find_worktree_root()
+        if not repo_root:
+            typer.echo("Error: Not in a git repository", err=True)
+            raise typer.Exit(1)
+
+        # Fetch latest main
+        typer.echo("Fetching origin/main...")
+        subprocess.run(["git", "fetch", "origin", "main"], cwd=repo_root, check=False)
+
+        # Attempt rebase
+        typer.echo("Rebasing onto origin/main...")
+        result = subprocess.run(
+            ["git", "rebase", "origin/main"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+        )
+
+        if result.returncode == 0:
+            # Success - push
+            typer.echo("Rebase succeeded, pushing...")
+            push_result = subprocess.run(
+                ["git", "push", "--force-with-lease"],
+                cwd=repo_root,
+            )
+            if push_result.returncode == 0:
+                typer.echo("Done")
+            else:
+                typer.echo("Push failed", err=True)
+                raise typer.Exit(1)
+        else:
+            # Conflicts - abort and hand off to Claude
+            typer.echo("Conflicts detected, aborting rebase...")
+            subprocess.run(["git", "rebase", "--abort"], cwd=repo_root)
+
+            # Get rebase prompt (custom or built-in)
+            task = gather_task(repo_root, "rebase")
+            if not task:
+                typer.echo("Error: No rebase command found", err=True)
+                raise typer.Exit(1)
+
+            typer.echo("Launching rebase assistant...")
+            subprocess.run(["claude", task.content], cwd=repo_root)

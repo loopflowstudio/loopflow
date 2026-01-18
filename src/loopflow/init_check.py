@@ -4,8 +4,6 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from loopflow.launcher import check_claude_available
-
 
 @dataclass
 class InitStatus:
@@ -32,6 +30,8 @@ def check_init_status(repo_root: Path) -> InitStatus:
 
 def _check_deps() -> list[str]:
     """Return list of missing required dependencies."""
+    from loopflow.lf.launcher import check_claude_available
+
     missing = []
     if not check_claude_available():
         missing.append("claude")

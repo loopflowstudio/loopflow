@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from loopflow.logging import (
+from loopflow.lf.logging import (
     get_model_env,
     open_json_log,
     open_log_file,

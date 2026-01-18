@@ -2,7 +2,7 @@
 
 import json
 
-from loopflow.launcher import normalize_claude_event, normalize_codex_event
+from loopflow.lf.launcher import normalize_claude_event, normalize_codex_event
 from loopflow.lfd.collector import _format_stream_line
 
 
@@ -254,34 +254,3 @@ def test_format_stream_line_unknown_type_filtered():
     assert result == []
 
 
-# Tests for _send_output_line
-
-
-def test_send_output_line_calls_fire_and_forget():
-    """_send_output_line sends output.line method with correct params."""
-    from unittest.mock import patch
-
-    from loopflow.lfd.collector import _send_output_line
-
-    with patch("loopflow.lfd.collector._send_fire_and_forget") as mock_send:
-        _send_output_line("session-123", "→ Read: foo.py")
-
-        mock_send.assert_called_once_with(
-            "output.line",
-            {"session_id": "session-123", "text": "→ Read: foo.py"},
-        )
-
-
-def test_send_output_line_handles_empty_text():
-    """_send_output_line handles empty text for blank lines."""
-    from unittest.mock import patch
-
-    from loopflow.lfd.collector import _send_output_line
-
-    with patch("loopflow.lfd.collector._send_fire_and_forget") as mock_send:
-        _send_output_line("session-123", "")
-
-        mock_send.assert_called_once_with(
-            "output.line",
-            {"session_id": "session-123", "text": ""},
-        )

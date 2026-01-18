@@ -10,16 +10,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from loopflow.config import parse_model
-from loopflow.context import build_prompt
-from loopflow.git import GitError, find_main_repo, open_pr
-from loopflow.launcher import build_model_command, get_runner
-from loopflow.lfd.pipelines import PipelineDef, RaceConfig, ResolvedStep, resolve_pipeline, StepConfig
-from loopflow.llm_http import generate_pr_message
-from loopflow.logging import write_prompt_file
-from loopflow.lfd.client import log_session_start, log_session_end
-from loopflow.lfd.models import Session, SessionStatus
-from loopflow.worktrees import create as create_worktree, remove as remove_worktree
+from loopflow.lf.config import parse_model
+from loopflow.lf.context import build_prompt
+from loopflow.lf.git import GitError, find_main_repo, open_pr
+from loopflow.lf.launcher import build_model_command, get_runner
+from loopflow.lf.pipelines import PipelineDef, RaceConfig, ResolvedStep, resolve_pipeline, StepConfig
+from loopflow.lf.messages import generate_pr_message
+from loopflow.lf.logging import write_prompt_file
+from loopflow.lf.models import Session, SessionStatus, log_session_start, log_session_end
+from loopflow.lf.worktrees import create as create_worktree, remove as remove_worktree
 
 
 @dataclass
@@ -430,7 +429,6 @@ def _judge_race(
 
     judge_prompt = _build_judge_prompt(diffs)
 
-    from loopflow.launcher import get_runner
     backend, variant = parse_model("claude:opus")
     runner = get_runner(backend)
 

@@ -7,10 +7,9 @@ from typing import Optional
 import typer
 import yaml
 
-from loopflow.config import ConfigError, load_config
-from loopflow.context import find_worktree_root, gather_task, list_all_tasks, _get_builtin_task
-from loopflow.init_check import check_init_status
-from loopflow.lfd.pipelines import load_pipeline
+from loopflow.lf.config import ConfigError, load_config
+from loopflow.lf.context import find_worktree_root, gather_task, list_all_tasks, _get_builtin_task
+from loopflow.lf.pipelines import load_pipeline
 
 
 # =============================================================================
@@ -65,7 +64,7 @@ app = typer.Typer(
 )
 
 # Import and register subcommands
-from loopflow.cli import run as run_module
+from loopflow.lf import run as run_module
 
 # Register top-level commands
 app.command(context_settings={"allow_extra_args": True, "allow_interspersed_args": True})(run_module.run)

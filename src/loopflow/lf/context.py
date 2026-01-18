@@ -8,19 +8,16 @@ from importlib import resources
 from pathlib import Path
 from typing import Optional
 
-from loopflow.config import load_config
-from loopflow.design import gather_design_docs
-from loopflow.files import gather_docs, gather_files, format_files, format_image_references
-from loopflow.frontmatter import TaskFile, parse_task_file
-from loopflow.summarize import is_stale, load_summary
-from loopflow.voices import Voice, load_voice
-from loopflow.work.asana_backend import AsanaBackend
-from loopflow.work.file_backend import FileBackend
-from loopflow.work.models import WorkItem
+from loopflow.lf.config import load_config
+from loopflow.lf.design import gather_design_docs
+from loopflow.lf.files import gather_docs, gather_files, format_files, format_image_references
+from loopflow.lf.frontmatter import TaskFile, parse_task_file
+from loopflow.lfops.summarize import is_stale, load_summary
+from loopflow.lf.voices import Voice, load_voice
 
 
 # Path to bundled builtin templates
-_TEMPLATES_DIR = Path(__file__).parent / "templates" / "commands"
+_TEMPLATES_DIR = Path(__file__).parent.parent / "templates" / "commands"
 
 
 @dataclass
@@ -38,7 +35,6 @@ class PromptComponents:
     voices: list[Voice] | None = None
     image_files: list[Path] | None = None  # Images for visual context
     summaries: list[tuple[Path, str]] | None = None  # Pre-generated summaries
-    work_queue: str | None = None  # Formatted work items
 
 
 def find_worktree_root(start: Optional[Path] = None) -> Path | None:
@@ -307,58 +303,6 @@ def gather_summaries(repo_root: Path, config) -> list[tuple[Path, str]]:
     return results
 
 
-def gather_work_queue(repo_root: Path) -> str | None:
-    """Gather work items and format for inclusion in prompt."""
-    config = load_config(repo_root)
-
-    # Get backend
-    if config and config.work and config.work.backend == "asana":
-        if not config.work.asana or not config.work.asana.project_id:
-            return None
-        try:
-            backend = AsanaBackend(config.work.asana.project_id)
-        except Exception:
-            return None
-    else:
-        backend = FileBackend(repo_root)
-
-    items = backend.list_items()
-    if not items:
-        return None
-
-    def format_item(item: WorkItem) -> str:
-        lines = [f"### {item.title} ({item.id})"]
-        lines.append(f"Status: {item.status}")
-        if item.claimed_by:
-            lines.append(f"Claimed by: {item.claimed_by}")
-        if item.blocked_on:
-            lines.append(f"Blocked: {item.blocked_on}")
-        if item.description:
-            lines.append("")
-            lines.append(item.description)
-        return "\n".join(lines)
-
-    sections = {
-        "proposed": [],
-        "approved": [],
-        "active": [],
-    }
-
-    for item in items:
-        if item.status in sections:
-            sections[item.status].append(format_item(item))
-
-    parts = []
-    if sections["active"]:
-        parts.append("## Active\n\n" + "\n\n".join(sections["active"]))
-    if sections["approved"]:
-        parts.append("## Approved (ready for work)\n\n" + "\n\n".join(sections["approved"]))
-    if sections["proposed"]:
-        parts.append("## Proposed (pending review)\n\n" + "\n\n".join(sections["proposed"]))
-
-    return "\n\n".join(parts) if parts else None
-
-
 def gather_prompt_components(
     repo_root: Path,
     task: Optional[str] = None,
@@ -444,9 +388,6 @@ def gather_prompt_components(
     # Load configured summaries
     summaries = gather_summaries(repo_root, config) if include_summaries else None
 
-    # Gather work queue
-    work_queue = gather_work_queue(repo_root)
-
     return PromptComponents(
         run_mode=run_mode,
         docs=docs,
@@ -459,7 +400,6 @@ def gather_prompt_components(
         voices=loaded_voices,
         image_files=gather_result.image_files or None,
         summaries=summaries,
-        work_queue=work_queue,
     )
 
 
@@ -527,9 +467,6 @@ def format_prompt(components: PromptComponents) -> str:
 
     if components.image_files:
         parts.append(format_image_references(components.image_files, components.repo_root))
-
-    if components.work_queue:
-        parts.append(f"Work queue.\n\n<lf:work>\n{components.work_queue}\n</lf:work>")
 
     return "\n\n".join(parts)
 

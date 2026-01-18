@@ -6,7 +6,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from loopflow.git import GitError, autocommit, find_main_repo, open_pr
+from loopflow.lf.git import GitError, autocommit, find_main_repo, open_pr
 
 
 @pytest.fixture
@@ -168,7 +168,7 @@ def test_find_main_repo_not_in_git_repo(tmp_path):
 
 def test_get_current_branch_returns_branch_name(temp_repo):
     """get_current_branch returns current branch name."""
-    from loopflow.git import get_current_branch
+    from loopflow.lf.git import get_current_branch
 
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(
@@ -182,7 +182,7 @@ def test_get_current_branch_returns_branch_name(temp_repo):
 
 def test_get_current_branch_returns_none_when_detached(temp_repo):
     """get_current_branch returns None when HEAD is detached."""
-    from loopflow.git import get_current_branch
+    from loopflow.lf.git import get_current_branch
 
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(

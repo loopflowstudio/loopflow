@@ -1,5 +1,6 @@
 ---
 produces: fixed code
+diff_files: false
 ---
 Debug an error using the stacktrace or error message from clipboard.
 

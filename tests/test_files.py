@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from loopflow.files import (
+from loopflow.lf.files import (
     gather_files,
     format_files,
     format_image_references,

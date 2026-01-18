@@ -2,10 +2,10 @@
 
 import pytest
 
-from loopflow.voices import Voice, VoiceNotFoundError, load_voice, parse_voice_arg
-from loopflow.context import gather_prompt_components, format_prompt
-from loopflow.frontmatter import parse_task_file, resolve_task_config, TaskConfig
-from loopflow.config import Config
+from loopflow.lf.voices import Voice, VoiceNotFoundError, load_voice, parse_voice_arg
+from loopflow.lf.context import gather_prompt_components, format_prompt
+from loopflow.lf.frontmatter import parse_task_file, resolve_task_config, TaskConfig
+from loopflow.lf.config import Config
 
 
 @pytest.fixture

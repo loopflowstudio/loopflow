@@ -6,7 +6,7 @@ from typing import Any
 
 import asana
 
-from loopflow.work.models import WorkItem, Status
+from loopflow.lfd.work.models import WorkItem, Status
 
 logger = logging.getLogger(__name__)
 

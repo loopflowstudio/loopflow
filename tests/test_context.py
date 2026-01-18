@@ -2,7 +2,7 @@
 
 import pytest
 
-from loopflow.context import (
+from loopflow.lf.context import (
     find_worktree_root,
     build_prompt,
     gather_task,
@@ -221,7 +221,7 @@ def test_gather_prompt_components_deduplicates_diff_and_context(temp_repo, monke
 
     # Mock gather_diff_files to return shared.py and diff_only.py
     monkeypatch.setattr(
-        "loopflow.context.gather_diff_files",
+        "loopflow.lf.context.gather_diff_files",
         lambda repo_root: ["shared.py", "diff_only.py"],
     )
 
@@ -374,7 +374,7 @@ def test_gather_task_returns_none_for_unknown_without_repo():
 
 def test_trigger_background_refresh_creates_log_file(tmp_path, monkeypatch):
     """Background refresh writes output to log file instead of DEVNULL."""
-    from loopflow.context import _trigger_background_refresh
+    from loopflow.lf.context import _trigger_background_refresh
     import subprocess
 
     (tmp_path / ".git").mkdir()

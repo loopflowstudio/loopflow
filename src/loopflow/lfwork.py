@@ -5,12 +5,12 @@ from pathlib import Path
 
 import typer
 
-from loopflow.config import load_config
-from loopflow.context import find_worktree_root
-from loopflow.work.models import WorkItem, get_next_work
-from loopflow.work.file_backend import FileBackend
-from loopflow.work.asana_backend import AsanaBackend
-from loopflow.work.backend import WorkBackend
+from loopflow.lf.config import load_config
+from loopflow.lf.context import find_worktree_root
+from loopflow.lfd.work.models import WorkItem, get_next_work
+from loopflow.lfd.work.file_backend import FileBackend
+from loopflow.lfd.work.asana_backend import AsanaBackend
+from loopflow.lfd.work.backend import WorkBackend
 
 app = typer.Typer(help="Work queue management")
 

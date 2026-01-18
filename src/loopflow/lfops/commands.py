@@ -4,32 +4,28 @@ import json
 import os
 import platform
 import shutil
-import signal
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 
 import typer
 
-from loopflow.config import load_config, parse_model
-from loopflow.context import find_worktree_root, gather_task, gather_prompt_components, format_prompt
-from loopflow.design import clear_design_artifacts
-from loopflow.git import GitError, find_main_repo, get_current_branch, has_upstream, open_pr
+from loopflow.lf.config import load_config, parse_model
+from loopflow.lf.context import find_worktree_root, gather_task, gather_prompt_components, format_prompt
+from loopflow.lf.design import clear_design_artifacts
+from loopflow.lf.git import GitError, find_main_repo, get_current_branch, has_upstream, open_pr
 from loopflow.init_check import check_init_status
-from loopflow.launcher import (
+from loopflow.lf.launcher import (
     check_claude_available,
     check_codex_available,
     check_gemini_available,
     build_claude_command,
     get_runner,
 )
-from loopflow.llm_http import generate_commit_message, generate_commit_message_from_diff, generate_pr_message
-from loopflow.logging import get_log_dir, get_model_env
-from loopflow.lfd.db import delete_session, load_sessions, update_session_status
-from loopflow.lfd.models import SessionStatus
-from loopflow.worktrees import get_path
+from loopflow.lf.messages import generate_commit_message, generate_commit_message_from_diff, generate_pr_message
+from loopflow.lf.logging import get_log_dir, get_model_env
+from loopflow.lf.worktrees import get_path
 
 app = typer.Typer(help="Loopflow operations")
 
@@ -425,114 +421,6 @@ def version() -> None:
     typer.echo(f"loopflow {__version__}")
 
 
-def _format_time_ago(started_at: datetime) -> str:
-    """Format time difference as '2m ago', '5h ago', etc."""
-    delta = datetime.now() - started_at
-    seconds = int(delta.total_seconds())
-
-    if seconds < 60:
-        return f"{seconds}s ago"
-    elif seconds < 3600:
-        return f"{seconds // 60}m ago"
-    elif seconds < 86400:
-        return f"{seconds // 3600}h ago"
-    else:
-        return f"{seconds // 86400}d ago"
-
-
-@app.command()
-def status(
-    all_repos: bool = typer.Option(False, "--all", "-a", help="Show sessions from all repos"),
-) -> None:
-    """Show running sessions."""
-    repo = None if all_repos else find_worktree_root()
-    sessions = load_sessions(repo=str(repo) if repo else None)
-
-    if not sessions:
-        typer.echo("No running sessions")
-        raise typer.Exit(0)
-
-    # Print header
-    typer.echo(f"{'ID':<10} {'TASK':<14} {'WORKTREE':<24} {'STATUS':<10} {'STARTED'}")
-
-    # Print sessions
-    for session in sessions:
-        worktree_name = session.worktree.name
-        time_ago = _format_time_ago(session.started_at)
-        typer.echo(
-            f"{session.id[:8]:<10} {session.task:<14} {worktree_name:<24} {session.status.value:<10} {time_ago}"
-        )
-
-
-def _resolve_session(sessions, prefix: str):
-    matches = [session for session in sessions if session.id.startswith(prefix)]
-    if not matches:
-        typer.echo(f"Error: No session matching '{prefix}'", err=True)
-        raise typer.Exit(1)
-    if len(matches) > 1:
-        ids = ", ".join(session.id[:8] for session in matches)
-        typer.echo(f"Error: Ambiguous session id '{prefix}': {ids}", err=True)
-        raise typer.Exit(1)
-    return matches[0]
-
-
-@app.command()
-def stop(
-    session_id: str = typer.Argument(help="Session id (prefix ok)"),
-    all_repos: bool = typer.Option(False, "--all", "-a", help="Search sessions from all repos"),
-    force: bool = typer.Option(False, "--force", help="Send SIGKILL instead of SIGTERM"),
-) -> None:
-    """Stop a running session."""
-    repo = None if all_repos else find_worktree_root()
-    sessions = load_sessions(repo=str(repo) if repo else None)
-    session = _resolve_session(sessions, session_id)
-
-    if session.status not in (SessionStatus.RUNNING, SessionStatus.WAITING):
-        typer.echo(f"Session {session.id[:8]} is not running")
-        raise typer.Exit(0)
-
-    if not session.pid:
-        typer.echo(f"Error: Session {session.id[:8]} has no PID to stop", err=True)
-        raise typer.Exit(1)
-
-    try:
-        os.kill(session.pid, signal.SIGKILL if force else signal.SIGTERM)
-    except OSError as e:
-        typer.echo(f"Error: Failed to stop session {session.id[:8]}: {e}", err=True)
-        raise typer.Exit(1)
-
-    update_session_status(session.id, SessionStatus.ERROR)
-    typer.echo(f"Stopped session {session.id[:8]}")
-
-
-@app.command()
-def prune(
-    all_repos: bool = typer.Option(False, "--all", "-a", help="Prune sessions from all repos"),
-) -> None:
-    """Remove completed sessions and their logs."""
-    repo = None if all_repos else find_worktree_root()
-    sessions = load_sessions(repo=str(repo) if repo else None)
-
-    removed = 0
-    for session in sessions:
-        if session.status in (SessionStatus.RUNNING, SessionStatus.WAITING):
-            continue
-
-        log_dir = get_log_dir(Path(session.worktree))
-        for suffix in (".log", ".jsonl"):
-            log_path = log_dir / f"{session.id}{suffix}"
-            if log_path.exists():
-                try:
-                    log_path.unlink()
-                except OSError:
-                    pass
-
-        if delete_session(session.id):
-            removed += 1
-
-    typer.echo(f"Pruned {removed} sessions")
-
-
 # =============================================================================
 # PR and landing operations (merged from lfpr)
 # =============================================================================
@@ -832,7 +720,7 @@ def _rebase_onto_main(repo_root: Path, base_branch: str) -> bool:
     If conflicts occur, launches Claude with the rebase task to resolve them.
     Handles force-push after rebase if the branch has an upstream.
     """
-    from loopflow.context import gather_task
+    from loopflow.lf.context import gather_task
 
     # Fetch latest main
     subprocess.run(["git", "fetch", "origin", base_branch], cwd=repo_root, check=False)
@@ -1721,7 +1609,7 @@ def summarize(
 @app.command()
 def rebase() -> None:
     """Rebase onto main, or launch assistant if conflicts."""
-    from loopflow.context import gather_task
+    from loopflow.lf.context import gather_task
 
     repo_root = find_worktree_root()
     if not repo_root:

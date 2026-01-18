@@ -11,16 +11,16 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from loopflow.config import load_config, parse_model
-from loopflow.context import PromptComponents, gather_prompt_components, format_prompt
-from loopflow.git import find_main_repo, get_current_branch
-from loopflow.launcher import build_model_command, get_runner
+from loopflow.lf.config import load_config, parse_model
+from loopflow.lf.context import PromptComponents, gather_prompt_components, format_prompt
+from loopflow.lf.git import find_main_repo, get_current_branch
+from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lfd.client import log_session_start, log_session_end
 from loopflow.lfd.db import _get_db, update_run_status
 from loopflow.lfd.models import AgentSpec, AgentStatus, MergeMode, Session, SessionStatus
-from loopflow.llm_http import generate_pr_message
-from loopflow.logging import write_prompt_file
-from loopflow.worktrees import WorktreeError, create as create_worktree
+from loopflow.lf.messages import generate_pr_message
+from loopflow.lf.logging import write_prompt_file
+from loopflow.lf.worktrees import WorktreeError, create as create_worktree
 
 
 def _random_suffix() -> str:

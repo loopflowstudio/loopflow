@@ -2,7 +2,7 @@
 
 import pytest
 
-from loopflow.config import load_config, parse_model, PipelineConfig, ConfigError
+from loopflow.lf.config import load_config, parse_model, PipelineConfig, ConfigError
 
 
 @pytest.fixture

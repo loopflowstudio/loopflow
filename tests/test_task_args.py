@@ -2,7 +2,7 @@
 
 import pytest
 
-from loopflow.context import gather_prompt_components, format_prompt
+from loopflow.lf.context import gather_prompt_components, format_prompt
 
 
 @pytest.fixture

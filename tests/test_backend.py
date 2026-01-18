@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
-from loopflow.launcher import get_runner, ClaudeRunner, CodexRunner, GeminiRunner, LaunchResult
+from loopflow.lf.launcher import get_runner, ClaudeRunner, CodexRunner, GeminiRunner, LaunchResult
 
 
 def test_get_runner_returns_claude():
@@ -45,7 +45,7 @@ def test_claude_runner_is_available():
     """ClaudeRunner.is_available() checks for claude CLI."""
     runner = ClaudeRunner()
 
-    with patch("loopflow.launcher.check_claude_available") as mock_check:
+    with patch("loopflow.lf.launcher.check_claude_available") as mock_check:
         mock_check.return_value = True
         assert runner.is_available() is True
 
@@ -71,7 +71,7 @@ def test_claude_runner_launch_returns_result():
     """ClaudeRunner.launch() returns LaunchResult."""
     runner = ClaudeRunner()
 
-    with patch("loopflow.launcher.launch_claude") as mock_launch:
+    with patch("loopflow.lf.launcher.launch_claude") as mock_launch:
         mock_launch.return_value = (0, "output")
         result = runner.launch("test prompt")
 
@@ -108,7 +108,7 @@ def test_gemini_runner_is_available():
     """GeminiRunner.is_available() checks for gemini CLI."""
     runner = GeminiRunner()
 
-    with patch("loopflow.launcher.check_gemini_available") as mock_check:
+    with patch("loopflow.lf.launcher.check_gemini_available") as mock_check:
         mock_check.return_value = True
         assert runner.is_available() is True
 

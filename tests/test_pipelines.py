@@ -3,7 +3,7 @@
 import tempfile
 from pathlib import Path
 
-from loopflow.lfd.pipelines import (
+from loopflow.lf.pipelines import (
     PipelineDef,
     PipelineStep,
     RaceConfig,
@@ -12,7 +12,7 @@ from loopflow.lfd.pipelines import (
     save_pipeline,
     resolve_pipeline,
 )
-from loopflow.pipeline import _count_logical_steps
+from loopflow.lf.pipeline import _count_logical_steps
 
 
 def test_pipeline_step_from_string():

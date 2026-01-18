@@ -7,11 +7,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from loopflow.builtins import get_builtin_prompt
-from loopflow.config import load_config, parse_model
-from loopflow.files import _compile_exclude_patterns, _is_ignored, is_binary
-from loopflow.launcher import build_claude_command, build_codex_command, build_gemini_command
-from loopflow.logging import get_model_env
+from loopflow.lf.builtins import get_builtin_prompt
+from loopflow.lf.config import load_config, parse_model
+from loopflow.lf.files import _compile_exclude_patterns, _is_ignored, is_binary
+from loopflow.lf.launcher import build_claude_command, build_codex_command, build_gemini_command
+from loopflow.lf.logging import get_model_env
 
 
 @dataclass

@@ -4,7 +4,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from loopflow.launcher import check_claude_available
+from loopflow.lf.launcher import check_claude_available
 
 
 @dataclass

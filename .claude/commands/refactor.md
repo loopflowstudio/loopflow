@@ -45,10 +45,12 @@ This is a collaborative exploration. You map the territory, surface tradeoffs, a
 
 4. **Propose directions**
 
-   Present 2-3 restructuring approaches. Each should:
+   Present 2-3 restructuring approaches that differ in *structure*, not just naming. Each should:
    - Address the diagnosed friction
    - Respect the hard constraints
    - Make clear what it costs (migration, breaking changes, complexity)
+
+   Example:
 
    ```
    **Direction A:** Centralize session state in a Session dataclass
@@ -62,7 +64,7 @@ This is a collaborative exploration. You map the territory, surface tradeoffs, a
    - Migration: Low—wrap existing code
    ```
 
-   Don't pick for them. Present the tradeoffs clearly.
+   Don't pick for them. Present the tradeoffs clearly. If they're unsure, ask what matters more: explicitness or convenience? Testability or simplicity?
 
 5. **Iterate on the design**
 
@@ -82,37 +84,6 @@ This is a collaborative exploration. You map the territory, surface tradeoffs, a
    - Repeat
 
    Don't batch up changes. Each commit should be a working state.
-
-## Presenting options
-
-Options should differ in *structure*, not just naming:
-
-```
-**Current:**
-def run_task(task, worktree, model):
-    session = {"task": task, "worktree": worktree, "status": "running"}
-    db.insert(session)
-    ...
-    session["status"] = "done"
-    db.update(session)
-
-**Option A:** (dataclass + explicit state machine)
-@dataclass
-class Session:
-    task: str
-    worktree: Path
-    status: Literal["pending", "running", "done", "error"]
-
-    def start(self): ...
-    def complete(self): ...
-
-**Option B:** (context manager)
-with SessionTracker(task, worktree) as session:
-    # status managed automatically
-    ...
-```
-
-If they're unsure, ask what matters more: explicitness or convenience? Testability or simplicity?
 
 ## Questions to ask
 

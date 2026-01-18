@@ -10,23 +10,23 @@ from typing import Optional
 
 import typer
 
-from loopflow.config import load_config, parse_model
-from loopflow.context import find_worktree_root, gather_prompt_components, gather_task, format_prompt, PromptComponents
-from loopflow.frontmatter import resolve_task_config, TaskConfig
-from loopflow.voices import parse_voice_arg, VoiceNotFoundError
-from loopflow.git import find_main_repo
-from loopflow.launcher import (
+from loopflow.lf.config import load_config, parse_model
+from loopflow.lf.context import find_worktree_root, gather_prompt_components, gather_task, format_prompt, PromptComponents
+from loopflow.lf.frontmatter import resolve_task_config, TaskConfig
+from loopflow.lf.voices import parse_voice_arg, VoiceNotFoundError
+from loopflow.lf.git import find_main_repo
+from loopflow.lf.launcher import (
     build_model_command,
     build_model_interactive_command,
     get_runner,
 )
-from loopflow.logging import get_model_env, write_prompt_file
-from loopflow.lfd.client import log_session_start, log_session_end
-from loopflow.lfd.models import Session, SessionStatus
-from loopflow.lfd.pipelines import load_pipeline as load_pipeline_file, PipelineDef, PipelineStep, RaceConfig
-from loopflow.pipeline import run_pipeline_def, _run_race_step
-from loopflow.tokens import analyze_components
-from loopflow.worktrees import WorktreeError, create
+from loopflow.lf.logging import get_model_env, write_prompt_file
+from loopflow.lf.session import log_session_start, log_session_end
+from loopflow.lf.models import Session, SessionStatus
+from loopflow.lf.pipelines import load_pipeline as load_pipeline_file, PipelineDef, PipelineStep, RaceConfig
+from loopflow.lf.pipeline import run_pipeline_def, _run_race_step
+from loopflow.lf.tokens import analyze_components
+from loopflow.lf.worktrees import WorktreeError, create
 
 
 ModelType = Optional[str]

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from loopflow.launcher import (
+from loopflow.lf.launcher import (
     build_claude_command,
     build_codex_command,
     build_codex_interactive_command,

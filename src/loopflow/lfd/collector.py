@@ -12,9 +12,9 @@ import threading
 import time
 from pathlib import Path
 
-from loopflow.git import autocommit as git_autocommit
-from loopflow.lfd.client import _send_fire_and_forget
-from loopflow.logging import (
+from loopflow.lf.git import autocommit as git_autocommit
+from loopflow.lf.session import _send_fire_and_forget
+from loopflow.lf.logging import (
     get_model_env,
     open_json_log,
     open_log_file,

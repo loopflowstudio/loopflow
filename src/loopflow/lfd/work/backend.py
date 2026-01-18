@@ -2,7 +2,7 @@
 
 from typing import Protocol
 
-from loopflow.work.models import WorkItem
+from loopflow.lfd.work.models import WorkItem
 
 
 class WorkBackend(Protocol):

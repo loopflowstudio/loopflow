@@ -1,6 +1,6 @@
 """Tests for automode default behavior."""
 
-from loopflow.config import Config
+from loopflow.lf.config import Config
 
 
 def test_config_interactive_list():
@@ -21,7 +21,7 @@ def test_config_interactive_defaults_empty():
 
 def test_task_in_interactive_list(tmp_path):
     """Tasks in interactive list default to interactive mode."""
-    from loopflow.config import load_config
+    from loopflow.lf.config import load_config
 
     config_file = tmp_path / ".git"
     config_file.mkdir()

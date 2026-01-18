@@ -5,7 +5,7 @@ from datetime import datetime
 from io import StringIO
 from pathlib import Path
 
-from loopflow.logging import (
+from loopflow.lf.logging import (
     get_log_dir,
     get_model_env,
     open_json_log,

@@ -3,8 +3,8 @@
 from pathlib import Path
 import tempfile
 
-from loopflow.work.models import WorkItem, get_next_work
-from loopflow.work.file_backend import FileBackend
+from loopflow.lfd.work.models import WorkItem, get_next_work
+from loopflow.lfd.work.file_backend import FileBackend
 
 
 def test_work_item_defaults():

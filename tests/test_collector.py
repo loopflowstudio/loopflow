@@ -2,7 +2,7 @@
 
 import json
 
-from loopflow.launcher import normalize_claude_event, normalize_codex_event
+from loopflow.lf.launcher import normalize_claude_event, normalize_codex_event
 from loopflow.lfd.collector import _format_stream_line
 
 

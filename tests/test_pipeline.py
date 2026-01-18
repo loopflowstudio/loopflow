@@ -1,6 +1,6 @@
 """Tests for loopflow.config module - PipelineConfig."""
 
-from loopflow.config import PipelineConfig
+from loopflow.lf.config import PipelineConfig
 
 
 def test_pipeline_config():

@@ -43,7 +43,7 @@ def _git_mock(status_output="", has_staged=False, commit_ok=True, push_ok=True):
 
 def test_commit_with_no_changes():
     """commit exits cleanly when there's nothing to commit."""
-    with patch("loopflow.lfops.find_worktree_root", return_value=Path("/fake/repo")):
+    with patch("loopflow.lfops.commands.find_worktree_root", return_value=Path("/fake/repo")):
         with patch("subprocess.run", side_effect=_git_mock(status_output="")):
             result = runner.invoke(app, ["commit"])
 
@@ -58,14 +58,14 @@ def test_commit_with_changes():
     mock_runner = MagicMock()
     mock_runner.launch.return_value = MagicMock(exit_code=0)
 
-    with patch("loopflow.lfops.find_worktree_root", return_value=Path("/fake/repo")):
+    with patch("loopflow.lfops.commands.find_worktree_root", return_value=Path("/fake/repo")):
         with patch("subprocess.run", side_effect=_git_mock(status_output="M README.md\n", has_staged=True)):
-            with patch("loopflow.lfops.gather_task", return_value=mock_task):
-                with patch("loopflow.lfops.gather_prompt_components") as mock_gather:
+            with patch("loopflow.lfops.commands.gather_task", return_value=mock_task):
+                with patch("loopflow.lfops.commands.gather_prompt_components") as mock_gather:
                     mock_gather.return_value = MagicMock()
-                    with patch("loopflow.lfops.format_prompt", return_value="test prompt"):
-                        with patch("loopflow.lfops.load_config", return_value=None):
-                            with patch("loopflow.lfops.get_runner", return_value=mock_runner):
+                    with patch("loopflow.lfops.commands.format_prompt", return_value="test prompt"):
+                        with patch("loopflow.lfops.commands.load_config", return_value=None):
+                            with patch("loopflow.lfops.commands.get_runner", return_value=mock_runner):
                                 result = runner.invoke(app, ["commit"])
 
                                 assert result.exit_code == 0
@@ -79,15 +79,15 @@ def test_commit_with_push_includes_push_output():
     mock_runner = MagicMock()
     mock_runner.launch.return_value = MagicMock(exit_code=0)
 
-    with patch("loopflow.lfops.find_worktree_root", return_value=Path("/fake/repo")):
-        with patch("loopflow.lfops.has_upstream", return_value=True):
+    with patch("loopflow.lfops.commands.find_worktree_root", return_value=Path("/fake/repo")):
+        with patch("loopflow.lfops.commands.has_upstream", return_value=True):
             with patch("subprocess.run", side_effect=_git_mock(status_output="M file.py\n", has_staged=True)):
-                with patch("loopflow.lfops.gather_task", return_value=mock_task):
-                    with patch("loopflow.lfops.gather_prompt_components") as mock_gather:
+                with patch("loopflow.lfops.commands.gather_task", return_value=mock_task):
+                    with patch("loopflow.lfops.commands.gather_prompt_components") as mock_gather:
                         mock_gather.return_value = MagicMock()
-                        with patch("loopflow.lfops.format_prompt", return_value="test prompt"):
-                            with patch("loopflow.lfops.load_config", return_value=None):
-                                with patch("loopflow.lfops.get_runner", return_value=mock_runner):
+                        with patch("loopflow.lfops.commands.format_prompt", return_value="test prompt"):
+                            with patch("loopflow.lfops.commands.load_config", return_value=None):
+                                with patch("loopflow.lfops.commands.get_runner", return_value=mock_runner):
                                     result = runner.invoke(app, ["commit", "--push"])
 
                                     assert result.exit_code == 0

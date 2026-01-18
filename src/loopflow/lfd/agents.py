@@ -14,8 +14,8 @@ from loopflow.lfd.models import AgentSpec, AgentRun, AgentStatus, TriggerSpec, T
 from loopflow.lfd.naming import agent_branch_name, agent_worktree_path
 from loopflow.lfd.process import is_process_running
 from loopflow.lfd.triggers import should_trigger
-from loopflow.logging import get_log_dir
-from loopflow.worktrees import WorktreeError, list_all
+from loopflow.lf.logging import get_log_dir
+from loopflow.lf.worktrees import WorktreeError, list_all
 
 AGENTS_DIR = Path.home() / ".lf" / "agents"
 _FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)

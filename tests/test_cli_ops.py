@@ -2,7 +2,7 @@
 
 from typer.testing import CliRunner
 
-from loopflow.cli import app
+from loopflow.lf import app
 from loopflow.lfops import app as lfops_app
 
 
@@ -62,6 +62,5 @@ def test_lfops_help_lists_management_commands():
     assert "install" in commands
     assert "doctor" in commands
     assert "version" in commands
-    assert "status" in commands
-    assert "stop" in commands
-    assert "prune" in commands
+    assert "pr" in commands
+    assert "land" in commands

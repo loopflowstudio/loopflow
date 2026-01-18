@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from loopflow.design import clear_design_artifacts, gather_design_docs, has_design_artifacts
+from loopflow.lf.design import clear_design_artifacts, gather_design_docs, has_design_artifacts
 
 
 def test_gather_design_docs_reads_markdown(tmp_path):

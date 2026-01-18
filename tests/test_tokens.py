@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from loopflow.tokens import count_tokens, TokenNode, TokenTree, analyze_prompt_tokens
+from loopflow.lf.tokens import count_tokens, TokenNode, TokenTree, analyze_prompt_tokens
 
 
 def test_count_tokens_returns_int():

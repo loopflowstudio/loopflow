@@ -1,15 +1,11 @@
-# v0.6.4
+# v0.6.5
 
-This release adds UX agent tooling, work queue infrastructure, and improves prompt organization and task management.
+This release refactors the package structure for better organization, splitting loopflow into separate lf/, lfops/, and lfd/ packages.
 
 ## Changes
 
-- Add lfwork CLI and work queue backend for task scheduling
-- Add lfops rebase command for easier branch rebasing
-- Add codebase summarization for pre-generated LLM context
-- Add personal-main branches for background agent isolation
-- Improve Maestro discoverability and standardize task file organization
-- Add AppleScript screenshot capture for agents
-- Add comprehensive design principles to Maestro
-- Fix prompt launchers and preview panels in UX agent
-- Open merged PR in browser after lfops land
+- Reorganize src/loopflow into lf/, lfops/, lfd/ packages for cleaner module boundaries
+- Simplify demo tapes with stub commands for cleaner recordings
+- Remove pydantic-ai dependency, running agents via CLI instead
+- Rebuild Maestro as worktree detail view with collapsed launcher and embedded terminal
+- Update documentation with demo gifs and clearer structure

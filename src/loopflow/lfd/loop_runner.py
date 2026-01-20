@@ -229,12 +229,17 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
             run_mode="auto",
         )
 
+        # Verify task file exists
+        if not components.task:
+            update_loop_run_status(run.id, LoopStatus.ERROR, error=f"Task file not found: {task_name}")
+            _cleanup_worktree(loop.repo, worktree_path, branch)
+            return False
+
         # Inject goal content
-        if components.task:
-            task_file, task_content = components.task
-            goal_section = f"<lf:goal:{loop.goal_name}>\n{goal_spec.content}\n</lf:goal:{loop.goal_name}>"
-            combined = f"{goal_section}\n\n---\n\n{task_content}"
-            components = components._replace(task=(task_file, combined))
+        task_file, task_content = components.task
+        goal_section = f"<lf:goal:{loop.goal_name}>\n{goal_spec.content}\n</lf:goal:{loop.goal_name}>"
+        combined = f"{goal_section}\n\n---\n\n{task_content}"
+        components = components._replace(task=(task_file, combined))
 
         prompt = format_prompt(components)
         prompt_file = write_prompt_file(prompt)

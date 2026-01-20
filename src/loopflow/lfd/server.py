@@ -12,7 +12,6 @@ from typing import Any
 
 from loopflow.lfd.db import (
     list_loops,
-    load_agent_runs,
     load_sessions,
     load_sessions_for_repo,
     load_sessions_for_worktree,

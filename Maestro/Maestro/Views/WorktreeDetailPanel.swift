@@ -12,7 +12,8 @@ struct WorktreeDetailPanel: View {
     @AppStorage("launcherExpanded") private var launcherExpanded = false
 
     @State private var showingDiffSheet = false
-    @State private var diffContent: String = ""
+    @State private var diffContent: String?
+    @State private var diffLoading = false
     @State private var commits: [CommitInfo] = []
     @State private var diffPreview: String = ""
     @State private var isLoadingCommits = false
@@ -46,7 +47,23 @@ struct WorktreeDetailPanel: View {
             launcherSection
         }
         .sheet(isPresented: $showingDiffSheet) {
-            DiffSheet(diff: diffContent, branch: worktree.branch)
+            DiffSheet(
+                worktree: worktree,
+                diffContent: diffContent,
+                isLoading: diffLoading,
+                onOpenWeb: {
+                    if let repoURL = appState.currentRepo {
+                        Task {
+                            if let url = try? await worktreeService.getGitHubCompareURL(
+                                branch: worktree.branch,
+                                in: repoURL
+                            ) {
+                                terminalLauncher.openURL(url)
+                            }
+                        }
+                    }
+                }
+            )
         }
         .alert("Error", isPresented: $showingActionError) {
             Button("OK") { actionError = nil }
@@ -513,53 +530,20 @@ struct WorktreeDetailPanel: View {
     }
 
     private func loadFullDiff() {
+        diffContent = nil
+        diffLoading = true
+        showingDiffSheet = true
+
         Task {
             do {
                 let worktreeURL = URL(fileURLWithPath: worktree.path)
                 let base = worktree.baseBranch ?? "main"
                 diffContent = try await worktreeService.getDiff("\(base)...HEAD", in: worktreeURL)
-                showingDiffSheet = true
             } catch {
-                actionError = "Failed to load diff: \(error.localizedDescription)"
-                showingActionError = true
+                diffContent = "Error loading diff: \(error.localizedDescription)"
             }
+            diffLoading = false
         }
-    }
-}
-
-// MARK: - Diff Sheet
-
-struct DiffSheet: View {
-    let diff: String
-    let branch: String
-
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Diff: \(branch)")
-                    .font(.headline)
-
-                Spacer()
-
-                Button("Done") {
-                    dismiss()
-                }
-                .buttonStyle(.bordered)
-            }
-            .padding()
-
-            Divider()
-
-            ScrollView([.horizontal, .vertical]) {
-                Text(diff)
-                    .font(.system(.body, design: .monospaced))
-                    .textSelection(.enabled)
-                    .padding()
-            }
-        }
-        .frame(minWidth: 600, minHeight: 400)
     }
 }
 

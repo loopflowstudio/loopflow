@@ -132,32 +132,46 @@ def count_outstanding(loop: Loop) -> int:
         return 0
 
 
-def start_loop(loop_id: str, foreground: bool = False) -> bool:
+class StartResult:
+    """Result of attempting to start a loop."""
+
+    def __init__(self, ok: bool, reason: str | None = None, outstanding: int | None = None):
+        self.ok = ok
+        self.reason = reason
+        self.outstanding = outstanding
+
+    def __bool__(self) -> bool:
+        return self.ok
+
+
+def start_loop(loop_id: str, foreground: bool = False) -> StartResult:
     """Mark a loop as running and start execution.
 
     If foreground=True, runs the loop in the current process.
     Otherwise spawns a background subprocess.
+
+    Returns a StartResult indicating success or failure reason.
     """
     loop = get_loop(loop_id)
     if not loop:
-        return False
+        return StartResult(False, "not_found")
 
     # Check if already running
     if loop.status == LoopStatus.RUNNING and loop.pid and is_process_running(loop.pid):
-        return False
+        return StartResult(False, "already_running")
 
     # Check outstanding commits before starting
     outstanding = count_outstanding(loop)
     if outstanding >= loop.pr_limit:
         update_loop_status(loop_id, LoopStatus.WAITING)
-        return False
+        return StartResult(False, "waiting", outstanding=outstanding)
 
     if foreground:
         # Run directly in this process
         update_loop_status(loop_id, LoopStatus.RUNNING)
         update_loop_pid(loop_id, os.getpid())
         _run_loop(loop)
-        return True
+        return StartResult(True)
     else:
         # Spawn background process
         import sys
@@ -170,7 +184,7 @@ def start_loop(loop_id: str, foreground: bool = False) -> bool:
         )
         update_loop_status(loop_id, LoopStatus.RUNNING)
         update_loop_pid(loop_id, proc.pid)
-        return True
+        return StartResult(True)
 
 
 def stop_loop(loop_id: str, force: bool = False) -> bool:

@@ -914,3 +914,37 @@ def test_db_save_loop_with_pid():
 
         loaded = get_loop("loop-1", db_path)
         assert loaded.pid == 54321
+
+
+# StartResult tests
+
+
+def test_start_result_truthy_when_ok():
+    """StartResult is truthy when ok=True."""
+    from loopflow.lfd.loops import StartResult
+
+    result = StartResult(True)
+    assert result.ok is True
+    assert result  # truthy
+    assert result.reason is None
+    assert result.outstanding is None
+
+
+def test_start_result_falsy_when_not_ok():
+    """StartResult is falsy when ok=False."""
+    from loopflow.lfd.loops import StartResult
+
+    result = StartResult(False, "already_running")
+    assert result.ok is False
+    assert not result  # falsy
+    assert result.reason == "already_running"
+
+
+def test_start_result_with_outstanding():
+    """StartResult includes outstanding count for waiting state."""
+    from loopflow.lfd.loops import StartResult
+
+    result = StartResult(False, "waiting", outstanding=5)
+    assert not result
+    assert result.reason == "waiting"
+    assert result.outstanding == 5

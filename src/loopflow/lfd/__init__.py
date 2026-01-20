@@ -18,7 +18,7 @@ from loopflow.lfd.db import (
     update_loop_status,
 )
 from loopflow.lfd.launchd import install as launchd_install, is_running, uninstall as launchd_uninstall
-from loopflow.lfd.loops import count_outstanding, create_loop, get_repo_from_cwd, start_loop, stop_loop
+from loopflow.lfd.loops import create_loop, get_repo_from_cwd, start_loop, stop_loop
 from loopflow.lfd.models import Loop, LoopStatus, LoopType
 from loopflow.lfd.server import run_server
 
@@ -122,22 +122,9 @@ def loop(
         from loopflow.lfd.db import save_loop
         save_loop(lp)
 
-    # Check if already running
-    from loopflow.lfd.process import is_process_running
-    if lp.status == LoopStatus.RUNNING and lp.pid and is_process_running(lp.pid):
-        typer.echo(f"Loop already running (PID {lp.pid})")
-        raise typer.Exit(1)
-
-    # Check outstanding commits
-    outstanding = count_outstanding(lp)
-    if outstanding >= lp.pr_limit:
-        update_loop_status(lp.id, LoopStatus.WAITING)
-        typer.echo(f"{c['yellow']}Waiting:{c['reset']} {outstanding} outstanding PRs (limit {lp.pr_limit})")
-        typer.echo(f"Run 'lfops land --squash' from {lp.personal_main} worktree to land work to main")
-        raise typer.Exit(0)
-
     # Start it
-    if start_loop(lp.id, foreground=foreground):
+    result = start_loop(lp.id, foreground=foreground)
+    if result:
         if foreground:
             typer.echo(f"{c['green']}Completed{c['reset']} loop {c['bold']}{goal}{c['reset']} ({lp.short_id()})")
         else:
@@ -147,6 +134,13 @@ def loop(
             typer.echo(f"  PR limit: {lp.pr_limit}")
             if area:
                 typer.echo(f"  Area: {area}")
+    elif result.reason == "already_running":
+        typer.echo(f"Loop already running (PID {lp.pid})")
+        raise typer.Exit(1)
+    elif result.reason == "waiting":
+        typer.echo(f"{c['yellow']}Waiting:{c['reset']} {result.outstanding} outstanding PRs (limit {lp.pr_limit})")
+        typer.echo(f"Run 'lfops land --squash' from {lp.personal_main} worktree to land work to main")
+        raise typer.Exit(0)
     else:
         typer.echo(f"{c['red']}Error:{c['reset']} Failed to start loop", err=True)
         raise typer.Exit(1)

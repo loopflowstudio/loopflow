@@ -14,9 +14,10 @@ The deliverable is a consolidated design document under `.design/`. Do not edit 
 2. Run `git diff` to see uncommitted changes
 3. Run `git log main..HEAD --oneline` to understand commit history
 4. Read any style guides in the repo
-5. Read existing `.design/*.md` files
-6. Write a single consolidated document to `.design/<branch-name>.md`
-7. Delete other `.design/*.md` files after consolidating
+5. Check `.docs/` for architecture context and prior decisions—evaluate choices against these
+6. Read existing `.design/*.md` files
+7. Write a single consolidated document to `.design/<branch-name>.md`
+8. Delete other `.design/*.md` files after consolidating
 
 ## What to look for
 

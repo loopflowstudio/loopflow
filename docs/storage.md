@@ -78,7 +78,7 @@ These two folders serve different purposes with different lifespans:
 |---|---|---|
 | **Lifespan** | Dies with the PR | Lives forever |
 | **Purpose** | Current work scratchpad | Forward-looking plans |
-| **In context?** | Yes (automatic) | No (opt-in) |
+| **In context?** | Yes | Yes |
 | **Cleared on merge?** | **Yes** | No |
 | **Example** | "Add auth to user endpoint" spec | "How auth should work long-term" |
 
@@ -120,7 +120,7 @@ Forward-looking internal documentation. What we're building next, not what we've
 |---|---|---|
 | **Audience** | Maintainers | Users |
 | **Focus** | Forward-looking, not yet built | Backwards-looking, what exists |
-| **In context?** | Yes | No |
+| **In context?** | Yes | No (opt-in) |
 | **Who writes** | Mostly agents, humans edit | Humans |
 | **Example** | "How auth should work" | "How to authenticate requests" |
 
@@ -171,7 +171,7 @@ Run `lf -c` to preview exactly what context gets assembled.
 |----------|---------|-----------|-------------|
 | `README.md`, `STYLE.md`, etc. | Top-level guidance | Yes | **Yes** |
 | `.design/` | PR scratchpad | **No** (cleared) | **Yes** |
-| `.docs/` | Forward-looking plans | Yes | No (opt-in) |
+| `.docs/` | Forward-looking plans | Yes | **Yes** |
 | `docs/` | Public docs | Yes | No (opt-in) |
 | `.claude/commands/` | Task prompts | Yes | (task file only) |
 | `.lf/config.yaml` | Repo config | Yes | No |
@@ -179,15 +179,7 @@ Run `lf -c` to preview exactly what context gets assembled.
 | `.lf/goals/` | Agent directives | Yes | (when agent uses) |
 | `.lf/summaries/` | Summaries | Gitignored | (when configured) |
 
-**Auto-included:** Well-known guidance files (`README.md`, `STYLE.md`, `CLAUDE.md`, `AGENTS.md`) and `.design/`. Not every `.md` file in the repo.
-
-To include `.docs/` in every task:
-
-```yaml
-# .lf/config.yaml
-context:
-  - .docs
-```
+**Auto-included:** Well-known guidance files (`README.md`, `STYLE.md`, `CLAUDE.md`, `AGENTS.md`), `.design/`, and `.docs/`. Not every `.md` file—`docs/` is opt-in.
 
 ## See Also
 

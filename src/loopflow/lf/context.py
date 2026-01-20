@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 from loopflow.lf.config import load_config
-from loopflow.lf.design import gather_design_docs
+from loopflow.lf.design import gather_design_docs, gather_internal_docs
 from loopflow.lf.files import gather_docs, gather_files, format_files, format_image_references
 from loopflow.lf.frontmatter import TaskFile, parse_task_file
 from loopflow.lf.skills import discover_skill_sources, find_skill, load_skill_prompt, list_all_skills
@@ -398,10 +398,13 @@ def gather_prompt_components(
     # Load bundled LOOPFLOW.md (system documentation)
     loopflow_doc = _load_loopflow_doc() if include_loopflow_doc else None
 
-    # Insert design docs before repo docs
+    # Insert design docs and internal docs before repo docs
+    # Order: .design/ (ephemeral), .docs/ (persistent internal), repo root .md files
     design_docs = gather_design_docs(repo_root)
-    if design_docs:
-        docs[0:0] = design_docs
+    internal_docs = gather_internal_docs(repo_root)
+    prefix_docs = design_docs + internal_docs
+    if prefix_docs:
+        docs[0:0] = prefix_docs
 
     diff = gather_diff(repo_root, exclude) if include_diff else None
 
@@ -512,7 +515,7 @@ def format_prompt(components: PromptComponents) -> str:
         docs_body = "\n\n".join(doc_parts)
         parts.append(
             "Repository documentation. Follow STYLE carefully. "
-            "May include design artifacts under .design/.\n\n"
+            "May include design artifacts (.design/) and internal docs (.docs/).\n\n"
             f"<lf:docs>\n{docs_body}\n</lf:docs>"
         )
 

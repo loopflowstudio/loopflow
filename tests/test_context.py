@@ -560,3 +560,86 @@ def _setup_task_template(tmp_path):
         "Diff A:\n{{diff_a}}\n\n"
         "Diff B:\n{{diff_b}}\n"
     )
+
+
+# =============================================================================
+# Internal docs (.docs/) tests
+# =============================================================================
+
+
+def test_internal_docs_auto_included(tmp_path):
+    """.docs/ markdown files are auto-included in context."""
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "README.md").write_text("# Test\n")
+
+    # Create .docs/ with some markdown files
+    internal_docs = tmp_path / ".docs"
+    internal_docs.mkdir()
+    (internal_docs / "architecture.md").write_text("# Architecture\n\nHow it works.\n")
+    (internal_docs / "decisions").mkdir()
+    (internal_docs / "decisions" / "adr-001.md").write_text("# ADR 001\n\nWe chose X.\n")
+
+    components = gather_prompt_components(tmp_path, "implement")
+    prompt = format_prompt(components)
+
+    # .docs/ files should be included
+    assert "# Architecture" in prompt
+    assert "How it works." in prompt
+    assert "# ADR 001" in prompt
+    assert "We chose X." in prompt
+
+
+def test_internal_docs_empty_when_missing(tmp_path):
+    """.docs/ missing doesn't cause errors."""
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "README.md").write_text("# Test\n")
+
+    components = gather_prompt_components(tmp_path, task=None, inline="test")
+    prompt = format_prompt(components)
+
+    # Should still work, just no .docs content
+    assert "# Test" in prompt
+
+
+def test_public_docs_not_auto_included(tmp_path):
+    """docs/ (public) is NOT auto-included in context."""
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "README.md").write_text("# Test\n")
+
+    # Create docs/ with public documentation
+    public_docs = tmp_path / "docs"
+    public_docs.mkdir()
+    (public_docs / "getting-started.md").write_text("# Getting Started\n\nFor users.\n")
+    (public_docs / "api.md").write_text("# API Reference\n\nEndpoints.\n")
+
+    components = gather_prompt_components(tmp_path, "implement")
+    prompt = format_prompt(components)
+
+    # docs/ should NOT be auto-included
+    assert "# Getting Started" not in prompt
+    assert "For users." not in prompt
+    assert "# API Reference" not in prompt
+
+
+def test_internal_docs_before_root_docs(tmp_path):
+    """.docs/ appears before repo root .md files in context."""
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "README.md").write_text("# Root README\n")
+
+    design_dir = tmp_path / ".design"
+    design_dir.mkdir()
+    (design_dir / "plan.md").write_text("# Design Plan\n")
+
+    internal_docs = tmp_path / ".docs"
+    internal_docs.mkdir()
+    (internal_docs / "context.md").write_text("# Internal Context\n")
+
+    components = gather_prompt_components(tmp_path, task=None, inline="test")
+
+    # Check order: .design/, then .docs/, then root docs
+    doc_paths = [str(p) for p, _ in components.docs]
+    design_idx = next(i for i, p in enumerate(doc_paths) if ".design" in p)
+    internal_idx = next(i for i, p in enumerate(doc_paths) if ".docs" in p)
+    readme_idx = next(i for i, p in enumerate(doc_paths) if "README" in p)
+
+    assert design_idx < internal_idx < readme_idx

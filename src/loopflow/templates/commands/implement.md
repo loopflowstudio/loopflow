@@ -13,12 +13,13 @@ The design doc is under `.design/` and auto-included. It contains data structure
 ## Workflow
 
 1. Read the design doc in `.design/` to understand what to build
-2. Read any style guides or conventions docs in the repo
-3. Implement data structures first—get the core types right
-4. Implement functions one at a time, following the signatures in the design
-5. Run tests to verify nothing broke
-6. Run the "done when" check from the design doc
-7. Do not commit—leave that to the caller or pipeline
+2. Check `.docs/` for architecture guidance and prior decisions that may affect implementation
+3. Read any style guides or conventions docs in the repo
+4. Implement data structures first—get the core types right
+5. Implement functions one at a time, following the signatures in the design
+6. Run tests to verify nothing broke
+7. Run the "done when" check from the design doc
+8. Do not commit—leave that to the caller or pipeline
 
 ## Implementation rules
 

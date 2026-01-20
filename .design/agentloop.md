@@ -31,22 +31,69 @@ The existing `runner.py:run_agent_iteration()` already:
 
 **What's missing**: A simpler CLI surface and better status visibility.
 
+## Goals vs Areas: Structured vs Convention
+
+Two ways to define agent scope:
+
+| Concept | Type | Purpose |
+|---------|------|---------|
+| **Area of Responsibility** | Structured (pathset) | WHERE the agent works |
+| **Goal** | Convention (prompt file) | WHAT the agent does |
+
+**Area** is structured because tooling can use it:
+- Scope context gathering to those paths
+- Restrict file edits to that area (safety)
+- Show ownership in UI ("who owns auth/?")
+
+**Goal** is convention because intent is nuanced:
+- "Improve test coverage" vs "Find security vulnerabilities"
+- Prose captures intent better than fields
+- Like voices—prompt files written for a purpose
+
+### Goal files
+
+Goal files live in `.lf/goals/` like voices live in `.lf/voices/`:
+
+```markdown
+# .lf/goals/security.md
+
+You are responsible for security across the codebase.
+
+## Priorities
+1. Authentication and authorization
+2. Input validation and sanitization
+3. SQL injection and XSS prevention
+4. Dependency vulnerabilities
+
+## Approach
+- Scan for vulnerabilities systematically
+- Fix issues directly rather than just reporting
+- Add tests that verify the fix
+- Document security patterns for the team
+```
+
+Referenced by name in agent definition, injected into every task prompt.
+
 ## Data structures
 
-No new data structures. Extend existing ones:
+Extend existing `AgentSpec`:
 
 ```python
-# Add to AgentSpec (already exists in models.py)
 @dataclass
 class AgentSpec:
     name: str
     repo: Path
     pipeline: str                # "design,implement,polish"
     trigger: TriggerSpec         # kind=LOOP for continuous
-    prompt: str                  # The "goal" - goals and responsibilities
+    area: list[str]              # NEW: pathset - where agent works
+    goal: str                    # NEW: reference to .lf/goals/{goal}.md
+    prompt: str                  # Optional inline prompt (legacy, prefer goal file)
     # ... existing fields ...
+```
 
-# Add step tracking to AgentRun
+Add step tracking to `AgentRun`:
+
+```python
 @dataclass
 class AgentRun:
     # ... existing fields ...
@@ -100,32 +147,57 @@ class LoopStatus:
     iteration: int
     current_step: str | None
     worktree: Path | None
-    goal: str
+    goal: str                # name of goal file
+    goal_content: str | None # loaded content for display
+    area: list[str]          # pathset
     pipeline: list[str]
     last_pr_url: str | None
 ```
 
+## Agent definition format
+
+Agent files in `~/.lf/agents/` reference goals and areas:
+
+```yaml
+# ~/.lf/agents/security-reviewer.md
+---
+name: security-reviewer
+repo: ~/src/myproject
+area: [src/auth/, src/api/middleware/, src/utils/crypto.py]
+goal: security
+pipeline: design,implement,polish
+trigger: loop
+merge: auto
+---
+
+Optional inline notes or overrides to the goal file.
+```
+
+The `goal: security` references `.lf/goals/security.md` in the repo.
+
 ## CLI interface
 
-Add to existing `lf` command (not a new `lf loop` subcommand):
+Add to existing `lf` command:
 
 ```bash
 # Start a loop (creates agent file + starts it)
 lf loop start security-review \
-  --goal "Find and fix security vulnerabilities" \
+  --goal security \
+  --area "src/auth/,src/api/middleware/" \
   --pipeline "design,implement,polish"
 
 # List all loops
 lf loop status
-# NAME              STATUS   ITER  STEP        PR
-# security-review   running  3     implement   github.com/...
-# test-coverage     idle     7     -           github.com/...
+# NAME              STATUS   ITER  STEP        AREA
+# security-review   running  3     implement   src/auth/...
+# test-coverage     idle     7     -           tests/...
 
 # Detailed status
 lf loop status security-review
 # Name: security-review
 # Status: running (iteration 3, step: implement)
-# Goal: Find and fix security vulnerabilities
+# Goal: security (.lf/goals/security.md)
+# Area: src/auth/, src/api/middleware/
 # Pipeline: design → implement → polish
 # Worktree: /Users/.../repo.security-review
 # Recent PRs:
@@ -187,19 +259,51 @@ CREATE TABLE loop_prs (
 The existing `run_agent_iteration()` handles most of this. Modifications:
 
 1. **Before each task**: Update `current_step` in DB, emit event
-2. **After each task**: Emit step.completed event
-3. **After PR creation**: Save to `loop_prs` table, emit iteration.done
-4. **On error**: Emit error event (existing behavior stops the loop)
+2. **Context scoping**: If `area` is set, only include those paths in context
+3. **After each task**: Emit step.completed event
+4. **After PR creation**: Save to `loop_prs` table, emit iteration.done
+5. **On error**: Emit error event (existing behavior stops the loop)
 
-Goal injection (already happens via `_inject_agent_prompt`):
+### Area scoping
+
+When `area` is set, it affects context gathering:
 
 ```python
-# Existing code in runner.py
+def gather_prompt_components(..., area: list[str] | None = None):
+    if area:
+        # Only include files matching the area pathset
+        # Similar to existing context: [...] but exclusive
+        diff_files = [f for f in diff_files if matches_area(f, area)]
+```
+
+Future: could also restrict edits to area (safety), but start with context scoping only.
+
+### Goal injection
+
+Load goal file and inject (extends existing `_inject_agent_prompt`):
+
+```python
+def _load_goal(repo: Path, goal_name: str) -> str | None:
+    """Load goal file from .lf/goals/{name}.md"""
+    path = repo / ".lf" / "goals" / f"{goal_name}.md"
+    return path.read_text() if path.exists() else None
+
 def _inject_agent_prompt(components, agent):
-    """Inject agent prompt into the prompt components."""
-    if not agent.prompt:
-        return components
-    # Prepends agent.prompt to task content
+    """Inject goal + inline prompt into task."""
+    parts = []
+
+    # Load goal file
+    if agent.goal:
+        goal_content = _load_goal(agent.repo, agent.goal)
+        if goal_content:
+            parts.append(f"<lf:goal>\n{goal_content}\n</lf:goal>")
+
+    # Add inline prompt if present
+    if agent.prompt:
+        parts.append(agent.prompt)
+
+    # Prepend to task content
+    ...
 ```
 
 ## UI changes
@@ -209,43 +313,74 @@ Maestro additions:
 1. **Loop badge** on AgentSidebar items showing current step
 2. **Loop detail** in AgentDetailPanel:
    - Pipeline progress: `design ✓ → implement ● → polish ○`
+   - Area visualization (file tree with highlighted paths)
+   - Goal preview (collapsible)
    - PR history with links
-3. **"Start Loop"** in New Agent sheet (sets trigger=loop)
+3. **"Start Loop"** in New Agent sheet:
+   - Goal selector (dropdown of `.lf/goals/*.md`)
+   - Area picker (file tree with checkboxes, progressively disclosed)
+   - Pipeline builder (drag-drop tasks)
 
 ## Constraints
 
 - Loop names = agent names (unique per `~/.lf/agents/`)
 - One loop per repo (existing worktree constraint)
 - Pipeline tasks must exist (validated at start)
-- Goal = agent prompt (required, non-empty)
+- Goal file must exist if specified (validated at start)
+- Area paths are relative to repo root
 - Stop waits for current step (existing SIGTERM behavior)
 
 ## Implementation order
 
-1. Add `current_step` column to agent_runs
-2. Update `runner.py` to track current_step
-3. Create `src/loopflow/lf/loop.py` with CLI wrappers
-4. Add `lf loop` commands to CLI
-5. Add loop_prs table and PR tracking
-6. Emit new events from runner
-7. Update Maestro UI
+1. Add `area` and `goal` fields to AgentSpec parsing
+2. Create `.lf/goals/` directory convention and loader
+3. Add `current_step` column to agent_runs
+4. Update `runner.py` to:
+   - Track current_step
+   - Load and inject goal files
+   - Scope context by area
+5. Create `src/loopflow/lf/loop.py` with CLI wrappers
+6. Add `lf loop` commands to CLI
+7. Add loop_prs table and PR tracking
+8. Emit new events from runner
+9. Update Maestro UI (area picker, goal selector)
 
 ## Done when
 
 ```bash
+# Create a goal file first
+cat > .lf/goals/test-coverage.md << 'EOF'
+You are responsible for test coverage.
+
+## Priorities
+1. Unit tests for core business logic
+2. Integration tests for API endpoints
+3. Edge case coverage
+
+## Approach
+- Find untested code paths
+- Write focused, fast tests
+- Aim for 80%+ coverage
+EOF
+
 # Start a loop
 lf loop start test-loop \
-  --goal "Add comprehensive test coverage" \
+  --goal test-coverage \
+  --area "src/,tests/" \
   --pipeline "design,implement,polish"
 
 # Verify it's running
 lf loop status
-# NAME       STATUS   ITER  STEP
-# test-loop  running  1     design
+# NAME       STATUS   ITER  STEP      AREA
+# test-loop  running  1     design    src/...
 
 # Watch progress
 lf loop status test-loop
-# Shows current step updating: design → implement → polish
+# Shows:
+#   Goal: test-coverage
+#   Area: src/, tests/
+#   Pipeline: design → implement → polish
+#   Current: design (iteration 1)
 
 # After iteration completes, verify PR
 gh pr list | grep test-loop
@@ -262,5 +397,7 @@ lf loop status
 
 Maestro verification:
 - Loop appears in agent sidebar
+- Goal content visible in detail panel
+- Area paths highlighted
 - Current step shows in detail panel
 - PR links appear after iteration

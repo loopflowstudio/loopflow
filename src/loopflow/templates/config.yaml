@@ -12,7 +12,7 @@ exclude:
   - "node_modules"
   - ".venv"
 
-# Skip all permission prompts (only use in trusted worktrees)
+# Skip permission prompts; Codex bypasses sandbox (only use in trusted worktrees)
 yolo: false
 
 # Push commits to origin automatically

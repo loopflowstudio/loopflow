@@ -18,6 +18,7 @@ from loopflow.lf.context import (
     gather_prompt_components,
     gather_task,
 )
+from loopflow.lf.deps import require_agent
 from loopflow.lf.frontmatter import TaskConfig, resolve_task_config
 from loopflow.lf.git import find_main_repo
 from loopflow.lf.launcher import (
@@ -222,8 +223,7 @@ def _launch_interactive_default(
         raise typer.Exit(1)
 
     if not runner.is_available():
-        typer.echo(f"Error: '{backend}' CLI not found", err=True)
-        raise typer.Exit(1)
+        require_agent(backend, repo_root=repo_root)
 
     skip_permissions = config.yolo if config else False
     cli_voices = parse_voice_arg(voice)
@@ -457,8 +457,7 @@ def run(
         raise typer.Exit(1)
 
     if not copy and not runner.is_available():
-        typer.echo(f"Error: '{backend}' CLI not found", err=True)
-        raise typer.Exit(1)
+        require_agent(backend, repo_root=repo_root)
 
     skip_permissions = config.yolo if config else False
 
@@ -632,8 +631,7 @@ def inline(
         raise typer.Exit(1)
 
     if not copy and not runner.is_available():
-        typer.echo(f"Error: '{backend}' CLI not found", err=True)
-        raise typer.Exit(1)
+        require_agent(backend, repo_root=repo_root)
 
     skip_permissions = config.yolo if config else False
 
@@ -860,8 +858,7 @@ def pipeline(
         raise typer.Exit(1)
 
     if not copy and not runner.is_available():
-        typer.echo(f"Error: '{backend}' CLI not found", err=True)
-        raise typer.Exit(1)
+        require_agent(backend, repo_root=repo_root)
 
     if worktree:
         try:

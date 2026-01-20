@@ -27,7 +27,7 @@ Submit PR to merge queue.
 lfops land
 ```
 
-Enables auto-merge on your PR. GitHub merges when CI passes and the merge queue clears. Run `wt remove <branch>` after merge completes to clean up.
+Enables auto-merge on your PR. GitHub merges when CI passes and the merge queue clears. Run `lfops wt prune` after merge completes to clean up.
 
 ## lfops commit
 
@@ -44,26 +44,6 @@ Options:
 | Flag | Description |
 |------|-------------|
 | `-p, --push` | Push after committing |
-
-## lfops init
-
-Scaffold `.lf/config.yaml`.
-
-```bash
-lfops init
-```
-
-Creates a starter config file in your repo.
-
-## lfops install
-
-Install dependencies.
-
-```bash
-lfops install
-```
-
-Installs Claude Code, Codex CLI, Gemini CLI, and worktrunk.
 
 ## lfops doctor
 
@@ -139,7 +119,7 @@ Options:
 ## Typical Workflow
 
 ```bash
-wt switch --create my-feature    # create worktree
+lfops wt create my-feature       # create worktree with schema-based branch
 # ... work on feature ...
 lfops commit                     # commit with generated message
 lfops pr                         # open PR (CI runs automatically)

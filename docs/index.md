@@ -53,11 +53,11 @@ lfd loop product-engineer
 ## Install
 
 ```bash
-pip install loopflow
-lfops install
+uv tool install loopflow
+lf init
 ```
 
-Requires macOS and [worktrunk](https://github.com/loopflowstudio/worktrunk) for git worktree management.
+Requires macOS. Run `lf init` to install Claude Code, worktrunk, and configure your repo.
 
 ## Try it
 

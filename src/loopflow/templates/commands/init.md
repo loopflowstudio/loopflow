@@ -53,12 +53,12 @@ If Node.js is missing:
 If Claude Code is missing:
 - Ask: "Claude Code is required. Install it?"
 - Yes: `npm install -g @anthropic-ai/claude-code`
-- No: explain they can run `lfops install --claude` later
+- No: explain they can install it manually later with that command
 
 If worktrunk is missing:
 - Ask: "worktrunk is required for worktree management. Install it?"
 - Yes: `brew install max-sixty/worktrunk/wt`
-- No: explain they can run `lfops install` later
+- No: explain they can install it manually later with that command
 
 ## Phase 3: Configure repository
 

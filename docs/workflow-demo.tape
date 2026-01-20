@@ -9,7 +9,7 @@ Set Padding 20
 Set Shell "bash"
 
 Hide
-Type "mkdir -p /tmp/demo-bin && for c in lf wt lfops; do echo '#!/bin/bash' > /tmp/demo-bin/$c && chmod +x /tmp/demo-bin/$c; done"
+Type "mkdir -p /tmp/demo-bin && for c in lf lfops; do echo '#!/bin/bash' > /tmp/demo-bin/$c && chmod +x /tmp/demo-bin/$c; done"
 Enter
 Sleep 500ms
 Type "export PATH=/tmp/demo-bin:$PATH"
@@ -20,7 +20,7 @@ Enter
 Sleep 200ms
 Show
 
-Type "wt switch --create add-divide"
+Type "lfops wt create add-divide"
 Enter
 Sleep 1.5s
 

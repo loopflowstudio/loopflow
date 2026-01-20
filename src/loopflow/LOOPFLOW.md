@@ -56,9 +56,8 @@ Keep `.design/<branch>.md` current as work progresses—what's done, what's left
 Loopflow works best with git worktrees. Each feature gets its own directory, isolated from other work.
 
 ```bash
-wt switch <branch> --create    # create worktree and switch
-wt list                        # show all worktrees
-wt remove <branch>             # remove worktree + branch
+lfops wt create <name>         # create worktree with schema-based branch
+lfops wt prune                 # remove merged worktrees
 ```
 
 Most prompts expect to run on a feature branch, not main. If a branch doesn't exist yet, create a worktree.

@@ -73,18 +73,42 @@ struct SetupService {
         try await runCommand(uvPath, args: ["tool", "install", "loopflow"])
         log("install: uv tool install completed")
 
-        // Run lfops install to set up all dependencies
-        let lfopsPath = findExecutable("lfops")
-        log("install: lfops path = \(lfopsPath ?? "not found")")
+        // Install dependencies directly (lf init is interactive, can't run headlessly)
+        try await installDependencies()
+        log("install: completed successfully")
+    }
 
-        guard let lfopsPath else {
-            log("install: ERROR - lfops not found after installing loopflow")
-            throw SetupError.commandFailed("lfops not found after installing loopflow")
+    /// Install Claude Code and worktrunk dependencies
+    private func installDependencies() async throws {
+        // Install Node.js via Homebrew if needed
+        if findExecutable("npm") == nil {
+            log("install: installing Node.js...")
+            if let brewPath = findExecutable("brew") {
+                try await runCommand(brewPath, args: ["install", "node"])
+            } else {
+                log("install: WARNING - Homebrew not found, skipping Node.js")
+            }
         }
 
-        log("install: running lfops install...")
-        try await runCommand(lfopsPath, args: ["install"])
-        log("install: completed successfully")
+        // Install Claude Code if needed
+        if findExecutable("claude") == nil {
+            if let npmPath = findExecutable("npm") {
+                log("install: installing Claude Code...")
+                try await runCommand(npmPath, args: ["install", "-g", "@anthropic-ai/claude-code"])
+            } else {
+                log("install: WARNING - npm not found, skipping Claude Code")
+            }
+        }
+
+        // Install worktrunk if needed
+        if findExecutable("wt") == nil {
+            if let brewPath = findExecutable("brew") {
+                log("install: installing worktrunk...")
+                try await runCommand(brewPath, args: ["install", "max-sixty/worktrunk/wt"])
+            } else {
+                log("install: WARNING - Homebrew not found, skipping worktrunk")
+            }
+        }
     }
 
     /// Ensure the loopflow daemon is running

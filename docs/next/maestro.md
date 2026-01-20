@@ -101,7 +101,7 @@ Click **+** or use **⌘N** to create a new worktree. Enter a branch name or lea
 
 ### Deleting Worktrees
 
-Right-click → **Delete** removes the worktree and its branch. This is equivalent to `wt remove <branch>`.
+Right-click → **Delete** removes the worktree and its branch. You can also use `lfops wt prune` to clean up merged worktrees.
 
 ## Agents Panel
 

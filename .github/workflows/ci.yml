@@ -12,3 +12,23 @@ jobs:
       - uses: astral-sh/setup-uv@v4
       - run: uv sync
       - run: uv run pytest tests/
+
+  maestro-tests:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Maestro SwiftUI tests
+        run: swift test --package-path Maestro
+
+  maestro-ui-tests:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        run: xcodegen generate
+        working-directory: Maestro
+      - name: Run Maestro UI tests
+        run: xcodebuild test -project Maestro.xcodeproj -scheme Maestro -destination 'platform=macOS'
+        working-directory: Maestro

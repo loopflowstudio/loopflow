@@ -11,6 +11,7 @@ usage() {
     echo "Commands:"
     echo "  build      Build the app"
     echo "  test       Build and run tests"
+    echo "  ui-test    Generate Xcode project and run UI tests"
     echo "  run        Build and launch the app (installs to ~/Applications)"
     echo "  clean      Remove dev app and reset permissions"
     echo "  xcode      Open in Xcode"
@@ -29,6 +30,19 @@ case "${1:-help}" in
         echo "Building and testing..."
         swift build
         swift test
+        ;;
+    ui-test)
+        echo "Generating Xcode project..."
+        if ! command -v xcodegen >/dev/null 2>&1; then
+            echo "xcodegen not found. Install with: brew install xcodegen"
+            exit 1
+        fi
+        rm -rf Maestro.xcodeproj
+        xcodegen generate
+        echo "Running UI tests..."
+        DERIVED_DATA="${TMPDIR:-/tmp}/maestro-ui-tests"
+        rm -rf "$DERIVED_DATA"
+        xcodebuild test -project Maestro.xcodeproj -scheme Maestro -destination 'platform=macOS,arch=arm64' -derivedDataPath "$DERIVED_DATA"
         ;;
     run)
         echo "Building and running Maestro..."

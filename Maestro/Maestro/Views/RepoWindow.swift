@@ -25,6 +25,15 @@ struct RepoWindow: View {
         }
         .background(WindowAccessor(repoURL: repoURL))
         .task {
+            if let mode = AppState.uiTestMode() {
+                setupComplete = true
+                hasCheckedSetup = true
+                hasOpenedRepo = true
+                let url = repoURL ?? URL(fileURLWithPath: "/tmp/loopflow-ui-tests")
+                appState.configureForUITest(mode, repoURL: url)
+                return
+            }
+
             // Check setup first
             let status = setupService.checkDependencies()
             setupComplete = status.lfInstalled

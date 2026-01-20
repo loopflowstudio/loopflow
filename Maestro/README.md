@@ -34,3 +34,15 @@ Socket events provide real-time updates without polling.
 
 Open Maestro.xcodeproj in Xcode, build and run.
 Distribution build: Archive → export as App.
+
+## UI Tests
+
+Generate the Xcode project if needed:
+```bash
+xcodegen generate
+```
+
+Run UI tests from the command line:
+```bash
+xcodebuild test -project Maestro.xcodeproj -scheme Maestro -destination 'platform=macOS'
+```

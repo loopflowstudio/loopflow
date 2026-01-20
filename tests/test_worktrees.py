@@ -127,7 +127,12 @@ def json_dump(payload) -> str:
     return json.dumps(payload)
 
 
-def _make_worktree(branch: str, is_dirty: bool = False, pr_state: str | None = None) -> Worktree:
+def _make_worktree(
+    branch: str,
+    is_dirty: bool = False,
+    pr_state: str | None = None,
+    ahead_main: int = 0,
+) -> Worktree:
     """Create a Worktree for testing."""
     return Worktree(
         name=branch,
@@ -141,7 +146,7 @@ def _make_worktree(branch: str, is_dirty: bool = False, pr_state: str | None = N
         pr_url=None,
         pr_number=None,
         pr_state=pr_state,
-        ahead_main=0,
+        ahead_main=ahead_main,
         behind_main=0,
         ahead_remote=0,
         behind_remote=0,
@@ -179,7 +184,8 @@ def test_is_merged_returns_true_when_pr_state_merged():
 
 def test_is_merged_checks_ancestor_for_squash_merge(tmp_path):
     """Checks if branch is ancestor of origin/main for squash merges."""
-    wt = _make_worktree("feature", pr_state=None)
+    # Branch has commits ahead of main (before being squash-merged)
+    wt = _make_worktree("feature", pr_state=None, ahead_main=3)
 
     # Branch is ancestor of origin/main (squash merged)
     with patch("loopflow.lf.worktrees.get_pr_state", return_value=None):
@@ -193,7 +199,8 @@ def test_is_merged_checks_ancestor_for_squash_merge(tmp_path):
 
 def test_is_merged_returns_false_when_not_ancestor(tmp_path):
     """Returns false when branch is not ancestor of origin/main."""
-    wt = _make_worktree("feature", pr_state=None)
+    # Branch has commits ahead of main (active work)
+    wt = _make_worktree("feature", pr_state=None, ahead_main=3)
 
     # Branch is not an ancestor (not yet merged)
     with patch("loopflow.lf.worktrees.get_pr_state", return_value=None):
@@ -201,6 +208,16 @@ def test_is_merged_returns_false_when_not_ancestor(tmp_path):
             mock_run.return_value = MagicMock(returncode=1)  # is-ancestor returns 1 when false
             result = is_merged(wt, tmp_path)
 
+    assert result is False
+
+
+def test_is_merged_returns_false_for_new_branch_with_no_commits():
+    """New branches with no commits ahead should not be considered merged."""
+    # New branch just created from main - no commits, no PR
+    wt = _make_worktree("new-feature", pr_state=None, ahead_main=0)
+
+    # Should return False without any subprocess calls
+    result = is_merged(wt, Path("/tmp/repo"))
     assert result is False
 
 

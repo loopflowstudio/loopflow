@@ -122,6 +122,26 @@ struct Worktree: Identifiable, Hashable, Codable {
     var lastCompletedTask: String? {
         recentTasks.first(where: { $0.isCompleted })?.task
     }
+
+    /// Short name extracted from worktree path (e.g., "../repo.my-feature" → "my-feature").
+    /// When branch names use a schema (e.g., "jack.my-feature.20260120_1234"),
+    /// the short name from the path is more user-friendly for display.
+    var shortName: String {
+        // Extract from path: ../repo.short-name → short-name
+        let pathURL = URL(fileURLWithPath: path)
+        let dirname = pathURL.lastPathComponent  // "repo.short-name"
+        if let dotIndex = dirname.firstIndex(of: ".") {
+            return String(dirname[dirname.index(after: dotIndex)...])
+        }
+        // Fallback to branch if path doesn't follow expected pattern
+        return branch
+    }
+
+    /// Display name for the worktree in the sidebar.
+    /// Uses shortName if it differs from branch (schema-based naming).
+    var displayName: String {
+        shortName
+    }
 }
 
 // JSON structure from `wt list --format json --full`

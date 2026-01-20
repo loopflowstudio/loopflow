@@ -213,6 +213,7 @@ def create(repo_root: Path, name: str, base: str | None = None) -> Path:
     """Create a worktree for a new branch. Returns path.
 
     If worktree already exists, switches to it and returns its path.
+    Uses `name` for both worktree path and branch name (no schema).
     """
     existing = {wt.branch for wt in list_all(repo_root)}
 
@@ -227,6 +228,43 @@ def create(repo_root: Path, name: str, base: str | None = None) -> Path:
 
     output = _run_wt(args, repo_root)
     return Path(output.strip())
+
+
+def create_with_schema(
+    repo_root: Path,
+    short_name: str,
+    base: str | None = None,
+    branch_config: "BranchNameConfig | None" = None,
+) -> Path:
+    """Create worktree with short name for path, schema-based branch name."""
+    from loopflow.lf.branch_names import format_branch_name
+
+    branch_name = format_branch_name(short_name, branch_config)
+    worktree_path = get_path(repo_root, short_name)
+
+    # Check if worktree path already exists
+    if worktree_path.exists():
+        raise WorktreeError(f"Worktree path already exists: {worktree_path}")
+
+    # Check if branch already exists
+    existing_branches = {wt.branch for wt in list_all(repo_root)}
+    if branch_name in existing_branches:
+        raise WorktreeError(f"Branch already exists: {branch_name}")
+
+    # Create worktree with explicit branch name using git directly
+    # (wt CLI doesn't support separate worktree name vs branch name)
+    base_ref = base or "main"
+    result = subprocess.run(
+        ["git", "worktree", "add", "-b", branch_name, str(worktree_path), base_ref],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        error = result.stderr.strip() or result.stdout.strip() or "Failed to create worktree"
+        raise WorktreeError(error)
+
+    return worktree_path
 
 
 def remove(repo_root: Path, name: str) -> bool:
@@ -246,6 +284,7 @@ def is_merged(wt: Worktree, repo_root: Path, base_branch: str = "main") -> bool:
         return False
     if wt.is_dirty:
         return False
+
     if wt.main_state == "integrated":
         return True
 
@@ -260,6 +299,11 @@ def is_merged(wt: Worktree, repo_root: Path, base_branch: str = "main") -> bool:
             return True
         if not _remote_branch_exists(repo_root, wt.branch) and pr_state != "open":
             return True
+
+    # New branch with no work yet and no PR - not merged, just empty
+    # This check comes after PR checks to avoid false negatives for squash-merged PRs
+    if wt.ahead_main == 0 and pr_state is None:
+        return False
 
     # Check if branch is ancestor of origin/base_branch (handles squash merges)
     result = subprocess.run(

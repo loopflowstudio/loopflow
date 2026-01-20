@@ -69,7 +69,7 @@ def parse_model(model: str) -> tuple[str, str | None]:
 class Config(BaseModel):
     agent_model: str = "claude:opus"  # Format: backend:variant (e.g., claude:opus, claude:sonnet, codex)
     pipelines: dict[str, PipelineConfig] = Field(default_factory=dict)
-    yolo: bool = False  # Skip prompts; Codex runs without sandboxing
+    yolo: bool = False  # Skip permissions; Codex also disables sandboxing
     chrome: bool = False  # Enable Chrome integration for Claude Code (browser automation)
     push: bool = False
     pr: bool = False

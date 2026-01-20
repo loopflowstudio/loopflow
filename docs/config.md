@@ -20,7 +20,7 @@ Configure loopflow via CLI flags or `.lf/config.yaml`. CLI flags override config
 | Add context files | `-x FILE` | `context: [FILE]` |
 | Voice/persona | `--voice NAME` | `voice: NAME` |
 | Chrome automation | `--chrome` | `chrome: true` |
-| Yolo mode (skip prompts/sandbox) | — | `yolo: true` |
+| Yolo mode (skip permissions) | — | `yolo: true` |
 
 ## Context Assembly
 
@@ -216,7 +216,7 @@ Auto-push after commits in auto mode.
 
 ### Yolo
 
-Skip permission prompts. Codex also disables sandboxing.
+Skip permissions. Codex also disables sandboxing.
 
 | | |
 |---|---|

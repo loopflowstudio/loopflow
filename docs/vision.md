@@ -78,6 +78,16 @@ lf implement --race claude,codex
 
 You own your workflows. They survive when tools change.
 
+### Best Practices, Not Magic
+
+There's no secret sauce in the prompts. They're just good practices written down:
+
+- Write prompts in your codebase, versioned and reviewed
+- Assemble context explicitly so you know what the agent sees
+- Chain tasks with commits between steps
+
+The value is the discipline—having prompts written, iterating on them, sharing them across your team. You shouldn't have to write everything from scratch. Good skills exist in the ecosystem. Loopflow lets you use them alongside your own.
+
 ### Worktrees for Isolation
 
 Each feature gets its own directory. Agents work in isolated branches while you work on something else.

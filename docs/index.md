@@ -98,6 +98,15 @@ lf review -m codex              # use Codex
 lf implement -m gemini          # use Gemini
 ```
 
+## Works With
+
+Loopflow plays nicely with tools in the ecosystem:
+
+- **[worktrunk](https://github.com/loopflowstudio/worktrunk)** — git worktree management
+- **[superpowers](https://github.com/obra/superpowers)** — skill library for AI agents
+
+Use your prompts alongside theirs. Any skill, any agent.
+
 ---
 
 *Craft and throughput. Not either/or.*

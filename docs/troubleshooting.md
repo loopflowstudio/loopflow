@@ -58,7 +58,6 @@ Claude, Codex, and Gemini have usage limits. Options:
 List all worktrees:
 
 ```bash
-wt list
 git worktree list
 ```
 
@@ -68,10 +67,10 @@ Clean up stale entries:
 git worktree prune
 ```
 
-Remove a specific worktree:
+Remove merged worktrees:
 
 ```bash
-wt remove <branch>
+lfops wt prune
 ```
 
 ## Loop stuck in WAITING
@@ -108,10 +107,10 @@ See [Configuration](config.md) for context options.
 
 **Symptom:** `lf` fails with "claude not found" or similar.
 
-Install dependencies:
+Run the setup wizard:
 
 ```bash
-lfops install
+lf init
 ```
 
 Check installation:

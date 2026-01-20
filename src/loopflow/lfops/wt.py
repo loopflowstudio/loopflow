@@ -9,6 +9,7 @@ import typer
 
 from loopflow.lf.config import load_config
 from loopflow.lf.context import find_worktree_root
+from loopflow.lf.deps import require_wt
 from loopflow.lf.worktrees import (
     create_with_schema,
     find_merged,
@@ -37,6 +38,8 @@ def register_commands(app: typer.Typer) -> None:
             # Worktree: ../repo.my-feature
             # Branch: jack.my-feature.20260120_1234 (with schema)
         """
+        require_wt()
+
         repo_root = find_worktree_root()
         if not repo_root:
             typer.echo("Error: Not in a git repository", err=True)
@@ -157,6 +160,8 @@ def register_commands(app: typer.Typer) -> None:
         sync: bool = typer.Option(True, "--sync/--no-sync", help="Sync base branch first"),
     ) -> None:
         """List worktrees with prunable metadata."""
+        require_wt()
+
         if format != "json":
             typer.echo("Error: only --format json is supported", err=True)
             raise typer.Exit(1)
@@ -186,6 +191,7 @@ def register_commands(app: typer.Typer) -> None:
         debug: bool = typer.Option(False, "--debug", help="Show merge detection details"),
     ) -> None:
         """Remove worktrees whose changes have been merged into main."""
+        require_wt()
         repo_root = find_worktree_root()
         if not repo_root:
             typer.echo("Error: Not in a git repository", err=True)

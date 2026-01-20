@@ -12,7 +12,7 @@ Design, implement, polish, ship. Each task reads what the previous one wrote.
 ## The flow
 
 ```bash
-wt switch --create auth-feature    # create worktree
+lfops wt create auth-feature       # create worktree with schema-based branch
 lf design: add OAuth login         # interactive: discuss approach
 lf implement                       # builds what you designed
 lf polish                          # runs tests, fixes issues
@@ -24,12 +24,11 @@ lfops pr                           # open PR
 Each feature gets its own directory. No branch switching, no stashing.
 
 ```bash
-wt switch --create my-feature    # create worktree at ../my-feature
-wt list                          # show all worktrees
-wt remove my-feature             # cleanup after merge
+lfops wt create my-feature       # create worktree with schema-based branch
+lfops wt prune                   # cleanup merged worktrees
 ```
 
-Requires [worktrunk](https://github.com/loopflowstudio/worktrunk).
+Requires [worktrunk](https://github.com/loopflowstudio/worktrunk) for underlying worktree operations.
 
 ## Built-in tasks
 
@@ -115,11 +114,11 @@ Run multiple features in separate worktrees:
 
 ```bash
 # Terminal 1
-wt switch --create feature-a
+lfops wt create feature-a
 lf implement: add caching
 
 # Terminal 2
-wt switch --create feature-b
+lfops wt create feature-b
 lf implement: add auth
 ```
 

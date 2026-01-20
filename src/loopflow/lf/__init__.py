@@ -20,6 +20,7 @@ from loopflow.lf.pipelines import load_pipeline
 # =============================================================================
 
 BUILTIN_CATEGORIES: dict[str, list[str]] = {
+    "Setup": ["init"],
     "Planning & Design": ["design", "explore", "refine"],
     "Implementation": ["implement", "iterate", "expand", "reduce"],
     "Quality": ["review", "polish", "debug"],
@@ -27,6 +28,7 @@ BUILTIN_CATEGORIES: dict[str, list[str]] = {
 }
 
 BUILTIN_DESCRIPTIONS: dict[str, str] = {
+    "init": "Set up loopflow in this repo",
     "design": "Plan what to build",
     "explore": "Investigate current diff",
     "implement": "Build from design doc",

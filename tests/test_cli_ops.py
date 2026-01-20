@@ -67,8 +67,7 @@ def test_lfops_help_lists_management_commands():
 
     assert result.exit_code == 0
     commands = _get_command_names(result.output)
-    assert "init" in commands
-    assert "install" in commands
+    # init and install moved to `lf init` (interactive prompt)
     assert "doctor" in commands
     assert "version" in commands
     assert "pr" in commands

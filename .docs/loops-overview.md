@@ -18,9 +18,9 @@ Agent loops run a Goal continuously against a repo, producing PRs to a personal-
 | Type | Trigger | Ends When | Use For |
 |------|---------|-----------|---------|
 | `lfd loop` | Manual start | PR limit hit | Continuous improvement |
-| `lfd flow` | Manual start | Single iteration completes | One-off projects |
-| `lfd subscribe` | File changes on main | One iteration | Reactive maintenance |
-| `lfd schedule` | Cron | One iteration | Periodic tasks |
+| `lfd flow` | Manual start | One iteration completes | One-off projects |
+| `lfd subscribe` | File changes on main | One iteration completes | Reactive maintenance |
+| `lfd schedule` | Cron | One iteration completes | Periodic tasks |
 
 ## Branch Model
 

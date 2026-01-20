@@ -166,11 +166,13 @@ def _generate_message_via_cli(repo_root: Path, prompt: str) -> CommitMessage:
         cwd=repo_root,
         text=True,
         capture_output=True,
-        env=get_model_env(),
+        env=get_model_env(strip_api_keys=False),
     )
     output = result.stdout.strip() if result.stdout else ""
     if result.returncode != 0 or not output:
-        detail = result.stderr.strip() if result.stderr else "CLI failed"
+        detail = result.stderr.strip() if result.stderr else ""
+        if not detail:
+            detail = result.stdout.strip() if result.stdout else "CLI failed"
         raise RuntimeError(detail)
     return _parse_cli_message(output)
 
@@ -277,11 +279,13 @@ def generate_release_notes(repo_root: Path, old_version: str, new_version: str) 
         cwd=repo_root,
         text=True,
         capture_output=True,
-        env=get_model_env(),
+        env=get_model_env(strip_api_keys=False),
     )
     output = result.stdout.strip() if result.stdout else ""
     if result.returncode != 0 or not output:
-        detail = result.stderr.strip() if result.stderr else "CLI failed"
+        detail = result.stderr.strip() if result.stderr else ""
+        if not detail:
+            detail = result.stdout.strip() if result.stdout else "CLI failed"
         raise RuntimeError(f"release notes generation failed: {detail}")
 
     _log_success("release notes")

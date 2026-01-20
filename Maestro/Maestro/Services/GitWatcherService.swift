@@ -25,32 +25,26 @@ actor GitWatcherService {
         self.watchedRepo = repo
         self.onChange = onChange
 
-        let gitDir = repo.appendingPathComponent(".git")
+        guard let gitDir = findGitDir(at: repo) else { return }
 
-        // Paths to watch
-        let paths: [String] = [
+        let paths = [
             gitDir.appendingPathComponent("worktrees").path,
             gitDir.appendingPathComponent("refs").path,
             gitDir.appendingPathComponent("index").path,
         ]
+        startStream(paths: paths)
+    }
 
-        // Verify .git exists (might be a worktree with .git file instead of directory)
-        let fm = FileManager.default
+    private func findGitDir(at repo: URL) -> URL? {
+        let gitDir = repo.appendingPathComponent(".git")
+
         var isDir: ObjCBool = false
-        guard fm.fileExists(atPath: gitDir.path, isDirectory: &isDir), isDir.boolValue else {
-            // This repo might be a worktree itself - find the real git dir
-            if let realGitDir = resolveGitDir(at: repo) {
-                let realPaths: [String] = [
-                    realGitDir.appendingPathComponent("worktrees").path,
-                    realGitDir.appendingPathComponent("refs").path,
-                    realGitDir.appendingPathComponent("index").path,
-                ]
-                startStream(paths: realPaths)
-            }
-            return
+        if FileManager.default.fileExists(atPath: gitDir.path, isDirectory: &isDir), isDir.boolValue {
+            return gitDir
         }
 
-        startStream(paths: paths)
+        // This repo might be a worktree itself - resolve the .git file
+        return resolveGitDir(at: repo)
     }
 
     func stop() {

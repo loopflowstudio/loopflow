@@ -2,6 +2,12 @@
 
 Import external skill libraries (starting with [obra/superpowers](https://github.com/obra/superpowers)) and run them through loopflow's universal launcher.
 
+## Philosophy
+
+Loopflow is a launcher that believes every company and team should put their core prompts in writing, in their codebase. Prompts are artifacts—versioned, reviewed, shared.
+
+But you shouldn't have to write everything from scratch. Good skills exist. Superpowers has them. Other libraries will emerge. Loopflow lets you use any skill, with any agent, while keeping your own prompts alongside.
+
 ## What to build
 
 `lf sp:<skill>` runs skills from superpowers with loopflow's context assembly and model selection.

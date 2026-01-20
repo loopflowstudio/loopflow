@@ -1,11 +1,7 @@
 """Tests for loopflow.lf.roadmap module."""
 
-from datetime import datetime
-from pathlib import Path
-
 from loopflow.lf.roadmap import (
     Roadmap,
-    RoadmapItem,
     approve_item,
     complete_item,
     create_item,
@@ -161,7 +157,9 @@ def test_create_item(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
 
-    item = create_item(repo, "api", "rate limiting", "Add Rate Limiting", "Implement rate limiting.")
+    item = create_item(
+        repo, "api", "rate limiting", "Add Rate Limiting", "Implement rate limiting."
+    )
 
     assert item.status == "proposed"
     assert item.area == "api"

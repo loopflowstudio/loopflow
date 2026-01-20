@@ -2,10 +2,10 @@
 
 import pytest
 
-from loopflow.lf.voices import Voice, VoiceNotFoundError, load_voice, parse_voice_arg
-from loopflow.lf.context import gather_prompt_components, format_prompt
-from loopflow.lf.frontmatter import parse_step_file, resolve_step_config, StepConfig
 from loopflow.lf.config import Config
+from loopflow.lf.context import format_prompt, gather_prompt_components
+from loopflow.lf.frontmatter import StepConfig, parse_step_file, resolve_step_config
+from loopflow.lf.voices import Voice, VoiceNotFoundError, load_voice, parse_voice_arg
 
 
 @pytest.fixture
@@ -191,9 +191,7 @@ def test_resolve_step_config_no_voice():
 
 
 def test_format_prompt_single_voice(temp_repo):
-    components = gather_prompt_components(
-        temp_repo, "implement", voices=["architect"]
-    )
+    components = gather_prompt_components(temp_repo, "implement", voices=["architect"])
     formatted = format_prompt(components)
 
     assert "<lf:voice:architect>" in formatted
@@ -204,9 +202,7 @@ def test_format_prompt_single_voice(temp_repo):
 
 
 def test_format_prompt_multiple_voices(temp_repo):
-    components = gather_prompt_components(
-        temp_repo, "implement", voices=["architect", "concise"]
-    )
+    components = gather_prompt_components(temp_repo, "implement", voices=["architect", "concise"])
     formatted = format_prompt(components)
 
     assert "<lf:voices>" in formatted
@@ -216,9 +212,7 @@ def test_format_prompt_multiple_voices(temp_repo):
 
 
 def test_format_prompt_voice_before_task(temp_repo):
-    components = gather_prompt_components(
-        temp_repo, "implement", voices=["architect"]
-    )
+    components = gather_prompt_components(temp_repo, "implement", voices=["architect"])
     formatted = format_prompt(components)
 
     voice_pos = formatted.find("<lf:voice:architect>")

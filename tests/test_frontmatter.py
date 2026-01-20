@@ -1,14 +1,12 @@
 """Tests for frontmatter parsing and config resolution."""
 
+from loopflow.lf.config import Config
 from loopflow.lf.frontmatter import (
     StepConfig,
-    StepFile,
-    ResolvedStepConfig,
+    get_step_defaults,
     parse_step_file,
     resolve_step_config,
-    get_step_defaults,
 )
-from loopflow.lf.config import Config
 
 
 def test_parse_step_file_no_frontmatter():

@@ -1,9 +1,6 @@
 """Tests for loopflow.lf.goals module."""
 
-from pathlib import Path
-
 from loopflow.lf.goals import (
-    Goal,
     goal_exists,
     list_builtin_goals,
     list_goals,

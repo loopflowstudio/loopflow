@@ -3,16 +3,16 @@
 import tempfile
 from pathlib import Path
 
+from loopflow.lf.flow import _count_logical_steps
 from loopflow.lf.flows import (
     FlowDef,
     FlowStep,
     RaceConfig,
     StepConfig,
     load_flow,
-    save_flow,
     resolve_flow,
+    save_flow,
 )
-from loopflow.lf.flow import _count_logical_steps
 
 
 def test_flow_step_from_string():
@@ -23,22 +23,26 @@ def test_flow_step_from_string():
 
 
 def test_flow_step_from_dict():
-    step = FlowStep.from_dict({
-        "step": "review",
-        "config": {"model": "claude:opus"},
-    })
+    step = FlowStep.from_dict(
+        {
+            "step": "review",
+            "config": {"model": "claude:opus"},
+        }
+    )
     assert step.step == "review"
     assert step.config is not None
     assert step.config.model == "claude:opus"
 
 
 def test_flow_step_with_parallel():
-    step = FlowStep.from_dict({
-        "parallel": [
-            {"step": "test"},
-            {"step": "lint"},
-        ]
-    })
+    step = FlowStep.from_dict(
+        {
+            "parallel": [
+                {"step": "test"},
+                {"step": "lint"},
+            ]
+        }
+    )
     assert step.parallel is not None
     assert len(step.parallel) == 2
     assert step.parallel[0].step == "test"
@@ -125,10 +129,12 @@ def test_resolve_flow_with_parallel():
         name="parallel",
         steps=[
             FlowStep(step="a"),
-            FlowStep(parallel=[
-                FlowStep(step="b"),
-                FlowStep(step="c"),
-            ]),
+            FlowStep(
+                parallel=[
+                    FlowStep(step="b"),
+                    FlowStep(step="c"),
+                ]
+            ),
             FlowStep(step="d"),
         ],
     )
@@ -206,14 +212,16 @@ def test_step_config_context():
 
 def test_flow_step_with_full_config():
     """FlowStep preserves voice and context in config."""
-    step = FlowStep.from_dict({
-        "step": "implement",
-        "config": {
-            "model": "claude:opus",
-            "voice": "architect",
-            "context": ["src/models.py"],
+    step = FlowStep.from_dict(
+        {
+            "step": "implement",
+            "config": {
+                "model": "claude:opus",
+                "voice": "architect",
+                "context": ["src/models.py"],
+            },
         }
-    })
+    )
 
     assert step.step == "implement"
     assert step.config is not None
@@ -276,11 +284,14 @@ def test_save_flow():
             name="test",
             steps=[
                 FlowStep(step="design"),
-                FlowStep(step="implement", config=StepConfig(
-                    model="claude:opus",
-                    voice=["architect"],
-                    context=["src/main.py"],
-                )),
+                FlowStep(
+                    step="implement",
+                    config=StepConfig(
+                        model="claude:opus",
+                        voice=["architect"],
+                        context=["src/main.py"],
+                    ),
+                ),
                 FlowStep(step="review"),
             ],
         )
@@ -322,10 +333,12 @@ def test_count_logical_steps_with_parallel():
         name="parallel",
         steps=[
             FlowStep(step="a"),
-            FlowStep(parallel=[
-                FlowStep(step="b"),
-                FlowStep(step="c"),
-            ]),
+            FlowStep(
+                parallel=[
+                    FlowStep(step="b"),
+                    FlowStep(step="c"),
+                ]
+            ),
             FlowStep(step="d"),
         ],
     )
@@ -343,15 +356,19 @@ def test_count_logical_steps_multiple_parallel_groups():
     flow = FlowDef(
         name="multi-parallel",
         steps=[
-            FlowStep(parallel=[
-                FlowStep(step="a"),
-                FlowStep(step="b"),
-            ]),
+            FlowStep(
+                parallel=[
+                    FlowStep(step="a"),
+                    FlowStep(step="b"),
+                ]
+            ),
             FlowStep(step="c"),
-            FlowStep(parallel=[
-                FlowStep(step="d"),
-                FlowStep(step="e"),
-            ]),
+            FlowStep(
+                parallel=[
+                    FlowStep(step="d"),
+                    FlowStep(step="e"),
+                ]
+            ),
         ],
     )
 
@@ -407,6 +424,7 @@ steps:
 
 # Race configuration tests
 
+
 def test_race_config_from_list():
     """RaceConfig parses simple list of models."""
     race = RaceConfig.from_dict(["claude:opus", "codex:o3"])
@@ -416,20 +434,24 @@ def test_race_config_from_list():
 
 def test_race_config_from_dict():
     """RaceConfig parses full dict with custom judge."""
-    race = RaceConfig.from_dict({
-        "models": ["claude:opus", "codex:o3"],
-        "judge": "custom-judge",
-    })
+    race = RaceConfig.from_dict(
+        {
+            "models": ["claude:opus", "codex:o3"],
+            "judge": "custom-judge",
+        }
+    )
     assert race.models == ["claude:opus", "codex:o3"]
     assert race.judge == "custom-judge"
 
 
 def test_race_config_from_model_objects():
     """RaceConfig parses list of model objects."""
-    race = RaceConfig.from_dict([
-        {"model": "claude:opus"},
-        {"model": "codex:o3"},
-    ])
+    race = RaceConfig.from_dict(
+        [
+            {"model": "claude:opus"},
+            {"model": "codex:o3"},
+        ]
+    )
     assert race.models == ["claude:opus", "codex:o3"]
 
 
@@ -444,10 +466,12 @@ def test_race_config_serialization():
 
 def test_flow_step_with_race():
     """FlowStep parses race configuration."""
-    step = FlowStep.from_dict({
-        "step": "implement",
-        "race": ["claude:opus", "codex:o3"],
-    })
+    step = FlowStep.from_dict(
+        {
+            "step": "implement",
+            "race": ["claude:opus", "codex:o3"],
+        }
+    )
     assert step.step == "implement"
     assert step.race is not None
     assert step.race.models == ["claude:opus", "codex:o3"]

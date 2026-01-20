@@ -6,12 +6,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from loopflow.lf.goals import _parse_frontmatter, _FRONTMATTER_PATTERN
+from loopflow.lf.goals import _FRONTMATTER_PATTERN, _parse_frontmatter
 
 
 @dataclass
 class RoadmapItem:
     """A design spec for substantial work."""
+
     path: Path
     area: str
     status: str  # proposed | approved | in-progress | done
@@ -23,6 +24,7 @@ class RoadmapItem:
 @dataclass
 class Roadmap:
     """All roadmap items for a repo."""
+
     items: list[RoadmapItem]
 
     def for_area(self, area: str) -> list[RoadmapItem]:
@@ -171,7 +173,7 @@ def _update_item_status(
 
     # Update existing frontmatter
     frontmatter_text = match.group(1)
-    body = text[match.end():]
+    body = text[match.end() :]
 
     lines = []
     status_found = False
@@ -198,9 +200,7 @@ def _update_item_status(
         item.approved_at = approved_at
 
 
-def create_item(
-    repo: Path, area: str, name: str, title: str, content: str
-) -> RoadmapItem:
+def create_item(repo: Path, area: str, name: str, title: str, content: str) -> RoadmapItem:
     """Create a new roadmap item."""
     roadmap_dir = repo / ".docs" / "roadmap" / area
     roadmap_dir.mkdir(parents=True, exist_ok=True)

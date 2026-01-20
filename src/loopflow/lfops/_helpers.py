@@ -130,7 +130,9 @@ def sync_main_repo(main_repo: Path, base_branch: str) -> bool:
     return True
 
 
-def remove_worktree(main_repo: Path, branch: str, worktree_path: Path, base_branch: str = "main") -> None:
+def remove_worktree(
+    main_repo: Path, branch: str, worktree_path: Path, base_branch: str = "main"
+) -> None:
     """Remove worktree and branch. Uses wt for events, falls back to git if needed."""
     # Update local base branch to match origin so wt correctly detects squash-merged branches
     sync_main_repo(main_repo, base_branch)

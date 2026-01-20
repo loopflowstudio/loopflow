@@ -2,15 +2,18 @@
 
 import sys
 from pathlib import Path
-from typing import Optional
 
 import typer
 import yaml
 
 from loopflow.lf.config import ConfigError, load_config
-from loopflow.lf.context import find_worktree_root, gather_task, list_all_tasks, _get_builtin_task
+from loopflow.lf.context import (
+    _get_builtin_task,
+    find_worktree_root,
+    gather_task,
+    list_all_tasks,
+)
 from loopflow.lf.pipelines import load_pipeline
-
 
 # =============================================================================
 # Built-in task metadata for formatted listing
@@ -47,7 +50,14 @@ def _use_color() -> bool:
 # ANSI color codes
 def _colors() -> dict[str, str]:
     if not _use_color():
-        return {"cyan": "", "bold": "", "dim": "", "yellow": "", "green": "", "reset": ""}
+        return {
+            "cyan": "",
+            "bold": "",
+            "dim": "",
+            "yellow": "",
+            "green": "",
+            "reset": "",
+        }
     return {
         "cyan": "\033[36m",
         "bold": "\033[1m",
@@ -57,17 +67,20 @@ def _colors() -> dict[str, str]:
         "reset": "\033[0m",
     }
 
+
 app = typer.Typer(
     name="lf",
     help="Arrange LLMs to code in harmony.",
     no_args_is_help=False,
 )
 
-# Import and register subcommands
-from loopflow.lf import run as run_module
+# Import and register subcommands (must be after app definition)
+from loopflow.lf import run as run_module  # noqa: E402
 
 # Register top-level commands
-app.command(context_settings={"allow_extra_args": True, "allow_interspersed_args": True})(run_module.run)
+app.command(context_settings={"allow_extra_args": True, "allow_interspersed_args": True})(
+    run_module.run
+)
 app.command()(run_module.inline)
 app.command()(run_module.cp)
 app.command()(run_module.add)
@@ -131,7 +144,9 @@ def _format_task_list() -> str:
             info = _get_task_info(repo_root, name, config)
             badge = f"  {c['yellow']}interactive{c['reset']}" if info.get("interactive") else ""
             customized = f" {c['dim']}(customized){c['reset']}" if name in user_task_set else ""
-            lines.append(f"  {c['bold']}{name:<14}{c['reset']} {c['dim']}{desc:<34}{c['reset']}{badge}{customized}")
+            line = f"  {c['bold']}{name:<14}{c['reset']} "
+            line += f"{c['dim']}{desc:<34}{c['reset']}{badge}{customized}"
+            lines.append(line)
         lines.append("")
 
     # Custom tasks (user-defined, not overriding builtins)
@@ -145,7 +160,9 @@ def _format_task_list() -> str:
             if info.get("produces"):
                 desc = str(info["produces"])[:34]
             badge = f"  {c['yellow']}interactive{c['reset']}" if info.get("interactive") else ""
-            lines.append(f"  {c['bold']}{name:<14}{c['reset']} {c['dim']}{desc:<34}{c['reset']}{badge}")
+            line = f"  {c['bold']}{name:<14}{c['reset']} "
+            line += f"{c['dim']}{desc:<34}{c['reset']}{badge}"
+            lines.append(line)
         lines.append("")
 
     # Global tasks (e.g., ~/.claude/commands/rams.md)
@@ -157,7 +174,9 @@ def _format_task_list() -> str:
             if info.get("produces"):
                 desc = str(info["produces"])[:34]
             badge = f"  {c['yellow']}interactive{c['reset']}" if info.get("interactive") else ""
-            lines.append(f"  {c['bold']}{name:<14}{c['reset']} {c['dim']}{desc:<34}{c['reset']}{badge}")
+            line = f"  {c['bold']}{name:<14}{c['reset']} "
+            line += f"{c['dim']}{desc:<34}{c['reset']}{badge}"
+            lines.append(line)
         lines.append("")
 
     # External skills section
@@ -176,7 +195,9 @@ def _format_task_list() -> str:
             lines.append("")
 
     # Footer
-    lines.append(f"{c['dim']}Built-ins work anywhere. Run lf <task> or lf <task>: args{c['reset']}")
+    footer = f"{c['dim']}Built-ins work anywhere. "
+    footer += f"Run lf <task> or lf <task>: args{c['reset']}"
+    lines.append(footer)
 
     return "\n".join(lines)
 
@@ -217,7 +238,7 @@ def main():
                 sys.argv.pop(1)
                 sys.argv.insert(1, "inline")
             elif first_arg not in known_commands:
-                # Handle colon suffix: "lf implement: add logout" -> "lf implement add logout"
+                # "lf implement: add logout" -> "lf implement add logout"
                 if first_arg.endswith(":"):
                     sys.argv[1] = first_arg[:-1]
                 name = sys.argv[1]
@@ -236,10 +257,13 @@ def main():
                     has_task = _get_builtin_task(name) is not None
 
                 if has_pipeline and has_task:
-                    typer.echo(f"Error: '{name}' exists as both a pipeline and a task", err=True)
-                    typer.echo(f"  Pipeline: defined in .lf/config.yaml", err=True)
+                    typer.echo(
+                        f"Error: '{name}' exists as both a pipeline and a task",
+                        err=True,
+                    )
+                    typer.echo("  Pipeline: defined in .lf/config.yaml", err=True)
                     typer.echo(f"  Task: .claude/commands/{name}.md or .lf/{name}.*", err=True)
-                    typer.echo(f"Remove one to resolve the conflict.", err=True)
+                    typer.echo("Remove one to resolve the conflict.", err=True)
                     raise SystemExit(1)
 
                 if has_pipeline:
@@ -249,7 +273,7 @@ def main():
                 else:
                     # Task not found
                     typer.echo(f"No task or pipeline named '{name}'", err=True)
-                    typer.echo(f"Run 'lf --list' to see available tasks.", err=True)
+                    typer.echo("Run 'lf --list' to see available tasks.", err=True)
                     raise SystemExit(1)
 
         app()

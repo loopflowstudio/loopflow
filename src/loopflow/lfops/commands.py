@@ -5,10 +5,10 @@ import sys
 import typer
 
 from loopflow.lfops import abandon as abandon_module
-from loopflow.lfops import init as init_module
-from loopflow.lfops import pr as pr_module
-from loopflow.lfops import land as land_module
 from loopflow.lfops import commit as commit_module
+from loopflow.lfops import init as init_module
+from loopflow.lfops import land as land_module
+from loopflow.lfops import pr as pr_module
 from loopflow.lfops import rebase as rebase_module
 from loopflow.lfops import summarize as summarize_module
 from loopflow.lfops import sync as sync_module

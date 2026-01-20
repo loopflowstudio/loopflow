@@ -6,7 +6,6 @@ from typing import Any
 
 from loopflow.lfd.work.models import WorkItem
 
-
 _FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 
 
@@ -25,7 +24,7 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
         return {}, text
 
     frontmatter = match.group(1)
-    content = text[match.end():]
+    content = text[match.end() :]
 
     metadata: dict[str, Any] = {}
     for line in frontmatter.split("\n"):
@@ -49,6 +48,7 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
 
 def _format_frontmatter(item: WorkItem) -> str:
     """Format a WorkItem as markdown with YAML frontmatter."""
+
     def fmt(val: Any) -> str:
         if val is None:
             return "null"

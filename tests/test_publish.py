@@ -2,7 +2,7 @@
 
 import pytest
 
-from loopflow.publish import bump_version, get_version, PublishError
+from loopflow.publish import PublishError, bump_version, get_version
 
 
 def test_get_version():

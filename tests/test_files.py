@@ -5,12 +5,12 @@ from pathlib import Path
 import pytest
 
 from loopflow.lf.files import (
-    gather_files,
+    _load_gitignore,
     format_files,
     format_image_references,
+    gather_files,
     is_binary,
     is_image,
-    _load_gitignore,
 )
 
 
@@ -61,8 +61,8 @@ def test_gather_files_orders_root_to_leaf(temp_repo):
     src_app = paths.index(temp_repo / "src" / "app.py")
 
     assert root_contrib < root_readme  # alphabetical in root
-    assert root_readme < src_readme    # root before src
-    assert src_readme < src_app        # docs before file
+    assert root_readme < src_readme  # root before src
+    assert src_readme < src_app  # docs before file
 
 
 def test_gather_files_excludes_gitignored(temp_repo):
@@ -343,6 +343,7 @@ def test_is_binary_text_file(temp_repo):
 def test_is_binary_unreadable_file(temp_repo):
     """is_binary returns True for unreadable files."""
     import os
+
     unreadable = temp_repo / "unreadable.txt"
     unreadable.write_text("content")
     os.chmod(unreadable, 0o000)
@@ -438,7 +439,7 @@ def test_gather_files_tracks_multiple_images(temp_repo):
     screenshots.mkdir()
     (screenshots / "before.png").write_bytes(b"\x89PNG")
     (screenshots / "after.png").write_bytes(b"\x89PNG")
-    (screenshots / "wireframe.jpg").write_bytes(b"\xFF\xD8\xFF")
+    (screenshots / "wireframe.jpg").write_bytes(b"\xff\xd8\xff")
 
     result = gather_files(["screenshots"], temp_repo)
 

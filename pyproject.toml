@@ -75,8 +75,24 @@ include = [
 [tool.hatch.version]
 path = "src/loopflow/__init__.py"
 
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # isort (import sorting)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["F841"]  # unused variables OK in test fixtures
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",
     "boto3>=1.35.0",
+    "ruff>=0.9.0",
 ]

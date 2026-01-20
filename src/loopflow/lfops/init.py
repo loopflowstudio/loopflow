@@ -285,7 +285,9 @@ def register_commands(app: typer.Typer) -> None:
         gemini: bool = typer.Option(False, "--gemini", help="Install Gemini CLI"),
         warp: bool = typer.Option(False, "--warp", help="Install Warp terminal"),
         cursor: bool = typer.Option(False, "--cursor", help="Install Cursor IDE"),
-        superpowers: bool = typer.Option(False, "--superpowers", help="Install superpowers skill library"),
+        superpowers: bool = typer.Option(
+            False, "--superpowers", help="Install superpowers skill library"
+        ),
     ) -> None:
         """Install loopflow dependencies.
 

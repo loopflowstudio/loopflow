@@ -275,7 +275,9 @@ def gather_source_content(path: Path, repo_root: Path, exclude: list[str] | None
     return "\n\n".join(parts)
 
 
-def _gather_source_content_working_dir(path: Path, repo_root: Path, exclude: list[str] | None = None) -> str:
+def _gather_source_content_working_dir(
+    path: Path, repo_root: Path, exclude: list[str] | None = None
+) -> str:
     """Fallback: collect file contents from working directory."""
     from loopflow.lf.files import _compile_exclude_patterns, _is_ignored, is_binary
 
@@ -328,7 +330,11 @@ def _estimate_tokens(text: str) -> int:
 def _run_summarize_cli(prompt: str, model: str, repo_root: Path) -> str:
     """Run CLI agent to generate summary."""
     from loopflow.lf.config import load_config, parse_model
-    from loopflow.lf.launcher import build_claude_command, build_codex_command, build_gemini_command
+    from loopflow.lf.launcher import (
+        build_claude_command,
+        build_codex_command,
+        build_gemini_command,
+    )
     from loopflow.lf.logging import get_model_env
 
     config = load_config(repo_root)
@@ -460,6 +466,7 @@ def refresh_if_stale(
 def register_commands(app) -> None:
     """Register summarize command on the app."""
     import typer
+
     from loopflow.lf.config import load_config
     from loopflow.lf.context import find_worktree_root
 
@@ -469,7 +476,9 @@ def register_commands(app) -> None:
         tokens: int = typer.Option(10000, "-t", "--tokens", help="Token budget"),
         model: str = typer.Option("gemini", "-m", "--model", help="Model to use"),
         force: bool = typer.Option(False, "-f", "--force", help="Regenerate even if cached"),
-        all_configured: bool = typer.Option(False, "-a", "--all", help="Regenerate all configured summaries"),
+        all_configured: bool = typer.Option(
+            False, "-a", "--all", help="Regenerate all configured summaries"
+        ),
     ) -> None:
         """Generate a codebase summary."""
         repo_root = find_worktree_root()

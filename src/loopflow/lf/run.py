@@ -11,9 +11,14 @@ from typing import Optional
 import typer
 
 from loopflow.lf.config import load_config, parse_model
-from loopflow.lf.context import find_worktree_root, gather_prompt_components, gather_task, format_prompt, PromptComponents
-from loopflow.lf.frontmatter import resolve_task_config, TaskConfig
-from loopflow.lf.voices import parse_voice_arg, VoiceNotFoundError
+from loopflow.lf.context import (
+    PromptComponents,
+    find_worktree_root,
+    format_prompt,
+    gather_prompt_components,
+    gather_task,
+)
+from loopflow.lf.frontmatter import TaskConfig, resolve_task_config
 from loopflow.lf.git import find_main_repo
 from loopflow.lf.launcher import (
     build_model_command,
@@ -21,12 +26,18 @@ from loopflow.lf.launcher import (
     get_runner,
 )
 from loopflow.lf.logging import get_model_env, write_prompt_file
-from loopflow.lf.models import Session, SessionStatus, log_session_start, log_session_end
-from loopflow.lf.pipelines import load_pipeline as load_pipeline_file, PipelineDef, PipelineStep, RaceConfig
-from loopflow.lf.pipeline import run_pipeline_def, _run_race_step
+from loopflow.lf.models import (
+    Session,
+    SessionStatus,
+    log_session_end,
+    log_session_start,
+)
+from loopflow.lf.pipeline import _run_race_step, run_pipeline_def
+from loopflow.lf.pipelines import PipelineDef, PipelineStep, RaceConfig
+from loopflow.lf.pipelines import load_pipeline as load_pipeline_file
 from loopflow.lf.tokens import analyze_components
+from loopflow.lf.voices import VoiceNotFoundError, parse_voice_arg
 from loopflow.lf.worktrees import WorktreeError, create
-
 
 ModelType = Optional[str]
 
@@ -48,10 +59,16 @@ def _warn_if_context_too_large(tree) -> None:
     """Warn user if prompt exceeds safe token limit."""
     total_tokens = tree.total()
     if total_tokens > MAX_SAFE_TOKENS:
-        typer.echo(f"\033[33m⚠ Prompt is {total_tokens:,} tokens (limit ~{MAX_SAFE_TOKENS:,})\033[0m", err=True)
+        typer.echo(
+            f"\033[33m⚠ Prompt is {total_tokens:,} tokens (limit ~{MAX_SAFE_TOKENS:,})\033[0m",
+            err=True,
+        )
         files_node = tree.root.children.get("files")
         if files_node and files_node.total_tokens() > MAX_SAFE_TOKENS * 0.5:
-            typer.echo("\033[33m  Large branch - try: --no-diff-files or -x <specific files>\033[0m", err=True)
+            typer.echo(
+                "\033[33m  Large branch - try: --no-diff-files or -x <specific files>\033[0m",
+                err=True,
+            )
         typer.echo(err=True)
 
 
@@ -227,7 +244,7 @@ def _launch_interactive_default(
             run_mode="interactive",
             include_loopflow_doc=config.include_loopflow_doc if config else True,
             voices=cli_voices or (config.voice if config else None),
-            include_diff=False,        # No diff without explicit task
+            include_diff=False,  # No diff without explicit task
             include_diff_files=False,  # No diff files without task
             include_summaries=include_summaries,
             config=config,
@@ -255,9 +272,7 @@ def _launch_interactive_default(
 def run(
     ctx: typer.Context,
     task: Optional[str] = typer.Argument(None, help="Task name (e.g., 'review', 'implement')"),
-    auto: bool = typer.Option(
-        False, "-a", "-A", "--auto", help="Override to run in auto mode"
-    ),
+    auto: bool = typer.Option(False, "-a", "-A", "--auto", help="Override to run in auto mode"),
     interactive: bool = typer.Option(
         False, "-i", "-I", "--interactive", help="Override to run in interactive mode"
     ),
@@ -268,13 +283,23 @@ def run(
         None, "-w", "-W", "--worktree", help="Create worktree and run task there"
     ),
     copy: bool = typer.Option(
-        False, "-c", "-C", "--copy", help="Copy prompt to clipboard and show token breakdown"
+        False,
+        "-c",
+        "-C",
+        "--copy",
+        help="Copy prompt to clipboard and show token breakdown",
     ),
     paste: Optional[bool] = typer.Option(
-        None, "-v", "-V", "--paste/--no-paste", help="Include clipboard content in prompt"
+        None,
+        "-v",
+        "-V",
+        "--paste/--no-paste",
+        help="Include clipboard content in prompt",
     ),
     docs: Optional[bool] = typer.Option(
-        None, "--lfdocs/--no-lfdocs", help="Include .docs/, .design/, and root .md files"
+        None,
+        "--lfdocs/--no-lfdocs",
+        help="Include .docs/, .design/, and root .md files",
     ),
     diff: Optional[bool] = typer.Option(
         None, "--diff/--no-diff", help="Include raw branch diff against main"
@@ -283,25 +308,39 @@ def run(
         None, "--diff-files/--no-diff-files", help="Include files touched by branch"
     ),
     summaries: Optional[bool] = typer.Option(
-        None, "--summaries/--no-summaries", help="Include pre-generated codebase summaries"
+        None,
+        "--summaries/--no-summaries",
+        help="Include pre-generated codebase summaries",
     ),
     model: ModelType = typer.Option(
         None, "-m", "-M", "--model", help="Model to use (backend or backend:variant)"
     ),
     voice: str = typer.Option(
-        None, "--voice", help="Voice(s) to use (comma-separated, e.g., 'architect,concise')"
+        None,
+        "--voice",
+        help="Voice(s) to use (comma-separated, e.g., 'architect,concise')",
     ),
     parallel: str = typer.Option(
-        None, "--parallel", help="Run in parallel with multiple models, keep worktrees (e.g., 'claude,codex')"
+        None,
+        "--parallel",
+        help="Run in parallel with multiple models, keep worktrees (e.g., 'claude,codex')",
     ),
     race: str = typer.Option(
-        None, "--race", help="Race multiple models, auto-judge winner (e.g., 'claude,codex,gemini')"
+        None,
+        "--race",
+        help="Race multiple models, auto-judge winner (e.g., 'claude,codex,gemini')",
     ),
     with_prompt: list[str] = typer.Option(
-        None, "-p", "-P", "--prompt", help="Append additional prompt files (e.g., -p nux)"
+        None,
+        "-p",
+        "-P",
+        "--prompt",
+        help="Append additional prompt files (e.g., -p nux)",
     ),
     chrome: Optional[bool] = typer.Option(
-        None, "--chrome/--no-chrome", help="Enable Chrome integration for Claude Code (browser automation)"
+        None,
+        "--chrome/--no-chrome",
+        help="Enable Chrome integration for Claude Code (browser automation)",
     ),
 ):
     """Run a task with an LLM model."""
@@ -509,9 +548,7 @@ def run(
 
 def inline(
     prompt: str = typer.Argument(help="Inline prompt to run"),
-    auto: bool = typer.Option(
-        False, "-a", "-A", "--auto", help="Override to run in auto mode"
-    ),
+    auto: bool = typer.Option(False, "-a", "-A", "--auto", help="Override to run in auto mode"),
     interactive: bool = typer.Option(
         False, "-i", "-I", "--interactive", help="Override to run in interactive mode"
     ),
@@ -519,13 +556,23 @@ def inline(
         None, "-x", "-X", "--context", help="Additional files for context"
     ),
     copy: bool = typer.Option(
-        False, "-c", "-C", "--copy", help="Copy prompt to clipboard and show token breakdown"
+        False,
+        "-c",
+        "-C",
+        "--copy",
+        help="Copy prompt to clipboard and show token breakdown",
     ),
     paste: Optional[bool] = typer.Option(
-        None, "-v", "-V", "--paste/--no-paste", help="Include clipboard content in prompt"
+        None,
+        "-v",
+        "-V",
+        "--paste/--no-paste",
+        help="Include clipboard content in prompt",
     ),
     docs: Optional[bool] = typer.Option(
-        None, "--lfdocs/--no-lfdocs", help="Include .docs/, .design/, and root .md files"
+        None,
+        "--lfdocs/--no-lfdocs",
+        help="Include .docs/, .design/, and root .md files",
     ),
     diff: Optional[bool] = typer.Option(
         None, "--diff/--no-diff", help="Include raw branch diff against main"
@@ -534,16 +581,22 @@ def inline(
         None, "--diff-files/--no-diff-files", help="Include files touched by branch"
     ),
     summaries: Optional[bool] = typer.Option(
-        None, "--summaries/--no-summaries", help="Include pre-generated codebase summaries"
+        None,
+        "--summaries/--no-summaries",
+        help="Include pre-generated codebase summaries",
     ),
     model: ModelType = typer.Option(
         None, "-m", "-M", "--model", help="Model to use (backend or backend:variant)"
     ),
     voice: str = typer.Option(
-        None, "--voice", help="Voice(s) to use (comma-separated, e.g., 'architect,concise')"
+        None,
+        "--voice",
+        help="Voice(s) to use (comma-separated, e.g., 'architect,concise')",
     ),
     chrome: Optional[bool] = typer.Option(
-        None, "--chrome/--no-chrome", help="Enable Chrome integration for Claude Code (browser automation)"
+        None,
+        "--chrome/--no-chrome",
+        help="Enable Chrome integration for Claude Code (browser automation)",
     ),
 ):
     """Run an inline prompt with an LLM model."""
@@ -594,7 +647,9 @@ def inline(
     include_paste = paste if paste is not None else (config.paste if config else False)
     include_docs = docs if docs is not None else (config.lfdocs if config else True)
     include_diff = diff if diff is not None else (config.diff if config else False)
-    include_diff_files = diff_files if diff_files is not None else (config.diff_files if config else True)
+    include_diff_files = (
+        diff_files if diff_files is not None else (config.diff_files if config else True)
+    )
     include_summaries = summaries if summaries is not None else bool(config and config.summaries)
 
     try:
@@ -656,23 +711,21 @@ def cp(
     paths: list[str] = typer.Argument(
         None, help="Files or directories to include (e.g., src tests)"
     ),
-    exclude: list[str] = typer.Option(
-        None, "-e", "-E", "--exclude", help="Patterns to exclude"
-    ),
-    paste: bool = typer.Option(
-        False, "-v", "-V", "--paste", help="Include clipboard content"
-    ),
+    exclude: list[str] = typer.Option(None, "-e", "-E", "--exclude", help="Patterns to exclude"),
+    paste: bool = typer.Option(False, "-v", "-V", "--paste", help="Include clipboard content"),
     docs: Optional[bool] = typer.Option(
-        None, "--lfdocs/--no-lfdocs", help="Include .docs/, .design/, and root .md files"
+        None,
+        "--lfdocs/--no-lfdocs",
+        help="Include .docs/, .design/, and root .md files",
     ),
-    diff: Optional[bool] = typer.Option(
-        None, "--diff/--no-diff", help="Include raw branch diff"
-    ),
+    diff: Optional[bool] = typer.Option(None, "--diff/--no-diff", help="Include raw branch diff"),
     diff_files: Optional[bool] = typer.Option(
         None, "--diff-files/--no-diff-files", help="Include files touched by branch"
     ),
     summaries: Optional[bool] = typer.Option(
-        None, "--summaries/--no-summaries", help="Include pre-generated codebase summaries"
+        None,
+        "--summaries/--no-summaries",
+        help="Include pre-generated codebase summaries",
     ),
 ):
     """Copy file context to clipboard."""
@@ -696,7 +749,9 @@ def cp(
     # Resolve flags (CLI overrides config)
     include_docs = docs if docs is not None else (config.lfdocs if config else True)
     include_diff = diff if diff is not None else (config.diff if config else False)
-    include_diff_files = diff_files if diff_files is not None else (config.diff_files if config else True)
+    include_diff_files = (
+        diff_files if diff_files is not None else (config.diff_files if config else True)
+    )
     include_summaries = summaries if summaries is not None else bool(config and config.summaries)
 
     components = gather_prompt_components(
@@ -758,11 +813,13 @@ def pipeline(
     worktree: str = typer.Option(
         None, "-w", "-W", "--worktree", help="Create worktree and run pipeline there"
     ),
-    pr: bool = typer.Option(
-        None, "--pr", help="Open PR when done"
-    ),
+    pr: bool = typer.Option(None, "--pr", help="Open PR when done"),
     copy: bool = typer.Option(
-        False, "-c", "-C", "--copy", help="Copy first task prompt to clipboard and show token breakdown"
+        False,
+        "-c",
+        "-C",
+        "--copy",
+        help="Copy first task prompt to clipboard and show token breakdown",
     ),
     model: ModelType = typer.Option(
         None, "-m", "-M", "--model", help="Model to use (backend or backend:variant)"
@@ -787,7 +844,10 @@ def pipeline(
     config_pipeline = config.pipelines.get(name) if config else None
 
     if not pipeline_def and not config_pipeline:
-        typer.echo(f"Error: Pipeline '{name}' not found in .lf/pipelines/ or .lf/config.yaml", err=True)
+        typer.echo(
+            f"Error: Pipeline '{name}' not found in .lf/pipelines/ or .lf/config.yaml",
+            err=True,
+        )
         raise typer.Exit(1)
 
     agent_model = model or (config.agent_model if config else "claude:opus")

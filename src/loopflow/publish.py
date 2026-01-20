@@ -1,4 +1,5 @@
 """Publishing utilities for loopflow releases."""
+
 import json
 import os
 import re
@@ -19,6 +20,7 @@ R2_PUBLIC_URL = "https://downloads.loopflow.studio"
 @dataclass
 class PublishState:
     """Current state for publishing."""
+
     version: str
     on_main: bool
     main_synced: bool
@@ -78,7 +80,15 @@ def check_ci_passed(repo_root: Path | None = None) -> tuple[bool, str]:
 
     # Get CI status for this commit
     result = _run(
-        ["gh", "run", "list", "--commit", commit_sha, "--json", "status,conclusion,workflowName"],
+        [
+            "gh",
+            "run",
+            "list",
+            "--commit",
+            commit_sha,
+            "--json",
+            "status,conclusion,workflowName",
+        ],
         cwd,
     )
 
@@ -91,7 +101,10 @@ def check_ci_passed(repo_root: Path | None = None) -> tuple[bool, str]:
         return False, f"Invalid JSON from gh run list: {result.stdout}"
 
     if not runs:
-        return False, f"No CI runs found for commit {commit_sha[:8]}. Push to main to trigger CI."
+        return (
+            False,
+            f"No CI runs found for commit {commit_sha[:8]}. Push to main to trigger CI.",
+        )
 
     # Check status of each workflow
     statuses = []
@@ -155,7 +168,8 @@ def check_publish_ready(repo_root: Path | None = None) -> PublishState:
 
     # Determine readiness
     if not on_main:
-        message = f"Not on main branch (current: {current_branch}). Merge your changes to main first."
+        message = f"Not on main branch (current: {current_branch}). "
+        message += "Merge your changes to main first."
         ready = False
     elif not main_synced:
         message = "Local main is not synced with origin/main. Push or pull first."
@@ -309,7 +323,10 @@ def upload_dmg(dmg_path: Path, version: str) -> tuple[bool, str]:
             },
         )
 
-        return True, f"Uploaded to {R2_PUBLIC_URL}/{versioned_key} and {R2_PUBLIC_URL}/{latest_key}"
+        return (
+            True,
+            f"Uploaded to {R2_PUBLIC_URL}/{versioned_key} and {R2_PUBLIC_URL}/{latest_key}",
+        )
     except Exception as e:
         return False, f"Upload failed: {e}"
 

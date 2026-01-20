@@ -168,7 +168,6 @@ def test_load_goal_with_path_object(tmp_path):
     goals_dir.mkdir(parents=True)
     (goals_dir / "refactor.md").write_text("# Refactor Goal\n")
 
-    from pathlib import Path
     content = load_goal(Path(".lf/goals/refactor.md"), repo_root)
 
     assert content is not None

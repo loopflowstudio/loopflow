@@ -43,7 +43,7 @@ from loopflow.lfd.db import (
     update_loop_pid,
     update_loop_status,
 )
-from loopflow.lfd.models import Loop, LoopStatus, LoopType, MergeMode
+from loopflow.lfd.models import Loop, LoopStatus, LoopType
 from loopflow.lfd.process import is_process_running
 
 
@@ -251,6 +251,7 @@ def stop_loop(loop_id: str, force: bool = False) -> bool:
 def _run_loop(loop: Loop) -> None:
     """Run the loop execution until it should pause."""
     from loopflow.lfd.loop_runner import run_loop_iterations
+
     run_loop_iterations(loop)
 
 

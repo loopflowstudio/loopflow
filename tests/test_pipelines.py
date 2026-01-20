@@ -3,16 +3,16 @@
 import tempfile
 from pathlib import Path
 
+from loopflow.lf.pipeline import _count_logical_steps
 from loopflow.lf.pipelines import (
     PipelineDef,
     PipelineStep,
     RaceConfig,
     StepConfig,
     load_pipeline,
-    save_pipeline,
     resolve_pipeline,
+    save_pipeline,
 )
-from loopflow.lf.pipeline import _count_logical_steps
 
 
 def test_pipeline_step_from_string():
@@ -23,22 +23,26 @@ def test_pipeline_step_from_string():
 
 
 def test_pipeline_step_from_dict():
-    step = PipelineStep.from_dict({
-        "task": "review",
-        "config": {"model": "claude:opus"},
-    })
+    step = PipelineStep.from_dict(
+        {
+            "task": "review",
+            "config": {"model": "claude:opus"},
+        }
+    )
     assert step.task == "review"
     assert step.config is not None
     assert step.config.model == "claude:opus"
 
 
 def test_pipeline_step_with_parallel():
-    step = PipelineStep.from_dict({
-        "parallel": [
-            {"task": "test"},
-            {"task": "lint"},
-        ]
-    })
+    step = PipelineStep.from_dict(
+        {
+            "parallel": [
+                {"task": "test"},
+                {"task": "lint"},
+            ]
+        }
+    )
     assert step.parallel is not None
     assert len(step.parallel) == 2
     assert step.parallel[0].task == "test"
@@ -125,10 +129,12 @@ def test_resolve_pipeline_with_parallel():
         name="parallel",
         steps=[
             PipelineStep(task="a"),
-            PipelineStep(parallel=[
-                PipelineStep(task="b"),
-                PipelineStep(task="c"),
-            ]),
+            PipelineStep(
+                parallel=[
+                    PipelineStep(task="b"),
+                    PipelineStep(task="c"),
+                ]
+            ),
             PipelineStep(task="d"),
         ],
     )
@@ -206,14 +212,16 @@ def test_step_config_context():
 
 def test_pipeline_step_with_full_config():
     """PipelineStep preserves voice and context in config."""
-    step = PipelineStep.from_dict({
-        "task": "implement",
-        "config": {
-            "model": "claude:opus",
-            "voice": "architect",
-            "context": ["src/models.py"],
+    step = PipelineStep.from_dict(
+        {
+            "task": "implement",
+            "config": {
+                "model": "claude:opus",
+                "voice": "architect",
+                "context": ["src/models.py"],
+            },
         }
-    })
+    )
 
     assert step.task == "implement"
     assert step.config is not None
@@ -276,11 +284,14 @@ def test_save_pipeline():
             name="test",
             steps=[
                 PipelineStep(task="design"),
-                PipelineStep(task="implement", config=StepConfig(
-                    model="claude:opus",
-                    voice="architect",
-                    context=["src/main.py"],
-                )),
+                PipelineStep(
+                    task="implement",
+                    config=StepConfig(
+                        model="claude:opus",
+                        voice="architect",
+                        context=["src/main.py"],
+                    ),
+                ),
                 PipelineStep(task="review"),
             ],
         )
@@ -322,10 +333,12 @@ def test_count_logical_steps_with_parallel():
         name="parallel",
         steps=[
             PipelineStep(task="a"),
-            PipelineStep(parallel=[
-                PipelineStep(task="b"),
-                PipelineStep(task="c"),
-            ]),
+            PipelineStep(
+                parallel=[
+                    PipelineStep(task="b"),
+                    PipelineStep(task="c"),
+                ]
+            ),
             PipelineStep(task="d"),
         ],
     )
@@ -343,15 +356,19 @@ def test_count_logical_steps_multiple_parallel_groups():
     pipeline = PipelineDef(
         name="multi-parallel",
         steps=[
-            PipelineStep(parallel=[
-                PipelineStep(task="a"),
-                PipelineStep(task="b"),
-            ]),
+            PipelineStep(
+                parallel=[
+                    PipelineStep(task="a"),
+                    PipelineStep(task="b"),
+                ]
+            ),
             PipelineStep(task="c"),
-            PipelineStep(parallel=[
-                PipelineStep(task="d"),
-                PipelineStep(task="e"),
-            ]),
+            PipelineStep(
+                parallel=[
+                    PipelineStep(task="d"),
+                    PipelineStep(task="e"),
+                ]
+            ),
         ],
     )
 
@@ -407,6 +424,7 @@ steps:
 
 # Race configuration tests
 
+
 def test_race_config_from_list():
     """RaceConfig parses simple list of models."""
     race = RaceConfig.from_dict(["claude:opus", "codex:o3"])
@@ -416,20 +434,24 @@ def test_race_config_from_list():
 
 def test_race_config_from_dict():
     """RaceConfig parses full dict with custom judge."""
-    race = RaceConfig.from_dict({
-        "models": ["claude:opus", "codex:o3"],
-        "judge": "custom-judge",
-    })
+    race = RaceConfig.from_dict(
+        {
+            "models": ["claude:opus", "codex:o3"],
+            "judge": "custom-judge",
+        }
+    )
     assert race.models == ["claude:opus", "codex:o3"]
     assert race.judge == "custom-judge"
 
 
 def test_race_config_from_model_objects():
     """RaceConfig parses list of model objects."""
-    race = RaceConfig.from_dict([
-        {"model": "claude:opus"},
-        {"model": "codex:o3"},
-    ])
+    race = RaceConfig.from_dict(
+        [
+            {"model": "claude:opus"},
+            {"model": "codex:o3"},
+        ]
+    )
     assert race.models == ["claude:opus", "codex:o3"]
 
 
@@ -444,10 +466,12 @@ def test_race_config_serialization():
 
 def test_pipeline_step_with_race():
     """PipelineStep parses race configuration."""
-    step = PipelineStep.from_dict({
-        "task": "implement",
-        "race": ["claude:opus", "codex:o3"],
-    })
+    step = PipelineStep.from_dict(
+        {
+            "task": "implement",
+            "race": ["claude:opus", "codex:o3"],
+        }
+    )
     assert step.task == "implement"
     assert step.race is not None
     assert step.race.models == ["claude:opus", "codex:o3"]

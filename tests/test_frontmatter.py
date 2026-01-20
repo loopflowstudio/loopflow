@@ -1,14 +1,12 @@
 """Tests for frontmatter parsing and config resolution."""
 
+from loopflow.lf.config import Config
 from loopflow.lf.frontmatter import (
     TaskConfig,
-    TaskFile,
-    ResolvedTaskConfig,
+    get_defaults,
     parse_task_file,
     resolve_task_config,
-    get_defaults,
 )
-from loopflow.lf.config import Config
 
 
 def test_parse_task_file_no_frontmatter():

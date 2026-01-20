@@ -6,7 +6,7 @@ from typing import Any
 
 import asana
 
-from loopflow.lfd.work.models import WorkItem, Status
+from loopflow.lfd.work.models import Status, WorkItem
 
 logger = logging.getLogger(__name__)
 
@@ -113,8 +113,13 @@ class AsanaBackend:
         tasks = client.tasks.get_tasks_for_project(
             self.project_id,
             opt_fields=[
-                "name", "notes", "completed", "memberships.section.name",
-                "tags.name", "custom_fields", "subtasks.name"
+                "name",
+                "notes",
+                "completed",
+                "memberships.section.name",
+                "tags.name",
+                "custom_fields",
+                "subtasks.name",
             ],
         )
 
@@ -134,8 +139,13 @@ class AsanaBackend:
             task = client.tasks.get_task(
                 item_id,
                 opt_fields=[
-                    "name", "notes", "completed", "memberships.section.name",
-                    "tags.name", "custom_fields", "subtasks.name"
+                    "name",
+                    "notes",
+                    "completed",
+                    "memberships.section.name",
+                    "tags.name",
+                    "custom_fields",
+                    "subtasks.name",
                 ],
             )
             if task.get("completed"):
@@ -168,7 +178,7 @@ class AsanaBackend:
         client = self._get_client()
 
         try:
-            task = client.tasks.get_task(item_id)
+            client.tasks.get_task(item_id)  # Verify task exists
         except Exception as e:
             logger.debug("Failed to get Asana task %s for update: %s", item_id, e)
             return None

@@ -7,10 +7,10 @@ import typer
 
 from loopflow.lf.config import load_config
 from loopflow.lf.context import find_worktree_root
-from loopflow.lfd.work.models import WorkItem, get_next_work
-from loopflow.lfd.work.file_backend import FileBackend
 from loopflow.lfd.work.asana_backend import AsanaBackend
 from loopflow.lfd.work.backend import WorkBackend
+from loopflow.lfd.work.file_backend import FileBackend
+from loopflow.lfd.work.models import WorkItem, get_next_work
 
 app = typer.Typer(help="Work queue management")
 

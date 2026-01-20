@@ -4,7 +4,6 @@ Monitors file changes on main and triggers loops when pathsets are modified.
 """
 
 import subprocess
-from pathlib import Path
 
 from loopflow.lfd.db import list_loops, update_loop_last_sha
 from loopflow.lfd.loops import start_loop
@@ -28,7 +27,9 @@ def check_subscription(loop: Loop) -> bool:
     # Get current main SHA
     result = subprocess.run(
         ["git", "rev-parse", "origin/main"],
-        cwd=repo, capture_output=True, text=True,
+        cwd=repo,
+        capture_output=True,
+        text=True,
     )
     if result.returncode != 0:
         return False
@@ -47,7 +48,9 @@ def check_subscription(loop: Loop) -> bool:
     paths = [p.strip() for p in loop.pathset.split(",")]
     result = subprocess.run(
         ["git", "diff", "--name-only", loop.last_main_sha, current_sha, "--"] + paths,
-        cwd=repo, capture_output=True, text=True,
+        cwd=repo,
+        capture_output=True,
+        text=True,
     )
 
     changed_files = result.stdout.strip()

@@ -15,9 +15,10 @@ from loopflow.lfd.db import (
     get_loop,
     get_loop_runs,
     list_loops,
-    update_loop_status,
 )
-from loopflow.lfd.launchd import install as launchd_install, is_running, uninstall as launchd_uninstall
+from loopflow.lfd.launchd import install as launchd_install
+from loopflow.lfd.launchd import is_running
+from loopflow.lfd.launchd import uninstall as launchd_uninstall
 from loopflow.lfd.loops import create_loop, get_repo_from_cwd, start_loop, stop_loop
 from loopflow.lfd.models import Loop, LoopStatus, LoopType
 from loopflow.lfd.server import run_server
@@ -33,7 +34,15 @@ def _use_color() -> bool:
 
 def _colors() -> dict[str, str]:
     if not _use_color():
-        return {"cyan": "", "bold": "", "dim": "", "yellow": "", "green": "", "red": "", "reset": ""}
+        return {
+            "cyan": "",
+            "bold": "",
+            "dim": "",
+            "yellow": "",
+            "green": "",
+            "red": "",
+            "reset": "",
+        }
     return {
         "cyan": "\033[36m",
         "bold": "\033[1m",
@@ -118,7 +127,10 @@ def start(
                     lp = loop
                     break
             if not lp:
-                typer.echo(f"{c['yellow']}Warning:{c['reset']} Loop '{goal}' not found, skipping", err=True)
+                typer.echo(
+                    f"{c['yellow']}Warning:{c['reset']} Loop '{goal}' not found, skipping",
+                    err=True,
+                )
             else:
                 loops_to_start.append(lp)
     else:
@@ -139,12 +151,14 @@ def start(
     for lp in loops_to_start:
         result = start_loop(lp.id)
         if result:
-            typer.echo(f"{c['green']}Started{c['reset']} {c['bold']}{lp.goal_name}{c['reset']} ({lp.short_id()})")
+            msg = f"{c['green']}Started{c['reset']} {c['bold']}{lp.goal_name}{c['reset']}"
+            typer.echo(f"{msg} ({lp.short_id()})")
             started += 1
         elif result.reason == "already_running":
             typer.echo(f"{c['dim']}Already running:{c['reset']} {lp.goal_name}")
         elif result.reason == "waiting":
-            typer.echo(f"{c['yellow']}Waiting:{c['reset']} {lp.goal_name} ({result.outstanding} outstanding)")
+            msg = f"{c['yellow']}Waiting:{c['reset']} {lp.goal_name}"
+            typer.echo(f"{msg} ({result.outstanding} outstanding)")
         else:
             typer.echo(f"{c['red']}Failed:{c['reset']} {lp.goal_name}")
 
@@ -157,7 +171,9 @@ def start(
 @app.command()
 def loop(
     goal: str = typer.Argument(..., help="Goal name from .lf/goals/"),
-    area: str = typer.Option(None, "-a", "--area", help="Area of responsibility (pathset override)"),
+    area: str = typer.Option(
+        None, "-a", "--area", help="Area of responsibility (pathset override)"
+    ),
     limit: int = typer.Option(None, "-l", "--limit", help="PR limit override"),
     merge_mode: str = typer.Option(None, "--merge-mode", help="Merge mode: pr or land"),
     foreground: bool = typer.Option(False, "-f", "--foreground", help="Run in foreground"),
@@ -171,7 +187,10 @@ def loop(
 
     # Validate goal exists
     if not goal_exists(repo, goal):
-        typer.echo(f"{c['red']}Error:{c['reset']} Goal '{goal}' not found in {repo}/.lf/goals/", err=True)
+        typer.echo(
+            f"{c['red']}Error:{c['reset']} Goal '{goal}' not found in {repo}/.lf/goals/",
+            err=True,
+        )
         available = list_goals(repo)
         if available:
             typer.echo(f"Available goals: {', '.join(available)}")
@@ -192,19 +211,23 @@ def loop(
         changed = True
     if merge_mode:
         from loopflow.lfd.models import MergeMode
+
         lp.merge_mode = MergeMode(merge_mode)
         changed = True
     if changed:
         from loopflow.lfd.db import save_loop
+
         save_loop(lp)
 
     # Start it
     result = start_loop(lp.id, foreground=foreground)
     if result:
         if foreground:
-            typer.echo(f"{c['green']}Completed{c['reset']} loop {c['bold']}{goal}{c['reset']} ({lp.short_id()})")
+            msg = f"{c['green']}Completed{c['reset']} loop {c['bold']}{goal}{c['reset']}"
+            typer.echo(f"{msg} ({lp.short_id()})")
         else:
-            typer.echo(f"{c['green']}Started{c['reset']} loop {c['bold']}{goal}{c['reset']} ({lp.short_id()})")
+            msg = f"{c['green']}Started{c['reset']} loop {c['bold']}{goal}{c['reset']}"
+            typer.echo(f"{msg} ({lp.short_id()})")
             typer.echo(f"  Repo: {repo}")
             typer.echo(f"  Loop main: {lp.loop_main}")
             typer.echo(f"  PR limit: {lp.pr_limit}")
@@ -214,7 +237,8 @@ def loop(
         typer.echo(f"Loop already running (PID {lp.pid})")
         raise typer.Exit(1)
     elif result.reason == "waiting":
-        typer.echo(f"{c['yellow']}Waiting:{c['reset']} {result.outstanding} outstanding PRs (limit {lp.pr_limit})")
+        msg = f"{c['yellow']}Waiting:{c['reset']} {result.outstanding} outstanding PRs"
+        typer.echo(f"{msg} (limit {lp.pr_limit})")
         typer.echo(f"Run 'lfops land --squash' from {lp.loop_main} worktree to land work to main")
         raise typer.Exit(0)
     else:
@@ -252,21 +276,27 @@ def flow(
         if not project_path.is_absolute():
             project_path = repo / project
         if not project_path.exists():
-            typer.echo(f"{c['red']}Error:{c['reset']} Project file not found: {project}", err=True)
+            typer.echo(
+                f"{c['red']}Error:{c['reset']} Project file not found: {project}",
+                err=True,
+            )
             raise typer.Exit(1)
         project_file = str(project_path)
 
     # Handle clipboard paste - write to temp file if provided
     if paste:
         import subprocess
+
         result = subprocess.run(["pbpaste"], capture_output=True, text=True)
         if result.returncode == 0 and result.stdout.strip():
             import tempfile
+
             with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
                 f.write(result.stdout)
                 if project_file:
                     # Append clipboard to project file content
-                    typer.echo(f"{c['yellow']}Note:{c['reset']} Both -p and -v provided; clipboard appended to project file")
+                    msg = f"{c['yellow']}Note:{c['reset']} Both -p and -v provided"
+                    typer.echo(f"{msg}; clipboard appended to project file")
                 else:
                     project_file = f.name
 
@@ -275,11 +305,13 @@ def flow(
 
     # Start it
     if start_loop(lp.id):
-        typer.echo(f"{c['green']}Started{c['reset']} flow {c['bold']}{goal}{c['reset']} ({lp.short_id()})")
+        typer.echo(
+            f"{c['green']}Started{c['reset']} flow {c['bold']}{goal}{c['reset']} ({lp.short_id()})"
+        )
         if project:
             typer.echo(f"  Project: {project}")
         if paste:
-            typer.echo(f"  Clipboard: included")
+            typer.echo("  Clipboard: included")
         if area:
             typer.echo(f"  Area: {area}")
     else:
@@ -307,7 +339,8 @@ def subscribe(
     # Create subscription
     lp = create_loop(LoopType.SUBSCRIBE, goal, repo, area=area, pathset=pathset)
 
-    typer.echo(f"{c['green']}Subscribed{c['reset']} {c['bold']}{goal}{c['reset']} to {pathset} ({lp.short_id()})")
+    msg = f"{c['green']}Subscribed{c['reset']} {c['bold']}{goal}{c['reset']} to {pathset}"
+    typer.echo(f"{msg} ({lp.short_id()})")
     typer.echo(f"  Will run when {pathset} changes on main")
 
 
@@ -335,12 +368,22 @@ def schedule(
         if not project_path.is_absolute():
             project_path = repo / project
         if not project_path.exists():
-            typer.echo(f"{c['red']}Error:{c['reset']} Project file not found: {project}", err=True)
+            typer.echo(
+                f"{c['red']}Error:{c['reset']} Project file not found: {project}",
+                err=True,
+            )
             raise typer.Exit(1)
         project_file = str(project_path)
 
     # Create schedule
-    lp = create_loop(LoopType.SCHEDULE, goal, repo, area=area, cron=cron_expr, project_file=project_file)
+    lp = create_loop(
+        LoopType.SCHEDULE,
+        goal,
+        repo,
+        area=area,
+        cron=cron_expr,
+        project_file=project_file,
+    )
 
     typer.echo(f"{c['green']}Scheduled{c['reset']} {c['bold']}{goal}{c['reset']} ({lp.short_id()})")
     typer.echo(f"  Cron: {cron_expr}")
@@ -421,7 +464,7 @@ def status(
         loops = list_loops()
         if not loops:
             typer.echo(f"{c['dim']}No loops configured{c['reset']}")
-            typer.echo(f"Start one with: lfd loop <goal>")
+            typer.echo("Start one with: lfd loop <goal>")
             return
 
         typer.echo(f"{'ID':<9} {'TYPE':<10} {'GOAL':<30} {'STATUS':<10} {'ITER':<6} REPO")
@@ -509,7 +552,8 @@ def stop(
         raise typer.Exit(1)
 
     if stop_loop(lp.id, force=force):
-        typer.echo(f"{c['yellow']}Stopped{c['reset']} {c['bold']}{_goal_display(lp)}{c['reset']} ({lp.short_id()})")
+        msg = f"{c['yellow']}Stopped{c['reset']} {c['bold']}{_goal_display(lp)}{c['reset']}"
+        typer.echo(f"{msg} ({lp.short_id()})")
     else:
         typer.echo(f"{c['red']}Error:{c['reset']} Failed to stop loop", err=True)
         raise typer.Exit(1)
@@ -560,7 +604,10 @@ def rm(
         raise typer.Exit(1)
 
     if lp.status == LoopStatus.RUNNING:
-        typer.echo(f"{c['red']}Error:{c['reset']} Loop is running. Stop it first with: lfd stop {loop_id}", err=True)
+        typer.echo(
+            f"{c['red']}Error:{c['reset']} Loop is running. Stop it first with: lfd stop {loop_id}",
+            err=True,
+        )
         raise typer.Exit(1)
 
     if not force:
@@ -587,7 +634,7 @@ def list_goals_cmd():
     goals_dir = repo / ".lf" / "goals"
     if not goals_dir.exists():
         typer.echo(f"{c['dim']}No goals directory found at {goals_dir}{c['reset']}")
-        typer.echo(f"Create one with: mkdir -p .lf/goals && echo '# My Goal' > .lf/goals/my-goal.md")
+        typer.echo("Create one with: mkdir -p .lf/goals && echo '# My Goal' > .lf/goals/my-goal.md")
         return
 
     goals = list_goals(repo)

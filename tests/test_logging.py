@@ -118,7 +118,7 @@ def test_write_log_line_adds_timestamp():
     assert output.startswith("[")
     assert "] test message\n" in output
     # Verify it's a valid ISO timestamp
-    timestamp_str = output[1:output.index("]")]
+    timestamp_str = output[1 : output.index("]")]
     datetime.fromisoformat(timestamp_str)
 
 

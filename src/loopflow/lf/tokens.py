@@ -6,7 +6,6 @@ from typing import Optional
 
 import tiktoken
 
-
 _encoder = tiktoken.get_encoding("cl100k_base")
 
 
@@ -92,7 +91,9 @@ class TokenTree:
 
             # Break down if significant
             if cat_total / total >= threshold_pct:
-                self._format_children(cat_node, lines, total, threshold_pct, indent=2, max_bar=max_bar)
+                self._format_children(
+                    cat_node, lines, total, threshold_pct, indent=2, max_bar=max_bar
+                )
 
         return "\n".join(lines)
 
@@ -147,9 +148,7 @@ class TokenTree:
             prefix = " " * indent
             bar = self._bar_for_tokens(rolled_up_tokens, total, max_bar)
             pad = max(0, 8 - indent)
-            lines.append(
-                f"{prefix}({rolled_up} more){'':<{pad}} {rolled_up_tokens:>6,} {bar}"
-            )
+            lines.append(f"{prefix}({rolled_up} more){'':<{pad}} {rolled_up_tokens:>6,} {bar}")
 
     @staticmethod
     def _bar_for_tokens(tokens: int, total: int, max_bar: int) -> str:

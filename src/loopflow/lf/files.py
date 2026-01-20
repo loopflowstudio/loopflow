@@ -11,29 +11,65 @@ import pathspec
 @dataclass
 class GatherResult:
     """Result of gathering files for context."""
+
     text_files: list[tuple[Path, str]] = field(default_factory=list)
     image_files: list[Path] = field(default_factory=list)
 
 
 # Image extensions (tracked separately, not embedded in text)
 _IMAGE_EXTENSIONS: set[str] = {
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".ico",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".bmp",
+    ".tiff",
+    ".ico",
 }
 
 # Known binary extensions (skip without reading)
 _BINARY_EXTENSIONS: set[str] = _IMAGE_EXTENSIONS | {
     # Archives
-    ".zip", ".tar", ".gz", ".bz2", ".7z", ".rar",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".bz2",
+    ".7z",
+    ".rar",
     # Executables/libraries
-    ".exe", ".dll", ".so", ".dylib", ".o", ".a",
+    ".exe",
+    ".dll",
+    ".so",
+    ".dylib",
+    ".o",
+    ".a",
     # Documents
-    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+    ".pdf",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".ppt",
+    ".pptx",
     # Media
-    ".mp3", ".mp4", ".wav", ".avi", ".mov", ".mkv",
+    ".mp3",
+    ".mp4",
+    ".wav",
+    ".avi",
+    ".mov",
+    ".mkv",
     # Fonts
-    ".ttf", ".otf", ".woff", ".woff2", ".eot",
+    ".ttf",
+    ".otf",
+    ".woff",
+    ".woff2",
+    ".eot",
     # Other
-    ".pyc", ".class", ".sqlite", ".db",
+    ".pyc",
+    ".class",
+    ".sqlite",
+    ".db",
 }
 
 
@@ -94,8 +130,9 @@ def _is_ignored(
 ) -> bool:
     """Check if path should be excluded from context.
 
-    Excludes .git, .lf (prompt config), gitignored paths, and paths matching exclude patterns.
-    Exclude patterns use Path.glob semantics (*.md = root only, **/*.md = recursive).
+    Excludes .git, .lf (prompt config), gitignored paths, and paths matching
+    exclude patterns. Patterns use Path.glob semantics (*.md = root only,
+    **/*.md = recursive).
     """
     rel_path = path.relative_to(repo_root)
 
@@ -135,7 +172,7 @@ def _gather_docs(
     """Gather .md files from path up to repo root.
 
     If path is a file, starts from its parent directory.
-    Returns docs in root-to-leaf order, with files sorted alphabetically within each directory.
+    Returns docs in root-to-leaf order, sorted alphabetically within each dir.
     """
     docs_by_dir: list[list[tuple[Path, str]]] = []
     current = path.parent if path.is_file() else path
@@ -205,7 +242,9 @@ def _expand_path(path_str: str, repo_root: Path) -> list[Path]:
     return []
 
 
-def gather_files(paths: list[str], repo_root: Path, exclude: Optional[list[str]] = None) -> GatherResult:
+def gather_files(
+    paths: list[str], repo_root: Path, exclude: Optional[list[str]] = None
+) -> GatherResult:
     """Gather files and their parent READMEs.
 
     Returns GatherResult with text files (path, content) and image file paths.
@@ -226,7 +265,11 @@ def gather_files(paths: list[str], repo_root: Path, exclude: Optional[list[str]]
                 continue
 
             # Check if this is an image
-            if path.is_file() and is_image(path) and not _is_ignored(path, repo_root, excluded_paths):
+            if (
+                path.is_file()
+                and is_image(path)
+                and not _is_ignored(path, repo_root, excluded_paths)
+            ):
                 seen.add(path)
                 image_files.append(path)
                 continue
@@ -254,10 +297,11 @@ def format_files(files: list[tuple[Path, str]], repo_root: Path) -> str:
     parts = []
     for path, content in files:
         relative = path.relative_to(repo_root)
-        parts.append(f"<lf:file path=\"{relative}\">\n{content}\n</lf:file>")
+        parts.append(f'<lf:file path="{relative}">\n{content}\n</lf:file>')
 
     body = "\n\n".join(parts)
-    return f"Reference files for this task. Includes parent documentation for context.\n\n<lf:files>\n{body}\n</lf:files>"
+    header = "Reference files for this task. Includes parent documentation for context."
+    return f"{header}\n\n<lf:files>\n{body}\n</lf:files>"
 
 
 def format_image_references(images: list[Path], repo_root: Path) -> str:
@@ -271,7 +315,7 @@ def format_image_references(images: list[Path], repo_root: Path) -> str:
 
     lines = ["The following images are available. Use your Read tool to view them:"]
     for img in images:
-        # Use relative path for repo files, absolute for external files (e.g., clipboard)
+        # Use relative path for repo files, absolute for external (e.g., clipboard)
         try:
             display_path = img.relative_to(repo_root)
         except ValueError:

@@ -16,7 +16,11 @@ from loopflow.lfd.models import Loop, LoopStatus, LoopType
 SCHEDULE_GRACE_PERIOD = timedelta(hours=24)
 
 
-def should_trigger_cron(cron_expr: str, last_run: datetime | None, grace_period: timedelta = SCHEDULE_GRACE_PERIOD) -> bool:
+def should_trigger_cron(
+    cron_expr: str,
+    last_run: datetime | None,
+    grace_period: timedelta = SCHEDULE_GRACE_PERIOD,
+) -> bool:
     """Check if cron should trigger based on last run time.
 
     Triggers if:

@@ -5,7 +5,12 @@ import subprocess
 import typer
 
 from loopflow.lf.config import load_config, parse_model
-from loopflow.lf.context import find_worktree_root, gather_task, gather_prompt_components, format_prompt
+from loopflow.lf.context import (
+    find_worktree_root,
+    format_prompt,
+    gather_prompt_components,
+    gather_task,
+)
 from loopflow.lf.git import ensure_draft_pr, has_upstream
 from loopflow.lf.launcher import get_runner
 
@@ -16,7 +21,9 @@ def register_commands(app: typer.Typer) -> None:
     @app.command()
     def commit(
         push: bool = typer.Option(False, "-p", "--push", help="Push after committing"),
-        add: bool = typer.Option(True, "-a/-A", "--add/--no-add", help="Stage all changes before committing"),
+        add: bool = typer.Option(
+            True, "-a/-A", "--add/--no-add", help="Stage all changes before committing"
+        ),
     ) -> None:
         """Commit with automatic message via agent.
 

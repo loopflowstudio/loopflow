@@ -7,11 +7,11 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from loopflow.lf.builtins import get_builtin_prompt
 from loopflow.lf.config import load_config, parse_model
 from loopflow.lf.context import gather_diff, gather_docs
 from loopflow.lf.launcher import build_claude_command, build_codex_command
 from loopflow.lf.logging import get_model_env
-from loopflow.lf.builtins import get_builtin_prompt
 
 
 @dataclass
@@ -283,7 +283,8 @@ def generate_release_notes(repo_root: Path, old_version: str, new_version: str) 
 
     parts = [f"Version bump: {old_version} → {new_version}"]
     if base_tag != f"v{old_version}":
-        parts.append(f"This is a {'major' if new_version.split('.')[0] > old_version.split('.')[0] else 'minor'} release summarizing all changes since {base_tag}.")
+        release_type = "major" if new_version.split(".")[0] > old_version.split(".")[0] else "minor"
+        parts.append(f"This is a {release_type} release summarizing all changes since {base_tag}.")
     if commits:
         parts.append(f"<commits>\n{commits}\n</commits>")
     parts.append(f"<task>\n{task_prompt}\n</task>")

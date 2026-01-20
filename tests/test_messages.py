@@ -62,7 +62,7 @@ def test_extract_json_invalid():
 def test_extract_json_with_actual_newlines_in_body():
     """JSON with actual newlines in string values (not escaped) should still work."""
     # This simulates Claude outputting actual newlines in the body
-    text = '''```json
+    text = """```json
 {
 "title": "test title",
 "body": "## Summary
@@ -73,7 +73,7 @@ This PR does things.
 
 - Added feature"
 }
-```'''
+```"""
     result = _extract_json_payload(text)
     assert result is not None
     assert result["title"] == "test title"
@@ -83,14 +83,14 @@ This PR does things.
 
 def test_extract_json_mixed_escaped_and_actual_newlines():
     """JSON with both escaped \\n and actual newlines should work."""
-    text = '''```json
+    text = """```json
 {
 "title": "folders: add feature",
 "body": "## Try it\\n\\n```bash
 mkdir -p .docs
 ```"
 }
-```'''
+```"""
     result = _extract_json_payload(text)
     assert result is not None
     assert result["title"] == "folders: add feature"

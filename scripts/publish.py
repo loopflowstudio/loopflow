@@ -152,7 +152,7 @@ def _finalize_release(version: str, skip_dmg: bool, skip_website: bool) -> int:
         if result.returncode != 0:
             print(f"Failed to create tag: {result.stderr}", file=sys.stderr)
             return 1
-        result = subprocess.run(["git", "push", "--tags"], cwd=ROOT)
+        result = subprocess.run(["git", "push", "origin", f"v{version}"], cwd=ROOT)
         if result.returncode != 0:
             print("Failed to push tags", file=sys.stderr)
             return 1

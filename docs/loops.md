@@ -110,17 +110,17 @@ When the limit is reached, the loop pauses until PRs are merged or closed.
 
 ## Branching Model
 
-Each loop gets its own `loop-<goal>` branch:
+Each loop gets its own `<goal>-main` branch:
 
 ```
 main
-  └── loop-product-engineer  (accumulates iteration work)
+  └── product-engineer-main  (accumulates iteration work)
         ├── product-engineer/001
         ├── product-engineer/002
         └── product-engineer/003
 ```
 
-Iteration branches merge to `loop-<goal>` automatically. You review and land `loop-<goal>` → `main` when ready.
+Iteration branches merge to `<goal>-main` automatically. You review and land `<goal>-main` → `main` when ready.
 
 ## See Also
 

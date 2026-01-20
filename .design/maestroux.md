@@ -1,29 +1,55 @@
 # Maestroux
 
-Live git watching and stale worktree detection for Maestro, without requiring lfd.
+Live git watching and stale worktree detection for Maestro, plus `lfops sync` and `lfops prune` commands.
 
 ## Review
 
 **Verdict:** Ready to ship
 
-No blocking issues. Implementation matches design for Phases 1, 2, and 4.
+Clean implementation across four commits. No blocking issues.
 
 ## Implementation Summary
 
-**GitWatcherService** - FSEvents-based file system watcher that monitors `.git/worktrees/`, `.git/refs/`, and `.git/index`. Debounces at 500ms. Handles both regular repos and worktrees (resolves `.git` files pointing to real git directories).
+**GitWatcherService** (`Maestro/Maestro/Services/GitWatcherService.swift`)
+- FSEvents-based watcher monitoring `.git/worktrees/`, `.git/refs/`, `.git/index`
+- 500ms debounce via `pendingChanges` Set and Task sleep
+- Handles worktrees-as-repos by resolving `.git` files to real git directories
+- Actor-isolated for thread safety
 
-**LFDEventService** - Updated with graceful connection handling. Checks socket existence before connecting, adds 5-second reconnect loop, exposes `isConnected` state via callback.
+**LFDEventService** (`Maestro/Maestro/Services/LFDEventService.swift`)
+- Graceful connection handling: checks socket existence before connecting
+- 5-second reconnect loop runs continuously
+- Exposes `isConnected` via callback for UI indicator
+- Changed `subscribe` to non-throwing (errors handled internally)
 
-**Staleness detection** - `Staleness` enum with four states: `.active`, `.merged`, `.remoteDeleted`, `.inactive(days:)`. Detection runs async after worktree refresh. Checks merged branches, remote refs, and commit age (14 day threshold).
+**Staleness detection** (`Maestro/Maestro/Services/WorktreeService.swift:212-248`)
+- Four states: `.active`, `.merged`, `.remoteDeleted`, `.inactive(days:)`
+- Checks: merged branches, remote ref existence, commit age (14 day threshold)
+- Runs async after worktree refresh (doesn't block UI)
 
-**UI** - Connection indicator in sidebar header (green dot = lfd connected, gray = file watcher only). Stale worktrees show badges with appropriate icons and dimmed text.
+**CLI commands** (`src/loopflow/lfops/sync.py`, `src/loopflow/lfops/prune.py`)
+- `lfops sync` — fetches origin/main, updates local ref if checked out
+- `lfops prune` — finds merged worktrees, confirms, removes them
+- Both integrate with existing `sync_main_repo` helper
+
+**Python worktrees** (`src/loopflow/lf/worktrees.py:232-255`)
+- `is_merged()` — checks PR state, then falls back to `merge-base --is-ancestor`
+- `find_merged()` — filters worktree list to merged ones
+- Handles squash merges correctly
+
+**UI** (`Maestro/Maestro/Views/WorktreeSidebar.swift`)
+- Connection indicator in header (green = lfd, gray = file watcher only)
+- Stale worktrees show badges with icons and dimmed text
+- Help text on hover explains each state
+
+**Tests** (`tests/test_worktrees.py:125-218`)
+- Coverage for `is_merged`: main/master exclusion, dirty exclusion, PR state, ancestor check
+- Coverage for `find_merged`: filters correctly
 
 ## Design Notes
 
-**Two-layer architecture works well.** Git watching provides baseline reactivity without daemon. lfd enhances with session tracking and live output when available. Clear separation.
+**Two-layer architecture works well.** Git watching provides baseline reactivity without daemon. lfd enhances with session tracking and live output when available. Clean separation means Maestro works even if lfd isn't running.
 
-**Phases not implemented:**
-- Phase 3 (working directory watching) - not needed for initial release
-- Phase 5 (auto-pruning) - stale detection is sufficient for now, pruning can be manual
+**Staleness threshold:** Hardcoded to 14 days. Could be configurable later.
 
-**Staleness threshold hardcoded to 14 days.** Could be configurable later if needed.
+**sync_main_repo refactored:** Simplified to always fetch first, then conditionally reset if branch is checked out. Cleaner than the previous branch-detection logic.

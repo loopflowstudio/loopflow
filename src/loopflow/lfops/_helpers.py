@@ -5,6 +5,7 @@ from pathlib import Path
 
 import typer
 
+from loopflow.lf.git import ensure_draft_pr
 from loopflow.lf.messages import generate_commit_message
 
 
@@ -20,6 +21,7 @@ def add_commit_push(repo_root: Path, push: bool = True) -> bool:
         if push:
             typer.echo("Pushing...")
             subprocess.run(["git", "push"], cwd=repo_root, check=True)
+            _maybe_create_draft_pr(repo_root)
         return False
 
     typer.echo("Staging changes...")
@@ -37,8 +39,16 @@ def add_commit_push(repo_root: Path, push: bool = True) -> bool:
     if push:
         typer.echo("Pushing...")
         subprocess.run(["git", "push"], cwd=repo_root, check=True)
+        _maybe_create_draft_pr(repo_root)
 
     return True
+
+
+def _maybe_create_draft_pr(repo_root: Path) -> None:
+    """Create draft PR after push if none exists. Silent on failure."""
+    url = ensure_draft_pr(repo_root)
+    if url:
+        typer.echo(f"Created draft PR: {url}")
 
 
 def get_default_branch(repo_root: Path) -> str:

@@ -21,11 +21,15 @@ struct WorktreeSidebar: View {
 
     private let terminalLauncher = TerminalLauncher()
 
+    private var featureWorktrees: [Worktree] {
+        appState.worktrees.filter { $0.branch != "main" }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
 
-            if appState.worktrees.isEmpty {
+            if featureWorktrees.isEmpty {
                 emptyState
             } else {
                 worktreeList
@@ -210,14 +214,13 @@ struct WorktreeSidebar: View {
     private var worktreeList: some View {
         ScrollView {
             LazyVStack(spacing: 4) {
-                ForEach(appState.worktrees) { worktree in
+                ForEach(featureWorktrees) { worktree in
                     WorktreeRow(
                         worktree: worktree,
                         isSelected: appState.selectedWorktree?.id == worktree.id,
-                        isRunning: appState.isWorktreeRunning(worktree),
                         terminalName: terminalDisplayName,
                         ideName: ideDisplayName,
-                        otherWorktrees: appState.worktrees.filter { $0.id != worktree.id },
+                        otherWorktrees: featureWorktrees.filter { $0.id != worktree.id },
                         onSelect: {
                             appState.selectedWorktree = worktree
                         },
@@ -490,7 +493,6 @@ struct AgentRow: View {
 struct WorktreeRow: View {
     let worktree: Worktree
     let isSelected: Bool
-    let isRunning: Bool
     let terminalName: String
     let ideName: String
     let otherWorktrees: [Worktree]
@@ -507,7 +509,6 @@ struct WorktreeRow: View {
     let onDelete: () -> Void
 
     @State private var isHovering = false
-    @State private var pulseAnimation = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -656,6 +657,30 @@ struct WorktreeRow: View {
             }
             .buttonStyle(.plain)
             .help("Open in \(ideName)")
+
+            // Land button - only visible when PR is open
+            if worktree.prState == .open {
+                Button {
+                    onLandPR()
+                } label: {
+                    Image(systemName: "airplane.arrival")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                }
+                .buttonStyle(.plain)
+                .help("Land PR")
+            }
+
+            // Abandon button
+            Button {
+                onDelete()
+            } label: {
+                Image(systemName: "trash")
+                    .font(.caption)
+                    .foregroundStyle(.red.opacity(0.8))
+            }
+            .buttonStyle(.plain)
+            .help("Abandon worktree")
         }
     }
 
@@ -665,26 +690,15 @@ struct WorktreeRow: View {
                 stageBadge(task)
             }
 
-            // Status indicator: ● running, ◐ dirty, ○ clean
-            if isRunning {
-                Text("●")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.blue)
-                    .scaleEffect(pulseAnimation ? 1.1 : 0.9)
-                    .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: pulseAnimation)
-                    .onAppear { pulseAnimation = true }
-                    .onDisappear { pulseAnimation = false }
-                    .accessibilityLabel("Task running")
-            } else if worktree.isDirty {
-                Text("◐")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.orange)
-                    .accessibilityLabel("Has uncommitted changes")
-            } else {
-                Text("○")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.green)
-                    .accessibilityLabel("Clean")
+            // Commit count badge
+            if worktree.aheadMain > 0 {
+                Text("\(worktree.aheadMain)")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(.blue))
+                    .accessibilityLabel("\(worktree.aheadMain) commits ahead of main")
             }
         }
     }

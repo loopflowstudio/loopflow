@@ -18,9 +18,13 @@ struct WorktreeDetailPanel: View {
     @State private var isLoadingFiles = false
     @State private var actionError: String?
     @State private var showingActionError = false
+    @State private var showingAbandonConfirmation = false
 
     private let terminalLauncher = TerminalLauncher()
     private let worktreeService = WorktreeService()
+
+    private var ideApp: IDEApp { appState.config?.ideApp ?? .cursor }
+    private var terminalApp: TerminalApp { appState.config?.terminalApp ?? .warp }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -66,20 +70,26 @@ struct WorktreeDetailPanel: View {
         } message: {
             Text(actionError ?? "An error occurred")
         }
+        .confirmationDialog(
+            "Abandon Worktree",
+            isPresented: $showingAbandonConfirmation
+        ) {
+            Button("Abandon", role: .destructive) {
+                abandonWorktree()
+            }
+        } message: {
+            Text("Are you sure you want to abandon '\(worktree.branch)'? This will remove the worktree and its local branch.")
+        }
     }
 
     // MARK: - Header
 
     private var header: some View {
         HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 8) {
-                    Text(worktree.branch)
-                        .font(.title2)
-                        .fontWeight(.semibold)
-
-                    statusBadge
-                }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(worktree.branch)
+                    .font(.title2)
+                    .fontWeight(.semibold)
 
                 HStack(spacing: 8) {
                     if let prNumber = worktree.prNumber, let prState = worktree.prState {
@@ -87,7 +97,7 @@ struct WorktreeDetailPanel: View {
                     }
 
                     if worktree.aheadMain > 0 {
-                        Text("\(worktree.aheadMain) ahead")
+                        Text("\(worktree.aheadMain) commits")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -98,35 +108,6 @@ struct WorktreeDetailPanel: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
-    }
-
-    private var statusBadge: some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(statusColor)
-                .frame(width: 8, height: 8)
-            Text(statusText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private var statusColor: Color {
-        if appState.activeWorktreePaths.contains(worktree.path) {
-            return .green
-        } else if worktree.isDirty {
-            return .orange
-        }
-        return .gray
-    }
-
-    private var statusText: String {
-        if appState.activeWorktreePaths.contains(worktree.path) {
-            return "Running"
-        } else if worktree.isDirty {
-            return "Modified"
-        }
-        return "Clean"
     }
 
     private func prBadge(number: Int, state: PRState) -> some View {
@@ -160,38 +141,89 @@ struct WorktreeDetailPanel: View {
     // MARK: - Quick Actions Bar
 
     private var quickActionsBar: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 16) {
             Button {
-                openInCursor()
+                openPR()
             } label: {
-                Label("Cursor", systemImage: "cursorarrow.rays")
+                HStack(spacing: 8) {
+                    AppIconProvider.iconImage(for: .github, size: 20)
+                    Text("PR")
+                        .fontWeight(.medium)
+                }
+                .frame(minWidth: 80)
             }
             .buttonStyle(.borderedProminent)
-            .controlSize(.regular)
-            .help("Open in Cursor")
+            .controlSize(.large)
+            .help("Open or create PR")
+
+            Button {
+                openInIDE()
+            } label: {
+                HStack(spacing: 8) {
+                    AppIconProvider.iconImage(for: AppIdentifier(ide: ideApp), size: 20)
+                    Text(ideApp.displayName)
+                        .fontWeight(.medium)
+                }
+                .frame(minWidth: 80)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .help("Open in \(ideApp.displayName)")
 
             Button {
                 openInTerminal()
             } label: {
-                Label("Warp", systemImage: "terminal")
+                HStack(spacing: 8) {
+                    AppIconProvider.iconImage(for: AppIdentifier(terminal: terminalApp), size: 20)
+                    Text(terminalApp.displayName)
+                        .fontWeight(.medium)
+                }
+                .frame(minWidth: 80)
             }
             .buttonStyle(.bordered)
-            .controlSize(.regular)
-            .help("Open in Warp")
-
-            Button {
-                openPR()
-            } label: {
-                Label("PR", systemImage: "arrow.up.right.square")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.regular)
-            .help("Open PR")
+            .controlSize(.large)
+            .help("Open in \(terminalApp.displayName)")
 
             Spacer()
+
+            // Land button - only when PR is open
+            if worktree.prState == .open {
+                Button {
+                    landPR()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "airplane.arrival")
+                            .font(.system(size: 16))
+                        Text("Land")
+                            .fontWeight(.medium)
+                    }
+                    .frame(minWidth: 80)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .tint(.green)
+                .help("Land PR (merge and clean up)")
+            }
+
+            // Abandon button
+            Button {
+                showingAbandonConfirmation = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 16))
+                    Text("Abandon")
+                        .fontWeight(.medium)
+                }
+                .frame(minWidth: 80)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .tint(.red)
+            .help("Abandon worktree")
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 12)
+        .padding(.vertical, 16)
     }
 
     // MARK: - Commits Section
@@ -394,26 +426,23 @@ struct WorktreeDetailPanel: View {
             .frame(width: 70, alignment: .trailing)
 
             // Quick actions
-            HStack(spacing: 4) {
+            HStack(spacing: 6) {
                 Button {
-                    openFileInCursor(file.path)
+                    openFileInIDE(file.path)
                 } label: {
-                    Image(systemName: "cursorarrow.rays")
-                        .font(.caption)
+                    AppIconProvider.iconImage(for: AppIdentifier(ide: ideApp), size: 14)
                 }
                 .buttonStyle(.borderless)
-                .help("Open in Cursor")
+                .help("Open in \(ideApp.displayName)")
 
                 Button {
                     openFileInTerminal(file.path)
                 } label: {
-                    Image(systemName: "terminal")
-                        .font(.caption)
+                    AppIconProvider.iconImage(for: AppIdentifier(terminal: terminalApp), size: 14)
                 }
                 .buttonStyle(.borderless)
-                .help("Open in Warp")
+                .help("Open in \(terminalApp.displayName)")
             }
-            .foregroundStyle(.secondary)
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 10)
@@ -447,7 +476,12 @@ struct WorktreeDetailPanel: View {
     private func changeBar(additions: Int, deletions: Int) -> some View {
         let total = additions + deletions
         let maxBlocks = 5
-        let addBlocks = total > 0 ? max(1, Int(round(Double(additions) / Double(total) * Double(maxBlocks)))) : 0
+        let addBlocks: Int
+        if total > 0 && additions > 0 {
+            addBlocks = max(1, Int(round(Double(additions) / Double(total) * Double(maxBlocks))))
+        } else {
+            addBlocks = 0
+        }
         let delBlocks = total > 0 ? maxBlocks - addBlocks : 0
 
         return HStack(spacing: 1) {
@@ -509,46 +543,99 @@ struct WorktreeDetailPanel: View {
         }
     }
 
-    private func openInCursor() {
-        let ide = appState.config?.ideApp ?? .cursor
+    private func openInIDE() {
         do {
-            try terminalLauncher.openInIDE(ide, at: URL(fileURLWithPath: worktree.path))
+            try terminalLauncher.openInIDE(ideApp, at: URL(fileURLWithPath: worktree.path))
         } catch {
-            actionError = "Failed to open IDE: \(error.localizedDescription)"
+            actionError = "Failed to open \(ideApp.displayName): \(error.localizedDescription)"
             showingActionError = true
         }
     }
 
     private func openPR() {
-        // Run lfops pr which opens the PR in browser
+        let worktreeURL = URL(fileURLWithPath: worktree.path)
+
+        // If draft PR exists, upgrade to ready then open
+        if worktree.prState == .draft {
+            Task {
+                do {
+                    try await worktreeService.markPRReady(in: worktreeURL)
+                    // Refresh to get updated PR URL, then open
+                    await appState.refreshWorktrees()
+                    if let url = worktree.prURL {
+                        terminalLauncher.openURL(url)
+                    }
+                } catch {
+                    await MainActor.run {
+                        actionError = "Failed to mark PR ready: \(error.localizedDescription)"
+                        showingActionError = true
+                    }
+                }
+            }
+            return
+        }
+
+        // If open/merged/closed PR exists, just open it
+        if let prURL = worktree.prURL {
+            terminalLauncher.openURL(prURL)
+            return
+        }
+
+        // No PR exists - create one (fallback, shouldn't happen with auto-draft)
         Task {
             do {
-                _ = try await worktreeService.createPR(in: URL(fileURLWithPath: worktree.path))
+                _ = try await worktreeService.createPR(in: worktreeURL)
             } catch {
-                // If there's already a PR, lfops pr just opens it
-                // Errors here are usually fine
+                await MainActor.run {
+                    actionError = "Failed to create PR: \(error.localizedDescription)"
+                    showingActionError = true
+                }
             }
         }
     }
 
-    private func openFileInCursor(_ path: String) {
+    private func landPR() {
+        Task {
+            do {
+                try await appState.landPR(for: worktree)
+            } catch {
+                await MainActor.run {
+                    actionError = "Failed to land PR: \(error.localizedDescription)"
+                    showingActionError = true
+                }
+            }
+        }
+    }
+
+    private func abandonWorktree() {
+        Task {
+            do {
+                try await appState.deleteWorktree(worktree)
+            } catch {
+                await MainActor.run {
+                    actionError = "Failed to abandon worktree: \(error.localizedDescription)"
+                    showingActionError = true
+                }
+            }
+        }
+    }
+
+    private func openFileInIDE(_ path: String) {
         let fullPath = URL(fileURLWithPath: worktree.path).appendingPathComponent(path)
-        let ide = appState.config?.ideApp ?? .cursor
         do {
-            try terminalLauncher.openInIDE(ide, at: fullPath)
+            try terminalLauncher.openInIDE(ideApp, at: fullPath)
         } catch {
-            actionError = "Failed to open file: \(error.localizedDescription)"
+            actionError = "Failed to open file in \(ideApp.displayName): \(error.localizedDescription)"
             showingActionError = true
         }
     }
 
     private func openFileInTerminal(_ path: String) {
         let dir = URL(fileURLWithPath: worktree.path).appendingPathComponent(path).deletingLastPathComponent()
-        let terminal = appState.config?.terminalApp ?? .warp
         do {
-            try terminalLauncher.launchTerminal(terminal, at: dir)
+            try terminalLauncher.launchTerminal(terminalApp, at: dir)
         } catch {
-            actionError = "Failed to open terminal: \(error.localizedDescription)"
+            actionError = "Failed to open \(terminalApp.displayName): \(error.localizedDescription)"
             showingActionError = true
         }
     }

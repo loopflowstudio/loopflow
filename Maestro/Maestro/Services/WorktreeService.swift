@@ -90,6 +90,33 @@ struct WorktreeService {
         _ = try await runLfops(["land"], in: worktreePath)
     }
 
+    func createDraftPR(branch: String, in worktreePath: URL) async throws {
+        guard let ghURL = findCommand("gh") else {
+            throw WorktreeError.commandFailed("gh CLI not found. Install GitHub CLI.")
+        }
+        _ = try await runProcess(ghURL, ["pr", "create", "--draft", "--fill"], in: worktreePath)
+    }
+
+    func markPRReady(in worktreePath: URL) async throws {
+        guard let ghURL = findCommand("gh") else {
+            throw WorktreeError.commandFailed("gh CLI not found. Install GitHub CLI.")
+        }
+        _ = try await runProcess(ghURL, ["pr", "ready"], in: worktreePath)
+    }
+
+    func branchIsPushed(_ branch: String, in repoURL: URL) async -> Bool {
+        do {
+            let output = try await runProcess(
+                URL(fileURLWithPath: "/usr/bin/git"),
+                ["ls-remote", "--heads", "origin", branch],
+                in: repoURL
+            )
+            return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        } catch {
+            return false
+        }
+    }
+
     func getDiff(_ spec: String, in repoURL: URL) async throws -> String {
         try await runProcess(URL(fileURLWithPath: "/usr/bin/git"), ["diff", spec], in: repoURL)
     }
@@ -125,7 +152,8 @@ struct WorktreeService {
 
     func getCommits(for worktree: Worktree, since: String = "main") async throws -> [CommitInfo] {
         let worktreeURL = URL(fileURLWithPath: worktree.path)
-        let format = "%H|%h|%s|%an|%aI"
+        // Message last so pipes in commit messages don't break parsing
+        let format = "%H|%h|%an|%aI|%s"
         let range = "\(since)..HEAD"
 
         let output = try await runProcess(
@@ -145,9 +173,9 @@ struct WorktreeService {
 
                 let sha = String(parts[0])
                 let shortSHA = String(parts[1])
-                let message = String(parts[2])
-                let author = String(parts[3])
-                let dateString = String(parts[4])
+                let author = String(parts[2])
+                let dateString = String(parts[3])
+                let message = String(parts[4])
 
                 guard let date = dateFormatter.date(from: dateString) else { return nil }
 

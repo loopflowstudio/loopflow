@@ -99,6 +99,10 @@ def autocommit(
         )
         if verbose:
             print(f"[{task}] pushed to origin")
+        # Create draft PR if none exists
+        url = ensure_draft_pr(repo_root)
+        if url and verbose:
+            print(f"[{task}] created draft PR: {url}")
 
     return True
 
@@ -163,6 +167,40 @@ def open_pr(
         raise GitError(result.stderr.strip() or "Failed to create PR")
 
     return result.stdout.strip()
+
+
+def has_pr(repo_root: Path) -> bool:
+    """Check if current branch has an open or draft PR."""
+    result = subprocess.run(
+        ["gh", "pr", "view", "--json", "state", "-q", ".state"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return False
+    state = result.stdout.strip().upper()
+    return state in ("OPEN", "DRAFT")
+
+
+def ensure_draft_pr(repo_root: Path) -> str | None:
+    """Create draft PR if none exists. Returns URL or None if skipped/failed."""
+    branch = get_current_branch(repo_root)
+    if not branch or branch == "main":
+        return None
+
+    if has_pr(repo_root):
+        return None
+
+    result = subprocess.run(
+        ["gh", "pr", "create", "--draft", "--fill"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        return result.stdout.strip()
+    return None
 
 
 def update_pr(

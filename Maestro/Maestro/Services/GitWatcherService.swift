@@ -1,5 +1,6 @@
 // Service for watching git directory changes via FSEvents.
 
+import CoreServices
 import Foundation
 
 enum GitChangeKind: Sendable {

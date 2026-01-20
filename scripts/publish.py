@@ -38,7 +38,11 @@ def update_website_release(version: str, public_url: str, dry_run: bool) -> bool
 
 def deploy_website() -> bool:
     try:
-        run(["python", "dev.py", "deploy", "--prod"], cwd=WEBSITE_ROOT)
+        subprocess.run(
+            ["python", "dev.py", "deploy", "--prod"],
+            cwd=WEBSITE_ROOT,
+            check=True,
+        )
     except subprocess.CalledProcessError:
         return False
     return True

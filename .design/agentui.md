@@ -137,7 +137,7 @@ func refreshLoops() async
 │   │ → Edit: tests.py    │   │
 │   │ ✓ Commit: add tests │   │
 │   └─────────────────────┘   │
-│   [Squash & Land]           │  ← Action when loop-main has commits
+│                  Land ↗     │  ← Subtle, appears on hover
 │                             │
 │   test-writer     ○ idle    │
 └─────────────────────────────┘
@@ -185,13 +185,12 @@ VStack {
             .frame(height: 120)
     }
 
-    // Squash & Land button (if loop-main has commits ahead of main)
-    if hasLandableWork(loop) {
-        Button("Squash & Land") {
-            squashLand(loop)
-        }
-    }
+    // Squash & Land (appears on hover, or as subtle link)
+    // Don't be loud — this is a power-user action
 }
+```
+
+**Squash & Land visibility:** Hidden until hover, or shown as subtle text link rather than prominent button. Power users know to look for it; new users shouldn't be distracted by it.
 ```
 
 ### Live output panel
@@ -203,10 +202,10 @@ VStack {
 
 ### Squash & Land flow
 
-Visible when `loop-<goal>` branch is ahead of main.
+Visible on hover when `loop-<goal>` branch is ahead of main. Subtle text link, not a prominent button.
 
-1. Button: "Squash & Land"
-2. Confirm: "Land N commits from coverage loop to main?"
+1. Hover reveals "Land" link
+2. Click shows confirm: "Land N commits from coverage loop to main?"
 3. Execute:
    ```bash
    git checkout main

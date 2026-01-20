@@ -3,6 +3,7 @@
 import os
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
@@ -21,6 +22,13 @@ _TEMPLATES_DIR = Path(__file__).parent.parent / "templates" / "commands"
 
 
 @dataclass
+class ClipboardContent:
+    """Content from clipboard - text, image, or both."""
+    text: str | None = None
+    image_path: Path | None = None
+
+
+@dataclass
 class PromptComponents:
     """Raw components of a prompt before assembly."""
 
@@ -30,7 +38,7 @@ class PromptComponents:
     diff_files: list[tuple[Path, str]]  # Includes both diff files and explicit context
     task: tuple[str, str] | None  # (name, content)
     repo_root: Path
-    clipboard: str | None = None
+    clipboard: ClipboardContent | None = None
     loopflow_doc: str | None = None  # Bundled system documentation
     voices: list[Voice] | None = None
     image_files: list[Path] | None = None  # Images for visual context
@@ -67,11 +75,64 @@ def _read_file_if_named(dir_path: Path, filename: str) -> str | None:
     return None
 
 
-def _read_clipboard() -> str | None:
-    """Read text from clipboard using pbpaste."""
+def _save_clipboard_image() -> Path | None:
+    """Save clipboard image to temp file. Returns path or None if no image."""
+    fd, path = tempfile.mkstemp(suffix=".png", prefix="clipboard-")
+    os.close(fd)
+    temp_path = Path(path)
+
+    # Try PNG first, fall back to TIFF, write to file if found
+    script = f'''
+set theFile to POSIX file "{temp_path}"
+try
+    set theData to the clipboard as «class PNGf»
+on error
+    try
+        set theData to the clipboard as «class TIFF»
+    on error
+        return "none"
+    end try
+end try
+try
+    set fileRef to open for access theFile with write permission
+    write theData to fileRef
+    close access fileRef
+    return "ok"
+on error
+    try
+        close access theFile
+    end try
+    return "error"
+end try
+'''
+    result = subprocess.run(
+        ["osascript", "-e", script],
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode == 0 and result.stdout.strip() == "ok":
+        return temp_path
+
+    temp_path.unlink(missing_ok=True)
+    return None
+
+
+def _read_clipboard() -> ClipboardContent | None:
+    """Read clipboard content - text, image, or both."""
+    text = None
+    image_path = None
+
+    # Check for text
     result = subprocess.run(["pbpaste"], capture_output=True, text=True)
     if result.returncode == 0 and result.stdout.strip():
-        return result.stdout
+        text = result.stdout
+
+    # Check for image
+    image_path = _save_clipboard_image()
+
+    if text or image_path:
+        return ClipboardContent(text=text, image_path=image_path)
     return None
 
 
@@ -462,11 +523,17 @@ def format_prompt(components: PromptComponents) -> str:
     if components.diff_files:
         parts.append(format_files(components.diff_files, components.repo_root))
 
-    if components.clipboard:
-        parts.append(f"Content from clipboard.\n\n<lf:clipboard>\n{components.clipboard}\n</lf:clipboard>")
+    # Handle clipboard content (text and/or image)
+    if components.clipboard and components.clipboard.text:
+        parts.append(f"Content from clipboard.\n\n<lf:clipboard>\n{components.clipboard.text}\n</lf:clipboard>")
 
-    if components.image_files:
-        parts.append(format_image_references(components.image_files, components.repo_root))
+    # Merge clipboard image with other image files
+    all_images = list(components.image_files) if components.image_files else []
+    if components.clipboard and components.clipboard.image_path:
+        all_images.insert(0, components.clipboard.image_path)
+
+    if all_images:
+        parts.append(format_image_references(all_images, components.repo_root))
 
     return "\n\n".join(parts)
 

@@ -46,7 +46,10 @@ class Skill:
 ## Key functions
 
 ```python
-def discover_skill_sources(config: Config) -> list[SkillSource]:
+def discover_skill_sources(
+    config_sources: list[SkillSourceConfig] | None,
+    repo_root: Path | None,
+) -> list[SkillSource]:
     """Find configured skill libraries."""
 
 def find_skill(name: str, sources: list[SkillSource]) -> Skill | None:
@@ -54,6 +57,9 @@ def find_skill(name: str, sources: list[SkillSource]) -> Skill | None:
 
 def load_skill_prompt(skill: Skill) -> str:
     """Extract prompt content from skill definition."""
+
+def list_all_skills(sources: list[SkillSource]) -> list[tuple[str, str]]:
+    """Return all skills as (prefixed_name, source_name) tuples."""
 ```
 
 ## Config
@@ -95,7 +101,11 @@ superpowers/
 Discovery:
 1. Scan `skills/` directory
 2. Each subdirectory with `SKILL.md` is a skill
-3. Normalize names: `brainstorming` → `brainstorm`, `writing-plans` → `write-plan`
+3. Normalize names:
+   - Remove trailing `-ing` suffix: `brainstorming` → `brainstorm`
+   - Remove trailing `-s` suffix: `writing-plans` → `writing-plan`
+   - Replace underscores with hyphens
+   - Special case: `test-driven-development` → `tdd`
 
 ## Prompt extraction
 
@@ -178,13 +188,13 @@ lf sp:write-plan -m codex
 ```
 
 **Documentation:**
-- [ ] docs/config.md has `skill_sources` option documented
-- [ ] docs/lf.md has `<prefix>:<skill>` syntax documented
-- [ ] docs/builtins.md mentions external skills
-- [ ] docs/patterns.md has mixed workflow example
+- [x] docs/config.md has `skill_sources` option documented
+- [x] docs/lf.md has `<prefix>:<skill>` syntax documented
+- [x] docs/builtins.md mentions external skills
+- [x] docs/patterns.md has mixed workflow example
 
 **UI:**
-- [ ] Maestro task selector shows external skills grouped by source
+- [x] Maestro task selector shows external skills grouped by source
 
 ## Future
 

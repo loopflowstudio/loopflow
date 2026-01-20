@@ -51,46 +51,22 @@ lfops status
 
 ## Summarization
 
-For large codebases, pre-generate summaries so agents have context without loading all files:
+For large codebases, pre-generate summaries:
 
 ```bash
-lfops summarize src/           # Generate summary for src/
-lfops summarize -a             # Regenerate all configured summaries
+lfops summarize src/    # generate summary for src/
 ```
 
-Configure in `.lf/config.yaml`:
-
-```yaml
-summary_tokens: 25000
-summaries:
-  - path: src
-  - path: lib
-    tokens: 5000
-```
-
-Summaries auto-refresh when source files change on main.
+Configure paths in `.lf/config.yaml`. See [Configuration](config.md).
 
 ## Context Options
 
-Add specific files to context:
-
 ```bash
 lf implement -x src/models.py -x src/api.py: add user endpoints
+lf debug -v    # -v pastes clipboard
 ```
 
-Paste clipboard content:
-
-```bash
-lf debug -v              # -v pastes clipboard
-```
-
-Set default context in config:
-
-```yaml
-context:
-  - src/schema.py
-  - docs/api.md
-```
+Set defaults in `.lf/config.yaml`. See [Configuration](config.md).
 
 ## Inline Prompts
 
@@ -139,41 +115,20 @@ lf debug -m claude:opus         # use Claude Opus
 
 ## Voices
 
-Apply personas to shape agent responses:
-
 ```bash
 lf review --voice concise
 lf implement --voice architect,concise  # multiple voices
 ```
 
-Create voices as markdown files in `.lf/voices/`:
-
-```markdown
-# .lf/voices/concise.md
-
-Be concise. One sentence where possible. Skip obvious explanations.
-```
+Create voices as markdown files in `.lf/voices/`.
 
 ## Custom Tasks
 
-Create your own tasks in `.claude/commands/`:
-
-```markdown
-# .claude/commands/test.md
-
-Run the test suite. Fix any failures.
-
-## Rules
-- Run `pytest tests/`
-- Fix failing tests
-- Don't skip or delete tests
-```
-
-Then run:
-
 ```bash
-lf test
+lf test    # runs .claude/commands/test.md
 ```
+
+Create your own tasks in `.claude/commands/`.
 
 ## Worktrees
 
@@ -199,21 +154,8 @@ lf sp:execute-plan                 # use superpowers execution skill
 lf review                          # use loopflow review task
 ```
 
-External skills get loopflow's context assembly—your repo docs, branch files, and config—even though they're defined elsewhere. This lets you mix and match: use superpowers' planning skills with loopflow's review workflow.
-
-Configure skill sources in `.lf/config.yaml`:
-
-```yaml
-skill_sources:
-  - name: superpowers
-    prefix: sp
-    path: ~/.superpowers
-```
-
-If `~/.superpowers` exists, it's auto-detected with prefix `sp`.
-
-See all available tasks and skills:
+External skills get loopflow's context assembly. If `~/.superpowers` exists, it's auto-detected with prefix `sp`.
 
 ```bash
-lf --list
+lf --list    # see all available tasks and skills
 ```

@@ -5,8 +5,6 @@ title: Getting Started
 
 # Getting Started
 
-Loopflow assembles context and prompts for AI coding agents. It gathers your repo docs, diff, and files—then passes everything to Claude, Codex, or Gemini.
-
 ## Install
 
 ```bash
@@ -40,23 +38,10 @@ lf : "fix the typo"           # inline prompt, no task file
 
 ## Write Your Own Tasks
 
-Tasks are markdown files in `.claude/commands/` or `.lf/`:
-
-```markdown
-# .claude/commands/review.md
-
-Review the diff on this branch. Fix any issues.
-
-## What to look for
-- Bugs and edge cases
-- Style guide violations
-- Missing tests
-```
-
-Run by name:
+Tasks are markdown files in `.claude/commands/`:
 
 ```bash
-lf review
+lf review    # runs .claude/commands/review.md
 ```
 
 ## Context Flags
@@ -91,8 +76,4 @@ wt remove my-feature             # cleanup after merge
 
 ## Next Steps
 
-- [`lf` command reference](lf.md) — all flags and options
-- [Built-in tasks](builtins.md) — debug, design, implement, polish, review
-- [`lfops` commands](lfops.md) — pr, land, commit, init, install
-- [Configuration](config.md) — `.lf/config.yaml` options
-- [Patterns](patterns.md) — workflows and recipes
+[Built-in Tasks](builtins.md) · [Patterns](patterns.md) · [`lf` reference](lf.md)

@@ -9,76 +9,41 @@ Loopflow includes these tasks out of the box. Override any by creating your own 
 
 ## debug
 
-Paste an error, fix it.
-
 ```bash
-# Copy an error to clipboard, then:
-lf debug -v
+lf debug -v    # paste error, fix it
 ```
-
-The debug task reads the stacktrace, finds the file, and fixes the bug. Best used with `-v` to paste clipboard content.
-
-**Default mode:** auto
 
 ## design
 
-Interactive spec writing.
-
 ```bash
-lf design: add OAuth login
+lf design: add OAuth login    # interactive spec writing
 ```
 
-Creates `.design/<branch>.md` with the design spec. Use this to explore the problem before writing code. The implement task reads this file automatically.
-
-**Default mode:** interactive
+Creates `.design/<branch>.md`. The implement task reads this automatically.
 
 ## implement
 
-Build from a design doc.
-
 ```bash
-lf implement
+lf implement    # build from .design/<branch>.md
 ```
-
-Reads `.design/<branch>.md` and implements what's described there. Works best after running `lf design`.
-
-**Default mode:** auto
 
 ## polish
 
-Run tests, fix issues.
-
 ```bash
-lf polish
+lf polish    # run tests, fix failures
 ```
-
-Runs the test suite, fixes any failures, and cleans up rough edges. Use after implement to ensure everything works.
-
-**Default mode:** auto
 
 ## review
 
-Assess code quality.
-
 ```bash
-lf review
+lf review    # assess code quality, fix issues
 ```
-
-Reviews the diff on the current branch. Looks for bugs, edge cases, style violations, and missing tests. Fixes issues directly rather than just reporting them.
-
-**Default mode:** auto
 
 ## commit
 
-Generate a commit message.
-
 ```bash
-lf commit
+lf commit    # generate commit message from diff
 ```
-
-Stages changes and generates a commit message based on the diff. Used internally by `lfops commit`.
-
-**Default mode:** auto
 
 ## Workflow Example
 
@@ -95,20 +60,7 @@ lfops pr                      # open PR
 
 ## Overriding Built-ins
 
-Create your own version in `.claude/commands/`:
-
-```markdown
-# .claude/commands/review.md
-
-Review the diff on this branch.
-
-## My team's rules
-- All functions must have type hints
-- Tests required for new features
-- No TODO comments in production code
-```
-
-Your version takes precedence over the built-in.
+Create `.claude/commands/review.md` and your version takes precedence.
 
 ## External Skills
 
@@ -131,6 +83,4 @@ Configure skill sources in `.lf/config.yaml`. See [Configuration](config.md#skil
 
 ## See Also
 
-- [`lf` command reference](lf.md) — flags and options
-- [Configuration](config.md) — `.lf/config.yaml` options
-- [Patterns](patterns.md) — workflows and recipes
+[`lf` reference](lf.md) · [Configuration](config.md) · [Patterns](patterns.md)

@@ -183,6 +183,4 @@ Run `lf -c` to preview exactly what context gets assembled.
 
 ## See Also
 
-- [Configuration](config.md) — `.lf/config.yaml` options
-- [Built-in Tasks](builtins.md) — what the default tasks do
-- [Patterns](patterns.md) — workflows and recipes
+[Configuration](config.md) · [Built-in Tasks](builtins.md) · [Patterns](patterns.md)

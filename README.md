@@ -1,8 +1,15 @@
 # Loopflow
 
-Reusable prompts for AI coding agents. Store them in git, chain them into pipelines, run them across isolated worktrees.
+Arrange agents to code in harmony.
 
 ![Demo](docs/demo.gif)
+
+```bash
+# Copy an error to clipboard, then:
+lf debug -v
+```
+
+Loopflow assembles context and prompts for AI coding agents. Tasks are markdown files—versioned, reusable, shareable.
 
 ## Install
 
@@ -13,13 +20,6 @@ lfops install
 
 ## Quick Start
 
-**Debug an error:**
-```bash
-# Copy an error to clipboard, then:
-lf debug -v
-```
-
-**Build a feature:**
 ```bash
 wt switch --create my-feature
 lf design: add user authentication
@@ -27,59 +27,46 @@ lf implement && lf polish && lf review
 lfops pr
 ```
 
-**Run a pipeline:**
+Or run agents in the background while you sleep:
+
 ```bash
-lf ship    # implement → polish → review → PR
+lfd loop find-pmf
 ```
 
-## How It Works
+## Why Loopflow
 
-Tasks are markdown files in `.claude/commands/`:
+**Prompts as artifacts**
 
 ```markdown
 # .claude/commands/review.md
-
 Review the diff on this branch. Fix any issues.
-
-## What to look for
-- Bugs and edge cases
-- Style guide violations
 ```
 
-Run by name:
+When something works, you can find it again.
+
+**Context management**
 
 ```bash
-lf review                     # run the task
-lf review -x src/api.py       # add context
-lf : "fix the typo"           # inline prompt
+lf review -c    # see what the agent sees
 ```
 
-Loopflow assembles context (repo docs, branch diff, files you specify) and passes it to Claude Code, Codex, or Gemini.
-
-[Learn more about tasks](docs/builtins.md)
-
-## Worktrees
-
-Agents work in isolated branches so you can keep working on something else:
+**Multi-model**
 
 ```bash
-wt switch --create auth       # create worktree
-wt list                       # show all worktrees
+lf review -m codex    # same prompt, different backend
 ```
 
-[Learn more about worktrees](docs/patterns.md#worktrees)
+**Background agents**
+
+```bash
+lfd loop find-pmf    # define goals, review PRs when you wake
+```
 
 ## Documentation
 
-- [Getting Started](docs/getting-started.md) — install, first task, ship your work
-- [Built-in Tasks](docs/builtins.md) — debug, design, implement, polish, review
-- [Configuration](docs/config.md) — models, context, pipelines
-- [Patterns](docs/patterns.md) — workflows and recipes
-- [Command Reference](docs/lf.md) — all flags and options
+[Read the docs →](docs/index.md)
 
 ## Works With
-
-Loopflow plays nicely with:
 
 - **[worktrunk](https://github.com/loopflowstudio/worktrunk)** — git worktree management (`wt` commands)
 - **[superpowers](https://github.com/obra/superpowers)** — skill library for AI agents (run via `lf sp:<skill>`)

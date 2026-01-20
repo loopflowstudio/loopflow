@@ -75,52 +75,36 @@ def _read_file_if_named(dir_path: Path, filename: str) -> str | None:
     return None
 
 
-def _has_clipboard_image() -> bool:
-    """Check if clipboard contains image data using osascript."""
-    script = '''
-try
-    set theData to the clipboard as «class PNGf»
-    return "true"
-on error
-    try
-        set theData to the clipboard as «class TIFF»
-        return "true"
-    on error
-        return "false"
-    end try
-end try
-'''
-    result = subprocess.run(
-        ["osascript", "-e", script],
-        capture_output=True,
-        text=True,
-    )
-    return result.returncode == 0 and result.stdout.strip() == "true"
-
-
 def _save_clipboard_image() -> Path | None:
-    """Save clipboard image to temp file. Returns path or None if failed."""
-    # Create temp file with .png extension
+    """Save clipboard image to temp file. Returns path or None if no image."""
     fd, path = tempfile.mkstemp(suffix=".png", prefix="clipboard-")
     os.close(fd)
     temp_path = Path(path)
 
-    # Use osascript to save clipboard image as PNG
+    # Try PNG first, fall back to TIFF, write to file if found
     script = f'''
-    set theFile to POSIX file "{temp_path}"
+set theFile to POSIX file "{temp_path}"
+try
+    set theData to the clipboard as «class PNGf»
+on error
     try
-        set theData to the clipboard as «class PNGf»
-        set fileRef to open for access theFile with write permission
-        write theData to fileRef
-        close access fileRef
-        return "ok"
+        set theData to the clipboard as «class TIFF»
     on error
-        try
-            close access theFile
-        end try
-        return "error"
+        return "none"
     end try
-    '''
+end try
+try
+    set fileRef to open for access theFile with write permission
+    write theData to fileRef
+    close access fileRef
+    return "ok"
+on error
+    try
+        close access theFile
+    end try
+    return "error"
+end try
+'''
     result = subprocess.run(
         ["osascript", "-e", script],
         capture_output=True,
@@ -130,7 +114,6 @@ def _save_clipboard_image() -> Path | None:
     if result.returncode == 0 and result.stdout.strip() == "ok":
         return temp_path
 
-    # Clean up on failure
     temp_path.unlink(missing_ok=True)
     return None
 
@@ -146,8 +129,7 @@ def _read_clipboard() -> ClipboardContent | None:
         text = result.stdout
 
     # Check for image
-    if _has_clipboard_image():
-        image_path = _save_clipboard_image()
+    image_path = _save_clipboard_image()
 
     if text or image_path:
         return ClipboardContent(text=text, image_path=image_path)

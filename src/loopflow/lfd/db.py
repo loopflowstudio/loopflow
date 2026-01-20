@@ -36,7 +36,7 @@ def _init_db(db_path: Path) -> None:
             type TEXT NOT NULL,
             goal TEXT NOT NULL,
             repo TEXT NOT NULL,
-            personal_main TEXT NOT NULL,
+            loop_main TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'idle',
             iteration INTEGER DEFAULT 0,
             pr_limit INTEGER DEFAULT 5,
@@ -464,16 +464,16 @@ def save_loop(loop: Loop, db_path: Path | None = None) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO loops
-        (id, type, goal, repo, personal_main, status, iteration, pr_limit, merge_mode,
+        (id, type, goal, repo, loop_main, status, iteration, pr_limit, merge_mode,
          project_file, pathset, cron, area, pid, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             loop.id,
             loop.type.value,
-            loop.goal,
+            loop.goal_name,
             str(loop.repo),
-            loop.personal_main,
+            loop.loop_main,
             loop.status.value,
             loop.iteration,
             loop.pr_limit,
@@ -609,16 +609,20 @@ def delete_loop(loop_id: str, db_path: Path | None = None) -> bool:
 
 def _loop_from_row(row: dict) -> Loop:
     """Convert database row to Loop."""
+    # Handle legacy "auto" merge mode by mapping to PR
+    merge_mode_str = row.get("merge_mode", "pr")
+    if merge_mode_str == "auto":
+        merge_mode_str = "pr"
     return Loop(
         id=row["id"],
         type=LoopType(row["type"]),
-        goal=row["goal"],
+        goal_name=row["goal"],
         repo=Path(row["repo"]),
-        personal_main=row["personal_main"],
+        loop_main=row["loop_main"],
         status=LoopStatus(row["status"]),
         iteration=row.get("iteration", 0),
         pr_limit=row.get("pr_limit", 5),
-        merge_mode=MergeMode(row.get("merge_mode", "auto")),
+        merge_mode=MergeMode(merge_mode_str),
         project_file=row.get("project_file"),
         pathset=row.get("pathset"),
         cron=row.get("cron"),

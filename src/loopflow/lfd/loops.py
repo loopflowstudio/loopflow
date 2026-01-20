@@ -3,6 +3,7 @@
 import os
 import signal
 import subprocess
+import sys
 import uuid
 from pathlib import Path
 
@@ -36,7 +37,7 @@ def _branch_exists(repo: Path, branch: str) -> bool:
     return result.returncode == 0
 
 
-def _allocate_personal_main(repo: Path, goal_name: str) -> str:
+def _allocate_loop_main(repo: Path, goal_name: str) -> str:
     """Return available branch name: goal-main, goal-1-main, etc."""
     candidate = f"{goal_name}-main"
     if not _branch_exists(repo, candidate):
@@ -48,7 +49,7 @@ def _allocate_personal_main(repo: Path, goal_name: str) -> str:
     raise ValueError(f"Could not allocate personal-main branch for {goal_name}")
 
 
-def _create_personal_main_branch(repo: Path, branch: str) -> None:
+def _create_loop_main_branch(repo: Path, branch: str) -> None:
     """Create personal-main branch from origin/main if it doesn't exist."""
     if _branch_exists(repo, branch):
         return
@@ -83,15 +84,15 @@ def create_loop(
         return existing
 
     # Allocate and create personal-main branch
-    personal_main = _allocate_personal_main(repo, goal_name)
-    _create_personal_main_branch(repo, personal_main)
+    loop_main = _allocate_loop_main(repo, goal_name)
+    _create_loop_main_branch(repo, loop_main)
 
     loop = Loop(
         id=str(uuid.uuid4()),
         type=loop_type,
-        goal=goal_name,
+        goal_name=goal_name,
         repo=repo,
-        personal_main=personal_main,
+        loop_main=loop_main,
         status=LoopStatus.IDLE,
         area=area,
         project_file=project_file,
@@ -110,14 +111,14 @@ def count_outstanding(loop: Loop) -> int:
     """
     # Ensure we have latest refs
     subprocess.run(
-        ["git", "fetch", "origin", "main", loop.personal_main],
+        ["git", "fetch", "origin", "main", loop.loop_main],
         cwd=loop.repo,
         capture_output=True,
     )
 
     # Count commits ahead
     result = subprocess.run(
-        ["git", "rev-list", "--count", f"origin/main..origin/{loop.personal_main}"],
+        ["git", "rev-list", "--count", f"origin/main..origin/{loop.loop_main}"],
         cwd=loop.repo,
         capture_output=True,
         text=True,
@@ -174,7 +175,6 @@ def start_loop(loop_id: str, foreground: bool = False) -> StartResult:
         return StartResult(True)
     else:
         # Spawn background process
-        import sys
         proc = subprocess.Popen(
             [sys.executable, "-m", "loopflow.lfd.loop_runner", loop_id],
             cwd=loop.repo,

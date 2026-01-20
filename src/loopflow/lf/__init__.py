@@ -65,7 +65,6 @@ app = typer.Typer(
 
 # Import and register subcommands
 from loopflow.lf import run as run_module
-from loopflow.lf import loop as loop_module
 
 # Register top-level commands
 app.command(context_settings={"allow_extra_args": True, "allow_interspersed_args": True})(run_module.run)
@@ -73,9 +72,6 @@ app.command()(run_module.inline)
 app.command()(run_module.cp)
 app.command()(run_module.add)
 app.command(name="pipeline")(run_module.pipeline)
-
-# Register subcommand groups
-app.add_typer(loop_module.app, name="loop")
 
 
 def _get_task_source(repo_root: Path | None, name: str) -> str:

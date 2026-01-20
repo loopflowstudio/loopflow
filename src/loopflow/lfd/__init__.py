@@ -88,6 +88,62 @@ def uninstall():
         raise typer.Exit(1)
 
 
+@app.command()
+def start(
+    goals: list[str] = typer.Argument(None, help="Goal names to start (all idle if omitted)"),
+    all_loops: bool = typer.Option(False, "-a", "--all", help="Include waiting loops"),
+):
+    """Start multiple loops in parallel.
+
+    Without arguments, starts all idle loops. With --all, also starts waiting loops.
+    """
+    c = _colors()
+    repo = get_repo_from_cwd()
+
+    # Get loops to start
+    if goals:
+        # Start specific goals
+        loops_to_start = []
+        for goal in goals:
+            lp = None
+            for loop in list_loops(repo=repo):
+                if loop.goal_name == goal:
+                    lp = loop
+                    break
+            if not lp:
+                typer.echo(f"{c['yellow']}Warning:{c['reset']} Loop '{goal}' not found, skipping", err=True)
+            else:
+                loops_to_start.append(lp)
+    else:
+        # Start all eligible loops
+        loops_to_start = []
+        for lp in list_loops(repo=repo):
+            if lp.status == LoopStatus.IDLE:
+                loops_to_start.append(lp)
+            elif all_loops and lp.status == LoopStatus.WAITING:
+                loops_to_start.append(lp)
+
+    if not loops_to_start:
+        typer.echo(f"{c['dim']}No loops to start{c['reset']}")
+        return
+
+    # Start each loop
+    started = 0
+    for lp in loops_to_start:
+        result = start_loop(lp.id)
+        if result:
+            typer.echo(f"{c['green']}Started{c['reset']} {c['bold']}{lp.goal_name}{c['reset']} ({lp.short_id()})")
+            started += 1
+        elif result.reason == "already_running":
+            typer.echo(f"{c['dim']}Already running:{c['reset']} {lp.goal_name}")
+        elif result.reason == "waiting":
+            typer.echo(f"{c['yellow']}Waiting:{c['reset']} {lp.goal_name} ({result.outstanding} outstanding)")
+        else:
+            typer.echo(f"{c['red']}Failed:{c['reset']} {lp.goal_name}")
+
+    typer.echo(f"\nStarted {started}/{len(loops_to_start)} loops")
+
+
 # Loop commands
 
 
@@ -130,7 +186,7 @@ def loop(
         else:
             typer.echo(f"{c['green']}Started{c['reset']} loop {c['bold']}{goal}{c['reset']} ({lp.short_id()})")
             typer.echo(f"  Repo: {repo}")
-            typer.echo(f"  Personal main: {lp.personal_main}")
+            typer.echo(f"  Loop main: {lp.loop_main}")
             typer.echo(f"  PR limit: {lp.pr_limit}")
             if area:
                 typer.echo(f"  Area: {area}")
@@ -139,7 +195,7 @@ def loop(
         raise typer.Exit(1)
     elif result.reason == "waiting":
         typer.echo(f"{c['yellow']}Waiting:{c['reset']} {result.outstanding} outstanding PRs (limit {lp.pr_limit})")
-        typer.echo(f"Run 'lfops land --squash' from {lp.personal_main} worktree to land work to main")
+        typer.echo(f"Run 'lfops land --squash' from {lp.loop_main} worktree to land work to main")
         raise typer.Exit(0)
     else:
         typer.echo(f"{c['red']}Error:{c['reset']} Failed to start loop", err=True)
@@ -247,6 +303,38 @@ def schedule(
         typer.echo(f"  Project: {project}")
 
 
+def _get_scheduler_status() -> dict | None:
+    """Get scheduler status from daemon if running."""
+    import json
+    import socket
+
+    socket_path = Path.home() / ".lf" / "lfd.sock"
+    if not socket_path.exists():
+        return None
+
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(2.0)
+        sock.connect(str(socket_path))
+        sock.sendall(b'{"method": "scheduler.status"}\n')
+
+        data = b""
+        while b"\n" not in data:
+            chunk = sock.recv(1024)
+            if not chunk:
+                break
+            data += chunk
+        sock.close()
+
+        if data:
+            response = json.loads(data.decode().strip())
+            if response.get("ok"):
+                return response.get("result")
+        return None
+    except Exception:
+        return None
+
+
 @app.command()
 def status(
     loop_id: str = typer.Argument(None, help="Loop ID (optional, shows all if omitted)"),
@@ -261,6 +349,23 @@ def status(
             raise typer.Exit(1)
         _print_loop_detail(lp, c)
     else:
+        # Show scheduler status if daemon is running
+        sched = _get_scheduler_status()
+        if sched:
+            slots_used = sched.get("slots_used", 0)
+            slots_total = sched.get("slots_total", 3)
+            outstanding = sched.get("outstanding", 0)
+            outstanding_limit = sched.get("outstanding_limit", 15)
+
+            slots_color = c["green"] if slots_used < slots_total else c["yellow"]
+            outstanding_color = c["green"] if outstanding < outstanding_limit else c["yellow"]
+
+            typer.echo(
+                f"Scheduler: {slots_color}{slots_used}/{slots_total}{c['reset']} slots, "
+                f"{outstanding_color}{outstanding}/{outstanding_limit}{c['reset']} outstanding"
+            )
+            typer.echo("")
+
         loops = list_loops()
         if not loops:
             typer.echo(f"{c['dim']}No loops configured{c['reset']}")
@@ -277,7 +382,7 @@ def status(
                 repo_short = "..." + repo_short[-22:]
 
             typer.echo(
-                f"{lp.short_id():<9} {lp.type.value:<10} {lp.goal:<16} "
+                f"{lp.short_id():<9} {lp.type.value:<10} {lp.goal_name:<16} "
                 f"{status_c}{lp.status.value:<10}{c['reset']} {lp.iteration:<6} {repo_short}"
             )
 
@@ -286,11 +391,11 @@ def _print_loop_detail(lp: Loop, c: dict[str, str]) -> None:
     """Print detailed info for a single loop."""
     status_c = _status_color(lp.status, c)
 
-    typer.echo(f"{c['bold']}{lp.goal}{c['reset']} ({lp.short_id()})")
+    typer.echo(f"{c['bold']}{lp.goal_name}{c['reset']} ({lp.short_id()})")
     typer.echo(f"  Type: {lp.type.value}")
     typer.echo(f"  Status: {status_c}{lp.status.value}{c['reset']}")
     typer.echo(f"  Repo: {lp.repo}")
-    typer.echo(f"  Personal main: {lp.personal_main}")
+    typer.echo(f"  Loop main: {lp.loop_main}")
     typer.echo(f"  Iteration: {lp.iteration}")
 
     if lp.area:
@@ -329,7 +434,7 @@ def stop(
         raise typer.Exit(1)
 
     if stop_loop(lp.id, force=force):
-        typer.echo(f"{c['yellow']}Stopped{c['reset']} {c['bold']}{lp.goal}{c['reset']} ({lp.short_id()})")
+        typer.echo(f"{c['yellow']}Stopped{c['reset']} {c['bold']}{lp.goal_name}{c['reset']} ({lp.short_id()})")
     else:
         typer.echo(f"{c['red']}Error:{c['reset']} Failed to stop loop", err=True)
         raise typer.Exit(1)
@@ -352,10 +457,10 @@ def prs(
     runs_with_prs = [r for r in runs if r.pr_url]
 
     if not runs_with_prs:
-        typer.echo(f"{c['dim']}No PRs found for '{lp.goal}'{c['reset']}")
+        typer.echo(f"{c['dim']}No PRs found for '{lp.goal_name}'{c['reset']}")
         return
 
-    typer.echo(f"{c['bold']}{lp.goal}{c['reset']} PRs ({lp.short_id()})")
+    typer.echo(f"{c['bold']}{lp.goal_name}{c['reset']} PRs ({lp.short_id()})")
     typer.echo("")
 
     for run in runs_with_prs:
@@ -384,12 +489,12 @@ def rm(
         raise typer.Exit(1)
 
     if not force:
-        confirm = typer.confirm(f"Delete loop '{lp.goal}' ({lp.short_id()})?")
+        confirm = typer.confirm(f"Delete loop '{lp.goal_name}' ({lp.short_id()})?")
         if not confirm:
             raise typer.Abort()
 
     if delete_loop(lp.id):
-        typer.echo(f"Deleted loop: {lp.goal} ({lp.short_id()})")
+        typer.echo(f"Deleted loop: {lp.goal_name} ({lp.short_id()})")
     else:
         typer.echo(f"{c['red']}Error:{c['reset']} Failed to delete loop", err=True)
         raise typer.Exit(1)

@@ -10,13 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from loopflow.lfd.agents import (
-    check_and_run_triggers,
-    list_agents,
-    start_agent,
-    stop_agent,
-)
 from loopflow.lfd.db import (
+    list_loops,
     load_agent_runs,
     load_sessions,
     load_sessions_for_repo,
@@ -25,7 +20,7 @@ from loopflow.lfd.db import (
     update_dead_runs,
     update_session_status,
 )
-from loopflow.lfd.models import Session, SessionStatus
+from loopflow.lfd.models import LoopStatus, Session, SessionStatus
 from loopflow.lfd.protocol import Event, Request, Response, error, success
 from loopflow.lfd.scheduler import Scheduler, load_scheduler_config
 
@@ -127,58 +122,28 @@ class Server:
             return error(f"Unknown method: {method}", request.id)
 
     async def _handle_status(self) -> Response:
-        agents = list_agents()
+        loops = list_loops()
         sessions = load_sessions(active_only=True)
-        runs = load_agent_runs(active_only=True)
+        running_loops = [lp for lp in loops if lp.status == LoopStatus.RUNNING]
 
         return success({
             "pid": os.getpid(),
-            "agents_defined": len(agents),
-            "agents_running": len(runs),
+            "loops_defined": len(loops),
+            "loops_running": len(running_loops),
             "sessions_active": len(sessions),
         })
 
     async def _handle_agents_list(self) -> Response:
-        agents = list_agents()
-        runs = {r.agent_name: r for r in load_agent_runs()}
-
-        result = []
-        for agent in agents:
-            data = agent.to_dict()
-            if agent.name in runs:
-                run = runs[agent.name]
-                data["status"] = run.status.value
-                data["last_run_at"] = run.started_at.isoformat()
-                data["iteration"] = run.iteration
-                data["pid"] = run.pid
-            else:
-                data["status"] = "idle"
-            result.append(data)
-
-        return success(result)
+        # Legacy endpoint - returns empty list, use loops.list instead
+        return success([])
 
     async def _handle_agents_start(self, params: dict) -> Response:
-        name = params.get("name")
-        if not name:
-            return error("Missing 'name' parameter")
-
-        result = await start_agent(name)
-        if result.error:
-            return error(result.error)
-
-        await self._broadcast(Event("agent.started", {"name": name, "pid": result.pid}))
-        return success({"name": name, "pid": result.pid})
+        # Legacy endpoint - use lfd loop command instead
+        return error("agents.start is deprecated, use 'lfd loop <goal>' instead")
 
     async def _handle_agents_stop(self, params: dict) -> Response:
-        name = params.get("name")
-        if not name:
-            return error("Missing 'name' parameter")
-
-        if stop_agent(name):
-            await self._broadcast(Event("agent.stopped", {"name": name}))
-            return success({"name": name})
-        else:
-            return error(f"Agent '{name}' not running")
+        # Legacy endpoint - use lfd stop command instead
+        return error("agents.stop is deprecated, use 'lfd stop <loop_id>' instead")
 
     async def _handle_sessions_list(self) -> Response:
         sessions = load_sessions()
@@ -301,12 +266,11 @@ class Server:
                     self.subscriptions.pop(writer, None)
 
     async def _periodic_check(self) -> None:
-        """Periodically check agent triggers and update dead processes."""
+        """Periodically update dead processes."""
         while self._running:
             try:
                 await asyncio.sleep(30)
                 update_dead_runs()
-                await check_and_run_triggers()
             except asyncio.CancelledError:
                 break
             except Exception:

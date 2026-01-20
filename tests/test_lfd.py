@@ -5,9 +5,6 @@ from datetime import datetime
 from pathlib import Path
 
 from loopflow.lfd.models import (
-    AgentSpec,
-    AgentRun,
-    AgentStatus,
     Loop,
     LoopRun,
     LoopStatus,
@@ -15,8 +12,6 @@ from loopflow.lfd.models import (
     MergeMode,
     Session,
     SessionStatus,
-    TriggerKind,
-    TriggerSpec,
 )
 from loopflow.lfd.protocol import Request, Response, Event, success, error
 from loopflow.lfd.db import (
@@ -25,12 +20,9 @@ from loopflow.lfd.db import (
     get_loop,
     get_loop_by_goal_repo,
     get_loop_runs,
-    get_latest_run,
     list_loops,
-    load_agent_runs,
     save_loop,
     save_loop_run,
-    save_run,
     save_session,
     load_sessions,
     load_sessions_for_worktree,
@@ -43,100 +35,6 @@ from loopflow.lfd.db import (
     update_loop_status,
     update_session_status,
 )
-
-
-def test_trigger_spec_serialization():
-    spec = TriggerSpec(kind=TriggerKind.INTERVAL, interval_seconds=300)
-    data = spec.to_dict()
-    restored = TriggerSpec.from_dict(data)
-    assert restored.kind == TriggerKind.INTERVAL
-    assert restored.interval_seconds == 300
-
-
-def test_trigger_spec_with_cron():
-    spec = TriggerSpec(kind=TriggerKind.CRON, cron="0 9 * * *", grace_minutes=120)
-    data = spec.to_dict()
-    restored = TriggerSpec.from_dict(data)
-    assert restored.kind == TriggerKind.CRON
-    assert restored.cron == "0 9 * * *"
-    assert restored.grace_minutes == 120
-
-
-def test_agent_spec_serialization():
-    spec = AgentSpec(
-        name="test-agent",
-        repo=Path("/tmp/repo"),
-        pipeline="ship",
-        trigger=TriggerSpec(kind=TriggerKind.MAIN_CHANGED),
-        context=["src/"],
-        prompt="Test prompt",
-    )
-    data = spec.to_dict()
-    restored = AgentSpec.from_dict(data)
-    assert restored.name == "test-agent"
-    assert restored.pipeline == "ship"
-    assert restored.trigger.kind == TriggerKind.MAIN_CHANGED
-
-
-def test_agent_spec_with_emoji_and_goal():
-    spec = AgentSpec(
-        name="security-bot",
-        repo=Path("/tmp/repo"),
-        pipeline="ship",
-        emoji="🔒",
-        goal=Path(".lf/goals/security.md"),
-        merge_mode=MergeMode.AUTO,
-    )
-    data = spec.to_dict()
-    restored = AgentSpec.from_dict(data)
-    assert restored.emoji == "🔒"
-    assert restored.goal == Path(".lf/goals/security.md")
-    assert restored.merge_mode == MergeMode.AUTO
-
-
-def test_agent_spec_with_personal_main():
-    spec = AgentSpec(
-        name="my-agent",
-        repo=Path("/tmp/repo"),
-        pipeline="ship",
-        merge_mode=MergeMode.PR,
-        personal_main="my-agent-main",
-    )
-    data = spec.to_dict()
-    restored = AgentSpec.from_dict(data)
-    assert restored.personal_main == "my-agent-main"
-    assert restored.merge_mode == MergeMode.PR
-
-
-def test_agent_run_serialization():
-    run = AgentRun(
-        id="run-1",
-        agent_name="test-agent",
-        status=AgentStatus.RUNNING,
-        started_at=datetime(2024, 1, 1, 12, 0, 0),
-        pid=1234,
-        iteration=5,
-    )
-    data = run.to_dict()
-    restored = AgentRun.from_dict(data)
-    assert restored.id == "run-1"
-    assert restored.status == AgentStatus.RUNNING
-    assert restored.iteration == 5
-
-
-def test_agent_run_with_emoji():
-    run = AgentRun(
-        id="run-1",
-        agent_name="security-bot",
-        status=AgentStatus.RUNNING,
-        started_at=datetime(2024, 1, 1, 12, 0, 0),
-        emoji="🔒",
-        iteration=1,
-    )
-    data = run.to_dict()
-    assert data["emoji"] == "🔒"
-    restored = AgentRun.from_dict(data)
-    assert restored.emoji == "🔒"
 
 
 def test_session_serialization():
@@ -181,52 +79,6 @@ def test_protocol_event_serialize():
     event = Event("agent.started", {"name": "test", "pid": 1234})
     serialized = event.serialize()
     assert '"event": "agent.started"' in serialized
-
-
-def test_db_save_and_load_run():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "test.db"
-        run = AgentRun(
-            id="run-1",
-            agent_name="test-agent",
-            status=AgentStatus.RUNNING,
-            started_at=datetime.now(),
-            pid=1234,
-            iteration=1,
-        )
-        save_run(run, db_path)
-
-        runs = load_agent_runs(db_path=db_path)
-        assert len(runs) == 1
-        assert runs[0].agent_name == "test-agent"
-
-
-def test_db_get_latest_run():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "test.db"
-
-        # Save two runs
-        run1 = AgentRun(
-            id="run-1",
-            agent_name="test-agent",
-            status=AgentStatus.STOPPED,
-            started_at=datetime(2024, 1, 1, 12, 0, 0),
-            iteration=1,
-        )
-        run2 = AgentRun(
-            id="run-2",
-            agent_name="test-agent",
-            status=AgentStatus.RUNNING,
-            started_at=datetime(2024, 1, 2, 12, 0, 0),
-            iteration=2,
-        )
-        save_run(run1, db_path)
-        save_run(run2, db_path)
-
-        latest = get_latest_run("test-agent", db_path)
-        assert latest is not None
-        assert latest.id == "run-2"
-        assert latest.iteration == 2
 
 
 def test_db_save_and_load_session():
@@ -467,14 +319,14 @@ def test_loop_model_defaults():
     loop = Loop(
         id="loop-1",
         type=LoopType.LOOP,
-        goal="test-coverage",
+        goal_name="test-coverage",
         repo=Path("/tmp/repo"),
-        personal_main="test-coverage-main",
+        loop_main="test-coverage-main",
     )
     assert loop.status == LoopStatus.IDLE
     assert loop.iteration == 0
     assert loop.pr_limit == 5
-    assert loop.merge_mode == MergeMode.AUTO
+    assert loop.merge_mode == MergeMode.PR
     assert loop.project_file is None
     assert loop.pathset is None
     assert loop.cron is None
@@ -487,9 +339,9 @@ def test_loop_model_short_id():
     loop = Loop(
         id="abcdef1234567890",
         type=LoopType.LOOP,
-        goal="test",
+        goal_name="test",
         repo=Path("/tmp/repo"),
-        personal_main="test-main",
+        loop_main="test-main",
     )
     assert loop.short_id() == "abcdef1"
 
@@ -523,9 +375,9 @@ def test_db_save_and_get_loop():
         loop = Loop(
             id="loop-123",
             type=LoopType.LOOP,
-            goal="test-coverage",
+            goal_name="test-coverage",
             repo=Path("/tmp/repo"),
-            personal_main="test-coverage-main",
+            loop_main="test-coverage-main",
             status=LoopStatus.IDLE,
             iteration=0,
             pr_limit=5,
@@ -535,9 +387,9 @@ def test_db_save_and_get_loop():
         loaded = get_loop("loop-123", db_path)
         assert loaded is not None
         assert loaded.id == "loop-123"
-        assert loaded.goal == "test-coverage"
+        assert loaded.goal_name == "test-coverage"
         assert loaded.type == LoopType.LOOP
-        assert loaded.personal_main == "test-coverage-main"
+        assert loaded.loop_main == "test-coverage-main"
 
 
 def test_db_get_loop_short_id():
@@ -547,9 +399,9 @@ def test_db_get_loop_short_id():
         loop = Loop(
             id="abcdef1234567890",
             type=LoopType.LOOP,
-            goal="test",
+            goal_name="test",
             repo=Path("/tmp/repo"),
-            personal_main="test-main",
+            loop_main="test-main",
         )
         save_loop(loop, db_path)
 
@@ -566,9 +418,9 @@ def test_db_get_loop_by_goal_repo():
         loop = Loop(
             id="loop-1",
             type=LoopType.FLOW,
-            goal="api-cleanup",
+            goal_name="api-cleanup",
             repo=Path("/tmp/repo"),
-            personal_main="api-cleanup-main",
+            loop_main="api-cleanup-main",
         )
         save_loop(loop, db_path)
 
@@ -589,16 +441,16 @@ def test_db_list_loops():
         loop1 = Loop(
             id="loop-1",
             type=LoopType.LOOP,
-            goal="goal-a",
+            goal_name="goal-a",
             repo=Path("/tmp/repo-a"),
-            personal_main="goal-a-main",
+            loop_main="goal-a-main",
         )
         loop2 = Loop(
             id="loop-2",
             type=LoopType.SUBSCRIBE,
-            goal="goal-b",
+            goal_name="goal-b",
             repo=Path("/tmp/repo-b"),
-            personal_main="goal-b-main",
+            loop_main="goal-b-main",
         )
         save_loop(loop1, db_path)
         save_loop(loop2, db_path)
@@ -609,7 +461,7 @@ def test_db_list_loops():
         # Filter by repo
         loops = list_loops(repo=Path("/tmp/repo-a"), db_path=db_path)
         assert len(loops) == 1
-        assert loops[0].goal == "goal-a"
+        assert loops[0].goal_name == "goal-a"
 
 
 def test_db_update_loop_status():
@@ -619,9 +471,9 @@ def test_db_update_loop_status():
         loop = Loop(
             id="loop-1",
             type=LoopType.LOOP,
-            goal="test",
+            goal_name="test",
             repo=Path("/tmp/repo"),
-            personal_main="test-main",
+            loop_main="test-main",
             status=LoopStatus.IDLE,
         )
         save_loop(loop, db_path)
@@ -640,9 +492,9 @@ def test_db_update_loop_iteration():
         loop = Loop(
             id="loop-1",
             type=LoopType.LOOP,
-            goal="test",
+            goal_name="test",
             repo=Path("/tmp/repo"),
-            personal_main="test-main",
+            loop_main="test-main",
             iteration=0,
         )
         save_loop(loop, db_path)
@@ -661,9 +513,9 @@ def test_db_delete_loop():
         loop = Loop(
             id="loop-1",
             type=LoopType.LOOP,
-            goal="test",
+            goal_name="test",
             repo=Path("/tmp/repo"),
-            personal_main="test-main",
+            loop_main="test-main",
         )
         save_loop(loop, db_path)
 
@@ -699,7 +551,7 @@ def test_db_save_and_get_loop_runs():
             type=LoopType.LOOP,
             goal="test",
             repo=Path("/tmp/repo"),
-            personal_main="test-main",
+            loop_main="test-main",
         )
         save_loop(loop, db_path)
 
@@ -738,7 +590,7 @@ def test_db_get_latest_loop_run():
             type=LoopType.LOOP,
             goal="test",
             repo=Path("/tmp/repo"),
-            personal_main="test-main",
+            loop_main="test-main",
         )
         save_loop(loop, db_path)
 
@@ -774,7 +626,7 @@ def test_db_update_loop_run_status():
             type=LoopType.LOOP,
             goal="test",
             repo=Path("/tmp/repo"),
-            personal_main="test-main",
+            loop_main="test-main",
         )
         save_loop(loop, db_path)
 
@@ -805,7 +657,7 @@ def test_db_update_loop_run_step():
             type=LoopType.LOOP,
             goal="test",
             repo=Path("/tmp/repo"),
-            personal_main="test-main",
+            loop_main="test-main",
         )
         save_loop(loop, db_path)
 
@@ -835,7 +687,7 @@ def test_db_update_loop_run_pr():
             type=LoopType.LOOP,
             goal="test",
             repo=Path("/tmp/repo"),
-            personal_main="test-main",
+            loop_main="test-main",
         )
         save_loop(loop, db_path)
 
@@ -865,7 +717,7 @@ def test_db_update_loop_pid():
             type=LoopType.LOOP,
             goal="test",
             repo=Path("/tmp/repo"),
-            personal_main="test-main",
+            loop_main="test-main",
         )
         save_loop(loop, db_path)
 
@@ -891,7 +743,7 @@ def test_loop_model_with_pid():
         type=LoopType.LOOP,
         goal="test",
         repo=Path("/tmp/repo"),
-        personal_main="test-main",
+        loop_main="test-main",
         pid=12345,
     )
     assert loop.pid == 12345
@@ -907,7 +759,7 @@ def test_db_save_loop_with_pid():
             type=LoopType.LOOP,
             goal="test",
             repo=Path("/tmp/repo"),
-            personal_main="test-main",
+            loop_main="test-main",
             pid=54321,
         )
         save_loop(loop, db_path)
@@ -948,3 +800,129 @@ def test_start_result_with_outstanding():
     assert not result
     assert result.reason == "waiting"
     assert result.outstanding == 5
+
+
+# Scheduler tests
+
+
+def test_scheduler_config_defaults():
+    """SchedulerConfig has correct defaults."""
+    from loopflow.lfd.scheduler import SchedulerConfig
+
+    config = SchedulerConfig()
+    assert config.concurrency == 3
+    assert config.global_pr_limit == 15
+
+
+def test_scheduler_acquire_and_release():
+    """Scheduler manages slots correctly."""
+    from loopflow.lfd.scheduler import Scheduler, SchedulerConfig
+
+    config = SchedulerConfig(concurrency=2, global_pr_limit=100)
+    scheduler = Scheduler(config)
+
+    # Initial state
+    assert scheduler.slots_available() == 2
+    assert scheduler.slots_used() == 0
+
+    # Acquire first slot
+    assert scheduler.acquire("run-1") is True
+    assert scheduler.slots_available() == 1
+    assert scheduler.slots_used() == 1
+
+    # Acquire second slot
+    assert scheduler.acquire("run-2") is True
+    assert scheduler.slots_available() == 0
+    assert scheduler.slots_used() == 2
+
+    # Can't acquire third slot (at limit)
+    assert scheduler.acquire("run-3") is False
+    assert scheduler.slots_used() == 2
+
+    # Release a slot
+    scheduler.release("run-1")
+    assert scheduler.slots_available() == 1
+    assert scheduler.slots_used() == 1
+
+    # Now can acquire again
+    assert scheduler.acquire("run-3") is True
+    assert scheduler.slots_used() == 2
+
+
+def test_scheduler_release_nonexistent():
+    """Releasing nonexistent run ID is safe."""
+    from loopflow.lfd.scheduler import Scheduler, SchedulerConfig
+
+    config = SchedulerConfig(concurrency=2, global_pr_limit=100)
+    scheduler = Scheduler(config)
+
+    # Should not raise
+    scheduler.release("nonexistent")
+    assert scheduler.slots_used() == 0
+
+
+def test_scheduler_get_status():
+    """Scheduler returns correct status."""
+    from loopflow.lfd.scheduler import Scheduler, SchedulerConfig
+
+    config = SchedulerConfig(concurrency=3, global_pr_limit=15)
+    scheduler = Scheduler(config)
+
+    scheduler.acquire("run-1")
+    scheduler.acquire("run-2")
+
+    status = scheduler.get_status()
+    assert status["slots_used"] == 2
+    assert status["slots_total"] == 3
+    assert status["outstanding_limit"] == 15
+    assert "run-1" in status["running"]
+    assert "run-2" in status["running"]
+
+
+def test_scheduler_can_start_respects_concurrency():
+    """can_start checks concurrency limit."""
+    from loopflow.lfd.scheduler import Scheduler, SchedulerConfig
+
+    config = SchedulerConfig(concurrency=1, global_pr_limit=100)
+    scheduler = Scheduler(config)
+
+    # Initially can start
+    can, reason = scheduler.can_start()
+    assert can is True
+    assert reason is None
+
+    # After acquiring, can't start
+    scheduler.acquire("run-1")
+    can, reason = scheduler.can_start()
+    assert can is False
+    assert reason == "concurrency"
+
+
+def test_scheduler_thread_safety():
+    """Scheduler is thread-safe for acquire/release."""
+    import threading
+    from loopflow.lfd.scheduler import Scheduler, SchedulerConfig
+
+    config = SchedulerConfig(concurrency=10, global_pr_limit=100)
+    scheduler = Scheduler(config)
+
+    acquired = []
+    failed = []
+
+    def try_acquire(run_id: str):
+        if scheduler.acquire(run_id):
+            acquired.append(run_id)
+        else:
+            failed.append(run_id)
+
+    # Start 20 threads trying to acquire 10 slots
+    threads = [threading.Thread(target=try_acquire, args=(f"run-{i}",)) for i in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    # Exactly 10 should have acquired
+    assert len(acquired) == 10
+    assert len(failed) == 10
+    assert scheduler.slots_used() == 10

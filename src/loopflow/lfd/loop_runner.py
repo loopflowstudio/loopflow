@@ -41,16 +41,67 @@ SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 SCHEDULER_POLL_INTERVAL = 30  # seconds between slot checks
 
 
+def _scheduler_call(method: str, params: dict | None = None) -> dict | None:
+    """Make a synchronous call to the daemon scheduler.
+
+    Returns the result dict on success, None on connection failure.
+    """
+    if not SOCKET_PATH.exists():
+        return None
+
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(5.0)
+        sock.connect(str(SOCKET_PATH))
+
+        request = {"method": method}
+        if params:
+            request["params"] = params
+
+        sock.sendall((json.dumps(request) + "\n").encode())
+
+        response_data = b""
+        while b"\n" not in response_data:
+            chunk = sock.recv(1024)
+            if not chunk:
+                break
+            response_data += chunk
+
+        sock.close()
+
+        if response_data:
+            response = json.loads(response_data.decode().strip())
+            if response.get("ok"):
+                return response.get("result", {})
+        return None
+    except Exception:
+        return None
+
+
+def _scheduler_acquire(run_id: str) -> bool:
+    """Try to acquire a scheduler slot. Returns True if acquired."""
+    result = _scheduler_call("scheduler.acquire", {"run_id": run_id})
+    if result is None:
+        # Daemon not running, allow iteration (standalone mode)
+        return True
+    return result.get("acquired", False)
+
+
+def _scheduler_release(run_id: str) -> None:
+    """Release a scheduler slot."""
+    _scheduler_call("scheduler.release", {"run_id": run_id})
+
+
 def run_loop_iterations(loop: Loop) -> None:
     """Run loop iterations until PR limit is reached or error occurs."""
     while True:
-        # Check if we should pause
+        # Check if we should pause (per-loop limit)
         outstanding = count_outstanding(loop)
         if outstanding >= loop.pr_limit:
             update_loop_status(loop.id, LoopStatus.WAITING)
             notify_event("loop.waiting", {
                 "loop_id": loop.id,
-                "goal": loop.goal,
+                "goal": loop.goal_name,
                 "outstanding": outstanding,
                 "limit": loop.pr_limit,
             })
@@ -58,8 +109,19 @@ def run_loop_iterations(loop: Loop) -> None:
 
         # Run one iteration
         iteration = loop.iteration + 1
+        run_id = str(uuid.uuid4())
+
+        # Wait for scheduler slot (global concurrency)
+        while not _scheduler_acquire(run_id):
+            notify_event("scheduler.waiting", {
+                "loop_id": loop.id,
+                "goal": loop.goal_name,
+                "reason": "concurrency",
+            })
+            time.sleep(SCHEDULER_POLL_INTERVAL)
+
         try:
-            success = run_iteration(loop, iteration)
+            success = run_iteration(loop, iteration, run_id)
             if success:
                 update_loop_iteration(loop.id, iteration)
                 loop.iteration = iteration
@@ -69,34 +131,41 @@ def run_loop_iterations(loop: Loop) -> None:
         except Exception as e:
             notify_event("loop.error", {
                 "loop_id": loop.id,
-                "goal": loop.goal,
+                "goal": loop.goal_name,
                 "error": str(e),
             })
             update_loop_status(loop.id, LoopStatus.ERROR)
             break
+        finally:
+            _scheduler_release(run_id)
 
     # Clear pid when done
     update_loop_pid(loop.id, None)
 
 
-def run_iteration(loop: Loop, iteration: int) -> bool:
+def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool:
     """Run a single iteration of the loop.
+
+    Args:
+        loop: The loop to run
+        iteration: Iteration number
+        run_id: Optional pre-allocated run ID (for scheduler coordination)
 
     Returns True if successful, False on error.
     """
     config = load_config(loop.repo)
 
-    # Create iteration branch from personal-main
-    branch = f"{loop.goal}/{iteration:03d}"
+    # Create iteration branch from loop-main
+    branch = f"{loop.goal_name}/{iteration:03d}"
     try:
-        worktree_path = create_worktree(loop.repo, branch, base=loop.personal_main)
+        worktree_path = create_worktree(loop.repo, branch, base=loop.loop_main)
     except WorktreeError as e:
         notify_event("loop.error", {"loop_id": loop.id, "error": f"Failed to create worktree: {e}"})
         return False
 
     # Create loop_run record
     run = LoopRun(
-        id=str(uuid.uuid4()),
+        id=run_id or str(uuid.uuid4()),
         loop_id=loop.id,
         iteration=iteration,
         status=LoopStatus.RUNNING,
@@ -107,12 +176,12 @@ def run_iteration(loop: Loop, iteration: int) -> bool:
 
     notify_event("loop.started", {
         "loop_id": loop.id,
-        "goal": loop.goal,
+        "goal": loop.goal_name,
         "iteration": iteration,
     })
 
     # Load goal content
-    goal_spec = load_goal(loop.repo, loop.goal)
+    goal_spec = load_goal(loop.repo, loop.goal_name)
     if not goal_spec:
         update_loop_run_status(run.id, LoopStatus.ERROR, error="Goal file not found")
         return False
@@ -163,7 +232,7 @@ def run_iteration(loop: Loop, iteration: int) -> bool:
         # Inject goal content
         if components.task:
             task_file, task_content = components.task
-            goal_section = f"<lf:goal:{loop.goal}>\n{goal_spec.content}\n</lf:goal:{loop.goal}>"
+            goal_section = f"<lf:goal:{loop.goal_name}>\n{goal_spec.content}\n</lf:goal:{loop.goal_name}>"
             combined = f"{goal_section}\n\n---\n\n{task_content}"
             components = components._replace(task=(task_file, combined))
 
@@ -188,7 +257,7 @@ def run_iteration(loop: Loop, iteration: int) -> bool:
             "--session-id",
             run.id,
             "--task",
-            f"{loop.goal}:{task_name}",
+            f"{loop.goal_name}:{task_name}",
             "--repo-root",
             str(worktree_path),
             "--prompt-file",
@@ -221,20 +290,21 @@ def run_iteration(loop: Loop, iteration: int) -> bool:
     # Clear current step
     update_loop_run_step(run.id, None)
 
-    # Create PR to personal-main
-    pr_url = _create_pr_to_personal_main(loop, worktree_path, branch, iteration)
+    # Create PR to loop-main and auto-merge (always)
+    pr_url = _create_pr_to_loop_main(loop, worktree_path, branch, iteration)
     if pr_url:
         update_loop_run_pr(run.id, pr_url)
+        _auto_merge_pr(worktree_path)
 
-        # Auto-merge if configured
-        if loop.merge_mode.value == "auto":
-            _auto_merge_pr(worktree_path)
+        # If LAND mode, also merge loop-main to main
+        if loop.merge_mode.value == "land":
+            _land_to_main(loop)
 
     update_loop_run_status(run.id, LoopStatus.IDLE)
 
     notify_event("loop.iteration.done", {
         "loop_id": loop.id,
-        "goal": loop.goal,
+        "goal": loop.goal_name,
         "iteration": iteration,
         "pr_url": pr_url,
     })
@@ -245,8 +315,8 @@ def run_iteration(loop: Loop, iteration: int) -> bool:
     return True
 
 
-def _create_pr_to_personal_main(loop: Loop, worktree_path: Path, branch: str, iteration: int) -> str | None:
-    """Push branch and create PR targeting personal-main."""
+def _create_pr_to_loop_main(loop: Loop, worktree_path: Path, branch: str, iteration: int) -> str | None:
+    """Push branch and create PR targeting loop-main."""
     # Push the branch
     result = subprocess.run(
         ["git", "push", "-u", "origin", branch],
@@ -260,18 +330,18 @@ def _create_pr_to_personal_main(loop: Loop, worktree_path: Path, branch: str, it
     # Generate PR message
     try:
         message = generate_pr_message(worktree_path)
-        title = f"[{loop.goal}] {message.title}"
-        body = f"Loop: {loop.goal}\nIteration: {iteration}\n\n{message.body}"
+        title = f"[{loop.goal_name}] {message.title}"
+        body = f"Loop: {loop.goal_name}\nIteration: {iteration}\n\n{message.body}"
     except Exception:
-        title = f"[{loop.goal}] Iteration {iteration}"
-        body = f"Loop: {loop.goal}\nIteration: {iteration}"
+        title = f"[{loop.goal_name}] Iteration {iteration}"
+        body = f"Loop: {loop.goal_name}\nIteration: {iteration}"
 
     # Create PR
     cmd = [
         "gh", "pr", "create",
         "--title", title,
         "--body", body,
-        "--base", loop.personal_main,
+        "--base", loop.loop_main,
     ]
     result = subprocess.run(cmd, cwd=worktree_path, capture_output=True, text=True)
 
@@ -285,6 +355,30 @@ def _auto_merge_pr(worktree_path: Path) -> bool:
     result = subprocess.run(
         ["gh", "pr", "merge", "--squash", "--delete-branch"],
         cwd=worktree_path,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
+
+
+def _land_to_main(loop: Loop) -> bool:
+    """Land loop-main to main via squash merge."""
+    # Create PR from loop-main to main and merge it
+    result = subprocess.run(
+        ["gh", "pr", "create", "--base", "main", "--head", loop.loop_main,
+         "--title", f"[{loop.goal_name}] Land accumulated work",
+         "--body", f"Auto-landing from loop: {loop.goal_name}"],
+        cwd=loop.repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return False
+
+    # Merge the PR
+    result = subprocess.run(
+        ["gh", "pr", "merge", "--squash", "--auto"],
+        cwd=loop.repo,
         capture_output=True,
         text=True,
     )

@@ -10,5 +10,5 @@ This release introduces agent loops for continuous goal-driven automation, exter
 - Redesign Maestro worktree panel as workflow dashboard with quick actions, history, and inline diffs
 - Add `lf add` command to scaffold new prompt files in `.claude/commands/`
 - Add image clipboard support - screenshots and images are now included in prompt context
-- Add `lfops sync` and `lfops prune` commands for worktree maintenance
+- Add `lfops sync` and `lfops wt prune` commands for worktree maintenance
 - Add `--refresh` flag to `lfops pr` and use PR base diff for accurate title/body generation

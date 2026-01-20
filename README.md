@@ -6,7 +6,7 @@ lf review
 
 Assembles context and prompts for AI coding agents. Tasks are markdown files—versioned, reusable, shareable.
 
-## Quick fix
+## Step
 
 Copy an error, watch it fix.
 
@@ -16,7 +16,7 @@ lf debug -v
 
 ![debug demo](docs/debug-demo.gif)
 
-## Feature workflow
+## Flow
 
 Design, implement, polish, ship.
 
@@ -29,7 +29,7 @@ lfops pr
 
 ![workflow demo](docs/workflow-demo.gif)
 
-## Background agents
+## Loop
 
 Define goals, review PRs when you wake.
 

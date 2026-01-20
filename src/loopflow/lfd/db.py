@@ -45,10 +45,10 @@ def _init_db(db_path: Path) -> None:
             area TEXT,
             pid INTEGER,
             last_main_sha TEXT,
-            created_at TEXT NOT NULL,
-            UNIQUE(type, goal, repo)
+            created_at TEXT NOT NULL
         );
 
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_loops_unique ON loops(type, goal, COALESCE(area, ''), repo);
         CREATE INDEX IF NOT EXISTS idx_loops_repo ON loops(repo);
         CREATE INDEX IF NOT EXISTS idx_loops_status ON loops(status);
 
@@ -310,13 +310,18 @@ def get_loop(loop_id: str, db_path: Path | None = None) -> Loop | None:
 
 
 def get_loop_by_goal_repo(
-    loop_type: LoopType, goal: str, repo: Path, db_path: Path | None = None
+    loop_type: LoopType,
+    goal: str,
+    repo: Path,
+    area: str | None = None,
+    *,
+    db_path: Path | None = None,
 ) -> Loop | None:
-    """Get a loop by type, goal, and repo."""
+    """Get a loop by type, goal, area, and repo."""
     conn = _get_db(db_path)
     cursor = conn.execute(
-        "SELECT * FROM loops WHERE type = ? AND goal = ? AND repo = ?",
-        (loop_type.value, goal, str(repo)),
+        "SELECT * FROM loops WHERE type = ? AND goal = ? AND COALESCE(area, '') = ? AND repo = ?",
+        (loop_type.value, goal, area or "", str(repo)),
     )
     row = cursor.fetchone()
     conn.close()

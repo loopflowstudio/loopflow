@@ -55,6 +55,13 @@ def _status_color(status: LoopStatus, c: dict[str, str]) -> str:
     return c["dim"]
 
 
+def _goal_display(lp: Loop) -> str:
+    """Return goal name with area suffix if present."""
+    if lp.area_slug:
+        return f"{lp.goal_name} ({lp.area_slug}/)"
+    return lp.goal_name
+
+
 # Daemon commands
 
 
@@ -376,9 +383,16 @@ def _get_scheduler_status() -> dict | None:
 @app.command()
 def status(
     loop_id: str = typer.Argument(None, help="Loop ID (optional, shows all if omitted)"),
+    ids_only: bool = typer.Option(False, "--ids", help="Print loop IDs only (for scripting)"),
 ):
     """Show status of loops."""
     c = _colors()
+
+    # Machine-readable output for scripting
+    if ids_only:
+        for lp in list_loops():
+            typer.echo(lp.id)
+        return
 
     if loop_id:
         lp = get_loop(loop_id)
@@ -410,18 +424,18 @@ def status(
             typer.echo(f"Start one with: lfd loop <goal>")
             return
 
-        typer.echo(f"{'ID':<9} {'TYPE':<10} {'GOAL':<16} {'STATUS':<10} {'ITER':<6} REPO")
-        typer.echo("-" * 80)
+        typer.echo(f"{'ID':<9} {'TYPE':<10} {'GOAL':<24} {'STATUS':<10} {'ITER':<6}")
+        typer.echo("-" * 70)
 
         for lp in loops:
             status_c = _status_color(lp.status, c)
-            repo_short = str(lp.repo).replace(str(Path.home()), "~")
-            if len(repo_short) > 25:
-                repo_short = "..." + repo_short[-22:]
+            goal_str = _goal_display(lp)
+            if len(goal_str) > 24:
+                goal_str = goal_str[:21] + "..."
 
             typer.echo(
-                f"{lp.short_id():<9} {lp.type.value:<10} {lp.goal_name:<16} "
-                f"{status_c}{lp.status.value:<10}{c['reset']} {lp.iteration:<6} {repo_short}"
+                f"{lp.short_id():<9} {lp.type.value:<10} {goal_str:<24} "
+                f"{status_c}{lp.status.value:<10}{c['reset']} {lp.iteration:<6}"
             )
 
 
@@ -460,11 +474,30 @@ def _print_loop_detail(lp: Loop, c: dict[str, str]) -> None:
 
 @app.command()
 def stop(
-    loop_id: str = typer.Argument(..., help="Loop ID to stop"),
+    loop_id: str = typer.Argument(None, help="Loop ID to stop (omit with --all)"),
+    all_loops: bool = typer.Option(False, "--all", help="Stop all running loops"),
     force: bool = typer.Option(False, "-f", "--force", help="Force kill (SIGKILL)"),
 ):
     """Stop a running loop."""
     c = _colors()
+
+    if all_loops:
+        # Stop all running loops
+        stopped = 0
+        for lp in list_loops():
+            if lp.status == LoopStatus.RUNNING:
+                if stop_loop(lp.id, force=force):
+                    typer.echo(f"{c['yellow']}Stopped{c['reset']} {_goal_display(lp)} ({lp.short_id()})")
+                    stopped += 1
+        if stopped == 0:
+            typer.echo(f"{c['dim']}No running loops to stop{c['reset']}")
+        else:
+            typer.echo(f"\nStopped {stopped} loop{'s' if stopped != 1 else ''}")
+        return
+
+    if not loop_id:
+        typer.echo(f"{c['red']}Error:{c['reset']} Provide a loop ID or use --all", err=True)
+        raise typer.Exit(1)
 
     lp = get_loop(loop_id)
     if not lp:
@@ -472,7 +505,7 @@ def stop(
         raise typer.Exit(1)
 
     if stop_loop(lp.id, force=force):
-        typer.echo(f"{c['yellow']}Stopped{c['reset']} {c['bold']}{lp.goal_name}{c['reset']} ({lp.short_id()})")
+        typer.echo(f"{c['yellow']}Stopped{c['reset']} {c['bold']}{_goal_display(lp)}{c['reset']} ({lp.short_id()})")
     else:
         typer.echo(f"{c['red']}Error:{c['reset']} Failed to stop loop", err=True)
         raise typer.Exit(1)

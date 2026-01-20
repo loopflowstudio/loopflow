@@ -1,0 +1,12 @@
+#!/bin/bash
+# Start all loopflow development agents
+set -e
+cd "$(git rev-parse --show-toplevel)"
+
+uv run lfd loop product-engineer -a Maestro/
+uv run lfd loop product-engineer -a src/loopflow/
+uv run lfd loop designer -a Maestro/
+uv run lfd loop designer -a src/loopflow/
+uv run lfd loop infra-engineer
+
+uv run lfd status

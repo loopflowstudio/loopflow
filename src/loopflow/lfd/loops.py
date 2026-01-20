@@ -37,16 +37,23 @@ def _branch_exists(repo: Path, branch: str) -> bool:
     return result.returncode == 0
 
 
-def _allocate_loop_main(repo: Path, goal_name: str) -> str:
-    """Return available branch name: goal-main, goal-1-main, etc."""
-    candidate = f"{goal_name}-main"
+def _allocate_loop_main(repo: Path, goal_name: str, area: str | None = None) -> str:
+    """Return available branch name: goal-main, goal-area-main, etc."""
+    if area:
+        # "Maestro/" -> "maestro", "src/loopflow/" -> "loopflow"
+        area_slug = area.rstrip("/").split("/")[-1].lower()
+        base = f"{goal_name}-{area_slug}"
+    else:
+        base = goal_name
+
+    candidate = f"{base}-main"
     if not _branch_exists(repo, candidate):
         return candidate
     for i in range(1, 100):
-        candidate = f"{goal_name}-{i}-main"
+        candidate = f"{base}-{i}-main"
         if not _branch_exists(repo, candidate):
             return candidate
-    raise ValueError(f"Could not allocate personal-main branch for {goal_name}")
+    raise ValueError(f"Could not allocate personal-main branch for {base}")
 
 
 def _create_loop_main_branch(repo: Path, branch: str) -> None:
@@ -77,14 +84,14 @@ def create_loop(
     pathset: str | None = None,
     cron: str | None = None,
 ) -> Loop:
-    """Create or get an existing loop for a goal+repo combination."""
-    # Check if loop already exists
-    existing = get_loop_by_goal_repo(loop_type, goal_name, repo)
+    """Create or get an existing loop for a goal+area+repo combination."""
+    # Check if loop already exists (now includes area in lookup)
+    existing = get_loop_by_goal_repo(loop_type, goal_name, repo, area=area)
     if existing:
         return existing
 
-    # Allocate and create personal-main branch
-    loop_main = _allocate_loop_main(repo, goal_name)
+    # Allocate and create personal-main branch (now includes area in name)
+    loop_main = _allocate_loop_main(repo, goal_name, area=area)
     _create_loop_main_branch(repo, loop_main)
 
     loop = Loop(

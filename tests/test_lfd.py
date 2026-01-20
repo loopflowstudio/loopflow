@@ -424,12 +424,12 @@ def test_db_get_loop_by_goal_repo():
         )
         save_loop(loop, db_path)
 
-        loaded = get_loop_by_goal_repo(LoopType.FLOW, "api-cleanup", Path("/tmp/repo"), db_path)
+        loaded = get_loop_by_goal_repo(LoopType.FLOW, "api-cleanup", Path("/tmp/repo"), db_path=db_path)
         assert loaded is not None
         assert loaded.id == "loop-1"
 
         # Different type should not match
-        not_found = get_loop_by_goal_repo(LoopType.LOOP, "api-cleanup", Path("/tmp/repo"), db_path)
+        not_found = get_loop_by_goal_repo(LoopType.LOOP, "api-cleanup", Path("/tmp/repo"), db_path=db_path)
         assert not_found is None
 
 

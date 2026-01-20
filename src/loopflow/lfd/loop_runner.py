@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 import uuid
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -261,7 +262,7 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
                 pass  # Project file may have been removed
 
         combined = f"{goal_section}\n\n---\n\n{task_content}"
-        components = components._replace(task=(task_file, combined))
+        components = replace(components, task=(task_file, combined))
 
         prompt = format_prompt(components)
         prompt_file = write_prompt_file(prompt)

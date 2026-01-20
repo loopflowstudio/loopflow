@@ -13,6 +13,7 @@ from loopflow.lf.config import load_config
 from loopflow.lf.design import gather_design_docs
 from loopflow.lf.files import gather_docs, gather_files, format_files, format_image_references
 from loopflow.lf.frontmatter import TaskFile, parse_task_file
+from loopflow.lf.skills import discover_skill_sources, find_skill, load_skill_prompt, list_all_skills
 from loopflow.lfops.summarize import is_stale, load_summary
 from loopflow.lf.voices import Voice, load_voice
 
@@ -182,11 +183,12 @@ def list_user_tasks(repo_root: Path) -> list[str]:
     return sorted(tasks)
 
 
-def list_all_tasks(repo_root: Path | None) -> tuple[list[str], list[str]]:
-    """Return (user_tasks, builtin_only_tasks) for discoverability.
+def list_all_tasks(repo_root: Path | None, config=None) -> tuple[list[str], list[str], list[tuple[str, str]]]:
+    """Return (user_tasks, builtin_only_tasks, external_skills) for discoverability.
 
     User tasks include any that override builtins.
     Builtin-only tasks are builtins not overridden by user tasks.
+    External skills are (prefixed_name, source_name) tuples from skill sources.
     """
     builtins = set(list_builtin_tasks())
     if repo_root:
@@ -195,19 +197,45 @@ def list_all_tasks(repo_root: Path | None) -> tuple[list[str], list[str]]:
         user = set()
 
     builtin_only = builtins - user
-    return sorted(user), sorted(builtin_only)
+
+    # Discover external skills
+    skill_source_configs = None
+    if config and config.skill_sources:
+        skill_source_configs = [
+            {"name": s.name, "prefix": s.prefix, "path": s.path}
+            for s in config.skill_sources
+        ]
+    sources = discover_skill_sources(skill_source_configs, repo_root)
+    external_skills = list_all_skills(sources)
+
+    return sorted(user), sorted(builtin_only), external_skills
 
 
-def gather_task(repo_root: Path | None, name: str) -> TaskFile | None:
+def gather_task(repo_root: Path | None, name: str, config=None) -> TaskFile | None:
     """Gather and parse task file with frontmatter.
 
     Search order:
-    1. .claude/commands/{name}.md (if repo_root provided)
-    2. .lf/{name}.md (if repo_root provided)
-    3. templates/commands/{name}.md (builtin fallback)
+    1. External skills (prefix:name format, e.g., sp:brainstorm)
+    2. .claude/commands/{name}.md (if repo_root provided)
+    3. .lf/{name}.md (if repo_root provided)
+    4. templates/commands/{name}.md (builtin fallback)
 
     Returns TaskFile with parsed config, or None if not found.
     """
+    # Check for external skill (prefix:name format)
+    if ":" in name:
+        skill_source_configs = None
+        if config and config.skill_sources:
+            skill_source_configs = [
+                {"name": s.name, "prefix": s.prefix, "path": s.path}
+                for s in config.skill_sources
+            ]
+        sources = discover_skill_sources(skill_source_configs, repo_root)
+        skill = find_skill(name, sources)
+        if skill:
+            content = load_skill_prompt(skill)
+            return parse_task_file(name, content)
+
     if repo_root:
         # Check .claude/commands first (portable format)
         claude_dir = repo_root / ".claude" / "commands"
@@ -399,7 +427,7 @@ def gather_prompt_components(
     if inline:
         task_result = ("inline", inline)
     elif task:
-        task_file = gather_task(repo_root, task)
+        task_file = gather_task(repo_root, task, config)
         if task_file:
             task_content = task_file.content
             # Process task_args if provided
@@ -418,7 +446,7 @@ def gather_prompt_components(
             # Append additional prompts if provided
             if with_prompts:
                 for prompt_name in with_prompts:
-                    prompt_file = gather_task(repo_root, prompt_name)
+                    prompt_file = gather_task(repo_root, prompt_name, config)
                     if prompt_file:
                         task_content = task_content.rstrip() + "\n\n---\n\n" + prompt_file.content
             task_result = (task, task_content)

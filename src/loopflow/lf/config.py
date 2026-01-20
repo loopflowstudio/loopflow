@@ -40,6 +40,14 @@ class SummaryConfig(BaseModel):
     model: str = "gemini"
 
 
+class SkillSourceConfig(BaseModel):
+    """External skill library configuration."""
+
+    name: str
+    prefix: str
+    path: str  # Supports ~ expansion
+
+
 def parse_model(model: str) -> tuple[str, str | None]:
     """Parse model string like 'claude:opus' into (backend, variant).
 
@@ -79,6 +87,7 @@ class Config(BaseModel):
     voice: Optional[list[str]] = None  # Default voices for all tasks
     summaries: list[SummaryConfig] = Field(default_factory=list)  # Summaries to include
     summary_tokens: int = 10000  # Default token budget for summaries
+    skill_sources: list[SkillSourceConfig] = Field(default_factory=list)  # External skill libraries
     work: Optional[WorkConfig] = None  # Work queue configuration
 
     @field_validator("context", mode="before")

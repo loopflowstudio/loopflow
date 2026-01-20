@@ -12,7 +12,9 @@ title: lf Command Reference
 ```bash
 lf <task>                    # run a task file
 lf <task>: args              # run with arguments
+lf <prefix>:<skill>          # run external skill
 lf : "inline prompt"         # no task file, just prompt
+lf --list                    # show all available tasks
 ```
 
 ## Examples
@@ -20,6 +22,7 @@ lf : "inline prompt"         # no task file, just prompt
 ```bash
 lf review                    # run .claude/commands/review.md
 lf implement: add auth       # pass arguments after colon
+lf sp:brainstorm             # run superpowers brainstorm skill
 lf : "fix the typo"          # inline prompt
 lf debug -v                  # paste clipboard, fix the bug
 ```
@@ -28,9 +31,10 @@ lf debug -v                  # paste clipboard, fix the bug
 
 Tasks are markdown files in these locations (searched in order):
 
-1. `.claude/commands/<task>.md` — preferred, portable
-2. `.lf/<task>.md` — local override
-3. Built-in tasks — debug, design, implement, polish, review
+1. External skills — `<prefix>:<skill>` format (e.g., `sp:brainstorm`)
+2. `.claude/commands/<task>.md` — preferred, portable
+3. `.lf/<task>.md` — local override
+4. Built-in tasks — debug, design, implement, polish, review
 
 ### Task Arguments
 
@@ -159,6 +163,29 @@ lf implement --voice architect,concise
 ```bash
 lf review -c    # shows token breakdown, copies to clipboard
 ```
+
+### External skills
+
+Run skills from external libraries like [superpowers](https://github.com/obra/superpowers):
+
+```bash
+lf sp:brainstorm              # run brainstorm skill from superpowers
+lf sp:write-plan -m codex     # with a different model
+lf sp:execute-plan -i         # interactive mode
+```
+
+External skills use loopflow's context assembly, so they get your repo docs, branch files, and other context that wouldn't be available running them directly.
+
+Configure skill sources in `.lf/config.yaml`:
+
+```yaml
+skill_sources:
+  - name: superpowers
+    prefix: sp
+    path: ~/.superpowers
+```
+
+If `~/.superpowers` exists, it's auto-detected with prefix `sp`.
 
 ## See Also
 

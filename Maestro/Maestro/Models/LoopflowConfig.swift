@@ -71,6 +71,13 @@ struct WorkConfig: Codable {
     }
 }
 
+/// External skill library configuration.
+struct SkillSourceConfig: Codable {
+    let name: String
+    let prefix: String
+    let path: String
+}
+
 struct LoopflowConfig: Codable {
     let agentModel: String?
     let interactive: [String]?
@@ -89,11 +96,13 @@ struct LoopflowConfig: Codable {
     let paste: Bool?
     let voice: VoiceConfig?
     let summaries: [SummaryConfig]?
+    let skillSources: [SkillSourceConfig]?
     let work: WorkConfig?
 
     enum CodingKeys: String, CodingKey {
         case agentModel = "agent_model"
         case diffFiles = "diff_files"
+        case skillSources = "skill_sources"
         case interactive, terminal, ide, workspace, context, exclude, push, pr, yolo, chrome, docs, diff, paste, voice, summaries, work
     }
 

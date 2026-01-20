@@ -7,15 +7,44 @@ enum RunMode: String, Codable, CaseIterable {
     case interactive
 }
 
+/// Source of a prompt (local repo or external skill library).
+enum PromptSource: Hashable {
+    case local                    // .claude/commands/ or .lf/
+    case external(String)         // External skill source name (e.g., "superpowers")
+
+    var isExternal: Bool {
+        if case .external = self { return true }
+        return false
+    }
+
+    var sourceName: String? {
+        if case .external(let name) = self { return name }
+        return nil
+    }
+}
+
 struct PromptCard: Identifiable, Hashable {
     var id: String { name }
 
     let name: String
     let content: String
     let defaultMode: RunMode
+    let source: PromptSource
+
+    init(name: String, content: String, defaultMode: RunMode, source: PromptSource = .local) {
+        self.name = name
+        self.content = content
+        self.defaultMode = defaultMode
+        self.source = source
+    }
 
     var displayName: String {
         name.replacingOccurrences(of: "_", with: " ")
+    }
+
+    /// For external skills, the prefix is part of the name (e.g., "sp:brainstorm")
+    var isExternalSkill: Bool {
+        source.isExternal
     }
 
     /// Short description extracted from the first non-frontmatter, non-header line

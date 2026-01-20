@@ -208,3 +208,31 @@ summaries:
 ```
 
 Generate with `lfops summarize`. Cached in `.lf/summaries/`.
+
+### Skill Sources
+
+External skill libraries that extend loopflow with additional tasks.
+
+```yaml
+skill_sources:
+  - name: superpowers
+    prefix: sp
+    path: ~/.superpowers
+```
+
+| Field | Description |
+|-------|-------------|
+| `name` | Display name for the source |
+| `prefix` | Prefix for invoking skills (e.g., `sp:brainstorm`) |
+| `path` | Path to skill library (supports `~` expansion) |
+
+After configuring, run skills with their prefix:
+
+```bash
+lf sp:brainstorm              # run superpowers brainstorm skill
+lf sp:write-plan -m codex     # with a different model
+```
+
+**Auto-detection:** If `~/.superpowers` exists, it's automatically registered with prefix `sp` even without explicit config.
+
+See [superpowers](https://github.com/obra/superpowers) for an example skill library.

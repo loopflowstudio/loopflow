@@ -29,7 +29,8 @@ def _init_db(db_path: Path) -> None:
             iteration INTEGER DEFAULT 0,
             error TEXT,
             main_sha TEXT,
-            emoji TEXT DEFAULT ''
+            emoji TEXT DEFAULT '',
+            current_step TEXT
         );
 
         CREATE INDEX IF NOT EXISTS idx_agent_runs_name ON agent_runs(agent_name);
@@ -49,6 +50,18 @@ def _init_db(db_path: Path) -> None:
         );
 
         CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
+
+        CREATE TABLE IF NOT EXISTS loop_prs (
+            id TEXT PRIMARY KEY,
+            loop_name TEXT NOT NULL,
+            iteration INTEGER NOT NULL,
+            pr_url TEXT NOT NULL,
+            pr_number INTEGER,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_loop_prs_name ON loop_prs(loop_name);
     """)
 
     conn.commit()
@@ -77,8 +90,8 @@ def save_run(run: AgentRun, db_path: Path | None = None) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO agent_runs
-        (id, agent_name, status, started_at, ended_at, pid, worktree, iteration, error, main_sha, emoji)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, agent_name, status, started_at, ended_at, pid, worktree, iteration, error, main_sha, emoji, current_step)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             run.id,
@@ -92,6 +105,7 @@ def save_run(run: AgentRun, db_path: Path | None = None) -> None:
             run.error,
             run.main_sha,
             run.emoji,
+            run.current_step,
         ),
     )
 
@@ -192,7 +206,69 @@ def _run_from_row(row: dict) -> AgentRun:
         error=row.get("error"),
         main_sha=row.get("main_sha"),
         emoji=row.get("emoji", ""),
+        current_step=row.get("current_step"),
     )
+
+
+def update_current_step(run_id: str, step: str | None, db_path: Path | None = None) -> bool:
+    """Update the current step for an agent run."""
+    conn = _get_db(db_path)
+    cursor = conn.execute(
+        "UPDATE agent_runs SET current_step = ? WHERE id = ?",
+        (step, run_id),
+    )
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    return updated
+
+
+# Loop PRs
+
+
+def save_loop_pr(
+    loop_name: str,
+    iteration: int,
+    pr_url: str,
+    pr_number: int | None = None,
+    status: str = "open",
+    db_path: Path | None = None,
+) -> str:
+    """Save a PR created by a loop iteration."""
+    import uuid
+
+    conn = _get_db(db_path)
+    pr_id = str(uuid.uuid4())
+
+    conn.execute(
+        """
+        INSERT INTO loop_prs (id, loop_name, iteration, pr_url, pr_number, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (pr_id, loop_name, iteration, pr_url, pr_number, status, datetime.now().isoformat()),
+    )
+
+    conn.commit()
+    conn.close()
+    return pr_id
+
+
+def get_loop_prs(loop_name: str, limit: int = 10, db_path: Path | None = None) -> list[dict]:
+    """Get PRs for a loop."""
+    conn = _get_db(db_path)
+    cursor = conn.execute(
+        """
+        SELECT id, loop_name, iteration, pr_url, pr_number, status, created_at
+        FROM loop_prs
+        WHERE loop_name = ?
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        (loop_name, limit),
+    )
+    prs = [dict(row) for row in cursor]
+    conn.close()
+    return prs
 
 
 # Sessions

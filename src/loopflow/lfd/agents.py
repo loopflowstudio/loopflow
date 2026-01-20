@@ -66,11 +66,6 @@ def _parse_agent_file(path: Path) -> AgentSpec | None:
 
     trigger = _parse_trigger(config)
 
-    # Parse goal path relative to repo
-    goal = None
-    if config.get("goal"):
-        goal = Path(config["goal"])
-
     # Parse merge mode
     merge_str = config.get("merge", "auto")
     merge_mode = MergeMode(merge_str)
@@ -81,6 +76,11 @@ def _parse_agent_file(path: Path) -> AgentSpec | None:
         # Legacy format: inline list of tasks
         pipeline = ",".join(pipeline)
 
+    # Parse area as list of paths
+    area = config.get("area", [])
+    if isinstance(area, str):
+        area = [a.strip() for a in area.split(",") if a.strip()]
+
     return AgentSpec(
         name=path.stem,
         repo=Path(config["repo"]).expanduser(),
@@ -89,7 +89,8 @@ def _parse_agent_file(path: Path) -> AgentSpec | None:
         context=config.get("context", []),
         prompt=prompt,
         emoji=config.get("emoji", ""),
-        goal=goal,
+        goal=config.get("goal", ""),
+        area=area,
         merge_mode=merge_mode,
         personal_main=config.get("personal_main"),
     )
@@ -299,7 +300,8 @@ def create_agent_file(
     prompt: str = "",
     interval_seconds: int | None = None,
     emoji: str = "",
-    goal: Path | None = None,
+    goal: str = "",
+    area: list[str] | None = None,
     merge: str = "auto",
     cron: str | None = None,
     grace_minutes: int | None = None,
@@ -322,6 +324,8 @@ def create_agent_file(
     lines.append(f"repo: {repo}")
     if goal:
         lines.append(f"goal: {goal}")
+    if area:
+        lines.append(f"area: [{', '.join(area)}]")
     lines.append(f"pipeline: {pipeline}")
     lines.append(f"merge: {merge}")
     lines.append(f"personal_main: {personal_main}")

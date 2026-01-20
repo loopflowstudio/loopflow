@@ -73,7 +73,8 @@ class AgentSpec:
     context: list[str] = field(default_factory=list)
     prompt: str = ""
     emoji: str = ""
-    goal: Path | None = None
+    goal: str = ""  # Name of goal file in .lf/goals/{goal}.md
+    area: list[str] = field(default_factory=list)  # Pathset - where agent works
     merge_mode: MergeMode = MergeMode.AUTO
     personal_main: str | None = None  # e.g. "myagent-main" or "myagent-1-main"
 
@@ -89,7 +90,9 @@ class AgentSpec:
         if self.emoji:
             result["emoji"] = self.emoji
         if self.goal:
-            result["goal"] = str(self.goal)
+            result["goal"] = self.goal
+        if self.area:
+            result["area"] = self.area
         if self.merge_mode != MergeMode.AUTO:
             result["merge_mode"] = self.merge_mode.value
         if self.personal_main:
@@ -99,7 +102,6 @@ class AgentSpec:
     @classmethod
     def from_dict(cls, data: dict) -> "AgentSpec":
         trigger_data = data.get("trigger", {})
-        goal = Path(data["goal"]) if data.get("goal") else None
         merge = data.get("merge_mode", "auto")
         return cls(
             name=data["name"],
@@ -109,7 +111,8 @@ class AgentSpec:
             context=data.get("context", []),
             prompt=data.get("prompt", ""),
             emoji=data.get("emoji", ""),
-            goal=goal,
+            goal=data.get("goal", ""),
+            area=data.get("area", []),
             merge_mode=MergeMode(merge),
             personal_main=data.get("personal_main"),
         )
@@ -128,6 +131,7 @@ class AgentRun:
     error: str | None = None
     main_sha: str | None = None
     emoji: str = ""
+    current_step: str | None = None  # Which task is currently running
 
     def to_dict(self) -> dict:
         result = {
@@ -144,6 +148,8 @@ class AgentRun:
         }
         if self.emoji:
             result["emoji"] = self.emoji
+        if self.current_step:
+            result["current_step"] = self.current_step
         return result
 
     @classmethod
@@ -160,6 +166,7 @@ class AgentRun:
             error=data.get("error"),
             main_sha=data.get("main_sha"),
             emoji=data.get("emoji", ""),
+            current_step=data.get("current_step"),
         )
 
 

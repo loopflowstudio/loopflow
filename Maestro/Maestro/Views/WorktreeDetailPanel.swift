@@ -560,9 +560,9 @@ struct WorktreeDetailPanel: View {
             Task {
                 do {
                     try await worktreeService.markPRReady(in: worktreeURL)
-                    // Refresh to get updated PR URL, then open
+                    let url = await worktreeService.getExistingPRURL(in: worktreeURL)
                     await appState.refreshWorktrees()
-                    if let url = worktree.prURL {
+                    if let url {
                         terminalLauncher.openURL(url)
                     }
                 } catch {
@@ -583,8 +583,16 @@ struct WorktreeDetailPanel: View {
 
         // No PR exists - create one (fallback, shouldn't happen with auto-draft)
         Task {
+            if let existingURL = await worktreeService.getExistingPRURL(in: worktreeURL) {
+                terminalLauncher.openURL(existingURL)
+                return
+            }
             do {
                 _ = try await worktreeService.createPR(in: worktreeURL)
+                await appState.refreshWorktrees()
+                if let createdURL = await worktreeService.getExistingPRURL(in: worktreeURL) {
+                    terminalLauncher.openURL(createdURL)
+                }
             } catch {
                 await MainActor.run {
                     actionError = "Failed to create PR: \(error.localizedDescription)"

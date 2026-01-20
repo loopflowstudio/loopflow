@@ -115,6 +115,7 @@ struct WorktreeJSON: Codable {
     let remote: RemoteStatusJSON?
     let operationState: String?
     let ci: CIJSON?
+    let prunable: Bool?
 
     enum CodingKeys: String, CodingKey {
         case branch, path, kind
@@ -122,7 +123,7 @@ struct WorktreeJSON: Codable {
         case workingTree = "working_tree"
         case main, remote
         case operationState = "operation_state"
-        case ci
+        case ci, prunable
     }
 }
 
@@ -200,5 +201,8 @@ extension Worktree {
         self.isRebasing = json.operationState == "rebase"
         self.isMerging = json.operationState == "merge"
         self.recentTasks = recentTasks
+        if json.prunable == true {
+            self.staleness = .merged
+        }
     }
 }

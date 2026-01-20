@@ -184,6 +184,9 @@ final class AppState {
             let isPushed = await worktreeService.branchIsPushed(worktree.branch, in: repo)
             guard isPushed else { continue }
 
+            let hasDiff = await worktreeService.hasDiffAgainstBase(worktree)
+            guard hasDiff else { continue }
+
             // Create draft PR in background (don't block or show errors)
             Task.detached { [worktreeService] in
                 let worktreeURL = URL(fileURLWithPath: worktree.path)
@@ -195,7 +198,12 @@ final class AppState {
     private func detectStaleness() async {
         guard let repo = currentRepo else { return }
 
-        let stalenessMap = await worktreeService.detectStalenessForAll(worktrees, in: repo)
+        let prunable = await worktreeService.getPrunableBranches(in: repo)
+        var stalenessMap = await worktreeService.detectStalenessForAll(worktrees, in: repo)
+
+        for branch in prunable {
+            stalenessMap[branch] = .merged
+        }
 
         // Update worktrees with staleness info
         for i in worktrees.indices {

@@ -5,7 +5,7 @@ import subprocess
 import typer
 
 from loopflow.lf.context import find_worktree_root
-from loopflow.lf.worktrees import find_merged, remove
+from loopflow.lf.worktrees import find_merged, list_all, merge_diagnostics, remove
 from loopflow.lfops._helpers import get_default_branch, sync_main_repo
 
 
@@ -26,6 +26,7 @@ def register_commands(app: typer.Typer) -> None:
     def prune(
         dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Show what would be pruned"),
         force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+        debug: bool = typer.Option(False, "--debug", help="Show merge detection details"),
     ) -> None:
         """Remove worktrees whose changes have been merged into main."""
         repo_root = find_worktree_root()
@@ -40,6 +41,18 @@ def register_commands(app: typer.Typer) -> None:
 
         # Find merged worktrees
         merged = find_merged(repo_root, base_branch)
+        if debug:
+            typer.echo("Merge diagnostics:")
+            for wt in list_all(repo_root):
+                info = merge_diagnostics(repo_root, wt, base_branch)
+                typer.echo(
+                    f"  {info['branch']}: "
+                    f"dirty={info['is_dirty']} "
+                    f"pr_state={info['pr_state'] or 'none'} "
+                    f"cherry_empty={info['cherry_empty']} "
+                    f"trees_match={info['trees_match']} "
+                    f"is_ancestor={info['is_ancestor']}"
+                )
 
         # Never prune the current worktree - user might be standing in it
         current_branch = _get_current_worktree_branch()

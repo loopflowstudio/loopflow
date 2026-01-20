@@ -549,7 +549,7 @@ def test_db_save_and_get_loop_runs():
         loop = Loop(
             id="loop-1",
             type=LoopType.LOOP,
-            goal="test",
+            goal_name="test",
             repo=Path("/tmp/repo"),
             loop_main="test-main",
         )
@@ -588,7 +588,7 @@ def test_db_get_latest_loop_run():
         loop = Loop(
             id="loop-1",
             type=LoopType.LOOP,
-            goal="test",
+            goal_name="test",
             repo=Path("/tmp/repo"),
             loop_main="test-main",
         )
@@ -624,7 +624,7 @@ def test_db_update_loop_run_status():
         loop = Loop(
             id="loop-1",
             type=LoopType.LOOP,
-            goal="test",
+            goal_name="test",
             repo=Path("/tmp/repo"),
             loop_main="test-main",
         )
@@ -655,7 +655,7 @@ def test_db_update_loop_run_step():
         loop = Loop(
             id="loop-1",
             type=LoopType.LOOP,
-            goal="test",
+            goal_name="test",
             repo=Path("/tmp/repo"),
             loop_main="test-main",
         )
@@ -685,7 +685,7 @@ def test_db_update_loop_run_pr():
         loop = Loop(
             id="loop-1",
             type=LoopType.LOOP,
-            goal="test",
+            goal_name="test",
             repo=Path("/tmp/repo"),
             loop_main="test-main",
         )
@@ -715,7 +715,7 @@ def test_db_update_loop_pid():
         loop = Loop(
             id="loop-1",
             type=LoopType.LOOP,
-            goal="test",
+            goal_name="test",
             repo=Path("/tmp/repo"),
             loop_main="test-main",
         )
@@ -741,7 +741,7 @@ def test_loop_model_with_pid():
     loop = Loop(
         id="loop-1",
         type=LoopType.LOOP,
-        goal="test",
+        goal_name="test",
         repo=Path("/tmp/repo"),
         loop_main="test-main",
         pid=12345,
@@ -757,7 +757,7 @@ def test_db_save_loop_with_pid():
         loop = Loop(
             id="loop-1",
             type=LoopType.LOOP,
-            goal="test",
+            goal_name="test",
             repo=Path("/tmp/repo"),
             loop_main="test-main",
             pid=54321,

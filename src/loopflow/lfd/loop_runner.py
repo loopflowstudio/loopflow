@@ -4,7 +4,6 @@ Runs iterations of a loop until the PR limit is reached or an error occurs.
 Can be invoked directly as a subprocess for background execution.
 """
 
-import secrets
 import subprocess
 import sys
 import uuid
@@ -13,7 +12,6 @@ from pathlib import Path
 
 from loopflow.lf.config import load_config, parse_model
 from loopflow.lf.context import gather_prompt_components, format_prompt
-from loopflow.lf.git import find_main_repo, get_current_branch
 from loopflow.lf.goals import load_goal
 from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lf.logging import write_prompt_file
@@ -30,36 +28,8 @@ from loopflow.lfd.db import (
     update_loop_run_step,
     update_loop_status,
 )
+from loopflow.lfd.loops import count_outstanding
 from loopflow.lfd.models import Loop, LoopRun, LoopStatus
-
-
-def _random_suffix() -> str:
-    """Generate a short random suffix for temp branch names."""
-    return secrets.token_hex(3)
-
-
-def count_outstanding(loop: Loop) -> int:
-    """Count commits on personal-main ahead of main."""
-    subprocess.run(
-        ["git", "fetch", "origin", "main", loop.personal_main],
-        cwd=loop.repo,
-        capture_output=True,
-    )
-
-    result = subprocess.run(
-        ["git", "rev-list", "--count", f"origin/main..origin/{loop.personal_main}"],
-        cwd=loop.repo,
-        capture_output=True,
-        text=True,
-    )
-
-    if result.returncode != 0:
-        return 0
-
-    try:
-        return int(result.stdout.strip())
-    except ValueError:
-        return 0
 
 
 def run_loop_iterations(loop: Loop) -> None:

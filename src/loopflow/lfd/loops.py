@@ -1,11 +1,43 @@
 """Loop management for lfd."""
 
 import os
+import random
 import signal
 import subprocess
 import sys
 import uuid
 from pathlib import Path
+
+
+# Word lists for generating unique branch names
+# Adjectives: short, distinct, pleasant
+ADJECTIVES = [
+    "amber", "azure", "bold", "bright", "calm", "clear", "cool", "crisp",
+    "dark", "deep", "dry", "fair", "fast", "firm", "fresh", "glad",
+    "gold", "green", "keen", "kind", "lean", "light", "mild", "neat",
+    "pale", "plain", "pure", "quick", "quiet", "rapid", "raw", "rich",
+    "ripe", "safe", "sharp", "silver", "sleek", "slim", "slow", "smooth",
+    "soft", "solid", "still", "strong", "swift", "tall", "tidy", "warm",
+    "wild", "wise",
+]
+
+# Nouns: short, distinct, concrete
+NOUNS = [
+    "arch", "beam", "brook", "cliff", "cloud", "cove", "creek", "crown",
+    "dale", "dawn", "dune", "edge", "elm", "fern", "field", "flame",
+    "flint", "frost", "gate", "glen", "grove", "hawk", "hill", "isle",
+    "lake", "lane", "leaf", "marsh", "mist", "moon", "moss", "oak",
+    "path", "peak", "pine", "pond", "rain", "reef", "ridge", "river",
+    "rock", "shade", "shore", "spark", "stone", "storm", "stream", "tide",
+    "vale", "wave",
+]
+
+
+def _generate_random_words() -> str:
+    """Generate a random adjective-noun pair like 'swift-river'."""
+    adj = random.choice(ADJECTIVES)
+    noun = random.choice(NOUNS)
+    return f"{adj}-{noun}"
 
 from loopflow.lf.context import find_worktree_root
 from loopflow.lf.git import find_main_repo
@@ -38,7 +70,12 @@ def _branch_exists(repo: Path, branch: str) -> bool:
 
 
 def _allocate_loop_main(repo: Path, goal_name: str, area: str | None = None) -> str:
-    """Return available branch name: goal-main, goal-area-main, etc."""
+    """Return unique branch name: goal-area-words-main or goal-words-main.
+
+    Always includes random words for uniqueness. Format:
+    - With area: product-engineer-api-swift-river-main
+    - Without area: product-engineer-swift-river-main
+    """
     if area:
         # "Maestro/" -> "maestro", "src/loopflow/" -> "loopflow"
         area_slug = area.rstrip("/").split("/")[-1].lower()
@@ -46,13 +83,13 @@ def _allocate_loop_main(repo: Path, goal_name: str, area: str | None = None) -> 
     else:
         base = goal_name
 
-    candidate = f"{base}-main"
-    if not _branch_exists(repo, candidate):
-        return candidate
-    for i in range(1, 100):
-        candidate = f"{base}-{i}-main"
+    # Try random word combinations until we find an available branch
+    for _ in range(100):
+        words = _generate_random_words()
+        candidate = f"{base}-{words}-main"
         if not _branch_exists(repo, candidate):
             return candidate
+
     raise ValueError(f"Could not allocate personal-main branch for {base}")
 
 

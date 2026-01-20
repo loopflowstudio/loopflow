@@ -1056,6 +1056,9 @@ def test_iteration_branch_prefix_strips_main_suffix():
     assert _iteration_branch_prefix("product-engineer-main") == "product-engineer"
     assert _iteration_branch_prefix("product-engineer-1-main") == "product-engineer-1"
     assert _iteration_branch_prefix("test-main") == "test"
+    # New format with random words
+    assert _iteration_branch_prefix("product-engineer-swift-river-main") == "product-engineer-swift-river"
+    assert _iteration_branch_prefix("test-api-calm-brook-main") == "test-api-calm-brook"
 
 
 def test_iteration_branch_prefix_without_suffix():
@@ -1064,3 +1067,39 @@ def test_iteration_branch_prefix_without_suffix():
 
     # Shouldn't happen in practice, but function handles it gracefully
     assert _iteration_branch_prefix("product-engineer") == "product-engineer"
+
+
+# Random word generation tests
+
+
+def test_generate_random_words_format():
+    """_generate_random_words returns adjective-noun format."""
+    from loopflow.lfd.loops import _generate_random_words, ADJECTIVES, NOUNS
+
+    words = _generate_random_words()
+    parts = words.split("-")
+    assert len(parts) == 2
+    assert parts[0] in ADJECTIVES
+    assert parts[1] in NOUNS
+
+
+def test_generate_random_words_produces_variety():
+    """_generate_random_words produces different results over multiple calls."""
+    from loopflow.lfd.loops import _generate_random_words
+
+    # Generate 20 word pairs, expect at least 5 unique
+    results = {_generate_random_words() for _ in range(20)}
+    assert len(results) >= 5  # Should be much higher with 50*50 combinations
+
+
+def test_word_lists_have_sufficient_variety():
+    """Word lists have enough entries for good uniqueness."""
+    from loopflow.lfd.loops import ADJECTIVES, NOUNS
+
+    # 50 adjectives * 50 nouns = 2500 combinations
+    assert len(ADJECTIVES) >= 50
+    assert len(NOUNS) >= 50
+    # All words should be lowercase and contain no special characters
+    for word in ADJECTIVES + NOUNS:
+        assert word.islower()
+        assert word.isalpha()

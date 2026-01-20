@@ -29,10 +29,10 @@ def should_trigger_cron(cron_expr: str, last_run: datetime | None) -> bool:
 
 
 def check_schedule(loop: Loop) -> bool:
-    """Check if scheduled loop should trigger. Returns True if should trigger."""
-    if loop.type != LoopType.SCHEDULE:
-        return False
+    """Check if scheduled loop should trigger. Returns True if should trigger.
 
+    Caller must ensure loop.type == LoopType.SCHEDULE.
+    """
     if not loop.cron:
         return False
 

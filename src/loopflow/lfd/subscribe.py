@@ -15,10 +15,8 @@ def check_subscription(loop: Loop) -> bool:
     """Check if subscription should trigger. Returns True if triggered.
 
     Updates last_main_sha as a side effect.
+    Caller must ensure loop.type == LoopType.SUBSCRIBE.
     """
-    if loop.type != LoopType.SUBSCRIBE:
-        return False
-
     if not loop.pathset:
         return False
 

@@ -21,13 +21,13 @@ Idempotent: run it to create, or again to update after more commits.
 
 ## lfops land
 
-Squash-merge to main, cleanup worktree.
+Submit PR to merge queue.
 
 ```bash
 lfops land
 ```
 
-Merges your PR to main, deletes the remote branch, and removes the local worktree. One command to ship.
+Enables auto-merge on your PR. GitHub merges when CI passes and the merge queue clears. Run `wt remove <branch>` after merge completes to clean up.
 
 ## lfops commit
 
@@ -113,10 +113,12 @@ Fetches main and rebases. If conflicts occur, launches an assistant to help reso
 wt switch --create my-feature    # create worktree
 # ... work on feature ...
 lfops commit                     # commit with generated message
-lfops pr                         # open PR
+lfops pr                         # open PR (CI runs automatically)
 # ... address review feedback ...
 lfops commit -p                  # commit and push
-lfops land                       # merge and cleanup
+lfops land                       # submit to merge queue
+# ... wait for CI to pass and merge ...
+wt remove my-feature             # cleanup after merge
 ```
 
 ## See Also

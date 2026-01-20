@@ -73,8 +73,8 @@ lf review
 ## Ship Your Work
 
 ```bash
-lfops pr      # create or update PR, open in browser
-lfops land    # squash-merge to main, cleanup worktree
+lfops pr      # create PR (CI runs automatically)
+lfops land    # submit to merge queue
 ```
 
 ## Worktrees
@@ -84,8 +84,9 @@ Loopflow works best with git worktrees. Each feature gets its own directory:
 ```bash
 wt switch --create my-feature    # create worktree
 lf implement: add auth           # agents work here
-lfops pr                         # open PR
-lfops land                       # merge and cleanup
+lfops pr                         # open PR (CI runs)
+lfops land                       # submit to merge queue
+wt remove my-feature             # cleanup after merge
 ```
 
 ## Next Steps

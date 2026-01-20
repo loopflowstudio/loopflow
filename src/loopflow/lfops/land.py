@@ -310,71 +310,32 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
             capture_output=True,
         )
 
-    # Use gh pr merge to squash-merge on GitHub (marks PR as merged, not closed)
-    # Don't use --delete-branch: it tries to sync local main which fails in worktrees
-    # Use PR number (not branch name) to avoid operating on old closed PRs
-    typer.echo(f"Merging PR #{pr_number}: {title}")
-    merge_cmd = ["gh", "pr", "merge", str(pr_number), "--squash", "--subject", title]
+    # Enable auto-merge on the PR
+    # With merge queue enabled, this queues the PR for merge after CI passes
+    typer.echo(f"Enabling auto-merge for PR #{pr_number}: {title}")
+    merge_cmd = ["gh", "pr", "merge", str(pr_number), "--squash", "--auto", "--subject", title]
     if body:
         merge_cmd.extend(["--body", body])
     result = subprocess.run(merge_cmd, cwd=repo_root, capture_output=True, text=True)
     if result.returncode != 0:
-        error_msg = result.stderr.strip() or result.stdout.strip() or "merge failed"
+        error_msg = result.stderr.strip() or result.stdout.strip() or "auto-merge failed"
         typer.echo(f"Error: {error_msg}", err=True)
         raise typer.Exit(1)
 
-    # Verify the PR was actually merged (not just closed)
-    # Use PR number to verify the specific PR we just merged
-    result = subprocess.run(
-        ["gh", "pr", "view", str(pr_number), "--json", "state", "-q", ".state"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        typer.echo("Error: Could not verify PR state after merge command", err=True)
-        typer.echo("Check GitHub to confirm the PR was merged before cleaning up.", err=True)
-        raise typer.Exit(1)
-    pr_state = result.stdout.strip().upper()
-    if pr_state != "MERGED":
-        typer.echo(f"Error: PR state is '{pr_state}' (expected 'MERGED')", err=True)
-        typer.echo("The PR was not merged. Check GitHub for details.", err=True)
-        raise typer.Exit(1)
-
-    # Delete remote branch (we handle this ourselves since we don't use --delete-branch)
-    subprocess.run(
-        ["git", "push", "origin", "--delete", branch],
-        cwd=repo_root,
-        capture_output=True,
-    )
-
-    # Sync main repo to get the merged changes (best-effort after merge)
-    if not sync_main_repo(main_repo, base_branch):
-        typer.echo(f"Warning: Could not sync {base_branch}. Run manually:", err=True)
-        typer.echo(f"  cd {main_repo} && git fetch origin && git checkout {base_branch} && git pull", err=True)
-
-    # Clean up worktree or local branch (best-effort)
-    was_in_worktree = repo_root != main_repo
-    if was_in_worktree:
-        try:
-            remove_worktree(main_repo, branch, repo_root, base_branch)
-        except Exception:
-            typer.echo(f"Warning: Could not remove worktree. Run manually:", err=True)
-            typer.echo(f"  wt remove {branch}", err=True)
-    else:
-        subprocess.run(["git", "branch", "-D", branch], cwd=main_repo, capture_output=True)
-
-    # Open merged PR in browser
+    # Get PR URL and open in browser
     result = subprocess.run(
         ["gh", "pr", "view", str(pr_number), "--json", "url", "-q", ".url"],
-        cwd=main_repo,
+        cwd=repo_root,
         capture_output=True,
         text=True,
     )
-    if result.returncode == 0 and result.stdout.strip():
-        subprocess.run(["open", result.stdout.strip()])
+    pr_url = result.stdout.strip() if result.returncode == 0 else None
+    if pr_url:
+        subprocess.run(["open", pr_url])
 
-    typer.echo(f"Landed {branch} onto {base_branch}.")
+    was_in_worktree = repo_root != main_repo
+    typer.echo(f"PR #{pr_number} queued for merge. Will merge when CI passes.")
+    typer.echo(f"Run 'wt remove {branch}' after merge completes.")
 
     if was_in_worktree:
         typer.echo(str(main_repo))

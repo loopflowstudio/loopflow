@@ -1,7 +1,6 @@
 """Shared helpers for lfops commands."""
 
 import subprocess
-import sys
 from pathlib import Path
 
 import typer
@@ -14,7 +13,7 @@ def run_lint(repo_root: Path) -> bool:
     """Run lf lint in auto mode. Returns True if successful."""
     typer.echo("Running lint...")
     result = subprocess.run(
-        [sys.executable, "-m", "loopflow.lf", "lint", "-a"],
+        ["lf", "lint", "-a"],
         cwd=repo_root,
     )
     return result.returncode == 0

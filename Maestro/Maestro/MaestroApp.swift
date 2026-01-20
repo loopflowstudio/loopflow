@@ -9,12 +9,16 @@ struct MaestroApp: App {
     @Environment(\.openWindow) private var openWindow
     @State private var captureError: String?
     @State private var showCaptureError = false
+    @AppStorage("appearanceMode") private var appearanceMode = AppearanceMode.system.rawValue
 
     var body: some Scene {
+        let preferredScheme = AppearanceMode(rawValue: appearanceMode)?.colorScheme
+
         // Welcome/main window - shown on launch
         WindowGroup {
             WelcomeWindow(recentsService: recentsService)
                 .tint(.loopflowBurgundy)
+                .preferredColorScheme(preferredScheme)
         }
         .windowStyle(.automatic)
         .defaultSize(width: 500, height: 400)
@@ -23,6 +27,7 @@ struct MaestroApp: App {
         WindowGroup(id: "repo", for: URL.self) { $repoURL in
             RepoWindow(repoURL: repoURL, recentsService: recentsService)
                 .tint(.loopflowBurgundy)
+                .preferredColorScheme(preferredScheme)
         }
         .windowStyle(.automatic)
         .defaultSize(width: 900, height: 700)
@@ -31,6 +36,7 @@ struct MaestroApp: App {
         WindowGroup(id: "agents") {
             AgentWindow()
                 .tint(.loopflowBurgundy)
+                .preferredColorScheme(preferredScheme)
         }
         .windowStyle(.automatic)
         .defaultSize(width: 800, height: 600)
@@ -41,6 +47,16 @@ struct MaestroApp: App {
                     get: { Flags.beta },
                     set: { Flags.setBeta($0) }
                 ))
+                Divider()
+                Picker("Appearance", selection: Binding(
+                    get: { appearanceMode },
+                    set: { appearanceMode = $0 }
+                )) {
+                    ForEach(AppearanceMode.allCases, id: \.rawValue) { mode in
+                        Text(mode.menuTitle).tag(mode.rawValue)
+                    }
+                }
+                .pickerStyle(.radioGroup)
             }
 
             // Agents menu item (beta only)

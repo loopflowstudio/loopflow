@@ -224,20 +224,26 @@ def upload_dmg(dmg_path: Path, version: str) -> tuple[bool, str]:
     latest_key = "LoopflowMaestro-latest.dmg"
 
     try:
-        # Upload versioned file
+        # Upload versioned file (cache forever)
         client.upload_file(
             str(dmg_path),
             bucket,
             versioned_key,
-            ExtraArgs={"ContentType": "application/x-apple-diskimage"},
+            ExtraArgs={
+                "ContentType": "application/x-apple-diskimage",
+                "CacheControl": "public, max-age=31536000, immutable",
+            },
         )
 
-        # Upload as latest
+        # Upload as latest (short cache)
         client.upload_file(
             str(dmg_path),
             bucket,
             latest_key,
-            ExtraArgs={"ContentType": "application/x-apple-diskimage"},
+            ExtraArgs={
+                "ContentType": "application/x-apple-diskimage",
+                "CacheControl": "public, max-age=60",
+            },
         )
 
         return True, f"Uploaded to {R2_PUBLIC_URL}/{versioned_key} and {R2_PUBLIC_URL}/{latest_key}"

@@ -1,14 +1,14 @@
-# v0.6.6
+# v0.6.7
 
-This release introduces agent loops for continuous goal-driven automation, external skill sources (superpowers integration), and major Maestro improvements including live git watching and a new worktree dashboard. It also adds image clipboard support, the `lf add` command for scaffolding prompts, and improved PR generation with base-branch diffs.
+This release adds automated screenshot pipelines with Maestro, a roadmap system for agent work selection, and interactive project setup. It also introduces linting and formatting infrastructure with ruff.
 
 ## Changes
 
-- Add `lfd loop` command for continuous goal-driven automation with configurable PR limits and background execution
-- Add external skill sources - run skills from superpowers library via `lf sp:<skill>` syntax
-- Add live git watching in Maestro with staleness detection for merged, deleted, or inactive worktrees
-- Redesign Maestro worktree panel as workflow dashboard with quick actions, history, and inline diffs
-- Add `lf add` command to scaffold new prompt files in `.claude/commands/`
-- Add image clipboard support - screenshots and images are now included in prompt context
-- Add `lfops sync` and `lfops wt prune` commands for worktree maintenance
-- Add `--refresh` flag to `lfops pr` and use PR base diff for accurate title/body generation
+- Add `lf init` command with interactive setup for lint-before-ship and project configuration
+- Add Maestro integration for automated screenshot pipelines
+- Add roadmap system for guiding agent work selection toward goals
+- Add ruff-based linting and formatting infrastructure
+- Support configurable branch naming schema for worktrees
+- Add global task discovery from `~/.claude/commands/` for user-wide tasks
+- Support multiple loops per goal with distinct areas in `lfd`
+- Add `voices` parameter to context building for prompt customization

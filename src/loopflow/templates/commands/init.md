@@ -20,8 +20,10 @@ If not Darwin, stop and explain: "Loopflow requires macOS. The Homebrew-based in
 Run these checks and report status:
 ```bash
 which brew    # Homebrew (needed for installs)
-which npm     # Node.js (needed for Claude Code)
+which npm     # Node.js (needed for coding agents)
 which claude  # Claude Code
+which codex   # Codex CLI
+which gemini  # Gemini CLI
 which wt      # worktrunk
 test -f .lf/config.yaml && echo "config exists"
 test -d ~/.superpowers && echo "superpowers exists"
@@ -32,12 +34,14 @@ Print a summary:
 Checking environment...
 ✓ Homebrew
 ✓ Node.js
-✓ Claude Code
+✓ Claude Code (coding agent)
 ✗ worktrunk (required)
 - superpowers (optional)
 
 Config: not initialized
 ```
+
+At least one coding agent (Claude Code, Codex, or Gemini CLI) is required. If any one of them is installed, that requirement is satisfied.
 
 If everything required is installed and config exists, say "You're all set! Try: lf debug -v" and offer to install optional extras.
 
@@ -46,14 +50,17 @@ If everything required is installed and config exists, say "You're all set! Try:
 If Homebrew is missing, stop: "Install Homebrew first: https://brew.sh"
 
 If Node.js is missing:
-- Ask: "Node.js is required for Claude Code. Install via Homebrew?"
+- Ask: "Node.js is required for coding agents. Install via Homebrew?"
 - Yes: `brew install node`
 - No: explain they need to install it manually
 
-If Claude Code is missing:
-- Ask: "Claude Code is required. Install it?"
+If no coding agent is installed (none of claude, codex, or gemini found):
+- Ask: "At least one coding agent is required. Install Claude Code? (recommended)"
 - Yes: `npm install -g @anthropic-ai/claude-code`
-- No: explain they can install it manually later with that command
+- No: offer alternatives:
+  - Codex CLI: `npm install -g @openai/codex`
+  - Gemini CLI: `npm install -g @google/gemini-cli`
+  - Skip: explain they need to install one manually before using loopflow
 
 If worktrunk is missing:
 - Ask: "worktrunk is required for worktree management. Install it?"
@@ -102,10 +109,12 @@ push: false
 Ask about each category. Let the user pick multiple.
 
 **Additional coding agents:**
-"Want to install other coding agents? (Claude Code is already set up)"
-- Codex CLI: `npm install -g @openai/codex`
-- Gemini CLI: `npm install -g @google/gemini-cli`
-- Neither (skip)
+Check which agents are already installed. Only offer ones that aren't installed yet.
+"Want to install additional coding agents?"
+- Claude Code: `npm install -g @anthropic-ai/claude-code` (if not installed)
+- Codex CLI: `npm install -g @openai/codex` (if not installed)
+- Gemini CLI: `npm install -g @google/gemini-cli` (if not installed)
+- None (skip)
 
 **Skill libraries:**
 Check if ~/.superpowers exists. If not:
@@ -123,12 +132,12 @@ If they select Warp or Cursor, note this for the summary but don't modify config
 
 ## Phase 5: Summary
 
-Print what was done:
+Print what was done. List each item that was checked or installed:
 ```
 Setup complete!
 
 ✓ Node.js (already installed)
-✓ Claude Code installed
+✓ Claude Code (coding agent)
 ✓ worktrunk installed
 ✓ .lf/config.yaml created
 ✓ superpowers installed
@@ -138,6 +147,8 @@ Ready! Try these commands:
   lf review       # review code on this branch
   lf --list       # see all available tasks
 ```
+
+Adapt the summary to reflect what was actually done. Show which coding agent(s) are available.
 
 ## Conversation style
 

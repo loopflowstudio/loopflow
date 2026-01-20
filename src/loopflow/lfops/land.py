@@ -27,6 +27,7 @@ from loopflow.lfops._helpers import (
     get_diff,
     remove_worktree,
     resolve_base_ref,
+    run_lint,
 )
 
 
@@ -405,7 +406,9 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
         typer.echo(f"PR #{pr_number} queued for merge. Will merge when CI passes.")
     else:
         typer.echo(f"PR #{pr_number} not queued for auto-merge.")
-        typer.echo("Enable auto-merge in repo settings or run `gh pr merge --squash` after CI passes.")
+        typer.echo(
+            "Enable auto-merge in repo settings or run `gh pr merge --squash` after CI passes."
+        )
     typer.echo("Run 'lfops wt prune' after merge completes.")
 
     if was_in_worktree:
@@ -689,6 +692,7 @@ def register_commands(app: typer.Typer) -> None:
         squash: bool = typer.Option(
             False, "--squash", help="Squash-merge loop-main to origin/main"
         ),
+        lint: bool = typer.Option(True, "--lint/--no-lint", help="Run lint before landing"),
     ) -> None:
         """Squash-merge branch to main and clean up.
 
@@ -704,6 +708,12 @@ def register_commands(app: typer.Typer) -> None:
         """
         main_repo = find_main_repo()
         config = load_config(main_repo) if main_repo else None
+
+        if lint:
+            lint_repo = main_repo or find_worktree_root()
+            if lint_repo and not run_lint(lint_repo):
+                typer.echo("Lint failed, aborting land", err=True)
+                raise typer.Exit(1)
 
         if squash:
             _land_squash_loop_main(strict, worktree)

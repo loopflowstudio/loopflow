@@ -14,7 +14,13 @@ from loopflow.lf.git import (
     open_pr,
 )
 from loopflow.lf.messages import generate_pr_message, generate_pr_message_from_diff
-from loopflow.lfops._helpers import _push, add_commit_push, get_default_branch, sync_main_repo
+from loopflow.lfops._helpers import (
+    _push,
+    add_commit_push,
+    get_default_branch,
+    run_lint,
+    sync_main_repo,
+)
 
 
 def _get_existing_pr_url(repo_root) -> str | None:
@@ -98,6 +104,7 @@ def register_commands(app: typer.Typer) -> None:
         refresh: bool = typer.Option(
             False, "--refresh", "-r", help="Force regenerate PR title and body"
         ),
+        lint: bool = typer.Option(True, "--lint/--no-lint", help="Run lint before PR"),
     ) -> None:
         """Create or update a GitHub PR, then open it in browser.
 
@@ -110,6 +117,10 @@ def register_commands(app: typer.Typer) -> None:
 
         if not shutil.which("gh"):
             typer.echo("Error: 'gh' CLI not found. Install with: brew install gh", err=True)
+            raise typer.Exit(1)
+
+        if lint and not run_lint(repo_root):
+            typer.echo("Lint failed, aborting PR", err=True)
             raise typer.Exit(1)
 
         _sync_main_repo(repo_root)

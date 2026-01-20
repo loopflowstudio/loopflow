@@ -87,7 +87,8 @@ def register_commands(app: typer.Typer) -> None:
                     if sp_path.exists():
                         typer.echo("✓ superpowers")
                     else:
-                        typer.echo("- superpowers: git clone https://github.com/obra/superpowers ~/.superpowers")
+                        url = "https://github.com/obra/superpowers"
+                        typer.echo(f"- superpowers: git clone {url} ~/.superpowers")
 
         # Optional: gh for PR creation
         if shutil.which("gh"):

@@ -89,6 +89,45 @@ lfops pr                         # open PR
 lfops land                       # merge and cleanup
 ```
 
+## Context Over Memory
+
+LLMs don't remember. Loopflow doesn't try to make them—it assembles the right context for each session.
+
+```bash
+lf implement -c    # preview what context goes in
+```
+
+```
+Tokens: 22,932
+
+files          17,625 ███████████████
+  docs         13,113 ███████████
+  STYLE.md      2,158 █
+  .design       1,239 █
+summary         4,016 ███
+  src/backend   2,500 ██
+  src/frontend  1,516 █
+task              634 ▏
+```
+
+Configure what's always included:
+
+```yaml
+# .lf/config.yaml
+summary_tokens: 25000
+summaries:
+  - path: src/backend
+  - path: src/frontend
+
+context:
+  - src/schema.py
+  - docs/api.md
+```
+
+Docs, summaries, design specs—assembled automatically. No "context lost" surprises.
+
+See [File Storage](storage.md) for the philosophy, [Configuration](config.md) for all options.
+
 ## Multi-Model
 
 Same task, different models:

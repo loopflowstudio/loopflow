@@ -7,12 +7,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from loopflow.lf.builtins import get_builtin_prompt
-from loopflow.lf.config import load_config, parse_model
-from loopflow.lf.files import _compile_exclude_patterns, _is_ignored, is_binary
-from loopflow.lf.launcher import build_claude_command, build_codex_command, build_gemini_command
-from loopflow.lf.logging import get_model_env
-
 
 @dataclass
 class Summary:
@@ -251,6 +245,8 @@ def gather_source_content(path: Path, repo_root: Path, exclude: list[str] | None
     Reads from merge-base so summary reflects the base codebase state,
     not local branch changes (which are visible via diff_files).
     """
+    from loopflow.lf.files import _compile_exclude_patterns, _is_ignored, is_binary
+
     base = _get_merge_base(repo_root)
     if not base:
         # Fallback to working directory if no merge-base (e.g., on main)
@@ -281,6 +277,8 @@ def gather_source_content(path: Path, repo_root: Path, exclude: list[str] | None
 
 def _gather_source_content_working_dir(path: Path, repo_root: Path, exclude: list[str] | None = None) -> str:
     """Fallback: collect file contents from working directory."""
+    from loopflow.lf.files import _compile_exclude_patterns, _is_ignored, is_binary
+
     full_path = repo_root if path == Path(".") else repo_root / path
     excluded_paths = _compile_exclude_patterns(exclude or [], repo_root) if exclude else None
 
@@ -314,6 +312,8 @@ def _gather_source_content_working_dir(path: Path, repo_root: Path, exclude: lis
 
 def _load_summarize_prompt(repo_root: Path) -> str:
     """Load summarize prompt, checking for override first."""
+    from loopflow.lf.builtins import get_builtin_prompt
+
     override = repo_root / ".lf" / "SUMMARIZE.md"
     if override.exists():
         return override.read_text()
@@ -327,6 +327,10 @@ def _estimate_tokens(text: str) -> int:
 
 def _run_summarize_cli(prompt: str, model: str, repo_root: Path) -> str:
     """Run CLI agent to generate summary."""
+    from loopflow.lf.config import load_config, parse_model
+    from loopflow.lf.launcher import build_claude_command, build_codex_command, build_gemini_command
+    from loopflow.lf.logging import get_model_env
+
     config = load_config(repo_root)
     agent_model = config.agent_model if config else "claude:opus"
 
@@ -456,6 +460,7 @@ def refresh_if_stale(
 def register_commands(app) -> None:
     """Register summarize command on the app."""
     import typer
+    from loopflow.lf.config import load_config
     from loopflow.lf.context import find_worktree_root
 
     @app.command()

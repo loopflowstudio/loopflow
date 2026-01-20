@@ -130,9 +130,23 @@ docs/
 
 Loopflow's file storage follows from its core beliefs:
 
-**Prompts as artifacts.** If it's worth running, it's worth saving. Tasks live in the repo, not your clipboard.
+### Context Over Memory
 
-**Context is the hard problem.** Large codebases overwhelm agents. Loopflow structures what goes in—summaries, design docs, targeted context. The folder structure supports this.
+LLMs don't remember. Every session starts fresh. Most tools try to solve this with memory systems—embedding databases, conversation history, retrieval pipelines.
+
+Loopflow takes a different approach: **active context management**. Instead of making agents remember, we structure what goes into each session. The right documentation, the right summaries, the right files—assembled automatically.
+
+This means:
+- **`.docs/`** captures institutional knowledge that persists across sessions
+- **Summaries** compress large codebases into digestible context
+- **Config** specifies what files are always relevant
+- **Design docs** carry intent from one step to the next
+
+You see exactly what the agent sees. Run `lf -c` to preview the token breakdown before running.
+
+### The Other Principles
+
+**Prompts as artifacts.** If it's worth running, it's worth saving. Tasks live in the repo, not your clipboard.
 
 **Human in the loop.** Everything is readable, editable, traceable. No magic databases. No hidden state. Files you can `git diff`.
 

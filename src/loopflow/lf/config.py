@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class IdeConfig(BaseModel):
@@ -76,6 +76,7 @@ class Config(BaseModel):
     land: str = "gh"  # "gh" (GitHub PR merge) or "local" (local squash-merge)
     context: list[str] = Field(default_factory=list)
     exclude: list[str] = Field(default_factory=list)
+    ignore: list[str] = Field(default_factory=list)  # Alias for exclude, merged on load
     include_tests_for: Optional[list[str]] = None
     ide: IdeConfig = Field(default_factory=IdeConfig)
     interactive: list[str] = Field(default_factory=list)  # Tasks that default to interactive
@@ -100,6 +101,13 @@ class Config(BaseModel):
     @field_validator("exclude", mode="before")
     @classmethod
     def split_exclude_string(cls, v):
+        if isinstance(v, str):
+            return v.split()
+        return v
+
+    @field_validator("ignore", mode="before")
+    @classmethod
+    def split_ignore_string(cls, v):
         if isinstance(v, str):
             return v.split()
         return v
@@ -129,6 +137,14 @@ class Config(BaseModel):
             name: PipelineConfig(name=name, **data) if isinstance(data, dict) else data
             for name, data in v.items()
         }
+
+    @model_validator(mode="after")
+    def merge_ignore_into_exclude(self) -> "Config":
+        """Merge ignore into exclude (ignore is an alias)."""
+        if self.ignore:
+            self.exclude = list(set(self.exclude + self.ignore))
+            self.ignore = []
+        return self
 
 
 class ConfigError(Exception):

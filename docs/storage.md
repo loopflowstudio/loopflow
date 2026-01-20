@@ -77,9 +77,10 @@ These two folders serve different purposes with different lifespans:
 | | `.design/` | `.docs/` |
 |---|---|---|
 | **Lifespan** | Dies with the PR | Lives forever |
-| **Purpose** | Current work scratchpad | Institutional knowledge |
+| **Purpose** | Current work scratchpad | Forward-looking plans |
+| **In context?** | Yes (automatic) | Yes (add to `context:`) |
 | **Cleared on merge?** | **Yes** | No |
-| **Example** | "Add auth to user endpoint" spec | "How our auth system works" |
+| **Example** | "Add auth to user endpoint" spec | "How auth should work long-term" |
 
 ### `.design/` — Current PR Only
 
@@ -98,31 +99,34 @@ Ephemeral scratchpad for the current branch. Committed to git, visible in the PR
 
 ### `.docs/` — Persists Forever
 
-Internal documentation that survives across PRs. Architecture, decisions, context for future work.
+Forward-looking internal documentation. What we're building next, not what we've already built.
 
 ```
 .docs/
-  architecture.md     # How the system works
-  decisions/          # ADRs, design decisions
-  context/            # Background for agents
+  vision.md           # Where the product is heading
+  roadmap/            # What's coming next
+  research/           # Background for future work
 ```
 
-**What goes here:** Knowledge that helps the *next* PR. Why the auth system works this way. What trade-offs were made. Context that would otherwise live in someone's head.
+**What goes here:** Plans for things not yet coded. Product direction. Research that informs future decisions.
 
-**This evolves.** Agents add to it. Humans refine it. It's a living knowledge base, not polished documentation.
+**What doesn't go here:** "Why we built X this way"—that belongs in a README next to the code, or in code comments.
+
+**This evolves.** Agents write most of it. Humans refine and redirect.
 
 ### `.docs/` vs `docs/` — Internal vs Public
 
 | | `.docs/` | `docs/` |
 |---|---|---|
 | **Audience** | Maintainers | Users |
-| **Tone** | Working notes | Polished |
+| **Focus** | Forward-looking, not yet built | Backwards-looking, what exists |
+| **In context?** | Yes (add to `context:`) | No (opt-in) |
 | **Who writes** | Mostly agents, humans edit | Humans |
-| **Example** | "Why we chose JWT over sessions" | "How to authenticate API requests" |
+| **Example** | "How auth should work" | "How to authenticate requests" |
 
 ### `docs/` — Public Documentation
 
-User-facing documentation. Getting started guides, API reference, tutorials.
+Backwards-looking, public-facing documentation. What exists today, how to use it.
 
 ```
 docs/
@@ -131,9 +135,9 @@ docs/
   patterns.md
 ```
 
-**Audience:** People using your software. External users, new team members, anyone learning the system.
+**Audience:** People using your software. External users, new team members.
 
-**Curated:** Unlike `.docs/`, this is polished. Reviewed. Updated when the product changes. Human-maintained.
+**Backwards-looking:** Documents what's already built. Updated when the product changes. Polished, reviewed, human-maintained.
 
 ## The Philosophy
 

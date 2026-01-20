@@ -1,10 +1,24 @@
 """Prune command for removing merged worktrees."""
 
+import subprocess
+
 import typer
 
 from loopflow.lf.context import find_worktree_root
 from loopflow.lf.worktrees import find_merged, remove
 from loopflow.lfops._helpers import get_default_branch, sync_main_repo
+
+
+def _get_current_worktree_branch() -> str | None:
+    """Get branch name of current worktree, if in one."""
+    result = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
 
 
 def register_commands(app: typer.Typer) -> None:
@@ -26,6 +40,11 @@ def register_commands(app: typer.Typer) -> None:
 
         # Find merged worktrees
         merged = find_merged(repo_root, base_branch)
+
+        # Never prune the current worktree - user might be standing in it
+        current_branch = _get_current_worktree_branch()
+        if current_branch:
+            merged = [wt for wt in merged if wt.branch != current_branch]
 
         if not merged:
             typer.echo("No merged worktrees found")

@@ -5,14 +5,58 @@ import subprocess
 from pathlib import Path
 
 import typer
+from typing import Annotated
 
+from loopflow.lf.config import load_config
 from loopflow.lf.context import find_worktree_root
-from loopflow.lf.worktrees import find_merged, list_all, merge_diagnostics, remove
+from loopflow.lf.worktrees import create_with_schema, find_merged, list_all, merge_diagnostics, remove
 from loopflow.lfops._helpers import get_default_branch, sync_main_repo
 
 
 def register_commands(app: typer.Typer) -> None:
     wt_app = typer.Typer(help="Worktree helper commands")
+
+    @wt_app.command("create")
+    def create_worktree(
+        name: Annotated[str, typer.Argument(help="Short name for worktree")],
+        base: Annotated[str | None, typer.Option("--base", "-b", help="Base branch")] = None,
+    ) -> None:
+        """Create worktree with schema-based branch name.
+
+        The worktree directory uses the short NAME you provide.
+        The git branch uses your configured schema (if any).
+
+        Example:
+            lfops wt create my-feature
+            # Worktree: ../repo.my-feature
+            # Branch: jack.my-feature.20260120_1234 (with schema)
+        """
+        repo_root = find_worktree_root()
+        if not repo_root:
+            typer.echo("Error: Not in a git repository", err=True)
+            raise typer.Exit(1)
+
+        config = load_config(repo_root)
+        branch_config = config.branch_names if config else None
+
+        try:
+            path = create_with_schema(repo_root, name, base, branch_config)
+        except Exception as e:
+            typer.echo(f"Error: {e}", err=True)
+            raise typer.Exit(1)
+
+        # Get the branch name from the created worktree
+        result = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=path,
+            capture_output=True,
+            text=True,
+        )
+        branch = result.stdout.strip() if result.returncode == 0 else name
+
+        typer.echo(f"Created worktree: {path.name}")
+        if branch != name:
+            typer.echo(f"Branch: {branch}")
 
     @wt_app.command("ci")
     def ci_status(

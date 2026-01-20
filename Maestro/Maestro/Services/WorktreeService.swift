@@ -172,12 +172,13 @@ struct WorktreeService {
     }
 
     func create(name: String, in repoURL: URL, baseBranch: String? = nil) async throws {
-        var args = ["-C", repoURL.path(), "switch", "--create", name]
+        // Use lfops wt create for schema-based branch naming
+        var args = ["wt", "create", name]
         if let base = baseBranch {
             args.append(contentsOf: ["--base", base])
         }
 
-        _ = try await run(args, in: repoURL)
+        _ = try await runLfops(args, in: repoURL)
     }
 
     func remove(name: String, in repoURL: URL) async throws {

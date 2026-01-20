@@ -540,10 +540,11 @@ struct WorktreeRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(worktree.branch)
+                Text(worktree.displayName)
                     .fontWeight(.medium)
                     .foregroundStyle(worktree.staleness.isStale ? .white.opacity(0.5) : .white)
                     .accessibilityIdentifier("worktree-branch")
+                    .help(worktree.branch != worktree.displayName ? "Branch: \(worktree.branch)" : "")
 
                 if worktree.staleness.isStale {
                     stalenessBadge

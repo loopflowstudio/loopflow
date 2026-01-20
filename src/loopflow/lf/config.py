@@ -48,6 +48,12 @@ class SkillSourceConfig(BaseModel):
     path: str  # Supports ~ expansion
 
 
+class BranchNameConfig(BaseModel):
+    """Configuration for branch name generation."""
+
+    schema_: str = Field(default="{name}", alias="schema")
+
+
 def parse_model(model: str) -> tuple[str, str | None]:
     """Parse model string like 'claude:opus' into (backend, variant).
 
@@ -90,6 +96,7 @@ class Config(BaseModel):
     summary_tokens: int = 10000  # Default token budget for summaries
     skill_sources: list[SkillSourceConfig] = Field(default_factory=list)  # External skill libraries
     work: Optional[WorkConfig] = None  # Work queue configuration
+    branch_names: Optional[BranchNameConfig] = None  # Branch naming schema
 
     @field_validator("context", mode="before")
     @classmethod

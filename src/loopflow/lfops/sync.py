@@ -2,8 +2,7 @@
 
 import typer
 
-from loopflow.lf.context import find_worktree_root
-from loopflow.lf.git import get_current_branch
+from loopflow.lf.git import find_main_repo, get_current_branch
 from loopflow.lfops._helpers import get_default_branch, is_repo_clean, sync_main_repo
 
 
@@ -11,7 +10,7 @@ def register_commands(app: typer.Typer) -> None:
     @app.command()
     def sync() -> None:
         """Fetch origin and update local main to match origin/main."""
-        repo_root = find_worktree_root()
+        repo_root = find_main_repo()
         if not repo_root:
             typer.echo("Error: Not in a git repository", err=True)
             raise typer.Exit(1)

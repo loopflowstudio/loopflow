@@ -1,6 +1,6 @@
 # Fix: Don't prune new/empty worktrees
 
-**What to build:** Prevent Maestro from auto-pruning brand new worktrees that have no commits yet.
+**Status:** Implemented. See `WorktreeService.swift:347-359`.
 
 ## The Bug
 
@@ -64,7 +64,7 @@ if worktree.aheadMain > 0,
 
 **Why this works:** A worktree with `aheadMain == 0` has no unique commits. If it also has no diff from base, it's not "merged" - it's just new. Only worktrees that had commits (`aheadMain > 0`) and now show no diff should be considered merged (the commits got squash-merged or rebased).
 
-## Done When
+## Verification
 
 1. Create a new worktree: `wt switch --create test-empty`
 2. Open Maestro, wait for staleness detection

@@ -70,42 +70,82 @@ Each iteration the agent:
 3. **Executes** - do that step, commit, PR
 4. **Repeats** - until goal reached or indefinitely for maintenance
 
+### First agents
+
+Role-based goals combined with area scope:
+
+| Agent | Goal | Area |
+|-------|------|------|
+| maestro-designer | designer | Maestro/ |
+| maestro-engineer | product-engineer | Maestro/ |
+| loopflow-designer | designer | src/loopflow/, docs/ |
+| loopflow-engineer | product-engineer | src/loopflow/ |
+| infra-engineer | infra-engineer | src/ |
+
 ### Goal files
 
-Goal files live in `.lf/goals/` like voices live in `.lf/voices/`. They define destinations, not job descriptions:
+Goal files live in `.lf/goals/`. For role-based agents, they define how someone in that role works each iteration:
 
 ```markdown
-# .lf/goals/test-coverage-80.md
+# .lf/goals/designer.md
 
-Reach 80% test coverage.
-
-## Measure
-`pytest --cov` reports current coverage.
-Target: 80% on src/
+Improve user experience and interface quality.
 
 ## Each iteration
-Pick ONE untested module and add comprehensive tests.
-Don't try to cover everything at once—small PRs that compound.
+1. Pick ONE screen, flow, or interaction
+2. Identify friction, inconsistency, or confusion
+3. Improve it with minimal scope creep
+4. Verify it looks/works right
+
+## Focus areas
+- Visual consistency
+- User flow friction
+- Error states and edge cases
+- Accessibility
 
 ## Done when
-Coverage >= 80%
+Never—continuous improvement
 ```
 
 ```markdown
-# .lf/goals/security-audit.md
+# .lf/goals/product-engineer.md
 
-Eliminate OWASP Top 10 vulnerabilities.
-
-## Measure
-`semgrep --config=p/owasp-top-ten` reports findings.
-Target: zero high/critical findings.
+Build features and ship working code.
 
 ## Each iteration
-Pick ONE vulnerability class, find instances, fix them.
-Order: SQL injection → XSS → auth bypass → ...
+1. Pick ONE feature gap, bug, or improvement
+2. Design minimally, implement fully
+3. Add tests for new code
+4. PR with clear description
+
+## Focus areas
+- Feature completeness
+- User-facing functionality
+- Test coverage on changes
+- No regressions
 
 ## Done when
-Zero high/critical findings in semgrep scan.
+Never—continuous improvement
+```
+
+```markdown
+# .lf/goals/infra-engineer.md
+
+Improve code quality, tooling, and developer experience.
+
+## Each iteration
+1. Pick ONE pain point (slow, flaky, complex, outdated)
+2. Fix it properly
+3. Document if non-obvious
+
+## Focus areas
+- Build/test speed
+- Code complexity
+- Dependency health
+- Developer ergonomics
+
+## Done when
+Never—continuous improvement
 ```
 
 Referenced by name in agent definition, injected into every task prompt.

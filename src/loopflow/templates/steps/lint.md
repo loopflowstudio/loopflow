@@ -11,7 +11,7 @@ Get the codebase passing lint and format checks. Fix issues directly rather than
 
 ### 1. Run lint check
 ```bash
-uv run ruff check src/ tests/
+ruff check src/ tests/
 ```
 
 If errors are found, fix them. Common fixes:
@@ -21,24 +21,24 @@ If errors are found, fix them. Common fixes:
 
 For auto-fixable issues:
 ```bash
-uv run ruff check src/ tests/ --fix
+ruff check src/ tests/ --fix
 ```
 
 ### 2. Run format check
 ```bash
-uv run ruff format --check src/ tests/
+ruff format --check src/ tests/
 ```
 
 If formatting issues are found:
 ```bash
-uv run ruff format src/ tests/
+ruff format src/ tests/
 ```
 
 ### 3. Verify
 Run both checks again to confirm everything passes:
 ```bash
-uv run ruff check src/ tests/
-uv run ruff format --check src/ tests/
+ruff check src/ tests/
+ruff format --check src/ tests/
 ```
 
 ## Output

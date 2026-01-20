@@ -48,6 +48,14 @@ lf implement
 
 Reads `.design/<branch>.md` and builds it. Runs in auto mode by default.
 
+### lint
+
+```bash
+lf lint
+```
+
+Runs ruff checks, fixes issues. Called automatically by `lfops land`.
+
 ### polish
 
 ```bash

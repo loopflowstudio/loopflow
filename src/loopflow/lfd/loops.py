@@ -1,11 +1,38 @@
 """Loop management for lfd."""
 
 import os
+import random
 import signal
 import subprocess
 import sys
 import uuid
 from pathlib import Path
+
+
+# Word lists for generating unique branch names (matches Maestro/NameGenerator.swift)
+MAGICAL = [
+    "aurora", "cascade", "crystal", "drift", "echo", "ember",
+    "fern", "flume", "frost", "glade", "grove", "haze",
+    "ivy", "jade", "luna", "mist", "nova", "opal",
+    "petal", "prism", "rain", "ripple", "sage", "shade",
+    "spark", "star", "stone", "storm", "tide", "vale",
+    "wave", "wisp", "wren", "zephyr",
+]
+
+MUSICAL = [
+    "allegro", "aria", "ballad", "cadence", "canon", "chord",
+    "coda", "duet", "forte", "fugue", "harmony", "hymn",
+    "lilt", "lyric", "melody", "motif", "opus", "prelude",
+    "refrain", "rondo", "sonata", "tempo", "trill", "tune",
+    "verse", "waltz",
+]
+
+
+def _generate_random_words() -> str:
+    """Generate a random magical-musical pair like 'aurora-melody'."""
+    magical = random.choice(MAGICAL)
+    musical = random.choice(MUSICAL)
+    return f"{magical}-{musical}"
 
 from loopflow.lf.context import find_worktree_root
 from loopflow.lf.git import find_main_repo
@@ -38,7 +65,12 @@ def _branch_exists(repo: Path, branch: str) -> bool:
 
 
 def _allocate_loop_main(repo: Path, goal_name: str, area: str | None = None) -> str:
-    """Return available branch name: goal-main, goal-area-main, etc."""
+    """Return unique branch name: goal-area-words-main or goal-words-main.
+
+    Always includes random words for uniqueness. Format:
+    - With area: product-engineer-api-swift-river-main
+    - Without area: product-engineer-swift-river-main
+    """
     if area:
         # "Maestro/" -> "maestro", "src/loopflow/" -> "loopflow"
         area_slug = area.rstrip("/").split("/")[-1].lower()
@@ -46,13 +78,13 @@ def _allocate_loop_main(repo: Path, goal_name: str, area: str | None = None) -> 
     else:
         base = goal_name
 
-    candidate = f"{base}-main"
-    if not _branch_exists(repo, candidate):
-        return candidate
-    for i in range(1, 100):
-        candidate = f"{base}-{i}-main"
+    # Try random word combinations until we find an available branch
+    for _ in range(100):
+        words = _generate_random_words()
+        candidate = f"{base}-{words}-main"
         if not _branch_exists(repo, candidate):
             return candidate
+
     raise ValueError(f"Could not allocate personal-main branch for {base}")
 
 

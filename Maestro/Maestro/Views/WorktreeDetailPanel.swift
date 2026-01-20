@@ -1,4 +1,4 @@
-// Worktree detail panel showing branch info, output streaming, and launcher.
+// Worktree detail panel showing dashboard with quick actions, history, and launcher.
 
 import SwiftUI
 
@@ -6,27 +6,47 @@ struct WorktreeDetailPanel: View {
     @Bindable var appState: AppState
     let worktree: Worktree
 
-    @State private var isLauncherExpanded = false
-    @State private var showingPRSheet = false
+    @AppStorage("historyExpanded") private var historyExpanded = true
+    @AppStorage("commitsExpanded") private var commitsExpanded = false
+    @AppStorage("diffPreviewExpanded") private var diffPreviewExpanded = false
+    @AppStorage("launcherExpanded") private var launcherExpanded = false
+
+    @State private var showingDiffSheet = false
+    @State private var diffContent: String = ""
+    @State private var commits: [CommitInfo] = []
+    @State private var diffPreview: String = ""
+    @State private var isLoadingCommits = false
+    @State private var isLoadingDiff = false
     @State private var actionError: String?
     @State private var showingActionError = false
 
     private let terminalLauncher = TerminalLauncher()
+    private let worktreeService = WorktreeService()
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
             header
 
             Divider()
 
-            // Output area
-            outputArea
+            quickActionsBar
 
             Divider()
 
-            // Launcher (collapsed by default)
+            ScrollView {
+                VStack(spacing: 0) {
+                    historySection
+                    commitsSection
+                    diffPreviewSection
+                }
+            }
+
+            Divider()
+
             launcherSection
+        }
+        .sheet(isPresented: $showingDiffSheet) {
+            DiffSheet(diff: diffContent, branch: worktree.branch)
         }
         .alert("Error", isPresented: $showingActionError) {
             Button("OK") { actionError = nil }
@@ -39,55 +59,61 @@ struct WorktreeDetailPanel: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            // Branch name
             VStack(alignment: .leading, spacing: 2) {
-                Text(worktree.branch)
-                    .font(.title2)
-                    .fontWeight(.semibold)
+                HStack(spacing: 8) {
+                    Text(worktree.branch)
+                        .font(.title2)
+                        .fontWeight(.semibold)
+
+                    statusBadge
+                }
 
                 HStack(spacing: 8) {
                     if let prNumber = worktree.prNumber, let prState = worktree.prState {
                         prBadge(number: prNumber, state: prState)
                     }
 
-                    Text(worktree.commitsText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if worktree.aheadMain > 0 {
+                        Text("\(worktree.aheadMain) ahead")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
 
             Spacer()
-
-            // Action buttons
-            HStack(spacing: 8) {
-                if worktree.prURL != nil {
-                    if worktree.prState == .open {
-                        Button("Land") {
-                            landPR()
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                    }
-                } else if worktree.branch != "main" {
-                    Button("Create PR") {
-                        createPR()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-
-                Button {
-                    openInTerminal()
-                } label: {
-                    Image(systemName: "terminal")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help("Open in \(appState.config?.terminalApp.displayName ?? "Terminal")")
-            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
+    }
+
+    private var statusBadge: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(statusColor)
+                .frame(width: 8, height: 8)
+            Text(statusText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var statusColor: Color {
+        if appState.activeWorktreePaths.contains(worktree.path) {
+            return .green
+        } else if worktree.isDirty {
+            return .orange
+        }
+        return .gray
+    }
+
+    private var statusText: String {
+        if appState.activeWorktreePaths.contains(worktree.path) {
+            return "Running"
+        } else if worktree.isDirty {
+            return "Modified"
+        }
+        return "Clean"
     }
 
     private func prBadge(number: Int, state: PRState) -> some View {
@@ -120,161 +146,297 @@ struct WorktreeDetailPanel: View {
         .help("View PR on GitHub")
     }
 
-    // MARK: - Output Area
+    // MARK: - Quick Actions Bar
 
-    private var outputArea: some View {
-        VStack(spacing: 0) {
-            // Status bar
-            HStack(spacing: 8) {
-                if isWorktreeRunning {
-                    Circle()
-                        .fill(.green)
-                        .frame(width: 8, height: 8)
-                    Text("Running")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Circle()
-                        .fill(.gray)
-                        .frame(width: 8, height: 8)
-                    Text("Idle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                if let lineCount = outputLineCount, lineCount > 0 {
-                    Text("\(lineCount) lines")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-
-                if hasOutput {
-                    Button {
-                        clearOutput()
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.caption)
+    private var quickActionsBar: some View {
+        HStack(spacing: 12) {
+            if worktree.prURL != nil {
+                Button {
+                    if let url = worktree.prURL {
+                        terminalLauncher.openURL(url)
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .help("Clear output")
+                } label: {
+                    Label("PR", systemImage: "arrow.up.right.square")
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Jump to PR")
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(.bar)
 
-            // Output content
-            if hasOutput {
-                outputContent
-            } else if let result = appState.currentSessionResult {
-                ResultsSummaryView(appState: appState, result: result)
+            Button {
+                openInCursor()
+            } label: {
+                Label("Cursor", systemImage: "cursorarrow.rays")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help("Open in Cursor")
+
+            Button {
+                openInTerminal()
+            } label: {
+                Label("Warp", systemImage: "terminal")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help("Open in Warp")
+
+            Button {
+                loadFullDiff()
+            } label: {
+                Label("Diff", systemImage: "doc.text.magnifyingglass")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help("View diff")
+
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+    }
+
+    // MARK: - History Section
+
+    private var historySection: some View {
+        DisclosureGroup(isExpanded: $historyExpanded) {
+            if worktree.recentTasks.isEmpty {
+                emptyHistoryView
             } else {
-                emptyOutputView
-            }
-        }
-        .frame(maxHeight: .infinity)
-    }
-
-    private var isWorktreeRunning: Bool {
-        appState.activeWorktreePaths.contains(worktree.path)
-    }
-
-    private var sessionIds: [String] {
-        appState.liveOutputBySession.keys.filter { sessionId in
-            // Match sessions for this worktree
-            if let result = appState.sessionResults[sessionId] {
-                return result.worktree == worktree.path
-            }
-            return false
-        }.sorted()
-    }
-
-    private var hasOutput: Bool {
-        !sessionIds.isEmpty && sessionIds.contains { sessionId in
-            !(appState.liveOutputBySession[sessionId]?.isEmpty ?? true)
-        }
-    }
-
-    private var outputLineCount: Int? {
-        sessionIds.compactMap { appState.liveOutputBySession[$0]?.count }.reduce(0, +)
-    }
-
-    private var outputContent: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(sessionIds, id: \.self) { sessionId in
-                        ForEach(appState.liveOutputBySession[sessionId] ?? []) { line in
-                            Text(line.text)
-                                .font(.system(.caption, design: .monospaced))
-                                .foregroundStyle(colorFor(line.text))
-                                .textSelection(.enabled)
-                                .id(line.id)
-                        }
+                VStack(spacing: 4) {
+                    ForEach(worktree.recentTasks.prefix(10)) { session in
+                        historyRow(session)
                     }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .background(Color(.textBackgroundColor))
-            .onChange(of: outputLineCount) { _, _ in
-                // Auto-scroll to bottom
-                if let sessionId = sessionIds.last,
-                   let lastLine = appState.liveOutputBySession[sessionId]?.last {
-                    withAnimation {
-                        proxy.scrollTo(lastLine.id, anchor: .bottom)
-                    }
-                }
+        } label: {
+            HStack {
+                Image(systemName: "clock")
+                    .font(.caption)
+                Text("History")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                Spacer()
             }
+            .foregroundStyle(.secondary)
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
 
-    private func colorFor(_ text: String) -> Color {
-        if text.hasPrefix("→") { return .blue }
-        if text.hasPrefix("✓") { return .green }
-        if text.hasPrefix("✗") { return .red }
-        return .primary
-    }
-
-    private func clearOutput() {
-        for sessionId in sessionIds {
-            if !appState.activeSessionIds.contains(sessionId) {
-                appState.liveOutputBySession.removeValue(forKey: sessionId)
-            }
+    private var emptyHistoryView: some View {
+        VStack(spacing: 8) {
+            Text("No history yet")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+            Text("Run a task to see it here.")
+                .font(.caption2)
+                .foregroundStyle(.quaternary)
         }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 16)
     }
 
-    private var emptyOutputView: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "text.alignleft")
-                .font(.system(size: 28))
+    private func historyRow(_ session: TaskSession) -> some View {
+        HStack(spacing: 8) {
+            statusDot(for: session)
+
+            Text(session.task)
+                .font(.caption)
+                .fontWeight(.medium)
+
+            Spacer()
+
+            Text(session.relativeTime)
+                .font(.caption2)
                 .foregroundStyle(.tertiary)
 
-            VStack(spacing: 4) {
-                Text("No activity yet")
-                    .fontWeight(.medium)
+            sessionStatusBadge(session)
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color.primary.opacity(0.03))
+        )
+    }
+
+    private func statusDot(for session: TaskSession) -> some View {
+        Circle()
+            .fill(colorForTask(session.task))
+            .frame(width: 8, height: 8)
+    }
+
+    private func colorForTask(_ task: String) -> Color {
+        switch task.lowercased() {
+        case "design": return .blue
+        case "implement": return .green
+        case "review": return .orange
+        case "polish": return .purple
+        default: return .gray
+        }
+    }
+
+    private func sessionStatusBadge(_ session: TaskSession) -> some View {
+        Group {
+            if session.isRunning {
+                Text("running")
+                    .foregroundStyle(.green)
+            } else if session.isCompleted {
+                Text("completed")
                     .foregroundStyle(.secondary)
-                Text("Run a task to see output here.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+            } else if session.isError {
+                Text("error")
+                    .foregroundStyle(.red)
+            } else {
+                Text(session.status)
+                    .foregroundStyle(.secondary)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding()
+        .font(.caption2)
+    }
+
+    // MARK: - Commits Section
+
+    private var commitsSection: some View {
+        DisclosureGroup(isExpanded: $commitsExpanded) {
+            if isLoadingCommits {
+                ProgressView()
+                    .scaleEffect(0.7)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+            } else if commits.isEmpty {
+                Text("No commits on this branch yet.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+            } else {
+                VStack(spacing: 4) {
+                    ForEach(commits.prefix(10)) { commit in
+                        commitRow(commit)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+            }
+        } label: {
+            HStack {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.caption)
+                Text("Commits")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                Spacer()
+            }
+            .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .onChange(of: commitsExpanded) { _, expanded in
+            if expanded && commits.isEmpty {
+                loadCommits()
+            }
+        }
+    }
+
+    private func commitRow(_ commit: CommitInfo) -> some View {
+        HStack(spacing: 8) {
+            Text(commit.shortSHA)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.blue)
+
+            Text(commit.message)
+                .font(.caption)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Spacer()
+
+            Text(commit.relativeTime)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color.primary.opacity(0.03))
+        )
+    }
+
+    // MARK: - Diff Preview Section
+
+    private var diffPreviewSection: some View {
+        DisclosureGroup(isExpanded: $diffPreviewExpanded) {
+            if isLoadingDiff {
+                ProgressView()
+                    .scaleEffect(0.7)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+            } else if diffPreview.isEmpty {
+                Text("No changes on this branch.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        Text(truncatedDiff)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.primary)
+                            .textSelection(.enabled)
+                    }
+                    .frame(maxHeight: 200)
+
+                    if diffPreview.count > 2000 {
+                        Button("Open Full Diff") {
+                            loadFullDiff()
+                        }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+            }
+        } label: {
+            HStack {
+                Image(systemName: "plus.forwardslash.minus")
+                    .font(.caption)
+                Text("Diff Preview")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                Spacer()
+            }
+            .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .onChange(of: diffPreviewExpanded) { _, expanded in
+            if expanded && diffPreview.isEmpty {
+                loadDiffPreview()
+            }
+        }
+    }
+
+    private var truncatedDiff: String {
+        if diffPreview.count > 2000 {
+            return String(diffPreview.prefix(2000)) + "\n..."
+        }
+        return diffPreview
     }
 
     // MARK: - Launcher Section
 
     private var launcherSection: some View {
         VStack(spacing: 0) {
-            // Toggle header
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
-                    isLauncherExpanded.toggle()
+                    launcherExpanded.toggle()
                 }
             } label: {
                 HStack {
@@ -284,7 +446,7 @@ struct WorktreeDetailPanel: View {
                         .font(.caption)
                         .fontWeight(.medium)
                     Spacer()
-                    Image(systemName: isLauncherExpanded ? "chevron.down" : "chevron.up")
+                    Image(systemName: launcherExpanded ? "chevron.down" : "chevron.up")
                         .font(.caption2)
                 }
                 .foregroundStyle(.secondary)
@@ -294,7 +456,7 @@ struct WorktreeDetailPanel: View {
             .buttonStyle(.plain)
             .background(.bar)
 
-            if isLauncherExpanded {
+            if launcherExpanded {
                 CollapsedLauncher(appState: appState, worktree: worktree)
             }
         }
@@ -312,26 +474,92 @@ struct WorktreeDetailPanel: View {
         }
     }
 
-    private func createPR() {
+    private func openInCursor() {
+        let ide = appState.config?.ideApp ?? .cursor
+        do {
+            try terminalLauncher.openInIDE(ide, at: URL(fileURLWithPath: worktree.path))
+        } catch {
+            actionError = "Failed to open IDE: \(error.localizedDescription)"
+            showingActionError = true
+        }
+    }
+
+    private func loadCommits() {
+        isLoadingCommits = true
         Task {
             do {
-                try await appState.createPR(for: worktree)
+                let base = worktree.baseBranch ?? "main"
+                commits = try await worktreeService.getCommits(for: worktree, since: base)
             } catch {
-                actionError = error.localizedDescription
+                // Silently fail - might be a new branch with no commits
+                commits = []
+            }
+            isLoadingCommits = false
+        }
+    }
+
+    private func loadDiffPreview() {
+        isLoadingDiff = true
+        Task {
+            do {
+                let worktreeURL = URL(fileURLWithPath: worktree.path)
+                let base = worktree.baseBranch ?? "main"
+                diffPreview = try await worktreeService.getDiff("\(base)...HEAD", in: worktreeURL)
+            } catch {
+                diffPreview = ""
+            }
+            isLoadingDiff = false
+        }
+    }
+
+    private func loadFullDiff() {
+        Task {
+            do {
+                let worktreeURL = URL(fileURLWithPath: worktree.path)
+                let base = worktree.baseBranch ?? "main"
+                diffContent = try await worktreeService.getDiff("\(base)...HEAD", in: worktreeURL)
+                showingDiffSheet = true
+            } catch {
+                actionError = "Failed to load diff: \(error.localizedDescription)"
                 showingActionError = true
             }
         }
     }
+}
 
-    private func landPR() {
-        Task {
-            do {
-                try await appState.landPR(for: worktree)
-            } catch {
-                actionError = error.localizedDescription
-                showingActionError = true
+// MARK: - Diff Sheet
+
+struct DiffSheet: View {
+    let diff: String
+    let branch: String
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Diff: \(branch)")
+                    .font(.headline)
+
+                Spacer()
+
+                Button("Done") {
+                    dismiss()
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding()
+
+            Divider()
+
+            ScrollView([.horizontal, .vertical]) {
+                Text(diff)
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+                    .padding()
             }
         }
+        .frame(minWidth: 600, minHeight: 400)
     }
 }
 
@@ -557,190 +785,6 @@ struct CollapsedLauncher: View {
             launchError = error.localizedDescription
             showingLaunchError = true
         }
-    }
-}
-
-// MARK: - Results Summary View
-
-struct ResultsSummaryView: View {
-    @Bindable var appState: AppState
-    let result: SessionResult
-
-    @State private var expandedFiles: Set<Int> = []
-
-    private let terminalLauncher = TerminalLauncher()
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                // Status header
-                HStack(spacing: 8) {
-                    statusIcon(result.status)
-
-                    Text(result.status == .running ? "Running \(result.task)..." : "\(result.task) \(result.status.rawValue)")
-                        .font(.caption)
-                        .fontWeight(.medium)
-
-                    Spacer()
-
-                    Text(formatDuration(result.duration))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-
-                // Files changed
-                if !result.filesChanged.isEmpty {
-                    filesSection
-                }
-
-                // Commits
-                if !result.newCommits.isEmpty {
-                    commitsSection
-                }
-
-                // Actions
-                if result.status != .running {
-                    actionButtons
-                }
-            }
-            .padding(16)
-        }
-        .background(Color(.textBackgroundColor))
-    }
-
-    @ViewBuilder
-    private func statusIcon(_ status: SessionResultStatus) -> some View {
-        switch status {
-        case .running:
-            ProgressView()
-                .scaleEffect(0.5)
-                .frame(width: 16, height: 16)
-        case .completed:
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-                .font(.caption)
-        case .error:
-            Image(systemName: "xmark.circle.fill")
-                .foregroundStyle(.red)
-                .font(.caption)
-        }
-    }
-
-    private var filesSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("\(result.filesChanged.count) file\(result.filesChanged.count == 1 ? "" : "s") changed")
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .foregroundStyle(.secondary)
-
-                Spacer()
-
-                Text("+\(result.totalLinesAdded) -\(result.totalLinesRemoved)")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-
-            ForEach(Array(result.filesChanged.enumerated()), id: \.element.id) { index, file in
-                fileRow(file, index: index)
-            }
-        }
-    }
-
-    private func fileRow(_ file: FileChange, index: Int) -> some View {
-        HStack(spacing: 6) {
-            fileKindIcon(file.kind)
-
-            Text(file.path)
-                .font(.caption)
-                .lineLimit(1)
-                .truncationMode(.middle)
-
-            Spacer()
-
-            HStack(spacing: 4) {
-                if file.linesAdded > 0 {
-                    Text("+\(file.linesAdded)")
-                        .font(.caption2)
-                        .foregroundStyle(.green)
-                }
-                if file.linesRemoved > 0 {
-                    Text("-\(file.linesRemoved)")
-                        .font(.caption2)
-                        .foregroundStyle(.red)
-                }
-            }
-        }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 4)
-                .fill(Color.primary.opacity(0.03))
-        )
-    }
-
-    @ViewBuilder
-    private func fileKindIcon(_ kind: FileChangeKind) -> some View {
-        switch kind {
-        case .added:
-            Image(systemName: "plus.circle.fill")
-                .foregroundStyle(.green)
-                .font(.caption2)
-        case .modified:
-            Image(systemName: "pencil.circle.fill")
-                .foregroundStyle(.orange)
-                .font(.caption2)
-        case .deleted:
-            Image(systemName: "minus.circle.fill")
-                .foregroundStyle(.red)
-                .font(.caption2)
-        case .renamed:
-            Image(systemName: "arrow.right.circle.fill")
-                .foregroundStyle(.blue)
-                .font(.caption2)
-        }
-    }
-
-    private var commitsSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("\(result.newCommits.count) new commit\(result.newCommits.count == 1 ? "" : "s")")
-                .font(.caption)
-                .fontWeight(.medium)
-                .foregroundStyle(.secondary)
-
-            ForEach(result.newCommits, id: \.self) { message in
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.turn.down.right")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                    Text(message)
-                        .font(.caption)
-                        .lineLimit(2)
-                }
-            }
-        }
-    }
-
-    private var actionButtons: some View {
-        HStack(spacing: 12) {
-            Button {
-                let terminal = appState.config?.terminalApp ?? .warp
-                try? terminalLauncher.launchTerminal(terminal, at: URL(fileURLWithPath: result.worktree))
-            } label: {
-                Label("Open Terminal", systemImage: "terminal")
-                    .font(.caption)
-            }
-            .buttonStyle(.bordered)
-
-            Spacer()
-        }
-    }
-
-    private func formatDuration(_ interval: TimeInterval) -> String {
-        let minutes = Int(interval) / 60
-        let seconds = Int(interval) % 60
-        return String(format: "%d:%02d", minutes, seconds)
     }
 }
 

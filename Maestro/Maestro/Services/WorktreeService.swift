@@ -94,6 +94,44 @@ struct WorktreeService {
         try await runProcess(URL(fileURLWithPath: "/usr/bin/git"), ["diff", spec], in: repoURL)
     }
 
+    func getCommits(for worktree: Worktree, since: String = "main") async throws -> [CommitInfo] {
+        let worktreeURL = URL(fileURLWithPath: worktree.path)
+        let format = "%H|%h|%s|%an|%aI"
+        let range = "\(since)..HEAD"
+
+        let output = try await runProcess(
+            URL(fileURLWithPath: "/usr/bin/git"),
+            ["log", range, "--format=\(format)"],
+            in: worktreeURL
+        )
+
+        let dateFormatter = ISO8601DateFormatter()
+        dateFormatter.formatOptions = [.withInternetDateTime]
+
+        return output
+            .split(separator: "\n")
+            .compactMap { line -> CommitInfo? in
+                let parts = line.split(separator: "|", maxSplits: 4)
+                guard parts.count >= 5 else { return nil }
+
+                let sha = String(parts[0])
+                let shortSHA = String(parts[1])
+                let message = String(parts[2])
+                let author = String(parts[3])
+                let dateString = String(parts[4])
+
+                guard let date = dateFormatter.date(from: dateString) else { return nil }
+
+                return CommitInfo(
+                    id: sha,
+                    shortSHA: shortSHA,
+                    message: message,
+                    author: author,
+                    date: date
+                )
+            }
+    }
+
     func getGitHubCompareURL(branch: String, in repoURL: URL, base: String = "main") async throws -> URL? {
         let remoteURL = try await runProcess(URL(fileURLWithPath: "/usr/bin/git"), ["remote", "get-url", "origin"], in: repoURL)
             .trimmingCharacters(in: .whitespacesAndNewlines)

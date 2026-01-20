@@ -45,7 +45,9 @@ lfd loop product-engineer
 uv tool install loopflow
 ```
 
-Built-in tasks included. No setup required.
+Built-in tasks included. Works immediately with Claude Code.
+
+Run `lf init` to install Claude Code, worktrunk, and configure preferences.
 
 ## Documentation
 

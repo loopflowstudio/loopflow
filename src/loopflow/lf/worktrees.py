@@ -251,12 +251,13 @@ def is_merged(wt: Worktree, repo_root: Path, base_branch: str = "main") -> bool:
     pr_state = wt.pr_state or get_pr_state(repo_root, wt.branch)
     if pr_state == "merged":
         return True
-    if _cherry_is_empty(repo_root, wt.branch, f"origin/{base_branch}"):
-        return True
-    if _trees_match(repo_root, wt.branch, f"origin/{base_branch}"):
-        return True
-    if not _remote_branch_exists(repo_root, wt.branch) and wt.pr_state != "open":
-        return True
+    if pr_state is not None:
+        if _cherry_is_empty(repo_root, wt.branch, f"origin/{base_branch}"):
+            return True
+        if _trees_match(repo_root, wt.branch, f"origin/{base_branch}"):
+            return True
+        if not _remote_branch_exists(repo_root, wt.branch) and pr_state != "open":
+            return True
 
     # Check if branch is ancestor of origin/base_branch (handles squash merges)
     result = subprocess.run(

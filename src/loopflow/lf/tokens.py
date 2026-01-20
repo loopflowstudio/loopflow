@@ -215,13 +215,15 @@ def analyze_prompt_tokens(
 
 def analyze_components(components) -> TokenTree:
     """Analyze token distribution from PromptComponents."""
+    # Extract text from ClipboardContent if present
+    clipboard_text = components.clipboard.text if components.clipboard else None
     return analyze_prompt_tokens(
         docs=components.docs,
         diff=components.diff,
         diff_files=components.diff_files,
         task=components.task,
         repo_root=components.repo_root,
-        clipboard=components.clipboard,
+        clipboard=clipboard_text,
         loopflow_doc=components.loopflow_doc,
         summaries=components.summaries,
     )

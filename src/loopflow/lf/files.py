@@ -271,7 +271,11 @@ def format_image_references(images: list[Path], repo_root: Path) -> str:
 
     lines = ["The following images are available. Use your Read tool to view them:"]
     for img in images:
-        rel = img.relative_to(repo_root)
-        lines.append(f"- {rel}")
+        # Use relative path for repo files, absolute for external files (e.g., clipboard)
+        try:
+            display_path = img.relative_to(repo_root)
+        except ValueError:
+            display_path = img
+        lines.append(f"- {display_path}")
 
     return "<lf:images>\n" + "\n".join(lines) + "\n</lf:images>"

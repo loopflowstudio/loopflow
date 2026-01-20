@@ -301,30 +301,31 @@ struct PipelineRow: View {
                 HStack(spacing: 2) {
                     ForEach(0..<min(pipeline.stepCount, 5), id: \.self) { _ in
                         Circle()
-                            .fill(Color.accentColor)
+                            .fill(Color.white.opacity(0.7))
                             .frame(width: 4, height: 4)
                     }
                     if pipeline.stepCount > 5 {
                         Text("+\(pipeline.stepCount - 5)")
                             .font(.system(size: 8))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.white.opacity(0.5))
                     }
                 }
 
                 Text(pipeline.name)
                     .fontWeight(.medium)
+                    .foregroundStyle(.white)
 
                 Spacer()
 
                 Text("\(pipeline.stepCount)")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.6))
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(isSelected ? Color.accentColor.opacity(0.15) : (isHovering ? Color.primary.opacity(0.05) : Color.clear))
+                    .fill(isSelected ? Color.white.opacity(0.2) : (isHovering ? Color.white.opacity(0.1) : Color.clear))
             )
             .contentShape(Rectangle())
         }

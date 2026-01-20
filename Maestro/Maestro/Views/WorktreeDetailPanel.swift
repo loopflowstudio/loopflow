@@ -47,6 +47,8 @@ struct WorktreeDetailPanel: View {
 
             launcherSection
         }
+        .background(Color.white)
+        .preferredColorScheme(.light)
         .onAppear {
             loadCommits()
             loadFileStats()
@@ -141,47 +143,47 @@ struct WorktreeDetailPanel: View {
     // MARK: - Quick Actions Bar
 
     private var quickActionsBar: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 12) {
             Button {
                 openPR()
             } label: {
                 HStack(spacing: 8) {
-                    AppIconProvider.iconImage(for: .github, size: 20)
+                    Image(systemName: "arrow.triangle.pull")
+                        .font(.system(size: 14))
                     Text("PR")
                         .fontWeight(.medium)
                 }
-                .frame(minWidth: 80)
+                .frame(minWidth: 70)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
+            .buttonStyle(DarkButtonStyle())
             .help("Open or create PR")
 
             Button {
                 openInIDE()
             } label: {
                 HStack(spacing: 8) {
-                    AppIconProvider.iconImage(for: AppIdentifier(ide: ideApp), size: 20)
+                    Image(systemName: "curlybraces")
+                        .font(.system(size: 14))
                     Text(ideApp.displayName)
                         .fontWeight(.medium)
                 }
-                .frame(minWidth: 80)
+                .frame(minWidth: 70)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
+            .buttonStyle(DarkButtonStyle())
             .help("Open in \(ideApp.displayName)")
 
             Button {
                 openInTerminal()
             } label: {
                 HStack(spacing: 8) {
-                    AppIconProvider.iconImage(for: AppIdentifier(terminal: terminalApp), size: 20)
+                    Image(systemName: "terminal")
+                        .font(.system(size: 14))
                     Text(terminalApp.displayName)
                         .fontWeight(.medium)
                 }
-                .frame(minWidth: 80)
+                .frame(minWidth: 70)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
+            .buttonStyle(DarkButtonStyle())
             .help("Open in \(terminalApp.displayName)")
 
             Spacer()
@@ -193,15 +195,13 @@ struct WorktreeDetailPanel: View {
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "airplane.arrival")
-                            .font(.system(size: 16))
+                            .font(.system(size: 14))
                         Text("Land")
                             .fontWeight(.medium)
                     }
-                    .frame(minWidth: 80)
+                    .frame(minWidth: 70)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .tint(.green)
+                .buttonStyle(DarkButtonStyle())
                 .help("Land PR (merge and clean up)")
             }
 
@@ -211,19 +211,18 @@ struct WorktreeDetailPanel: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "trash")
-                        .font(.system(size: 16))
+                        .font(.system(size: 14))
                     Text("Abandon")
                         .fontWeight(.medium)
                 }
-                .frame(minWidth: 80)
+                .frame(minWidth: 70)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-            .tint(.red)
+            .buttonStyle(DarkButtonStyle())
             .help("Abandon worktree")
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
+        .background(Color.loopflowCream)
     }
 
     // MARK: - Commits Section
@@ -279,7 +278,7 @@ struct WorktreeDetailPanel: View {
         HStack(spacing: 10) {
             Text(commit.shortSHA)
                 .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(.blue)
+                .foregroundStyle(.secondary)
                 .frame(width: 60, alignment: .leading)
 
             Text(commit.message)
@@ -297,7 +296,7 @@ struct WorktreeDetailPanel: View {
         .padding(.horizontal, 10)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(Color.primary.opacity(0.03))
+                .fill(Color.loopflowCream)
         )
     }
 
@@ -383,7 +382,7 @@ struct WorktreeDetailPanel: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(Color.primary.opacity(0.03))
+                .fill(Color.loopflowCream)
         )
     }
 
@@ -448,7 +447,7 @@ struct WorktreeDetailPanel: View {
         .padding(.horizontal, 10)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(Color.primary.opacity(0.03))
+                .fill(Color.loopflowCream)
         )
         .contentShape(Rectangle())
         .onTapGesture {
@@ -523,7 +522,7 @@ struct WorktreeDetailPanel: View {
                 .padding(.vertical, 10)
             }
             .buttonStyle(.plain)
-            .background(.bar)
+            .background(Color.loopflowCream)
 
             if launcherExpanded {
                 CollapsedLauncher(appState: appState, worktree: worktree)
@@ -780,7 +779,7 @@ struct CollapsedLauncher: View {
             }
         }
         .padding(16)
-        .background(Color(.controlBackgroundColor))
+        .background(Color.loopflowCream)
         .alert("Couldn't Start", isPresented: $showingLaunchError) {
             Button("OK") { launchError = nil }
         } message: {
@@ -809,7 +808,7 @@ struct CollapsedLauncher: View {
                 .buttonStyle(.plain)
             }
         }
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(Color.loopflowCream)
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .overlay(
             RoundedRectangle(cornerRadius: 6)
@@ -886,6 +885,22 @@ struct CollapsedLauncher: View {
             launchError = error.localizedDescription
             showingLaunchError = true
         }
+    }
+}
+
+// MARK: - Dark Button Style
+
+struct DarkButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline)
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(configuration.isPressed ? Color.loopflowText.opacity(0.8) : Color.loopflowText)
+            )
     }
 }
 

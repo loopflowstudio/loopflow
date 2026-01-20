@@ -40,6 +40,7 @@ struct WorktreeSidebar: View {
                 agentsSection
             }
         }
+        .background(Color.loopflowBurgundy)
         .sheet(isPresented: $showingNewWorktreeSheet) {
             NewWorktreeSheet(appState: appState)
         }
@@ -151,14 +152,14 @@ struct WorktreeSidebar: View {
             Text("Workspaces")
                 .font(.caption)
                 .fontWeight(.medium)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white.opacity(0.7))
                 .help("Each workspace is an isolated folder where AI works without affecting your main code")
 
             Spacer()
 
             // lfd connection indicator
             Circle()
-                .fill(appState.lfdConnected ? Color.green : Color.gray.opacity(0.5))
+                .fill(appState.lfdConnected ? Color.green : Color.white.opacity(0.3))
                 .frame(width: 6, height: 6)
                 .help(appState.lfdConnected ? "Connected to lfd daemon" : "lfd daemon not connected (using file watcher)")
 
@@ -167,6 +168,7 @@ struct WorktreeSidebar: View {
             } label: {
                 Image(systemName: "plus")
                     .font(.caption)
+                    .foregroundStyle(.white.opacity(0.7))
             }
             .buttonStyle(.plain)
             .help("Create a new workspace")
@@ -184,15 +186,15 @@ struct WorktreeSidebar: View {
             VStack(spacing: 12) {
                 Image(systemName: "square.stack.3d.up")
                     .font(.system(size: 28))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.white.opacity(0.3))
 
                 VStack(spacing: 4) {
                     Text("No workspaces yet")
                         .fontWeight(.medium)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.white.opacity(0.7))
                     Text("Create a workspace to let AI work on a feature without affecting your main code.")
                         .font(.caption)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.white.opacity(0.5))
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 16)
                 }
@@ -319,7 +321,7 @@ struct WorktreeSidebar: View {
                 Text("PIPELINES")
                     .font(.caption)
                     .fontWeight(.semibold)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.7))
 
                 Spacer()
 
@@ -328,6 +330,7 @@ struct WorktreeSidebar: View {
                 } label: {
                     Image(systemName: "plus")
                         .font(.caption)
+                        .foregroundStyle(.white.opacity(0.7))
                 }
                 .buttonStyle(.plain)
                 .help("New Pipeline")
@@ -339,7 +342,7 @@ struct WorktreeSidebar: View {
             if appState.pipelines.isEmpty {
                 VStack(spacing: 4) {
                     Text("No pipelines")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.white.opacity(0.5))
                         .font(.caption)
                 }
                 .frame(maxWidth: .infinity)
@@ -372,7 +375,7 @@ struct WorktreeSidebar: View {
                 Text("AGENTS")
                     .font(.caption)
                     .fontWeight(.semibold)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.7))
 
                 Spacer()
             }
@@ -383,7 +386,7 @@ struct WorktreeSidebar: View {
             if appState.agents.isEmpty {
                 VStack(spacing: 4) {
                     Text("No agents")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.white.opacity(0.5))
                         .font(.caption)
                 }
                 .frame(maxWidth: .infinity)
@@ -440,35 +443,36 @@ struct AgentRow: View {
 
                 Text(agent.name)
                     .fontWeight(.medium)
+                    .foregroundStyle(.white)
 
                 Spacer()
 
                 Text(agent.statusText)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.6))
             }
 
             HStack(spacing: 4) {
                 Image(systemName: "arrow.triangle.2.circlepath")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.white.opacity(0.3))
 
                 if agent.iteration > 0 {
                     Text("\(agent.iteration) iterations")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.white.opacity(0.6))
 
                     if let lastRun = agent.lastRunText {
                         Text("•")
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(.white.opacity(0.3))
                         Text(lastRun)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.white.opacity(0.6))
                     }
                 } else {
                     Text("trigger: \(agent.triggerText)")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.white.opacity(0.6))
                 }
             }
         }
@@ -476,7 +480,7 @@ struct AgentRow: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(isHovering ? Color.primary.opacity(0.05) : Color.clear)
+                .fill(isHovering ? Color.white.opacity(0.1) : Color.clear)
         )
         .contentShape(Rectangle())
         .onHover { hovering in
@@ -521,7 +525,7 @@ struct WorktreeRow: View {
             HStack {
                 Text(worktree.branch)
                     .fontWeight(.medium)
-                    .foregroundStyle(worktree.staleness.isStale ? .secondary : .primary)
+                    .foregroundStyle(worktree.staleness.isStale ? .white.opacity(0.5) : .white)
 
                 if worktree.staleness.isStale {
                     stalenessBadge
@@ -539,18 +543,18 @@ struct WorktreeRow: View {
             HStack(spacing: 4) {
                 Image(systemName: "arrow.turn.down.right")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.white.opacity(0.3))
 
                 Text(worktree.commitsText)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.6))
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(isSelected ? Color.accentColor.opacity(0.25) : (isHovering ? Color.primary.opacity(0.05) : Color.clear))
+                .fill(isSelected ? Color.white.opacity(0.2) : (isHovering ? Color.white.opacity(0.1) : Color.clear))
         )
         .contentShape(Rectangle())
         .onHover { hovering in
@@ -621,7 +625,7 @@ struct WorktreeRow: View {
             } label: {
                 Image(systemName: "doc.text.magnifyingglass")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.7))
             }
             .buttonStyle(.plain)
             .help("View diff against main")
@@ -643,7 +647,7 @@ struct WorktreeRow: View {
                 } label: {
                     Image(systemName: "plus.rectangle")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.white.opacity(0.7))
                 }
                 .buttonStyle(.plain)
                 .help("Create PR")
@@ -654,7 +658,7 @@ struct WorktreeRow: View {
             } label: {
                 Image(systemName: "terminal")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.7))
             }
             .buttonStyle(.plain)
             .help("Open in \(terminalName)")
@@ -664,7 +668,7 @@ struct WorktreeRow: View {
             } label: {
                 Image(systemName: "curlybraces")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.7))
             }
             .buttonStyle(.plain)
             .help("Open in \(ideName)")
@@ -688,7 +692,7 @@ struct WorktreeRow: View {
             } label: {
                 Image(systemName: "trash")
                     .font(.caption)
-                    .foregroundStyle(.red.opacity(0.8))
+                    .foregroundStyle(.white.opacity(0.5))
             }
             .buttonStyle(.plain)
             .help("Abandon worktree")

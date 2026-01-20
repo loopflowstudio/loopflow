@@ -58,7 +58,7 @@ struct WelcomeWindow: View {
                             .buttonStyle(.plain)
                             .background(
                                 RoundedRectangle(cornerRadius: 6)
-                                    .fill(Color.primary.opacity(0.05))
+                                    .fill(Color.loopflowCream)
                             )
                         }
                     }
@@ -77,6 +77,8 @@ struct WelcomeWindow: View {
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.white)
+        .preferredColorScheme(.light)
     }
 
     private func openRepo(_ url: URL) {

@@ -122,9 +122,9 @@ final class AppState {
 
             await refreshWorktrees()
 
-            // Auto-select first worktree so launch button always has a target
+            // Auto-select first feature worktree (main is hidden from sidebar)
             if selectedWorktree == nil {
-                selectedWorktree = worktrees.first
+                selectedWorktree = worktrees.first { $0.branch != "main" }
             }
 
             prompts = try promptService.loadPrompts(from: url, config: config)

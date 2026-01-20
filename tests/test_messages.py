@@ -57,3 +57,40 @@ def test_extract_json_no_braces():
 def test_extract_json_invalid():
     """Invalid JSON returns None."""
     assert _extract_json_payload("{not valid json}") is None
+
+
+def test_extract_json_with_actual_newlines_in_body():
+    """JSON with actual newlines in string values (not escaped) should still work."""
+    # This simulates Claude outputting actual newlines in the body
+    text = '''```json
+{
+"title": "test title",
+"body": "## Summary
+
+This PR does things.
+
+## Changes
+
+- Added feature"
+}
+```'''
+    result = _extract_json_payload(text)
+    assert result is not None
+    assert result["title"] == "test title"
+    assert "## Summary" in result["body"]
+    assert "## Changes" in result["body"]
+
+
+def test_extract_json_mixed_escaped_and_actual_newlines():
+    """JSON with both escaped \\n and actual newlines should work."""
+    text = '''```json
+{
+"title": "folders: add feature",
+"body": "## Try it\\n\\n```bash
+mkdir -p .docs
+```"
+}
+```'''
+    result = _extract_json_payload(text)
+    assert result is not None
+    assert result["title"] == "folders: add feature"

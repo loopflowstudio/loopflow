@@ -428,12 +428,16 @@ def test_db_get_loop_by_goal_repo():
         )
         save_loop(loop, db_path)
 
-        loaded = get_loop_by_goal_repo(LoopType.FLOW, "api-cleanup", Path("/tmp/repo"), db_path=db_path)
+        loaded = get_loop_by_goal_repo(
+            LoopType.FLOW, "api-cleanup", Path("/tmp/repo"), db_path=db_path
+        )
         assert loaded is not None
         assert loaded.id == "loop-1"
 
         # Different type should not match
-        not_found = get_loop_by_goal_repo(LoopType.LOOP, "api-cleanup", Path("/tmp/repo"), db_path=db_path)
+        not_found = get_loop_by_goal_repo(
+            LoopType.LOOP, "api-cleanup", Path("/tmp/repo"), db_path=db_path
+        )
         assert not_found is None
 
 
@@ -1063,7 +1067,8 @@ def test_iteration_branch_prefix_strips_main_suffix():
     assert _iteration_branch_prefix("product-engineer-1-main") == "product-engineer-1"
     assert _iteration_branch_prefix("test-main") == "test"
     # New format with random words
-    assert _iteration_branch_prefix("product-engineer-swift-river-main") == "product-engineer-swift-river"
+    branch = "product-engineer-swift-river-main"
+    assert _iteration_branch_prefix(branch) == "product-engineer-swift-river"
     assert _iteration_branch_prefix("test-api-calm-brook-main") == "test-api-calm-brook"
 
 
@@ -1080,7 +1085,7 @@ def test_iteration_branch_prefix_without_suffix():
 
 def test_generate_random_words_format():
     """_generate_random_words returns magical-musical format."""
-    from loopflow.lfd.loops import _generate_random_words, MAGICAL, MUSICAL
+    from loopflow.lfd.loops import MAGICAL, MUSICAL, _generate_random_words
 
     words = _generate_random_words()
     parts = words.split("-")

@@ -47,7 +47,8 @@ def _init_db(db_path: Path) -> None:
             created_at TEXT NOT NULL
         );
 
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_loops_unique ON loops(type, goal, COALESCE(area, ''), repo);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_loops_unique
+            ON loops(type, goal, COALESCE(area, ''), repo);
         CREATE INDEX IF NOT EXISTS idx_loops_repo ON loops(repo);
         CREATE INDEX IF NOT EXISTS idx_loops_status ON loops(status);
 

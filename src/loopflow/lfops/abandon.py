@@ -6,7 +6,7 @@ from pathlib import Path
 import typer
 
 from loopflow.lf.git import find_main_repo
-from loopflow.lfops._helpers import remove_worktree, get_default_branch
+from loopflow.lfops._helpers import get_default_branch, remove_worktree
 
 
 def _find_worktree_by_branch(main_repo: Path, branch: str) -> Path | None:
@@ -69,7 +69,10 @@ def register_commands(app: typer.Typer) -> None:
     def abandon(
         branch: str = typer.Argument(..., help="Branch name to abandon"),
         force: bool = typer.Option(
-            False, "-f", "--force", help="Skip confirmation and force abandon with uncommitted changes"
+            False,
+            "-f",
+            "--force",
+            help="Skip confirmation and force abandon with uncommitted changes",
         ),
     ) -> None:
         """Abandon a branch: close PR, remove worktree, delete branch."""
@@ -91,14 +94,18 @@ def register_commands(app: typer.Typer) -> None:
         # Check for uncommitted changes
         if not _is_worktree_clean(worktree_path):
             if not force:
-                typer.echo(f"Error: Worktree has uncommitted changes. Use --force to abandon anyway.", err=True)
+                typer.echo(
+                    "Error: Worktree has uncommitted changes. Use --force to abandon anyway.",
+                    err=True,
+                )
                 raise typer.Exit(1)
             typer.echo("Warning: Abandoning worktree with uncommitted changes")
 
         # Confirm
         if not force:
             typer.confirm(
-                f"Abandon branch '{branch}'? This will close the PR, delete the remote branch, and remove the worktree.",
+                f"Abandon branch '{branch}'? "
+                "This will close the PR, delete the remote branch, and remove the worktree.",
                 abort=True,
             )
 
@@ -120,6 +127,6 @@ def register_commands(app: typer.Typer) -> None:
         typer.echo("Removing worktree...")
         base_branch = get_default_branch(main_repo)
         remove_worktree(main_repo, branch, worktree_path, base_branch)
-        typer.echo(f"Worktree removed")
+        typer.echo("Worktree removed")
 
         typer.echo(f"Abandoned '{branch}'")

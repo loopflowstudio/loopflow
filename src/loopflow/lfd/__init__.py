@@ -534,7 +534,8 @@ def stop(
         for lp in list_loops():
             if lp.status == LoopStatus.RUNNING:
                 if stop_loop(lp.id, force=force):
-                    typer.echo(f"{c['yellow']}Stopped{c['reset']} {_goal_display(lp)} ({lp.short_id()})")
+                    msg = f"{c['yellow']}Stopped{c['reset']} {_goal_display(lp)}"
+                    typer.echo(f"{msg} ({lp.short_id()})")
                     stopped += 1
         if stopped == 0:
             typer.echo(f"{c['dim']}No running loops to stop{c['reset']}")

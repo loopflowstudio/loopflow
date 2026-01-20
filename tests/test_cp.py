@@ -45,13 +45,13 @@ def test_cp_includes_context_files(temp_repo, monkeypatch):
     assert "print('hello')" in copied_text
 
 
-def test_cp_no_docs_excludes_documentation(temp_repo, monkeypatch):
-    """cp --no-docs excludes repo .md files."""
+def test_cp_no_lfdocs_excludes_documentation(temp_repo, monkeypatch):
+    """cp --no-lfdocs excludes repo .md files."""
     monkeypatch.chdir(temp_repo)
     runner = CliRunner()
 
     with patch("loopflow.lf.run._copy_to_clipboard") as mock_copy:
-        result = runner.invoke(app, ["cp", "--no-docs"])
+        result = runner.invoke(app, ["cp", "--no-lfdocs"])
 
     assert result.exit_code == 0
     copied_text = mock_copy.call_args[0][0]

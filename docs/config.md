@@ -12,8 +12,8 @@ Configure loopflow via CLI flags or `.lf/config.yaml`. CLI flags override config
 | Behavior | CLI Flag | Config |
 |----------|----------|--------|
 | Model | `-m claude:opus` | `agent_model: claude:opus` |
-| Interactive mode | `-i` | `interactive: [design]` |
-| Include docs | `--docs` (default) | `docs: true` |
+| Interactive mode | `-i` | frontmatter: `interactive: true` |
+| Include lf docs | `--lfdocs` (default) | `lfdocs: true` |
 | Include branch files | `--diff-files` (default) | `diff_files: true` |
 | Include raw diff | `--diff` | `diff: true` |
 | Include clipboard | `-v, --paste` | — |
@@ -22,17 +22,22 @@ Configure loopflow via CLI flags or `.lf/config.yaml`. CLI flags override config
 | Chrome automation | `--chrome` | `chrome: true` |
 | Skip permissions | — | `yolo: true` |
 
-## Defaults
+## Context Assembly
 
-Out of the box, every task includes:
+Every task gets context assembled automatically. Run any command to see the breakdown:
 
-| Context | Default | How to change |
-|---------|---------|---------------|
-| Repo docs (README, STYLE, etc.) | ✓ included | `--no-docs` or `docs: false` |
-| Files changed on branch | ✓ included | `--no-diff-files` or `diff_files: false` |
-| Raw git diff | not included | `--diff` or `diff: true` |
-| Clipboard | not included | `-v` flag only |
-| Summaries | if configured | `--no-summaries` or remove from config |
+![Context assembly](context-demo.gif)
+
+The token breakdown shows what's included:
+
+| Section | What it contains | Config |
+|---------|------------------|--------|
+| **files** | `.docs/`, `.design/`, root `.md` files | `lfdocs: true` (default) |
+| **diff_files** | Files changed on this branch | `diff_files: true` (default) |
+| **summary** | Token-limited codebase overviews | `summaries:` in config |
+| **clipboard** | Pasted content (errors, context) | `-v` flag |
+
+Defaults work well for most repos. Summaries require configuration.
 
 ## Config File
 
@@ -41,10 +46,6 @@ Create `.lf/config.yaml` at your repo root:
 ```yaml
 agent_model: claude:opus
 push: true
-
-interactive:
-  - design
-  - iterate
 
 voice: architect
 
@@ -60,6 +61,94 @@ exclude:
 ---
 
 ## Options Reference
+
+### LF Docs (files)
+
+`.docs/`, `.design/`, and root markdown files.
+
+| | |
+|---|---|
+| **CLI** | `--lfdocs` / `--no-lfdocs` |
+| **Config** | `lfdocs: true` |
+| **Default** | `true` (included) |
+
+Includes README.md, STYLE.md, and similar guidance files. Also auto-includes `.design/` (current PR scratchpad) and `.docs/` (internal docs). See [File Storage](storage.md) for the full list.
+
+### Branch Files (diff_files)
+
+Full content of files modified on the current branch.
+
+| | |
+|---|---|
+| **CLI** | `--diff-files` / `--no-diff-files` |
+| **Config** | `diff_files: true` |
+| **Default** | `true` (included) |
+
+This is how agents see your changes. They get complete files, not just diffs.
+
+### Summaries
+
+Token-limited overviews of large directories. Configure paths and budget:
+
+```yaml
+summary_tokens: 25000
+
+summaries:
+  - path: src
+  - path: lib
+    tokens: 5000
+```
+
+Generate with `lfops summarize`. Summaries give agents codebase context without consuming the full token budget. Only summarize directories you're *not* including directly.
+
+| | |
+|---|---|
+| **CLI** | `--no-summaries` |
+| **Default** | included if configured |
+
+### Clipboard
+
+Paste content (errors, stack traces, context) into the prompt.
+
+| | |
+|---|---|
+| **CLI** | `-v, --paste` |
+| **Default** | not included |
+
+Use `-v` when debugging: copy an error, then `lf debug -v`.
+
+### Raw Diff
+
+Include `git diff main...HEAD` output showing exact line changes.
+
+| | |
+|---|---|
+| **CLI** | `--diff` / `--no-diff` |
+| **Config** | `diff: true` |
+| **Default** | `false` (not included) |
+
+Use when you want the agent to see precisely what changed. Can combine with `--diff-files`.
+
+### Context Files
+
+Additional files always included in every task.
+
+| | |
+|---|---|
+| **CLI** | `-x FILE` (repeatable) |
+| **Config** | `context: [src/schema.py, docs/api.md]` |
+
+CLI adds to config; config sets baseline for all tasks.
+
+### Exclude Patterns
+
+Glob patterns to exclude from file listings.
+
+| | |
+|---|---|
+| **Config** | `exclude: ["*.test.ts", node_modules, dist]` |
+
+---
 
 ### Model
 
@@ -80,65 +169,18 @@ Auto mode runs to completion. Interactive mode allows interruption and chat.
 | | |
 |---|---|
 | **CLI** | `-i` (interactive), `-a` (auto) |
-| **Config** | `interactive: [design, iterate]` |
 | **Default** | auto for all tasks |
 
-Tasks listed in `interactive` config default to interactive mode. CLI flags override.
+Set a task's default mode in its frontmatter:
 
-### Branch Files (diff_files)
+```yaml
+---
+interactive: true
+---
+# Your task prompt here
+```
 
-Include full content of files modified on the current branch.
-
-| | |
-|---|---|
-| **CLI** | `--diff-files` / `--no-diff-files` |
-| **Config** | `diff_files: true` |
-| **Default** | `true` (included) |
-
-This is how agents see your changes. They get complete files, not just diffs.
-
-### Raw Diff
-
-Include `git diff main...HEAD` output showing exact line changes.
-
-| | |
-|---|---|
-| **CLI** | `--diff` / `--no-diff` |
-| **Config** | `diff: true` |
-| **Default** | `false` (not included) |
-
-Use when you want the agent to see precisely what changed. Can combine with `--diff-files`.
-
-### Docs
-
-Include all `.md` files from repository root.
-
-| | |
-|---|---|
-| **CLI** | `--docs` / `--no-docs` |
-| **Config** | `docs: true` |
-| **Default** | `true` (included) |
-
-README, STYLE, and other markdown files provide project context.
-
-### Context Files
-
-Additional files always included in every task.
-
-| | |
-|---|---|
-| **CLI** | `-x FILE` (repeatable) |
-| **Config** | `context: [src/schema.py, docs/api.md]` |
-
-CLI adds to config; config sets baseline for all tasks.
-
-### Exclude Patterns
-
-Glob patterns to exclude from file listings.
-
-| | |
-|---|---|
-| **Config** | `exclude: ["*.test.ts", node_modules, dist]` |
+CLI flags override the frontmatter default.
 
 ### Voice
 

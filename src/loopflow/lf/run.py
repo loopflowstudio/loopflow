@@ -211,7 +211,7 @@ def _launch_interactive_default(
 
     # Resolve flags
     include_paste = paste if paste is not None else (config.paste if config else False)
-    include_docs = docs if docs is not None else (config.docs if config else True)
+    include_docs = docs if docs is not None else (config.lfdocs if config else True)
     include_summaries = summaries if summaries is not None else bool(config and config.summaries)
 
     try:
@@ -272,7 +272,7 @@ def run(
         None, "-v", "-V", "--paste/--no-paste", help="Include clipboard content in prompt"
     ),
     docs: Optional[bool] = typer.Option(
-        None, "--docs/--no-docs", help="Include repo documentation (.md files)"
+        None, "--lfdocs/--no-lfdocs", help="Include .docs/, .design/, and root .md files"
     ),
     diff: Optional[bool] = typer.Option(
         None, "--diff/--no-diff", help="Include raw branch diff against main"
@@ -430,7 +430,7 @@ def run(
 
     # Resolve paste/docs/diff/diff_files/summaries flags (CLI > frontmatter > config > default)
     include_paste = paste if paste is not None else (config.paste if config else False)
-    include_docs = docs if docs is not None else (config.docs if config else True)
+    include_docs = docs if docs is not None else (config.lfdocs if config else True)
     include_diff = diff if diff is not None else (config.diff if config else False)
     # diff_files: CLI > frontmatter > config > default
     if diff_files is not None:
@@ -523,7 +523,7 @@ def inline(
         None, "-v", "-V", "--paste/--no-paste", help="Include clipboard content in prompt"
     ),
     docs: Optional[bool] = typer.Option(
-        None, "--docs/--no-docs", help="Include repo documentation (.md files)"
+        None, "--lfdocs/--no-lfdocs", help="Include .docs/, .design/, and root .md files"
     ),
     diff: Optional[bool] = typer.Option(
         None, "--diff/--no-diff", help="Include raw branch diff against main"
@@ -590,7 +590,7 @@ def inline(
 
     # Resolve paste/docs/diff/diff_files/summaries flags (CLI overrides config)
     include_paste = paste if paste is not None else (config.paste if config else False)
-    include_docs = docs if docs is not None else (config.docs if config else True)
+    include_docs = docs if docs is not None else (config.lfdocs if config else True)
     include_diff = diff if diff is not None else (config.diff if config else False)
     include_diff_files = diff_files if diff_files is not None else (config.diff_files if config else True)
     include_summaries = summaries if summaries is not None else bool(config and config.summaries)
@@ -661,7 +661,7 @@ def cp(
         False, "-v", "-V", "--paste", help="Include clipboard content"
     ),
     docs: Optional[bool] = typer.Option(
-        None, "--docs/--no-docs", help="Include repo documentation (.md files)"
+        None, "--lfdocs/--no-lfdocs", help="Include .docs/, .design/, and root .md files"
     ),
     diff: Optional[bool] = typer.Option(
         None, "--diff/--no-diff", help="Include raw branch diff"
@@ -692,7 +692,7 @@ def cp(
         exclude_patterns.extend(config.exclude)
 
     # Resolve flags (CLI overrides config)
-    include_docs = docs if docs is not None else (config.docs if config else True)
+    include_docs = docs if docs is not None else (config.lfdocs if config else True)
     include_diff = diff if diff is not None else (config.diff if config else False)
     include_diff_files = diff_files if diff_files is not None else (config.diff_files if config else True)
     include_summaries = summaries if summaries is not None else bool(config and config.summaries)

@@ -18,6 +18,9 @@ from loopflow.lfd.process import is_process_running
 
 DB_PATH = Path.home() / ".lf" / "lfd.db"
 
+# Track which databases have been migrated this process
+_migrated_dbs: set[Path] = set()
+
 
 def _init_db(db_path: Path) -> None:
     """Initialize lfd.db with schema."""
@@ -87,7 +90,130 @@ def _init_db(db_path: Path) -> None:
     """)
 
     conn.commit()
+
+    # Run migrations for existing databases
+    _migrate_db(conn)
+
     conn.close()
+
+
+def _migrate_db(conn: sqlite3.Connection) -> None:
+    """Apply migrations for schema changes."""
+    cursor = conn.execute("PRAGMA table_info(loops)")
+    columns = {row[1]: row for row in cursor.fetchall()}
+
+    # Migration 1: Add goals column if missing
+    if "goals" not in columns:
+        conn.execute("ALTER TABLE loops ADD COLUMN goals TEXT")
+        conn.commit()
+
+    # Migration 2: Add area column if missing
+    if "area" not in columns:
+        conn.execute("ALTER TABLE loops ADD COLUMN area TEXT NOT NULL DEFAULT '.'")
+        conn.commit()
+
+    # Migration 3: Make goal column nullable (SQLite doesn't support ALTER COLUMN,
+    # so we recreate the table if goal has NOT NULL constraint)
+    # columns format: (cid, name, type, notnull, dflt_value, pk)
+    goal_info = columns.get("goal")
+    if goal_info and goal_info[3] == 1:  # notnull == 1 means NOT NULL constraint
+        _migrate_goal_nullable(conn)
+
+
+def _migrate_goal_nullable(conn: sqlite3.Connection) -> None:
+    """Make the goal column nullable and merge loops by area."""
+    # Step 1: Merge goals for loops with same (type, area, repo)
+    # Group by area and collect goals into JSON array
+    cursor = conn.execute("""
+        SELECT type, COALESCE(area, '.') as area, repo,
+               MIN(id) as id,
+               MIN(loop_main) as loop_main,
+               GROUP_CONCAT(goal) as goals_csv,
+               MAX(status) as status,
+               MAX(iteration) as iteration,
+               MAX(pr_limit) as pr_limit,
+               MAX(merge_mode) as merge_mode,
+               MAX(project_file) as project_file,
+               MAX(pathset) as pathset,
+               MAX(cron) as cron,
+               MAX(pid) as pid,
+               MAX(last_main_sha) as last_main_sha,
+               MIN(created_at) as created_at
+        FROM loops
+        GROUP BY type, COALESCE(area, '.'), repo
+    """)
+    merged_rows = cursor.fetchall()
+
+    # Step 2: Create new table
+    conn.execute("""
+        CREATE TABLE loops_new (
+            id TEXT PRIMARY KEY,
+            type TEXT NOT NULL,
+            area TEXT NOT NULL,
+            repo TEXT NOT NULL,
+            loop_main TEXT NOT NULL,
+            goals TEXT,
+            status TEXT NOT NULL DEFAULT 'idle',
+            iteration INTEGER DEFAULT 0,
+            pr_limit INTEGER DEFAULT 5,
+            merge_mode TEXT DEFAULT 'pr',
+            project_file TEXT,
+            pathset TEXT,
+            cron TEXT,
+            goal TEXT,
+            pid INTEGER,
+            last_main_sha TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+
+    # Step 3: Insert merged data
+    for row in merged_rows:
+        # Convert comma-separated goals to JSON array
+        goals_csv = row[5]
+        if goals_csv:
+            goals_list = [g.strip() for g in goals_csv.split(",") if g.strip()]
+            goals_json = json.dumps(goals_list)
+        else:
+            goals_json = None
+
+        conn.execute(
+            """INSERT INTO loops_new
+               (id, type, area, repo, loop_main, goals, status, iteration, pr_limit,
+                merge_mode, project_file, pathset, cron, goal, pid, last_main_sha, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                row[3],  # id
+                row[0],  # type
+                row[1],  # area
+                row[2],  # repo
+                row[4],  # loop_main
+                goals_json,  # goals
+                row[6],  # status
+                row[7],  # iteration
+                row[8],  # pr_limit
+                row[9],  # merge_mode
+                row[10],  # project_file
+                row[11],  # pathset
+                row[12],  # cron
+                None,  # goal (legacy, now nullable)
+                row[13],  # pid
+                row[14],  # last_main_sha
+                row[15],  # created_at
+            ),
+        )
+
+    # Step 4: Drop old table and rename
+    conn.execute("DROP TABLE loops")
+    conn.execute("ALTER TABLE loops_new RENAME TO loops")
+
+    # Step 5: Recreate indexes
+    conn.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_loops_area_repo
+                    ON loops(type, area, repo)""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_loops_repo ON loops(repo)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_loops_status ON loops(status)")
+
+    conn.commit()
 
 
 def _get_db(db_path: Path | None = None) -> sqlite3.Connection:
@@ -95,11 +221,19 @@ def _get_db(db_path: Path | None = None) -> sqlite3.Connection:
     if db_path is None:
         db_path = DB_PATH
 
-    if not db_path.exists():
+    needs_init = not db_path.exists()
+
+    if needs_init:
         _init_db(db_path)
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+
+    # Run migrations on existing databases (once per process)
+    if not needs_init and db_path not in _migrated_dbs:
+        _migrate_db(conn)
+        _migrated_dbs.add(db_path)
+
     return conn
 
 

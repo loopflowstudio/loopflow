@@ -18,9 +18,10 @@ From commit `6120f041`:
 - Maestro sidebar shows short name with full branch in tooltip
 - Bug fix: new branches with no commits are no longer marked as prunable
 
-### Verification
+### Verification (2026-01-20)
 
 - All 454 tests pass (`uv run pytest tests/`)
+- Maestro builds successfully (`xcodebuild -scheme Maestro build`)
 - Working tree is clean
 - Implementation matches the commit message spec
 

@@ -110,7 +110,40 @@ If the skill references other files (e.g., `REFERENCES.md`), include them as add
 - Badge showing source prefix
 - Same run flow as native tasks
 
-**README:** "Works With" section listing ecosystem tools (worktrunk, superpowers).
+## Documentation updates
+
+All public-facing docs need updates to reflect skill sources.
+
+**README.md** (done):
+- "Works With" section listing ecosystem tools (worktrunk, superpowers)
+
+**docs/index.md** (done):
+- "Works With" section mirroring README
+
+**docs/vision.md** (done):
+- "Best Practices, Not Magic" section explaining the philosophy
+
+**docs/config.md:**
+- Add `skill_sources` configuration option
+- Document auto-detection behavior
+- Example config with superpowers
+
+**docs/lf.md:**
+- Document `lf <prefix>:<skill>` syntax
+- Add `--list` flag showing external skills
+- Examples with `lf sp:brainstorm`
+
+**docs/builtins.md:**
+- Note that external skills appear alongside built-ins
+- Explain prefix namespacing
+
+**docs/getting-started.md:**
+- Mention ecosystem tools in "Next Steps" or similar
+- Optional: quick example of using external skill
+
+**docs/patterns.md:**
+- Add pattern for mixing loopflow tasks with external skills
+- Example workflow: `lf sp:brainstorm` → `lf implement` → `lf sp:execute-plan`
 
 ## Constraints
 
@@ -121,6 +154,7 @@ If the skill references other files (e.g., `REFERENCES.md`), include them as add
 
 ## Done when
 
+**Functional:**
 ```bash
 # Configure superpowers
 cat >> .lf/config.yaml << 'EOF'
@@ -142,6 +176,15 @@ lf sp:brainstorm: add user auth
 lf sp:write-plan -m codex
 # Same skill, Codex backend
 ```
+
+**Documentation:**
+- [ ] docs/config.md has `skill_sources` option documented
+- [ ] docs/lf.md has `<prefix>:<skill>` syntax documented
+- [ ] docs/builtins.md mentions external skills
+- [ ] docs/patterns.md has mixed workflow example
+
+**UI:**
+- [ ] Maestro task selector shows external skills grouped by source
 
 ## Future
 

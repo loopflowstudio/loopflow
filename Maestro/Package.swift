@@ -10,7 +10,9 @@ let package = Package(
     products: [
         .executable(name: "Maestro", targets: ["Maestro"])
     ],
-    dependencies: [],
+    dependencies: [
+        .package(url: "https://github.com/nalexn/ViewInspector.git", from: "0.10.0")
+    ],
     targets: [
         .executableTarget(
             name: "Maestro",
@@ -20,7 +22,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MaestroTests",
-            dependencies: ["Maestro"],
+            dependencies: ["Maestro", "ViewInspector"],
             path: "MaestroTests"
         )
     ]

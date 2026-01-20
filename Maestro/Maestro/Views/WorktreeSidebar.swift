@@ -192,11 +192,13 @@ struct WorktreeSidebar: View {
                     Text("No workspaces yet")
                         .fontWeight(.medium)
                         .foregroundStyle(.white.opacity(0.7))
+                        .accessibilityIdentifier("worktree-empty-title")
                     Text("Create a workspace to let AI work on a feature without affecting your main code.")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.5))
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 16)
+                        .accessibilityIdentifier("worktree-empty-description")
                 }
 
                 Button {
@@ -207,6 +209,7 @@ struct WorktreeSidebar: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
+                .accessibilityIdentifier("worktree-empty-create")
             }
 
             // More space below for optical centering
@@ -526,6 +529,7 @@ struct WorktreeRow: View {
                 Text(worktree.branch)
                     .fontWeight(.medium)
                     .foregroundStyle(worktree.staleness.isStale ? .white.opacity(0.5) : .white)
+                    .accessibilityIdentifier("worktree-branch")
 
                 if worktree.staleness.isStale {
                     stalenessBadge
@@ -548,6 +552,7 @@ struct WorktreeRow: View {
                 Text(worktree.commitsText)
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.6))
+                    .accessibilityIdentifier("worktree-commits")
             }
         }
         .padding(.horizontal, 12)
@@ -714,6 +719,7 @@ struct WorktreeRow: View {
                     .padding(.vertical, 1)
                     .background(Capsule().fill(.blue))
                     .accessibilityLabel("\(worktree.aheadMain) commits ahead of main")
+                    .accessibilityIdentifier("worktree-ahead-badge")
             }
         }
     }
@@ -764,6 +770,7 @@ struct WorktreeRow: View {
             }
             .foregroundStyle(color)
             .help("This worktree may be ready for cleanup")
+            .accessibilityIdentifier("worktree-staleness")
         }
     }
 }

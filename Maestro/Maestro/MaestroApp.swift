@@ -13,12 +13,22 @@ struct MaestroApp: App {
 
     var body: some Scene {
         let preferredScheme = AppearanceMode(rawValue: appearanceMode)?.colorScheme
+        let uiTestMode = AppState.uiTestMode()
 
         // Welcome/main window - shown on launch
         WindowGroup {
-            WelcomeWindow(recentsService: recentsService)
+            if let mode = uiTestMode {
+                RepoWindow(
+                    repoURL: URL(fileURLWithPath: "/tmp/loopflow-ui-tests"),
+                    recentsService: recentsService
+                )
                 .tint(.loopflowBurgundy)
                 .preferredColorScheme(preferredScheme)
+            } else {
+                WelcomeWindow(recentsService: recentsService)
+                    .tint(.loopflowBurgundy)
+                    .preferredColorScheme(preferredScheme)
+            }
         }
         .windowStyle(.automatic)
         .defaultSize(width: 500, height: 400)

@@ -12,6 +12,11 @@ struct OutputLine: Identifiable {
 @MainActor
 @Observable
 final class AppState {
+    enum UITestMode: String {
+        case emptyWorkspaces = "empty-workspaces"
+        case sampleWorkspaces = "sample-workspaces"
+    }
+
     var currentRepo: URL?
     var config: LoopflowConfig?
     var worktrees: [Worktree] = []
@@ -80,6 +85,53 @@ final class AppState {
     private let contextPreviewService = ContextPreviewService()
     private let resultsService = ResultsService()
     private let gitWatcher = GitWatcherService()
+
+    static func uiTestMode() -> UITestMode? {
+        let args = ProcessInfo.processInfo.arguments
+        if let index = args.firstIndex(of: "-ui-test-mode"), args.count > index + 1 {
+            return UITestMode(rawValue: args[index + 1])
+        }
+        if let mode = ProcessInfo.processInfo.environment["MAESTRO_UI_TEST_MODE"] {
+            return UITestMode(rawValue: mode)
+        }
+        return nil
+    }
+
+    func configureForUITest(_ mode: UITestMode, repoURL: URL) {
+        currentRepo = repoURL
+        config = nil
+        prompts = []
+        pipelines = []
+        agents = []
+        voices = []
+        selectedWorktree = nil
+        isLoading = false
+        errorMessage = nil
+
+        switch mode {
+        case .emptyWorkspaces:
+            worktrees = []
+        case .sampleWorkspaces:
+            worktrees = [
+                Worktree(
+                    path: "/tmp/loopflow-ui-tests/feature-a",
+                    branch: "feature-a",
+                    baseBranch: "main",
+                    isDirty: false,
+                    aheadMain: 2,
+                    behindMain: 0,
+                    aheadRemote: 0,
+                    behindRemote: 0,
+                    prURL: URL(string: "https://github.com/org/repo/pull/12"),
+                    prNumber: 12,
+                    prState: .open,
+                    hasCodeWorkspace: false,
+                    isRebasing: false,
+                    isMerging: false
+                )
+            ]
+        }
+    }
 
     func openRepo(_ url: URL) async {
         currentRepo = url

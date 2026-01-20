@@ -22,13 +22,36 @@ Execute these steps in order. Stop if any step fails.
 
 ### 1. Create release worktree
 
-All changes—including version bumps—must happen on a branch, then merge to main. Create a worktree for the release:
+All changes—including version bumps—must happen on a branch, then merge to main.
+
+Start from a fresh, up-to-date main:
+```bash
+wt switch main
+git fetch origin main
+git pull --ff-only
+```
+
+Create a release worktree from current main:
 
 ```bash
 wt switch --create release-vX.Y.Z
 ```
 
 Use the version you'll be releasing (determined in step 3).
+
+If the release worktree already exists, do not reuse it unless it's rebased on main. Prefer removing and recreating it:
+```bash
+wt remove release-vX.Y.Z
+wt switch --create release-vX.Y.Z
+```
+
+Verify the release worktree is based on the latest main:
+```bash
+git fetch origin main
+git merge-base --is-ancestor origin/main HEAD
+```
+
+If the merge-base check fails, stop and recreate/rebase the worktree before running tests.
 
 ### 2. Run tests
 

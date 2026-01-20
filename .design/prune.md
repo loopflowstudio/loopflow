@@ -72,33 +72,7 @@ func syncMain() async throws
 
 ## UI changes
 
-### Sidebar header
-
-Add a "Prune" button next to the "+" button in the Workspaces header. Icon: `trash.slash` or similar.
-
-```swift
-// In WorktreeSidebar header
-Button(action: { showingPruneConfirmation = true }) {
-    Image(systemName: "trash.slash")
-}
-.help("Remove merged worktrees")
-```
-
-### Prune confirmation
-
-Alert showing which worktrees will be removed:
-
-```
-Prune Merged Worktrees?
-
-These worktrees have been merged and will be removed:
-• feature-a
-• bugfix-123
-
-[Cancel] [Prune]
-```
-
-If none found: "No merged worktrees found."
+No manual prune button in Maestro. The API methods (`pruneWorktrees`, `syncMain`) are available in AppState for background/automatic pruning controlled by a settings toggle (handled in a separate branch).
 
 ## Constraints
 
@@ -137,5 +111,4 @@ lfops prune
 
 ### Maestro
 
-- Click "Prune" in sidebar → confirmation lists merged worktrees → click "Prune" → worktrees removed and list refreshes
-- Sync happens automatically before prune (no separate UI needed)
+API methods available for background pruning (no manual UI in this branch).

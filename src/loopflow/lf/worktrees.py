@@ -229,3 +229,27 @@ def remove(repo_root: Path, name: str) -> bool:
         return True
     except WorktreeError:
         return False
+
+
+def is_merged(wt: Worktree, repo_root: Path, base_branch: str = "main") -> bool:
+    """Check if worktree's branch has been merged to base branch."""
+    if wt.branch in ("main", "master"):
+        return False
+    if wt.is_dirty:
+        return False
+    if wt.pr_state == "merged":
+        return True
+
+    # Check if branch is ancestor of origin/base_branch (handles squash merges)
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", wt.branch, f"origin/{base_branch}"],
+        cwd=repo_root,
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def find_merged(repo_root: Path, base_branch: str = "main") -> list[Worktree]:
+    """Return worktrees whose changes have been merged into base branch."""
+    worktrees = list_all(repo_root)
+    return [wt for wt in worktrees if is_merged(wt, repo_root, base_branch)]

@@ -87,32 +87,31 @@ def get_diff(repo_root: Path, base_ref: str) -> str:
 
 
 def sync_main_repo(main_repo: Path, base_branch: str) -> bool:
-    """Update local base_branch to match origin."""
+    """Fetch origin/base_branch. Updates local ref if base_branch is checked out here."""
+    fetch_result = subprocess.run(
+        ["git", "fetch", "origin", base_branch],
+        cwd=main_repo,
+        capture_output=True,
+    )
+    if fetch_result.returncode != 0:
+        return False
+
+    # If base_branch is checked out here, update it to match origin
     result = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
         cwd=main_repo,
         capture_output=True,
         text=True,
     )
-    current_branch = result.stdout.strip() if result.returncode == 0 else ""
-
-    if current_branch == base_branch:
-        # Branch is checked out: fetch + reset to origin (fast-forward)
-        subprocess.run(["git", "fetch", "origin", base_branch], cwd=main_repo, check=False)
-        result = subprocess.run(
+    if result.returncode == 0 and result.stdout.strip() == base_branch:
+        subprocess.run(
             ["git", "reset", "--hard", f"origin/{base_branch}"],
             cwd=main_repo,
             capture_output=True,
         )
-        return result.returncode == 0
-    else:
-        # Branch not checked out: update ref directly
-        result = subprocess.run(
-            ["git", "fetch", "origin", f"{base_branch}:{base_branch}"],
-            cwd=main_repo,
-            capture_output=True,
-        )
-        return result.returncode == 0
+
+    # origin/base_branch is now up-to-date, which is sufficient for merge-base checks
+    return True
 
 
 def remove_worktree(main_repo: Path, branch: str, worktree_path: Path, base_branch: str = "main") -> None:

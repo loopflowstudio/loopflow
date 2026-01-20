@@ -9,8 +9,8 @@ import typer
 
 from loopflow.lf.config import load_config
 from loopflow.lf.context import find_worktree_root
-from loopflow.lf.git import find_main_repo
 from loopflow.lf.deps import require_wt
+from loopflow.lf.git import find_main_repo
 from loopflow.lf.worktrees import (
     create_with_schema,
     find_merged,

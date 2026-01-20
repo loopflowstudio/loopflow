@@ -82,8 +82,9 @@ def register_commands(app: typer.Typer) -> None:
         existing_url = _get_existing_pr_url(repo_root)
 
         if existing_url:
-            # Skip regeneration if no new commits to push
-            if not _has_unpushed_commits(repo_root):
+            # Skip regeneration if no new commits unless this is a draft PR.
+            # Drafts are created with gh --fill, so refresh them with LLM output.
+            if not _has_unpushed_commits(repo_root) and not is_draft_pr(repo_root):
                 typer.echo("No new commits. Opening existing PR...")
                 subprocess.run(["open", existing_url])
                 return

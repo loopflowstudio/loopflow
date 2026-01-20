@@ -1,22 +1,66 @@
 """Shared helpers for lfops commands."""
 
+import shutil
 import subprocess
 from pathlib import Path
 
 import typer
 
+from loopflow.lf.config import Config, load_config
 from loopflow.lf.git import ensure_draft_pr, get_current_branch
 from loopflow.lf.messages import generate_commit_message
 
 
-def run_lint(repo_root: Path) -> bool:
-    """Run lf lint in auto mode. Returns True if successful."""
-    typer.echo("Running lint...")
-    result = subprocess.run(
-        ["lf", "lint", "-a"],
-        cwd=repo_root,
+def _check_lint(repo_root: Path, config: Config | None) -> bool | None:
+    """Run lint check. Returns True if passes, False if fails, None if can't check."""
+    # Try user-configured command first
+    if config and config.lint_check:
+        result = subprocess.run(
+            config.lint_check,
+            shell=True,
+            cwd=repo_root,
+            capture_output=True,
+        )
+        return result.returncode == 0
+
+    # Fall back to auto-detect ruff
+    if shutil.which("ruff") is None:
+        return None
+
+    targets = []
+    if (repo_root / "src").is_dir():
+        targets.append("src/")
+    if (repo_root / "tests").is_dir():
+        targets.append("tests/")
+    if not targets:
+        return None
+
+    check = subprocess.run(["ruff", "check", *targets], cwd=repo_root, capture_output=True)
+    if check.returncode != 0:
+        return False
+
+    fmt = subprocess.run(
+        ["ruff", "format", "--check", *targets], cwd=repo_root, capture_output=True
     )
-    return result.returncode == 0
+    return fmt.returncode == 0
+
+
+def run_lint(repo_root: Path) -> bool:
+    """Check lint first; invoke agent only if checks fail."""
+    config = load_config(repo_root)
+    result = _check_lint(repo_root, config)
+
+    if result is True:
+        typer.echo("Lint passed")
+        return True
+
+    if result is False:
+        typer.echo("Lint issues found, running fixer...")
+    else:
+        typer.echo("Running lint...")
+
+    agent_result = subprocess.run(["lf", "lint", "-a"], cwd=repo_root)
+    return agent_result.returncode == 0
 
 
 def add_commit_push(repo_root: Path, push: bool = True) -> bool:

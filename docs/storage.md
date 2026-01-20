@@ -70,30 +70,35 @@ Everything loopflow-specific that isn't a task prompt.
 
 **`summaries/`** — Pre-generated codebase overviews for large repos. Created with `lfops summarize`. Gitignored—regenerated as needed.
 
-### `.design/` — Current PR Working State
+### `.design/` vs `.docs/` — The Key Distinction
 
-Ephemeral scratchpad for the current branch. Committed to git, visible in the PR, but **cleared when merged**.
+These two folders serve different purposes with different lifespans:
+
+| | `.design/` | `.docs/` |
+|---|---|---|
+| **Lifespan** | Dies with the PR | Lives forever |
+| **Purpose** | Current work scratchpad | Institutional knowledge |
+| **Cleared on merge?** | **Yes** | No |
+| **Example** | "Add auth to user endpoint" spec | "How our auth system works" |
+
+### `.design/` — Current PR Only
+
+Ephemeral scratchpad for the current branch. Committed to git, visible in the PR, but **deleted when the PR merges**.
 
 ```
 .design/
-  feature-name.md     # Design spec
-  questions.md        # Open questions
+  feature-name.md     # Design spec for this PR
+  questions.md        # Open questions from this work
   review.md           # Review verdict
 ```
 
-**Why ephemeral?** Design docs are scaffolding—checkpoints for recovery, not documentation for posterity. By the time code merges, the code itself (and its README) should be the documentation. Keeping `.design/` around creates stale artifacts.
+**What goes here:** Anything that helps *this PR* but shouldn't persist. Design specs, captured questions, review notes. By merge time, the code speaks for itself.
 
-**What goes here:**
-- Design specs written by `lf design`
-- Questions captured during auto runs
-- Review verdicts from `lf review`
-- Anything that helps this PR but shouldn't persist
+**The rule:** If it matters after merge, put it in `.docs/` instead.
 
-**The rule:** If it matters after merge, it belongs somewhere else.
+### `.docs/` — Persists Forever
 
-### `.docs/` — Internal Documentation
-
-Persistent documentation for maintainers. Architecture, decisions, context that helps future work.
+Internal documentation that survives across PRs. Architecture, decisions, context for future work.
 
 ```
 .docs/
@@ -102,14 +107,18 @@ Persistent documentation for maintainers. Architecture, decisions, context that 
   context/            # Background for agents
 ```
 
-**Why separate from `docs/`?** Different audiences.
+**What goes here:** Knowledge that helps the *next* PR. Why the auth system works this way. What trade-offs were made. Context that would otherwise live in someone's head.
 
-- `docs/` is for **users** of the repo—getting started, API reference, tutorials
-- `.docs/` is for **maintainers**—architecture, why decisions were made, context that helps the next person (or agent) understand the codebase
+**This evolves.** Agents add to it. Humans refine it. It's a living knowledge base, not polished documentation.
 
-**Agents use this.** When you run `lf implement`, it reads `.docs/` for architectural context. When agents need to understand why something is the way it is, `.docs/decisions/` has the answer.
+### `.docs/` vs `docs/` — Internal vs Public
 
-**This evolves.** Unlike `docs/` (which is carefully curated for users), `.docs/` can be messier. Agents can add to it. Humans can edit directly. It's a living knowledge base, not polished documentation.
+| | `.docs/` | `docs/` |
+|---|---|---|
+| **Audience** | Maintainers | Users |
+| **Tone** | Working notes | Polished |
+| **Who writes** | Humans + agents | Humans |
+| **Example** | "Why we chose JWT over sessions" | "How to authenticate API requests" |
 
 ### `docs/` — Public Documentation
 
@@ -154,16 +163,24 @@ Run `lf -c` to preview exactly what context gets assembled.
 
 ## Quick Reference
 
-| Location | Purpose | Persists after merge? |
-|----------|---------|----------------------|
-| `.claude/commands/` | Task prompts | Yes |
-| `.lf/config.yaml` | Repo configuration | Yes |
-| `.lf/voices/` | Agent personas | Yes |
-| `.lf/goals/` | Autonomous agent directives | Yes |
-| `.lf/summaries/` | Generated summaries | Gitignored |
-| `.design/` | Current PR working state | **No** (cleared) |
-| `.docs/` | Internal maintainer docs | Yes |
-| `docs/` | Public user docs | Yes |
+| Location | Purpose | Persists? | Included by default? |
+|----------|---------|-----------|---------------------|
+| `.claude/commands/` | Task prompts | Yes | (task file only) |
+| `.lf/config.yaml` | Repo config | Yes | No |
+| `.lf/voices/` | Personas | Yes | (when `--voice` used) |
+| `.lf/goals/` | Agent directives | Yes | (when agent uses goal) |
+| `.lf/summaries/` | Summaries | Gitignored | (when configured) |
+| `.design/` | PR scratchpad | **No** (cleared) | **Yes** |
+| `.docs/` | Internal docs | Yes | Add to `context:` |
+| `docs/` | Public docs | Yes | Add to `context:` |
+
+To include `.docs/` in every task, add it to your config:
+
+```yaml
+# .lf/config.yaml
+context:
+  - .docs
+```
 
 ## See Also
 

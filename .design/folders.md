@@ -144,12 +144,14 @@ The agent runner injects the goal content into the prompt when spawning iteratio
 
 1. ✅ `docs/storage.md` documents all folder conventions with philosophy
 2. ✅ Navigation updated to include storage page
-3. ✅ "Context over memory" philosophy documented
+3. ✅ "Structured context" philosophy documented
 4. ✅ Summarize module has unit tests (29 tests)
 5. ✅ Demo tape for context visualization created
-6. Built-in prompts reference `.docs/` appropriately
-7. Running `lfops land` on a branch with `.docs/` changes merges them (doesn't clear)
-8. Goal loading works: agent with `goal: test-coverage` reads `.lf/goals/test-coverage.md`
+6. `.docs/` included by default (like `.design/` is now)
+7. `docs/` NOT included by default (opt-in via `context:`)
+8. Built-in prompts reference `.docs/` appropriately
+9. Running `lfops land` on a branch with `.docs/` changes merges them (doesn't clear)
+10. Goal loading works: agent with `goal: test-coverage` reads `.lf/goals/test-coverage.md`
 
 Verification:
 ```bash

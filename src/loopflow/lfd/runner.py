@@ -13,8 +13,8 @@ from pathlib import Path
 
 from loopflow.lf.config import load_config, parse_model
 from loopflow.lf.context import PromptComponents, gather_prompt_components, format_prompt
+from loopflow.lf.design import load_goal
 from loopflow.lf.git import find_main_repo, get_current_branch
-from loopflow.lf.goals import load_goal
 from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lfd.client import log_session_start, log_session_end, notify_event
 from loopflow.lfd.db import _get_db, update_run_status, update_current_step, save_loop_pr
@@ -123,7 +123,7 @@ def run_agent_iteration(
             include_loopflow_doc=config.include_loopflow_doc if config else True,
         )
 
-        # Inject agent goal and prompt
+        # Inject agent prompt and goal
         components = _inject_agent_prompt(components, agent, main_repo)
         prompt = format_prompt(components)
         prompt_file = write_prompt_file(prompt)
@@ -237,22 +237,26 @@ def _parse_pipeline(pipeline: str, config) -> list[str]:
 def _inject_agent_prompt(
     components: PromptComponents,
     agent: AgentSpec,
-    repo: Path | None = None,
+    repo_root: Path,
 ) -> PromptComponents:
-    """Inject agent goal and prompt into the prompt components."""
+    """Inject agent prompt and goal into the prompt components.
+
+    If the agent has a goal, loads it from .lf/goals/ and prepends
+    it to the task content. Goals provide high-level directives for
+    autonomous agent loops.
+    """
     parts = []
 
-    # Load goal file if specified
-    if agent.goal and repo:
-        goal_content = load_goal(repo, agent.goal)
+    # Load and inject goal if specified
+    if agent.goal:
+        goal_content = load_goal(agent.goal, repo_root)
         if goal_content:
-            parts.append(f"<lf:goal>\n{goal_content}\n</lf:goal>")
+            parts.append(f"<lf:goal:{agent.goal}>\n{goal_content}\n</lf:goal:{agent.goal}>")
 
-    # Add inline prompt if present
+    # Add agent prompt if specified
     if agent.prompt:
         parts.append(agent.prompt)
 
-    # If no goal or prompt, return unchanged
     if not parts:
         return components
 

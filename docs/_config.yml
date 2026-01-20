@@ -7,8 +7,8 @@ plugins:
 header_pages:
   - index.md
   - maestro.md
+  - storage.md
   - config.md
   - patterns.md
   - lfd.md
   - api.md
-  - vision.md

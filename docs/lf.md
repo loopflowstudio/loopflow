@@ -63,7 +63,7 @@ Follow the existing code style.
 | Flag | Description |
 |------|-------------|
 | `-x FILE` | Add a file or directory to context |
-| `--no-docs` | Skip repo docs (README, STYLE, etc.) |
+| `--no-lfdocs` | Skip repo docs (README, STYLE, etc.) |
 | `--no-diff-files` | Skip files changed on this branch |
 | `--diff` | Include raw `git diff` output |
 
@@ -113,7 +113,7 @@ Every task automatically includes:
 
 | Context | Default | How to disable |
 |---------|---------|----------------|
-| **Repo docs** (README, STYLE, etc.) | ✓ included | `--no-docs` |
+| **Repo docs** (README, STYLE, etc.) | ✓ included | `--no-lfdocs` |
 | **Branch files** (files you've changed) | ✓ included | `--no-diff-files` |
 
 ## What's Opt-In

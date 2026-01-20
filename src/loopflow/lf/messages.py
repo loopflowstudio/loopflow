@@ -77,6 +77,20 @@ def _log_success(action: str) -> None:
     print(f"[lf] {action} via CLI ok", file=sys.stderr)
 
 
+def _normalize_json_newlines(text: str) -> str:
+    """Replace actual newlines inside JSON strings with escaped \\n."""
+    import re
+
+    def escape_string_content(match: re.Match) -> str:
+        content = match.group(1)
+        # Replace actual newlines with escaped version
+        content = content.replace("\n", "\\n")
+        return f'"{content}"'
+
+    # Match JSON string values (handle escaped quotes inside)
+    return re.sub(r'"((?:[^"\\]|\\.)*)"', escape_string_content, text)
+
+
 def _extract_json_payload(text: str) -> dict | None:
     text = text.strip()
     if not text:
@@ -88,14 +102,26 @@ def _extract_json_payload(text: str) -> dict | None:
     except json.JSONDecodeError:
         pass
 
-    start = text.find("{")
+    # Look for ```json fence first to avoid matching {placeholders} in prose
+    search_start = 0
+    json_fence = text.find("```json")
+    if json_fence != -1:
+        search_start = json_fence
+
+    start = text.find("{", search_start)
     end = text.rfind("}")
     if start == -1 or end == -1 or start >= end:
         return None
+    candidate = text[start : end + 1]
     try:
-        payload = json.loads(text[start : end + 1])
+        payload = json.loads(candidate)
     except json.JSONDecodeError:
-        return None
+        # Try normalizing newlines inside strings (Claude sometimes outputs actual newlines)
+        try:
+            normalized = _normalize_json_newlines(candidate)
+            payload = json.loads(normalized)
+        except json.JSONDecodeError:
+            return None
     return payload if isinstance(payload, dict) else None
 
 

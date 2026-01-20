@@ -24,6 +24,21 @@ def _get_existing_pr_url(repo_root) -> str | None:
     return None
 
 
+def _has_unpushed_commits(repo_root) -> bool:
+    """Check if the current branch has commits not yet pushed to remote."""
+    result = subprocess.run(
+        ["git", "rev-list", "--count", "@{u}..HEAD"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        # No upstream tracking branch - assume there are new commits
+        return True
+    count = int(result.stdout.strip()) if result.stdout.strip() else 0
+    return count > 0
+
+
 def _update_pr(repo_root, title: str, body: str) -> str:
     """Update existing PR title and body. Returns URL."""
     subprocess.run(
@@ -67,6 +82,12 @@ def register_commands(app: typer.Typer) -> None:
         existing_url = _get_existing_pr_url(repo_root)
 
         if existing_url:
+            # Skip regeneration if no new commits to push
+            if not _has_unpushed_commits(repo_root):
+                typer.echo("No new commits. Opening existing PR...")
+                subprocess.run(["open", existing_url])
+                return
+
             typer.echo("Updating existing PR...")
             message = generate_pr_message(repo_root)
             typer.echo(f"\n{message.title}\n")

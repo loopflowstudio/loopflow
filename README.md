@@ -66,10 +66,13 @@ Requires macOS and [worktrunk](https://github.com/loopflowstudio/worktrunk) for 
 ## Requirements
 
 - macOS
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
-- [worktrunk](https://github.com/loopflowstudio/worktrunk) (`wt` for git worktrees)
+- A coding agent (Claude Code, Codex, or Gemini CLI)
 
-Run `lfops install` to install both.
+```bash
+lfops install           # installs Claude Code (default)
+lfops install codex     # or Codex
+lfops install gemini    # or Gemini CLI
+```
 
 ## License
 

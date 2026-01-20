@@ -47,7 +47,7 @@ def test_top_level_help_no_ops():
     commands = _get_command_names(result.output)
     assert "ops" not in commands
     assert "run" in commands
-    assert "pipeline" in commands
+    assert "loop" in commands
 
 
 def test_lfops_help_lists_management_commands():

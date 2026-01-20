@@ -9,6 +9,76 @@ from pathlib import Path
 from loopflow.lf.models import Session, SessionStatus
 
 
+# New loop-based models
+
+
+class LoopType(Enum):
+    """Type of loop execution."""
+    LOOP = "loop"          # Continuous homeostasis
+    FLOW = "flow"          # One-off project execution
+    SUBSCRIBE = "subscribe"  # Triggered by pathset changes on main
+    SCHEDULE = "schedule"    # Triggered by cron
+
+
+class LoopStatus(Enum):
+    """Runtime status of a loop."""
+    IDLE = "idle"          # Not running
+    RUNNING = "running"    # Currently executing an iteration
+    WAITING = "waiting"    # Paused (outstanding >= limit)
+    ERROR = "error"        # Last iteration failed
+
+
+class MergeMode(Enum):
+    """How iteration branches merge to personal-main."""
+    AUTO = "auto"    # PR auto-merges to personal-main (default)
+    PR = "pr"        # PR to personal-main waits for approval
+    LAND = "land"    # Auto-merge to personal-main AND to main
+
+
+@dataclass
+class Loop:
+    """A loop configuration (goal + repo combination)."""
+    id: str
+    type: LoopType
+    goal: str
+    repo: Path
+    personal_main: str
+    status: LoopStatus = LoopStatus.IDLE
+    iteration: int = 0
+    pr_limit: int = 5
+    merge_mode: MergeMode = MergeMode.AUTO
+
+    # Type-specific config
+    project_file: str | None = None   # for flow
+    pathset: str | None = None        # for subscribe (comma-separated)
+    cron: str | None = None           # for schedule
+    area: str | None = None           # area of responsibility override
+
+    created_at: datetime = field(default_factory=datetime.now)
+
+    def short_id(self) -> str:
+        """Return first 7 chars of ID (like git)."""
+        return self.id[:7]
+
+
+@dataclass
+class LoopRun:
+    """A single iteration attempt."""
+    id: str
+    loop_id: str
+    iteration: int
+    status: LoopStatus
+    started_at: datetime
+    ended_at: datetime | None = None
+    worktree: str | None = None
+    current_step: str | None = None
+    error: str | None = None
+    pr_url: str | None = None
+
+
+# Legacy models (kept for backwards compatibility during migration)
+
+
 class TriggerKind(Enum):
     MANUAL = "manual"
     MAIN_CHANGED = "main-changed"

@@ -1,33 +1,61 @@
-"""lfd: Agent orchestration daemon.
+"""lfd: Loopflow daemon.
 
-Unix socket daemon that owns agent lifecycle, trigger evaluation, and session tracking.
+Commands for managing agent loops.
 """
 
 import asyncio
-import os
-import subprocess
 import sys
 from pathlib import Path
 
 import typer
 
-from loopflow.lf.git import find_main_repo
-from loopflow.lfd.agents import (
-    create_agent_file,
-    delete_agent_file,
-    get_agent,
-    get_agent_file_path,
-    get_worktree_path,
-    list_agents,
+from loopflow.lf.goals import goal_exists, list_goals, load_goal
+from loopflow.lfd.db import (
+    delete_loop,
+    get_loop,
+    get_loop_runs,
+    list_loops,
+    update_loop_status,
 )
-from loopflow.lfd.client import DaemonClient
-from loopflow.lfd.db import get_latest_run
 from loopflow.lfd.launchd import install as launchd_install, is_running, uninstall as launchd_uninstall
+from loopflow.lfd.loops import create_loop, get_repo_from_cwd, start_loop, stop_loop
+from loopflow.lfd.models import Loop, LoopStatus, LoopType
 from loopflow.lfd.server import run_server
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 
-app = typer.Typer(help="Loopflow daemon - agent orchestration")
+app = typer.Typer(help="Loopflow daemon - agent loops")
+
+
+def _use_color() -> bool:
+    return sys.stdout.isatty()
+
+
+def _colors() -> dict[str, str]:
+    if not _use_color():
+        return {"cyan": "", "bold": "", "dim": "", "yellow": "", "green": "", "red": "", "reset": ""}
+    return {
+        "cyan": "\033[36m",
+        "bold": "\033[1m",
+        "dim": "\033[90m",
+        "yellow": "\033[33m",
+        "green": "\033[32m",
+        "red": "\033[31m",
+        "reset": "\033[0m",
+    }
+
+
+def _status_color(status: LoopStatus, c: dict[str, str]) -> str:
+    if status == LoopStatus.RUNNING:
+        return c["green"]
+    elif status == LoopStatus.ERROR:
+        return c["red"]
+    elif status == LoopStatus.WAITING:
+        return c["yellow"]
+    return c["dim"]
+
+
+# Daemon commands
 
 
 @app.command()
@@ -37,33 +65,9 @@ def serve():
 
 
 @app.command()
-def status():
-    """Show daemon and agent status."""
-    if not is_running():
-        typer.echo("lfd is not running")
-        typer.echo("")
-        typer.echo("Start with: lfd install")
-        raise typer.Exit(1)
-
-    client = DaemonClient()
-    try:
-        result = asyncio.run(client.call("status"))
-        typer.echo(f"lfd running (pid {result.get('pid', 'unknown')})")
-        typer.echo(f"Agents: {result.get('agents_defined', 0)} defined, {result.get('agents_running', 0)} running")
-        typer.echo(f"Sessions: {result.get('sessions_active', 0)} active")
-    except Exception as e:
-        typer.echo(f"lfd running but not responding: {e}")
-        raise typer.Exit(1)
-
-
-@app.command()
 def install():
-    """Install launchd plist for auto-start.
-
-    If already running, restarts with the new configuration.
-    """
+    """Install launchd plist for auto-start."""
     was_running = is_running()
-
     if launchd_install():
         if was_running:
             typer.echo("lfd reinstalled and restarted")
@@ -84,323 +88,289 @@ def uninstall():
         raise typer.Exit(1)
 
 
-@app.command()
-def notify(
-    event: str = typer.Argument(help="Event name (e.g. worktree.created)"),
-    branch: str = typer.Option(None, "--branch", "-b", help="Branch name"),
-    path: str = typer.Option(None, "--path", "-p", help="Worktree path"),
-):
-    """Send an event to lfd for broadcast to subscribers."""
-    if not is_running():
-        return  # Silently fail if daemon not running
-
-    data = {}
-    if branch:
-        data["branch"] = branch
-    if path:
-        data["path"] = path
-
-    client = DaemonClient()
-    try:
-        asyncio.run(client.call("notify", {"event": event, "data": data}))
-    except Exception:
-        pass  # Best effort - don't fail hooks
-
-
-# Agent commands
-
-
-@app.command(name="list")
-def list_cmd():
-    """List all agents."""
-    agents = list_agents()
-
-    if not agents:
-        typer.echo("No agents defined")
-        typer.echo("")
-        typer.echo("Create one with: lfd new <name>")
-        return
-
-    typer.echo(f"{'EMOJI':<6} {'NAME':<18} {'STATUS':<10} {'TRIGGER':<12} {'PIPELINE':<25}")
-    typer.echo("-" * 75)
-
-    for agent in agents:
-        pipeline_str = agent.pipeline
-        if len(pipeline_str) > 23:
-            pipeline_str = pipeline_str[:20] + "..."
-
-        trigger_str = agent.trigger.kind.value
-        if agent.trigger.kind.value == "interval" and agent.trigger.interval_seconds:
-            trigger_str = f"int({agent.trigger.interval_seconds}s)"
-        elif agent.trigger.kind.value == "cron" and agent.trigger.cron:
-            trigger_str = f"cron"
-
-        # Get status from latest run
-        latest = get_latest_run(agent.name)
-        status_str = latest.status.value if latest else "idle"
-
-        emoji_str = agent.emoji if agent.emoji else "-"
-        name_str = agent.name[:18] if len(agent.name) > 18 else agent.name
-
-        typer.echo(f"{emoji_str:<6} {name_str:<18} {status_str:<10} {trigger_str:<12} {pipeline_str:<25}")
+# Loop commands
 
 
 @app.command()
-def start(
-    name: str = typer.Argument(help="Agent name"),
+def loop(
+    goal: str = typer.Argument(..., help="Goal name from .lf/goals/"),
+    area: str = typer.Option(None, "-r", help="Area of responsibility (pathset override)"),
 ):
-    """Start an agent."""
-    if not is_running():
-        typer.echo("lfd is not running. Start with: lfd install")
+    """Start a continuous homeostasis loop."""
+    c = _colors()
+    repo = get_repo_from_cwd()
+    if not repo:
+        typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
 
-    client = DaemonClient()
-    try:
-        result = asyncio.run(client.call("agents.start", {"name": name}))
-        typer.echo(f"Started agent '{name}' (PID {result.get('pid')})")
-    except Exception as e:
-        typer.echo(f"Failed to start agent: {e}", err=True)
+    # Validate goal exists
+    if not goal_exists(repo, goal):
+        typer.echo(f"{c['red']}Error:{c['reset']} Goal '{goal}' not found in {repo}/.lf/goals/", err=True)
+        available = list_goals(repo)
+        if available:
+            typer.echo(f"Available goals: {', '.join(available)}")
         raise typer.Exit(1)
+
+    # Create or get loop
+    lp = create_loop(LoopType.LOOP, goal, repo, area=area)
+
+    # Start it
+    if start_loop(lp.id):
+        typer.echo(f"{c['green']}Started{c['reset']} loop {c['bold']}{goal}{c['reset']} ({lp.short_id()})")
+        typer.echo(f"  Repo: {repo}")
+        typer.echo(f"  Personal main: {lp.personal_main}")
+        if area:
+            typer.echo(f"  Area: {area}")
+    else:
+        typer.echo(f"{c['red']}Error:{c['reset']} Failed to start loop", err=True)
+        raise typer.Exit(1)
+
+
+@app.command()
+def flow(
+    goal: str = typer.Argument(..., help="Goal name from .lf/goals/"),
+    project: str = typer.Option(..., "--project", "-p", help="Project file path"),
+    area: str = typer.Option(None, "-r", help="Area of responsibility (pathset override)"),
+):
+    """Start a one-off flow until project is done."""
+    c = _colors()
+    repo = get_repo_from_cwd()
+    if not repo:
+        typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    # Validate goal exists
+    if not goal_exists(repo, goal):
+        typer.echo(f"{c['red']}Error:{c['reset']} Goal '{goal}' not found", err=True)
+        raise typer.Exit(1)
+
+    # Validate project file exists
+    project_path = Path(project)
+    if not project_path.is_absolute():
+        project_path = repo / project
+    if not project_path.exists():
+        typer.echo(f"{c['red']}Error:{c['reset']} Project file not found: {project}", err=True)
+        raise typer.Exit(1)
+
+    # Create or get loop
+    lp = create_loop(LoopType.FLOW, goal, repo, area=area, project_file=str(project_path))
+
+    # Start it
+    if start_loop(lp.id):
+        typer.echo(f"{c['green']}Started{c['reset']} flow {c['bold']}{goal}{c['reset']} ({lp.short_id()})")
+        typer.echo(f"  Project: {project}")
+        if area:
+            typer.echo(f"  Area: {area}")
+    else:
+        typer.echo(f"{c['red']}Error:{c['reset']} Failed to start flow", err=True)
+        raise typer.Exit(1)
+
+
+@app.command()
+def subscribe(
+    pathset: str = typer.Argument(..., help="Pathset to watch (comma-separated)"),
+    goal: str = typer.Argument(..., help="Goal name from .lf/goals/"),
+    area: str = typer.Option(None, "-r", help="Area of responsibility override"),
+):
+    """Subscribe to pathset changes on main."""
+    c = _colors()
+    repo = get_repo_from_cwd()
+    if not repo:
+        typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    if not goal_exists(repo, goal):
+        typer.echo(f"{c['red']}Error:{c['reset']} Goal '{goal}' not found", err=True)
+        raise typer.Exit(1)
+
+    # Create subscription
+    lp = create_loop(LoopType.SUBSCRIBE, goal, repo, area=area, pathset=pathset)
+
+    typer.echo(f"{c['green']}Subscribed{c['reset']} {c['bold']}{goal}{c['reset']} to {pathset} ({lp.short_id()})")
+    typer.echo(f"  Will run when {pathset} changes on main")
+
+
+@app.command()
+def schedule(
+    cron_expr: str = typer.Argument(..., help="Cron expression (e.g., '0 9 * * *')"),
+    goal: str = typer.Argument(..., help="Goal name from .lf/goals/"),
+    project: str = typer.Option(None, "--project", "-p", help="Project file path"),
+    area: str = typer.Option(None, "-r", help="Area of responsibility override"),
+):
+    """Schedule a loop to run on cron."""
+    c = _colors()
+    repo = get_repo_from_cwd()
+    if not repo:
+        typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    if not goal_exists(repo, goal):
+        typer.echo(f"{c['red']}Error:{c['reset']} Goal '{goal}' not found", err=True)
+        raise typer.Exit(1)
+
+    project_file = None
+    if project:
+        project_path = Path(project)
+        if not project_path.is_absolute():
+            project_path = repo / project
+        if not project_path.exists():
+            typer.echo(f"{c['red']}Error:{c['reset']} Project file not found: {project}", err=True)
+            raise typer.Exit(1)
+        project_file = str(project_path)
+
+    # Create schedule
+    lp = create_loop(LoopType.SCHEDULE, goal, repo, area=area, cron=cron_expr, project_file=project_file)
+
+    typer.echo(f"{c['green']}Scheduled{c['reset']} {c['bold']}{goal}{c['reset']} ({lp.short_id()})")
+    typer.echo(f"  Cron: {cron_expr}")
+    if project:
+        typer.echo(f"  Project: {project}")
+
+
+@app.command()
+def status(
+    loop_id: str = typer.Argument(None, help="Loop ID (optional, shows all if omitted)"),
+):
+    """Show status of loops."""
+    c = _colors()
+
+    if loop_id:
+        lp = get_loop(loop_id)
+        if not lp:
+            typer.echo(f"{c['red']}Error:{c['reset']} Loop '{loop_id}' not found", err=True)
+            raise typer.Exit(1)
+        _print_loop_detail(lp, c)
+    else:
+        loops = list_loops()
+        if not loops:
+            typer.echo(f"{c['dim']}No loops configured{c['reset']}")
+            typer.echo(f"Start one with: lfd loop <goal>")
+            return
+
+        typer.echo(f"{'ID':<9} {'TYPE':<10} {'GOAL':<16} {'STATUS':<10} {'ITER':<6} REPO")
+        typer.echo("-" * 80)
+
+        for lp in loops:
+            status_c = _status_color(lp.status, c)
+            repo_short = str(lp.repo).replace(str(Path.home()), "~")
+            if len(repo_short) > 25:
+                repo_short = "..." + repo_short[-22:]
+
+            typer.echo(
+                f"{lp.short_id():<9} {lp.type.value:<10} {lp.goal:<16} "
+                f"{status_c}{lp.status.value:<10}{c['reset']} {lp.iteration:<6} {repo_short}"
+            )
+
+
+def _print_loop_detail(lp: Loop, c: dict[str, str]) -> None:
+    """Print detailed info for a single loop."""
+    status_c = _status_color(lp.status, c)
+
+    typer.echo(f"{c['bold']}{lp.goal}{c['reset']} ({lp.short_id()})")
+    typer.echo(f"  Type: {lp.type.value}")
+    typer.echo(f"  Status: {status_c}{lp.status.value}{c['reset']}")
+    typer.echo(f"  Repo: {lp.repo}")
+    typer.echo(f"  Personal main: {lp.personal_main}")
+    typer.echo(f"  Iteration: {lp.iteration}")
+
+    if lp.area:
+        typer.echo(f"  Area: {lp.area}")
+    if lp.project_file:
+        typer.echo(f"  Project: {lp.project_file}")
+    if lp.pathset:
+        typer.echo(f"  Pathset: {lp.pathset}")
+    if lp.cron:
+        typer.echo(f"  Cron: {lp.cron}")
+
+    # Show recent runs
+    runs = get_loop_runs(lp.id, limit=5)
+    if runs:
+        typer.echo(f"\n  {c['dim']}Recent runs:{c['reset']}")
+        for run in runs:
+            run_status_c = _status_color(run.status, c)
+            pr_info = f" → {run.pr_url}" if run.pr_url else ""
+            typer.echo(
+                f"    #{run.iteration} {run_status_c}{run.status.value}{c['reset']}"
+                f" {run.started_at.strftime('%Y-%m-%d %H:%M')}{pr_info}"
+            )
 
 
 @app.command()
 def stop(
-    name: str = typer.Argument(help="Agent name"),
+    loop_id: str = typer.Argument(..., help="Loop ID to stop"),
 ):
-    """Stop a running agent."""
-    if not is_running():
-        typer.echo("lfd is not running")
+    """Stop a running loop."""
+    c = _colors()
+
+    lp = get_loop(loop_id)
+    if not lp:
+        typer.echo(f"{c['red']}Error:{c['reset']} Loop '{loop_id}' not found", err=True)
         raise typer.Exit(1)
 
-    client = DaemonClient()
-    try:
-        asyncio.run(client.call("agents.stop", {"name": name}))
-        typer.echo(f"Stopped agent '{name}'")
-    except Exception as e:
-        typer.echo(f"Failed to stop agent: {e}", err=True)
+    if stop_loop(lp.id):
+        typer.echo(f"{c['yellow']}Stopped{c['reset']} {c['bold']}{lp.goal}{c['reset']} ({lp.short_id()})")
+    else:
+        typer.echo(f"{c['red']}Error:{c['reset']} Failed to stop loop", err=True)
         raise typer.Exit(1)
 
 
 @app.command()
-def show(
-    name: str = typer.Argument(help="Agent name"),
+def prs(
+    loop_id: str = typer.Argument(..., help="Loop ID"),
+    limit: int = typer.Option(10, "-n", "--limit", help="Number of PRs to show"),
 ):
-    """Show details of an agent."""
-    agent = get_agent(name)
-    if not agent:
-        typer.echo(f"Agent '{name}' not found", err=True)
+    """Show PRs created by a loop."""
+    c = _colors()
+
+    lp = get_loop(loop_id)
+    if not lp:
+        typer.echo(f"{c['red']}Error:{c['reset']} Loop '{loop_id}' not found", err=True)
         raise typer.Exit(1)
 
-    typer.echo(f"Agent: {agent.name}")
-    if agent.emoji:
-        typer.echo(f"  Emoji: {agent.emoji}")
-    typer.echo(f"  Repo: {agent.repo}")
-    if agent.goal:
-        typer.echo(f"  Goal: {agent.goal}")
-    typer.echo(f"  Pipeline: {agent.pipeline}")
-    typer.echo(f"  Merge: {agent.merge_mode.value}")
-    if agent.personal_main:
-        typer.echo(f"  Personal main: {agent.personal_main}")
-    typer.echo(f"  Trigger: {agent.trigger.kind.value}")
-    if agent.trigger.cron:
-        typer.echo(f"  Cron: {agent.trigger.cron}")
-        typer.echo(f"  Grace: {agent.trigger.grace_minutes}m")
-    if agent.trigger.interval_seconds:
-        typer.echo(f"  Interval: {agent.trigger.interval_seconds}s")
-    if agent.context:
-        typer.echo(f"  Context: {', '.join(agent.context)}")
+    runs = get_loop_runs(lp.id, limit=limit)
+    runs_with_prs = [r for r in runs if r.pr_url]
 
-    # Show runtime status
-    latest = get_latest_run(agent.name)
-    if latest:
-        typer.echo(f"  Status: {latest.status.value}")
-        typer.echo(f"  Last run: {latest.started_at.isoformat()}")
-        typer.echo(f"  Iteration: {latest.iteration}")
-        if latest.pid:
-            typer.echo(f"  PID: {latest.pid}")
-
-    # Show worktree status
-    worktree = get_worktree_path(agent)
-    if worktree:
-        typer.echo(f"  Worktree: {worktree}")
-
-    typer.echo(f"  Prompt:")
-    typer.echo("")
-    for line in agent.prompt.split("\n")[:10]:
-        typer.echo(f"    {line}")
-    if agent.prompt.count("\n") > 10:
-        typer.echo("    ...")
-
-
-@app.command()
-def logs(
-    name: str = typer.Argument(help="Agent name"),
-    follow: bool = typer.Option(False, "-f", "--follow", help="Follow log output"),
-    lines: int = typer.Option(50, "-n", "--lines", help="Number of lines to show"),
-):
-    """Show agent logs."""
-    log_path = Path.home() / ".lf" / "logs" / "agents" / f"{name}.log"
-
-    if not log_path.exists():
-        typer.echo(f"No logs found for agent '{name}'")
-        typer.echo(f"  Expected: {log_path}")
+    if not runs_with_prs:
+        typer.echo(f"{c['dim']}No PRs found for '{lp.goal}'{c['reset']}")
         return
 
-    if follow:
-        subprocess.run(["tail", "-f", str(log_path)])
-    else:
-        subprocess.run(["tail", f"-{lines}", str(log_path)])
-
-
-# Agent definition management
-
-
-@app.command()
-def new(
-    name: str = typer.Argument(help="Agent name"),
-    emoji: str = typer.Option(
-        "",
-        "-e",
-        "--emoji",
-        help="Emoji identifier for visual tracking (e.g., 🔧)",
-    ),
-    goal: str = typer.Option(
-        None,
-        "-g",
-        "--goal",
-        help="Path to goal file (relative to repo, e.g., .lf/goals/security.md)",
-    ),
-    pipeline: str = typer.Option(
-        "ship",
-        "-p",
-        "--pipeline",
-        help="Pipeline name to run (from .lf/pipelines/)",
-    ),
-    trigger: str = typer.Option(
-        "manual",
-        "-t",
-        "--trigger",
-        help="Trigger: manual, loop, cron, main-changed, or interval",
-    ),
-    merge: str = typer.Option(
-        "auto",
-        "-m",
-        "--merge",
-        help="Merge mode: auto, pr, or silent",
-    ),
-    interval: int = typer.Option(
-        None,
-        "-i",
-        "--interval",
-        help="Interval in seconds (for interval trigger)",
-    ),
-    cron: str = typer.Option(
-        None,
-        "--cron",
-        help="Cron expression (for cron trigger, e.g., '0 9 * * *')",
-    ),
-    grace: int = typer.Option(
-        60,
-        "--grace",
-        help="Grace period in minutes for missed cron schedules",
-    ),
-    context: str = typer.Option(
-        None,
-        "-x",
-        "--context",
-        help="Comma-separated context paths",
-    ),
-):
-    """Create a new agent."""
-    from loopflow.lf.context import find_worktree_root
-    repo_root = find_worktree_root()
-    if not repo_root:
-        typer.echo("Error: Not in a git repository", err=True)
-        raise typer.Exit(1)
-
-    main_repo = find_main_repo(repo_root) or repo_root
-
-    existing = get_agent_file_path(name)
-    if existing:
-        typer.echo(f"Agent '{name}' already exists at {existing}", err=True)
-        raise typer.Exit(1)
-
-    context_list = [c.strip() for c in context.split(",")] if context else None
-    goal_path = Path(goal) if goal else None
-
-    if trigger == "interval" and not interval:
-        typer.echo("Error: --interval required for interval trigger", err=True)
-        raise typer.Exit(1)
-
-    if trigger == "cron" and not cron:
-        typer.echo("Error: --cron required for cron trigger", err=True)
-        raise typer.Exit(1)
-
-    if merge not in ("auto", "pr", "silent"):
-        typer.echo("Error: --merge must be 'auto', 'pr', or 'silent'", err=True)
-        raise typer.Exit(1)
-
-    path = create_agent_file(
-        name=name,
-        repo=main_repo,
-        pipeline=pipeline,
-        trigger=trigger,
-        context=context_list,
-        interval_seconds=interval,
-        emoji=emoji,
-        goal=goal_path,
-        merge=merge,
-        cron=cron,
-        grace_minutes=grace if grace != 60 else None,
-    )
-
-    typer.echo(f"Created agent: {path}")
-    if emoji:
-        typer.echo(f"  Emoji: {emoji}")
-    typer.echo(f"  Pipeline: {pipeline}")
-    typer.echo(f"  Trigger: {trigger}")
-    typer.echo(f"  Merge: {merge}")
+    typer.echo(f"{c['bold']}{lp.goal}{c['reset']} PRs ({lp.short_id()})")
     typer.echo("")
-    typer.echo(f"Edit the prompt: lfd edit {name}")
 
-
-@app.command()
-def edit(
-    name: str = typer.Argument(help="Agent name"),
-):
-    """Open agent file in $EDITOR."""
-    agent_path = get_agent_file_path(name)
-    if not agent_path:
-        typer.echo(f"Agent '{name}' not found", err=True)
-        typer.echo("Available agents:")
-        for a in list_agents():
-            typer.echo(f"  {a.name}")
-        raise typer.Exit(1)
-
-    editor = os.environ.get("EDITOR", "vi")
-    subprocess.run([editor, str(agent_path)])
+    for run in runs_with_prs:
+        status_c = _status_color(run.status, c)
+        typer.echo(
+            f"  #{run.iteration:<3} {status_c}{run.status.value:<10}{c['reset']} "
+            f"{c['dim']}{run.started_at.strftime('%Y-%m-%d')}{c['reset']}  {run.pr_url}"
+        )
 
 
 @app.command()
 def rm(
-    name: str = typer.Argument(help="Agent name"),
+    loop_id: str = typer.Argument(..., help="Loop ID to remove"),
     force: bool = typer.Option(False, "-f", "--force", help="Skip confirmation"),
 ):
-    """Remove an agent."""
-    agent_path = get_agent_file_path(name)
-    if not agent_path:
-        typer.echo(f"Agent '{name}' not found", err=True)
+    """Remove a loop and its history."""
+    c = _colors()
+
+    lp = get_loop(loop_id)
+    if not lp:
+        typer.echo(f"{c['red']}Error:{c['reset']} Loop '{loop_id}' not found", err=True)
+        raise typer.Exit(1)
+
+    if lp.status == LoopStatus.RUNNING:
+        typer.echo(f"{c['red']}Error:{c['reset']} Loop is running. Stop it first with: lfd stop {loop_id}", err=True)
         raise typer.Exit(1)
 
     if not force:
-        confirm = typer.confirm(f"Delete agent '{name}'?")
+        confirm = typer.confirm(f"Delete loop '{lp.goal}' ({lp.short_id()})?")
         if not confirm:
             raise typer.Abort()
 
-    if delete_agent_file(name):
-        typer.echo(f"Deleted agent: {name}")
+    if delete_loop(lp.id):
+        typer.echo(f"Deleted loop: {lp.goal} ({lp.short_id()})")
     else:
-        typer.echo("Failed to delete agent", err=True)
+        typer.echo(f"{c['red']}Error:{c['reset']} Failed to delete loop", err=True)
         raise typer.Exit(1)
 
 
@@ -408,5 +378,4 @@ def main() -> None:
     """Entry point for lfd command."""
     if len(sys.argv) == 1:
         sys.argv.append("status")
-
     app()

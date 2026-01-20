@@ -14,3 +14,4 @@ Maestro/dist/
 
 # Loopflow (generated cache)
 .lf/summaries/
+*.profraw

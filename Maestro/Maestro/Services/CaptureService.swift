@@ -24,114 +24,24 @@ struct CaptureService {
         guard let window = NSApp.keyWindow else {
             throw CaptureError.noWindow
         }
-        return try captureWindow(window)
+        return try captureWindow(window, to: screenshotURL())
     }
 
-    private func captureWindow(_ window: NSWindow) throws -> URL {
-        let outputURL = screenshotURL()
-        if try captureWindowLayer(window, to: outputURL) {
-            return outputURL
+    /// Capture the key window to a specific path
+    func captureKeyWindow(to outputPath: String) throws -> URL {
+        guard let window = NSApp.keyWindow else {
+            throw CaptureError.noWindow
         }
-        if try captureWindowContent(window, to: outputURL) {
-            return outputURL
-        }
-        return try captureWindowWithScreencapture(window, to: outputURL)
+        return try captureWindow(window, to: URL(fileURLWithPath: outputPath))
     }
 
-    private func captureWindowLayer(_ window: NSWindow, to outputURL: URL) throws -> Bool {
-        guard let contentView = window.contentView else {
-            return false
-        }
-
-        window.displayIfNeeded()
-        contentView.displayIfNeeded()
-
-        let bounds = contentView.bounds
-        if bounds.isEmpty {
-            return false
-        }
-
-        contentView.wantsLayer = true
-        guard let layer = contentView.layer ?? contentView.superview?.layer else {
-            return false
-        }
-
-        let scale = window.backingScaleFactor
-        let width = Int(bounds.width * scale)
-        let height = Int(bounds.height * scale)
-        guard width > 0, height > 0 else {
-            return false
-        }
-
-        guard let rep = NSBitmapImageRep(
-            bitmapDataPlanes: nil,
-            pixelsWide: width,
-            pixelsHigh: height,
-            bitsPerSample: 8,
-            samplesPerPixel: 4,
-            hasAlpha: true,
-            isPlanar: false,
-            colorSpaceName: .deviceRGB,
-            bytesPerRow: 0,
-            bitsPerPixel: 0
-        ) else {
-            throw CaptureError.captureFailed("Could not allocate bitmap for capture.")
-        }
-
-        rep.size = bounds.size
-        guard let ctx = NSGraphicsContext(bitmapImageRep: rep) else {
-            throw CaptureError.captureFailed("Could not create graphics context.")
-        }
-
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = ctx
-        ctx.cgContext.scaleBy(x: scale, y: scale)
-        layer.render(in: ctx.cgContext)
-        NSGraphicsContext.restoreGraphicsState()
-
-        guard let pngData = rep.representation(using: .png, properties: [:]) else {
-            throw CaptureError.captureFailed("Could not encode layer capture.")
-        }
-
-        try pngData.write(to: outputURL, options: .atomic)
-        return true
+    func captureWindow(_ window: NSWindow, to outputPath: String) throws -> URL {
+        try captureWindow(window, to: URL(fileURLWithPath: outputPath))
     }
 
-    private func captureWindowContent(_ window: NSWindow, to outputURL: URL) throws -> Bool {
-        guard let contentView = window.contentView else {
-            return false
-        }
-
-        window.displayIfNeeded()
-        contentView.displayIfNeeded()
-
-        let bounds = contentView.bounds
-        if bounds.isEmpty {
-            return false
-        }
-
-        guard let rep = contentView.bitmapImageRepForCachingDisplay(in: bounds) else {
-            return false
-        }
-
-        contentView.cacheDisplay(in: bounds, to: rep)
-
-        let image = NSImage(size: bounds.size)
-        image.addRepresentation(rep)
-
-        guard
-            let tiffData = image.tiffRepresentation,
-            let bitmap = NSBitmapImageRep(data: tiffData),
-            let pngData = bitmap.representation(using: .png, properties: [:])
-        else {
-            throw CaptureError.captureFailed("Could not encode window content.")
-        }
-
-        try pngData.write(to: outputURL, options: .atomic)
-        return true
-    }
-
-    private func captureWindowWithScreencapture(_ window: NSWindow, to outputURL: URL) throws -> URL {
+    /// Capture a window using screencapture command.
+    /// This is the most reliable method for capturing NavigationSplitView and other complex views.
+    func captureWindow(_ window: NSWindow, to outputURL: URL) throws -> URL {
         let windowID = window.windowNumber
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")

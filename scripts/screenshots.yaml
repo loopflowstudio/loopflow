@@ -1,0 +1,15 @@
+# Screenshot manifest for Maestro documentation
+# Run: python scripts/generate_screenshots.py
+
+repo: https://github.com/loopflowstudio/loopflow-demos
+local: ~/src/loopflow-demos
+
+screenshots:
+  # Main window - shows sidebar + prompt launcher
+  - name: maestro-main
+    window_size: [1200, 800]
+
+  # Main window with loops - shows running agent
+  - name: maestro-loops
+    window_size: [1200, 800]
+    mock_loops: true

@@ -13,6 +13,7 @@ from loopflow.lf.context import (
 )
 from loopflow.lf.git import ensure_draft_pr, has_upstream
 from loopflow.lf.launcher import get_runner
+from loopflow.lfops._helpers import run_lint
 
 
 def register_commands(app: typer.Typer) -> None:
@@ -24,6 +25,7 @@ def register_commands(app: typer.Typer) -> None:
         add: bool = typer.Option(
             True, "-a/-A", "--add/--no-add", help="Stage all changes before committing"
         ),
+        lint: bool = typer.Option(True, "--lint/--no-lint", help="Run lint before committing"),
     ) -> None:
         """Commit with automatic message via agent.
 
@@ -44,6 +46,10 @@ def register_commands(app: typer.Typer) -> None:
         if not result.stdout.strip():
             typer.echo("Nothing to commit", err=True)
             raise typer.Exit(0)
+
+        if lint and not run_lint(repo_root):
+            typer.echo("Lint failed, aborting commit", err=True)
+            raise typer.Exit(1)
 
         if add:
             subprocess.run(["git", "add", "-A"], cwd=repo_root, check=True)

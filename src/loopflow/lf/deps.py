@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 
 import typer
-
+import yaml
 
 # Package info for each dependency
 DEPS = {
@@ -127,8 +127,6 @@ def require_deps(
 
 def _set_agent_model(repo_root: Path, backend: str) -> None:
     """Set agent_model in .lf/config.yaml."""
-    import yaml
-
     config_path = repo_root / ".lf" / "config.yaml"
 
     if config_path.exists():

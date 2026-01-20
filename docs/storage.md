@@ -78,7 +78,7 @@ These two folders serve different purposes with different lifespans:
 |---|---|---|
 | **Lifespan** | Dies with the PR | Lives forever |
 | **Purpose** | Current work scratchpad | Forward-looking plans |
-| **In context?** | Yes (automatic) | Yes (add to `context:`) |
+| **In context?** | Yes (automatic) | No (opt-in) |
 | **Cleared on merge?** | **Yes** | No |
 | **Example** | "Add auth to user endpoint" spec | "How auth should work long-term" |
 
@@ -120,7 +120,7 @@ Forward-looking internal documentation. What we're building next, not what we've
 |---|---|---|
 | **Audience** | Maintainers | Users |
 | **Focus** | Forward-looking, not yet built | Backwards-looking, what exists |
-| **In context?** | Yes (add to `context:`) | No (opt-in) |
+| **In context?** | Yes | No |
 | **Who writes** | Mostly agents, humans edit | Humans |
 | **Example** | "How auth should work" | "How to authenticate requests" |
 
@@ -167,18 +167,21 @@ Run `lf -c` to preview exactly what context gets assembled.
 
 ## Quick Reference
 
-| Location | Purpose | Persists? | Included by default? |
-|----------|---------|-----------|---------------------|
+| Location | Purpose | Persists? | In context? |
+|----------|---------|-----------|-------------|
+| `README.md`, `STYLE.md`, etc. | Top-level guidance | Yes | **Yes** |
+| `.design/` | PR scratchpad | **No** (cleared) | **Yes** |
+| `.docs/` | Forward-looking plans | Yes | No (opt-in) |
+| `docs/` | Public docs | Yes | No (opt-in) |
 | `.claude/commands/` | Task prompts | Yes | (task file only) |
 | `.lf/config.yaml` | Repo config | Yes | No |
-| `.lf/voices/` | Personas | Yes | (when `--voice` used) |
-| `.lf/goals/` | Agent directives | Yes | (when agent uses goal) |
+| `.lf/voices/` | Personas | Yes | (when `--voice`) |
+| `.lf/goals/` | Agent directives | Yes | (when agent uses) |
 | `.lf/summaries/` | Summaries | Gitignored | (when configured) |
-| `.design/` | PR scratchpad | **No** (cleared) | **Yes** |
-| `.docs/` | Internal docs | Yes | Add to `context:` |
-| `docs/` | Public docs | Yes | Add to `context:` |
 
-To include `.docs/` in every task, add it to your config:
+**Auto-included:** Well-known guidance files (`README.md`, `STYLE.md`, `CLAUDE.md`, `AGENTS.md`) and `.design/`. Not every `.md` file in the repo.
+
+To include `.docs/` in every task:
 
 ```yaml
 # .lf/config.yaml

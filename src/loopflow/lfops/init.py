@@ -260,9 +260,38 @@ def register_commands(app: typer.Typer) -> None:
         # Success message
         typer.echo("\n✓ Ready! Run 'lf' to see available tasks.")
 
+    def _install_npm_package(name: str, package: str, check_fn) -> bool:
+        """Install an npm package if not present. Returns success."""
+        if check_fn():
+            typer.echo(f"✓ {name}")
+            return True
+        typer.echo(f"Installing {name}...")
+        result = subprocess.run(
+            ["npm", "install", "-g", package],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            typer.echo(f"✓ {name} installed")
+            return True
+        typer.echo(f"✗ Could not install {name}: {result.stderr}", err=True)
+        return False
+
     @app.command()
-    def install() -> None:
-        """Install loopflow dependencies (Claude, Codex, worktrunk, etc)."""
+    def install(
+        all_deps: bool = typer.Option(False, "--all", "-a", help="Install all dependencies"),
+        claude: bool = typer.Option(False, "--claude", help="Install Claude Code"),
+        codex: bool = typer.Option(False, "--codex", help="Install Codex CLI"),
+        gemini: bool = typer.Option(False, "--gemini", help="Install Gemini CLI"),
+        warp: bool = typer.Option(False, "--warp", help="Install Warp terminal"),
+        cursor: bool = typer.Option(False, "--cursor", help="Install Cursor IDE"),
+        superpowers: bool = typer.Option(False, "--superpowers", help="Install superpowers skill library"),
+    ) -> None:
+        """Install loopflow dependencies.
+
+        By default, installs only worktrunk (required for worktree operations).
+        Use --all to install everything, or individual flags for specific tools.
+        """
         if platform.system() != "Darwin":
             typer.echo("Error: lfops install only supports macOS", err=True)
             typer.echo("Install dependencies manually.", err=True)
@@ -272,68 +301,40 @@ def register_commands(app: typer.Typer) -> None:
             typer.echo("Error: Homebrew not found. Install from https://brew.sh", err=True)
             raise typer.Exit(1)
 
-        # Load config to check what's needed
+        # Load config for superpowers path
         repo_root = find_worktree_root()
         config = load_config(repo_root) if repo_root else None
-        ide = config.ide if config else None
 
-        # Node.js (required for Claude Code)
-        if not shutil.which("npm"):
-            typer.echo("Installing Node.js...")
-            if _install_node() and shutil.which("npm"):
-                typer.echo("✓ Node.js installed")
+        # Determine what to install
+        install_claude = all_deps or claude
+        install_codex = all_deps or codex
+        install_gemini = all_deps or gemini
+        install_warp = all_deps or warp
+        install_cursor = all_deps or cursor
+        install_superpowers = all_deps or superpowers
+
+        # Node.js (required for coding agents)
+        need_node = install_claude or install_codex or install_gemini
+        if need_node:
+            if not shutil.which("npm"):
+                typer.echo("Installing Node.js...")
+                if _install_node() and shutil.which("npm"):
+                    typer.echo("✓ Node.js installed")
+                else:
+                    typer.echo("✗ Could not install Node.js", err=True)
+                    raise typer.Exit(1)
             else:
-                typer.echo("✗ Could not install Node.js", err=True)
-                raise typer.Exit(1)
-        else:
-            typer.echo("✓ Node.js")
+                typer.echo("✓ Node.js")
 
-        # Claude Code
-        if check_claude_available():
-            typer.echo("✓ Claude Code")
-        else:
-            typer.echo("Installing Claude Code...")
-            result = subprocess.run(
-                ["npm", "install", "-g", "@anthropic-ai/claude-code"],
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode == 0:
-                typer.echo("✓ Claude Code installed")
-            else:
-                typer.echo(f"✗ Could not install Claude Code: {result.stderr}", err=True)
+        # Coding agents
+        if install_claude:
+            _install_npm_package("Claude Code", "@anthropic-ai/claude-code", check_claude_available)
+        if install_codex:
+            _install_npm_package("Codex", "@openai/codex", check_codex_available)
+        if install_gemini:
+            _install_npm_package("Gemini CLI", "@google/gemini-cli", check_gemini_available)
 
-        # Codex
-        if check_codex_available():
-            typer.echo("✓ Codex")
-        else:
-            typer.echo("Installing Codex...")
-            result = subprocess.run(
-                ["npm", "install", "-g", "@openai/codex"],
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode == 0:
-                typer.echo("✓ Codex installed")
-            else:
-                typer.echo(f"✗ Could not install Codex: {result.stderr}", err=True)
-
-        # Gemini CLI
-        if check_gemini_available():
-            typer.echo("✓ Gemini CLI")
-        else:
-            typer.echo("Installing Gemini CLI...")
-            result = subprocess.run(
-                ["npm", "install", "-g", "@google/gemini-cli"],
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode == 0:
-                typer.echo("✓ Gemini CLI installed")
-            else:
-                typer.echo(f"✗ Could not install Gemini CLI: {result.stderr}", err=True)
-
-        # Worktrunk (required for worktree operations)
+        # Worktrunk (always installed - it's the core dependency)
         if shutil.which("wt"):
             typer.echo("✓ worktrunk")
         else:
@@ -343,8 +344,8 @@ def register_commands(app: typer.Typer) -> None:
                 typer.echo("✗ Could not install worktrunk", err=True)
                 raise typer.Exit(1)
 
-        # Warp (if enabled in config, default true)
-        if not ide or ide.warp:
+        # IDE/Terminals
+        if install_warp:
             if shutil.which("warp"):
                 typer.echo("✓ Warp")
             else:
@@ -354,8 +355,7 @@ def register_commands(app: typer.Typer) -> None:
                 else:
                     typer.echo("✗ Could not install Warp", err=True)
 
-        # Cursor (if enabled in config, default true)
-        if not ide or ide.cursor:
+        if install_cursor:
             if shutil.which("cursor"):
                 typer.echo("✓ Cursor")
             else:
@@ -365,18 +365,18 @@ def register_commands(app: typer.Typer) -> None:
                 else:
                     typer.echo("✗ Could not install Cursor", err=True)
 
-        # Superpowers skill library (if configured)
-        _install_superpowers(config)
+        # Skill libraries
+        if install_superpowers:
+            _install_superpowers(config)
 
     @app.command()
     def doctor() -> None:
         """Check loopflow dependencies and repo status."""
         all_ok = True
 
-        # Load config to check what's needed
+        # Load config
         repo_root = find_worktree_root()
         config = load_config(repo_root) if repo_root else None
-        ide = config.ide if config else None
 
         # Repo status
         if repo_root:
@@ -388,41 +388,46 @@ def register_commands(app: typer.Typer) -> None:
         else:
             typer.echo("- not in a git repo")
 
-        # Required
-        if shutil.which("npm"):
-            typer.echo("✓ npm")
-        else:
-            typer.echo("✗ npm - Install Node.js: https://nodejs.org")
-            all_ok = False
-
-        if check_claude_available():
-            typer.echo("✓ claude")
-        else:
-            typer.echo("✗ claude - Run: lfops install")
-            all_ok = False
-
+        # Required: only worktrunk
         if shutil.which("wt"):
             typer.echo("✓ wt")
         else:
             typer.echo("✗ wt - Run: lfops install")
             all_ok = False
 
-        # IDE tools (based on config)
-        if not ide or ide.warp:
-            if shutil.which("warp"):
-                typer.echo("✓ warp")
-            else:
-                typer.echo("✗ warp - Run: lfops install")
-                all_ok = False
+        # Optional: coding agents
+        if shutil.which("npm"):
+            typer.echo("✓ npm")
+        else:
+            typer.echo("- npm: brew install node")
 
-        if not ide or ide.cursor:
-            if shutil.which("cursor"):
-                typer.echo("✓ cursor")
-            else:
-                typer.echo("✗ cursor - Run: lfops install")
-                all_ok = False
+        if check_claude_available():
+            typer.echo("✓ claude")
+        else:
+            typer.echo("- claude: lfops install --claude")
 
-        # Skill libraries (if configured)
+        if check_codex_available():
+            typer.echo("✓ codex")
+        else:
+            typer.echo("- codex: lfops install --codex")
+
+        if check_gemini_available():
+            typer.echo("✓ gemini")
+        else:
+            typer.echo("- gemini: lfops install --gemini")
+
+        # Optional: IDE/terminals
+        if shutil.which("warp"):
+            typer.echo("✓ warp")
+        else:
+            typer.echo("- warp: lfops install --warp")
+
+        if shutil.which("cursor"):
+            typer.echo("✓ cursor")
+        else:
+            typer.echo("- cursor: lfops install --cursor")
+
+        # Optional: skill libraries
         if config and config.skill_sources:
             for source in config.skill_sources:
                 if source.name == "superpowers" or source.prefix == "sp":
@@ -430,25 +435,13 @@ def register_commands(app: typer.Typer) -> None:
                     if sp_path.exists():
                         typer.echo("✓ superpowers")
                     else:
-                        typer.echo("✗ superpowers - Run: lfops install")
-                        all_ok = False
-
-        # Optional model backends
-        if check_codex_available():
-            typer.echo("✓ codex (optional)")
-        else:
-            typer.echo("- codex (optional): npm install -g @openai/codex")
-
-        if check_gemini_available():
-            typer.echo("✓ gemini (optional)")
-        else:
-            typer.echo("- gemini (optional): npm install -g @google/gemini-cli")
+                        typer.echo("- superpowers: lfops install --superpowers")
 
         # Optional: gh for PR creation
         if shutil.which("gh"):
-            typer.echo("✓ gh (optional)")
+            typer.echo("✓ gh")
         else:
-            typer.echo("- gh (optional): brew install gh")
+            typer.echo("- gh: brew install gh")
 
         raise typer.Exit(0 if all_ok else 1)
 

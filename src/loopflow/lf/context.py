@@ -21,6 +21,12 @@ from loopflow.lf.voices import Voice, load_voice
 # Path to bundled builtin templates
 _TEMPLATES_DIR = Path(__file__).parent.parent / "templates" / "commands"
 
+# Global command locations to check (in order)
+_GLOBAL_COMMAND_PATHS = [
+    Path.home() / ".claude" / "commands",
+    # Future: ~/.cursor/commands, ~/.codex/prompts, etc.
+]
+
 
 @dataclass
 class ClipboardContent:
@@ -183,21 +189,39 @@ def list_user_tasks(repo_root: Path) -> list[str]:
     return sorted(tasks)
 
 
-def list_all_tasks(repo_root: Path | None, config=None) -> tuple[list[str], list[str], list[tuple[str, str]]]:
-    """Return (user_tasks, builtin_only_tasks, external_skills) for discoverability.
+def list_global_tasks() -> list[str]:
+    """Return names of globally-installed tasks (e.g., ~/.claude/commands/)."""
+    tasks = set()
+    for global_dir in _GLOBAL_COMMAND_PATHS:
+        if global_dir.exists():
+            for p in global_dir.glob("*.md"):
+                tasks.add(p.stem)
+    return sorted(tasks)
 
-    User tasks include any that override builtins.
-    Builtin-only tasks are builtins not overridden by user tasks.
+
+def list_all_tasks(
+    repo_root: Path | None, config=None
+) -> tuple[list[str], list[str], list[str], list[tuple[str, str]]]:
+    """Return (user_tasks, global_tasks, builtin_only_tasks, external_skills).
+
+    User tasks include any that override builtins or globals.
+    Global tasks are from ~/.claude/commands/ not overridden by repo-local.
+    Builtin-only tasks are builtins not overridden by user or global tasks.
     External skills are (prefixed_name, source_name) tuples from skill sources.
     """
     builtins = set(list_builtin_tasks())
     user = set(list_user_tasks(repo_root)) if repo_root else set()
-    builtin_only = builtins - user
+    global_tasks = set(list_global_tasks())
+
+    # Global tasks not overridden by repo-local
+    global_only = global_tasks - user
+    # Builtins not overridden by user or global
+    builtin_only = builtins - user - global_tasks
 
     sources = discover_skill_sources(config.skill_sources if config else None, repo_root)
     external_skills = list_all_skills(sources)
 
-    return sorted(user), sorted(builtin_only), external_skills
+    return sorted(user), sorted(global_only), sorted(builtin_only), external_skills
 
 
 def gather_task(repo_root: Path | None, name: str, config=None) -> TaskFile | None:
@@ -205,9 +229,10 @@ def gather_task(repo_root: Path | None, name: str, config=None) -> TaskFile | No
 
     Search order:
     1. External skills (prefix:name format, e.g., sp:brainstorm)
-    2. .claude/commands/{name}.md (if repo_root provided)
-    3. .lf/{name}.md (if repo_root provided)
-    4. templates/commands/{name}.md (builtin fallback)
+    2. .claude/commands/{name}.md (repo-local)
+    3. .lf/{name}.md (repo-local)
+    4. ~/.claude/commands/{name}.md (global user commands)
+    5. templates/commands/{name}.md (builtin fallback)
 
     Returns TaskFile with parsed config, or None if not found.
     """
@@ -228,6 +253,12 @@ def gather_task(repo_root: Path | None, name: str, config=None) -> TaskFile | No
         # Fall back to .lf directory
         lf_dir = repo_root / ".lf"
         content = _read_file_if_named(lf_dir, f"{name}.md")
+        if content:
+            return parse_task_file(name, content)
+
+    # Check global user commands (e.g., ~/.claude/commands/)
+    for global_dir in _GLOBAL_COMMAND_PATHS:
+        content = _read_file_if_named(global_dir, f"{name}.md")
         if content:
             return parse_task_file(name, content)
 

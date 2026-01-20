@@ -389,6 +389,7 @@ def main() -> int:
     )
     parser.add_argument("bump", nargs="?", choices=["patch", "minor", "major"], default="patch")
     parser.add_argument("-n", "--dry-run", action="store_true", help="Show what would be done")
+    parser.add_argument("--local", action="store_true", help="Build and install locally only (no publish)")
     parser.add_argument("--skip-tests", action="store_true", help="Skip test run")
     parser.add_argument("--skip-ci", action="store_true", help="Skip CI check")
     parser.add_argument("--dmg-only", action="store_true", help="Only build and upload DMG (no PyPI)")
@@ -446,6 +447,31 @@ def main() -> int:
             if not update_website_release(version, R2_PUBLIC_URL, dry_run=False):
                 print("Website update failed.", file=sys.stderr)
                 return 1
+        return 0
+
+    # Handle --local mode: build and install only
+    if args.local:
+        from loopflow.publish import build_package, install_locally
+
+        if args.dry_run:
+            print("Would build package and install locally")
+            return 0
+
+        print("Building package...")
+        success, output = build_package(ROOT)
+        if not success:
+            print("Build failed:", file=sys.stderr)
+            print(output, file=sys.stderr)
+            return 1
+        print("Build succeeded.")
+
+        print("Installing locally...")
+        success, output = install_locally(ROOT)
+        if not success:
+            print("Local install failed:", file=sys.stderr)
+            print(output, file=sys.stderr)
+            return 1
+        print("Installed locally.")
         return 0
 
     # --- Idempotent release flow: detect state and act accordingly ---

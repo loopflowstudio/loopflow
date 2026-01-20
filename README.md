@@ -12,9 +12,27 @@ Copy an error, watch it fix.
 
 ```bash
 lf debug -v
+
+Tokens: 33,017
+
+files          20,850 ████████████
+  docs         17,978 ██████████
+  STYLE.md      2,158 █
+  README.md       475 ▏
+docs           11,004 ██████
+loopflow          657 ▏
+task              506 ▏
+clipboard         342 ▏
 ```
 
-![debug demo](docs/debug-demo.gif)
+Loopflow assembles context from your repo—docs, style guides, the current diff—and packages it with a task prompt. The token profile shows what's going in. This context is what makes the agent effective.
+
+Tasks are markdown files in `.claude/commands/` or `.lf/`. Run by name:
+
+```bash
+lf review                 # run review.md
+lf implement: add auth    # pass arguments
+```
 
 ## Flow
 

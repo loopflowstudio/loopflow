@@ -50,26 +50,62 @@ Two ways to define agent scope:
 - Prose captures intent better than fields
 - Like voices—prompt files written for a purpose
 
+**Key insight**: The area implies responsibility ("you are responsible for auth" is redundant if `area: [src/auth/]`). Goals should be concrete objectives, not job descriptions.
+
+### Incremental climbing
+
+Goals are destinations. Each PR is one step toward the goal, not an attempt to achieve everything at once.
+
+```
+Goal: 80% test coverage (currently 45%)
+  └── PR #1: Add tests for auth module (+5%)
+  └── PR #2: Add tests for api endpoints (+8%)
+  └── PR #3: Add tests for utils (+3%)
+  └── ... keeps climbing until 80%
+```
+
+Each iteration the agent:
+1. **Assesses** - where are we vs the goal?
+2. **Plans** - what's one achievable step?
+3. **Executes** - do that step, commit, PR
+4. **Repeats** - until goal reached or indefinitely for maintenance
+
 ### Goal files
 
-Goal files live in `.lf/goals/` like voices live in `.lf/voices/`:
+Goal files live in `.lf/goals/` like voices live in `.lf/voices/`. They define destinations, not job descriptions:
 
 ```markdown
-# .lf/goals/security.md
+# .lf/goals/test-coverage-80.md
 
-You are responsible for security across the codebase.
+Reach 80% test coverage.
 
-## Priorities
-1. Authentication and authorization
-2. Input validation and sanitization
-3. SQL injection and XSS prevention
-4. Dependency vulnerabilities
+## Measure
+`pytest --cov` reports current coverage.
+Target: 80% on src/
 
-## Approach
-- Scan for vulnerabilities systematically
-- Fix issues directly rather than just reporting
-- Add tests that verify the fix
-- Document security patterns for the team
+## Each iteration
+Pick ONE untested module and add comprehensive tests.
+Don't try to cover everything at once—small PRs that compound.
+
+## Done when
+Coverage >= 80%
+```
+
+```markdown
+# .lf/goals/security-audit.md
+
+Eliminate OWASP Top 10 vulnerabilities.
+
+## Measure
+`semgrep --config=p/owasp-top-ten` reports findings.
+Target: zero high/critical findings.
+
+## Each iteration
+Pick ONE vulnerability class, find instances, fix them.
+Order: SQL injection → XSS → auth bypass → ...
+
+## Done when
+Zero high/critical findings in semgrep scan.
 ```
 
 Referenced by name in agent definition, injected into every task prompt.
@@ -348,24 +384,24 @@ Maestro additions:
 ## Done when
 
 ```bash
-# Create a goal file first
-cat > .lf/goals/test-coverage.md << 'EOF'
-You are responsible for test coverage.
+# Create a goal file (destination, not job description)
+cat > .lf/goals/test-coverage-80.md << 'EOF'
+Reach 80% test coverage.
 
-## Priorities
-1. Unit tests for core business logic
-2. Integration tests for API endpoints
-3. Edge case coverage
+## Measure
+`pytest --cov` - target 80% on src/
 
-## Approach
-- Find untested code paths
-- Write focused, fast tests
-- Aim for 80%+ coverage
+## Each iteration
+Pick ONE untested module. Add comprehensive tests.
+Small PRs that compound.
+
+## Done when
+Coverage >= 80%
 EOF
 
 # Start a loop
 lf loop start test-loop \
-  --goal test-coverage \
+  --goal test-coverage-80 \
   --area "src/,tests/" \
   --pipeline "design,implement,polish"
 
@@ -377,7 +413,7 @@ lf loop status
 # Watch progress
 lf loop status test-loop
 # Shows:
-#   Goal: test-coverage
+#   Goal: test-coverage-80 (Reach 80% test coverage)
 #   Area: src/, tests/
 #   Pipeline: design → implement → polish
 #   Current: design (iteration 1)

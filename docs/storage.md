@@ -130,17 +130,17 @@ docs/
 
 Loopflow's file storage follows from its core beliefs:
 
-### Structured Context
+### Documentation for Humans and Agents
 
-Every agent session starts fresh. The question is: what context does it need?
+Good documentation serves both audiences. Loopflow puts context where it naturally belongs—not in special agent-only files, but in places humans already look and edit.
 
-Loopflow structures what goes in:
-- **`.docs/`** — institutional knowledge that persists across sessions
-- **Summaries** — large codebases compressed into digestible overviews
-- **Config** — files that are always relevant
-- **Design docs** — intent that carries from one step to the next
+- **`.docs/`** — internal docs that humans and agents both read and write
+- **`.design/`** — specs humans review, agents implement from, either can edit
+- **`docs/`** — public docs humans maintain, agents reference
 
-Run `lf -c` to preview exactly what context gets assembled before running.
+When you write a design doc, you're writing for the implementing agent *and* for the human who might tweak it before running `lf implement`. When agents add notes to `.docs/`, they're building knowledge you can read and refine directly—no special viewer needed, just markdown in your repo.
+
+Run `lf -c` to preview exactly what context gets assembled.
 
 ### Other Principles
 

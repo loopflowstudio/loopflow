@@ -58,6 +58,8 @@ final class AppState {
     private var sessionStartMap: [String: Date] = [:]  // session ID → start time
     private var autoPruneInFlight: Bool = false
     private var autoSyncTask: Task<Void, Never>?
+    var refreshMessage: String?
+    var isRefreshingWorktrees: Bool = false
 
     // Loading state
     var isLoading: Bool = false
@@ -148,12 +150,16 @@ final class AppState {
         isLoading = false
     }
 
-    func refreshWorktrees() async {
+    func refreshWorktrees(showFeedback: Bool = false) async {
         guard let repo = currentRepo else { return }
 
         do {
+            if showFeedback {
+                isRefreshingWorktrees = true
+                refreshMessage = "Syncing..."
+            }
             let previousSelection = selectedWorktree?.branch
-            _ = try? await worktreeService.sync(in: repo)
+            let syncSucceeded = (try? await worktreeService.sync(in: repo)) != nil
             worktrees = try await worktreeService.list(in: repo)
 
             // Preserve selection by matching on branch name
@@ -168,8 +174,25 @@ final class AppState {
             Task {
                 await detectStaleness()
             }
+
+            if showFeedback {
+                refreshMessage = syncSucceeded ? "Refreshed" : "Refresh (sync failed)"
+            }
         } catch {
             errorMessage = error.localizedDescription
+            if showFeedback {
+                refreshMessage = "Refresh failed"
+            }
+        }
+
+        if showFeedback {
+            isRefreshingWorktrees = false
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2))
+                if refreshMessage != nil {
+                    refreshMessage = nil
+                }
+            }
         }
     }
 

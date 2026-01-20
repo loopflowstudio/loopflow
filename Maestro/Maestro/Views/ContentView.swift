@@ -63,9 +63,19 @@ struct ContentView: View {
         }
         .navigationTitle(appState.currentRepo?.lastPathComponent ?? "Loopflow Maestro")
         .toolbar {
+            ToolbarItem(placement: .automatic) {
+                if appState.isRefreshingWorktrees {
+                    ProgressView()
+                        .controlSize(.small)
+                } else if let message = appState.refreshMessage {
+                    Text(message)
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    Task { await appState.refreshWorktrees() }
+                    Task { await appState.refreshWorktrees(showFeedback: true) }
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }

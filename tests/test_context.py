@@ -1,5 +1,7 @@
 """Tests for loopflow.context module."""
 
+from unittest.mock import patch
+
 import pytest
 
 from loopflow.lf.context import (
@@ -320,6 +322,7 @@ def test_list_user_tasks_returns_user_tasks(tmp_path):
     assert "config" not in tasks  # config.yaml should be excluded
 
 
+@patch("loopflow.lf.skills._SUPERPOWERS_PATHS", [])
 def test_list_all_tasks_separates_user_and_builtin(tmp_path):
     """list_all_tasks returns user tasks, builtin-only tasks, and external skills."""
     (tmp_path / ".git").mkdir()
@@ -347,6 +350,7 @@ def test_list_all_tasks_separates_user_and_builtin(tmp_path):
     assert external_skills == []
 
 
+@patch("loopflow.lf.skills._SUPERPOWERS_PATHS", [])
 def test_list_all_tasks_without_repo():
     """list_all_tasks works without a repo root (returns only builtins)."""
     user_tasks, builtin_only, external_skills = list_all_tasks(None)

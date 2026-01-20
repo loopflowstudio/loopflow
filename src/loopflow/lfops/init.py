@@ -100,6 +100,42 @@ def _install_worktrunk() -> bool:
     return False
 
 
+def _install_superpowers(config) -> bool:
+    """Clone superpowers skill library if configured and not present."""
+    if not config or not config.skill_sources:
+        return False
+
+    # Check if superpowers is configured
+    sp_source = None
+    for source in config.skill_sources:
+        if source.name == "superpowers" or source.prefix == "sp":
+            sp_source = source
+            break
+
+    if not sp_source:
+        return False
+
+    # Expand path and check if it exists
+    sp_path = Path(sp_source.path).expanduser()
+    if sp_path.exists():
+        typer.echo("✓ superpowers")
+        return True
+
+    # Clone superpowers
+    typer.echo("Installing superpowers skill library...")
+    result = subprocess.run(
+        ["git", "clone", "https://github.com/obra/superpowers", str(sp_path)],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        typer.echo("✓ superpowers installed")
+        return True
+
+    typer.echo(f"✗ Could not clone superpowers: {result.stderr}", err=True)
+    return False
+
+
 def _print_setup_status(status: SetupStatus) -> None:
     """Print dependency check results."""
     typer.echo("Checking dependencies...")
@@ -329,6 +365,9 @@ def register_commands(app: typer.Typer) -> None:
                 else:
                     typer.echo("✗ Could not install Cursor", err=True)
 
+        # Superpowers skill library (if configured)
+        _install_superpowers(config)
+
     @app.command()
     def doctor() -> None:
         """Check loopflow dependencies and repo status."""
@@ -382,6 +421,17 @@ def register_commands(app: typer.Typer) -> None:
             else:
                 typer.echo("✗ cursor - Run: lfops install")
                 all_ok = False
+
+        # Skill libraries (if configured)
+        if config and config.skill_sources:
+            for source in config.skill_sources:
+                if source.name == "superpowers" or source.prefix == "sp":
+                    sp_path = Path(source.path).expanduser()
+                    if sp_path.exists():
+                        typer.echo("✓ superpowers")
+                    else:
+                        typer.echo("✗ superpowers - Run: lfops install")
+                        all_ok = False
 
         # Optional model backends
         if check_codex_available():

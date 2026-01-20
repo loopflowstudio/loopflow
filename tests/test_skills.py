@@ -123,7 +123,7 @@ def test_discover_skill_sources_skips_nonexistent_path(tmp_path):
     config_sources = [
         SkillSourceConfig(name="missing", prefix="ms", path=str(tmp_path / "nonexistent"))
     ]
-    sources = discover_skill_sources(config_sources)
+    sources = discover_skill_sources(config_sources, auto_detect=False)
     assert len(sources) == 0
 
 
@@ -149,7 +149,7 @@ def test_discover_skill_sources_multiple_sources(tmp_path):
         SkillSourceConfig(name="source1", prefix="s1", path=str(sp1)),
         SkillSourceConfig(name="source2", prefix="s2", path=str(sp2)),
     ]
-    sources = discover_skill_sources(config_sources)
+    sources = discover_skill_sources(config_sources, auto_detect=False)
 
     assert len(sources) == 2
     prefixes = {s.prefix for s in sources}

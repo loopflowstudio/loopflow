@@ -88,12 +88,14 @@ def _find_skill_prompt_path(source_path: Path, skill_name: str) -> Path | None:
 def discover_skill_sources(
     config_sources: "list[SkillSourceConfig] | None" = None,
     repo_root: Path | None = None,
+    *,
+    auto_detect: bool = True,
 ) -> list[SkillSource]:
     """Find configured skill libraries.
 
     Checks:
     1. Explicit config sources
-    2. Auto-detection at ~/.superpowers or ./superpowers
+    2. Auto-detection at ~/.superpowers or ./superpowers (if auto_detect=True)
     """
     sources = []
     seen_prefixes = set()
@@ -114,7 +116,7 @@ def discover_skill_sources(
             seen_prefixes.add(source_config.prefix)
 
     # Auto-detect superpowers if not explicitly configured
-    if "sp" not in seen_prefixes:
+    if auto_detect and "sp" not in seen_prefixes:
         # Check repo-local first
         if repo_root:
             local_path = repo_root / "superpowers"

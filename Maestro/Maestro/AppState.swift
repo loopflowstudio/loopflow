@@ -17,6 +17,56 @@ final class AppState {
         case sampleWorkspaces = "sample-workspaces"
     }
 
+    struct ScreenshotMode {
+        let outputPath: String
+        let repoPath: String?
+        let windowSize: (Int, Int)?
+        let selectBranch: String?
+        let mockLoops: Bool
+
+        static func fromArgs() -> ScreenshotMode? {
+            let args = ProcessInfo.processInfo.arguments
+            guard let captureIndex = args.firstIndex(of: "--capture"),
+                  args.count > captureIndex + 1 else {
+                return nil
+            }
+
+            let outputPath = args[captureIndex + 1]
+            var repoPath: String?
+            var windowSize: (Int, Int)?
+            var selectBranch: String?
+            var mockLoops = false
+
+            if let repoIndex = args.firstIndex(of: "--repo"), args.count > repoIndex + 1 {
+                repoPath = args[repoIndex + 1]
+            }
+
+            if let sizeIndex = args.firstIndex(of: "--size"), args.count > sizeIndex + 1 {
+                let sizeStr = args[sizeIndex + 1]
+                let parts = sizeStr.split(separator: "x")
+                if parts.count == 2, let w = Int(parts[0]), let h = Int(parts[1]) {
+                    windowSize = (w, h)
+                }
+            }
+
+            if let selectIndex = args.firstIndex(of: "--select"), args.count > selectIndex + 1 {
+                selectBranch = args[selectIndex + 1]
+            }
+
+            if args.contains("--mock-loops") {
+                mockLoops = true
+            }
+
+            return ScreenshotMode(
+                outputPath: outputPath,
+                repoPath: repoPath,
+                windowSize: windowSize,
+                selectBranch: selectBranch,
+                mockLoops: mockLoops
+            )
+        }
+    }
+
     var currentRepo: URL?
     var config: LoopflowConfig?
     var worktrees: [Worktree] = []
@@ -131,6 +181,40 @@ final class AppState {
                 )
             ]
         }
+    }
+
+    func configureMockLoops() {
+        loops = [
+            Loop(
+                id: "mock-loop-1",
+                type: .loop,
+                goalName: "test-coverage",
+                repo: currentRepo?.path ?? "/tmp/demo",
+                loopMain: "loop-test-coverage",
+                status: .running,
+                iteration: 3,
+                prLimit: 5,
+                mergeMode: .pr,
+                pid: 12345,
+                createdAt: Date().addingTimeInterval(-3600),
+                currentRunId: "run-123",
+                currentStep: "implement"
+            ),
+            Loop(
+                id: "mock-loop-2",
+                type: .loop,
+                goalName: "docs-sync",
+                repo: currentRepo?.path ?? "/tmp/demo",
+                loopMain: "loop-docs-sync",
+                status: .idle,
+                iteration: 12,
+                prLimit: 3,
+                mergeMode: .pr,
+                pid: nil,
+                createdAt: Date().addingTimeInterval(-86400)
+            )
+        ]
+        lfdConnected = true
     }
 
     func openRepo(_ url: URL) async {

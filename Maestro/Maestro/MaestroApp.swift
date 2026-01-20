@@ -14,10 +14,15 @@ struct MaestroApp: App {
     var body: some Scene {
         let preferredScheme = AppearanceMode(rawValue: appearanceMode)?.colorScheme
         let uiTestMode = AppState.uiTestMode()
+        let screenshotMode = AppState.ScreenshotMode.fromArgs()
 
         // Welcome/main window - shown on launch
         WindowGroup {
-            if uiTestMode != nil {
+            if let screenshot = screenshotMode {
+                ScreenshotWindow(mode: screenshot, recentsService: recentsService)
+                    .tint(.loopflowBurgundy)
+                    .preferredColorScheme(preferredScheme)
+            } else if uiTestMode != nil {
                 RepoWindow(
                     repoURL: URL(fileURLWithPath: "/tmp/loopflow-ui-tests"),
                     recentsService: recentsService

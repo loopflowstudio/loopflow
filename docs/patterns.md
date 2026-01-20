@@ -105,11 +105,11 @@ lf : "rename getUserById to findUserById everywhere"
 ## PR Workflow
 
 ```bash
-lfops pr      # create or update PR, open in browser
-lfops land    # merge and cleanup worktree
+lfops pr      # create or update PR (CI runs automatically)
+lfops land    # submit to merge queue
 ```
 
-The `pr` command is idempotent: run it to create, or again to update after more commits.
+The `pr` command is idempotent: run it to create, or again to update after more commits. The `land` command enables auto-merge—GitHub merges when CI passes.
 
 ## Full Feature Workflow
 
@@ -122,8 +122,9 @@ lf implement                        # build from design
 lf polish                           # run tests, fix issues
 lf review                           # final quality check
 lfops commit                        # commit with generated message
-lfops pr                            # create PR
-lfops land                          # merge when approved
+lfops pr                            # create PR (CI runs)
+lfops land                          # submit to merge queue
+wt remove my-feature                # cleanup after merge
 ```
 
 ## Different Models

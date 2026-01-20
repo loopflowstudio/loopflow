@@ -335,8 +335,9 @@ def test_list_user_tasks_returns_user_tasks(tmp_path):
 
 
 @patch("loopflow.lf.skills._SUPERPOWERS_PATHS", [])
+@patch("loopflow.lf.context._GLOBAL_COMMAND_PATHS", [])
 def test_list_all_tasks_separates_user_and_builtin(tmp_path):
-    """list_all_tasks returns user tasks, builtin-only tasks, and external skills."""
+    """list_all_tasks returns user tasks, global tasks, builtin-only tasks, and external skills."""
     (tmp_path / ".git").mkdir()
 
     # Override one builtin
@@ -345,11 +346,14 @@ def test_list_all_tasks_separates_user_and_builtin(tmp_path):
     (lf / "design.md").write_text("custom design")
     (lf / "custom.md").write_text("custom task")
 
-    user_tasks, builtin_only, external_skills = list_all_tasks(tmp_path)
+    user_tasks, global_tasks, builtin_only, external_skills = list_all_tasks(tmp_path)
 
     # design is overridden, so it's in user_tasks
     assert "design" in user_tasks
     assert "custom" in user_tasks
+
+    # global_tasks is empty when _GLOBAL_COMMAND_PATHS is mocked to []
+    assert global_tasks == []
 
     # Other builtins like implement, review should be in builtin_only
     assert "implement" in builtin_only
@@ -363,11 +367,13 @@ def test_list_all_tasks_separates_user_and_builtin(tmp_path):
 
 
 @patch("loopflow.lf.skills._SUPERPOWERS_PATHS", [])
+@patch("loopflow.lf.context._GLOBAL_COMMAND_PATHS", [])
 def test_list_all_tasks_without_repo():
     """list_all_tasks works without a repo root (returns only builtins)."""
-    user_tasks, builtin_only, external_skills = list_all_tasks(None)
+    user_tasks, global_tasks, builtin_only, external_skills = list_all_tasks(None)
 
     assert user_tasks == []
+    assert global_tasks == []
     assert "design" in builtin_only
     assert "implement" in builtin_only
     assert external_skills == []

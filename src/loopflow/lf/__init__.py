@@ -8,7 +8,7 @@ import typer
 import yaml
 
 from loopflow.lf.config import ConfigError, load_config
-from loopflow.lf.context import find_worktree_root, gather_task, list_all_tasks, _get_builtin_task
+from loopflow.lf.context import find_worktree_root, gather_task, list_all_tasks
 from loopflow.lf.pipelines import load_pipeline
 
 
@@ -74,19 +74,6 @@ app.command()(run_module.add)
 app.command(name="pipeline")(run_module.pipeline)
 
 
-def _get_task_source(repo_root: Path | None, name: str) -> str:
-    """Return source location: .claude, .lf, or builtin."""
-    if repo_root:
-        if (repo_root / ".claude" / "commands" / f"{name}.md").exists():
-            return ".claude"
-        lf_dir = repo_root / ".lf"
-        if lf_dir.exists():
-            for p in lf_dir.iterdir():
-                if p.is_file() and (p.stem == name or p.name == name):
-                    return ".lf"
-    return "builtin"
-
-
 def _parse_frontmatter(content: str) -> dict:
     """Extract frontmatter fields from task content."""
     if not content.startswith("---"):
@@ -98,37 +85,12 @@ def _parse_frontmatter(content: str) -> dict:
         return {}
 
 
-def _get_task_info(repo_root: Path | None, name: str) -> dict:
+def _get_task_info(repo_root: Path | None, name: str, config=None) -> dict:
     """Get task metadata for display."""
-    info = {"name": name, "source": _get_task_source(repo_root, name)}
-
-    # Find the actual file to read frontmatter
-    content = None
-    if repo_root:
-        # Check .claude/commands first
-        claude_path = repo_root / ".claude" / "commands" / f"{name}.md"
-        if claude_path.exists():
-            content = claude_path.read_text()
-        else:
-            # Check .lf
-            lf_dir = repo_root / ".lf"
-            if lf_dir.exists():
-                for p in lf_dir.iterdir():
-                    if p.is_file() and (p.stem == name or p.name == name):
-                        content = p.read_text()
-                        break
-
-    # Fall back to builtin
-    if content is None:
-        builtin = _get_builtin_task(name)
-        if builtin:
-            content = builtin.read_text()
-
-    if content:
-        fm = _parse_frontmatter(content)
-        info.update(fm)
-
-    return info
+    task = gather_task(repo_root, name, config)
+    if task and task.content:
+        return _parse_frontmatter(task.content)
+    return {}
 
 
 def _format_task_list() -> str:
@@ -137,9 +99,10 @@ def _format_task_list() -> str:
     repo_root = find_worktree_root()
     config = load_config(repo_root) if repo_root else None
 
-    user_tasks, builtin_only, external_skills = list_all_tasks(repo_root, config)
+    user_tasks, global_tasks, builtin_only, external_skills = list_all_tasks(repo_root, config)
     user_task_set = set(user_tasks)
-    all_known_tasks = user_task_set | set(builtin_only)
+    global_task_set = set(global_tasks)
+    all_known_tasks = user_task_set | global_task_set | set(builtin_only)
 
     lines = []
 
@@ -165,7 +128,7 @@ def _format_task_list() -> str:
         lines.append(f"{c['dim']}{category}{c['reset']}")
         for name in category_tasks:
             desc = BUILTIN_DESCRIPTIONS.get(name, "")
-            info = _get_task_info(repo_root, name)
+            info = _get_task_info(repo_root, name, config)
             badge = f"  {c['yellow']}interactive{c['reset']}" if info.get("interactive") else ""
             customized = f" {c['dim']}(customized){c['reset']}" if name in user_task_set else ""
             lines.append(f"  {c['bold']}{name:<14}{c['reset']} {c['dim']}{desc:<34}{c['reset']}{badge}{customized}")
@@ -176,8 +139,20 @@ def _format_task_list() -> str:
     if custom:
         lines.append(f"{c['green']}Custom{c['reset']}")
         for name in sorted(custom):
-            info = _get_task_info(repo_root, name)
+            info = _get_task_info(repo_root, name, config)
             # Try to get a description from produces or just leave blank
+            desc = ""
+            if info.get("produces"):
+                desc = str(info["produces"])[:34]
+            badge = f"  {c['yellow']}interactive{c['reset']}" if info.get("interactive") else ""
+            lines.append(f"  {c['bold']}{name:<14}{c['reset']} {c['dim']}{desc:<34}{c['reset']}{badge}")
+        lines.append("")
+
+    # Global tasks (e.g., ~/.claude/commands/rams.md)
+    if global_tasks:
+        lines.append(f"{c['green']}Global{c['reset']}")
+        for name in sorted(global_tasks):
+            info = _get_task_info(repo_root, name, config)
             desc = ""
             if info.get("produces"):
                 desc = str(info["produces"])[:34]

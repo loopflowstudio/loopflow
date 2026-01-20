@@ -66,14 +66,25 @@ lfd loop find-pmf    # define goals, review PRs when you wake
 
 [Read the docs →](docs/index.md)
 
-## Works With
+## Integrations
 
-- **[worktrunk](https://github.com/loopflowstudio/worktrunk)** — git worktree management (`wt` commands)
-- **[superpowers](https://github.com/obra/superpowers)** — skill library for AI agents (run via `lf sp:<skill>`)
+**Coding Agents**
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — Anthropic's coding agent (default)
+- [Codex CLI](https://github.com/openai/codex) — OpenAI's coding agent
+- [Gemini CLI](https://github.com/google-gemini/gemini-cli) — Google's coding agent
+- [RAMS](https://github.com/loopflowstudio/rams) — design review agent (global tasks via `~/.claude/commands/`)
+
+**IDE & Terminals**
+- [Cursor](https://cursor.sh) — AI-powered code editor
+- [Warp](https://www.warp.dev) — modern terminal
+
+**Worktrees & Skills**
+- [worktrunk](https://github.com/loopflowstudio/worktrunk) — git worktree management (`wt` commands)
+- [superpowers](https://github.com/obra/superpowers) — skill library (run via `lf sp:<skill>`)
 
 ## Requirements
 
-macOS. Works with [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex CLI](https://github.com/openai/codex), or [Gemini CLI](https://github.com/google-gemini/gemini-cli).
+macOS.
 
 ## License
 

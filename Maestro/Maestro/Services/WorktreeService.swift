@@ -48,6 +48,7 @@ struct WorktreeService {
     }
 
     private let sessionService = SessionService()
+    @MainActor private static var lfopsCompatible: Bool?
 
     private func runProcessWithStatus(
         _ executable: URL,
@@ -86,7 +87,8 @@ struct WorktreeService {
     }
 
     func list(in repoURL: URL) async throws -> [Worktree] {
-        if let lfopsURL = findCommand("lfops") {
+        let lfopsCompatible = await getLfopsCompatible()
+        if lfopsCompatible != false, let lfopsURL = findCommand("lfops") {
             do {
                 let (output, status) = try await runProcessWithStatus(
                     lfopsURL,
@@ -96,12 +98,21 @@ struct WorktreeService {
                 LoggingService.append("""
                 worktrees.list command=lfops status=\(status) bytes=\(output.utf8.count)
                 """)
-                if let worktrees = try? await decodeWorktrees(from: output, source: "lfops") {
+                if status == 0, let worktrees = try? await decodeWorktrees(from: output, source: "lfops") {
+                    await setLfopsCompatible(true)
                     return worktrees
+                }
+                if output.contains("No such command 'wt'") {
+                    await setLfopsCompatible(false)
+                    LoggingService.append("worktrees.list command=lfops status=disabled reason=no-wt-command")
                 }
             } catch {
                 // Fall back to wt directly if lfops doesn't support wt or isn't working.
                 LoggingService.append("worktrees.list command=lfops error=\(error.localizedDescription)")
+                if error.localizedDescription.contains("No such command 'wt'") {
+                    await setLfopsCompatible(false)
+                    LoggingService.append("worktrees.list command=lfops status=disabled reason=no-wt-command")
+                }
             }
         }
 
@@ -114,6 +125,9 @@ struct WorktreeService {
         LoggingService.append("""
         worktrees.list command=wt status=\(status) bytes=\(output.utf8.count)
         """)
+        if status != 0 {
+            throw WorktreeError.commandFailed(output)
+        }
         return try await decodeWorktrees(from: output, source: "wt")
     }
 
@@ -147,6 +161,14 @@ struct WorktreeService {
         }
         LoggingService.append("worktrees.parse source=\(source) count=\(worktrees.count)")
         return worktrees
+    }
+
+    private func getLfopsCompatible() async -> Bool? {
+        await MainActor.run { WorktreeService.lfopsCompatible }
+    }
+
+    private func setLfopsCompatible(_ value: Bool) async {
+        await MainActor.run { WorktreeService.lfopsCompatible = value }
     }
 
     func create(name: String, in repoURL: URL, baseBranch: String? = nil) async throws {

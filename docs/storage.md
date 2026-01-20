@@ -117,7 +117,7 @@ Internal documentation that survives across PRs. Architecture, decisions, contex
 |---|---|---|
 | **Audience** | Maintainers | Users |
 | **Tone** | Working notes | Polished |
-| **Who writes** | Humans + agents | Humans |
+| **Who writes** | Mostly agents, humans edit | Humans |
 | **Example** | "Why we chose JWT over sessions" | "How to authenticate API requests" |
 
 ### `docs/` — Public Documentation

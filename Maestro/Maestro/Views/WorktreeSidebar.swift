@@ -720,6 +720,15 @@ struct WorktreeRow: View {
 
     private var statusBadge: some View {
         HStack(spacing: 6) {
+            // CI status badge
+            if let ci = worktree.ciStatus {
+                Image(systemName: ci.icon)
+                    .font(.system(size: 10))
+                    .foregroundStyle(ci.color)
+                    .help("CI: \(ci.rawValue)")
+                    .accessibilityIdentifier("worktree-ci-badge")
+            }
+
             if let task = worktree.lastCompletedTask ?? worktree.lastTask {
                 stageBadge(task)
             }

@@ -1,5 +1,6 @@
 import XCTest
 
+@MainActor
 final class WorktreeSidebarUITests: XCTestCase {
     func testEmptyStateCopy() {
         let app = XCUIApplication()

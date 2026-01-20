@@ -220,6 +220,49 @@ struct WorktreeService {
         }
     }
 
+    func getCIStatus(for branch: String, in repoURL: URL) async -> CIStatus {
+        guard let ghURL = findCommand("gh") else {
+            return .unknown
+        }
+        do {
+            let (output, status) = try await runProcessWithStatus(
+                ghURL,
+                ["pr", "checks", branch, "--json", "state", "-q", ".[].state"],
+                in: repoURL
+            )
+            if status != 0 {
+                return .unknown
+            }
+            let states = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                .split(separator: "\n")
+                .map { String($0) }
+
+            if states.isEmpty {
+                return .unknown
+            }
+            if states.contains("FAILURE") || states.contains("ERROR") {
+                return .failing
+            }
+            if states.contains("PENDING") || states.contains("QUEUED") || states.contains("IN_PROGRESS") {
+                return .pending
+            }
+            if states.allSatisfy({ $0 == "SUCCESS" || $0 == "SKIPPED" || $0 == "NEUTRAL" }) {
+                return .passing
+            }
+            return .unknown
+        } catch {
+            return .unknown
+        }
+    }
+
+    func getCIStatusForAll(_ worktrees: [Worktree], in repoURL: URL) async -> [String: CIStatus] {
+        var results: [String: CIStatus] = [:]
+        for worktree in worktrees where worktree.prNumber != nil {
+            results[worktree.branch] = await getCIStatus(for: worktree.branch, in: repoURL)
+        }
+        return results
+    }
+
     func branchIsPushed(_ branch: String, in repoURL: URL) async -> Bool {
         do {
             let output = try await runProcess(

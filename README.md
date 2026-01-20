@@ -80,7 +80,10 @@ Run `lf init` to install Claude Code, worktrunk, and configure preferences.
 
 **Tools**
 - [worktrunk](https://github.com/loopflowstudio/worktrunk) — git worktree management (`wt` commands)
-- [superpowers](https://github.com/obra/superpowers) — skill library (`lf sp:<skill>`)
+
+**Skill Libraries**
+- [superpowers](https://github.com/obra/superpowers) — prompt library (`lf sp:<skill>`)
+- [rams](https://rams.ai) — accessibility and visual design review
 
 ## Requirements
 

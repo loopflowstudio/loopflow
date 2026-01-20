@@ -1044,3 +1044,23 @@ def test_schedule_first_run_beyond_grace():
     # No last_run, but zero grace period means prev_time is stale
     result = should_trigger_cron("* * * * *", None, grace_period=timedelta(seconds=0))
     assert result is False
+
+
+# Iteration branch prefix tests
+
+
+def test_iteration_branch_prefix_strips_main_suffix():
+    """_iteration_branch_prefix strips -main suffix."""
+    from loopflow.lfd.loop_runner import _iteration_branch_prefix
+
+    assert _iteration_branch_prefix("product-engineer-main") == "product-engineer"
+    assert _iteration_branch_prefix("product-engineer-1-main") == "product-engineer-1"
+    assert _iteration_branch_prefix("test-main") == "test"
+
+
+def test_iteration_branch_prefix_without_suffix():
+    """_iteration_branch_prefix handles edge case without -main suffix."""
+    from loopflow.lfd.loop_runner import _iteration_branch_prefix
+
+    # Shouldn't happen in practice, but function handles it gracefully
+    assert _iteration_branch_prefix("product-engineer") == "product-engineer"

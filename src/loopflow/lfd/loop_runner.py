@@ -42,6 +42,17 @@ SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 SCHEDULER_POLL_INTERVAL = 30  # seconds between slot checks
 
 
+def _iteration_branch_prefix(loop_main: str) -> str:
+    """Derive iteration branch prefix from loop-main.
+
+    'product-engineer-main' → 'product-engineer'
+    'product-engineer-1-main' → 'product-engineer-1'
+    """
+    if loop_main.endswith("-main"):
+        return loop_main[:-5]
+    return loop_main
+
+
 def _scheduler_call(method: str, params: dict | None = None) -> dict | None:
     """Make a synchronous call to the daemon scheduler.
 
@@ -173,7 +184,8 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
     config = load_config(loop.repo)
 
     # Create iteration branch from loop-main
-    branch = f"{loop.goal_name}/{iteration:03d}"
+    prefix = _iteration_branch_prefix(loop.loop_main)
+    branch = f"{prefix}/{iteration:03d}"
     try:
         worktree_path = create_worktree(loop.repo, branch, base=loop.loop_main)
     except WorktreeError as e:

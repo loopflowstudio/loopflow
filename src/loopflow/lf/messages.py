@@ -88,7 +88,13 @@ def _extract_json_payload(text: str) -> dict | None:
     except json.JSONDecodeError:
         pass
 
-    start = text.find("{")
+    # Look for ```json fence first to avoid matching {placeholders} in prose
+    search_start = 0
+    json_fence = text.find("```json")
+    if json_fence != -1:
+        search_start = json_fence
+
+    start = text.find("{", search_start)
     end = text.rfind("}")
     if start == -1 or end == -1 or start >= end:
         return None

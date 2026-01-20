@@ -44,6 +44,7 @@ def _init_db(db_path: Path) -> None:
             cron TEXT,
             area TEXT,
             pid INTEGER,
+            last_main_sha TEXT,
             created_at TEXT NOT NULL,
             UNIQUE(type, goal, repo)
         );
@@ -346,8 +347,8 @@ def save_loop(loop: Loop, db_path: Path | None = None) -> None:
         """
         INSERT OR REPLACE INTO loops
         (id, type, goal, repo, loop_main, status, iteration, pr_limit, merge_mode,
-         project_file, pathset, cron, area, pid, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         project_file, pathset, cron, area, pid, last_main_sha, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             loop.id,
@@ -364,6 +365,7 @@ def save_loop(loop: Loop, db_path: Path | None = None) -> None:
             loop.cron,
             loop.area,
             loop.pid,
+            loop.last_main_sha,
             loop.created_at.isoformat(),
         ),
     )
@@ -463,6 +465,21 @@ def update_loop_pid(
     return updated
 
 
+def update_loop_last_sha(
+    loop_id: str, sha: str | None, db_path: Path | None = None
+) -> bool:
+    """Update a loop's last_main_sha (for subscribe loops)."""
+    conn = _get_db(db_path)
+    cursor = conn.execute(
+        "UPDATE loops SET last_main_sha = ? WHERE id = ? OR id LIKE ?",
+        (sha, loop_id, f"{loop_id}%"),
+    )
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    return updated
+
+
 def delete_loop(loop_id: str, db_path: Path | None = None) -> bool:
     """Delete a loop and its runs."""
     conn = _get_db(db_path)
@@ -509,6 +526,7 @@ def _loop_from_row(row: dict) -> Loop:
         cron=row.get("cron"),
         area=row.get("area"),
         pid=row.get("pid"),
+        last_main_sha=row.get("last_main_sha"),
         created_at=datetime.fromisoformat(row["created_at"]),
     )
 

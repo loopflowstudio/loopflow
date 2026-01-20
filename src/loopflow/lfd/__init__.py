@@ -152,6 +152,7 @@ def loop(
     goal: str = typer.Argument(..., help="Goal name from .lf/goals/"),
     area: str = typer.Option(None, "-a", "--area", help="Area of responsibility (pathset override)"),
     limit: int = typer.Option(None, "-l", "--limit", help="PR limit override"),
+    merge_mode: str = typer.Option(None, "--merge-mode", help="Merge mode: pr or land"),
     foreground: bool = typer.Option(False, "-f", "--foreground", help="Run in foreground"),
 ):
     """Start a continuous homeostasis loop."""
@@ -169,12 +170,24 @@ def loop(
             typer.echo(f"Available goals: {', '.join(available)}")
         raise typer.Exit(1)
 
+    # Validate merge_mode if specified
+    if merge_mode and merge_mode not in ("pr", "land"):
+        typer.echo(f"{c['red']}Error:{c['reset']} merge-mode must be 'pr' or 'land'", err=True)
+        raise typer.Exit(1)
+
     # Create or get loop
     lp = create_loop(LoopType.LOOP, goal, repo, area=area)
 
-    # Override pr_limit if specified
+    # Override settings if specified
+    changed = False
     if limit is not None:
         lp.pr_limit = limit
+        changed = True
+    if merge_mode:
+        from loopflow.lfd.models import MergeMode
+        lp.merge_mode = MergeMode(merge_mode)
+        changed = True
+    if changed:
         from loopflow.lfd.db import save_loop
         save_loop(lp)
 
@@ -205,10 +218,15 @@ def loop(
 @app.command()
 def flow(
     goal: str = typer.Argument(..., help="Goal name from .lf/goals/"),
-    project: str = typer.Option(..., "--project", "-p", help="Project file path"),
+    project: str = typer.Option(None, "--project", "-p", help="Project/prompt file path"),
+    paste: bool = typer.Option(False, "-v", "--paste", help="Include clipboard as prompt"),
     area: str = typer.Option(None, "-r", help="Area of responsibility (pathset override)"),
 ):
-    """Start a one-off flow until project is done."""
+    """Start a one-off flow (runs once then stops).
+
+    The flow runs a single iteration of the goal's pipeline, optionally with
+    additional context from a project file or clipboard.
+    """
     c = _colors()
     repo = get_repo_from_cwd()
     if not repo:
@@ -220,21 +238,41 @@ def flow(
         typer.echo(f"{c['red']}Error:{c['reset']} Goal '{goal}' not found", err=True)
         raise typer.Exit(1)
 
-    # Validate project file exists
-    project_path = Path(project)
-    if not project_path.is_absolute():
-        project_path = repo / project
-    if not project_path.exists():
-        typer.echo(f"{c['red']}Error:{c['reset']} Project file not found: {project}", err=True)
-        raise typer.Exit(1)
+    # Resolve project file if specified
+    project_file = None
+    if project:
+        project_path = Path(project)
+        if not project_path.is_absolute():
+            project_path = repo / project
+        if not project_path.exists():
+            typer.echo(f"{c['red']}Error:{c['reset']} Project file not found: {project}", err=True)
+            raise typer.Exit(1)
+        project_file = str(project_path)
+
+    # Handle clipboard paste - write to temp file if provided
+    if paste:
+        import subprocess
+        result = subprocess.run(["pbpaste"], capture_output=True, text=True)
+        if result.returncode == 0 and result.stdout.strip():
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+                f.write(result.stdout)
+                if project_file:
+                    # Append clipboard to project file content
+                    typer.echo(f"{c['yellow']}Note:{c['reset']} Both -p and -v provided; clipboard appended to project file")
+                else:
+                    project_file = f.name
 
     # Create or get loop
-    lp = create_loop(LoopType.FLOW, goal, repo, area=area, project_file=str(project_path))
+    lp = create_loop(LoopType.FLOW, goal, repo, area=area, project_file=project_file)
 
     # Start it
     if start_loop(lp.id):
         typer.echo(f"{c['green']}Started{c['reset']} flow {c['bold']}{goal}{c['reset']} ({lp.short_id()})")
-        typer.echo(f"  Project: {project}")
+        if project:
+            typer.echo(f"  Project: {project}")
+        if paste:
+            typer.echo(f"  Clipboard: included")
         if area:
             typer.echo(f"  Area: {area}")
     else:

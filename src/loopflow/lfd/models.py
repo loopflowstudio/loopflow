@@ -54,6 +54,7 @@ class Loop:
     area: str | None = None           # area of responsibility override
 
     pid: int | None = None            # process ID when running
+    last_main_sha: str | None = None  # for subscribe: last seen main SHA
     created_at: datetime = field(default_factory=datetime.now)
 
     def short_id(self) -> str:

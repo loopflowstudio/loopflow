@@ -265,11 +265,31 @@ class Server:
                     self.subscriptions.pop(writer, None)
 
     async def _periodic_check(self) -> None:
-        """Periodically update dead processes."""
+        """Periodically update dead processes and check triggers."""
+        from loopflow.lfd.schedule import run_schedule_check
+        from loopflow.lfd.subscribe import run_subscription_check
+
         while self._running:
             try:
                 await asyncio.sleep(30)
                 update_dead_runs()
+
+                # Check subscription triggers (file changes on main)
+                triggered_subs = run_subscription_check()
+                for loop_id in triggered_subs:
+                    await self._broadcast(Event("loop.triggered", {
+                        "loop_id": loop_id,
+                        "trigger": "subscription",
+                    }))
+
+                # Check schedule triggers (cron)
+                triggered_scheds = run_schedule_check()
+                for loop_id in triggered_scheds:
+                    await self._broadcast(Event("loop.triggered", {
+                        "loop_id": loop_id,
+                        "trigger": "schedule",
+                    }))
+
             except asyncio.CancelledError:
                 break
             except Exception:

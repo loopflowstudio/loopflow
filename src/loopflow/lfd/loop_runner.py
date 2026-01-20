@@ -93,19 +93,26 @@ def _scheduler_release(run_id: str) -> None:
 
 
 def run_loop_iterations(loop: Loop) -> None:
-    """Run loop iterations until PR limit is reached or error occurs."""
+    """Run loop iterations until PR limit is reached or error occurs.
+
+    For FLOW loops, runs exactly one iteration then stops.
+    For LOOP loops, runs continuously until pr_limit outstanding.
+    """
+    from loopflow.lfd.models import LoopType
+
     while True:
-        # Check if we should pause (per-loop limit)
-        outstanding = count_outstanding(loop)
-        if outstanding >= loop.pr_limit:
-            update_loop_status(loop.id, LoopStatus.WAITING)
-            notify_event("loop.waiting", {
-                "loop_id": loop.id,
-                "goal": loop.goal_name,
-                "outstanding": outstanding,
-                "limit": loop.pr_limit,
-            })
-            break
+        # Check if we should pause (per-loop limit) - skip for FLOW which runs once
+        if loop.type != LoopType.FLOW:
+            outstanding = count_outstanding(loop)
+            if outstanding >= loop.pr_limit:
+                update_loop_status(loop.id, LoopStatus.WAITING)
+                notify_event("loop.waiting", {
+                    "loop_id": loop.id,
+                    "goal": loop.goal_name,
+                    "outstanding": outstanding,
+                    "limit": loop.pr_limit,
+                })
+                break
 
         # Run one iteration
         iteration = loop.iteration + 1
@@ -138,6 +145,11 @@ def run_loop_iterations(loop: Loop) -> None:
             break
         finally:
             _scheduler_release(run_id)
+
+        # FLOW loops run exactly once then stop
+        if loop.type == LoopType.FLOW:
+            update_loop_status(loop.id, LoopStatus.IDLE)
+            break
 
     # Clear pid when done
     update_loop_pid(loop.id, None)
@@ -238,6 +250,16 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
         # Inject goal content
         task_file, task_content = components.task
         goal_section = f"<lf:goal:{loop.goal_name}>\n{goal_spec.content}\n</lf:goal:{loop.goal_name}>"
+
+        # For FLOW loops, inject project file content if present
+        from loopflow.lfd.models import LoopType
+        if loop.type == LoopType.FLOW and loop.project_file:
+            try:
+                prompt_content = Path(loop.project_file).read_text()
+                goal_section += f"\n\n<lf:prompt>\n{prompt_content}\n</lf:prompt>"
+            except OSError:
+                pass  # Project file may have been removed
+
         combined = f"{goal_section}\n\n---\n\n{task_content}"
         components = components._replace(task=(task_file, combined))
 
@@ -366,28 +388,51 @@ def _auto_merge_pr(worktree_path: Path) -> bool:
     return result.returncode == 0
 
 
-def _land_to_main(loop: Loop) -> bool:
-    """Land loop-main to main via squash merge."""
-    # Create PR from loop-main to main and merge it
+def _land_to_main(loop: Loop) -> str | None:
+    """Create or update PR from loop-main → main, enable auto-merge.
+
+    Returns PR URL on success, None on failure.
+    Works from main repo (not worktree, which gets deleted).
+    Idempotent: existing PR just gets auto-merge re-enabled.
+    """
+    repo = loop.repo
+
+    # Push loop-main
+    subprocess.run(["git", "push", "origin", loop.loop_main], cwd=repo, capture_output=True)
+
+    # Check for existing PR
+    result = subprocess.run(
+        ["gh", "pr", "list", "--head", loop.loop_main, "--base", "main",
+         "--json", "number,url", "--state", "open"],
+        cwd=repo, capture_output=True, text=True,
+    )
+    existing = json.loads(result.stdout) if result.returncode == 0 and result.stdout.strip() else []
+
+    if existing:
+        # PR exists - ensure auto-merge is enabled
+        pr_number = existing[0]["number"]
+        subprocess.run(
+            ["gh", "pr", "merge", str(pr_number), "--squash", "--auto"],
+            cwd=repo, capture_output=True,
+        )
+        return existing[0]["url"]
+
+    # Create new PR
     result = subprocess.run(
         ["gh", "pr", "create", "--base", "main", "--head", loop.loop_main,
          "--title", f"[{loop.goal_name}] Land accumulated work",
-         "--body", f"Auto-landing from loop: {loop.goal_name}"],
-        cwd=loop.repo,
-        capture_output=True,
-        text=True,
+         "--body", f"Auto-land from loop: {loop.goal_name}"],
+        cwd=repo, capture_output=True, text=True,
     )
     if result.returncode != 0:
-        return False
+        return None
 
-    # Merge the PR
-    result = subprocess.run(
-        ["gh", "pr", "merge", "--squash", "--auto"],
-        cwd=loop.repo,
-        capture_output=True,
-        text=True,
-    )
-    return result.returncode == 0
+    pr_url = result.stdout.strip()
+
+    # Enable auto-merge on the new PR
+    subprocess.run(["gh", "pr", "merge", "--squash", "--auto"], cwd=repo, capture_output=True)
+
+    return pr_url
 
 
 def _cleanup_worktree(repo: Path, worktree_path: Path, branch: str) -> None:

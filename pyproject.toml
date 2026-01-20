@@ -31,6 +31,7 @@ dependencies = [
     "pydantic>=2.12.5",
     "tiktoken>=0.7.0",
     "asana>=5.0.0",
+    "croniter>=2.0",
 ]
 
 [project.urls]

@@ -10,7 +10,7 @@ import typer
 from loopflow.lf.config import load_config
 from loopflow.lf.context import find_worktree_root
 from loopflow.lf.design import clear_design_artifacts
-from loopflow.lf.git import GitError, find_main_repo, get_current_branch, open_pr
+from loopflow.lf.git import GitError, ensure_ready_pr, find_main_repo, get_current_branch, is_draft_pr, open_pr
 from loopflow.lf.messages import generate_commit_message_from_diff, generate_pr_message
 from loopflow.lf.worktrees import get_path
 from loopflow.lfops._helpers import (
@@ -81,6 +81,11 @@ def _clear_design_and_push(repo_root: Path) -> bool:
     subprocess.run(["git", "commit", "-m", "clear .design/"], cwd=repo_root, check=True)
     subprocess.run(["git", "push"], cwd=repo_root, check=True)
     return True
+
+
+def _auto_merge_not_allowed(message: str) -> bool:
+    lowered = message.lower()
+    return "auto merge is not allowed" in lowered or "enablepullrequestautomerge" in lowered
 
 
 def _squash_commits(repo_root: Path, base_ref: str, commit_msg: str) -> None:
@@ -323,6 +328,12 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
             capture_output=True,
         )
 
+    if is_draft_pr(repo_root, pr_number):
+        typer.echo("Marking PR as ready for review...")
+        if not ensure_ready_pr(repo_root, pr_number):
+            typer.echo("Error: Failed to mark PR as ready", err=True)
+            raise typer.Exit(1)
+
     # Enable auto-merge on the PR
     # With merge queue enabled, this queues the PR for merge after CI passes
     typer.echo(f"Enabling auto-merge for PR #{pr_number}: {title}")
@@ -330,10 +341,18 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
     if body:
         merge_cmd.extend(["--body", body])
     result = subprocess.run(merge_cmd, cwd=repo_root, capture_output=True, text=True)
+    auto_merge_enabled = True
     if result.returncode != 0:
         error_msg = result.stderr.strip() or result.stdout.strip() or "auto-merge failed"
-        typer.echo(f"Error: {error_msg}", err=True)
-        raise typer.Exit(1)
+        if _auto_merge_not_allowed(error_msg):
+            auto_merge_enabled = False
+            typer.echo(
+                "Auto-merge is disabled for this repo. Enable it in repo settings or merge manually after CI passes.",
+                err=True,
+            )
+        else:
+            typer.echo(f"Error: {error_msg}", err=True)
+            raise typer.Exit(1)
 
     # Get PR URL and open in browser
     result = subprocess.run(
@@ -347,7 +366,11 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
         subprocess.run(["open", pr_url])
 
     was_in_worktree = repo_root != main_repo
-    typer.echo(f"PR #{pr_number} queued for merge. Will merge when CI passes.")
+    if auto_merge_enabled:
+        typer.echo(f"PR #{pr_number} queued for merge. Will merge when CI passes.")
+    else:
+        typer.echo(f"PR #{pr_number} not queued for auto-merge.")
+        typer.echo("Enable auto-merge in repo settings or run `gh pr merge --squash` after CI passes.")
     typer.echo(f"Run 'wt remove {branch}' after merge completes.")
 
     if was_in_worktree:

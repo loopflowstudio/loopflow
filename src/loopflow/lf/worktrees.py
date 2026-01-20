@@ -237,7 +237,10 @@ def is_merged(wt: Worktree, repo_root: Path, base_branch: str = "main") -> bool:
         return False
     if wt.is_dirty:
         return False
-    if wt.pr_state == "merged":
+
+    # Check PR state - from wt list or via gh pr view fallback
+    pr_state = wt.pr_state or get_pr_state(repo_root, wt.branch)
+    if pr_state == "merged":
         return True
 
     # Check if branch is ancestor of origin/base_branch (handles squash merges)

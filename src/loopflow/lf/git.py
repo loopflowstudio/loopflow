@@ -1,4 +1,5 @@
 """Git operations for push and PR automation."""
+import json
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -201,6 +202,50 @@ def ensure_draft_pr(repo_root: Path) -> str | None:
     if result.returncode == 0:
         return result.stdout.strip()
     return None
+
+
+def _get_pr_info(repo_root: Path, pr_number: int | None = None) -> dict | None:
+    cmd = ["gh", "pr", "view", "--json", "number,isDraft"]
+    if pr_number is not None:
+        cmd.insert(3, str(pr_number))
+    result = subprocess.run(
+        cmd,
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    return json.loads(result.stdout)
+
+
+def is_draft_pr(repo_root: Path, pr_number: int | None = None) -> bool | None:
+    """Return True if PR is a draft, False if ready, None if not found."""
+    info = _get_pr_info(repo_root, pr_number)
+    if not info:
+        return None
+    return bool(info.get("isDraft", False))
+
+
+def ensure_ready_pr(repo_root: Path, pr_number: int | None = None) -> bool:
+    """Mark draft PR as ready. Returns True if ready or updated."""
+    info = _get_pr_info(repo_root, pr_number)
+    if not info:
+        return False
+    if not info.get("isDraft", False):
+        return True
+
+    cmd = ["gh", "pr", "ready"]
+    number = pr_number or info.get("number")
+    if number is not None:
+        cmd.append(str(number))
+    result = subprocess.run(
+        cmd,
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
 
 
 def update_pr(

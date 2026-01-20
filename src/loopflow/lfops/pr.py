@@ -6,7 +6,7 @@ import subprocess
 import typer
 
 from loopflow.lf.context import find_worktree_root
-from loopflow.lf.git import GitError, open_pr
+from loopflow.lf.git import GitError, ensure_ready_pr, is_draft_pr, open_pr
 from loopflow.lf.messages import generate_pr_message
 from loopflow.lfops._helpers import add_commit_push
 
@@ -98,6 +98,11 @@ def register_commands(app: typer.Typer) -> None:
             except GitError as e:
                 typer.echo(f"Error: {e}", err=True)
                 raise typer.Exit(1)
+            if is_draft_pr(repo_root):
+                if not ensure_ready_pr(repo_root):
+                    typer.echo("Error: Failed to mark PR as ready", err=True)
+                    raise typer.Exit(1)
+                typer.echo("Marked PR as ready for review")
             typer.echo(f"Updated: {pr_url}")
         else:
             typer.echo("Creating PR...")
@@ -110,6 +115,11 @@ def register_commands(app: typer.Typer) -> None:
             except GitError as e:
                 typer.echo(f"Error: {e}", err=True)
                 raise typer.Exit(1)
+            if is_draft_pr(repo_root):
+                if not ensure_ready_pr(repo_root):
+                    typer.echo("Error: Failed to mark PR as ready", err=True)
+                    raise typer.Exit(1)
+                typer.echo("Marked PR as ready for review")
             typer.echo(f"Created: {pr_url}")
 
         subprocess.run(["open", pr_url])

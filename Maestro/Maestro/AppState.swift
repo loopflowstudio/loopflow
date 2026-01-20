@@ -62,6 +62,9 @@ final class AppState {
     var errorMessage: String?
     var agentsAvailable: Bool = false
 
+    // Daemon connection state
+    var lfdConnected: Bool = false
+
     // Services
     private let worktreeService = WorktreeService()
     private let configLoader = ConfigLoader()
@@ -72,11 +75,15 @@ final class AppState {
     private let voiceService = VoiceService()
     private let contextPreviewService = ContextPreviewService()
     private let resultsService = ResultsService()
+    private let gitWatcher = GitWatcherService()
 
     func openRepo(_ url: URL) async {
         currentRepo = url
         isLoading = true
         errorMessage = nil
+
+        // Start native git watching (works without lfd)
+        await startGitWatching(repo: url)
 
         // Ensure daemon is running on first launch
         let setupService = SetupService()
@@ -152,6 +159,11 @@ final class AppState {
 
             // Auto-create draft PRs for pushed branches without PRs
             await createDraftPRsIfNeeded(in: repo)
+
+            // Detect staleness asynchronously (don't block UI)
+            Task {
+                await detectStaleness()
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -172,6 +184,19 @@ final class AppState {
             Task.detached { [worktreeService] in
                 let worktreeURL = URL(fileURLWithPath: worktree.path)
                 try? await worktreeService.createDraftPR(branch: worktree.branch, in: worktreeURL)
+            }
+        }
+    }
+
+    private func detectStaleness() async {
+        guard let repo = currentRepo else { return }
+
+        let stalenessMap = await worktreeService.detectStalenessForAll(worktrees, in: repo)
+
+        // Update worktrees with staleness info
+        for i in worktrees.indices {
+            if let staleness = stalenessMap[worktrees[i].branch] {
+                worktrees[i].staleness = staleness
             }
         }
     }
@@ -221,18 +246,40 @@ final class AppState {
         eventService = LFDEventService()
 
         Task {
-            try? await eventService?.subscribe(
-                to: ["worktree.*", "session.*", "output.line"]
-            ) { [weak self] event in
-                Task { @MainActor in
-                    switch event {
-                    case .worktree:
-                        await self?.refreshWorktrees()
-                    case .session(let sessionEvent):
-                        self?.handleSessionEvent(sessionEvent)
-                    case .output(let outputEvent):
-                        self?.handleOutputEvent(outputEvent)
+            await eventService?.subscribe(
+                to: ["worktree.*", "session.*", "output.line"],
+                onEvent: { [weak self] event in
+                    Task { @MainActor in
+                        switch event {
+                        case .worktree:
+                            await self?.refreshWorktrees()
+                        case .session(let sessionEvent):
+                            self?.handleSessionEvent(sessionEvent)
+                        case .output(let outputEvent):
+                            self?.handleOutputEvent(outputEvent)
+                        }
                     }
+                },
+                onConnectionChange: { [weak self] connected in
+                    Task { @MainActor in
+                        self?.lfdConnected = connected
+                    }
+                }
+            )
+        }
+    }
+
+    private func startGitWatching(repo: URL) async {
+        await gitWatcher.watch(repo: repo) { [weak self] change in
+            Task { @MainActor in
+                switch change {
+                case .worktrees:
+                    await self?.refreshWorktrees()
+                case .refs:
+                    await self?.refreshWorktrees()  // Commits affect worktree display
+                case .index:
+                    // Index changes affect diff - could add refreshDiff() later
+                    break
                 }
             }
         }

@@ -212,6 +212,55 @@ func createDraftPR(branch: String, in worktreePath: URL) async throws {
             }
     }
 
+    func detectStaleness(for worktree: Worktree, in repoURL: URL) async -> Staleness {
+        // Skip main branch - it's never stale
+        if worktree.branch == "main" || worktree.branch == "master" {
+            return .active
+        }
+
+        // Check if branch is merged to main
+        if let merged = try? await runGit(["branch", "--merged", "main"], in: repoURL) {
+            let mergedBranches = merged.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+            if mergedBranches.contains(worktree.branch) {
+                return .merged
+            }
+        }
+
+        // Check if remote tracking branch exists
+        let remoteRef = "refs/remotes/origin/\(worktree.branch)"
+        let refExists = try? await runGit(["show-ref", "--verify", remoteRef], in: repoURL)
+        if refExists == nil && worktree.prNumber != nil {
+            // Had a PR but remote branch is gone → merged and cleaned up
+            return .remoteDeleted
+        }
+
+        // Check last commit date
+        if let lastCommitTime = try? await runGit(["log", "-1", "--format=%ct", worktree.branch], in: repoURL) {
+            let trimmed = lastCommitTime.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let timestamp = Double(trimmed) {
+                let age = Date().timeIntervalSince1970 - timestamp
+                let days = Int(age / 86400)
+                if days > 14 {
+                    return .inactive(days: days)
+                }
+            }
+        }
+
+        return .active
+    }
+
+    func detectStalenessForAll(_ worktrees: [Worktree], in repoURL: URL) async -> [String: Staleness] {
+        var results: [String: Staleness] = [:]
+        for worktree in worktrees {
+            results[worktree.branch] = await detectStaleness(for: worktree, in: repoURL)
+        }
+        return results
+    }
+
+    private func runGit(_ args: [String], in directory: URL) async throws -> String {
+        try await runProcess(URL(fileURLWithPath: "/usr/bin/git"), args, in: directory)
+    }
+
     func getGitHubCompareURL(branch: String, in repoURL: URL, base: String = "main") async throws -> URL? {
         let remoteURL = try await runProcess(URL(fileURLWithPath: "/usr/bin/git"), ["remote", "get-url", "origin"], in: repoURL)
             .trimmingCharacters(in: .whitespacesAndNewlines)

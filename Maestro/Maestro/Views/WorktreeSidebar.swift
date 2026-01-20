@@ -156,6 +156,12 @@ struct WorktreeSidebar: View {
 
             Spacer()
 
+            // lfd connection indicator
+            Circle()
+                .fill(appState.lfdConnected ? Color.green : Color.gray.opacity(0.5))
+                .frame(width: 6, height: 6)
+                .help(appState.lfdConnected ? "Connected to lfd daemon" : "lfd daemon not connected (using file watcher)")
+
             Button {
                 showingNewWorktreeSheet = true
             } label: {
@@ -515,6 +521,11 @@ struct WorktreeRow: View {
             HStack {
                 Text(worktree.branch)
                     .fontWeight(.medium)
+                    .foregroundStyle(worktree.staleness.isStale ? .secondary : .primary)
+
+                if worktree.staleness.isStale {
+                    stalenessBadge
+                }
 
                 Spacer()
 
@@ -723,6 +734,33 @@ struct WorktreeRow: View {
         .background(style.color.opacity(0.2))
         .foregroundStyle(style.color)
         .clipShape(Capsule())
+    }
+
+    @ViewBuilder
+    private var stalenessBadge: some View {
+        let (icon, color, text): (String, Color, String) = {
+            switch worktree.staleness {
+            case .active:
+                return ("", .clear, "")
+            case .merged:
+                return ("checkmark.circle.fill", .green, "Merged")
+            case .remoteDeleted:
+                return ("xmark.circle.fill", .orange, "Remote deleted")
+            case .inactive(let days):
+                return ("moon.zzz.fill", .gray, "\(days)d inactive")
+            }
+        }()
+
+        if worktree.staleness.isStale {
+            HStack(spacing: 2) {
+                Image(systemName: icon)
+                    .font(.system(size: 8))
+                Text(text)
+                    .font(.caption2)
+            }
+            .foregroundStyle(color)
+            .help("This worktree may be ready for cleanup")
+        }
     }
 }
 

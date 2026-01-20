@@ -152,6 +152,4 @@ lfops prune                      # cleanup merged worktrees
 
 ## See Also
 
-- [`lf` command reference](lf.md) — running tasks
-- [Built-in tasks](builtins.md) — debug, design, implement, polish, review
-- [Configuration](config.md) — `.lf/config.yaml` options
+[`lf` reference](lf.md) · [Built-in Tasks](builtins.md) · [Configuration](config.md)

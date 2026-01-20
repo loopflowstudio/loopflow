@@ -21,23 +21,11 @@ lfd subscribe "src/api/**" api-docs-updater
 
 When files matching the pathset change on main, the goal runs one iteration.
 
-### Use Cases
-
-- **Auto-update docs** when API code changes
-- **Regenerate schemas** when models change
-- **Run migrations** when database files change
-- **Update tests** when interfaces change
-
 ### Examples
 
 ```bash
-# Watch API routes, update OpenAPI spec
 lfd subscribe "src/api/routes/**" openapi-updater
-
-# Watch models, regenerate types
 lfd subscribe "src/models/*.py" type-generator
-
-# Watch multiple paths
 lfd subscribe "schema.graphql,src/resolvers/**" graphql-codegen
 ```
 
@@ -67,29 +55,6 @@ Schedules have a 24-hour grace period for laptop use:
 - **9am schedule, computer wakes next week** → skipped (too stale)
 
 This handles laptops that sleep overnight or during commutes.
-
-### Use Cases
-
-- **Daily triage** of issues and PRs
-- **Weekly cleanup** of stale branches
-- **Morning standup prep** gathering status
-- **Periodic refactoring** passes
-
-### Examples
-
-```bash
-# Every morning at 9am
-lfd schedule "0 9 * * *" morning-triage
-
-# Every Monday at 10am
-lfd schedule "0 10 * * MON" weekly-review
-
-# Every 6 hours
-lfd schedule "0 */6 * * *" health-check
-
-# First of month at midnight
-lfd schedule "0 0 1 * *" monthly-cleanup
-```
 
 ### Cron Syntax
 
@@ -167,5 +132,4 @@ Each creates a separate loop instance with its own state.
 
 ## See Also
 
-- [Loops](loops.md) — continuous loops and the lfd daemon
-- [Configuration](config.md) — `.lf/config.yaml` options
+[Loops](loops.md) · [`lfd` reference](lfd.md) · [Configuration](config.md)

@@ -72,45 +72,11 @@ lfd flow designer -v                   # with clipboard content
 
 ## Goals
 
-Goals live in `.lf/goals/` and describe what the agent should do:
-
-```markdown
-# .lf/goals/product-engineer.md
-
-You are a product engineer focused on building user-facing features.
-
-## Ultimate Goal
-
-Ship working features that solve real user problems.
-
-## Each Iteration
-
-Pick ONE implementable task from the area you're responsible for:
-- A feature specified in a design doc
-- A bug that affects users
-- A usability improvement
-
-**Output**: Working code committed to a PR.
-```
-
-List available goals:
+Goals live in `.lf/goals/` and describe what the agent should do. List available goals:
 
 ```bash
 lfd list-goals
 ```
-
-## Commands
-
-| Command | Description |
-|---------|-------------|
-| `lfd loop <goal>` | Start continuous loop |
-| `lfd flow <goal>` | Run single iteration |
-| `lfd status` | Show all loops |
-| `lfd stop <goal>` | Stop a running loop |
-| `lfd prs <goal>` | Show PRs from a loop |
-| `lfd rm <goal>` | Remove loop and history |
-| `lfd serve` | Run daemon in foreground |
-| `lfd install` | Install for auto-start |
 
 ## Options
 
@@ -156,22 +122,6 @@ main
 
 Iteration branches merge to `loop-<goal>` automatically. You review and land `loop-<goal>` → `main` when ready.
 
-## Daemon Management
-
-```bash
-lfd install      # Install launchd service (auto-starts on login)
-lfd uninstall    # Remove launchd service
-lfd serve        # Run in foreground (debugging)
-```
-
-The daemon handles:
-- Running scheduled loops
-- Watching for pathset changes (subscriptions)
-- Managing concurrent iterations
-- Respecting global concurrency limits
-
 ## See Also
 
-- [Triggers](triggers.md) — schedule and subscribe triggers
-- [Configuration](config.md) — `.lf/config.yaml` options
-- [Patterns](patterns.md) — workflows and recipes
+[`lfd` reference](lfd.md) · [Triggers](triggers.md) · [Configuration](config.md)

@@ -38,23 +38,11 @@ Tasks are markdown files in these locations (searched in order):
 
 ### Task Arguments
 
-Pass arguments after a colon:
-
 ```bash
 lf implement: add user authentication
 ```
 
-Inside the task file, use `{args}` as a placeholder:
-
-```markdown
-# .claude/commands/implement.md
-
-Implement the following feature:
-
-{args}
-
-Follow the existing code style.
-```
+Inside task files, `{args}` is replaced with whatever comes after the colon.
 
 ## Context Flags
 
@@ -166,29 +154,12 @@ lf review -c    # shows token breakdown, copies to clipboard
 
 ### External skills
 
-Run skills from external libraries like [superpowers](https://github.com/obra/superpowers):
-
 ```bash
-lf sp:brainstorm              # run brainstorm skill from superpowers
-lf sp:write-plan -m codex     # with a different model
-lf sp:execute-plan -i         # interactive mode
+lf sp:brainstorm    # run skill from superpowers
 ```
 
-External skills use loopflow's context assembly, so they get your repo docs, branch files, and other context that wouldn't be available running them directly.
-
-Configure skill sources in `.lf/config.yaml`:
-
-```yaml
-skill_sources:
-  - name: superpowers
-    prefix: sp
-    path: ~/.superpowers
-```
-
-If `~/.superpowers` exists, it's auto-detected with prefix `sp`.
+If `~/.superpowers` exists, it's auto-detected with prefix `sp`. See [Configuration](config.md) for custom skill sources.
 
 ## See Also
 
-- [Built-in tasks](builtins.md) — debug, design, implement, polish, review
-- [Configuration](config.md) — `.lf/config.yaml` options
-- [Patterns](patterns.md) — workflows and recipes
+[Built-in Tasks](builtins.md) · [Configuration](config.md) · [Patterns](patterns.md)

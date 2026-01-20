@@ -57,20 +57,7 @@ lf debug -v                       # fix it
 
 ## How It Works
 
-Tasks are markdown files in `.claude/commands/` or `.lf/`:
-
-```markdown
-# .claude/commands/review.md
-
-Review the diff on this branch. Fix any issues.
-
-## What to look for
-- Bugs and edge cases
-- Style guide violations
-- Missing tests
-```
-
-Run by name:
+Tasks are markdown files in `.claude/commands/`:
 
 ```bash
 lf review                     # run .claude/commands/review.md
@@ -91,42 +78,19 @@ lfops land                       # merge and cleanup
 
 ## Structured Context
 
-Every session needs the right context. Loopflow assembles it automatically.
-
 ```bash
-lf implement -c    # preview what context goes in
+lf implement -c    # see what the agent sees
 ```
 
 ```
 Tokens: 22,932
 
 files          17,625 ███████████████
-  docs         13,113 ███████████
-  STYLE.md      2,158 █
-  .design       1,239 █
 summary         4,016 ███
-  src/backend   2,500 ██
-  src/frontend  1,516 █
 task              634 ▏
 ```
 
-Configure what's always included:
-
-```yaml
-# .lf/config.yaml
-summary_tokens: 25000
-summaries:
-  - path: src/backend
-  - path: src/frontend
-
-context:
-  - src/schema.py
-  - docs/api.md
-```
-
-Docs, summaries, design specs—assembled automatically. You see what the agent sees.
-
-See [File Storage](storage.md) for the philosophy, [Configuration](config.md) for all options.
+Docs, summaries, branch files—assembled automatically. [Configure what's included →](config.md)
 
 ## Multi-Model
 
@@ -152,10 +116,4 @@ Use your prompts alongside theirs. Any skill, any agent.
 
 ## Next Steps
 
-- [Getting Started](getting-started.md) — install, run the demo, write your first task
-- [`lf` command reference](lf.md) — all flags and options
-- [Built-in tasks](builtins.md) — debug, design, implement, polish, review
-- [`lfops` commands](lfops.md) — pr, land, commit, init, install
-- [File Storage](storage.md) — where things live and why
-- [Configuration](config.md) — `.lf/config.yaml` options
-- [Patterns](patterns.md) — workflows and recipes
+[Getting Started](getting-started.md) · [Built-in Tasks](builtins.md) · [Patterns](patterns.md) · [Configuration](config.md)

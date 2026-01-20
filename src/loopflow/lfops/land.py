@@ -157,13 +157,14 @@ def _rebase_onto_main(repo_root: Path, base_branch: str) -> bool:
 
         # Run agent with the rebase task
         agent_model = task.config.model or (config.agent_model if config else "claude:opus")
-        backend, _ = parse_model(agent_model)
+        backend, model_variant = parse_model(agent_model)
         runner = get_runner(backend)
         rebase_result = runner.launch(
             task.content,
             auto=True,
             stream=True,
             skip_permissions=True,
+            model_variant=model_variant,
             cwd=repo_root,
         )
         if rebase_result.exit_code != 0:

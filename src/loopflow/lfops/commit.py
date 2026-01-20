@@ -78,6 +78,7 @@ def register_commands(app: typer.Typer) -> None:
             auto=True,
             stream=True,
             skip_permissions=True,
+            model_variant=model_variant,
             cwd=repo_root,
         )
 

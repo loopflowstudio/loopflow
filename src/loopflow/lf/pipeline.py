@@ -437,6 +437,7 @@ def _judge_race(
         auto=True,
         stream=False,
         skip_permissions=skip_permissions,
+        model_variant=variant,
         cwd=repo_root,
     )
 

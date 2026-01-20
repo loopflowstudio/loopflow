@@ -42,7 +42,7 @@ struct ConfigLoader {
         var diffFiles: Bool?
         var paste: Bool?
         var voice: VoiceConfig?
-        var summaries: [SummaryConfig]?
+        let summaries: [SummaryConfig]? = nil
 
         let lines = contents.components(separatedBy: .newlines)
         var currentList: String?
@@ -130,6 +130,7 @@ struct ConfigLoader {
             paste: paste,
             voice: voice,
             summaries: summaries,
+            skillSources: nil,  // TODO: parse skill_sources from YAML
             work: nil
         )
     }

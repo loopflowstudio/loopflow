@@ -77,6 +77,13 @@ wt list                       # show all worktrees
 - [Patterns](docs/patterns.md) — workflows and recipes
 - [Command Reference](docs/lf.md) — all flags and options
 
+## Works With
+
+Loopflow plays nicely with:
+
+- **[worktrunk](https://github.com/loopflowstudio/worktrunk)** — git worktree management (`wt` commands)
+- **[superpowers](https://github.com/obra/superpowers)** — skill library for AI agents (run via `lf sp:<skill>`)
+
 ## Requirements
 
 macOS. Works with [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex CLI](https://github.com/openai/codex), or [Gemini CLI](https://github.com/google-gemini/gemini-cli).

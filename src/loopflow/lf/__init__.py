@@ -137,7 +137,7 @@ def _format_task_list() -> str:
     repo_root = find_worktree_root()
     config = load_config(repo_root) if repo_root else None
 
-    user_tasks, builtin_only = list_all_tasks(repo_root)
+    user_tasks, builtin_only, external_skills = list_all_tasks(repo_root, config)
     user_task_set = set(user_tasks)
     all_known_tasks = user_task_set | set(builtin_only)
 
@@ -184,6 +184,21 @@ def _format_task_list() -> str:
             badge = f"  {c['yellow']}interactive{c['reset']}" if info.get("interactive") else ""
             lines.append(f"  {c['bold']}{name:<14}{c['reset']} {c['dim']}{desc:<34}{c['reset']}{badge}")
         lines.append("")
+
+    # External skills section
+    if external_skills:
+        # Group by source
+        by_source: dict[str, list[str]] = {}
+        for prefixed_name, source_name in external_skills:
+            by_source.setdefault(source_name, []).append(prefixed_name)
+
+        lines.append(f"{c['cyan']}{c['bold']}EXTERNAL SKILLS{c['reset']}")
+        lines.append("")
+        for source_name, skill_names in sorted(by_source.items()):
+            lines.append(f"{c['dim']}{source_name}{c['reset']}")
+            for name in skill_names:
+                lines.append(f"  {c['bold']}{name:<20}{c['reset']}")
+            lines.append("")
 
     # Footer
     lines.append(f"{c['dim']}Built-ins work anywhere. Run lf <task> or lf <task>: args{c['reset']}")
@@ -238,8 +253,8 @@ def main():
                 has_file_pipeline = repo_root and load_pipeline(name, repo_root) is not None
                 has_pipeline = has_config_pipeline or has_file_pipeline
 
-                # gather_task now includes builtins
-                has_task = gather_task(repo_root, name) is not None if repo_root else False
+                # gather_task now includes builtins and external skills
+                has_task = gather_task(repo_root, name, config) is not None if repo_root else False
                 # Also check builtin even without repo_root
                 if not has_task and not repo_root:
                     has_task = _get_builtin_task(name) is not None

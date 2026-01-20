@@ -186,3 +186,34 @@ wt remove feature                # delete worktree + branch
 ```
 
 See [worktrunk](https://github.com/loopflowstudio/worktrunk) for the full `wt` command reference.
+
+## Mixing Loopflow and External Skills
+
+Use your own tasks alongside skills from external libraries like [superpowers](https://github.com/obra/superpowers):
+
+```bash
+wt switch --create my-feature
+lf sp:brainstorm: add user auth   # use superpowers brainstorm skill
+lf implement                       # use loopflow implement task
+lf sp:execute-plan                 # use superpowers execution skill
+lf review                          # use loopflow review task
+```
+
+External skills get loopflow's context assembly—your repo docs, branch files, and config—even though they're defined elsewhere. This lets you mix and match: use superpowers' planning skills with loopflow's review workflow.
+
+Configure skill sources in `.lf/config.yaml`:
+
+```yaml
+skill_sources:
+  - name: superpowers
+    prefix: sp
+    path: ~/.superpowers
+```
+
+If `~/.superpowers` exists, it's auto-detected with prefix `sp`.
+
+See all available tasks and skills:
+
+```bash
+lf --list
+```

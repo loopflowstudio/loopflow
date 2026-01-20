@@ -110,6 +110,25 @@ Review the diff on this branch.
 
 Your version takes precedence over the built-in.
 
+## External Skills
+
+Beyond built-ins, loopflow can run skills from external libraries. External skills use a `prefix:name` format:
+
+```bash
+lf sp:brainstorm              # run brainstorm from superpowers
+lf sp:write-plan              # run write-plan from superpowers
+```
+
+External skills get loopflow's full context assembly (docs, diff, branch files) even though they're defined elsewhere.
+
+To see all available tasks including external skills:
+
+```bash
+lf --list
+```
+
+Configure skill sources in `.lf/config.yaml`. See [Configuration](config.md#skill-sources) for details.
+
 ## See Also
 
 - [`lf` command reference](lf.md) — flags and options

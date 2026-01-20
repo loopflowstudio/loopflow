@@ -388,7 +388,7 @@ def run(
         )
 
     # Gather task file to get frontmatter config
-    task_file = gather_task(repo_root, task)
+    task_file = gather_task(repo_root, task, config)
     frontmatter = task_file.config if task_file else TaskConfig()
 
     # Parse voice arg

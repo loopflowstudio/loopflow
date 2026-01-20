@@ -198,8 +198,9 @@ struct PromptLauncher: View {
                 // Dropdown results
                 if isTaskSearchFocused && (!filteredTasks.isEmpty || !filteredPipelines.isEmpty) {
                     VStack(alignment: .leading, spacing: 0) {
-                        // Tasks section
-                        if !filteredTasks.isEmpty {
+                        // Tasks section (local prompts)
+                        let localTasks = filteredTasks.filter { !$0.isExternalSkill }
+                        if !localTasks.isEmpty {
                             Text("Tasks")
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
@@ -207,7 +208,7 @@ struct PromptLauncher: View {
                                 .padding(.top, 6)
                                 .padding(.bottom, 2)
 
-                            ForEach(Array(filteredTasks.enumerated()), id: \.element.id) { index, prompt in
+                            ForEach(Array(localTasks.enumerated()), id: \.element.id) { index, prompt in
                                 Button {
                                     selectTask(prompt)
                                 } label: {
@@ -233,6 +234,44 @@ struct PromptLauncher: View {
                                     .background(index == highlightedTaskIndex ? Color.accentColor.opacity(0.1) : Color.clear)
                                 }
                                 .buttonStyle(.plain)
+                            }
+                        }
+
+                        // External skills section
+                        let externalSkills = filteredTasks.filter { $0.isExternalSkill }
+                        if !externalSkills.isEmpty {
+                            // Group by source
+                            let bySource = Dictionary(grouping: externalSkills) { $0.source.sourceName ?? "external" }
+                            ForEach(Array(bySource.keys.sorted()), id: \.self) { sourceName in
+                                Text(sourceName.capitalized)
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                                    .padding(.horizontal, 10)
+                                    .padding(.top, 6)
+                                    .padding(.bottom, 2)
+
+                                ForEach(Array((bySource[sourceName] ?? []).enumerated()), id: \.element.id) { index, prompt in
+                                    let adjustedIndex = localTasks.count + index
+                                    Button {
+                                        selectTask(prompt)
+                                    } label: {
+                                        HStack {
+                                            Image(systemName: "link")
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                            Text(prompt.displayName)
+                                                .fontWeight(.medium)
+                                            Spacer()
+                                            Text("auto")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 6)
+                                        .background(adjustedIndex == highlightedTaskIndex ? Color.accentColor.opacity(0.1) : Color.clear)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
                             }
                         }
 

@@ -35,7 +35,7 @@ from loopflow.lfd.db import (
     update_loop_status,
 )
 from loopflow.lfd.loops import count_outstanding
-from loopflow.lfd.models import Loop, LoopRun, LoopStatus
+from loopflow.lfd.models import Loop, LoopRun, LoopStatus, LoopType
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 SCHEDULER_POLL_INTERVAL = 30  # seconds between slot checks
@@ -98,8 +98,6 @@ def run_loop_iterations(loop: Loop) -> None:
     For FLOW loops, runs exactly one iteration then stops.
     For LOOP loops, runs continuously until pr_limit outstanding.
     """
-    from loopflow.lfd.models import LoopType
-
     while True:
         # Check if we should pause (per-loop limit) - skip for FLOW which runs once
         if loop.type != LoopType.FLOW:
@@ -252,7 +250,6 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
         goal_section = f"<lf:goal:{loop.goal_name}>\n{goal_spec.content}\n</lf:goal:{loop.goal_name}>"
 
         # For FLOW loops, inject project file content if present
-        from loopflow.lfd.models import LoopType
         if loop.type == LoopType.FLOW and loop.project_file:
             try:
                 prompt_content = Path(loop.project_file).read_text()

@@ -1,9 +1,10 @@
 """Schedule checking for lfd.
 
 Evaluates cron expressions and triggers loops on schedule.
+Designed for laptop use: missed schedules within 24h still trigger on wake.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from croniter import croniter
 
@@ -11,17 +12,33 @@ from loopflow.lfd.db import get_latest_loop_run, list_loops
 from loopflow.lfd.loops import start_loop
 from loopflow.lfd.models import Loop, LoopStatus, LoopType
 
+# Grace period for missed schedules (laptop was asleep/off)
+SCHEDULE_GRACE_PERIOD = timedelta(hours=24)
 
-def should_trigger_cron(cron_expr: str, last_run: datetime | None) -> bool:
-    """Check if cron should trigger based on last run time."""
+
+def should_trigger_cron(cron_expr: str, last_run: datetime | None, grace_period: timedelta = SCHEDULE_GRACE_PERIOD) -> bool:
+    """Check if cron should trigger based on last run time.
+
+    Triggers if:
+    - The previous scheduled time is after last_run (a schedule was missed)
+    - AND the scheduled time is within the grace period (not too stale)
+
+    This handles laptop use: if computer was off at 9am but wakes at 2pm,
+    the 9am schedule still runs. But if computer was off for a week,
+    stale schedules are skipped.
+    """
     now = datetime.now()
     cron = croniter(cron_expr, now)
 
     # Get previous scheduled time
     prev_time = cron.get_prev(datetime)
 
+    # Skip if scheduled time is too old (stale)
+    if now - prev_time > grace_period:
+        return False
+
     if last_run is None:
-        # First check - trigger if we're past the scheduled time
+        # First check - trigger if we're past the scheduled time (and within grace)
         return True
 
     # Trigger if prev_time is after last_run

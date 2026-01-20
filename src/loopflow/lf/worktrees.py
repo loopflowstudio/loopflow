@@ -240,6 +240,8 @@ def remove(repo_root: Path, name: str) -> bool:
 
 def is_merged(wt: Worktree, repo_root: Path, base_branch: str = "main") -> bool:
     """Check if worktree's branch has been merged to base branch."""
+    if wt.branch is None:
+        return False  # Detached HEAD - can't determine merge status
     if wt.branch in ("main", "master"):
         return False
     if wt.is_dirty:

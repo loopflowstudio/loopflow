@@ -117,14 +117,14 @@ lfops sync
 
 Fetches `origin/main` and updates your local main branch. Safe to run from any worktree.
 
-## lfops prune
+## lfops wt prune
 
 Remove worktrees whose branches have been merged.
 
 ```bash
-lfops prune           # interactive confirmation
-lfops prune --dry-run # show what would be pruned
-lfops prune --force   # skip confirmation
+lfops wt prune           # interactive confirmation
+lfops wt prune --dry-run # show what would be pruned
+lfops wt prune --force   # skip confirmation
 ```
 
 Finds worktrees where the PR was merged or the branch is an ancestor of `origin/main` (handles squash merges). Never prunes main/master or dirty worktrees.
@@ -147,7 +147,7 @@ lfops pr                         # open PR (CI runs automatically)
 lfops commit -p                  # commit and push
 lfops land                       # submit to merge queue
 # ... wait for CI to pass and merge ...
-lfops prune                      # cleanup merged worktrees
+lfops wt prune                   # cleanup merged worktrees
 ```
 
 ## See Also

@@ -90,7 +90,7 @@ struct WorktreeService {
         _ = try await runLfops(["land"], in: worktreePath)
     }
 
-    func createDraftPR(branch: String, in worktreePath: URL) async throws {
+func createDraftPR(branch: String, in worktreePath: URL) async throws {
         guard let ghURL = findCommand("gh") else {
             throw WorktreeError.commandFailed("gh CLI not found. Install GitHub CLI.")
         }
@@ -115,6 +115,29 @@ struct WorktreeService {
         } catch {
             return false
         }
+    }
+
+    func sync(in repoURL: URL) async throws {
+        _ = try await runLfops(["sync"], in: repoURL)
+    }
+
+    func prune(in repoURL: URL, dryRun: Bool = false) async throws -> [String] {
+        var args = ["prune", "--force"]
+        if dryRun {
+            args.append("--dry-run")
+        }
+        let output = try await runLfops(args, in: repoURL)
+
+        // Parse output to get branch names
+        // Output format: "Would remove:" or "Removed:" followed by "  branch-name" lines
+        var branches: [String] = []
+        for line in output.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if !trimmed.isEmpty && !trimmed.contains(":") && !trimmed.starts(with: "Syncing") && !trimmed.starts(with: "No merged") {
+                branches.append(trimmed)
+            }
+        }
+        return branches
     }
 
     func getDiff(_ spec: String, in repoURL: URL) async throws -> String {

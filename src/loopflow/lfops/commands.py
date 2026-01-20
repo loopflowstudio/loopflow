@@ -10,6 +10,8 @@ from loopflow.lfops import land as land_module
 from loopflow.lfops import commit as commit_module
 from loopflow.lfops import rebase as rebase_module
 from loopflow.lfops import summarize as summarize_module
+from loopflow.lfops import sync as sync_module
+from loopflow.lfops import prune as prune_module
 
 app = typer.Typer(help="Loopflow operations")
 
@@ -20,6 +22,8 @@ land_module.register_commands(app)
 commit_module.register_commands(app)
 rebase_module.register_commands(app)
 summarize_module.register_commands(app)
+sync_module.register_commands(app)
+prune_module.register_commands(app)
 
 
 def main() -> None:

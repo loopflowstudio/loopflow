@@ -107,6 +107,35 @@ lfops rebase
 
 Fetches main and rebases. If conflicts occur, launches an assistant to help resolve them.
 
+## lfops sync
+
+Update local main to match origin.
+
+```bash
+lfops sync
+```
+
+Fetches `origin/main` and updates your local main branch. Safe to run from any worktree.
+
+## lfops prune
+
+Remove worktrees whose branches have been merged.
+
+```bash
+lfops prune           # interactive confirmation
+lfops prune --dry-run # show what would be pruned
+lfops prune --force   # skip confirmation
+```
+
+Finds worktrees where the PR was merged or the branch is an ancestor of `origin/main` (handles squash merges). Never prunes main/master or dirty worktrees.
+
+Options:
+
+| Flag | Description |
+|------|-------------|
+| `-n, --dry-run` | Show what would be pruned without removing |
+| `-f, --force` | Skip confirmation prompt |
+
 ## Typical Workflow
 
 ```bash
@@ -118,7 +147,7 @@ lfops pr                         # open PR (CI runs automatically)
 lfops commit -p                  # commit and push
 lfops land                       # submit to merge queue
 # ... wait for CI to pass and merge ...
-wt remove my-feature             # cleanup after merge
+lfops prune                      # cleanup merged worktrees
 ```
 
 ## See Also

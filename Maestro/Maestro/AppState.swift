@@ -202,6 +202,21 @@ final class AppState {
         await refreshWorktrees()
     }
 
+    func syncMain() async throws {
+        guard let repo = currentRepo else { return }
+        try await worktreeService.sync(in: repo)
+        await refreshWorktrees()
+    }
+
+    func pruneWorktrees(dryRun: Bool = false) async throws -> [String] {
+        guard let repo = currentRepo else { return [] }
+        let pruned = try await worktreeService.prune(in: repo, dryRun: dryRun)
+        if !dryRun {
+            await refreshWorktrees()
+        }
+        return pruned
+    }
+
     func startEventSubscription() {
         eventService = LFDEventService()
 

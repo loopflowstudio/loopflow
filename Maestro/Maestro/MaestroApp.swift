@@ -17,7 +17,7 @@ struct MaestroApp: App {
 
         // Welcome/main window - shown on launch
         WindowGroup {
-            if let mode = uiTestMode {
+            if uiTestMode != nil {
                 RepoWindow(
                     repoURL: URL(fileURLWithPath: "/tmp/loopflow-ui-tests"),
                     recentsService: recentsService

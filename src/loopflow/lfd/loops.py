@@ -8,13 +8,9 @@ from pathlib import Path
 
 from loopflow.lf.context import find_worktree_root
 from loopflow.lf.git import find_main_repo
-from loopflow.lf.goals import Goal, goal_exists, list_goals, load_goal
 from loopflow.lfd.db import (
-    delete_loop,
     get_loop,
     get_loop_by_goal_repo,
-    get_loop_runs,
-    list_loops,
     save_loop,
     update_loop_pid,
     update_loop_status,
@@ -134,15 +130,6 @@ def count_outstanding(loop: Loop) -> int:
         return int(result.stdout.strip())
     except ValueError:
         return 0
-
-
-def should_continue(loop: Loop) -> bool:
-    """Check if loop should continue or pause due to PR limit.
-
-    Returns False if outstanding commits >= pr_limit, True otherwise.
-    """
-    outstanding = count_outstanding(loop)
-    return outstanding < loop.pr_limit
 
 
 def start_loop(loop_id: str, foreground: bool = False) -> bool:

@@ -83,6 +83,11 @@ def _clear_design_and_push(repo_root: Path) -> bool:
     return True
 
 
+def _auto_merge_not_allowed(message: str) -> bool:
+    lowered = message.lower()
+    return "auto merge is not allowed" in lowered or "enablepullrequestautomerge" in lowered
+
+
 def _squash_commits(repo_root: Path, base_ref: str, commit_msg: str) -> None:
     original_head = subprocess.run(
         ["git", "rev-parse", "HEAD"],
@@ -336,10 +341,18 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
     if body:
         merge_cmd.extend(["--body", body])
     result = subprocess.run(merge_cmd, cwd=repo_root, capture_output=True, text=True)
+    auto_merge_enabled = True
     if result.returncode != 0:
         error_msg = result.stderr.strip() or result.stdout.strip() or "auto-merge failed"
-        typer.echo(f"Error: {error_msg}", err=True)
-        raise typer.Exit(1)
+        if _auto_merge_not_allowed(error_msg):
+            auto_merge_enabled = False
+            typer.echo(
+                "Auto-merge is disabled for this repo. Enable it in repo settings or merge manually after CI passes.",
+                err=True,
+            )
+        else:
+            typer.echo(f"Error: {error_msg}", err=True)
+            raise typer.Exit(1)
 
     # Get PR URL and open in browser
     result = subprocess.run(
@@ -353,7 +366,11 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
         subprocess.run(["open", pr_url])
 
     was_in_worktree = repo_root != main_repo
-    typer.echo(f"PR #{pr_number} queued for merge. Will merge when CI passes.")
+    if auto_merge_enabled:
+        typer.echo(f"PR #{pr_number} queued for merge. Will merge when CI passes.")
+    else:
+        typer.echo(f"PR #{pr_number} not queued for auto-merge.")
+        typer.echo("Enable auto-merge in repo settings or run `gh pr merge --squash` after CI passes.")
     typer.echo(f"Run 'wt remove {branch}' after merge completes.")
 
     if was_in_worktree:

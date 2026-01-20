@@ -40,7 +40,7 @@ from loopflow.lfd.protocol import Event, Request, error, success
 def test_session_serialization():
     session = Session(
         id="sess-1",
-        task="implement",
+        step="implement",
         repo="/tmp/repo",
         worktree="/tmp/repo.feature",
         status=SessionStatus.RUNNING,
@@ -50,7 +50,7 @@ def test_session_serialization():
     )
     data = session.to_dict()
     restored = Session.from_dict(data)
-    assert restored.task == "implement"
+    assert restored.step == "implement"
     assert restored.status == SessionStatus.RUNNING
 
 
@@ -86,7 +86,7 @@ def test_db_save_and_load_session():
         db_path = Path(tmpdir) / "test.db"
         session = Session(
             id="sess-1",
-            task="implement",
+            step="implement",
             repo="/tmp/repo",
             worktree="/tmp/repo.feature",
             status=SessionStatus.RUNNING,
@@ -96,7 +96,7 @@ def test_db_save_and_load_session():
 
         sessions = load_sessions(db_path=db_path)
         assert len(sessions) == 1
-        assert sessions[0].task == "implement"
+        assert sessions[0].step == "implement"
 
 
 def test_db_load_sessions_for_worktree():
@@ -105,7 +105,7 @@ def test_db_load_sessions_for_worktree():
 
         session1 = Session(
             id="sess-1",
-            task="implement",
+            step="implement",
             repo="/tmp/repo",
             worktree="/tmp/repo.feature-a",
             status=SessionStatus.COMPLETED,
@@ -113,7 +113,7 @@ def test_db_load_sessions_for_worktree():
         )
         session2 = Session(
             id="sess-2",
-            task="review",
+            step="review",
             repo="/tmp/repo",
             worktree="/tmp/repo.feature-a",
             status=SessionStatus.COMPLETED,
@@ -121,7 +121,7 @@ def test_db_load_sessions_for_worktree():
         )
         session3 = Session(
             id="sess-3",
-            task="implement",
+            step="implement",
             repo="/tmp/repo",
             worktree="/tmp/repo.feature-b",
             status=SessionStatus.COMPLETED,
@@ -145,7 +145,7 @@ def test_db_load_sessions_for_repo():
 
         session1 = Session(
             id="sess-1",
-            task="implement",
+            step="implement",
             repo="/tmp/repo-a",
             worktree="/tmp/repo-a.feature",
             status=SessionStatus.COMPLETED,
@@ -153,7 +153,7 @@ def test_db_load_sessions_for_repo():
         )
         session2 = Session(
             id="sess-2",
-            task="review",
+            step="review",
             repo="/tmp/repo-b",
             worktree="/tmp/repo-b.feature",
             status=SessionStatus.COMPLETED,
@@ -174,7 +174,7 @@ def test_db_update_session_status():
 
         session = Session(
             id="sess-1",
-            task="implement",
+            step="implement",
             repo="/tmp/repo",
             worktree="/tmp/repo.feature",
             status=SessionStatus.RUNNING,
@@ -197,7 +197,7 @@ def test_db_update_session_status_nonexistent():
         # Initialize DB by saving and then checking update
         session = Session(
             id="sess-1",
-            task="implement",
+            step="implement",
             repo="/tmp/repo",
             worktree="/tmp/repo.feature",
             status=SessionStatus.RUNNING,

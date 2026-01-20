@@ -5,16 +5,16 @@ from unittest.mock import patch
 import pytest
 
 from loopflow.lf.context import (
-    PromptComponents,
-    _get_builtin_task,
-    build_prompt,
     find_worktree_root,
-    format_prompt,
+    build_prompt,
+    gather_step,
     gather_prompt_components,
-    gather_task,
-    list_all_tasks,
-    list_builtin_tasks,
-    list_user_tasks,
+    format_prompt,
+    PromptComponents,
+    list_builtin_steps,
+    list_user_steps,
+    list_all_steps,
+    _get_builtin_step,
 )
 
 
@@ -65,8 +65,8 @@ def test_build_prompt_assembles_full_context(temp_repo):
     assert "</lf:docs>" in result
 
     # Task with preamble outside
-    assert "The task" in result
-    assert "<lf:task:implement>" in result
+    assert "The step" in result
+    assert "<lf:step:implement>" in result
     assert "Implement the feature." in result
 
 
@@ -74,7 +74,7 @@ def test_build_prompt_handles_missing_task(temp_repo):
     """Missing task shows helpful message instead of crashing."""
     result = build_prompt(temp_repo, "nonexistent")
 
-    assert "No task file found" in result
+    assert "No step file found" in result
 
 
 def test_build_prompt_with_voices(temp_repo):
@@ -103,29 +103,29 @@ def test_build_prompt_includes_context_files(temp_repo):
 
 def test_build_prompt_inline_instead_of_task(temp_repo):
     """Inline prompt replaces task file lookup."""
-    result = build_prompt(temp_repo, task=None, inline="fix the bug in main.py")
+    result = build_prompt(temp_repo, step=None, inline="fix the bug in main.py")
 
-    assert "The task" in result
-    assert "<lf:task>" in result
+    assert "The step" in result
+    assert "<lf:step>" in result
     assert "fix the bug in main.py" in result
-    assert "</lf:task>" in result
+    assert "</lf:step>" in result
     # Should not have task name in delimiters
-    assert "<lf:task:implement>" not in result
+    assert "<lf:step:implement>" not in result
 
 
 def test_build_prompt_inline_with_context(temp_repo):
     """Inline prompt works with context files."""
     (temp_repo / "main.py").write_text("print('hello')\n")
 
-    result = build_prompt(temp_repo, task=None, inline="add tests", context=["main.py"])
+    result = build_prompt(temp_repo, step=None, inline="add tests", context=["main.py"])
 
-    assert "<lf:task>" in result
+    assert "<lf:step>" in result
     assert "add tests" in result
     assert "<lf:files>" in result
     assert "print('hello')" in result
 
 
-def test_gather_task_prefers_claude_commands(temp_repo):
+def test_gather_step_prefers_claude_commands(temp_repo):
     """Task file in .claude/commands/ is preferred over .lf/."""
     claude_dir = temp_repo / ".claude" / "commands"
     claude_dir.mkdir(parents=True)
@@ -134,32 +134,32 @@ def test_gather_task_prefers_claude_commands(temp_repo):
     lf = temp_repo / ".lf"
     (lf / "test.md").write_text("Task from .lf/\n")
 
-    result = gather_task(temp_repo, "test")
+    result = gather_step(temp_repo, "test")
     assert result.content == "Task from .claude/commands/\n"
 
 
-def test_gather_task_finds_md_in_lf(temp_repo):
+def test_gather_step_finds_md_in_lf(temp_repo):
     """Task file with .md extension in .lf/ works."""
     lf = temp_repo / ".lf"
     (lf / "test.md").write_text("Task from .lf/ md file\n")
 
-    result = gather_task(temp_repo, "test")
+    result = gather_step(temp_repo, "test")
     assert result.content == "Task from .lf/ md file\n"
 
 
-def test_gather_task_ignores_non_md_extensions(temp_repo):
+def test_gather_step_ignores_non_md_extensions(temp_repo):
     """Task files with non-.md extensions are not found."""
     lf = temp_repo / ".lf"
     (lf / "test.lf").write_text("Task from .lf file\n")
     (lf / "test.txt").write_text("Task from .txt file\n")
 
-    result = gather_task(temp_repo, "test")
+    result = gather_step(temp_repo, "test")
     assert result is None  # Only .md is supported
 
 
-def test_gather_task_returns_none_when_missing(temp_repo):
-    """gather_task returns None when no matching file exists."""
-    result = gather_task(temp_repo, "nonexistent")
+def test_gather_step_returns_none_when_missing(temp_repo):
+    """gather_step returns None when no matching file exists."""
+    result = gather_step(temp_repo, "nonexistent")
     assert result is None
 
 
@@ -171,7 +171,7 @@ def test_gather_prompt_components_returns_dataclass(temp_repo):
     assert components.repo_root == temp_repo
     assert len(components.docs) == 3  # .design/plan + README, STYLE
     assert components.loopflow_doc is not None  # bundled system doc
-    assert components.task == ("implement", "Implement the feature.\n")
+    assert components.step == ("implement", "Implement the feature.\n")
 
 
 def test_gather_prompt_components_includes_context(temp_repo):
@@ -189,19 +189,19 @@ def test_gather_prompt_components_includes_context(temp_repo):
 
 def test_gather_prompt_components_inline_task(temp_repo):
     """gather_prompt_components handles inline task."""
-    components = gather_prompt_components(temp_repo, task=None, inline="fix the bug")
+    components = gather_prompt_components(temp_repo, step=None, inline="fix the bug")
 
-    assert components.task == ("inline", "fix the bug")
+    assert components.step == ("inline", "fix the bug")
 
 
 def test_gather_prompt_components_missing_task(temp_repo):
     """gather_prompt_components handles missing task file."""
     components = gather_prompt_components(temp_repo, "nonexistent")
 
-    assert components.task is not None
-    name, content = components.task
+    assert components.step is not None
+    name, content = components.step
     assert name == "nonexistent"
-    assert "No task file found" in content
+    assert "No step file found" in content
 
 
 def test_format_prompt_from_components(temp_repo):
@@ -217,11 +217,13 @@ def test_format_prompt_with_all_components(temp_repo):
     """format_prompt includes all component types."""
     (temp_repo / "main.py").write_text("print('hello')")
 
-    components = gather_prompt_components(temp_repo, "implement", context=["main.py"])
+    components = gather_prompt_components(
+        temp_repo, "implement", context=["main.py"]
+    )
     formatted = format_prompt(components)
 
     assert "<lf:docs>" in formatted
-    assert "<lf:task:implement>" in formatted
+    assert "<lf:step:implement>" in formatted
     assert "<lf:files>" in formatted
 
 
@@ -260,9 +262,9 @@ def test_gather_prompt_components_deduplicates_diff_and_context(temp_repo, monke
 # =============================================================================
 
 
-def test_list_builtin_tasks_returns_known_builtins():
+def test_list_builtin_steps_returns_known_builtins():
     """Builtin tasks list includes expected tasks."""
-    builtins = list_builtin_tasks()
+    builtins = list_builtin_steps()
     assert "design" in builtins
     assert "implement" in builtins
     assert "review" in builtins
@@ -271,46 +273,46 @@ def test_list_builtin_tasks_returns_known_builtins():
     assert "explore" in builtins
 
 
-def test_get_builtin_task_returns_path_for_known_builtin():
-    """_get_builtin_task returns path for existing builtin."""
-    path = _get_builtin_task("design")
+def test_get_builtin_step_returns_path_for_known_builtin():
+    """_get_builtin_step returns path for existing builtin."""
+    path = _get_builtin_step("design")
     assert path is not None
     assert path.exists()
     assert path.name == "design.md"
 
 
-def test_get_builtin_task_returns_none_for_unknown():
-    """_get_builtin_task returns None for non-existent task."""
-    path = _get_builtin_task("nonexistent_task_xyz")
+def test_get_builtin_step_returns_none_for_unknown():
+    """_get_builtin_step returns None for non-existent task."""
+    path = _get_builtin_step("nonexistent_task_xyz")
     assert path is None
 
 
-def test_gather_task_falls_back_to_builtin(tmp_path):
-    """gather_task returns builtin when no user task exists."""
+def test_gather_step_falls_back_to_builtin(tmp_path):
+    """gather_step returns builtin when no user task exists."""
     # Create empty repo
     (tmp_path / ".git").mkdir()
 
     # No .lf/ or .claude/commands/ - should fall back to builtin
-    result = gather_task(tmp_path, "design")
+    result = gather_step(tmp_path, "design")
     assert result is not None
     assert result.name == "design"
     assert "implementation spec" in result.content.lower()
 
 
-def test_gather_task_user_overrides_builtin(tmp_path):
+def test_gather_step_user_overrides_builtin(tmp_path):
     """User task file takes precedence over builtin."""
     (tmp_path / ".git").mkdir()
     lf = tmp_path / ".lf"
     lf.mkdir()
     (lf / "design.md").write_text("My custom design task\n")
 
-    result = gather_task(tmp_path, "design")
+    result = gather_step(tmp_path, "design")
     assert result is not None
     assert "My custom design task" in result.content
 
 
-def test_list_user_tasks_returns_user_tasks(tmp_path):
-    """list_user_tasks returns tasks from .lf/ and .claude/commands/."""
+def test_list_user_steps_returns_user_tasks(tmp_path):
+    """list_user_steps returns tasks from .lf/ and .claude/commands/."""
     (tmp_path / ".git").mkdir()
 
     # .lf/ tasks
@@ -325,7 +327,7 @@ def test_list_user_tasks_returns_user_tasks(tmp_path):
     claude.mkdir(parents=True)
     (claude / "third.md").write_text("third task")
 
-    tasks = list_user_tasks(tmp_path)
+    tasks = list_user_steps(tmp_path)
     assert "custom" in tasks
     assert "another" in tasks
     assert "third" in tasks
@@ -333,9 +335,9 @@ def test_list_user_tasks_returns_user_tasks(tmp_path):
 
 
 @patch("loopflow.lf.skills._SUPERPOWERS_PATHS", [])
-@patch("loopflow.lf.context._GLOBAL_COMMAND_PATHS", [])
-def test_list_all_tasks_separates_user_and_builtin(tmp_path):
-    """list_all_tasks returns user tasks, global tasks, builtin-only tasks, and external skills."""
+@patch("loopflow.lf.context._GLOBAL_STEP_PATHS", [])
+def test_list_all_steps_separates_user_and_builtin(tmp_path):
+    """list_all_steps returns user tasks, global tasks, builtin-only tasks, and external skills."""
     (tmp_path / ".git").mkdir()
 
     # Override one builtin
@@ -344,13 +346,13 @@ def test_list_all_tasks_separates_user_and_builtin(tmp_path):
     (lf / "design.md").write_text("custom design")
     (lf / "custom.md").write_text("custom task")
 
-    user_tasks, global_tasks, builtin_only, external_skills = list_all_tasks(tmp_path)
+    user_tasks, global_tasks, builtin_only, external_skills = list_all_steps(tmp_path)
 
     # design is overridden, so it's in user_tasks
     assert "design" in user_tasks
     assert "custom" in user_tasks
 
-    # global_tasks is empty when _GLOBAL_COMMAND_PATHS is mocked to []
+    # global_tasks is empty when _GLOBAL_STEP_PATHS is mocked to []
     assert global_tasks == []
 
     # Other builtins like implement, review should be in builtin_only
@@ -365,10 +367,10 @@ def test_list_all_tasks_separates_user_and_builtin(tmp_path):
 
 
 @patch("loopflow.lf.skills._SUPERPOWERS_PATHS", [])
-@patch("loopflow.lf.context._GLOBAL_COMMAND_PATHS", [])
-def test_list_all_tasks_without_repo():
-    """list_all_tasks works without a repo root (returns only builtins)."""
-    user_tasks, global_tasks, builtin_only, external_skills = list_all_tasks(None)
+@patch("loopflow.lf.context._GLOBAL_STEP_PATHS", [])
+def test_list_all_steps_without_repo():
+    """list_all_steps works without a repo root (returns only builtins)."""
+    user_tasks, global_tasks, builtin_only, external_skills = list_all_steps(None)
 
     assert user_tasks == []
     assert global_tasks == []
@@ -377,17 +379,17 @@ def test_list_all_tasks_without_repo():
     assert external_skills == []
 
 
-def test_gather_task_works_without_repo():
-    """gather_task returns builtin tasks even without repo_root."""
-    result = gather_task(None, "design")
+def test_gather_step_works_without_repo():
+    """gather_step returns builtin tasks even without repo_root."""
+    result = gather_step(None, "design")
     assert result is not None
     assert result.name == "design"
     assert "implementation spec" in result.content.lower()
 
 
-def test_gather_task_returns_none_for_unknown_without_repo():
-    """gather_task returns None for unknown tasks without repo_root."""
-    result = gather_task(None, "nonexistent_task_xyz")
+def test_gather_step_returns_none_for_unknown_without_repo():
+    """gather_step returns None for unknown tasks without repo_root."""
+    result = gather_step(None, "nonexistent_task_xyz")
     assert result is None
 
 
@@ -398,9 +400,8 @@ def test_gather_task_returns_none_for_unknown_without_repo():
 
 def test_trigger_background_refresh_creates_log_file(tmp_path, monkeypatch):
     """Background refresh writes output to log file instead of DEVNULL."""
-    import subprocess
-
     from loopflow.lf.context import _trigger_background_refresh
+    import subprocess
 
     (tmp_path / ".git").mkdir()
     summaries_dir = tmp_path / ".lf" / "summaries"
@@ -451,12 +452,12 @@ def test_task_args_replace_template_variables(tmp_path):
 
     components = gather_prompt_components(
         tmp_path,
-        task="compare",
-        task_args=task_args,
+        step="compare",
+        step_args=task_args,
     )
 
-    assert components.task is not None
-    _, content = components.task
+    assert components.step is not None
+    _, content = components.step
 
     assert "impl-claude" in content
     assert "impl-codex" in content
@@ -477,8 +478,8 @@ def test_task_args_in_formatted_prompt(tmp_path):
 
     components = gather_prompt_components(
         tmp_path,
-        task="compare",
-        task_args=task_args,
+        step="compare",
+        step_args=task_args,
     )
     prompt = format_prompt(components)
 
@@ -493,11 +494,11 @@ def test_task_args_no_args_leaves_templates(tmp_path):
     _setup_task_template(tmp_path)
     components = gather_prompt_components(
         tmp_path,
-        task="compare",
+        step="compare",
     )
 
-    assert components.task is not None
-    _, content = components.task
+    assert components.step is not None
+    _, content = components.step
 
     # Template variables still present
     assert "{{name_a}}" in content
@@ -511,12 +512,12 @@ def test_task_args_partial_substitution(tmp_path):
 
     components = gather_prompt_components(
         tmp_path,
-        task="compare",
-        task_args=task_args,
+        step="compare",
+        step_args=task_args,
     )
 
-    assert components.task is not None
-    _, content = components.task
+    assert components.step is not None
+    _, content = components.step
 
     assert "version-1" in content
     assert "{{name_a}}" not in content
@@ -532,12 +533,12 @@ def test_task_args_with_equals_in_value(tmp_path):
 
     components = gather_prompt_components(
         tmp_path,
-        task="compare",
-        task_args=task_args,
+        step="compare",
+        step_args=task_args,
     )
 
-    assert components.task is not None
-    _, content = components.task
+    assert components.step is not None
+    _, content = components.step
 
     # Should preserve the = in the value
     assert "x=1, y=2" in content
@@ -554,12 +555,12 @@ def test_task_args_with_multiline_value(tmp_path):
 
     components = gather_prompt_components(
         tmp_path,
-        task="compare",
-        task_args=task_args,
+        step="compare",
+        step_args=task_args,
     )
 
-    assert components.task is not None
-    _, content = components.task
+    assert components.step is not None
+    _, content = components.step
 
     assert "def new_function():" in content
     assert "return 42" in content
@@ -573,7 +574,9 @@ def _setup_task_template(tmp_path):
     lf = tmp_path / ".lf"
     lf.mkdir(exist_ok=True)
     (lf / "compare.md").write_text(
-        "Compare {{name_a}} and {{name_b}}.\n\nDiff A:\n{{diff_a}}\n\nDiff B:\n{{diff_b}}\n"
+        "Compare {{name_a}} and {{name_b}}.\n\n"
+        "Diff A:\n{{diff_a}}\n\n"
+        "Diff B:\n{{diff_b}}\n"
     )
 
 
@@ -609,7 +612,7 @@ def test_internal_docs_empty_when_missing(tmp_path):
     (tmp_path / ".git").mkdir()
     (tmp_path / "README.md").write_text("# Test\n")
 
-    components = gather_prompt_components(tmp_path, task=None, inline="test")
+    components = gather_prompt_components(tmp_path, step=None, inline="test")
     prompt = format_prompt(components)
 
     # Should still work, just no .docs content
@@ -649,7 +652,7 @@ def test_internal_docs_before_root_docs(tmp_path):
     internal_docs.mkdir()
     (internal_docs / "context.md").write_text("# Internal Context\n")
 
-    components = gather_prompt_components(tmp_path, task=None, inline="test")
+    components = gather_prompt_components(tmp_path, step=None, inline="test")
 
     # Check order: .design/, then .docs/, then root docs
     doc_paths = [str(p) for p, _ in components.docs]

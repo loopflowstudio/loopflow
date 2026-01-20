@@ -74,7 +74,7 @@ def main():
     """Entry point for collector subprocess."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--session-id", required=True)
-    parser.add_argument("--task", default=None)
+    parser.add_argument("--step", default=None)
     parser.add_argument("--repo-root", default=None)
     parser.add_argument("--autocommit", action="store_true")
     parser.add_argument("--push", action="store_true")
@@ -118,7 +118,7 @@ def main():
     exit_code = collect_output(
         args.session_id,
         command,
-        args.task,
+        args.step,
         repo_root,
         args.autocommit,
         args.push,

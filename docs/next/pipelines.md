@@ -7,16 +7,16 @@ title: Pipelines
 
 *Coming soon.*
 
-Declarative task chaining with auto-commits between steps.
+Declarative step chaining with auto-commits between steps.
 
 ## Overview
 
-Pipelines chain tasks together. Each task runs in auto mode, with automatic commits between steps. Define them in `.lf/config.yaml`:
+Pipelines chain steps together. Each step runs in auto mode, with automatic commits between steps. Define them in `.lf/config.yaml`:
 
 ```yaml
 pipelines:
   ship:
-    tasks: [implement, review, polish, commit]
+    steps: [implement, review, polish, commit]
     push: true
     pr: true
 ```
@@ -31,7 +31,7 @@ lf ship
 
 | Option | Description |
 |--------|-------------|
-| `tasks` | List of task names to run in order |
+| `steps` | List of step names to run in order |
 | `push` | Override global `push` setting for this pipeline |
 | `pr` | Open PR after pipeline completes |
 
@@ -44,7 +44,7 @@ Full workflow from implementation to PR:
 ```yaml
 pipelines:
   ship:
-    tasks: [implement, review, polish, commit]
+    steps: [implement, review, polish, commit]
     pr: true
 ```
 
@@ -55,7 +55,7 @@ Fast iteration without review:
 ```yaml
 pipelines:
   quick:
-    tasks: [implement, commit]
+    steps: [implement, commit]
     push: true
 ```
 
@@ -66,19 +66,19 @@ Cleanup pass on existing code:
 ```yaml
 pipelines:
   polish:
-    tasks: [review, polish]
+    steps: [review, polish]
 ```
 
 ## Autonomous Mode
 
 In autonomous mode:
 - No interactive prompts
-- Auto-commits between tasks
+- Auto-commits between steps
 - Pushes if `push: true` in config
 - Opens PR if `pr: true`
 
 ```bash
-lf ship    # runs each task, commits between steps
+lf ship    # runs each step, commits between steps
 ```
 
 ## Pipeline Files
@@ -87,7 +87,7 @@ You can also define pipelines as YAML files in `.lf/pipelines/`:
 
 ```yaml
 # .lf/pipelines/ship.yaml
-tasks:
+steps:
   - implement
   - review
   - polish
@@ -105,7 +105,7 @@ Run steps in parallel:
 ```yaml
 pipelines:
   test-all:
-    tasks:
+    steps:
       - parallel:
           - test-unit
           - test-integration
@@ -119,9 +119,9 @@ Race models against each other:
 ```yaml
 pipelines:
   race-implement:
-    tasks:
+    steps:
       - race:
-          task: implement
+          step: implement
           models: [claude, codex]
       - commit
 ```

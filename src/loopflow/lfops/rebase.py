@@ -4,7 +4,7 @@ import subprocess
 
 import typer
 
-from loopflow.lf.context import find_worktree_root, gather_task
+from loopflow.lf.context import find_worktree_root, gather_step
 
 
 def register_commands(app: typer.Typer) -> None:
@@ -49,9 +49,9 @@ def register_commands(app: typer.Typer) -> None:
         subprocess.run(["git", "rebase", "--abort"], cwd=repo_root)
 
         # Get rebase prompt (custom or built-in)
-        task = gather_task(repo_root, "rebase")
-        if not task:
-            typer.echo("Error: No rebase command found", err=True)
+        step = gather_step(repo_root, "rebase")
+        if not step:
+            typer.echo("Error: No rebase step found", err=True)
             raise typer.Exit(1)
 
         typer.echo("Launching rebase assistant...")

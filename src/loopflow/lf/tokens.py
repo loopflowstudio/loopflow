@@ -220,7 +220,7 @@ def analyze_components(components) -> TokenTree:
         docs=components.docs,
         diff=components.diff,
         diff_files=components.diff_files,
-        task=components.task,
+        task=components.step,
         repo_root=components.repo_root,
         clipboard=clipboard_text,
         loopflow_doc=components.loopflow_doc,

@@ -131,7 +131,7 @@ def _rebase_onto_main(repo_root: Path, base_branch: str) -> bool:
     If conflicts occur, launches the rebase task assistant to resolve them.
     Handles force-push after rebase if the branch has an upstream.
     """
-    from loopflow.lf.context import gather_task
+    from loopflow.lf.context import gather_step
 
     # Fetch latest main
     subprocess.run(["git", "fetch", "origin", base_branch], cwd=repo_root, check=False)
@@ -160,17 +160,17 @@ def _rebase_onto_main(repo_root: Path, base_branch: str) -> bool:
 
         # Get rebase prompt (custom or built-in)
         config = load_config(repo_root)
-        task = gather_task(repo_root, "rebase", config=config)
-        if not task:
-            typer.echo("Error: No rebase task found", err=True)
+        step = gather_step(repo_root, "rebase", config=config)
+        if not step:
+            typer.echo("Error: No rebase step found", err=True)
             return False
 
-        # Run agent with the rebase task
-        agent_model = task.config.model or (config.agent_model if config else "claude:opus")
+        # Run agent with the rebase step
+        agent_model = step.config.model or (config.agent_model if config else "claude:opus")
         backend, model_variant = parse_model(agent_model)
         runner = get_runner(backend)
         rebase_result = runner.launch(
-            task.content,
+            step.content,
             auto=True,
             stream=True,
             skip_permissions=True,

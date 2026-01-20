@@ -6,6 +6,9 @@ from pathlib import Path
 
 _FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 
+# Path to bundled builtin goal templates
+_GOALS_TEMPLATES_DIR = Path(__file__).parent.parent / "templates" / "goals"
+
 
 @dataclass
 class Goal:
@@ -17,17 +20,40 @@ class Goal:
     pipeline: str  # Default pipeline
 
 
+def _get_builtin_goal(name: str) -> Path | None:
+    """Return path to bundled goal template if it exists."""
+    builtin = _GOALS_TEMPLATES_DIR / f"{name}.md"
+    return builtin if builtin.exists() else None
+
+
+def list_builtin_goals() -> list[str]:
+    """Return names of all builtin goals."""
+    if not _GOALS_TEMPLATES_DIR.exists():
+        return []
+    return sorted(p.stem for p in _GOALS_TEMPLATES_DIR.glob("*.md"))
+
+
 def load_goal(repo: Path, goal_name: str) -> Goal | None:
-    """Load and parse a goal file from .lf/goals/{name}.md.
+    """Load and parse a goal file.
+
+    Checks in order:
+    1. .lf/goals/{name}.md (user-defined)
+    2. templates/goals/{name}.md (builtin fallback)
 
     Returns None if goal file doesn't exist.
     """
     if not goal_name:
         return None
 
+    # Check user-defined goal first
     goal_path = repo / ".lf" / "goals" / f"{goal_name}.md"
     if not goal_path.exists():
-        return None
+        # Fall back to builtin templates
+        builtin_path = _get_builtin_goal(goal_name)
+        if builtin_path:
+            goal_path = builtin_path
+        else:
+            return None
 
     text = goal_path.read_text()
     frontmatter, content = _parse_frontmatter(text)
@@ -52,20 +78,30 @@ def load_goal_content(repo: Path, goal_name: str) -> str | None:
 
 
 def list_goals(repo: Path) -> list[str]:
-    """List available goal names in a repo."""
-    goals_dir = repo / ".lf" / "goals"
-    if not goals_dir.exists():
-        return []
+    """List available goal names in a repo (including builtins)."""
+    goals = set()
 
-    return [p.stem for p in sorted(goals_dir.glob("*.md"))]
+    # User-defined goals
+    goals_dir = repo / ".lf" / "goals"
+    if goals_dir.exists():
+        goals.update(p.stem for p in goals_dir.glob("*.md"))
+
+    # Builtin goals
+    goals.update(list_builtin_goals())
+
+    return sorted(goals)
 
 
 def goal_exists(repo: Path, goal_name: str) -> bool:
-    """Check if a goal file exists."""
+    """Check if a goal file exists (user-defined or builtin)."""
     if not goal_name:
         return False
+    # Check user-defined goal
     goal_path = repo / ".lf" / "goals" / f"{goal_name}.md"
-    return goal_path.exists()
+    if goal_path.exists():
+        return True
+    # Check builtin goal
+    return _get_builtin_goal(goal_name) is not None
 
 
 def _parse_frontmatter(text: str) -> tuple[dict, str]:

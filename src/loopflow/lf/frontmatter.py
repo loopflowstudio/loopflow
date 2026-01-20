@@ -1,4 +1,4 @@
-"""Parse YAML frontmatter from task files."""
+"""Parse YAML frontmatter from step files."""
 
 import re
 from dataclasses import dataclass, field
@@ -8,8 +8,8 @@ _FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 
 
 @dataclass
-class TaskConfig:
-    """Per-task configuration from frontmatter."""
+class StepConfig:
+    """Per-step configuration from frontmatter or pipeline overrides."""
 
     interactive: bool | None = None
     include: list[str] | None = None
@@ -18,20 +18,44 @@ class TaskConfig:
     voice: list[str] | None = None
     chrome: bool | None = None  # Enable Chrome integration for Claude Code
     diff_files: bool | None = None  # Include files changed on branch
+    context: list[str] | None = None  # Additional context files (from pipeline overrides)
+
+    def to_dict(self) -> dict:
+        result = {}
+        if self.model:
+            result["model"] = self.model
+        if self.voice:
+            result["voice"] = self.voice
+        if self.context:
+            result["context"] = self.context
+        return result
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "StepConfig":
+        voice_raw = data.get("voice")
+        if isinstance(voice_raw, str):
+            voice = [voice_raw] if voice_raw else None
+        else:
+            voice = voice_raw if voice_raw else None
+        return cls(
+            model=data.get("model"),
+            voice=voice,
+            context=data.get("context"),
+        )
 
 
 @dataclass
-class TaskFile:
-    """Parsed task file with frontmatter and content."""
+class StepFile:
+    """Parsed step file with frontmatter and content."""
 
     name: str
     content: str
-    config: TaskConfig = field(default_factory=TaskConfig)
+    config: StepConfig = field(default_factory=StepConfig)
 
 
 @dataclass
-class ResolvedTaskConfig:
-    """Fully resolved task configuration after merging all sources."""
+class ResolvedStepConfig:
+    """Fully resolved step configuration after merging all sources."""
 
     interactive: bool
     include: list[str]
@@ -41,11 +65,11 @@ class ResolvedTaskConfig:
     voice: list[str]
 
 
-def parse_task_file(name: str, text: str) -> TaskFile:
-    """Parse a task file, extracting frontmatter if present."""
+def parse_step_file(name: str, text: str) -> StepFile:
+    """Parse a step file, extracting frontmatter if present."""
     match = _FRONTMATTER_PATTERN.match(text)
     if not match:
-        return TaskFile(name=name, content=text, config=TaskConfig())
+        return StepFile(name=name, content=text, config=StepConfig())
 
     frontmatter = match.group(1)
     content = text[match.end() :]
@@ -58,10 +82,10 @@ def parse_task_file(name: str, text: str) -> TaskFile:
     else:
         voice = voice_raw if voice_raw else None
 
-    return TaskFile(
+    return StepFile(
         name=name,
         content=content,
-        config=TaskConfig(
+        config=StepConfig(
             interactive=config_dict.get("interactive"),
             include=config_dict.get("include"),
             exclude=config_dict.get("exclude"),
@@ -146,9 +170,9 @@ def _parse_scalar(value: str) -> Any:
     return value
 
 
-def get_defaults() -> TaskConfig:
-    """Return default task configuration."""
-    return TaskConfig(
+def get_step_defaults() -> StepConfig:
+    """Return default step configuration."""
+    return StepConfig(
         interactive=False,
         include=None,
         exclude=["tests/**"],
@@ -156,18 +180,18 @@ def get_defaults() -> TaskConfig:
     )
 
 
-def resolve_task_config(
-    task_name: str,
+def resolve_step_config(
+    step_name: str,
     global_config,  # Config | None - avoid circular import
-    frontmatter: TaskConfig,
+    frontmatter: StepConfig,
     cli_interactive: bool | None,
     cli_auto: bool | None,
     cli_model: str | None,
     cli_context: list[str] | None,
     cli_voice: list[str] | None = None,
-) -> ResolvedTaskConfig:
+) -> ResolvedStepConfig:
     """Merge configs: CLI > frontmatter > global > defaults."""
-    defaults = get_defaults()
+    defaults = get_step_defaults()
 
     # Resolve interactive: CLI > frontmatter > global (interactive list) > default
     if cli_interactive:
@@ -176,7 +200,7 @@ def resolve_task_config(
         interactive = False
     elif frontmatter.interactive is not None:
         interactive = frontmatter.interactive
-    elif global_config and task_name in global_config.interactive:
+    elif global_config and step_name in global_config.interactive:
         interactive = True
     else:
         interactive = defaults.interactive or False
@@ -204,7 +228,7 @@ def resolve_task_config(
         include = list(frontmatter.include)
     elif global_config and global_config.include_tests_for:
         # Legacy: include_tests_for: [polish, implement] means those tasks include tests
-        if task_name in global_config.include_tests_for:
+        if step_name in global_config.include_tests_for:
             include = ["tests/**"]
         else:
             include = []
@@ -232,7 +256,7 @@ def resolve_task_config(
     else:
         voice = []
 
-    return ResolvedTaskConfig(
+    return ResolvedStepConfig(
         interactive=interactive,
         include=include,
         exclude=exclude,

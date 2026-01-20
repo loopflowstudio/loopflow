@@ -24,7 +24,7 @@ Configure loopflow via CLI flags or `.lf/config.yaml`. CLI flags override config
 
 ## Context Assembly
 
-Every task gets context assembled automatically. Run any command to see the breakdown:
+Every step gets context assembled automatically. Run any command to see the breakdown:
 
 ![Context assembly](context-demo.gif)
 
@@ -131,14 +131,14 @@ Use when you want the agent to see precisely what changed. Can combine with `--d
 
 ### Context Files
 
-Additional files always included in every task.
+Additional files always included in every step.
 
 | | |
 |---|---|
 | **CLI** | `-x FILE` (repeatable) |
 | **Config** | `context: [src/schema.py, docs/api.md]` |
 
-CLI adds to config; config sets baseline for all tasks.
+CLI adds to config; config sets baseline for all steps.
 
 ### Exclude Patterns
 
@@ -152,7 +152,7 @@ Glob patterns to exclude from file listings.
 
 ### Model
 
-Default model for all tasks.
+Default model for all steps.
 
 | | |
 |---|---|
@@ -169,15 +169,15 @@ Auto mode runs to completion. Interactive mode allows interruption and chat.
 | | |
 |---|---|
 | **CLI** | `-i` (interactive), `-a` (auto) |
-| **Default** | auto for all tasks |
+| **Default** | auto for all steps |
 
-Set a task's default mode in its frontmatter:
+Set a step's default mode in its frontmatter:
 
 ```yaml
 ---
 interactive: true
 ---
-# Your task prompt here
+# Your step prompt here
 ```
 
 CLI flags override the frontmatter default.
@@ -253,7 +253,7 @@ Generate with `lfops summarize`. Cached in `.lf/summaries/`.
 
 ### Skill Sources
 
-External skill libraries that extend loopflow with additional tasks.
+External skill libraries that extend loopflow with additional steps.
 
 ```yaml
 skill_sources:

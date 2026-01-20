@@ -27,7 +27,7 @@ def test_add_creates_prompt_file(temp_repo, monkeypatch):
     assert target.exists()
     content = target.read_text()
     assert "produces:" in content
-    assert "Review task." in content
+    assert "Review step." in content
     assert "{args}" in content
 
 
@@ -57,7 +57,7 @@ def test_add_force_overwrites(temp_repo, monkeypatch):
 
     assert result.exit_code == 0
     content = (commands_dir / "review.md").read_text()
-    assert "Review task." in content
+    assert "Review step." in content
 
 
 def test_add_requires_git_repo(tmp_path, monkeypatch):

@@ -9,29 +9,21 @@ from importlib import resources
 from pathlib import Path
 from typing import Optional
 
+from loopflow.lf.config import load_config
 from loopflow.lf.design import gather_design_docs, gather_internal_docs
-from loopflow.lf.files import (
-    format_files,
-    format_image_references,
-    gather_docs,
-    gather_files,
-)
-from loopflow.lf.frontmatter import TaskFile, parse_task_file
-from loopflow.lf.skills import (
-    discover_skill_sources,
-    find_skill,
-    list_all_skills,
-    load_skill_prompt,
-)
-from loopflow.lf.voices import Voice, load_voice
+from loopflow.lf.files import gather_docs, gather_files, format_files, format_image_references
+from loopflow.lf.frontmatter import StepFile, parse_step_file
+from loopflow.lf.skills import discover_skill_sources, find_skill, load_skill_prompt, list_all_skills
 from loopflow.lfops.summarize import is_stale, load_summary
+from loopflow.lf.voices import Voice, load_voice
+
 
 # Path to bundled builtin templates
-_TEMPLATES_DIR = Path(__file__).parent.parent / "templates" / "commands"
+_TEMPLATES_DIR = Path(__file__).parent.parent / "templates" / "steps"
 
-# Global command locations to check (in order)
-_GLOBAL_COMMAND_PATHS = [
-    Path.home() / ".claude" / "commands",
+# Global step locations to check (in order)
+_GLOBAL_STEP_PATHS = [
+    Path.home() / ".claude" / "commands",  # Keep for Claude Code compatibility
     # Future: ~/.cursor/commands, ~/.codex/prompts, etc.
 ]
 
@@ -39,7 +31,6 @@ _GLOBAL_COMMAND_PATHS = [
 @dataclass
 class ClipboardContent:
     """Content from clipboard - text, image, or both."""
-
     text: str | None = None
     image_path: Path | None = None
 
@@ -52,7 +43,7 @@ class PromptComponents:
     docs: list[tuple[Path, str]]
     diff: str | None
     diff_files: list[tuple[Path, str]]  # Includes both diff files and explicit context
-    task: tuple[str, str] | None  # (name, content)
+    step: tuple[str, str] | None  # (name, content)
     repo_root: Path
     clipboard: ClipboardContent | None = None
     loopflow_doc: str | None = None  # Bundled system documentation
@@ -152,21 +143,21 @@ def _read_clipboard() -> ClipboardContent | None:
     return None
 
 
-def _get_builtin_task(name: str) -> Path | None:
+def _get_builtin_step(name: str) -> Path | None:
     """Return path to bundled template if it exists."""
     builtin = _TEMPLATES_DIR / f"{name}.md"
     return builtin if builtin.exists() else None
 
 
-def list_builtin_tasks() -> list[str]:
-    """Return names of all builtin tasks."""
+def list_builtin_steps() -> list[str]:
+    """Return names of all builtin steps."""
     if not _TEMPLATES_DIR.exists():
         return []
     return sorted(p.stem for p in _TEMPLATES_DIR.glob("*.md"))
 
 
-# Files in .lf/ that aren't tasks (prompts, docs, etc)
-_LF_NON_TASK_FILES = {
+# Files in .lf/ that aren't steps (prompts, docs, etc)
+_LF_NON_STEP_FILES = {
     "config.yaml",
     "config.yml",
     "COMMIT_MESSAGE.md",
@@ -174,58 +165,58 @@ _LF_NON_TASK_FILES = {
 }
 
 
-def list_user_tasks(repo_root: Path) -> list[str]:
-    """Return names of user-defined tasks in the repo."""
-    tasks = set()
+def list_user_steps(repo_root: Path) -> list[str]:
+    """Return names of user-defined steps in the repo."""
+    steps = set()
 
-    # .claude/commands/*.md
+    # .claude/commands/*.md (keep for Claude Code compatibility)
     claude_dir = repo_root / ".claude" / "commands"
     if claude_dir.exists():
         for p in claude_dir.glob("*.md"):
-            tasks.add(p.stem)
+            steps.add(p.stem)
 
     # .lf/*.md
     lf_dir = repo_root / ".lf"
     if lf_dir.exists():
         for p in lf_dir.glob("*.md"):
-            if p.name in _LF_NON_TASK_FILES:
+            if p.name in _LF_NON_STEP_FILES:
                 continue
-            # Skip uppercase files (likely docs/prompts, not tasks)
+            # Skip uppercase files (likely docs/prompts, not steps)
             if p.stem.isupper():
                 continue
-            tasks.add(p.stem)
+            steps.add(p.stem)
 
-    return sorted(tasks)
+    return sorted(steps)
 
 
-def list_global_tasks() -> list[str]:
-    """Return names of globally-installed tasks (e.g., ~/.claude/commands/)."""
-    tasks = set()
-    for global_dir in _GLOBAL_COMMAND_PATHS:
+def list_global_steps() -> list[str]:
+    """Return names of globally-installed steps (e.g., ~/.claude/commands/)."""
+    steps = set()
+    for global_dir in _GLOBAL_STEP_PATHS:
         if global_dir.exists():
             for p in global_dir.glob("*.md"):
-                tasks.add(p.stem)
-    return sorted(tasks)
+                steps.add(p.stem)
+    return sorted(steps)
 
 
-def list_all_tasks(
+def list_all_steps(
     repo_root: Path | None, config=None
 ) -> tuple[list[str], list[str], list[str], list[tuple[str, str]]]:
-    """Return (user_tasks, global_tasks, builtin_only_tasks, external_skills).
+    """Return (user_steps, global_steps, builtin_only_steps, external_skills).
 
-    User tasks include any that override builtins or globals.
-    Global tasks are from ~/.claude/commands/ not overridden by repo-local.
-    Builtin-only tasks are builtins not overridden by user or global tasks.
+    User steps include any that override builtins or globals.
+    Global steps are from ~/.claude/commands/ not overridden by repo-local.
+    Builtin-only steps are builtins not overridden by user or global steps.
     External skills are (prefixed_name, source_name) tuples from skill sources.
     """
-    builtins = set(list_builtin_tasks())
-    user = set(list_user_tasks(repo_root)) if repo_root else set()
-    global_tasks = set(list_global_tasks())
+    builtins = set(list_builtin_steps())
+    user = set(list_user_steps(repo_root)) if repo_root else set()
+    global_steps = set(list_global_steps())
 
-    # Global tasks not overridden by repo-local
-    global_only = global_tasks - user
+    # Global steps not overridden by repo-local
+    global_only = global_steps - user
     # Builtins not overridden by user or global
-    builtin_only = builtins - user - global_tasks
+    builtin_only = builtins - user - global_steps
 
     sources = discover_skill_sources(config.skill_sources if config else None, repo_root)
     external_skills = list_all_skills(sources)
@@ -233,49 +224,49 @@ def list_all_tasks(
     return sorted(user), sorted(global_only), sorted(builtin_only), external_skills
 
 
-def gather_task(repo_root: Path | None, name: str, config=None) -> TaskFile | None:
-    """Gather and parse task file with frontmatter.
+def gather_step(repo_root: Path | None, name: str, config=None) -> StepFile | None:
+    """Gather and parse step file with frontmatter.
 
     Search order:
     1. External skills (prefix:name format, e.g., sp:brainstorm)
-    2. .claude/commands/{name}.md (repo-local)
+    2. .claude/commands/{name}.md (repo-local, Claude Code compatible)
     3. .lf/{name}.md (repo-local)
-    4. ~/.claude/commands/{name}.md (global user commands)
-    5. templates/commands/{name}.md (builtin fallback)
+    4. ~/.claude/commands/{name}.md (global user steps)
+    5. templates/steps/{name}.md (builtin fallback)
 
-    Returns TaskFile with parsed config, or None if not found.
+    Returns StepFile with parsed config, or None if not found.
     """
     if ":" in name:
         sources = discover_skill_sources(config.skill_sources if config else None, repo_root)
         skill = find_skill(name, sources)
         if skill:
             content = load_skill_prompt(skill)
-            return parse_task_file(name, content)
+            return parse_step_file(name, content)
 
     if repo_root:
-        # Check .claude/commands first (portable format)
+        # Check .claude/commands first (Claude Code compatible)
         claude_dir = repo_root / ".claude" / "commands"
         content = _read_file_if_named(claude_dir, f"{name}.md")
         if content:
-            return parse_task_file(name, content)
+            return parse_step_file(name, content)
 
         # Fall back to .lf directory
         lf_dir = repo_root / ".lf"
         content = _read_file_if_named(lf_dir, f"{name}.md")
         if content:
-            return parse_task_file(name, content)
+            return parse_step_file(name, content)
 
-    # Check global user commands (e.g., ~/.claude/commands/)
-    for global_dir in _GLOBAL_COMMAND_PATHS:
+    # Check global user steps (e.g., ~/.claude/commands/)
+    for global_dir in _GLOBAL_STEP_PATHS:
         content = _read_file_if_named(global_dir, f"{name}.md")
         if content:
-            return parse_task_file(name, content)
+            return parse_step_file(name, content)
 
     # Fall back to builtin templates
-    builtin_path = _get_builtin_task(name)
+    builtin_path = _get_builtin_step(name)
     if builtin_path:
         content = builtin_path.read_text()
-        return parse_task_file(name, content)
+        return parse_step_file(name, content)
 
     return None
 
@@ -429,11 +420,11 @@ def gather_summaries(repo_root: Path, config) -> list[tuple[Path, str]]:
 
 def gather_prompt_components(
     repo_root: Path,
-    task: Optional[str] = None,
+    step: Optional[str] = None,
     inline: Optional[str] = None,
     context: Optional[list[str]] = None,
     exclude: Optional[list[str]] = None,
-    task_args: Optional[list[str]] = None,
+    step_args: Optional[list[str]] = None,
     paste: bool = False,
     include_tests_for: Optional[list[str]] = None,
     run_mode: Optional[str] = None,
@@ -461,40 +452,40 @@ def gather_prompt_components(
 
     diff = gather_diff(repo_root, exclude) if include_diff else None
 
-    task_result = None
+    step_result = None
     if inline:
-        task_result = ("inline", inline)
-    elif task:
-        task_file = gather_task(repo_root, task, config)
-        if task_file:
-            task_content = task_file.content
-            # Process task_args if provided
-            if task_args:
+        step_result = ("inline", inline)
+    elif step:
+        step_file = gather_step(repo_root, step, config)
+        if step_file:
+            step_content = step_file.content
+            # Process step_args if provided
+            if step_args:
                 plain_args = []
-                for arg in task_args:
+                for arg in step_args:
                     if "=" in arg:
                         # Template substitution: {{key}} -> value
                         key, value = arg.split("=", 1)
-                        task_content = task_content.replace(f"{{{{{key}}}}}", value)
+                        step_content = step_content.replace(f"{{{{{key}}}}}", value)
                     else:
                         plain_args.append(arg)
-                # Append plain args to task content
+                # Append plain args to step content
                 if plain_args:
-                    task_content = task_content.rstrip() + "\n\n" + " ".join(plain_args)
+                    step_content = step_content.rstrip() + "\n\n" + " ".join(plain_args)
             # Append additional prompts if provided
             if with_prompts:
                 for prompt_name in with_prompts:
-                    prompt_file = gather_task(repo_root, prompt_name, config)
+                    prompt_file = gather_step(repo_root, prompt_name, config)
                     if prompt_file:
-                        task_content = task_content.rstrip() + "\n\n---\n\n" + prompt_file.content
-            task_result = (task, task_content)
+                        step_content = step_content.rstrip() + "\n\n---\n\n" + prompt_file.content
+            step_result = (step, step_content)
         else:
-            task_result = (task, f"No task file found for '{task}'.")
+            step_result = (step, f"No step file found for '{step}'.")
 
     context_exclude = list(exclude) if exclude else []
     if include_tests_for is not None:
-        task_name = task or "inline"
-        include_tests = task_name in set(include_tests_for)
+        step_name = step or "inline"
+        include_tests = step_name in set(include_tests_for)
         if not include_tests and "tests/**" not in context_exclude:
             context_exclude.append("tests/**")
 
@@ -520,7 +511,7 @@ def gather_prompt_components(
         docs=docs,
         diff=diff,
         diff_files=gather_result.text_files,
-        task=task_result,
+        step=step_result,
         repo_root=repo_root,
         clipboard=clipboard,
         loopflow_doc=loopflow_doc,
@@ -544,28 +535,21 @@ def format_prompt(components: PromptComponents) -> str:
     if components.loopflow_doc:
         parts.append(f"<lf:loopflow>\n{components.loopflow_doc}\n</lf:loopflow>")
 
-    if components.task:
-        name, content = components.task
-        task_tag = (
-            f"<lf:task>\n{content}\n</lf:task>"
-            if name == "inline"
-            else f"<lf:task:{name}>\n{content}\n</lf:task:{name}>"
-        )
+    if components.step:
+        name, content = components.step
+        step_tag = f"<lf:step>\n{content}\n</lf:step>" if name == "inline" else f"<lf:step:{name}>\n{content}\n</lf:step:{name}>"
 
-        # Voices go between "The task." header and the actual task content
+        # Voices go between "The step." header and the actual step content
         if components.voices:
             if len(components.voices) == 1:
                 v = components.voices[0]
                 voice_section = f"<lf:voice:{v.name}>\n{v.content}\n</lf:voice:{v.name}>"
             else:
-                voice_parts = [
-                    f"<lf:voice:{v.name}>\n{v.content}\n</lf:voice:{v.name}>"
-                    for v in components.voices
-                ]
+                voice_parts = [f"<lf:voice:{v.name}>\n{v.content}\n</lf:voice:{v.name}>" for v in components.voices]
                 voice_section = f"<lf:voices>\n{chr(10).join(voice_parts)}\n</lf:voices>"
-            parts.append(f"The task.\n\n{voice_section}\n\n{task_tag}")
+            parts.append(f"The step.\n\n{voice_section}\n\n{step_tag}")
         else:
-            parts.append(f"The task.\n\n{task_tag}")
+            parts.append(f"The step.\n\n{step_tag}")
 
     if components.docs:
         doc_parts = []
@@ -582,7 +566,7 @@ def format_prompt(components: PromptComponents) -> str:
     if components.summaries:
         summary_parts = []
         for summary_path, content in components.summaries:
-            summary_parts.append(f'<lf:summary path="{summary_path}">\n{content}\n</lf:summary>')
+            summary_parts.append(f"<lf:summary path=\"{summary_path}\">\n{content}\n</lf:summary>")
         summaries_body = "\n\n".join(summary_parts)
         parts.append(
             "Pre-generated codebase summaries.\n\n"
@@ -590,8 +574,7 @@ def format_prompt(components: PromptComponents) -> str:
         )
 
     if components.diff:
-        diff_block = f"<lf:diff>\n{components.diff}\n</lf:diff>"
-        parts.append(f"Changes on this branch (diff against main).\n\n{diff_block}")
+        parts.append(f"Changes on this branch (diff against main).\n\n<lf:diff>\n{components.diff}\n</lf:diff>")
 
     # diff_files now contains merged diff + context files (deduplicated at load time)
     if components.diff_files:
@@ -599,8 +582,7 @@ def format_prompt(components: PromptComponents) -> str:
 
     # Handle clipboard content (text and/or image)
     if components.clipboard and components.clipboard.text:
-        clip = f"<lf:clipboard>\n{components.clipboard.text}\n</lf:clipboard>"
-        parts.append(f"Content from clipboard.\n\n{clip}")
+        parts.append(f"Content from clipboard.\n\n<lf:clipboard>\n{components.clipboard.text}\n</lf:clipboard>")
 
     # Merge clipboard image with other image files
     all_images = list(components.image_files) if components.image_files else []
@@ -615,7 +597,7 @@ def format_prompt(components: PromptComponents) -> str:
 
 def build_prompt(
     repo_root: Path,
-    task: Optional[str] = None,
+    step: Optional[str] = None,
     inline: Optional[str] = None,
     context: Optional[list[str]] = None,
     exclude: Optional[list[str]] = None,
@@ -627,7 +609,7 @@ def build_prompt(
     """Build the full prompt for an LLM session."""
     components = gather_prompt_components(
         repo_root,
-        task,
+        step,
         inline,
         context,
         exclude,

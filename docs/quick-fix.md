@@ -39,7 +39,7 @@ Run `lf debug -c` to see the breakdown without launching.
 
 ## Inline prompts
 
-Skip the task file entirely:
+Skip the step file entirely:
 
 ```bash
 lf : "fix the typo in README"

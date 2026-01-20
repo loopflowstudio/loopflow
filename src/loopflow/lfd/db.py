@@ -139,7 +139,7 @@ def save_session(session: Session, db_path: Path | None = None) -> None:
         """,
         (
             session.id,
-            session.task,
+            session.step,  # DB column is 'task' for backward compat
             session.repo,
             session.worktree,
             session.status.value,
@@ -250,7 +250,7 @@ def _session_from_row(row: dict) -> Session:
     """Convert database row to Session."""
     return Session(
         id=row["id"],
-        task=row["task"],
+        step=row["task"],  # DB column is 'task' for backward compat
         repo=row["repo"],
         worktree=row["worktree"],
         status=SessionStatus(row["status"]),

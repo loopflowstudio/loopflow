@@ -20,7 +20,7 @@ Prompts receive context assembled by loopflow. What's included is configurable v
 
 - Root-level `.md` files (README, STYLE, etc.)
 - Current diff against main
-- The task prompt from `.claude/commands/<task>.md` or `.lf/<task>.md`
+- The step prompt from `.claude/commands/<step>.md` or `.lf/<step>.md`
 - Additional files via `-x` flag or `context:` in config
 
 ---
@@ -37,7 +37,7 @@ In interactive mode, commit at natural breakpoints. Don't leave the branch in a 
 
 ```
 .claude/commands/
-  <task>.md        # prompt files (Claude Code compatible)
+  <step>.md        # prompt files (Claude Code compatible)
 
 .lf/
   config.yaml      # repo configuration

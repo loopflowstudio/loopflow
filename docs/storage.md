@@ -13,7 +13,7 @@ Loopflow treats **prompts as artifacts**. Not chat logs. Not clipboard snippets.
 
 This extends to everything loopflow touches:
 
-- **Tasks** live in `.claude/commands/`
+- **Steps** live in `.claude/commands/`
 - **Config** lives in `.lf/`
 - **Working state** lives in `.design/`
 - **Internal docs** live in `.docs/`
@@ -23,16 +23,16 @@ When something works, you can find it again. When something breaks, you can trac
 ## Folder Reference
 
 ```
-.claude/commands/     # Task prompts
+.claude/commands/     # Step prompts
 .lf/                  # Config and extensions
 .design/              # Current PR working state
 .docs/                # Internal documentation
 docs/                 # Public documentation
 ```
 
-### `.claude/commands/` — Task Prompts
+### `.claude/commands/` — Step Prompts
 
-The primary home for task definitions.
+The primary home for step definitions.
 
 ```
 .claude/commands/
@@ -41,15 +41,15 @@ The primary home for task definitions.
   debug.md
 ```
 
-**Why here?** Claude Code compatibility. Tasks in `.claude/commands/` work with both `lf` and native Claude Code slash commands. Portable across tools.
+**Why here?** Claude Code compatibility. Steps in `.claude/commands/` work with both `lf` and native Claude Code slash commands. Portable across tools.
 
-**What goes here:** Single-purpose prompts. Each file is one task—review, implement, debug, polish. The filename becomes the command: `lf review` runs `review.md`.
+**What goes here:** Single-purpose prompts. Each file is one step—review, implement, debug, polish. The filename becomes the command: `lf review` runs `review.md`.
 
 **What doesn't:** Config, personas, long-running goals. Those belong in `.lf/`.
 
 ### `.lf/` — Config and Extensions
 
-Everything loopflow-specific that isn't a task prompt.
+Everything loopflow-specific that isn't a step prompt.
 
 ```
 .lf/
@@ -66,7 +66,7 @@ Everything loopflow-specific that isn't a task prompt.
 
 **`voices/`** — Personas that shape how agents respond. "Be concise." "Think like an architect." Applied with `--voice`.
 
-**`goals/`** — High-level directives for autonomous agent loops. Unlike tasks (single-purpose), goals describe ongoing objectives an agent works toward across multiple iterations. Used by background agents via `lfd`.
+**`goals/`** — High-level directives for autonomous agent loops. Unlike steps (single-purpose), goals describe ongoing objectives an agent works toward across multiple iterations. Used by background agents via `lfd`.
 
 **`summaries/`** — Pre-generated codebase overviews for large repos. Created with `lfops summarize`. Gitignored—regenerated as needed.
 
@@ -157,7 +157,7 @@ Run `lf -c` to preview exactly what context gets assembled.
 
 ### Other Principles
 
-**Prompts as artifacts.** If it's worth running, it's worth saving. Tasks live in the repo, not your clipboard.
+**Prompts as artifacts.** If it's worth running, it's worth saving. Steps live in the repo, not your clipboard.
 
 **Human in the loop.** Everything is readable, editable, traceable. No magic databases. No hidden state. Files you can `git diff`.
 
@@ -173,7 +173,7 @@ Run `lf -c` to preview exactly what context gets assembled.
 | `.design/` | PR scratchpad | **No** (cleared) | **Yes** |
 | `.docs/` | Forward-looking plans | Yes | **Yes** |
 | `docs/` | Public docs | Yes | No (opt-in) |
-| `.claude/commands/` | Task prompts | Yes | (task file only) |
+| `.claude/commands/` | Step prompts | Yes | (step file only) |
 | `.lf/config.yaml` | Repo config | Yes | No |
 | `.lf/voices/` | Personas | Yes | (when `--voice`) |
 | `.lf/goals/` | Agent directives | Yes | (when agent uses) |

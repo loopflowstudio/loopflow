@@ -820,6 +820,7 @@ def test_scheduler_acquire_and_release():
 
     config = SchedulerConfig(concurrency=2, global_pr_limit=100)
     scheduler = Scheduler(config)
+    scheduler.total_outstanding = lambda: 0  # Mock to avoid git/db calls
 
     # Initial state
     assert scheduler.slots_available() == 2
@@ -875,6 +876,7 @@ def test_scheduler_get_status():
 
     config = SchedulerConfig(concurrency=3, global_pr_limit=15)
     scheduler = Scheduler(config)
+    scheduler.total_outstanding = lambda: 0  # Mock to avoid git/db calls
 
     acquired, reason = scheduler.acquire("run-1")
     assert acquired is True
@@ -897,6 +899,7 @@ def test_scheduler_can_start_respects_concurrency():
 
     config = SchedulerConfig(concurrency=1, global_pr_limit=100)
     scheduler = Scheduler(config)
+    scheduler.total_outstanding = lambda: 0  # Mock to avoid git/db calls
 
     # Initially can start
     can, reason = scheduler.can_start()
@@ -932,6 +935,7 @@ def test_scheduler_thread_safety():
 
     config = SchedulerConfig(concurrency=10, global_pr_limit=100)
     scheduler = Scheduler(config)
+    scheduler.total_outstanding = lambda: 0  # Mock to avoid git/db calls
 
     acquired_runs = []
     failed = []

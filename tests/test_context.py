@@ -77,6 +77,18 @@ def test_build_prompt_handles_missing_task(temp_repo):
     assert "No task file found" in result
 
 
+def test_build_prompt_with_voices(temp_repo):
+    """build_prompt passes voices through to formatting."""
+    voices_dir = temp_repo / ".lf" / "voices"
+    voices_dir.mkdir(parents=True, exist_ok=True)
+    (voices_dir / "concise.md").write_text("Be concise.")
+
+    result = build_prompt(temp_repo, "implement", voices=["concise"])
+
+    assert "<lf:voice:concise>" in result
+    assert "Be concise." in result
+
+
 def test_build_prompt_includes_context_files(temp_repo):
     """Context files passed via -c appear in output."""
     (temp_repo / "main.py").write_text("print('hello')\n")

@@ -573,6 +573,7 @@ def build_prompt(
     include_tests_for: Optional[list[str]] = None,
     run_mode: Optional[str] = None,
     include_loopflow_doc: bool = True,
+    voices: Optional[list[str]] = None,
 ) -> str:
     """Build the full prompt for an LLM session."""
     components = gather_prompt_components(
@@ -584,5 +585,6 @@ def build_prompt(
         include_tests_for=include_tests_for,
         run_mode=run_mode,
         include_loopflow_doc=include_loopflow_doc,
+        voices=voices,
     )
     return format_prompt(components)

@@ -24,10 +24,16 @@ struct OutputEvent: Sendable {
     let timestamp: Date
 }
 
+struct LoopEvent: Sendable {
+    let name: String
+    let loopId: String?
+}
+
 enum LFDEvent: Sendable {
     case worktree(WorktreeEvent)
     case session(SessionEvent)
     case output(OutputEvent)
+    case loop(LoopEvent)
 }
 
 actor LFDEventService {
@@ -184,6 +190,13 @@ actor LFDEventService {
                 sessionId: data["session_id"] as? String ?? "",
                 text: data["text"] as? String ?? "",
                 timestamp: timestamp
+            ))
+        }
+
+        if name.hasPrefix("loop.") {
+            return .loop(LoopEvent(
+                name: name,
+                loopId: data["loop_id"] as? String ?? data["id"] as? String
             ))
         }
 

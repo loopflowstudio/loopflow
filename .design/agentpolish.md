@@ -2,22 +2,23 @@
 
 ## Summary
 
-Loop branch names now include random words for uniqueness, along with the area of responsibility.
+Loop branch names now include random words for uniqueness, along with the area of responsibility. Uses the same magical/musical word lists as Maestro's `NameGenerator.swift`.
 
 ## Changes
 
 **Format:**
-- Without area: `{goal}-{adjective}-{noun}-main`
-- With area: `{goal}-{area_slug}-{adjective}-{noun}-main`
+- Without area: `{goal}-{magical}-{musical}-main`
+- With area: `{goal}-{area_slug}-{magical}-{musical}-main`
 
 **Examples:**
-- `product-engineer-swift-river-main`
-- `test-coverage-api-calm-brook-main`
+- `product-engineer-aurora-melody-main` (no area)
+- `product-engineer-maestro-aurora-melody-main` (area="Maestro/")
 
 **Implementation:**
-- Added 50 adjectives and 50 nouns to `loops.py` (2500 possible combinations)
+- Added magical (34 words) and musical (26 words) lists to `loops.py` (884 combinations)
+- Word lists match `Maestro/Maestro/Services/NameGenerator.swift`
 - Updated `_allocate_loop_main()` to always include random words
-- Iteration branches derive from loop-main: `product-engineer-swift-river/001`
+- Iteration branches derive from loop-main: `product-engineer-aurora-melody/001`
 
 ## Files Changed
 

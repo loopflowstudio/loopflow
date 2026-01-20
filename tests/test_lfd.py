@@ -1073,14 +1073,14 @@ def test_iteration_branch_prefix_without_suffix():
 
 
 def test_generate_random_words_format():
-    """_generate_random_words returns adjective-noun format."""
-    from loopflow.lfd.loops import _generate_random_words, ADJECTIVES, NOUNS
+    """_generate_random_words returns magical-musical format."""
+    from loopflow.lfd.loops import _generate_random_words, MAGICAL, MUSICAL
 
     words = _generate_random_words()
     parts = words.split("-")
     assert len(parts) == 2
-    assert parts[0] in ADJECTIVES
-    assert parts[1] in NOUNS
+    assert parts[0] in MAGICAL
+    assert parts[1] in MUSICAL
 
 
 def test_generate_random_words_produces_variety():
@@ -1089,17 +1089,17 @@ def test_generate_random_words_produces_variety():
 
     # Generate 20 word pairs, expect at least 5 unique
     results = {_generate_random_words() for _ in range(20)}
-    assert len(results) >= 5  # Should be much higher with 50*50 combinations
+    assert len(results) >= 5  # Should be much higher with 34*26 combinations
 
 
 def test_word_lists_have_sufficient_variety():
     """Word lists have enough entries for good uniqueness."""
-    from loopflow.lfd.loops import ADJECTIVES, NOUNS
+    from loopflow.lfd.loops import MAGICAL, MUSICAL
 
-    # 50 adjectives * 50 nouns = 2500 combinations
-    assert len(ADJECTIVES) >= 50
-    assert len(NOUNS) >= 50
+    # 34 magical * 26 musical = 884 combinations
+    assert len(MAGICAL) >= 30
+    assert len(MUSICAL) >= 20
     # All words should be lowercase and contain no special characters
-    for word in ADJECTIVES + NOUNS:
+    for word in MAGICAL + MUSICAL:
         assert word.islower()
         assert word.isalpha()

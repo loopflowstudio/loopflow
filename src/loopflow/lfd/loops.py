@@ -9,35 +9,30 @@ import uuid
 from pathlib import Path
 
 
-# Word lists for generating unique branch names
-# Adjectives: short, distinct, pleasant
-ADJECTIVES = [
-    "amber", "azure", "bold", "bright", "calm", "clear", "cool", "crisp",
-    "dark", "deep", "dry", "fair", "fast", "firm", "fresh", "glad",
-    "gold", "green", "keen", "kind", "lean", "light", "mild", "neat",
-    "pale", "plain", "pure", "quick", "quiet", "rapid", "raw", "rich",
-    "ripe", "safe", "sharp", "silver", "sleek", "slim", "slow", "smooth",
-    "soft", "solid", "still", "strong", "swift", "tall", "tidy", "warm",
-    "wild", "wise",
+# Word lists for generating unique branch names (matches Maestro/NameGenerator.swift)
+MAGICAL = [
+    "aurora", "cascade", "crystal", "drift", "echo", "ember",
+    "fern", "flume", "frost", "glade", "grove", "haze",
+    "ivy", "jade", "luna", "mist", "nova", "opal",
+    "petal", "prism", "rain", "ripple", "sage", "shade",
+    "spark", "star", "stone", "storm", "tide", "vale",
+    "wave", "wisp", "wren", "zephyr",
 ]
 
-# Nouns: short, distinct, concrete
-NOUNS = [
-    "arch", "beam", "brook", "cliff", "cloud", "cove", "creek", "crown",
-    "dale", "dawn", "dune", "edge", "elm", "fern", "field", "flame",
-    "flint", "frost", "gate", "glen", "grove", "hawk", "hill", "isle",
-    "lake", "lane", "leaf", "marsh", "mist", "moon", "moss", "oak",
-    "path", "peak", "pine", "pond", "rain", "reef", "ridge", "river",
-    "rock", "shade", "shore", "spark", "stone", "storm", "stream", "tide",
-    "vale", "wave",
+MUSICAL = [
+    "allegro", "aria", "ballad", "cadence", "canon", "chord",
+    "coda", "duet", "forte", "fugue", "harmony", "hymn",
+    "lilt", "lyric", "melody", "motif", "opus", "prelude",
+    "refrain", "rondo", "sonata", "tempo", "trill", "tune",
+    "verse", "waltz",
 ]
 
 
 def _generate_random_words() -> str:
-    """Generate a random adjective-noun pair like 'swift-river'."""
-    adj = random.choice(ADJECTIVES)
-    noun = random.choice(NOUNS)
-    return f"{adj}-{noun}"
+    """Generate a random magical-musical pair like 'aurora-melody'."""
+    magical = random.choice(MAGICAL)
+    musical = random.choice(MUSICAL)
+    return f"{magical}-{musical}"
 
 from loopflow.lf.context import find_worktree_root
 from loopflow.lf.git import find_main_repo

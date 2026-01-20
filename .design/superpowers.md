@@ -93,10 +93,12 @@ If the skill references other files (e.g., `REFERENCES.md`), include them as add
 
 ## UI changes
 
-Maestro task selector should show external skills:
+**Maestro:** Task selector should show external skills:
 - Group by source: "Loopflow" section, "Superpowers" section
 - Badge showing source prefix
 - Same run flow as native tasks
+
+**README:** "Works With" section listing ecosystem tools (worktrunk, superpowers).
 
 ## Constraints
 

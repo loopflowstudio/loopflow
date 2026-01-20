@@ -1,4 +1,4 @@
-// Worktree detail panel showing branch info, output streaming, and launcher.
+// Worktree detail panel showing dashboard with commits, changed files, and launcher.
 
 import SwiftUI
 
@@ -6,32 +6,79 @@ struct WorktreeDetailPanel: View {
     @Bindable var appState: AppState
     let worktree: Worktree
 
-    @State private var isLauncherExpanded = false
-    @State private var showingPRSheet = false
+    @AppStorage("commitsExpanded") private var commitsExpanded = true
+    @AppStorage("filesExpanded") private var filesExpanded = true
+    @AppStorage("launcherExpanded") private var launcherExpanded = false
+
+    @State private var showingDiffSheet = false
+    @State private var commits: [CommitInfo] = []
+    @State private var fileStats: [FileDiffStat] = []
+    @State private var selectedFileDiff: String = ""
+    @State private var isLoadingCommits = false
+    @State private var isLoadingFiles = false
     @State private var actionError: String?
     @State private var showingActionError = false
+    @State private var showingAbandonConfirmation = false
 
     private let terminalLauncher = TerminalLauncher()
+    private let worktreeService = WorktreeService()
+
+    private var ideApp: IDEApp { appState.config?.ideApp ?? .cursor }
+    private var terminalApp: TerminalApp { appState.config?.terminalApp ?? .warp }
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
             header
 
             Divider()
 
-            // Output area
-            outputArea
+            quickActionsBar
 
             Divider()
 
-            // Launcher (collapsed by default)
+            ScrollView {
+                VStack(spacing: 0) {
+                    commitsSection
+                    filesSection
+                }
+            }
+
+            Divider()
+
             launcherSection
+        }
+        .onAppear {
+            loadCommits()
+            loadFileStats()
+        }
+        .onChange(of: worktree.id) {
+            commits = []
+            fileStats = []
+            loadCommits()
+            loadFileStats()
+        }
+        .sheet(isPresented: $showingDiffSheet) {
+            DiffSheet(
+                worktree: worktree,
+                diffContent: selectedFileDiff.isEmpty ? nil : selectedFileDiff,
+                isLoading: false,
+                onOpenWeb: { openPR() }
+            )
         }
         .alert("Error", isPresented: $showingActionError) {
             Button("OK") { actionError = nil }
         } message: {
             Text(actionError ?? "An error occurred")
+        }
+        .confirmationDialog(
+            "Abandon Worktree",
+            isPresented: $showingAbandonConfirmation
+        ) {
+            Button("Abandon", role: .destructive) {
+                abandonWorktree()
+            }
+        } message: {
+            Text("Are you sure you want to abandon '\(worktree.branch)'? This will remove the worktree and its local branch.")
         }
     }
 
@@ -39,8 +86,7 @@ struct WorktreeDetailPanel: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            // Branch name
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(worktree.branch)
                     .font(.title2)
                     .fontWeight(.semibold)
@@ -50,41 +96,15 @@ struct WorktreeDetailPanel: View {
                         prBadge(number: prNumber, state: prState)
                     }
 
-                    Text(worktree.commitsText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if worktree.aheadMain > 0 {
+                        Text("\(worktree.aheadMain) commits")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
 
             Spacer()
-
-            // Action buttons
-            HStack(spacing: 8) {
-                if worktree.prURL != nil {
-                    if worktree.prState == .open {
-                        Button("Land") {
-                            landPR()
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                    }
-                } else if worktree.branch != "main" {
-                    Button("Create PR") {
-                        createPR()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-
-                Button {
-                    openInTerminal()
-                } label: {
-                    Image(systemName: "terminal")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help("Open in \(appState.config?.terminalApp.displayName ?? "Terminal")")
-            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
@@ -99,9 +119,7 @@ struct WorktreeDetailPanel: View {
         }
 
         return Button {
-            if let url = worktree.prURL {
-                terminalLauncher.openURL(url)
-            }
+            openPR()
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "arrow.up.right.square")
@@ -120,161 +138,374 @@ struct WorktreeDetailPanel: View {
         .help("View PR on GitHub")
     }
 
-    // MARK: - Output Area
+    // MARK: - Quick Actions Bar
 
-    private var outputArea: some View {
-        VStack(spacing: 0) {
-            // Status bar
-            HStack(spacing: 8) {
-                if isWorktreeRunning {
-                    Circle()
-                        .fill(.green)
-                        .frame(width: 8, height: 8)
-                    Text("Running")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Circle()
-                        .fill(.gray)
-                        .frame(width: 8, height: 8)
-                    Text("Idle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+    private var quickActionsBar: some View {
+        HStack(spacing: 16) {
+            Button {
+                openPR()
+            } label: {
+                HStack(spacing: 8) {
+                    AppIconProvider.iconImage(for: .github, size: 20)
+                    Text("PR")
+                        .fontWeight(.medium)
                 }
+                .frame(minWidth: 80)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .help("Open or create PR")
 
-                Spacer()
-
-                if let lineCount = outputLineCount, lineCount > 0 {
-                    Text("\(lineCount) lines")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+            Button {
+                openInIDE()
+            } label: {
+                HStack(spacing: 8) {
+                    AppIconProvider.iconImage(for: AppIdentifier(ide: ideApp), size: 20)
+                    Text(ideApp.displayName)
+                        .fontWeight(.medium)
                 }
+                .frame(minWidth: 80)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .help("Open in \(ideApp.displayName)")
 
-                if hasOutput {
-                    Button {
-                        clearOutput()
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.caption)
+            Button {
+                openInTerminal()
+            } label: {
+                HStack(spacing: 8) {
+                    AppIconProvider.iconImage(for: AppIdentifier(terminal: terminalApp), size: 20)
+                    Text(terminalApp.displayName)
+                        .fontWeight(.medium)
+                }
+                .frame(minWidth: 80)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .help("Open in \(terminalApp.displayName)")
+
+            Spacer()
+
+            // Land button - only when PR is open
+            if worktree.prState == .open {
+                Button {
+                    landPR()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "airplane.arrival")
+                            .font(.system(size: 16))
+                        Text("Land")
+                            .fontWeight(.medium)
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .help("Clear output")
+                    .frame(minWidth: 80)
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .tint(.green)
+                .help("Land PR (merge and clean up)")
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(.bar)
 
-            // Output content
-            if hasOutput {
-                outputContent
-            } else if let result = appState.currentSessionResult {
-                ResultsSummaryView(appState: appState, result: result)
+            // Abandon button
+            Button {
+                showingAbandonConfirmation = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 16))
+                    Text("Abandon")
+                        .fontWeight(.medium)
+                }
+                .frame(minWidth: 80)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .tint(.red)
+            .help("Abandon worktree")
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+    }
+
+    // MARK: - Commits Section
+
+    private var commitsSection: some View {
+        DisclosureGroup(isExpanded: $commitsExpanded) {
+            if isLoadingCommits {
+                ProgressView()
+                    .scaleEffect(0.8)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 20)
+            } else if commits.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.title2)
+                        .foregroundStyle(.tertiary)
+                    Text("No commits yet")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
             } else {
-                emptyOutputView
-            }
-        }
-        .frame(maxHeight: .infinity)
-    }
-
-    private var isWorktreeRunning: Bool {
-        appState.activeWorktreePaths.contains(worktree.path)
-    }
-
-    private var sessionIds: [String] {
-        appState.liveOutputBySession.keys.filter { sessionId in
-            // Match sessions for this worktree
-            if let result = appState.sessionResults[sessionId] {
-                return result.worktree == worktree.path
-            }
-            return false
-        }.sorted()
-    }
-
-    private var hasOutput: Bool {
-        !sessionIds.isEmpty && sessionIds.contains { sessionId in
-            !(appState.liveOutputBySession[sessionId]?.isEmpty ?? true)
-        }
-    }
-
-    private var outputLineCount: Int? {
-        sessionIds.compactMap { appState.liveOutputBySession[$0]?.count }.reduce(0, +)
-    }
-
-    private var outputContent: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(sessionIds, id: \.self) { sessionId in
-                        ForEach(appState.liveOutputBySession[sessionId] ?? []) { line in
-                            Text(line.text)
-                                .font(.system(.caption, design: .monospaced))
-                                .foregroundStyle(colorFor(line.text))
-                                .textSelection(.enabled)
-                                .id(line.id)
-                        }
+                VStack(spacing: 8) {
+                    ForEach(commits.prefix(15)) { commit in
+                        commitRow(commit)
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 12)
             }
-            .background(Color(.textBackgroundColor))
-            .onChange(of: outputLineCount) { _, _ in
-                // Auto-scroll to bottom
-                if let sessionId = sessionIds.last,
-                   let lastLine = appState.liveOutputBySession[sessionId]?.last {
-                    withAnimation {
-                        proxy.scrollTo(lastLine.id, anchor: .bottom)
+        } label: {
+            HStack {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.subheadline)
+                Text("Commits")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                if !commits.isEmpty {
+                    Text("(\(commits.count))")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
+            }
+            .foregroundStyle(.primary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+
+    private func commitRow(_ commit: CommitInfo) -> some View {
+        HStack(spacing: 10) {
+            Text(commit.shortSHA)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.blue)
+                .frame(width: 60, alignment: .leading)
+
+            Text(commit.message)
+                .font(.subheadline)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Spacer()
+
+            Text(commit.relativeTime)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.primary.opacity(0.03))
+        )
+    }
+
+    // MARK: - Files Section (GitHub-style diff summary)
+
+    private var filesSection: some View {
+        DisclosureGroup(isExpanded: $filesExpanded) {
+            if isLoadingFiles {
+                ProgressView()
+                    .scaleEffect(0.8)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 20)
+            } else if fileStats.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "doc.text")
+                        .font(.title2)
+                        .foregroundStyle(.tertiary)
+                    Text("No changes")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
+            } else {
+                VStack(spacing: 6) {
+                    // Summary bar
+                    fileSummaryBar
+
+                    // File list
+                    ForEach(fileStats) { file in
+                        fileRow(file)
                     }
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
-        }
-    }
-
-    private func colorFor(_ text: String) -> Color {
-        if text.hasPrefix("→") { return .blue }
-        if text.hasPrefix("✓") { return .green }
-        if text.hasPrefix("✗") { return .red }
-        return .primary
-    }
-
-    private func clearOutput() {
-        for sessionId in sessionIds {
-            if !appState.activeSessionIds.contains(sessionId) {
-                appState.liveOutputBySession.removeValue(forKey: sessionId)
+        } label: {
+            HStack {
+                Image(systemName: "doc.text.fill")
+                    .font(.subheadline)
+                Text("Changed Files")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                if !fileStats.isEmpty {
+                    Text("(\(fileStats.count))")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
             }
+            .foregroundStyle(.primary)
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
 
-    private var emptyOutputView: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "text.alignleft")
-                .font(.system(size: 28))
-                .foregroundStyle(.tertiary)
+    private var fileSummaryBar: some View {
+        let totalAdditions = fileStats.reduce(0) { $0 + $1.additions }
+        let totalDeletions = fileStats.reduce(0) { $0 + $1.deletions }
 
-            VStack(spacing: 4) {
-                Text("No activity yet")
+        return HStack(spacing: 16) {
+            HStack(spacing: 4) {
+                Text("+\(totalAdditions)")
+                    .font(.system(.caption, design: .monospaced))
                     .fontWeight(.medium)
-                    .foregroundStyle(.secondary)
-                Text("Run a task to see output here.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.green)
+            }
+
+            HStack(spacing: 4) {
+                Text("-\(totalDeletions)")
+                    .font(.system(.caption, design: .monospaced))
+                    .fontWeight(.medium)
+                    .foregroundStyle(.red)
+            }
+
+            Spacer()
+
+            Text("\(fileStats.count) files changed")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.primary.opacity(0.03))
+        )
+    }
+
+    private func fileRow(_ file: FileDiffStat) -> some View {
+        HStack(spacing: 8) {
+            // File icon based on extension
+            fileIcon(for: file.fileExtension)
+                .frame(width: 16)
+
+            // File path
+            VStack(alignment: .leading, spacing: 1) {
+                Text(file.filename)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .lineLimit(1)
+
+                if !file.directory.isEmpty {
+                    Text(file.directory)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+
+            // Change stats bar (GitHub-style)
+            changeBar(additions: file.additions, deletions: file.deletions)
+
+            // Stats
+            HStack(spacing: 8) {
+                Text("+\(file.additions)")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.green)
+
+                Text("-\(file.deletions)")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.red)
+            }
+            .frame(width: 70, alignment: .trailing)
+
+            // Quick actions
+            HStack(spacing: 6) {
+                Button {
+                    openFileInIDE(file.path)
+                } label: {
+                    AppIconProvider.iconImage(for: AppIdentifier(ide: ideApp), size: 14)
+                }
+                .buttonStyle(.borderless)
+                .help("Open in \(ideApp.displayName)")
+
+                Button {
+                    openFileInTerminal(file.path)
+                } label: {
+                    AppIconProvider.iconImage(for: AppIdentifier(terminal: terminalApp), size: 14)
+                }
+                .buttonStyle(.borderless)
+                .help("Open in \(terminalApp.displayName)")
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding()
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.primary.opacity(0.03))
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            loadFileDiff(file.path)
+        }
+    }
+
+    private func fileIcon(for ext: String) -> some View {
+        let (icon, color): (String, Color) = switch ext {
+        case "swift": ("swift", .orange)
+        case "py": ("text.page", .blue)
+        case "ts", "tsx", "js", "jsx": ("curlybraces", .yellow)
+        case "md": ("doc.richtext", .purple)
+        case "yaml", "yml", "json": ("gearshape", .gray)
+        case "css", "scss": ("paintbrush", .pink)
+        case "html": ("chevron.left.forwardslash.chevron.right", .orange)
+        default: ("doc", .gray)
+        }
+
+        return Image(systemName: icon)
+            .font(.caption)
+            .foregroundStyle(color)
+    }
+
+    private func changeBar(additions: Int, deletions: Int) -> some View {
+        let total = additions + deletions
+        let maxBlocks = 5
+        let addBlocks: Int
+        if total > 0 && additions > 0 {
+            addBlocks = max(1, Int(round(Double(additions) / Double(total) * Double(maxBlocks))))
+        } else {
+            addBlocks = 0
+        }
+        let delBlocks = total > 0 ? maxBlocks - addBlocks : 0
+
+        return HStack(spacing: 1) {
+            ForEach(0..<addBlocks, id: \.self) { _ in
+                Rectangle()
+                    .fill(Color.green)
+                    .frame(width: 6, height: 10)
+            }
+            ForEach(0..<delBlocks, id: \.self) { _ in
+                Rectangle()
+                    .fill(Color.red)
+                    .frame(width: 6, height: 10)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 2))
     }
 
     // MARK: - Launcher Section
 
     private var launcherSection: some View {
         VStack(spacing: 0) {
-            // Toggle header
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
-                    isLauncherExpanded.toggle()
+                    launcherExpanded.toggle()
                 }
             } label: {
                 HStack {
@@ -284,7 +515,7 @@ struct WorktreeDetailPanel: View {
                         .font(.caption)
                         .fontWeight(.medium)
                     Spacer()
-                    Image(systemName: isLauncherExpanded ? "chevron.down" : "chevron.up")
+                    Image(systemName: launcherExpanded ? "chevron.down" : "chevron.up")
                         .font(.caption2)
                 }
                 .foregroundStyle(.secondary)
@@ -294,7 +525,7 @@ struct WorktreeDetailPanel: View {
             .buttonStyle(.plain)
             .background(.bar)
 
-            if isLauncherExpanded {
+            if launcherExpanded {
                 CollapsedLauncher(appState: appState, worktree: worktree)
             }
         }
@@ -312,13 +543,53 @@ struct WorktreeDetailPanel: View {
         }
     }
 
-    private func createPR() {
+    private func openInIDE() {
+        do {
+            try terminalLauncher.openInIDE(ideApp, at: URL(fileURLWithPath: worktree.path))
+        } catch {
+            actionError = "Failed to open \(ideApp.displayName): \(error.localizedDescription)"
+            showingActionError = true
+        }
+    }
+
+    private func openPR() {
+        let worktreeURL = URL(fileURLWithPath: worktree.path)
+
+        // If draft PR exists, upgrade to ready then open
+        if worktree.prState == .draft {
+            Task {
+                do {
+                    try await worktreeService.markPRReady(in: worktreeURL)
+                    // Refresh to get updated PR URL, then open
+                    await appState.refreshWorktrees()
+                    if let url = worktree.prURL {
+                        terminalLauncher.openURL(url)
+                    }
+                } catch {
+                    await MainActor.run {
+                        actionError = "Failed to mark PR ready: \(error.localizedDescription)"
+                        showingActionError = true
+                    }
+                }
+            }
+            return
+        }
+
+        // If open/merged/closed PR exists, just open it
+        if let prURL = worktree.prURL {
+            terminalLauncher.openURL(prURL)
+            return
+        }
+
+        // No PR exists - create one (fallback, shouldn't happen with auto-draft)
         Task {
             do {
-                try await appState.createPR(for: worktree)
+                _ = try await worktreeService.createPR(in: worktreeURL)
             } catch {
-                actionError = error.localizedDescription
-                showingActionError = true
+                await MainActor.run {
+                    actionError = "Failed to create PR: \(error.localizedDescription)"
+                    showingActionError = true
+                }
             }
         }
     }
@@ -328,8 +599,83 @@ struct WorktreeDetailPanel: View {
             do {
                 try await appState.landPR(for: worktree)
             } catch {
-                actionError = error.localizedDescription
-                showingActionError = true
+                await MainActor.run {
+                    actionError = "Failed to land PR: \(error.localizedDescription)"
+                    showingActionError = true
+                }
+            }
+        }
+    }
+
+    private func abandonWorktree() {
+        Task {
+            do {
+                try await appState.deleteWorktree(worktree)
+            } catch {
+                await MainActor.run {
+                    actionError = "Failed to abandon worktree: \(error.localizedDescription)"
+                    showingActionError = true
+                }
+            }
+        }
+    }
+
+    private func openFileInIDE(_ path: String) {
+        let fullPath = URL(fileURLWithPath: worktree.path).appendingPathComponent(path)
+        do {
+            try terminalLauncher.openInIDE(ideApp, at: fullPath)
+        } catch {
+            actionError = "Failed to open file in \(ideApp.displayName): \(error.localizedDescription)"
+            showingActionError = true
+        }
+    }
+
+    private func openFileInTerminal(_ path: String) {
+        let dir = URL(fileURLWithPath: worktree.path).appendingPathComponent(path).deletingLastPathComponent()
+        do {
+            try terminalLauncher.launchTerminal(terminalApp, at: dir)
+        } catch {
+            actionError = "Failed to open \(terminalApp.displayName): \(error.localizedDescription)"
+            showingActionError = true
+        }
+    }
+
+    private func loadCommits() {
+        isLoadingCommits = true
+        Task {
+            do {
+                let base = worktree.baseBranch ?? "main"
+                commits = try await worktreeService.getCommits(for: worktree, since: base)
+            } catch {
+                commits = []
+            }
+            isLoadingCommits = false
+        }
+    }
+
+    private func loadFileStats() {
+        isLoadingFiles = true
+        Task {
+            do {
+                let worktreeURL = URL(fileURLWithPath: worktree.path)
+                let base = worktree.baseBranch ?? "main"
+                fileStats = try await worktreeService.getDiffStats("\(base)...HEAD", in: worktreeURL)
+            } catch {
+                fileStats = []
+            }
+            isLoadingFiles = false
+        }
+    }
+
+    private func loadFileDiff(_ path: String) {
+        Task {
+            do {
+                let worktreeURL = URL(fileURLWithPath: worktree.path)
+                let base = worktree.baseBranch ?? "main"
+                selectedFileDiff = try await worktreeService.getDiff("\(base)...HEAD -- \(path)", in: worktreeURL)
+                showingDiffSheet = true
+            } catch {
+                selectedFileDiff = ""
             }
         }
     }
@@ -344,7 +690,6 @@ struct CollapsedLauncher: View {
     @State private var taskSearchText: String = ""
     @State private var argsText: String = ""
     @State private var selectedTask: PromptCard?
-    @State private var selectedPipeline: PipelineDef?
     @State private var isShowingDropdown = false
     @State private var launchError: String?
     @State private var showingLaunchError = false
@@ -411,7 +756,7 @@ struct CollapsedLauncher: View {
                 Spacer()
 
                 Button {
-                    runAuto()
+                    run(interactive: false)
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "play.fill")
@@ -423,7 +768,7 @@ struct CollapsedLauncher: View {
                 .keyboardShortcut(.return, modifiers: .command)
 
                 Button {
-                    runInteractive()
+                    run(interactive: true)
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "terminal")
@@ -527,8 +872,8 @@ struct CollapsedLauncher: View {
         return string
     }
 
-    private func runAuto() {
-        let command = buildCommand(interactive: false)
+    private func run(interactive: Bool) {
+        let command = buildCommand(interactive: interactive)
         let terminal = appState.config?.terminalApp ?? .warp
 
         do {
@@ -541,206 +886,6 @@ struct CollapsedLauncher: View {
             launchError = error.localizedDescription
             showingLaunchError = true
         }
-    }
-
-    private func runInteractive() {
-        let command = buildCommand(interactive: true)
-        let terminal = appState.config?.terminalApp ?? .warp
-
-        do {
-            try terminalLauncher.launchTerminal(
-                terminal,
-                at: URL(fileURLWithPath: worktree.path),
-                command: command
-            )
-        } catch {
-            launchError = error.localizedDescription
-            showingLaunchError = true
-        }
-    }
-}
-
-// MARK: - Results Summary View
-
-struct ResultsSummaryView: View {
-    @Bindable var appState: AppState
-    let result: SessionResult
-
-    @State private var expandedFiles: Set<Int> = []
-
-    private let terminalLauncher = TerminalLauncher()
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                // Status header
-                HStack(spacing: 8) {
-                    statusIcon(result.status)
-
-                    Text(result.status == .running ? "Running \(result.task)..." : "\(result.task) \(result.status.rawValue)")
-                        .font(.caption)
-                        .fontWeight(.medium)
-
-                    Spacer()
-
-                    Text(formatDuration(result.duration))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-
-                // Files changed
-                if !result.filesChanged.isEmpty {
-                    filesSection
-                }
-
-                // Commits
-                if !result.newCommits.isEmpty {
-                    commitsSection
-                }
-
-                // Actions
-                if result.status != .running {
-                    actionButtons
-                }
-            }
-            .padding(16)
-        }
-        .background(Color(.textBackgroundColor))
-    }
-
-    @ViewBuilder
-    private func statusIcon(_ status: SessionResultStatus) -> some View {
-        switch status {
-        case .running:
-            ProgressView()
-                .scaleEffect(0.5)
-                .frame(width: 16, height: 16)
-        case .completed:
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-                .font(.caption)
-        case .error:
-            Image(systemName: "xmark.circle.fill")
-                .foregroundStyle(.red)
-                .font(.caption)
-        }
-    }
-
-    private var filesSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("\(result.filesChanged.count) file\(result.filesChanged.count == 1 ? "" : "s") changed")
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .foregroundStyle(.secondary)
-
-                Spacer()
-
-                Text("+\(result.totalLinesAdded) -\(result.totalLinesRemoved)")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-
-            ForEach(Array(result.filesChanged.enumerated()), id: \.element.id) { index, file in
-                fileRow(file, index: index)
-            }
-        }
-    }
-
-    private func fileRow(_ file: FileChange, index: Int) -> some View {
-        HStack(spacing: 6) {
-            fileKindIcon(file.kind)
-
-            Text(file.path)
-                .font(.caption)
-                .lineLimit(1)
-                .truncationMode(.middle)
-
-            Spacer()
-
-            HStack(spacing: 4) {
-                if file.linesAdded > 0 {
-                    Text("+\(file.linesAdded)")
-                        .font(.caption2)
-                        .foregroundStyle(.green)
-                }
-                if file.linesRemoved > 0 {
-                    Text("-\(file.linesRemoved)")
-                        .font(.caption2)
-                        .foregroundStyle(.red)
-                }
-            }
-        }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 4)
-                .fill(Color.primary.opacity(0.03))
-        )
-    }
-
-    @ViewBuilder
-    private func fileKindIcon(_ kind: FileChangeKind) -> some View {
-        switch kind {
-        case .added:
-            Image(systemName: "plus.circle.fill")
-                .foregroundStyle(.green)
-                .font(.caption2)
-        case .modified:
-            Image(systemName: "pencil.circle.fill")
-                .foregroundStyle(.orange)
-                .font(.caption2)
-        case .deleted:
-            Image(systemName: "minus.circle.fill")
-                .foregroundStyle(.red)
-                .font(.caption2)
-        case .renamed:
-            Image(systemName: "arrow.right.circle.fill")
-                .foregroundStyle(.blue)
-                .font(.caption2)
-        }
-    }
-
-    private var commitsSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("\(result.newCommits.count) new commit\(result.newCommits.count == 1 ? "" : "s")")
-                .font(.caption)
-                .fontWeight(.medium)
-                .foregroundStyle(.secondary)
-
-            ForEach(result.newCommits, id: \.self) { message in
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.turn.down.right")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                    Text(message)
-                        .font(.caption)
-                        .lineLimit(2)
-                }
-            }
-        }
-    }
-
-    private var actionButtons: some View {
-        HStack(spacing: 12) {
-            Button {
-                let terminal = appState.config?.terminalApp ?? .warp
-                try? terminalLauncher.launchTerminal(terminal, at: URL(fileURLWithPath: result.worktree))
-            } label: {
-                Label("Open Terminal", systemImage: "terminal")
-                    .font(.caption)
-            }
-            .buttonStyle(.bordered)
-
-            Spacer()
-        }
-    }
-
-    private func formatDuration(_ interval: TimeInterval) -> String {
-        let minutes = Int(interval) / 60
-        let seconds = Int(interval) % 60
-        return String(format: "%d:%02d", minutes, seconds)
     }
 }
 
@@ -763,5 +908,5 @@ struct ResultsSummaryView: View {
         isMerging: false
     )
     return WorktreeDetailPanel(appState: state, worktree: worktree)
-        .frame(width: 600, height: 500)
+        .frame(width: 600, height: 600)
 }

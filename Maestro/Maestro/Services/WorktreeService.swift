@@ -90,8 +90,103 @@ struct WorktreeService {
         _ = try await runLfops(["land"], in: worktreePath)
     }
 
+    func createDraftPR(branch: String, in worktreePath: URL) async throws {
+        guard let ghURL = findCommand("gh") else {
+            throw WorktreeError.commandFailed("gh CLI not found. Install GitHub CLI.")
+        }
+        _ = try await runProcess(ghURL, ["pr", "create", "--draft", "--fill"], in: worktreePath)
+    }
+
+    func markPRReady(in worktreePath: URL) async throws {
+        guard let ghURL = findCommand("gh") else {
+            throw WorktreeError.commandFailed("gh CLI not found. Install GitHub CLI.")
+        }
+        _ = try await runProcess(ghURL, ["pr", "ready"], in: worktreePath)
+    }
+
+    func branchIsPushed(_ branch: String, in repoURL: URL) async -> Bool {
+        do {
+            let output = try await runProcess(
+                URL(fileURLWithPath: "/usr/bin/git"),
+                ["ls-remote", "--heads", "origin", branch],
+                in: repoURL
+            )
+            return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        } catch {
+            return false
+        }
+    }
+
     func getDiff(_ spec: String, in repoURL: URL) async throws -> String {
         try await runProcess(URL(fileURLWithPath: "/usr/bin/git"), ["diff", spec], in: repoURL)
+    }
+
+    func getDiffStats(_ spec: String, in repoURL: URL) async throws -> [FileDiffStat] {
+        // Use --numstat for machine-readable output: additions, deletions, filename
+        let output = try await runProcess(
+            URL(fileURLWithPath: "/usr/bin/git"),
+            ["diff", spec, "--numstat"],
+            in: repoURL
+        )
+
+        return output
+            .split(separator: "\n")
+            .compactMap { line -> FileDiffStat? in
+                let parts = line.split(separator: "\t")
+                guard parts.count >= 3 else { return nil }
+
+                // Binary files show "-" for additions/deletions
+                let additions = Int(parts[0]) ?? 0
+                let deletions = Int(parts[1]) ?? 0
+                let path = String(parts[2])
+
+                return FileDiffStat(
+                    id: path,
+                    path: path,
+                    additions: additions,
+                    deletions: deletions
+                )
+            }
+            .sorted { $0.totalChanges > $1.totalChanges }
+    }
+
+    func getCommits(for worktree: Worktree, since: String = "main") async throws -> [CommitInfo] {
+        let worktreeURL = URL(fileURLWithPath: worktree.path)
+        // Message last so pipes in commit messages don't break parsing
+        let format = "%H|%h|%an|%aI|%s"
+        let range = "\(since)..HEAD"
+
+        let output = try await runProcess(
+            URL(fileURLWithPath: "/usr/bin/git"),
+            ["log", range, "--format=\(format)"],
+            in: worktreeURL
+        )
+
+        let dateFormatter = ISO8601DateFormatter()
+        dateFormatter.formatOptions = [.withInternetDateTime]
+
+        return output
+            .split(separator: "\n")
+            .compactMap { line -> CommitInfo? in
+                let parts = line.split(separator: "|", maxSplits: 4)
+                guard parts.count >= 5 else { return nil }
+
+                let sha = String(parts[0])
+                let shortSHA = String(parts[1])
+                let author = String(parts[2])
+                let dateString = String(parts[3])
+                let message = String(parts[4])
+
+                guard let date = dateFormatter.date(from: dateString) else { return nil }
+
+                return CommitInfo(
+                    id: sha,
+                    shortSHA: shortSHA,
+                    message: message,
+                    author: author,
+                    date: date
+                )
+            }
     }
 
     func getGitHubCompareURL(branch: String, in repoURL: URL, base: String = "main") async throws -> URL? {

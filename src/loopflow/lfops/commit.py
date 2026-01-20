@@ -6,7 +6,7 @@ import typer
 
 from loopflow.lf.config import load_config, parse_model
 from loopflow.lf.context import find_worktree_root, gather_task, gather_prompt_components, format_prompt
-from loopflow.lf.git import has_upstream
+from loopflow.lf.git import ensure_draft_pr, has_upstream
 from loopflow.lf.launcher import get_runner
 
 
@@ -90,6 +90,10 @@ def register_commands(app: typer.Typer) -> None:
                 result = subprocess.run(["git", "push"], cwd=repo_root)
                 if result.returncode == 0:
                     typer.echo("Pushed to origin")
+                    # Create draft PR if none exists
+                    url = ensure_draft_pr(repo_root)
+                    if url:
+                        typer.echo(f"Created draft PR: {url}")
                 else:
                     typer.echo("Push failed", err=True)
                     raise typer.Exit(1)

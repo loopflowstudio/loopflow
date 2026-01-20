@@ -149,8 +149,30 @@ final class AppState {
             if let branch = previousSelection {
                 selectedWorktree = worktrees.first { $0.branch == branch }
             }
+
+            // Auto-create draft PRs for pushed branches without PRs
+            await createDraftPRsIfNeeded(in: repo)
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func createDraftPRsIfNeeded(in repo: URL) async {
+        for worktree in worktrees {
+            // Skip if: no commits, already has PR, or is main branch
+            guard worktree.aheadMain > 0,
+                  worktree.prNumber == nil,
+                  worktree.branch != "main" else { continue }
+
+            // Check if branch is pushed to remote
+            let isPushed = await worktreeService.branchIsPushed(worktree.branch, in: repo)
+            guard isPushed else { continue }
+
+            // Create draft PR in background (don't block or show errors)
+            Task.detached { [worktreeService] in
+                let worktreeURL = URL(fileURLWithPath: worktree.path)
+                try? await worktreeService.createDraftPR(branch: worktree.branch, in: worktreeURL)
+            }
         }
     }
 

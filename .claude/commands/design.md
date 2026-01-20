@@ -15,10 +15,13 @@ The design doc is scaffolding—a checkpoint for recovery, not documentation for
 ## Workflow
 
 1. Run `git branch --show-current` to confirm you're on a feature branch (not `main`)
-2. Create `.design/<feature-name>.md` early—after the first exchange or two
-3. Write as you go, refining with each conversation turn
-4. Run `git add .design/ && git commit -m "design: <branch>"` when done
-5. End session. Implementation happens via `lf implement`.
+2. Find the repository root with `git rev-parse --show-toplevel`
+3. Create design doc at **repository root**: `<repo-root>/.design/<feature-name>.md` early—after the first exchange or two
+4. Write as you go, refining with each conversation turn
+5. Run `git add .design/ && git commit -m "design: <branch>"` when done
+6. End session. Implementation happens via `lf implement`.
+
+**Important:** The `.design/` directory must be at the repository root, not in subdirectories. If working on files in a subdirectory like `Maestro/`, still write design docs to the root `.design/` folder.
 
 Write as you go, not at the end. If the session crashes mid-design, the partial doc is still useful. Let writing inspire questions—gaps become obvious when you make things concrete.
 

@@ -47,7 +47,7 @@ struct ConfigLoaderTests {
         let warpConfig = LoopflowConfig(
             agentModel: nil, interactive: nil, terminal: "warp",
             ide: nil, workspace: nil, context: nil, exclude: nil,
-            push: nil, pr: nil, yolo: nil,
+            push: nil, pr: nil, yolo: nil, chrome: nil,
             docs: nil, diff: nil, diffFiles: nil, paste: nil, voice: nil, summaries: nil, work: nil
         )
         #expect(warpConfig.terminalApp == TerminalApp.warp)
@@ -55,7 +55,7 @@ struct ConfigLoaderTests {
         let itermConfig = LoopflowConfig(
             agentModel: nil, interactive: nil, terminal: "iterm",
             ide: nil, workspace: nil, context: nil, exclude: nil,
-            push: nil, pr: nil, yolo: nil,
+            push: nil, pr: nil, yolo: nil, chrome: nil,
             docs: nil, diff: nil, diffFiles: nil, paste: nil, voice: nil, summaries: nil, work: nil
         )
         #expect(itermConfig.terminalApp == TerminalApp.iterm)
@@ -63,7 +63,7 @@ struct ConfigLoaderTests {
         let defaultConfig = LoopflowConfig(
             agentModel: nil, interactive: nil, terminal: nil,
             ide: nil, workspace: nil, context: nil, exclude: nil,
-            push: nil, pr: nil, yolo: nil,
+            push: nil, pr: nil, yolo: nil, chrome: nil,
             docs: nil, diff: nil, diffFiles: nil, paste: nil, voice: nil, summaries: nil, work: nil
         )
         #expect(defaultConfig.terminalApp == TerminalApp.warp)
@@ -74,7 +74,7 @@ struct ConfigLoaderTests {
         let config = LoopflowConfig(
             agentModel: nil, interactive: ["design", "iterate"],
             terminal: nil, ide: nil, workspace: nil, context: nil,
-            exclude: nil, push: nil, pr: nil, yolo: nil,
+            exclude: nil, push: nil, pr: nil, yolo: nil, chrome: nil,
             docs: nil, diff: nil, diffFiles: nil, paste: nil, voice: nil, summaries: nil, work: nil
         )
 

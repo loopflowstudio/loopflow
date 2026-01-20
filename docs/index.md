@@ -117,6 +117,7 @@ Use your prompts alongside theirs. Any skill, any agent.
 - [`lf` command reference](lf.md) — all flags and options
 - [Built-in tasks](builtins.md) — debug, design, implement, polish, review
 - [`lfops` commands](lfops.md) — pr, land, commit, init, install
+- [File Storage](storage.md) — where things live and why
 - [Configuration](config.md) — `.lf/config.yaml` options
 - [Patterns](patterns.md) — workflows and recipes
 - [Philosophy](vision.md) — the loopflow mindset

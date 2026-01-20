@@ -95,12 +95,9 @@ No new data structures. This is documentation and convention enforcement.
 
 ### 1. Documentation updates
 
-Update these files to reflect the conventions:
-
-- `README.md` — Brief mention of folder structure
-- `docs/config.md` — Full reference for `.lf/` contents
-- `docs/patterns.md` — Add section on `.docs/` usage
-- `STYLE.md` — Add folder conventions
+- `docs/storage.md` — **New page** explaining all folder conventions (created)
+- `docs/index.md` — Link to storage page (done)
+- `docs/_config.yml` — Add to nav (done)
 
 ### 2. `lfops land` behavior
 
@@ -145,8 +142,8 @@ The agent runner injects the goal content into the prompt when spawning iteratio
 
 ## Done when
 
-1. `docs/config.md` documents all dot-directories with their purposes
-2. `docs/patterns.md` has a section on using `.docs/` for internal documentation
+1. ✅ `docs/storage.md` documents all folder conventions with philosophy
+2. ✅ Navigation updated to include storage page
 3. Built-in prompts reference `.docs/` appropriately
 4. Running `lfops land` on a branch with `.docs/` changes merges them (doesn't clear)
 5. Goal loading works: agent with `goal: test-coverage` reads `.lf/goals/test-coverage.md`

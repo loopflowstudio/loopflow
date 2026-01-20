@@ -89,9 +89,9 @@ lfops pr                         # open PR
 lfops land                       # merge and cleanup
 ```
 
-## Context Over Memory
+## Structured Context
 
-LLMs don't remember. Loopflow doesn't try to make them—it assembles the right context for each session.
+Every session needs the right context. Loopflow assembles it automatically.
 
 ```bash
 lf implement -c    # preview what context goes in
@@ -124,7 +124,7 @@ context:
   - docs/api.md
 ```
 
-Docs, summaries, design specs—assembled automatically. No "context lost" surprises.
+Docs, summaries, design specs—assembled automatically. You see what the agent sees.
 
 See [File Storage](storage.md) for the philosophy, [Configuration](config.md) for all options.
 

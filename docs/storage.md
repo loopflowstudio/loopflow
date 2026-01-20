@@ -130,21 +130,19 @@ docs/
 
 Loopflow's file storage follows from its core beliefs:
 
-### Context Over Memory
+### Structured Context
 
-LLMs don't remember. Every session starts fresh. Most tools try to solve this with memory systems—embedding databases, conversation history, retrieval pipelines.
+Every agent session starts fresh. The question is: what context does it need?
 
-Loopflow takes a different approach: **active context management**. Instead of making agents remember, we structure what goes into each session. The right documentation, the right summaries, the right files—assembled automatically.
+Loopflow structures what goes in:
+- **`.docs/`** — institutional knowledge that persists across sessions
+- **Summaries** — large codebases compressed into digestible overviews
+- **Config** — files that are always relevant
+- **Design docs** — intent that carries from one step to the next
 
-This means:
-- **`.docs/`** captures institutional knowledge that persists across sessions
-- **Summaries** compress large codebases into digestible context
-- **Config** specifies what files are always relevant
-- **Design docs** carry intent from one step to the next
+Run `lf -c` to preview exactly what context gets assembled before running.
 
-You see exactly what the agent sees. Run `lf -c` to preview the token breakdown before running.
-
-### The Other Principles
+### Other Principles
 
 **Prompts as artifacts.** If it's worth running, it's worth saving. Tasks live in the repo, not your clipboard.
 

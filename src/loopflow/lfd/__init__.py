@@ -64,11 +64,14 @@ def _status_color(status: LoopStatus, c: dict[str, str]) -> str:
     return c["dim"]
 
 
-def _goal_display(lp: Loop) -> str:
-    """Return goal name with area suffix if present."""
-    if lp.area_slug:
-        return f"{lp.goal_name} ({lp.area_slug}/)"
-    return lp.goal_name
+def _loop_display(lp: Loop) -> str:
+    """Return area and goals for display."""
+    return f"{lp.area} [{lp.goals_display}]"
+
+
+def _is_area(s: str) -> bool:
+    """Check if string looks like an area (contains / or is .)."""
+    return "/" in s or s == "."
 
 
 # Daemon commands
@@ -106,8 +109,8 @@ def uninstall():
 
 @app.command()
 def start(
-    goals: list[str] = typer.Argument(None, help="Goal names to start (all idle if omitted)"),
-    all_loops: bool = typer.Option(False, "-a", "--all", help="Include waiting loops"),
+    areas: list[str] = typer.Argument(None, help="Areas to start (all idle if omitted)"),
+    all_loops: bool = typer.Option(False, "--all", help="Include waiting loops"),
 ):
     """Start multiple loops in parallel.
 
@@ -117,18 +120,18 @@ def start(
     repo = get_repo_from_cwd()
 
     # Get loops to start
-    if goals:
-        # Start specific goals
+    if areas:
+        # Start specific areas
         loops_to_start = []
-        for goal in goals:
+        for area in areas:
             lp = None
             for loop in list_loops(repo=repo):
-                if loop.goal_name == goal:
+                if loop.area == area:
                     lp = loop
                     break
             if not lp:
                 typer.echo(
-                    f"{c['yellow']}Warning:{c['reset']} Loop '{goal}' not found, skipping",
+                    f"{c['yellow']}Warning:{c['reset']} Loop for '{area}' not found, skipping",
                     err=True,
                 )
             else:
@@ -151,16 +154,16 @@ def start(
     for lp in loops_to_start:
         result = start_loop(lp.id)
         if result:
-            msg = f"{c['green']}Started{c['reset']} {c['bold']}{lp.goal_name}{c['reset']}"
+            msg = f"{c['green']}Started{c['reset']} {c['bold']}{lp.area}{c['reset']}"
             typer.echo(f"{msg} ({lp.short_id()})")
             started += 1
         elif result.reason == "already_running":
-            typer.echo(f"{c['dim']}Already running:{c['reset']} {lp.goal_name}")
+            typer.echo(f"{c['dim']}Already running:{c['reset']} {lp.area}")
         elif result.reason == "waiting":
-            msg = f"{c['yellow']}Waiting:{c['reset']} {lp.goal_name}"
+            msg = f"{c['yellow']}Waiting:{c['reset']} {lp.area}"
             typer.echo(f"{msg} ({result.outstanding} outstanding)")
         else:
-            typer.echo(f"{c['red']}Failed:{c['reset']} {lp.goal_name}")
+            typer.echo(f"{c['red']}Failed:{c['reset']} {lp.area}")
 
     typer.echo(f"\nStarted {started}/{len(loops_to_start)} loops")
 
@@ -170,31 +173,59 @@ def start(
 
 @app.command()
 def loop(
-    goal: str = typer.Argument(..., help="Goal name from .lf/goals/"),
-    area: str = typer.Option(
-        None, "-a", "--area", help="Area of responsibility (pathset override)"
-    ),
+    area: str = typer.Argument(..., help="Area of responsibility (e.g., Maestro/, src/, .)"),
+    goals: list[str] = typer.Option(None, "-g", "--goal", help="Goal to add (repeatable)"),
+    legacy_area: str = typer.Option(None, "-a", "--area", help="[deprecated] Use positional area"),
     limit: int = typer.Option(None, "-l", "--limit", help="PR limit override"),
     merge_mode: str = typer.Option(None, "--merge-mode", help="Merge mode: pr or land"),
     foreground: bool = typer.Option(False, "-f", "--foreground", help="Run in foreground"),
 ):
-    """Start a continuous homeostasis loop."""
+    """Start a continuous homeostasis loop.
+
+    Area is required (e.g., Maestro/, src/loopflow/, or . for whole repo).
+    Goals are optional - adaptive mode is implicit if no mode goal is specified.
+
+    Examples:
+        lfd loop Maestro/                           # adaptive mode
+        lfd loop Maestro/ -g product-engineer       # adaptive + role
+        lfd loop Maestro/ -g product-engineer -g designer  # adaptive + roles
+        lfd loop . -g infra-engineer               # whole repo
+    """
     c = _colors()
     repo = get_repo_from_cwd()
     if not repo:
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
 
-    # Validate goal exists
-    if not goal_exists(repo, goal):
+    # Backwards compatibility: lfd loop goal-name -a area
+    if legacy_area and not _is_area(area):
+        # Old syntax: area is actually a goal name
+        goals = [area] + (goals or [])
+        area = legacy_area
+
+    # Validate area looks like a path
+    if not _is_area(area):
         typer.echo(
-            f"{c['red']}Error:{c['reset']} Goal '{goal}' not found in {repo}/.lf/goals/",
+            f"{c['red']}Error:{c['reset']} '{area}' doesn't look like an area. "
+            "Use a path like Maestro/, src/, or . for whole repo.",
             err=True,
         )
-        available = list_goals(repo)
-        if available:
-            typer.echo(f"Available goals: {', '.join(available)}")
+        typer.echo(f"\nDid you mean: lfd loop {area}/ ?")
         raise typer.Exit(1)
+
+    goals = goals or []
+
+    # Validate goals exist
+    for goal_name in goals:
+        if not goal_exists(repo, goal_name):
+            typer.echo(
+                f"{c['red']}Error:{c['reset']} Goal '{goal_name}' not found",
+                err=True,
+            )
+            available = list_goals(repo)
+            if available:
+                typer.echo(f"Available goals: {', '.join(available)}")
+            raise typer.Exit(1)
 
     # Validate merge_mode if specified
     if merge_mode and merge_mode not in ("pr", "land"):
@@ -202,7 +233,7 @@ def loop(
         raise typer.Exit(1)
 
     # Create or get loop
-    lp = create_loop(LoopType.LOOP, goal, repo, area=area)
+    lp = create_loop(LoopType.LOOP, area, repo, goals=goals)
 
     # Override settings if specified
     changed = False
@@ -223,16 +254,15 @@ def loop(
     result = start_loop(lp.id, foreground=foreground)
     if result:
         if foreground:
-            msg = f"{c['green']}Completed{c['reset']} loop {c['bold']}{goal}{c['reset']}"
+            msg = f"{c['green']}Completed{c['reset']} loop {c['bold']}{area}{c['reset']}"
             typer.echo(f"{msg} ({lp.short_id()})")
         else:
-            msg = f"{c['green']}Started{c['reset']} loop {c['bold']}{goal}{c['reset']}"
+            msg = f"{c['green']}Started{c['reset']} loop {c['bold']}{area}{c['reset']}"
             typer.echo(f"{msg} ({lp.short_id()})")
             typer.echo(f"  Repo: {repo}")
             typer.echo(f"  Loop main: {lp.loop_main}")
+            typer.echo(f"  Goals: {lp.goals_display}")
             typer.echo(f"  PR limit: {lp.pr_limit}")
-            if area:
-                typer.echo(f"  Area: {area}")
     elif result.reason == "already_running":
         typer.echo(f"Loop already running (PID {lp.pid})")
         raise typer.Exit(1)
@@ -248,15 +278,20 @@ def loop(
 
 @app.command()
 def flow(
-    goal: str = typer.Argument(..., help="Goal name from .lf/goals/"),
+    area: str = typer.Argument(..., help="Area of responsibility (e.g., Maestro/, src/, .)"),
+    goals: list[str] = typer.Option(None, "-g", "--goal", help="Goal to add (repeatable)"),
     project: str = typer.Option(None, "--project", "-p", help="Project/prompt file path"),
     paste: bool = typer.Option(False, "-v", "--paste", help="Include clipboard as prompt"),
-    area: str = typer.Option(None, "-r", help="Area of responsibility (pathset override)"),
 ):
     """Start a one-off flow (runs once then stops).
 
-    The flow runs a single iteration of the goal's pipeline, optionally with
-    additional context from a project file or clipboard.
+    The flow runs a single iteration, optionally with additional context
+    from a project file or clipboard.
+
+    Examples:
+        lfd flow Maestro/                        # one-off adaptive iteration
+        lfd flow Maestro/ -g product-engineer    # with role
+        lfd flow . -p project.md                 # whole repo with project file
     """
     c = _colors()
     repo = get_repo_from_cwd()
@@ -264,10 +299,22 @@ def flow(
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
 
-    # Validate goal exists
-    if not goal_exists(repo, goal):
-        typer.echo(f"{c['red']}Error:{c['reset']} Goal '{goal}' not found", err=True)
+    # Validate area looks like a path
+    if not _is_area(area):
+        typer.echo(
+            f"{c['red']}Error:{c['reset']} '{area}' doesn't look like an area. "
+            "Use a path like Maestro/, src/, or . for whole repo.",
+            err=True,
+        )
         raise typer.Exit(1)
+
+    goals = goals or []
+
+    # Validate goals exist
+    for goal_name in goals:
+        if not goal_exists(repo, goal_name):
+            typer.echo(f"{c['red']}Error:{c['reset']} Goal '{goal_name}' not found", err=True)
+            raise typer.Exit(1)
 
     # Resolve project file if specified
     project_file = None
@@ -301,19 +348,18 @@ def flow(
                     project_file = f.name
 
     # Create or get loop
-    lp = create_loop(LoopType.FLOW, goal, repo, area=area, project_file=project_file)
+    lp = create_loop(LoopType.FLOW, area, repo, goals=goals, project_file=project_file)
 
     # Start it
     if start_loop(lp.id):
         typer.echo(
-            f"{c['green']}Started{c['reset']} flow {c['bold']}{goal}{c['reset']} ({lp.short_id()})"
+            f"{c['green']}Started{c['reset']} flow {c['bold']}{area}{c['reset']} ({lp.short_id()})"
         )
+        typer.echo(f"  Goals: {lp.goals_display}")
         if project:
             typer.echo(f"  Project: {project}")
         if paste:
             typer.echo("  Clipboard: included")
-        if area:
-            typer.echo(f"  Area: {area}")
     else:
         typer.echo(f"{c['red']}Error:{c['reset']} Failed to start flow", err=True)
         raise typer.Exit(1)
@@ -321,9 +367,9 @@ def flow(
 
 @app.command()
 def subscribe(
+    area: str = typer.Argument(..., help="Area of responsibility (e.g., Maestro/, src/, .)"),
     pathset: str = typer.Argument(..., help="Pathset to watch (comma-separated)"),
-    goal: str = typer.Argument(..., help="Goal name from .lf/goals/"),
-    area: str = typer.Option(None, "-r", help="Area of responsibility override"),
+    goals: list[str] = typer.Option(None, "-g", "--goal", help="Goal to add (repeatable)"),
 ):
     """Subscribe to pathset changes on main."""
     c = _colors()
@@ -332,24 +378,34 @@ def subscribe(
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
 
-    if not goal_exists(repo, goal):
-        typer.echo(f"{c['red']}Error:{c['reset']} Goal '{goal}' not found", err=True)
+    if not _is_area(area):
+        typer.echo(
+            f"{c['red']}Error:{c['reset']} '{area}' doesn't look like an area.",
+            err=True,
+        )
         raise typer.Exit(1)
 
-    # Create subscription
-    lp = create_loop(LoopType.SUBSCRIBE, goal, repo, area=area, pathset=pathset)
+    goals = goals or []
+    for goal_name in goals:
+        if not goal_exists(repo, goal_name):
+            typer.echo(f"{c['red']}Error:{c['reset']} Goal '{goal_name}' not found", err=True)
+            raise typer.Exit(1)
 
-    msg = f"{c['green']}Subscribed{c['reset']} {c['bold']}{goal}{c['reset']} to {pathset}"
+    # Create subscription
+    lp = create_loop(LoopType.SUBSCRIBE, area, repo, goals=goals, pathset=pathset)
+
+    msg = f"{c['green']}Subscribed{c['reset']} {c['bold']}{area}{c['reset']} to {pathset}"
     typer.echo(f"{msg} ({lp.short_id()})")
+    typer.echo(f"  Goals: {lp.goals_display}")
     typer.echo(f"  Will run when {pathset} changes on main")
 
 
 @app.command()
 def schedule(
+    area: str = typer.Argument(..., help="Area of responsibility (e.g., Maestro/, src/, .)"),
     cron_expr: str = typer.Argument(..., help="Cron expression (e.g., '0 9 * * *')"),
-    goal: str = typer.Argument(..., help="Goal name from .lf/goals/"),
+    goals: list[str] = typer.Option(None, "-g", "--goal", help="Goal to add (repeatable)"),
     project: str = typer.Option(None, "--project", "-p", help="Project file path"),
-    area: str = typer.Option(None, "-r", help="Area of responsibility override"),
 ):
     """Schedule a loop to run on cron."""
     c = _colors()
@@ -358,9 +414,18 @@ def schedule(
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
 
-    if not goal_exists(repo, goal):
-        typer.echo(f"{c['red']}Error:{c['reset']} Goal '{goal}' not found", err=True)
+    if not _is_area(area):
+        typer.echo(
+            f"{c['red']}Error:{c['reset']} '{area}' doesn't look like an area.",
+            err=True,
+        )
         raise typer.Exit(1)
+
+    goals = goals or []
+    for goal_name in goals:
+        if not goal_exists(repo, goal_name):
+            typer.echo(f"{c['red']}Error:{c['reset']} Goal '{goal_name}' not found", err=True)
+            raise typer.Exit(1)
 
     project_file = None
     if project:
@@ -378,14 +443,15 @@ def schedule(
     # Create schedule
     lp = create_loop(
         LoopType.SCHEDULE,
-        goal,
+        area,
         repo,
-        area=area,
+        goals=goals,
         cron=cron_expr,
         project_file=project_file,
     )
 
-    typer.echo(f"{c['green']}Scheduled{c['reset']} {c['bold']}{goal}{c['reset']} ({lp.short_id()})")
+    typer.echo(f"{c['green']}Scheduled{c['reset']} {c['bold']}{area}{c['reset']} ({lp.short_id()})")
+    typer.echo(f"  Goals: {lp.goals_display}")
     typer.echo(f"  Cron: {cron_expr}")
     if project:
         typer.echo(f"  Project: {project}")
@@ -467,12 +533,12 @@ def status(
             typer.echo("Start one with: lfd loop <goal>")
             return
 
-        typer.echo(f"{'ID':<9} {'TYPE':<10} {'GOAL':<30} {'STATUS':<10} {'ITER':<6} REPO")
+        typer.echo(f"{'ID':<9} {'TYPE':<10} {'AREA':<30} {'STATUS':<10} {'ITER':<6} REPO")
         typer.echo("-" * 90)
 
         for lp in loops:
             status_c = _status_color(lp.status, c)
-            goal_str = _goal_display(lp)
+            goal_str = _loop_display(lp)
             if len(goal_str) > 30:
                 goal_str = goal_str[:27] + "..."
 
@@ -490,15 +556,13 @@ def _print_loop_detail(lp: Loop, c: dict[str, str]) -> None:
     """Print detailed info for a single loop."""
     status_c = _status_color(lp.status, c)
 
-    typer.echo(f"{c['bold']}{lp.goal_name}{c['reset']} ({lp.short_id()})")
+    typer.echo(f"{c['bold']}{lp.area}{c['reset']} ({lp.short_id()})")
     typer.echo(f"  Type: {lp.type.value}")
     typer.echo(f"  Status: {status_c}{lp.status.value}{c['reset']}")
     typer.echo(f"  Repo: {lp.repo}")
     typer.echo(f"  Loop main: {lp.loop_main}")
+    typer.echo(f"  Goals: {lp.goals_display}")
     typer.echo(f"  Iteration: {lp.iteration}")
-
-    if lp.area:
-        typer.echo(f"  Area: {lp.area}")
     if lp.project_file:
         typer.echo(f"  Project: {lp.project_file}")
     if lp.pathset:
@@ -534,7 +598,7 @@ def stop(
         for lp in list_loops():
             if lp.status == LoopStatus.RUNNING:
                 if stop_loop(lp.id, force=force):
-                    msg = f"{c['yellow']}Stopped{c['reset']} {_goal_display(lp)}"
+                    msg = f"{c['yellow']}Stopped{c['reset']} {_loop_display(lp)}"
                     typer.echo(f"{msg} ({lp.short_id()})")
                     stopped += 1
         if stopped == 0:
@@ -553,7 +617,7 @@ def stop(
         raise typer.Exit(1)
 
     if stop_loop(lp.id, force=force):
-        msg = f"{c['yellow']}Stopped{c['reset']} {c['bold']}{_goal_display(lp)}{c['reset']}"
+        msg = f"{c['yellow']}Stopped{c['reset']} {c['bold']}{_loop_display(lp)}{c['reset']}"
         typer.echo(f"{msg} ({lp.short_id()})")
     else:
         typer.echo(f"{c['red']}Error:{c['reset']} Failed to stop loop", err=True)
@@ -577,10 +641,10 @@ def prs(
     runs_with_prs = [r for r in runs if r.pr_url]
 
     if not runs_with_prs:
-        typer.echo(f"{c['dim']}No PRs found for '{lp.goal_name}'{c['reset']}")
+        typer.echo(f"{c['dim']}No PRs found for '{lp.area}'{c['reset']}")
         return
 
-    typer.echo(f"{c['bold']}{lp.goal_name}{c['reset']} PRs ({lp.short_id()})")
+    typer.echo(f"{c['bold']}{lp.area}{c['reset']} PRs ({lp.short_id()})")
     typer.echo("")
 
     for run in runs_with_prs:
@@ -612,12 +676,12 @@ def rm(
         raise typer.Exit(1)
 
     if not force:
-        confirm = typer.confirm(f"Delete loop '{lp.goal_name}' ({lp.short_id()})?")
+        confirm = typer.confirm(f"Delete loop '{lp.area}' ({lp.short_id()})?")
         if not confirm:
             raise typer.Abort()
 
     if delete_loop(lp.id):
-        typer.echo(f"Deleted loop: {lp.goal_name} ({lp.short_id()})")
+        typer.echo(f"Deleted loop: {lp.area} ({lp.short_id()})")
     else:
         typer.echo(f"{c['red']}Error:{c['reset']} Failed to delete loop", err=True)
         raise typer.Exit(1)

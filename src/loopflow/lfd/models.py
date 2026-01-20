@@ -39,13 +39,14 @@ class MergeMode(Enum):
 
 @dataclass
 class Loop:
-    """A loop configuration (goal + repo combination)."""
+    """A loop configuration (area + goals combination)."""
 
     id: str
     type: LoopType
-    goal_name: str
+    area: str  # PRIMARY identifier, required (e.g., "Maestro/", ".", "src/loopflow/")
     repo: Path
     loop_main: str
+    goals: list[str] = field(default_factory=list)  # goal names from -g flags
     status: LoopStatus = LoopStatus.IDLE
     iteration: int = 0
     pr_limit: int = 5
@@ -55,7 +56,9 @@ class Loop:
     project_file: str | None = None  # for flow
     pathset: str | None = None  # for subscribe (comma-separated)
     cron: str | None = None  # for schedule
-    area: str | None = None  # area of responsibility override
+
+    # Legacy field for backwards compat (deprecated, use goals)
+    goal_name: str | None = None
 
     pid: int | None = None  # process ID when running
     last_main_sha: str | None = None  # for subscribe: last seen main SHA
@@ -66,11 +69,18 @@ class Loop:
         return self.id[:7]
 
     @property
-    def area_slug(self) -> str | None:
-        """Return area as a slug for display/naming, or None if no area."""
-        if not self.area:
-            return None
+    def area_slug(self) -> str:
+        """Return area as a slug for display/naming."""
+        if self.area == ".":
+            return "root"
         return self.area.rstrip("/").split("/")[-1]
+
+    @property
+    def goals_display(self) -> str:
+        """Return goals as comma-separated string for display."""
+        if not self.goals:
+            return "adaptive"
+        return ", ".join(self.goals)
 
 
 @dataclass

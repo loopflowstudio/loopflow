@@ -1,4 +1,5 @@
 ---
+kind: mode
 pipeline: "@ship"
 ---
 Look at the roadmap and recent git history. Decide what mode to operate in.

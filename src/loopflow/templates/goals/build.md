@@ -1,4 +1,5 @@
 ---
+kind: mode
 pipeline: "@ship"
 ---
 Build from approved roadmap specs.

@@ -1,4 +1,5 @@
 ---
+kind: mode
 pipeline: "@polish"
 ---
 Make the codebase cleaner, easier, smaller.

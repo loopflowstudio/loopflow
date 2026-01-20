@@ -3,10 +3,9 @@
 set -e
 cd "$(git rev-parse --show-toplevel)"
 
-uv run lfd loop product-engineer -a Maestro/
-uv run lfd loop product-engineer -a src/loopflow/
-uv run lfd loop designer -a Maestro/
-uv run lfd loop designer -a src/loopflow/
-uv run lfd loop infra-engineer
+# One agent per area, multiple goals per agent
+uv run lfd loop Maestro/ -g product-engineer -g designer
+uv run lfd loop src/loopflow/ -g product-engineer -g designer
+uv run lfd loop . -g infra-engineer
 
 uv run lfd status

@@ -2,12 +2,23 @@
 
 import re
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 
 _FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 
 # Path to bundled builtin goal templates
 _GOALS_TEMPLATES_DIR = Path(__file__).parent.parent / "templates" / "goals"
+
+# Builtin mode goals (decide what to work on)
+_BUILTIN_MODES = {"adaptive", "roadmap", "build", "simplify"}
+
+
+class GoalKind(Enum):
+    """Whether a goal is a role (how to work) or mode (what to decide)."""
+
+    ROLE = "role"
+    MODE = "mode"
 
 
 @dataclass
@@ -18,6 +29,7 @@ class Goal:
     content: str
     area: list[str]  # Default pathset
     pipeline: str  # Default pipeline
+    kind: GoalKind = GoalKind.ROLE  # Default to role
 
 
 def _get_builtin_goal(name: str) -> Path | None:
@@ -63,11 +75,15 @@ def load_goal(repo: Path, goal_name: str) -> Goal | None:
     if isinstance(area, str):
         area = [a.strip() for a in area.split(",") if a.strip()]
 
+    # Determine kind
+    kind = _detect_goal_kind(goal_name, frontmatter, content)
+
     return Goal(
         name=goal_name,
         content=content,
         area=area,
         pipeline=frontmatter.get("pipeline", "@ship"),
+        kind=kind,
     )
 
 
@@ -155,3 +171,82 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
                 result[key] = value
 
     return result, body
+
+
+# Goal kind detection and composition
+
+
+def _detect_goal_kind(name: str, frontmatter: dict, content: str) -> GoalKind:
+    """Infer kind from frontmatter or content heuristics."""
+    # Explicit frontmatter takes precedence
+    if "kind" in frontmatter:
+        kind_str = frontmatter["kind"].lower()
+        if kind_str == "mode":
+            return GoalKind.MODE
+        return GoalKind.ROLE
+
+    # Builtin modes
+    if name in _BUILTIN_MODES:
+        return GoalKind.MODE
+
+    # Heuristic: if content talks about deciding what to do, it's a mode
+    mode_patterns = [
+        "## Decision",
+        "decide what mode",
+        "deciding what to",
+        ".docs/roadmap/",
+        "status: approved",
+        "status: proposed",
+    ]
+    for pattern in mode_patterns:
+        if pattern in content:
+            return GoalKind.MODE
+
+    return GoalKind.ROLE
+
+
+def needs_adaptive(goals: list[Goal]) -> bool:
+    """True if no mode goal present—adaptive should be injected."""
+    return not any(g.kind == GoalKind.MODE for g in goals)
+
+
+def resolve_goals(repo: Path, goal_names: list[str]) -> list[Goal]:
+    """Load and resolve goal names to Goal objects."""
+    goals = []
+    for name in goal_names:
+        goal = load_goal(repo, name)
+        if goal:
+            goals.append(goal)
+    return goals
+
+
+def build_effective_goals(repo: Path, goal_names: list[str]) -> list[Goal]:
+    """Build final goal list, injecting adaptive if needed.
+
+    - If goal_names is empty → [adaptive]
+    - If only roles → [adaptive] + roles
+    - If any mode present → goals as-is (no adaptive injection)
+    """
+    goals = resolve_goals(repo, goal_names)
+
+    if needs_adaptive(goals):
+        adaptive = load_goal(repo, "adaptive")
+        if adaptive:
+            goals = [adaptive] + goals
+
+    return goals
+
+
+def render_goals(goals: list[Goal]) -> str:
+    """Combine goals into single prompt. Modes first, then roles."""
+    # Sort: modes first, then roles
+    modes = [g for g in goals if g.kind == GoalKind.MODE]
+    roles = [g for g in goals if g.kind == GoalKind.ROLE]
+    ordered = modes + roles
+
+    parts = []
+    for goal in ordered:
+        tag = "mode" if goal.kind == GoalKind.MODE else "role"
+        parts.append(f"<lf:{tag}:{goal.name}>\n{goal.content}\n</lf:{tag}:{goal.name}>")
+
+    return "\n\n".join(parts)

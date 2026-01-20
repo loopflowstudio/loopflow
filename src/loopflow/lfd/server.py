@@ -27,6 +27,7 @@ from loopflow.lfd.db import (
 )
 from loopflow.lfd.models import Session, SessionStatus
 from loopflow.lfd.protocol import Event, Request, Response, error, success
+from loopflow.lfd.scheduler import Scheduler, load_scheduler_config
 
 
 class Server:
@@ -36,6 +37,7 @@ class Server:
         self.subscriptions: dict[StreamWriter, list[str]] = {}
         self._running = False
         self._check_task: asyncio.Task | None = None
+        self.scheduler = Scheduler(load_scheduler_config())
 
     async def start(self) -> None:
         self.socket_path.parent.mkdir(parents=True, exist_ok=True)
@@ -115,6 +117,12 @@ class Server:
             return await self._handle_notify(params)
         elif method == "output.line":
             return await self._handle_output_line(params)
+        elif method == "scheduler.status":
+            return await self._handle_scheduler_status()
+        elif method == "scheduler.acquire":
+            return await self._handle_scheduler_acquire(params)
+        elif method == "scheduler.release":
+            return await self._handle_scheduler_release(params)
         else:
             return error(f"Unknown method: {method}", request.id)
 
@@ -249,6 +257,37 @@ class Server:
             "timestamp": datetime.now().isoformat(),
         }))
         return success({})
+
+    async def _handle_scheduler_status(self) -> Response:
+        """Return scheduler status."""
+        return success(self.scheduler.get_status())
+
+    async def _handle_scheduler_acquire(self, params: dict) -> Response:
+        """Try to acquire a scheduler slot."""
+        run_id = params.get("run_id")
+        if not run_id:
+            return error("Missing 'run_id' parameter")
+
+        acquired = self.scheduler.acquire(run_id)
+        if acquired:
+            await self._broadcast(Event("scheduler.slot.acquired", {
+                "run_id": run_id,
+                "slots_used": self.scheduler.slots_used(),
+            }))
+        return success({"acquired": acquired, "slots_used": self.scheduler.slots_used()})
+
+    async def _handle_scheduler_release(self, params: dict) -> Response:
+        """Release a scheduler slot."""
+        run_id = params.get("run_id")
+        if not run_id:
+            return error("Missing 'run_id' parameter")
+
+        self.scheduler.release(run_id)
+        await self._broadcast(Event("scheduler.slot.released", {
+            "run_id": run_id,
+            "slots_used": self.scheduler.slots_used(),
+        }))
+        return success({"slots_used": self.scheduler.slots_used()})
 
     async def _broadcast(self, event: Event) -> None:
         message = (event.serialize() + "\n").encode()

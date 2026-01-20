@@ -2,10 +2,16 @@
 
 Runs iterations of a loop until the PR limit is reached or an error occurs.
 Can be invoked directly as a subprocess for background execution.
+
+When running in background, coordinates with the daemon scheduler to respect
+global concurrency and PR limits.
 """
 
+import json
+import socket
 import subprocess
 import sys
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -30,6 +36,9 @@ from loopflow.lfd.db import (
 )
 from loopflow.lfd.loops import count_outstanding
 from loopflow.lfd.models import Loop, LoopRun, LoopStatus
+
+SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
+SCHEDULER_POLL_INTERVAL = 30  # seconds between slot checks
 
 
 def run_loop_iterations(loop: Loop) -> None:

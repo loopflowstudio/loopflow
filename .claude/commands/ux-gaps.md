@@ -53,7 +53,8 @@ See `Maestro/DESIGN.md` for full research. Key principles:
 7. **Transparency Over Automation** (Cursor) — show plans before execution
 8. **Design Should Disappear** (Jony Ive) — minimize chrome
 9. **Remove Barriers** (fast.ai, Paper) — accessibility without patronizing
-10. **Craft Signals Care** (Collison, Ive) — beauty implies care
+10. **Affordances Over Status** (Norman) — give users actions, not just information
+11. **Craft Signals Care** (Collison, Ive) — beauty implies care
 
 ## Visual Audit
 
@@ -77,6 +78,7 @@ For each area of Maestro, identify gaps:
 4. **Worktree Sidebar**: vs Notion's page tree, Figma's layers
 5. **Running State**: vs Cursor's streaming, Figma's presence indicators
 6. **Errors/Empty States**: vs Notion's empty pages, Figma's placeholders
+   - Apply principle #10: Every error/empty state should offer an action button
 
 ## Output
 

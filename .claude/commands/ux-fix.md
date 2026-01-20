@@ -36,10 +36,11 @@ Prioritize improvements in this order:
 - Progressive disclosure of advanced options
 - Reduce decisions for new users
 
-### 4. Error States
-- Clear error messages
-- Recovery paths
-- Graceful degradation
+### 4. Error & Empty States
+- **Affordances over status**: "Connect lfd" not "lfd not connected"
+- Every error has a recovery action button
+- Empty states guide to the next action
+- Graceful degradation with clear path forward
 
 ## Constraints
 

@@ -140,7 +140,21 @@ For Maestro:
 
 > "Deep learning has, until now, been a very exclusive game. We're breaking it open."
 
-### 10. Craft Signals Care (Patrick Collison, Jony Ive)
+### 10. Affordances Over Status (Don Norman)
+
+**Give users actions, not just information.**
+
+When something is wrong, don't just tell them—give them a button to fix it. Empty states, error states, and disconnected states should all offer the next step.
+
+For Maestro:
+- "Connect lfd" not "lfd not connected"
+- "Create workspace" not "No workspaces found"
+- "Install Claude Code" not "Claude Code not found"
+- Every error should have a recovery action adjacent to it
+
+> "Don't tell people what's wrong. Give people the affordance to fix it."
+
+### 11. Craft Signals Care (Patrick Collison, Jony Ive)
 
 **Beauty in visible details implies care in invisible ones.**
 

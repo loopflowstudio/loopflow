@@ -237,8 +237,6 @@ func listLoops(repo: URL) async throws -> [Loop] {
 
 **Output tracking:** Loop iterations use `loop_runs.id` as the session ID for output. The collector already sends `output.line` events with this ID.
 
-**Hiding iteration worktrees:** Filter worktrees where branch matches `<goal>/\d{3}` pattern — these are ephemeral loop iterations.
-
 ## Done when
 
 **Happy path:**

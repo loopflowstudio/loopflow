@@ -53,6 +53,7 @@ def main() -> int:
     parser.add_argument("bump", nargs="?", choices=["patch", "minor", "major"])
     parser.add_argument("-n", "--dry-run", action="store_true", help="Show what would be done")
     parser.add_argument("--skip-tests", action="store_true", help="Skip test run")
+    parser.add_argument("--skip-ci", action="store_true", help="Skip CI check (don't push and wait for CI)")
     parser.add_argument("-f", "--force", action="store_true", help="Skip main branch check")
     parser.add_argument("--dmg-only", action="store_true", help="Only build and upload DMG (no PyPI)")
     parser.add_argument("--skip-dmg", action="store_true", help="Skip DMG build/upload")
@@ -68,7 +69,7 @@ def main() -> int:
         return 1
 
     # Import here so --help works without dependencies
-    from loopflow.llm_http import generate_release_notes
+    from loopflow.lf.messages import generate_release_notes
     from loopflow.publish import (
         build_dmg,
         bump_version,
@@ -78,6 +79,7 @@ def main() -> int:
         get_version,
         install_locally,
         publish_package,
+        check_ci_passed,
         run_tests,
         upload_dmg,
         write_version,
@@ -143,6 +145,7 @@ def main() -> int:
     if args.dry_run:
         print(f"Would bump version: {old_version} → {new_version} ({args.bump})")
         print("Would run tests" if not args.skip_tests else "Would skip tests")
+        print("Would verify CI passed" if not args.skip_ci else "Would skip CI check")
         print("Would generate release notes")
         print(f"Would commit: release: v{new_version}")
         print(f"Would tag: v{new_version}")
@@ -165,6 +168,15 @@ def main() -> int:
             print(output, file=sys.stderr)
             return 1
         print("Tests passed.")
+
+    # Step 2b: Verify CI passed
+    if not args.skip_ci:
+        print("Verifying CI passed...")
+        success, message = check_ci_passed(ROOT)
+        if not success:
+            print(f"CI check failed: {message}", file=sys.stderr)
+            return 1
+        print(message)
 
     # Step 3: Generate release notes (before any git changes)
     print("Generating release notes...")

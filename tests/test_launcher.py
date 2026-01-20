@@ -174,6 +174,38 @@ def test_build_codex_command_skip_permissions():
     assert "/repo" in cmd
 
 
+def test_build_codex_command_yolo():
+    """build_codex_command with yolo bypasses sandbox and approvals."""
+    cmd = build_codex_command(
+        auto=False,
+        stream=False,
+        skip_permissions=False,
+        yolo=True,
+        sandbox_root=Path("/repo"),
+        workdir=Path("/repo/worktree"),
+    )
+
+    assert "--dangerously-bypass-approvals-and-sandbox" in cmd
+    assert "--sandbox" not in cmd
+    assert "--add-dir" not in cmd
+
+
+def test_build_codex_command_yolo_ignores_skip_permissions():
+    """build_codex_command yolo mode ignores skip_permissions."""
+    cmd = build_codex_command(
+        auto=True,
+        stream=False,
+        skip_permissions=True,
+        yolo=True,
+        sandbox_root=Path("/repo"),
+        workdir=Path("/repo/worktree"),
+    )
+
+    assert "--dangerously-bypass-approvals-and-sandbox" in cmd
+    assert 'approval_policy="never"' not in " ".join(cmd)
+    assert "--sandbox" not in cmd
+
+
 def test_build_codex_command_with_model_variant():
     """build_codex_command adds config flag for model variant."""
     cmd = build_codex_command(
@@ -240,6 +272,20 @@ def test_build_codex_interactive_command_with_model():
 
     assert "-c" in cmd
     assert 'model="gpt-4o"' in cmd
+
+
+def test_build_codex_interactive_command_yolo():
+    """build_codex_interactive_command with yolo bypasses sandbox."""
+    cmd = build_codex_interactive_command(
+        skip_permissions=False,
+        yolo=True,
+        sandbox_root=Path("/repo"),
+        workdir=Path("/repo/worktree"),
+    )
+
+    assert "--dangerously-bypass-approvals-and-sandbox" in cmd
+    assert "--sandbox" not in cmd
+    assert "--add-dir" not in cmd
 
 
 # Tests for build_model_command

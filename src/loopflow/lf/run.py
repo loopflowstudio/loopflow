@@ -102,6 +102,7 @@ def _execute_task(
         command = build_model_interactive_command(
             backend,
             skip_permissions=skip_permissions,
+            yolo=skip_permissions,
             model_variant=model_variant,
             sandbox_root=repo_root.parent,
             workdir=repo_root,
@@ -114,6 +115,7 @@ def _execute_task(
             auto=True,
             stream=True,
             skip_permissions=skip_permissions,
+            yolo=skip_permissions,
             model_variant=model_variant,
             sandbox_root=repo_root.parent,
             workdir=repo_root,

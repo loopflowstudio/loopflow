@@ -2,6 +2,7 @@
 // Maps to JSON from `wt list --format json --full`.
 
 import Foundation
+import SwiftUI
 
 enum PRState: String, Codable {
     case open
@@ -15,6 +16,31 @@ enum PRState: String, Codable {
         case .merged: return "Merged"
         case .closed: return "Closed"
         case .draft: return "Draft"
+        }
+    }
+}
+
+enum CIStatus: String, Codable {
+    case passing
+    case failing
+    case pending
+    case unknown
+
+    var icon: String {
+        switch self {
+        case .passing: return "checkmark.circle.fill"
+        case .failing: return "xmark.circle.fill"
+        case .pending: return "clock.fill"
+        case .unknown: return "questionmark.circle"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .passing: return .green
+        case .failing: return .red
+        case .pending: return .orange
+        case .unknown: return .gray
         }
     }
 }
@@ -61,11 +87,12 @@ struct Worktree: Identifiable, Hashable, Codable {
     let isMerging: Bool
     var recentTasks: [TaskSession] = []
     var staleness: Staleness = .active
+    var ciStatus: CIStatus?
 
     enum CodingKeys: String, CodingKey {
         case path, branch, baseBranch, isDirty, aheadMain, behindMain
         case aheadRemote, behindRemote, prURL, prNumber, prState
-        case hasCodeWorkspace, isRebasing, isMerging, recentTasks, staleness
+        case hasCodeWorkspace, isRebasing, isMerging, recentTasks, staleness, ciStatus
     }
 
     var commitsText: String {

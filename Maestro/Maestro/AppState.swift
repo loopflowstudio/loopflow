@@ -222,9 +222,10 @@ final class AppState {
             // Auto-create draft PRs for pushed branches without PRs
             await createDraftPRsIfNeeded(in: repo)
 
-            // Detect staleness asynchronously (don't block UI)
+            // Detect staleness and CI status asynchronously (don't block UI)
             Task {
                 await detectStaleness()
+                await fetchCIStatus()
             }
 
             if showFeedback {
@@ -288,6 +289,19 @@ final class AppState {
         }
 
         await autoPruneCompletedWorktrees(stalenessMap, in: repo)
+    }
+
+    private func fetchCIStatus() async {
+        guard let repo = currentRepo else { return }
+
+        let ciStatusMap = await worktreeService.getCIStatusForAll(worktrees, in: repo)
+
+        // Update worktrees with CI status
+        for i in worktrees.indices {
+            if let status = ciStatusMap[worktrees[i].branch] {
+                worktrees[i].ciStatus = status
+            }
+        }
     }
 
     private func autoPruneCompletedWorktrees(_ stalenessMap: [String: Staleness], in repo: URL) async {

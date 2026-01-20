@@ -239,6 +239,7 @@ def build_codex_command(
     auto: bool,
     stream: bool,
     skip_permissions: bool,
+    yolo: bool = False,
     model_variant: str | None = None,
     sandbox_root: Path | None = None,
     workdir: Path | None = None,
@@ -247,6 +248,7 @@ def build_codex_command(
     """Build Codex CLI command for the requested run mode.
 
     Prompt should be appended as a CLI argument.
+    yolo bypasses approvals and sandboxing.
     """
     cmd = ["codex", "exec"]
 
@@ -259,23 +261,27 @@ def build_codex_command(
     if stream:
         cmd.append("--json")
 
-    cmd.extend(["--sandbox", "workspace-write"])
-    if sandbox_root:
-        cmd.extend(["--add-dir", str(sandbox_root)])
+    if yolo:
+        cmd.append("--dangerously-bypass-approvals-and-sandbox")
+    else:
+        cmd.extend(["--sandbox", "workspace-write"])
+        if sandbox_root:
+            cmd.extend(["--add-dir", str(sandbox_root)])
 
     # Attach images via -i flag
     if images:
         for img in images:
             cmd.extend(["-i", str(img)])
 
-    if skip_permissions:
-        # Keep sandboxing but avoid approval prompts in exec mode.
-        cmd.extend(["-c", 'approval_policy="never"'])
-    elif auto:
-        if _codex_exec_supports_full_auto():
-            cmd.append("--full-auto")
-        else:
-            cmd.extend(["-c", 'approval_policy="on-request"'])
+    if not yolo:
+        if skip_permissions:
+            # Keep sandboxing but avoid approval prompts in exec mode.
+            cmd.extend(["-c", 'approval_policy="never"'])
+        elif auto:
+            if _codex_exec_supports_full_auto():
+                cmd.append("--full-auto")
+            else:
+                cmd.extend(["-c", 'approval_policy="on-request"'])
 
     return cmd
 
@@ -297,6 +303,7 @@ def _codex_exec_supports_full_auto() -> bool:
 
 def build_codex_interactive_command(
     skip_permissions: bool,
+    yolo: bool = False,
     model_variant: str | None = None,
     sandbox_root: Path | None = None,
     workdir: Path | None = None,
@@ -305,17 +312,21 @@ def build_codex_interactive_command(
     """Build Codex CLI command for interactive mode.
 
     Prompt should be appended as a CLI argument.
+    yolo bypasses approvals and sandboxing.
     """
     cmd = ["codex"]
     if model_variant:
         cmd.extend(["-c", f'model="{model_variant}"'])
     if workdir:
         cmd.extend(["-C", str(workdir)])
-    if skip_permissions:
-        cmd.extend(["-a", "never"])
-    cmd.extend(["--sandbox", "workspace-write"])
-    if sandbox_root:
-        cmd.extend(["--add-dir", str(sandbox_root)])
+    if yolo:
+        cmd.append("--dangerously-bypass-approvals-and-sandbox")
+    else:
+        if skip_permissions:
+            cmd.extend(["-a", "never"])
+        cmd.extend(["--sandbox", "workspace-write"])
+        if sandbox_root:
+            cmd.extend(["--add-dir", str(sandbox_root)])
     # Attach images via -i flag
     if images:
         for img in images:
@@ -388,6 +399,7 @@ def build_model_command(
     auto: bool,
     stream: bool,
     skip_permissions: bool,
+    yolo: bool = False,
     model_variant: str | None = None,
     sandbox_root: Path | None = None,
     workdir: Path | None = None,
@@ -414,6 +426,7 @@ def build_model_command(
         auto=auto,
         stream=stream,
         skip_permissions=skip_permissions,
+        yolo=yolo,
         model_variant=model_variant,
         sandbox_root=sandbox_root,
         workdir=workdir,
@@ -424,6 +437,7 @@ def build_model_command(
 def build_model_interactive_command(
     model: str,
     skip_permissions: bool,
+    yolo: bool = False,
     model_variant: str | None = None,
     sandbox_root: Path | None = None,
     workdir: Path | None = None,
@@ -446,6 +460,7 @@ def build_model_interactive_command(
         )
     return build_codex_interactive_command(
         skip_permissions=skip_permissions,
+        yolo=yolo,
         model_variant=model_variant,
         sandbox_root=sandbox_root,
         workdir=workdir,

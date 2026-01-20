@@ -272,6 +272,7 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
             auto=True,
             stream=True,
             skip_permissions=skip_permissions,
+            yolo=skip_permissions,
             model_variant=model_variant,
             workdir=worktree_path,
         )

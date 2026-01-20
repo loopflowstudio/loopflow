@@ -77,7 +77,7 @@ struct AddFileButton: View {
         ContextChip(label: "Docs", isOn: .constant(true), color: .blue)
         ContextChip(label: "Files", isOn: .constant(true), color: .teal)
         ContextChip(label: "Diff", isOn: .constant(false), color: .green)
-        ContextChip(label: "Clipboard", isOn: .constant(false), color: .purple)
+        ContextChip(label: "Clipboard", isOn: .constant(false), color: .accentColor)
 
         Divider().frame(height: 16)
 

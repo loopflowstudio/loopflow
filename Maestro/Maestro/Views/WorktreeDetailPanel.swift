@@ -6,6 +6,7 @@ struct WorktreeDetailPanel: View {
     @Bindable var appState: AppState
     let worktree: Worktree
 
+    @Environment(\.colorScheme) private var colorScheme
     @AppStorage("commitsExpanded") private var commitsExpanded = true
     @AppStorage("filesExpanded") private var filesExpanded = true
     @AppStorage("launcherExpanded") private var launcherExpanded = false
@@ -25,6 +26,7 @@ struct WorktreeDetailPanel: View {
 
     private var ideApp: IDEApp { appState.config?.ideApp ?? .cursor }
     private var terminalApp: TerminalApp { appState.config?.terminalApp ?? .warp }
+    private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -47,8 +49,7 @@ struct WorktreeDetailPanel: View {
 
             launcherSection
         }
-        .background(Color.white)
-        .preferredColorScheme(.light)
+        .background(palette.background)
         .onAppear {
             loadCommits()
             loadFileStats()
@@ -222,7 +223,7 @@ struct WorktreeDetailPanel: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
-        .background(Color.loopflowCream)
+        .background(palette.surface)
     }
 
     // MARK: - Commits Section
@@ -296,7 +297,7 @@ struct WorktreeDetailPanel: View {
         .padding(.horizontal, 10)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(Color.loopflowCream)
+                .fill(palette.surface)
         )
     }
 
@@ -382,7 +383,7 @@ struct WorktreeDetailPanel: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(Color.loopflowCream)
+                .fill(palette.surface)
         )
     }
 
@@ -447,7 +448,7 @@ struct WorktreeDetailPanel: View {
         .padding(.horizontal, 10)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(Color.loopflowCream)
+                .fill(palette.surface)
         )
         .contentShape(Rectangle())
         .onTapGesture {
@@ -522,7 +523,7 @@ struct WorktreeDetailPanel: View {
                 .padding(.vertical, 10)
             }
             .buttonStyle(.plain)
-            .background(Color.loopflowCream)
+            .background(palette.surface)
 
             if launcherExpanded {
                 CollapsedLauncher(appState: appState, worktree: worktree)
@@ -686,6 +687,8 @@ struct CollapsedLauncher: View {
     @Bindable var appState: AppState
     let worktree: Worktree
 
+    @Environment(\.colorScheme) private var colorScheme
+
     @State private var taskSearchText: String = ""
     @State private var argsText: String = ""
     @State private var selectedTask: PromptCard?
@@ -695,6 +698,8 @@ struct CollapsedLauncher: View {
     @FocusState private var isTaskFieldFocused: Bool
 
     private let terminalLauncher = TerminalLauncher()
+
+    private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     private var filteredTasks: [PromptCard] {
         if taskSearchText.isEmpty {
@@ -747,7 +752,7 @@ struct CollapsedLauncher: View {
                     ContextChip(label: "Docs", isOn: $appState.includeDocs, color: .blue)
                     ContextChip(label: "Files", isOn: $appState.includeDiffFiles, color: .teal)
                     ContextChip(label: "Diff", isOn: $appState.includeDiff, color: .green)
-                    ContextChip(label: "Clipboard", isOn: $appState.includePaste, color: .purple)
+                    ContextChip(label: "Clipboard", isOn: $appState.includePaste, color: .accentColor)
                 }
             }
 
@@ -779,7 +784,7 @@ struct CollapsedLauncher: View {
             }
         }
         .padding(16)
-        .background(Color.loopflowCream)
+        .background(palette.surface)
         .alert("Couldn't Start", isPresented: $showingLaunchError) {
             Button("OK") { launchError = nil }
         } message: {
@@ -808,11 +813,11 @@ struct CollapsedLauncher: View {
                 .buttonStyle(.plain)
             }
         }
-        .background(Color.loopflowCream)
+        .background(palette.surface)
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .overlay(
             RoundedRectangle(cornerRadius: 6)
-                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                .stroke(palette.border, lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
         .frame(width: 200)
@@ -891,15 +896,19 @@ struct CollapsedLauncher: View {
 // MARK: - Dark Button Style
 
 struct DarkButtonStyle: ButtonStyle {
+    @Environment(\.colorScheme) private var colorScheme
+
     func makeBody(configuration: Configuration) -> some View {
+        let palette = LoopflowPalette.make(for: colorScheme)
+
         configuration.label
             .font(.subheadline)
-            .foregroundStyle(.white)
+            .foregroundStyle(Color.loopflowCream)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(configuration.isPressed ? Color.loopflowText.opacity(0.8) : Color.loopflowText)
+                    .fill(configuration.isPressed ? palette.accentHover : palette.accent)
             )
     }
 }

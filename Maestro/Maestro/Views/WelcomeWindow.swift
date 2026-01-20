@@ -6,6 +6,11 @@ struct WelcomeWindow: View {
     let recentsService: RecentsService
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var palette: LoopflowPalette {
+        LoopflowPalette.make(for: colorScheme)
+    }
 
     var body: some View {
         VStack(spacing: 32) {
@@ -58,7 +63,7 @@ struct WelcomeWindow: View {
                             .buttonStyle(.plain)
                             .background(
                                 RoundedRectangle(cornerRadius: 6)
-                                    .fill(Color.loopflowCream)
+                                    .fill(palette.surface)
                             )
                         }
                     }
@@ -77,8 +82,7 @@ struct WelcomeWindow: View {
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.white)
-        .preferredColorScheme(.light)
+        .background(palette.background)
     }
 
     private func openRepo(_ url: URL) {

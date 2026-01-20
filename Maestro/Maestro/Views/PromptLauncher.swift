@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 struct PromptLauncher: View {
     @Bindable var appState: AppState
 
+    @Environment(\.colorScheme) private var colorScheme
     @State private var inputText: String = ""
     @State private var showingPromptPicker = false
     @State private var highlightedPromptIndex = 0
@@ -18,6 +19,7 @@ struct PromptLauncher: View {
     @State private var expandedSections: Set<ContextKind> = [.docs, .files]
 
     private let terminalLauncher = TerminalLauncher()
+    private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     // Track whether a pipeline is selected (vs a task)
     @State private var selectedPipeline: PipelineDef?
@@ -191,7 +193,7 @@ struct PromptLauncher: View {
                 .padding(.vertical, 6)
                 .background(
                     RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.primary.opacity(0.05))
+                        .fill(palette.surfaceMuted)
                 )
                 .frame(minWidth: 120)
 
@@ -308,7 +310,7 @@ struct PromptLauncher: View {
                             }
                         }
                     }
-                    .background(Color(nsColor: .controlBackgroundColor))
+                    .background(palette.surface)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                     .overlay(
                         RoundedRectangle(cornerRadius: 6)
@@ -544,8 +546,8 @@ struct PromptLauncher: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(Capsule().fill(Color.purple.opacity(0.15)))
-        .foregroundStyle(Color.purple)
+        .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+        .foregroundStyle(Color.accentColor)
     }
 
     private func voicePickerPopover() -> some View {
@@ -582,7 +584,7 @@ struct PromptLauncher: View {
                     } label: {
                         HStack {
                             Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(isSelected ? Color.purple : Color.secondary)
+                                .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
                             Text(voice.displayName)
                                 .fontWeight(.medium)
                             Spacer()
@@ -746,7 +748,7 @@ struct PromptLauncher: View {
             }
         }
         .padding(.vertical, 4)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(palette.surface)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
@@ -898,7 +900,7 @@ struct PromptLauncher: View {
         }
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(palette.surface)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10)
@@ -1035,7 +1037,7 @@ struct PromptLauncher: View {
                         .help("AI sees: Files you've changed on this branch. Helps it understand your work in progress.")
                     ContextChip(label: "Diff", isOn: $appState.includeDiff, color: .green)
                         .help("AI sees: Exact line-by-line changes. Useful for reviews and understanding what changed.")
-                    ContextChip(label: "Clipboard", isOn: $appState.includePaste, color: .purple)
+                    ContextChip(label: "Clipboard", isOn: $appState.includePaste, color: .accentColor)
                         .help("AI sees: Whatever you copied. Paste code, errors, or docs for reference.")
                     ContextChip(label: "Chrome", isOn: $appState.includeChrome, color: .indigo)
                         .help("AI can control Chrome browser for web testing and automation.")

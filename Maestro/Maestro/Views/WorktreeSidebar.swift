@@ -720,7 +720,7 @@ struct WorktreeRow: View {
 
     private static let stageStyles: [String: (icon: String, color: Color)] = [
         "design": ("lightbulb", .blue),
-        "implement": ("hammer", .purple),
+        "implement": ("hammer", .loopflowBurgundy),
         "review": ("magnifyingglass", .orange),
         "polish": ("sparkles", .green),
     ]

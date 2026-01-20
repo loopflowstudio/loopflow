@@ -5,6 +5,11 @@ import SwiftUI
 struct ContentView: View {
     @Bindable var appState: AppState
     @State private var showingError = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var palette: LoopflowPalette {
+        LoopflowPalette.make(for: colorScheme)
+    }
 
     private func pipelineEditorBinding(_ pipeline: PipelineDef) -> some View {
         PipelineEditor(
@@ -67,6 +72,7 @@ struct ContentView: View {
                 .help("Refresh workspaces and tasks")
             }
         }
+        .background(palette.background)
     }
 
     @ViewBuilder

@@ -56,6 +56,8 @@ final class AppState {
     var showResultsLog: Bool = false  // Toggle for streaming log view
     private var sessionTaskMap: [String: String] = [:]  // session ID → task name
     private var sessionStartMap: [String: Date] = [:]  // session ID → start time
+    private var autoPruneInFlight: Bool = false
+    private var autoSyncTask: Task<Void, Never>?
 
     // Loading state
     var isLoading: Bool = false
@@ -84,6 +86,7 @@ final class AppState {
 
         // Start native git watching (works without lfd)
         await startGitWatching(repo: url)
+        startAutoSyncTimer()
 
         // Ensure daemon is running on first launch
         let setupService = SetupService()
@@ -197,6 +200,61 @@ final class AppState {
         for i in worktrees.indices {
             if let staleness = stalenessMap[worktrees[i].branch] {
                 worktrees[i].staleness = staleness
+            }
+        }
+
+        await autoPruneCompletedWorktrees(stalenessMap, in: repo)
+    }
+
+    private func autoPruneCompletedWorktrees(_ stalenessMap: [String: Staleness], in repo: URL) async {
+        if autoPruneInFlight {
+            return
+        }
+
+        let candidates = worktrees.filter { worktree in
+            guard worktree.branch != "main", worktree.branch != "master" else { return false }
+            guard worktree.isDirty == false, worktree.isMerging == false, worktree.isRebasing == false else { return false }
+            guard let staleness = stalenessMap[worktree.branch] else { return false }
+
+            switch staleness {
+            case .merged:
+                return true
+            case .remoteDeleted:
+                return worktree.aheadMain == 0
+            case .active, .inactive:
+                return false
+            }
+        }
+
+        if candidates.isEmpty {
+            return
+        }
+
+        autoPruneInFlight = true
+        let branches = candidates.map(\.branch)
+        let worktreeService = worktreeService
+
+        Task { [weak self] in
+            for branch in branches {
+                _ = try? await worktreeService.remove(name: branch, in: repo)
+            }
+
+            guard let self else { return }
+            self.autoPruneInFlight = false
+            await self.refreshWorktrees()
+        }
+    }
+
+    private func startAutoSyncTimer() {
+        autoSyncTask?.cancel()
+        autoSyncTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                if let repo = self.currentRepo {
+                    _ = try? await self.worktreeService.sync(in: repo)
+                    await self.refreshWorktrees()
+                }
+                try? await Task.sleep(for: .seconds(120))
             }
         }
     }

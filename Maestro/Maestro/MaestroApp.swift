@@ -14,6 +14,7 @@ struct MaestroApp: App {
         // Welcome/main window - shown on launch
         WindowGroup {
             WelcomeWindow(recentsService: recentsService)
+                .tint(.loopflowBurgundy)
         }
         .windowStyle(.automatic)
         .defaultSize(width: 500, height: 400)
@@ -21,6 +22,7 @@ struct MaestroApp: App {
         // Repo windows - opened explicitly for each repository
         WindowGroup(id: "repo", for: URL.self) { $repoURL in
             RepoWindow(repoURL: repoURL, recentsService: recentsService)
+                .tint(.loopflowBurgundy)
         }
         .windowStyle(.automatic)
         .defaultSize(width: 900, height: 700)
@@ -28,6 +30,7 @@ struct MaestroApp: App {
         // Agents window - global agent management (beta only)
         WindowGroup(id: "agents") {
             AgentWindow()
+                .tint(.loopflowBurgundy)
         }
         .windowStyle(.automatic)
         .defaultSize(width: 800, height: 600)

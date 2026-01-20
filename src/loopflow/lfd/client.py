@@ -91,3 +91,25 @@ async def _check_daemon() -> bool:
         await client.close()
 
 
+def notify_event(event: str, data: dict[str, Any] | None = None) -> None:
+    """Fire-and-forget event notification to daemon.
+
+    If daemon is not running, silently ignores the notification.
+    """
+    try:
+        asyncio.run(_notify_event(event, data or {}))
+    except Exception:
+        pass  # Fire-and-forget: ignore failures
+
+
+async def _notify_event(event: str, data: dict[str, Any]) -> None:
+    """Send event notification to daemon."""
+    client = DaemonClient()
+    try:
+        await client.call("notify", {"event": event, "data": data})
+    except Exception:
+        pass  # Fire-and-forget
+    finally:
+        await client.close()
+
+

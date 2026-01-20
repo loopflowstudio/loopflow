@@ -8,6 +8,10 @@ from loopflow.lfd.models import (
     AgentSpec,
     AgentRun,
     AgentStatus,
+    Loop,
+    LoopRun,
+    LoopStatus,
+    LoopType,
     MergeMode,
     Session,
     SessionStatus,
@@ -16,13 +20,27 @@ from loopflow.lfd.models import (
 )
 from loopflow.lfd.protocol import Request, Response, Event, success, error
 from loopflow.lfd.db import (
-    save_run,
-    load_agent_runs,
+    delete_loop,
+    get_latest_loop_run,
+    get_loop,
+    get_loop_by_goal_repo,
+    get_loop_runs,
     get_latest_run,
+    list_loops,
+    load_agent_runs,
+    save_loop,
+    save_loop_run,
+    save_run,
     save_session,
     load_sessions,
     load_sessions_for_worktree,
     load_sessions_for_repo,
+    update_loop_iteration,
+    update_loop_pid,
+    update_loop_run_pr,
+    update_loop_run_status,
+    update_loop_run_step,
+    update_loop_status,
     update_session_status,
 )
 
@@ -81,13 +99,13 @@ def test_agent_spec_with_personal_main():
         name="my-agent",
         repo=Path("/tmp/repo"),
         pipeline="ship",
-        merge_mode=MergeMode.SILENT,
+        merge_mode=MergeMode.PR,
         personal_main="my-agent-main",
     )
     data = spec.to_dict()
     restored = AgentSpec.from_dict(data)
     assert restored.personal_main == "my-agent-main"
-    assert restored.merge_mode == MergeMode.SILENT
+    assert restored.merge_mode == MergeMode.PR
 
 
 def test_agent_run_serialization():
@@ -439,3 +457,460 @@ def test_server_handle_output_line_allows_empty_text():
             assert broadcast_events[0].data["text"] == ""
 
     asyncio.run(run_test())
+
+
+# Loop model tests
+
+
+def test_loop_model_defaults():
+    """Loop model has correct defaults."""
+    loop = Loop(
+        id="loop-1",
+        type=LoopType.LOOP,
+        goal="test-coverage",
+        repo=Path("/tmp/repo"),
+        personal_main="test-coverage-main",
+    )
+    assert loop.status == LoopStatus.IDLE
+    assert loop.iteration == 0
+    assert loop.pr_limit == 5
+    assert loop.merge_mode == MergeMode.AUTO
+    assert loop.project_file is None
+    assert loop.pathset is None
+    assert loop.cron is None
+    assert loop.area is None
+    assert loop.pid is None
+
+
+def test_loop_model_short_id():
+    """Loop.short_id() returns first 7 chars."""
+    loop = Loop(
+        id="abcdef1234567890",
+        type=LoopType.LOOP,
+        goal="test",
+        repo=Path("/tmp/repo"),
+        personal_main="test-main",
+    )
+    assert loop.short_id() == "abcdef1"
+
+
+def test_loop_run_model():
+    """LoopRun model stores iteration data."""
+    run = LoopRun(
+        id="run-1",
+        loop_id="loop-1",
+        iteration=3,
+        status=LoopStatus.RUNNING,
+        started_at=datetime.now(),
+        worktree="/tmp/repo.wt",
+        current_step="implement",
+    )
+    assert run.iteration == 3
+    assert run.status == LoopStatus.RUNNING
+    assert run.current_step == "implement"
+    assert run.ended_at is None
+    assert run.error is None
+    assert run.pr_url is None
+
+
+# Loop database tests
+
+
+def test_db_save_and_get_loop():
+    """Save and retrieve a loop."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        loop = Loop(
+            id="loop-123",
+            type=LoopType.LOOP,
+            goal="test-coverage",
+            repo=Path("/tmp/repo"),
+            personal_main="test-coverage-main",
+            status=LoopStatus.IDLE,
+            iteration=0,
+            pr_limit=5,
+        )
+        save_loop(loop, db_path)
+
+        loaded = get_loop("loop-123", db_path)
+        assert loaded is not None
+        assert loaded.id == "loop-123"
+        assert loaded.goal == "test-coverage"
+        assert loaded.type == LoopType.LOOP
+        assert loaded.personal_main == "test-coverage-main"
+
+
+def test_db_get_loop_short_id():
+    """Get loop by short ID prefix."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        loop = Loop(
+            id="abcdef1234567890",
+            type=LoopType.LOOP,
+            goal="test",
+            repo=Path("/tmp/repo"),
+            personal_main="test-main",
+        )
+        save_loop(loop, db_path)
+
+        # Should find by prefix
+        loaded = get_loop("abcdef1", db_path)
+        assert loaded is not None
+        assert loaded.id == "abcdef1234567890"
+
+
+def test_db_get_loop_by_goal_repo():
+    """Get loop by type, goal, and repo."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        loop = Loop(
+            id="loop-1",
+            type=LoopType.FLOW,
+            goal="api-cleanup",
+            repo=Path("/tmp/repo"),
+            personal_main="api-cleanup-main",
+        )
+        save_loop(loop, db_path)
+
+        loaded = get_loop_by_goal_repo(LoopType.FLOW, "api-cleanup", Path("/tmp/repo"), db_path)
+        assert loaded is not None
+        assert loaded.id == "loop-1"
+
+        # Different type should not match
+        not_found = get_loop_by_goal_repo(LoopType.LOOP, "api-cleanup", Path("/tmp/repo"), db_path)
+        assert not_found is None
+
+
+def test_db_list_loops():
+    """List all loops."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+
+        loop1 = Loop(
+            id="loop-1",
+            type=LoopType.LOOP,
+            goal="goal-a",
+            repo=Path("/tmp/repo-a"),
+            personal_main="goal-a-main",
+        )
+        loop2 = Loop(
+            id="loop-2",
+            type=LoopType.SUBSCRIBE,
+            goal="goal-b",
+            repo=Path("/tmp/repo-b"),
+            personal_main="goal-b-main",
+        )
+        save_loop(loop1, db_path)
+        save_loop(loop2, db_path)
+
+        loops = list_loops(db_path=db_path)
+        assert len(loops) == 2
+
+        # Filter by repo
+        loops = list_loops(repo=Path("/tmp/repo-a"), db_path=db_path)
+        assert len(loops) == 1
+        assert loops[0].goal == "goal-a"
+
+
+def test_db_update_loop_status():
+    """Update loop status."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        loop = Loop(
+            id="loop-1",
+            type=LoopType.LOOP,
+            goal="test",
+            repo=Path("/tmp/repo"),
+            personal_main="test-main",
+            status=LoopStatus.IDLE,
+        )
+        save_loop(loop, db_path)
+
+        updated = update_loop_status("loop-1", LoopStatus.RUNNING, db_path)
+        assert updated is True
+
+        loaded = get_loop("loop-1", db_path)
+        assert loaded.status == LoopStatus.RUNNING
+
+
+def test_db_update_loop_iteration():
+    """Update loop iteration count."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        loop = Loop(
+            id="loop-1",
+            type=LoopType.LOOP,
+            goal="test",
+            repo=Path("/tmp/repo"),
+            personal_main="test-main",
+            iteration=0,
+        )
+        save_loop(loop, db_path)
+
+        updated = update_loop_iteration("loop-1", 5, db_path)
+        assert updated is True
+
+        loaded = get_loop("loop-1", db_path)
+        assert loaded.iteration == 5
+
+
+def test_db_delete_loop():
+    """Delete loop and its runs."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        loop = Loop(
+            id="loop-1",
+            type=LoopType.LOOP,
+            goal="test",
+            repo=Path("/tmp/repo"),
+            personal_main="test-main",
+        )
+        save_loop(loop, db_path)
+
+        # Add a run
+        run = LoopRun(
+            id="run-1",
+            loop_id="loop-1",
+            iteration=1,
+            status=LoopStatus.RUNNING,
+            started_at=datetime.now(),
+        )
+        save_loop_run(run, db_path)
+
+        # Delete loop (should also delete runs)
+        deleted = delete_loop("loop-1", db_path)
+        assert deleted is True
+
+        assert get_loop("loop-1", db_path) is None
+        assert get_loop_runs("loop-1", db_path=db_path) == []
+
+
+# Loop run database tests
+
+
+def test_db_save_and_get_loop_runs():
+    """Save and retrieve loop runs."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+
+        # Create parent loop first
+        loop = Loop(
+            id="loop-1",
+            type=LoopType.LOOP,
+            goal="test",
+            repo=Path("/tmp/repo"),
+            personal_main="test-main",
+        )
+        save_loop(loop, db_path)
+
+        run1 = LoopRun(
+            id="run-1",
+            loop_id="loop-1",
+            iteration=1,
+            status=LoopStatus.IDLE,
+            started_at=datetime(2024, 1, 1, 12, 0, 0),
+            pr_url="https://github.com/user/repo/pull/1",
+        )
+        run2 = LoopRun(
+            id="run-2",
+            loop_id="loop-1",
+            iteration=2,
+            status=LoopStatus.RUNNING,
+            started_at=datetime(2024, 1, 2, 12, 0, 0),
+        )
+        save_loop_run(run1, db_path)
+        save_loop_run(run2, db_path)
+
+        runs = get_loop_runs("loop-1", db_path=db_path)
+        assert len(runs) == 2
+        # Ordered by started_at DESC
+        assert runs[0].id == "run-2"
+        assert runs[1].id == "run-1"
+
+
+def test_db_get_latest_loop_run():
+    """Get most recent run for a loop."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+
+        loop = Loop(
+            id="loop-1",
+            type=LoopType.LOOP,
+            goal="test",
+            repo=Path("/tmp/repo"),
+            personal_main="test-main",
+        )
+        save_loop(loop, db_path)
+
+        run1 = LoopRun(
+            id="run-1",
+            loop_id="loop-1",
+            iteration=1,
+            status=LoopStatus.IDLE,
+            started_at=datetime(2024, 1, 1, 12, 0, 0),
+        )
+        run2 = LoopRun(
+            id="run-2",
+            loop_id="loop-1",
+            iteration=2,
+            status=LoopStatus.RUNNING,
+            started_at=datetime(2024, 1, 2, 12, 0, 0),
+        )
+        save_loop_run(run1, db_path)
+        save_loop_run(run2, db_path)
+
+        latest = get_latest_loop_run("loop-1", db_path)
+        assert latest is not None
+        assert latest.id == "run-2"
+
+
+def test_db_update_loop_run_status():
+    """Update loop run status."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+
+        loop = Loop(
+            id="loop-1",
+            type=LoopType.LOOP,
+            goal="test",
+            repo=Path("/tmp/repo"),
+            personal_main="test-main",
+        )
+        save_loop(loop, db_path)
+
+        run = LoopRun(
+            id="run-1",
+            loop_id="loop-1",
+            iteration=1,
+            status=LoopStatus.RUNNING,
+            started_at=datetime.now(),
+        )
+        save_loop_run(run, db_path)
+
+        updated = update_loop_run_status("run-1", LoopStatus.IDLE, db_path=db_path)
+        assert updated is True
+
+        runs = get_loop_runs("loop-1", db_path=db_path)
+        assert runs[0].status == LoopStatus.IDLE
+        assert runs[0].ended_at is not None
+
+
+def test_db_update_loop_run_step():
+    """Update loop run's current step."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+
+        loop = Loop(
+            id="loop-1",
+            type=LoopType.LOOP,
+            goal="test",
+            repo=Path("/tmp/repo"),
+            personal_main="test-main",
+        )
+        save_loop(loop, db_path)
+
+        run = LoopRun(
+            id="run-1",
+            loop_id="loop-1",
+            iteration=1,
+            status=LoopStatus.RUNNING,
+            started_at=datetime.now(),
+        )
+        save_loop_run(run, db_path)
+
+        updated = update_loop_run_step("run-1", "implement", db_path)
+        assert updated is True
+
+        runs = get_loop_runs("loop-1", db_path=db_path)
+        assert runs[0].current_step == "implement"
+
+
+def test_db_update_loop_run_pr():
+    """Update loop run's PR URL."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+
+        loop = Loop(
+            id="loop-1",
+            type=LoopType.LOOP,
+            goal="test",
+            repo=Path("/tmp/repo"),
+            personal_main="test-main",
+        )
+        save_loop(loop, db_path)
+
+        run = LoopRun(
+            id="run-1",
+            loop_id="loop-1",
+            iteration=1,
+            status=LoopStatus.RUNNING,
+            started_at=datetime.now(),
+        )
+        save_loop_run(run, db_path)
+
+        updated = update_loop_run_pr("run-1", "https://github.com/user/repo/pull/42", db_path)
+        assert updated is True
+
+        runs = get_loop_runs("loop-1", db_path=db_path)
+        assert runs[0].pr_url == "https://github.com/user/repo/pull/42"
+
+
+def test_db_update_loop_pid():
+    """Update loop's process ID."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+
+        loop = Loop(
+            id="loop-1",
+            type=LoopType.LOOP,
+            goal="test",
+            repo=Path("/tmp/repo"),
+            personal_main="test-main",
+        )
+        save_loop(loop, db_path)
+
+        # Set pid
+        updated = update_loop_pid("loop-1", 12345, db_path)
+        assert updated is True
+
+        loaded = get_loop("loop-1", db_path)
+        assert loaded.pid == 12345
+
+        # Clear pid
+        updated = update_loop_pid("loop-1", None, db_path)
+        assert updated is True
+
+        loaded = get_loop("loop-1", db_path)
+        assert loaded.pid is None
+
+
+def test_loop_model_with_pid():
+    """Loop model stores pid correctly."""
+    loop = Loop(
+        id="loop-1",
+        type=LoopType.LOOP,
+        goal="test",
+        repo=Path("/tmp/repo"),
+        personal_main="test-main",
+        pid=12345,
+    )
+    assert loop.pid == 12345
+
+
+def test_db_save_loop_with_pid():
+    """Save and load loop with pid."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+
+        loop = Loop(
+            id="loop-1",
+            type=LoopType.LOOP,
+            goal="test",
+            repo=Path("/tmp/repo"),
+            personal_main="test-main",
+            pid=54321,
+        )
+        save_loop(loop, db_path)
+
+        loaded = get_loop("loop-1", db_path)
+        assert loaded.pid == 54321

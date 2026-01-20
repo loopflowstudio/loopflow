@@ -18,7 +18,7 @@ from loopflow.lfd.db import (
     update_loop_status,
 )
 from loopflow.lfd.launchd import install as launchd_install, is_running, uninstall as launchd_uninstall
-from loopflow.lfd.loops import create_loop, get_repo_from_cwd, start_loop, stop_loop
+from loopflow.lfd.loops import count_outstanding, create_loop, get_repo_from_cwd, start_loop, stop_loop
 from loopflow.lfd.models import Loop, LoopStatus, LoopType
 from loopflow.lfd.server import run_server
 
@@ -94,7 +94,9 @@ def uninstall():
 @app.command()
 def loop(
     goal: str = typer.Argument(..., help="Goal name from .lf/goals/"),
-    area: str = typer.Option(None, "-r", help="Area of responsibility (pathset override)"),
+    area: str = typer.Option(None, "-a", "--area", help="Area of responsibility (pathset override)"),
+    limit: int = typer.Option(None, "-l", "--limit", help="PR limit override"),
+    foreground: bool = typer.Option(False, "-f", "--foreground", help="Run in foreground"),
 ):
     """Start a continuous homeostasis loop."""
     c = _colors()
@@ -114,13 +116,37 @@ def loop(
     # Create or get loop
     lp = create_loop(LoopType.LOOP, goal, repo, area=area)
 
+    # Override pr_limit if specified
+    if limit is not None:
+        lp.pr_limit = limit
+        from loopflow.lfd.db import save_loop
+        save_loop(lp)
+
+    # Check if already running
+    from loopflow.lfd.process import is_process_running
+    if lp.status == LoopStatus.RUNNING and lp.pid and is_process_running(lp.pid):
+        typer.echo(f"Loop already running (PID {lp.pid})")
+        raise typer.Exit(1)
+
+    # Check outstanding commits
+    outstanding = count_outstanding(lp)
+    if outstanding >= lp.pr_limit:
+        update_loop_status(lp.id, LoopStatus.WAITING)
+        typer.echo(f"{c['yellow']}Waiting:{c['reset']} {outstanding} outstanding PRs (limit {lp.pr_limit})")
+        typer.echo(f"Run 'lfops land --squash' from {lp.personal_main} worktree to land work to main")
+        raise typer.Exit(0)
+
     # Start it
-    if start_loop(lp.id):
-        typer.echo(f"{c['green']}Started{c['reset']} loop {c['bold']}{goal}{c['reset']} ({lp.short_id()})")
-        typer.echo(f"  Repo: {repo}")
-        typer.echo(f"  Personal main: {lp.personal_main}")
-        if area:
-            typer.echo(f"  Area: {area}")
+    if start_loop(lp.id, foreground=foreground):
+        if foreground:
+            typer.echo(f"{c['green']}Completed{c['reset']} loop {c['bold']}{goal}{c['reset']} ({lp.short_id()})")
+        else:
+            typer.echo(f"{c['green']}Started{c['reset']} loop {c['bold']}{goal}{c['reset']} ({lp.short_id()})")
+            typer.echo(f"  Repo: {repo}")
+            typer.echo(f"  Personal main: {lp.personal_main}")
+            typer.echo(f"  PR limit: {lp.pr_limit}")
+            if area:
+                typer.echo(f"  Area: {area}")
     else:
         typer.echo(f"{c['red']}Error:{c['reset']} Failed to start loop", err=True)
         raise typer.Exit(1)
@@ -298,6 +324,7 @@ def _print_loop_detail(lp: Loop, c: dict[str, str]) -> None:
 @app.command()
 def stop(
     loop_id: str = typer.Argument(..., help="Loop ID to stop"),
+    force: bool = typer.Option(False, "-f", "--force", help="Force kill (SIGKILL)"),
 ):
     """Stop a running loop."""
     c = _colors()
@@ -307,7 +334,7 @@ def stop(
         typer.echo(f"{c['red']}Error:{c['reset']} Loop '{loop_id}' not found", err=True)
         raise typer.Exit(1)
 
-    if stop_loop(lp.id):
+    if stop_loop(lp.id, force=force):
         typer.echo(f"{c['yellow']}Stopped{c['reset']} {c['bold']}{lp.goal}{c['reset']} ({lp.short_id()})")
     else:
         typer.echo(f"{c['red']}Error:{c['reset']} Failed to stop loop", err=True)
@@ -372,6 +399,43 @@ def rm(
     else:
         typer.echo(f"{c['red']}Error:{c['reset']} Failed to delete loop", err=True)
         raise typer.Exit(1)
+
+
+@app.command("list-goals")
+def list_goals_cmd():
+    """Show available goals in current repo."""
+    c = _colors()
+    repo = get_repo_from_cwd()
+    if not repo:
+        typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    goals_dir = repo / ".lf" / "goals"
+    if not goals_dir.exists():
+        typer.echo(f"{c['dim']}No goals directory found at {goals_dir}{c['reset']}")
+        typer.echo(f"Create one with: mkdir -p .lf/goals && echo '# My Goal' > .lf/goals/my-goal.md")
+        return
+
+    goals = list_goals(repo)
+    if not goals:
+        typer.echo(f"{c['dim']}No goals found in {goals_dir}{c['reset']}")
+        return
+
+    typer.echo(f"Goals in {c['dim']}{goals_dir}/{c['reset']}")
+    typer.echo("")
+
+    for goal_name in goals:
+        goal = load_goal(repo, goal_name)
+        if goal:
+            area_str = f"area: [{', '.join(goal.area)}]" if goal.area else ""
+            pipeline_str = f"pipeline: {goal.pipeline}" if goal.pipeline else ""
+            details = "  ".join(filter(None, [area_str, pipeline_str]))
+            typer.echo(f"  {c['bold']}{goal_name:<20}{c['reset']} {c['dim']}{details}{c['reset']}")
+        else:
+            typer.echo(f"  {c['bold']}{goal_name:<20}{c['reset']}")
+
+    typer.echo("")
+    typer.echo(f"{len(goals)} goal{'s' if len(goals) != 1 else ''} found")
 
 
 def main() -> None:

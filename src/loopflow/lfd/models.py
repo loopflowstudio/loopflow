@@ -54,6 +54,7 @@ class Loop:
     cron: str | None = None           # for schedule
     area: str | None = None           # area of responsibility override
 
+    pid: int | None = None            # process ID when running
     created_at: datetime = field(default_factory=datetime.now)
 
     def short_id(self) -> str:
@@ -122,16 +123,7 @@ class TriggerSpec:
         )
 
 
-class MergeMode(Enum):
-    """How iteration branches merge to personal-main.
-
-    AUTO: Create PR per iteration, auto-merge to personal-main
-    PR: Create PR per iteration, wait for manual approval
-    SILENT: No PRs, merge directly to personal-main
-    """
-    AUTO = "auto"
-    PR = "pr"
-    SILENT = "silent"
+# Note: MergeMode is defined above for loops. Legacy code may use SILENT which maps to AUTO.
 
 
 @dataclass

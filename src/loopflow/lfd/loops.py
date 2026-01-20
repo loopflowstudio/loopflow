@@ -1,5 +1,7 @@
 """Loop management for lfd."""
 
+import os
+import signal
 import subprocess
 import uuid
 from pathlib import Path
@@ -14,9 +16,11 @@ from loopflow.lfd.db import (
     get_loop_runs,
     list_loops,
     save_loop,
+    update_loop_pid,
     update_loop_status,
 )
 from loopflow.lfd.models import Loop, LoopStatus, LoopType, MergeMode
+from loopflow.lfd.process import is_process_running
 
 
 def _branch_exists(repo: Path, branch: str) -> bool:
@@ -103,27 +107,111 @@ def create_loop(
     return loop
 
 
-def start_loop(loop_id: str) -> bool:
-    """Mark a loop as running and start execution."""
+def count_outstanding(loop: Loop) -> int:
+    """Count commits on personal-main ahead of main.
+
+    Returns number of commits on personal-main that are not yet on main.
+    """
+    # Ensure we have latest refs
+    subprocess.run(
+        ["git", "fetch", "origin", "main", loop.personal_main],
+        cwd=loop.repo,
+        capture_output=True,
+    )
+
+    # Count commits ahead
+    result = subprocess.run(
+        ["git", "rev-list", "--count", f"origin/main..origin/{loop.personal_main}"],
+        cwd=loop.repo,
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode != 0:
+        return 0  # Branch doesn't exist yet or other error
+
+    try:
+        return int(result.stdout.strip())
+    except ValueError:
+        return 0
+
+
+def should_continue(loop: Loop) -> bool:
+    """Check if loop should continue or pause due to PR limit.
+
+    Returns False if outstanding commits >= pr_limit, True otherwise.
+    """
+    outstanding = count_outstanding(loop)
+    return outstanding < loop.pr_limit
+
+
+def start_loop(loop_id: str, foreground: bool = False) -> bool:
+    """Mark a loop as running and start execution.
+
+    If foreground=True, runs the loop in the current process.
+    Otherwise spawns a background subprocess.
+    """
     loop = get_loop(loop_id)
     if not loop:
         return False
 
-    # TODO: Actually spawn the subprocess to run the loop
-    # For now, just mark it as running
-    update_loop_status(loop_id, LoopStatus.RUNNING)
-    return True
+    # Check if already running
+    if loop.status == LoopStatus.RUNNING and loop.pid and is_process_running(loop.pid):
+        return False
+
+    # Check outstanding commits before starting
+    outstanding = count_outstanding(loop)
+    if outstanding >= loop.pr_limit:
+        update_loop_status(loop_id, LoopStatus.WAITING)
+        return False
+
+    if foreground:
+        # Run directly in this process
+        update_loop_status(loop_id, LoopStatus.RUNNING)
+        update_loop_pid(loop_id, os.getpid())
+        _run_loop(loop)
+        return True
+    else:
+        # Spawn background process
+        import sys
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "loopflow.lfd.loop_runner", loop_id],
+            cwd=loop.repo,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        update_loop_status(loop_id, LoopStatus.RUNNING)
+        update_loop_pid(loop_id, proc.pid)
+        return True
 
 
-def stop_loop(loop_id: str) -> bool:
-    """Stop a running loop."""
+def stop_loop(loop_id: str, force: bool = False) -> bool:
+    """Stop a running loop.
+
+    If force=True, sends SIGKILL. Otherwise sends SIGTERM for graceful shutdown.
+    """
     loop = get_loop(loop_id)
     if not loop:
         return False
 
-    # TODO: Actually kill the subprocess if running
+    # Kill process if running
+    if loop.pid and is_process_running(loop.pid):
+        sig = signal.SIGKILL if force else signal.SIGTERM
+        try:
+            os.kill(loop.pid, sig)
+        except OSError:
+            pass
+
     update_loop_status(loop_id, LoopStatus.IDLE)
+    update_loop_pid(loop_id, None)
     return True
+
+
+def _run_loop(loop: Loop) -> None:
+    """Run the loop execution until it should pause."""
+    from loopflow.lfd.loop_runner import run_loop_iterations
+    run_loop_iterations(loop)
 
 
 def get_repo_from_cwd() -> Path | None:

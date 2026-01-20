@@ -45,6 +45,7 @@ def _init_db(db_path: Path) -> None:
             pathset TEXT,
             cron TEXT,
             area TEXT,
+            pid INTEGER,
             created_at TEXT NOT NULL,
             UNIQUE(type, goal, repo)
         );
@@ -464,8 +465,8 @@ def save_loop(loop: Loop, db_path: Path | None = None) -> None:
         """
         INSERT OR REPLACE INTO loops
         (id, type, goal, repo, personal_main, status, iteration, pr_limit, merge_mode,
-         project_file, pathset, cron, area, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         project_file, pathset, cron, area, pid, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             loop.id,
@@ -481,6 +482,7 @@ def save_loop(loop: Loop, db_path: Path | None = None) -> None:
             loop.pathset,
             loop.cron,
             loop.area,
+            loop.pid,
             loop.created_at.isoformat(),
         ),
     )
@@ -565,6 +567,21 @@ def update_loop_iteration(
     return updated
 
 
+def update_loop_pid(
+    loop_id: str, pid: int | None, db_path: Path | None = None
+) -> bool:
+    """Update a loop's process ID."""
+    conn = _get_db(db_path)
+    cursor = conn.execute(
+        "UPDATE loops SET pid = ? WHERE id = ? OR id LIKE ?",
+        (pid, loop_id, f"{loop_id}%"),
+    )
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    return updated
+
+
 def delete_loop(loop_id: str, db_path: Path | None = None) -> bool:
     """Delete a loop and its runs."""
     conn = _get_db(db_path)
@@ -606,6 +623,7 @@ def _loop_from_row(row: dict) -> Loop:
         pathset=row.get("pathset"),
         cron=row.get("cron"),
         area=row.get("area"),
+        pid=row.get("pid"),
         created_at=datetime.fromisoformat(row["created_at"]),
     )
 

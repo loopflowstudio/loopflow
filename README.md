@@ -52,6 +52,25 @@ Requires macOS and [worktrunk](https://github.com/loopflowstudio/worktrunk) for 
 
 [Read the docs →](docs/index.md)
 
+## Integrations
+
+**Coding Agents**
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — Anthropic's coding agent (default)
+- [Codex CLI](https://github.com/openai/codex) — OpenAI's coding agent
+- [Gemini CLI](https://github.com/google-gemini/gemini-cli) — Google's coding agent
+
+**Tools**
+- [worktrunk](https://github.com/loopflowstudio/worktrunk) — git worktree management (`wt` commands)
+- [superpowers](https://github.com/obra/superpowers) — skill library (`lf sp:<skill>`)
+
+## Requirements
+
+- macOS
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+- [worktrunk](https://github.com/loopflowstudio/worktrunk) (`wt` for git worktrees)
+
+Run `lfops install` to install both.
+
 ## License
 
 MIT

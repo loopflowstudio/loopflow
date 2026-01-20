@@ -4,9 +4,15 @@ Import external skill libraries (starting with [obra/superpowers](https://github
 
 ## Philosophy
 
-Loopflow is a launcher that believes every company and team should put their core prompts in writing, in their codebase. Prompts are artifacts—versioned, reviewed, shared.
+Loopflow implements best practices for working with AI agents:
 
-But you shouldn't have to write everything from scratch. Good skills exist. Superpowers has them. Other libraries will emerge. Loopflow lets you use any skill, with any agent, while keeping your own prompts alongside.
+- **Write prompts down.** In your codebase, versioned, reviewed.
+- **Assemble context explicitly.** Know what the agent sees.
+- **Chain tasks with quality gates.** Commits between steps, not vibes.
+
+There's no magic in the prompts themselves. The value is the discipline—having them written, iterating on them, sharing them across your team.
+
+You shouldn't have to write everything from scratch. Good skills exist. Superpowers has them. Other libraries will emerge. Loopflow lets you use any skill, with any agent, while keeping your own prompts alongside.
 
 ## What to build
 

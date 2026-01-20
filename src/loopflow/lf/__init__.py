@@ -19,7 +19,7 @@ BUILTIN_CATEGORIES: dict[str, list[str]] = {
     "Setup": ["init"],
     "Planning & Design": ["design", "explore", "refine"],
     "Implementation": ["implement", "iterate", "expand", "reduce"],
-    "Quality": ["review", "polish", "debug"],
+    "Quality": ["review", "polish", "lint", "debug"],
     "Git": ["commit", "rebase"],
 }
 
@@ -33,6 +33,7 @@ BUILTIN_DESCRIPTIONS: dict[str, str] = {
     "reduce": "Simplify while preserving behavior",
     "review": "Assess code, write verdict",
     "polish": "Fix issues, run tests",
+    "lint": "Run linter, fix issues",
     "debug": "Fix errors from clipboard",
     "commit": "Commit with generated message",
     "rebase": "Rebase onto main",

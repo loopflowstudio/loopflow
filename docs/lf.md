@@ -34,7 +34,7 @@ Tasks are markdown files in these locations (searched in order):
 1. External skills — `<prefix>:<skill>` format (e.g., `sp:brainstorm`)
 2. `.claude/commands/<step>.md` — preferred, portable
 3. `.lf/<step>.md` — local override
-4. Built-in steps — debug, design, implement, polish, review
+4. Built-in steps — commit, debug, design, expand, explore, implement, init, iterate, lint, polish, rebase, reduce, refine, review, roadmap
 
 ### Task Arguments
 

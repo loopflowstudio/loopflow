@@ -98,6 +98,7 @@ class Config(BaseModel):
     skill_sources: list[SkillSourceConfig] = Field(default_factory=list)  # External skill libraries
     work: Optional[WorkConfig] = None  # Work queue configuration
     branch_names: Optional[BranchNameConfig] = None  # Branch naming schema
+    lint_check: Optional[str] = None  # Command to check if lint passes (exits 0 = pass)
 
     @field_validator("context", mode="before")
     @classmethod

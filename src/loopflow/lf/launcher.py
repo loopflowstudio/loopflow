@@ -459,7 +459,7 @@ def _run_streaming_json(
         cmd,
         cwd=cwd,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
         env=get_model_env(),
     )

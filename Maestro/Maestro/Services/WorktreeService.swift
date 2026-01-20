@@ -344,7 +344,10 @@ struct WorktreeService {
         }
 
         let baseBranch = worktree.baseBranch ?? "main"
-        if (try? await runProcess(
+        // Only mark as merged if the worktree has commits (aheadMain > 0).
+        // A worktree with 0 commits ahead and no diff is just new, not merged.
+        if worktree.aheadMain > 0,
+           (try? await runProcess(
             URL(fileURLWithPath: "/usr/bin/git"),
             ["diff", "--quiet", "\(baseBranch)...\(worktree.branch)"],
             in: repoURL

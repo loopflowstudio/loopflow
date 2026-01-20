@@ -5,16 +5,16 @@ title: lf Command Reference
 
 # lf Command Reference
 
-`lf` runs tasks against AI coding agents. It assembles context (repo docs, diff, files) and passes everything to Claude, Codex, or Gemini.
+`lf` runs steps against AI coding agents. It assembles context (repo docs, diff, files) and passes everything to Claude, Codex, or Gemini.
 
 ## Basic Usage
 
 ```bash
-lf <task>                    # run a task file
-lf <task>: args              # run with arguments
+lf <step>                    # run a step file
+lf <step>: args              # run with arguments
 lf <prefix>:<skill>          # run external skill
-lf : "inline prompt"         # no task file, just prompt
-lf --list                    # show all available tasks
+lf : "inline prompt"         # no step file, just prompt
+lf --list                    # show all available steps
 ```
 
 ## Examples
@@ -32,9 +32,9 @@ lf debug -v                  # paste clipboard, fix the bug
 Tasks are markdown files in these locations (searched in order):
 
 1. External skills — `<prefix>:<skill>` format (e.g., `sp:brainstorm`)
-2. `.claude/commands/<task>.md` — preferred, portable
-3. `.lf/<task>.md` — local override
-4. Built-in tasks — debug, design, implement, polish, review
+2. `.claude/commands/<step>.md` — preferred, portable
+3. `.lf/<step>.md` — local override
+4. Built-in steps — debug, design, implement, polish, review
 
 ### Task Arguments
 
@@ -42,7 +42,7 @@ Tasks are markdown files in these locations (searched in order):
 lf implement: add user authentication
 ```
 
-Inside task files, `{args}` is replaced with whatever comes after the colon.
+Inside step files, `{args}` is replaced with whatever comes after the colon.
 
 ## Context Flags
 
@@ -97,7 +97,7 @@ Inside task files, `{args}` is replaced with whatever comes after the colon.
 
 ## What's Included by Default
 
-Every task automatically includes:
+Every step automatically includes:
 
 | Context | Default | How to disable |
 |---------|---------|----------------|

@@ -1,4 +1,4 @@
-"""Data structures and logging for lf task execution."""
+"""Data structures and logging for lf step execution."""
 
 import json
 import socket
@@ -21,7 +21,7 @@ class SessionStatus(Enum):
 @dataclass
 class Session:
     id: str
-    task: str
+    step: str
     repo: str
     worktree: str
     status: SessionStatus
@@ -34,7 +34,7 @@ class Session:
     def to_dict(self) -> dict:
         return {
             "id": self.id,
-            "task": self.task,
+            "step": self.step,
             "repo": self.repo,
             "worktree": self.worktree,
             "status": self.status.value,
@@ -49,7 +49,7 @@ class Session:
     def from_dict(cls, data: dict) -> "Session":
         return cls(
             id=data["id"],
-            task=data["task"],
+            step=data.get("step") or data.get("task", ""),  # Backward compat with old "task" key
             repo=data["repo"],
             worktree=data["worktree"],
             status=SessionStatus(data["status"]),

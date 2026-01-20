@@ -25,8 +25,8 @@ push: false
 #     tokens: 16000
 #     model: gemini
 
-# Example pipelines
-# pipelines:
+# Example flows
+# flows:
 #   ship:
-#     tasks: [implement, rebase, polish, draft_commit]
+#     steps: [implement, rebase, polish, draft_commit]
 #     pr: true

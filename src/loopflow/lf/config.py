@@ -25,9 +25,9 @@ class WorkConfig(BaseModel):
     auto_land: bool = False
 
 
-class PipelineConfig(BaseModel):
+class FlowConfig(BaseModel):
     name: str = ""
-    tasks: list[str]
+    steps: list[str]
     push: Optional[bool] = None
     pr: Optional[bool] = None
 
@@ -73,9 +73,8 @@ def parse_model(model: str) -> tuple[str, str | None]:
 
 
 class Config(BaseModel):
-    # Format: backend:variant (e.g., claude:opus, claude:sonnet, codex)
-    agent_model: str = "claude:opus"
-    pipelines: dict[str, PipelineConfig] = Field(default_factory=dict)
+    agent_model: str = "claude:opus"  # Format: backend:variant (e.g., claude:opus, claude:sonnet, codex)
+    flows: dict[str, FlowConfig] = Field(default_factory=dict)
     yolo: bool = False  # Skip permissions; Codex also disables sandboxing
     chrome: bool = False  # Enable Chrome integration for Claude Code (browser automation)
     push: bool = False
@@ -136,13 +135,13 @@ class Config(BaseModel):
             return [v] if v else None
         return v if v else None
 
-    @field_validator("pipelines", mode="before")
+    @field_validator("flows", mode="before")
     @classmethod
-    def parse_pipelines(cls, v):
+    def parse_flows(cls, v):
         if not v:
             return {}
         return {
-            name: PipelineConfig(name=name, **data) if isinstance(data, dict) else data
+            name: FlowConfig(name=name, **data) if isinstance(data, dict) else data
             for name, data in v.items()
         }
 
@@ -157,7 +156,6 @@ class Config(BaseModel):
 
 class ConfigError(Exception):
     """User-friendly config error."""
-
     pass
 
 
@@ -184,9 +182,8 @@ def load_config(repo_root: Path) -> Config | None:
             # Simplify Pydantic's verbose output
             lines = msg.split("\n")
             errors = [
-                line.strip()
-                for line in lines[1:]
-                if line.strip() and not line.strip().startswith("For further")
+                l.strip() for l in lines[1:]
+                if l.strip() and not l.strip().startswith("For further")
             ]
             raise ConfigError(f"Invalid config in {config_path}:\n" + "\n".join(errors))
         raise ConfigError(f"Invalid config in {config_path}: {e}")

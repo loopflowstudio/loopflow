@@ -18,21 +18,21 @@ summaries:
   - path: src/loopflow
     model: claude
 
-pipelines:
+flows:
   ship:
-    tasks:
+    steps:
       - implement
       - rebase
       - polish
       - draft_commit
     pr: true
   submit:
-    tasks:
+    steps:
       - polish
       - draft_commit
     pr: true
   ux:
-    tasks:
+    steps:
       - ux-research
       - ux-gaps
       - ux-fix

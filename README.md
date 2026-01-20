@@ -4,7 +4,7 @@
 lf review
 ```
 
-Assembles context and prompts for AI coding agents. Tasks are markdown files—versioned, reusable, shareable.
+Assembles context and prompts for AI coding agents. Steps are markdown files—versioned, reusable, shareable.
 
 ## Step
 

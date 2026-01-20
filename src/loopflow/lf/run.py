@@ -1,4 +1,4 @@
-"""Task execution commands."""
+"""Step execution commands."""
 
 import os
 import subprocess
@@ -11,15 +11,9 @@ from typing import Optional
 import typer
 
 from loopflow.lf.config import load_config, parse_model
-from loopflow.lf.context import (
-    PromptComponents,
-    find_worktree_root,
-    format_prompt,
-    gather_prompt_components,
-    gather_task,
-)
-from loopflow.lf.deps import require_agent
-from loopflow.lf.frontmatter import TaskConfig, resolve_task_config
+from loopflow.lf.context import find_worktree_root, gather_prompt_components, gather_step, format_prompt, PromptComponents
+from loopflow.lf.frontmatter import resolve_step_config, StepConfig
+from loopflow.lf.voices import parse_voice_arg, VoiceNotFoundError
 from loopflow.lf.git import find_main_repo
 from loopflow.lf.launcher import (
     build_model_command,
@@ -27,18 +21,12 @@ from loopflow.lf.launcher import (
     get_runner,
 )
 from loopflow.lf.logging import get_model_env, write_prompt_file
-from loopflow.lf.models import (
-    Session,
-    SessionStatus,
-    log_session_end,
-    log_session_start,
-)
-from loopflow.lf.pipeline import _run_race_step, run_pipeline_def
-from loopflow.lf.pipelines import PipelineDef, PipelineStep, RaceConfig
-from loopflow.lf.pipelines import load_pipeline as load_pipeline_file
+from loopflow.lf.models import Session, SessionStatus, log_session_start, log_session_end
+from loopflow.lf.flows import load_flow as load_flow_file, FlowDef, FlowStep, RaceConfig
+from loopflow.lf.flow import run_flow_def, _run_race_step
 from loopflow.lf.tokens import analyze_components
-from loopflow.lf.voices import VoiceNotFoundError, parse_voice_arg
 from loopflow.lf.worktrees import WorktreeError, create
+
 
 ModelType = Optional[str]
 
@@ -50,7 +38,7 @@ PROMPT_TEMPLATE = """\
 ---
 produces: <results>
 ---
-{name} task.
+{name} step.
 
 {{args}}
 """
@@ -60,16 +48,10 @@ def _warn_if_context_too_large(tree) -> None:
     """Warn user if prompt exceeds safe token limit."""
     total_tokens = tree.total()
     if total_tokens > MAX_SAFE_TOKENS:
-        typer.echo(
-            f"\033[33m⚠ Prompt is {total_tokens:,} tokens (limit ~{MAX_SAFE_TOKENS:,})\033[0m",
-            err=True,
-        )
+        typer.echo(f"\033[33m⚠ Prompt is {total_tokens:,} tokens (limit ~{MAX_SAFE_TOKENS:,})\033[0m", err=True)
         files_node = tree.root.children.get("files")
         if files_node and files_node.total_tokens() > MAX_SAFE_TOKENS * 0.5:
-            typer.echo(
-                "\033[33m  Large branch - try: --no-diff-files or -x <specific files>\033[0m",
-                err=True,
-            )
+            typer.echo("\033[33m  Large branch - try: --no-diff-files or -x <specific files>\033[0m", err=True)
         typer.echo(err=True)
 
 
@@ -78,8 +60,8 @@ def _copy_to_clipboard(text: str) -> None:
     subprocess.run(["pbcopy"], input=text.encode(), check=True)
 
 
-def _execute_task(
-    task_name: str,
+def _execute_step(
+    step_name: str,
     repo_root: Path,
     components: PromptComponents,
     is_interactive: bool,
@@ -88,10 +70,10 @@ def _execute_task(
     skip_permissions: bool,
     chrome: bool = False,
 ) -> int:
-    """Execute a task (run or inline) and return exit code.
+    """Execute a step (run or inline) and return exit code.
 
     This shared helper handles session creation, command building, and execution
-    for both named tasks and inline prompts.
+    for both named steps and inline prompts.
     """
     prompt = format_prompt(components)
     prompt_file = write_prompt_file(prompt)
@@ -105,7 +87,7 @@ def _execute_task(
     run_mode = "interactive" if is_interactive else "auto"
     session = Session(
         id=str(uuid.uuid4()),
-        task=task_name,
+        step=step_name,
         repo=str(main_repo),
         worktree=str(repo_root),
         status=SessionStatus.RUNNING,
@@ -143,7 +125,7 @@ def _execute_task(
 
     # For interactive mode, run CLI directly to preserve terminal
     if is_interactive:
-        typer.echo(f"\033[90m━━━ {task_name} ━━━\033[0m", err=True)
+        typer.echo(f"\033[90m━━━ {step_name} ━━━\033[0m", err=True)
         for line in token_summary.split("\n"):
             typer.echo(f"\033[90m{line}\033[0m", err=True)
         typer.echo(err=True)
@@ -171,8 +153,8 @@ def _execute_task(
         "loopflow.lfd.collector",
         "--session-id",
         session.id,
-        "--task",
-        task_name,
+        "--step",
+        step_name,
         "--repo-root",
         str(repo_root),
         "--prompt-file",
@@ -212,7 +194,7 @@ def _launch_interactive_default(
     docs: bool | None = None,
     summaries: bool | None = None,
 ) -> None:
-    """Launch interactive claude with docs context (no task)."""
+    """Launch interactive claude with docs context (no step)."""
     agent_model = model or (config.agent_model if config else "claude:opus")
     backend, model_variant = parse_model(agent_model)
 
@@ -223,7 +205,8 @@ def _launch_interactive_default(
         raise typer.Exit(1)
 
     if not runner.is_available():
-        require_agent(backend, repo_root=repo_root)
+        typer.echo(f"Error: '{backend}' CLI not found", err=True)
+        raise typer.Exit(1)
 
     skip_permissions = config.yolo if config else False
     cli_voices = parse_voice_arg(voice)
@@ -236,7 +219,7 @@ def _launch_interactive_default(
     try:
         components = gather_prompt_components(
             repo_root,
-            task=None,
+            step=None,
             inline=None,
             context=context,
             exclude=list(config.exclude) if config and config.exclude else None,
@@ -244,8 +227,8 @@ def _launch_interactive_default(
             run_mode="interactive",
             include_loopflow_doc=config.include_loopflow_doc if config else True,
             voices=cli_voices or (config.voice if config else None),
-            include_diff=False,  # No diff without explicit task
-            include_diff_files=False,  # No diff files without task
+            include_diff=False,        # No diff without explicit step
+            include_diff_files=False,  # No diff files without step
             include_summaries=include_summaries,
             config=config,
         )
@@ -257,8 +240,8 @@ def _launch_interactive_default(
     if not include_docs:
         components.docs = []
 
-    result_code = _execute_task(
-        "chat",  # Task name for session tracking
+    result_code = _execute_step(
+        "chat",  # Step name for session tracking
         repo_root,
         components,
         is_interactive=True,
@@ -271,8 +254,10 @@ def _launch_interactive_default(
 
 def run(
     ctx: typer.Context,
-    task: Optional[str] = typer.Argument(None, help="Task name (e.g., 'review', 'implement')"),
-    auto: bool = typer.Option(False, "-a", "-A", "--auto", help="Override to run in auto mode"),
+    step: Optional[str] = typer.Argument(None, help="Step name (e.g., 'review', 'implement')"),
+    auto: bool = typer.Option(
+        False, "-a", "-A", "--auto", help="Override to run in auto mode"
+    ),
     interactive: bool = typer.Option(
         False, "-i", "-I", "--interactive", help="Override to run in interactive mode"
     ),
@@ -280,26 +265,16 @@ def run(
         None, "-x", "-X", "--context", help="Additional files for context"
     ),
     worktree: str = typer.Option(
-        None, "-w", "-W", "--worktree", help="Create worktree and run task there"
+        None, "-w", "-W", "--worktree", help="Create worktree and run step there"
     ),
     copy: bool = typer.Option(
-        False,
-        "-c",
-        "-C",
-        "--copy",
-        help="Copy prompt to clipboard and show token breakdown",
+        False, "-c", "-C", "--copy", help="Copy prompt to clipboard and show token breakdown"
     ),
     paste: Optional[bool] = typer.Option(
-        None,
-        "-v",
-        "-V",
-        "--paste/--no-paste",
-        help="Include clipboard content in prompt",
+        None, "-v", "-V", "--paste/--no-paste", help="Include clipboard content in prompt"
     ),
     docs: Optional[bool] = typer.Option(
-        None,
-        "--lfdocs/--no-lfdocs",
-        help="Include .docs/, .design/, and root .md files",
+        None, "--lfdocs/--no-lfdocs", help="Include .docs/, .design/, and root .md files"
     ),
     diff: Optional[bool] = typer.Option(
         None, "--diff/--no-diff", help="Include raw branch diff against main"
@@ -308,42 +283,28 @@ def run(
         None, "--diff-files/--no-diff-files", help="Include files touched by branch"
     ),
     summaries: Optional[bool] = typer.Option(
-        None,
-        "--summaries/--no-summaries",
-        help="Include pre-generated codebase summaries",
+        None, "--summaries/--no-summaries", help="Include pre-generated codebase summaries"
     ),
     model: ModelType = typer.Option(
         None, "-m", "-M", "--model", help="Model to use (backend or backend:variant)"
     ),
     voice: str = typer.Option(
-        None,
-        "--voice",
-        help="Voice(s) to use (comma-separated, e.g., 'architect,concise')",
+        None, "--voice", help="Voice(s) to use (comma-separated, e.g., 'architect,concise')"
     ),
     parallel: str = typer.Option(
-        None,
-        "--parallel",
-        help="Run in parallel with multiple models, keep worktrees (e.g., 'claude,codex')",
+        None, "--parallel", help="Run in parallel with multiple models, keep worktrees (e.g., 'claude,codex')"
     ),
     race: str = typer.Option(
-        None,
-        "--race",
-        help="Race multiple models, auto-judge winner (e.g., 'claude,codex,gemini')",
+        None, "--race", help="Race multiple models, auto-judge winner (e.g., 'claude,codex,gemini')"
     ),
     with_prompt: list[str] = typer.Option(
-        None,
-        "-p",
-        "-P",
-        "--prompt",
-        help="Append additional prompt files (e.g., -p nux)",
+        None, "-p", "-P", "--prompt", help="Append additional prompt files (e.g., -p nux)"
     ),
     chrome: Optional[bool] = typer.Option(
-        None,
-        "--chrome/--no-chrome",
-        help="Enable Chrome integration for Claude Code (browser automation)",
+        None, "--chrome/--no-chrome", help="Enable Chrome integration for Claude Code (browser automation)"
     ),
 ):
-    """Run a task with an LLM model."""
+    """Run a step with an LLM model."""
     repo_root = find_worktree_root()
 
     # Some features require a git repo
@@ -370,7 +331,7 @@ def run(
 
         race_config = RaceConfig(models=models)
         result_code = _run_race_step(
-            task,
+            step,
             race_config,
             repo_root,
             main_repo,
@@ -386,8 +347,8 @@ def run(
     if parallel:
         models = [m.strip() for m in parallel.split(",")]
         for model_name in models:
-            wt_name = f"{task}-{model_name}"
-            cmd = ["lf", task, "-w", wt_name, "--model", model_name, "-a"]
+            wt_name = f"{step}-{model_name}"
+            cmd = ["lf", step, "-w", wt_name, "--model", model_name, "-a"]
             if ctx.args:
                 cmd.extend(ctx.args)
             if context:
@@ -415,8 +376,8 @@ def run(
         repo_root = worktree_path
         config = load_config(repo_root)
 
-    # Handle no task: launch interactive claude with docs context
-    if task is None:
+    # Handle no step: launch interactive claude with docs context
+    if step is None:
         return _launch_interactive_default(
             repo_root,
             config,
@@ -428,16 +389,16 @@ def run(
             summaries=summaries,
         )
 
-    # Gather task file to get frontmatter config
-    task_file = gather_task(repo_root, task, config)
-    frontmatter = task_file.config if task_file else TaskConfig()
+    # Gather step file to get frontmatter config
+    step_file = gather_step(repo_root, step, config)
+    frontmatter = step_file.config if step_file else StepConfig()
 
     # Parse voice arg
     cli_voices = parse_voice_arg(voice)
 
     # Resolve config: CLI > frontmatter > global > defaults
-    resolved = resolve_task_config(
-        task_name=task,
+    resolved = resolve_step_config(
+        step_name=step,
         global_config=config,
         frontmatter=frontmatter,
         cli_interactive=True if interactive else None,
@@ -457,7 +418,8 @@ def run(
         raise typer.Exit(1)
 
     if not copy and not runner.is_available():
-        require_agent(backend, repo_root=repo_root)
+        typer.echo(f"Error: '{backend}' CLI not found", err=True)
+        raise typer.Exit(1)
 
     skip_permissions = config.yolo if config else False
 
@@ -487,10 +449,10 @@ def run(
     try:
         components = gather_prompt_components(
             repo_root,
-            task,
+            step,
             context=resolved.context or None,
             exclude=exclude_patterns or None,
-            task_args=args,
+            step_args=args,
             paste=include_paste,
             run_mode="interactive" if is_interactive else "auto",
             include_loopflow_doc=config.include_loopflow_doc if config else True,
@@ -528,8 +490,8 @@ def run(
     else:
         chrome_enabled = False
 
-    result_code = _execute_task(
-        task,
+    result_code = _execute_step(
+        step,
         repo_root,
         components,
         is_interactive,
@@ -547,7 +509,9 @@ def run(
 
 def inline(
     prompt: str = typer.Argument(help="Inline prompt to run"),
-    auto: bool = typer.Option(False, "-a", "-A", "--auto", help="Override to run in auto mode"),
+    auto: bool = typer.Option(
+        False, "-a", "-A", "--auto", help="Override to run in auto mode"
+    ),
     interactive: bool = typer.Option(
         False, "-i", "-I", "--interactive", help="Override to run in interactive mode"
     ),
@@ -555,23 +519,13 @@ def inline(
         None, "-x", "-X", "--context", help="Additional files for context"
     ),
     copy: bool = typer.Option(
-        False,
-        "-c",
-        "-C",
-        "--copy",
-        help="Copy prompt to clipboard and show token breakdown",
+        False, "-c", "-C", "--copy", help="Copy prompt to clipboard and show token breakdown"
     ),
     paste: Optional[bool] = typer.Option(
-        None,
-        "-v",
-        "-V",
-        "--paste/--no-paste",
-        help="Include clipboard content in prompt",
+        None, "-v", "-V", "--paste/--no-paste", help="Include clipboard content in prompt"
     ),
     docs: Optional[bool] = typer.Option(
-        None,
-        "--lfdocs/--no-lfdocs",
-        help="Include .docs/, .design/, and root .md files",
+        None, "--lfdocs/--no-lfdocs", help="Include .docs/, .design/, and root .md files"
     ),
     diff: Optional[bool] = typer.Option(
         None, "--diff/--no-diff", help="Include raw branch diff against main"
@@ -580,22 +534,16 @@ def inline(
         None, "--diff-files/--no-diff-files", help="Include files touched by branch"
     ),
     summaries: Optional[bool] = typer.Option(
-        None,
-        "--summaries/--no-summaries",
-        help="Include pre-generated codebase summaries",
+        None, "--summaries/--no-summaries", help="Include pre-generated codebase summaries"
     ),
     model: ModelType = typer.Option(
         None, "-m", "-M", "--model", help="Model to use (backend or backend:variant)"
     ),
     voice: str = typer.Option(
-        None,
-        "--voice",
-        help="Voice(s) to use (comma-separated, e.g., 'architect,concise')",
+        None, "--voice", help="Voice(s) to use (comma-separated, e.g., 'architect,concise')"
     ),
     chrome: Optional[bool] = typer.Option(
-        None,
-        "--chrome/--no-chrome",
-        help="Enable Chrome integration for Claude Code (browser automation)",
+        None, "--chrome/--no-chrome", help="Enable Chrome integration for Claude Code (browser automation)"
     ),
 ):
     """Run an inline prompt with an LLM model."""
@@ -610,10 +558,10 @@ def inline(
     cli_voices = parse_voice_arg(voice)
 
     # Resolve config for inline prompts (no frontmatter)
-    resolved = resolve_task_config(
-        task_name="inline",
+    resolved = resolve_step_config(
+        step_name="inline",
         global_config=config,
-        frontmatter=TaskConfig(),
+        frontmatter=StepConfig(),
         cli_interactive=True if interactive else None,
         cli_auto=True if auto else None,
         cli_model=model,
@@ -631,7 +579,8 @@ def inline(
         raise typer.Exit(1)
 
     if not copy and not runner.is_available():
-        require_agent(backend, repo_root=repo_root)
+        typer.echo(f"Error: '{backend}' CLI not found", err=True)
+        raise typer.Exit(1)
 
     skip_permissions = config.yolo if config else False
 
@@ -645,15 +594,13 @@ def inline(
     include_paste = paste if paste is not None else (config.paste if config else False)
     include_docs = docs if docs is not None else (config.lfdocs if config else True)
     include_diff = diff if diff is not None else (config.diff if config else False)
-    include_diff_files = (
-        diff_files if diff_files is not None else (config.diff_files if config else True)
-    )
+    include_diff_files = diff_files if diff_files is not None else (config.diff_files if config else True)
     include_summaries = summaries if summaries is not None else bool(config and config.summaries)
 
     try:
         components = gather_prompt_components(
             repo_root,
-            task=None,
+            step=None,
             inline=prompt,
             context=resolved.context or None,
             exclude=exclude_patterns or None,
@@ -691,7 +638,7 @@ def inline(
     else:
         chrome_enabled = False
 
-    result_code = _execute_task(
+    result_code = _execute_step(
         "inline",
         repo_root,
         components,
@@ -709,21 +656,23 @@ def cp(
     paths: list[str] = typer.Argument(
         None, help="Files or directories to include (e.g., src tests)"
     ),
-    exclude: list[str] = typer.Option(None, "-e", "-E", "--exclude", help="Patterns to exclude"),
-    paste: bool = typer.Option(False, "-v", "-V", "--paste", help="Include clipboard content"),
-    docs: Optional[bool] = typer.Option(
-        None,
-        "--lfdocs/--no-lfdocs",
-        help="Include .docs/, .design/, and root .md files",
+    exclude: list[str] = typer.Option(
+        None, "-e", "-E", "--exclude", help="Patterns to exclude"
     ),
-    diff: Optional[bool] = typer.Option(None, "--diff/--no-diff", help="Include raw branch diff"),
+    paste: bool = typer.Option(
+        False, "-v", "-V", "--paste", help="Include clipboard content"
+    ),
+    docs: Optional[bool] = typer.Option(
+        None, "--lfdocs/--no-lfdocs", help="Include .docs/, .design/, and root .md files"
+    ),
+    diff: Optional[bool] = typer.Option(
+        None, "--diff/--no-diff", help="Include raw branch diff"
+    ),
     diff_files: Optional[bool] = typer.Option(
         None, "--diff-files/--no-diff-files", help="Include files touched by branch"
     ),
     summaries: Optional[bool] = typer.Option(
-        None,
-        "--summaries/--no-summaries",
-        help="Include pre-generated codebase summaries",
+        None, "--summaries/--no-summaries", help="Include pre-generated codebase summaries"
     ),
 ):
     """Copy file context to clipboard."""
@@ -747,14 +696,12 @@ def cp(
     # Resolve flags (CLI overrides config)
     include_docs = docs if docs is not None else (config.lfdocs if config else True)
     include_diff = diff if diff is not None else (config.diff if config else False)
-    include_diff_files = (
-        diff_files if diff_files is not None else (config.diff_files if config else True)
-    )
+    include_diff_files = diff_files if diff_files is not None else (config.diff_files if config else True)
     include_summaries = summaries if summaries is not None else bool(config and config.summaries)
 
     components = gather_prompt_components(
         repo_root,
-        task=None,
+        step=None,
         context=all_context or None,
         exclude=exclude_patterns or None,
         paste=paste,
@@ -803,27 +750,25 @@ def add(
     typer.echo(f"Created {target.relative_to(repo_root)}")
 
 
-def pipeline(
-    name: str = typer.Argument(help="Pipeline name from config.yaml or .lf/pipelines/"),
+def flow(
+    name: str = typer.Argument(help="Flow name from config.yaml or .lf/flows/"),
     context: list[str] = typer.Option(
-        None, "-x", "-X", "--context", help="Context files for all tasks"
+        None, "-x", "-X", "--context", help="Context files for all steps"
     ),
     worktree: str = typer.Option(
-        None, "-w", "-W", "--worktree", help="Create worktree and run pipeline there"
+        None, "-w", "-W", "--worktree", help="Create worktree and run flow there"
     ),
-    pr: bool = typer.Option(None, "--pr", help="Open PR when done"),
+    pr: bool = typer.Option(
+        None, "--pr", help="Open PR when done"
+    ),
     copy: bool = typer.Option(
-        False,
-        "-c",
-        "-C",
-        "--copy",
-        help="Copy first task prompt to clipboard and show token breakdown",
+        False, "-c", "-C", "--copy", help="Copy first step prompt to clipboard and show token breakdown"
     ),
     model: ModelType = typer.Option(
         None, "-m", "-M", "--model", help="Model to use (backend or backend:variant)"
     ),
 ):
-    """Run a named pipeline."""
+    """Run a named flow."""
     repo_root = find_worktree_root()
 
     # Worktree creation still requires git
@@ -837,15 +782,12 @@ def pipeline(
 
     config = load_config(repo_root)
 
-    # Check for pipeline in .lf/pipelines/ first, then config.yaml
-    pipeline_def = load_pipeline_file(name, repo_root)
-    config_pipeline = config.pipelines.get(name) if config else None
+    # Check for flow in .lf/flows/ first, then config.yaml
+    flow_def = load_flow_file(name, repo_root)
+    config_flow = config.flows.get(name) if config else None
 
-    if not pipeline_def and not config_pipeline:
-        typer.echo(
-            f"Error: Pipeline '{name}' not found in .lf/pipelines/ or .lf/config.yaml",
-            err=True,
-        )
+    if not flow_def and not config_flow:
+        typer.echo(f"Error: Flow '{name}' not found in .lf/flows/ or .lf/config.yaml", err=True)
         raise typer.Exit(1)
 
     agent_model = model or (config.agent_model if config else "claude:opus")
@@ -858,7 +800,8 @@ def pipeline(
         raise typer.Exit(1)
 
     if not copy and not runner.is_available():
-        require_agent(backend, repo_root=repo_root)
+        typer.echo(f"Error: '{backend}' CLI not found", err=True)
+        raise typer.Exit(1)
 
     if worktree:
         try:
@@ -875,19 +818,19 @@ def pipeline(
     exclude = list(config.exclude) if config and config.exclude else None
 
     if copy:
-        # Show tokens for first task in pipeline
-        if pipeline_def:
-            first_task = pipeline_def.steps[0].task if pipeline_def.steps else None
+        # Show tokens for first step in flow
+        if flow_def:
+            first_step = flow_def.steps[0].step if flow_def.steps else None
         else:
-            first_task = config_pipeline.tasks[0] if config_pipeline.tasks else None
+            first_step = config_flow.steps[0] if config_flow.steps else None
 
-        if not first_task:
-            typer.echo("Error: Pipeline has no tasks", err=True)
+        if not first_step:
+            typer.echo("Error: Flow has no steps", err=True)
             raise typer.Exit(1)
 
         components = gather_prompt_components(
             repo_root,
-            first_task,
+            first_step,
             context=all_context or None,
             exclude=exclude,
             include_tests_for=config.include_tests_for if config else None,
@@ -899,7 +842,7 @@ def pipeline(
         prompt = format_prompt(components)
         _copy_to_clipboard(prompt)
         tree = analyze_components(components)
-        typer.echo(f"Pipeline '{name}' first task: {first_task}\n")
+        typer.echo(f"Flow '{name}' first step: {first_step}\n")
         typer.echo(tree.format())
         _warn_if_context_too_large(tree)
         typer.echo("\nCopied to clipboard.")
@@ -910,18 +853,18 @@ def pipeline(
     skip_permissions = config.yolo if config else False
     chrome_enabled = config.chrome if config else False
 
-    # Convert config.yaml pipeline to PipelineDef if needed
-    if not pipeline_def:
-        # PipelineConfig.push/pr override global settings
-        push_enabled = config_pipeline.push if config_pipeline.push is not None else push_enabled
-        pr_enabled = config_pipeline.pr if config_pipeline.pr is not None else pr_enabled
-        pipeline_def = PipelineDef(
+    # Convert config.yaml flow to FlowDef if needed
+    if not flow_def:
+        # FlowConfig.push/pr override global settings
+        push_enabled = config_flow.push if config_flow.push is not None else push_enabled
+        pr_enabled = config_flow.pr if config_flow.pr is not None else pr_enabled
+        flow_def = FlowDef(
             name=name,
-            steps=[PipelineStep(task=t) for t in config_pipeline.tasks],
+            steps=[FlowStep(step=t) for t in config_flow.steps],
         )
 
-    exit_code = run_pipeline_def(
-        pipeline_def,
+    exit_code = run_flow_def(
+        flow_def,
         repo_root,
         context=all_context or None,
         exclude=exclude,

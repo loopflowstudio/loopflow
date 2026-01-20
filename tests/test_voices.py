@@ -2,10 +2,10 @@
 
 import pytest
 
-from loopflow.lf.config import Config
-from loopflow.lf.context import format_prompt, gather_prompt_components
-from loopflow.lf.frontmatter import TaskConfig, parse_task_file, resolve_task_config
 from loopflow.lf.voices import Voice, VoiceNotFoundError, load_voice, parse_voice_arg
+from loopflow.lf.context import gather_prompt_components, format_prompt
+from loopflow.lf.frontmatter import parse_step_file, resolve_step_config, StepConfig
+from loopflow.lf.config import Config
 
 
 @pytest.fixture
@@ -90,53 +90,53 @@ def test_parse_voice_arg_filters_empty_items():
 # Frontmatter parsing tests
 
 
-def test_parse_task_file_with_voice_string():
+def test_parse_step_file_with_voice_string():
     content = """---
 voice: architect
 ---
 Task content"""
-    result = parse_task_file("test", content)
+    result = parse_step_file("test", content)
     assert result.config.voice == ["architect"]
 
 
-def test_parse_task_file_with_voice_list():
+def test_parse_step_file_with_voice_list():
     content = """---
 voice: [architect, concise]
 ---
 Task content"""
-    result = parse_task_file("test", content)
+    result = parse_step_file("test", content)
     assert result.config.voice == ["architect", "concise"]
 
 
-def test_parse_task_file_with_voice_multiline_list():
+def test_parse_step_file_with_voice_multiline_list():
     content = """---
 voice:
   - architect
   - concise
 ---
 Task content"""
-    result = parse_task_file("test", content)
+    result = parse_step_file("test", content)
     assert result.config.voice == ["architect", "concise"]
 
 
-def test_parse_task_file_no_voice():
+def test_parse_step_file_no_voice():
     content = """---
 interactive: true
 ---
 Task content"""
-    result = parse_task_file("test", content)
+    result = parse_step_file("test", content)
     assert result.config.voice is None
 
 
 # Config voice resolution tests
 
 
-def test_resolve_task_config_cli_voice_wins():
+def test_resolve_step_config_cli_voice_wins():
     config = Config(voice=["architect"])
-    resolved = resolve_task_config(
-        task_name="test",
+    resolved = resolve_step_config(
+        step_name="test",
         global_config=config,
-        frontmatter=TaskConfig(voice=["concise"]),
+        frontmatter=StepConfig(voice=["concise"]),
         cli_interactive=None,
         cli_auto=None,
         cli_model=None,
@@ -146,12 +146,12 @@ def test_resolve_task_config_cli_voice_wins():
     assert resolved.voice == ["reviewer"]
 
 
-def test_resolve_task_config_frontmatter_voice_over_global():
+def test_resolve_step_config_frontmatter_voice_over_global():
     config = Config(voice=["architect"])
-    resolved = resolve_task_config(
-        task_name="test",
+    resolved = resolve_step_config(
+        step_name="test",
         global_config=config,
-        frontmatter=TaskConfig(voice=["concise"]),
+        frontmatter=StepConfig(voice=["concise"]),
         cli_interactive=None,
         cli_auto=None,
         cli_model=None,
@@ -160,12 +160,12 @@ def test_resolve_task_config_frontmatter_voice_over_global():
     assert resolved.voice == ["concise"]
 
 
-def test_resolve_task_config_global_voice():
+def test_resolve_step_config_global_voice():
     config = Config(voice=["architect"])
-    resolved = resolve_task_config(
-        task_name="test",
+    resolved = resolve_step_config(
+        step_name="test",
         global_config=config,
-        frontmatter=TaskConfig(),
+        frontmatter=StepConfig(),
         cli_interactive=None,
         cli_auto=None,
         cli_model=None,
@@ -174,11 +174,11 @@ def test_resolve_task_config_global_voice():
     assert resolved.voice == ["architect"]
 
 
-def test_resolve_task_config_no_voice():
-    resolved = resolve_task_config(
-        task_name="test",
+def test_resolve_step_config_no_voice():
+    resolved = resolve_step_config(
+        step_name="test",
         global_config=None,
-        frontmatter=TaskConfig(),
+        frontmatter=StepConfig(),
         cli_interactive=None,
         cli_auto=None,
         cli_model=None,
@@ -191,7 +191,9 @@ def test_resolve_task_config_no_voice():
 
 
 def test_format_prompt_single_voice(temp_repo):
-    components = gather_prompt_components(temp_repo, "implement", voices=["architect"])
+    components = gather_prompt_components(
+        temp_repo, "implement", voices=["architect"]
+    )
     formatted = format_prompt(components)
 
     assert "<lf:voice:architect>" in formatted
@@ -202,7 +204,9 @@ def test_format_prompt_single_voice(temp_repo):
 
 
 def test_format_prompt_multiple_voices(temp_repo):
-    components = gather_prompt_components(temp_repo, "implement", voices=["architect", "concise"])
+    components = gather_prompt_components(
+        temp_repo, "implement", voices=["architect", "concise"]
+    )
     formatted = format_prompt(components)
 
     assert "<lf:voices>" in formatted
@@ -212,12 +216,14 @@ def test_format_prompt_multiple_voices(temp_repo):
 
 
 def test_format_prompt_voice_before_task(temp_repo):
-    components = gather_prompt_components(temp_repo, "implement", voices=["architect"])
+    components = gather_prompt_components(
+        temp_repo, "implement", voices=["architect"]
+    )
     formatted = format_prompt(components)
 
     voice_pos = formatted.find("<lf:voice:architect>")
-    task_pos = formatted.find("<lf:task:implement>")
-    assert voice_pos < task_pos, "Voice should appear before task"
+    step_pos = formatted.find("<lf:step:implement>")
+    assert voice_pos < step_pos, "Voice should appear before step"
 
 
 def test_format_prompt_no_voices(temp_repo):

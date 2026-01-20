@@ -1,4 +1,4 @@
-"""Pipeline execution for chaining tasks."""
+"""Flow execution for chaining steps."""
 
 import os
 import platform
@@ -14,30 +14,17 @@ from loopflow.lf.config import parse_model
 from loopflow.lf.context import build_prompt
 from loopflow.lf.git import GitError, find_main_repo, open_pr
 from loopflow.lf.launcher import build_model_command, get_runner
-from loopflow.lf.logging import write_prompt_file
+from loopflow.lf.flows import FlowDef, RaceConfig, ResolvedStep, resolve_flow, StepConfig
 from loopflow.lf.messages import generate_pr_message
-from loopflow.lf.models import (
-    Session,
-    SessionStatus,
-    log_session_end,
-    log_session_start,
-)
-from loopflow.lf.pipelines import (
-    PipelineDef,
-    RaceConfig,
-    ResolvedStep,
-    StepConfig,
-    resolve_pipeline,
-)
-from loopflow.lf.worktrees import create as create_worktree
-from loopflow.lf.worktrees import remove as remove_worktree
+from loopflow.lf.logging import write_prompt_file
+from loopflow.lf.models import Session, SessionStatus, log_session_start, log_session_end
+from loopflow.lf.worktrees import create as create_worktree, remove as remove_worktree
 
 
 @dataclass
 class _StepParams:
-    """Parameters for executing a single pipeline step."""
-
-    task: str
+    """Parameters for executing a single flow step."""
+    step: str
     backend: str
     model_variant: str | None
     context: list[str] | None
@@ -45,7 +32,7 @@ class _StepParams:
 
 
 def _build_step_params(
-    task: str,
+    step: str,
     config: StepConfig | None,
     backend: str,
     model_variant: str | None,
@@ -66,7 +53,7 @@ def _build_step_params(
             step_voices = [config.voice]
 
     return _StepParams(
-        task=task,
+        step=step,
         backend=step_backend,
         model_variant=step_variant,
         context=step_context or None,
@@ -85,14 +72,14 @@ def _run_step(
     total_steps: int,
     chrome: bool = False,
 ) -> int:
-    """Execute a single pipeline step. Returns exit code."""
-    print(f"\n{'=' * 60}")
-    print(f"[{step_num}/{total_steps}] {params.task}")
-    print(f"{'=' * 60}\n")
+    """Execute a single flow step. Returns exit code."""
+    print(f"\n{'='*60}")
+    print(f"[{step_num}/{total_steps}] {params.step}")
+    print(f"{'='*60}\n")
 
     prompt = build_prompt(
         repo_root,
-        params.task,
+        params.step,
         context=params.context,
         exclude=exclude,
         run_mode="auto",
@@ -102,7 +89,7 @@ def _run_step(
 
     session = Session(
         id=str(uuid.uuid4()),
-        task=params.task,
+        step=params.step,
         repo=str(main_repo),
         worktree=str(repo_root),
         status=SessionStatus.RUNNING,
@@ -130,8 +117,8 @@ def _run_step(
         "loopflow.lfd.collector",
         "--session-id",
         session.id,
-        "--task",
-        params.task,
+        "--step",
+        params.step,
         "--repo-root",
         str(repo_root),
         "--prompt-file",
@@ -152,17 +139,17 @@ def _run_step(
     log_session_end(session.id, status)
 
     if result_code != 0:
-        print(f"\n[{params.task}] failed with exit code {result_code}")
+        print(f"\n[{params.step}] failed with exit code {result_code}")
 
     return result_code
 
 
-def _finalize_pipeline(
-    pipeline_name: str,
+def _finalize_flow(
+    flow_name: str,
     repo_root: Path,
     should_pr: bool,
 ) -> None:
-    """Handle post-pipeline tasks: PR creation and notification."""
+    """Handle post-flow tasks: PR creation and notification."""
     if should_pr:
         try:
             message = generate_pr_message(repo_root)
@@ -172,20 +159,16 @@ def _finalize_pipeline(
         except GitError as e:
             print(f"\nPR creation failed: {e}")
 
-    _notify_done(pipeline_name)
+    _notify_done(flow_name)
 
 
-def _notify_done(pipeline_name: str) -> None:
+def _notify_done(flow_name: str) -> None:
     """Show macOS notification. No-op on other platforms."""
     if platform.system() != "Darwin":
         return
     try:
         subprocess.run(
-            [
-                "osascript",
-                "-e",
-                f'display notification "Pipeline complete" with title "lf {pipeline_name}"',
-            ],
+            ["osascript", "-e", f'display notification "Flow complete" with title "lf {flow_name}"'],
             capture_output=True,
         )
     except FileNotFoundError:
@@ -195,9 +178,8 @@ def _notify_done(pipeline_name: str) -> None:
 @dataclass
 class _WorktreeTask:
     """A task to run in a temporary worktree."""
-
-    task: str
-    label: str  # Display label (task name or model name)
+    step: str
+    label: str  # Display label (step name or model name)
     wt_prefix: str  # Worktree name prefix (e.g., "_parallel" or "_race")
     backend: str
     model_variant: str | None
@@ -208,7 +190,6 @@ class _WorktreeTask:
 @dataclass
 class _WorktreeResult:
     """Result from running a task in a temporary worktree."""
-
     label: str
     worktree: Path
     exit_code: int
@@ -240,7 +221,7 @@ def _run_worktree_tasks(
 
         prompt = build_prompt(
             wt_path,
-            wt_task.task,
+            wt_task.step,
             context=wt_task.context,
             exclude=exclude,
             run_mode="auto",
@@ -250,7 +231,7 @@ def _run_worktree_tasks(
 
         session = Session(
             id=str(uuid.uuid4()),
-            task=wt_task.task,
+            step=wt_task.step,
             repo=str(main_repo),
             worktree=str(wt_path),
             status=SessionStatus.RUNNING,
@@ -273,22 +254,14 @@ def _run_worktree_tasks(
             chrome=chrome,
         )
         collector_cmd = [
-            sys.executable,
-            "-m",
-            "loopflow.lfd.collector",
-            "--session-id",
-            session.id,
-            "--task",
-            wt_task.task,
-            "--repo-root",
-            str(wt_path),
-            "--prompt-file",
-            prompt_file,
+            sys.executable, "-m", "loopflow.lfd.collector",
+            "--session-id", session.id,
+            "--step", wt_task.step,
+            "--repo-root", str(wt_path),
+            "--prompt-file", prompt_file,
             "--foreground",
-            "--prefix",
-            f"[{wt_task.label}] ",
-            "--",
-            *command,
+            "--prefix", f"[{wt_task.label}] ",
+            "--", *command,
         ]
 
         print(f"[{wt_task.label}] Starting in {wt_path.name}...")
@@ -340,35 +313,31 @@ def _run_parallel_group(
     chrome: bool = False,
 ) -> list[int]:
     """Run parallel steps in temporary worktrees. Returns list of exit codes."""
-    task_names = [s.task for s in steps]
-    print(f"\n{'=' * 60}")
-    print(f"[{group_num}/{total_groups}] Parallel: {', '.join(task_names)}")
-    print(f"{'=' * 60}\n")
+    step_names = [s.step for s in steps]
+    print(f"\n{'='*60}")
+    print(f"[{group_num}/{total_groups}] Parallel: {', '.join(step_names)}")
+    print(f"{'='*60}\n")
 
     wt_tasks = []
     for step in steps:
-        params = _build_step_params(step.task, step.config, backend, model_variant, context)
-        wt_tasks.append(
-            _WorktreeTask(
-                task=params.task,
-                label=params.task,
-                wt_prefix="_parallel",
-                backend=params.backend,
-                model_variant=params.model_variant,
-                context=params.context,
-                voices=params.voices,
-            )
-        )
+        params = _build_step_params(step.step, step.config, backend, model_variant, context)
+        wt_tasks.append(_WorktreeTask(
+            step=params.step,
+            label=params.step,
+            wt_prefix="_parallel",
+            backend=params.backend,
+            model_variant=params.model_variant,
+            context=params.context,
+            voices=params.voices,
+        ))
 
-    results = _run_worktree_tasks(
-        wt_tasks, repo_root, main_repo, exclude, skip_permissions, chrome=chrome
-    )
+    results = _run_worktree_tasks(wt_tasks, repo_root, main_repo, exclude, skip_permissions, chrome=chrome)
     _cleanup_worktrees(repo_root, results)
     return [r.exit_code for r in results]
 
 
 def _run_race_step(
-    task: str,
+    step: str,
     race: RaceConfig,
     repo_root: Path,
     main_repo: Path,
@@ -379,30 +348,26 @@ def _run_race_step(
     total_steps: int,
     chrome: bool = False,
 ) -> int:
-    """Run task with multiple models in parallel, judge and merge winner."""
+    """Run step with multiple models in parallel, judge and merge winner."""
     models = race.models
-    print(f"\n{'=' * 60}")
-    print(f"[{step_num}/{total_steps}] Race: {task} ({', '.join(models)})")
-    print(f"{'=' * 60}\n")
+    print(f"\n{'='*60}")
+    print(f"[{step_num}/{total_steps}] Race: {step} ({', '.join(models)})")
+    print(f"{'='*60}\n")
 
     wt_tasks = []
     for model in models:
         backend, model_variant = parse_model(model)
-        wt_tasks.append(
-            _WorktreeTask(
-                task=task,
-                label=model,
-                wt_prefix=f"_race-{task}",
-                backend=backend,
-                model_variant=model_variant,
-                context=list(context) if context else None,
-                voices=None,
-            )
-        )
+        wt_tasks.append(_WorktreeTask(
+            step=step,
+            label=model,
+            wt_prefix=f"_race-{step}",
+            backend=backend,
+            model_variant=model_variant,
+            context=list(context) if context else None,
+            voices=None,
+        ))
 
-    results = _run_worktree_tasks(
-        wt_tasks, repo_root, main_repo, exclude, skip_permissions, chrome=chrome
-    )
+    results = _run_worktree_tasks(wt_tasks, repo_root, main_repo, exclude, skip_permissions, chrome=chrome)
 
     # Filter to successful results
     successes = [r for r in results if r.exit_code == 0]
@@ -437,7 +402,7 @@ def _run_race_step(
 def _judge_race(
     results: list[_WorktreeResult],
     repo_root: Path,
-    judge_task: str,
+    judge_step: str,
     skip_permissions: bool,
 ) -> _WorktreeResult | None:
     """Run judge to pick winner from race results."""
@@ -457,14 +422,12 @@ def _judge_race(
             capture_output=True,
             text=True,
         )
-        diffs.append(
-            {
-                "model": r.label,
-                "worktree": str(r.worktree),
-                "summary": diff_text,
-                "diff": full_diff.stdout if full_diff.returncode == 0 else "",
-            }
-        )
+        diffs.append({
+            "model": r.label,
+            "worktree": str(r.worktree),
+            "summary": diff_text,
+            "diff": full_diff.stdout if full_diff.returncode == 0 else "",
+        })
 
     judge_prompt = _build_judge_prompt(diffs)
 
@@ -527,14 +490,12 @@ def _build_judge_prompt(diffs: list[dict]) -> str:
         lines.append("```")
         lines.append("")
 
-    lines.extend(
-        [
-            "## Your verdict",
-            "",
-            "Reply with ONLY the model name of the winner (e.g., 'claude:opus' or 'codex:o3').",
-            "Do not explain your reasoning.",
-        ]
-    )
+    lines.extend([
+        "## Your verdict",
+        "",
+        "Reply with ONLY the model name of the winner (e.g., 'claude:opus' or 'codex:o3').",
+        "Do not explain your reasoning.",
+    ])
 
     return "\n".join(lines)
 
@@ -583,8 +544,8 @@ def _count_logical_steps(resolved: list[ResolvedStep]) -> int:
     return count
 
 
-def run_pipeline_def(
-    pipeline: PipelineDef,
+def run_flow_def(
+    flow: FlowDef,
     repo_root: Path,
     context: Optional[list[str]] = None,
     exclude: Optional[list[str]] = None,
@@ -595,7 +556,7 @@ def run_pipeline_def(
     model_variant: str | None = "opus",
     chrome: bool = False,
 ) -> int:
-    """Run a PipelineDef (from .lf/pipelines/). Returns first non-zero exit code, or 0."""
+    """Run a FlowDef (from .lf/flows/). Returns first non-zero exit code, or 0."""
     should_push = push_enabled
     should_pr = pr_enabled
     if should_pr:
@@ -607,7 +568,7 @@ def run_pipeline_def(
         return 1
 
     main_repo = find_main_repo(repo_root) or repo_root
-    resolved = resolve_pipeline(pipeline, repo_root)
+    resolved = resolve_flow(flow, repo_root)
     total = _count_logical_steps(resolved)
 
     i = 0
@@ -642,13 +603,13 @@ def run_pipeline_def(
             if any(code != 0 for code in exit_codes):
                 return max(exit_codes)
         elif step.race is not None:
-            # Race step: run task with multiple models
+            # Race step: run step with multiple models
             step_context = list(context) if context else []
             if step.config and step.config.context:
                 step_context.extend(step.config.context)
 
             result_code = _run_race_step(
-                step.task,
+                step.step,
                 step.race,
                 repo_root,
                 main_repo,
@@ -665,16 +626,10 @@ def run_pipeline_def(
             i += 1
         else:
             # Sequential step
-            params = _build_step_params(step.task, step.config, backend, model_variant, context)
+            params = _build_step_params(step.step, step.config, backend, model_variant, context)
             result_code = _run_step(
-                params,
-                repo_root,
-                main_repo,
-                exclude,
-                skip_permissions,
-                should_push,
-                step_num,
-                total,
+                params, repo_root, main_repo, exclude,
+                skip_permissions, should_push, step_num, total,
                 chrome=chrome,
             )
             if result_code != 0:
@@ -682,5 +637,5 @@ def run_pipeline_def(
 
             i += 1
 
-    _finalize_pipeline(pipeline.name, repo_root, should_pr)
+    _finalize_flow(flow.name, repo_root, should_pr)
     return 0

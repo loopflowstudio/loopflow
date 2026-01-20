@@ -18,14 +18,12 @@ from datetime import datetime
 from pathlib import Path
 
 from loopflow.lf.config import load_config, parse_model
-from loopflow.lf.context import format_prompt, gather_prompt_components
+from loopflow.lf.context import gather_prompt_components, format_prompt
 from loopflow.lf.goals import load_goal
 from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lf.logging import write_prompt_file
 from loopflow.lf.messages import generate_pr_message
-from loopflow.lf.worktrees import WorktreeError
-from loopflow.lf.worktrees import create as create_worktree
-from loopflow.lf.worktrees import remove as remove_worktree
+from loopflow.lf.worktrees import WorktreeError, create as create_worktree, remove as remove_worktree
 from loopflow.lfd.client import notify_event
 from loopflow.lfd.db import (
     get_loop,
@@ -121,15 +119,12 @@ def run_loop_iterations(loop: Loop) -> None:
             outstanding = count_outstanding(loop)
             if outstanding >= loop.pr_limit:
                 update_loop_status(loop.id, LoopStatus.WAITING)
-                notify_event(
-                    "loop.waiting",
-                    {
-                        "loop_id": loop.id,
-                        "goal": loop.goal_name,
-                        "outstanding": outstanding,
-                        "limit": loop.pr_limit,
-                    },
-                )
+                notify_event("loop.waiting", {
+                    "loop_id": loop.id,
+                    "goal": loop.goal_name,
+                    "outstanding": outstanding,
+                    "limit": loop.pr_limit,
+                })
                 break
 
         # Run one iteration
@@ -141,14 +136,11 @@ def run_loop_iterations(loop: Loop) -> None:
             acquired, reason = _scheduler_acquire(run_id)
             if acquired:
                 break
-            notify_event(
-                "scheduler.waiting",
-                {
-                    "loop_id": loop.id,
-                    "goal": loop.goal_name,
-                    "reason": reason or "concurrency",
-                },
-            )
+            notify_event("scheduler.waiting", {
+                "loop_id": loop.id,
+                "goal": loop.goal_name,
+                "reason": reason or "concurrency",
+            })
             time.sleep(SCHEDULER_POLL_INTERVAL)
 
         try:
@@ -160,14 +152,11 @@ def run_loop_iterations(loop: Loop) -> None:
                 update_loop_status(loop.id, LoopStatus.ERROR)
                 break
         except Exception as e:
-            notify_event(
-                "loop.error",
-                {
-                    "loop_id": loop.id,
-                    "goal": loop.goal_name,
-                    "error": str(e),
-                },
-            )
+            notify_event("loop.error", {
+                "loop_id": loop.id,
+                "goal": loop.goal_name,
+                "error": str(e),
+            })
             update_loop_status(loop.id, LoopStatus.ERROR)
             break
         finally:
@@ -200,10 +189,7 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
     try:
         worktree_path = create_worktree(loop.repo, branch, base=loop.loop_main)
     except WorktreeError as e:
-        notify_event(
-            "loop.error",
-            {"loop_id": loop.id, "error": f"Failed to create worktree: {e}"},
-        )
+        notify_event("loop.error", {"loop_id": loop.id, "error": f"Failed to create worktree: {e}"})
         return False
 
     # Create loop_run record
@@ -217,14 +203,11 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
     )
     save_loop_run(run)
 
-    notify_event(
-        "loop.started",
-        {
-            "loop_id": loop.id,
-            "goal": loop.goal_name,
-            "iteration": iteration,
-        },
-    )
+    notify_event("loop.started", {
+        "loop_id": loop.id,
+        "goal": loop.goal_name,
+        "iteration": iteration,
+    })
 
     # Load goal content
     goal_spec = load_goal(loop.repo, loop.goal_name)
@@ -232,13 +215,13 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
         update_loop_run_status(run.id, LoopStatus.ERROR, error="Goal file not found")
         return False
 
-    # Parse pipeline tasks from goal or default
-    pipeline = goal_spec.pipeline or "design,implement,polish"
-    tasks = [t.strip() for t in pipeline.split(",")]
-    if pipeline.startswith("@") and config and config.pipelines:
-        config_pipeline = config.pipelines.get(pipeline[1:])
-        if config_pipeline:
-            tasks = config_pipeline.tasks
+    # Parse flow steps from goal or default
+    flow = goal_spec.pipeline or "design,implement,polish"
+    tasks = [t.strip() for t in flow.split(",")]
+    if flow.startswith("@") and config and config.flows:
+        config_flow = config.flows.get(flow[1:])
+        if config_flow:
+            tasks = config_flow.steps
 
     # Get model configuration
     agent_model = config.agent_model if config else "claude:opus"
@@ -251,17 +234,14 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
 
     skip_permissions = config.yolo if config else False
 
-    # Run each task in the pipeline
+    # Run each step in the flow
     for task_name in tasks:
         update_loop_run_step(run.id, task_name)
-        notify_event(
-            "loop.step.started",
-            {
-                "loop_id": loop.id,
-                "step": task_name,
-                "iteration": iteration,
-            },
-        )
+        notify_event("loop.step.started", {
+            "loop_id": loop.id,
+            "step": task_name,
+            "iteration": iteration,
+        })
 
         # Gather prompt components
         context_paths = goal_spec.area if goal_spec.area else None
@@ -270,24 +250,20 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
 
         components = gather_prompt_components(
             worktree_path,
-            task=task_name,
+            step=task_name,
             context=context_paths,
             run_mode="auto",
         )
 
-        # Verify task file exists
-        if not components.task:
-            update_loop_run_status(
-                run.id, LoopStatus.ERROR, error=f"Task file not found: {task_name}"
-            )
+        # Verify step file exists
+        if not components.step:
+            update_loop_run_status(run.id, LoopStatus.ERROR, error=f"Step file not found: {task_name}")
             _cleanup_worktree(loop.repo, worktree_path, branch)
             return False
 
         # Inject goal content
-        task_file, task_content = components.task
-        goal_tag = f"<lf:goal:{loop.goal_name}>"
-        goal_end = f"</lf:goal:{loop.goal_name}>"
-        goal_section = f"{goal_tag}\n{goal_spec.content}\n{goal_end}"
+        step_file, step_content = components.step
+        goal_section = f"<lf:goal:{loop.goal_name}>\n{goal_spec.content}\n</lf:goal:{loop.goal_name}>"
 
         # For FLOW loops, inject project file content if present
         if loop.type == LoopType.FLOW and loop.project_file:
@@ -297,8 +273,8 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
             except OSError:
                 pass  # Project file may have been removed
 
-        combined = f"{goal_section}\n\n---\n\n{task_content}"
-        components = replace(components, task=(task_file, combined))
+        combined = f"{goal_section}\n\n---\n\n{step_content}"
+        components = replace(components, step=(step_file, combined))
 
         prompt = format_prompt(components)
         prompt_file = write_prompt_file(prompt)
@@ -321,7 +297,7 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
             "loopflow.lfd.collector",
             "--session-id",
             run.id,
-            "--task",
+            "--step",
             f"{loop.goal_name}:{task_name}",
             "--repo-root",
             str(worktree_path),
@@ -341,14 +317,11 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
         except OSError:
             pass
 
-        notify_event(
-            "loop.step.completed",
-            {
-                "loop_id": loop.id,
-                "step": task_name,
-                "status": "completed" if result_code == 0 else "error",
-            },
-        )
+        notify_event("loop.step.completed", {
+            "loop_id": loop.id,
+            "step": task_name,
+            "status": "completed" if result_code == 0 else "error",
+        })
 
         if result_code != 0:
             update_loop_run_status(run.id, LoopStatus.ERROR, error=f"{task_name} failed")
@@ -370,15 +343,12 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
 
     update_loop_run_status(run.id, LoopStatus.IDLE)
 
-    notify_event(
-        "loop.iteration.done",
-        {
-            "loop_id": loop.id,
-            "goal": loop.goal_name,
-            "iteration": iteration,
-            "pr_url": pr_url,
-        },
-    )
+    notify_event("loop.iteration.done", {
+        "loop_id": loop.id,
+        "goal": loop.goal_name,
+        "iteration": iteration,
+        "pr_url": pr_url,
+    })
 
     # Cleanup worktree
     _cleanup_worktree(loop.repo, worktree_path, branch)
@@ -386,9 +356,7 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
     return True
 
 
-def _create_pr_to_loop_main(
-    loop: Loop, worktree_path: Path, branch: str, iteration: int
-) -> str | None:
+def _create_pr_to_loop_main(loop: Loop, worktree_path: Path, branch: str, iteration: int) -> str | None:
     """Push branch and create PR targeting loop-main."""
     # Push the branch
     result = subprocess.run(
@@ -411,15 +379,10 @@ def _create_pr_to_loop_main(
 
     # Create PR
     cmd = [
-        "gh",
-        "pr",
-        "create",
-        "--title",
-        title,
-        "--body",
-        body,
-        "--base",
-        loop.loop_main,
+        "gh", "pr", "create",
+        "--title", title,
+        "--body", body,
+        "--base", loop.loop_main,
     ]
     result = subprocess.run(cmd, cwd=worktree_path, capture_output=True, text=True)
 
@@ -453,22 +416,9 @@ def _land_to_main(loop: Loop) -> str | None:
 
     # Check for existing PR
     result = subprocess.run(
-        [
-            "gh",
-            "pr",
-            "list",
-            "--head",
-            loop.loop_main,
-            "--base",
-            "main",
-            "--json",
-            "number,url",
-            "--state",
-            "open",
-        ],
-        cwd=repo,
-        capture_output=True,
-        text=True,
+        ["gh", "pr", "list", "--head", loop.loop_main, "--base", "main",
+         "--json", "number,url", "--state", "open"],
+        cwd=repo, capture_output=True, text=True,
     )
     existing = json.loads(result.stdout) if result.returncode == 0 and result.stdout.strip() else []
 
@@ -477,29 +427,16 @@ def _land_to_main(loop: Loop) -> str | None:
         pr_number = existing[0]["number"]
         subprocess.run(
             ["gh", "pr", "merge", str(pr_number), "--squash", "--auto"],
-            cwd=repo,
-            capture_output=True,
+            cwd=repo, capture_output=True,
         )
         return existing[0]["url"]
 
     # Create new PR
     result = subprocess.run(
-        [
-            "gh",
-            "pr",
-            "create",
-            "--base",
-            "main",
-            "--head",
-            loop.loop_main,
-            "--title",
-            f"[{loop.goal_name}] Land accumulated work",
-            "--body",
-            f"Auto-land from loop: {loop.goal_name}",
-        ],
-        cwd=repo,
-        capture_output=True,
-        text=True,
+        ["gh", "pr", "create", "--base", "main", "--head", loop.loop_main,
+         "--title", f"[{loop.goal_name}] Land accumulated work",
+         "--body", f"Auto-land from loop: {loop.goal_name}"],
+        cwd=repo, capture_output=True, text=True,
     )
     if result.returncode != 0:
         return None

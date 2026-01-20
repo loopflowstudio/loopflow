@@ -5,7 +5,7 @@ title: Feature Workflow
 
 # Feature Workflow
 
-Design, implement, polish, ship. Each task reads what the previous one wrote.
+Design, implement, polish, ship. Each step reads what the previous one wrote.
 
 ![workflow demo](workflow-demo.gif)
 
@@ -30,7 +30,7 @@ lfops wt prune                   # cleanup merged worktrees
 
 Requires [worktrunk](https://github.com/loopflowstudio/worktrunk) for underlying worktree operations.
 
-## Built-in tasks
+## Built-in steps
 
 ### design
 
@@ -64,7 +64,7 @@ lf review
 
 Assesses code quality. Fixes issues it finds.
 
-## How tasks chain
+## How steps chain
 
 Tasks pass state through files:
 
@@ -86,7 +86,7 @@ lfops land    # submit to merge queue
 
 `pr` is idempotent—run it to create, or again after more commits. `land` enables auto-merge; GitHub merges when CI passes.
 
-## Custom tasks
+## Custom steps
 
 Tasks are markdown files in `.claude/commands/`:
 

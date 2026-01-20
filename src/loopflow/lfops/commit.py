@@ -5,15 +5,9 @@ import subprocess
 import typer
 
 from loopflow.lf.config import load_config, parse_model
-from loopflow.lf.context import (
-    find_worktree_root,
-    format_prompt,
-    gather_prompt_components,
-    gather_task,
-)
+from loopflow.lf.context import find_worktree_root, gather_step, gather_prompt_components, format_prompt
 from loopflow.lf.git import ensure_draft_pr, has_upstream
 from loopflow.lf.launcher import get_runner
-from loopflow.lfops._helpers import run_lint
 
 
 def register_commands(app: typer.Typer) -> None:
@@ -22,10 +16,7 @@ def register_commands(app: typer.Typer) -> None:
     @app.command()
     def commit(
         push: bool = typer.Option(False, "-p", "--push", help="Push after committing"),
-        add: bool = typer.Option(
-            True, "-a/-A", "--add/--no-add", help="Stage all changes before committing"
-        ),
-        lint: bool = typer.Option(True, "--lint/--no-lint", help="Run lint before committing"),
+        add: bool = typer.Option(True, "-a/-A", "--add/--no-add", help="Stage all changes before committing"),
     ) -> None:
         """Commit with automatic message via agent.
 
@@ -47,10 +38,6 @@ def register_commands(app: typer.Typer) -> None:
             typer.echo("Nothing to commit", err=True)
             raise typer.Exit(0)
 
-        if lint and not run_lint(repo_root):
-            typer.echo("Lint failed, aborting commit", err=True)
-            raise typer.Exit(1)
-
         if add:
             subprocess.run(["git", "add", "-A"], cwd=repo_root, check=True)
 
@@ -62,16 +49,16 @@ def register_commands(app: typer.Typer) -> None:
             typer.echo("Nothing staged to commit", err=True)
             raise typer.Exit(0)
 
-        # Get the commit task prompt
-        task = gather_task(repo_root, "commit")
-        if not task:
-            typer.echo("Error: No commit task found", err=True)
+        # Get the commit step prompt
+        step = gather_step(repo_root, "commit")
+        if not step:
+            typer.echo("Error: No commit step found", err=True)
             raise typer.Exit(1)
 
         # Build prompt with diff context
         components = gather_prompt_components(
             repo_root,
-            task="commit",
+            step="commit",
             include_diff=True,
             include_diff_files=False,
             include_loopflow_doc=False,

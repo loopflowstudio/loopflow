@@ -6,26 +6,32 @@ Unified file storage conventions for loopflow: documented folder hierarchy, `.do
 
 **Verdict:** Ready to ship
 
-All checklist items complete. The implementation correctly:
+The branch delivers what it set out to do, with clean implementation and thorough tests.
 
-1. **Auto-includes `.docs/`** — `gather_internal_docs()` added to `design.py`, integrated into context assembly in `context.py`. Order is `.design/` → `.docs/` → root docs.
+### What's implemented
 
-2. **Keeps `docs/` opt-in** — Public docs not auto-included; must be added via `context:` in config.
+1. **`.docs/` auto-inclusion** — `gather_internal_docs()` in `design.py` collects markdown files recursively. Context assembly order is `.design/` → `.docs/` → root docs. Four tests verify inclusion, ordering, and that public `docs/` stays opt-in.
 
-3. **Goal loading works** — `load_goal()` in `design.py` handles both name lookup (`.lf/goals/{name}.md`) and explicit paths. Agent runner injects goal content with `<lf:goal:...>` tags.
+2. **Goal loading** — `load_goal()` handles name lookup (`.lf/goals/{name}.md`) and explicit paths. Agent runner injects goals with `<lf:goal:{name}>` tags. Four tests cover the loading logic.
 
-4. **Built-in prompts updated** — `design.md`, `implement.md`, `review.md` now reference `.docs/` in their workflows.
+3. **`--docs` renamed to `--lfdocs`** — CLI flag and config key renamed for clarity. All four occurrences in `run.py` updated, test updated.
 
-5. **Documentation complete** — `docs/storage.md` explains philosophy and folder conventions. Quick reference table updated to show `.docs/` as auto-included.
+4. **PR title extraction fix** — `_extract_json_payload()` now starts searching for `{` after any `json` fence, avoiding false matches on `{placeholder}` patterns in prose. New test file `test_messages.py` with 7 tests.
 
-6. **Tests added** — `test_context.py` covers `.docs/` inclusion, order, and `docs/` exclusion. `test_design.py` covers `gather_internal_docs()` and `load_goal()`. 29 summarize tests added.
+5. **Built-in prompts updated** — `design.md`, `implement.md`, `review.md` now reference `.docs/` in their workflows.
 
-Minor style note: the inline imports in `summarize.py` (lines 245, 277, 312, 327) are intentional to avoid circular imports at module load time. The pattern is acceptable here.
+6. **Documentation** — New `docs/storage.md` explains the folder philosophy. Config docs reorganized with context assembly section and demo gif. Public `docs/vision.md` removed (kept internal in `.docs/`).
+
+7. **Summarize tests** — 29 new tests in `test_summarize.py` covering metadata, hashing, staleness, content gathering, and config integration.
+
+### Style notes
+
+The inline imports in `summarize.py` (lines 245, 277, 312, 327) avoid circular imports at module load time. The pattern is acceptable here—this is the one case where STYLE.md allows it.
 
 ## Design notes
 
-**Ephemeral vs persistent distinction.** `.design/` is cleared on merge; `.docs/` persists. This enforces the rule: if it matters after merge, put it in `.docs/`.
+**Ephemeral vs persistent.** `.design/` clears on merge; `.docs/` persists. This enforces: if it matters after merge, put it in `.docs/`.
 
-**Context order.** The prompt assembles docs in order: `.design/` (ephemeral, most specific to current work), `.docs/` (persistent internal), then root `.md` files. This puts the most relevant context first.
+**Context order.** `.design/` (ephemeral, current work) → `.docs/` (persistent internal) → root `.md` files. Most relevant context first.
 
-**Goal injection.** Goals are wrapped in `<lf:goal:{name}>` tags when injected, making them visually distinct from task prompts in the assembled context.
+**Goal injection.** Goals wrapped in `<lf:goal:{name}>` tags, visually distinct from task prompts.

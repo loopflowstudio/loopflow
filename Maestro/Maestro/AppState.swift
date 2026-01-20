@@ -153,6 +153,7 @@ final class AppState {
 
         do {
             let previousSelection = selectedWorktree?.branch
+            _ = try? await worktreeService.sync(in: repo)
             worktrees = try await worktreeService.list(in: repo)
 
             // Preserve selection by matching on branch name

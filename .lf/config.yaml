@@ -1,6 +1,11 @@
 agent_model: claude:opus
 yolo: true
 chrome: true
+
+skill_sources:
+  - name: superpowers
+    prefix: sp
+    path: ~/.superpowers
 context:
   - docs
   - .design

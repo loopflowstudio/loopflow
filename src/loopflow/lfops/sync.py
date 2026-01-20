@@ -3,7 +3,8 @@
 import typer
 
 from loopflow.lf.context import find_worktree_root
-from loopflow.lfops._helpers import get_default_branch, sync_main_repo
+from loopflow.lf.git import get_current_branch
+from loopflow.lfops._helpers import get_default_branch, is_repo_clean, sync_main_repo
 
 
 def register_commands(app: typer.Typer) -> None:
@@ -16,6 +17,8 @@ def register_commands(app: typer.Typer) -> None:
             raise typer.Exit(1)
 
         base_branch = get_default_branch(repo_root)
+        current_branch = get_current_branch(repo_root)
+        is_clean = is_repo_clean(repo_root)
 
         typer.echo(f"Fetching origin/{base_branch}...")
         success = sync_main_repo(repo_root, base_branch)
@@ -23,5 +26,11 @@ def register_commands(app: typer.Typer) -> None:
         if success:
             typer.echo(f"Updated {base_branch} to origin/{base_branch}")
         else:
-            typer.echo(f"Failed to update {base_branch}", err=True)
+            if current_branch == base_branch and not is_clean:
+                typer.echo(
+                    f"Refusing to reset {base_branch} with uncommitted changes",
+                    err=True,
+                )
+            else:
+                typer.echo(f"Failed to update {base_branch}", err=True)
             raise typer.Exit(1)

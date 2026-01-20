@@ -212,6 +212,13 @@ def generate_pr_message(repo_root: Path) -> CommitMessage:
     return _generate_message(repo_root, prompt, "pr message")
 
 
+def generate_pr_message_from_diff(repo_root: Path, diff: str | None) -> CommitMessage:
+    """Generate PR title and body from a provided diff."""
+    task_prompt = get_builtin_prompt("pr_message")
+    prompt = _build_message_prompt(repo_root, diff, task_prompt)
+    return _generate_message(repo_root, prompt, "pr message")
+
+
 def _get_commits_since_tag(repo_root: Path, tag: str) -> str | None:
     """Get commit log since a tag."""
     result = subprocess.run(

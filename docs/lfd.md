@@ -202,8 +202,8 @@ lfd rm <loop-id> --force
 
 ## Goals
 
-Goals are markdown files in `.lf/goals/` describing what an agent should accomplish. See [Loops](loops.md) for details.
+Goals are markdown files in `.lf/goals/` describing what an agent should accomplish. See [Background Agents](agents.md) for details.
 
 ## See Also
 
-[Loops](loops.md) · [Triggers](triggers.md) · [Configuration](config.md)
+[Background Agents](agents.md) · [Configuration](config.md)

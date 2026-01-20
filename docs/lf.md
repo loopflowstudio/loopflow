@@ -162,4 +162,4 @@ If `~/.superpowers` exists, it's auto-detected with prefix `sp`. See [Configurat
 
 ## See Also
 
-[Built-in Tasks](builtins.md) · [Configuration](config.md) · [Patterns](patterns.md)
+[Feature Workflow](workflow.md) · [Configuration](config.md) · [Quick Fix](quick-fix.md)

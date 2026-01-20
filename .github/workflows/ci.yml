@@ -7,7 +7,7 @@ on:
   merge_group:
 
 jobs:
-  test:
+  loopflow-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,14 +15,14 @@ jobs:
       - run: uv sync
       - run: uv run pytest tests/
 
-  maestro-tests:
+  maestro-test:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - name: Run Maestro SwiftUI tests
         run: swift test --package-path Maestro
 
-  maestro-ui-tests:
+  maestro-ui-test:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4

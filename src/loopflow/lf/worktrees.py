@@ -25,6 +25,8 @@ class Worktree:
     base_branch: str | None
     on_origin: bool
     is_dirty: bool
+    main_state: str | None
+    integration_reason: str | None
     pr_url: str | None
     pr_number: int | None
     pr_state: str | None  # "open", "merged", "closed", "draft"
@@ -160,6 +162,9 @@ def list_all(repo_root: Path) -> list[Worktree]:
         ahead_main = int(main.get("ahead") or 0)
         behind_main = int(main.get("behind") or 0)
 
+        main_state = item.get("main_state")
+        integration_reason = item.get("integration_reason")
+
         remote = item.get("remote") or {}
         on_origin = bool(remote.get("name") or remote.get("branch"))
         ahead_remote = int(remote.get("ahead") or 0)
@@ -182,6 +187,8 @@ def list_all(repo_root: Path) -> list[Worktree]:
                 base_branch=item.get("base_branch"),
                 on_origin=on_origin,
                 is_dirty=is_dirty,
+                main_state=main_state,
+                integration_reason=integration_reason,
                 pr_url=pr_url,
                 pr_number=pr_number,
                 pr_state=pr_state if pr_state else None,
@@ -237,15 +244,77 @@ def is_merged(wt: Worktree, repo_root: Path, base_branch: str = "main") -> bool:
         return False
     if wt.is_dirty:
         return False
+    if wt.main_state == "integrated":
+        return True
 
     # Check PR state - from wt list or via gh pr view fallback
     pr_state = wt.pr_state or get_pr_state(repo_root, wt.branch)
     if pr_state == "merged":
         return True
+    if _cherry_is_empty(repo_root, wt.branch, f"origin/{base_branch}"):
+        return True
+    if _trees_match(repo_root, wt.branch, f"origin/{base_branch}"):
+        return True
+    if not _remote_branch_exists(repo_root, wt.branch) and wt.pr_state != "open":
+        return True
 
     # Check if branch is ancestor of origin/base_branch (handles squash merges)
     result = subprocess.run(
         ["git", "merge-base", "--is-ancestor", wt.branch, f"origin/{base_branch}"],
+        cwd=repo_root,
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def merge_diagnostics(repo_root: Path, wt: Worktree, base_branch: str = "main") -> dict:
+    """Return merge detection diagnostics for a worktree."""
+    base_ref = f"origin/{base_branch}"
+    diagnostics = {
+        "branch": wt.branch,
+        "base_ref": base_ref,
+        "is_dirty": wt.is_dirty,
+        "pr_state": wt.pr_state,
+        "main_state": wt.main_state,
+        "cherry_empty": _cherry_is_empty(repo_root, wt.branch, base_ref),
+        "trees_match": _trees_match(repo_root, wt.branch, base_ref),
+        "is_ancestor": False,
+    }
+
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", wt.branch, base_ref],
+        cwd=repo_root,
+        capture_output=True,
+    )
+    diagnostics["is_ancestor"] = result.returncode == 0
+    return diagnostics
+
+
+def _trees_match(repo_root: Path, branch: str, base_ref: str) -> bool:
+    result = subprocess.run(
+        ["git", "diff", "--quiet", f"{base_ref}...{branch}"],
+        cwd=repo_root,
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def _cherry_is_empty(repo_root: Path, branch: str, base_ref: str) -> bool:
+    result = subprocess.run(
+        ["git", "cherry", base_ref, branch],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return False
+    return result.stdout.strip() == ""
+
+
+def _remote_branch_exists(repo_root: Path, branch: str) -> bool:
+    ref = f"refs/remotes/origin/{branch}"
+    result = subprocess.run(
+        ["git", "show-ref", "--verify", ref],
         cwd=repo_root,
         capture_output=True,
     )

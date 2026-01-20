@@ -56,11 +56,18 @@ final class AppState {
     var showResultsLog: Bool = false  // Toggle for streaming log view
     private var sessionTaskMap: [String: String] = [:]  // session ID → task name
     private var sessionStartMap: [String: Date] = [:]  // session ID → start time
+    private var autoPruneInFlight: Bool = false
+    private var autoSyncTask: Task<Void, Never>?
+    var refreshMessage: String?
+    var isRefreshingWorktrees: Bool = false
 
     // Loading state
     var isLoading: Bool = false
     var errorMessage: String?
     var agentsAvailable: Bool = false
+
+    // Daemon connection state
+    var lfdConnected: Bool = false
 
     // Services
     private let worktreeService = WorktreeService()
@@ -72,11 +79,16 @@ final class AppState {
     private let voiceService = VoiceService()
     private let contextPreviewService = ContextPreviewService()
     private let resultsService = ResultsService()
+    private let gitWatcher = GitWatcherService()
 
     func openRepo(_ url: URL) async {
         currentRepo = url
         isLoading = true
         errorMessage = nil
+
+        // Start native git watching (works without lfd)
+        await startGitWatching(repo: url)
+        startAutoSyncTimer()
 
         // Ensure daemon is running on first launch
         let setupService = SetupService()
@@ -115,9 +127,9 @@ final class AppState {
 
             await refreshWorktrees()
 
-            // Auto-select first worktree so launch button always has a target
+            // Auto-select first feature worktree (main is hidden from sidebar)
             if selectedWorktree == nil {
-                selectedWorktree = worktrees.first
+                selectedWorktree = worktrees.first { $0.branch != "main" }
             }
 
             prompts = try promptService.loadPrompts(from: url, config: config)
@@ -138,11 +150,16 @@ final class AppState {
         isLoading = false
     }
 
-    func refreshWorktrees() async {
+    func refreshWorktrees(showFeedback: Bool = false) async {
         guard let repo = currentRepo else { return }
 
         do {
+            if showFeedback {
+                isRefreshingWorktrees = true
+                refreshMessage = "Syncing..."
+            }
             let previousSelection = selectedWorktree?.branch
+            let syncSucceeded = (try? await worktreeService.sync(in: repo)) != nil
             worktrees = try await worktreeService.list(in: repo)
 
             // Preserve selection by matching on branch name
@@ -152,8 +169,30 @@ final class AppState {
 
             // Auto-create draft PRs for pushed branches without PRs
             await createDraftPRsIfNeeded(in: repo)
+
+            // Detect staleness asynchronously (don't block UI)
+            Task {
+                await detectStaleness()
+            }
+
+            if showFeedback {
+                refreshMessage = syncSucceeded ? "Refreshed" : "Refresh (sync failed)"
+            }
         } catch {
             errorMessage = error.localizedDescription
+            if showFeedback {
+                refreshMessage = "Refresh failed"
+            }
+        }
+
+        if showFeedback {
+            isRefreshingWorktrees = false
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2))
+                if refreshMessage != nil {
+                    refreshMessage = nil
+                }
+            }
         }
     }
 
@@ -168,10 +207,86 @@ final class AppState {
             let isPushed = await worktreeService.branchIsPushed(worktree.branch, in: repo)
             guard isPushed else { continue }
 
+            let hasDiff = await worktreeService.hasDiffAgainstBase(worktree)
+            guard hasDiff else { continue }
+
             // Create draft PR in background (don't block or show errors)
             Task.detached { [worktreeService] in
                 let worktreeURL = URL(fileURLWithPath: worktree.path)
                 try? await worktreeService.createDraftPR(branch: worktree.branch, in: worktreeURL)
+            }
+        }
+    }
+
+    private func detectStaleness() async {
+        guard let repo = currentRepo else { return }
+
+        let prunable = await worktreeService.getPrunableBranches(in: repo)
+        var stalenessMap = await worktreeService.detectStalenessForAll(worktrees, in: repo)
+
+        for branch in prunable {
+            stalenessMap[branch] = .merged
+        }
+
+        // Update worktrees with staleness info
+        for i in worktrees.indices {
+            if let staleness = stalenessMap[worktrees[i].branch] {
+                worktrees[i].staleness = staleness
+            }
+        }
+
+        await autoPruneCompletedWorktrees(stalenessMap, in: repo)
+    }
+
+    private func autoPruneCompletedWorktrees(_ stalenessMap: [String: Staleness], in repo: URL) async {
+        if autoPruneInFlight {
+            return
+        }
+
+        let candidates = worktrees.filter { worktree in
+            guard worktree.branch != "main", worktree.branch != "master" else { return false }
+            guard worktree.isDirty == false, worktree.isMerging == false, worktree.isRebasing == false else { return false }
+            guard let staleness = stalenessMap[worktree.branch] else { return false }
+
+            switch staleness {
+            case .merged:
+                return true
+            case .remoteDeleted:
+                return worktree.aheadMain == 0
+            case .active, .inactive:
+                return false
+            }
+        }
+
+        if candidates.isEmpty {
+            return
+        }
+
+        autoPruneInFlight = true
+        let branches = candidates.map(\.branch)
+        let worktreeService = worktreeService
+
+        Task { [weak self] in
+            for branch in branches {
+                _ = try? await worktreeService.remove(name: branch, in: repo)
+            }
+
+            guard let self else { return }
+            self.autoPruneInFlight = false
+            await self.refreshWorktrees()
+        }
+    }
+
+    private func startAutoSyncTimer() {
+        autoSyncTask?.cancel()
+        autoSyncTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                if let repo = self.currentRepo {
+                    _ = try? await self.worktreeService.sync(in: repo)
+                    await self.refreshWorktrees()
+                }
+                try? await Task.sleep(for: .seconds(120))
             }
         }
     }
@@ -221,18 +336,40 @@ final class AppState {
         eventService = LFDEventService()
 
         Task {
-            try? await eventService?.subscribe(
-                to: ["worktree.*", "session.*", "output.line"]
-            ) { [weak self] event in
-                Task { @MainActor in
-                    switch event {
-                    case .worktree:
-                        await self?.refreshWorktrees()
-                    case .session(let sessionEvent):
-                        self?.handleSessionEvent(sessionEvent)
-                    case .output(let outputEvent):
-                        self?.handleOutputEvent(outputEvent)
+            await eventService?.subscribe(
+                to: ["worktree.*", "session.*", "output.line"],
+                onEvent: { [weak self] event in
+                    Task { @MainActor in
+                        switch event {
+                        case .worktree:
+                            await self?.refreshWorktrees()
+                        case .session(let sessionEvent):
+                            self?.handleSessionEvent(sessionEvent)
+                        case .output(let outputEvent):
+                            self?.handleOutputEvent(outputEvent)
+                        }
                     }
+                },
+                onConnectionChange: { [weak self] connected in
+                    Task { @MainActor in
+                        self?.lfdConnected = connected
+                    }
+                }
+            )
+        }
+    }
+
+    private func startGitWatching(repo: URL) async {
+        await gitWatcher.watch(repo: repo) { [weak self] change in
+            Task { @MainActor in
+                switch change {
+                case .worktrees:
+                    await self?.refreshWorktrees()
+                case .refs:
+                    await self?.refreshWorktrees()  // Commits affect worktree display
+                case .index:
+                    // Index changes affect diff - could add refreshDiff() later
+                    break
                 }
             }
         }

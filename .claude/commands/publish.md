@@ -119,6 +119,13 @@ uv publish
 
 Requires `UV_PUBLISH_TOKEN` env var or `~/.pypirc` credentials.
 
+### 8b. Publish Maestro DMG + update website
+
+Build and upload the Maestro DMG, then update the website download metadata:
+```bash
+python scripts/publish.py --dmg-only
+```
+
 ### 9. Install locally and restart daemon
 
 ```bash
@@ -147,4 +154,3 @@ git push --tags
 Report each step as it completes. End with:
 - New version number
 - PyPI URL: https://pypi.org/project/loopflow/
-

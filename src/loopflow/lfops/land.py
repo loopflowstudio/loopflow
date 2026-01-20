@@ -7,10 +7,11 @@ from pathlib import Path
 
 import typer
 
-from loopflow.lf.config import load_config
+from loopflow.lf.config import load_config, parse_model
 from loopflow.lf.context import find_worktree_root
 from loopflow.lf.design import clear_design_artifacts
 from loopflow.lf.git import GitError, ensure_ready_pr, find_main_repo, get_current_branch, is_draft_pr, open_pr
+from loopflow.lf.launcher import get_runner
 from loopflow.lf.messages import generate_commit_message_from_diff, generate_pr_message
 from loopflow.lf.worktrees import get_path
 from loopflow.lfops._helpers import (
@@ -117,7 +118,7 @@ def _squash_commits(repo_root: Path, base_ref: str, commit_msg: str) -> None:
 def _rebase_onto_main(repo_root: Path, base_branch: str) -> bool:
     """Rebase branch onto base_branch. Returns True if successful.
 
-    If conflicts occur, launches Claude with the rebase task to resolve them.
+    If conflicts occur, launches the rebase task assistant to resolve them.
     Handles force-push after rebase if the branch has an upstream.
     """
     from loopflow.lf.context import gather_task
@@ -143,19 +144,30 @@ def _rebase_onto_main(repo_root: Path, base_branch: str) -> bool:
         text=True,
     )
     if result.returncode != 0:
-        # Conflicts - abort and hand off to Claude
+        # Conflicts - abort and hand off to assistant
         typer.echo("Conflicts detected, launching rebase assistant...")
         subprocess.run(["git", "rebase", "--abort"], cwd=repo_root, capture_output=True)
 
         # Get rebase prompt (custom or built-in)
-        task = gather_task(repo_root, "rebase")
+        config = load_config(repo_root)
+        task = gather_task(repo_root, "rebase", config=config)
         if not task:
             typer.echo("Error: No rebase task found", err=True)
             return False
 
-        # Run Claude with the rebase task
-        rebase_result = subprocess.run(["claude", task.content], cwd=repo_root)
-        if rebase_result.returncode != 0:
+        # Run agent with the rebase task
+        agent_model = task.config.model or (config.agent_model if config else "claude:opus")
+        backend, model_variant = parse_model(agent_model)
+        runner = get_runner(backend)
+        rebase_result = runner.launch(
+            task.content,
+            auto=True,
+            stream=True,
+            skip_permissions=True,
+            model_variant=model_variant,
+            cwd=repo_root,
+        )
+        if rebase_result.exit_code != 0:
             typer.echo("Rebase assistant failed", err=True)
             return False
 

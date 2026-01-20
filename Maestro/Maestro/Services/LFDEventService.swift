@@ -35,27 +35,60 @@ actor LFDEventService {
     private let socketPath = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".lf/lfd.sock")
     private var onEvent: (@Sendable (LFDEvent) -> Void)?
+    private var onConnectionChange: (@Sendable (Bool) -> Void)?
+    private var patterns: [String] = []
+    private var reconnectTask: Task<Void, Never>?
+    private var _isConnected = false
+
+    var isConnected: Bool { _isConnected }
 
     func subscribe(
         to patterns: [String],
-        onEvent: @escaping @Sendable (LFDEvent) -> Void
-    ) async throws {
+        onEvent: @escaping @Sendable (LFDEvent) -> Void,
+        onConnectionChange: @escaping @Sendable (Bool) -> Void
+    ) async {
+        self.patterns = patterns
         self.onEvent = onEvent
+        self.onConnectionChange = onConnectionChange
+
+        await connect()
+        startReconnectLoop()
+    }
+
+    private func connect() async {
+        // Check if socket exists before attempting connection
+        guard FileManager.default.fileExists(atPath: socketPath.path) else {
+            updateConnectionState(false)
+            return
+        }
 
         let params = NWParameters()
         let endpoint = NWEndpoint.unix(path: socketPath.path)
         connection = NWConnection(to: endpoint, using: params)
 
         connection?.stateUpdateHandler = { [weak self] state in
-            if case .failed = state {
-                Task { await self?.disconnect() }
+            Task {
+                switch state {
+                case .ready:
+                    await self?.handleConnected()
+                case .failed, .cancelled:
+                    await self?.handleDisconnected()
+                default:
+                    break
+                }
             }
         }
 
         connection?.start(queue: .main)
 
         // Wait briefly for connection to establish
-        try await Task.sleep(for: .milliseconds(100))
+        try? await Task.sleep(for: .milliseconds(100))
+
+        // Only send subscribe if connection is ready
+        guard connection?.state == .ready else {
+            updateConnectionState(false)
+            return
+        }
 
         // Send subscribe request
         let patternsJson = patterns.map { "\"\($0)\"" }.joined(separator: ",")
@@ -64,6 +97,36 @@ actor LFDEventService {
 
         // Start receiving events
         receiveLoop()
+    }
+
+    private func handleConnected() {
+        updateConnectionState(true)
+    }
+
+    private func handleDisconnected() {
+        connection?.cancel()
+        connection = nil
+        updateConnectionState(false)
+    }
+
+    private func updateConnectionState(_ connected: Bool) {
+        guard _isConnected != connected else { return }
+        _isConnected = connected
+        onConnectionChange?(connected)
+    }
+
+    private func startReconnectLoop() {
+        reconnectTask?.cancel()
+        reconnectTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                guard !Task.isCancelled else { return }
+
+                if !_isConnected {
+                    await connect()
+                }
+            }
+        }
     }
 
     private func receiveLoop() {
@@ -133,8 +196,12 @@ actor LFDEventService {
     }
 
     func disconnect() {
+        reconnectTask?.cancel()
+        reconnectTask = nil
         connection?.cancel()
         connection = nil
         onEvent = nil
+        onConnectionChange = nil
+        updateConnectionState(false)
     }
 }

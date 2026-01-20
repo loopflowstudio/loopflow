@@ -6,6 +6,11 @@ struct OutputPanel: View {
     @Bindable var appState: AppState
     @State private var isExpanded = false
     @State private var selectedSessionId: String?
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var palette: LoopflowPalette {
+        LoopflowPalette.make(for: colorScheme)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -105,7 +110,7 @@ struct OutputPanel: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(.bar)
+        .background(palette.surface)
     }
 
     @ViewBuilder
@@ -126,7 +131,7 @@ struct OutputPanel: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(height: 200)
-            .background(Color(.textBackgroundColor))
+            .background(palette.surface)
             .onChange(of: appState.liveOutputBySession[sessionId]?.count) { _, _ in
                 // Auto-scroll to bottom
                 if let lastLine = appState.liveOutputBySession[sessionId]?.last {

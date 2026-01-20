@@ -136,6 +136,8 @@ def _make_worktree(branch: str, is_dirty: bool = False, pr_state: str | None = N
         base_branch="main",
         on_origin=True,
         is_dirty=is_dirty,
+        main_state=None,
+        integration_reason=None,
         pr_url=None,
         pr_number=None,
         pr_state=pr_state,

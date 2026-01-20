@@ -12,6 +12,7 @@ from loopflow.lfops import rebase as rebase_module
 from loopflow.lfops import summarize as summarize_module
 from loopflow.lfops import sync as sync_module
 from loopflow.lfops import prune as prune_module
+from loopflow.lfops import wt as wt_module
 
 app = typer.Typer(help="Loopflow operations")
 
@@ -24,6 +25,7 @@ rebase_module.register_commands(app)
 summarize_module.register_commands(app)
 sync_module.register_commands(app)
 prune_module.register_commands(app)
+wt_module.register_commands(app)
 
 
 def main() -> None:

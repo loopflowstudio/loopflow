@@ -35,6 +35,7 @@ class Runner(ABC):
         auto: bool = False,
         stream: bool = False,
         skip_permissions: bool = False,
+        model_variant: str | None = None,
         session_id: str | None = None,
         cwd: Optional[Path] = None,
     ) -> LaunchResult:
@@ -56,11 +57,12 @@ class ClaudeRunner(Runner):
         auto: bool = False,
         stream: bool = False,
         skip_permissions: bool = False,
+        model_variant: str | None = None,
         session_id: str | None = None,
         cwd: Optional[Path] = None,
     ) -> LaunchResult:
         exit_code, output = launch_claude(
-            prompt, auto, stream, skip_permissions, session_id, cwd
+            prompt, auto, stream, skip_permissions, model_variant, session_id, cwd
         )
         return LaunchResult(exit_code, output)
 
@@ -77,6 +79,7 @@ class CodexRunner(Runner):
         auto: bool = False,
         stream: bool = False,
         skip_permissions: bool = False,
+        model_variant: str | None = None,
         session_id: str | None = None,
         cwd: Optional[Path] = None,
     ) -> LaunchResult:
@@ -84,6 +87,7 @@ class CodexRunner(Runner):
             auto=auto,
             stream=stream,
             skip_permissions=skip_permissions,
+            model_variant=model_variant,
             sandbox_root=cwd.parent if cwd else None,
             workdir=cwd,
         )
@@ -118,6 +122,7 @@ class GeminiRunner(Runner):
         auto: bool = False,
         stream: bool = False,
         skip_permissions: bool = False,
+        model_variant: str | None = None,
         session_id: str | None = None,
         cwd: Optional[Path] = None,
     ) -> LaunchResult:
@@ -125,6 +130,7 @@ class GeminiRunner(Runner):
             auto=auto,
             stream=stream,
             skip_permissions=skip_permissions,
+            model_variant=model_variant,
             sandbox_root=cwd.parent if cwd else None,
             workdir=cwd,
         )
@@ -167,6 +173,7 @@ def launch_claude(
     auto: bool = False,
     stream: bool = False,
     skip_permissions: bool = False,
+    model_variant: str | None = None,
     session_id: str | None = None,
     cwd: Optional[Path] = None,
 ) -> tuple[int, str | None]:
@@ -179,6 +186,7 @@ def launch_claude(
         auto=auto,
         stream=stream,
         skip_permissions=skip_permissions,
+        model_variant=model_variant,
     )
     cmd_with_prompt = cmd + [prompt]
 
@@ -459,7 +467,7 @@ def _run_streaming_json(
         cmd,
         cwd=cwd,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
         env=get_model_env(),
     )

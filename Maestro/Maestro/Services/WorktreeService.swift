@@ -50,7 +50,7 @@ struct WorktreeService {
     private let sessionService = SessionService()
 
     func list(in repoURL: URL) async throws -> [Worktree] {
-        let output = try await run(["-C", repoURL.path(), "list", "--format", "json", "--full"], in: repoURL)
+        let output = try await runLfops(["wt", "list", "--format", "json", "--full"], in: repoURL)
 
         guard let data = output.data(using: .utf8) else {
             return []
@@ -90,7 +90,7 @@ struct WorktreeService {
         _ = try await runLfops(["land"], in: worktreePath)
     }
 
-func createDraftPR(branch: String, in worktreePath: URL) async throws {
+    func createDraftPR(branch: String, in worktreePath: URL) async throws {
         guard let ghURL = findCommand("gh") else {
             throw WorktreeError.commandFailed("gh CLI not found. Install GitHub CLI.")
         }
@@ -102,6 +102,20 @@ func createDraftPR(branch: String, in worktreePath: URL) async throws {
             throw WorktreeError.commandFailed("gh CLI not found. Install GitHub CLI.")
         }
         _ = try await runProcess(ghURL, ["pr", "ready"], in: worktreePath)
+    }
+
+    func getExistingPRURL(in worktreePath: URL) async -> URL? {
+        guard let ghURL = findCommand("gh") else {
+            return nil
+        }
+        do {
+            let output = try await runProcess(ghURL, ["pr", "view", "--json", "url", "-q", ".url"], in: worktreePath)
+            let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            return URL(string: trimmed)
+        } catch {
+            return nil
+        }
     }
 
     func branchIsPushed(_ branch: String, in repoURL: URL) async -> Bool {
@@ -117,6 +131,21 @@ func createDraftPR(branch: String, in worktreePath: URL) async throws {
         }
     }
 
+    func hasDiffAgainstBase(_ worktree: Worktree) async -> Bool {
+        let base = worktree.baseBranch ?? "main"
+        let worktreeURL = URL(fileURLWithPath: worktree.path)
+        do {
+            let output = try await runProcess(
+                URL(fileURLWithPath: "/usr/bin/git"),
+                ["diff", "--name-only", "\(base)...HEAD"],
+                in: worktreeURL
+            )
+            return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        } catch {
+            return true
+        }
+    }
+
     func sync(in repoURL: URL) async throws {
         _ = try await runLfops(["sync"], in: repoURL)
     }
@@ -128,16 +157,7 @@ func createDraftPR(branch: String, in worktreePath: URL) async throws {
         }
         let output = try await runLfops(args, in: repoURL)
 
-        // Parse output to get branch names
-        // Output format: "Would remove:" or "Removed:" followed by "  branch-name" lines
-        var branches: [String] = []
-        for line in output.components(separatedBy: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if !trimmed.isEmpty && !trimmed.contains(":") && !trimmed.starts(with: "Syncing") && !trimmed.starts(with: "No merged") {
-                branches.append(trimmed)
-            }
-        }
-        return branches
+        return parsePrunableBranches(from: output)
     }
 
     func getDiff(_ spec: String, in repoURL: URL) async throws -> String {
@@ -212,6 +232,73 @@ func createDraftPR(branch: String, in worktreePath: URL) async throws {
             }
     }
 
+    func detectStaleness(for worktree: Worktree, in repoURL: URL) async -> Staleness {
+        // Skip main branch - it's never stale
+        if worktree.branch == "main" || worktree.branch == "master" {
+            return .active
+        }
+
+        let baseBranch = worktree.baseBranch ?? "main"
+        if (try? await runProcess(
+            URL(fileURLWithPath: "/usr/bin/git"),
+            ["diff", "--quiet", "\(baseBranch)...\(worktree.branch)"],
+            in: repoURL
+        )) != nil {
+            return .merged
+        }
+
+        // Check if branch is merged to main
+        if let merged = try? await runGit(["branch", "--merged", "main"], in: repoURL) {
+            let mergedBranches = merged.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+            if mergedBranches.contains(worktree.branch) {
+                return .merged
+            }
+        }
+
+        // Check if remote tracking branch exists
+        let remoteRef = "refs/remotes/origin/\(worktree.branch)"
+        let refExists = try? await runGit(["show-ref", "--verify", remoteRef], in: repoURL)
+        if refExists == nil && worktree.prNumber != nil {
+            // Had a PR but remote branch is gone → merged and cleaned up
+            return .remoteDeleted
+        }
+
+        // Check last commit date
+        if let lastCommitTime = try? await runGit(["log", "-1", "--format=%ct", worktree.branch], in: repoURL) {
+            let trimmed = lastCommitTime.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let timestamp = Double(trimmed) {
+                let age = Date().timeIntervalSince1970 - timestamp
+                let days = Int(age / 86400)
+                if days > 14 {
+                    return .inactive(days: days)
+                }
+            }
+        }
+
+        return .active
+    }
+
+    func detectStalenessForAll(_ worktrees: [Worktree], in repoURL: URL) async -> [String: Staleness] {
+        var results: [String: Staleness] = [:]
+        for worktree in worktrees {
+            results[worktree.branch] = await detectStaleness(for: worktree, in: repoURL)
+        }
+        return results
+    }
+
+    private func runGit(_ args: [String], in directory: URL) async throws -> String {
+        try await runProcess(URL(fileURLWithPath: "/usr/bin/git"), args, in: directory)
+    }
+
+    func getPrunableBranches(in repoURL: URL) async -> Set<String> {
+        do {
+            let output = try await runLfops(["prune", "--dry-run"], in: repoURL)
+            return Set(parsePrunableBranches(from: output))
+        } catch {
+            return []
+        }
+    }
+
     func getGitHubCompareURL(branch: String, in repoURL: URL, base: String = "main") async throws -> URL? {
         let remoteURL = try await runProcess(URL(fileURLWithPath: "/usr/bin/git"), ["remote", "get-url", "origin"], in: repoURL)
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -276,5 +363,16 @@ func createDraftPR(branch: String, in worktreePath: URL) async throws {
             return false
         }
         return contents.contains { $0.hasSuffix(".code-workspace") }
+    }
+
+    private func parsePrunableBranches(from output: String) -> [String] {
+        var branches: [String] = []
+        for line in output.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if !trimmed.isEmpty && !trimmed.contains(":") && !trimmed.starts(with: "Syncing") && !trimmed.starts(with: "No merged") {
+                branches.append(trimmed)
+            }
+        }
+        return branches
     }
 }

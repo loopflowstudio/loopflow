@@ -11,6 +11,11 @@ struct ResultsPanel: View {
     @State private var showingDiffSheet = false
     @State private var diffContent: String?
     @State private var diffLoading = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var palette: LoopflowPalette {
+        LoopflowPalette.make(for: colorScheme)
+    }
 
     private let terminalLauncher = TerminalLauncher()
 
@@ -128,7 +133,7 @@ struct ResultsPanel: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(.bar)
+        .background(palette.surface)
     }
 
     private func copyOutput(_ result: SessionResult) {
@@ -194,7 +199,7 @@ struct ResultsPanel: View {
                 .padding(16)
             }
             .frame(maxHeight: 280)
-            .background(Color(.textBackgroundColor))
+            .background(palette.surface)
         }
     }
 
@@ -329,7 +334,7 @@ struct ResultsPanel: View {
         return DiffContentView(content: truncated)
             .font(.system(.caption2, design: .monospaced))
             .padding(8)
-            .background(Color(.textBackgroundColor))
+            .background(palette.surface)
             .clipShape(RoundedRectangle(cornerRadius: 4))
             .overlay(
                 RoundedRectangle(cornerRadius: 4)
@@ -540,7 +545,7 @@ struct ResultsPanel: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(.bar)
+        .background(palette.surface)
     }
 
     private func logView(lines: [OutputLine]) -> some View {
@@ -560,7 +565,7 @@ struct ResultsPanel: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(height: 200)
-            .background(Color(.textBackgroundColor))
+            .background(palette.surface)
             .onChange(of: lines.count) { _, _ in
                 if let lastLine = lines.last {
                     withAnimation { proxy.scrollTo(lastLine.id, anchor: .bottom) }

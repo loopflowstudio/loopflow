@@ -40,19 +40,22 @@ def register_commands(app: typer.Typer) -> None:
             )
             if push_result.returncode == 0:
                 typer.echo("Done")
-            else:
-                typer.echo("Push failed", err=True)
-                raise typer.Exit(1)
-        else:
-            # Conflicts - abort and hand off to Claude
-            typer.echo("Conflicts detected, aborting rebase...")
-            subprocess.run(["git", "rebase", "--abort"], cwd=repo_root)
+                return
+            typer.echo("Push failed", err=True)
+            raise typer.Exit(1)
 
-            # Get rebase prompt (custom or built-in)
-            task = gather_task(repo_root, "rebase")
-            if not task:
-                typer.echo("Error: No rebase command found", err=True)
-                raise typer.Exit(1)
+        # Conflicts - abort and hand off to assistant
+        typer.echo("Conflicts detected, aborting rebase...")
+        subprocess.run(["git", "rebase", "--abort"], cwd=repo_root)
 
-            typer.echo("Launching rebase assistant...")
-            subprocess.run(["claude", task.content], cwd=repo_root)
+        # Get rebase prompt (custom or built-in)
+        task = gather_task(repo_root, "rebase")
+        if not task:
+            typer.echo("Error: No rebase command found", err=True)
+            raise typer.Exit(1)
+
+        typer.echo("Launching rebase assistant...")
+        rebase_result = subprocess.run(["lf", "rebase", "-a"], cwd=repo_root)
+        if rebase_result.returncode != 0:
+            typer.echo("Rebase assistant failed", err=True)
+            raise typer.Exit(1)

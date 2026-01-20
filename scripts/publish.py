@@ -2,11 +2,50 @@
 """Publish loopflow to PyPI and/or DMG to R2."""
 
 import argparse
+import json
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
+WEBSITE_ROOT = ROOT.parent / "loopflowstudio" / "website"
+MAESTRO_RELEASE_PATH = WEBSITE_ROOT / "static" / "maestro-release.json"
+
+
+def update_website_release(version: str, public_url: str, dry_run: bool) -> bool:
+    release = {
+        "version": version,
+        "latest_url": f"{public_url}/LoopflowMaestro-latest.dmg",
+        "versioned_url": f"{public_url}/LoopflowMaestro-{version}.dmg",
+        "published_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+
+    if not WEBSITE_ROOT.exists():
+        print(f"Website repo not found at {WEBSITE_ROOT}. Skipping website update.")
+        return False
+
+    if dry_run:
+        print(f"Would update website release metadata at {MAESTRO_RELEASE_PATH}")
+        print(json.dumps(release, indent=2))
+        print("Would deploy website via: python dev.py deploy --prod")
+        return True
+
+    MAESTRO_RELEASE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    MAESTRO_RELEASE_PATH.write_text(json.dumps(release, indent=2) + "\n")
+    return deploy_website()
+
+
+def deploy_website() -> bool:
+    try:
+        subprocess.run(
+            ["python", "dev.py", "deploy", "--prod"],
+            cwd=WEBSITE_ROOT,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        return False
+    return True
 
 
 def main() -> int:
@@ -17,6 +56,7 @@ def main() -> int:
     parser.add_argument("-f", "--force", action="store_true", help="Skip main branch check")
     parser.add_argument("--dmg-only", action="store_true", help="Only build and upload DMG (no PyPI)")
     parser.add_argument("--skip-dmg", action="store_true", help="Skip DMG build/upload")
+    parser.add_argument("--skip-website", action="store_true", help="Skip website update/deploy")
     args = parser.parse_args()
 
     # Validate args
@@ -53,6 +93,8 @@ def main() -> int:
             print("Would build Maestro DMG")
             print(f"Would upload DMG to {R2_PUBLIC_URL}/LoopflowMaestro-{version}.dmg")
             print(f"Would upload DMG to {R2_PUBLIC_URL}/LoopflowMaestro-latest.dmg")
+            if not args.skip_website:
+                print("Would update website release metadata and deploy")
             return 0
 
         print("Building Maestro DMG...")
@@ -73,6 +115,11 @@ def main() -> int:
         print(output)
 
         print(f"\nDMG published: {R2_PUBLIC_URL}/LoopflowMaestro-{version}.dmg")
+        if not args.skip_website:
+            print("Updating website...")
+            if not update_website_release(version, R2_PUBLIC_URL, dry_run=False):
+                print("Website update failed.", file=sys.stderr)
+                return 1
         return 0
 
     # Full release flow
@@ -104,6 +151,8 @@ def main() -> int:
         if not args.skip_dmg:
             print("Would build Maestro DMG")
             print(f"Would upload DMG to {R2_PUBLIC_URL}/LoopflowMaestro-{new_version}.dmg")
+            if not args.skip_website:
+                print("Would update website release metadata and deploy")
         print("Would install locally")
         return 0
 
@@ -206,6 +255,11 @@ def main() -> int:
                 print(output, file=sys.stderr)
             else:
                 print(output)
+                if not args.skip_website:
+                    print("Updating website...")
+                    if not update_website_release(new_version, R2_PUBLIC_URL, dry_run=False):
+                        print("Website update failed.", file=sys.stderr)
+                        return 1
 
     # Step 9: Install locally from the built wheel
     print("Installing locally...")

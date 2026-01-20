@@ -6,6 +6,7 @@ struct WorktreeDetailPanel: View {
     @Bindable var appState: AppState
     let worktree: Worktree
 
+    @Environment(\.colorScheme) private var colorScheme
     @AppStorage("commitsExpanded") private var commitsExpanded = true
     @AppStorage("filesExpanded") private var filesExpanded = true
     @AppStorage("launcherExpanded") private var launcherExpanded = false
@@ -25,6 +26,7 @@ struct WorktreeDetailPanel: View {
 
     private var ideApp: IDEApp { appState.config?.ideApp ?? .cursor }
     private var terminalApp: TerminalApp { appState.config?.terminalApp ?? .warp }
+    private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -47,6 +49,7 @@ struct WorktreeDetailPanel: View {
 
             launcherSection
         }
+        .background(palette.background)
         .onAppear {
             loadCommits()
             loadFileStats()
@@ -141,47 +144,47 @@ struct WorktreeDetailPanel: View {
     // MARK: - Quick Actions Bar
 
     private var quickActionsBar: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 12) {
             Button {
                 openPR()
             } label: {
                 HStack(spacing: 8) {
-                    AppIconProvider.iconImage(for: .github, size: 20)
+                    Image(systemName: "arrow.triangle.pull")
+                        .font(.system(size: 14))
                     Text("PR")
                         .fontWeight(.medium)
                 }
-                .frame(minWidth: 80)
+                .frame(minWidth: 70)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
+            .buttonStyle(DarkButtonStyle())
             .help("Open or create PR")
 
             Button {
                 openInIDE()
             } label: {
                 HStack(spacing: 8) {
-                    AppIconProvider.iconImage(for: AppIdentifier(ide: ideApp), size: 20)
+                    Image(systemName: "curlybraces")
+                        .font(.system(size: 14))
                     Text(ideApp.displayName)
                         .fontWeight(.medium)
                 }
-                .frame(minWidth: 80)
+                .frame(minWidth: 70)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
+            .buttonStyle(DarkButtonStyle())
             .help("Open in \(ideApp.displayName)")
 
             Button {
                 openInTerminal()
             } label: {
                 HStack(spacing: 8) {
-                    AppIconProvider.iconImage(for: AppIdentifier(terminal: terminalApp), size: 20)
+                    Image(systemName: "terminal")
+                        .font(.system(size: 14))
                     Text(terminalApp.displayName)
                         .fontWeight(.medium)
                 }
-                .frame(minWidth: 80)
+                .frame(minWidth: 70)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
+            .buttonStyle(DarkButtonStyle())
             .help("Open in \(terminalApp.displayName)")
 
             Spacer()
@@ -193,15 +196,13 @@ struct WorktreeDetailPanel: View {
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "airplane.arrival")
-                            .font(.system(size: 16))
+                            .font(.system(size: 14))
                         Text("Land")
                             .fontWeight(.medium)
                     }
-                    .frame(minWidth: 80)
+                    .frame(minWidth: 70)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .tint(.green)
+                .buttonStyle(DarkButtonStyle())
                 .help("Land PR (merge and clean up)")
             }
 
@@ -211,19 +212,18 @@ struct WorktreeDetailPanel: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "trash")
-                        .font(.system(size: 16))
+                        .font(.system(size: 14))
                     Text("Abandon")
                         .fontWeight(.medium)
                 }
-                .frame(minWidth: 80)
+                .frame(minWidth: 70)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-            .tint(.red)
+            .buttonStyle(DarkButtonStyle())
             .help("Abandon worktree")
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
+        .background(palette.surface)
     }
 
     // MARK: - Commits Section
@@ -279,7 +279,7 @@ struct WorktreeDetailPanel: View {
         HStack(spacing: 10) {
             Text(commit.shortSHA)
                 .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(.blue)
+                .foregroundStyle(.secondary)
                 .frame(width: 60, alignment: .leading)
 
             Text(commit.message)
@@ -297,7 +297,7 @@ struct WorktreeDetailPanel: View {
         .padding(.horizontal, 10)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(Color.primary.opacity(0.03))
+                .fill(palette.surface)
         )
     }
 
@@ -383,7 +383,7 @@ struct WorktreeDetailPanel: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(Color.primary.opacity(0.03))
+                .fill(palette.surface)
         )
     }
 
@@ -448,7 +448,7 @@ struct WorktreeDetailPanel: View {
         .padding(.horizontal, 10)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(Color.primary.opacity(0.03))
+                .fill(palette.surface)
         )
         .contentShape(Rectangle())
         .onTapGesture {
@@ -523,7 +523,7 @@ struct WorktreeDetailPanel: View {
                 .padding(.vertical, 10)
             }
             .buttonStyle(.plain)
-            .background(.bar)
+            .background(palette.surface)
 
             if launcherExpanded {
                 CollapsedLauncher(appState: appState, worktree: worktree)
@@ -560,9 +560,9 @@ struct WorktreeDetailPanel: View {
             Task {
                 do {
                     try await worktreeService.markPRReady(in: worktreeURL)
-                    // Refresh to get updated PR URL, then open
+                    let url = await worktreeService.getExistingPRURL(in: worktreeURL)
                     await appState.refreshWorktrees()
-                    if let url = worktree.prURL {
+                    if let url {
                         terminalLauncher.openURL(url)
                     }
                 } catch {
@@ -583,8 +583,16 @@ struct WorktreeDetailPanel: View {
 
         // No PR exists - create one (fallback, shouldn't happen with auto-draft)
         Task {
+            if let existingURL = await worktreeService.getExistingPRURL(in: worktreeURL) {
+                terminalLauncher.openURL(existingURL)
+                return
+            }
             do {
                 _ = try await worktreeService.createPR(in: worktreeURL)
+                await appState.refreshWorktrees()
+                if let createdURL = await worktreeService.getExistingPRURL(in: worktreeURL) {
+                    terminalLauncher.openURL(createdURL)
+                }
             } catch {
                 await MainActor.run {
                     actionError = "Failed to create PR: \(error.localizedDescription)"
@@ -687,6 +695,8 @@ struct CollapsedLauncher: View {
     @Bindable var appState: AppState
     let worktree: Worktree
 
+    @Environment(\.colorScheme) private var colorScheme
+
     @State private var taskSearchText: String = ""
     @State private var argsText: String = ""
     @State private var selectedTask: PromptCard?
@@ -696,6 +706,8 @@ struct CollapsedLauncher: View {
     @FocusState private var isTaskFieldFocused: Bool
 
     private let terminalLauncher = TerminalLauncher()
+
+    private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     private var filteredTasks: [PromptCard] {
         if taskSearchText.isEmpty {
@@ -748,7 +760,7 @@ struct CollapsedLauncher: View {
                     ContextChip(label: "Docs", isOn: $appState.includeDocs, color: .blue)
                     ContextChip(label: "Files", isOn: $appState.includeDiffFiles, color: .teal)
                     ContextChip(label: "Diff", isOn: $appState.includeDiff, color: .green)
-                    ContextChip(label: "Clipboard", isOn: $appState.includePaste, color: .purple)
+                    ContextChip(label: "Clipboard", isOn: $appState.includePaste, color: .accentColor)
                 }
             }
 
@@ -780,7 +792,7 @@ struct CollapsedLauncher: View {
             }
         }
         .padding(16)
-        .background(Color(.controlBackgroundColor))
+        .background(palette.surface)
         .alert("Couldn't Start", isPresented: $showingLaunchError) {
             Button("OK") { launchError = nil }
         } message: {
@@ -809,11 +821,11 @@ struct CollapsedLauncher: View {
                 .buttonStyle(.plain)
             }
         }
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(palette.surface)
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .overlay(
             RoundedRectangle(cornerRadius: 6)
-                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                .stroke(palette.border, lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
         .frame(width: 200)
@@ -886,6 +898,26 @@ struct CollapsedLauncher: View {
             launchError = error.localizedDescription
             showingLaunchError = true
         }
+    }
+}
+
+// MARK: - Dark Button Style
+
+struct DarkButtonStyle: ButtonStyle {
+    @Environment(\.colorScheme) private var colorScheme
+
+    func makeBody(configuration: Configuration) -> some View {
+        let palette = LoopflowPalette.make(for: colorScheme)
+
+        configuration.label
+            .font(.subheadline)
+            .foregroundStyle(Color.loopflowCream)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(configuration.isPressed ? palette.accentHover : palette.accent)
+            )
     }
 }
 

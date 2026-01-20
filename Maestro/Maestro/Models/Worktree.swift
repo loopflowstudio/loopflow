@@ -19,6 +19,29 @@ enum PRState: String, Codable {
     }
 }
 
+enum Staleness: Codable, Equatable, Hashable {
+    case active
+    case merged
+    case remoteDeleted
+    case inactive(days: Int)
+
+    var displayText: String {
+        switch self {
+        case .active: return "Active"
+        case .merged: return "Merged"
+        case .remoteDeleted: return "Remote deleted"
+        case .inactive(let days): return "Inactive \(days)d"
+        }
+    }
+
+    var isStale: Bool {
+        switch self {
+        case .active: return false
+        case .merged, .remoteDeleted, .inactive: return true
+        }
+    }
+}
+
 struct Worktree: Identifiable, Hashable, Codable {
     var id: String { branch }
 
@@ -37,11 +60,12 @@ struct Worktree: Identifiable, Hashable, Codable {
     let isRebasing: Bool
     let isMerging: Bool
     var recentTasks: [TaskSession] = []
+    var staleness: Staleness = .active
 
     enum CodingKeys: String, CodingKey {
         case path, branch, baseBranch, isDirty, aheadMain, behindMain
         case aheadRemote, behindRemote, prURL, prNumber, prState
-        case hasCodeWorkspace, isRebasing, isMerging, recentTasks
+        case hasCodeWorkspace, isRebasing, isMerging, recentTasks, staleness
     }
 
     var statusText: String {
@@ -91,6 +115,7 @@ struct WorktreeJSON: Codable {
     let remote: RemoteStatusJSON?
     let operationState: String?
     let ci: CIJSON?
+    let prunable: Bool?
 
     enum CodingKeys: String, CodingKey {
         case branch, path, kind
@@ -98,7 +123,7 @@ struct WorktreeJSON: Codable {
         case workingTree = "working_tree"
         case main, remote
         case operationState = "operation_state"
-        case ci
+        case ci, prunable
     }
 }
 
@@ -176,5 +201,8 @@ extension Worktree {
         self.isRebasing = json.operationState == "rebase"
         self.isMerging = json.operationState == "merge"
         self.recentTasks = recentTasks
+        if json.prunable == true {
+            self.staleness = .merged
+        }
     }
 }

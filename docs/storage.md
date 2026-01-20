@@ -157,4 +157,4 @@ Loopflow's file storage follows from its core beliefs:
 
 - [Configuration](config.md) — `.lf/config.yaml` options
 - [Built-in Tasks](builtins.md) — what the default tasks do
-- [Philosophy](vision.md) — the loopflow mindset
+- [Patterns](patterns.md) — workflows and recipes

@@ -1,9 +1,16 @@
 """Tests for CLI structure after ops removal."""
 
+import re
+
 from typer.testing import CliRunner
 
 from loopflow.lf import app
 from loopflow.lfops import get_app
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape codes from text."""
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
 
 def _get_command_names(output: str) -> list[str]:
@@ -11,6 +18,7 @@ def _get_command_names(output: str) -> list[str]:
 
     Handles both plain text "Commands:" and Rich-formatted "╭─ Commands ─..."
     """
+    output = _strip_ansi(output)
     lines = output.splitlines()
 
     # Find the commands section (handles Rich box formatting)

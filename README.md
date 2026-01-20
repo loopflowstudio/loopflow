@@ -42,11 +42,10 @@ lfd loop product-engineer
 ## Install
 
 ```bash
-pip install loopflow
-lfops install
+uv tool install loopflow
 ```
 
-Requires macOS and [worktrunk](https://github.com/loopflowstudio/worktrunk) for git worktree management.
+Built-in tasks included. No setup required.
 
 ## Documentation
 
@@ -66,13 +65,7 @@ Requires macOS and [worktrunk](https://github.com/loopflowstudio/worktrunk) for 
 ## Requirements
 
 - macOS
-- A coding agent (Claude Code, Codex, or Gemini CLI)
-
-```bash
-lfops install           # installs Claude Code (default)
-lfops install codex     # or Codex
-lfops install gemini    # or Gemini CLI
-```
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), or [Gemini CLI](https://github.com/google-gemini/gemini-cli)
 
 ## License
 

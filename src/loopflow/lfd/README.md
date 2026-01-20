@@ -20,20 +20,6 @@ SQLite at `~/.lf/lfd.db` (WAL mode).
 | model | TEXT | claude-code, codex, etc. |
 | run_mode | TEXT | auto or interactive |
 
-### agent_runs table
-| Column | Type | Description |
-|--------|------|-------------|
-| id | TEXT PK | UUID |
-| agent_name | TEXT | Agent definition name |
-| status | TEXT | idle, running, waiting, error, stopped |
-| started_at | TEXT | ISO8601 |
-| ended_at | TEXT | ISO8601 or NULL |
-| pid | INTEGER | Process ID |
-| worktree | TEXT | Current worktree path |
-| iteration | INTEGER | Run count |
-| error | TEXT | Error message or NULL |
-| main_sha | TEXT | Main branch SHA at start |
-
 ## Protocol
 
 JSON-over-newline on Unix socket at `~/.lf/lfd.sock`.

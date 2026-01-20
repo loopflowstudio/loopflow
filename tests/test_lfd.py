@@ -55,9 +55,9 @@ def test_session_serialization():
 
 
 def test_protocol_request_parse():
-    line = '{"method": "agents.list", "params": {"name": "test"}}'
+    line = '{"method": "sessions.list", "params": {"name": "test"}}'
     request = Request.parse(line)
-    assert request.method == "agents.list"
+    assert request.method == "sessions.list"
     assert request.params == {"name": "test"}
 
 
@@ -826,17 +826,23 @@ def test_scheduler_acquire_and_release():
     assert scheduler.slots_used() == 0
 
     # Acquire first slot
-    assert scheduler.acquire("run-1") is True
+    acquired, reason = scheduler.acquire("run-1")
+    assert acquired is True
+    assert reason is None
     assert scheduler.slots_available() == 1
     assert scheduler.slots_used() == 1
 
     # Acquire second slot
-    assert scheduler.acquire("run-2") is True
+    acquired, reason = scheduler.acquire("run-2")
+    assert acquired is True
+    assert reason is None
     assert scheduler.slots_available() == 0
     assert scheduler.slots_used() == 2
 
     # Can't acquire third slot (at limit)
-    assert scheduler.acquire("run-3") is False
+    acquired, reason = scheduler.acquire("run-3")
+    assert acquired is False
+    assert reason == "concurrency"
     assert scheduler.slots_used() == 2
 
     # Release a slot
@@ -845,7 +851,9 @@ def test_scheduler_acquire_and_release():
     assert scheduler.slots_used() == 1
 
     # Now can acquire again
-    assert scheduler.acquire("run-3") is True
+    acquired, reason = scheduler.acquire("run-3")
+    assert acquired is True
+    assert reason is None
     assert scheduler.slots_used() == 2
 
 
@@ -868,8 +876,12 @@ def test_scheduler_get_status():
     config = SchedulerConfig(concurrency=3, global_pr_limit=15)
     scheduler = Scheduler(config)
 
-    scheduler.acquire("run-1")
-    scheduler.acquire("run-2")
+    acquired, reason = scheduler.acquire("run-1")
+    assert acquired is True
+    assert reason is None
+    acquired, reason = scheduler.acquire("run-2")
+    assert acquired is True
+    assert reason is None
 
     status = scheduler.get_status()
     assert status["slots_used"] == 2
@@ -892,10 +904,25 @@ def test_scheduler_can_start_respects_concurrency():
     assert reason is None
 
     # After acquiring, can't start
-    scheduler.acquire("run-1")
+    acquired, reason = scheduler.acquire("run-1")
+    assert acquired is True
+    assert reason is None
     can, reason = scheduler.can_start()
     assert can is False
     assert reason == "concurrency"
+
+
+def test_scheduler_acquire_respects_global_limit():
+    """acquire blocks when global outstanding exceeds limit."""
+    from loopflow.lfd.scheduler import Scheduler, SchedulerConfig
+
+    config = SchedulerConfig(concurrency=2, global_pr_limit=1)
+    scheduler = Scheduler(config)
+    scheduler.total_outstanding = lambda: 2
+
+    acquired, reason = scheduler.acquire("run-1")
+    assert acquired is False
+    assert reason == "global_limit"
 
 
 def test_scheduler_thread_safety():
@@ -906,12 +933,13 @@ def test_scheduler_thread_safety():
     config = SchedulerConfig(concurrency=10, global_pr_limit=100)
     scheduler = Scheduler(config)
 
-    acquired = []
+    acquired_runs = []
     failed = []
 
     def try_acquire(run_id: str):
-        if scheduler.acquire(run_id):
-            acquired.append(run_id)
+        acquired, _reason = scheduler.acquire(run_id)
+        if acquired:
+            acquired_runs.append(run_id)
         else:
             failed.append(run_id)
 
@@ -923,7 +951,7 @@ def test_scheduler_thread_safety():
         t.join()
 
     # Exactly 10 should have acquired
-    assert len(acquired) == 10
+    assert len(acquired_runs) == 10
     assert len(failed) == 10
     assert scheduler.slots_used() == 10
 

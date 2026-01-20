@@ -68,26 +68,6 @@ def _init_db(db_path: Path) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_loop_runs_loop ON loop_runs(loop_id);
 
-        -- Legacy tables (kept for migration)
-
-        CREATE TABLE IF NOT EXISTS agent_runs (
-            id TEXT PRIMARY KEY,
-            agent_name TEXT NOT NULL,
-            status TEXT NOT NULL,
-            started_at TEXT NOT NULL,
-            ended_at TEXT,
-            pid INTEGER,
-            worktree TEXT,
-            iteration INTEGER DEFAULT 0,
-            error TEXT,
-            main_sha TEXT,
-            emoji TEXT DEFAULT '',
-            current_step TEXT
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_agent_runs_name ON agent_runs(agent_name);
-        CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status);
-
         CREATE TABLE IF NOT EXISTS sessions (
             id TEXT PRIMARY KEY,
             task TEXT NOT NULL,
@@ -102,18 +82,6 @@ def _init_db(db_path: Path) -> None:
         );
 
         CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
-
-        CREATE TABLE IF NOT EXISTS loop_prs (
-            id TEXT PRIMARY KEY,
-            loop_name TEXT NOT NULL,
-            iteration INTEGER NOT NULL,
-            pr_url TEXT NOT NULL,
-            pr_number INTEGER,
-            status TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_loop_prs_name ON loop_prs(loop_name);
     """)
 
     conn.commit()
@@ -156,54 +124,6 @@ def update_dead_runs(db_path: Path | None = None) -> int:
     conn.commit()
     conn.close()
     return count
-
-
-# Loop PRs
-
-
-def save_loop_pr(
-    loop_name: str,
-    iteration: int,
-    pr_url: str,
-    pr_number: int | None = None,
-    status: str = "open",
-    db_path: Path | None = None,
-) -> str:
-    """Save a PR created by a loop iteration."""
-    import uuid
-
-    conn = _get_db(db_path)
-    pr_id = str(uuid.uuid4())
-
-    conn.execute(
-        """
-        INSERT INTO loop_prs (id, loop_name, iteration, pr_url, pr_number, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (pr_id, loop_name, iteration, pr_url, pr_number, status, datetime.now().isoformat()),
-    )
-
-    conn.commit()
-    conn.close()
-    return pr_id
-
-
-def get_loop_prs(loop_name: str, limit: int = 10, db_path: Path | None = None) -> list[dict]:
-    """Get PRs for a loop."""
-    conn = _get_db(db_path)
-    cursor = conn.execute(
-        """
-        SELECT id, loop_name, iteration, pr_url, pr_number, status, created_at
-        FROM loop_prs
-        WHERE loop_name = ?
-        ORDER BY created_at DESC
-        LIMIT ?
-        """,
-        (loop_name, limit),
-    )
-    prs = [dict(row) for row in cursor]
-    conn.close()
-    return prs
 
 
 # Sessions

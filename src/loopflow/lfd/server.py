@@ -91,12 +91,6 @@ class Server:
 
         if method == "status":
             return await self._handle_status()
-        elif method == "agents.list":
-            return await self._handle_agents_list()
-        elif method == "agents.start":
-            return await self._handle_agents_start(params)
-        elif method == "agents.stop":
-            return await self._handle_agents_stop(params)
         elif method == "sessions.list":
             return await self._handle_sessions_list()
         elif method == "sessions.history":
@@ -131,18 +125,6 @@ class Server:
             "loops_running": len(running_loops),
             "sessions_active": len(sessions),
         })
-
-    async def _handle_agents_list(self) -> Response:
-        # Legacy endpoint - returns empty list, use loops.list instead
-        return success([])
-
-    async def _handle_agents_start(self, params: dict) -> Response:
-        # Legacy endpoint - use lfd loop command instead
-        return error("agents.start is deprecated, use 'lfd loop <goal>' instead")
-
-    async def _handle_agents_stop(self, params: dict) -> Response:
-        # Legacy endpoint - use lfd stop command instead
-        return error("agents.stop is deprecated, use 'lfd stop <loop_id>' instead")
 
     async def _handle_sessions_list(self) -> Response:
         sessions = load_sessions()
@@ -232,13 +214,17 @@ class Server:
         if not run_id:
             return error("Missing 'run_id' parameter")
 
-        acquired = self.scheduler.acquire(run_id)
+        acquired, reason = self.scheduler.acquire(run_id)
         if acquired:
             await self._broadcast(Event("scheduler.slot.acquired", {
                 "run_id": run_id,
                 "slots_used": self.scheduler.slots_used(),
             }))
-        return success({"acquired": acquired, "slots_used": self.scheduler.slots_used()})
+        return success({
+            "acquired": acquired,
+            "reason": reason,
+            "slots_used": self.scheduler.slots_used(),
+        })
 
     async def _handle_scheduler_release(self, params: dict) -> Response:
         """Release a scheduler slot."""

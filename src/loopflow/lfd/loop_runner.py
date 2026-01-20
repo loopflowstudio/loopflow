@@ -78,13 +78,16 @@ def _scheduler_call(method: str, params: dict | None = None) -> dict | None:
         return None
 
 
-def _scheduler_acquire(run_id: str) -> bool:
-    """Try to acquire a scheduler slot. Returns True if acquired."""
+def _scheduler_acquire(run_id: str) -> tuple[bool, str | None]:
+    """Try to acquire a scheduler slot.
+
+    Returns (acquired, reason) when the daemon is available.
+    """
     result = _scheduler_call("scheduler.acquire", {"run_id": run_id})
     if result is None:
         # Daemon not running, allow iteration (standalone mode)
-        return True
-    return result.get("acquired", False)
+        return True, None
+    return result.get("acquired", False), result.get("reason")
 
 
 def _scheduler_release(run_id: str) -> None:
@@ -117,11 +120,14 @@ def run_loop_iterations(loop: Loop) -> None:
         run_id = str(uuid.uuid4())
 
         # Wait for scheduler slot (global concurrency)
-        while not _scheduler_acquire(run_id):
+        while True:
+            acquired, reason = _scheduler_acquire(run_id)
+            if acquired:
+                break
             notify_event("scheduler.waiting", {
                 "loop_id": loop.id,
                 "goal": loop.goal_name,
-                "reason": "concurrency",
+                "reason": reason or "concurrency",
             })
             time.sleep(SCHEDULER_POLL_INTERVAL)
 
@@ -197,15 +203,12 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
         return False
 
     # Parse pipeline tasks from goal or default
-    pipeline = goal_spec.pipeline if goal_spec.pipeline else "design,implement,polish"
+    pipeline = goal_spec.pipeline or "design,implement,polish"
+    tasks = [t.strip() for t in pipeline.split(",")]
     if pipeline.startswith("@") and config and config.pipelines:
-        pipeline_name = pipeline[1:]
-        if pipeline_name in config.pipelines:
-            tasks = config.pipelines[pipeline_name].tasks
-        else:
-            tasks = [t.strip() for t in pipeline.split(",")]
-    else:
-        tasks = [t.strip() for t in pipeline.split(",")]
+        config_pipeline = config.pipelines.get(pipeline[1:])
+        if config_pipeline:
+            tasks = config_pipeline.tasks
 
     # Get model configuration
     agent_model = config.agent_model if config else "claude:opus"

@@ -84,16 +84,23 @@ class Scheduler:
 
         return True, None
 
-    def acquire(self, run_id: str) -> bool:
+    def acquire(self, run_id: str) -> tuple[bool, str | None]:
         """Try to acquire a slot for an iteration.
 
-        Returns True if slot acquired, False if no slots available.
+        Returns (acquired, reason) where reason explains why if not acquired.
         """
         with self._lock:
             if len(self._running) >= self.concurrency:
-                return False
+                return False, "concurrency"
+
+        if self.total_outstanding() >= self.global_pr_limit:
+            return False, "global_limit"
+
+        with self._lock:
+            if len(self._running) >= self.concurrency:
+                return False, "concurrency"
             self._running.add(run_id)
-            return True
+            return True, None
 
     def release(self, run_id: str) -> None:
         """Release a slot when iteration completes."""

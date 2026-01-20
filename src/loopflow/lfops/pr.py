@@ -40,9 +40,9 @@ def _has_unpushed_commits(repo_root) -> bool:
 
 
 def _get_pr_diff(repo_root) -> str | None:
-    """Fetch PR diff via gh for accuracy against the PR base."""
+    """Fetch combined PR diff via gh for accuracy against the PR base."""
     result = subprocess.run(
-        ["gh", "pr", "diff", "--patch"],
+        ["gh", "pr", "diff"],
         cwd=repo_root,
         capture_output=True,
         text=True,
@@ -84,7 +84,11 @@ def register_commands(app: typer.Typer) -> None:
     """Register PR command on the app."""
 
     @app.command("pr")
-    def pr() -> None:
+    def pr(
+        refresh: bool = typer.Option(
+            False, "--refresh", "-r", help="Force regenerate PR title and body"
+        ),
+    ) -> None:
         """Create or update a GitHub PR, then open it in browser.
 
         Auto-commits any uncommitted changes before creating/updating the PR.
@@ -107,9 +111,9 @@ def register_commands(app: typer.Typer) -> None:
         existing_url = _get_existing_pr_url(repo_root)
 
         if existing_url:
-            # Skip regeneration if no new commits unless this is a draft PR.
+            # Skip regeneration if no new commits unless refresh flag or draft PR.
             # Drafts are created with gh --fill, so refresh them with LLM output.
-            if not _has_unpushed_commits(repo_root) and not is_draft_pr(repo_root):
+            if not refresh and not _has_unpushed_commits(repo_root) and not is_draft_pr(repo_root):
                 typer.echo("No new commits. Opening existing PR...")
                 subprocess.run(["open", existing_url])
                 return

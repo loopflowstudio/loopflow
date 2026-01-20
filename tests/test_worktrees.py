@@ -6,8 +6,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from loopflow.lf.worktrees import (
+    Worktree,
     WorktreeError,
     create,
+    find_merged,
+    is_merged,
     list_all,
     remove,
 )
@@ -122,3 +125,94 @@ def json_dump(payload) -> str:
     import json
 
     return json.dumps(payload)
+
+
+def _make_worktree(branch: str, is_dirty: bool = False, pr_state: str | None = None) -> Worktree:
+    """Create a Worktree for testing."""
+    return Worktree(
+        name=branch,
+        path=Path(f"/tmp/{branch}"),
+        branch=branch,
+        base_branch="main",
+        on_origin=True,
+        is_dirty=is_dirty,
+        pr_url=None,
+        pr_number=None,
+        pr_state=pr_state,
+        ahead_main=0,
+        behind_main=0,
+        ahead_remote=0,
+        behind_remote=0,
+        lines_added=0,
+        lines_removed=0,
+        has_staged=False,
+        has_modified=is_dirty,
+        has_untracked=False,
+        is_rebasing=False,
+        is_merging=False,
+    )
+
+
+def test_is_merged_returns_false_for_main():
+    """Never consider main/master as merged."""
+    wt = _make_worktree("main")
+    assert is_merged(wt, Path("/tmp/repo")) is False
+
+    wt = _make_worktree("master")
+    assert is_merged(wt, Path("/tmp/repo")) is False
+
+
+def test_is_merged_returns_false_for_dirty_worktree():
+    """Dirty worktrees are not considered merged."""
+    wt = _make_worktree("feature", is_dirty=True, pr_state="merged")
+    assert is_merged(wt, Path("/tmp/repo")) is False
+
+
+def test_is_merged_returns_true_when_pr_state_merged():
+    """PR state 'merged' means the worktree is merged."""
+    wt = _make_worktree("feature", pr_state="merged")
+    # No subprocess call needed when pr_state is merged
+    assert is_merged(wt, Path("/tmp/repo")) is True
+
+
+def test_is_merged_checks_ancestor_for_squash_merge(tmp_path):
+    """Checks if branch is ancestor of origin/main for squash merges."""
+    wt = _make_worktree("feature", pr_state=None)
+
+    # Branch is ancestor of origin/main (squash merged)
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0)  # is-ancestor returns 0 when true
+        result = is_merged(wt, tmp_path)
+
+    assert result is True
+    mock_run.assert_called_once()
+
+
+def test_is_merged_returns_false_when_not_ancestor(tmp_path):
+    """Returns false when branch is not ancestor of origin/main."""
+    wt = _make_worktree("feature", pr_state=None)
+
+    # Branch is not an ancestor (not yet merged)
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=1)  # is-ancestor returns 1 when false
+        result = is_merged(wt, tmp_path)
+
+    assert result is False
+
+
+def test_find_merged_returns_only_merged_worktrees(tmp_path):
+    """find_merged filters to only merged worktrees."""
+    merged_wt = _make_worktree("merged-feature", pr_state="merged")
+    unmerged_wt = _make_worktree("unmerged-feature", pr_state="open")
+    main_wt = _make_worktree("main")
+
+    with patch("loopflow.lf.worktrees.list_all") as mock_list:
+        mock_list.return_value = [merged_wt, unmerged_wt, main_wt]
+        with patch("subprocess.run") as mock_run:
+            # unmerged returns non-zero (not ancestor)
+            mock_run.return_value = MagicMock(returncode=1)
+            result = find_merged(tmp_path)
+
+    # Only the merged worktree should be returned
+    assert len(result) == 1
+    assert result[0].branch == "merged-feature"

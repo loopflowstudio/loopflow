@@ -120,6 +120,18 @@ def get_current_branch(repo_root: Path) -> str | None:
     return branch if branch else None
 
 
+def get_default_base_ref(repo_root: Path) -> str:
+    """Return default base ref (origin/HEAD), falling back to main."""
+    result = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "origin/HEAD"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    base_ref = result.stdout.strip() if result.returncode == 0 else ""
+    return base_ref or "main"
+
+
 
 
 def open_pr(

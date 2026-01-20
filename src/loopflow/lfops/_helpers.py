@@ -5,7 +5,7 @@ from pathlib import Path
 
 import typer
 
-from loopflow.lf.git import ensure_draft_pr
+from loopflow.lf.git import ensure_draft_pr, get_current_branch
 from loopflow.lf.messages import generate_commit_message
 
 
@@ -63,6 +63,16 @@ def get_default_branch(repo_root: Path) -> str:
     return "main"
 
 
+def is_repo_clean(repo_root: Path) -> bool:
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0 and not result.stdout.strip()
+
+
 def resolve_base_ref(repo_root: Path, base_branch: str) -> str:
     origin_ref = f"origin/{base_branch}"
     result = subprocess.run(
@@ -97,18 +107,17 @@ def sync_main_repo(main_repo: Path, base_branch: str) -> bool:
         return False
 
     # If base_branch is checked out here, update it to match origin
-    result = subprocess.run(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-        cwd=main_repo,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode == 0 and result.stdout.strip() == base_branch:
-        subprocess.run(
+    current_branch = get_current_branch(main_repo)
+    if current_branch == base_branch:
+        if not is_repo_clean(main_repo):
+            return False
+        result = subprocess.run(
             ["git", "reset", "--hard", f"origin/{base_branch}"],
             cwd=main_repo,
             capture_output=True,
         )
+        if result.returncode != 0:
+            return False
 
     # origin/base_branch is now up-to-date, which is sufficient for merge-base checks
     return True

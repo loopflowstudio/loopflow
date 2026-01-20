@@ -6,9 +6,9 @@ import subprocess
 import typer
 
 from loopflow.lf.context import find_worktree_root
-from loopflow.lf.git import GitError, ensure_ready_pr, is_draft_pr, open_pr
-from loopflow.lf.messages import generate_pr_message
-from loopflow.lfops._helpers import add_commit_push
+from loopflow.lf.git import GitError, ensure_ready_pr, find_main_repo, is_draft_pr, open_pr
+from loopflow.lf.messages import generate_pr_message, generate_pr_message_from_diff
+from loopflow.lfops._helpers import add_commit_push, get_default_branch, sync_main_repo
 
 
 def _get_existing_pr_url(repo_root) -> str | None:
@@ -39,6 +39,19 @@ def _has_unpushed_commits(repo_root) -> bool:
     return count > 0
 
 
+def _get_pr_diff(repo_root) -> str | None:
+    """Fetch combined PR diff via gh for accuracy against the PR base."""
+    result = subprocess.run(
+        ["gh", "pr", "diff"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    return result.stdout
+
+
 def _update_pr(repo_root, title: str, body: str) -> str:
     """Update existing PR title and body. Returns URL."""
     subprocess.run(
@@ -57,11 +70,25 @@ def _update_pr(repo_root, title: str, body: str) -> str:
     return _get_existing_pr_url(repo_root) or ""
 
 
+def _sync_main_repo(repo_root) -> None:
+    main_repo = find_main_repo(repo_root) or repo_root
+    base_branch = get_default_branch(main_repo)
+    if not sync_main_repo(main_repo, base_branch):
+        typer.echo(
+            f"Warning: failed to sync {base_branch}; diff may be stale",
+            err=True,
+        )
+
+
 def register_commands(app: typer.Typer) -> None:
     """Register PR command on the app."""
 
     @app.command("pr")
-    def pr() -> None:
+    def pr(
+        refresh: bool = typer.Option(
+            False, "--refresh", "-r", help="Force regenerate PR title and body"
+        ),
+    ) -> None:
         """Create or update a GitHub PR, then open it in browser.
 
         Auto-commits any uncommitted changes before creating/updating the PR.
@@ -75,6 +102,8 @@ def register_commands(app: typer.Typer) -> None:
             typer.echo("Error: 'gh' CLI not found. Install with: brew install gh", err=True)
             raise typer.Exit(1)
 
+        _sync_main_repo(repo_root)
+
         # Always auto-commit and push any pending changes
         add_commit_push(repo_root)
 
@@ -82,15 +111,19 @@ def register_commands(app: typer.Typer) -> None:
         existing_url = _get_existing_pr_url(repo_root)
 
         if existing_url:
-            # Skip regeneration if no new commits unless this is a draft PR.
+            # Skip regeneration if no new commits unless refresh flag or draft PR.
             # Drafts are created with gh --fill, so refresh them with LLM output.
-            if not _has_unpushed_commits(repo_root) and not is_draft_pr(repo_root):
+            if not refresh and not _has_unpushed_commits(repo_root) and not is_draft_pr(repo_root):
                 typer.echo("No new commits. Opening existing PR...")
                 subprocess.run(["open", existing_url])
                 return
 
             typer.echo("Updating existing PR...")
-            message = generate_pr_message(repo_root)
+            diff = _get_pr_diff(repo_root)
+            if diff:
+                message = generate_pr_message_from_diff(repo_root, diff)
+            else:
+                message = generate_pr_message(repo_root)
             typer.echo(f"\n{message.title}\n")
             typer.echo(message.body)
             typer.echo("")

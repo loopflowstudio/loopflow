@@ -1,5 +1,5 @@
 agent_model: claude:opus 
-yolo: true
+yolo: true 
 chrome: true
 
 skill_sources:

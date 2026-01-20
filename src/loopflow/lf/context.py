@@ -240,8 +240,12 @@ def gather_task(repo_root: Path | None, name: str, config=None) -> TaskFile | No
     return None
 
 
-def gather_diff(repo_root: Path, exclude: Optional[list[str]] = None) -> str | None:
-    """Get diff against main branch. Returns None if on main or no diff."""
+def gather_diff(
+    repo_root: Path,
+    exclude: Optional[list[str]] = None,
+    base_ref: str | None = None,
+) -> str | None:
+    """Get diff against base branch. Returns None if on main or no diff."""
     # Get current branch
     result = subprocess.run(
         ["git", "branch", "--show-current"],
@@ -253,8 +257,12 @@ def gather_diff(repo_root: Path, exclude: Optional[list[str]] = None) -> str | N
     if not branch or branch == "main":
         return None
 
-    # Get diff against main, excluding specified patterns
-    cmd = ["git", "diff", "main...HEAD"]
+    # Get diff against base, excluding specified patterns
+    if base_ref is None:
+        from loopflow.lf.git import get_default_base_ref
+
+        base_ref = get_default_base_ref(repo_root)
+    cmd = ["git", "diff", f"{base_ref}...HEAD"]
     if exclude:
         cmd.append("--")
         cmd.extend(f":(exclude){pattern}" for pattern in exclude)
@@ -271,8 +279,8 @@ def gather_diff(repo_root: Path, exclude: Optional[list[str]] = None) -> str | N
     return result.stdout
 
 
-def gather_diff_files(repo_root: Path) -> list[str]:
-    """Return file paths touched by this branch vs main.
+def gather_diff_files(repo_root: Path, base_ref: str | None = None) -> list[str]:
+    """Return file paths touched by this branch vs base branch.
 
     Filters out deleted files (can't load those).
     Exclude patterns are applied later when files are loaded via gather_files().
@@ -288,8 +296,13 @@ def gather_diff_files(repo_root: Path) -> list[str]:
     if not branch or branch == "main":
         return []
 
+    if base_ref is None:
+        from loopflow.lf.git import get_default_base_ref
+
+        base_ref = get_default_base_ref(repo_root)
+
     result = subprocess.run(
-        ["git", "diff", "--name-only", "main...HEAD"],
+        ["git", "diff", "--name-only", f"{base_ref}...HEAD"],
         cwd=repo_root,
         capture_output=True,
         text=True,

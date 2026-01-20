@@ -61,6 +61,13 @@ class Loop:
         """Return first 7 chars of ID (like git)."""
         return self.id[:7]
 
+    @property
+    def area_slug(self) -> str | None:
+        """Return area as a slug for display/naming, or None if no area."""
+        if not self.area:
+            return None
+        return self.area.rstrip("/").split("/")[-1]
+
 
 @dataclass
 class LoopRun:

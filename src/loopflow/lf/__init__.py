@@ -71,6 +71,7 @@ app.command(context_settings={"allow_extra_args": True, "allow_interspersed_args
 app.command()(run_module.inline)
 app.command(name="pipeline")(run_module.pipeline)
 app.command()(run_module.cp)
+app.command()(run_module.add)
 
 
 def _get_task_source(repo_root: Path | None, name: str) -> str:
@@ -202,6 +203,7 @@ def main():
         "pipeline",
         "inline",
         "cp",
+        "add",
         "--help",
         "-h",
     }

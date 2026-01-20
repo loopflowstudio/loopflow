@@ -191,21 +191,10 @@ def list_all_tasks(repo_root: Path | None, config=None) -> tuple[list[str], list
     External skills are (prefixed_name, source_name) tuples from skill sources.
     """
     builtins = set(list_builtin_tasks())
-    if repo_root:
-        user = set(list_user_tasks(repo_root))
-    else:
-        user = set()
-
+    user = set(list_user_tasks(repo_root)) if repo_root else set()
     builtin_only = builtins - user
 
-    # Discover external skills
-    skill_source_configs = None
-    if config and config.skill_sources:
-        skill_source_configs = [
-            {"name": s.name, "prefix": s.prefix, "path": s.path}
-            for s in config.skill_sources
-        ]
-    sources = discover_skill_sources(skill_source_configs, repo_root)
+    sources = discover_skill_sources(config.skill_sources if config else None, repo_root)
     external_skills = list_all_skills(sources)
 
     return sorted(user), sorted(builtin_only), external_skills
@@ -222,15 +211,8 @@ def gather_task(repo_root: Path | None, name: str, config=None) -> TaskFile | No
 
     Returns TaskFile with parsed config, or None if not found.
     """
-    # Check for external skill (prefix:name format)
     if ":" in name:
-        skill_source_configs = None
-        if config and config.skill_sources:
-            skill_source_configs = [
-                {"name": s.name, "prefix": s.prefix, "path": s.path}
-                for s in config.skill_sources
-            ]
-        sources = discover_skill_sources(skill_source_configs, repo_root)
+        sources = discover_skill_sources(config.skill_sources if config else None, repo_root)
         skill = find_skill(name, sources)
         if skill:
             content = load_skill_prompt(skill)

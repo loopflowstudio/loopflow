@@ -3,7 +3,10 @@
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from loopflow.lf.config import SkillSourceConfig
 
 
 @dataclass
@@ -37,15 +40,12 @@ def _normalize_skill_name(dir_name: str) -> str:
     writing-plans -> write-plan
     test-driven-development -> tdd
     """
-    # Remove common suffixes
     name = dir_name.lower()
     name = re.sub(r"ing$", "", name)  # brainstorming -> brainstorm
-    name = re.sub(r"s$", "", name)    # writing-plans -> writing-plan after next step
+    name = re.sub(r"s$", "", name)    # writing-plans -> writing-plan
 
-    # Convert to kebab case
     name = name.replace("_", "-")
 
-    # Common abbreviations
     if name == "test-driven-development":
         return "tdd"
 
@@ -61,7 +61,6 @@ def _discover_superpowers_skills(source_path: Path) -> list[str]:
     skills = []
     for entry in skills_dir.iterdir():
         if entry.is_dir():
-            # Check for SKILL.md (superpowers convention)
             skill_file = entry / "SKILL.md"
             if skill_file.exists():
                 skills.append(_normalize_skill_name(entry.name))
@@ -75,7 +74,6 @@ def _find_skill_prompt_path(source_path: Path, skill_name: str) -> Path | None:
     if not skills_dir.exists():
         return None
 
-    # Try to find matching directory
     for entry in skills_dir.iterdir():
         if entry.is_dir():
             normalized = _normalize_skill_name(entry.name)
@@ -88,7 +86,7 @@ def _find_skill_prompt_path(source_path: Path, skill_name: str) -> Path | None:
 
 
 def discover_skill_sources(
-    config_sources: list[dict] | None = None,
+    config_sources: "list[SkillSourceConfig] | None" = None,
     repo_root: Path | None = None,
 ) -> list[SkillSource]:
     """Find configured skill libraries.
@@ -100,23 +98,20 @@ def discover_skill_sources(
     sources = []
     seen_prefixes = set()
 
-    # Process explicit config sources
     if config_sources:
         for source_config in config_sources:
-            name = source_config.get("name", "")
-            prefix = source_config.get("prefix", "")
-            path_str = source_config.get("path", "")
-
-            if not name or not prefix or not path_str:
-                continue
-
-            path = Path(path_str).expanduser()
+            path = Path(source_config.path).expanduser()
             if not path.exists():
                 continue
 
             skills = _discover_superpowers_skills(path)
-            sources.append(SkillSource(name=name, prefix=prefix, path=path, skills=skills))
-            seen_prefixes.add(prefix)
+            sources.append(SkillSource(
+                name=source_config.name,
+                prefix=source_config.prefix,
+                path=path,
+                skills=skills,
+            ))
+            seen_prefixes.add(source_config.prefix)
 
     # Auto-detect superpowers if not explicitly configured
     if "sp" not in seen_prefixes:

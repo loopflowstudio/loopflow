@@ -14,9 +14,10 @@ from pathlib import Path
 from loopflow.lf.config import load_config, parse_model
 from loopflow.lf.context import PromptComponents, gather_prompt_components, format_prompt
 from loopflow.lf.git import find_main_repo, get_current_branch
+from loopflow.lf.goals import load_goal
 from loopflow.lf.launcher import build_model_command, get_runner
-from loopflow.lfd.client import log_session_start, log_session_end
-from loopflow.lfd.db import _get_db, update_run_status
+from loopflow.lfd.client import log_session_start, log_session_end, notify_event
+from loopflow.lfd.db import _get_db, update_run_status, update_current_step, save_loop_pr
 from loopflow.lfd.models import AgentSpec, AgentStatus, MergeMode, Session, SessionStatus
 from loopflow.lf.messages import generate_pr_message
 from loopflow.lf.logging import write_prompt_file
@@ -90,24 +91,40 @@ def run_agent_iteration(
     # Run each task in the pipeline
     total = len(tasks)
     for i, task_name in enumerate(tasks):
+        # Update current step in database
+        update_current_step(run_id, task_name)
+
+        # Emit step started event
+        notify_event("loop.step.started", {
+            "name": agent.name,
+            "step": task_name,
+            "iteration": iteration,
+        })
+
         if foreground:
             print(f"\n{'='*60}")
             print(f"[{i+1}/{total}] {task_name}")
             print(f"{'='*60}\n")
 
         # Gather prompt components for this task
+        # If area is set, use it to filter context
+        context_paths = all_context or None
+        if agent.area:
+            # Area takes precedence - only include files in the area
+            context_paths = list(agent.area)
+
         components = gather_prompt_components(
             worktree_path,
             task=task_name,
-            context=all_context or None,
+            context=context_paths,
             exclude=exclude,
             include_tests_for=config.include_tests_for if config else None,
             run_mode="auto",
             include_loopflow_doc=config.include_loopflow_doc if config else True,
         )
 
-        # Inject agent prompt
-        components = _inject_agent_prompt(components, agent)
+        # Inject agent goal and prompt
+        components = _inject_agent_prompt(components, agent, main_repo)
         prompt = format_prompt(components)
         prompt_file = write_prompt_file(prompt)
 
@@ -169,13 +186,33 @@ def run_agent_iteration(
         status = SessionStatus.COMPLETED if result_code == 0 else SessionStatus.ERROR
         log_session_end(session.id, status)
 
+        # Emit step completed event
+        notify_event("loop.step.completed", {
+            "name": agent.name,
+            "step": task_name,
+            "status": "completed" if result_code == 0 else "error",
+        })
+
         if result_code != 0:
             print(f"\n[{task_name}] failed with exit code {result_code}")
             update_run_status(run_id, AgentStatus.ERROR)
+            update_current_step(run_id, None)
             return result_code
 
+    # Clear current step after all tasks complete
+    update_current_step(run_id, None)
+
     # Handle merge strategy
-    exit_code = _handle_merge(agent, worktree_path)
+    exit_code, pr_url = _handle_merge(agent, worktree_path)
+
+    # Track PR if created
+    if pr_url:
+        save_loop_pr(agent.name, iteration, pr_url)
+        notify_event("loop.iteration.done", {
+            "name": agent.name,
+            "iteration": iteration,
+            "pr_url": pr_url,
+        })
 
     return exit_code
 
@@ -200,12 +237,24 @@ def _parse_pipeline(pipeline: str, config) -> list[str]:
 def _inject_agent_prompt(
     components: PromptComponents,
     agent: AgentSpec,
+    repo: Path | None = None,
 ) -> PromptComponents:
-    """Inject agent prompt into the prompt components."""
-    if not agent.prompt:
-        return components
+    """Inject agent goal and prompt into the prompt components."""
+    parts = []
 
-    parts = [agent.prompt]
+    # Load goal file if specified
+    if agent.goal and repo:
+        goal_content = load_goal(repo, agent.goal)
+        if goal_content:
+            parts.append(f"<lf:goal>\n{goal_content}\n</lf:goal>")
+
+    # Add inline prompt if present
+    if agent.prompt:
+        parts.append(agent.prompt)
+
+    # If no goal or prompt, return unchanged
+    if not parts:
+        return components
 
     original_task = components.task
     if original_task:
@@ -232,34 +281,36 @@ def _inject_agent_prompt(
     )
 
 
-def _handle_merge(agent: AgentSpec, worktree_path: Path) -> int:
+def _handle_merge(agent: AgentSpec, worktree_path: Path) -> tuple[int, str | None]:
     """Handle merge mode after pipeline completion.
 
     With personal-main workflow:
     - AUTO: Create PR to personal-main, auto-merge
     - PR: Create PR to personal-main, wait for approval
     - SILENT: Merge directly to personal-main without PR
+
+    Returns (exit_code, pr_url).
     """
     branch = get_current_branch(worktree_path)
     if not branch:
-        return 1
+        return 1, None
 
     # If no personal_main, fall back to legacy behavior
     if not agent.personal_main:
         if agent.merge_mode == MergeMode.AUTO:
-            return _handle_auto_merge_legacy(worktree_path)
+            return _handle_auto_merge_legacy(worktree_path), None
         elif agent.merge_mode == MergeMode.PR:
             return _handle_pr_merge_legacy(agent, worktree_path, branch)
-        return 0
+        return 0, None
 
     # Personal-main workflow
     if agent.merge_mode == MergeMode.SILENT:
-        return _handle_silent_merge(agent, worktree_path, branch)
+        return _handle_silent_merge(agent, worktree_path, branch), None
     elif agent.merge_mode == MergeMode.AUTO:
         return _handle_auto_merge(agent, worktree_path, branch)
     elif agent.merge_mode == MergeMode.PR:
         return _handle_pr_merge(agent, worktree_path, branch)
-    return 0
+    return 0, None
 
 
 def _handle_silent_merge(agent: AgentSpec, worktree_path: Path, branch: str) -> int:
@@ -336,8 +387,11 @@ def _handle_silent_merge(agent: AgentSpec, worktree_path: Path, branch: str) -> 
     return 0
 
 
-def _handle_auto_merge(agent: AgentSpec, worktree_path: Path, branch: str) -> int:
-    """Create PR to personal-main and auto-merge it."""
+def _handle_auto_merge(agent: AgentSpec, worktree_path: Path, branch: str) -> tuple[int, str | None]:
+    """Create PR to personal-main and auto-merge it.
+
+    Returns (exit_code, pr_url).
+    """
     # Push the iteration branch
     result = subprocess.run(
         ["git", "push", "-u", "origin", branch],
@@ -347,9 +401,10 @@ def _handle_auto_merge(agent: AgentSpec, worktree_path: Path, branch: str) -> in
     )
     if result.returncode != 0:
         print(f"Failed to push branch: {result.stderr}")
-        return 1
+        return 1, None
 
     # Create PR targeting personal-main
+    pr_url = None
     try:
         message = generate_pr_message(worktree_path)
         title = f"[{agent.name}] {message.title}"
@@ -383,16 +438,19 @@ def _handle_auto_merge(agent: AgentSpec, worktree_path: Path, branch: str) -> in
             print("PR already exists")
         else:
             print(f"Failed to create PR: {result.stderr}")
-            return 1
+            return 1, None
     except Exception as e:
         print(f"Failed to create PR: {e}")
-        return 1
+        return 1, None
 
-    return 0
+    return 0, pr_url
 
 
-def _handle_pr_merge(agent: AgentSpec, worktree_path: Path, branch: str) -> int:
-    """Create PR to personal-main and wait for approval."""
+def _handle_pr_merge(agent: AgentSpec, worktree_path: Path, branch: str) -> tuple[int, str | None]:
+    """Create PR to personal-main and wait for approval.
+
+    Returns (exit_code, pr_url).
+    """
     # Push the iteration branch
     result = subprocess.run(
         ["git", "push", "-u", "origin", branch],
@@ -402,9 +460,10 @@ def _handle_pr_merge(agent: AgentSpec, worktree_path: Path, branch: str) -> int:
     )
     if result.returncode != 0:
         print(f"Failed to push branch: {result.stderr}")
-        return 1
+        return 1, None
 
     # Create PR targeting personal-main
+    pr_url = None
     try:
         message = generate_pr_message(worktree_path)
         title = f"[{agent.name}] {message.title}"
@@ -419,17 +478,18 @@ def _handle_pr_merge(agent: AgentSpec, worktree_path: Path, branch: str) -> int:
         result = subprocess.run(cmd, cwd=worktree_path, capture_output=True, text=True)
 
         if result.returncode == 0:
-            print(f"PR created: {result.stdout.strip()}")
+            pr_url = result.stdout.strip()
+            print(f"PR created: {pr_url}")
         elif "already exists" in result.stderr:
             print("PR already exists")
         else:
             print(f"Failed to create PR: {result.stderr}")
-            return 1
+            return 1, None
     except Exception as e:
         print(f"Failed to create PR: {e}")
-        return 1
+        return 1, None
 
-    return 0
+    return 0, pr_url
 
 
 # Legacy handlers for agents without personal-main
@@ -451,8 +511,11 @@ def _handle_auto_merge_legacy(worktree_path: Path) -> int:
     return 0
 
 
-def _handle_pr_merge_legacy(agent: AgentSpec, worktree_path: Path, branch: str) -> int:
-    """Create a PR for this iteration (legacy behavior)."""
+def _handle_pr_merge_legacy(agent: AgentSpec, worktree_path: Path, branch: str) -> tuple[int, str | None]:
+    """Create a PR for this iteration (legacy behavior).
+
+    Returns (exit_code, pr_url).
+    """
     # Push the branch
     result = subprocess.run(
         ["git", "push", "-u", "origin", branch],
@@ -462,9 +525,10 @@ def _handle_pr_merge_legacy(agent: AgentSpec, worktree_path: Path, branch: str) 
     )
     if result.returncode != 0:
         print(f"Failed to push branch: {result.stderr}")
-        return 1
+        return 1, None
 
     # Create PR
+    pr_url = None
     try:
         message = generate_pr_message(worktree_path)
         title = f"[{agent.name}] {message.title}"
@@ -478,14 +542,15 @@ def _handle_pr_merge_legacy(agent: AgentSpec, worktree_path: Path, branch: str) 
         result = subprocess.run(cmd, cwd=worktree_path, capture_output=True, text=True)
 
         if result.returncode == 0:
-            print(f"PR created: {result.stdout.strip()}")
+            pr_url = result.stdout.strip()
+            print(f"PR created: {pr_url}")
         elif "already exists" in result.stderr:
             print("PR already exists")
         else:
             print(f"Failed to create PR: {result.stderr}")
-            return 1
+            return 1, None
     except Exception as e:
         print(f"Failed to create PR: {e}")
-        return 1
+        return 1, None
 
-    return 0
+    return 0, pr_url

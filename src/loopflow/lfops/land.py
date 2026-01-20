@@ -229,12 +229,25 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
             text=True,
         )
         unpushed = int(result.stdout.strip()) if result.returncode == 0 else 0
+        # Check if branches have diverged (remote has commits not in local)
+        result = subprocess.run(
+            ["git", "rev-list", "HEAD..@{u}", "--count"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+        )
+        remote_ahead = int(result.stdout.strip()) if result.returncode == 0 else 0
         if unpushed > 0:
             if strict:
                 typer.echo("Error: Unpushed commits (use without --strict to auto-push)", err=True)
                 raise typer.Exit(1)
-            typer.echo("Pushing to origin...")
-            subprocess.run(["git", "push"], cwd=repo_root, check=True)
+            if remote_ahead > 0:
+                # Branches diverged (e.g., after rebase) - force push safely
+                typer.echo("Branches diverged, force-pushing with lease...")
+                subprocess.run(["git", "push", "--force-with-lease"], cwd=repo_root, check=True)
+            else:
+                typer.echo("Pushing to origin...")
+                subprocess.run(["git", "push"], cwd=repo_root, check=True)
     else:
         if strict:
             typer.echo("Error: Branch not pushed (use without --strict to auto-push)", err=True)

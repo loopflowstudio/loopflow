@@ -9,6 +9,76 @@ from pathlib import Path
 from loopflow.lf.models import Session, SessionStatus
 
 
+# New loop-based models
+
+
+class LoopType(Enum):
+    """Type of loop execution."""
+    LOOP = "loop"          # Continuous homeostasis
+    FLOW = "flow"          # One-off project execution
+    SUBSCRIBE = "subscribe"  # Triggered by pathset changes on main
+    SCHEDULE = "schedule"    # Triggered by cron
+
+
+class LoopStatus(Enum):
+    """Runtime status of a loop."""
+    IDLE = "idle"          # Not running
+    RUNNING = "running"    # Currently executing an iteration
+    WAITING = "waiting"    # Paused (outstanding >= limit)
+    ERROR = "error"        # Last iteration failed
+
+
+class MergeMode(Enum):
+    """How iteration branches merge to personal-main."""
+    AUTO = "auto"    # PR auto-merges to personal-main (default)
+    PR = "pr"        # PR to personal-main waits for approval
+    LAND = "land"    # Auto-merge to personal-main AND to main
+
+
+@dataclass
+class Loop:
+    """A loop configuration (goal + repo combination)."""
+    id: str
+    type: LoopType
+    goal: str
+    repo: Path
+    personal_main: str
+    status: LoopStatus = LoopStatus.IDLE
+    iteration: int = 0
+    pr_limit: int = 5
+    merge_mode: MergeMode = MergeMode.AUTO
+
+    # Type-specific config
+    project_file: str | None = None   # for flow
+    pathset: str | None = None        # for subscribe (comma-separated)
+    cron: str | None = None           # for schedule
+    area: str | None = None           # area of responsibility override
+
+    created_at: datetime = field(default_factory=datetime.now)
+
+    def short_id(self) -> str:
+        """Return first 7 chars of ID (like git)."""
+        return self.id[:7]
+
+
+@dataclass
+class LoopRun:
+    """A single iteration attempt."""
+    id: str
+    loop_id: str
+    iteration: int
+    status: LoopStatus
+    started_at: datetime
+    ended_at: datetime | None = None
+    worktree: str | None = None
+    current_step: str | None = None
+    error: str | None = None
+    pr_url: str | None = None
+
+
+# Legacy models (kept for backwards compatibility during migration)
+
+
 class TriggerKind(Enum):
     MANUAL = "manual"
     MAIN_CHANGED = "main-changed"
@@ -73,7 +143,8 @@ class AgentSpec:
     context: list[str] = field(default_factory=list)
     prompt: str = ""
     emoji: str = ""
-    goal: Path | None = None
+    goal: str = ""  # Name of goal file in .lf/goals/{goal}.md
+    area: list[str] = field(default_factory=list)  # Pathset - where agent works
     merge_mode: MergeMode = MergeMode.AUTO
     personal_main: str | None = None  # e.g. "myagent-main" or "myagent-1-main"
 
@@ -89,7 +160,9 @@ class AgentSpec:
         if self.emoji:
             result["emoji"] = self.emoji
         if self.goal:
-            result["goal"] = str(self.goal)
+            result["goal"] = self.goal
+        if self.area:
+            result["area"] = self.area
         if self.merge_mode != MergeMode.AUTO:
             result["merge_mode"] = self.merge_mode.value
         if self.personal_main:
@@ -99,7 +172,6 @@ class AgentSpec:
     @classmethod
     def from_dict(cls, data: dict) -> "AgentSpec":
         trigger_data = data.get("trigger", {})
-        goal = Path(data["goal"]) if data.get("goal") else None
         merge = data.get("merge_mode", "auto")
         return cls(
             name=data["name"],
@@ -109,7 +181,8 @@ class AgentSpec:
             context=data.get("context", []),
             prompt=data.get("prompt", ""),
             emoji=data.get("emoji", ""),
-            goal=goal,
+            goal=data.get("goal", ""),
+            area=data.get("area", []),
             merge_mode=MergeMode(merge),
             personal_main=data.get("personal_main"),
         )
@@ -128,6 +201,7 @@ class AgentRun:
     error: str | None = None
     main_sha: str | None = None
     emoji: str = ""
+    current_step: str | None = None  # Which task is currently running
 
     def to_dict(self) -> dict:
         result = {
@@ -144,6 +218,8 @@ class AgentRun:
         }
         if self.emoji:
             result["emoji"] = self.emoji
+        if self.current_step:
+            result["current_step"] = self.current_step
         return result
 
     @classmethod
@@ -160,6 +236,7 @@ class AgentRun:
             error=data.get("error"),
             main_sha=data.get("main_sha"),
             emoji=data.get("emoji", ""),
+            current_step=data.get("current_step"),
         )
 
 

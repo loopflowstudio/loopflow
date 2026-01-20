@@ -12,7 +12,7 @@ from loopflow.lf.context import find_worktree_root
 from loopflow.lf.git import find_main_repo
 from loopflow.lfd.db import (
     get_loop,
-    get_loop_by_goal_repo,
+    get_loop_by_area_repo,
     save_loop,
     update_loop_pid,
     update_loop_status,
@@ -112,28 +112,30 @@ def _branch_exists(repo: Path, branch: str) -> bool:
     return result.returncode == 0
 
 
-def _allocate_loop_main(repo: Path, goal_name: str, area: str | None = None) -> str:
-    """Return unique branch name: goal-area-words-main or goal-words-main.
+def _area_slug(area: str) -> str:
+    """Convert area to slug: 'Maestro/' -> 'maestro', '.' -> 'root'."""
+    if area == ".":
+        return "root"
+    return area.rstrip("/").split("/")[-1].lower()
 
-    Always includes random words for uniqueness. Format:
-    - With area: product-engineer-api-swift-river-main
-    - Without area: product-engineer-swift-river-main
+
+def _allocate_loop_main(repo: Path, area: str) -> str:
+    """Return unique branch name based on area.
+
+    Format: area-words-main
+    - With area: maestro-swift-river-main
+    - Root: root-swift-river-main
     """
-    if area:
-        # "Maestro/" -> "maestro", "src/loopflow/" -> "loopflow"
-        area_slug = area.rstrip("/").split("/")[-1].lower()
-        base = f"{goal_name}-{area_slug}"
-    else:
-        base = goal_name
+    slug = _area_slug(area)
 
     # Try random word combinations until we find an available branch
     for _ in range(100):
         words = _generate_random_words()
-        candidate = f"{base}-{words}-main"
+        candidate = f"{slug}-{words}-main"
         if not _branch_exists(repo, candidate):
             return candidate
 
-    raise ValueError(f"Could not allocate personal-main branch for {base}")
+    raise ValueError(f"Could not allocate personal-main branch for {slug}")
 
 
 def _create_loop_main_branch(repo: Path, branch: str) -> None:
@@ -157,31 +159,37 @@ def _create_loop_main_branch(repo: Path, branch: str) -> None:
 
 def create_loop(
     loop_type: LoopType,
-    goal_name: str,
+    area: str,
     repo: Path,
-    area: str | None = None,
+    goals: list[str] | None = None,
     project_file: str | None = None,
     pathset: str | None = None,
     cron: str | None = None,
 ) -> Loop:
-    """Create or get an existing loop for a goal+area+repo combination."""
-    # Check if loop already exists (now includes area in lookup)
-    existing = get_loop_by_goal_repo(loop_type, goal_name, repo, area=area)
+    """Create or get an existing loop for an area+repo combination."""
+    goals = goals or []
+
+    # Check if loop already exists for this area
+    existing = get_loop_by_area_repo(loop_type, area, repo)
     if existing:
+        # Update goals if changed
+        if set(existing.goals) != set(goals):
+            existing.goals = goals
+            save_loop(existing)
         return existing
 
-    # Allocate and create personal-main branch (now includes area in name)
-    loop_main = _allocate_loop_main(repo, goal_name, area=area)
+    # Allocate and create personal-main branch based on area
+    loop_main = _allocate_loop_main(repo, area)
     _create_loop_main_branch(repo, loop_main)
 
     loop = Loop(
         id=str(uuid.uuid4()),
         type=loop_type,
-        goal_name=goal_name,
+        area=area,
         repo=repo,
         loop_main=loop_main,
+        goals=goals,
         status=LoopStatus.IDLE,
-        area=area,
         project_file=project_file,
         pathset=pathset,
         cron=cron,

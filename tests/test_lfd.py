@@ -8,7 +8,7 @@ from loopflow.lfd.db import (
     delete_loop,
     get_latest_loop_run,
     get_loop,
-    get_loop_by_goal_repo,
+    get_loop_by_area_repo,
     get_loop_runs,
     list_loops,
     load_sessions,
@@ -323,7 +323,7 @@ def test_loop_model_defaults():
     loop = Loop(
         id="loop-1",
         type=LoopType.LOOP,
-        goal_name="test-coverage",
+        area="src/test-coverage/",
         repo=Path("/tmp/repo"),
         loop_main="test-coverage-main",
     )
@@ -334,7 +334,7 @@ def test_loop_model_defaults():
     assert loop.project_file is None
     assert loop.pathset is None
     assert loop.cron is None
-    assert loop.area is None
+    assert loop.goals == []  # goals default to empty list
     assert loop.pid is None
 
 
@@ -343,7 +343,7 @@ def test_loop_model_short_id():
     loop = Loop(
         id="abcdef1234567890",
         type=LoopType.LOOP,
-        goal_name="test",
+        area="src/test/",
         repo=Path("/tmp/repo"),
         loop_main="test-main",
     )
@@ -379,7 +379,7 @@ def test_db_save_and_get_loop():
         loop = Loop(
             id="loop-123",
             type=LoopType.LOOP,
-            goal_name="test-coverage",
+            area="src/test-coverage/",
             repo=Path("/tmp/repo"),
             loop_main="test-coverage-main",
             status=LoopStatus.IDLE,
@@ -391,7 +391,7 @@ def test_db_save_and_get_loop():
         loaded = get_loop("loop-123", db_path)
         assert loaded is not None
         assert loaded.id == "loop-123"
-        assert loaded.goal_name == "test-coverage"
+        assert loaded.area == "src/test-coverage/"
         assert loaded.type == LoopType.LOOP
         assert loaded.loop_main == "test-coverage-main"
 
@@ -403,7 +403,7 @@ def test_db_get_loop_short_id():
         loop = Loop(
             id="abcdef1234567890",
             type=LoopType.LOOP,
-            goal_name="test",
+            area="src/test/",
             repo=Path("/tmp/repo"),
             loop_main="test-main",
         )
@@ -415,28 +415,28 @@ def test_db_get_loop_short_id():
         assert loaded.id == "abcdef1234567890"
 
 
-def test_db_get_loop_by_goal_repo():
-    """Get loop by type, goal, and repo."""
+def test_db_get_loop_by_area_repo():
+    """Get loop by type, area, and repo."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         loop = Loop(
             id="loop-1",
             type=LoopType.FLOW,
-            goal_name="api-cleanup",
+            area="src/api/",
             repo=Path("/tmp/repo"),
-            loop_main="api-cleanup-main",
+            loop_main="api-aurora-melody-main",
         )
         save_loop(loop, db_path)
 
-        loaded = get_loop_by_goal_repo(
-            LoopType.FLOW, "api-cleanup", Path("/tmp/repo"), db_path=db_path
+        loaded = get_loop_by_area_repo(
+            LoopType.FLOW, "src/api/", Path("/tmp/repo"), db_path=db_path
         )
         assert loaded is not None
         assert loaded.id == "loop-1"
 
         # Different type should not match
-        not_found = get_loop_by_goal_repo(
-            LoopType.LOOP, "api-cleanup", Path("/tmp/repo"), db_path=db_path
+        not_found = get_loop_by_area_repo(
+            LoopType.LOOP, "src/api/", Path("/tmp/repo"), db_path=db_path
         )
         assert not_found is None
 
@@ -449,14 +449,14 @@ def test_db_list_loops():
         loop1 = Loop(
             id="loop-1",
             type=LoopType.LOOP,
-            goal_name="goal-a",
+            area="src/goal-a/",
             repo=Path("/tmp/repo-a"),
             loop_main="goal-a-main",
         )
         loop2 = Loop(
             id="loop-2",
             type=LoopType.SUBSCRIBE,
-            goal_name="goal-b",
+            area="src/goal-b/",
             repo=Path("/tmp/repo-b"),
             loop_main="goal-b-main",
         )
@@ -469,7 +469,7 @@ def test_db_list_loops():
         # Filter by repo
         loops = list_loops(repo=Path("/tmp/repo-a"), db_path=db_path)
         assert len(loops) == 1
-        assert loops[0].goal_name == "goal-a"
+        assert loops[0].area == "src/goal-a/"
 
 
 def test_db_update_loop_status():
@@ -479,7 +479,7 @@ def test_db_update_loop_status():
         loop = Loop(
             id="loop-1",
             type=LoopType.LOOP,
-            goal_name="test",
+            area="src/test/",
             repo=Path("/tmp/repo"),
             loop_main="test-main",
             status=LoopStatus.IDLE,
@@ -500,7 +500,7 @@ def test_db_update_loop_iteration():
         loop = Loop(
             id="loop-1",
             type=LoopType.LOOP,
-            goal_name="test",
+            area="src/test/",
             repo=Path("/tmp/repo"),
             loop_main="test-main",
             iteration=0,
@@ -521,7 +521,7 @@ def test_db_delete_loop():
         loop = Loop(
             id="loop-1",
             type=LoopType.LOOP,
-            goal_name="test",
+            area="src/test/",
             repo=Path("/tmp/repo"),
             loop_main="test-main",
         )
@@ -557,7 +557,7 @@ def test_db_save_and_get_loop_runs():
         loop = Loop(
             id="loop-1",
             type=LoopType.LOOP,
-            goal_name="test",
+            area="src/test/",
             repo=Path("/tmp/repo"),
             loop_main="test-main",
         )
@@ -596,7 +596,7 @@ def test_db_get_latest_loop_run():
         loop = Loop(
             id="loop-1",
             type=LoopType.LOOP,
-            goal_name="test",
+            area="src/test/",
             repo=Path("/tmp/repo"),
             loop_main="test-main",
         )
@@ -632,7 +632,7 @@ def test_db_update_loop_run_status():
         loop = Loop(
             id="loop-1",
             type=LoopType.LOOP,
-            goal_name="test",
+            area="src/test/",
             repo=Path("/tmp/repo"),
             loop_main="test-main",
         )
@@ -663,7 +663,7 @@ def test_db_update_loop_run_step():
         loop = Loop(
             id="loop-1",
             type=LoopType.LOOP,
-            goal_name="test",
+            area="src/test/",
             repo=Path("/tmp/repo"),
             loop_main="test-main",
         )
@@ -693,7 +693,7 @@ def test_db_update_loop_run_pr():
         loop = Loop(
             id="loop-1",
             type=LoopType.LOOP,
-            goal_name="test",
+            area="src/test/",
             repo=Path("/tmp/repo"),
             loop_main="test-main",
         )
@@ -723,7 +723,7 @@ def test_db_update_loop_pid():
         loop = Loop(
             id="loop-1",
             type=LoopType.LOOP,
-            goal_name="test",
+            area="src/test/",
             repo=Path("/tmp/repo"),
             loop_main="test-main",
         )
@@ -749,7 +749,7 @@ def test_loop_model_with_pid():
     loop = Loop(
         id="loop-1",
         type=LoopType.LOOP,
-        goal_name="test",
+        area="src/test/",
         repo=Path("/tmp/repo"),
         loop_main="test-main",
         pid=12345,
@@ -765,7 +765,7 @@ def test_db_save_loop_with_pid():
         loop = Loop(
             id="loop-1",
             type=LoopType.LOOP,
-            goal_name="test",
+            area="src/test/",
             repo=Path("/tmp/repo"),
             loop_main="test-main",
             pid=54321,

@@ -1,5 +1,6 @@
 """SQLite database for lfd state."""
 
+import json
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -31,24 +32,25 @@ def _init_db(db_path: Path) -> None:
         CREATE TABLE IF NOT EXISTS loops (
             id TEXT PRIMARY KEY,
             type TEXT NOT NULL,
-            goal TEXT NOT NULL,
+            area TEXT NOT NULL,
             repo TEXT NOT NULL,
             loop_main TEXT NOT NULL,
+            goals TEXT,
             status TEXT NOT NULL DEFAULT 'idle',
             iteration INTEGER DEFAULT 0,
             pr_limit INTEGER DEFAULT 5,
-            merge_mode TEXT DEFAULT 'auto',
+            merge_mode TEXT DEFAULT 'pr',
             project_file TEXT,
             pathset TEXT,
             cron TEXT,
-            area TEXT,
+            goal TEXT,
             pid INTEGER,
             last_main_sha TEXT,
             created_at TEXT NOT NULL
         );
 
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_loops_unique
-            ON loops(type, goal, COALESCE(area, ''), repo);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_loops_area_repo
+            ON loops(type, area, repo);
         CREATE INDEX IF NOT EXISTS idx_loops_repo ON loops(repo);
         CREATE INDEX IF NOT EXISTS idx_loops_status ON loops(status);
 
@@ -271,16 +273,17 @@ def save_loop(loop: Loop, db_path: Path | None = None) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO loops
-        (id, type, goal, repo, loop_main, status, iteration, pr_limit, merge_mode,
-         project_file, pathset, cron, area, pid, last_main_sha, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, type, area, repo, loop_main, goals, status, iteration, pr_limit, merge_mode,
+         project_file, pathset, cron, goal, pid, last_main_sha, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             loop.id,
             loop.type.value,
-            loop.goal_name,
+            loop.area,
             str(loop.repo),
             loop.loop_main,
+            json.dumps(loop.goals) if loop.goals else None,
             loop.status.value,
             loop.iteration,
             loop.pr_limit,
@@ -288,7 +291,7 @@ def save_loop(loop: Loop, db_path: Path | None = None) -> None:
             loop.project_file,
             loop.pathset,
             loop.cron,
-            loop.area,
+            loop.goal_name,  # Legacy field
             loop.pid,
             loop.last_main_sha,
             loop.created_at.isoformat(),
@@ -314,19 +317,18 @@ def get_loop(loop_id: str, db_path: Path | None = None) -> Loop | None:
     return _loop_from_row(dict(row)) if row else None
 
 
-def get_loop_by_goal_repo(
+def get_loop_by_area_repo(
     loop_type: LoopType,
-    goal: str,
+    area: str,
     repo: Path,
-    area: str | None = None,
     *,
     db_path: Path | None = None,
 ) -> Loop | None:
-    """Get a loop by type, goal, area, and repo."""
+    """Get a loop by type, area, and repo."""
     conn = _get_db(db_path)
     cursor = conn.execute(
-        "SELECT * FROM loops WHERE type = ? AND goal = ? AND COALESCE(area, '') = ? AND repo = ?",
-        (loop_type.value, goal, area or "", str(repo)),
+        "SELECT * FROM loops WHERE type = ? AND area = ? AND repo = ?",
+        (loop_type.value, area, str(repo)),
     )
     row = cursor.fetchone()
     conn.close()
@@ -433,12 +435,21 @@ def _loop_from_row(row: dict) -> Loop:
     merge_mode_str = row.get("merge_mode", "pr")
     if merge_mode_str == "auto":
         merge_mode_str = "pr"
+
+    # Parse goals JSON
+    goals_str = row.get("goals")
+    goals = json.loads(goals_str) if goals_str else []
+
+    # Handle area - could be in 'area' column or legacy 'goal' was used as area marker
+    area = row.get("area") or "."
+
     return Loop(
         id=row["id"],
         type=LoopType(row["type"]),
-        goal_name=row["goal"],
+        area=area,
         repo=Path(row["repo"]),
         loop_main=row["loop_main"],
+        goals=goals,
         status=LoopStatus(row["status"]),
         iteration=row.get("iteration", 0),
         pr_limit=row.get("pr_limit", 5),
@@ -446,7 +457,7 @@ def _loop_from_row(row: dict) -> Loop:
         project_file=row.get("project_file"),
         pathset=row.get("pathset"),
         cron=row.get("cron"),
-        area=row.get("area"),
+        goal_name=row.get("goal"),  # Legacy field
         pid=row.get("pid"),
         last_main_sha=row.get("last_main_sha"),
         created_at=datetime.fromisoformat(row["created_at"]),

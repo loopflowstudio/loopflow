@@ -19,7 +19,7 @@ from pathlib import Path
 
 from loopflow.lf.config import load_config, parse_model
 from loopflow.lf.context import format_prompt, gather_prompt_components
-from loopflow.lf.goals import load_goal
+from loopflow.lf.goals import build_effective_goals, render_goals
 from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lf.logging import write_prompt_file
 from loopflow.lf.messages import generate_pr_message
@@ -125,7 +125,7 @@ def run_loop_iterations(loop: Loop) -> None:
                     "loop.waiting",
                     {
                         "loop_id": loop.id,
-                        "goal": loop.goal_name,
+                        "area": loop.area,
                         "outstanding": outstanding,
                         "limit": loop.pr_limit,
                     },
@@ -145,7 +145,7 @@ def run_loop_iterations(loop: Loop) -> None:
                 "scheduler.waiting",
                 {
                     "loop_id": loop.id,
-                    "goal": loop.goal_name,
+                    "area": loop.area,
                     "reason": reason or "concurrency",
                 },
             )
@@ -164,7 +164,7 @@ def run_loop_iterations(loop: Loop) -> None:
                 "loop.error",
                 {
                     "loop_id": loop.id,
-                    "goal": loop.goal_name,
+                    "area": loop.area,
                     "error": str(e),
                 },
             )
@@ -218,19 +218,21 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
         "loop.started",
         {
             "loop_id": loop.id,
-            "goal": loop.goal_name,
+            "area": loop.area,
+            "goals": loop.goals,
             "iteration": iteration,
         },
     )
 
-    # Load goal content
-    goal_spec = load_goal(loop.repo, loop.goal_name)
-    if not goal_spec:
-        update_loop_run_status(run.id, LoopStatus.ERROR, error="Goal file not found")
+    # Build effective goals (inject adaptive if no mode present)
+    effective_goals = build_effective_goals(loop.repo, loop.goals)
+    if not effective_goals:
+        update_loop_run_status(run.id, LoopStatus.ERROR, error="No valid goals found")
         return False
 
-    # Parse flow steps from goal or default
-    flow = goal_spec.pipeline or "design,implement,polish"
+    # Parse flow steps from first goal's pipeline or default
+    # TODO: Consider merging pipelines from multiple goals
+    flow = effective_goals[0].pipeline or "design,implement,polish"
     tasks = [t.strip() for t in flow.split(",")]
     if flow.startswith("@") and config and config.flows:
         config_flow = config.flows.get(flow[1:])
@@ -261,9 +263,10 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
         )
 
         # Gather prompt components
-        context_paths = goal_spec.area if goal_spec.area else None
-        if loop.area:
-            context_paths = [a.strip() for a in loop.area.split(",")]
+        # Use area from loop (required), fall back to first goal's area
+        context_paths = [loop.area] if loop.area != "." else None
+        if not context_paths and effective_goals[0].area:
+            context_paths = effective_goals[0].area
 
         components = gather_prompt_components(
             worktree_path,
@@ -280,10 +283,9 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
             _cleanup_worktree(loop.repo, worktree_path, branch)
             return False
 
-        # Inject goal content
+        # Inject goal content using render_goals (modes first, then roles)
         step_file, step_content = components.step
-        goal_name = loop.goal_name
-        goal_section = f"<lf:goal:{goal_name}>\n{goal_spec.content}\n</lf:goal:{goal_name}>"
+        goal_section = render_goals(effective_goals)
 
         # For FLOW loops, inject project file content if present
         if loop.type == LoopType.FLOW and loop.project_file:
@@ -318,7 +320,7 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
             "--session-id",
             run.id,
             "--step",
-            f"{loop.goal_name}:{task_name}",
+            f"{loop.area}:{task_name}",
             "--repo-root",
             str(worktree_path),
             "--prompt-file",
@@ -370,7 +372,8 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
         "loop.iteration.done",
         {
             "loop_id": loop.id,
-            "goal": loop.goal_name,
+            "area": loop.area,
+            "goals": loop.goals,
             "iteration": iteration,
             "pr_url": pr_url,
         },
@@ -399,11 +402,11 @@ def _create_pr_to_loop_main(
     # Generate PR message
     try:
         message = generate_pr_message(worktree_path)
-        title = f"[{loop.goal_name}] {message.title}"
-        body = f"Loop: {loop.goal_name}\nIteration: {iteration}\n\n{message.body}"
+        title = f"[{loop.area_slug}] {message.title}"
+        body = f"Loop: {loop.area} [{loop.goals_display}]\nIteration: {iteration}\n\n{message.body}"
     except Exception:
-        title = f"[{loop.goal_name}] Iteration {iteration}"
-        body = f"Loop: {loop.goal_name}\nIteration: {iteration}"
+        title = f"[{loop.area_slug}] Iteration {iteration}"
+        body = f"Loop: {loop.area} [{loop.goals_display}]\nIteration: {iteration}"
 
     # Create PR
     cmd = [
@@ -489,9 +492,9 @@ def _land_to_main(loop: Loop) -> str | None:
             "--head",
             loop.loop_main,
             "--title",
-            f"[{loop.goal_name}] Land accumulated work",
+            f"[{loop.area_slug}] Land accumulated work",
             "--body",
-            f"Auto-land from loop: {loop.goal_name}",
+            f"Auto-land from loop: {loop.area} [{loop.goals_display}]",
         ],
         cwd=repo,
         capture_output=True,

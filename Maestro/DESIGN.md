@@ -227,6 +227,211 @@ From loopflowstudio existing patterns:
 
 ---
 
+## Implementation Reference
+
+Specific implementation guidelines for SwiftUI, adapted from Vercel Design Guidelines and UI Skills.
+
+### Typography & Text
+
+```swift
+// Monospaced digits for numeric data
+Text("\(tokenCount)")
+    .monospacedDigit()
+
+// Proper quotes and ellipsis
+"Hello" not "Hello"     // curly quotes
+"Loading…" not "Loading..."  // ellipsis character
+
+// Non-breaking space for units
+Text("10\u{00A0}MB")    // keeps "10" and "MB" together
+```
+
+- Use `.monospacedDigit()` for token counts, timestamps, file sizes
+- Curly quotes ("") not straight quotes ("")
+- Ellipsis character (…) not three periods (...)
+- Avoid modifying letter spacing unless explicitly needed
+
+### Layout & Spacing
+
+```swift
+// Expand hit target beyond visual bounds
+Button(action: { }) {
+    Image(systemName: "xmark")
+        .frame(width: 16, height: 16)
+}
+.contentShape(Rectangle().size(width: 44, height: 44))
+
+// Nested corner radii: child ≤ parent - padding
+RoundedRectangle(cornerRadius: 12)  // parent
+    .padding(8)
+    RoundedRectangle(cornerRadius: 4)  // child: 12 - 8 = 4
+```
+
+- Minimum tap targets: 44pt × 44pt
+- Child corner radius must not exceed parent minus padding
+- Optical alignment over geometric when it looks better (±1pt)
+- Use `.safeAreaInset()` for toolbar-adjacent content
+
+### Animation
+
+```swift
+// Only animate these properties
+.offset(x: isExpanded ? 0 : -100)
+.scaleEffect(isPressed ? 0.95 : 1.0)
+.opacity(isVisible ? 1 : 0)
+.rotationEffect(.degrees(isSpinning ? 360 : 0))
+
+// Respect reduce motion
+@Environment(\.accessibilityReduceMotion) var reduceMotion
+
+.animation(reduceMotion ? nil : .spring(), value: isExpanded)
+```
+
+- Only animate `offset`, `scaleEffect`, `opacity`, `rotationEffect`
+- Never animate frame size directly—use `matchedGeometryEffect` or transitions
+- Check `accessibilityReduceMotion` and disable animations when true
+- Interaction feedback under 200ms
+- Use `.spring()` for physical feel, `.easeOut` for exits
+
+### Keyboard & Focus
+
+```swift
+@FocusState private var focusedField: Field?
+
+TextField("Search", text: $query)
+    .focused($focusedField, equals: .search)
+
+// Focus ring styling
+.focusable()
+.onFocusChange { focused in
+    // custom focus appearance
+}
+```
+
+- All flows keyboard-navigable
+- Implement focus traps in sheets and popovers
+- Return focus to trigger element when dismissing
+- Support standard shortcuts: ⌘W close, ⌘, preferences, ⌘Q quit
+
+### Accessibility
+
+```swift
+// Icon-only buttons need labels
+Button(action: { }) {
+    Image(systemName: "trash")
+}
+.accessibilityLabel("Delete")
+.accessibilityHint("Removes this item permanently")
+
+// Semantic grouping
+VStack {
+    Text(title)
+    Text(subtitle)
+}
+.accessibilityElement(children: .combine)
+
+// Sort priority for VoiceOver
+.accessibilitySortPriority(1)  // higher = read first
+```
+
+- Every control needs `.accessibilityLabel()` if not self-evident
+- Use `.accessibilityHint()` for non-obvious consequences
+- Group related elements with `.accessibilityElement(children: .combine)`
+- Hide decorative elements with `.accessibilityHidden(true)`
+- Test with VoiceOver enabled
+
+### Color & Contrast
+
+```swift
+@Environment(\.colorScheme) var colorScheme
+
+// Semantic colors adapt automatically
+Color.primary       // text
+Color.secondary     // secondary text
+Color.accentColor   // interactive elements
+
+// Check high contrast mode
+@Environment(\.accessibilityHighContrastEnabled) var highContrast
+```
+
+- One accent color per view (burgundy #722f37 for Maestro)
+- Use semantic colors over hardcoded values
+- Support both light and dark via `colorScheme`
+- Test with Increase Contrast accessibility setting
+- Interactive states must have higher contrast than rest state
+
+### Forms & Input
+
+```swift
+TextField("Email", text: $email)
+    .textContentType(.emailAddress)
+    .autocorrectionDisabled()
+    .textInputAutocapitalization(.never)
+
+// Show errors adjacent to fields
+VStack(alignment: .leading) {
+    TextField("Name", text: $name)
+    if let error = nameError {
+        Text(error)
+            .foregroundColor(.red)
+            .font(.caption)
+    }
+}
+```
+
+- Use appropriate `.textContentType()` for autofill
+- Disable autocorrect for emails, codes, usernames
+- Enter/Return should submit when appropriate (`.onSubmit`)
+- Show validation errors adjacent to fields, not in alerts
+- Keep submit buttons enabled; show errors on tap if invalid
+
+### Performance
+
+```swift
+// Lazy loading for lists
+LazyVStack {
+    ForEach(items) { item in
+        ItemRow(item: item)
+    }
+}
+
+// Avoid expensive operations in body
+var body: some View {
+    // ❌ Don't compute here
+    // ✅ Use @State, @StateObject, or computed properties
+}
+```
+
+- Use `LazyVStack`/`LazyHStack` for long lists
+- Move expensive work to background with `Task { }`
+- Profile with Instruments, not guesswork
+- Target <100ms for all UI interactions
+
+### State & Navigation
+
+```swift
+// Deep linking support
+.onOpenURL { url in
+    // Parse and navigate
+}
+
+// Preserve scroll position
+ScrollViewReader { proxy in
+    ScrollView {
+        // content
+    }
+    .onAppear {
+        proxy.scrollTo(savedPosition)
+    }
+}
+```
+
+- Support deep linking for shareable states
+- Preserve scroll position on navigation
+- Warn before losing unsaved changes (`.interactiveDismissDisabled`)
+
+---
+
 ## What "Conducting Agents" Implies About UX
 
 The musical metaphor suggests specific design decisions:
@@ -425,3 +630,5 @@ Captured for future sessions:
 - Stripe documentation, Patrick Collison interviews
 - Cursor documentation, founder interviews
 - loopflowstudio monorepo (Cadenza, website)
+- Vercel Design Guidelines: vercel.com/design/guidelines
+- UI Skills: ui-skills.com

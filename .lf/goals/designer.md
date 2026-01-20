@@ -28,3 +28,37 @@ Focus on depth over breadth. A single well-thought-out design is better than mul
 - Trade-offs are explicitly stated, not hidden
 - Each design is implementable in 1-3 iterations
 - Diagrams or examples included where they add clarity
+
+## Visual Design Rules
+
+When designing UI components, follow these guidelines (adapted from Vercel Design Guidelines and UI Skills):
+
+### Typography
+- Use `.monospacedDigit()` for numeric data (token counts, timestamps)
+- Curly quotes ("") not straight quotes ("")
+- Ellipsis character (…) not three periods (...)
+- Non-breaking spaces for units: `10 MB` (use `\u{00A0}`)
+
+### Layout
+- Optical alignment over geometric when it looks better (±1pt)
+- Child corner radius must not exceed parent radius
+- Use `.contentShape()` to expand hit targets beyond visual bounds
+- Minimum tap targets: 44pt
+
+### Animation
+- Only animate `offset`, `scaleEffect`, `opacity`, `rotationEffect`
+- Never animate frame size directly—use `matchedGeometryEffect` or transitions
+- Check `@Environment(\.accessibilityReduceMotion)` and skip animations when true
+- Interaction feedback under 200ms
+
+### Accessibility
+- All flows keyboard-navigable via `@FocusState` and `.focusable()`
+- Icon-only buttons require `.accessibilityLabel()`
+- Use semantic labels: `.accessibilityLabel()`, `.accessibilityHint()`
+- Support VoiceOver navigation order with `.accessibilitySortPriority()`
+
+### Color
+- One accent color per view
+- Support both light and dark with `@Environment(\.colorScheme)`
+- Use semantic colors (`Color.primary`, `Color.secondary`) over hardcoded values
+- Test with Increase Contrast accessibility setting

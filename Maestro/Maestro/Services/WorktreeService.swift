@@ -94,6 +94,35 @@ struct WorktreeService {
         try await runProcess(URL(fileURLWithPath: "/usr/bin/git"), ["diff", spec], in: repoURL)
     }
 
+    func getDiffStats(_ spec: String, in repoURL: URL) async throws -> [FileDiffStat] {
+        // Use --numstat for machine-readable output: additions, deletions, filename
+        let output = try await runProcess(
+            URL(fileURLWithPath: "/usr/bin/git"),
+            ["diff", spec, "--numstat"],
+            in: repoURL
+        )
+
+        return output
+            .split(separator: "\n")
+            .compactMap { line -> FileDiffStat? in
+                let parts = line.split(separator: "\t")
+                guard parts.count >= 3 else { return nil }
+
+                // Binary files show "-" for additions/deletions
+                let additions = Int(parts[0]) ?? 0
+                let deletions = Int(parts[1]) ?? 0
+                let path = String(parts[2])
+
+                return FileDiffStat(
+                    id: path,
+                    path: path,
+                    additions: additions,
+                    deletions: deletions
+                )
+            }
+            .sorted { $0.totalChanges > $1.totalChanges }
+    }
+
     func getCommits(for worktree: Worktree, since: String = "main") async throws -> [CommitInfo] {
         let worktreeURL = URL(fileURLWithPath: worktree.path)
         let format = "%H|%h|%s|%an|%aI"

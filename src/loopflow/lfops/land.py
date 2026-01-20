@@ -10,7 +10,7 @@ import typer
 from loopflow.lf.config import load_config
 from loopflow.lf.context import find_worktree_root
 from loopflow.lf.design import clear_design_artifacts
-from loopflow.lf.git import GitError, find_main_repo, get_current_branch, open_pr
+from loopflow.lf.git import GitError, ensure_ready_pr, find_main_repo, get_current_branch, is_draft_pr, open_pr
 from loopflow.lf.messages import generate_commit_message_from_diff, generate_pr_message
 from loopflow.lf.worktrees import get_path
 from loopflow.lfops._helpers import (
@@ -322,6 +322,12 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
             cwd=repo_root,
             capture_output=True,
         )
+
+    if is_draft_pr(repo_root, pr_number):
+        typer.echo("Marking PR as ready for review...")
+        if not ensure_ready_pr(repo_root, pr_number):
+            typer.echo("Error: Failed to mark PR as ready", err=True)
+            raise typer.Exit(1)
 
     # Enable auto-merge on the PR
     # With merge queue enabled, this queues the PR for merge after CI passes

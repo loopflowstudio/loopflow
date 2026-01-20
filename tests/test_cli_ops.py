@@ -46,7 +46,7 @@ def _get_command_names(output: str) -> list[str]:
 
 
 def test_top_level_help_no_ops():
-    """Verify ops subcommand was removed from lf."""
+    """Verify ops and loop subcommands were removed from lf."""
     runner = CliRunner()
 
     result = runner.invoke(app, ["--help"])
@@ -54,8 +54,8 @@ def test_top_level_help_no_ops():
     assert result.exit_code == 0
     commands = _get_command_names(result.output)
     assert "ops" not in commands
+    assert "loop" not in commands  # loop is now lfd command
     assert "run" in commands
-    assert "loop" in commands
 
 
 def test_lfops_help_lists_management_commands():

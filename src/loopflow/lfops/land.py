@@ -523,8 +523,8 @@ def _land_local(strict: bool, worktree: str | None) -> None:
         typer.echo(str(main_repo))
 
 
-def _land_squash_personal_main(strict: bool, worktree: str | None) -> None:
-    """Squash-merge personal-main to origin/main via PR."""
+def _land_squash_loop_main(strict: bool, worktree: str | None) -> None:
+    """Squash-merge loop-main to origin/main via PR."""
     repo_root, _ = _resolve_repos(worktree, strict)
 
     if not shutil.which("gh"):
@@ -536,10 +536,10 @@ def _land_squash_personal_main(strict: bool, worktree: str | None) -> None:
         typer.echo("Error: Detached HEAD", err=True)
         raise typer.Exit(1)
 
-    # Verify this is a personal-main branch
+    # Verify this is a loop-main branch
     if not branch.endswith("-main"):
-        typer.echo(f"Error: --squash is for personal-main branches (got '{branch}')", err=True)
-        typer.echo("Run this from a personal-main worktree like 'agent-name-main'", err=True)
+        typer.echo(f"Error: --squash is for loop-main branches (got '{branch}')", err=True)
+        typer.echo("Run this from a loop-main worktree like 'agent-name-main'", err=True)
         raise typer.Exit(1)
 
     # Ensure branch is pushed
@@ -576,7 +576,7 @@ def _land_squash_personal_main(strict: bool, worktree: str | None) -> None:
     typer.echo("Generating PR message...")
     message = generate_pr_message(repo_root)
 
-    # Create PR from personal-main to main
+    # Create PR from loop-main to main
     typer.echo(f"Creating PR: {branch} → main")
     cmd = [
         "gh", "pr", "create",
@@ -633,7 +633,7 @@ def register_commands(app: typer.Typer) -> None:
         local: bool = typer.Option(None, "-l", "--local/--gh", help="Local merge (no PR) vs GitHub PR merge"),
         create_pr: bool = typer.Option(False, "-c", "--create-pr", help="Create PR and merge in one step"),
         strict: bool = typer.Option(False, "-s", "--strict", help="Error if uncommitted/unpushed changes exist"),
-        squash: bool = typer.Option(False, "--squash", help="Squash-merge personal-main to origin/main"),
+        squash: bool = typer.Option(False, "--squash", help="Squash-merge loop-main to origin/main"),
     ) -> None:
         """Squash-merge branch to main and clean up.
 
@@ -644,14 +644,14 @@ def register_commands(app: typer.Typer) -> None:
         Default: uses gh pr merge (requires PR via lfops pr).
         With --local: local merge + push (no PR needed).
         With --create-pr: create PR and immediately merge.
-        With --squash: squash-merge entire personal-main branch to main (for agents).
+        With --squash: squash-merge entire loop-main branch to main (for agents).
         Config: set `land: local` in .lf/config.yaml to default to --local.
         """
         main_repo = find_main_repo()
         config = load_config(main_repo) if main_repo else None
 
         if squash:
-            _land_squash_personal_main(strict, worktree)
+            _land_squash_loop_main(strict, worktree)
             return
 
         use_local = local if local is not None else (config and config.land == "local")

@@ -1,22 +1,23 @@
 """Loop management for lfd."""
 
+import os
+import signal
 import subprocess
+import sys
 import uuid
 from pathlib import Path
 
 from loopflow.lf.context import find_worktree_root
 from loopflow.lf.git import find_main_repo
-from loopflow.lf.goals import Goal, goal_exists, list_goals, load_goal
 from loopflow.lfd.db import (
-    delete_loop,
     get_loop,
     get_loop_by_goal_repo,
-    get_loop_runs,
-    list_loops,
     save_loop,
+    update_loop_pid,
     update_loop_status,
 )
 from loopflow.lfd.models import Loop, LoopStatus, LoopType, MergeMode
+from loopflow.lfd.process import is_process_running
 
 
 def _branch_exists(repo: Path, branch: str) -> bool:
@@ -36,7 +37,7 @@ def _branch_exists(repo: Path, branch: str) -> bool:
     return result.returncode == 0
 
 
-def _allocate_personal_main(repo: Path, goal_name: str) -> str:
+def _allocate_loop_main(repo: Path, goal_name: str) -> str:
     """Return available branch name: goal-main, goal-1-main, etc."""
     candidate = f"{goal_name}-main"
     if not _branch_exists(repo, candidate):
@@ -48,7 +49,7 @@ def _allocate_personal_main(repo: Path, goal_name: str) -> str:
     raise ValueError(f"Could not allocate personal-main branch for {goal_name}")
 
 
-def _create_personal_main_branch(repo: Path, branch: str) -> None:
+def _create_loop_main_branch(repo: Path, branch: str) -> None:
     """Create personal-main branch from origin/main if it doesn't exist."""
     if _branch_exists(repo, branch):
         return
@@ -83,15 +84,15 @@ def create_loop(
         return existing
 
     # Allocate and create personal-main branch
-    personal_main = _allocate_personal_main(repo, goal_name)
-    _create_personal_main_branch(repo, personal_main)
+    loop_main = _allocate_loop_main(repo, goal_name)
+    _create_loop_main_branch(repo, loop_main)
 
     loop = Loop(
         id=str(uuid.uuid4()),
         type=loop_type,
-        goal=goal_name,
+        goal_name=goal_name,
         repo=repo,
-        personal_main=personal_main,
+        loop_main=loop_main,
         status=LoopStatus.IDLE,
         area=area,
         project_file=project_file,
@@ -103,27 +104,115 @@ def create_loop(
     return loop
 
 
-def start_loop(loop_id: str) -> bool:
-    """Mark a loop as running and start execution."""
+def count_outstanding(loop: Loop) -> int:
+    """Count commits on personal-main ahead of main.
+
+    Returns number of commits on personal-main that are not yet on main.
+    """
+    # Ensure we have latest refs
+    subprocess.run(
+        ["git", "fetch", "origin", "main", loop.loop_main],
+        cwd=loop.repo,
+        capture_output=True,
+    )
+
+    # Count commits ahead
+    result = subprocess.run(
+        ["git", "rev-list", "--count", f"origin/main..origin/{loop.loop_main}"],
+        cwd=loop.repo,
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode != 0:
+        return 0  # Branch doesn't exist yet or other error
+
+    try:
+        return int(result.stdout.strip())
+    except ValueError:
+        return 0
+
+
+class StartResult:
+    """Result of attempting to start a loop."""
+
+    def __init__(self, ok: bool, reason: str | None = None, outstanding: int | None = None):
+        self.ok = ok
+        self.reason = reason
+        self.outstanding = outstanding
+
+    def __bool__(self) -> bool:
+        return self.ok
+
+
+def start_loop(loop_id: str, foreground: bool = False) -> StartResult:
+    """Mark a loop as running and start execution.
+
+    If foreground=True, runs the loop in the current process.
+    Otherwise spawns a background subprocess.
+
+    Returns a StartResult indicating success or failure reason.
+    """
+    loop = get_loop(loop_id)
+    if not loop:
+        return StartResult(False, "not_found")
+
+    # Check if already running
+    if loop.status == LoopStatus.RUNNING and loop.pid and is_process_running(loop.pid):
+        return StartResult(False, "already_running")
+
+    # Check outstanding commits before starting
+    outstanding = count_outstanding(loop)
+    if outstanding >= loop.pr_limit:
+        update_loop_status(loop_id, LoopStatus.WAITING)
+        return StartResult(False, "waiting", outstanding=outstanding)
+
+    if foreground:
+        # Run directly in this process
+        update_loop_status(loop_id, LoopStatus.RUNNING)
+        update_loop_pid(loop_id, os.getpid())
+        _run_loop(loop)
+        return StartResult(True)
+    else:
+        # Spawn background process
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "loopflow.lfd.loop_runner", loop_id],
+            cwd=loop.repo,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        update_loop_status(loop_id, LoopStatus.RUNNING)
+        update_loop_pid(loop_id, proc.pid)
+        return StartResult(True)
+
+
+def stop_loop(loop_id: str, force: bool = False) -> bool:
+    """Stop a running loop.
+
+    If force=True, sends SIGKILL. Otherwise sends SIGTERM for graceful shutdown.
+    """
     loop = get_loop(loop_id)
     if not loop:
         return False
 
-    # TODO: Actually spawn the subprocess to run the loop
-    # For now, just mark it as running
-    update_loop_status(loop_id, LoopStatus.RUNNING)
-    return True
+    # Kill process if running
+    if loop.pid and is_process_running(loop.pid):
+        sig = signal.SIGKILL if force else signal.SIGTERM
+        try:
+            os.kill(loop.pid, sig)
+        except OSError:
+            pass
 
-
-def stop_loop(loop_id: str) -> bool:
-    """Stop a running loop."""
-    loop = get_loop(loop_id)
-    if not loop:
-        return False
-
-    # TODO: Actually kill the subprocess if running
     update_loop_status(loop_id, LoopStatus.IDLE)
+    update_loop_pid(loop_id, None)
     return True
+
+
+def _run_loop(loop: Loop) -> None:
+    """Run the loop execution until it should pause."""
+    from loopflow.lfd.loop_runner import run_loop_iterations
+    run_loop_iterations(loop)
 
 
 def get_repo_from_cwd() -> Path | None:

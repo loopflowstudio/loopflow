@@ -18,7 +18,7 @@ def write_prompt_file(prompt: str) -> str:
     return path
 
 
-def get_model_env() -> dict[str, str]:
+def get_model_env(strip_api_keys: bool = True) -> dict[str, str]:
     """Get environment for model subprocess.
 
     Removes API keys so CLIs use subscriptions instead of API credits:
@@ -26,8 +26,9 @@ def get_model_env() -> dict[str, str]:
     - OPENAI_API_KEY removed so Codex uses ChatGPT subscription
     """
     env = os.environ.copy()
-    env.pop("ANTHROPIC_API_KEY", None)
-    env.pop("OPENAI_API_KEY", None)
+    if strip_api_keys:
+        env.pop("ANTHROPIC_API_KEY", None)
+        env.pop("OPENAI_API_KEY", None)
     return env
 
 

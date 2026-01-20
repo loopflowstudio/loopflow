@@ -6,8 +6,6 @@ from datetime import datetime
 from pathlib import Path
 
 from loopflow.lfd.models import (
-    AgentRun,
-    AgentStatus,
     Loop,
     LoopRun,
     LoopStatus,
@@ -36,7 +34,7 @@ def _init_db(db_path: Path) -> None:
             type TEXT NOT NULL,
             goal TEXT NOT NULL,
             repo TEXT NOT NULL,
-            personal_main TEXT NOT NULL,
+            loop_main TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'idle',
             iteration INTEGER DEFAULT 0,
             pr_limit INTEGER DEFAULT 5,
@@ -45,6 +43,8 @@ def _init_db(db_path: Path) -> None:
             pathset TEXT,
             cron TEXT,
             area TEXT,
+            pid INTEGER,
+            last_main_sha TEXT,
             created_at TEXT NOT NULL,
             UNIQUE(type, goal, repo)
         );
@@ -68,26 +68,6 @@ def _init_db(db_path: Path) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_loop_runs_loop ON loop_runs(loop_id);
 
-        -- Legacy tables (kept for migration)
-
-        CREATE TABLE IF NOT EXISTS agent_runs (
-            id TEXT PRIMARY KEY,
-            agent_name TEXT NOT NULL,
-            status TEXT NOT NULL,
-            started_at TEXT NOT NULL,
-            ended_at TEXT,
-            pid INTEGER,
-            worktree TEXT,
-            iteration INTEGER DEFAULT 0,
-            error TEXT,
-            main_sha TEXT,
-            emoji TEXT DEFAULT '',
-            current_step TEXT
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_agent_runs_name ON agent_runs(agent_name);
-        CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status);
-
         CREATE TABLE IF NOT EXISTS sessions (
             id TEXT PRIMARY KEY,
             task TEXT NOT NULL,
@@ -102,18 +82,6 @@ def _init_db(db_path: Path) -> None:
         );
 
         CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
-
-        CREATE TABLE IF NOT EXISTS loop_prs (
-            id TEXT PRIMARY KEY,
-            loop_name TEXT NOT NULL,
-            iteration INTEGER NOT NULL,
-            pr_url TEXT NOT NULL,
-            pr_number INTEGER,
-            status TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_loop_prs_name ON loop_prs(loop_name);
     """)
 
     conn.commit()
@@ -133,194 +101,29 @@ def _get_db(db_path: Path | None = None) -> sqlite3.Connection:
     return conn
 
 
-# Agent runs
-
-def save_run(run: AgentRun, db_path: Path | None = None) -> None:
-    """Save an agent run."""
-    conn = _get_db(db_path)
-
-    conn.execute(
-        """
-        INSERT OR REPLACE INTO agent_runs
-        (id, agent_name, status, started_at, ended_at, pid, worktree, iteration, error, main_sha, emoji, current_step)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            run.id,
-            run.agent_name,
-            run.status.value,
-            run.started_at.isoformat(),
-            run.ended_at.isoformat() if run.ended_at else None,
-            run.pid,
-            run.worktree,
-            run.iteration,
-            run.error,
-            run.main_sha,
-            run.emoji,
-            run.current_step,
-        ),
-    )
-
-    conn.commit()
-    conn.close()
-
-
-def load_agent_runs(active_only: bool = False, db_path: Path | None = None) -> list[AgentRun]:
-    """Load agent runs."""
-    conn = _get_db(db_path)
-
-    if active_only:
-        cursor = conn.execute(
-            "SELECT * FROM agent_runs WHERE status = 'running'"
-        )
-    else:
-        cursor = conn.execute("SELECT * FROM agent_runs")
-
-    runs = [_run_from_row(dict(row)) for row in cursor]
-    conn.close()
-    return runs
-
-
-def get_latest_run(agent_name: str, db_path: Path | None = None) -> AgentRun | None:
-    """Get the most recent run for an agent."""
-    conn = _get_db(db_path)
-
-    cursor = conn.execute(
-        "SELECT * FROM agent_runs WHERE agent_name = ? ORDER BY started_at DESC LIMIT 1",
-        (agent_name,),
-    )
-    row = cursor.fetchone()
-    conn.close()
-
-    if not row:
-        return None
-    return _run_from_row(dict(row))
-
-
-def update_run_status(run_id: str, status: AgentStatus, error: str | None = None, db_path: Path | None = None) -> bool:
-    """Update run status."""
-    conn = _get_db(db_path)
-
-    ended_at = None
-    if status in (AgentStatus.STOPPED, AgentStatus.ERROR, AgentStatus.IDLE):
-        ended_at = datetime.now().isoformat()
-
-    if error:
-        cursor = conn.execute(
-            "UPDATE agent_runs SET status = ?, ended_at = ?, error = ? WHERE id = ?",
-            (status.value, ended_at, error, run_id),
-        )
-    else:
-        cursor = conn.execute(
-            "UPDATE agent_runs SET status = ?, ended_at = COALESCE(?, ended_at) WHERE id = ?",
-            (status.value, ended_at, run_id),
-        )
-
-    conn.commit()
-    updated = cursor.rowcount > 0
-    conn.close()
-    return updated
+# Process status checks
 
 
 def update_dead_runs(db_path: Path | None = None) -> int:
-    """Mark runs as stopped if their process is no longer running."""
+    """Mark loops as idle if their process is no longer running."""
     conn = _get_db(db_path)
 
     cursor = conn.execute(
-        "SELECT id, pid FROM agent_runs WHERE status = 'running' AND pid IS NOT NULL"
+        "SELECT id, pid FROM loops WHERE status = 'running' AND pid IS NOT NULL"
     )
 
     count = 0
     for row in cursor.fetchall():
         if not is_process_running(row["pid"]):
             conn.execute(
-                "UPDATE agent_runs SET status = 'stopped', ended_at = ? WHERE id = ?",
-                (datetime.now().isoformat(), row["id"]),
+                "UPDATE loops SET status = 'idle', pid = NULL WHERE id = ?",
+                (row["id"],),
             )
             count += 1
 
     conn.commit()
     conn.close()
     return count
-
-
-def _run_from_row(row: dict) -> AgentRun:
-    """Convert database row to AgentRun."""
-    return AgentRun(
-        id=row["id"],
-        agent_name=row["agent_name"],
-        status=AgentStatus(row["status"]),
-        started_at=datetime.fromisoformat(row["started_at"]),
-        ended_at=datetime.fromisoformat(row["ended_at"]) if row.get("ended_at") else None,
-        pid=row.get("pid"),
-        worktree=row.get("worktree"),
-        iteration=row.get("iteration", 0),
-        error=row.get("error"),
-        main_sha=row.get("main_sha"),
-        emoji=row.get("emoji", ""),
-        current_step=row.get("current_step"),
-    )
-
-
-def update_current_step(run_id: str, step: str | None, db_path: Path | None = None) -> bool:
-    """Update the current step for an agent run."""
-    conn = _get_db(db_path)
-    cursor = conn.execute(
-        "UPDATE agent_runs SET current_step = ? WHERE id = ?",
-        (step, run_id),
-    )
-    conn.commit()
-    updated = cursor.rowcount > 0
-    conn.close()
-    return updated
-
-
-# Loop PRs
-
-
-def save_loop_pr(
-    loop_name: str,
-    iteration: int,
-    pr_url: str,
-    pr_number: int | None = None,
-    status: str = "open",
-    db_path: Path | None = None,
-) -> str:
-    """Save a PR created by a loop iteration."""
-    import uuid
-
-    conn = _get_db(db_path)
-    pr_id = str(uuid.uuid4())
-
-    conn.execute(
-        """
-        INSERT INTO loop_prs (id, loop_name, iteration, pr_url, pr_number, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (pr_id, loop_name, iteration, pr_url, pr_number, status, datetime.now().isoformat()),
-    )
-
-    conn.commit()
-    conn.close()
-    return pr_id
-
-
-def get_loop_prs(loop_name: str, limit: int = 10, db_path: Path | None = None) -> list[dict]:
-    """Get PRs for a loop."""
-    conn = _get_db(db_path)
-    cursor = conn.execute(
-        """
-        SELECT id, loop_name, iteration, pr_url, pr_number, status, created_at
-        FROM loop_prs
-        WHERE loop_name = ?
-        ORDER BY created_at DESC
-        LIMIT ?
-        """,
-        (loop_name, limit),
-    )
-    prs = [dict(row) for row in cursor]
-    conn.close()
-    return prs
 
 
 # Sessions
@@ -463,16 +266,16 @@ def save_loop(loop: Loop, db_path: Path | None = None) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO loops
-        (id, type, goal, repo, personal_main, status, iteration, pr_limit, merge_mode,
-         project_file, pathset, cron, area, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, type, goal, repo, loop_main, status, iteration, pr_limit, merge_mode,
+         project_file, pathset, cron, area, pid, last_main_sha, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             loop.id,
             loop.type.value,
-            loop.goal,
+            loop.goal_name,
             str(loop.repo),
-            loop.personal_main,
+            loop.loop_main,
             loop.status.value,
             loop.iteration,
             loop.pr_limit,
@@ -481,6 +284,8 @@ def save_loop(loop: Loop, db_path: Path | None = None) -> None:
             loop.pathset,
             loop.cron,
             loop.area,
+            loop.pid,
+            loop.last_main_sha,
             loop.created_at.isoformat(),
         ),
     )
@@ -565,6 +370,36 @@ def update_loop_iteration(
     return updated
 
 
+def update_loop_pid(
+    loop_id: str, pid: int | None, db_path: Path | None = None
+) -> bool:
+    """Update a loop's process ID."""
+    conn = _get_db(db_path)
+    cursor = conn.execute(
+        "UPDATE loops SET pid = ? WHERE id = ? OR id LIKE ?",
+        (pid, loop_id, f"{loop_id}%"),
+    )
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    return updated
+
+
+def update_loop_last_sha(
+    loop_id: str, sha: str | None, db_path: Path | None = None
+) -> bool:
+    """Update a loop's last_main_sha (for subscribe loops)."""
+    conn = _get_db(db_path)
+    cursor = conn.execute(
+        "UPDATE loops SET last_main_sha = ? WHERE id = ? OR id LIKE ?",
+        (sha, loop_id, f"{loop_id}%"),
+    )
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    return updated
+
+
 def delete_loop(loop_id: str, db_path: Path | None = None) -> bool:
     """Delete a loop and its runs."""
     conn = _get_db(db_path)
@@ -592,20 +427,26 @@ def delete_loop(loop_id: str, db_path: Path | None = None) -> bool:
 
 def _loop_from_row(row: dict) -> Loop:
     """Convert database row to Loop."""
+    # Handle legacy "auto" merge mode by mapping to PR
+    merge_mode_str = row.get("merge_mode", "pr")
+    if merge_mode_str == "auto":
+        merge_mode_str = "pr"
     return Loop(
         id=row["id"],
         type=LoopType(row["type"]),
-        goal=row["goal"],
+        goal_name=row["goal"],
         repo=Path(row["repo"]),
-        personal_main=row["personal_main"],
+        loop_main=row["loop_main"],
         status=LoopStatus(row["status"]),
         iteration=row.get("iteration", 0),
         pr_limit=row.get("pr_limit", 5),
-        merge_mode=MergeMode(row.get("merge_mode", "auto")),
+        merge_mode=MergeMode(merge_mode_str),
         project_file=row.get("project_file"),
         pathset=row.get("pathset"),
         cron=row.get("cron"),
         area=row.get("area"),
+        pid=row.get("pid"),
+        last_main_sha=row.get("last_main_sha"),
         created_at=datetime.fromisoformat(row["created_at"]),
     )
 

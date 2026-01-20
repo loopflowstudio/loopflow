@@ -10,14 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from loopflow.lfd.agents import (
-    check_and_run_triggers,
-    list_agents,
-    start_agent,
-    stop_agent,
-)
 from loopflow.lfd.db import (
-    load_agent_runs,
+    list_loops,
     load_sessions,
     load_sessions_for_repo,
     load_sessions_for_worktree,
@@ -25,8 +19,9 @@ from loopflow.lfd.db import (
     update_dead_runs,
     update_session_status,
 )
-from loopflow.lfd.models import Session, SessionStatus
+from loopflow.lfd.models import LoopStatus, Session, SessionStatus
 from loopflow.lfd.protocol import Event, Request, Response, error, success
+from loopflow.lfd.scheduler import Scheduler, load_scheduler_config
 
 
 class Server:
@@ -36,6 +31,7 @@ class Server:
         self.subscriptions: dict[StreamWriter, list[str]] = {}
         self._running = False
         self._check_task: asyncio.Task | None = None
+        self.scheduler = Scheduler(load_scheduler_config())
 
     async def start(self) -> None:
         self.socket_path.parent.mkdir(parents=True, exist_ok=True)
@@ -95,12 +91,6 @@ class Server:
 
         if method == "status":
             return await self._handle_status()
-        elif method == "agents.list":
-            return await self._handle_agents_list()
-        elif method == "agents.start":
-            return await self._handle_agents_start(params)
-        elif method == "agents.stop":
-            return await self._handle_agents_stop(params)
         elif method == "sessions.list":
             return await self._handle_sessions_list()
         elif method == "sessions.history":
@@ -115,62 +105,26 @@ class Server:
             return await self._handle_notify(params)
         elif method == "output.line":
             return await self._handle_output_line(params)
+        elif method == "scheduler.status":
+            return await self._handle_scheduler_status()
+        elif method == "scheduler.acquire":
+            return await self._handle_scheduler_acquire(params)
+        elif method == "scheduler.release":
+            return await self._handle_scheduler_release(params)
         else:
             return error(f"Unknown method: {method}", request.id)
 
     async def _handle_status(self) -> Response:
-        agents = list_agents()
+        loops = list_loops()
         sessions = load_sessions(active_only=True)
-        runs = load_agent_runs(active_only=True)
+        running_loops = [lp for lp in loops if lp.status == LoopStatus.RUNNING]
 
         return success({
             "pid": os.getpid(),
-            "agents_defined": len(agents),
-            "agents_running": len(runs),
+            "loops_defined": len(loops),
+            "loops_running": len(running_loops),
             "sessions_active": len(sessions),
         })
-
-    async def _handle_agents_list(self) -> Response:
-        agents = list_agents()
-        runs = {r.agent_name: r for r in load_agent_runs()}
-
-        result = []
-        for agent in agents:
-            data = agent.to_dict()
-            if agent.name in runs:
-                run = runs[agent.name]
-                data["status"] = run.status.value
-                data["last_run_at"] = run.started_at.isoformat()
-                data["iteration"] = run.iteration
-                data["pid"] = run.pid
-            else:
-                data["status"] = "idle"
-            result.append(data)
-
-        return success(result)
-
-    async def _handle_agents_start(self, params: dict) -> Response:
-        name = params.get("name")
-        if not name:
-            return error("Missing 'name' parameter")
-
-        result = await start_agent(name)
-        if result.error:
-            return error(result.error)
-
-        await self._broadcast(Event("agent.started", {"name": name, "pid": result.pid}))
-        return success({"name": name, "pid": result.pid})
-
-    async def _handle_agents_stop(self, params: dict) -> Response:
-        name = params.get("name")
-        if not name:
-            return error("Missing 'name' parameter")
-
-        if stop_agent(name):
-            await self._broadcast(Event("agent.stopped", {"name": name}))
-            return success({"name": name})
-        else:
-            return error(f"Agent '{name}' not running")
 
     async def _handle_sessions_list(self) -> Response:
         sessions = load_sessions()
@@ -250,6 +204,41 @@ class Server:
         }))
         return success({})
 
+    async def _handle_scheduler_status(self) -> Response:
+        """Return scheduler status."""
+        return success(self.scheduler.get_status())
+
+    async def _handle_scheduler_acquire(self, params: dict) -> Response:
+        """Try to acquire a scheduler slot."""
+        run_id = params.get("run_id")
+        if not run_id:
+            return error("Missing 'run_id' parameter")
+
+        acquired, reason = self.scheduler.acquire(run_id)
+        if acquired:
+            await self._broadcast(Event("scheduler.slot.acquired", {
+                "run_id": run_id,
+                "slots_used": self.scheduler.slots_used(),
+            }))
+        return success({
+            "acquired": acquired,
+            "reason": reason,
+            "slots_used": self.scheduler.slots_used(),
+        })
+
+    async def _handle_scheduler_release(self, params: dict) -> Response:
+        """Release a scheduler slot."""
+        run_id = params.get("run_id")
+        if not run_id:
+            return error("Missing 'run_id' parameter")
+
+        self.scheduler.release(run_id)
+        await self._broadcast(Event("scheduler.slot.released", {
+            "run_id": run_id,
+            "slots_used": self.scheduler.slots_used(),
+        }))
+        return success({"slots_used": self.scheduler.slots_used()})
+
     async def _broadcast(self, event: Event) -> None:
         message = (event.serialize() + "\n").encode()
         for writer, patterns in list(self.subscriptions.items()):
@@ -262,12 +251,31 @@ class Server:
                     self.subscriptions.pop(writer, None)
 
     async def _periodic_check(self) -> None:
-        """Periodically check agent triggers and update dead processes."""
+        """Periodically update dead processes and check triggers."""
+        from loopflow.lfd.schedule import run_schedule_check
+        from loopflow.lfd.subscribe import run_subscription_check
+
         while self._running:
             try:
                 await asyncio.sleep(30)
                 update_dead_runs()
-                await check_and_run_triggers()
+
+                # Check subscription triggers (file changes on main)
+                triggered_subs = run_subscription_check()
+                for loop_id in triggered_subs:
+                    await self._broadcast(Event("loop.triggered", {
+                        "loop_id": loop_id,
+                        "trigger": "subscription",
+                    }))
+
+                # Check schedule triggers (cron)
+                triggered_scheds = run_schedule_check()
+                for loop_id in triggered_scheds:
+                    await self._broadcast(Event("loop.triggered", {
+                        "loop_id": loop_id,
+                        "trigger": "schedule",
+                    }))
+
             except asyncio.CancelledError:
                 break
             except Exception:

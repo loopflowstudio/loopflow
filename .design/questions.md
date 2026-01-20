@@ -1,17 +1,18 @@
 # Questions
 
-## Missing Design Document
+## Resolved: Missing Design Document
 
-The implement task requires a design document at `.design/product-engineer-001.md` (or similar) but no design document was found.
+The implement task was re-run after the branch naming feature was already implemented. The feature is complete:
 
-- The `.design/` directory did not exist
-- No `.design/*.md` files are present
-- The branch `product-engineer/001` has no uncommitted changes vs main
+### What was implemented
+Configurable branch name schemas for worktree creation (`lfops wt create`).
 
-**Blocker**: Cannot proceed with implementation without a design document specifying:
-1. What feature/functionality to build
-2. Data structures and their fields
-3. Function signatures
-4. Done-when criteria
+### Implementation status
+- **Python**: `src/loopflow/lf/branch_names.py` - schema formatting with placeholders `{name}`, `{user}`, `{ts}`, `{date}`
+- **Config**: `src/loopflow/lf/config.py` - `BranchNameConfig` model with `schema` field
+- **CLI**: `src/loopflow/lfops/wt.py` - `lfops wt create` command using the schema
+- **Maestro**: UI shows short name in sidebar with full branch in tooltip
+- **Tests**: `tests/test_branch_names.py` - 13 tests covering happy path and edge cases
 
-**Recommendation**: Run the `design` task first to create a design document, then re-run `implement`.
+### Test results
+All 467 tests pass including the new branch_names tests.

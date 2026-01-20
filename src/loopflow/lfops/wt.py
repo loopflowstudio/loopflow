@@ -9,6 +9,7 @@ import typer
 
 from loopflow.lf.config import load_config
 from loopflow.lf.context import find_worktree_root
+from loopflow.lf.git import find_main_repo
 from loopflow.lf.deps import require_wt
 from loopflow.lf.worktrees import (
     create_with_schema,
@@ -18,6 +19,7 @@ from loopflow.lf.worktrees import (
     remove,
 )
 from loopflow.lfops._helpers import get_default_branch, sync_main_repo
+from loopflow.lfops.shell import write_directive
 
 
 def register_commands(app: typer.Typer) -> None:
@@ -40,7 +42,7 @@ def register_commands(app: typer.Typer) -> None:
         """
         require_wt()
 
-        repo_root = find_worktree_root()
+        repo_root = find_main_repo()
         if not repo_root:
             typer.echo("Error: Not in a git repository", err=True)
             raise typer.Exit(1)
@@ -66,6 +68,12 @@ def register_commands(app: typer.Typer) -> None:
         typer.echo(f"Created worktree: {path.name}")
         if branch != name:
             typer.echo(f"Branch: {branch}")
+
+        # Write cd directive for shell integration
+        if not write_directive(f"cd {path}"):
+            # Shell integration not active - print manual cd command
+            typer.echo(f"\ncd {path}")
+            typer.echo("\nTip: Run 'lfops shell install' for auto-cd after worktree creation")
 
     @wt_app.command("ci")
     def ci_status(

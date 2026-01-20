@@ -10,6 +10,7 @@ from loopflow.lfops import init as init_module
 from loopflow.lfops import land as land_module
 from loopflow.lfops import pr as pr_module
 from loopflow.lfops import rebase as rebase_module
+from loopflow.lfops import shell as shell_module
 from loopflow.lfops import summarize as summarize_module
 from loopflow.lfops import sync as sync_module
 from loopflow.lfops import wt as wt_module
@@ -23,6 +24,7 @@ pr_module.register_commands(app)
 land_module.register_commands(app)
 commit_module.register_commands(app)
 rebase_module.register_commands(app)
+shell_module.register_commands(app)
 summarize_module.register_commands(app)
 sync_module.register_commands(app)
 wt_module.register_commands(app)

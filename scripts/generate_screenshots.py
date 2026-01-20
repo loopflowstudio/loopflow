@@ -60,9 +60,7 @@ def setup_demo_repo(manifest: Manifest) -> Path:
 
     if not repo_path.exists():
         # Convert HTTPS URL to SSH for cloning
-        ssh_url = manifest.repo_url.replace(
-            "https://github.com/", "git@github.com:"
-        )
+        ssh_url = manifest.repo_url.replace("https://github.com/", "git@github.com:")
         if not ssh_url.endswith(".git"):
             ssh_url += ".git"
         print(f"Cloning {ssh_url} to {repo_path}...")

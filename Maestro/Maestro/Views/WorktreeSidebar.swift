@@ -18,6 +18,7 @@ struct WorktreeSidebar: View {
     @State private var compareWorktrees: (Worktree, Worktree)?
     @State private var compareContent: String?
     @State private var compareLoading = false
+    @State private var showingDiagnostics = false
 
     private let terminalLauncher = TerminalLauncher()
 
@@ -98,6 +99,9 @@ struct WorktreeSidebar: View {
                 )
             }
         }
+        .sheet(isPresented: $showingDiagnostics) {
+            DiagnosticsView()
+        }
     }
 
     private func viewDiff(_ worktree: Worktree) {
@@ -172,6 +176,16 @@ struct WorktreeSidebar: View {
             }
             .buttonStyle(.plain)
             .help("Create a new workspace")
+
+            Button {
+                showingDiagnostics = true
+            } label: {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+            .buttonStyle(.plain)
+            .help("Open diagnostics")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)

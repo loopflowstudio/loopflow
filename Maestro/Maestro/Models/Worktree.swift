@@ -68,13 +68,6 @@ struct Worktree: Identifiable, Hashable, Codable {
         case hasCodeWorkspace, isRebasing, isMerging, recentTasks, staleness
     }
 
-    var statusText: String {
-        if isDirty {
-            return "modified"
-        }
-        return "clean"
-    }
-
     var commitsText: String {
         var parts: [String] = []
         if let pr = prNumber {
@@ -112,6 +105,7 @@ struct WorktreeJSON: Codable {
     let baseBranch: String?
     let workingTree: WorkingTreeJSON?
     let main: MainStatusJSON?
+    let mainState: String?
     let remote: RemoteStatusJSON?
     let operationState: String?
     let ci: CIJSON?
@@ -121,7 +115,9 @@ struct WorktreeJSON: Codable {
         case branch, path, kind
         case baseBranch = "base_branch"
         case workingTree = "working_tree"
-        case main, remote
+        case main
+        case mainState = "main_state"
+        case remote
         case operationState = "operation_state"
         case ci, prunable
     }

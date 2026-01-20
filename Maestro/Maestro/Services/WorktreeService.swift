@@ -48,16 +48,106 @@ struct WorktreeService {
     }
 
     private let sessionService = SessionService()
+    @MainActor private static var lfopsCompatible: Bool?
+
+    private func runProcessWithStatus(
+        _ executable: URL,
+        _ args: [String],
+        in directory: URL,
+        fallbackToWhich: Bool = false
+    ) async throws -> (String, Int32) {
+        let execURL: URL
+        if fallbackToWhich, let resolved = findCommand(executable.lastPathComponent) {
+            execURL = resolved
+        } else {
+            execURL = executable
+        }
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let process = Process()
+            let pipe = Pipe()
+
+            process.executableURL = execURL
+            process.arguments = args
+            process.currentDirectoryURL = directory
+            process.standardOutput = pipe
+            process.standardError = pipe
+
+            do {
+                try process.run()
+                process.waitUntilExit()
+
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: data, encoding: .utf8) ?? ""
+                continuation.resume(returning: (output, process.terminationStatus))
+            } catch {
+                continuation.resume(throwing: error)
+            }
+        }
+    }
 
     func list(in repoURL: URL) async throws -> [Worktree] {
-        let output = try await runLfops(["wt", "list", "--format", "json", "--full"], in: repoURL)
+        let lfopsCompatible = await getLfopsCompatible()
+        if lfopsCompatible != false, let lfopsURL = findCommand("lfops") {
+            do {
+                let (output, status) = try await runProcessWithStatus(
+                    lfopsURL,
+                    ["wt", "list", "--format", "json", "--full"],
+                    in: repoURL
+                )
+                LoggingService.append("""
+                worktrees.list command=lfops status=\(status) bytes=\(output.utf8.count)
+                """)
+                if status == 0, let worktrees = try? await decodeWorktrees(from: output, source: "lfops") {
+                    await setLfopsCompatible(true)
+                    return worktrees
+                }
+                if output.contains("No such command 'wt'") {
+                    await setLfopsCompatible(false)
+                    LoggingService.append("worktrees.list command=lfops status=disabled reason=no-wt-command")
+                }
+            } catch {
+                // Fall back to wt directly if lfops doesn't support wt or isn't working.
+                LoggingService.append("worktrees.list command=lfops error=\(error.localizedDescription)")
+                if error.localizedDescription.contains("No such command 'wt'") {
+                    await setLfopsCompatible(false)
+                    LoggingService.append("worktrees.list command=lfops status=disabled reason=no-wt-command")
+                }
+            }
+        }
 
+        let (output, status) = try await runProcessWithStatus(
+            URL(fileURLWithPath: "/opt/homebrew/bin/wt"),
+            ["list", "--format", "json", "--full"],
+            in: repoURL,
+            fallbackToWhich: true
+        )
+        LoggingService.append("""
+        worktrees.list command=wt status=\(status) bytes=\(output.utf8.count)
+        """)
+        if status != 0 {
+            throw WorktreeError.commandFailed(output)
+        }
+        return try await decodeWorktrees(from: output, source: "wt")
+    }
+
+    private func decodeWorktrees(from output: String, source: String) async throws -> [Worktree] {
         guard let data = output.data(using: .utf8) else {
             return []
         }
 
         let decoder = JSONDecoder()
-        let items = try decoder.decode([WorktreeJSON].self, from: data)
+        let items: [WorktreeJSON]
+        do {
+            items = try decoder.decode([WorktreeJSON].self, from: data)
+        } catch {
+            let preview = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            let snippet = preview.prefix(200)
+            LoggingService.append("""
+            worktrees.parse source=\(source) error=\(error.localizedDescription) preview=\(snippet)
+            """)
+            throw error
+        }
 
         // Filter to actual worktrees (not just branches)
         var worktrees: [Worktree] = []
@@ -65,8 +155,20 @@ struct WorktreeService {
             let hasWorkspace = checkForCodeWorkspace(at: URL(fileURLWithPath: json.path))
             let sessions = (try? await sessionService.history(for: json.path, limit: 10)) ?? []
             worktrees.append(Worktree(from: json, hasCodeWorkspace: hasWorkspace, recentTasks: sessions))
+            LoggingService.append("""
+            worktrees.parse source=\(source) branch=\(json.branch) path=\(json.path) main_state=\(json.mainState ?? "unknown") prunable=\(json.prunable == true)
+            """)
         }
+        LoggingService.append("worktrees.parse source=\(source) count=\(worktrees.count)")
         return worktrees
+    }
+
+    private func getLfopsCompatible() async -> Bool? {
+        await MainActor.run { WorktreeService.lfopsCompatible }
+    }
+
+    private func setLfopsCompatible(_ value: Bool) async {
+        await MainActor.run { WorktreeService.lfopsCompatible = value }
     }
 
     func create(name: String, in repoURL: URL, baseBranch: String? = nil) async throws {
@@ -235,6 +337,9 @@ struct WorktreeService {
     func detectStaleness(for worktree: Worktree, in repoURL: URL) async -> Staleness {
         // Skip main branch - it's never stale
         if worktree.branch == "main" || worktree.branch == "master" {
+            LoggingService.append("""
+            worktrees.staleness branch=\(worktree.branch) staleness=Active
+            """)
             return .active
         }
 
@@ -244,6 +349,9 @@ struct WorktreeService {
             ["diff", "--quiet", "\(baseBranch)...\(worktree.branch)"],
             in: repoURL
         )) != nil {
+            LoggingService.append("""
+            worktrees.staleness branch=\(worktree.branch) staleness=Merged
+            """)
             return .merged
         }
 
@@ -251,6 +359,9 @@ struct WorktreeService {
         if let merged = try? await runGit(["branch", "--merged", "main"], in: repoURL) {
             let mergedBranches = merged.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
             if mergedBranches.contains(worktree.branch) {
+                LoggingService.append("""
+                worktrees.staleness branch=\(worktree.branch) staleness=Merged
+                """)
                 return .merged
             }
         }
@@ -260,6 +371,9 @@ struct WorktreeService {
         let refExists = try? await runGit(["show-ref", "--verify", remoteRef], in: repoURL)
         if refExists == nil && worktree.prNumber != nil {
             // Had a PR but remote branch is gone → merged and cleaned up
+            LoggingService.append("""
+            worktrees.staleness branch=\(worktree.branch) staleness=Remote deleted
+            """)
             return .remoteDeleted
         }
 
@@ -270,11 +384,18 @@ struct WorktreeService {
                 let age = Date().timeIntervalSince1970 - timestamp
                 let days = Int(age / 86400)
                 if days > 14 {
-                    return .inactive(days: days)
+                    let result: Staleness = .inactive(days: days)
+                    LoggingService.append("""
+                    worktrees.staleness branch=\(worktree.branch) staleness=\(result.displayText)
+                    """)
+                    return result
                 }
             }
         }
 
+        LoggingService.append("""
+        worktrees.staleness branch=\(worktree.branch) staleness=Active
+        """)
         return .active
     }
 

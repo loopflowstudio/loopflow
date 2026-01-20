@@ -424,18 +424,22 @@ def status(
             typer.echo(f"Start one with: lfd loop <goal>")
             return
 
-        typer.echo(f"{'ID':<9} {'TYPE':<10} {'GOAL':<24} {'STATUS':<10} {'ITER':<6}")
-        typer.echo("-" * 70)
+        typer.echo(f"{'ID':<9} {'TYPE':<10} {'GOAL':<30} {'STATUS':<10} {'ITER':<6} REPO")
+        typer.echo("-" * 90)
 
         for lp in loops:
             status_c = _status_color(lp.status, c)
             goal_str = _goal_display(lp)
-            if len(goal_str) > 24:
-                goal_str = goal_str[:21] + "..."
+            if len(goal_str) > 30:
+                goal_str = goal_str[:27] + "..."
+
+            repo_short = str(lp.repo).replace(str(Path.home()), "~")
+            if len(repo_short) > 20:
+                repo_short = "..." + repo_short[-17:]
 
             typer.echo(
-                f"{lp.short_id():<9} {lp.type.value:<10} {goal_str:<24} "
-                f"{status_c}{lp.status.value:<10}{c['reset']} {lp.iteration:<6}"
+                f"{lp.short_id():<9} {lp.type.value:<10} {goal_str:<30} "
+                f"{status_c}{lp.status.value:<10}{c['reset']} {lp.iteration:<6} {repo_short}"
             )
 
 

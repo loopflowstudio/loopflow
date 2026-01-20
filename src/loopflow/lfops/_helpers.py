@@ -19,8 +19,7 @@ def add_commit_push(repo_root: Path, push: bool = True) -> bool:
     )
     if not result.stdout.strip():
         if push:
-            typer.echo("Pushing...")
-            subprocess.run(["git", "push"], cwd=repo_root, check=True)
+            _push(repo_root)
             _maybe_create_draft_pr(repo_root)
         return False
 
@@ -37,11 +36,19 @@ def add_commit_push(repo_root: Path, push: bool = True) -> bool:
     subprocess.run(["git", "commit", "-m", commit_msg], cwd=repo_root, check=True)
 
     if push:
-        typer.echo("Pushing...")
-        subprocess.run(["git", "push"], cwd=repo_root, check=True)
+        _push(repo_root)
         _maybe_create_draft_pr(repo_root)
 
     return True
+
+
+def _push(repo_root: Path) -> None:
+    """Push current branch, using --force-with-lease if needed (e.g., after rebase)."""
+    typer.echo("Pushing...")
+    result = subprocess.run(["git", "push"], cwd=repo_root, capture_output=True)
+    if result.returncode != 0:
+        # Non-fast-forward - use force-with-lease (safe for feature branches after rebase)
+        subprocess.run(["git", "push", "--force-with-lease"], cwd=repo_root, check=True)
 
 
 def _maybe_create_draft_pr(repo_root: Path) -> None:

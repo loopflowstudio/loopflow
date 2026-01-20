@@ -8,7 +8,7 @@ import typer
 from loopflow.lf.context import find_worktree_root
 from loopflow.lf.git import GitError, ensure_ready_pr, find_main_repo, is_draft_pr, open_pr
 from loopflow.lf.messages import generate_pr_message, generate_pr_message_from_diff
-from loopflow.lfops._helpers import add_commit_push, get_default_branch, sync_main_repo
+from loopflow.lfops._helpers import _push, add_commit_push, get_default_branch, sync_main_repo
 
 
 def _get_existing_pr_url(repo_root) -> str | None:
@@ -54,11 +54,7 @@ def _get_pr_diff(repo_root) -> str | None:
 
 def _update_pr(repo_root, title: str, body: str) -> str:
     """Update existing PR title and body. Returns URL."""
-    subprocess.run(
-        ["git", "push"],
-        cwd=repo_root,
-        capture_output=True,
-    )
+    _push(repo_root)
     result = subprocess.run(
         ["gh", "pr", "edit", "--title", title, "--body", body],
         cwd=repo_root,

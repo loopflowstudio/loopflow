@@ -8,7 +8,7 @@ import typer
 import yaml
 
 from loopflow.lf.config import ConfigError, load_config
-from loopflow.lf.context import find_worktree_root, gather_task, list_all_tasks
+from loopflow.lf.context import find_worktree_root, gather_task, list_all_tasks, _get_builtin_task
 from loopflow.lf.pipelines import load_pipeline
 
 

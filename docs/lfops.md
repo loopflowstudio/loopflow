@@ -152,4 +152,4 @@ lfops wt prune                   # cleanup merged worktrees
 
 ## See Also
 
-[`lf` reference](lf.md) · [Built-in Tasks](builtins.md) · [Configuration](config.md)
+[`lf` reference](lf.md) · [Feature Workflow](workflow.md) · [Configuration](config.md)

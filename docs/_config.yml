@@ -1,14 +1,17 @@
 title: Loopflow
-description: Run LLM coding agents from reusable prompt files
+description: Composable prompts for AI coding agents
 remote_theme: pages-themes/minimal@v0.2.0
 plugins:
   - jekyll-remote-theme
 
 header_pages:
   - index.md
-  - maestro.md
-  - storage.md
-  - config.md
-  - patterns.md
+  - quick-fix.md
+  - workflow.md
+  - agents.md
+  - lf.md
+  - lfops.md
   - lfd.md
-  - api.md
+  - config.md
+  - storage.md
+  - troubleshooting.md

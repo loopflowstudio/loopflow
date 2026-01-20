@@ -130,9 +130,9 @@ Backwards-looking, public-facing documentation. What exists today, how to use it
 
 ```
 docs/
-  getting-started.md
-  config.md
-  patterns.md
+  quick-fix.md
+  workflow.md
+  agents.md
 ```
 
 **Audience:** People using your software. External users, new team members.
@@ -183,4 +183,4 @@ Run `lf -c` to preview exactly what context gets assembled.
 
 ## See Also
 
-[Configuration](config.md) · [Built-in Tasks](builtins.md) · [Patterns](patterns.md)
+[Configuration](config.md) · [Feature Workflow](workflow.md) · [Quick Fix](quick-fix.md)

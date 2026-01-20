@@ -82,7 +82,7 @@ The loop hit its PR limit. Options:
 
 1. Review and merge outstanding PRs
 2. Increase the limit: `lfd loop <goal> --limit 10`
-3. Land accumulated work: see [Loops](loops.md) for branching model
+3. Land accumulated work: see [Background Agents](agents.md) for branching model
 
 ## Context too large
 
@@ -124,8 +124,8 @@ lfops doctor
 
 **Symptom:** `lfd loop <goal>` fails with "goal not found".
 
-Goals must be in `.lf/goals/`. Check with `ls .lf/goals/` or see [Loops](loops.md) for how to create one.
+Goals must be in `.lf/goals/`. Check with `ls .lf/goals/` or see [Background Agents](agents.md) for how to create one.
 
 ## See Also
 
-[Configuration](config.md) · [Patterns](patterns.md) · [`lfd` reference](lfd.md)
+[Configuration](config.md) · [Background Agents](agents.md) · [`lfd` reference](lfd.md)

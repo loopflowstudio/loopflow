@@ -1,5 +1,5 @@
-# VHS Demo: Full Workflow
-Output docs/design-demo.gif
+# VHS Demo: Feature Workflow (Tier 2)
+Output docs/workflow-demo.gif
 
 Set FontSize 14
 Set Width 900
@@ -28,10 +28,14 @@ Type "lf design: add division to calculator"
 Enter
 Sleep 2s
 
-Type "lf implement && lf polish && lf review"
+Type "lf implement && lf polish"
 Enter
 Sleep 2s
 
-Type "# Ready to ship!"
+Type "lfops pr"
+Enter
+Sleep 2s
+
+Type "# Feature shipped!"
 Enter
 Sleep 1.5s

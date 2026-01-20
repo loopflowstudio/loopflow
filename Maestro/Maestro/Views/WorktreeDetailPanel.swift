@@ -44,6 +44,11 @@ struct WorktreeDetailPanel: View {
 
             launcherSection
         }
+        .onChange(of: worktree.id) {
+            // Reset cached data when switching worktrees
+            commits = []
+            diff = ""
+        }
         .sheet(isPresented: $showingDiffSheet) {
             DiffSheet(
                 worktree: worktree,

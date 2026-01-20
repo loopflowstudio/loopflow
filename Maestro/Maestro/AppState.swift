@@ -22,8 +22,8 @@ final class AppState {
     var worktrees: [Worktree] = []
     var prompts: [PromptCard] = []
     var pipelines: [PipelineDef] = []
-    var agents: [Agent] = []
     var voices: [Voice] = []
+    var loops: [Loop] = []
 
     // Prompt launcher state
     var selectedPrompt: PromptCard?
@@ -48,6 +48,7 @@ final class AppState {
     // Sidebar state
     var selectedWorktree: Worktree?
     var selectedPipeline: PipelineDef?
+    var selectedLoop: Loop?
 
     // Live output state
     var liveOutputBySession: [String: [OutputLine]] = [:]
@@ -69,7 +70,6 @@ final class AppState {
     // Loading state
     var isLoading: Bool = false
     var errorMessage: String?
-    var agentsAvailable: Bool = false
 
     // Daemon connection state
     var lfdConnected: Bool = false
@@ -79,7 +79,7 @@ final class AppState {
     private let configLoader = ConfigLoader()
     private let promptService = PromptService()
     private let pipelineService = PipelineService()
-    private let agentService = AgentService()
+    private let loopService = LoopService()
     private var eventService: LFDEventService?
     private let voiceService = VoiceService()
     private let contextPreviewService = ContextPreviewService()
@@ -102,8 +102,8 @@ final class AppState {
         config = nil
         prompts = []
         pipelines = []
-        agents = []
         voices = []
+        loops = []
         selectedWorktree = nil
         isLoading = false
         errorMessage = nil
@@ -194,7 +194,7 @@ final class AppState {
             }
 
             await estimateTokens()
-            await refreshAgents()
+            await refreshLoops()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -403,7 +403,7 @@ final class AppState {
 
         Task {
             await eventService?.subscribe(
-                to: ["worktree.*", "session.*", "output.line"],
+                to: ["worktree.*", "session.*", "output.line", "loop.*"],
                 onEvent: { [weak self] event in
                     Task { @MainActor in
                         switch event {
@@ -413,6 +413,8 @@ final class AppState {
                             self?.handleSessionEvent(sessionEvent)
                         case .output(let outputEvent):
                             self?.handleOutputEvent(outputEvent)
+                        case .loop(_):
+                            await self?.refreshLoops()
                         }
                     }
                 },
@@ -624,26 +626,30 @@ final class AppState {
             .first
     }
 
-    func refreshAgents() async {
+    func refreshLoops() async {
+        guard let repo = currentRepo else { return }
         do {
-            agents = try await agentService.list()
-            agentsAvailable = true
+            loops = try await loopService.listLoops(repo: repo)
         } catch {
-            // API not running - agents feature unavailable
-            agents = []
-            agentsAvailable = false
+            loops = []
         }
     }
 
-    func startAgent(_ agent: Agent) async throws {
-        guard let repo = currentRepo else { return }
-        try await agentService.start(agentId: agent.id, repoRoot: repo)
-        await refreshAgents()
+    func liveOutput(for loop: Loop) -> [OutputLine] {
+        // Loop runs use their run ID as session ID for output tracking
+        guard let runId = loop.currentRunId else { return [] }
+        return liveOutputBySession[runId] ?? []
     }
 
-    func stopAgent(_ agent: Agent) async throws {
-        try await agentService.stop(agentId: agent.id)
-        await refreshAgents()
+    func squashLandLoop(_ loop: Loop) async throws {
+        guard let repo = currentRepo else { return }
+        try await loopService.squashLand(loop: loop, repoRoot: repo)
+        await refreshLoops()
+        await refreshWorktrees()
+    }
+
+    func connectLfd() async throws {
+        try await loopService.connectLfd()
     }
 
     func estimateTokens() async {

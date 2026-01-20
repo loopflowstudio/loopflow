@@ -19,6 +19,8 @@ struct WorktreeSidebar: View {
     @State private var compareContent: String?
     @State private var compareLoading = false
     @State private var showingDiagnostics = false
+    @State private var showingLandConfirmation = false
+    @State private var loopToLand: Loop?
 
     private let terminalLauncher = TerminalLauncher()
 
@@ -38,8 +40,9 @@ struct WorktreeSidebar: View {
 
             if Flags.beta {
                 pipelinesSection
-                agentsSection
             }
+
+            loopsSection
         }
         .background(Color.loopflowBurgundy)
         .sheet(isPresented: $showingNewWorktreeSheet) {
@@ -386,133 +389,95 @@ struct WorktreeSidebar: View {
         }
     }
 
-    private var agentsSection: some View {
+    private var loopsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("AGENTS")
+                Text("Loops")
                     .font(.caption)
-                    .fontWeight(.semibold)
+                    .fontWeight(.medium)
                     .foregroundStyle(.white.opacity(0.7))
 
                 Spacer()
+
+                // Connection indicator
+                if appState.lfdConnected {
+                    Circle()
+                        .fill(Color.green)
+                        .frame(width: 6, height: 6)
+                        .help("Connected to lfd")
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .padding(.top, 8)
 
-            if appState.agents.isEmpty {
+            if !appState.lfdConnected {
+                // Disconnected state - show affordance, not status
+                VStack(spacing: 8) {
+                    Button {
+                        Task {
+                            do {
+                                try await appState.connectLfd()
+                            } catch {
+                                actionError = "Failed to connect lfd: \(error.localizedDescription)"
+                                showingActionError = true
+                            }
+                        }
+                    } label: {
+                        Label("Connect lfd", systemImage: "link")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 12)
+            } else if appState.loops.isEmpty {
                 VStack(spacing: 4) {
-                    Text("No agents")
+                    Text("No loops")
                         .foregroundStyle(.white.opacity(0.5))
                         .font(.caption)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.bottom, 12)
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 4) {
-                        ForEach(appState.agents) { agent in
-                            AgentRow(
-                                agent: agent,
-                                onStart: {
-                                    Task {
-                                        do {
-                                            try await appState.startAgent(agent)
-                                        } catch {
-                                            actionError = error.localizedDescription
-                                            showingActionError = true
-                                        }
-                                    }
-                                },
-                                onStop: {
-                                    Task {
-                                        do {
-                                            try await appState.stopAgent(agent)
-                                        } catch {
-                                            actionError = error.localizedDescription
-                                            showingActionError = true
-                                        }
-                                    }
-                                }
-                            )
-                        }
+                LazyVStack(spacing: 4) {
+                    ForEach(appState.loops) { loop in
+                        LoopRow(
+                            loop: loop,
+                            isSelected: appState.selectedLoop?.id == loop.id,
+                            liveOutput: appState.liveOutput(for: loop),
+                            hasLandableWork: loop.commitsAhead > 0,
+                            onSelect: {
+                                appState.selectedLoop = loop
+                            },
+                            onLand: {
+                                loopToLand = loop
+                                showingLandConfirmation = true
+                            }
+                        )
                     }
-                    .padding(.horizontal, 8)
                 }
+                .padding(.horizontal, 8)
             }
         }
-    }
-}
-
-struct AgentRow: View {
-    let agent: Agent
-    let onStart: () -> Void
-    let onStop: () -> Void
-
-    @State private var isHovering = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Circle()
-                    .fill(agent.status.color)
-                    .frame(width: 8, height: 8)
-
-                Text(agent.name)
-                    .fontWeight(.medium)
-                    .foregroundStyle(.white)
-
-                Spacer()
-
-                Text(agent.statusText)
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.6))
-            }
-
-            HStack(spacing: 4) {
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.3))
-
-                if agent.iteration > 0 {
-                    Text("\(agent.iteration) iterations")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.6))
-
-                    if let lastRun = agent.lastRunText {
-                        Text("•")
-                            .foregroundStyle(.white.opacity(0.3))
-                        Text(lastRun)
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.6))
+        .confirmationDialog(
+            "Land Loop",
+            isPresented: $showingLandConfirmation,
+            presenting: loopToLand
+        ) { loop in
+            Button("Land") {
+                Task {
+                    do {
+                        try await appState.squashLandLoop(loop)
+                    } catch {
+                        actionError = "Failed to land: \(error.localizedDescription)"
+                        showingActionError = true
                     }
-                } else {
-                    Text("trigger: \(agent.triggerText)")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.6))
                 }
             }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(isHovering ? Color.white.opacity(0.1) : Color.clear)
-        )
-        .contentShape(Rectangle())
-        .onHover { hovering in
-            isHovering = hovering
-        }
-        .contextMenu {
-            if agent.status == .running {
-                Button("Stop") {
-                    onStop()
-                }
-            } else {
-                Button("Start") {
-                    onStart()
-                }
-            }
+        } message: { loop in
+            Text("Squash and land '\(loop.goalName)' loop commits to main?")
         }
     }
 }

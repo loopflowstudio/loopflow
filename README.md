@@ -27,7 +27,7 @@ lf polish
 lfops pr
 ```
 
-![workflow demo](docs/design-demo.gif)
+![workflow demo](docs/workflow-demo.gif)
 
 ## Background agents
 

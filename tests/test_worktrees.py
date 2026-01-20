@@ -180,9 +180,10 @@ def test_is_merged_checks_ancestor_for_squash_merge(tmp_path):
     wt = _make_worktree("feature", pr_state=None)
 
     # Branch is ancestor of origin/main (squash merged)
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0)  # is-ancestor returns 0 when true
-        result = is_merged(wt, tmp_path)
+    with patch("loopflow.lf.worktrees.get_pr_state", return_value=None):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)  # is-ancestor returns 0 when true
+            result = is_merged(wt, tmp_path)
 
     assert result is True
     mock_run.assert_called_once()
@@ -193,9 +194,10 @@ def test_is_merged_returns_false_when_not_ancestor(tmp_path):
     wt = _make_worktree("feature", pr_state=None)
 
     # Branch is not an ancestor (not yet merged)
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=1)  # is-ancestor returns 1 when false
-        result = is_merged(wt, tmp_path)
+    with patch("loopflow.lf.worktrees.get_pr_state", return_value=None):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1)  # is-ancestor returns 1 when false
+            result = is_merged(wt, tmp_path)
 
     assert result is False
 

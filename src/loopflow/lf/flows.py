@@ -11,6 +11,7 @@ from loopflow.lf.frontmatter import StepConfig
 @dataclass
 class RaceConfig:
     """Configuration for model racing—run same task with multiple models."""
+
     models: list[str]
     judge: str = "compare"
 
@@ -144,6 +145,7 @@ def list_flows(repo: Path) -> list[FlowDef]:
 @dataclass
 class ResolvedStep:
     """A step ready for execution with dependencies resolved."""
+
     step: str
     config: StepConfig | None = None
     parallel_group: int | None = None
@@ -159,12 +161,14 @@ def resolve_flow(flow: FlowDef, repo: Path) -> list[ResolvedStep]:
         nonlocal parallel_group
 
         if flow_step.step:
-            resolved.append(ResolvedStep(
-                step=flow_step.step,
-                config=flow_step.config,
-                parallel_group=group,
-                race=flow_step.race,
-            ))
+            resolved.append(
+                ResolvedStep(
+                    step=flow_step.step,
+                    config=flow_step.config,
+                    parallel_group=group,
+                    race=flow_step.race,
+                )
+            )
         elif flow_step.flow:
             nested = load_flow(flow_step.flow, repo)
             if nested:

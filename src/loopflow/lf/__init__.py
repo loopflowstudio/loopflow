@@ -2,15 +2,14 @@
 
 import sys
 from pathlib import Path
-from typing import Optional
 
 import typer
 import yaml
 
+from loopflow.lf import run as run_module
 from loopflow.lf.config import ConfigError, load_config
 from loopflow.lf.context import find_worktree_root, gather_step, list_all_steps
 from loopflow.lf.flows import load_flow
-
 
 # =============================================================================
 # Built-in step metadata for formatted listing
@@ -59,17 +58,16 @@ def _colors() -> dict[str, str]:
         "reset": "\033[0m",
     }
 
+
 app = typer.Typer(
     name="lf",
     help="Arrange LLMs to code in harmony.",
     no_args_is_help=False,
 )
 
-# Import and register subcommands
-from loopflow.lf import run as run_module
-
 # Register top-level commands
-app.command(context_settings={"allow_extra_args": True, "allow_interspersed_args": True})(run_module.run)
+_run_ctx = {"allow_extra_args": True, "allow_interspersed_args": True}
+app.command(context_settings=_run_ctx)(run_module.run)
 app.command()(run_module.inline)
 app.command()(run_module.cp)
 app.command()(run_module.add)
@@ -132,8 +130,11 @@ def _format_step_list() -> str:
             desc = BUILTIN_DESCRIPTIONS.get(name, "")
             info = _get_step_info(repo_root, name, config)
             badge = f"  {c['yellow']}interactive{c['reset']}" if info.get("interactive") else ""
-            customized = f" {c['dim']}(customized){c['reset']}" if name in user_step_set else ""
-            lines.append(f"  {c['bold']}{name:<14}{c['reset']} {c['dim']}{desc:<34}{c['reset']}{badge}{customized}")
+            custom_tag = f" {c['dim']}(customized){c['reset']}" if name in user_step_set else ""
+            lines.append(
+                f"  {c['bold']}{name:<14}{c['reset']} {c['dim']}{desc:<34}{c['reset']}"
+                f"{badge}{custom_tag}"
+            )
         lines.append("")
 
     # Custom steps (user-defined, not overriding builtins)
@@ -147,7 +148,9 @@ def _format_step_list() -> str:
             if info.get("produces"):
                 desc = str(info["produces"])[:34]
             badge = f"  {c['yellow']}interactive{c['reset']}" if info.get("interactive") else ""
-            lines.append(f"  {c['bold']}{name:<14}{c['reset']} {c['dim']}{desc:<34}{c['reset']}{badge}")
+            lines.append(
+                f"  {c['bold']}{name:<14}{c['reset']} {c['dim']}{desc:<34}{c['reset']}{badge}"
+            )
         lines.append("")
 
     # Global steps (e.g., ~/.claude/commands/rams.md)
@@ -159,7 +162,9 @@ def _format_step_list() -> str:
             if info.get("produces"):
                 desc = str(info["produces"])[:34]
             badge = f"  {c['yellow']}interactive{c['reset']}" if info.get("interactive") else ""
-            lines.append(f"  {c['bold']}{name:<14}{c['reset']} {c['dim']}{desc:<34}{c['reset']}{badge}")
+            lines.append(
+                f"  {c['bold']}{name:<14}{c['reset']} {c['dim']}{desc:<34}{c['reset']}{badge}"
+            )
         lines.append("")
 
     # External skills section
@@ -236,9 +241,9 @@ def main():
 
                 if has_flow and has_step:
                     typer.echo(f"Error: '{name}' exists as both a flow and a step", err=True)
-                    typer.echo(f"  Flow: defined in .lf/config.yaml", err=True)
+                    typer.echo("  Flow: defined in .lf/config.yaml", err=True)
                     typer.echo(f"  Step: .claude/commands/{name}.md or .lf/{name}.*", err=True)
-                    typer.echo(f"Remove one to resolve the conflict.", err=True)
+                    typer.echo("Remove one to resolve the conflict.", err=True)
                     raise SystemExit(1)
 
                 if has_flow:
@@ -248,7 +253,7 @@ def main():
                 else:
                     # Step not found
                     typer.echo(f"No step or flow named '{name}'", err=True)
-                    typer.echo(f"Run 'lf --list' to see available steps.", err=True)
+                    typer.echo("Run 'lf --list' to see available steps.", err=True)
                     raise SystemExit(1)
 
         app()

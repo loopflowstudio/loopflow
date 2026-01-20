@@ -12,18 +12,20 @@ from typing import Optional
 
 from loopflow.lf.config import parse_model
 from loopflow.lf.context import build_prompt
+from loopflow.lf.flows import FlowDef, RaceConfig, ResolvedStep, StepConfig, resolve_flow
 from loopflow.lf.git import GitError, find_main_repo, open_pr
 from loopflow.lf.launcher import build_model_command, get_runner
-from loopflow.lf.flows import FlowDef, RaceConfig, ResolvedStep, resolve_flow, StepConfig
-from loopflow.lf.messages import generate_pr_message
 from loopflow.lf.logging import write_prompt_file
-from loopflow.lf.models import Session, SessionStatus, log_session_start, log_session_end
-from loopflow.lf.worktrees import create as create_worktree, remove as remove_worktree
+from loopflow.lf.messages import generate_pr_message
+from loopflow.lf.models import Session, SessionStatus, log_session_end, log_session_start
+from loopflow.lf.worktrees import create as create_worktree
+from loopflow.lf.worktrees import remove as remove_worktree
 
 
 @dataclass
 class _StepParams:
     """Parameters for executing a single flow step."""
+
     step: str
     backend: str
     model_variant: str | None
@@ -73,9 +75,9 @@ def _run_step(
     chrome: bool = False,
 ) -> int:
     """Execute a single flow step. Returns exit code."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"[{step_num}/{total_steps}] {params.step}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     prompt = build_prompt(
         repo_root,
@@ -167,8 +169,9 @@ def _notify_done(flow_name: str) -> None:
     if platform.system() != "Darwin":
         return
     try:
+        notify_cmd = f'display notification "Flow complete" with title "lf {flow_name}"'
         subprocess.run(
-            ["osascript", "-e", f'display notification "Flow complete" with title "lf {flow_name}"'],
+            ["osascript", "-e", notify_cmd],
             capture_output=True,
         )
     except FileNotFoundError:
@@ -178,6 +181,7 @@ def _notify_done(flow_name: str) -> None:
 @dataclass
 class _WorktreeTask:
     """A task to run in a temporary worktree."""
+
     step: str
     label: str  # Display label (step name or model name)
     wt_prefix: str  # Worktree name prefix (e.g., "_parallel" or "_race")
@@ -190,6 +194,7 @@ class _WorktreeTask:
 @dataclass
 class _WorktreeResult:
     """Result from running a task in a temporary worktree."""
+
     label: str
     worktree: Path
     exit_code: int
@@ -254,14 +259,22 @@ def _run_worktree_tasks(
             chrome=chrome,
         )
         collector_cmd = [
-            sys.executable, "-m", "loopflow.lfd.collector",
-            "--session-id", session.id,
-            "--step", wt_task.step,
-            "--repo-root", str(wt_path),
-            "--prompt-file", prompt_file,
+            sys.executable,
+            "-m",
+            "loopflow.lfd.collector",
+            "--session-id",
+            session.id,
+            "--step",
+            wt_task.step,
+            "--repo-root",
+            str(wt_path),
+            "--prompt-file",
+            prompt_file,
             "--foreground",
-            "--prefix", f"[{wt_task.label}] ",
-            "--", *command,
+            "--prefix",
+            f"[{wt_task.label}] ",
+            "--",
+            *command,
         ]
 
         print(f"[{wt_task.label}] Starting in {wt_path.name}...")
@@ -314,24 +327,28 @@ def _run_parallel_group(
 ) -> list[int]:
     """Run parallel steps in temporary worktrees. Returns list of exit codes."""
     step_names = [s.step for s in steps]
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"[{group_num}/{total_groups}] Parallel: {', '.join(step_names)}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     wt_tasks = []
     for step in steps:
         params = _build_step_params(step.step, step.config, backend, model_variant, context)
-        wt_tasks.append(_WorktreeTask(
-            step=params.step,
-            label=params.step,
-            wt_prefix="_parallel",
-            backend=params.backend,
-            model_variant=params.model_variant,
-            context=params.context,
-            voices=params.voices,
-        ))
+        wt_tasks.append(
+            _WorktreeTask(
+                step=params.step,
+                label=params.step,
+                wt_prefix="_parallel",
+                backend=params.backend,
+                model_variant=params.model_variant,
+                context=params.context,
+                voices=params.voices,
+            )
+        )
 
-    results = _run_worktree_tasks(wt_tasks, repo_root, main_repo, exclude, skip_permissions, chrome=chrome)
+    results = _run_worktree_tasks(
+        wt_tasks, repo_root, main_repo, exclude, skip_permissions, chrome=chrome
+    )
     _cleanup_worktrees(repo_root, results)
     return [r.exit_code for r in results]
 
@@ -350,24 +367,28 @@ def _run_race_step(
 ) -> int:
     """Run step with multiple models in parallel, judge and merge winner."""
     models = race.models
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"[{step_num}/{total_steps}] Race: {step} ({', '.join(models)})")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     wt_tasks = []
     for model in models:
         backend, model_variant = parse_model(model)
-        wt_tasks.append(_WorktreeTask(
-            step=step,
-            label=model,
-            wt_prefix=f"_race-{step}",
-            backend=backend,
-            model_variant=model_variant,
-            context=list(context) if context else None,
-            voices=None,
-        ))
+        wt_tasks.append(
+            _WorktreeTask(
+                step=step,
+                label=model,
+                wt_prefix=f"_race-{step}",
+                backend=backend,
+                model_variant=model_variant,
+                context=list(context) if context else None,
+                voices=None,
+            )
+        )
 
-    results = _run_worktree_tasks(wt_tasks, repo_root, main_repo, exclude, skip_permissions, chrome=chrome)
+    results = _run_worktree_tasks(
+        wt_tasks, repo_root, main_repo, exclude, skip_permissions, chrome=chrome
+    )
 
     # Filter to successful results
     successes = [r for r in results if r.exit_code == 0]
@@ -422,12 +443,14 @@ def _judge_race(
             capture_output=True,
             text=True,
         )
-        diffs.append({
-            "model": r.label,
-            "worktree": str(r.worktree),
-            "summary": diff_text,
-            "diff": full_diff.stdout if full_diff.returncode == 0 else "",
-        })
+        diffs.append(
+            {
+                "model": r.label,
+                "worktree": str(r.worktree),
+                "summary": diff_text,
+                "diff": full_diff.stdout if full_diff.returncode == 0 else "",
+            }
+        )
 
     judge_prompt = _build_judge_prompt(diffs)
 
@@ -490,12 +513,14 @@ def _build_judge_prompt(diffs: list[dict]) -> str:
         lines.append("```")
         lines.append("")
 
-    lines.extend([
-        "## Your verdict",
-        "",
-        "Reply with ONLY the model name of the winner (e.g., 'claude:opus' or 'codex:o3').",
-        "Do not explain your reasoning.",
-    ])
+    lines.extend(
+        [
+            "## Your verdict",
+            "",
+            "Reply with ONLY the model name of the winner (e.g., 'claude:opus' or 'codex:o3').",
+            "Do not explain your reasoning.",
+        ]
+    )
 
     return "\n".join(lines)
 
@@ -628,8 +653,14 @@ def run_flow_def(
             # Sequential step
             params = _build_step_params(step.step, step.config, backend, model_variant, context)
             result_code = _run_step(
-                params, repo_root, main_repo, exclude,
-                skip_permissions, should_push, step_num, total,
+                params,
+                repo_root,
+                main_repo,
+                exclude,
+                skip_permissions,
+                should_push,
+                step_num,
+                total,
                 chrome=chrome,
             )
             if result_code != 0:

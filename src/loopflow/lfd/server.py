@@ -8,7 +8,6 @@ import signal
 from asyncio import StreamReader, StreamWriter
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 from loopflow.lfd.db import (
     list_loops,
@@ -119,12 +118,14 @@ class Server:
         sessions = load_sessions(active_only=True)
         running_loops = [lp for lp in loops if lp.status == LoopStatus.RUNNING]
 
-        return success({
-            "pid": os.getpid(),
-            "loops_defined": len(loops),
-            "loops_running": len(running_loops),
-            "sessions_active": len(sessions),
-        })
+        return success(
+            {
+                "pid": os.getpid(),
+                "loops_defined": len(loops),
+                "loops_running": len(running_loops),
+                "sessions_active": len(sessions),
+            }
+        )
 
     async def _handle_sessions_list(self) -> Response:
         sessions = load_sessions()
@@ -153,11 +154,16 @@ class Server:
 
         session = Session.from_dict(session_data)
         save_session(session)
-        await self._broadcast(Event("session.started", {
-            "id": session.id,
-            "step": session.step,
-            "worktree": session.worktree,
-        }))
+        await self._broadcast(
+            Event(
+                "session.started",
+                {
+                    "id": session.id,
+                    "step": session.step,
+                    "worktree": session.worktree,
+                },
+            )
+        )
         return success({"id": session.id})
 
     async def _handle_sessions_end(self, params: dict) -> Response:
@@ -197,11 +203,16 @@ class Server:
         if not session_id or text is None:
             return error("Missing 'session_id' or 'text' parameter")
 
-        await self._broadcast(Event("output.line", {
-            "session_id": session_id,
-            "text": text,
-            "timestamp": datetime.now().isoformat(),
-        }))
+        await self._broadcast(
+            Event(
+                "output.line",
+                {
+                    "session_id": session_id,
+                    "text": text,
+                    "timestamp": datetime.now().isoformat(),
+                },
+            )
+        )
         return success({})
 
     async def _handle_scheduler_status(self) -> Response:
@@ -216,15 +227,22 @@ class Server:
 
         acquired, reason = self.scheduler.acquire(run_id)
         if acquired:
-            await self._broadcast(Event("scheduler.slot.acquired", {
-                "run_id": run_id,
+            await self._broadcast(
+                Event(
+                    "scheduler.slot.acquired",
+                    {
+                        "run_id": run_id,
+                        "slots_used": self.scheduler.slots_used(),
+                    },
+                )
+            )
+        return success(
+            {
+                "acquired": acquired,
+                "reason": reason,
                 "slots_used": self.scheduler.slots_used(),
-            }))
-        return success({
-            "acquired": acquired,
-            "reason": reason,
-            "slots_used": self.scheduler.slots_used(),
-        })
+            }
+        )
 
     async def _handle_scheduler_release(self, params: dict) -> Response:
         """Release a scheduler slot."""
@@ -233,10 +251,15 @@ class Server:
             return error("Missing 'run_id' parameter")
 
         self.scheduler.release(run_id)
-        await self._broadcast(Event("scheduler.slot.released", {
-            "run_id": run_id,
-            "slots_used": self.scheduler.slots_used(),
-        }))
+        await self._broadcast(
+            Event(
+                "scheduler.slot.released",
+                {
+                    "run_id": run_id,
+                    "slots_used": self.scheduler.slots_used(),
+                },
+            )
+        )
         return success({"slots_used": self.scheduler.slots_used()})
 
     async def _broadcast(self, event: Event) -> None:
@@ -263,18 +286,28 @@ class Server:
                 # Check subscription triggers (file changes on main)
                 triggered_subs = run_subscription_check()
                 for loop_id in triggered_subs:
-                    await self._broadcast(Event("loop.triggered", {
-                        "loop_id": loop_id,
-                        "trigger": "subscription",
-                    }))
+                    await self._broadcast(
+                        Event(
+                            "loop.triggered",
+                            {
+                                "loop_id": loop_id,
+                                "trigger": "subscription",
+                            },
+                        )
+                    )
 
                 # Check schedule triggers (cron)
                 triggered_scheds = run_schedule_check()
                 for loop_id in triggered_scheds:
-                    await self._broadcast(Event("loop.triggered", {
-                        "loop_id": loop_id,
-                        "trigger": "schedule",
-                    }))
+                    await self._broadcast(
+                        Event(
+                            "loop.triggered",
+                            {
+                                "loop_id": loop_id,
+                                "trigger": "schedule",
+                            },
+                        )
+                    )
 
             except asyncio.CancelledError:
                 break
@@ -284,7 +317,7 @@ class Server:
 
 async def run_server(socket_path: Path) -> None:
     """Main daemon entry point. Runs until terminated."""
-    from loopflow.lfd.launchd import write_pid, remove_pid
+    from loopflow.lfd.launchd import remove_pid, write_pid
 
     server = Server(socket_path)
 

@@ -9,14 +9,17 @@ from importlib import resources
 from pathlib import Path
 from typing import Optional
 
-from loopflow.lf.config import load_config
 from loopflow.lf.design import gather_design_docs, gather_internal_docs
-from loopflow.lf.files import gather_docs, gather_files, format_files, format_image_references
+from loopflow.lf.files import format_files, format_image_references, gather_docs, gather_files
 from loopflow.lf.frontmatter import StepFile, parse_step_file
-from loopflow.lf.skills import discover_skill_sources, find_skill, load_skill_prompt, list_all_skills
-from loopflow.lfops.summarize import is_stale, load_summary
+from loopflow.lf.skills import (
+    discover_skill_sources,
+    find_skill,
+    list_all_skills,
+    load_skill_prompt,
+)
 from loopflow.lf.voices import Voice, load_voice
-
+from loopflow.lfops.summarize import is_stale, load_summary
 
 # Path to bundled builtin templates
 _TEMPLATES_DIR = Path(__file__).parent.parent / "templates" / "steps"
@@ -31,6 +34,7 @@ _GLOBAL_STEP_PATHS = [
 @dataclass
 class ClipboardContent:
     """Content from clipboard - text, image, or both."""
+
     text: str | None = None
     image_path: Path | None = None
 
@@ -537,7 +541,10 @@ def format_prompt(components: PromptComponents) -> str:
 
     if components.step:
         name, content = components.step
-        step_tag = f"<lf:step>\n{content}\n</lf:step>" if name == "inline" else f"<lf:step:{name}>\n{content}\n</lf:step:{name}>"
+        if name == "inline":
+            step_tag = f"<lf:step>\n{content}\n</lf:step>"
+        else:
+            step_tag = f"<lf:step:{name}>\n{content}\n</lf:step:{name}>"
 
         # Voices go between "The step." header and the actual step content
         if components.voices:
@@ -545,7 +552,10 @@ def format_prompt(components: PromptComponents) -> str:
                 v = components.voices[0]
                 voice_section = f"<lf:voice:{v.name}>\n{v.content}\n</lf:voice:{v.name}>"
             else:
-                voice_parts = [f"<lf:voice:{v.name}>\n{v.content}\n</lf:voice:{v.name}>" for v in components.voices]
+                voice_parts = [
+                    f"<lf:voice:{v.name}>\n{v.content}\n</lf:voice:{v.name}>"
+                    for v in components.voices
+                ]
                 voice_section = f"<lf:voices>\n{chr(10).join(voice_parts)}\n</lf:voices>"
             parts.append(f"The step.\n\n{voice_section}\n\n{step_tag}")
         else:
@@ -566,7 +576,7 @@ def format_prompt(components: PromptComponents) -> str:
     if components.summaries:
         summary_parts = []
         for summary_path, content in components.summaries:
-            summary_parts.append(f"<lf:summary path=\"{summary_path}\">\n{content}\n</lf:summary>")
+            summary_parts.append(f'<lf:summary path="{summary_path}">\n{content}\n</lf:summary>')
         summaries_body = "\n\n".join(summary_parts)
         parts.append(
             "Pre-generated codebase summaries.\n\n"
@@ -574,7 +584,10 @@ def format_prompt(components: PromptComponents) -> str:
         )
 
     if components.diff:
-        parts.append(f"Changes on this branch (diff against main).\n\n<lf:diff>\n{components.diff}\n</lf:diff>")
+        parts.append(
+            f"Changes on this branch (diff against main).\n\n"
+            f"<lf:diff>\n{components.diff}\n</lf:diff>"
+        )
 
     # diff_files now contains merged diff + context files (deduplicated at load time)
     if components.diff_files:
@@ -582,7 +595,10 @@ def format_prompt(components: PromptComponents) -> str:
 
     # Handle clipboard content (text and/or image)
     if components.clipboard and components.clipboard.text:
-        parts.append(f"Content from clipboard.\n\n<lf:clipboard>\n{components.clipboard.text}\n</lf:clipboard>")
+        parts.append(
+            f"Content from clipboard.\n\n"
+            f"<lf:clipboard>\n{components.clipboard.text}\n</lf:clipboard>"
+        )
 
     # Merge clipboard image with other image files
     all_images = list(components.image_files) if components.image_files else []

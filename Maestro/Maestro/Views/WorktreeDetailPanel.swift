@@ -8,14 +8,12 @@ struct WorktreeDetailPanel: View {
 
     @AppStorage("historyExpanded") private var historyExpanded = true
     @AppStorage("commitsExpanded") private var commitsExpanded = false
-    @AppStorage("diffPreviewExpanded") private var diffPreviewExpanded = false
+    @AppStorage("diffExpanded") private var diffExpanded = false
     @AppStorage("launcherExpanded") private var launcherExpanded = false
 
     @State private var showingDiffSheet = false
-    @State private var diffContent: String?
-    @State private var diffLoading = false
     @State private var commits: [CommitInfo] = []
-    @State private var diffPreview: String = ""
+    @State private var diff: String = ""
     @State private var isLoadingCommits = false
     @State private var isLoadingDiff = false
     @State private var actionError: String?
@@ -38,7 +36,7 @@ struct WorktreeDetailPanel: View {
                 VStack(spacing: 0) {
                     historySection
                     commitsSection
-                    diffPreviewSection
+                    diffSection
                 }
             }
 
@@ -49,8 +47,8 @@ struct WorktreeDetailPanel: View {
         .sheet(isPresented: $showingDiffSheet) {
             DiffSheet(
                 worktree: worktree,
-                diffContent: diffContent,
-                isLoading: diffLoading,
+                diffContent: diff.isEmpty ? nil : diff,
+                isLoading: isLoadingDiff,
                 onOpenWeb: {
                     if let repoURL = appState.currentRepo {
                         Task {
@@ -386,14 +384,14 @@ struct WorktreeDetailPanel: View {
 
     // MARK: - Diff Preview Section
 
-    private var diffPreviewSection: some View {
-        DisclosureGroup(isExpanded: $diffPreviewExpanded) {
+    private var diffSection: some View {
+        DisclosureGroup(isExpanded: $diffExpanded) {
             if isLoadingDiff {
                 ProgressView()
                     .scaleEffect(0.7)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
-            } else if diffPreview.isEmpty {
+            } else if diff.isEmpty {
                 Text("No changes on this branch.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
@@ -409,7 +407,7 @@ struct WorktreeDetailPanel: View {
                     }
                     .frame(maxHeight: 200)
 
-                    if diffPreview.count > 2000 {
+                    if diff.count > 2000 {
                         Button("Open Full Diff") {
                             loadFullDiff()
                         }
@@ -433,18 +431,18 @@ struct WorktreeDetailPanel: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .onChange(of: diffPreviewExpanded) { _, expanded in
-            if expanded && diffPreview.isEmpty {
-                loadDiffPreview()
+        .onChange(of: diffExpanded) { _, expanded in
+            if expanded && diff.isEmpty {
+                loadDiff()
             }
         }
     }
 
     private var truncatedDiff: String {
-        if diffPreview.count > 2000 {
-            return String(diffPreview.prefix(2000)) + "\n..."
+        if diff.count > 2000 {
+            return String(diff.prefix(2000)) + "\n..."
         }
-        return diffPreview
+        return diff
     }
 
     // MARK: - Launcher Section
@@ -515,34 +513,24 @@ struct WorktreeDetailPanel: View {
         }
     }
 
-    private func loadDiffPreview() {
+    private func loadDiff() {
         isLoadingDiff = true
         Task {
             do {
                 let worktreeURL = URL(fileURLWithPath: worktree.path)
                 let base = worktree.baseBranch ?? "main"
-                diffPreview = try await worktreeService.getDiff("\(base)...HEAD", in: worktreeURL)
+                diff = try await worktreeService.getDiff("\(base)...HEAD", in: worktreeURL)
             } catch {
-                diffPreview = ""
+                diff = ""
             }
             isLoadingDiff = false
         }
     }
 
     private func loadFullDiff() {
-        diffContent = nil
-        diffLoading = true
         showingDiffSheet = true
-
-        Task {
-            do {
-                let worktreeURL = URL(fileURLWithPath: worktree.path)
-                let base = worktree.baseBranch ?? "main"
-                diffContent = try await worktreeService.getDiff("\(base)...HEAD", in: worktreeURL)
-            } catch {
-                diffContent = "Error loading diff: \(error.localizedDescription)"
-            }
-            diffLoading = false
+        if diff.isEmpty {
+            loadDiff()
         }
     }
 }

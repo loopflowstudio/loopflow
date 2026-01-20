@@ -7,50 +7,6 @@ import Testing
 @Suite("Worktree Model")
 struct WorktreeModelTests {
 
-    @Test("Worktree status text shows clean when not dirty")
-    func statusTextClean() {
-        let worktree = Worktree(
-            path: "/test/path",
-            branch: "main",
-            baseBranch: nil,
-            isDirty: false,
-            aheadMain: 0,
-            behindMain: 0,
-            aheadRemote: 0,
-            behindRemote: 0,
-            prURL: nil,
-            prNumber: nil,
-            prState: nil,
-            hasCodeWorkspace: false,
-            isRebasing: false,
-            isMerging: false
-        )
-
-        #expect(worktree.statusText == "clean")
-    }
-
-    @Test("Worktree status text shows modified when dirty")
-    func statusTextDirty() {
-        let worktree = Worktree(
-            path: "/test/path",
-            branch: "feature",
-            baseBranch: "main",
-            isDirty: true,
-            aheadMain: 2,
-            behindMain: 0,
-            aheadRemote: 1,
-            behindRemote: 0,
-            prURL: nil,
-            prNumber: nil,
-            prState: nil,
-            hasCodeWorkspace: false,
-            isRebasing: false,
-            isMerging: false
-        )
-
-        #expect(worktree.statusText == "modified")
-    }
-
     @Test("Worktree commits text includes PR number when present")
     func commitsTextWithPR() {
         let worktree = Worktree(

@@ -1,4 +1,5 @@
 """Publishing utilities for loopflow releases."""
+import json
 import os
 import re
 import subprocess
@@ -63,6 +64,68 @@ def write_version(version: str) -> None:
 def _run(cmd: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
     """Run a command and return result."""
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+
+
+def check_ci_passed(repo_root: Path | None = None) -> tuple[bool, str]:
+    """Check if CI passed for the current HEAD commit. Returns (success, message)."""
+    cwd = repo_root or Path.cwd()
+
+    # Get current commit SHA
+    result = _run(["git", "rev-parse", "HEAD"], cwd)
+    if result.returncode != 0:
+        return False, "Failed to get current commit"
+    commit_sha = result.stdout.strip()
+
+    # Get CI status for this commit
+    result = _run(
+        ["gh", "run", "list", "--commit", commit_sha, "--json", "status,conclusion,workflowName"],
+        cwd,
+    )
+
+    if result.returncode != 0:
+        return False, f"Failed to get CI status: {result.stderr}"
+
+    try:
+        runs = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return False, f"Invalid JSON from gh run list: {result.stdout}"
+
+    if not runs:
+        return False, f"No CI runs found for commit {commit_sha[:8]}. Push to main to trigger CI."
+
+    # Check status of each workflow
+    statuses = []
+    all_passed = True
+    any_running = False
+
+    seen_workflows = set()
+    for run in runs:
+        workflow = run.get("workflowName", "unknown")
+        if workflow in seen_workflows:
+            continue
+        seen_workflows.add(workflow)
+
+        status = run.get("status")
+        conclusion = run.get("conclusion")
+
+        if status in ("queued", "in_progress", "pending", "waiting"):
+            any_running = True
+            statuses.append(f"{workflow}: {status}")
+        elif conclusion == "success":
+            statuses.append(f"{workflow}: ✓")
+        else:
+            all_passed = False
+            statuses.append(f"{workflow}: ✗ ({conclusion or status})")
+
+    status_str = ", ".join(statuses)
+
+    if any_running:
+        return False, f"CI still running: {status_str}"
+
+    if not all_passed:
+        return False, f"CI failed: {status_str}"
+
+    return True, f"CI passed: {status_str}"
 
 
 def check_publish_ready(repo_root: Path | None = None) -> PublishState:

@@ -6,7 +6,13 @@ import subprocess
 import typer
 
 from loopflow.lf.context import find_worktree_root
-from loopflow.lf.git import GitError, ensure_ready_pr, find_main_repo, is_draft_pr, open_pr
+from loopflow.lf.git import (
+    GitError,
+    ensure_ready_pr,
+    find_main_repo,
+    is_draft_pr,
+    open_pr,
+)
 from loopflow.lf.messages import generate_pr_message, generate_pr_message_from_diff
 from loopflow.lfops._helpers import _push, add_commit_push, get_default_branch, sync_main_repo
 
@@ -14,7 +20,15 @@ from loopflow.lfops._helpers import _push, add_commit_push, get_default_branch, 
 def _get_existing_pr_url(repo_root) -> str | None:
     """Check if an open PR exists for current branch. Returns URL if exists, None otherwise."""
     result = subprocess.run(
-        ["gh", "pr", "view", "--json", "url,state", "-q", 'select(.state == "OPEN") | .url'],
+        [
+            "gh",
+            "pr",
+            "view",
+            "--json",
+            "url,state",
+            "-q",
+            'select(.state == "OPEN") | .url',
+        ],
         cwd=repo_root,
         capture_output=True,
         text=True,

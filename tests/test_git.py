@@ -1,8 +1,6 @@
 """Tests for loopflow.git module."""
 
-import subprocess
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -26,11 +24,7 @@ def test_open_pr_raises_on_failure(temp_repo):
         # Mock gh pr create failure
         def side_effect(*args, **kwargs):
             if "gh" in args[0]:
-                return MagicMock(
-                    returncode=1,
-                    stderr="error: failed to create PR",
-                    stdout=""
-                )
+                return MagicMock(returncode=1, stderr="error: failed to create PR", stdout="")
             return MagicMock(returncode=0)
 
         mock_run.side_effect = side_effect
@@ -42,18 +36,12 @@ def test_open_pr_raises_on_failure(temp_repo):
 def test_open_pr_returns_existing_pr_url(temp_repo):
     """Opening PR when one exists returns existing URL."""
     with patch("subprocess.run") as mock_run:
+
         def side_effect(*args, **kwargs):
             if "gh" in args[0] and "create" in args[0]:
-                return MagicMock(
-                    returncode=1,
-                    stderr="already exists",
-                    stdout=""
-                )
+                return MagicMock(returncode=1, stderr="already exists", stdout="")
             if "gh" in args[0] and "view" in args[0]:
-                return MagicMock(
-                    returncode=0,
-                    stdout="https://github.com/user/repo/pull/1"
-                )
+                return MagicMock(returncode=0, stdout="https://github.com/user/repo/pull/1")
             return MagicMock(returncode=0)
 
         mock_run.side_effect = side_effect
@@ -92,7 +80,11 @@ def test_autocommit_creates_commit_when_dirty(temp_repo):
 
         # Check commit message includes task
         # Find the actual git commit call (not just containing "commit" substring)
-        commit_calls = [c for c in mock_run.call_args_list if len(c[0]) > 0 and c[0][0][0] == "git" and "commit" in c[0][0]]
+        commit_calls = [
+            c
+            for c in mock_run.call_args_list
+            if len(c[0]) > 0 and c[0][0][0] == "git" and "commit" in c[0][0]
+        ]
         assert len(commit_calls) > 0
         # The commit message should be in the -m flag
         commit_args = commit_calls[0][0][0]
@@ -128,10 +120,7 @@ def test_find_main_repo_from_main_repo(temp_repo):
     """find_main_repo returns repo root when in main repo."""
     with patch("subprocess.run") as mock_run:
         # Simulate being in a regular repo (not a worktree)
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout=str(temp_repo / ".git")
-        )
+        mock_run.return_value = MagicMock(returncode=0, stdout=str(temp_repo / ".git"))
 
         result = find_main_repo(temp_repo)
         assert result == temp_repo
@@ -148,10 +137,7 @@ def test_find_main_repo_from_worktree(tmp_path):
 
     with patch("subprocess.run") as mock_run:
         # Simulate git returning the main repo's .git dir
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout=str(main_repo / ".git")
-        )
+        mock_run.return_value = MagicMock(returncode=0, stdout=str(main_repo / ".git"))
 
         result = find_main_repo(worktree)
         assert result == main_repo
@@ -160,7 +146,9 @@ def test_find_main_repo_from_worktree(tmp_path):
 def test_find_main_repo_not_in_git_repo(tmp_path):
     """find_main_repo returns None when not in a git repo."""
     with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=128, stdout="", stderr="fatal: not a git repository")
+        mock_run.return_value = MagicMock(
+            returncode=128, stdout="", stderr="fatal: not a git repository"
+        )
 
         result = find_main_repo(tmp_path)
         assert result is None
@@ -171,10 +159,7 @@ def test_get_current_branch_returns_branch_name(temp_repo):
     from loopflow.lf.git import get_current_branch
 
     with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="feature-branch\n"
-        )
+        mock_run.return_value = MagicMock(returncode=0, stdout="feature-branch\n")
 
         result = get_current_branch(temp_repo)
         assert result == "feature-branch"
@@ -185,10 +170,7 @@ def test_get_current_branch_returns_none_when_detached(temp_repo):
     from loopflow.lf.git import get_current_branch
 
     with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout=""
-        )
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
 
         result = get_current_branch(temp_repo)
         assert result is None

@@ -73,7 +73,8 @@ def parse_model(model: str) -> tuple[str, str | None]:
 
 
 class Config(BaseModel):
-    agent_model: str = "claude:opus"  # Format: backend:variant (e.g., claude:opus, claude:sonnet, codex)
+    # Format: backend:variant (e.g., claude:opus, claude:sonnet, codex)
+    agent_model: str = "claude:opus"
     pipelines: dict[str, PipelineConfig] = Field(default_factory=dict)
     yolo: bool = False  # Skip permissions; Codex also disables sandboxing
     chrome: bool = False  # Enable Chrome integration for Claude Code (browser automation)
@@ -156,6 +157,7 @@ class Config(BaseModel):
 
 class ConfigError(Exception):
     """User-friendly config error."""
+
     pass
 
 
@@ -182,8 +184,9 @@ def load_config(repo_root: Path) -> Config | None:
             # Simplify Pydantic's verbose output
             lines = msg.split("\n")
             errors = [
-                l.strip() for l in lines[1:]
-                if l.strip() and not l.strip().startswith("For further")
+                line.strip()
+                for line in lines[1:]
+                if line.strip() and not line.strip().startswith("For further")
             ]
             raise ConfigError(f"Invalid config in {config_path}:\n" + "\n".join(errors))
         raise ConfigError(f"Invalid config in {config_path}: {e}")

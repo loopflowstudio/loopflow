@@ -1,10 +1,10 @@
 """Tests for work queue functionality."""
 
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
-from loopflow.lfd.work.models import WorkItem, get_next_work
 from loopflow.lfd.work.file_backend import FileBackend
+from loopflow.lfd.work.models import WorkItem, get_next_work
 
 
 def test_work_item_defaults():
@@ -37,7 +37,13 @@ def test_get_next_work_skips_human_claimed():
 
 def test_get_next_work_prefers_non_blocked():
     items = [
-        WorkItem(id="a", title="A", description="", status="approved", blocked_on="waiting for input"),
+        WorkItem(
+            id="a",
+            title="A",
+            description="",
+            status="approved",
+            blocked_on="waiting for input",
+        ),
         WorkItem(id="b", title="B", description="", status="approved"),
     ]
     result = get_next_work(items)

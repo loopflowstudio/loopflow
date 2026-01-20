@@ -6,7 +6,9 @@ from pathlib import Path
 from typing import Any, AsyncIterator
 
 # Re-export session logging functions for backwards compatibility
-from loopflow.lf.models import log_session_start, log_session_end, SOCKET_PATH
+from loopflow.lf.models import SOCKET_PATH
+from loopflow.lf.models import log_session_end as log_session_end
+from loopflow.lf.models import log_session_start as log_session_start
 
 
 class DaemonClient:
@@ -19,9 +21,7 @@ class DaemonClient:
 
     async def connect(self) -> None:
         """Connect to the daemon socket."""
-        self._reader, self._writer = await asyncio.open_unix_connection(
-            str(self.socket_path)
-        )
+        self._reader, self._writer = await asyncio.open_unix_connection(str(self.socket_path))
 
     async def close(self) -> None:
         """Close the connection."""
@@ -69,6 +69,7 @@ class DaemonClient:
 
 class DaemonError(Exception):
     """Error from daemon."""
+
     pass
 
 
@@ -111,5 +112,3 @@ async def _notify_event(event: str, data: dict[str, Any]) -> None:
         pass  # Fire-and-forget
     finally:
         await client.close()
-
-

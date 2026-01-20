@@ -22,7 +22,11 @@ The deliverable is working, clean code that passes tests.
    - Rewrite the primary design doc in `.design/` to match the implementation (keep any decisions log)
    - Update README and docs if the branch changes user-facing behavior or APIs
 
-2. **Test**
+2. **Lint**
+   - Run `lf lint` to check for lint and format issues
+   - Fix any failures before proceeding to tests
+
+3. **Test**
    - Run the full test suite: `./dev test` (runs both Python and Swift tests)
    - If tests fail, determine: broken test or broken code?
    - Fix failures one by one, running single tests while debugging

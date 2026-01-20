@@ -4,6 +4,27 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
+from loopflow.lfd.db import (
+    delete_loop,
+    get_latest_loop_run,
+    get_loop,
+    get_loop_by_goal_repo,
+    get_loop_runs,
+    list_loops,
+    load_sessions,
+    load_sessions_for_repo,
+    load_sessions_for_worktree,
+    save_loop,
+    save_loop_run,
+    save_session,
+    update_loop_iteration,
+    update_loop_pid,
+    update_loop_run_pr,
+    update_loop_run_status,
+    update_loop_run_step,
+    update_loop_status,
+    update_session_status,
+)
 from loopflow.lfd.models import (
     Loop,
     LoopRun,
@@ -13,28 +34,7 @@ from loopflow.lfd.models import (
     Session,
     SessionStatus,
 )
-from loopflow.lfd.protocol import Request, Response, Event, success, error
-from loopflow.lfd.db import (
-    delete_loop,
-    get_latest_loop_run,
-    get_loop,
-    get_loop_by_goal_repo,
-    get_loop_runs,
-    list_loops,
-    save_loop,
-    save_loop_run,
-    save_session,
-    load_sessions,
-    load_sessions_for_worktree,
-    load_sessions_for_repo,
-    update_loop_iteration,
-    update_loop_pid,
-    update_loop_run_pr,
-    update_loop_run_status,
-    update_loop_run_step,
-    update_loop_status,
-    update_session_status,
-)
+from loopflow.lfd.protocol import Event, Request, error, success
 
 
 def test_session_serialization():
@@ -215,6 +215,7 @@ def test_db_update_session_status_nonexistent():
 def test_server_handle_output_line_broadcasts_event():
     """output.line handler broadcasts event to subscribers."""
     import asyncio
+
     from loopflow.lfd.server import Server
 
     async def run_test():
@@ -252,6 +253,7 @@ def test_server_handle_output_line_broadcasts_event():
 def test_server_handle_output_line_missing_session_id():
     """output.line handler returns error for missing session_id."""
     import asyncio
+
     from loopflow.lfd.server import Server
 
     async def run_test():
@@ -271,6 +273,7 @@ def test_server_handle_output_line_missing_session_id():
 def test_server_handle_output_line_missing_text():
     """output.line handler returns error for missing text."""
     import asyncio
+
     from loopflow.lfd.server import Server
 
     async def run_test():
@@ -290,6 +293,7 @@ def test_server_handle_output_line_missing_text():
 def test_server_handle_output_line_allows_empty_text():
     """output.line handler accepts empty string for text (allows blank lines)."""
     import asyncio
+
     from loopflow.lfd.server import Server
 
     async def run_test():
@@ -424,12 +428,16 @@ def test_db_get_loop_by_goal_repo():
         )
         save_loop(loop, db_path)
 
-        loaded = get_loop_by_goal_repo(LoopType.FLOW, "api-cleanup", Path("/tmp/repo"), db_path=db_path)
+        loaded = get_loop_by_goal_repo(
+            LoopType.FLOW, "api-cleanup", Path("/tmp/repo"), db_path=db_path
+        )
         assert loaded is not None
         assert loaded.id == "loop-1"
 
         # Different type should not match
-        not_found = get_loop_by_goal_repo(LoopType.LOOP, "api-cleanup", Path("/tmp/repo"), db_path=db_path)
+        not_found = get_loop_by_goal_repo(
+            LoopType.LOOP, "api-cleanup", Path("/tmp/repo"), db_path=db_path
+        )
         assert not_found is None
 
 
@@ -931,6 +939,7 @@ def test_scheduler_acquire_respects_global_limit():
 def test_scheduler_thread_safety():
     """Scheduler is thread-safe for acquire/release."""
     import threading
+
     from loopflow.lfd.scheduler import Scheduler, SchedulerConfig
 
     config = SchedulerConfig(concurrency=10, global_pr_limit=100)
@@ -965,7 +974,6 @@ def test_scheduler_thread_safety():
 
 def test_schedule_triggers_within_grace_period():
     """Schedule triggers when missed time is within 24h grace period."""
-    from datetime import timedelta
     from loopflow.lfd.schedule import should_trigger_cron
 
     # Cron for 9am daily, last run was yesterday
@@ -983,6 +991,7 @@ def test_schedule_triggers_within_grace_period():
 def test_schedule_skips_stale_beyond_grace_period():
     """Schedule does NOT trigger when missed time is beyond grace period."""
     from datetime import timedelta
+
     from loopflow.lfd.schedule import should_trigger_cron
 
     # Use a short grace period for testing
@@ -1016,6 +1025,7 @@ def test_schedule_skips_stale_beyond_grace_period():
 def test_schedule_grace_period_skips_very_old():
     """Schedule with 0 grace period skips any missed time."""
     from datetime import timedelta
+
     from loopflow.lfd.schedule import should_trigger_cron
 
     # With zero grace period, only triggers if prev_time == now (impossible)
@@ -1028,7 +1038,6 @@ def test_schedule_grace_period_skips_very_old():
 
 def test_schedule_first_run_within_grace():
     """First schedule run triggers if within grace period."""
-    from datetime import timedelta
     from loopflow.lfd.schedule import should_trigger_cron
 
     # No last_run (first time), should trigger if within grace
@@ -1039,6 +1048,7 @@ def test_schedule_first_run_within_grace():
 def test_schedule_first_run_beyond_grace():
     """First schedule run skips if beyond grace period."""
     from datetime import timedelta
+
     from loopflow.lfd.schedule import should_trigger_cron
 
     # No last_run, but zero grace period means prev_time is stale
@@ -1057,7 +1067,8 @@ def test_iteration_branch_prefix_strips_main_suffix():
     assert _iteration_branch_prefix("product-engineer-1-main") == "product-engineer-1"
     assert _iteration_branch_prefix("test-main") == "test"
     # New format with random words
-    assert _iteration_branch_prefix("product-engineer-swift-river-main") == "product-engineer-swift-river"
+    branch = "product-engineer-swift-river-main"
+    assert _iteration_branch_prefix(branch) == "product-engineer-swift-river"
     assert _iteration_branch_prefix("test-api-calm-brook-main") == "test-api-calm-brook"
 
 
@@ -1074,7 +1085,7 @@ def test_iteration_branch_prefix_without_suffix():
 
 def test_generate_random_words_format():
     """_generate_random_words returns magical-musical format."""
-    from loopflow.lfd.loops import _generate_random_words, MAGICAL, MUSICAL
+    from loopflow.lfd.loops import MAGICAL, MUSICAL, _generate_random_words
 
     words = _generate_random_words()
     parts = words.split("-")

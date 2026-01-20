@@ -10,11 +10,7 @@ def test_normalize_claude_event_single_block():
     """normalize_claude_event handles single tool_use block."""
     event = {
         "type": "assistant",
-        "message": {
-            "content": [
-                {"type": "tool_use", "name": "Read", "input": {"path": "foo.py"}}
-            ]
-        }
+        "message": {"content": [{"type": "tool_use", "name": "Read", "input": {"path": "foo.py"}}]},
     }
 
     result = normalize_claude_event(event)
@@ -34,7 +30,7 @@ def test_normalize_claude_event_multiple_blocks():
                 {"type": "text", "text": "I'll read this file..."},
                 {"type": "tool_use", "name": "Edit", "input": {"path": "bar.py"}},
             ]
-        }
+        },
     }
 
     result = normalize_claude_event(event)
@@ -57,7 +53,7 @@ def test_normalize_claude_event_empty_text_skipped():
                 {"type": "text", "text": ""},
                 {"type": "tool_use", "name": "Read", "input": {}},
             ]
-        }
+        },
     }
 
     result = normalize_claude_event(event)
@@ -134,11 +130,7 @@ def test_format_stream_line_assistant_tool_use():
     """_format_stream_line formats assistant tool_use blocks."""
     event = {
         "type": "assistant",
-        "message": {
-            "content": [
-                {"type": "tool_use", "name": "Read", "input": {"path": "foo.py"}}
-            ]
-        }
+        "message": {"content": [{"type": "tool_use", "name": "Read", "input": {"path": "foo.py"}}]},
     }
     result = _format_stream_line(json.dumps(event))
 
@@ -149,11 +141,7 @@ def test_format_stream_line_assistant_tool_use_no_path():
     """_format_stream_line handles tool_use without path."""
     event = {
         "type": "assistant",
-        "message": {
-            "content": [
-                {"type": "tool_use", "name": "Bash", "input": {"command": "ls"}}
-            ]
-        }
+        "message": {"content": [{"type": "tool_use", "name": "Bash", "input": {"command": "ls"}}]},
     }
     result = _format_stream_line(json.dumps(event))
 
@@ -164,11 +152,7 @@ def test_format_stream_line_assistant_text():
     """_format_stream_line formats assistant text blocks."""
     event = {
         "type": "assistant",
-        "message": {
-            "content": [
-                {"type": "text", "text": "I'll help you with that."}
-            ]
-        }
+        "message": {"content": [{"type": "text", "text": "I'll help you with that."}]},
     }
     result = _format_stream_line(json.dumps(event))
 
@@ -179,11 +163,7 @@ def test_format_stream_line_assistant_empty_text_skipped():
     """_format_stream_line skips empty text blocks."""
     event = {
         "type": "assistant",
-        "message": {
-            "content": [
-                {"type": "text", "text": ""}
-            ]
-        }
+        "message": {"content": [{"type": "text", "text": ""}]},
     }
     result = _format_stream_line(json.dumps(event))
 
@@ -199,7 +179,7 @@ def test_format_stream_line_assistant_multiple_blocks():
                 {"type": "text", "text": "Reading the file..."},
                 {"type": "tool_use", "name": "Read", "input": {"path": "test.py"}},
             ]
-        }
+        },
     }
     result = _format_stream_line(json.dumps(event))
 
@@ -252,5 +232,3 @@ def test_format_stream_line_unknown_type_filtered():
     result = _format_stream_line(json.dumps(event))
 
     assert result == []
-
-

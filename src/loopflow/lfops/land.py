@@ -10,7 +10,14 @@ import typer
 from loopflow.lf.config import load_config, parse_model
 from loopflow.lf.context import find_worktree_root
 from loopflow.lf.design import clear_design_artifacts
-from loopflow.lf.git import GitError, ensure_ready_pr, find_main_repo, get_current_branch, is_draft_pr, open_pr
+from loopflow.lf.git import (
+    GitError,
+    ensure_ready_pr,
+    find_main_repo,
+    get_current_branch,
+    is_draft_pr,
+    open_pr,
+)
 from loopflow.lf.launcher import get_runner
 from loopflow.lf.messages import generate_commit_message_from_diff, generate_pr_message
 from loopflow.lf.worktrees import get_path
@@ -20,7 +27,6 @@ from loopflow.lfops._helpers import (
     get_diff,
     remove_worktree,
     resolve_base_ref,
-    sync_main_repo,
 )
 
 
@@ -55,7 +61,10 @@ def _resolve_repos(worktree: str | None, strict: bool) -> tuple[Path, Path]:
     )
     if result.stdout.strip():
         if strict:
-            typer.echo("Error: Uncommitted changes (use without --strict to auto-commit)", err=True)
+            typer.echo(
+                "Error: Uncommitted changes (use without --strict to auto-commit)",
+                err=True,
+            )
             raise typer.Exit(1)
         add_commit_push(repo_root, push=False)
 
@@ -256,7 +265,10 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
         remote_ahead = int(result.stdout.strip()) if result.returncode == 0 else 0
         if unpushed > 0:
             if strict:
-                typer.echo("Error: Unpushed commits (use without --strict to auto-push)", err=True)
+                typer.echo(
+                    "Error: Unpushed commits (use without --strict to auto-push)",
+                    err=True,
+                )
                 raise typer.Exit(1)
             if remote_ahead > 0:
                 # Branches diverged (e.g., after rebase) - force push safely
@@ -314,7 +326,10 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
             body = message.body
             base_branch = get_default_branch(main_repo)
         else:
-            typer.echo("Error: No open PR found. Run 'lfops pr' first, or use --local or --create-pr.", err=True)
+            typer.echo(
+                "Error: No open PR found. Run 'lfops pr' first, or use --local or --create-pr.",
+                err=True,
+            )
             raise typer.Exit(1)
     else:
         pr_number = pr_data.get("number")
@@ -349,7 +364,16 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
     # Enable auto-merge on the PR
     # With merge queue enabled, this queues the PR for merge after CI passes
     typer.echo(f"Enabling auto-merge for PR #{pr_number}: {title}")
-    merge_cmd = ["gh", "pr", "merge", str(pr_number), "--squash", "--auto", "--subject", title]
+    merge_cmd = [
+        "gh",
+        "pr",
+        "merge",
+        str(pr_number),
+        "--squash",
+        "--auto",
+        "--subject",
+        title,
+    ]
     if body:
         merge_cmd.extend(["--body", body])
     result = subprocess.run(merge_cmd, cwd=repo_root, capture_output=True, text=True)
@@ -358,10 +382,9 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
         error_msg = result.stderr.strip() or result.stdout.strip() or "auto-merge failed"
         if _auto_merge_not_allowed(error_msg):
             auto_merge_enabled = False
-            typer.echo(
-                "Auto-merge is disabled for this repo. Enable it in repo settings or merge manually after CI passes.",
-                err=True,
-            )
+            msg = "Auto-merge is disabled for this repo. "
+            msg += "Enable it in repo settings or merge manually after CI passes."
+            typer.echo(msg, err=True)
         else:
             typer.echo(f"Error: {error_msg}", err=True)
             raise typer.Exit(1)
@@ -382,7 +405,9 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
         typer.echo(f"PR #{pr_number} queued for merge. Will merge when CI passes.")
     else:
         typer.echo(f"PR #{pr_number} not queued for auto-merge.")
-        typer.echo("Enable auto-merge in repo settings or run `gh pr merge --squash` after CI passes.")
+        typer.echo(
+            "Enable auto-merge in repo settings or run `gh pr merge --squash` after CI passes."
+        )
     typer.echo(f"Run 'wt remove {branch}' after merge completes.")
 
     if was_in_worktree:
@@ -503,7 +528,10 @@ def _land_local(strict: bool, worktree: str | None) -> None:
     # Check there's something to commit
     result = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=main_repo)
     if result.returncode == 0:
-        typer.echo(f"Nothing to land - {branch} has no changes relative to {base_branch}.", err=True)
+        typer.echo(
+            f"Nothing to land - {branch} has no changes relative to {base_branch}.",
+            err=True,
+        )
         raise typer.Exit(1)
 
     # Commit and push
@@ -524,7 +552,7 @@ def _land_local(strict: bool, worktree: str | None) -> None:
         try:
             remove_worktree(main_repo, branch, repo_root, base_branch)
         except Exception:
-            typer.echo(f"Warning: Could not remove worktree. Run manually:", err=True)
+            typer.echo("Warning: Could not remove worktree. Run manually:", err=True)
             typer.echo(f"  wt remove {branch}", err=True)
     else:
         subprocess.run(["git", "branch", "-D", branch], cwd=main_repo, capture_output=True)
@@ -573,7 +601,10 @@ def _land_squash_loop_main(strict: bool, worktree: str | None) -> None:
         unpushed = int(result.stdout.strip()) if result.returncode == 0 else 0
         if unpushed > 0:
             if strict:
-                typer.echo("Error: Unpushed commits (use without --strict to auto-push)", err=True)
+                typer.echo(
+                    "Error: Unpushed commits (use without --strict to auto-push)",
+                    err=True,
+                )
                 raise typer.Exit(1)
             typer.echo("Pushing to origin...")
             subprocess.run(["git", "push"], cwd=repo_root, check=True)
@@ -591,11 +622,17 @@ def _land_squash_loop_main(strict: bool, worktree: str | None) -> None:
     # Create PR from loop-main to main
     typer.echo(f"Creating PR: {branch} → main")
     cmd = [
-        "gh", "pr", "create",
-        "--base", "main",
-        "--head", branch,
-        "--title", message.title,
-        "--body", message.body,
+        "gh",
+        "pr",
+        "create",
+        "--base",
+        "main",
+        "--head",
+        branch,
+        "--title",
+        message.title,
+        "--body",
+        message.body,
     ]
     result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)
 
@@ -642,10 +679,18 @@ def register_commands(app: typer.Typer) -> None:
     @app.command()
     def land(
         worktree: str = typer.Option(None, "-w", "--worktree", help="Target worktree by name"),
-        local: bool = typer.Option(None, "-l", "--local/--gh", help="Local merge (no PR) vs GitHub PR merge"),
-        create_pr: bool = typer.Option(False, "-c", "--create-pr", help="Create PR and merge in one step"),
-        strict: bool = typer.Option(False, "-s", "--strict", help="Error if uncommitted/unpushed changes exist"),
-        squash: bool = typer.Option(False, "--squash", help="Squash-merge loop-main to origin/main"),
+        local: bool = typer.Option(
+            None, "-l", "--local/--gh", help="Local merge (no PR) vs GitHub PR merge"
+        ),
+        create_pr: bool = typer.Option(
+            False, "-c", "--create-pr", help="Create PR and merge in one step"
+        ),
+        strict: bool = typer.Option(
+            False, "-s", "--strict", help="Error if uncommitted/unpushed changes exist"
+        ),
+        squash: bool = typer.Option(
+            False, "--squash", help="Squash-merge loop-main to origin/main"
+        ),
     ) -> None:
         """Squash-merge branch to main and clean up.
 

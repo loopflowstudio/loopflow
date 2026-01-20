@@ -34,6 +34,7 @@ class StepConfig:
 @dataclass
 class RaceConfig:
     """Configuration for model racing—run same task with multiple models."""
+
     models: list[str]
     judge: str = "compare"
 
@@ -167,6 +168,7 @@ def list_pipelines(repo: Path) -> list[PipelineDef]:
 @dataclass
 class ResolvedStep:
     """A step ready for execution with dependencies resolved."""
+
     task: str
     config: StepConfig | None = None
     parallel_group: int | None = None
@@ -182,12 +184,14 @@ def resolve_pipeline(pipeline: PipelineDef, repo: Path) -> list[ResolvedStep]:
         nonlocal parallel_group
 
         if step.task:
-            resolved.append(ResolvedStep(
-                task=step.task,
-                config=step.config,
-                parallel_group=group,
-                race=step.race,
-            ))
+            resolved.append(
+                ResolvedStep(
+                    task=step.task,
+                    config=step.config,
+                    parallel_group=group,
+                    race=step.race,
+                )
+            )
         elif step.pipeline:
             nested = load_pipeline(step.pipeline, repo)
             if nested:

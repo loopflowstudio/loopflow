@@ -3,13 +3,19 @@
 import json
 import subprocess
 from pathlib import Path
+from typing import Annotated
 
 import typer
-from typing import Annotated
 
 from loopflow.lf.config import load_config
 from loopflow.lf.context import find_worktree_root
-from loopflow.lf.worktrees import create_with_schema, find_merged, list_all, merge_diagnostics, remove
+from loopflow.lf.worktrees import (
+    create_with_schema,
+    find_merged,
+    list_all,
+    merge_diagnostics,
+    remove,
+)
 from loopflow.lfops._helpers import get_default_branch, sync_main_repo
 
 
@@ -98,8 +104,17 @@ def register_commands(app: typer.Typer) -> None:
         """Fetch and display logs for failed CI checks."""
         # Get the run ID for the PR
         result = subprocess.run(
-            ["gh", "pr", "view", branch, "--json", "statusCheckRollup", "-q",
-             '.statusCheckRollup[] | select(.conclusion == "FAILURE" or .conclusion == "failure") | .detailsUrl'],
+            [
+                "gh",
+                "pr",
+                "view",
+                branch,
+                "--json",
+                "statusCheckRollup",
+                "-q",
+                '.statusCheckRollup[] | select(.conclusion == "FAILURE" '
+                'or .conclusion == "failure") | .detailsUrl',
+            ],
             cwd=repo_root,
             capture_output=True,
             text=True,

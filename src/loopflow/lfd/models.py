@@ -6,37 +6,41 @@ from enum import Enum
 from pathlib import Path
 
 # Re-export Session and SessionStatus from lf.models for backwards compatibility
-from loopflow.lf.models import Session, SessionStatus
-
+from loopflow.lf.models import Session as Session
+from loopflow.lf.models import SessionStatus as SessionStatus
 
 # New loop-based models
 
 
 class LoopType(Enum):
     """Type of loop execution."""
-    LOOP = "loop"          # Continuous homeostasis
-    FLOW = "flow"          # One-off project execution
+
+    LOOP = "loop"  # Continuous homeostasis
+    FLOW = "flow"  # One-off project execution
     SUBSCRIBE = "subscribe"  # Triggered by pathset changes on main
-    SCHEDULE = "schedule"    # Triggered by cron
+    SCHEDULE = "schedule"  # Triggered by cron
 
 
 class LoopStatus(Enum):
     """Runtime status of a loop."""
-    IDLE = "idle"          # Not running
-    RUNNING = "running"    # Currently executing an iteration
-    WAITING = "waiting"    # Paused (outstanding >= limit)
-    ERROR = "error"        # Last iteration failed
+
+    IDLE = "idle"  # Not running
+    RUNNING = "running"  # Currently executing an iteration
+    WAITING = "waiting"  # Paused (outstanding >= limit)
+    ERROR = "error"  # Last iteration failed
 
 
 class MergeMode(Enum):
     """How iteration branches merge to loop-main."""
-    PR = "pr"        # Accumulate on loop-main, human reviews and lands
-    LAND = "land"    # Auto-land to main after each iteration
+
+    PR = "pr"  # Accumulate on loop-main, human reviews and lands
+    LAND = "land"  # Auto-land to main after each iteration
 
 
 @dataclass
 class Loop:
     """A loop configuration (goal + repo combination)."""
+
     id: str
     type: LoopType
     goal_name: str
@@ -48,12 +52,12 @@ class Loop:
     merge_mode: MergeMode = MergeMode.PR
 
     # Type-specific config
-    project_file: str | None = None   # for flow
-    pathset: str | None = None        # for subscribe (comma-separated)
-    cron: str | None = None           # for schedule
-    area: str | None = None           # area of responsibility override
+    project_file: str | None = None  # for flow
+    pathset: str | None = None  # for subscribe (comma-separated)
+    cron: str | None = None  # for schedule
+    area: str | None = None  # area of responsibility override
 
-    pid: int | None = None            # process ID when running
+    pid: int | None = None  # process ID when running
     last_main_sha: str | None = None  # for subscribe: last seen main SHA
     created_at: datetime = field(default_factory=datetime.now)
 
@@ -72,6 +76,7 @@ class Loop:
 @dataclass
 class LoopRun:
     """A single iteration attempt."""
+
     id: str
     loop_id: str
     iteration: int

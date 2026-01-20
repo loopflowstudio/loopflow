@@ -3,9 +3,9 @@
 import json
 import subprocess
 import sys
-from functools import lru_cache
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -103,7 +103,13 @@ class CodexRunner(Runner):
             )
             return LaunchResult(exit_code, output)
         if auto:
-            result = subprocess.run(cmd_with_prompt, cwd=cwd, capture_output=True, text=True, env=get_model_env())
+            result = subprocess.run(
+                cmd_with_prompt,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                env=get_model_env(),
+            )
             return LaunchResult(result.returncode, result.stdout)
 
         result = subprocess.run(cmd_with_prompt, cwd=cwd, text=True, env=get_model_env())
@@ -146,7 +152,13 @@ class GeminiRunner(Runner):
             )
             return LaunchResult(exit_code, output)
         if auto:
-            result = subprocess.run(cmd_with_prompt, cwd=cwd, capture_output=True, text=True, env=get_model_env())
+            result = subprocess.run(
+                cmd_with_prompt,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                env=get_model_env(),
+            )
             return LaunchResult(result.returncode, result.stdout)
 
         result = subprocess.run(cmd_with_prompt, cwd=cwd, text=True, env=get_model_env())
@@ -198,7 +210,13 @@ def launch_claude(
             session_id=session_id,
         )
     elif auto:
-        result = subprocess.run(cmd_with_prompt, cwd=cwd, capture_output=True, text=True, env=get_model_env())
+        result = subprocess.run(
+            cmd_with_prompt,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            env=get_model_env(),
+        )
         return result.returncode, result.stdout
     else:
         result = subprocess.run(cmd_with_prompt, cwd=cwd, text=True, env=get_model_env())
@@ -412,7 +430,13 @@ def build_model_command(
     Images are passed to Codex via -i flag; Claude/Gemini read from filesystem.
     """
     if model == "claude":
-        return build_claude_command(auto=auto, stream=stream, skip_permissions=skip_permissions, model_variant=model_variant, chrome=chrome)
+        return build_claude_command(
+            auto=auto,
+            stream=stream,
+            skip_permissions=skip_permissions,
+            model_variant=model_variant,
+            chrome=chrome,
+        )
     if model == "gemini":
         return build_gemini_command(
             auto=auto,
@@ -450,7 +474,13 @@ def build_model_interactive_command(
     Images are passed to Codex via -i flag; Claude/Gemini read from filesystem.
     """
     if model == "claude":
-        return build_claude_command(auto=False, stream=False, skip_permissions=skip_permissions, model_variant=model_variant, chrome=chrome)
+        return build_claude_command(
+            auto=False,
+            stream=False,
+            skip_permissions=skip_permissions,
+            model_variant=model_variant,
+            chrome=chrome,
+        )
     if model == "gemini":
         return build_gemini_interactive_command(
             skip_permissions=skip_permissions,
@@ -510,7 +540,9 @@ def _run_streaming_json(
         for normalized in normalized_events:
             formatted = _format_normalized_event(normalized)
             if formatted:
-                _print_status(formatted) if formatted.startswith("→") else print(formatted, end="", flush=True)
+                _print_status(formatted) if formatted.startswith("→") else print(
+                    formatted, end="", flush=True
+                )
                 write_log_line(log_file, formatted)
 
             if normalized.get("type") == "result":
@@ -534,24 +566,30 @@ def normalize_claude_event(event: dict) -> list[dict]:
         content = msg.get("content", [])
         for block in content:
             if block.get("type") == "tool_use":
-                results.append({
-                    "type": "tool_use",
-                    "tool": block.get("name", "unknown"),
-                    "input": block.get("input", {}),
-                })
+                results.append(
+                    {
+                        "type": "tool_use",
+                        "tool": block.get("name", "unknown"),
+                        "input": block.get("input", {}),
+                    }
+                )
             elif block.get("type") == "text":
                 text = block.get("text", "")
                 if text:
-                    results.append({
-                        "type": "text",
-                        "content": text,
-                    })
+                    results.append(
+                        {
+                            "type": "text",
+                            "content": text,
+                        }
+                    )
 
     elif event_type == "result":
-        results.append({
-            "type": "result",
-            "status": event.get("subtype", "unknown"),
-        })
+        results.append(
+            {
+                "type": "result",
+                "status": event.get("subtype", "unknown"),
+            }
+        )
 
     return results
 
@@ -572,17 +610,21 @@ def normalize_gemini_event(event: dict) -> list[dict]:
             results.append({"type": "text", "content": text})
 
     elif event_type == "tool_use":
-        results.append({
-            "type": "tool_use",
-            "tool": event.get("name", "unknown"),
-            "input": event.get("input", {}),
-        })
+        results.append(
+            {
+                "type": "tool_use",
+                "tool": event.get("name", "unknown"),
+                "input": event.get("input", {}),
+            }
+        )
 
     elif event_type == "result":
-        results.append({
-            "type": "result",
-            "status": event.get("status", "unknown"),
-        })
+        results.append(
+            {
+                "type": "result",
+                "status": event.get("status", "unknown"),
+            }
+        )
 
     return results
 

@@ -4,8 +4,6 @@ import os
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from loopflow.lf.branch_names import _get_git_username, _sanitize_for_branch, format_branch_name
 from loopflow.lf.config import BranchNameConfig
 

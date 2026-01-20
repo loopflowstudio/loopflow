@@ -4,11 +4,17 @@ Provides worktree management for parallel development workflows.
 Interface is tool-agnostic.
 """
 
+from __future__ import annotations
+
 import json
 import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from loopflow.lf.config import BranchNameConfig
 
 
 class WorktreeError(Exception):

@@ -10,10 +10,11 @@ _FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 @dataclass
 class Goal:
     """A parsed goal file."""
+
     name: str
     content: str
-    area: list[str]      # Default pathset
-    pipeline: str        # Default pipeline
+    area: list[str]  # Default pathset
+    pipeline: str  # Default pipeline
 
 
 def load_goal(repo: Path, goal_name: str) -> Goal | None:
@@ -77,7 +78,7 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
         return {}, text
 
     frontmatter_text = match.group(1)
-    body = text[match.end():].strip()
+    body = text[match.end() :].strip()
 
     # Simple YAML parsing (no external dependency)
     result: dict = {}

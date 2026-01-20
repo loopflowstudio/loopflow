@@ -3,7 +3,6 @@
 from dataclasses import dataclass
 from typing import Literal
 
-
 Status = Literal["proposed", "approved", "active", "done"]
 ClaimedBy = Literal["human", "agent"]
 
@@ -23,9 +22,7 @@ class WorkItem:
 def get_next_work(items: list[WorkItem]) -> WorkItem | None:
     """Pick non-blocked work items."""
     candidates = [
-        c for c in items
-        if c.status in ("approved", "active")
-        and c.claimed_by != "human"
+        c for c in items if c.status in ("approved", "active") and c.claimed_by != "human"
     ]
 
     if not candidates:

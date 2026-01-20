@@ -1,7 +1,6 @@
 """SQLite database for lfd state."""
 
 import sqlite3
-import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -48,7 +47,8 @@ def _init_db(db_path: Path) -> None:
             created_at TEXT NOT NULL
         );
 
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_loops_unique ON loops(type, goal, COALESCE(area, ''), repo);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_loops_unique
+            ON loops(type, goal, COALESCE(area, ''), repo);
         CREATE INDEX IF NOT EXISTS idx_loops_repo ON loops(repo);
         CREATE INDEX IF NOT EXISTS idx_loops_status ON loops(status);
 
@@ -108,9 +108,7 @@ def update_dead_runs(db_path: Path | None = None) -> int:
     """Mark loops as idle if their process is no longer running."""
     conn = _get_db(db_path)
 
-    cursor = conn.execute(
-        "SELECT id, pid FROM loops WHERE status = 'running' AND pid IS NOT NULL"
-    )
+    cursor = conn.execute("SELECT id, pid FROM loops WHERE status = 'running' AND pid IS NOT NULL")
 
     count = 0
     for row in cursor.fetchall():
@@ -127,6 +125,7 @@ def update_dead_runs(db_path: Path | None = None) -> int:
 
 
 # Sessions
+
 
 def save_session(session: Session, db_path: Path | None = None) -> None:
     """Save a session."""
@@ -182,7 +181,9 @@ def load_sessions(
     return sessions
 
 
-def load_sessions_for_worktree(worktree: str, limit: int = 20, db_path: Path | None = None) -> list[Session]:
+def load_sessions_for_worktree(
+    worktree: str, limit: int = 20, db_path: Path | None = None
+) -> list[Session]:
     """Load recent sessions for a worktree path."""
     conn = _get_db(db_path)
 
@@ -196,7 +197,9 @@ def load_sessions_for_worktree(worktree: str, limit: int = 20, db_path: Path | N
     return sessions
 
 
-def load_sessions_for_repo(repo: str, limit: int = 50, db_path: Path | None = None) -> list[Session]:
+def load_sessions_for_repo(
+    repo: str, limit: int = 50, db_path: Path | None = None
+) -> list[Session]:
     """Load recent sessions across all worktrees in a repo."""
     conn = _get_db(db_path)
 
@@ -210,7 +213,9 @@ def load_sessions_for_repo(repo: str, limit: int = 50, db_path: Path | None = No
     return sessions
 
 
-def update_session_status(session_id: str, status: SessionStatus, db_path: Path | None = None) -> bool:
+def update_session_status(
+    session_id: str, status: SessionStatus, db_path: Path | None = None
+) -> bool:
     """Update session status."""
     conn = _get_db(db_path)
 
@@ -345,9 +350,7 @@ def list_loops(repo: Path | None = None, db_path: Path | None = None) -> list[Lo
     return loops
 
 
-def update_loop_status(
-    loop_id: str, status: LoopStatus, db_path: Path | None = None
-) -> bool:
+def update_loop_status(loop_id: str, status: LoopStatus, db_path: Path | None = None) -> bool:
     """Update a loop's status."""
     conn = _get_db(db_path)
     cursor = conn.execute(
@@ -360,9 +363,7 @@ def update_loop_status(
     return updated
 
 
-def update_loop_iteration(
-    loop_id: str, iteration: int, db_path: Path | None = None
-) -> bool:
+def update_loop_iteration(loop_id: str, iteration: int, db_path: Path | None = None) -> bool:
     """Update a loop's iteration count."""
     conn = _get_db(db_path)
     cursor = conn.execute(
@@ -375,9 +376,7 @@ def update_loop_iteration(
     return updated
 
 
-def update_loop_pid(
-    loop_id: str, pid: int | None, db_path: Path | None = None
-) -> bool:
+def update_loop_pid(loop_id: str, pid: int | None, db_path: Path | None = None) -> bool:
     """Update a loop's process ID."""
     conn = _get_db(db_path)
     cursor = conn.execute(
@@ -390,9 +389,7 @@ def update_loop_pid(
     return updated
 
 
-def update_loop_last_sha(
-    loop_id: str, sha: str | None, db_path: Path | None = None
-) -> bool:
+def update_loop_last_sha(loop_id: str, sha: str | None, db_path: Path | None = None) -> bool:
     """Update a loop's last_main_sha (for subscribe loops)."""
     conn = _get_db(db_path)
     cursor = conn.execute(
@@ -465,7 +462,8 @@ def save_loop_run(run: LoopRun, db_path: Path | None = None) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO loop_runs
-        (id, loop_id, iteration, status, started_at, ended_at, worktree, current_step, error, pr_url)
+        (id, loop_id, iteration, status, started_at, ended_at,
+         worktree, current_step, error, pr_url)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
@@ -516,7 +514,10 @@ def get_latest_loop_run(loop_id: str, db_path: Path | None = None) -> LoopRun | 
 
 
 def update_loop_run_status(
-    run_id: str, status: LoopStatus, error: str | None = None, db_path: Path | None = None
+    run_id: str,
+    status: LoopStatus,
+    error: str | None = None,
+    db_path: Path | None = None,
 ) -> bool:
     """Update a loop run's status."""
     conn = _get_db(db_path)

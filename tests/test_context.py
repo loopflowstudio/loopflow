@@ -5,16 +5,16 @@ from unittest.mock import patch
 import pytest
 
 from loopflow.lf.context import (
-    find_worktree_root,
-    build_prompt,
-    gather_task,
-    gather_prompt_components,
-    format_prompt,
     PromptComponents,
+    _get_builtin_task,
+    build_prompt,
+    find_worktree_root,
+    format_prompt,
+    gather_prompt_components,
+    gather_task,
+    list_all_tasks,
     list_builtin_tasks,
     list_user_tasks,
-    list_all_tasks,
-    _get_builtin_task,
 )
 
 
@@ -217,9 +217,7 @@ def test_format_prompt_with_all_components(temp_repo):
     """format_prompt includes all component types."""
     (temp_repo / "main.py").write_text("print('hello')")
 
-    components = gather_prompt_components(
-        temp_repo, "implement", context=["main.py"]
-    )
+    components = gather_prompt_components(temp_repo, "implement", context=["main.py"])
     formatted = format_prompt(components)
 
     assert "<lf:docs>" in formatted
@@ -400,8 +398,9 @@ def test_gather_task_returns_none_for_unknown_without_repo():
 
 def test_trigger_background_refresh_creates_log_file(tmp_path, monkeypatch):
     """Background refresh writes output to log file instead of DEVNULL."""
-    from loopflow.lf.context import _trigger_background_refresh
     import subprocess
+
+    from loopflow.lf.context import _trigger_background_refresh
 
     (tmp_path / ".git").mkdir()
     summaries_dir = tmp_path / ".lf" / "summaries"
@@ -574,9 +573,7 @@ def _setup_task_template(tmp_path):
     lf = tmp_path / ".lf"
     lf.mkdir(exist_ok=True)
     (lf / "compare.md").write_text(
-        "Compare {{name_a}} and {{name_b}}.\n\n"
-        "Diff A:\n{{diff_a}}\n\n"
-        "Diff B:\n{{diff_b}}\n"
+        "Compare {{name_a}} and {{name_b}}.\n\nDiff A:\n{{diff_a}}\n\nDiff B:\n{{diff_b}}\n"
     )
 
 

@@ -2,18 +2,17 @@
 
 import pytest
 
+from loopflow.lf.config import SkillSourceConfig
 from loopflow.lf.skills import (
-    SkillSource,
     Skill,
-    _normalize_skill_name,
+    SkillSource,
     _discover_superpowers_skills,
+    _normalize_skill_name,
     discover_skill_sources,
     find_skill,
-    load_skill_prompt,
     list_all_skills,
+    load_skill_prompt,
 )
-from loopflow.lf.config import SkillSourceConfig
-
 
 # =============================================================================
 # Skill name normalization
@@ -108,9 +107,7 @@ def test_discover_superpowers_skills_empty_if_no_valid_skills(tmp_path):
 
 
 def test_discover_skill_sources_from_config(superpowers_dir):
-    config_sources = [
-        SkillSourceConfig(name="superpowers", prefix="sp", path=str(superpowers_dir))
-    ]
+    config_sources = [SkillSourceConfig(name="superpowers", prefix="sp", path=str(superpowers_dir))]
     sources = discover_skill_sources(config_sources)
 
     assert len(sources) == 1
@@ -184,9 +181,7 @@ def test_discover_skill_sources_config_prevents_auto_detection(tmp_path, superpo
     (skill / "SKILL.md").write_text("Local only")
 
     # Configure sp prefix explicitly
-    config_sources = [
-        SkillSourceConfig(name="superpowers", prefix="sp", path=str(superpowers_dir))
-    ]
+    config_sources = [SkillSourceConfig(name="superpowers", prefix="sp", path=str(superpowers_dir))]
     sources = discover_skill_sources(config_sources, repo_root=tmp_path)
 
     # Should use configured source, not local

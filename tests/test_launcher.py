@@ -1,23 +1,23 @@
 """Tests for loopflow.lf.launcher module."""
 
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from loopflow.lf.launcher import (
+    ClaudeRunner,
+    CodexRunner,
+    GeminiRunner,
+    LaunchResult,
+    _format_normalized_event,
     build_claude_command,
     build_codex_command,
     build_codex_interactive_command,
     build_model_command,
     build_model_interactive_command,
     check_claude_available,
-    _format_normalized_event,
     get_runner,
-    ClaudeRunner,
-    CodexRunner,
-    GeminiRunner,
-    LaunchResult,
 )
 
 

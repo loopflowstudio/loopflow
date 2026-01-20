@@ -1,26 +1,23 @@
 """Tests for loopflow.lfops.summarize module."""
 
-import json
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 from loopflow.lfops.summarize import (
     Summary,
     SummaryMetadata,
-    _path_to_filename,
-    _load_metadata,
-    _save_metadata,
     _ensure_gitignored,
+    _gather_source_content_working_dir,
+    _load_metadata,
+    _path_to_filename,
+    _save_metadata,
+    compute_source_hash,
+    hash_content,
+    is_stale,
     load_summary,
     save_summary,
-    hash_content,
-    compute_source_hash,
-    is_stale,
-    gather_source_content,
-    _gather_source_content_working_dir,
 )
 
 
@@ -346,9 +343,7 @@ def test_gather_source_content_working_dir_excludes_patterns(temp_repo):
     (src / "main_test.py").write_text("test code")
 
     # Pattern must use ** for recursive matching
-    content = _gather_source_content_working_dir(
-        Path("src"), temp_repo, exclude=["**/*_test.py"]
-    )
+    content = _gather_source_content_working_dir(Path("src"), temp_repo, exclude=["**/*_test.py"])
 
     assert "main.py" in content
     assert "production code" in content

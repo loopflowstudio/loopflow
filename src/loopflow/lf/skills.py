@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 @dataclass
 class SkillSource:
     """External skill library."""
+
     name: str
     prefix: str
     path: Path
@@ -21,6 +22,7 @@ class SkillSource:
 @dataclass
 class Skill:
     """A skill from an external source."""
+
     name: str
     source: str
     prompt_path: Path
@@ -42,7 +44,7 @@ def _normalize_skill_name(dir_name: str) -> str:
     """
     name = dir_name.lower()
     name = re.sub(r"ing$", "", name)  # brainstorming -> brainstorm
-    name = re.sub(r"s$", "", name)    # writing-plans -> writing-plan
+    name = re.sub(r"s$", "", name)  # writing-plans -> writing-plan
 
     name = name.replace("_", "-")
 
@@ -107,12 +109,14 @@ def discover_skill_sources(
                 continue
 
             skills = _discover_superpowers_skills(path)
-            sources.append(SkillSource(
-                name=source_config.name,
-                prefix=source_config.prefix,
-                path=path,
-                skills=skills,
-            ))
+            sources.append(
+                SkillSource(
+                    name=source_config.name,
+                    prefix=source_config.prefix,
+                    path=path,
+                    skills=skills,
+                )
+            )
             seen_prefixes.add(source_config.prefix)
 
     # Auto-detect superpowers if not explicitly configured
@@ -123,12 +127,14 @@ def discover_skill_sources(
             if local_path.exists():
                 skills = _discover_superpowers_skills(local_path)
                 if skills:
-                    sources.append(SkillSource(
-                        name="superpowers",
-                        prefix="sp",
-                        path=local_path,
-                        skills=skills,
-                    ))
+                    sources.append(
+                        SkillSource(
+                            name="superpowers",
+                            prefix="sp",
+                            path=local_path,
+                            skills=skills,
+                        )
+                    )
                     seen_prefixes.add("sp")
 
         # Then check default locations
@@ -137,12 +143,14 @@ def discover_skill_sources(
                 if default_path.exists():
                     skills = _discover_superpowers_skills(default_path)
                     if skills:
-                        sources.append(SkillSource(
-                            name="superpowers",
-                            prefix="sp",
-                            path=default_path,
-                            skills=skills,
-                        ))
+                        sources.append(
+                            SkillSource(
+                                name="superpowers",
+                                prefix="sp",
+                                path=default_path,
+                                skills=skills,
+                            )
+                        )
                         break
 
     return sources

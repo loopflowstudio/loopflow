@@ -1,4 +1,5 @@
 """Git operations for push and PR automation."""
+
 import json
 import subprocess
 from pathlib import Path
@@ -7,6 +8,7 @@ from typing import Optional
 
 class GitError(Exception):
     """Git operation failed."""
+
     pass
 
 
@@ -130,8 +132,6 @@ def get_default_base_ref(repo_root: Path) -> str:
     )
     base_ref = result.stdout.strip() if result.returncode == 0 else ""
     return base_ref or "main"
-
-
 
 
 def open_pr(

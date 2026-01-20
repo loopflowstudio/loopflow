@@ -8,32 +8,6 @@ import sys
 import uuid
 from pathlib import Path
 
-
-# Word lists for generating unique branch names (matches Maestro/NameGenerator.swift)
-MAGICAL = [
-    "aurora", "cascade", "crystal", "drift", "echo", "ember",
-    "fern", "flume", "frost", "glade", "grove", "haze",
-    "ivy", "jade", "luna", "mist", "nova", "opal",
-    "petal", "prism", "rain", "ripple", "sage", "shade",
-    "spark", "star", "stone", "storm", "tide", "vale",
-    "wave", "wisp", "wren", "zephyr",
-]
-
-MUSICAL = [
-    "allegro", "aria", "ballad", "cadence", "canon", "chord",
-    "coda", "duet", "forte", "fugue", "harmony", "hymn",
-    "lilt", "lyric", "melody", "motif", "opus", "prelude",
-    "refrain", "rondo", "sonata", "tempo", "trill", "tune",
-    "verse", "waltz",
-]
-
-
-def _generate_random_words() -> str:
-    """Generate a random magical-musical pair like 'aurora-melody'."""
-    magical = random.choice(MAGICAL)
-    musical = random.choice(MUSICAL)
-    return f"{magical}-{musical}"
-
 from loopflow.lf.context import find_worktree_root
 from loopflow.lf.git import find_main_repo
 from loopflow.lfd.db import (
@@ -43,8 +17,82 @@ from loopflow.lfd.db import (
     update_loop_pid,
     update_loop_status,
 )
-from loopflow.lfd.models import Loop, LoopStatus, LoopType, MergeMode
+from loopflow.lfd.models import Loop, LoopStatus, LoopType
 from loopflow.lfd.process import is_process_running
+
+# Word lists for generating unique branch names (matches Maestro/NameGenerator.swift)
+MAGICAL = [
+    "aurora",
+    "cascade",
+    "crystal",
+    "drift",
+    "echo",
+    "ember",
+    "fern",
+    "flume",
+    "frost",
+    "glade",
+    "grove",
+    "haze",
+    "ivy",
+    "jade",
+    "luna",
+    "mist",
+    "nova",
+    "opal",
+    "petal",
+    "prism",
+    "rain",
+    "ripple",
+    "sage",
+    "shade",
+    "spark",
+    "star",
+    "stone",
+    "storm",
+    "tide",
+    "vale",
+    "wave",
+    "wisp",
+    "wren",
+    "zephyr",
+]
+
+MUSICAL = [
+    "allegro",
+    "aria",
+    "ballad",
+    "cadence",
+    "canon",
+    "chord",
+    "coda",
+    "duet",
+    "forte",
+    "fugue",
+    "harmony",
+    "hymn",
+    "lilt",
+    "lyric",
+    "melody",
+    "motif",
+    "opus",
+    "prelude",
+    "refrain",
+    "rondo",
+    "sonata",
+    "tempo",
+    "trill",
+    "tune",
+    "verse",
+    "waltz",
+]
+
+
+def _generate_random_words() -> str:
+    """Generate a random magical-musical pair like 'aurora-melody'."""
+    magical = random.choice(MAGICAL)
+    musical = random.choice(MUSICAL)
+    return f"{magical}-{musical}"
 
 
 def _branch_exists(repo: Path, branch: str) -> bool:
@@ -251,6 +299,7 @@ def stop_loop(loop_id: str, force: bool = False) -> bool:
 def _run_loop(loop: Loop) -> None:
     """Run the loop execution until it should pause."""
     from loopflow.lfd.loop_runner import run_loop_iterations
+
     run_loop_iterations(loop)
 
 

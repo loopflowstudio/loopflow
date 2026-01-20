@@ -36,19 +36,7 @@ def gather_internal_docs(repo_root: Path) -> list[tuple[Path, str]]:
 
 
 def load_goal(goal: str | Path, repo_root: Path) -> str | None:
-    """Load goal content from .lf/goals/{name}.md or a direct path.
-
-    Goals are high-level directives for autonomous agent loops.
-    Unlike tasks (single-purpose prompts), goals describe ongoing
-    objectives an agent works toward across multiple iterations.
-
-    Args:
-        goal: Goal name (e.g., "test-coverage") or path (e.g., ".lf/goals/test-coverage.md")
-        repo_root: Repository root path
-
-    Returns:
-        Goal content as string, or None if not found.
-    """
+    """Load goal content from .lf/goals/{name}.md or a direct path."""
     goal_str = str(goal)
 
     # If it's just a name (no path separator), look in .lf/goals/

@@ -26,7 +26,7 @@ The branch delivers what it set out to do, with clean implementation and thoroug
 
 ### Style notes
 
-The inline imports in `summarize.py` (lines 245, 277, 312, 327) avoid circular imports at module load time. The pattern is acceptable here—this is the one case where STYLE.md allows it.
+The inline imports in `summarize.py` (lines 248, 280, 315, 330) avoid circular imports at module load time. The pattern is acceptable here—this is the one case where STYLE.md allows it.
 
 ## Design notes
 

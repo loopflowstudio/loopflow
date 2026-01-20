@@ -66,7 +66,7 @@ lf review
 | `-x FILE` | Add a file to context |
 | `-v` | Paste clipboard content |
 | `--diff` | Include raw `git diff` output |
-| `--no-docs` | Skip repo docs |
+| `--no-lfdocs` | Skip repo docs |
 | `-i` | Run interactively (can interrupt) |
 | `-a` | Run in auto mode (default) |
 

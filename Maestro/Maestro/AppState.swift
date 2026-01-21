@@ -218,13 +218,16 @@ final class AppState {
     }
 
     func openRepo(_ url: URL) async {
+        let startTime = CFAbsoluteTimeGetCurrent()
         currentRepo = url
         isLoading = true
         errorMessage = nil
 
         do {
             // Fast path: load config and list worktrees (no sync)
+            let t0 = CFAbsoluteTimeGetCurrent()
             config = try configLoader.load(from: url)
+            LoggingService.append("openRepo.config elapsed=\(Int((CFAbsoluteTimeGetCurrent() - t0) * 1000))ms")
 
             // Initialize toggles from config
             includeDocs = config?.docs ?? true
@@ -245,8 +248,10 @@ final class AppState {
                 selectedContextFolders = []
             }
 
-            // List worktrees immediately (no sync - fast)
-            worktrees = try await worktreeService.list(in: url)
+            // List worktrees immediately (no sync, no full details - fast)
+            let t1 = CFAbsoluteTimeGetCurrent()
+            worktrees = try await worktreeService.list(in: url, full: false)
+            LoggingService.append("openRepo.listWorktrees elapsed=\(Int((CFAbsoluteTimeGetCurrent() - t1) * 1000))ms")
 
             // Auto-select first feature worktree
             if selectedWorktree == nil {
@@ -254,9 +259,11 @@ final class AppState {
             }
 
             // Load prompts and voices (fast, local files)
+            let t2 = CFAbsoluteTimeGetCurrent()
             prompts = try promptService.loadPrompts(from: url, config: config)
             pipelines = pipelineService.loadPipelines(from: url)
             refreshVoices()
+            LoggingService.append("openRepo.prompts elapsed=\(Int((CFAbsoluteTimeGetCurrent() - t2) * 1000))ms")
 
             if let voiceNames = config?.voiceNames, !voiceNames.isEmpty {
                 selectedVoices = voices.filter { voiceNames.contains($0.name) }
@@ -266,6 +273,7 @@ final class AppState {
         }
 
         isLoading = false
+        LoggingService.append("openRepo.total elapsed=\(Int((CFAbsoluteTimeGetCurrent() - startTime) * 1000))ms")
 
         // Slow operations in background (don't block UI)
         Task {

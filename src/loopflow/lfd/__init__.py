@@ -4,6 +4,9 @@ Commands for managing agent loops.
 """
 
 import asyncio
+import json
+import socket
+import subprocess
 import sys
 from pathlib import Path
 
@@ -11,17 +14,19 @@ import typer
 
 from loopflow.lf.flows import load_flow
 from loopflow.lf.goals import goal_exists, list_goals, load_goal
+from loopflow.lf.logging import get_log_dir
 from loopflow.lfd.db import (
     delete_loop,
     get_loop,
     get_loop_runs,
     list_loops,
+    save_loop,
 )
 from loopflow.lfd.launchd import install as launchd_install
 from loopflow.lfd.launchd import is_running
 from loopflow.lfd.launchd import uninstall as launchd_uninstall
 from loopflow.lfd.loops import create_loop, get_wt_from_cwd, start_loop, stop_loop
-from loopflow.lfd.models import Loop, LoopStatus, LoopType
+from loopflow.lfd.models import Loop, LoopStatus, LoopType, MergeMode
 from loopflow.lfd.server import run_server
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
@@ -257,13 +262,9 @@ def loop(
         lp.pr_limit = limit
         changed = True
     if merge_mode:
-        from loopflow.lfd.models import MergeMode
-
         lp.merge_mode = MergeMode(merge_mode)
         changed = True
     if changed:
-        from loopflow.lfd.db import save_loop
-
         save_loop(lp)
 
     # Start it
@@ -335,8 +336,6 @@ def flow(
     # Handle clipboard paste - write to temp file if provided
     project_file = None
     if paste:
-        import subprocess
-
         result = subprocess.run(["pbpaste"], capture_output=True, text=True)
         if result.returncode == 0 and result.stdout.strip():
             import tempfile
@@ -455,9 +454,6 @@ def schedule(
 
 def _get_scheduler_status() -> dict | None:
     """Get scheduler status from daemon if running."""
-    import json
-    import socket
-
     socket_path = Path.home() / ".lf" / "lfd.sock"
     if not socket_path.exists():
         return None
@@ -691,8 +687,6 @@ def logs(
     lines: int = typer.Option(50, "-n", "--lines", help="Number of lines to show"),
 ):
     """Show logs for a loop's current run."""
-    import subprocess
-
     c = _colors()
     lp = get_loop(loop_id)
     if not lp:
@@ -711,8 +705,6 @@ def logs(
         return
 
     # Find log file
-    from loopflow.lf.logging import get_log_dir
-
     worktree_path = Path(run.worktree)
     log_dir = get_log_dir(worktree_path)
 

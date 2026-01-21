@@ -1136,3 +1136,105 @@ def test_word_lists_have_sufficient_variety():
     for word in MAGICAL + MUSICAL:
         assert word.islower()
         assert word.isalpha()
+
+
+# =============================================================================
+# Loop runner / flow processing tests
+# =============================================================================
+
+
+def test_resolved_step_has_expected_attributes():
+    """ResolvedStep has all attributes the loop runner expects."""
+    from loopflow.lf.flows import ResolvedStep
+
+    step = ResolvedStep()
+
+    # These attributes are accessed by loop_runner.py
+    assert hasattr(step, "step")
+    assert hasattr(step, "config")
+    assert hasattr(step, "parallel_group")
+    assert hasattr(step, "choose")
+    assert hasattr(step, "join")
+
+    # Verify defaults are None
+    assert step.step is None
+    assert step.config is None
+    assert step.parallel_group is None
+    assert step.choose is None
+    assert step.join is None
+
+
+def test_resolved_step_with_values():
+    """ResolvedStep can be constructed with values."""
+    from loopflow.lf.flows import ResolvedStep, StepConfig
+
+    config = StepConfig(model="claude:sonnet")
+    step = ResolvedStep(
+        step="implement",
+        config=config,
+        parallel_group=1,
+    )
+
+    assert step.step == "implement"
+    assert step.config.model == "claude:sonnet"
+    assert step.parallel_group == 1
+
+
+def test_loop_runner_can_process_simple_flow():
+    """Loop runner can iterate through resolved steps without errors.
+
+    This test verifies the loop runner's step processing logic doesn't
+    crash on attribute access (like the step.race bug that was fixed).
+    """
+    from loopflow.lf.flows import ResolvedStep
+
+    # Simulate what the loop runner does when iterating steps
+    resolved = [
+        ResolvedStep(step="lint"),
+        ResolvedStep(step="implement"),
+        ResolvedStep(step="test"),
+    ]
+
+    # Verify we can safely check all attributes without AttributeError
+    for step in resolved:
+        # These are the checks done in loop_runner.run_iteration
+        _ = step.parallel_group is not None
+        _ = step.choose is not None
+        _ = step.join is not None
+        _ = step.step
+
+
+def test_loop_runner_handles_fork_join_groups():
+    """Loop runner correctly identifies fork/join groups."""
+    from loopflow.lf.flows import Join, ResolvedStep
+
+    resolved = [
+        ResolvedStep(step="variant-a", parallel_group=0),
+        ResolvedStep(step="variant-b", parallel_group=0),
+        ResolvedStep(join=Join()),  # Join uses default JoinConfig
+        ResolvedStep(step="final"),
+    ]
+
+    # Simulate the loop runner's fork detection logic
+    i = 0
+    fork_groups_found = 0
+
+    while i < len(resolved):
+        step = resolved[i]
+        if step.parallel_group is not None:
+            group_steps = []
+            group = step.parallel_group
+            while i < len(resolved) and resolved[i].parallel_group == group:
+                group_steps.append(resolved[i])
+                i += 1
+            fork_groups_found += 1
+            assert len(group_steps) == 2
+
+            # Should find join after fork
+            if i < len(resolved):
+                assert resolved[i].join is not None
+                i += 1
+            continue
+        i += 1
+
+    assert fork_groups_found == 1

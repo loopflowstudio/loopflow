@@ -295,7 +295,7 @@ def _build_loop_prompt(
     loop: Loop,
     effective_goals: list,
     worktree_path: Path,
-    task_name: str,
+    step_name: str,
     context_paths: list[str] | None,
     extra_context: list[str] | None = None,
     voices: list[str] | None = None,
@@ -306,7 +306,7 @@ def _build_loop_prompt(
 
     components = gather_prompt_components(
         worktree_path,
-        step=task_name,
+        step=step_name,
         context=merged_context or None,
         run_mode="auto",
         voices=voices,
@@ -527,11 +527,11 @@ def _run_choose_result(
     if not options:
         return 1
 
-    tasks: list[_VariantTask] = []
+    variants: list[_VariantTask] = []
     for idx, option in enumerate(options, 1):
         label = option.label or f"{option.model}:{idx}"
         backend, model_variant = parse_model(option.model)
-        tasks.append(
+        variants.append(
             _VariantTask(
                 step=choose_result.step,
                 label=label,
@@ -543,7 +543,7 @@ def _run_choose_result(
         )
 
     processes: list[tuple[_VariantTask, subprocess.Popen, Path, str, str]] = []
-    for task in tasks:
+    for task in variants:
         label_short = task.label.replace(":", "-")
         wt_name = f"_choose-{branch.replace('/', '-')}-{label_short}-{uuid.uuid4().hex[:8]}"
         try:
@@ -755,13 +755,13 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
             continue
 
         if step.choose_result is not None:
-            task_name = step.choose_result.step
-            update_loop_run_step(run.id, task_name)
+            step_name = step.choose_result.step
+            update_loop_run_step(run.id, step_name)
             notify_event(
                 "loop.step.started",
                 {
                     "loop_id": loop.id,
-                    "step": task_name,
+                    "step": step_name,
                     "iteration": iteration,
                 },
             )
@@ -780,13 +780,13 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
                 "loop.step.completed",
                 {
                     "loop_id": loop.id,
-                    "step": task_name,
+                    "step": step_name,
                     "status": "completed" if result_code == 0 else "error",
                 },
             )
 
             if result_code != 0:
-                update_loop_run_status(run.id, LoopStatus.ERROR, error=f"{task_name} failed")
+                update_loop_run_status(run.id, LoopStatus.ERROR, error=f"{step_name} failed")
                 _cleanup_worktree(loop.repo, worktree_path, branch)
                 return False
 
@@ -797,13 +797,13 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
             i += 1
             continue
 
-        task_name = step.step
-        update_loop_run_step(run.id, task_name)
+        step_name = step.step
+        update_loop_run_step(run.id, step_name)
         notify_event(
             "loop.step.started",
             {
                 "loop_id": loop.id,
-                "step": task_name,
+                "step": step_name,
                 "iteration": iteration,
             },
         )
@@ -825,13 +825,13 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
             loop,
             effective_goals,
             worktree_path,
-            task_name,
+            step_name,
             step_context or None,
             voices=step_voices,
         )
         if not prompt_result:
             update_loop_run_status(
-                run.id, LoopStatus.ERROR, error=f"Step file not found: {task_name}"
+                run.id, LoopStatus.ERROR, error=f"Step file not found: {step_name}"
             )
             _cleanup_worktree(loop.repo, worktree_path, branch)
             return False
@@ -844,20 +844,20 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
             step_variant,
             skip_permissions,
             run.id,
-            f"{loop.area}:{task_name}",
+            f"{loop.area}:{step_name}",
         )
 
         notify_event(
             "loop.step.completed",
             {
                 "loop_id": loop.id,
-                "step": task_name,
+                "step": step_name,
                 "status": "completed" if result_code == 0 else "error",
             },
         )
 
         if result_code != 0:
-            update_loop_run_status(run.id, LoopStatus.ERROR, error=f"{task_name} failed")
+            update_loop_run_status(run.id, LoopStatus.ERROR, error=f"{step_name} failed")
             _cleanup_worktree(loop.repo, worktree_path, branch)
             return False
 

@@ -284,9 +284,7 @@ def run(
     interactive: bool = typer.Option(
         False, "-i", "-I", "--interactive", help="Override to run in interactive mode"
     ),
-    path: list[str] = typer.Option(
-        None, "-p", "-P", "--path", help="Additional files to include"
-    ),
+    path: list[str] = typer.Option(None, "-p", "-P", "--path", help="Additional files to include"),
     worktree: str = typer.Option(
         None, "-w", "-W", "--worktree", help="Create worktree and run step there"
     ),
@@ -388,7 +386,7 @@ def run(
     # Parse voice arg
     cli_voices = parse_voice_arg(voice)
 
-    # Resolve config: CLI > frontmatter > global > defaults
+    # Resolve config: CLI > frontmatter > global > external-skill-default > defaults
     resolved = resolve_step_config(
         step_name=step,
         global_config=config,
@@ -398,6 +396,7 @@ def run(
         cli_model=model,
         cli_context=list(path) if path else None,
         cli_voice=cli_voices or None,
+        is_external_skill=step_file.is_external_skill if step_file else False,
     )
 
     is_interactive = resolved.interactive
@@ -506,9 +505,7 @@ def inline(
     interactive: bool = typer.Option(
         False, "-i", "-I", "--interactive", help="Override to run in interactive mode"
     ),
-    path: list[str] = typer.Option(
-        None, "-p", "-P", "--path", help="Additional files to include"
-    ),
+    path: list[str] = typer.Option(None, "-p", "-P", "--path", help="Additional files to include"),
     copy: bool = typer.Option(
         False, "-c", "-C", "--copy", help="Copy prompt to clipboard and show token breakdown"
     ),

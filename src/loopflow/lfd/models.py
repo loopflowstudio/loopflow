@@ -16,6 +16,7 @@ def area_to_slug(area: str) -> str:
         return "root"
     return area.rstrip("/").split("/")[-1].lower()
 
+
 # New loop-based models
 
 

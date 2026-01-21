@@ -219,3 +219,59 @@ def test_resolve_step_config_frontmatter_include_over_legacy():
     )
     # Frontmatter include takes precedence over legacy include_tests_for
     assert resolved.include == ["docs/**"]
+
+
+def test_resolve_step_config_external_skill_defaults_interactive():
+    resolved = resolve_step_config(
+        step_name="sp:brainstorm",
+        global_config=None,
+        frontmatter=StepConfig(),
+        cli_interactive=None,
+        cli_auto=None,
+        cli_model=None,
+        cli_context=None,
+        is_external_skill=True,
+    )
+    assert resolved.interactive is True
+
+
+def test_resolve_step_config_external_skill_cli_auto_overrides():
+    resolved = resolve_step_config(
+        step_name="sp:brainstorm",
+        global_config=None,
+        frontmatter=StepConfig(),
+        cli_interactive=None,
+        cli_auto=True,
+        cli_model=None,
+        cli_context=None,
+        is_external_skill=True,
+    )
+    assert resolved.interactive is False
+
+
+def test_resolve_step_config_external_skill_frontmatter_overrides():
+    resolved = resolve_step_config(
+        step_name="sp:brainstorm",
+        global_config=None,
+        frontmatter=StepConfig(interactive=False),
+        cli_interactive=None,
+        cli_auto=None,
+        cli_model=None,
+        cli_context=None,
+        is_external_skill=True,
+    )
+    assert resolved.interactive is False
+
+
+def test_resolve_step_config_non_external_still_defaults_auto():
+    resolved = resolve_step_config(
+        step_name="review",
+        global_config=None,
+        frontmatter=StepConfig(),
+        cli_interactive=None,
+        cli_auto=None,
+        cli_model=None,
+        cli_context=None,
+        is_external_skill=False,
+    )
+    assert resolved.interactive is False

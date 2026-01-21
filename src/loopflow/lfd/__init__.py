@@ -346,7 +346,9 @@ def flow(
                 project_file = f.name
 
     # Create or get loop
-    lp = create_loop(LoopType.FLOW, area, repo, goals=goals, flow=flow_name, project_file=project_file)
+    lp = create_loop(
+        LoopType.FLOW, area, repo, goals=goals, flow=flow_name, project_file=project_file
+    )
 
     # Start it
     if start_loop(lp.id):
@@ -366,7 +368,9 @@ def flow(
 def subscribe(
     flow: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
     area: str = typer.Argument(..., help="Area of responsibility (e.g., Maestro/, src/, .)"),
-    path: list[str] = typer.Option(..., "-p", "-P", "--path", help="Paths to watch (repeatable, supports globs)"),
+    path: list[str] = typer.Option(
+        ..., "-p", "-P", "--path", help="Paths to watch (repeatable, supports globs)"
+    ),
     goals: list[str] = typer.Option(None, "-g", "--goal", help="Goal to add (repeatable)"),
 ):
     """Subscribe to path changes on main."""
@@ -401,7 +405,7 @@ def subscribe(
     typer.echo(f"{msg} ({lp.short_id()})")
     typer.echo(f"  Goals: {lp.goals_display}")
     typer.echo(f"  Flow: {lp.flow_display}")
-    typer.echo(f"  Will run when paths change on main")
+    typer.echo("  Will run when paths change on main")
 
 
 @app.command()

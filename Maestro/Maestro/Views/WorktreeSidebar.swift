@@ -22,6 +22,10 @@ struct WorktreeSidebar: View {
     @State private var showingLandConfirmation = false
     @State private var loopToLand: Loop?
 
+    // Keyboard navigation state
+    @State private var keyboardFocusedId: String?
+    @FocusState private var isSidebarFocused: Bool
+
     private let terminalLauncher = TerminalLauncher()
 
     private var featureWorktrees: [Worktree] {
@@ -105,6 +109,17 @@ struct WorktreeSidebar: View {
         .sheet(isPresented: $showingDiagnostics) {
             DiagnosticsView()
         }
+        // Notification observers for keyboard actions
+        .onReceive(NotificationCenter.default.publisher(for: .showNewWorktreeSheet)) { _ in
+            showingNewWorktreeSheet = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .viewWorktreeDiff)) { notification in
+            if let worktree = notification.object as? Worktree {
+                viewDiff(worktree)
+            } else if let selected = appState.selectedWorktree {
+                viewDiff(selected)
+            }
+        }
     }
 
     private func viewDiff(_ worktree: Worktree) {
@@ -179,6 +194,8 @@ struct WorktreeSidebar: View {
             }
             .buttonStyle(.plain)
             .help("Create a new workspace")
+            .accessibleButton("Create new workspace")
+            .minHitTarget()
 
             Button {
                 showingDiagnostics = true
@@ -189,6 +206,8 @@ struct WorktreeSidebar: View {
             }
             .buttonStyle(.plain)
             .help("Open diagnostics")
+            .accessibleButton("Open diagnostics")
+            .minHitTarget()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -246,11 +265,13 @@ struct WorktreeSidebar: View {
                     WorktreeRow(
                         worktree: worktree,
                         isSelected: appState.selectedWorktree?.id == worktree.id,
+                        isKeyboardFocused: keyboardFocusedId == worktree.id,
                         terminalName: terminalDisplayName,
                         ideName: ideDisplayName,
                         otherWorktrees: featureWorktrees.filter { $0.id != worktree.id },
                         onSelect: {
                             appState.selectedWorktree = worktree
+                            keyboardFocusedId = worktree.id
                         },
                         onDoubleClick: {
                             openInTerminal(worktree)
@@ -304,6 +325,83 @@ struct WorktreeSidebar: View {
             }
             .padding(.horizontal, 8)
         }
+        .focusable()
+        .focused($isSidebarFocused)
+        .focusEffectDisabled()
+        .onKeyPress(.upArrow) {
+            moveFocus(-1)
+            return .handled
+        }
+        .onKeyPress(.downArrow) {
+            moveFocus(1)
+            return .handled
+        }
+        .onKeyPress(.return) {
+            if let id = keyboardFocusedId,
+               let worktree = featureWorktrees.first(where: { $0.id == id }) {
+                appState.selectedWorktree = worktree
+            }
+            return .handled
+        }
+        .onKeyPress(characters: .init(charactersIn: "t")) { _ in
+            executeWorktreeShortcut { openInTerminal($0) }
+        }
+        .onKeyPress(characters: .init(charactersIn: "i")) { _ in
+            executeWorktreeShortcut { openInIDE($0) }
+        }
+        .onKeyPress(characters: .init(charactersIn: "d")) { _ in
+            executeWorktreeShortcut { viewDiff($0) }
+        }
+        .onKeyPress(characters: .init(charactersIn: "p")) { _ in
+            executeWorktreeShortcut { worktree in
+                if let url = worktree.prURL {
+                    terminalLauncher.openURL(url)
+                } else {
+                    Task {
+                        try? await appState.createPR(for: worktree)
+                    }
+                }
+            }
+        }
+        .onKeyPress(characters: .init(charactersIn: "l")) { _ in
+            executeWorktreeShortcut { worktree in
+                guard worktree.prState == .open else { return }
+                Task {
+                    try? await appState.landPR(for: worktree)
+                }
+            }
+        }
+        .onKeyPress(.delete) {
+            executeWorktreeShortcut { worktree in
+                worktreeToDelete = worktree
+                showingDeleteConfirmation = true
+            }
+        }
+    }
+
+    private func moveFocus(_ delta: Int) {
+        let worktrees = featureWorktrees
+        guard !worktrees.isEmpty else { return }
+
+        if let currentId = keyboardFocusedId,
+           let currentIndex = worktrees.firstIndex(where: { $0.id == currentId }) {
+            let newIndex = max(0, min(worktrees.count - 1, currentIndex + delta))
+            keyboardFocusedId = worktrees[newIndex].id
+        } else {
+            // No current focus, start at first or last based on direction
+            keyboardFocusedId = delta > 0 ? worktrees.first?.id : worktrees.last?.id
+        }
+    }
+
+    private func executeWorktreeShortcut(_ action: (Worktree) -> Void) -> KeyPress.Result {
+        // Use keyboard-focused worktree if available, otherwise selected worktree
+        let targetWorktree = keyboardFocusedId.flatMap { id in
+            featureWorktrees.first { $0.id == id }
+        } ?? appState.selectedWorktree
+
+        guard let worktree = targetWorktree else { return .ignored }
+        action(worktree)
+        return .handled
     }
 
     private func openInTerminal(_ worktree: Worktree) {
@@ -485,6 +583,7 @@ struct WorktreeSidebar: View {
 struct WorktreeRow: View {
     let worktree: Worktree
     let isSelected: Bool
+    var isKeyboardFocused: Bool = false
     let terminalName: String
     let ideName: String
     let otherWorktrees: [Worktree]
@@ -541,6 +640,12 @@ struct WorktreeRow: View {
             RoundedRectangle(cornerRadius: 8)
                 .fill(isSelected ? Color.white.opacity(0.2) : (isHovering ? Color.white.opacity(0.1) : Color.clear))
         )
+        .overlay(
+            // Keyboard focus ring
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.accentColor, lineWidth: 2)
+                .opacity(isKeyboardFocused && !isSelected ? 1 : 0)
+        )
         .contentShape(Rectangle())
         .onHover { hovering in
             isHovering = hovering
@@ -551,6 +656,10 @@ struct WorktreeRow: View {
         .onTapGesture {
             onSelect()
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Worktree: \(worktree.branch)")
+        .accessibilityHint("Double-click to open in terminal")
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
         .contextMenu {
             Button("Open in \(terminalName)") {
                 onOpenTerminal()
@@ -614,6 +723,8 @@ struct WorktreeRow: View {
             }
             .buttonStyle(.plain)
             .help("View diff against main")
+            .accessibleButton("View diff")
+            .minHitTarget()
 
             // PR button: create or view based on current state
             if worktree.prURL != nil {
@@ -626,6 +737,8 @@ struct WorktreeRow: View {
                 }
                 .buttonStyle(.plain)
                 .help("View PR #\(worktree.prNumber ?? 0)")
+                .accessibleButton("View pull request \(worktree.prNumber ?? 0)")
+                .minHitTarget()
             } else {
                 Button {
                     onCreatePR()
@@ -636,6 +749,8 @@ struct WorktreeRow: View {
                 }
                 .buttonStyle(.plain)
                 .help("Create PR")
+                .accessibleButton("Create pull request")
+                .minHitTarget()
             }
 
             Button {
@@ -647,6 +762,8 @@ struct WorktreeRow: View {
             }
             .buttonStyle(.plain)
             .help("Open in \(terminalName)")
+            .accessibleButton("Open in \(terminalName)")
+            .minHitTarget()
 
             Button {
                 onOpenIDE()
@@ -657,6 +774,8 @@ struct WorktreeRow: View {
             }
             .buttonStyle(.plain)
             .help("Open in \(ideName)")
+            .accessibleButton("Open in \(ideName)")
+            .minHitTarget()
 
             // Land button - only visible when PR is open
             if worktree.prState == .open {
@@ -669,6 +788,8 @@ struct WorktreeRow: View {
                 }
                 .buttonStyle(.plain)
                 .help("Land PR")
+                .accessibleButton("Land pull request")
+                .minHitTarget()
             }
 
             // Abandon button
@@ -681,6 +802,8 @@ struct WorktreeRow: View {
             }
             .buttonStyle(.plain)
             .help("Abandon worktree")
+            .accessibleButton("Delete worktree")
+            .minHitTarget()
         }
     }
 

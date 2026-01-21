@@ -631,6 +631,197 @@ Captured for future sessions:
 
 ---
 
+## Design System Implementation
+
+Maestro implements a formal design system in `DesignSystem.swift`. Use these patterns for consistency.
+
+### Spacing Scale (4pt base)
+
+```swift
+import Maestro
+
+// Use semantic spacing, not arbitrary values
+.padding(.horizontal, Spacing.lg)  // 16pt
+.padding(.vertical, Spacing.md)    // 12pt
+
+enum Spacing {
+    static let xxs: CGFloat = 2
+    static let xs: CGFloat = 4
+    static let sm: CGFloat = 8
+    static let md: CGFloat = 12
+    static let lg: CGFloat = 16
+    static let xl: CGFloat = 20
+    static let xxl: CGFloat = 24
+    static let xxxl: CGFloat = 32
+}
+```
+
+### Hit Targets
+
+```swift
+// Minimum 24pt for desktop (Vercel guideline)
+Button { } label: {
+    Image(systemName: "trash")
+}
+.minHitTarget()  // Ensures 24×24 minimum
+
+enum HitTarget {
+    static let minimum: CGFloat = 24    // Desktop
+    static let comfortable: CGFloat = 32
+    static let touch: CGFloat = 44      // Mobile
+}
+```
+
+### Corner Radius
+
+```swift
+// Consistent radii across the app
+.clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+
+enum CornerRadius {
+    static let sm: CGFloat = 4
+    static let md: CGFloat = 8
+    static let lg: CGFloat = 12
+    static let xl: CGFloat = 16
+    static let full: CGFloat = 9999
+}
+```
+
+### Z-Index (Layering)
+
+```swift
+enum ZIndex {
+    static let base: Double = 0
+    static let dropdown: Double = 100
+    static let modal: Double = 200
+    static let toast: Double = 300
+    static let tooltip: Double = 400
+}
+```
+
+### Typography
+
+Adapted from loopflowstudio. Three type families:
+
+```swift
+enum Typography {
+    static let serifFamily = "Cormorant Garamond"  // Headlines, editorial
+    static let sansFamily = "Lato"                  // Body, UI
+    static let monoFamily = "JetBrains Mono"        // Code
+
+    // Usage
+    static func heroTitle(_ size: CGFloat = 32) -> Font
+    static func sectionTitle(_ size: CGFloat = 20) -> Font
+    static func body(_ size: CGFloat = 16) -> Font
+    static func caption(_ size: CGFloat = 12) -> Font
+    static func code(_ size: CGFloat = 13) -> Font
+}
+```
+
+### Animations with Motion Preferences
+
+Always respect `reduceMotion`. Use `DesignAnimation` helpers:
+
+```swift
+@Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+// ✅ Correct: respects reduce motion
+withAnimation(DesignAnimation.standard(reduceMotion)) {
+    isExpanded.toggle()
+}
+
+// ❌ Wrong: ignores accessibility
+withAnimation(.easeInOut) {
+    isExpanded.toggle()
+}
+
+enum DesignAnimation {
+    static func standard(_ reduceMotion: Bool) -> Animation?  // 0.2s easeInOut
+    static func fast(_ reduceMotion: Bool) -> Animation?      // 0.1s easeOut
+    static func spring(_ reduceMotion: Bool) -> Animation?    // spring response
+}
+```
+
+### Accessibility View Modifiers
+
+Use these modifiers for consistent accessibility:
+
+```swift
+// Icon-only buttons
+Button { delete() } label: {
+    Image(systemName: "trash")
+}
+.accessibleButton("Delete worktree", hint: "Removes this worktree permanently")
+.minHitTarget()
+
+// Toggles
+Toggle(isOn: $isEnabled) { }
+.accessibleToggle("Enable feature", isOn: isEnabled)
+
+// Custom implementations
+extension View {
+    func accessibleButton(_ label: String, hint: String? = nil) -> some View
+    func accessibleToggle(_ label: String, isOn: Bool) -> some View
+    func minHitTarget() -> some View
+}
+```
+
+### Status Colors
+
+```swift
+// Semantic status colors from BrandColors
+Color.statusSuccess  // green
+Color.statusError    // red
+Color.statusWarning  // orange
+Color.statusInfo     // blue
+```
+
+### Keyboard Navigation
+
+Maestro is keyboard-first. All actions are accessible via keyboard.
+
+**Global Shortcuts (menu bar):**
+
+| Shortcut | Action |
+|----------|--------|
+| ⌘K | Command Palette |
+| ⌘L | Focus Prompt Input |
+| ⌘N | New Workspace |
+| ⌘4 | Capture for Review |
+
+**Sidebar Shortcuts (when sidebar focused):**
+
+| Key | Action |
+|-----|--------|
+| ↑/↓ | Navigate worktree list |
+| ↵ | Select focused worktree |
+| T | Open in Terminal |
+| I | Open in IDE |
+| D | View Diff |
+| P | View/Create PR |
+| L | Land PR (if open) |
+| ⌫ | Delete worktree |
+
+**Command Palette:**
+- Fuzzy search all actions
+- Arrow keys to navigate
+- Enter to execute
+- Escape to close
+
+### Verification Checklist
+
+Before merging UI changes:
+
+- [ ] Uses `Spacing` enum, not arbitrary padding values
+- [ ] Buttons have minimum hit target (`.minHitTarget()`)
+- [ ] All `withAnimation` calls use `DesignAnimation` helpers
+- [ ] Icon-only buttons have `.accessibleButton()` or `.accessibilityLabel()`
+- [ ] Toggles have `.accessibleToggle()` or accessibility value
+- [ ] Test with VoiceOver enabled
+- [ ] Test with Reduce Motion enabled
+
+---
+
 ## Sources
 
 - Design of Everyday Things (Don Norman)

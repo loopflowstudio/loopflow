@@ -7,6 +7,7 @@ struct PromptLauncher: View {
     @Bindable var appState: AppState
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var inputText: String = ""
     @State private var showingPromptPicker = false
     @State private var highlightedPromptIndex = 0
@@ -709,6 +710,7 @@ struct PromptLauncher: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.return, modifiers: .command)
+                .accessibleButton("Run \(taskSearchText.isEmpty ? "task" : taskSearchText)", hint: "Press Command Return to run")
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 12)
@@ -792,7 +794,7 @@ struct PromptLauncher: View {
 
                 // Token count - clickable to expand preview
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
+                    withAnimation(DesignAnimation.standard(reduceMotion)) {
                         isPreviewExpanded.toggle()
                         if isPreviewExpanded {
                             Task { await appState.refreshContextPreview() }
@@ -815,9 +817,10 @@ struct PromptLauncher: View {
                 }
                 .buttonStyle(.plain)
                 .help("Click to see context breakdown")
+                .accessibleButton("Toggle context preview", hint: isPreviewExpanded ? "Collapse" : "Expand")
 
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
+                    withAnimation(DesignAnimation.standard(reduceMotion)) {
                         showAdvancedOptions.toggle()
                     }
                 } label: {
@@ -831,6 +834,7 @@ struct PromptLauncher: View {
                 }
                 .buttonStyle(.plain)
                 .help("Model, voice, context toggles, and command preview")
+                .accessibleButton("Toggle advanced options", hint: showAdvancedOptions ? "Collapse" : "Expand")
             }
 
             // Context preview panel
@@ -912,7 +916,7 @@ struct PromptLauncher: View {
         VStack(alignment: .leading, spacing: 2) {
             // Section header - clickable to expand/collapse
             Button {
-                withAnimation(.easeInOut(duration: 0.15)) {
+                withAnimation(DesignAnimation.fast(reduceMotion)) {
                     if expandedSections.contains(section.kind) {
                         expandedSections.remove(section.kind)
                     } else {
@@ -1008,7 +1012,7 @@ struct PromptLauncher: View {
         VStack(alignment: .leading, spacing: 8) {
             // Collapsible header - always visible
             Button {
-                withAnimation(.easeInOut(duration: 0.15)) {
+                withAnimation(DesignAnimation.fast(reduceMotion)) {
                     contextBarExpanded.toggle()
                 }
             } label: {
@@ -1026,6 +1030,7 @@ struct PromptLauncher: View {
                 .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
+            .accessibleButton("Toggle context options", hint: contextBarExpanded ? "Collapse" : "Expand")
 
             // Expanded content
             if contextBarExpanded {
@@ -1136,7 +1141,7 @@ struct PromptLauncher: View {
     private var commandPreview: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button {
-                withAnimation(.easeInOut(duration: 0.15)) {
+                withAnimation(DesignAnimation.fast(reduceMotion)) {
                     showCommandPreview.toggle()
                 }
             } label: {
@@ -1152,6 +1157,7 @@ struct PromptLauncher: View {
                 .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
+            .accessibleButton("Toggle command preview", hint: showCommandPreview ? "Collapse" : "Expand")
 
             if showCommandPreview {
                 HStack {

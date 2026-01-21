@@ -73,12 +73,27 @@ struct MaestroApp: App {
                 .keyboardShortcut("4", modifiers: [.command])
             }
 
-            // Edit menu shortcut for prompt focus (handled by PromptLauncher)
+            // Edit menu shortcuts
             CommandGroup(after: .textEditing) {
                 Button("Focus Prompt") {
-                    // Handled by hidden button in PromptLauncher
+                    NotificationCenter.default.post(name: .focusPromptInput, object: nil)
                 }
                 .keyboardShortcut("l", modifiers: .command)
+            }
+
+            // View menu - command palette and navigation
+            CommandGroup(after: .sidebar) {
+                Button("Command Palette") {
+                    NotificationCenter.default.post(name: .toggleCommandPalette, object: nil)
+                }
+                .keyboardShortcut("k", modifiers: .command)
+
+                Divider()
+
+                Button("New Workspace") {
+                    NotificationCenter.default.post(name: .showNewWorktreeSheet, object: nil)
+                }
+                .keyboardShortcut("n", modifiers: .command)
             }
         }
     }

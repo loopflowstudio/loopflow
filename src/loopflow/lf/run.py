@@ -14,6 +14,7 @@ from loopflow.lf.config import load_config, parse_model
 from loopflow.lf.context import (
     PromptComponents,
     find_worktree_root,
+    format_drop_label,
     format_prompt,
     gather_prompt_components,
     gather_step,
@@ -68,25 +69,13 @@ def _trim_components_if_needed(components: PromptComponents) -> PromptComponents
     """Trim prompt components to fit within the safe token limit."""
     trimmed, dropped = trim_prompt_components(components, MAX_SAFE_TOKENS)
     if dropped:
-        dropped_summary = ", ".join(_format_drop_label(item) for item in dropped)
+        dropped_summary = ", ".join(format_drop_label(item) for item in dropped)
         typer.echo(
             f"\033[33m⚠ Context trimmed to fit {MAX_SAFE_TOKENS:,} tokens. "
             f"Dropped: {dropped_summary}\033[0m",
             err=True,
         )
     return trimmed
-
-
-def _format_drop_label(drop) -> str:
-    if drop.kind == "diff_files":
-        return "diff_files"
-    if drop.kind in ("docs", "summaries"):
-        return f"{drop.kind}:{drop.name}"
-    if drop.kind == "diff":
-        return "diff"
-    if drop.kind == "clipboard":
-        return "clipboard"
-    return drop.kind
 
 
 def _copy_to_clipboard(text: str) -> None:
@@ -295,8 +284,8 @@ def run(
     interactive: bool = typer.Option(
         False, "-i", "-I", "--interactive", help="Override to run in interactive mode"
     ),
-    context: list[str] = typer.Option(
-        None, "-x", "-X", "--context", help="Additional files for context"
+    path: list[str] = typer.Option(
+        None, "-p", "-P", "--path", help="Additional files to include"
     ),
     worktree: str = typer.Option(
         None, "-w", "-W", "--worktree", help="Create worktree and run step there"
@@ -328,9 +317,6 @@ def run(
     parallel: str = typer.Option(
         None, "--parallel", help="Run parallel with multiple models (e.g., 'claude,codex')"
     ),
-    with_prompt: list[str] = typer.Option(
-        None, "-p", "-P", "--prompt", help="Append additional prompt files (e.g., -p nux)"
-    ),
     chrome: Optional[bool] = typer.Option(
         None, "--chrome/--no-chrome", help="Enable Chrome browser automation"
     ),
@@ -357,9 +343,9 @@ def run(
             cmd = ["lf", step, "-w", wt_name, "--model", model_name, "-a"]
             if ctx.args:
                 cmd.extend(ctx.args)
-            if context:
-                for ctx_file in context:
-                    cmd.extend(["-x", ctx_file])
+            if path:
+                for p in path:
+                    cmd.extend(["-p", p])
 
             subprocess.Popen(
                 cmd,
@@ -387,7 +373,7 @@ def run(
         return _launch_interactive_default(
             repo_root,
             config,
-            context=list(context) if context else None,
+            context=list(path) if path else None,
             model=model,
             voice=voice,
             paste=paste,
@@ -410,7 +396,7 @@ def run(
         cli_interactive=True if interactive else None,
         cli_auto=True if auto else None,
         cli_model=model,
-        cli_context=list(context) if context else None,
+        cli_context=list(path) if path else None,
         cli_voice=cli_voices or None,
     )
 
@@ -467,7 +453,6 @@ def run(
             include_diff_files=include_diff_files,
             include_summaries=include_summaries,
             config=config,
-            with_prompts=list(with_prompt) if with_prompt else None,
         )
     except VoiceNotFoundError as e:
         typer.echo(f"Error: {e}", err=True)
@@ -521,8 +506,8 @@ def inline(
     interactive: bool = typer.Option(
         False, "-i", "-I", "--interactive", help="Override to run in interactive mode"
     ),
-    context: list[str] = typer.Option(
-        None, "-x", "-X", "--context", help="Additional files for context"
+    path: list[str] = typer.Option(
+        None, "-p", "-P", "--path", help="Additional files to include"
     ),
     copy: bool = typer.Option(
         False, "-c", "-C", "--copy", help="Copy prompt to clipboard and show token breakdown"
@@ -571,7 +556,7 @@ def inline(
         cli_interactive=True if interactive else None,
         cli_auto=True if auto else None,
         cli_model=model,
-        cli_context=list(context) if context else None,
+        cli_context=list(path) if path else None,
         cli_voice=cli_voices or None,
     )
 
@@ -762,8 +747,8 @@ def add(
 
 def flow(
     name: str = typer.Argument(help="Flow name from .lf/flows/"),
-    context: list[str] = typer.Option(
-        None, "-x", "-X", "--context", help="Context files for all steps"
+    path: list[str] = typer.Option(
+        None, "-p", "-P", "--path", help="Additional files for all steps"
     ),
     worktree: str = typer.Option(
         None, "-w", "-W", "--worktree", help="Create worktree and run flow there"
@@ -818,8 +803,8 @@ def flow(
         repo_root = worktree_path
 
     all_context = list(config.context) if config and config.context else []
-    if context:
-        all_context.extend(context)
+    if path:
+        all_context.extend(path)
 
     exclude = list(config.exclude) if config and config.exclude else None
 

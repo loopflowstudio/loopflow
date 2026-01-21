@@ -67,6 +67,19 @@ class DroppedComponent:
     reason: str | None = None
 
 
+def format_drop_label(drop: DroppedComponent) -> str:
+    """Format a dropped component for display."""
+    if drop.kind == "diff_files":
+        return "diff_files"
+    if drop.kind in ("docs", "summaries"):
+        return f"{drop.kind}:{drop.name}"
+    if drop.kind == "diff":
+        return "diff"
+    if drop.kind == "clipboard":
+        return "clipboard"
+    return drop.kind
+
+
 def trim_prompt_components(
     components: PromptComponents, max_tokens: int
 ) -> tuple[PromptComponents, list[DroppedComponent]]:
@@ -593,7 +606,6 @@ def gather_prompt_components(
     include_diff_files: bool = True,
     include_summaries: bool = True,
     config=None,
-    with_prompts: Optional[list[str]] = None,
 ) -> PromptComponents:
     """Gather all prompt components without assembling them."""
     docs = gather_docs(repo_root, repo_root, exclude)
@@ -631,12 +643,6 @@ def gather_prompt_components(
                 # Append plain args to step content
                 if plain_args:
                     step_content = step_content.rstrip() + "\n\n" + " ".join(plain_args)
-            # Append additional prompts if provided
-            if with_prompts:
-                for prompt_name in with_prompts:
-                    prompt_file = gather_step(repo_root, prompt_name, config)
-                    if prompt_file:
-                        step_content = step_content.rstrip() + "\n\n---\n\n" + prompt_file.content
             step_result = (step, step_content)
         else:
             step_result = (step, f"No step file found for '{step}'.")

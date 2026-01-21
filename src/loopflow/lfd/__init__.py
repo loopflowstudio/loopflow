@@ -298,18 +298,14 @@ def flow(
     flow_name: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
     area: str = typer.Argument(..., help="Area of responsibility (e.g., Maestro/, src/, .)"),
     goals: list[str] = typer.Option(None, "-g", "--goal", help="Goal to add (repeatable)"),
-    project: str = typer.Option(None, "--project", "-p", help="Project/prompt file path"),
     paste: bool = typer.Option(False, "-v", "--paste", help="Include clipboard as prompt"),
 ):
     """Start a one-off flow (runs once then stops).
 
-    The flow runs a single iteration, optionally with additional context
-    from a project file or clipboard.
-
     Examples:
-        lfd flow ship Maestro/                    # one-off adaptive iteration
+        lfd flow ship Maestro/                        # one-off adaptive iteration
         lfd flow ship Maestro/ -g product-engineer    # with role
-        lfd flow ship . -p project.md             # whole repo with project file
+        lfd flow ship . -v                            # whole repo with clipboard
     """
     c = _colors()
     repo = get_repo_from_cwd()
@@ -336,21 +332,8 @@ def flow(
 
     flow_name = _validate_flow(repo, flow_name, c)
 
-    # Resolve project file if specified
-    project_file = None
-    if project:
-        project_path = Path(project)
-        if not project_path.is_absolute():
-            project_path = repo / project
-        if not project_path.exists():
-            typer.echo(
-                f"{c['red']}Error:{c['reset']} Project file not found: {project}",
-                err=True,
-            )
-            raise typer.Exit(1)
-        project_file = str(project_path)
-
     # Handle clipboard paste - write to temp file if provided
+    project_file = None
     if paste:
         import subprocess
 
@@ -360,12 +343,7 @@ def flow(
 
             with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
                 f.write(result.stdout)
-                if project_file:
-                    # Append clipboard to project file content
-                    msg = f"{c['yellow']}Note:{c['reset']} Both -p and -v provided"
-                    typer.echo(f"{msg}; clipboard appended to project file")
-                else:
-                    project_file = f.name
+                project_file = f.name
 
     # Create or get loop
     lp = create_loop(LoopType.FLOW, area, repo, goals=goals, flow=flow_name, project_file=project_file)
@@ -377,8 +355,6 @@ def flow(
         )
         typer.echo(f"  Goals: {lp.goals_display}")
         typer.echo(f"  Flow: {lp.flow_display}")
-        if project:
-            typer.echo(f"  Project: {project}")
         if paste:
             typer.echo("  Clipboard: included")
     else:
@@ -390,10 +366,10 @@ def flow(
 def subscribe(
     flow: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
     area: str = typer.Argument(..., help="Area of responsibility (e.g., Maestro/, src/, .)"),
-    pathset: str = typer.Argument(..., help="Pathset to watch (comma-separated)"),
+    path: list[str] = typer.Option(..., "-p", "-P", "--path", help="Paths to watch (repeatable, supports globs)"),
     goals: list[str] = typer.Option(None, "-g", "--goal", help="Goal to add (repeatable)"),
 ):
-    """Subscribe to pathset changes on main."""
+    """Subscribe to path changes on main."""
     c = _colors()
     repo = get_repo_from_cwd()
     if not repo:
@@ -415,6 +391,9 @@ def subscribe(
 
     flow = _validate_flow(repo, flow, c)
 
+    # Convert path list to comma-separated pathset
+    pathset = ",".join(path)
+
     # Create subscription
     lp = create_loop(LoopType.SUBSCRIBE, area, repo, goals=goals, flow=flow, pathset=pathset)
 
@@ -422,7 +401,7 @@ def subscribe(
     typer.echo(f"{msg} ({lp.short_id()})")
     typer.echo(f"  Goals: {lp.goals_display}")
     typer.echo(f"  Flow: {lp.flow_display}")
-    typer.echo(f"  Will run when {pathset} changes on main")
+    typer.echo(f"  Will run when paths change on main")
 
 
 @app.command()
@@ -431,7 +410,6 @@ def schedule(
     area: str = typer.Argument(..., help="Area of responsibility (e.g., Maestro/, src/, .)"),
     cron_expr: str = typer.Argument(..., help="Cron expression (e.g., '0 9 * * *')"),
     goals: list[str] = typer.Option(None, "-g", "--goal", help="Goal to add (repeatable)"),
-    project: str = typer.Option(None, "--project", "-p", help="Project file path"),
 ):
     """Schedule a loop to run on cron."""
     c = _colors()
@@ -455,19 +433,6 @@ def schedule(
 
     flow = _validate_flow(repo, flow, c)
 
-    project_file = None
-    if project:
-        project_path = Path(project)
-        if not project_path.is_absolute():
-            project_path = repo / project
-        if not project_path.exists():
-            typer.echo(
-                f"{c['red']}Error:{c['reset']} Project file not found: {project}",
-                err=True,
-            )
-            raise typer.Exit(1)
-        project_file = str(project_path)
-
     # Create schedule
     lp = create_loop(
         LoopType.SCHEDULE,
@@ -476,15 +441,12 @@ def schedule(
         goals=goals,
         flow=flow,
         cron=cron_expr,
-        project_file=project_file,
     )
 
     typer.echo(f"{c['green']}Scheduled{c['reset']} {c['bold']}{area}{c['reset']} ({lp.short_id()})")
     typer.echo(f"  Goals: {lp.goals_display}")
     typer.echo(f"  Flow: {lp.flow_display}")
     typer.echo(f"  Cron: {cron_expr}")
-    if project:
-        typer.echo(f"  Project: {project}")
 
 
 def _get_scheduler_status() -> dict | None:

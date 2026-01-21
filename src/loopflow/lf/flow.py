@@ -15,6 +15,7 @@ import yaml
 
 from loopflow.lf.config import parse_model
 from loopflow.lf.context import (
+    format_drop_label,
     format_prompt,
     gather_prompt_components,
     gather_step,
@@ -42,18 +43,6 @@ class _StepParams:
     model_variant: str | None
     context: list[str] | None
     voices: list[str] | None
-
-
-def _format_drop_label(drop) -> str:
-    if drop.kind == "diff_files":
-        return "diff_files"
-    if drop.kind in ("docs", "summaries"):
-        return f"{drop.kind}:{drop.name}"
-    if drop.kind == "diff":
-        return "diff"
-    if drop.kind == "clipboard":
-        return "clipboard"
-    return drop.kind
 
 
 def _build_step_params(
@@ -116,7 +105,7 @@ def _run_step(
     )
     components, dropped = trim_prompt_components(components, MAX_SAFE_TOKENS)
     if dropped:
-        dropped_summary = ", ".join(_format_drop_label(item) for item in dropped)
+        dropped_summary = ", ".join(format_drop_label(item) for item in dropped)
         print(
             f"\033[33m⚠ Context trimmed to fit {MAX_SAFE_TOKENS:,} tokens. "
             f"Dropped: {dropped_summary}\033[0m"
@@ -348,7 +337,7 @@ def _run_worktree_tasks(
         )
         components, dropped = trim_prompt_components(components, MAX_SAFE_TOKENS)
         if dropped:
-            dropped_summary = ", ".join(_format_drop_label(item) for item in dropped)
+            dropped_summary = ", ".join(format_drop_label(item) for item in dropped)
             print(
                 f"\033[33m⚠ Context trimmed to fit {MAX_SAFE_TOKENS:,} tokens. "
                 f"Dropped: {dropped_summary}\033[0m"

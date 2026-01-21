@@ -26,37 +26,25 @@ class Flow(list):
         super().__init__(steps)
 
 
-class RaceConfig(BaseModel):
-    """Configuration for model racing—run same task with multiple models."""
+class JoinConfig(BaseModel):
+    """Configuration for joining fork outcomes."""
 
     model_config = ConfigDict(extra="forbid")
 
-    models: list[str] = Field(default_factory=list)
-    judge: str = "compare"
+    step: str | None = None
+    agent_model: str | None = None
+    voice: list[str] | None = None
 
     @model_validator(mode="before")
     @classmethod
     def _normalize(cls, data):
-        if isinstance(data, list):
-            models: list[str] = []
-            for item in data:
-                if isinstance(item, str):
-                    models.append(item)
-                elif isinstance(item, dict) and "model" in item:
-                    models.append(item["model"])
-            return {"models": models}
+        if isinstance(data, str):
+            return {"step": data}
         return data
 
-    def to_dict(self) -> dict:
-        return self.model_dump(exclude_none=True)
 
-    @classmethod
-    def from_dict(cls, data: list | dict) -> "RaceConfig":
-        return cls.model_validate(data)
-
-
-class ChooseFork(BaseModel):
-    """Prompt-driven fork between named subflows."""
+class Choose(BaseModel):
+    """Prompt-driven choice between named subflows."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -65,26 +53,12 @@ class ChooseFork(BaseModel):
     prompt: str | None = None
 
 
-class ChooseResultOption(BaseModel):
-    """Variant configuration for choose_result."""
+class Join(BaseModel):
+    """Join forked outputs into a single changeset."""
 
     model_config = ConfigDict(extra="forbid")
 
-    model: str
-    voice: list[str] | None = None
-    context: list[str] | None = None
-    label: str | None = None
-
-
-class ChooseResult(BaseModel):
-    """Run variants and select the best result."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    step: str
-    options: list[ChooseResultOption]
-    judge: str = "compare"
-    output: str | None = None
+    join: JoinConfig = Field(default_factory=lambda: JoinConfig(step="synthesize"))
 
 
 class FlowStep(BaseModel):
@@ -92,21 +66,20 @@ class FlowStep(BaseModel):
 
     step: str | None = None
     flow: str | None = None
-    parallel: list["FlowStep"] | None = None
-    race: RaceConfig | None = None
+    fork: list["FlowStep"] | None = None
     config: StepConfig | None = None
-    choose_fork: ChooseFork | None = None
-    choose_result: ChooseResult | None = None
+    choose: Choose | None = None
+    join: Join | None = None
 
     @model_validator(mode="before")
     @classmethod
     def _normalize(cls, data):
         if isinstance(data, str):
             return {"step": data}
-        if isinstance(data, ChooseFork):
-            return {"choose_fork": data}
-        if isinstance(data, ChooseResult):
-            return {"choose_result": data}
+        if isinstance(data, Choose):
+            return {"choose": data}
+        if isinstance(data, Join):
+            return {"join": data}
         return data
 
     def to_dict(self) -> dict | str:
@@ -139,12 +112,12 @@ FlowStep.model_rebuild()
 
 
 def _step_to_data(step: FlowStep) -> dict | str:
-    if step.choose_fork:
-        return {"choose_fork": _choose_fork_to_data(step.choose_fork)}
-    if step.choose_result:
-        return {"choose_result": _choose_result_to_data(step.choose_result)}
-    if step.parallel is not None:
-        return {"parallel": [_step_to_data(s) for s in step.parallel]}
+    if step.choose:
+        return {"choose": _choose_to_data(step.choose)}
+    if step.join:
+        return {"join": _join_to_data(step.join)}
+    if step.fork is not None:
+        return {"fork": [_step_to_data(s) for s in step.fork]}
 
     if step.flow:
         data: dict = {"flow": step.flow}
@@ -153,8 +126,6 @@ def _step_to_data(step: FlowStep) -> dict | str:
     else:
         return {}
 
-    if step.race:
-        data["race"] = step.race.to_dict()
     if step.config:
         config_data = step.config.to_dict()
         if config_data:
@@ -166,12 +137,12 @@ def _step_to_data(step: FlowStep) -> dict | str:
     return data
 
 
-def _choose_fork_to_data(choose_fork: ChooseFork) -> dict:
-    return choose_fork.model_dump(exclude_none=True)
+def _choose_to_data(choose: Choose) -> dict:
+    return choose.model_dump(exclude_none=True)
 
 
-def _choose_result_to_data(choose_result: ChooseResult) -> dict:
-    return choose_result.model_dump(exclude_none=True)
+def _join_to_data(join: Join) -> dict:
+    return join.model_dump(exclude_none=True)
 
 
 def _load_flow_module(name: str, path: Path) -> ModuleType:
@@ -181,8 +152,8 @@ def _load_flow_module(name: str, path: Path) -> ModuleType:
 
     module = importlib_util.module_from_spec(spec)
     module.__dict__["Flow"] = Flow
-    module.__dict__["ChooseFork"] = ChooseFork
-    module.__dict__["ChooseResult"] = ChooseResult
+    module.__dict__["Choose"] = Choose
+    module.__dict__["Join"] = Join
     spec.loader.exec_module(module)
     return module
 
@@ -257,30 +228,29 @@ class ResolvedStep:
     step: str | None = None
     config: StepConfig | None = None
     parallel_group: int | None = None
-    race: RaceConfig | None = None
-    choose_fork: ChooseFork | None = None
-    choose_result: ChooseResult | None = None
+    choose: Choose | None = None
+    join: Join | None = None
 
 
 def resolve_flow(flow: FlowDef, repo: Path) -> list[ResolvedStep]:
-    """Expand nested flows, return flat list with parallel groups marked."""
+    """Expand nested flows, return flat list with fork groups marked."""
     resolved: list[ResolvedStep] = []
     parallel_group = 0
 
     def _resolve_step(flow_step: FlowStep, group: int | None = None) -> None:
         nonlocal parallel_group
 
-        if flow_step.choose_fork:
+        if flow_step.choose:
             resolved.append(
                 ResolvedStep(
-                    choose_fork=flow_step.choose_fork,
+                    choose=flow_step.choose,
                     parallel_group=group,
                 )
             )
-        elif flow_step.choose_result:
+        elif flow_step.join:
             resolved.append(
                 ResolvedStep(
-                    choose_result=flow_step.choose_result,
+                    join=flow_step.join,
                     parallel_group=group,
                 )
             )
@@ -290,7 +260,6 @@ def resolve_flow(flow: FlowDef, repo: Path) -> list[ResolvedStep]:
                     step=flow_step.step,
                     config=flow_step.config,
                     parallel_group=group,
-                    race=flow_step.race,
                 )
             )
         elif flow_step.flow:
@@ -298,11 +267,11 @@ def resolve_flow(flow: FlowDef, repo: Path) -> list[ResolvedStep]:
             if nested:
                 for nested_step in nested.steps:
                     _resolve_step(nested_step, group)
-        elif flow_step.parallel:
+        elif flow_step.fork:
             current_group = parallel_group
             parallel_group += 1
-            for parallel_step in flow_step.parallel:
-                _resolve_step(parallel_step, current_group)
+            for fork_step in flow_step.fork:
+                _resolve_step(fork_step, current_group)
 
     for flow_step in flow.steps:
         _resolve_step(flow_step)

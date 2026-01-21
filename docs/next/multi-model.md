@@ -7,27 +7,15 @@ title: Multi-Model
 
 *Coming soon.*
 
-Run tasks with multiple models in parallel or race them against each other.
-
-## Model Racing
-
-Race models against each other, pick the winner:
-
-```bash
-lf implement --race claude,codex: add caching layer
-```
-
-This runs both models in parallel worktrees, then uses a judge prompt to pick the better implementation.
+Run tasks with multiple models in parallel.
 
 ## Parallel Execution
-
-For parallel without judging:
 
 ```bash
 lf implement --parallel claude,codex: add caching
 ```
 
-Compare results manually with `lfwt compare`.
+Compare results manually with `lfwt compare` or use a flow `fork` + `join` to synthesize.
 
 ## Model Selection
 

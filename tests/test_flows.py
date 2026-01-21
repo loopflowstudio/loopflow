@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 
 from loopflow.lf.flow import _count_logical_steps
-from loopflow.lf.flows import FlowDef, FlowStep, RaceConfig, load_flow, resolve_flow, save_flow
+from loopflow.lf.flows import FlowDef, FlowStep, load_flow, resolve_flow, save_flow
 from loopflow.lf.frontmatter import StepConfig
 
 
@@ -12,7 +12,7 @@ def test_flow_step_from_string():
     step = FlowStep.from_dict("implement")
     assert step.step == "implement"
     assert step.flow is None
-    assert step.parallel is None
+    assert step.fork is None
 
 
 def test_flow_step_from_dict():
@@ -27,19 +27,19 @@ def test_flow_step_from_dict():
     assert step.config.model == "claude:opus"
 
 
-def test_flow_step_with_parallel():
+def test_flow_step_with_fork():
     step = FlowStep.from_dict(
         {
-            "parallel": [
+            "fork": [
                 {"step": "test"},
                 {"step": "lint"},
             ]
         }
     )
-    assert step.parallel is not None
-    assert len(step.parallel) == 2
-    assert step.parallel[0].step == "test"
-    assert step.parallel[1].step == "lint"
+    assert step.fork is not None
+    assert len(step.fork) == 2
+    assert step.fork[0].step == "test"
+    assert step.fork[1].step == "lint"
 
 
 def test_flow_step_serialization():
@@ -58,7 +58,7 @@ def test_flow_def_from_dict():
         "steps": [
             "design",
             "implement",
-            {"parallel": [{"step": "test"}, {"step": "lint"}]},
+            {"fork": [{"step": "test"}, {"step": "lint"}]},
             "land",
         ]
     }
@@ -66,7 +66,7 @@ def test_flow_def_from_dict():
     assert flow.name == "ship"
     assert len(flow.steps) == 4
     assert flow.steps[0].step == "design"
-    assert flow.steps[2].parallel is not None
+    assert flow.steps[2].fork is not None
 
 
 def test_load_flow():
@@ -81,7 +81,7 @@ def flow():
         "steps": [
             "design",
             "implement",
-            {"parallel": ["test", "lint"]},
+            {"fork": ["test", "lint"]},
             "land",
         ]
     }
@@ -150,13 +150,13 @@ def test_resolve_flow_sequential():
     assert resolved[2].step == "c"
 
 
-def test_resolve_flow_with_parallel():
+def test_resolve_flow_with_fork():
     flow = FlowDef(
         name="parallel",
         steps=[
             FlowStep(step="a"),
             FlowStep(
-                parallel=[
+                fork=[
                     FlowStep(step="b"),
                     FlowStep(step="c"),
                 ]
@@ -172,7 +172,7 @@ def test_resolve_flow_with_parallel():
     assert resolved[0].step == "a"
     assert resolved[0].parallel_group is None
 
-    # b and c should be in the same parallel group
+    # b and c should be in the same fork group
     assert resolved[1].step == "b"
     assert resolved[1].parallel_group == 0
     assert resolved[2].step == "c"
@@ -358,14 +358,14 @@ def test_count_logical_steps_sequential():
     assert count == 3
 
 
-def test_count_logical_steps_with_parallel():
-    """Parallel groups count as 1 logical step."""
+def test_count_logical_steps_with_fork():
+    """Fork groups count as 1 logical step."""
     flow = FlowDef(
         name="parallel",
         steps=[
             FlowStep(step="a"),
             FlowStep(
-                parallel=[
+                fork=[
                     FlowStep(step="b"),
                     FlowStep(step="c"),
                 ]
@@ -378,24 +378,24 @@ def test_count_logical_steps_with_parallel():
         resolved = resolve_flow(flow, Path(tmpdir))
         count = _count_logical_steps(resolved)
 
-    # a, parallel(b+c), d = 3 logical steps
+    # a, fork(b+c), d = 3 logical steps
     assert count == 3
 
 
-def test_count_logical_steps_multiple_parallel_groups():
-    """Multiple parallel groups each count as 1."""
+def test_count_logical_steps_multiple_fork_groups():
+    """Multiple fork groups each count as 1."""
     flow = FlowDef(
         name="multi-parallel",
         steps=[
             FlowStep(
-                parallel=[
+                fork=[
                     FlowStep(step="a"),
                     FlowStep(step="b"),
                 ]
             ),
             FlowStep(step="c"),
             FlowStep(
-                parallel=[
+                fork=[
                     FlowStep(step="d"),
                     FlowStep(step="e"),
                 ]
@@ -407,12 +407,12 @@ def test_count_logical_steps_multiple_parallel_groups():
         resolved = resolve_flow(flow, Path(tmpdir))
         count = _count_logical_steps(resolved)
 
-    # parallel(a+b), c, parallel(d+e) = 3 logical steps
+    # fork(a+b), c, fork(d+e) = 3 logical steps
     assert count == 3
 
 
-def test_load_flow_with_parallel():
-    """Load flow with parallel steps from YAML."""
+def test_load_flow_with_fork():
+    """Load flow with fork steps from YAML."""
     with tempfile.TemporaryDirectory() as tmpdir:
         repo = Path(tmpdir)
         flows_dir = repo / ".lf" / "flows"
@@ -421,12 +421,12 @@ def test_load_flow_with_parallel():
         (flows_dir / "verify.py").write_text("""
 def flow():
     return {
-        "steps": [
-            "implement",
-            {"parallel": [{"step": "test"}, {"step": "lint"}]},
-            "commit",
-        ]
-    }
+            "steps": [
+                "implement",
+                {"fork": [{"step": "test"}, {"step": "lint"}]},
+                "commit",
+            ]
+        }
 """)
 
         flow = load_flow("verify", repo)
@@ -436,11 +436,11 @@ def flow():
         # First is sequential
         assert flow.steps[0].step == "implement"
 
-        # Second is parallel group
-        assert flow.steps[1].parallel is not None
-        assert len(flow.steps[1].parallel) == 2
-        assert flow.steps[1].parallel[0].step == "test"
-        assert flow.steps[1].parallel[1].step == "lint"
+        # Second is fork group
+        assert flow.steps[1].fork is not None
+        assert len(flow.steps[1].fork) == 2
+        assert flow.steps[1].fork[0].step == "test"
+        assert flow.steps[1].fork[1].step == "lint"
 
         # Third is sequential
         assert flow.steps[2].step == "commit"
@@ -453,130 +453,3 @@ def flow():
         assert resolved[1].parallel_group == 0
         assert resolved[2].parallel_group == 0
         assert resolved[3].parallel_group is None
-
-
-# Race configuration tests
-
-
-def test_race_config_from_list():
-    """RaceConfig parses simple list of models."""
-    race = RaceConfig.from_dict(["claude:opus", "codex:o3"])
-    assert race.models == ["claude:opus", "codex:o3"]
-    assert race.judge == "compare"
-
-
-def test_race_config_from_dict():
-    """RaceConfig parses full dict with custom judge."""
-    race = RaceConfig.from_dict(
-        {
-            "models": ["claude:opus", "codex:o3"],
-            "judge": "custom-judge",
-        }
-    )
-    assert race.models == ["claude:opus", "codex:o3"]
-    assert race.judge == "custom-judge"
-
-
-def test_race_config_from_model_objects():
-    """RaceConfig parses list of model objects."""
-    race = RaceConfig.from_dict(
-        [
-            {"model": "claude:opus"},
-            {"model": "codex:o3"},
-        ]
-    )
-    assert race.models == ["claude:opus", "codex:o3"]
-
-
-def test_race_config_serialization():
-    """RaceConfig round-trips through to_dict."""
-    race = RaceConfig(models=["claude:opus", "codex:o3"], judge="custom")
-    data = race.to_dict()
-    restored = RaceConfig.from_dict(data)
-    assert restored.models == ["claude:opus", "codex:o3"]
-    assert restored.judge == "custom"
-
-
-def test_flow_step_with_race():
-    """FlowStep parses race configuration."""
-    step = FlowStep.from_dict(
-        {
-            "step": "implement",
-            "race": ["claude:opus", "codex:o3"],
-        }
-    )
-    assert step.step == "implement"
-    assert step.race is not None
-    assert step.race.models == ["claude:opus", "codex:o3"]
-
-
-def test_flow_step_race_serialization():
-    """FlowStep with race round-trips."""
-    step = FlowStep(
-        step="implement",
-        race=RaceConfig(models=["claude:opus", "codex:o3"]),
-    )
-    data = step.to_dict()
-    restored = FlowStep.from_dict(data)
-    assert restored.race is not None
-    assert restored.race.models == ["claude:opus", "codex:o3"]
-
-
-def test_load_flow_with_race():
-    """Load flow with race step from YAML."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        repo = Path(tmpdir)
-        flows_dir = repo / ".lf" / "flows"
-        flows_dir.mkdir(parents=True)
-
-        (flows_dir / "raceship.py").write_text("""
-def flow():
-    return {
-        "steps": [
-            "design",
-            {
-                "step": "implement",
-                "race": ["claude:opus", "codex:o3"],
-            },
-            "review",
-        ]
-    }
-""")
-
-        flow = load_flow("raceship", repo)
-        assert flow is not None
-        assert len(flow.steps) == 3
-
-        # First step is simple
-        assert flow.steps[0].step == "design"
-        assert flow.steps[0].race is None
-
-        # Second step has race
-        assert flow.steps[1].step == "implement"
-        assert flow.steps[1].race is not None
-        assert flow.steps[1].race.models == ["claude:opus", "codex:o3"]
-
-        # Third step is simple
-        assert flow.steps[2].step == "review"
-        assert flow.steps[2].race is None
-
-
-def test_resolve_flow_with_race():
-    """Resolved steps preserve race configuration."""
-    flow = FlowDef(
-        name="raceship",
-        steps=[
-            FlowStep(step="design"),
-            FlowStep(step="implement", race=RaceConfig(models=["claude", "codex"])),
-            FlowStep(step="review"),
-        ],
-    )
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        resolved = resolve_flow(flow, Path(tmpdir))
-
-    assert len(resolved) == 3
-    assert resolved[0].race is None
-    assert resolved[1].race is not None
-    assert resolved[1].race.models == ["claude", "codex"]
-    assert resolved[2].race is None

@@ -17,9 +17,10 @@ from loopflow.lf.context import (
     format_prompt,
     gather_prompt_components,
     gather_step,
+    trim_prompt_components,
 )
-from loopflow.lf.flow import _run_race_step, run_flow_def
-from loopflow.lf.flows import RaceConfig, load_flow
+from loopflow.lf.flow import run_flow_def
+from loopflow.lf.flows import load_flow
 from loopflow.lf.frontmatter import StepConfig, resolve_step_config
 from loopflow.lf.git import find_main_repo
 from loopflow.lf.launcher import (
@@ -29,14 +30,11 @@ from loopflow.lf.launcher import (
 )
 from loopflow.lf.logging import get_model_env, write_prompt_file
 from loopflow.lf.models import Session, SessionStatus, log_session_end, log_session_start
-from loopflow.lf.tokens import analyze_components
+from loopflow.lf.tokens import MAX_SAFE_TOKENS, analyze_components
 from loopflow.lf.voices import VoiceNotFoundError, parse_voice_arg
 from loopflow.lf.worktrees import WorktreeError, create
 
 ModelType = Optional[str]
-
-# Context limit: 120k leaves room for model response
-MAX_SAFE_TOKENS = 120_000
 
 # Template for new prompt files created by `lf add`
 PROMPT_TEMPLATE = """\
@@ -64,6 +62,31 @@ def _warn_if_context_too_large(tree) -> None:
                 err=True,
             )
         typer.echo(err=True)
+
+
+def _trim_components_if_needed(components: PromptComponents) -> PromptComponents:
+    """Trim prompt components to fit within the safe token limit."""
+    trimmed, dropped = trim_prompt_components(components, MAX_SAFE_TOKENS)
+    if dropped:
+        dropped_summary = ", ".join(_format_drop_label(item) for item in dropped)
+        typer.echo(
+            f"\033[33m⚠ Context trimmed to fit {MAX_SAFE_TOKENS:,} tokens. "
+            f"Dropped: {dropped_summary}\033[0m",
+            err=True,
+        )
+    return trimmed
+
+
+def _format_drop_label(drop) -> str:
+    if drop.kind == "diff_files":
+        return "diff_files"
+    if drop.kind in ("docs", "summaries"):
+        return f"{drop.kind}:{drop.name}"
+    if drop.kind == "diff":
+        return "diff"
+    if drop.kind == "clipboard":
+        return "clipboard"
+    return drop.kind
 
 
 def _copy_to_clipboard(text: str) -> None:
@@ -251,6 +274,8 @@ def _launch_interactive_default(
     if not include_docs:
         components.docs = []
 
+    components = _trim_components_if_needed(components)
+
     result_code = _execute_step(
         "chat",  # Step name for session tracking
         repo_root,
@@ -303,9 +328,6 @@ def run(
     parallel: str = typer.Option(
         None, "--parallel", help="Run parallel with multiple models (e.g., 'claude,codex')"
     ),
-    race: str = typer.Option(
-        None, "--race", help="Race models, auto-judge winner (e.g., 'claude,codex,gemini')"
-    ),
     with_prompt: list[str] = typer.Option(
         None, "-p", "-P", "--prompt", help="Append additional prompt files (e.g., -p nux)"
     ),
@@ -324,33 +346,8 @@ def run(
         if parallel:
             typer.echo("Error: --parallel requires a git repository", err=True)
             raise typer.Exit(1)
-        if race:
-            typer.echo("Error: --race requires a git repository", err=True)
-            raise typer.Exit(1)
         # Use cwd as fallback for non-git usage
         repo_root = Path.cwd()
-
-    # Handle race execution
-    if race:
-        models = [m.strip() for m in race.split(",")]
-        config = load_config(repo_root)
-        main_repo = find_main_repo(repo_root) or repo_root
-        skip_permissions = config.yolo if config else False
-        exclude = list(config.exclude) if config and config.exclude else None
-
-        race_config = RaceConfig(models=models)
-        result_code = _run_race_step(
-            step,
-            race_config,
-            repo_root,
-            main_repo,
-            exclude,
-            skip_permissions,
-            list(context) if context else None,
-            1,  # step_num
-            1,  # total_steps
-        )
-        raise typer.Exit(result_code)
 
     # Handle parallel execution (creates persistent worktrees)
     if parallel:
@@ -479,6 +476,8 @@ def run(
     # Apply docs flag
     if not include_docs:
         components.docs = []
+
+    components = _trim_components_if_needed(components)
 
     if copy:
         prompt = format_prompt(components)
@@ -631,6 +630,8 @@ def inline(
     if not include_docs:
         components.docs = []
 
+    components = _trim_components_if_needed(components)
+
     if copy:
         prompt_text = format_prompt(components)
         _copy_to_clipboard(prompt_text)
@@ -723,6 +724,8 @@ def cp(
     # Apply docs flag
     if not include_docs:
         components.docs = []
+
+    components = _trim_components_if_needed(components)
 
     prompt = format_prompt(components)
     _copy_to_clipboard(prompt)
@@ -839,6 +842,7 @@ def flow(
             include_diff_files=config.diff_files if config else True,
             config=config,
         )
+        components = _trim_components_if_needed(components)
         prompt = format_prompt(components)
         _copy_to_clipboard(prompt)
         tree = analyze_components(components)

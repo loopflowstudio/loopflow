@@ -15,7 +15,9 @@ from loopflow.lf.context import (
     list_all_steps,
     list_builtin_steps,
     list_user_steps,
+    trim_prompt_components,
 )
+from loopflow.lf.tokens import count_tokens
 
 
 @pytest.fixture
@@ -658,3 +660,65 @@ def test_internal_docs_before_root_docs(tmp_path):
     readme_idx = next(i for i, p in enumerate(doc_paths) if "README" in p)
 
     assert design_idx < internal_idx < readme_idx
+
+
+def test_trim_prompt_components_drops_oversize_diff_files(tmp_path):
+    """Drop diff_files entirely when they exceed the token budget."""
+    big_text = "hello " * 2000
+    diff_tokens = count_tokens(big_text)
+    components = PromptComponents(
+        run_mode=None,
+        docs=[],
+        diff=None,
+        diff_files=[(tmp_path / "big.py", big_text)],
+        step=("implement", "do it"),
+        repo_root=tmp_path,
+        clipboard=None,
+        loopflow_doc=None,
+        voices=None,
+        image_files=None,
+        summaries=None,
+    )
+
+    trimmed, dropped = trim_prompt_components(components, diff_tokens - 1)
+
+    assert trimmed.diff_files == []
+    assert any(item.kind == "diff_files" for item in dropped)
+
+
+def test_trim_prompt_components_keeps_small_diff_files(tmp_path):
+    """Keep diff_files if they fit and drop largest other components first."""
+    big_doc = "alpha " * 400
+    small_doc = "beta " * 10
+    diff_content = "code " * 5
+    step_content = "step " * 5
+
+    big_tokens = count_tokens(big_doc)
+    total_tokens = (
+        big_tokens
+        + count_tokens(small_doc)
+        + count_tokens(diff_content)
+        + count_tokens(step_content)
+    )
+    max_tokens = total_tokens - (big_tokens // 2)
+
+    components = PromptComponents(
+        run_mode=None,
+        docs=[(tmp_path / "big.md", big_doc), (tmp_path / "small.md", small_doc)],
+        diff=None,
+        diff_files=[(tmp_path / "main.py", diff_content)],
+        step=("implement", step_content),
+        repo_root=tmp_path,
+        clipboard=None,
+        loopflow_doc=None,
+        voices=None,
+        image_files=None,
+        summaries=None,
+    )
+
+    trimmed, dropped = trim_prompt_components(components, max_tokens)
+
+    assert trimmed.diff_files
+    assert (tmp_path / "big.md") not in {path for path, _content in trimmed.docs}
+    assert dropped
+    assert dropped[0].kind == "docs"

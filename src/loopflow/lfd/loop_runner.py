@@ -21,12 +21,20 @@ from pathlib import Path
 import yaml
 
 from loopflow.lf.config import load_config, parse_model
-from loopflow.lf.context import format_prompt, gather_prompt_components
-from loopflow.lf.flows import ChooseFork, ChooseResult, FlowDef, load_flow, resolve_flow
+from loopflow.lf.context import format_prompt, gather_prompt_components, gather_step
+from loopflow.lf.flows import (
+    Choose,
+    FlowDef,
+    JoinConfig,
+    ResolvedStep,
+    load_flow,
+    resolve_flow,
+)
 from loopflow.lf.goals import build_effective_goals, render_goals
 from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lf.logging import write_prompt_file
 from loopflow.lf.messages import generate_pr_message
+from loopflow.lf.voices import load_voice
 from loopflow.lf.worktrees import WorktreeError
 from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
@@ -46,16 +54,6 @@ from loopflow.lfd.models import Loop, LoopRun, LoopStatus, LoopType
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 SCHEDULER_POLL_INTERVAL = 30  # seconds between slot checks
-
-
-@dataclass
-class _VariantTask:
-    step: str
-    label: str
-    backend: str
-    model_variant: str | None
-    context: list[str] | None
-    voices: list[str] | None
 
 
 @dataclass
@@ -217,7 +215,7 @@ def _parse_choice(path: Path) -> tuple[str | None, str | None]:
     return data.get("choice"), data.get("reason")
 
 
-def _build_choose_fork_prompt(
+def _build_choose_prompt(
     flow_name: str,
     options: dict[str, list],
     output_path: Path,
@@ -257,20 +255,20 @@ def _build_choose_fork_prompt(
     return "\n".join(lines)
 
 
-def _choose_fork_branch(
-    choose_fork: ChooseFork,
+def _choose_branch(
+    choose: Choose,
     flow_name: str,
     repo_root: Path,
     backend: str,
     model_variant: str | None,
     skip_permissions: bool,
 ) -> str:
-    output_path = Path(choose_fork.output or f".design/choices/{flow_name}.md")
+    output_path = Path(choose.output or f".design/choices/{flow_name}.md")
     if not output_path.is_absolute():
         output_path = repo_root / output_path
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    prompt = _build_choose_fork_prompt(flow_name, choose_fork.options, output_path, choose_fork.prompt)
+    prompt = _build_choose_prompt(flow_name, choose.options, output_path, choose.prompt)
 
     runner = get_runner(backend)
     result = runner.launch(
@@ -282,11 +280,11 @@ def _choose_fork_branch(
         cwd=repo_root,
     )
     if result.exit_code != 0:
-        raise RuntimeError("choose_fork failed to run")
+        raise RuntimeError("choose failed to run")
 
     choice, _reason = _parse_choice(output_path)
-    if not choice or choice not in choose_fork.options:
-        raise RuntimeError(f"choose_fork wrote invalid choice to {output_path}")
+    if not choice or choice not in choose.options:
+        raise RuntimeError(f"choose wrote invalid choice to {output_path}")
 
     return choice
 
@@ -386,23 +384,79 @@ def _run_collector_step(
     return result_code
 
 
-def _build_judge_prompt(diffs: list[dict]) -> str:
+def _format_voice_section(voice_names: list[str] | None, repo_root: Path) -> str | None:
+    if not voice_names:
+        return None
+
+    voices = [load_voice(name, repo_root) for name in voice_names]
+    if len(voices) == 1:
+        v = voices[0]
+        return f"<lf:voice:{v.name}>\n{v.content}\n</lf:voice:{v.name}>"
+
+    voice_parts = [f"<lf:voice:{v.name}>\n{v.content}\n</lf:voice:{v.name}>" for v in voices]
+    return f"<lf:voices>\n{chr(10).join(voice_parts)}\n</lf:voices>"
+
+
+def _load_join_instructions(step_name: str | None, repo_root: Path) -> str | None:
+    name = step_name or "synthesize"
+    step_file = gather_step(repo_root, name)
+    if not step_file:
+        return None
+
+    return step_file.content.strip() or None
+
+
+def _collect_fork_diffs(results: list[_VariantResult]) -> list[dict]:
+    diffs = []
+    for r in results:
+        diff_result = subprocess.run(
+            ["git", "diff", "--stat"],
+            cwd=r.worktree,
+            capture_output=True,
+            text=True,
+        )
+        diff_text = diff_result.stdout if diff_result.returncode == 0 else "(no diff)"
+
+        full_diff = subprocess.run(
+            ["git", "diff"],
+            cwd=r.worktree,
+            capture_output=True,
+            text=True,
+        )
+        diffs.append(
+            {
+                "label": r.label,
+                "worktree": str(r.worktree),
+                "summary": diff_text,
+                "diff": full_diff.stdout if full_diff.returncode == 0 else "",
+            }
+        )
+    return diffs
+
+
+def _build_join_prompt(
+    diffs: list[dict],
+    instructions: str | None,
+    voice_section: str | None,
+    flow_name: str,
+) -> str:
     lines = [
-        "You are judging a model race. Multiple models attempted the same coding task.",
-        "Compare their outputs and pick the best one.",
+        "You are joining changes from multiple forked worktrees into the current worktree.",
+        "Synthesize the best parts of all forks into a single changeset here.",
+        "Do NOT edit the forked worktrees directly.",
+        "After applying the changes, commit the result.",
+        f"Write a short summary to .design/joins/{flow_name}.md if that file makes sense.",
         "",
-        "Criteria:",
-        "- Correctness: Does the solution actually work?",
-        "- Completeness: Did it address the full task?",
-        "- Code quality: Is it clean, readable, well-structured?",
-        "- Simplicity: Does it avoid over-engineering?",
-        "",
-        "Here are the submissions:",
-        "",
+        "Forked worktrees:",
     ]
 
+    for d in diffs:
+        lines.append(f"- {d['label']}: {d['worktree']}")
+
+    lines.extend(["", "Diffs from each fork:"])
+
     for i, d in enumerate(diffs, 1):
-        lines.append(f"## Submission {i}: {d['model']}")
+        lines.append(f"## Fork {i}: {d['label']}")
         lines.append("")
         lines.append("Summary of changes:")
         lines.append("```")
@@ -420,93 +474,19 @@ def _build_judge_prompt(diffs: list[dict]) -> str:
         lines.append("```")
         lines.append("")
 
-    lines.extend(
-        [
-            "## Your verdict",
-            "",
-            "Reply with ONLY the model name of the winner (e.g., 'claude:opus' or 'codex:o3').",
-            "Do not explain your reasoning.",
-        ]
-    )
-
-    return "\n".join(lines)
-
-
-def _judge_variants(
-    results: list[_VariantResult],
-    repo_root: Path,
-    skip_permissions: bool,
-) -> _VariantResult | None:
-    diffs = []
-    for r in results:
-        diff_result = subprocess.run(
-            ["git", "diff", "HEAD~1", "--stat"],
-            cwd=r.worktree,
-            capture_output=True,
-            text=True,
-        )
-        diff_text = diff_result.stdout if diff_result.returncode == 0 else "(no diff)"
-
-        full_diff = subprocess.run(
-            ["git", "diff", "HEAD~1"],
-            cwd=r.worktree,
-            capture_output=True,
-            text=True,
-        )
-        diffs.append(
-            {
-                "model": r.label,
-                "worktree": str(r.worktree),
-                "summary": diff_text,
-                "diff": full_diff.stdout if full_diff.returncode == 0 else "",
-            }
+    if instructions:
+        lines.extend(
+            [
+                "## Join instructions",
+                instructions,
+                "",
+            ]
         )
 
-    judge_prompt = _build_judge_prompt(diffs)
-
-    backend, variant = parse_model("claude:opus")
-    runner = get_runner(backend)
-
-    result = runner.launch(
-        judge_prompt,
-        auto=True,
-        stream=False,
-        skip_permissions=skip_permissions,
-        model_variant=variant,
-        cwd=repo_root,
-    )
-    if result.exit_code != 0:
-        return None
-
-    output = result.output or ""
-    for r in results:
-        if r.label in output:
-            return r
-
-    return None
-
-
-def _merge_variant_winner(repo_root: Path, winner: _VariantResult) -> None:
-    result = subprocess.run(
-        ["git", "diff", "--name-only", "HEAD~1"],
-        cwd=winner.worktree,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        return
-
-    changed_files = [f.strip() for f in result.stdout.strip().split("\n") if f.strip()]
-
-    for file_path in changed_files:
-        src = winner.worktree / file_path
-        dst = repo_root / file_path
-
-        if src.exists():
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            dst.write_bytes(src.read_bytes())
-        elif dst.exists():
-            dst.unlink()
+    body = "\n".join(lines)
+    if voice_section:
+        return f"The voice.\n\n{voice_section}\n\n{body}"
+    return body
 
 
 def _cleanup_variant_worktrees(repo_root: Path, results: list[_VariantResult]) -> None:
@@ -514,54 +494,100 @@ def _cleanup_variant_worktrees(repo_root: Path, results: list[_VariantResult]) -
         remove_worktree(repo_root, r.worktree.name.split(".")[-1])
 
 
-def _run_choose_result(
-    choose_result: ChooseResult,
+def _build_loop_inline_prompt(
     loop: Loop,
+    effective_goals: list,
+    worktree_path: Path,
+    inline_text: str,
+    context_paths: list[str] | None,
+    voices: list[str] | None = None,
+) -> str | None:
+    components = gather_prompt_components(
+        worktree_path,
+        inline=inline_text,
+        context=context_paths,
+        run_mode="auto",
+        voices=voices,
+    )
+    if not components.step:
+        return None
+
+    step_file, step_content = components.step
+    goal_section = render_goals(effective_goals)
+
+    if loop.type == LoopType.FLOW and loop.project_file:
+        try:
+            prompt_content = Path(loop.project_file).read_text()
+        except OSError:
+            prompt_content = None
+        if prompt_content:
+            goal_section += f"\n\n<lf:prompt>\n{prompt_content}\n</lf:prompt>"
+
+    combined = f"{goal_section}\n\n---\n\n{step_content}"
+    components = replace(components, step=(step_file, combined))
+    return format_prompt(components)
+
+
+def _run_fork_join_group(
+    loop: Loop,
+    flow_name: str,
     worktree_path: Path,
     branch: str,
+    steps: list[ResolvedStep],
+    join_config: JoinConfig,
     context_paths: list[str] | None,
     effective_goals: list,
     skip_permissions: bool,
+    backend: str,
+    model_variant: str | None,
 ) -> int:
-    options = choose_result.options
-    if not options:
-        return 1
+    results: list[_VariantResult] = []
+    label_counts: dict[str, int] = {}
 
-    variants: list[_VariantTask] = []
-    for idx, option in enumerate(options, 1):
-        label = option.label or f"{option.model}:{idx}"
-        backend, model_variant = parse_model(option.model)
-        variants.append(
-            _VariantTask(
-                step=choose_result.step,
-                label=label,
-                backend=backend,
-                model_variant=model_variant,
-                context=option.context,
-                voices=option.voice,
-            )
-        )
+    for step in steps:
+        if not step.step:
+            continue
 
-    processes: list[tuple[_VariantTask, subprocess.Popen, Path, str, str]] = []
-    for task in variants:
-        label_short = task.label.replace(":", "-")
-        wt_name = f"_choose-{branch.replace('/', '-')}-{label_short}-{uuid.uuid4().hex[:8]}"
+        step_backend = backend
+        step_variant = model_variant
+        step_context = list(context_paths) if context_paths else []
+        step_voices = None
+
+        if step.config:
+            if step.config.model:
+                step_backend, step_variant = parse_model(step.config.model)
+            if step.config.context:
+                step_context.extend(step.config.context)
+            if step.config.voice:
+                step_voices = step.config.voice
+
+        label_base = step.step
+        label_counts[label_base] = label_counts.get(label_base, 0) + 1
+        label = label_base
+        if label_counts[label_base] > 1:
+            label = f"{label_base}:{label_counts[label_base]}"
+
+        wt_name = f"_fork-{branch.replace('/', '-')}-{label.replace(':', '-')}"
         try:
             wt_path = create_worktree(loop.repo, wt_name, base=branch)
         except Exception:
-            for _, proc, wt, _, _ in processes:
-                proc.terminate()
-                remove_worktree(loop.repo, wt.name.split(".")[-1])
+            _cleanup_variant_worktrees(loop.repo, results)
             return 1
+
+        subprocess.run(
+            ["git", "reset", "--hard", branch],
+            cwd=wt_path,
+            capture_output=True,
+        )
+        subprocess.run(["git", "clean", "-fd"], cwd=wt_path, capture_output=True)
 
         prompt_result = _build_loop_prompt(
             loop,
             effective_goals,
             wt_path,
-            task.step,
-            context_paths,
-            extra_context=task.context,
-            voices=task.voices,
+            step.step,
+            step_context or None,
+            voices=step_voices,
         )
         if not prompt_result:
             remove_worktree(loop.repo, wt_path.name.split(".")[-1])
@@ -569,63 +595,63 @@ def _run_choose_result(
 
         prompt, _step_file = prompt_result
         session_id = str(uuid.uuid4())
-        step_label = f"{loop.area}:{task.step}:{task.label}"
+        step_label = f"{loop.area}:{step.step}:{label}"
 
-        prompt_file = write_prompt_file(prompt)
-        command = build_model_command(
-            task.backend,
-            auto=True,
-            stream=True,
-            skip_permissions=skip_permissions,
-            yolo=skip_permissions,
-            model_variant=task.model_variant,
-            workdir=wt_path,
-        )
-        collector_cmd = [
-            sys.executable,
-            "-m",
-            "loopflow.lfd.collector",
-            "--session-id",
+        exit_code = _run_collector_step(
+            prompt,
+            wt_path,
+            step_backend,
+            step_variant,
+            skip_permissions,
             session_id,
-            "--step",
             step_label,
-            "--repo-root",
-            str(wt_path),
-            "--prompt-file",
-            prompt_file,
-            "--autocommit",
-            "--prefix",
-            f"[{task.label}] ",
-            "--",
-            *command,
-        ]
+            autocommit=True,
+            prefix=f"[{label}] ",
+        )
 
-        process = subprocess.Popen(collector_cmd, cwd=wt_path)
-        processes.append((task, process, wt_path, prompt_file, session_id))
-
-    results: list[_VariantResult] = []
-    for task, process, wt_path, prompt_file, session_id in processes:
-        exit_code = process.wait()
-        try:
-            Path(prompt_file).unlink()
-        except OSError:
-            pass
-        results.append(_VariantResult(task.label, wt_path, exit_code, session_id))
+        results.append(_VariantResult(label, wt_path, exit_code, session_id))
 
     successes = [r for r in results if r.exit_code == 0]
     if not successes:
         _cleanup_variant_worktrees(loop.repo, results)
         return 1
 
-    if len(successes) == 1:
-        winner = successes[0]
-    else:
-        winner = _judge_variants(successes, loop.repo, skip_permissions) or successes[0]
+    join_prompt = _build_join_prompt(
+        _collect_fork_diffs(successes),
+        _load_join_instructions(join_config.step, loop.repo),
+        _format_voice_section(join_config.voice, loop.repo),
+        flow_name,
+    )
+    join_prompt = _build_loop_inline_prompt(
+        loop,
+        effective_goals,
+        worktree_path,
+        join_prompt,
+        context_paths,
+        voices=None,
+    )
+    if not join_prompt:
+        _cleanup_variant_worktrees(loop.repo, results)
+        return 1
 
-    _merge_variant_winner(worktree_path, winner)
+    join_backend = backend
+    join_variant = model_variant
+    if join_config.agent_model:
+        join_backend, join_variant = parse_model(join_config.agent_model)
+
+    join_result = _run_collector_step(
+        join_prompt,
+        worktree_path,
+        join_backend,
+        join_variant,
+        skip_permissions,
+        str(uuid.uuid4()),
+        f"{loop.area}:join",
+        autocommit=True,
+    )
+
     _cleanup_variant_worktrees(loop.repo, results)
-
-    return 0
+    return join_result
 
 
 def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool:
@@ -720,11 +746,39 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
     while i < len(resolved):
         step = resolved[i]
         if step.parallel_group is not None:
-            update_loop_run_status(
-                run.id, LoopStatus.ERROR, error="Parallel steps are not supported in lfd loops yet"
+            group_steps = []
+            group = step.parallel_group
+            while i < len(resolved) and resolved[i].parallel_group == group:
+                group_steps.append(resolved[i])
+                i += 1
+
+            if i >= len(resolved) or resolved[i].join is None:
+                update_loop_run_status(
+                    run.id, LoopStatus.ERROR, error="Fork must be immediately followed by join"
+                )
+                _cleanup_worktree(loop.repo, worktree_path, branch)
+                return False
+
+            result_code = _run_fork_join_group(
+                loop,
+                flow_def.name,
+                worktree_path,
+                branch,
+                group_steps,
+                resolved[i].join.join,
+                context_paths,
+                effective_goals,
+                skip_permissions,
+                backend,
+                model_variant,
             )
-            _cleanup_worktree(loop.repo, worktree_path, branch)
-            return False
+            if result_code != 0:
+                update_loop_run_status(run.id, LoopStatus.ERROR, error="join failed")
+                _cleanup_worktree(loop.repo, worktree_path, branch)
+                return False
+
+            i += 1
+            continue
 
         if step.race is not None:
             update_loop_run_status(
@@ -733,10 +787,10 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
             _cleanup_worktree(loop.repo, worktree_path, branch)
             return False
 
-        if step.choose_fork is not None:
+        if step.choose is not None:
             try:
-                choice = _choose_fork_branch(
-                    step.choose_fork,
+                choice = _choose_branch(
+                    step.choose,
                     flow_def.name,
                     worktree_path,
                     backend,
@@ -748,50 +802,16 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
                 _cleanup_worktree(loop.repo, worktree_path, branch)
                 return False
 
-            branch_steps = step.choose_fork.options[choice]
+            branch_steps = step.choose.options[choice]
             branch_flow = FlowDef.from_dict(f"{flow_def.name}:{choice}", {"steps": branch_steps})
             branch_resolved = resolve_flow(branch_flow, loop.repo)
             resolved = resolved[:i] + branch_resolved + resolved[i + 1 :]
             continue
 
-        if step.choose_result is not None:
-            step_name = step.choose_result.step
-            update_loop_run_step(run.id, step_name)
-            notify_event(
-                "loop.step.started",
-                {
-                    "loop_id": loop.id,
-                    "step": step_name,
-                    "iteration": iteration,
-                },
-            )
-
-            result_code = _run_choose_result(
-                step.choose_result,
-                loop,
-                worktree_path,
-                branch,
-                context_paths,
-                effective_goals,
-                skip_permissions,
-            )
-
-            notify_event(
-                "loop.step.completed",
-                {
-                    "loop_id": loop.id,
-                    "step": step_name,
-                    "status": "completed" if result_code == 0 else "error",
-                },
-            )
-
-            if result_code != 0:
-                update_loop_run_status(run.id, LoopStatus.ERROR, error=f"{step_name} failed")
-                _cleanup_worktree(loop.repo, worktree_path, branch)
-                return False
-
-            i += 1
-            continue
+        if step.join is not None:
+            update_loop_run_status(run.id, LoopStatus.ERROR, error="Join must follow fork")
+            _cleanup_worktree(loop.repo, worktree_path, branch)
+            return False
 
         if not step.step:
             i += 1

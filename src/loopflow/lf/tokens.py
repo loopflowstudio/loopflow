@@ -8,6 +8,9 @@ import tiktoken
 
 _encoder = tiktoken.get_encoding("cl100k_base")
 
+# Context limit: 120k leaves room for model response.
+MAX_SAFE_TOKENS = 120_000
+
 
 def count_tokens(text: str) -> int:
     """Count tokens in text using Claude's tokenizer."""

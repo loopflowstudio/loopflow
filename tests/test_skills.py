@@ -4,10 +4,10 @@ import pytest
 
 from loopflow.lf.config import SkillRegistryConfig, SkillSourceConfig
 from loopflow.lf.skills import (
+    _REGISTRY_INDEX_FILE,
     RegistrySkill,
     Skill,
     SkillSource,
-    _REGISTRY_INDEX_FILE,
     _discover_superpowers_skills,
     _get_registry_skills,
     _normalize_skill_name,

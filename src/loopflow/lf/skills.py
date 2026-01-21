@@ -304,7 +304,8 @@ def discover_skill_sources(
 
         if prefix in seen_prefixes:
             warnings.warn(
-                f"SkillRegistry prefix '{prefix}' conflicts with existing sources; skipping registry."
+                "SkillRegistry prefix "
+                f"'{prefix}' conflicts with existing sources; skipping registry."
             )
         else:
             registry_skills = _get_registry_skills(base_url, cache_path, ttl_seconds)

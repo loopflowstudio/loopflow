@@ -285,64 +285,23 @@ def _count_tokens(text: str) -> int:
 
 def _run_summarize_cli(prompt: str, model: str, repo_root: Path) -> str:
     """Run CLI agent to generate summary."""
-    from loopflow.lf.config import load_config, parse_model
-    from loopflow.lf.launcher import (
-        build_claude_command,
-        build_codex_command,
-        build_gemini_command,
-    )
+    from loopflow.lf.config import parse_model
+    from loopflow.lf.launcher import build_model_command
     from loopflow.lf.logging import get_model_env
 
-    config = load_config(repo_root)
-    agent_model = config.agent_model if config else "claude:opus"
+    backend, model_variant = parse_model(model)
+    cmd = build_model_command(
+        model=backend,
+        auto=True,
+        stream=False,
+        skip_permissions=True,
+        model_variant=model_variant,
+        sandbox_root=repo_root.parent,
+        workdir=repo_root,
+    )
 
-    # Use specified model or fall back to config
-    if model in ("gemini", "gemini:flash", "gemini:pro"):
-        model_variant = "2.5-pro" if model == "gemini:pro" else "2.0-flash"
-        cmd = build_gemini_command(
-            auto=True,
-            stream=False,
-            skip_permissions=True,
-            model_variant=model_variant,
-        )
-    elif model in ("claude", "claude:sonnet", "claude:opus"):
-        model_variant = "opus" if model == "claude:opus" else "sonnet"
-        cmd = build_claude_command(
-            auto=True,
-            stream=False,
-            skip_permissions=True,
-            model_variant=model_variant,
-        )
-    else:
-        # Default to config model
-        backend, model_variant = parse_model(agent_model)
-        if backend == "codex":
-            cmd = build_codex_command(
-                auto=True,
-                stream=False,
-                skip_permissions=True,
-                model_variant=model_variant,
-                sandbox_root=repo_root.parent,
-                workdir=repo_root,
-            )
-        elif backend == "gemini":
-            cmd = build_gemini_command(
-                auto=True,
-                stream=False,
-                skip_permissions=True,
-                model_variant=model_variant,
-            )
-        else:
-            cmd = build_claude_command(
-                auto=True,
-                stream=False,
-                skip_permissions=True,
-                model_variant=model_variant,
-            )
-
-    cmd_with_prompt = cmd + [prompt]
     result = subprocess.run(
-        cmd_with_prompt,
+        cmd + [prompt],
         cwd=repo_root,
         text=True,
         capture_output=True,

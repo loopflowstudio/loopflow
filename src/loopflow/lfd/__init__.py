@@ -684,6 +684,56 @@ def rm(
         raise typer.Exit(1)
 
 
+@app.command()
+def logs(
+    loop_id: str = typer.Argument(..., help="Loop ID"),
+    follow: bool = typer.Option(False, "-f", "--follow", help="Follow output (like tail -f)"),
+    lines: int = typer.Option(50, "-n", "--lines", help="Number of lines to show"),
+):
+    """Show logs for a loop's current run."""
+    import subprocess
+
+    c = _colors()
+    lp = get_loop(loop_id)
+    if not lp:
+        typer.echo(f"{c['red']}Error:{c['reset']} Loop '{loop_id}' not found", err=True)
+        raise typer.Exit(1)
+
+    # Get latest run for this loop
+    runs = get_loop_runs(lp.id, limit=1)
+    if not runs:
+        typer.echo(f"{c['dim']}No runs found for '{lp.area}'{c['reset']}")
+        return
+
+    run = runs[0]
+    if not run.worktree:
+        typer.echo(f"{c['dim']}No worktree for current run{c['reset']}")
+        return
+
+    # Find log file
+    from loopflow.lf.logging import get_log_dir
+
+    worktree_path = Path(run.worktree)
+    log_dir = get_log_dir(worktree_path)
+
+    # Find most recent log file for this session
+    log_files = sorted(log_dir.glob("*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not log_files:
+        typer.echo(f"{c['dim']}No log files found in {log_dir}{c['reset']}")
+        return
+
+    log_file = log_files[0]
+    typer.echo(f"{c['dim']}Log: {log_file}{c['reset']}")
+    typer.echo("")
+
+    if follow:
+        # Use tail -f for following
+        subprocess.run(["tail", "-f", str(log_file)])
+    else:
+        # Show last N lines
+        subprocess.run(["tail", f"-{lines}", str(log_file)])
+
+
 @app.command("list-goals")
 def list_goals_cmd():
     """Show available goals in current repo."""

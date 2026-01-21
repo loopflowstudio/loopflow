@@ -1,4 +1,4 @@
-# Maestro — macOS App
+# Concerto — macOS App
 
 Visual interface for loopflow. SwiftUI, requires macOS 15+.
 
@@ -27,12 +27,12 @@ Two patterns, intentionally different:
 
 ## Why Both?
 
-Direct DB reads mean Maestro can show history even if lfd crashed.
+Direct DB reads mean Concerto can show history even if lfd crashed.
 Socket events provide real-time updates without polling.
 
 ## Build
 
-Open Maestro.xcodeproj in Xcode, build and run.
+Open LoopflowSwift.xcodeproj in Xcode, build and run.
 Distribution build: Archive → export as App.
 
 ## UI Tests
@@ -44,5 +44,5 @@ xcodegen generate
 
 Run UI tests from the command line:
 ```bash
-xcodebuild test -project Maestro.xcodeproj -scheme Maestro -destination 'platform=macOS'
+xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS'
 ```

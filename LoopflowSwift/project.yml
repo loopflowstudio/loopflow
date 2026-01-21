@@ -1,4 +1,4 @@
-name: Maestro
+name: LoopflowSwift
 options:
   bundleIdPrefix: com.loopflow
   deploymentTarget:
@@ -15,41 +15,29 @@ packages:
     from: 0.10.0
 
 targets:
-  Maestro:
+  Concerto:
     type: application
     platform: macOS
     sources:
-      - path: Maestro
+      - path: Concerto
         excludes:
           - Info.plist
     settings:
       base:
-        INFOPLIST_FILE: Maestro/Info.plist
+        INFOPLIST_FILE: Concerto/Info.plist
         GENERATE_INFOPLIST_FILE: NO
-        PRODUCT_BUNDLE_IDENTIFIER: com.loopflow.maestro
+        PRODUCT_BUNDLE_IDENTIFIER: com.loopflow.concerto
         CODE_SIGN_STYLE: Automatic
 
-  MaestroTests:
+  ConcertoTests:
     type: bundle.unit-test
     platform: macOS
     sources:
-      - path: MaestroTests
+      - path: ConcertoTests
     dependencies:
-      - target: Maestro
+      - target: Concerto
       - package: ViewInspector
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
-        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Maestro.app/Contents/MacOS/Maestro
-
-  MaestroUITests:
-    type: bundle.ui-testing
-    platform: macOS
-    sources:
-      - path: MaestroUITests
-    dependencies:
-      - target: Maestro
-    settings:
-      base:
-        GENERATE_INFOPLIST_FILE: YES
-        TEST_TARGET_NAME: Maestro
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Concerto.app/Contents/MacOS/Concerto

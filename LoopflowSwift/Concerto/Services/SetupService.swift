@@ -3,7 +3,7 @@
 import Foundation
 import os.log
 
-private let logger = Logger(subsystem: "com.loopflow.maestro", category: "setup")
+private let logger = Logger(subsystem: "com.loopflow.concerto", category: "setup")
 
 struct SetupService {
     struct DependencyStatus {
@@ -12,7 +12,7 @@ struct SetupService {
     }
 
     private let logFile: URL = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".lf/logs/maestro-setup.log")
+        .appendingPathComponent(".lf/logs/concerto-setup.log")
 
     private func log(_ message: String) {
         let timestamp = ISO8601DateFormatter().string(from: Date())

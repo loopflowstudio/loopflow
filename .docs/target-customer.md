@@ -10,7 +10,7 @@ Writing software is like writing music. Yes, it produces something valuable. But
 
 ---
 
-## Working name: Maestro
+## Working name: Concerto
 
 Mastery through practice. Works with the instrument—sometimes conducting, sometimes playing. Craft, skill, deliberate repetition. Knows when to focus on one performance and when to run things in parallel.
 
@@ -87,7 +87,7 @@ Loopflow solves one problem well: **prompt and context construction**. Like work
 
 - Pipelines — chain tasks with clear structure
 - Background agents — autonomous work via `lfd`
-- Maestro — the podium for conducting agents
+- Concerto — the podium for conducting agents
 
 ### Feature mapping
 

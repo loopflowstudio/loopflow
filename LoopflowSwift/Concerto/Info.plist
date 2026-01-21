@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleIdentifier</key>
-    <string>com.loopflow.maestro</string>
+    <string>com.loopflow.concerto</string>
     <key>CFBundleName</key>
-    <string>Maestro</string>
+    <string>Concerto</string>
     <key>CFBundleDisplayName</key>
-    <string>Loopflow Maestro</string>
+    <string>Loopflow Concerto</string>
     <key>CFBundleExecutable</key>
-    <string>Maestro</string>
+    <string>Concerto</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleVersion</key>
@@ -23,10 +23,10 @@
     <key>LSUIElement</key>
     <false/>
     <key>NSAppleEventsUsageDescription</key>
-    <string>Maestro needs to control terminal applications to open worktrees and run commands.</string>
+    <string>Concerto needs to control terminal applications to open worktrees and run commands.</string>
     <key>NSAppleScriptEnabled</key>
     <true/>
     <key>OSAScriptingDefinition</key>
-    <string>Maestro.sdef</string>
+    <string>Concerto.sdef</string>
 </dict>
 </plist>

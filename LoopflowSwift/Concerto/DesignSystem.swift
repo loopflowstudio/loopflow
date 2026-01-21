@@ -1,4 +1,4 @@
-// Design system for Maestro
+// Design system for Concerto
 // Based on UI Skills and Vercel Design Guidelines
 
 import SwiftUI

@@ -19,7 +19,7 @@ struct CaptureService {
         }
     }
 
-    /// Capture the key window and save to /tmp/maestro-<timestamp>.png
+    /// Capture the key window and save to /tmp/concerto-<timestamp>.png
     func captureKeyWindow() throws -> URL {
         guard let window = NSApp.keyWindow else {
             throw CaptureError.noWindow
@@ -72,6 +72,6 @@ struct CaptureService {
         formatter.dateFormat = "yyyyMMdd-HHmmss"
         let timestamp = formatter.string(from: Date())
 
-        return URL(fileURLWithPath: "/tmp/maestro-\(timestamp).png")
+        return URL(fileURLWithPath: "/tmp/concerto-\(timestamp).png")
     }
 }

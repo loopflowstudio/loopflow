@@ -2,12 +2,16 @@
 
 import pytest
 
-from loopflow.lf.config import SkillSourceConfig
+from loopflow.lf.config import SkillRegistryConfig, SkillSourceConfig
 from loopflow.lf.skills import (
+    RegistrySkill,
     Skill,
     SkillSource,
+    _REGISTRY_INDEX_FILE,
     _discover_superpowers_skills,
+    _get_registry_skills,
     _normalize_skill_name,
+    _write_registry_cache,
     discover_skill_sources,
     find_skill,
     list_all_skills,
@@ -198,6 +202,57 @@ def test_discover_skill_sources_no_sources_returns_empty():
 
 
 # =============================================================================
+# SkillRegistry discovery
+# =============================================================================
+
+
+def test_discover_skill_sources_registry_enabled(tmp_path, monkeypatch):
+    registry_skills = [
+        RegistrySkill(id="alpha", name="Alpha", description="alpha", updated_at=None),
+        RegistrySkill(id="beta", name="Beta", description="beta", updated_at=None),
+    ]
+
+    def fake_get_registry_skills(base_url, cache_path, ttl_seconds):
+        return registry_skills
+
+    monkeypatch.setattr("loopflow.lf.skills._get_registry_skills", fake_get_registry_skills)
+
+    config = SkillRegistryConfig(
+        enabled=True,
+        base_url="https://example.com",
+        prefix="sr",
+        cache_dir=str(tmp_path),
+    )
+
+    sources = discover_skill_sources(
+        None,
+        repo_root=None,
+        auto_detect=False,
+        registry_config=config,
+    )
+
+    assert len(sources) == 1
+    source = sources[0]
+    assert source.kind == "registry"
+    assert source.prefix == "sr"
+    assert "alpha" in source.skills
+
+
+def test_get_registry_skills_uses_cache(tmp_path, monkeypatch):
+    cache_path = tmp_path / _REGISTRY_INDEX_FILE
+    sample = [RegistrySkill(id="alpha", name="Alpha", description="alpha", updated_at=None)]
+    _write_registry_cache(cache_path, sample)
+
+    def fail_fetch(base_url):
+        raise AssertionError("should not fetch")
+
+    monkeypatch.setattr("loopflow.lf.skills._fetch_registry_index", fail_fetch)
+
+    skills = _get_registry_skills("https://example.com", cache_path, ttl_seconds=86400)
+    assert [skill.id for skill in skills] == ["alpha"]
+
+
+# =============================================================================
 # find_skill
 # =============================================================================
 
@@ -275,6 +330,34 @@ def test_find_skill_handles_multiple_sources(tmp_path):
 
     assert skill1_result.source == "s1"
     assert skill2_result.source == "s2"
+
+
+def test_find_skill_handles_registry_source(tmp_path, monkeypatch):
+    cached = tmp_path / "alpha.md"
+    cached.write_text("# Alpha")
+
+    def fake_cache(base_url, cache_dir, skill_id):
+        return cached
+
+    monkeypatch.setattr("loopflow.lf.skills._ensure_registry_skill_cached", fake_cache)
+
+    sources = [
+        SkillSource(
+            name="skillregistry",
+            prefix="sr",
+            path=tmp_path,
+            skills=["alpha"],
+            kind="registry",
+            base_url="https://example.com",
+            cache_dir=tmp_path,
+        )
+    ]
+
+    skill = find_skill("sr:alpha", sources)
+
+    assert skill is not None
+    assert skill.name == "alpha"
+    assert skill.prompt_path == cached
 
 
 # =============================================================================

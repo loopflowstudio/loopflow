@@ -222,7 +222,11 @@ def list_all_steps(
     # Builtins not overridden by user or global
     builtin_only = builtins - user - global_steps
 
-    sources = discover_skill_sources(config.skill_sources if config else None, repo_root)
+    sources = discover_skill_sources(
+        config.skill_sources if config else None,
+        repo_root,
+        registry_config=config.skill_registry if config else None,
+    )
     external_skills = list_all_skills(sources)
 
     return sorted(user), sorted(global_only), sorted(builtin_only), external_skills
@@ -241,7 +245,11 @@ def gather_step(repo_root: Path | None, name: str, config=None) -> StepFile | No
     Returns StepFile with parsed config, or None if not found.
     """
     if ":" in name:
-        sources = discover_skill_sources(config.skill_sources if config else None, repo_root)
+        sources = discover_skill_sources(
+            config.skill_sources if config else None,
+            repo_root,
+            registry_config=config.skill_registry if config else None,
+        )
         skill = find_skill(name, sources)
         if skill:
             content = load_skill_prompt(skill)

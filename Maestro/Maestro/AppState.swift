@@ -114,6 +114,7 @@ final class AppState {
     private var sessionStartMap: [String: Date] = [:]  // session ID → start time
     private var autoPruneInFlight: Bool = false
     private var autoSyncTask: Task<Void, Never>?
+    private var listDebounceTask: Task<Void, Never>?
     var refreshMessage: String?
     var isRefreshingWorktrees: Bool = false
 
@@ -134,7 +135,6 @@ final class AppState {
     private let voiceService = VoiceService()
     private let contextPreviewService = ContextPreviewService()
     private let resultsService = ResultsService()
-    private let gitWatcher = GitWatcherService()
 
     static func uiTestMode() -> UITestMode? {
         let args = ProcessInfo.processInfo.arguments
@@ -218,26 +218,16 @@ final class AppState {
     }
 
     func openRepo(_ url: URL) async {
+        let startTime = CFAbsoluteTimeGetCurrent()
         currentRepo = url
         isLoading = true
         errorMessage = nil
 
-        // Start native git watching (works without lfd)
-        await startGitWatching(repo: url)
-        startAutoSyncTimer()
-
-        // Ensure daemon is running on first launch
-        let setupService = SetupService()
         do {
-            try await setupService.ensureDaemonRunning()
-            // Start event subscription after daemon is running
-            startEventSubscription()
-        } catch {
-            // Non-fatal - daemon setup failed but app can still work
-        }
-
-        do {
+            // Fast path: load config and list worktrees (no sync)
+            let t0 = CFAbsoluteTimeGetCurrent()
             config = try configLoader.load(from: url)
+            LoggingService.append("openRepo.config elapsed=\(Int((CFAbsoluteTimeGetCurrent() - t0) * 1000))ms")
 
             // Initialize toggles from config
             includeDocs = config?.docs ?? true
@@ -250,42 +240,83 @@ final class AppState {
             // Initialize context folders from config
             if let contextPaths = config?.context {
                 if contextPaths == ["."] {
-                    // "." means include all - select all root directories
                     selectedContextFolders = Set(listRootFolders(in: url))
                 } else {
-                    selectedContextFolders = Set(contextPaths.map { path in
-                        url.appendingPathComponent(path)
-                    })
+                    selectedContextFolders = Set(contextPaths.map { url.appendingPathComponent($0) })
                 }
             } else {
                 selectedContextFolders = []
             }
 
-            await refreshWorktrees()
+            // List worktrees immediately (no sync, no full details - fast)
+            let t1 = CFAbsoluteTimeGetCurrent()
+            worktrees = try await worktreeService.list(in: url, full: false)
+            LoggingService.append("openRepo.listWorktrees elapsed=\(Int((CFAbsoluteTimeGetCurrent() - t1) * 1000))ms")
 
-            // Auto-select first feature worktree (main is hidden from sidebar)
+            // Auto-select first feature worktree
             if selectedWorktree == nil {
                 selectedWorktree = worktrees.first { $0.branch != "main" }
             }
 
+            // Load prompts and voices (fast, local files)
+            let t2 = CFAbsoluteTimeGetCurrent()
             prompts = try promptService.loadPrompts(from: url, config: config)
             pipelines = pipelineService.loadPipelines(from: url)
             refreshVoices()
+            LoggingService.append("openRepo.prompts elapsed=\(Int((CFAbsoluteTimeGetCurrent() - t2) * 1000))ms")
 
-            // Initialize selected voices from config
             if let voiceNames = config?.voiceNames, !voiceNames.isEmpty {
                 selectedVoices = voices.filter { voiceNames.contains($0.name) }
             }
-
-            await estimateTokens()
-            await refreshLoops()
         } catch {
             errorMessage = error.localizedDescription
         }
 
         isLoading = false
+        LoggingService.append("openRepo.total elapsed=\(Int((CFAbsoluteTimeGetCurrent() - startTime) * 1000))ms")
+
+        // Slow operations in background (don't block UI)
+        Task {
+            // Start daemon and event subscription
+            let setupService = SetupService()
+            if (try? await setupService.ensureDaemonRunning()) != nil {
+                startEventSubscription()
+            }
+
+            // Background enrichment: sync, loops, tokens, staleness
+            await syncAndEnrich()
+            await refreshLoops()
+            await estimateTokens()
+        }
+
+        startAutoSyncTimer()
     }
 
+    // MARK: - Refresh Operations
+
+    /// Fast list refresh - debounced, no sync. Use for LFD events and after actions.
+    func listWorktrees() {
+        listDebounceTask?.cancel()
+        listDebounceTask = Task {
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !Task.isCancelled else { return }
+            await _listWorktrees()
+        }
+    }
+
+    private func _listWorktrees() async {
+        guard let repo = currentRepo else { return }
+        do {
+            worktrees = try await worktreeService.list(in: repo)
+            if let branch = selectedWorktree?.branch {
+                selectedWorktree = worktrees.first { $0.branch == branch }
+            }
+        } catch {
+            // Silent failure for background refresh
+        }
+    }
+
+    /// Manual refresh with feedback - syncs and lists.
     func refreshWorktrees(showFeedback: Bool = false) async {
         guard let repo = currentRepo else { return }
 
@@ -294,22 +325,11 @@ final class AppState {
                 isRefreshingWorktrees = true
                 refreshMessage = "Syncing..."
             }
-            let previousSelection = selectedWorktree?.branch
             let syncSucceeded = (try? await worktreeService.sync(in: repo)) != nil
             worktrees = try await worktreeService.list(in: repo)
 
-            // Preserve selection by matching on branch name
-            if let branch = previousSelection {
+            if let branch = selectedWorktree?.branch {
                 selectedWorktree = worktrees.first { $0.branch == branch }
-            }
-
-            // Auto-create draft PRs for pushed branches without PRs
-            await createDraftPRsIfNeeded(in: repo)
-
-            // Detect staleness and CI status asynchronously (don't block UI)
-            Task {
-                await detectStaleness()
-                await fetchCIStatus()
             }
 
             if showFeedback {
@@ -331,6 +351,22 @@ final class AppState {
                 }
             }
         }
+    }
+
+    /// Background enrichment - sync, staleness, CI, draft PRs. Called by timer.
+    private func syncAndEnrich() async {
+        guard let repo = currentRepo else { return }
+
+        // Sync with remote
+        _ = try? await worktreeService.sync(in: repo)
+
+        // Refresh list
+        await _listWorktrees()
+
+        // Enrich with slow operations (staleness, CI, draft PRs)
+        await detectStaleness()
+        await fetchCIStatus()
+        await createDraftPRsIfNeeded(in: repo)
     }
 
     private func createDraftPRsIfNeeded(in repo: URL) async {
@@ -413,18 +449,22 @@ final class AppState {
         }
 
         autoPruneInFlight = true
-        let branches = candidates.map(\.branch)
-        let worktreeService = worktreeService
+        let branchesToPrune = Set(candidates.map(\.branch))
 
-        Task { [weak self] in
-            for branch in branches {
+        // Remove from local state immediately (optimistic update)
+        worktrees.removeAll { branchesToPrune.contains($0.branch) }
+        if let selected = selectedWorktree, branchesToPrune.contains(selected.branch) {
+            selectedWorktree = nil
+        }
+
+        // Then delete from disk in background (no cascading refresh)
+        Task.detached { [worktreeService] in
+            for branch in branchesToPrune {
                 _ = try? await worktreeService.remove(name: branch, in: repo)
             }
-
-            guard let self else { return }
-            self.autoPruneInFlight = false
-            await self.refreshWorktrees()
         }
+
+        autoPruneInFlight = false
     }
 
     private func startAutoSyncTimer() {
@@ -432,11 +472,8 @@ final class AppState {
         autoSyncTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                if let repo = self.currentRepo {
-                    _ = try? await self.worktreeService.sync(in: repo)
-                    await self.refreshWorktrees()
-                }
-                try? await Task.sleep(for: .seconds(120))
+                await self.syncAndEnrich()
+                try? await Task.sleep(for: .seconds(60))
             }
         }
     }
@@ -445,39 +482,39 @@ final class AppState {
         guard let repo = currentRepo else { return }
 
         try await worktreeService.create(name: name, in: repo, baseBranch: baseBranch)
-        await refreshWorktrees()
+        await _listWorktrees()  // Immediate refresh - caller needs the new worktree in the list
     }
 
     func deleteWorktree(_ worktree: Worktree) async throws {
         guard let repo = currentRepo else { return }
 
         try await worktreeService.remove(name: worktree.branch, in: repo)
-        await refreshWorktrees()
+        listWorktrees()
     }
 
     func createPR(for worktree: Worktree) async throws {
         let worktreeURL = URL(fileURLWithPath: worktree.path)
         try await worktreeService.createPR(in: worktreeURL)
-        await refreshWorktrees()
+        listWorktrees()
     }
 
     func landPR(for worktree: Worktree) async throws {
         let worktreeURL = URL(fileURLWithPath: worktree.path)
         try await worktreeService.landPR(in: worktreeURL)
-        await refreshWorktrees()
+        listWorktrees()
     }
 
     func syncMain() async throws {
         guard let repo = currentRepo else { return }
         try await worktreeService.sync(in: repo)
-        await refreshWorktrees()
+        listWorktrees()
     }
 
     func pruneWorktrees(dryRun: Bool = false) async throws -> [String] {
         guard let repo = currentRepo else { return [] }
         let pruned = try await worktreeService.prune(in: repo, dryRun: dryRun)
         if !dryRun {
-            await refreshWorktrees()
+            listWorktrees()
         }
         return pruned
     }
@@ -492,7 +529,7 @@ final class AppState {
                     Task { @MainActor in
                         switch event {
                         case .worktree:
-                            await self?.refreshWorktrees()
+                            self?.listWorktrees()
                         case .session(let sessionEvent):
                             self?.handleSessionEvent(sessionEvent)
                         case .output(let outputEvent):
@@ -508,22 +545,6 @@ final class AppState {
                     }
                 }
             )
-        }
-    }
-
-    private func startGitWatching(repo: URL) async {
-        await gitWatcher.watch(repo: repo) { [weak self] change in
-            Task { @MainActor in
-                switch change {
-                case .worktrees:
-                    await self?.refreshWorktrees()
-                case .refs:
-                    await self?.refreshWorktrees()  // Commits affect worktree display
-                case .index:
-                    // Index changes affect diff - could add refreshDiff() later
-                    break
-                }
-            }
         }
     }
 
@@ -729,7 +750,7 @@ final class AppState {
         guard let repo = currentRepo else { return }
         try await loopService.squashLand(loop: loop, repoRoot: repo)
         await refreshLoops()
-        await refreshWorktrees()
+        listWorktrees()
     }
 
     func connectLfd() async throws {

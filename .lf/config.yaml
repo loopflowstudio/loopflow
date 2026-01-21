@@ -1,4 +1,4 @@
-agent_model: codex 
+agent_model: claude:opus 
 yolo: true 
 chrome: true
 

@@ -1257,7 +1257,6 @@ struct PromptLauncher: View {
 
         do {
             try await appState.createWorktree(name: name)
-            await appState.refreshWorktrees()
 
             // Select the newly created worktree
             if let newWorktree = appState.worktrees.first(where: { $0.branch == name }) {

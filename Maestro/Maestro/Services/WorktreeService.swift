@@ -86,52 +86,66 @@ struct WorktreeService {
         }
     }
 
-    func list(in repoURL: URL) async throws -> [Worktree] {
+    /// List worktrees. Use `full: false` for fast initial load (skips diff stats, CI, session history).
+    func list(in repoURL: URL, full: Bool = true) async throws -> [Worktree] {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        var args = ["wt", "list", "--format", "json"]
+        if full { args.append("--full") }
+
         let lfopsCompatible = await getLfopsCompatible()
         if lfopsCompatible != false, let lfopsURL = findCommand("lfops") {
             do {
-                let (output, status) = try await runProcessWithStatus(
-                    lfopsURL,
-                    ["wt", "list", "--format", "json", "--full"],
-                    in: repoURL
-                )
-                LoggingService.append("""
-                worktrees.list command=lfops status=\(status) bytes=\(output.utf8.count)
-                """)
-                if status == 0, let worktrees = try? await decodeWorktrees(from: output, source: "lfops") {
-                    await setLfopsCompatible(true)
-                    return worktrees
+                let t0 = CFAbsoluteTimeGetCurrent()
+                let (output, status) = try await runProcessWithStatus(lfopsURL, args, in: repoURL)
+                let cmdTime = Int((CFAbsoluteTimeGetCurrent() - t0) * 1000)
+                LoggingService.append("worktrees.list command=lfops full=\(full) status=\(status) bytes=\(output.utf8.count) cmd_ms=\(cmdTime)")
+                if status == 0 {
+                    let t1 = CFAbsoluteTimeGetCurrent()
+                    if let worktrees = try? await decodeWorktrees(from: output, source: "lfops", loadSessions: full) {
+                        let decodeTime = Int((CFAbsoluteTimeGetCurrent() - t1) * 1000)
+                        let totalTime = Int((CFAbsoluteTimeGetCurrent() - startTime) * 1000)
+                        LoggingService.append("worktrees.list decode_ms=\(decodeTime) total_ms=\(totalTime)")
+                        await setLfopsCompatible(true)
+                        return worktrees
+                    }
                 }
                 if output.contains("No such command 'wt'") {
                     await setLfopsCompatible(false)
                     LoggingService.append("worktrees.list command=lfops status=disabled reason=no-wt-command")
                 }
             } catch {
-                // Fall back to wt directly if lfops doesn't support wt or isn't working.
                 LoggingService.append("worktrees.list command=lfops error=\(error.localizedDescription)")
                 if error.localizedDescription.contains("No such command 'wt'") {
                     await setLfopsCompatible(false)
-                    LoggingService.append("worktrees.list command=lfops status=disabled reason=no-wt-command")
                 }
             }
         }
 
+        // Fallback to wt directly
+        var wtArgs = ["list", "--format", "json"]
+        if full { wtArgs.append("--full") }
+
+        let t0 = CFAbsoluteTimeGetCurrent()
         let (output, status) = try await runProcessWithStatus(
             URL(fileURLWithPath: "/opt/homebrew/bin/wt"),
-            ["list", "--format", "json", "--full"],
+            wtArgs,
             in: repoURL,
             fallbackToWhich: true
         )
-        LoggingService.append("""
-        worktrees.list command=wt status=\(status) bytes=\(output.utf8.count)
-        """)
+        let cmdTime = Int((CFAbsoluteTimeGetCurrent() - t0) * 1000)
+        LoggingService.append("worktrees.list command=wt full=\(full) status=\(status) bytes=\(output.utf8.count) cmd_ms=\(cmdTime)")
         if status != 0 {
             throw WorktreeError.commandFailed(output)
         }
-        return try await decodeWorktrees(from: output, source: "wt")
+        let t1 = CFAbsoluteTimeGetCurrent()
+        let result = try await decodeWorktrees(from: output, source: "wt", loadSessions: full)
+        let decodeTime = Int((CFAbsoluteTimeGetCurrent() - t1) * 1000)
+        let totalTime = Int((CFAbsoluteTimeGetCurrent() - startTime) * 1000)
+        LoggingService.append("worktrees.list decode_ms=\(decodeTime) total_ms=\(totalTime)")
+        return result
     }
 
-    private func decodeWorktrees(from output: String, source: String) async throws -> [Worktree] {
+    private func decodeWorktrees(from output: String, source: String, loadSessions: Bool) async throws -> [Worktree] {
         guard let data = output.data(using: .utf8) else {
             return []
         }
@@ -141,11 +155,8 @@ struct WorktreeService {
         do {
             items = try decoder.decode([WorktreeJSON].self, from: data)
         } catch {
-            let preview = output.trimmingCharacters(in: .whitespacesAndNewlines)
-            let snippet = preview.prefix(200)
-            LoggingService.append("""
-            worktrees.parse source=\(source) error=\(error.localizedDescription) preview=\(snippet)
-            """)
+            let snippet = output.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200)
+            LoggingService.append("worktrees.parse source=\(source) error=\(error.localizedDescription) preview=\(snippet)")
             throw error
         }
 
@@ -153,11 +164,8 @@ struct WorktreeService {
         var worktrees: [Worktree] = []
         for json in items where json.kind != "branch" {
             let hasWorkspace = checkForCodeWorkspace(at: URL(fileURLWithPath: json.path))
-            let sessions = (try? await sessionService.history(for: json.path, limit: 10)) ?? []
+            let sessions = loadSessions ? ((try? await sessionService.history(for: json.path, limit: 10)) ?? []) : []
             worktrees.append(Worktree(from: json, hasCodeWorkspace: hasWorkspace, recentTasks: sessions))
-            LoggingService.append("""
-            worktrees.parse source=\(source) branch=\(json.branch) path=\(json.path) main_state=\(json.mainState ?? "unknown") prunable=\(json.prunable == true)
-            """)
         }
         LoggingService.append("worktrees.parse source=\(source) count=\(worktrees.count)")
         return worktrees

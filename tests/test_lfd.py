@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from loopflow.lfd.db import (
+    _get_db,
     delete_loop,
     get_latest_loop_run,
     get_loop,
@@ -25,6 +26,7 @@ from loopflow.lfd.db import (
     update_loop_status,
     update_session_status,
 )
+from loopflow.lfd.migrations.registry import MIGRATIONS
 from loopflow.lfd.models import (
     Loop,
     LoopRun,
@@ -97,6 +99,18 @@ def test_db_save_and_load_session():
         sessions = load_sessions(db_path=db_path)
         assert len(sessions) == 1
         assert sessions[0].step == "implement"
+
+
+def test_db_records_initial_migration():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        conn = _get_db(db_path)
+        rows = conn.execute("SELECT version, applied_at FROM schema_migrations").fetchall()
+        conn.close()
+
+        assert len(rows) == 1
+        assert rows[0][0] == MIGRATIONS[0].version
+        assert rows[0][1]
 
 
 def test_db_load_sessions_for_worktree():

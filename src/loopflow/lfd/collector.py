@@ -187,16 +187,23 @@ def _run_streaming(
 
     Prompt is passed as a CLI argument.
     """
-    cmd = command + [prompt] if prompt else command
+    use_stdin = (
+        prompt is not None and len(command) > 1 and command[0] == "codex" and command[1] == "exec"
+    )
+    cmd = command + ["-"] if use_stdin else (command + [prompt] if prompt else command)
 
     process = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
+        stdin=subprocess.PIPE if use_stdin else None,
         text=True,
         start_new_session=True,
         env=get_model_env(),
     )
+    if use_stdin and process.stdin:
+        process.stdin.write(prompt)
+        process.stdin.close()
 
     def _handle_signal(signum, frame):
         if process.poll() is None:

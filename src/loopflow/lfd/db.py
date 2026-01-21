@@ -5,6 +5,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+from loopflow.lfd.migrations.registry import MIGRATIONS
 from loopflow.lfd.models import (
     Loop,
     LoopRun,
@@ -25,69 +26,57 @@ def _init_db(db_path: Path) -> None:
 
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA journal_mode=WAL")
-
-    conn.executescript("""
-        -- New loop-based tables
-
-        CREATE TABLE IF NOT EXISTS loops (
-            id TEXT PRIMARY KEY,
-            type TEXT NOT NULL,
-            area TEXT NOT NULL,
-            repo TEXT NOT NULL,
-            loop_main TEXT NOT NULL,
-            goals TEXT,
-            status TEXT NOT NULL DEFAULT 'idle',
-            iteration INTEGER DEFAULT 0,
-            pr_limit INTEGER DEFAULT 5,
-            merge_mode TEXT DEFAULT 'pr',
-            project_file TEXT,
-            pathset TEXT,
-            cron TEXT,
-            goal TEXT,
-            pid INTEGER,
-            last_main_sha TEXT,
-            created_at TEXT NOT NULL
-        );
-
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_loops_area_repo
-            ON loops(type, area, repo);
-        CREATE INDEX IF NOT EXISTS idx_loops_repo ON loops(repo);
-        CREATE INDEX IF NOT EXISTS idx_loops_status ON loops(status);
-
-        CREATE TABLE IF NOT EXISTS loop_runs (
-            id TEXT PRIMARY KEY,
-            loop_id TEXT NOT NULL,
-            iteration INTEGER NOT NULL,
-            status TEXT NOT NULL,
-            started_at TEXT NOT NULL,
-            ended_at TEXT,
-            worktree TEXT,
-            current_step TEXT,
-            error TEXT,
-            pr_url TEXT,
-            FOREIGN KEY (loop_id) REFERENCES loops(id)
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_loop_runs_loop ON loop_runs(loop_id);
-
-        CREATE TABLE IF NOT EXISTS sessions (
-            id TEXT PRIMARY KEY,
-            task TEXT NOT NULL,
-            repo TEXT NOT NULL,
-            worktree TEXT NOT NULL,
-            status TEXT NOT NULL,
-            started_at TEXT NOT NULL,
-            ended_at TEXT,
-            pid INTEGER,
-            model TEXT NOT NULL,
-            run_mode TEXT NOT NULL DEFAULT 'auto'
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
-    """)
-
-    conn.commit()
     conn.close()
+
+
+def _get_applied_migrations(conn: sqlite3.Connection) -> set[str]:
+    """Get set of applied migration versions."""
+    try:
+        cursor = conn.execute("SELECT version FROM schema_migrations")
+        return {row[0] for row in cursor}
+    except sqlite3.OperationalError:
+        return set()
+
+
+def _record_migration(conn: sqlite3.Connection, version: str) -> None:
+    """Record that a migration was applied."""
+    conn.execute(
+        "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+        (version, datetime.now().isoformat()),
+    )
+
+
+def _migrate_db(conn: sqlite3.Connection) -> None:
+    """Apply pending migrations in order."""
+    applied = _get_applied_migrations(conn)
+
+    for migration in MIGRATIONS:
+        if migration.version not in applied:
+            migration.apply(conn)
+            _record_migration(conn, migration.version)
+            conn.commit()
+
+
+def create_migration(description: str) -> Path:
+    """Create a new migration file with auto-generated timestamp."""
+    now = datetime.now()
+    slug = description.lower().replace(" ", "_")[:30]
+    filename = f"m_{now.strftime('%Y_%m_%d_%H%M%S')}_{slug}.py"
+
+    template = f'''"""
+{description}
+"""
+VERSION = "{now.isoformat()}"
+DESCRIPTION = "{description}"
+
+def apply(conn):
+    conn.executescript("""
+        -- TODO: migration SQL here
+    """)
+'''
+    path = Path(__file__).parent / "migrations" / filename
+    path.write_text(template)
+    return path
 
 
 def _get_db(db_path: Path | None = None) -> sqlite3.Connection:
@@ -95,11 +84,16 @@ def _get_db(db_path: Path | None = None) -> sqlite3.Connection:
     if db_path is None:
         db_path = DB_PATH
 
-    if not db_path.exists():
+    needs_init = not db_path.exists()
+
+    if needs_init:
         _init_db(db_path)
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+
+    _migrate_db(conn)
+
     return conn
 
 

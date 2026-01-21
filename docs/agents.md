@@ -13,7 +13,7 @@ Define goals, review PRs when you wake. `lfd` runs agent loops in the background
 
 ```bash
 lfd install                      # one-time: install daemon
-lfd loop Maestro/ --flow ship    # start a loop
+lfd loop ship Maestro/           # start a loop
 lfd status                       # check progress
 lfd prs <loop-id>                # see created PRs
 ```
@@ -40,9 +40,9 @@ Or run manually: `lfd serve`
 ## Continuous loops
 
 ```bash
-lfd loop Maestro/ --flow ship                   # run continuously
-lfd loop Maestro/ --flow ship --limit 3         # max 3 outstanding PRs
-lfd loop Maestro/ --flow ship --merge-mode land # auto-land to main
+lfd loop ship Maestro/                   # run continuously
+lfd loop ship Maestro/ --limit 3         # max 3 outstanding PRs
+lfd loop ship Maestro/ --merge-mode land # auto-land to main
 ```
 
 When the PR limit is reached, the loop pauses until PRs are merged.
@@ -52,9 +52,9 @@ When the PR limit is reached, the loop pauses until PRs are merged.
 Run exactly one iteration:
 
 ```bash
-lfd flow Maestro/ --flow ship             # single iteration
-lfd flow Maestro/ --flow ship -p spec.md  # with project file
-lfd flow Maestro/ --flow ship -v          # with clipboard
+lfd flow ship Maestro/             # single iteration
+lfd flow ship Maestro/ -p spec.md  # with project file
+lfd flow ship Maestro/ -v          # with clipboard
 ```
 
 ## Triggers
@@ -64,27 +64,27 @@ Beyond continuous loops, agents can react to events.
 ### Subscribe to file changes
 
 ```bash
-lfd subscribe src/api/ "src/api/**" --flow ship
+lfd subscribe ship src/api/ -p src/api
 ```
 
-When files matching the pattern change on main, runs one iteration.
+When files change under the watched path on main, runs one iteration.
 
 ```bash
-lfd subscribe src/api/ "src/api/routes/**" --flow ship
-lfd subscribe . "schema.graphql,src/resolvers/**" --flow ship
+lfd subscribe ship src/api/ -p src/api/routes
+lfd subscribe ship . -p schema.graphql -p src/resolvers
 ```
 
 ### Schedule with cron
 
 ```bash
-lfd schedule . "0 9 * * *" --flow ship
+lfd schedule ship . "0 9 * * *"
 ```
 
 Schedules have a 24-hour grace period—if your laptop wakes after the scheduled time but within 24 hours, it still runs.
 
 ```bash
-lfd schedule . "0 9 * * MON-FRI" --flow ship     # 9am weekdays
-lfd schedule . "0 0 * * 0" --flow ship           # midnight Sundays
+lfd schedule ship . "0 9 * * MON-FRI"     # 9am weekdays
+lfd schedule ship . "0 0 * * 0"           # midnight Sundays
 ```
 
 ## Managing loops
@@ -116,8 +116,8 @@ Each goal defines what the agent should accomplish, its quality bar, and iterati
 ## Merge mode
 
 ```bash
-lfd loop Maestro/ --flow ship --merge-mode pr    # accumulate PRs (default)
-lfd loop Maestro/ --flow ship --merge-mode land  # auto-land each iteration
+lfd loop ship Maestro/ --merge-mode pr    # accumulate PRs (default)
+lfd loop ship Maestro/ --merge-mode land  # auto-land each iteration
 ```
 
 ## Reference

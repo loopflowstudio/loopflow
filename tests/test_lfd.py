@@ -101,16 +101,20 @@ def test_db_save_and_load_session():
         assert sessions[0].step == "implement"
 
 
-def test_db_records_initial_migration():
+def test_db_records_migrations():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         conn = _get_db(db_path)
-        rows = conn.execute("SELECT version, applied_at FROM schema_migrations").fetchall()
+        rows = conn.execute(
+            "SELECT version, applied_at FROM schema_migrations ORDER BY version"
+        ).fetchall()
         conn.close()
 
-        assert len(rows) == 1
-        assert rows[0][0] == MIGRATIONS[0].version
-        assert rows[0][1]
+        # Should have all migrations recorded
+        assert len(rows) == len(MIGRATIONS)
+        for i, row in enumerate(rows):
+            assert row[0] == MIGRATIONS[i].version
+            assert row[1]  # applied_at timestamp exists
 
 
 def test_db_load_sessions_for_worktree():

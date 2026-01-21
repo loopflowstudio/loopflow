@@ -533,13 +533,13 @@ def _load_loopflow_doc() -> str:
 def _trigger_background_refresh(repo_root: Path) -> None:
     """Spawn background process to refresh stale summaries.
 
-    Uses a lock file to prevent concurrent refresh attempts.
-    Logs output to .lf/summaries/refresh.log for debugging.
+    Uses a lock file in ~/.lf to prevent concurrent refresh attempts.
+    Logs output to ~/.lf/refresh.log for debugging.
     """
-    summaries_dir = repo_root / ".lf" / "summaries"
-    summaries_dir.mkdir(parents=True, exist_ok=True)
-    lock_file = summaries_dir / ".refresh.lock"
-    log_file = summaries_dir / "refresh.log"
+    lf_dir = Path.home() / ".lf"
+    lf_dir.mkdir(parents=True, exist_ok=True)
+    lock_file = lf_dir / ".refresh.lock"
+    log_file = lf_dir / "refresh.log"
 
     # Check if refresh already in progress
     if lock_file.exists():

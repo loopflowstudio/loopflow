@@ -569,3 +569,80 @@ def _loop_run_from_row(row: dict) -> LoopRun:
         error=row.get("error"),
         pr_url=row.get("pr_url"),
     )
+
+
+# Summary functions
+
+
+def save_summary_db(
+    repo: str,
+    path: str,
+    token_budget: int,
+    source_hash: str,
+    content: str,
+    model: str,
+    db_path: Path | None = None,
+) -> None:
+    """Save a summary to the database."""
+    import uuid
+
+    conn = _get_db(db_path)
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO summaries
+        (id, repo, path, token_budget, source_hash, content, model, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            str(uuid.uuid4()),
+            repo,
+            path,
+            token_budget,
+            source_hash,
+            content,
+            model,
+            datetime.now().isoformat(),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def load_summary_db(
+    repo: str,
+    path: str,
+    token_budget: int,
+    db_path: Path | None = None,
+) -> dict | None:
+    """Load a summary from the database.
+
+    Returns dict with keys: content, source_hash, model, created_at
+    """
+    conn = _get_db(db_path)
+    cursor = conn.execute(
+        "SELECT content, source_hash, model, created_at FROM summaries "
+        "WHERE repo = ? AND path = ? AND token_budget = ?",
+        (repo, path, token_budget),
+    )
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        return None
+
+    return {
+        "content": row["content"],
+        "source_hash": row["source_hash"],
+        "model": row["model"],
+        "created_at": row["created_at"],
+    }
+
+
+def delete_summaries_for_repo(repo: str, db_path: Path | None = None) -> int:
+    """Delete all summaries for a repo."""
+    conn = _get_db(db_path)
+    cursor = conn.execute("DELETE FROM summaries WHERE repo = ?", (repo,))
+    conn.commit()
+    count = cursor.rowcount
+    conn.close()
+    return count

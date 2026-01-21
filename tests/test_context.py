@@ -405,7 +405,10 @@ def test_trigger_background_refresh_creates_log_file(tmp_path, monkeypatch):
     from loopflow.lf.context import _trigger_background_refresh
 
     (tmp_path / ".git").mkdir()
-    summaries_dir = tmp_path / ".lf" / "summaries"
+
+    # Mock Path.home() to use tmp_path so we can check the files
+    lf_dir = tmp_path / ".lf"
+    monkeypatch.setattr("loopflow.lf.context.Path.home", lambda: tmp_path)
 
     # Mock Popen to avoid actually running the subprocess
     popen_calls = []
@@ -420,11 +423,11 @@ def test_trigger_background_refresh_creates_log_file(tmp_path, monkeypatch):
 
     _trigger_background_refresh(tmp_path)
 
-    # Should have created summaries dir
-    assert summaries_dir.exists()
+    # Should have created ~/.lf dir
+    assert lf_dir.exists()
 
     # Should have written lock file
-    lock_file = summaries_dir / ".refresh.lock"
+    lock_file = lf_dir / ".refresh.lock"
     assert lock_file.exists()
     assert lock_file.read_text() == "12345"
 

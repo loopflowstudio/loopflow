@@ -52,7 +52,7 @@ lfops pr
 Define goals, review PRs when you wake.
 
 ```bash
-lfd loop Maestro/ --flow ship
+lfd loop ship Maestro/
 ```
 
 ![loops demo](docs/loops-demo.gif)

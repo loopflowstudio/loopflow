@@ -1,7 +1,6 @@
 """Codebase summarization for LLM context."""
 
 import hashlib
-import json
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime
@@ -20,129 +19,39 @@ class Summary:
     model: str
 
 
-@dataclass
-class SummaryMetadata:
-    """Metadata for a single summary."""
-
-    source_hash: str
-    token_budget: int
-    created_at: str
-    model: str
-
-
-def _path_to_filename(path: Path, token_budget: int) -> str:
-    """Convert path and token budget to summary filename."""
-    base = "root" if path == Path(".") else str(path).replace("/", "-").replace("\\", "-")
-    return f"{base}-{token_budget}.md"
-
-
-def _summaries_dir(repo_root: Path) -> Path:
-    return repo_root / ".lf" / "summaries"
-
-
-def _metadata_path(repo_root: Path) -> Path:
-    return _summaries_dir(repo_root) / "_metadata.json"
-
-
-def _load_metadata(repo_root: Path) -> dict[str, SummaryMetadata]:
-    """Load metadata for all summaries."""
-    path = _metadata_path(repo_root)
-    if not path.exists():
-        return {}
-
-    data = json.loads(path.read_text())
-    result = {}
-    for key, val in data.items():
-        result[key] = SummaryMetadata(
-            source_hash=val["source_hash"],
-            token_budget=val["token_budget"],
-            created_at=val["created_at"],
-            model=val["model"],
-        )
-    return result
-
-
-def _save_metadata(repo_root: Path, metadata: dict[str, SummaryMetadata]) -> None:
-    """Save metadata for all summaries."""
-    path = _metadata_path(repo_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    data = {}
-    for key, val in metadata.items():
-        data[key] = {
-            "source_hash": val.source_hash,
-            "token_budget": val.token_budget,
-            "created_at": val.created_at,
-            "model": val.model,
-        }
-    path.write_text(json.dumps(data, indent=2) + "\n")
-
-
-def _ensure_gitignored(repo_root: Path) -> None:
-    """Ensure .lf/summaries/ is in .gitignore."""
-    gitignore = repo_root / ".gitignore"
-    pattern = ".lf/summaries/"
-
-    if gitignore.exists():
-        content = gitignore.read_text()
-        if pattern in content:
-            return
-        # Append with newline if file doesn't end with one
-        if content and not content.endswith("\n"):
-            content += "\n"
-        content += pattern + "\n"
-        gitignore.write_text(content)
-    else:
-        gitignore.write_text(pattern + "\n")
-
-
 def load_summary(path: Path, repo_root: Path, token_budget: int) -> Summary | None:
-    """Load cached summary from .lf/summaries/.
+    """Load cached summary from database.
 
     Returns None if no summary exists for this path and token budget.
     """
-    filename = _path_to_filename(path, token_budget)
-    summary_path = _summaries_dir(repo_root) / filename
+    from loopflow.lfd.db import load_summary_db
 
-    if not summary_path.exists():
+    data = load_summary_db(str(repo_root), str(path), token_budget)
+    if not data:
         return None
 
-    metadata = _load_metadata(repo_root)
-    key = f"{path}:{token_budget}"
-    if key not in metadata:
-        return None
-
-    meta = metadata[key]
     return Summary(
         path=path,
-        content=summary_path.read_text(),
-        token_budget=meta.token_budget,
-        source_hash=meta.source_hash,
-        created_at=datetime.fromisoformat(meta.created_at),
-        model=meta.model,
+        content=data["content"],
+        token_budget=token_budget,
+        source_hash=data["source_hash"],
+        created_at=datetime.fromisoformat(data["created_at"]),
+        model=data["model"],
     )
 
 
 def save_summary(summary: Summary, repo_root: Path) -> None:
-    """Save summary to .lf/summaries/."""
-    _ensure_gitignored(repo_root)
+    """Save summary to database."""
+    from loopflow.lfd.db import save_summary_db
 
-    summaries_dir = _summaries_dir(repo_root)
-    summaries_dir.mkdir(parents=True, exist_ok=True)
-
-    filename = _path_to_filename(summary.path, summary.token_budget)
-    summary_path = summaries_dir / filename
-    summary_path.write_text(summary.content)
-
-    metadata = _load_metadata(repo_root)
-    key = f"{summary.path}:{summary.token_budget}"
-    metadata[key] = SummaryMetadata(
-        source_hash=summary.source_hash,
+    save_summary_db(
+        repo=str(repo_root),
+        path=str(summary.path),
         token_budget=summary.token_budget,
-        created_at=summary.created_at.isoformat(),
+        source_hash=summary.source_hash,
+        content=summary.content,
         model=summary.model,
     )
-    _save_metadata(repo_root, metadata)
 
 
 def hash_content(content: str) -> str:
@@ -312,6 +221,10 @@ def _gather_source_content_working_dir(
     return "\n\n".join(parts)
 
 
+# Threshold for recursive summarization (~100k tokens = ~400k chars)
+RECURSIVE_THRESHOLD = 400000
+
+
 def _load_summarize_prompt(repo_root: Path) -> str:
     """Load summarize prompt, checking for override first."""
     from loopflow.lf.builtins import get_builtin_prompt
@@ -322,9 +235,52 @@ def _load_summarize_prompt(repo_root: Path) -> str:
     return get_builtin_prompt("summarize")
 
 
-def _estimate_tokens(text: str) -> int:
-    """Rough token estimate (~4 chars per token)."""
-    return len(text) // 4
+def _list_subdirectories(path: Path, repo_root: Path) -> list[Path]:
+    """List top-level subdirectories under path at merge-base.
+
+    Returns relative paths from repo_root.
+    """
+    base = _get_merge_base(repo_root)
+    full_path = repo_root if path == Path(".") else repo_root / path
+
+    if base:
+        # Use git to list directories at merge-base
+        target = str(path) if path != Path(".") else ""
+        cmd = ["git", "ls-tree", "--name-only", base]
+        if target:
+            cmd.extend(["--", target])
+        result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)
+        if result.returncode == 0 and result.stdout.strip():
+            entries = result.stdout.strip().split("\n")
+            subdirs = []
+            for entry in entries:
+                # Check if it's a directory in the tree
+                check = subprocess.run(
+                    ["git", "cat-file", "-t", f"{base}:{entry}"],
+                    cwd=repo_root,
+                    capture_output=True,
+                    text=True,
+                )
+                if check.returncode == 0 and check.stdout.strip() == "tree":
+                    subdirs.append(Path(entry))
+            return sorted(subdirs)
+
+    # Fallback: use working directory
+    if not full_path.is_dir():
+        return []
+
+    subdirs = []
+    for p in sorted(full_path.iterdir()):
+        if p.is_dir() and not p.name.startswith("."):
+            subdirs.append(p.relative_to(repo_root))
+    return subdirs
+
+
+def _count_tokens(text: str) -> int:
+    """Count tokens using tiktoken."""
+    from loopflow.lf.tokens import count_tokens
+
+    return count_tokens(text)
 
 
 def _run_summarize_cli(prompt: str, model: str, repo_root: Path) -> str:
@@ -410,13 +366,14 @@ def generate_summary(
     """Generate summary via LLM, respecting token budget.
 
     If source content fits within budget, returns it directly without LLM call.
+    For large content exceeding RECURSIVE_THRESHOLD, recursively summarizes subdirectories.
     """
     source_content = gather_source_content(path, repo_root, exclude)
     source_hash = compute_source_hash(path, repo_root)
+    content_tokens = _count_tokens(source_content)
 
     # If source fits in budget, use it directly
-    estimated_tokens = _estimate_tokens(source_content)
-    if estimated_tokens <= token_budget:
+    if content_tokens <= token_budget:
         return Summary(
             path=path,
             content=source_content,
@@ -426,9 +383,110 @@ def generate_summary(
             model="raw",  # No summarization needed
         )
 
+    # If content exceeds recursive threshold, split into subdirs
+    if len(source_content) > RECURSIVE_THRESHOLD:
+        subdirs = _list_subdirectories(path, repo_root)
+        if len(subdirs) > 1:
+            # Measure each subdir's content size
+            subdir_data = []
+            for subdir in subdirs:
+                subdir_content = gather_source_content(subdir, repo_root, exclude)
+                subdir_tokens = _count_tokens(subdir_content)
+                subdir_data.append((subdir, subdir_tokens, subdir_content))
+
+            # Bin-pack subdirs into groups that fit under model context
+            # Model context limit for summarization (leave room for prompt overhead)
+            MODEL_CONTEXT = 90000  # ~90k tokens safe for summarization
+            total_tokens = sum(t for _, t, _ in subdir_data)
+
+            # Sort by size descending for first-fit-decreasing bin packing
+            subdir_data.sort(key=lambda x: x[1], reverse=True)
+
+            groups: list[list[tuple]] = []  # Each group is [(subdir, tokens, content), ...]
+
+            for item in subdir_data:
+                subdir, tokens, content = item
+                placed = False
+
+                # If single subdir exceeds model context, it needs recursive split
+                if tokens > MODEL_CONTEXT:
+                    # Recurse on this large subdir
+                    groups.append([item])
+                    placed = True
+                else:
+                    # Try to fit in existing group
+                    for group in groups:
+                        group_tokens = sum(t for _, t, _ in group)
+                        if group_tokens + tokens <= MODEL_CONTEXT:
+                            group.append(item)
+                            placed = True
+                            break
+
+                if not placed:
+                    groups.append([item])
+
+            # Now summarize each group with proportional budget
+            sub_summaries = []
+
+            for group in groups:
+                group_tokens = sum(t for _, t, _ in group)
+                # Proportional budget based on group's share of total
+                group_budget = max((group_tokens * token_budget) // total_tokens, 1000)
+
+                if len(group) == 1 and group[0][1] > MODEL_CONTEXT:
+                    # Single large subdir - recurse
+                    subdir, _, _ = group[0]
+                    sub_summary = generate_summary(subdir, repo_root, group_budget, model, exclude)
+                    sub_summaries.append(f"## {subdir}\n\n{sub_summary.content}")
+                else:
+                    # Group of subdirs - combine and summarize
+                    group_content = "\n\n".join(f"## {s}\n\n{c}" for s, _, c in group)
+
+                    if group_tokens <= group_budget:
+                        # Small enough to keep raw
+                        sub_summaries.append(group_content)
+                    else:
+                        # Summarize the group
+                        prompt_template = _load_summarize_prompt(repo_root)
+                        prompt = prompt_template.format(
+                            token_budget=group_budget, content=group_content
+                        )
+                        group_summary = _run_summarize_cli(prompt, model, repo_root)
+                        group_names = ", ".join(str(s) for s, _, _ in group)
+                        sub_summaries.append(f"## {group_names}\n\n{group_summary}")
+
+            # Concatenate all group summaries
+            combined = "\n\n".join(sub_summaries)
+            combined_tokens = _count_tokens(combined)
+
+            # If combined fits in budget, use it directly
+            if combined_tokens <= token_budget:
+                return Summary(
+                    path=path,
+                    content=combined,
+                    token_budget=token_budget,
+                    source_hash=source_hash,
+                    created_at=datetime.now(),
+                    model="recursive",
+                )
+
+            # Otherwise summarize the combined content
+            prompt_template = _load_summarize_prompt(repo_root)
+            prompt = prompt_template.format(token_budget=token_budget, content=combined)
+            summary_content = _run_summarize_cli(prompt, model, repo_root)
+
+            return Summary(
+                path=path,
+                content=summary_content,
+                token_budget=token_budget,
+                source_hash=source_hash,
+                created_at=datetime.now(),
+                model=f"recursive+{model}",
+            )
+
+    # Standard summarization for content that fits in model context
     prompt_template = _load_summarize_prompt(repo_root)
     prompt = prompt_template.format(token_budget=token_budget, content=source_content)
-
     summary_content = _run_summarize_cli(prompt, model, repo_root)
 
     return Summary(
@@ -493,7 +551,7 @@ def register_commands(app) -> None:
                 typer.echo("No summaries configured in .lf/config.yaml")
                 raise typer.Exit(0)
 
-            lock_file = repo_root / ".lf" / "summaries" / ".refresh.lock"
+            lock_file = Path.home() / ".lf" / ".refresh.lock"
             try:
                 for summary_config in config.summaries:
                     summary_path = Path(summary_config.path)
@@ -550,8 +608,8 @@ def register_commands(app) -> None:
             typer.echo(f"Error generating summary: {e}", err=True)
             raise typer.Exit(1)
 
-        filename = _path_to_filename(summary_path, tokens)
-        typer.echo(f"Summary saved to .lf/summaries/{filename}")
-        typer.echo(f"  Tokens: {tokens}")
-        typer.echo(f"  Model: {model}")
+        typer.echo("Summary saved to database")
+        typer.echo(f"  Path: {summary_path}")
+        typer.echo(f"  Token budget: {tokens}")
+        typer.echo(f"  Model: {summary.model}")
         typer.echo(f"  Length: {len(summary.content)} chars")

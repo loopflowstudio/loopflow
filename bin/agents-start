@@ -4,8 +4,8 @@ set -e
 cd "$(git rev-parse --show-toplevel)"
 
 # One agent per area, multiple goals per agent
-uv run lfd loop Maestro/ -g product-engineer -g designer
-uv run lfd loop src/loopflow/ -g product-engineer -g designer
-uv run lfd loop . -g infra-engineer
+uv run lfd loop ship Maestro/ -g product-engineer -g designer
+uv run lfd loop ship src/loopflow/ -g product-engineer -g designer
+uv run lfd loop ship . -g infra-engineer
 
 uv run lfd status

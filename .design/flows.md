@@ -3,6 +3,9 @@
 ## Summary
 Flows are Python-defined DAGs in `.lf/flows/*.py`, with `choose` (prompted decision between subflows), `fork` (run N branches), and `join` (synthesize forked outputs back into one changeset). `ship` starts with a choose between adding to roadmap and scoping from roadmap. `add_to_roadmap` runs a fork of three model+voice variants, then joins them into a single changeset on the main worktree; `scope_from_roadmap` continues through `design_from_roadmap` → `implement` → `polish`.
 
+## Recent updates
+- Ran ruff lint/format; formatted `src/loopflow/lfd/db.py`.
+
 ## Outstanding work
 - Update docs/README with choose/fork/join examples and the ship flow fork/join pattern.
 - Encourage join to write a summary artifact (e.g., `.design/joins/<flow>.md`) but do not require it for correctness.

@@ -476,7 +476,8 @@ def gather_diff(
         cmd,
         cwd=repo_root,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="replace",  # Handle binary content in diffs
     )
     if result.returncode != 0 or not result.stdout.strip():
         return None

@@ -179,9 +179,11 @@ def load_flow(name: str, repo: Path) -> FlowDef | None:
     if callable(flow_func):
         return _coerce_flow(name, flow_func())
 
-    flow_value = getattr(module, name.upper(), None)
-    if flow_value is None:
-        flow_value = getattr(module, "FLOW", None)
+    flow_value = None
+    for attr in (name.upper(), "FLOW"):
+        flow_value = getattr(module, attr, None)
+        if flow_value is not None:
+            break
     if flow_value is None:
         raise ValueError(f"Flow '{name}' must define flow() or FLOW/{name.upper()}")
 

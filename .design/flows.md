@@ -5,6 +5,7 @@ Flows are Python-defined DAGs in `.lf/flows/*.py`, with `choose` (prompted decis
 
 ## Recent updates
 - Ran ruff lint/format; formatted `src/loopflow/lfd/db.py`.
+- Simplified flow attribute lookup when loading flow modules.
 
 ## Outstanding work
 - Update docs/README with choose/fork/join examples and the ship flow fork/join pattern.

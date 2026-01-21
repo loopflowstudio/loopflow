@@ -275,6 +275,7 @@ class Server:
 
     async def _periodic_check(self) -> None:
         """Periodically update dead processes and check triggers."""
+        from loopflow.lfd.draft_prs import run_draft_pr_check
         from loopflow.lfd.schedule import run_schedule_check
         from loopflow.lfd.subscribe import run_subscription_check
 
@@ -305,6 +306,19 @@ class Server:
                             {
                                 "loop_id": loop_id,
                                 "trigger": "schedule",
+                            },
+                        )
+                    )
+
+                # Auto-create draft PRs for pushed branches
+                created_prs = run_draft_pr_check()
+                for branch in created_prs:
+                    await self._broadcast(
+                        Event(
+                            "worktree.updated",
+                            {
+                                "branch": branch,
+                                "reason": "draft_pr_created",
                             },
                         )
                     )

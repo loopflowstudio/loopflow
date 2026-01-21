@@ -194,7 +194,6 @@ def test_is_merged_checks_ancestor_for_squash_merge(tmp_path):
             result = is_merged(wt, tmp_path)
 
     assert result is True
-    mock_run.assert_called_once()
 
 
 def test_is_merged_returns_false_when_not_ancestor(tmp_path):

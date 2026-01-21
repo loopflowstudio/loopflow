@@ -201,6 +201,10 @@ struct WorktreeService {
         _ = try await runLfops(["land"], in: worktreePath)
     }
 
+    func landBranch(in worktreePath: URL) async throws {
+        _ = try await runLfops(["land", "--create-pr"], in: worktreePath)
+    }
+
     func createDraftPR(branch: String, in worktreePath: URL) async throws {
         guard let ghURL = findCommand("gh") else {
             throw WorktreeError.commandFailed("gh CLI not found. Install GitHub CLI.")

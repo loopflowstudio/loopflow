@@ -177,7 +177,8 @@ final class AppState {
                     prState: .open,
                     hasCodeWorkspace: false,
                     isRebasing: false,
-                    isMerging: false
+                    isMerging: false,
+                    hasDiff: true
                 )
             ]
         }
@@ -357,7 +358,7 @@ final class AppState {
         }
     }
 
-    /// Background enrichment - sync, staleness, CI, draft PRs. Called by timer.
+    /// Background enrichment - sync, staleness, CI. Called by timer.
     private func syncAndEnrich() async {
         guard let repo = currentRepo else { return }
 
@@ -367,32 +368,9 @@ final class AppState {
         // Refresh list
         await _listWorktrees()
 
-        // Enrich with slow operations (staleness, CI, draft PRs)
+        // Enrich with slow operations (staleness, CI)
         await detectStaleness()
         await fetchCIStatus()
-        await createDraftPRsIfNeeded(in: repo)
-    }
-
-    private func createDraftPRsIfNeeded(in repo: URL) async {
-        for worktree in worktrees {
-            // Skip if: no commits, already has PR, or is main branch
-            guard worktree.aheadMain > 0,
-                  worktree.prNumber == nil,
-                  worktree.branch != "main" else { continue }
-
-            // Check if branch is pushed to remote
-            let isPushed = await worktreeService.branchIsPushed(worktree.branch, in: repo)
-            guard isPushed else { continue }
-
-            let hasDiff = await worktreeService.hasDiffAgainstBase(worktree)
-            guard hasDiff else { continue }
-
-            // Create draft PR in background (don't block or show errors)
-            Task.detached { [worktreeService] in
-                let worktreeURL = URL(fileURLWithPath: worktree.path)
-                try? await worktreeService.createDraftPR(branch: worktree.branch, in: worktreeURL)
-            }
-        }
     }
 
     private func detectStaleness() async {
@@ -505,6 +483,12 @@ final class AppState {
     func landPR(for worktree: Worktree) async throws {
         let worktreeURL = URL(fileURLWithPath: worktree.path)
         try await worktreeService.landPR(in: worktreeURL)
+        listWorktrees()
+    }
+
+    func landBranch(for worktree: Worktree) async throws {
+        let worktreeURL = URL(fileURLWithPath: worktree.path)
+        try await worktreeService.landBranch(in: worktreeURL)
         listWorktrees()
     }
 

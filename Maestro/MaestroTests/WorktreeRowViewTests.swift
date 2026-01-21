@@ -14,7 +14,8 @@ struct WorktreeRowViewTests {
         behindMain: Int = 0,
         prNumber: Int? = nil,
         prState: PRState? = nil,
-        staleness: Staleness = .active
+        staleness: Staleness = .active,
+        hasDiff: Bool = true
     ) -> Worktree {
         var worktree = Worktree(
             path: "/tmp/repo.feature",
@@ -30,7 +31,8 @@ struct WorktreeRowViewTests {
             prState: prState,
             hasCodeWorkspace: false,
             isRebasing: false,
-            isMerging: false
+            isMerging: false,
+            hasDiff: hasDiff
         )
         worktree.staleness = staleness
         return worktree

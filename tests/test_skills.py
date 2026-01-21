@@ -210,8 +210,6 @@ def test_discover_skill_sources_no_sources_returns_empty():
 
 def test_discover_skill_sources_auto_detects_rams(tmp_path, monkeypatch):
     """rams.ai is auto-detected when ~/.claude/commands/rams.md exists."""
-    from pathlib import Path
-
     rams_dir = tmp_path / ".claude" / "commands"
     rams_dir.mkdir(parents=True)
     rams_file = rams_dir / "rams.md"

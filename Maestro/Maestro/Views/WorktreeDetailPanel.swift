@@ -65,7 +65,7 @@ struct WorktreeDetailPanel: View {
                 worktree: worktree,
                 diffContent: selectedFileDiff.isEmpty ? nil : selectedFileDiff,
                 isLoading: false,
-                onOpenWeb: { openPR() }
+                onOpenWeb: { viewPR() }
             )
         }
         .alert("Error", isPresented: $showingActionError) {
@@ -122,7 +122,7 @@ struct WorktreeDetailPanel: View {
         }
 
         return Button {
-            openPR()
+            viewPR()
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "arrow.up.right.square")
@@ -145,19 +145,21 @@ struct WorktreeDetailPanel: View {
 
     private var quickActionsBar: some View {
         HStack(spacing: 12) {
+            // Land button - primary action, always first
             Button {
-                openPR()
+                landBranch()
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: "arrow.triangle.pull")
+                    Image(systemName: "airplane.arrival")
                         .font(.system(size: 14))
-                    Text("PR")
+                    Text("Land")
                         .fontWeight(.medium)
                 }
                 .frame(minWidth: 70)
             }
             .buttonStyle(DarkButtonStyle())
-            .help("Open or create PR")
+            .disabled(!worktree.hasDiff)
+            .help("Land branch (creates PR if needed, rebases, marks ready, enables auto-merge)")
 
             Button {
                 openInIDE()
@@ -189,21 +191,22 @@ struct WorktreeDetailPanel: View {
 
             Spacer()
 
-            // Land button - only when PR is open
-            if worktree.prState == .open {
+            // View PR button - only when PR exists
+            if worktree.prNumber != nil {
                 Button {
-                    landPR()
+                    viewPR()
                 } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: "airplane.arrival")
+                        Image(systemName: "arrow.triangle.pull")
                             .font(.system(size: 14))
-                        Text("Land")
+                        Text("View PR")
                             .fontWeight(.medium)
                     }
                     .frame(minWidth: 70)
                 }
                 .buttonStyle(DarkButtonStyle())
-                .help("Land PR (merge and clean up)")
+                .disabled(!worktree.hasDiff)
+                .help("View PR on GitHub")
             }
 
             // Abandon button
@@ -552,63 +555,19 @@ struct WorktreeDetailPanel: View {
         }
     }
 
-    private func openPR() {
-        let worktreeURL = URL(fileURLWithPath: worktree.path)
-
-        // If draft PR exists, upgrade to ready then open
-        if worktree.prState == .draft {
-            Task {
-                do {
-                    try await worktreeService.markPRReady(in: worktreeURL)
-                    let url = await worktreeService.getExistingPRURL(in: worktreeURL)
-                    appState.listWorktrees()
-                    if let url {
-                        terminalLauncher.openURL(url)
-                    }
-                } catch {
-                    await MainActor.run {
-                        actionError = "Failed to mark PR ready: \(error.localizedDescription)"
-                        showingActionError = true
-                    }
-                }
-            }
-            return
-        }
-
-        // If open/merged/closed PR exists, just open it
+    private func viewPR() {
         if let prURL = worktree.prURL {
             terminalLauncher.openURL(prURL)
-            return
-        }
-
-        // No PR exists - create one (fallback, shouldn't happen with auto-draft)
-        Task {
-            if let existingURL = await worktreeService.getExistingPRURL(in: worktreeURL) {
-                terminalLauncher.openURL(existingURL)
-                return
-            }
-            do {
-                _ = try await worktreeService.createPR(in: worktreeURL)
-                appState.listWorktrees()
-                if let createdURL = await worktreeService.getExistingPRURL(in: worktreeURL) {
-                    terminalLauncher.openURL(createdURL)
-                }
-            } catch {
-                await MainActor.run {
-                    actionError = "Failed to create PR: \(error.localizedDescription)"
-                    showingActionError = true
-                }
-            }
         }
     }
 
-    private func landPR() {
+    private func landBranch() {
         Task {
             do {
-                try await appState.landPR(for: worktree)
+                try await appState.landBranch(for: worktree)
             } catch {
                 await MainActor.run {
-                    actionError = "Failed to land PR: \(error.localizedDescription)"
+                    actionError = "Failed to land branch: \(error.localizedDescription)"
                     showingActionError = true
                 }
             }
@@ -937,7 +896,8 @@ struct DarkButtonStyle: ButtonStyle {
         prState: .open,
         hasCodeWorkspace: false,
         isRebasing: false,
-        isMerging: false
+        isMerging: false,
+        hasDiff: true
     )
     return WorktreeDetailPanel(appState: state, worktree: worktree)
         .frame(width: 600, height: 600)

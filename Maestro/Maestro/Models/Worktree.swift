@@ -85,6 +85,7 @@ struct Worktree: Identifiable, Hashable, Codable {
     let hasCodeWorkspace: Bool
     let isRebasing: Bool
     let isMerging: Bool
+    let hasDiff: Bool
     var recentTasks: [TaskSession] = []
     var staleness: Staleness = .active
     var ciStatus: CIStatus?
@@ -92,7 +93,7 @@ struct Worktree: Identifiable, Hashable, Codable {
     enum CodingKeys: String, CodingKey {
         case path, branch, baseBranch, isDirty, aheadMain, behindMain
         case aheadRemote, behindRemote, prURL, prNumber, prState
-        case hasCodeWorkspace, isRebasing, isMerging, recentTasks, staleness, ciStatus
+        case hasCodeWorkspace, isRebasing, isMerging, hasDiff, recentTasks, staleness, ciStatus
     }
 
     var commitsText: String {
@@ -243,6 +244,10 @@ extension Worktree {
         self.hasCodeWorkspace = hasCodeWorkspace
         self.isRebasing = json.operationState == "rebase"
         self.isMerging = json.operationState == "merge"
+
+        let diffStats = json.workingTree?.diffVsMain
+        self.hasDiff = (diffStats?.added ?? 0) + (diffStats?.deleted ?? 0) > 0
+
         self.recentTasks = recentTasks
         if json.prunable == true {
             self.staleness = .merged

@@ -23,7 +23,8 @@ struct WorktreeModelTests {
             prState: .open,
             hasCodeWorkspace: false,
             isRebasing: false,
-            isMerging: false
+            isMerging: false,
+            hasDiff: true
         )
 
         #expect(worktree.commitsText.contains("PR #42"))
@@ -46,7 +47,8 @@ struct WorktreeModelTests {
             prState: nil,
             hasCodeWorkspace: false,
             isRebasing: false,
-            isMerging: false
+            isMerging: false,
+            hasDiff: true
         )
 
         #expect(worktree.commitsText.contains("no PR"))
@@ -70,7 +72,8 @@ struct WorktreeModelTests {
             prState: nil,
             hasCodeWorkspace: false,
             isRebasing: false,
-            isMerging: false
+            isMerging: false,
+            hasDiff: false
         )
 
         #expect(worktree.id == "my-feature")

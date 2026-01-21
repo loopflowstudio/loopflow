@@ -284,10 +284,18 @@ def remove(repo_root: Path, name: str) -> bool:
 
 def is_merged(wt: Worktree, repo_root: Path, base_branch: str = "main") -> bool:
     """Check if worktree's branch has been merged to base branch."""
+    from loopflow.lf.git import find_main_repo
+
     if wt.branch is None:
         return False  # Detached HEAD - can't determine merge status
     if wt.branch in ("main", "master"):
         return False
+    try:
+        main_repo = find_main_repo(repo_root)
+        if main_repo and wt.path == main_repo:
+            return False  # Never prune the main repo checkout
+    except Exception:
+        pass  # In tests with fake paths, skip this check
     if wt.is_dirty:
         return False
 

@@ -1,5 +1,6 @@
 """Tests for loopflow.context module."""
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -334,6 +335,7 @@ def test_list_user_steps_returns_user_tasks(tmp_path):
     assert "config" not in tasks  # config.yaml should be excluded
 
 
+@patch("loopflow.lf.skills._RAMS_PATH", Path("/nonexistent/rams.md"))
 @patch("loopflow.lf.skills._SUPERPOWERS_PATHS", [])
 @patch("loopflow.lf.context._GLOBAL_STEP_PATHS", [])
 def test_list_all_steps_separates_user_and_builtin(tmp_path):
@@ -366,6 +368,7 @@ def test_list_all_steps_separates_user_and_builtin(tmp_path):
     assert external_skills == []
 
 
+@patch("loopflow.lf.skills._RAMS_PATH", Path("/nonexistent/rams.md"))
 @patch("loopflow.lf.skills._SUPERPOWERS_PATHS", [])
 @patch("loopflow.lf.context._GLOBAL_STEP_PATHS", [])
 def test_list_all_steps_without_repo():

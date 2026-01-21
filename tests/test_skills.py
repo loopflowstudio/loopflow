@@ -114,10 +114,11 @@ def test_discover_skill_sources_from_config(superpowers_dir):
     config_sources = [SkillSourceConfig(name="superpowers", prefix="sp", path=str(superpowers_dir))]
     sources = discover_skill_sources(config_sources)
 
-    assert len(sources) == 1
-    assert sources[0].name == "superpowers"
-    assert sources[0].prefix == "sp"
-    assert "brainstorm" in sources[0].skills
+    # Filter out auto-detected sources like rams
+    sp_sources = [s for s in sources if s.prefix == "sp"]
+    assert len(sp_sources) == 1
+    assert sp_sources[0].name == "superpowers"
+    assert "brainstorm" in sp_sources[0].skills
 
 
 def test_discover_skill_sources_skips_nonexistent_path(tmp_path):
@@ -125,7 +126,9 @@ def test_discover_skill_sources_skips_nonexistent_path(tmp_path):
         SkillSourceConfig(name="missing", prefix="ms", path=str(tmp_path / "nonexistent"))
     ]
     sources = discover_skill_sources(config_sources, auto_detect=False)
-    assert len(sources) == 0
+    # Filter out auto-detected sources like rams
+    ms_sources = [s for s in sources if s.prefix == "ms"]
+    assert len(ms_sources) == 0
 
 
 def test_discover_skill_sources_multiple_sources(tmp_path):
@@ -152,8 +155,10 @@ def test_discover_skill_sources_multiple_sources(tmp_path):
     ]
     sources = discover_skill_sources(config_sources, auto_detect=False)
 
-    assert len(sources) == 2
-    prefixes = {s.prefix for s in sources}
+    # Filter to only the explicitly configured sources
+    configured_sources = [s for s in sources if s.prefix in {"s1", "s2"}]
+    assert len(configured_sources) == 2
+    prefixes = {s.prefix for s in configured_sources}
     assert prefixes == {"s1", "s2"}
 
 
@@ -169,9 +174,10 @@ def test_discover_skill_sources_auto_detects_local_superpowers(tmp_path):
 
     sources = discover_skill_sources(None, repo_root=tmp_path)
 
-    assert len(sources) == 1
-    assert sources[0].prefix == "sp"
-    assert "local-skill" in sources[0].skills
+    # Should include the local superpowers
+    sp_sources = [s for s in sources if s.prefix == "sp"]
+    assert len(sp_sources) == 1
+    assert "local-skill" in sp_sources[0].skills
 
 
 def test_discover_skill_sources_config_prevents_auto_detection(tmp_path, superpowers_dir):
@@ -189,9 +195,10 @@ def test_discover_skill_sources_config_prevents_auto_detection(tmp_path, superpo
     sources = discover_skill_sources(config_sources, repo_root=tmp_path)
 
     # Should use configured source, not local
-    assert len(sources) == 1
-    assert "brainstorm" in sources[0].skills
-    assert "local-only" not in sources[0].skills
+    sp_sources = [s for s in sources if s.prefix == "sp"]
+    assert len(sp_sources) == 1
+    assert "brainstorm" in sp_sources[0].skills
+    assert "local-only" not in sp_sources[0].skills
 
 
 def test_discover_skill_sources_no_sources_returns_empty():
@@ -199,6 +206,24 @@ def test_discover_skill_sources_no_sources_returns_empty():
     # May be empty or may find ~/.superpowers if it exists
     # Just verify it doesn't crash
     assert isinstance(sources, list)
+
+
+def test_discover_skill_sources_auto_detects_rams(tmp_path, monkeypatch):
+    """rams.ai is auto-detected when ~/.claude/commands/rams.md exists."""
+    rams_dir = tmp_path / ".claude" / "commands"
+    rams_dir.mkdir(parents=True)
+    rams_file = rams_dir / "rams.md"
+    rams_file.write_text("# Rams\nAccessibility and design review.")
+
+    monkeypatch.setattr("loopflow.lf.skills._RAMS_PATH", rams_file)
+
+    sources = discover_skill_sources(None, repo_root=None, auto_detect=False)
+
+    rams_sources = [s for s in sources if s.prefix == "rams"]
+    assert len(rams_sources) == 1
+    assert rams_sources[0].name == "rams.ai"
+    assert rams_sources[0].kind == "single-file"
+    assert "rams" in rams_sources[0].skills
 
 
 # =============================================================================
@@ -231,10 +256,11 @@ def test_discover_skill_sources_registry_enabled(tmp_path, monkeypatch):
         registry_config=config,
     )
 
-    assert len(sources) == 1
-    source = sources[0]
+    # Find the registry source
+    sr_sources = [s for s in sources if s.prefix == "sr"]
+    assert len(sr_sources) == 1
+    source = sr_sources[0]
     assert source.kind == "registry"
-    assert source.prefix == "sr"
     assert "alpha" in source.skills
 
 
@@ -358,6 +384,29 @@ def test_find_skill_handles_registry_source(tmp_path, monkeypatch):
     assert skill is not None
     assert skill.name == "alpha"
     assert skill.prompt_path == cached
+
+
+def test_find_skill_handles_single_file_source(tmp_path):
+    """Single-file skills (like rams) work correctly."""
+    skill_file = tmp_path / "rams.md"
+    skill_file.write_text("# Rams skill\nReview accessibility and design.")
+
+    sources = [
+        SkillSource(
+            name="rams.ai",
+            prefix="rams",
+            path=tmp_path,
+            skills=["rams"],
+            kind="single-file",
+        )
+    ]
+
+    skill = find_skill("rams:rams", sources)
+
+    assert skill is not None
+    assert skill.name == "rams"
+    assert skill.source == "rams.ai"
+    assert skill.prompt_path == skill_file
 
 
 # =============================================================================

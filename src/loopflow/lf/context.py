@@ -377,17 +377,24 @@ def list_all_steps(
     user = set(list_user_steps(repo_root)) if repo_root else set()
     global_steps = set(list_global_steps())
 
-    # Global steps not overridden by repo-local
-    global_only = global_steps - user
-    # Builtins not overridden by user or global
-    builtin_only = builtins - user - global_steps
-
     sources = discover_skill_sources(
         config.skill_sources if config else None,
         repo_root,
         registry_config=config.skill_registry if config else None,
     )
     external_skills = list_all_skills(sources)
+
+    # Collect skill names that are handled by external sources (to exclude from global)
+    external_skill_names = set()
+    for source in sources:
+        if source.kind == "single-file":
+            # Single-file skills like rams are named after the file
+            external_skill_names.update(source.skills)
+
+    # Global steps not overridden by repo-local or handled by external sources
+    global_only = global_steps - user - external_skill_names
+    # Builtins not overridden by user or global
+    builtin_only = builtins - user - global_steps
 
     return sorted(user), sorted(global_only), sorted(builtin_only), external_skills
 
@@ -415,6 +422,9 @@ def gather_step(repo_root: Path | None, name: str, config=None) -> StepFile | No
             content = load_skill_prompt(skill)
             step_file = parse_step_file(name, content)
             step_file.is_external_skill = True
+            # External skills default to interactive (if not specified in frontmatter)
+            if step_file.config.interactive is None:
+                step_file.config.interactive = True
             return step_file
 
     if repo_root:

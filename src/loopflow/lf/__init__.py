@@ -158,7 +158,7 @@ def _format_step_list() -> str:
             )
         lines.append("")
 
-    # Global steps (e.g., ~/.claude/commands/rams.md)
+    # Global steps (user-installed at ~/.claude/commands/)
     if global_steps:
         lines.append(f"{c['green']}Global{c['reset']}")
         for name in sorted(global_steps):

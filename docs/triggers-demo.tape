@@ -26,7 +26,7 @@ Type "# Watch files and react to changes"
 Enter
 Sleep 1s
 
-Type "lfd subscribe src/api/ 'src/api/**' --flow ship"
+Type "lfd subscribe ship src/api/ -p src/api"
 Enter
 Sleep 2s
 
@@ -37,7 +37,7 @@ Type "# Schedule to run at 9am daily"
 Enter
 Sleep 1s
 
-Type "lfd schedule . '0 9 * * *' --flow ship"
+Type "lfd schedule ship . '0 9 * * *'"
 Enter
 Sleep 2s
 
@@ -70,11 +70,11 @@ Type "# Combine triggers as needed"
 Enter
 Sleep 1s
 
-Type "lfd subscribe . 'schema.graphql' --flow ship"
+Type "lfd subscribe ship . -p schema.graphql"
 Enter
 Sleep 1.5s
 
-Type "lfd schedule . '0 10 * * MON' --flow ship"
+Type "lfd schedule ship . '0 10 * * MON'"
 Enter
 Sleep 1.5s
 

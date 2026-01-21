@@ -9,7 +9,6 @@ import uuid
 from pathlib import Path
 
 from loopflow.lf.context import find_worktree_root
-from loopflow.lf.git import find_main_repo
 from loopflow.lfd.db import (
     get_loop,
     get_loop_by_area_repo,
@@ -314,9 +313,6 @@ def _run_loop(loop: Loop) -> None:
     run_loop_iterations(loop)
 
 
-def get_repo_from_cwd() -> Path | None:
-    """Get the main repo path from current working directory."""
-    worktree_root = find_worktree_root()
-    if not worktree_root:
-        return None
-    return find_main_repo(worktree_root) or worktree_root
+def get_wt_from_cwd() -> Path | None:
+    """Get the worktree path from current working directory."""
+    return find_worktree_root()

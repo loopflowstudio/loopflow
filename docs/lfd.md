@@ -11,8 +11,8 @@ title: lfd Command Reference
 
 ```bash
 lfd                          # show status (default)
-lfd loop <area> --flow <flow> # start continuous loop
-lfd flow <area> --flow <flow> # run single iteration
+lfd loop <flow> <area>       # start continuous loop
+lfd flow <flow> <area>       # run single iteration
 lfd status                   # show all loops
 ```
 
@@ -55,9 +55,9 @@ Stops the daemon and removes the launchd plist.
 Start a continuous homeostasis loop.
 
 ```bash
-lfd loop <area> --flow <flow>
-lfd loop src/api/ --flow ship
-lfd loop . --flow ship
+lfd loop <flow> <area>
+lfd loop ship src/api/
+lfd loop ship .
 ```
 
 Runs iterations until the PR limit is reached, then waits. Each iteration picks work based on the goal, runs a pipeline, and creates a PR.
@@ -77,7 +77,6 @@ pr: true
 
 | Flag | Description |
 |------|-------------|
-| `--flow, --pipeline` | Flow to run (from `.lf/flows/<name>.py`) |
 | `-g, --goal` | Goal to add (repeatable) |
 | `-l, --limit` | PR limit override (default: 5) |
 | `--merge-mode` | `pr` (accumulate) or `land` (auto-merge to main) |
@@ -88,16 +87,15 @@ pr: true
 Run a single iteration (one-shot).
 
 ```bash
-lfd flow <area> --flow <flow>
-lfd flow Maestro/ --flow ship -p spec.md
-lfd flow . --flow ship -v
+lfd flow <flow> <area>
+lfd flow ship Maestro/ -p spec.md
+lfd flow ship . -v
 ```
 
 Like `lfd loop` but stops after one iteration. Good for specific tasks.
 
 | Flag | Description |
 |------|-------------|
-| `--flow, --pipeline` | Flow to run (from `.lf/flows/<name>.py`) |
 | `-g, --goal` | Goal to add (repeatable) |
 | `-p, --project` | Project/prompt file to include |
 | `-v, --paste` | Include clipboard content |
@@ -123,16 +121,16 @@ lfd start --all              # include waiting loops
 Watch for file changes on main.
 
 ```bash
-lfd subscribe <area> <pathset> --flow <flow>
-lfd subscribe src/api/ "src/api/**" --flow ship
-lfd subscribe . "schema.graphql,src/resolvers/**" --flow ship
+lfd subscribe <flow> <area> -p <path>
+lfd subscribe ship src/api/ -p src/api
+lfd subscribe ship . -p schema.graphql -p src/resolvers
 ```
 
-When files matching the pathset change on main, triggers one iteration.
+When files change under the watched paths on main, triggers one iteration.
 
 | Flag | Description |
 |------|-------------|
-| `--flow, --pipeline` | Flow to run (from `.lf/flows/<name>.py`) |
+| `-p, --path` | Path to watch (repeatable) |
 | `-g, --goal` | Goal to add (repeatable) |
 
 ### lfd schedule
@@ -140,18 +138,16 @@ When files matching the pathset change on main, triggers one iteration.
 Run on a cron schedule.
 
 ```bash
-lfd schedule "<area>" "<cron>" --flow <flow>
-lfd schedule . "0 9 * * *" --flow ship
-lfd schedule Maestro/ "0 10 * * MON" --flow ship
+lfd schedule <flow> <area> "<cron>"
+lfd schedule ship . "0 9 * * *"
+lfd schedule ship Maestro/ "0 10 * * MON"
 ```
 
 Schedules have a 24-hour grace period for laptops—if your computer wakes after the scheduled time but within 24 hours, it still runs.
 
 | Flag | Description |
 |------|-------------|
-| `--flow, --pipeline` | Flow to run (from `.lf/flows/<name>.py`) |
 | `-g, --goal` | Goal to add (repeatable) |
-| `-p, --project` | Project file to include |
 
 ## Monitoring
 

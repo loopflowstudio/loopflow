@@ -4,6 +4,9 @@ Commands for managing agent loops.
 """
 
 import asyncio
+import json
+import socket
+import subprocess
 import sys
 from pathlib import Path
 
@@ -11,17 +14,19 @@ import typer
 
 from loopflow.lf.flows import load_flow
 from loopflow.lf.goals import goal_exists, list_goals, load_goal
+from loopflow.lf.logging import get_log_dir
 from loopflow.lfd.db import (
     delete_loop,
     get_loop,
     get_loop_runs,
     list_loops,
+    save_loop,
 )
 from loopflow.lfd.launchd import install as launchd_install
 from loopflow.lfd.launchd import is_running
 from loopflow.lfd.launchd import uninstall as launchd_uninstall
-from loopflow.lfd.loops import create_loop, get_repo_from_cwd, start_loop, stop_loop
-from loopflow.lfd.models import Loop, LoopStatus, LoopType
+from loopflow.lfd.loops import create_loop, get_wt_from_cwd, start_loop, stop_loop
+from loopflow.lfd.models import Loop, LoopStatus, LoopType, MergeMode
 from loopflow.lfd.server import run_server
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
@@ -136,7 +141,7 @@ def start(
     Without arguments, starts all idle loops. With --all, also starts waiting loops.
     """
     c = _colors()
-    repo = get_repo_from_cwd()
+    repo = get_wt_from_cwd()
 
     # Get loops to start
     if areas:
@@ -212,7 +217,7 @@ def loop(
         lfd loop ship .                                     # whole repo
     """
     c = _colors()
-    repo = get_repo_from_cwd()
+    repo = get_wt_from_cwd()
     if not repo:
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
@@ -257,13 +262,9 @@ def loop(
         lp.pr_limit = limit
         changed = True
     if merge_mode:
-        from loopflow.lfd.models import MergeMode
-
         lp.merge_mode = MergeMode(merge_mode)
         changed = True
     if changed:
-        from loopflow.lfd.db import save_loop
-
         save_loop(lp)
 
     # Start it
@@ -308,7 +309,7 @@ def flow(
         lfd flow ship . -v                            # whole repo with clipboard
     """
     c = _colors()
-    repo = get_repo_from_cwd()
+    repo = get_wt_from_cwd()
     if not repo:
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
@@ -335,8 +336,6 @@ def flow(
     # Handle clipboard paste - write to temp file if provided
     project_file = None
     if paste:
-        import subprocess
-
         result = subprocess.run(["pbpaste"], capture_output=True, text=True)
         if result.returncode == 0 and result.stdout.strip():
             import tempfile
@@ -375,7 +374,7 @@ def subscribe(
 ):
     """Subscribe to path changes on main."""
     c = _colors()
-    repo = get_repo_from_cwd()
+    repo = get_wt_from_cwd()
     if not repo:
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
@@ -417,7 +416,7 @@ def schedule(
 ):
     """Schedule a loop to run on cron."""
     c = _colors()
-    repo = get_repo_from_cwd()
+    repo = get_wt_from_cwd()
     if not repo:
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
@@ -455,9 +454,6 @@ def schedule(
 
 def _get_scheduler_status() -> dict | None:
     """Get scheduler status from daemon if running."""
-    import json
-    import socket
-
     socket_path = Path.home() / ".lf" / "lfd.sock"
     if not socket_path.exists():
         return None
@@ -684,11 +680,57 @@ def rm(
         raise typer.Exit(1)
 
 
+@app.command()
+def logs(
+    loop_id: str = typer.Argument(..., help="Loop ID"),
+    follow: bool = typer.Option(False, "-f", "--follow", help="Follow output (like tail -f)"),
+    lines: int = typer.Option(50, "-n", "--lines", help="Number of lines to show"),
+):
+    """Show logs for a loop's current run."""
+    c = _colors()
+    lp = get_loop(loop_id)
+    if not lp:
+        typer.echo(f"{c['red']}Error:{c['reset']} Loop '{loop_id}' not found", err=True)
+        raise typer.Exit(1)
+
+    # Get latest run for this loop
+    runs = get_loop_runs(lp.id, limit=1)
+    if not runs:
+        typer.echo(f"{c['dim']}No runs found for '{lp.area}'{c['reset']}")
+        return
+
+    run = runs[0]
+    if not run.worktree:
+        typer.echo(f"{c['dim']}No worktree for current run{c['reset']}")
+        return
+
+    # Find log file
+    worktree_path = Path(run.worktree)
+    log_dir = get_log_dir(worktree_path)
+
+    # Find most recent log file for this session
+    log_files = sorted(log_dir.glob("*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not log_files:
+        typer.echo(f"{c['dim']}No log files found in {log_dir}{c['reset']}")
+        return
+
+    log_file = log_files[0]
+    typer.echo(f"{c['dim']}Log: {log_file}{c['reset']}")
+    typer.echo("")
+
+    if follow:
+        # Use tail -f for following
+        subprocess.run(["tail", "-f", str(log_file)])
+    else:
+        # Show last N lines
+        subprocess.run(["tail", f"-{lines}", str(log_file)])
+
+
 @app.command("list-goals")
 def list_goals_cmd():
     """Show available goals in current repo."""
     c = _colors()
-    repo = get_repo_from_cwd()
+    repo = get_wt_from_cwd()
     if not repo:
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)

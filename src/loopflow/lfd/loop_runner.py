@@ -591,13 +591,6 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
             i += 1
             continue
 
-        if step.race is not None:
-            update_loop_run_status(
-                run.id, LoopStatus.ERROR, error="Race steps are not supported in lfd loops yet"
-            )
-            _cleanup_worktree(loop.repo, worktree_path, branch)
-            return False
-
         if step.choose is not None:
             try:
                 choice = choose_branch(

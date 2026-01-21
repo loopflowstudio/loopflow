@@ -43,7 +43,7 @@ lfops pr
 Define goals, review PRs when you wake.
 
 ```bash
-lfd loop product-engineer
+lfd loop Maestro/ --flow ship
 ```
 
 ![loops demo](loops-demo.gif)

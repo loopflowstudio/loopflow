@@ -80,8 +80,8 @@ lfops wt prune
 The loop hit its PR limit. Options:
 
 1. Review and merge outstanding PRs
-2. Increase the limit: `lfd loop <goal> --limit 10`
-3. Land accumulated work: see [Background Agents](agents.md) for branching model
+2. Increase the limit: `lfd loop <area> --flow <flow> --limit 10`
+3. Land accumulated work: see [Background Agents](agents.md) for loop management
 
 ## Context too large
 
@@ -121,7 +121,7 @@ lfops doctor
 
 ## Goal not found
 
-**Symptom:** `lfd loop <goal>` fails with "goal not found".
+**Symptom:** `lfd loop <area> --flow <flow> -g <goal>` fails with "goal not found".
 
 Goals must be in `.lf/goals/`. Check with `ls .lf/goals/` or see [Background Agents](agents.md) for how to create one.
 

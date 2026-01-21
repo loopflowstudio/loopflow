@@ -18,6 +18,7 @@ from loopflow.lf.skills import (
     list_all_skills,
     load_skill_prompt,
 )
+from loopflow.lf.tokens import count_tokens
 from loopflow.lf.voices import Voice, load_voice
 from loopflow.lfops.summarize import is_stale, load_summary
 
@@ -54,6 +55,165 @@ class PromptComponents:
     voices: list[Voice] | None = None
     image_files: list[Path] | None = None  # Images for visual context
     summaries: list[tuple[Path, str]] | None = None  # Pre-generated summaries
+
+
+@dataclass(frozen=True)
+class DroppedComponent:
+    """Component dropped to fit token limits."""
+
+    kind: str
+    name: str | None
+    tokens: int
+    reason: str | None = None
+
+
+def format_drop_label(drop: DroppedComponent) -> str:
+    """Format a dropped component for display."""
+    if drop.kind == "diff_files":
+        return "diff_files"
+    if drop.kind in ("docs", "summaries"):
+        return f"{drop.kind}:{drop.name}"
+    if drop.kind == "diff":
+        return "diff"
+    if drop.kind == "clipboard":
+        return "clipboard"
+    return drop.kind
+
+
+def trim_prompt_components(
+    components: PromptComponents, max_tokens: int
+) -> tuple[PromptComponents, list[DroppedComponent]]:
+    """Drop large components until the prompt fits the token budget."""
+    dropped: list[DroppedComponent] = []
+    total_tokens = _total_component_tokens(components)
+    if total_tokens <= max_tokens:
+        return components, dropped
+
+    diff_files_tokens = _diff_files_tokens(components)
+    if components.diff_files and diff_files_tokens > max_tokens:
+        components.diff_files = []
+        dropped.append(
+            DroppedComponent("diff_files", None, diff_files_tokens, reason="exceeds limit")
+        )
+        total_tokens = _total_component_tokens(components)
+        if total_tokens <= max_tokens:
+            return components, dropped
+
+    while total_tokens > max_tokens:
+        candidates = _drop_candidates(components)
+        if not candidates:
+            break
+
+        candidates.sort(key=lambda item: (-item.tokens, item.kind, item.name or ""))
+        candidate = candidates[0]
+        if candidate.tokens <= 0:
+            break
+
+        _apply_drop_candidate(components, candidate)
+        dropped.append(
+            DroppedComponent(
+                candidate.kind,
+                candidate.name,
+                candidate.tokens,
+                reason="greedy",
+            )
+        )
+        total_tokens -= candidate.tokens
+
+    if total_tokens > max_tokens and components.diff_files:
+        diff_files_tokens = _diff_files_tokens(components)
+        components.diff_files = []
+        dropped.append(
+            DroppedComponent("diff_files", None, diff_files_tokens, reason="last resort")
+        )
+
+    return components, dropped
+
+
+@dataclass(frozen=True)
+class _DropCandidate:
+    kind: str
+    name: str | None
+    tokens: int
+    path: Path | None = None
+
+
+def _drop_candidates(components: PromptComponents) -> list[_DropCandidate]:
+    candidates: list[_DropCandidate] = []
+
+    if components.docs:
+        for doc_path, content in components.docs:
+            candidates.append(
+                _DropCandidate("docs", doc_path.name, count_tokens(content), path=doc_path)
+            )
+
+    if components.summaries:
+        for summary_path, content in components.summaries:
+            candidates.append(
+                _DropCandidate(
+                    "summaries",
+                    str(summary_path),
+                    count_tokens(content),
+                    path=summary_path,
+                )
+            )
+
+    if components.diff:
+        candidates.append(_DropCandidate("diff", "branch diff", count_tokens(components.diff)))
+
+    if components.clipboard and components.clipboard.text:
+        candidates.append(
+            _DropCandidate(
+                "clipboard",
+                "pasted text",
+                count_tokens(components.clipboard.text),
+            )
+        )
+
+    return candidates
+
+
+def _apply_drop_candidate(components: PromptComponents, candidate: _DropCandidate) -> None:
+    if candidate.kind == "docs":
+        components.docs = [
+            (path, content) for path, content in components.docs if path != candidate.path
+        ]
+    elif candidate.kind == "summaries":
+        components.summaries = [
+            (path, content)
+            for path, content in components.summaries or []
+            if path != candidate.path
+        ]
+    elif candidate.kind == "diff":
+        components.diff = None
+    elif candidate.kind == "clipboard":
+        components.clipboard = None
+
+
+def _diff_files_tokens(components: PromptComponents) -> int:
+    if not components.diff_files:
+        return 0
+    return sum(count_tokens(content) for _path, content in components.diff_files)
+
+
+def _total_component_tokens(components: PromptComponents) -> int:
+    total = 0
+    if components.loopflow_doc:
+        total += count_tokens(components.loopflow_doc)
+    if components.docs:
+        total += sum(count_tokens(content) for _path, content in components.docs)
+    if components.diff:
+        total += count_tokens(components.diff)
+    if components.diff_files:
+        total += sum(count_tokens(content) for _path, content in components.diff_files)
+    if components.summaries:
+        total += sum(count_tokens(content) for _path, content in components.summaries)
+    if components.step:
+        _name, content = components.step
+        total += count_tokens(content)
+    if components.clipboard and components.clipboard.text:
+        total += count_tokens(components.clipboard.text)
+    return total
 
 
 def find_worktree_root(start: Optional[Path] = None) -> Path | None:
@@ -446,7 +606,6 @@ def gather_prompt_components(
     include_diff_files: bool = True,
     include_summaries: bool = True,
     config=None,
-    with_prompts: Optional[list[str]] = None,
 ) -> PromptComponents:
     """Gather all prompt components without assembling them."""
     docs = gather_docs(repo_root, repo_root, exclude)
@@ -484,12 +643,6 @@ def gather_prompt_components(
                 # Append plain args to step content
                 if plain_args:
                     step_content = step_content.rstrip() + "\n\n" + " ".join(plain_args)
-            # Append additional prompts if provided
-            if with_prompts:
-                for prompt_name in with_prompts:
-                    prompt_file = gather_step(repo_root, prompt_name, config)
-                    if prompt_file:
-                        step_content = step_content.rstrip() + "\n\n---\n\n" + prompt_file.content
             step_result = (step, step_content)
         else:
             step_result = (step, f"No step file found for '{step}'.")

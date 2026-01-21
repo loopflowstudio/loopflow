@@ -61,7 +61,7 @@ def load_roadmap(repo: Path) -> Roadmap:
             if item:
                 items.append(item)
 
-    # Sort by created_at (oldest first for FIFO-ish behavior, though agent judges)
+    # Sort by created_at (oldest first for FIFO-ish behavior, though agent decides)
     items.sort(key=lambda x: x.created_at)
     return Roadmap(items=items)
 

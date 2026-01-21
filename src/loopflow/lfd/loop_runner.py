@@ -13,12 +13,26 @@ import subprocess
 import sys
 import time
 import uuid
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
 from loopflow.lf.config import load_config, parse_model
 from loopflow.lf.context import format_prompt, gather_prompt_components
+from loopflow.lf.flow import (
+    build_join_prompt,
+    choose_branch,
+    collect_fork_diffs,
+    format_voice_section,
+    load_join_instructions,
+)
+from loopflow.lf.flows import (
+    FlowDef,
+    JoinConfig,
+    ResolvedStep,
+    load_flow,
+    resolve_flow,
+)
 from loopflow.lf.goals import build_effective_goals, render_goals
 from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lf.logging import write_prompt_file
@@ -42,6 +56,14 @@ from loopflow.lfd.models import Loop, LoopRun, LoopStatus, LoopType
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 SCHEDULER_POLL_INTERVAL = 30  # seconds between slot checks
+
+
+@dataclass
+class _VariantResult:
+    label: str
+    worktree: Path
+    exit_code: int
+    session_id: str
 
 
 def _iteration_branch_prefix(loop_main: str) -> str:
@@ -182,6 +204,267 @@ def run_loop_iterations(loop: Loop) -> None:
     update_loop_pid(loop.id, None)
 
 
+def _build_loop_prompt(
+    loop: Loop,
+    effective_goals: list,
+    worktree_path: Path,
+    step_name: str,
+    context_paths: list[str] | None,
+    extra_context: list[str] | None = None,
+    voices: list[str] | None = None,
+) -> tuple[str, str] | None:
+    merged_context = list(context_paths) if context_paths else []
+    if extra_context:
+        merged_context.extend(extra_context)
+
+    components = gather_prompt_components(
+        worktree_path,
+        step=step_name,
+        context=merged_context or None,
+        run_mode="auto",
+        voices=voices,
+    )
+
+    if not components.step:
+        return None
+
+    step_file, step_content = components.step
+    goal_section = render_goals(effective_goals)
+
+    if loop.type == LoopType.FLOW and loop.project_file:
+        try:
+            prompt_content = Path(loop.project_file).read_text()
+        except OSError:
+            prompt_content = None
+        if prompt_content:
+            goal_section += f"\n\n<lf:prompt>\n{prompt_content}\n</lf:prompt>"
+
+    combined = f"{goal_section}\n\n---\n\n{step_content}"
+    components = replace(components, step=(step_file, combined))
+    prompt = format_prompt(components)
+
+    return prompt, step_file
+
+
+def _run_collector_step(
+    prompt: str,
+    worktree_path: Path,
+    backend: str,
+    model_variant: str | None,
+    skip_permissions: bool,
+    session_id: str,
+    step_label: str,
+    autocommit: bool = True,
+    prefix: str | None = None,
+) -> int:
+    prompt_file = write_prompt_file(prompt)
+
+    command = build_model_command(
+        backend,
+        auto=True,
+        stream=True,
+        skip_permissions=skip_permissions,
+        yolo=skip_permissions,
+        model_variant=model_variant,
+        workdir=worktree_path,
+    )
+
+    collector_cmd = [
+        sys.executable,
+        "-m",
+        "loopflow.lfd.collector",
+        "--session-id",
+        session_id,
+        "--step",
+        step_label,
+        "--repo-root",
+        str(worktree_path),
+        "--prompt-file",
+        prompt_file,
+    ]
+    if autocommit:
+        collector_cmd.append("--autocommit")
+    if prefix:
+        collector_cmd.extend(["--prefix", prefix])
+    collector_cmd.extend(["--", *command])
+
+    process = subprocess.Popen(collector_cmd, cwd=worktree_path)
+    result_code = process.wait()
+
+    try:
+        Path(prompt_file).unlink()
+    except OSError:
+        pass
+
+    return result_code
+
+
+def _cleanup_variant_worktrees(repo_root: Path, results: list[_VariantResult]) -> None:
+    for r in results:
+        remove_worktree(repo_root, r.worktree.name.split(".")[-1])
+
+
+def _build_loop_inline_prompt(
+    loop: Loop,
+    effective_goals: list,
+    worktree_path: Path,
+    inline_text: str,
+    context_paths: list[str] | None,
+    voices: list[str] | None = None,
+) -> str | None:
+    components = gather_prompt_components(
+        worktree_path,
+        inline=inline_text,
+        context=context_paths,
+        run_mode="auto",
+        voices=voices,
+    )
+    if not components.step:
+        return None
+
+    step_file, step_content = components.step
+    goal_section = render_goals(effective_goals)
+
+    if loop.type == LoopType.FLOW and loop.project_file:
+        try:
+            prompt_content = Path(loop.project_file).read_text()
+        except OSError:
+            prompt_content = None
+        if prompt_content:
+            goal_section += f"\n\n<lf:prompt>\n{prompt_content}\n</lf:prompt>"
+
+    combined = f"{goal_section}\n\n---\n\n{step_content}"
+    components = replace(components, step=(step_file, combined))
+    return format_prompt(components)
+
+
+def _run_fork_join_group(
+    loop: Loop,
+    flow_name: str,
+    worktree_path: Path,
+    branch: str,
+    steps: list[ResolvedStep],
+    join_config: JoinConfig,
+    context_paths: list[str] | None,
+    effective_goals: list,
+    skip_permissions: bool,
+    backend: str,
+    model_variant: str | None,
+) -> int:
+    results: list[_VariantResult] = []
+    label_counts: dict[str, int] = {}
+
+    for step in steps:
+        if not step.step:
+            continue
+
+        step_backend = backend
+        step_variant = model_variant
+        step_context = list(context_paths) if context_paths else []
+        step_voices = None
+
+        if step.config:
+            if step.config.model:
+                step_backend, step_variant = parse_model(step.config.model)
+            if step.config.context:
+                step_context.extend(step.config.context)
+            if step.config.voice:
+                step_voices = step.config.voice
+
+        label_base = step.step
+        label_counts[label_base] = label_counts.get(label_base, 0) + 1
+        label = label_base
+        if label_counts[label_base] > 1:
+            label = f"{label_base}:{label_counts[label_base]}"
+
+        wt_name = f"_fork-{branch.replace('/', '-')}-{label.replace(':', '-')}"
+        try:
+            wt_path = create_worktree(loop.repo, wt_name, base=branch)
+        except Exception:
+            _cleanup_variant_worktrees(loop.repo, results)
+            return 1
+
+        subprocess.run(
+            ["git", "reset", "--hard", branch],
+            cwd=wt_path,
+            capture_output=True,
+        )
+        subprocess.run(["git", "clean", "-fd"], cwd=wt_path, capture_output=True)
+
+        prompt_result = _build_loop_prompt(
+            loop,
+            effective_goals,
+            wt_path,
+            step.step,
+            step_context or None,
+            voices=step_voices,
+        )
+        if not prompt_result:
+            remove_worktree(loop.repo, wt_path.name.split(".")[-1])
+            return 1
+
+        prompt, _step_file = prompt_result
+        session_id = str(uuid.uuid4())
+        step_label = f"{loop.area}:{step.step}:{label}"
+
+        exit_code = _run_collector_step(
+            prompt,
+            wt_path,
+            step_backend,
+            step_variant,
+            skip_permissions,
+            session_id,
+            step_label,
+            autocommit=True,
+            prefix=f"[{label}] ",
+        )
+
+        results.append(_VariantResult(label, wt_path, exit_code, session_id))
+
+    successes = [r for r in results if r.exit_code == 0]
+    if not successes:
+        _cleanup_variant_worktrees(loop.repo, results)
+        return 1
+
+    fork_worktrees = [(r.label, r.worktree) for r in successes]
+    join_prompt = build_join_prompt(
+        collect_fork_diffs(fork_worktrees),
+        load_join_instructions(join_config.step, loop.repo),
+        format_voice_section(join_config.voice, loop.repo),
+        flow_name,
+    )
+    join_prompt = _build_loop_inline_prompt(
+        loop,
+        effective_goals,
+        worktree_path,
+        join_prompt,
+        context_paths,
+        voices=None,
+    )
+    if not join_prompt:
+        _cleanup_variant_worktrees(loop.repo, results)
+        return 1
+
+    join_backend = backend
+    join_variant = model_variant
+    if join_config.agent_model:
+        join_backend, join_variant = parse_model(join_config.agent_model)
+
+    join_result = _run_collector_step(
+        join_prompt,
+        worktree_path,
+        join_backend,
+        join_variant,
+        skip_permissions,
+        str(uuid.uuid4()),
+        f"{loop.area}:join",
+        autocommit=True,
+    )
+
+    _cleanup_variant_worktrees(loop.repo, results)
+    return join_result
+
+
 def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool:
     """Run a single iteration of the loop.
 
@@ -220,6 +503,7 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
             "loop_id": loop.id,
             "area": loop.area,
             "goals": loop.goals,
+            "flow": loop.flow,
             "iteration": iteration,
         },
     )
@@ -230,14 +514,29 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
         update_loop_run_status(run.id, LoopStatus.ERROR, error="No valid goals found")
         return False
 
-    # Parse flow steps from first goal's pipeline or default
-    # TODO: Consider merging pipelines from multiple goals
-    flow = effective_goals[0].pipeline or "design,implement,polish"
-    tasks = [t.strip() for t in flow.split(",")]
-    if flow.startswith("@") and config and config.flows:
-        config_flow = config.flows.get(flow[1:])
-        if config_flow:
-            tasks = config_flow.steps
+    flow = loop.flow
+    if not flow:
+        update_loop_run_status(run.id, LoopStatus.ERROR, error="Flow is required")
+        _cleanup_worktree(loop.repo, worktree_path, branch)
+        return False
+
+    try:
+        flow_def = load_flow(flow, loop.repo)
+    except ValueError as exc:
+        update_loop_run_status(run.id, LoopStatus.ERROR, error=str(exc))
+        _cleanup_worktree(loop.repo, worktree_path, branch)
+        return False
+
+    if not flow_def:
+        update_loop_run_status(run.id, LoopStatus.ERROR, error=f"Unknown flow '{flow}'")
+        _cleanup_worktree(loop.repo, worktree_path, branch)
+        return False
+
+    resolved = resolve_flow(flow_def, loop.repo)
+    if not resolved:
+        update_loop_run_status(run.id, LoopStatus.ERROR, error=f"Empty flow '{flow}'")
+        _cleanup_worktree(loop.repo, worktree_path, branch)
+        return False
 
     # Get model configuration
     agent_model = config.agent_model if config else "claude:opus"
@@ -250,108 +549,150 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
 
     skip_permissions = config.yolo if config else False
 
-    # Run each step in the flow
-    for task_name in tasks:
-        update_loop_run_step(run.id, task_name)
-        notify_event(
-            "loop.step.started",
-            {
-                "loop_id": loop.id,
-                "step": task_name,
-                "iteration": iteration,
-            },
-        )
+    context_paths = [loop.area] if loop.area != "." else None
+    if not context_paths and effective_goals[0].area:
+        context_paths = effective_goals[0].area
 
-        # Gather prompt components
-        # Use area from loop (required), fall back to first goal's area
-        context_paths = [loop.area] if loop.area != "." else None
-        if not context_paths and effective_goals[0].area:
-            context_paths = effective_goals[0].area
+    i = 0
+    while i < len(resolved):
+        step = resolved[i]
+        if step.parallel_group is not None:
+            group_steps = []
+            group = step.parallel_group
+            while i < len(resolved) and resolved[i].parallel_group == group:
+                group_steps.append(resolved[i])
+                i += 1
 
-        components = gather_prompt_components(
-            worktree_path,
-            step=task_name,
-            context=context_paths,
-            run_mode="auto",
-        )
+            if i >= len(resolved) or resolved[i].join is None:
+                update_loop_run_status(
+                    run.id, LoopStatus.ERROR, error="Fork must be immediately followed by join"
+                )
+                _cleanup_worktree(loop.repo, worktree_path, branch)
+                return False
 
-        # Verify step file exists
-        if not components.step:
+            result_code = _run_fork_join_group(
+                loop,
+                flow_def.name,
+                worktree_path,
+                branch,
+                group_steps,
+                resolved[i].join.join,
+                context_paths,
+                effective_goals,
+                skip_permissions,
+                backend,
+                model_variant,
+            )
+            if result_code != 0:
+                update_loop_run_status(run.id, LoopStatus.ERROR, error="join failed")
+                _cleanup_worktree(loop.repo, worktree_path, branch)
+                return False
+
+            i += 1
+            continue
+
+        if step.race is not None:
             update_loop_run_status(
-                run.id, LoopStatus.ERROR, error=f"Step file not found: {task_name}"
+                run.id, LoopStatus.ERROR, error="Race steps are not supported in lfd loops yet"
             )
             _cleanup_worktree(loop.repo, worktree_path, branch)
             return False
 
-        # Inject goal content using render_goals (modes first, then roles)
-        step_file, step_content = components.step
-        goal_section = render_goals(effective_goals)
-
-        # For FLOW loops, inject project file content if present
-        if loop.type == LoopType.FLOW and loop.project_file:
+        if step.choose is not None:
             try:
-                prompt_content = Path(loop.project_file).read_text()
-                goal_section += f"\n\n<lf:prompt>\n{prompt_content}\n</lf:prompt>"
-            except OSError:
-                pass  # Project file may have been removed
+                choice = choose_branch(
+                    step.choose,
+                    flow_def.name,
+                    worktree_path,
+                    backend,
+                    model_variant,
+                    skip_permissions,
+                )
+            except RuntimeError as exc:
+                update_loop_run_status(run.id, LoopStatus.ERROR, error=str(exc))
+                _cleanup_worktree(loop.repo, worktree_path, branch)
+                return False
 
-        combined = f"{goal_section}\n\n---\n\n{step_content}"
-        components = replace(components, step=(step_file, combined))
+            branch_steps = step.choose.options[choice]
+            branch_flow = FlowDef.from_dict(f"{flow_def.name}:{choice}", {"steps": branch_steps})
+            branch_resolved = resolve_flow(branch_flow, loop.repo)
+            resolved = resolved[:i] + branch_resolved + resolved[i + 1 :]
+            continue
 
-        prompt = format_prompt(components)
-        prompt_file = write_prompt_file(prompt)
+        if step.join is not None:
+            update_loop_run_status(run.id, LoopStatus.ERROR, error="Join must follow fork")
+            _cleanup_worktree(loop.repo, worktree_path, branch)
+            return False
 
-        # Build and run command
-        command = build_model_command(
-            backend,
-            auto=True,
-            stream=True,
-            skip_permissions=skip_permissions,
-            yolo=skip_permissions,
-            model_variant=model_variant,
-            workdir=worktree_path,
+        if not step.step:
+            i += 1
+            continue
+
+        step_name = step.step
+        update_loop_run_step(run.id, step_name)
+        notify_event(
+            "loop.step.started",
+            {
+                "loop_id": loop.id,
+                "step": step_name,
+                "iteration": iteration,
+            },
         )
 
-        # Run via collector for output capture
-        collector_cmd = [
-            sys.executable,
-            "-m",
-            "loopflow.lfd.collector",
-            "--session-id",
+        step_backend = backend
+        step_variant = model_variant
+        step_context = list(context_paths) if context_paths else []
+        step_voices = None
+
+        if step.config:
+            if step.config.model:
+                step_backend, step_variant = parse_model(step.config.model)
+            if step.config.context:
+                step_context.extend(step.config.context)
+            if step.config.voice:
+                step_voices = step.config.voice
+
+        prompt_result = _build_loop_prompt(
+            loop,
+            effective_goals,
+            worktree_path,
+            step_name,
+            step_context or None,
+            voices=step_voices,
+        )
+        if not prompt_result:
+            update_loop_run_status(
+                run.id, LoopStatus.ERROR, error=f"Step file not found: {step_name}"
+            )
+            _cleanup_worktree(loop.repo, worktree_path, branch)
+            return False
+
+        prompt, _step_file = prompt_result
+        result_code = _run_collector_step(
+            prompt,
+            worktree_path,
+            step_backend,
+            step_variant,
+            skip_permissions,
             run.id,
-            "--step",
-            f"{loop.area}:{task_name}",
-            "--repo-root",
-            str(worktree_path),
-            "--prompt-file",
-            prompt_file,
-            "--autocommit",
-            "--",
-            *command,
-        ]
-
-        process = subprocess.Popen(collector_cmd, cwd=worktree_path)
-        result_code = process.wait()
-
-        # Clean up prompt file
-        try:
-            Path(prompt_file).unlink()
-        except OSError:
-            pass
+            f"{loop.area}:{step_name}",
+        )
 
         notify_event(
             "loop.step.completed",
             {
                 "loop_id": loop.id,
-                "step": task_name,
+                "step": step_name,
                 "status": "completed" if result_code == 0 else "error",
             },
         )
 
         if result_code != 0:
-            update_loop_run_status(run.id, LoopStatus.ERROR, error=f"{task_name} failed")
+            update_loop_run_status(run.id, LoopStatus.ERROR, error=f"{step_name} failed")
             _cleanup_worktree(loop.repo, worktree_path, branch)
             return False
+
+        i += 1
 
     # Clear current step
     update_loop_run_step(run.id, None)
@@ -374,6 +715,7 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
             "loop_id": loop.id,
             "area": loop.area,
             "goals": loop.goals,
+            "flow": loop.flow,
             "iteration": iteration,
             "pr_url": pr_url,
         },
@@ -403,10 +745,18 @@ def _create_pr_to_loop_main(
     try:
         message = generate_pr_message(worktree_path)
         title = f"[{loop.area_slug}] {message.title}"
-        body = f"Loop: {loop.area} [{loop.goals_display}]\nIteration: {iteration}\n\n{message.body}"
+        body = (
+            f"Loop: {loop.area} [{loop.goals_display}]\n"
+            f"Flow: {loop.flow_display}\n"
+            f"Iteration: {iteration}\n\n{message.body}"
+        )
     except Exception:
         title = f"[{loop.area_slug}] Iteration {iteration}"
-        body = f"Loop: {loop.area} [{loop.goals_display}]\nIteration: {iteration}"
+        body = (
+            f"Loop: {loop.area} [{loop.goals_display}]\n"
+            f"Flow: {loop.flow_display}\n"
+            f"Iteration: {iteration}"
+        )
 
     # Create PR
     cmd = [
@@ -494,7 +844,7 @@ def _land_to_main(loop: Loop) -> str | None:
             "--title",
             f"[{loop.area_slug}] Land accumulated work",
             "--body",
-            f"Auto-land from loop: {loop.area} [{loop.goals_display}]",
+            f"Auto-land from loop: {loop.area} [{loop.goals_display}] (flow: {loop.flow_display})",
         ],
         cwd=repo,
         capture_output=True,

@@ -26,57 +26,8 @@ def _init_db(db_path: Path) -> None:
 
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA journal_mode=WAL")
+    _run_migrations(conn)
     conn.close()
-
-
-def _get_applied_migrations(conn: sqlite3.Connection) -> set[str]:
-    """Get set of applied migration versions."""
-    try:
-        cursor = conn.execute("SELECT version FROM schema_migrations")
-        return {row[0] for row in cursor}
-    except sqlite3.OperationalError:
-        return set()
-
-
-def _record_migration(conn: sqlite3.Connection, version: str) -> None:
-    """Record that a migration was applied."""
-    conn.execute(
-        "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
-        (version, datetime.now().isoformat()),
-    )
-
-
-def _migrate_db(conn: sqlite3.Connection) -> None:
-    """Apply pending migrations in order."""
-    applied = _get_applied_migrations(conn)
-
-    for migration in MIGRATIONS:
-        if migration.version not in applied:
-            migration.apply(conn)
-            _record_migration(conn, migration.version)
-            conn.commit()
-
-
-def create_migration(description: str) -> Path:
-    """Create a new migration file with auto-generated timestamp."""
-    now = datetime.now()
-    slug = description.lower().replace(" ", "_")[:30]
-    filename = f"m_{now.strftime('%Y_%m_%d_%H%M%S')}_{slug}.py"
-
-    template = f'''"""
-{description}
-"""
-VERSION = "{now.isoformat()}"
-DESCRIPTION = "{description}"
-
-def apply(conn):
-    conn.executescript("""
-        -- TODO: migration SQL here
-    """)
-'''
-    path = Path(__file__).parent / "migrations" / filename
-    path.write_text(template)
-    return path
 
 
 def _get_db(db_path: Path | None = None) -> sqlite3.Connection:
@@ -84,17 +35,45 @@ def _get_db(db_path: Path | None = None) -> sqlite3.Connection:
     if db_path is None:
         db_path = DB_PATH
 
-    needs_init = not db_path.exists()
-
-    if needs_init:
+    if not db_path.exists():
         _init_db(db_path)
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
-
-    _migrate_db(conn)
-
+    _run_migrations(conn)
+    _ensure_loop_columns(conn)
     return conn
+
+
+def _run_migrations(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            version TEXT PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        )
+        """
+    )
+    applied = {row[0] for row in conn.execute("SELECT version FROM schema_migrations").fetchall()}
+    for migration in MIGRATIONS:
+        if migration.version in applied:
+            continue
+        migration.apply(conn)
+        conn.execute(
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+            (migration.version, datetime.now().isoformat()),
+        )
+        conn.commit()
+
+
+def _ensure_loop_columns(conn: sqlite3.Connection) -> None:
+    """Add missing columns to loops table for forward-compat."""
+    cursor = conn.execute("PRAGMA table_info(loops)")
+    columns = {row["name"] for row in cursor.fetchall()}
+
+    if "flow" not in columns:
+        conn.execute("ALTER TABLE loops ADD COLUMN flow TEXT")
+        conn.commit()
 
 
 # Process status checks
@@ -267,9 +246,9 @@ def save_loop(loop: Loop, db_path: Path | None = None) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO loops
-        (id, type, area, repo, loop_main, goals, status, iteration, pr_limit, merge_mode,
+        (id, type, area, repo, loop_main, goals, flow, status, iteration, pr_limit, merge_mode,
          project_file, pathset, cron, goal, pid, last_main_sha, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             loop.id,
@@ -278,6 +257,7 @@ def save_loop(loop: Loop, db_path: Path | None = None) -> None:
             str(loop.repo),
             loop.loop_main,
             json.dumps(loop.goals) if loop.goals else None,
+            loop.flow,
             loop.status.value,
             loop.iteration,
             loop.pr_limit,
@@ -444,6 +424,7 @@ def _loop_from_row(row: dict) -> Loop:
         repo=Path(row["repo"]),
         loop_main=row["loop_main"],
         goals=goals,
+        flow=row.get("flow"),
         status=LoopStatus(row["status"]),
         iteration=row.get("iteration", 0),
         pr_limit=row.get("pr_limit", 5),

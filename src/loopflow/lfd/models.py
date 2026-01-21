@@ -9,6 +9,13 @@ from pathlib import Path
 from loopflow.lf.models import Session as Session
 from loopflow.lf.models import SessionStatus as SessionStatus
 
+
+def area_to_slug(area: str) -> str:
+    """Convert area to slug: 'Maestro/' -> 'maestro', '.' -> 'root'."""
+    if area == ".":
+        return "root"
+    return area.rstrip("/").split("/")[-1].lower()
+
 # New loop-based models
 
 
@@ -39,13 +46,14 @@ class MergeMode(Enum):
 
 @dataclass
 class Loop:
-    """A loop configuration (area + goals combination)."""
+    """A loop configuration (area + flow + goals combination)."""
 
     id: str
     type: LoopType
     area: str  # PRIMARY identifier, required (e.g., "Maestro/", ".", "src/loopflow/")
     repo: Path
     loop_main: str
+    flow: str | None = None  # pipeline/flow name (e.g. "ship")
     goals: list[str] = field(default_factory=list)  # goal names from -g flags
     status: LoopStatus = LoopStatus.IDLE
     iteration: int = 0
@@ -70,10 +78,8 @@ class Loop:
 
     @property
     def area_slug(self) -> str:
-        """Return area as a slug for display/naming."""
-        if self.area == ".":
-            return "root"
-        return self.area.rstrip("/").split("/")[-1]
+        """Return area as a lowercase slug for display/naming."""
+        return area_to_slug(self.area)
 
     @property
     def goals_display(self) -> str:
@@ -81,6 +87,11 @@ class Loop:
         if not self.goals:
             return "adaptive"
         return ", ".join(self.goals)
+
+    @property
+    def flow_display(self) -> str:
+        """Return flow display string."""
+        return self.flow or "default"
 
 
 @dataclass

@@ -19,7 +19,7 @@ struct LoopRow: View {
                     .fill(loop.status.color)
                     .frame(width: 8, height: 8)
 
-                Text(loop.goalName)
+                Text(loop.areaDisplay)
                     .fontWeight(.medium)
                     .foregroundStyle(.white)
 
@@ -40,6 +40,12 @@ struct LoopRow: View {
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.6))
                 }
+            }
+
+            if !loop.detailText.isEmpty {
+                Text(loop.detailText)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.6))
             }
 
             if !loop.iterationText.isEmpty {

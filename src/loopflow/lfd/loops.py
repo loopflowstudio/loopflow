@@ -17,7 +17,7 @@ from loopflow.lfd.db import (
     update_loop_pid,
     update_loop_status,
 )
-from loopflow.lfd.models import Loop, LoopStatus, LoopType
+from loopflow.lfd.models import Loop, LoopStatus, LoopType, area_to_slug
 from loopflow.lfd.process import is_process_running
 
 # Word lists for generating unique branch names (matches Maestro/NameGenerator.swift)
@@ -112,13 +112,6 @@ def _branch_exists(repo: Path, branch: str) -> bool:
     return result.returncode == 0
 
 
-def _area_slug(area: str) -> str:
-    """Convert area to slug: 'Maestro/' -> 'maestro', '.' -> 'root'."""
-    if area == ".":
-        return "root"
-    return area.rstrip("/").split("/")[-1].lower()
-
-
 def _allocate_loop_main(repo: Path, area: str) -> str:
     """Return unique branch name based on area.
 
@@ -126,7 +119,7 @@ def _allocate_loop_main(repo: Path, area: str) -> str:
     - With area: maestro-swift-river-main
     - Root: root-swift-river-main
     """
-    slug = _area_slug(area)
+    slug = area_to_slug(area)
 
     # Try random word combinations until we find an available branch
     for _ in range(100):
@@ -162,6 +155,7 @@ def create_loop(
     area: str,
     repo: Path,
     goals: list[str] | None = None,
+    flow: str | None = None,
     project_file: str | None = None,
     pathset: str | None = None,
     cron: str | None = None,
@@ -172,10 +166,18 @@ def create_loop(
     # Check if loop already exists for this area
     existing = get_loop_by_area_repo(loop_type, area, repo)
     if existing:
-        # Update goals if changed
+        # Update goals/flow if changed
         if set(existing.goals) != set(goals):
             existing.goals = goals
-            save_loop(existing)
+        if flow and existing.flow != flow:
+            existing.flow = flow
+        if existing.project_file != project_file:
+            existing.project_file = project_file
+        if existing.pathset != pathset:
+            existing.pathset = pathset
+        if existing.cron != cron:
+            existing.cron = cron
+        save_loop(existing)
         return existing
 
     # Allocate and create personal-main branch based on area
@@ -188,6 +190,7 @@ def create_loop(
         area=area,
         repo=repo,
         loop_main=loop_main,
+        flow=flow,
         goals=goals,
         status=LoopStatus.IDLE,
         project_file=project_file,

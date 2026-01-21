@@ -1,6 +1,6 @@
 ---
 kind: mode
-pipeline: "@ship"
+pipeline: "ship"
 ---
 Build from approved roadmap specs.
 

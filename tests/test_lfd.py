@@ -341,6 +341,8 @@ def test_loop_model_defaults():
         repo=Path("/tmp/repo"),
         loop_main="test-coverage-main",
     )
+    assert loop.flow is None
+    assert loop.flow_display == "default"
     assert loop.status == LoopStatus.IDLE
     assert loop.iteration == 0
     assert loop.pr_limit == 5
@@ -396,6 +398,7 @@ def test_db_save_and_get_loop():
             area="src/test-coverage/",
             repo=Path("/tmp/repo"),
             loop_main="test-coverage-main",
+            flow="ship",
             status=LoopStatus.IDLE,
             iteration=0,
             pr_limit=5,
@@ -408,6 +411,7 @@ def test_db_save_and_get_loop():
         assert loaded.area == "src/test-coverage/"
         assert loaded.type == LoopType.LOOP
         assert loaded.loop_main == "test-coverage-main"
+        assert loaded.flow == "ship"
 
 
 def test_db_get_loop_short_id():

@@ -188,7 +188,9 @@ final class AppState {
             Loop(
                 id: "mock-loop-1",
                 type: .loop,
-                goalName: "test-coverage",
+                area: "src/tests/",
+                goals: ["test-coverage"],
+                flow: "ship",
                 repo: currentRepo?.path ?? "/tmp/demo",
                 loopMain: "loop-test-coverage",
                 status: .running,
@@ -203,7 +205,9 @@ final class AppState {
             Loop(
                 id: "mock-loop-2",
                 type: .loop,
-                goalName: "docs-sync",
+                area: "docs/",
+                goals: ["docs-sync"],
+                flow: "ship",
                 repo: currentRepo?.path ?? "/tmp/demo",
                 loopMain: "loop-docs-sync",
                 status: .idle,

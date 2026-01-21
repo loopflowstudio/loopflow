@@ -2,7 +2,7 @@
 
 import pytest
 
-from loopflow.lf.config import ConfigError, FlowConfig, load_config, parse_model
+from loopflow.lf.config import ConfigError, load_config, parse_model
 
 
 @pytest.fixture
@@ -16,29 +16,6 @@ def temp_repo(tmp_path):
 def test_load_config_returns_none_when_missing(temp_repo):
     """No config file means None."""
     assert load_config(temp_repo) is None
-
-
-def test_load_config_parses_flows(temp_repo):
-    """Flows are loaded from config.yaml."""
-    config_yaml = temp_repo / ".lf" / "config.yaml"
-    config_yaml.write_text("""
-flows:
-  ship:
-    steps:
-      - implement
-      - review
-      - commit
-  quick:
-    steps:
-      - implement
-""")
-
-    config = load_config(temp_repo)
-
-    assert config is not None
-    assert "ship" in config.flows
-    assert config.flows["ship"].steps == ["implement", "review", "commit"]
-    assert config.flows["quick"].steps == ["implement"]
 
 
 def test_load_config_empty_file(temp_repo):
@@ -63,7 +40,7 @@ def test_load_config_skip_permissions_flag(temp_repo):
 def test_load_config_skip_permissions_defaults_false(temp_repo):
     """yolo defaults to False when not set."""
     config_yaml = temp_repo / ".lf" / "config.yaml"
-    config_yaml.write_text("flows:\n  foo:\n    steps:\n      - task1\n")
+    config_yaml.write_text("agent_model: claude:opus\n")
 
     config = load_config(temp_repo)
 
@@ -89,36 +66,13 @@ pr: false
 def test_load_config_push_pr_defaults_false(temp_repo):
     """push and pr default to False when not set."""
     config_yaml = temp_repo / ".lf" / "config.yaml"
-    config_yaml.write_text("flows:\n  foo:\n    steps:\n      - task1\n")
+    config_yaml.write_text("agent_model: claude:opus\n")
 
     config = load_config(temp_repo)
 
     assert config is not None
     assert config.push is False
     assert config.pr is False
-
-
-def test_load_config_flow_push_pr_override(temp_repo):
-    """Flow-specific push/pr settings override globals."""
-    config_yaml = temp_repo / ".lf" / "config.yaml"
-    config_yaml.write_text("""
-push: false
-pr: false
-flows:
-  ship:
-    steps:
-      - implement
-      - review
-    pr: true
-""")
-
-    config = load_config(temp_repo)
-
-    assert config is not None
-    assert config.push is False
-    assert config.pr is False
-    assert config.flows["ship"].pr is True
-    assert config.flows["ship"].push is None
 
 
 def test_load_config_context_as_string(temp_repo):
@@ -247,9 +201,7 @@ def test_load_config_raises_on_invalid_schema(temp_repo):
     """Invalid config schema raises ConfigError."""
     config_yaml = temp_repo / ".lf" / "config.yaml"
     config_yaml.write_text("""
-flows:
-  ship:
-    wrong_field: value
+summary_tokens: nope
 """)
 
     with pytest.raises(ConfigError, match="Invalid config"):
@@ -380,35 +332,6 @@ interactive:
     assert config is not None
     assert "design" in config.interactive
     assert "iterate" in config.interactive
-
-
-# =============================================================================
-# FlowConfig tests
-# =============================================================================
-
-
-def test_flow_config():
-    """FlowConfig holds name and step list."""
-    f = FlowConfig(name="ship", steps=["implement", "review"])
-
-    assert f.name == "ship"
-    assert f.steps == ["implement", "review"]
-
-
-def test_flow_config_with_push_pr():
-    """FlowConfig can override push/pr settings."""
-    f = FlowConfig(name="ship", steps=["implement"], push=True, pr=True)
-
-    assert f.push is True
-    assert f.pr is True
-
-
-def test_flow_config_defaults_none():
-    """FlowConfig push/pr default to None."""
-    f = FlowConfig(name="ship", steps=["implement"])
-
-    assert f.push is None
-    assert f.pr is None
 
 
 # =============================================================================

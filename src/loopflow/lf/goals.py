@@ -82,7 +82,7 @@ def load_goal(repo: Path, goal_name: str) -> Goal | None:
         name=goal_name,
         content=content,
         area=area,
-        pipeline=frontmatter.get("pipeline", "@ship"),
+        pipeline=frontmatter.get("pipeline", "ship"),
         kind=kind,
     )
 

@@ -14,13 +14,14 @@ from loopflow.lf.config import load_config, parse_model
 from loopflow.lf.context import (
     PromptComponents,
     find_worktree_root,
+    format_drop_label,
     format_prompt,
     gather_prompt_components,
     gather_step,
+    trim_prompt_components,
 )
-from loopflow.lf.flow import _run_race_step, run_flow_def
-from loopflow.lf.flows import FlowDef, FlowStep, RaceConfig
-from loopflow.lf.flows import load_flow as load_flow_file
+from loopflow.lf.flow import run_flow_def
+from loopflow.lf.flows import load_flow
 from loopflow.lf.frontmatter import StepConfig, resolve_step_config
 from loopflow.lf.git import find_main_repo
 from loopflow.lf.launcher import (
@@ -30,14 +31,11 @@ from loopflow.lf.launcher import (
 )
 from loopflow.lf.logging import get_model_env, write_prompt_file
 from loopflow.lf.models import Session, SessionStatus, log_session_end, log_session_start
-from loopflow.lf.tokens import analyze_components
+from loopflow.lf.tokens import MAX_SAFE_TOKENS, analyze_components
 from loopflow.lf.voices import VoiceNotFoundError, parse_voice_arg
 from loopflow.lf.worktrees import WorktreeError, create
 
 ModelType = Optional[str]
-
-# Context limit: 120k leaves room for model response
-MAX_SAFE_TOKENS = 120_000
 
 # Template for new prompt files created by `lf add`
 PROMPT_TEMPLATE = """\
@@ -65,6 +63,19 @@ def _warn_if_context_too_large(tree) -> None:
                 err=True,
             )
         typer.echo(err=True)
+
+
+def _trim_components_if_needed(components: PromptComponents) -> PromptComponents:
+    """Trim prompt components to fit within the safe token limit."""
+    trimmed, dropped = trim_prompt_components(components, MAX_SAFE_TOKENS)
+    if dropped:
+        dropped_summary = ", ".join(format_drop_label(item) for item in dropped)
+        typer.echo(
+            f"\033[33m⚠ Context trimmed to fit {MAX_SAFE_TOKENS:,} tokens. "
+            f"Dropped: {dropped_summary}\033[0m",
+            err=True,
+        )
+    return trimmed
 
 
 def _copy_to_clipboard(text: str) -> None:
@@ -252,6 +263,8 @@ def _launch_interactive_default(
     if not include_docs:
         components.docs = []
 
+    components = _trim_components_if_needed(components)
+
     result_code = _execute_step(
         "chat",  # Step name for session tracking
         repo_root,
@@ -271,8 +284,8 @@ def run(
     interactive: bool = typer.Option(
         False, "-i", "-I", "--interactive", help="Override to run in interactive mode"
     ),
-    context: list[str] = typer.Option(
-        None, "-x", "-X", "--context", help="Additional files for context"
+    path: list[str] = typer.Option(
+        None, "-p", "-P", "--path", help="Additional files to include"
     ),
     worktree: str = typer.Option(
         None, "-w", "-W", "--worktree", help="Create worktree and run step there"
@@ -304,12 +317,6 @@ def run(
     parallel: str = typer.Option(
         None, "--parallel", help="Run parallel with multiple models (e.g., 'claude,codex')"
     ),
-    race: str = typer.Option(
-        None, "--race", help="Race models, auto-judge winner (e.g., 'claude,codex,gemini')"
-    ),
-    with_prompt: list[str] = typer.Option(
-        None, "-p", "-P", "--prompt", help="Append additional prompt files (e.g., -p nux)"
-    ),
     chrome: Optional[bool] = typer.Option(
         None, "--chrome/--no-chrome", help="Enable Chrome browser automation"
     ),
@@ -325,33 +332,8 @@ def run(
         if parallel:
             typer.echo("Error: --parallel requires a git repository", err=True)
             raise typer.Exit(1)
-        if race:
-            typer.echo("Error: --race requires a git repository", err=True)
-            raise typer.Exit(1)
         # Use cwd as fallback for non-git usage
         repo_root = Path.cwd()
-
-    # Handle race execution
-    if race:
-        models = [m.strip() for m in race.split(",")]
-        config = load_config(repo_root)
-        main_repo = find_main_repo(repo_root) or repo_root
-        skip_permissions = config.yolo if config else False
-        exclude = list(config.exclude) if config and config.exclude else None
-
-        race_config = RaceConfig(models=models)
-        result_code = _run_race_step(
-            step,
-            race_config,
-            repo_root,
-            main_repo,
-            exclude,
-            skip_permissions,
-            list(context) if context else None,
-            1,  # step_num
-            1,  # total_steps
-        )
-        raise typer.Exit(result_code)
 
     # Handle parallel execution (creates persistent worktrees)
     if parallel:
@@ -361,9 +343,9 @@ def run(
             cmd = ["lf", step, "-w", wt_name, "--model", model_name, "-a"]
             if ctx.args:
                 cmd.extend(ctx.args)
-            if context:
-                for ctx_file in context:
-                    cmd.extend(["-x", ctx_file])
+            if path:
+                for p in path:
+                    cmd.extend(["-p", p])
 
             subprocess.Popen(
                 cmd,
@@ -391,7 +373,7 @@ def run(
         return _launch_interactive_default(
             repo_root,
             config,
-            context=list(context) if context else None,
+            context=list(path) if path else None,
             model=model,
             voice=voice,
             paste=paste,
@@ -414,7 +396,7 @@ def run(
         cli_interactive=True if interactive else None,
         cli_auto=True if auto else None,
         cli_model=model,
-        cli_context=list(context) if context else None,
+        cli_context=list(path) if path else None,
         cli_voice=cli_voices or None,
     )
 
@@ -471,7 +453,6 @@ def run(
             include_diff_files=include_diff_files,
             include_summaries=include_summaries,
             config=config,
-            with_prompts=list(with_prompt) if with_prompt else None,
         )
     except VoiceNotFoundError as e:
         typer.echo(f"Error: {e}", err=True)
@@ -480,6 +461,8 @@ def run(
     # Apply docs flag
     if not include_docs:
         components.docs = []
+
+    components = _trim_components_if_needed(components)
 
     if copy:
         prompt = format_prompt(components)
@@ -523,8 +506,8 @@ def inline(
     interactive: bool = typer.Option(
         False, "-i", "-I", "--interactive", help="Override to run in interactive mode"
     ),
-    context: list[str] = typer.Option(
-        None, "-x", "-X", "--context", help="Additional files for context"
+    path: list[str] = typer.Option(
+        None, "-p", "-P", "--path", help="Additional files to include"
     ),
     copy: bool = typer.Option(
         False, "-c", "-C", "--copy", help="Copy prompt to clipboard and show token breakdown"
@@ -573,7 +556,7 @@ def inline(
         cli_interactive=True if interactive else None,
         cli_auto=True if auto else None,
         cli_model=model,
-        cli_context=list(context) if context else None,
+        cli_context=list(path) if path else None,
         cli_voice=cli_voices or None,
     )
 
@@ -631,6 +614,8 @@ def inline(
     # Apply docs flag
     if not include_docs:
         components.docs = []
+
+    components = _trim_components_if_needed(components)
 
     if copy:
         prompt_text = format_prompt(components)
@@ -725,6 +710,8 @@ def cp(
     if not include_docs:
         components.docs = []
 
+    components = _trim_components_if_needed(components)
+
     prompt = format_prompt(components)
     _copy_to_clipboard(prompt)
 
@@ -759,9 +746,9 @@ def add(
 
 
 def flow(
-    name: str = typer.Argument(help="Flow name from config.yaml or .lf/flows/"),
-    context: list[str] = typer.Option(
-        None, "-x", "-X", "--context", help="Context files for all steps"
+    name: str = typer.Argument(help="Flow name from .lf/flows/"),
+    path: list[str] = typer.Option(
+        None, "-p", "-P", "--path", help="Additional files for all steps"
     ),
     worktree: str = typer.Option(
         None, "-w", "-W", "--worktree", help="Create worktree and run flow there"
@@ -788,12 +775,10 @@ def flow(
 
     config = load_config(repo_root)
 
-    # Check for flow in .lf/flows/ first, then config.yaml
-    flow_def = load_flow_file(name, repo_root)
-    config_flow = config.flows.get(name) if config else None
+    flow_def = load_flow(name, repo_root)
 
-    if not flow_def and not config_flow:
-        typer.echo(f"Error: Flow '{name}' not found in .lf/flows/ or .lf/config.yaml", err=True)
+    if not flow_def:
+        typer.echo(f"Error: Flow '{name}' not found in .lf/flows/", err=True)
         raise typer.Exit(1)
 
     agent_model = model or (config.agent_model if config else "claude:opus")
@@ -818,17 +803,14 @@ def flow(
         repo_root = worktree_path
 
     all_context = list(config.context) if config and config.context else []
-    if context:
-        all_context.extend(context)
+    if path:
+        all_context.extend(path)
 
     exclude = list(config.exclude) if config and config.exclude else None
 
     if copy:
         # Show tokens for first step in flow
-        if flow_def:
-            first_step = flow_def.steps[0].step if flow_def.steps else None
-        else:
-            first_step = config_flow.steps[0] if config_flow.steps else None
+        first_step = flow_def.steps[0].step if flow_def.steps else None
 
         if not first_step:
             typer.echo("Error: Flow has no steps", err=True)
@@ -845,6 +827,7 @@ def flow(
             include_diff_files=config.diff_files if config else True,
             config=config,
         )
+        components = _trim_components_if_needed(components)
         prompt = format_prompt(components)
         _copy_to_clipboard(prompt)
         tree = analyze_components(components)
@@ -858,16 +841,6 @@ def flow(
     pr_enabled = pr if pr is not None else (config.pr if config else False)
     skip_permissions = config.yolo if config else False
     chrome_enabled = config.chrome if config else False
-
-    # Convert config.yaml flow to FlowDef if needed
-    if not flow_def:
-        # FlowConfig.push/pr override global settings
-        push_enabled = config_flow.push if config_flow.push is not None else push_enabled
-        pr_enabled = config_flow.pr if config_flow.pr is not None else pr_enabled
-        flow_def = FlowDef(
-            name=name,
-            steps=[FlowStep(step=t) for t in config_flow.steps],
-        )
 
     exit_code = run_flow_def(
         flow_def,

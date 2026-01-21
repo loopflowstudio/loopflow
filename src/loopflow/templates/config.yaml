@@ -29,8 +29,4 @@ push: false
 #     tokens: 16000
 #     model: gemini
 
-# Example flows
-# flows:
-#   ship:
-#     steps: [implement, rebase, polish, draft_commit]
-#     pr: true
+# Flows live in .lf/flows/<name>.py

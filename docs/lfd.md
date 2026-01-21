@@ -11,8 +11,8 @@ title: lfd Command Reference
 
 ```bash
 lfd                          # show status (default)
-lfd loop <goal>              # start continuous loop
-lfd flow <goal>              # run single iteration
+lfd loop <area> --flow <flow> # start continuous loop
+lfd flow <area> --flow <flow> # run single iteration
 lfd status                   # show all loops
 ```
 
@@ -55,16 +55,30 @@ Stops the daemon and removes the launchd plist.
 Start a continuous homeostasis loop.
 
 ```bash
-lfd loop <goal>
-lfd loop test-coverage
-lfd loop api-cleanup -a src/api/
+lfd loop <area> --flow <flow>
+lfd loop src/api/ --flow ship
+lfd loop . --flow ship
 ```
 
 Runs iterations until the PR limit is reached, then waits. Each iteration picks work based on the goal, runs a pipeline, and creates a PR.
 
+Flows live in `.lf/flows/<name>.py`:
+
+```yaml
+---
+steps:
+  - implement
+  - rebase
+  - polish
+  - draft_commit
+pr: true
+---
+```
+
 | Flag | Description |
 |------|-------------|
-| `-a, --area` | Area override (pathset) |
+| `--flow, --pipeline` | Flow to run (from `.lf/flows/<name>.py`) |
+| `-g, --goal` | Goal to add (repeatable) |
 | `-l, --limit` | PR limit override (default: 5) |
 | `--merge-mode` | `pr` (accumulate) or `land` (auto-merge to main) |
 | `-f, --foreground` | Run in foreground instead of background |
@@ -74,18 +88,19 @@ Runs iterations until the PR limit is reached, then waits. Each iteration picks 
 Run a single iteration (one-shot).
 
 ```bash
-lfd flow <goal>
-lfd flow designer -p spec.md
-lfd flow quick-fix -v
+lfd flow <area> --flow <flow>
+lfd flow Maestro/ --flow ship -p spec.md
+lfd flow . --flow ship -v
 ```
 
 Like `lfd loop` but stops after one iteration. Good for specific tasks.
 
 | Flag | Description |
 |------|-------------|
+| `--flow, --pipeline` | Flow to run (from `.lf/flows/<name>.py`) |
+| `-g, --goal` | Goal to add (repeatable) |
 | `-p, --project` | Project/prompt file to include |
 | `-v, --paste` | Include clipboard content |
-| `-r` | Area override (pathset) |
 
 ### lfd start
 
@@ -93,7 +108,7 @@ Start multiple loops at once.
 
 ```bash
 lfd start                    # start all idle loops
-lfd start goal1 goal2        # start specific goals
+lfd start src/api/ Maestro/  # start specific areas
 lfd start --all              # include waiting loops
 ```
 
@@ -108,33 +123,35 @@ lfd start --all              # include waiting loops
 Watch for file changes on main.
 
 ```bash
-lfd subscribe <pathset> <goal>
-lfd subscribe "src/api/**" api-docs
-lfd subscribe "schema.graphql,src/resolvers/**" codegen
+lfd subscribe <area> <pathset> --flow <flow>
+lfd subscribe src/api/ "src/api/**" --flow ship
+lfd subscribe . "schema.graphql,src/resolvers/**" --flow ship
 ```
 
 When files matching the pathset change on main, triggers one iteration.
 
 | Flag | Description |
 |------|-------------|
-| `-r` | Area override (pathset) |
+| `--flow, --pipeline` | Flow to run (from `.lf/flows/<name>.py`) |
+| `-g, --goal` | Goal to add (repeatable) |
 
 ### lfd schedule
 
 Run on a cron schedule.
 
 ```bash
-lfd schedule "<cron>" <goal>
-lfd schedule "0 9 * * *" morning-triage
-lfd schedule "0 10 * * MON" weekly-review
+lfd schedule "<area>" "<cron>" --flow <flow>
+lfd schedule . "0 9 * * *" --flow ship
+lfd schedule Maestro/ "0 10 * * MON" --flow ship
 ```
 
 Schedules have a 24-hour grace period for laptops—if your computer wakes after the scheduled time but within 24 hours, it still runs.
 
 | Flag | Description |
 |------|-------------|
+| `--flow, --pipeline` | Flow to run (from `.lf/flows/<name>.py`) |
+| `-g, --goal` | Goal to add (repeatable) |
 | `-p, --project` | Project file to include |
-| `-r` | Area override (pathset) |
 
 ## Monitoring
 
@@ -147,7 +164,7 @@ lfd status                   # all loops
 lfd status <loop-id>         # specific loop details
 ```
 
-Shows loop type, goal, status, iteration count, and outstanding PRs.
+Shows loop type, area, status, iteration count, and outstanding PRs.
 
 ### lfd prs
 

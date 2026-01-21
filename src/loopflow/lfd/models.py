@@ -39,13 +39,14 @@ class MergeMode(Enum):
 
 @dataclass
 class Loop:
-    """A loop configuration (area + goals combination)."""
+    """A loop configuration (area + flow + goals combination)."""
 
     id: str
     type: LoopType
     area: str  # PRIMARY identifier, required (e.g., "Maestro/", ".", "src/loopflow/")
     repo: Path
     loop_main: str
+    flow: str | None = None  # pipeline/flow name (e.g. "ship")
     goals: list[str] = field(default_factory=list)  # goal names from -g flags
     status: LoopStatus = LoopStatus.IDLE
     iteration: int = 0
@@ -81,6 +82,11 @@ class Loop:
         if not self.goals:
             return "adaptive"
         return ", ".join(self.goals)
+
+    @property
+    def flow_display(self) -> str:
+        """Return flow display string."""
+        return self.flow or "default"
 
 
 @dataclass

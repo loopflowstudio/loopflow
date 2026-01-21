@@ -19,6 +19,7 @@ from pathlib import Path
 
 from loopflow.lf.config import load_config, parse_model
 from loopflow.lf.context import format_prompt, gather_prompt_components
+from loopflow.lf.flows import load_flow, resolve_flow
 from loopflow.lf.goals import build_effective_goals, render_goals
 from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lf.logging import write_prompt_file
@@ -107,6 +108,19 @@ def _scheduler_acquire(run_id: str) -> tuple[bool, str | None]:
 def _scheduler_release(run_id: str) -> None:
     """Release a scheduler slot."""
     _scheduler_call("scheduler.release", {"run_id": run_id})
+
+
+def _resolve_flow_steps(flow: str, repo_root: Path) -> list[str]:
+    """Resolve a flow name into ordered steps."""
+    flow = flow.strip()
+    if not flow:
+        return []
+
+    flow_def = load_flow(flow, repo_root)
+    if not flow_def:
+        return []
+    resolved = resolve_flow(flow_def, repo_root)
+    return [step.step for step in resolved if step.step]
 
 
 def run_loop_iterations(loop: Loop) -> None:
@@ -220,6 +234,7 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
             "loop_id": loop.id,
             "area": loop.area,
             "goals": loop.goals,
+            "flow": loop.flow,
             "iteration": iteration,
         },
     )
@@ -230,14 +245,25 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
         update_loop_run_status(run.id, LoopStatus.ERROR, error="No valid goals found")
         return False
 
-    # Parse flow steps from first goal's pipeline or default
+    # Resolve flow steps from loop flow or goal pipeline (fallback)
     # TODO: Consider merging pipelines from multiple goals
-    flow = effective_goals[0].pipeline or "design,implement,polish"
-    tasks = [t.strip() for t in flow.split(",")]
-    if flow.startswith("@") and config and config.flows:
-        config_flow = config.flows.get(flow[1:])
-        if config_flow:
-            tasks = config_flow.steps
+    flow = loop.flow
+    if not flow:
+        update_loop_run_status(run.id, LoopStatus.ERROR, error="Flow is required")
+        _cleanup_worktree(loop.repo, worktree_path, branch)
+        return False
+
+    try:
+        tasks = _resolve_flow_steps(flow, loop.repo)
+    except ValueError as exc:
+        update_loop_run_status(run.id, LoopStatus.ERROR, error=str(exc))
+        _cleanup_worktree(loop.repo, worktree_path, branch)
+        return False
+
+    if not tasks:
+        update_loop_run_status(run.id, LoopStatus.ERROR, error=f"Unknown flow '{flow}'")
+        _cleanup_worktree(loop.repo, worktree_path, branch)
+        return False
 
     # Get model configuration
     agent_model = config.agent_model if config else "claude:opus"
@@ -374,6 +400,7 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
             "loop_id": loop.id,
             "area": loop.area,
             "goals": loop.goals,
+            "flow": loop.flow,
             "iteration": iteration,
             "pr_url": pr_url,
         },
@@ -403,10 +430,18 @@ def _create_pr_to_loop_main(
     try:
         message = generate_pr_message(worktree_path)
         title = f"[{loop.area_slug}] {message.title}"
-        body = f"Loop: {loop.area} [{loop.goals_display}]\nIteration: {iteration}\n\n{message.body}"
+        body = (
+            f"Loop: {loop.area} [{loop.goals_display}]\n"
+            f"Flow: {loop.flow_display}\n"
+            f"Iteration: {iteration}\n\n{message.body}"
+        )
     except Exception:
         title = f"[{loop.area_slug}] Iteration {iteration}"
-        body = f"Loop: {loop.area} [{loop.goals_display}]\nIteration: {iteration}"
+        body = (
+            f"Loop: {loop.area} [{loop.goals_display}]\n"
+            f"Flow: {loop.flow_display}\n"
+            f"Iteration: {iteration}"
+        )
 
     # Create PR
     cmd = [
@@ -494,7 +529,7 @@ def _land_to_main(loop: Loop) -> str | None:
             "--title",
             f"[{loop.area_slug}] Land accumulated work",
             "--body",
-            f"Auto-land from loop: {loop.area} [{loop.goals_display}]",
+            f"Auto-land from loop: {loop.area} [{loop.goals_display}] (flow: {loop.flow_display})",
         ],
         cwd=repo,
         capture_output=True,

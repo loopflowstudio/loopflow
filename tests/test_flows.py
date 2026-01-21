@@ -4,15 +4,8 @@ import tempfile
 from pathlib import Path
 
 from loopflow.lf.flow import _count_logical_steps
-from loopflow.lf.flows import (
-    FlowDef,
-    FlowStep,
-    RaceConfig,
-    StepConfig,
-    load_flow,
-    resolve_flow,
-    save_flow,
-)
+from loopflow.lf.flows import FlowDef, FlowStep, RaceConfig, load_flow, resolve_flow, save_flow
+from loopflow.lf.frontmatter import StepConfig
 
 
 def test_flow_step_from_string():
@@ -82,20 +75,53 @@ def test_load_flow():
         flows_dir = repo / ".lf" / "flows"
         flows_dir.mkdir(parents=True)
 
-        (flows_dir / "ship.yaml").write_text("""
-steps:
-  - design
-  - implement
-  - parallel:
-      - test
-      - lint
-  - land
+        (flows_dir / "ship.py").write_text("""
+def flow():
+    return {
+        "steps": [
+            "design",
+            "implement",
+            {"parallel": ["test", "lint"]},
+            "land",
+        ]
+    }
 """)
 
         flow = load_flow("ship", repo)
         assert flow is not None
         assert flow.name == "ship"
         assert len(flow.steps) == 4
+
+
+def test_load_flow_with_flow_list_helper():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        repo = Path(tmpdir)
+        flows_dir = repo / ".lf" / "flows"
+        flows_dir.mkdir(parents=True)
+
+        (flows_dir / "simple.py").write_text("""
+def flow():
+    return Flow("implement", "review")
+""")
+
+        flow = load_flow("simple", repo)
+        assert flow is not None
+        assert [step.step for step in flow.steps] == ["implement", "review"]
+
+
+def test_load_flow_with_named_constant():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        repo = Path(tmpdir)
+        flows_dir = repo / ".lf" / "flows"
+        flows_dir.mkdir(parents=True)
+
+        (flows_dir / "ship.py").write_text("""
+SHIP = Flow("design", "implement")
+""")
+
+        flow = load_flow("ship", repo)
+        assert flow is not None
+        assert [step.step for step in flow.steps] == ["design", "implement"]
 
 
 def test_load_flow_not_found():
@@ -163,10 +189,9 @@ def test_resolve_flow_nested():
         flows_dir.mkdir(parents=True)
 
         # Create a nested flow
-        (flows_dir / "inner.yaml").write_text("""
-steps:
-  - test
-  - lint
+        (flows_dir / "inner.py").write_text("""
+def flow():
+    return {"steps": ["test", "lint"]}
 """)
 
         flow = FlowDef(
@@ -243,16 +268,22 @@ def test_load_flow_with_config():
         flows_dir = repo / ".lf" / "flows"
         flows_dir.mkdir(parents=True)
 
-        (flows_dir / "ship.yaml").write_text("""
-steps:
-  - step: design
-  - step: implement
-    config:
-      model: claude:opus
-      voice: architect
-      context:
-        - src/schema.py
-  - step: review
+        (flows_dir / "ship.py").write_text("""
+def flow():
+    return {
+        "steps": [
+            "design",
+            {
+                "step": "implement",
+                "config": {
+                    "model": "claude:opus",
+                    "voice": "architect",
+                    "context": ["src/schema.py"],
+                },
+            },
+            "review",
+        ]
+    }
 """)
 
         flow = load_flow("ship", repo)
@@ -298,7 +329,7 @@ def test_save_flow():
 
         path = save_flow(flow, repo)
         assert path.exists()
-        assert path.name == "test.yaml"
+        assert path.name == "test.py"
 
         # Load it back and verify
         loaded = load_flow("test", repo)
@@ -387,13 +418,15 @@ def test_load_flow_with_parallel():
         flows_dir = repo / ".lf" / "flows"
         flows_dir.mkdir(parents=True)
 
-        (flows_dir / "verify.yaml").write_text("""
-steps:
-  - implement
-  - parallel:
-      - step: test
-      - step: lint
-  - commit
+        (flows_dir / "verify.py").write_text("""
+def flow():
+    return {
+        "steps": [
+            "implement",
+            {"parallel": [{"step": "test"}, {"step": "lint"}]},
+            "commit",
+        ]
+    }
 """)
 
         flow = load_flow("verify", repo)
@@ -496,14 +529,18 @@ def test_load_flow_with_race():
         flows_dir = repo / ".lf" / "flows"
         flows_dir.mkdir(parents=True)
 
-        (flows_dir / "raceship.yaml").write_text("""
-steps:
-  - design
-  - step: implement
-    race:
-      - claude:opus
-      - codex:o3
-  - review
+        (flows_dir / "raceship.py").write_text("""
+def flow():
+    return {
+        "steps": [
+            "design",
+            {
+                "step": "implement",
+                "race": ["claude:opus", "codex:o3"],
+            },
+            "review",
+        ]
+    }
 """)
 
         flow = load_flow("raceship", repo)

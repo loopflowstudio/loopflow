@@ -15,7 +15,7 @@ def test_load_goal_user_defined(tmp_path):
     goals_dir = repo / ".lf" / "goals"
     goals_dir.mkdir(parents=True)
     (goals_dir / "my-goal.md").write_text("""---
-pipeline: @ship
+pipeline: ship
 area: api
 ---
 
@@ -28,7 +28,7 @@ Goal content here.
 
     assert goal is not None
     assert goal.name == "my-goal"
-    assert goal.pipeline == "@ship"
+    assert goal.pipeline == "ship"
     assert goal.area == ["api"]
     assert "# My Goal" in goal.content
 
@@ -44,7 +44,7 @@ def test_load_goal_falls_back_to_builtin(tmp_path):
     assert goal is not None
     assert goal.name == "adaptive"
     # Note: builtin templates have quoted values which our simple parser preserves
-    assert "@ship" in goal.pipeline
+    assert "ship" in goal.pipeline
 
 
 def test_load_goal_user_overrides_builtin(tmp_path):
@@ -53,7 +53,7 @@ def test_load_goal_user_overrides_builtin(tmp_path):
     goals_dir = repo / ".lf" / "goals"
     goals_dir.mkdir(parents=True)
     (goals_dir / "adaptive.md").write_text("""---
-pipeline: @custom
+pipeline: custom
 ---
 
 # Custom Adaptive
@@ -63,7 +63,7 @@ My custom version.
 
     goal = load_goal(repo, "adaptive")
 
-    assert goal.pipeline == "@custom"
+    assert goal.pipeline == "custom"
     assert "Custom Adaptive" in goal.content
 
 
@@ -117,7 +117,7 @@ def test_load_goal_content_backwards_compat(tmp_path):
     goals_dir = repo / ".lf" / "goals"
     goals_dir.mkdir(parents=True)
     (goals_dir / "simple.md").write_text("""---
-pipeline: "@ship"
+pipeline: "ship"
 ---
 
 # Simple Goal
@@ -218,7 +218,7 @@ def test_load_goal_empty_name(tmp_path):
 
 
 def test_load_goal_default_pipeline(tmp_path):
-    """Goal defaults to @ship pipeline when not specified."""
+    """Goal defaults to ship pipeline when not specified."""
     repo = tmp_path / "repo"
     goals_dir = repo / ".lf" / "goals"
     goals_dir.mkdir(parents=True)
@@ -226,4 +226,4 @@ def test_load_goal_default_pipeline(tmp_path):
 
     goal = load_goal(repo, "no-pipeline")
 
-    assert goal.pipeline == "@ship"
+    assert goal.pipeline == "ship"

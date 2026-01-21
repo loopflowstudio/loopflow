@@ -1,4 +1,4 @@
-agent_model: claude:opus 
+agent_model: codex 
 yolo: true 
 chrome: true
 
@@ -17,22 +17,3 @@ summary_tokens: 25000
 summaries:
   - path: src/loopflow
     model: claude
-
-flows:
-  ship:
-    steps:
-      - implement
-      - rebase
-      - polish
-      - draft_commit
-    pr: true
-  submit:
-    steps:
-      - polish
-      - draft_commit
-    pr: true
-  ux:
-    steps:
-      - ux-research
-      - ux-gaps
-      - ux-fix

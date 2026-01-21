@@ -9,6 +9,7 @@ from pathlib import Path
 
 import typer
 
+from loopflow.lf.flows import load_flow
 from loopflow.lf.goals import goal_exists, list_goals, load_goal
 from loopflow.lfd.db import (
     delete_loop,
@@ -66,12 +67,30 @@ def _status_color(status: LoopStatus, c: dict[str, str]) -> str:
 
 def _loop_display(lp: Loop) -> str:
     """Return area and goals for display."""
-    return f"{lp.area} [{lp.goals_display}]"
+    return f"{lp.area} [{lp.flow_display}] [{lp.goals_display}]"
 
 
 def _is_area(s: str) -> bool:
     """Check if string looks like an area (contains / or is .)."""
     return "/" in s or s == "."
+
+
+def _validate_flow(repo: Path, flow: str, c: dict[str, str]) -> str:
+    """Validate and normalize flow name."""
+    normalized = flow.strip()
+    if not normalized:
+        typer.echo(f"{c['red']}Error:{c['reset']} Flow cannot be empty", err=True)
+        raise typer.Exit(1)
+
+    flow_def = load_flow(normalized, repo)
+    if not flow_def:
+        typer.echo(
+            f"{c['red']}Error:{c['reset']} Flow '{normalized}' not found in .lf/flows/",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    return normalized
 
 
 # Daemon commands
@@ -175,6 +194,12 @@ def start(
 def loop(
     area: str = typer.Argument(..., help="Area of responsibility (e.g., Maestro/, src/, .)"),
     goals: list[str] = typer.Option(None, "-g", "--goal", help="Goal to add (repeatable)"),
+    flow: str = typer.Option(
+        ...,
+        "--flow",
+        "--pipeline",
+        help="Flow to run (from .lf/flows/<name>.py)",
+    ),
     legacy_area: str = typer.Option(None, "-a", "--area", help="[deprecated] Use positional area"),
     limit: int = typer.Option(None, "-l", "--limit", help="PR limit override"),
     merge_mode: str = typer.Option(None, "--merge-mode", help="Merge mode: pr or land"),
@@ -186,10 +211,10 @@ def loop(
     Goals are optional - adaptive mode is implicit if no mode goal is specified.
 
     Examples:
-        lfd loop Maestro/                           # adaptive mode
-        lfd loop Maestro/ -g product-engineer       # adaptive + role
-        lfd loop Maestro/ -g product-engineer -g designer  # adaptive + roles
-        lfd loop . -g infra-engineer               # whole repo
+        lfd loop Maestro/ --flow ship                         # adaptive mode
+        lfd loop Maestro/ --flow ship -g product-engineer      # adaptive + role
+        lfd loop Maestro/ --flow ship -g product-engineer -g designer  # adaptive + roles
+        lfd loop . --flow ship -g infra-engineer     # whole repo
     """
     c = _colors()
     repo = get_repo_from_cwd()
@@ -227,13 +252,15 @@ def loop(
                 typer.echo(f"Available goals: {', '.join(available)}")
             raise typer.Exit(1)
 
+    flow = _validate_flow(repo, flow, c)
+
     # Validate merge_mode if specified
     if merge_mode and merge_mode not in ("pr", "land"):
         typer.echo(f"{c['red']}Error:{c['reset']} merge-mode must be 'pr' or 'land'", err=True)
         raise typer.Exit(1)
 
     # Create or get loop
-    lp = create_loop(LoopType.LOOP, area, repo, goals=goals)
+    lp = create_loop(LoopType.LOOP, area, repo, goals=goals, flow=flow)
 
     # Override settings if specified
     changed = False
@@ -262,6 +289,7 @@ def loop(
             typer.echo(f"  Repo: {repo}")
             typer.echo(f"  Loop main: {lp.loop_main}")
             typer.echo(f"  Goals: {lp.goals_display}")
+            typer.echo(f"  Flow: {lp.flow_display}")
             typer.echo(f"  PR limit: {lp.pr_limit}")
     elif result.reason == "already_running":
         typer.echo(f"Loop already running (PID {lp.pid})")
@@ -280,6 +308,12 @@ def loop(
 def flow(
     area: str = typer.Argument(..., help="Area of responsibility (e.g., Maestro/, src/, .)"),
     goals: list[str] = typer.Option(None, "-g", "--goal", help="Goal to add (repeatable)"),
+    flow: str = typer.Option(
+        ...,
+        "--flow",
+        "--pipeline",
+        help="Flow to run (from .lf/flows/<name>.py)",
+    ),
     project: str = typer.Option(None, "--project", "-p", help="Project/prompt file path"),
     paste: bool = typer.Option(False, "-v", "--paste", help="Include clipboard as prompt"),
 ):
@@ -289,9 +323,9 @@ def flow(
     from a project file or clipboard.
 
     Examples:
-        lfd flow Maestro/                        # one-off adaptive iteration
-        lfd flow Maestro/ -g product-engineer    # with role
-        lfd flow . -p project.md                 # whole repo with project file
+        lfd flow Maestro/ --flow ship                 # one-off adaptive iteration
+        lfd flow Maestro/ --flow ship -g product-engineer    # with role
+        lfd flow . --flow ship -p project.md      # whole repo with project file
     """
     c = _colors()
     repo = get_repo_from_cwd()
@@ -315,6 +349,8 @@ def flow(
         if not goal_exists(repo, goal_name):
             typer.echo(f"{c['red']}Error:{c['reset']} Goal '{goal_name}' not found", err=True)
             raise typer.Exit(1)
+
+    flow = _validate_flow(repo, flow, c)
 
     # Resolve project file if specified
     project_file = None
@@ -348,7 +384,7 @@ def flow(
                     project_file = f.name
 
     # Create or get loop
-    lp = create_loop(LoopType.FLOW, area, repo, goals=goals, project_file=project_file)
+    lp = create_loop(LoopType.FLOW, area, repo, goals=goals, flow=flow, project_file=project_file)
 
     # Start it
     if start_loop(lp.id):
@@ -356,6 +392,7 @@ def flow(
             f"{c['green']}Started{c['reset']} flow {c['bold']}{area}{c['reset']} ({lp.short_id()})"
         )
         typer.echo(f"  Goals: {lp.goals_display}")
+        typer.echo(f"  Flow: {lp.flow_display}")
         if project:
             typer.echo(f"  Project: {project}")
         if paste:
@@ -370,6 +407,12 @@ def subscribe(
     area: str = typer.Argument(..., help="Area of responsibility (e.g., Maestro/, src/, .)"),
     pathset: str = typer.Argument(..., help="Pathset to watch (comma-separated)"),
     goals: list[str] = typer.Option(None, "-g", "--goal", help="Goal to add (repeatable)"),
+    flow: str = typer.Option(
+        ...,
+        "--flow",
+        "--pipeline",
+        help="Flow to run (from .lf/flows/<name>.py)",
+    ),
 ):
     """Subscribe to pathset changes on main."""
     c = _colors()
@@ -391,12 +434,15 @@ def subscribe(
             typer.echo(f"{c['red']}Error:{c['reset']} Goal '{goal_name}' not found", err=True)
             raise typer.Exit(1)
 
+    flow = _validate_flow(repo, flow, c)
+
     # Create subscription
-    lp = create_loop(LoopType.SUBSCRIBE, area, repo, goals=goals, pathset=pathset)
+    lp = create_loop(LoopType.SUBSCRIBE, area, repo, goals=goals, flow=flow, pathset=pathset)
 
     msg = f"{c['green']}Subscribed{c['reset']} {c['bold']}{area}{c['reset']} to {pathset}"
     typer.echo(f"{msg} ({lp.short_id()})")
     typer.echo(f"  Goals: {lp.goals_display}")
+    typer.echo(f"  Flow: {lp.flow_display}")
     typer.echo(f"  Will run when {pathset} changes on main")
 
 
@@ -405,6 +451,12 @@ def schedule(
     area: str = typer.Argument(..., help="Area of responsibility (e.g., Maestro/, src/, .)"),
     cron_expr: str = typer.Argument(..., help="Cron expression (e.g., '0 9 * * *')"),
     goals: list[str] = typer.Option(None, "-g", "--goal", help="Goal to add (repeatable)"),
+    flow: str = typer.Option(
+        ...,
+        "--flow",
+        "--pipeline",
+        help="Flow to run (from .lf/flows/<name>.py)",
+    ),
     project: str = typer.Option(None, "--project", "-p", help="Project file path"),
 ):
     """Schedule a loop to run on cron."""
@@ -427,6 +479,8 @@ def schedule(
             typer.echo(f"{c['red']}Error:{c['reset']} Goal '{goal_name}' not found", err=True)
             raise typer.Exit(1)
 
+    flow = _validate_flow(repo, flow, c)
+
     project_file = None
     if project:
         project_path = Path(project)
@@ -446,12 +500,14 @@ def schedule(
         area,
         repo,
         goals=goals,
+        flow=flow,
         cron=cron_expr,
         project_file=project_file,
     )
 
     typer.echo(f"{c['green']}Scheduled{c['reset']} {c['bold']}{area}{c['reset']} ({lp.short_id()})")
     typer.echo(f"  Goals: {lp.goals_display}")
+    typer.echo(f"  Flow: {lp.flow_display}")
     typer.echo(f"  Cron: {cron_expr}")
     if project:
         typer.echo(f"  Project: {project}")
@@ -562,6 +618,7 @@ def _print_loop_detail(lp: Loop, c: dict[str, str]) -> None:
     typer.echo(f"  Repo: {lp.repo}")
     typer.echo(f"  Loop main: {lp.loop_main}")
     typer.echo(f"  Goals: {lp.goals_display}")
+    typer.echo(f"  Flow: {lp.flow_display}")
     typer.echo(f"  Iteration: {lp.iteration}")
     if lp.project_file:
         typer.echo(f"  Project: {lp.project_file}")

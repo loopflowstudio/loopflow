@@ -87,7 +87,7 @@ review → iterate → polish
 ```
 Review finds issues. Iterate fixes them. Polish closes it out.
 
-These are examples. Check `.lf/config.yaml` for the actual pipelines configured in this repo.
+These are examples. Check `.lf/flows/` for the actual pipelines configured in this repo.
 
 ---
 

@@ -25,13 +25,6 @@ class WorkConfig(BaseModel):
     auto_land: bool = False
 
 
-class FlowConfig(BaseModel):
-    name: str = ""
-    steps: list[str]
-    push: Optional[bool] = None
-    pr: Optional[bool] = None
-
-
 class SummaryConfig(BaseModel):
     """Per-path summary configuration."""
 
@@ -85,7 +78,6 @@ def parse_model(model: str) -> tuple[str, str | None]:
 class Config(BaseModel):
     # Format: backend:variant (e.g., claude:opus, claude:sonnet, codex)
     agent_model: str = "claude:opus"
-    flows: dict[str, FlowConfig] = Field(default_factory=dict)
     yolo: bool = False  # Skip permissions; Codex also disables sandboxing
     chrome: bool = False  # Enable Chrome integration for Claude Code (browser automation)
     push: bool = False
@@ -148,16 +140,6 @@ class Config(BaseModel):
             return [v] if v else None
         return v if v else None
 
-    @field_validator("flows", mode="before")
-    @classmethod
-    def parse_flows(cls, v):
-        if not v:
-            return {}
-        return {
-            name: FlowConfig(name=name, **data) if isinstance(data, dict) else data
-            for name, data in v.items()
-        }
-
     @model_validator(mode="after")
     def merge_ignore_into_exclude(self) -> "Config":
         """Merge ignore into exclude (ignore is an alias)."""
@@ -186,6 +168,13 @@ def load_config(repo_root: Path) -> Config | None:
 
     if not data:
         return None
+
+    if "flows" in data:
+        raise ConfigError(
+            f"Invalid config in {config_path}:\n"
+            "  'flows' is no longer supported in .lf/config.yaml.\n"
+            "  Move flows to .lf/flows/<name>.py."
+        )
 
     try:
         config = Config(**data)

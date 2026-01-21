@@ -477,7 +477,7 @@ struct WorktreeSidebar: View {
                 }
             }
         } message: { loop in
-            Text("Squash and land '\(loop.goalName)' loop commits to main?")
+            Text("Squash and land '\(loop.areaDisplay)' loop commits to main?")
         }
     }
 }

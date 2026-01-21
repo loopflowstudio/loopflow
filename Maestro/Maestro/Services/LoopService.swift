@@ -16,8 +16,10 @@ struct LoopService {
         }
         defer { sqlite3_close(db) }
 
+        ensureLoopColumns(db: db)
+
         let query = """
-            SELECT id, type, goal, repo, loop_main, status, iteration, pr_limit,
+            SELECT id, type, area, goals, flow, repo, loop_main, status, iteration, pr_limit,
                    merge_mode, pid, created_at
             FROM loops
             WHERE repo = ?
@@ -38,28 +40,29 @@ struct LoopService {
         while sqlite3_step(stmt) == SQLITE_ROW {
             guard let idPtr = sqlite3_column_text(stmt, 0),
                   let typePtr = sqlite3_column_text(stmt, 1),
-                  let goalPtr = sqlite3_column_text(stmt, 2),
-                  let repoPtr = sqlite3_column_text(stmt, 3),
-                  let loopMainPtr = sqlite3_column_text(stmt, 4),
-                  let statusPtr = sqlite3_column_text(stmt, 5) else {
+                  let repoPtr = sqlite3_column_text(stmt, 5),
+                  let loopMainPtr = sqlite3_column_text(stmt, 6),
+                  let statusPtr = sqlite3_column_text(stmt, 7) else {
                 continue
             }
 
             let id = String(cString: idPtr)
             let typeStr = String(cString: typePtr)
-            let goal = String(cString: goalPtr)
+            let area = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? "."
+            let goals = decodeGoals(sqlite3_column_text(stmt, 3))
+            let flow = sqlite3_column_text(stmt, 4).map { String(cString: $0) }
             let repoPath = String(cString: repoPtr)
             let loopMain = String(cString: loopMainPtr)
             let statusStr = String(cString: statusPtr)
 
-            let iteration = Int(sqlite3_column_int(stmt, 6))
-            let prLimit = Int(sqlite3_column_int(stmt, 7))
+            let iteration = Int(sqlite3_column_int(stmt, 8))
+            let prLimit = Int(sqlite3_column_int(stmt, 9))
 
-            let mergeModeStr = sqlite3_column_text(stmt, 8).map { String(cString: $0) } ?? "pr"
-            let pid = sqlite3_column_type(stmt, 9) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 9)) : nil
+            let mergeModeStr = sqlite3_column_text(stmt, 10).map { String(cString: $0) } ?? "pr"
+            let pid = sqlite3_column_type(stmt, 11) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 11)) : nil
 
             var createdAt = Date()
-            if let datePtr = sqlite3_column_text(stmt, 10) {
+            if let datePtr = sqlite3_column_text(stmt, 12) {
                 let dateStr = String(cString: datePtr)
                 createdAt = dateFormatter.date(from: dateStr) ?? ISO8601DateFormatter().date(from: dateStr) ?? Date()
             }
@@ -71,7 +74,9 @@ struct LoopService {
             var loop = Loop(
                 id: id,
                 type: type,
-                goalName: goal,
+                area: area,
+                goals: goals,
+                flow: flow,
                 repo: repoPath,
                 loopMain: loopMain,
                 status: status,
@@ -99,6 +104,33 @@ struct LoopService {
         }
 
         return loops
+    }
+
+    private func ensureLoopColumns(db: OpaquePointer?) {
+        guard let db else { return }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "PRAGMA table_info(loops)", -1, &stmt, nil) == SQLITE_OK else {
+            return
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        var columns: Set<String> = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let namePtr = sqlite3_column_text(stmt, 1) {
+                columns.insert(String(cString: namePtr))
+            }
+        }
+
+        if !columns.contains("flow") {
+            sqlite3_exec(db, "ALTER TABLE loops ADD COLUMN flow TEXT", nil, nil, nil)
+        }
+    }
+
+    private func decodeGoals(_ goalsPtr: UnsafePointer<UInt8>?) -> [String] {
+        guard let goalsPtr else { return [] }
+        let goalsStr = String(cString: goalsPtr)
+        guard let data = goalsStr.data(using: .utf8) else { return [] }
+        return (try? JSONDecoder().decode([String].self, from: data)) ?? []
     }
 
     private func getCommitsAhead(branch: String, in repoRoot: URL) async throws -> Int {
@@ -196,7 +228,7 @@ struct LoopService {
         _ = try await runGitCommand(["merge", "--squash", loop.loopMain], in: repoRoot)
 
         // Commit with generated message
-        let commitMessage = "loop(\(loop.goalName)): land \(loop.commitsAhead) commits"
+        let commitMessage = "loop(\(loop.areaDisplay)): land \(loop.commitsAhead) commits"
         _ = try await runGitCommand(["commit", "-m", commitMessage], in: repoRoot)
 
         // Push

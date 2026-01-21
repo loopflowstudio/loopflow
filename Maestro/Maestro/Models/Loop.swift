@@ -35,7 +35,9 @@ enum LoopMergeMode: String, Codable {
 struct Loop: Identifiable, Hashable {
     let id: String
     let type: LoopType
-    let goalName: String
+    let area: String
+    let goals: [String]
+    let flow: String?
     let repo: String
     let loopMain: String
     var status: LoopStatus
@@ -53,6 +55,23 @@ struct Loop: Identifiable, Hashable {
     var commitsAhead: Int = 0
 
     var shortId: String { String(id.prefix(7)) }
+
+    var areaDisplay: String {
+        area == "." ? "root" : area
+    }
+
+    var goalsDisplay: String {
+        goals.isEmpty ? "adaptive" : goals.joined(separator: ", ")
+    }
+
+    var flowDisplay: String {
+        flow ?? "default"
+    }
+
+    var detailText: String {
+        let parts = [flowDisplay, goalsDisplay].filter { !$0.isEmpty }
+        return parts.joined(separator: " · ")
+    }
 
     var statusText: String {
         switch status {

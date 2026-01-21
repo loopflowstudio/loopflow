@@ -58,6 +58,15 @@ exclude:
   - node_modules
 ```
 
+## Flows
+
+Flows are stored as Python files in `.lf/flows/`:
+
+```python
+def flow():
+    return Flow(["implement", "rebase", "polish", "draft_commit"])
+```
+
 ---
 
 ## Options Reference

@@ -4,12 +4,15 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, field_validator
+
 _FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 
 
-@dataclass
-class StepConfig:
+class StepConfig(BaseModel):
     """Per-step configuration from frontmatter or pipeline overrides."""
+
+    model_config = ConfigDict(extra="ignore")
 
     interactive: bool | None = None
     include: list[str] | None = None
@@ -18,30 +21,32 @@ class StepConfig:
     voice: list[str] | None = None
     chrome: bool | None = None  # Enable Chrome integration for Claude Code
     diff_files: bool | None = None  # Include files changed on branch
-    context: list[str] | None = None  # Additional context files (from pipeline overrides)
+    context: list[str] | None = None  # Additional context files (from flow overrides)
+
+    @field_validator("voice", mode="before")
+    @classmethod
+    def _normalize_voice(cls, value):
+        if value is None or value == "":
+            return None
+        if isinstance(value, str):
+            return [value]
+        return value
+
+    @field_validator("include", "exclude", "context", mode="before")
+    @classmethod
+    def _normalize_lists(cls, value):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return [item for item in value.split() if item]
+        return value
 
     def to_dict(self) -> dict:
-        result = {}
-        if self.model:
-            result["model"] = self.model
-        if self.voice:
-            result["voice"] = self.voice
-        if self.context:
-            result["context"] = self.context
-        return result
+        return self.model_dump(exclude_none=True)
 
     @classmethod
     def from_dict(cls, data: dict) -> "StepConfig":
-        voice_raw = data.get("voice")
-        if isinstance(voice_raw, str):
-            voice = [voice_raw] if voice_raw else None
-        else:
-            voice = voice_raw if voice_raw else None
-        return cls(
-            model=data.get("model"),
-            voice=voice,
-            context=data.get("context"),
-        )
+        return cls.model_validate(data)
 
 
 @dataclass
@@ -75,25 +80,10 @@ def parse_step_file(name: str, text: str) -> StepFile:
     content = text[match.end() :]
     config_dict = _parse_yaml_frontmatter(frontmatter)
 
-    # Normalize voice: can be string or list
-    voice_raw = config_dict.get("voice")
-    if isinstance(voice_raw, str):
-        voice = [voice_raw] if voice_raw else None
-    else:
-        voice = voice_raw if voice_raw else None
-
     return StepFile(
         name=name,
         content=content,
-        config=StepConfig(
-            interactive=config_dict.get("interactive"),
-            include=config_dict.get("include"),
-            exclude=config_dict.get("exclude"),
-            model=config_dict.get("model"),
-            voice=voice,
-            chrome=config_dict.get("chrome"),
-            diff_files=config_dict.get("diff_files"),
-        ),
+        config=StepConfig.model_validate(config_dict),
     )
 
 
@@ -103,7 +93,7 @@ def _parse_yaml_frontmatter(text: str) -> dict[str, Any]:
     Handles:
     - key: value pairs
     - key: [inline, list] syntax
-    - key:\\n  - list\\n  - items syntax
+    - key:\n  - list\n  - items syntax
     - boolean values (true/false, yes/no)
     - integers
     """
@@ -220,33 +210,22 @@ def resolve_step_config(
         exclude = list(frontmatter.exclude)
     elif global_config and global_config.exclude:
         exclude = list(global_config.exclude)
+    elif defaults.exclude is not None:
+        exclude = list(defaults.exclude)
     else:
-        exclude = list(defaults.exclude) if defaults.exclude else []
+        exclude = []
 
     # Resolve include: frontmatter > legacy include_tests_for > default
     if frontmatter.include is not None:
         include = list(frontmatter.include)
     elif global_config and global_config.include_tests_for:
-        # Legacy: include_tests_for: [polish, implement] means those tasks include tests
-        if step_name in global_config.include_tests_for:
-            include = ["tests/**"]
-        else:
-            include = []
+        include = ["tests/**"] if step_name in global_config.include_tests_for else []
+    elif defaults.include is not None:
+        include = list(defaults.include)
     else:
         include = []
 
-    # If include contains tests/**, remove from exclude
-    if "tests/**" in include and "tests/**" in exclude:
-        exclude.remove("tests/**")
-
-    # Resolve context: CLI extends frontmatter extends global
-    context: list[str] = []
-    if global_config and global_config.context:
-        context.extend(global_config.context)
-    if cli_context:
-        context.extend(cli_context)
-
-    # Resolve voice: CLI > frontmatter > global > none
+    # Resolve voice: CLI > frontmatter > global > default
     if cli_voice:
         voice = list(cli_voice)
     elif frontmatter.voice:
@@ -255,6 +234,19 @@ def resolve_step_config(
         voice = list(global_config.voice)
     else:
         voice = []
+
+    # Resolve context: global context + frontmatter + CLI
+    context: list[str] = []
+    if global_config and global_config.context:
+        context.extend(global_config.context)
+    if frontmatter.context:
+        context.extend(frontmatter.context)
+    if cli_context:
+        context.extend(cli_context)
+
+    # Remove included paths from excludes
+    if include:
+        exclude = [item for item in exclude if item not in include]
 
     return ResolvedStepConfig(
         interactive=interactive,

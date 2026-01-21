@@ -19,8 +19,7 @@ from loopflow.lf.context import (
     gather_step,
 )
 from loopflow.lf.flow import _run_race_step, run_flow_def
-from loopflow.lf.flows import FlowDef, FlowStep, RaceConfig
-from loopflow.lf.flows import load_flow as load_flow_file
+from loopflow.lf.flows import RaceConfig, load_flow
 from loopflow.lf.frontmatter import StepConfig, resolve_step_config
 from loopflow.lf.git import find_main_repo
 from loopflow.lf.launcher import (
@@ -759,7 +758,7 @@ def add(
 
 
 def flow(
-    name: str = typer.Argument(help="Flow name from config.yaml or .lf/flows/"),
+    name: str = typer.Argument(help="Flow name from .lf/flows/"),
     context: list[str] = typer.Option(
         None, "-x", "-X", "--context", help="Context files for all steps"
     ),
@@ -788,12 +787,10 @@ def flow(
 
     config = load_config(repo_root)
 
-    # Check for flow in .lf/flows/ first, then config.yaml
-    flow_def = load_flow_file(name, repo_root)
-    config_flow = config.flows.get(name) if config else None
+    flow_def = load_flow(name, repo_root)
 
-    if not flow_def and not config_flow:
-        typer.echo(f"Error: Flow '{name}' not found in .lf/flows/ or .lf/config.yaml", err=True)
+    if not flow_def:
+        typer.echo(f"Error: Flow '{name}' not found in .lf/flows/", err=True)
         raise typer.Exit(1)
 
     agent_model = model or (config.agent_model if config else "claude:opus")
@@ -825,10 +822,7 @@ def flow(
 
     if copy:
         # Show tokens for first step in flow
-        if flow_def:
-            first_step = flow_def.steps[0].step if flow_def.steps else None
-        else:
-            first_step = config_flow.steps[0] if config_flow.steps else None
+        first_step = flow_def.steps[0].step if flow_def.steps else None
 
         if not first_step:
             typer.echo("Error: Flow has no steps", err=True)
@@ -858,16 +852,6 @@ def flow(
     pr_enabled = pr if pr is not None else (config.pr if config else False)
     skip_permissions = config.yolo if config else False
     chrome_enabled = config.chrome if config else False
-
-    # Convert config.yaml flow to FlowDef if needed
-    if not flow_def:
-        # FlowConfig.push/pr override global settings
-        push_enabled = config_flow.push if config_flow.push is not None else push_enabled
-        pr_enabled = config_flow.pr if config_flow.pr is not None else pr_enabled
-        flow_def = FlowDef(
-            name=name,
-            steps=[FlowStep(step=t) for t in config_flow.steps],
-        )
 
     exit_code = run_flow_def(
         flow_def,

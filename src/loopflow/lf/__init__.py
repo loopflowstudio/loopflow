@@ -9,7 +9,7 @@ import yaml
 from loopflow.lf import run as run_module
 from loopflow.lf.config import ConfigError, load_config
 from loopflow.lf.context import find_worktree_root, gather_step, list_all_steps
-from loopflow.lf.flows import load_flow
+from loopflow.lf.flows import list_flows, load_flow
 
 # =============================================================================
 # Built-in step metadata for formatted listing
@@ -108,12 +108,16 @@ def _format_step_list() -> str:
     lines = []
 
     # Flows section
-    if config and config.flows:
+    if repo_root:
+        flows = list_flows(repo_root)
+    else:
+        flows = []
+
+    if flows:
         lines.append(f"{c['cyan']}{c['bold']}FLOWS{c['reset']}")
-        for name in sorted(config.flows.keys()):
-            f = config.flows[name]
-            chain = f" {c['dim']}→{c['reset']} ".join(f.steps) if f.steps else ""
-            lines.append(f"  {c['bold']}{name:<14}{c['reset']} {c['dim']}{chain}{c['reset']}")
+        for flow in sorted(flows, key=lambda f: f.name):
+            chain = f" {c['dim']}→{c['reset']} ".join(step.step for step in flow.steps if step.step)
+            lines.append(f"  {c['bold']}{flow.name:<14}{c['reset']} {c['dim']}{chain}{c['reset']}")
         lines.append("")
 
     # Steps section
@@ -232,17 +236,15 @@ def main():
                 repo_root = find_worktree_root()
                 config = load_config(repo_root) if repo_root else None
 
-                # Check for flow in config.yaml or .lf/flows/
-                has_config_flow = config and name in config.flows
-                has_file_flow = repo_root and load_flow(name, repo_root) is not None
-                has_flow = has_config_flow or has_file_flow
+                # Check for flow in .lf/flows/
+                has_flow = repo_root and load_flow(name, repo_root) is not None
 
                 # gather_step handles builtins and external skills even without repo_root
                 has_step = gather_step(repo_root, name, config) is not None
 
                 if has_flow and has_step:
                     typer.echo(f"Error: '{name}' exists as both a flow and a step", err=True)
-                    typer.echo("  Flow: defined in .lf/config.yaml", err=True)
+                    typer.echo("  Flow: defined in .lf/flows/", err=True)
                     typer.echo(f"  Step: .claude/commands/{name}.md or .lf/{name}.*", err=True)
                     typer.echo("Remove one to resolve the conflict.", err=True)
                     raise SystemExit(1)

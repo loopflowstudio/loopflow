@@ -2,6 +2,7 @@
 
 import os
 import platform
+import re
 import subprocess
 import sys
 import uuid
@@ -10,9 +11,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+import yaml
+
 from loopflow.lf.config import parse_model
 from loopflow.lf.context import build_prompt
-from loopflow.lf.flows import FlowDef, RaceConfig, ResolvedStep, StepConfig, resolve_flow
+from loopflow.lf.flows import (
+    ChooseFork,
+    ChooseResult,
+    FlowDef,
+    RaceConfig,
+    ResolvedStep,
+    resolve_flow,
+)
+from loopflow.lf.frontmatter import StepConfig
 from loopflow.lf.git import GitError, find_main_repo, open_pr
 from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lf.logging import write_prompt_file
@@ -569,6 +580,164 @@ def _count_logical_steps(resolved: list[ResolvedStep]) -> int:
     return count
 
 
+def _parse_choice(path: Path) -> tuple[str | None, str | None]:
+    if not path.exists():
+        return None, None
+
+    text = path.read_text()
+    match = re.match(r"^---\n(.*?)\n---\n?", text, re.DOTALL)
+    if not match:
+        return None, None
+
+    data = yaml.safe_load(match.group(1)) or {}
+    return data.get("choice"), data.get("reason")
+
+
+def _build_choose_fork_prompt(
+    flow_name: str,
+    options: dict[str, list],
+    output_path: Path,
+    override: str | None,
+) -> str:
+    if override:
+        return override
+
+    lines = [
+        "You are choosing which branch to run in a flow.",
+        f"Flow: {flow_name}",
+        "",
+        "Available options:",
+    ]
+    for key, steps in options.items():
+        steps_str = ", ".join(
+            s if isinstance(s, str) else getattr(s, "step", str(s)) for s in steps
+        )
+        lines.append(f"- {key}: {steps_str}")
+
+    lines.extend(
+        [
+            "",
+            "Decide which option to run based on repository state.",
+            "Inspect .docs/roadmap and .design as needed.",
+            "",
+            f"Write your decision to {output_path} with this frontmatter:",
+            "---",
+            "choice: <option>",
+            "reason: <short explanation>",
+            "options: [<option>, <option>]",
+            "---",
+            "",
+            "Then include a short explanation in the body.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _choose_fork_branch(
+    choose_fork: ChooseFork,
+    flow_name: str,
+    repo_root: Path,
+    backend: str,
+    model_variant: str | None,
+    skip_permissions: bool,
+) -> str:
+    output_path = Path(choose_fork.output or f".design/choices/{flow_name}.md")
+    if not output_path.is_absolute():
+        output_path = repo_root / output_path
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    prompt = _build_choose_fork_prompt(
+        flow_name,
+        choose_fork.options,
+        output_path,
+        choose_fork.prompt,
+    )
+
+    runner = get_runner(backend)
+    result = runner.launch(
+        prompt,
+        auto=True,
+        stream=False,
+        skip_permissions=skip_permissions,
+        model_variant=model_variant,
+        cwd=repo_root,
+    )
+    if result.exit_code != 0:
+        raise RuntimeError("choose_fork failed to run")
+
+    choice, _reason = _parse_choice(output_path)
+    if not choice or choice not in choose_fork.options:
+        raise RuntimeError(f"choose_fork wrote invalid choice to {output_path}")
+
+    return choice
+
+
+def _run_choose_result(
+    step: str,
+    choose_result: ChooseResult,
+    repo_root: Path,
+    main_repo: Path,
+    exclude: list[str] | None,
+    skip_permissions: bool,
+    context: list[str] | None,
+    step_num: int,
+    total_steps: int,
+    chrome: bool = False,
+) -> int:
+    options = choose_result.options
+    wt_tasks = []
+
+    print(f"\n{'=' * 60}")
+    print(f"[{step_num}/{total_steps}] Choose result: {step} ({len(options)} variants)")
+    print(f"{'=' * 60}\n")
+
+    for idx, option in enumerate(options, 1):
+        label = option.label or f"{option.model}:{idx}"
+        step_context = list(context) if context else []
+        if option.context:
+            step_context.extend(option.context)
+        voices = list(option.voice) if option.voice else None
+        backend, model_variant = parse_model(option.model)
+        wt_tasks.append(
+            _WorktreeTask(
+                step=step,
+                label=label,
+                wt_prefix=f"_choose-{step}",
+                backend=backend,
+                model_variant=model_variant,
+                context=step_context or None,
+                voices=voices,
+            )
+        )
+
+    results = _run_worktree_tasks(
+        wt_tasks, repo_root, main_repo, exclude, skip_permissions, chrome=chrome
+    )
+    successes = [r for r in results if r.exit_code == 0]
+
+    if not successes:
+        print("\nAll variants failed, no winner to merge")
+        _cleanup_worktrees(repo_root, results)
+        return 1
+
+    if len(successes) == 1:
+        winner = successes[0]
+        print(f"\nOnly {winner.label} succeeded, using it as winner")
+    else:
+        print(f"\n{len(successes)} variants succeeded, running judge...")
+        winner = _judge_race(successes, repo_root, choose_result.judge, skip_permissions)
+        if not winner:
+            print("Judge failed to pick winner, using first successful variant")
+            winner = successes[0]
+        else:
+            print(f"Judge picked: {winner.label}")
+
+    _merge_race_winner(repo_root, winner)
+    _cleanup_worktrees(repo_root, results)
+
+    return 0
+
+
 def run_flow_def(
     flow: FlowDef,
     repo_root: Path,
@@ -627,6 +796,38 @@ def run_flow_def(
             )
             if any(code != 0 for code in exit_codes):
                 return max(exit_codes)
+        elif step.choose_fork is not None:
+            choice = _choose_fork_branch(
+                step.choose_fork,
+                flow.name,
+                repo_root,
+                backend,
+                model_variant,
+                skip_permissions,
+            )
+            branch_steps = step.choose_fork.options[choice]
+            branch_flow = FlowDef.from_dict(f"{flow.name}:{choice}", {"steps": branch_steps})
+            branch_resolved = resolve_flow(branch_flow, repo_root)
+            resolved = resolved[:i] + branch_resolved + resolved[i + 1 :]
+            total = _count_logical_steps(resolved)
+            continue
+        elif step.choose_result is not None:
+            result_code = _run_choose_result(
+                step.choose_result.step,
+                step.choose_result,
+                repo_root,
+                main_repo,
+                exclude,
+                skip_permissions,
+                context,
+                step_num,
+                total,
+                chrome=chrome,
+            )
+            if result_code != 0:
+                return result_code
+
+            i += 1
         elif step.race is not None:
             # Race step: run step with multiple models
             step_context = list(context) if context else []

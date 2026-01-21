@@ -1,6 +1,6 @@
 ---
 kind: mode
-pipeline: "@polish"
+pipeline: "polish"
 ---
 Make the codebase cleaner, easier, smaller.
 

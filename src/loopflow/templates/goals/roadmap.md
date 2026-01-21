@@ -1,6 +1,6 @@
 ---
 kind: mode
-pipeline: "@design"
+pipeline: "design"
 ---
 Read `.docs/` to understand where we're going.
 

@@ -192,41 +192,30 @@ def start(
 
 @app.command()
 def loop(
+    flow: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
     area: str = typer.Argument(..., help="Area of responsibility (e.g., Maestro/, src/, .)"),
     goals: list[str] = typer.Option(None, "-g", "--goal", help="Goal to add (repeatable)"),
-    flow: str = typer.Option(
-        ...,
-        "--flow",
-        "--pipeline",
-        help="Flow to run (from .lf/flows/<name>.py)",
-    ),
-    legacy_area: str = typer.Option(None, "-a", "--area", help="[deprecated] Use positional area"),
     limit: int = typer.Option(None, "-l", "--limit", help="PR limit override"),
     merge_mode: str = typer.Option(None, "--merge-mode", help="Merge mode: pr or land"),
     foreground: bool = typer.Option(False, "-f", "--foreground", help="Run in foreground"),
 ):
     """Start a continuous homeostasis loop.
 
-    Area is required (e.g., Maestro/, src/loopflow/, or . for whole repo).
+    Flow is required - specifies which flow to run from .lf/flows/.
+    Area is required - scopes the work (e.g., Maestro/, src/, or . for whole repo).
     Goals are optional - adaptive mode is implicit if no mode goal is specified.
 
     Examples:
-        lfd loop Maestro/ --flow ship                         # adaptive mode
-        lfd loop Maestro/ --flow ship -g product-engineer      # adaptive + role
-        lfd loop Maestro/ --flow ship -g product-engineer -g designer  # adaptive + roles
-        lfd loop . --flow ship -g infra-engineer     # whole repo
+        lfd loop ship Maestro/                              # adaptive mode
+        lfd loop ship Maestro/ -g product-engineer          # adaptive + role
+        lfd loop ship Maestro/ -g product-engineer -g designer  # adaptive + roles
+        lfd loop ship .                                     # whole repo
     """
     c = _colors()
     repo = get_repo_from_cwd()
     if not repo:
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
-
-    # Backwards compatibility: lfd loop goal-name -a area
-    if legacy_area and not _is_area(area):
-        # Old syntax: area is actually a goal name
-        goals = [area] + (goals or [])
-        area = legacy_area
 
     # Validate area looks like a path
     if not _is_area(area):
@@ -306,14 +295,9 @@ def loop(
 
 @app.command()
 def flow(
+    flow_name: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
     area: str = typer.Argument(..., help="Area of responsibility (e.g., Maestro/, src/, .)"),
     goals: list[str] = typer.Option(None, "-g", "--goal", help="Goal to add (repeatable)"),
-    flow: str = typer.Option(
-        ...,
-        "--flow",
-        "--pipeline",
-        help="Flow to run (from .lf/flows/<name>.py)",
-    ),
     project: str = typer.Option(None, "--project", "-p", help="Project/prompt file path"),
     paste: bool = typer.Option(False, "-v", "--paste", help="Include clipboard as prompt"),
 ):
@@ -323,9 +307,9 @@ def flow(
     from a project file or clipboard.
 
     Examples:
-        lfd flow Maestro/ --flow ship                 # one-off adaptive iteration
-        lfd flow Maestro/ --flow ship -g product-engineer    # with role
-        lfd flow . --flow ship -p project.md      # whole repo with project file
+        lfd flow ship Maestro/                    # one-off adaptive iteration
+        lfd flow ship Maestro/ -g product-engineer    # with role
+        lfd flow ship . -p project.md             # whole repo with project file
     """
     c = _colors()
     repo = get_repo_from_cwd()
@@ -350,7 +334,7 @@ def flow(
             typer.echo(f"{c['red']}Error:{c['reset']} Goal '{goal_name}' not found", err=True)
             raise typer.Exit(1)
 
-    flow = _validate_flow(repo, flow, c)
+    flow_name = _validate_flow(repo, flow_name, c)
 
     # Resolve project file if specified
     project_file = None
@@ -384,7 +368,7 @@ def flow(
                     project_file = f.name
 
     # Create or get loop
-    lp = create_loop(LoopType.FLOW, area, repo, goals=goals, flow=flow, project_file=project_file)
+    lp = create_loop(LoopType.FLOW, area, repo, goals=goals, flow=flow_name, project_file=project_file)
 
     # Start it
     if start_loop(lp.id):
@@ -404,15 +388,10 @@ def flow(
 
 @app.command()
 def subscribe(
+    flow: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
     area: str = typer.Argument(..., help="Area of responsibility (e.g., Maestro/, src/, .)"),
     pathset: str = typer.Argument(..., help="Pathset to watch (comma-separated)"),
     goals: list[str] = typer.Option(None, "-g", "--goal", help="Goal to add (repeatable)"),
-    flow: str = typer.Option(
-        ...,
-        "--flow",
-        "--pipeline",
-        help="Flow to run (from .lf/flows/<name>.py)",
-    ),
 ):
     """Subscribe to pathset changes on main."""
     c = _colors()
@@ -448,15 +427,10 @@ def subscribe(
 
 @app.command()
 def schedule(
+    flow: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
     area: str = typer.Argument(..., help="Area of responsibility (e.g., Maestro/, src/, .)"),
     cron_expr: str = typer.Argument(..., help="Cron expression (e.g., '0 9 * * *')"),
     goals: list[str] = typer.Option(None, "-g", "--goal", help="Goal to add (repeatable)"),
-    flow: str = typer.Option(
-        ...,
-        "--flow",
-        "--pipeline",
-        help="Flow to run (from .lf/flows/<name>.py)",
-    ),
     project: str = typer.Option(None, "--project", "-p", help="Project file path"),
 ):
     """Schedule a loop to run on cron."""

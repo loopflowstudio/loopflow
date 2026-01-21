@@ -491,10 +491,11 @@ def _run_fork_join_group(
         _cleanup_worktrees(repo_root, results)
         return 1
 
-    join_prompt = _build_join_prompt(
-        _collect_fork_diffs(successes),
-        _load_join_instructions(join_config, repo_root),
-        _format_voice_section(join_config.voice, repo_root),
+    fork_worktrees = [(r.label, r.worktree) for r in successes]
+    join_prompt = build_join_prompt(
+        collect_fork_diffs(fork_worktrees),
+        load_join_instructions(join_config.step, repo_root),
+        format_voice_section(join_config.voice, repo_root),
         flow_name,
     )
     join_backend = backend
@@ -517,7 +518,8 @@ def _run_fork_join_group(
     return result_code
 
 
-def _format_voice_section(voice_names: list[str] | None, repo_root: Path) -> str | None:
+def format_voice_section(voice_names: list[str] | None, repo_root: Path) -> str | None:
+    """Format voice content for inclusion in prompts."""
     if not voice_names:
         return None
 
@@ -530,36 +532,17 @@ def _format_voice_section(voice_names: list[str] | None, repo_root: Path) -> str
     return f"<lf:voices>\n{chr(10).join(voice_parts)}\n</lf:voices>"
 
 
-def _load_join_instructions(join: JoinConfig, repo_root: Path) -> str | None:
-    step_name = join.step or "synthesize"
-    step_file = gather_step(repo_root, step_name)
+def load_join_instructions(step_name: str | None, repo_root: Path) -> str | None:
+    """Load instructions for the join step."""
+    name = step_name or "synthesize"
+    step_file = gather_step(repo_root, name)
     if not step_file:
         return None
 
     return step_file.content.strip() or None
 
 
-def _collect_fork_diffs(results: list[_WorktreeResult]) -> list[dict]:
-    diffs = []
-    for r in results:
-        diff_text = _run_git_diff(r.worktree, ["diff", "--stat"])
-        full_diff = _run_git_diff(r.worktree, ["diff"])
-        if not diff_text.strip() and not full_diff.strip():
-            diff_text = _run_git_diff(r.worktree, ["show", "--stat", "--format=", "HEAD"])
-            full_diff = _run_git_diff(r.worktree, ["show", "--format=", "HEAD"])
-
-        diffs.append(
-            {
-                "label": r.label,
-                "worktree": str(r.worktree),
-                "summary": diff_text.strip() or "(no diff)",
-                "diff": full_diff,
-            }
-        )
-    return diffs
-
-
-def _run_git_diff(worktree: Path, args: list[str]) -> str:
+def _run_git(worktree: Path, args: list[str]) -> str:
     result = subprocess.run(
         ["git", *args],
         cwd=worktree,
@@ -569,7 +552,28 @@ def _run_git_diff(worktree: Path, args: list[str]) -> str:
     return result.stdout if result.returncode == 0 else ""
 
 
-def _build_join_prompt(
+def collect_fork_diffs(worktrees: list[tuple[str, Path]]) -> list[dict]:
+    """Collect diffs from forked worktrees. Takes list of (label, path) tuples."""
+    diffs = []
+    for label, worktree in worktrees:
+        diff_text = _run_git(worktree, ["diff", "--stat"])
+        full_diff = _run_git(worktree, ["diff"])
+        if not diff_text.strip() and not full_diff.strip():
+            diff_text = _run_git(worktree, ["show", "--stat", "--format=", "HEAD"])
+            full_diff = _run_git(worktree, ["show", "--format=", "HEAD"])
+
+        diffs.append(
+            {
+                "label": label,
+                "worktree": str(worktree),
+                "summary": diff_text.strip() or "(no diff)",
+                "diff": full_diff,
+            }
+        )
+    return diffs
+
+
+def build_join_prompt(
     diffs: list[dict],
     instructions: str | None,
     voice_section: str | None,
@@ -704,7 +708,7 @@ def _build_choose_prompt(
     return "\n".join(lines)
 
 
-def _choose_branch(
+def choose_branch(
     choose: Choose,
     flow_name: str,
     repo_root: Path,
@@ -712,6 +716,7 @@ def _choose_branch(
     model_variant: str | None,
     skip_permissions: bool,
 ) -> str:
+    """Run a choose step and return the selected branch name."""
     output_path = Path(choose.output or f".design/choices/{flow_name}.md")
     if not output_path.is_absolute():
         output_path = repo_root / output_path
@@ -804,7 +809,7 @@ def run_flow_def(
             i += 1
             continue
         elif step.choose is not None:
-            choice = _choose_branch(
+            choice = choose_branch(
                 step.choose,
                 flow.name,
                 repo_root,

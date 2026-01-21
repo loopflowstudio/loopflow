@@ -8,7 +8,6 @@ global concurrency and PR limits.
 """
 
 import json
-import re
 import socket
 import subprocess
 import sys
@@ -18,12 +17,16 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
-import yaml
-
 from loopflow.lf.config import load_config, parse_model
-from loopflow.lf.context import format_prompt, gather_prompt_components, gather_step
+from loopflow.lf.context import format_prompt, gather_prompt_components
+from loopflow.lf.flow import (
+    build_join_prompt,
+    choose_branch,
+    collect_fork_diffs,
+    format_voice_section,
+    load_join_instructions,
+)
 from loopflow.lf.flows import (
-    Choose,
     FlowDef,
     JoinConfig,
     ResolvedStep,
@@ -34,7 +37,6 @@ from loopflow.lf.goals import build_effective_goals, render_goals
 from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lf.logging import write_prompt_file
 from loopflow.lf.messages import generate_pr_message
-from loopflow.lf.voices import load_voice
 from loopflow.lf.worktrees import WorktreeError
 from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
@@ -202,93 +204,6 @@ def run_loop_iterations(loop: Loop) -> None:
     update_loop_pid(loop.id, None)
 
 
-def _parse_choice(path: Path) -> tuple[str | None, str | None]:
-    if not path.exists():
-        return None, None
-
-    text = path.read_text()
-    match = re.match(r"^---\n(.*?)\n---\n?", text, re.DOTALL)
-    if not match:
-        return None, None
-
-    data = yaml.safe_load(match.group(1)) or {}
-    return data.get("choice"), data.get("reason")
-
-
-def _build_choose_prompt(
-    flow_name: str,
-    options: dict[str, list],
-    output_path: Path,
-    override: str | None,
-) -> str:
-    if override:
-        return override
-
-    lines = [
-        "You are choosing which branch to run in a flow.",
-        f"Flow: {flow_name}",
-        "",
-        "Available options:",
-    ]
-    for key, steps in options.items():
-        steps_str = ", ".join(
-            s if isinstance(s, str) else getattr(s, "step", str(s)) for s in steps
-        )
-        lines.append(f"- {key}: {steps_str}")
-
-    lines.extend(
-        [
-            "",
-            "Decide which option to run based on repository state.",
-            "Inspect .docs/roadmap and .design as needed.",
-            "",
-            f"Write your decision to {output_path} with this frontmatter:",
-            "---",
-            "choice: <option>",
-            "reason: <short explanation>",
-            "options: [<option>, <option>]",
-            "---",
-            "",
-            "Then include a short explanation in the body.",
-        ]
-    )
-    return "\n".join(lines)
-
-
-def _choose_branch(
-    choose: Choose,
-    flow_name: str,
-    repo_root: Path,
-    backend: str,
-    model_variant: str | None,
-    skip_permissions: bool,
-) -> str:
-    output_path = Path(choose.output or f".design/choices/{flow_name}.md")
-    if not output_path.is_absolute():
-        output_path = repo_root / output_path
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    prompt = _build_choose_prompt(flow_name, choose.options, output_path, choose.prompt)
-
-    runner = get_runner(backend)
-    result = runner.launch(
-        prompt,
-        auto=True,
-        stream=False,
-        skip_permissions=skip_permissions,
-        model_variant=model_variant,
-        cwd=repo_root,
-    )
-    if result.exit_code != 0:
-        raise RuntimeError("choose failed to run")
-
-    choice, _reason = _parse_choice(output_path)
-    if not choice or choice not in choose.options:
-        raise RuntimeError(f"choose wrote invalid choice to {output_path}")
-
-    return choice
-
-
 def _build_loop_prompt(
     loop: Loop,
     effective_goals: list,
@@ -382,111 +297,6 @@ def _run_collector_step(
         pass
 
     return result_code
-
-
-def _format_voice_section(voice_names: list[str] | None, repo_root: Path) -> str | None:
-    if not voice_names:
-        return None
-
-    voices = [load_voice(name, repo_root) for name in voice_names]
-    if len(voices) == 1:
-        v = voices[0]
-        return f"<lf:voice:{v.name}>\n{v.content}\n</lf:voice:{v.name}>"
-
-    voice_parts = [f"<lf:voice:{v.name}>\n{v.content}\n</lf:voice:{v.name}>" for v in voices]
-    return f"<lf:voices>\n{chr(10).join(voice_parts)}\n</lf:voices>"
-
-
-def _load_join_instructions(step_name: str | None, repo_root: Path) -> str | None:
-    name = step_name or "synthesize"
-    step_file = gather_step(repo_root, name)
-    if not step_file:
-        return None
-
-    return step_file.content.strip() or None
-
-
-def _collect_fork_diffs(results: list[_VariantResult]) -> list[dict]:
-    diffs = []
-    for r in results:
-        diff_result = subprocess.run(
-            ["git", "diff", "--stat"],
-            cwd=r.worktree,
-            capture_output=True,
-            text=True,
-        )
-        diff_text = diff_result.stdout if diff_result.returncode == 0 else "(no diff)"
-
-        full_diff = subprocess.run(
-            ["git", "diff"],
-            cwd=r.worktree,
-            capture_output=True,
-            text=True,
-        )
-        diffs.append(
-            {
-                "label": r.label,
-                "worktree": str(r.worktree),
-                "summary": diff_text,
-                "diff": full_diff.stdout if full_diff.returncode == 0 else "",
-            }
-        )
-    return diffs
-
-
-def _build_join_prompt(
-    diffs: list[dict],
-    instructions: str | None,
-    voice_section: str | None,
-    flow_name: str,
-) -> str:
-    lines = [
-        "You are joining changes from multiple forked worktrees into the current worktree.",
-        "Synthesize the best parts of all forks into a single changeset here.",
-        "Do NOT edit the forked worktrees directly.",
-        "After applying the changes, commit the result.",
-        f"Write a short summary to .design/joins/{flow_name}.md if that file makes sense.",
-        "",
-        "Forked worktrees:",
-    ]
-
-    for d in diffs:
-        lines.append(f"- {d['label']}: {d['worktree']}")
-
-    lines.extend(["", "Diffs from each fork:"])
-
-    for i, d in enumerate(diffs, 1):
-        lines.append(f"## Fork {i}: {d['label']}")
-        lines.append("")
-        lines.append("Summary of changes:")
-        lines.append("```")
-        lines.append(d["summary"])
-        lines.append("```")
-        lines.append("")
-        lines.append("Full diff:")
-        lines.append("```diff")
-        diff_lines = d["diff"].split("\n")
-        if len(diff_lines) > 200:
-            lines.extend(diff_lines[:200])
-            lines.append(f"... ({len(diff_lines) - 200} more lines)")
-        else:
-            lines.append(d["diff"])
-        lines.append("```")
-        lines.append("")
-
-    if instructions:
-        lines.extend(
-            [
-                "## Join instructions",
-                instructions,
-                "",
-            ]
-        )
-
-    body = "\n".join(lines)
-    if voice_section:
-        return f"The voice.\n\n{voice_section}\n\n{body}"
-    return body
 
 
 def _cleanup_variant_worktrees(repo_root: Path, results: list[_VariantResult]) -> None:
@@ -616,10 +426,11 @@ def _run_fork_join_group(
         _cleanup_variant_worktrees(loop.repo, results)
         return 1
 
-    join_prompt = _build_join_prompt(
-        _collect_fork_diffs(successes),
-        _load_join_instructions(join_config.step, loop.repo),
-        _format_voice_section(join_config.voice, loop.repo),
+    fork_worktrees = [(r.label, r.worktree) for r in successes]
+    join_prompt = build_join_prompt(
+        collect_fork_diffs(fork_worktrees),
+        load_join_instructions(join_config.step, loop.repo),
+        format_voice_section(join_config.voice, loop.repo),
         flow_name,
     )
     join_prompt = _build_loop_inline_prompt(
@@ -789,7 +600,7 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
 
         if step.choose is not None:
             try:
-                choice = _choose_branch(
+                choice = choose_branch(
                     step.choose,
                     flow_def.name,
                     worktree_path,

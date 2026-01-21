@@ -9,6 +9,13 @@ from pathlib import Path
 from loopflow.lf.models import Session as Session
 from loopflow.lf.models import SessionStatus as SessionStatus
 
+
+def area_to_slug(area: str) -> str:
+    """Convert area to slug: 'Maestro/' -> 'maestro', '.' -> 'root'."""
+    if area == ".":
+        return "root"
+    return area.rstrip("/").split("/")[-1].lower()
+
 # New loop-based models
 
 
@@ -71,10 +78,8 @@ class Loop:
 
     @property
     def area_slug(self) -> str:
-        """Return area as a slug for display/naming."""
-        if self.area == ".":
-            return "root"
-        return self.area.rstrip("/").split("/")[-1]
+        """Return area as a lowercase slug for display/naming."""
+        return area_to_slug(self.area)
 
     @property
     def goals_display(self) -> str:

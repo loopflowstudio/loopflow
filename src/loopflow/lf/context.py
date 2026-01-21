@@ -413,7 +413,9 @@ def gather_step(repo_root: Path | None, name: str, config=None) -> StepFile | No
         skill = find_skill(name, sources)
         if skill:
             content = load_skill_prompt(skill)
-            return parse_step_file(name, content)
+            step_file = parse_step_file(name, content)
+            step_file.is_external_skill = True
+            return step_file
 
     if repo_root:
         # Check .claude/commands first (Claude Code compatible)

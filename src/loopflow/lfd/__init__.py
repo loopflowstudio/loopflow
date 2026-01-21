@@ -20,7 +20,7 @@ from loopflow.lfd.db import (
 from loopflow.lfd.launchd import install as launchd_install
 from loopflow.lfd.launchd import is_running
 from loopflow.lfd.launchd import uninstall as launchd_uninstall
-from loopflow.lfd.loops import create_loop, get_repo_from_cwd, start_loop, stop_loop
+from loopflow.lfd.loops import create_loop, get_wt_from_cwd, start_loop, stop_loop
 from loopflow.lfd.models import Loop, LoopStatus, LoopType
 from loopflow.lfd.server import run_server
 
@@ -136,7 +136,7 @@ def start(
     Without arguments, starts all idle loops. With --all, also starts waiting loops.
     """
     c = _colors()
-    repo = get_repo_from_cwd()
+    repo = get_wt_from_cwd()
 
     # Get loops to start
     if areas:
@@ -212,7 +212,7 @@ def loop(
         lfd loop ship .                                     # whole repo
     """
     c = _colors()
-    repo = get_repo_from_cwd()
+    repo = get_wt_from_cwd()
     if not repo:
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
@@ -308,7 +308,7 @@ def flow(
         lfd flow ship . -v                            # whole repo with clipboard
     """
     c = _colors()
-    repo = get_repo_from_cwd()
+    repo = get_wt_from_cwd()
     if not repo:
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
@@ -375,7 +375,7 @@ def subscribe(
 ):
     """Subscribe to path changes on main."""
     c = _colors()
-    repo = get_repo_from_cwd()
+    repo = get_wt_from_cwd()
     if not repo:
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
@@ -417,7 +417,7 @@ def schedule(
 ):
     """Schedule a loop to run on cron."""
     c = _colors()
-    repo = get_repo_from_cwd()
+    repo = get_wt_from_cwd()
     if not repo:
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
@@ -688,7 +688,7 @@ def rm(
 def list_goals_cmd():
     """Show available goals in current repo."""
     c = _colors()
-    repo = get_repo_from_cwd()
+    repo = get_wt_from_cwd()
     if not repo:
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)

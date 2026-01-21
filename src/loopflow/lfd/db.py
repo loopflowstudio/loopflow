@@ -14,7 +14,7 @@ from loopflow.lfd.models import (
     Session,
     SessionStatus,
 )
-from loopflow.lfd.migrations import MIGRATIONS, Migration
+from loopflow.lfd.migrations import MIGRATIONS
 from loopflow.lfd.process import is_process_running
 
 DB_PATH = Path.home() / ".lf" / "lfd.db"
@@ -26,16 +26,7 @@ def _init_db(db_path: Path) -> None:
 
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA journal_mode=WAL")
-    _migrate_initial(conn)
-    _record_migration(conn, _get_initial_migration().version)
-    conn.commit()
     conn.close()
-
-
-def _get_initial_migration() -> Migration:
-    if not MIGRATIONS:
-        raise ValueError("No migrations registered.")
-    return MIGRATIONS[0]
 
 
 def _get_applied_migrations(conn: sqlite3.Connection) -> set[str]:
@@ -55,32 +46,8 @@ def _record_migration(conn: sqlite3.Connection, version: str) -> None:
     )
 
 
-def _is_legacy_db(conn: sqlite3.Connection) -> bool:
-    """Check if this is a pre-migration database."""
-    cursor = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
-    )
-    return cursor.fetchone() is None
-
-
-def _migrate_initial(conn: sqlite3.Connection) -> None:
-    """Create initial schema (current state)."""
-    _get_initial_migration().apply(conn)
-
-
 def _migrate_db(conn: sqlite3.Connection) -> None:
     """Apply pending migrations in order."""
-    if _is_legacy_db(conn):
-        conn.execute("""
-            CREATE TABLE schema_migrations (
-                version TEXT PRIMARY KEY,
-                applied_at TEXT NOT NULL
-            )
-        """)
-        _record_migration(conn, _get_initial_migration().version)
-        conn.commit()
-        return
-
     applied = _get_applied_migrations(conn)
 
     for migration in MIGRATIONS:

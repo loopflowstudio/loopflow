@@ -180,12 +180,11 @@ def resolve_step_config(
     cli_model: str | None,
     cli_context: list[str] | None,
     cli_voice: list[str] | None = None,
-    is_external_skill: bool = False,
 ) -> ResolvedStepConfig:
-    """Merge configs: CLI > frontmatter > global > external-skill-default > defaults."""
+    """Merge configs: CLI > frontmatter > global > defaults."""
     defaults = get_step_defaults()
 
-    # Resolve interactive: CLI > frontmatter > global (interactive list) > external skill > default
+    # Resolve interactive: CLI > frontmatter > global (interactive list) > default
     if cli_interactive:
         interactive = True
     elif cli_auto:
@@ -193,8 +192,6 @@ def resolve_step_config(
     elif frontmatter.interactive is not None:
         interactive = frontmatter.interactive
     elif global_config and step_name in global_config.interactive:
-        interactive = True
-    elif is_external_skill:
         interactive = True
     else:
         interactive = defaults.interactive or False

@@ -221,35 +221,36 @@ def test_resolve_step_config_frontmatter_include_over_legacy():
     assert resolved.include == ["docs/**"]
 
 
-def test_resolve_step_config_external_skill_defaults_interactive():
+def test_resolve_step_config_frontmatter_interactive_true():
+    """External skills set interactive=True in frontmatter at load time."""
     resolved = resolve_step_config(
         step_name="sp:brainstorm",
         global_config=None,
-        frontmatter=StepConfig(),
+        frontmatter=StepConfig(interactive=True),  # Set by gather_step for external skills
         cli_interactive=None,
         cli_auto=None,
         cli_model=None,
         cli_context=None,
-        is_external_skill=True,
     )
     assert resolved.interactive is True
 
 
-def test_resolve_step_config_external_skill_cli_auto_overrides():
+def test_resolve_step_config_cli_auto_overrides_frontmatter():
+    """CLI -a overrides frontmatter interactive=True."""
     resolved = resolve_step_config(
         step_name="sp:brainstorm",
         global_config=None,
-        frontmatter=StepConfig(),
+        frontmatter=StepConfig(interactive=True),  # External skill default
         cli_interactive=None,
         cli_auto=True,
         cli_model=None,
         cli_context=None,
-        is_external_skill=True,
     )
     assert resolved.interactive is False
 
 
-def test_resolve_step_config_external_skill_frontmatter_overrides():
+def test_resolve_step_config_frontmatter_interactive_false():
+    """Skill with explicit interactive=False in frontmatter stays auto."""
     resolved = resolve_step_config(
         step_name="sp:brainstorm",
         global_config=None,
@@ -258,12 +259,12 @@ def test_resolve_step_config_external_skill_frontmatter_overrides():
         cli_auto=None,
         cli_model=None,
         cli_context=None,
-        is_external_skill=True,
     )
     assert resolved.interactive is False
 
 
-def test_resolve_step_config_non_external_still_defaults_auto():
+def test_resolve_step_config_no_frontmatter_defaults_auto():
+    """Regular steps without frontmatter default to auto mode."""
     resolved = resolve_step_config(
         step_name="review",
         global_config=None,
@@ -272,6 +273,5 @@ def test_resolve_step_config_non_external_still_defaults_auto():
         cli_auto=None,
         cli_model=None,
         cli_context=None,
-        is_external_skill=False,
     )
     assert resolved.interactive is False

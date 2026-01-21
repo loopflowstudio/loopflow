@@ -386,7 +386,7 @@ def run(
     # Parse voice arg
     cli_voices = parse_voice_arg(voice)
 
-    # Resolve config: CLI > frontmatter > global > external-skill-default > defaults
+    # Resolve config: CLI > frontmatter > global > defaults
     resolved = resolve_step_config(
         step_name=step,
         global_config=config,
@@ -396,7 +396,6 @@ def run(
         cli_model=model,
         cli_context=list(path) if path else None,
         cli_voice=cli_voices or None,
-        is_external_skill=step_file.is_external_skill if step_file else False,
     )
 
     is_interactive = resolved.interactive

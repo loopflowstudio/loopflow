@@ -422,6 +422,9 @@ def gather_step(repo_root: Path | None, name: str, config=None) -> StepFile | No
             content = load_skill_prompt(skill)
             step_file = parse_step_file(name, content)
             step_file.is_external_skill = True
+            # External skills default to interactive (if not specified in frontmatter)
+            if step_file.config.interactive is None:
+                step_file.config.interactive = True
             return step_file
 
     if repo_root:

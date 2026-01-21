@@ -561,7 +561,7 @@ struct WorktreeDetailPanel: View {
                 do {
                     try await worktreeService.markPRReady(in: worktreeURL)
                     let url = await worktreeService.getExistingPRURL(in: worktreeURL)
-                    await appState.refreshWorktrees()
+                    appState.listWorktrees()
                     if let url {
                         terminalLauncher.openURL(url)
                     }
@@ -589,7 +589,7 @@ struct WorktreeDetailPanel: View {
             }
             do {
                 _ = try await worktreeService.createPR(in: worktreeURL)
-                await appState.refreshWorktrees()
+                appState.listWorktrees()
                 if let createdURL = await worktreeService.getExistingPRURL(in: worktreeURL) {
                     terminalLauncher.openURL(createdURL)
                 }

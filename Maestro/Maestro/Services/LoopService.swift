@@ -16,11 +16,24 @@ struct LoopService {
         }
         defer { sqlite3_close(db) }
 
-        ensureLoopColumns(db: db)
+        let columns = ensureLoopColumns(db: db)
+        var selectColumns = ["id", "type", "area", "goals", "flow"]
+        if columns.contains("goal") {
+            selectColumns.append("goal")
+        }
+        selectColumns.append(contentsOf: [
+            "repo",
+            "loop_main",
+            "status",
+            "iteration",
+            "pr_limit",
+            "merge_mode",
+            "pid",
+            "created_at",
+        ])
 
         let query = """
-            SELECT id, type, area, goals, flow, repo, loop_main, status, iteration, pr_limit,
-                   merge_mode, pid, created_at
+            SELECT \(selectColumns.joined(separator: ", "))
             FROM loops
             WHERE repo = ?
             ORDER BY created_at DESC
@@ -37,33 +50,37 @@ struct LoopService {
         let dateFormatter = ISO8601DateFormatter()
         dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
 
+        let columnIndex = Dictionary(uniqueKeysWithValues: selectColumns.enumerated().map { ($1, $0) })
+
         while sqlite3_step(stmt) == SQLITE_ROW {
-            guard let idPtr = sqlite3_column_text(stmt, 0),
-                  let typePtr = sqlite3_column_text(stmt, 1),
-                  let repoPtr = sqlite3_column_text(stmt, 5),
-                  let loopMainPtr = sqlite3_column_text(stmt, 6),
-                  let statusPtr = sqlite3_column_text(stmt, 7) else {
+            guard let id = columnText(stmt, columnIndex["id"]),
+                  let typeStr = columnText(stmt, columnIndex["type"]),
+                  let repoPath = columnText(stmt, columnIndex["repo"]),
+                  let loopMain = columnText(stmt, columnIndex["loop_main"]),
+                  let statusStr = columnText(stmt, columnIndex["status"]) else {
                 continue
             }
 
-            let id = String(cString: idPtr)
-            let typeStr = String(cString: typePtr)
-            let area = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? "."
-            let goals = decodeGoals(sqlite3_column_text(stmt, 3))
-            let flow = sqlite3_column_text(stmt, 4).map { String(cString: $0) }
-            let repoPath = String(cString: repoPtr)
-            let loopMain = String(cString: loopMainPtr)
-            let statusStr = String(cString: statusPtr)
+            let areaValue = columnText(stmt, columnIndex["area"]) ?? "."
+            let goalFallback = columnText(stmt, columnIndex["goal"])
+            var goals = decodeGoals(columnText(stmt, columnIndex["goals"]))
+            if goals.isEmpty, let goalFallback, !goalFallback.isEmpty {
+                goals = [goalFallback]
+            }
+            let flow = columnText(stmt, columnIndex["flow"])
+            let area = areaValue.isEmpty ? "." : areaValue
 
-            let iteration = Int(sqlite3_column_int(stmt, 8))
-            let prLimit = Int(sqlite3_column_int(stmt, 9))
+            let iteration = Int(sqlite3_column_int(stmt, columnIndex["iteration"] ?? 0))
+            let prLimit = Int(sqlite3_column_int(stmt, columnIndex["pr_limit"] ?? 0))
 
-            let mergeModeStr = sqlite3_column_text(stmt, 10).map { String(cString: $0) } ?? "pr"
-            let pid = sqlite3_column_type(stmt, 11) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 11)) : nil
+            let mergeModeStr = columnText(stmt, columnIndex["merge_mode"]) ?? "pr"
+            let pidIndex = columnIndex["pid"] ?? 0
+            let pid = sqlite3_column_type(stmt, pidIndex) != SQLITE_NULL
+                ? Int(sqlite3_column_int(stmt, pidIndex))
+                : nil
 
             var createdAt = Date()
-            if let datePtr = sqlite3_column_text(stmt, 12) {
-                let dateStr = String(cString: datePtr)
+            if let dateStr = columnText(stmt, columnIndex["created_at"]) {
                 createdAt = dateFormatter.date(from: dateStr) ?? ISO8601DateFormatter().date(from: dateStr) ?? Date()
             }
 
@@ -106,11 +123,11 @@ struct LoopService {
         return loops
     }
 
-    private func ensureLoopColumns(db: OpaquePointer?) {
-        guard let db else { return }
+    private func ensureLoopColumns(db: OpaquePointer?) -> Set<String> {
+        guard let db else { return [] }
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, "PRAGMA table_info(loops)", -1, &stmt, nil) == SQLITE_OK else {
-            return
+            return []
         }
         defer { sqlite3_finalize(stmt) }
 
@@ -121,16 +138,37 @@ struct LoopService {
             }
         }
 
+        if !columns.contains("area") {
+            sqlite3_exec(db, "ALTER TABLE loops ADD COLUMN area TEXT", nil, nil, nil)
+            columns.insert("area")
+        }
+        if !columns.contains("goals") {
+            sqlite3_exec(db, "ALTER TABLE loops ADD COLUMN goals TEXT", nil, nil, nil)
+            columns.insert("goals")
+        }
         if !columns.contains("flow") {
             sqlite3_exec(db, "ALTER TABLE loops ADD COLUMN flow TEXT", nil, nil, nil)
+            columns.insert("flow")
         }
+        return columns
     }
 
-    private func decodeGoals(_ goalsPtr: UnsafePointer<UInt8>?) -> [String] {
-        guard let goalsPtr else { return [] }
-        let goalsStr = String(cString: goalsPtr)
-        guard let data = goalsStr.data(using: .utf8) else { return [] }
-        return (try? JSONDecoder().decode([String].self, from: data)) ?? []
+    private func decodeGoals(_ goalsStr: String?) -> [String] {
+        guard let goalsStr, !goalsStr.isEmpty else { return [] }
+        guard let data = goalsStr.data(using: .utf8) else { return [goalsStr] }
+        if let decoded = try? JSONDecoder().decode([String].self, from: data) {
+            return decoded
+        }
+        if let decoded = try? JSONDecoder().decode(String.self, from: data) {
+            return [decoded]
+        }
+        return [goalsStr]
+    }
+
+    private func columnText(_ stmt: OpaquePointer?, _ index: Int?) -> String? {
+        guard let index else { return nil }
+        guard let ptr = sqlite3_column_text(stmt, index) else { return nil }
+        return String(cString: ptr)
     }
 
     private func getCommitsAhead(branch: String, in repoRoot: URL) async throws -> Int {

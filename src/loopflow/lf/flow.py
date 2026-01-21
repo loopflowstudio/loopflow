@@ -542,29 +542,31 @@ def _load_join_instructions(join: JoinConfig, repo_root: Path) -> str | None:
 def _collect_fork_diffs(results: list[_WorktreeResult]) -> list[dict]:
     diffs = []
     for r in results:
-        diff_result = subprocess.run(
-            ["git", "diff", "--stat"],
-            cwd=r.worktree,
-            capture_output=True,
-            text=True,
-        )
-        diff_text = diff_result.stdout if diff_result.returncode == 0 else "(no diff)"
+        diff_text = _run_git_diff(r.worktree, ["diff", "--stat"])
+        full_diff = _run_git_diff(r.worktree, ["diff"])
+        if not diff_text.strip() and not full_diff.strip():
+            diff_text = _run_git_diff(r.worktree, ["show", "--stat", "--format=", "HEAD"])
+            full_diff = _run_git_diff(r.worktree, ["show", "--format=", "HEAD"])
 
-        full_diff = subprocess.run(
-            ["git", "diff"],
-            cwd=r.worktree,
-            capture_output=True,
-            text=True,
-        )
         diffs.append(
             {
                 "label": r.label,
                 "worktree": str(r.worktree),
-                "summary": diff_text,
-                "diff": full_diff.stdout if full_diff.returncode == 0 else "",
+                "summary": diff_text.strip() or "(no diff)",
+                "diff": full_diff,
             }
         )
     return diffs
+
+
+def _run_git_diff(worktree: Path, args: list[str]) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=worktree,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout if result.returncode == 0 else ""
 
 
 def _build_join_prompt(

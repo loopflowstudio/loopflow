@@ -5,6 +5,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+from loopflow.lfd.migrations.registry import MIGRATIONS
 from loopflow.lfd.models import (
     Loop,
     LoopRun,
@@ -14,7 +15,6 @@ from loopflow.lfd.models import (
     Session,
     SessionStatus,
 )
-from loopflow.lfd.migrations import MIGRATIONS
 from loopflow.lfd.process import is_process_running
 
 DB_PATH = Path.home() / ".lf" / "lfd.db"

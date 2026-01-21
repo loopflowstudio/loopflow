@@ -26,7 +26,7 @@ from loopflow.lfd.db import (
     update_loop_status,
     update_session_status,
 )
-from loopflow.lfd.migrations import MIGRATIONS
+from loopflow.lfd.migrations.registry import MIGRATIONS
 from loopflow.lfd.models import (
     Loop,
     LoopRun,

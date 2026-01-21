@@ -188,10 +188,7 @@ def _run_streaming(
     Prompt is passed as a CLI argument.
     """
     use_stdin = (
-        prompt is not None
-        and len(command) > 1
-        and command[0] == "codex"
-        and command[1] == "exec"
+        prompt is not None and len(command) > 1 and command[0] == "codex" and command[1] == "exec"
     )
     cmd = command + ["-"] if use_stdin else (command + [prompt] if prompt else command)
 

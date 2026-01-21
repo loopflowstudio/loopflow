@@ -55,6 +55,22 @@ def deploy_website() -> bool:
     return True
 
 
+# --- Screenshot generation ---
+
+
+def _generate_screenshots() -> tuple[bool, str]:
+    """Run scripts/generate_screenshots.py, return (success, output)."""
+    script = ROOT / "scripts" / "generate_screenshots.py"
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    output = result.stdout + result.stderr
+    return result.returncode == 0, output
+
+
 # --- State detection ---
 
 
@@ -232,6 +248,7 @@ def _create_release_pr(
     bump: str,
     skip_tests: bool,
     skip_ci: bool,
+    skip_screenshots: bool,
 ) -> int:
     """Create release PR with version bump."""
     from loopflow.lf.messages import generate_release_notes
@@ -274,7 +291,16 @@ def _create_release_pr(
             return 1
         print(message)
 
-    # Step 4: Generate release notes
+    # Step 4: Generate screenshots
+    if not skip_screenshots:
+        print("Generating screenshots...")
+        success, output = _generate_screenshots()
+        if not success:
+            print(f"Screenshot generation failed: {output}", file=sys.stderr)
+            return 1
+        print("Screenshots generated.")
+
+    # Step 5: Generate release notes
     print("Generating release notes...")
     try:
         notes = generate_release_notes(ROOT, old_version, new_version)
@@ -283,7 +309,7 @@ def _create_release_pr(
         return 1
     print("Release notes generated.")
 
-    # Step 5: Bump version and build package (validate before committing)
+    # Step 6: Bump version and build package (validate before committing)
     print(f"Bumping version: {old_version} → {new_version}")
     write_version(new_version)
 
@@ -296,7 +322,7 @@ def _create_release_pr(
         return 1
     print("Build succeeded.")
 
-    # Step 6: Write release notes, create release branch, commit, push, create PR
+    # Step 7: Write release notes, create release branch, commit, push, create PR
     changes_md = "\n".join(f"- {change}" for change in notes.changes)
     release_notes_content = f"# v{new_version}\n\n{notes.summary}\n\n## Changes\n\n{changes_md}\n"
     (ROOT / "RELEASE_NOTES.md").write_text(release_notes_content)
@@ -315,7 +341,7 @@ def _create_release_pr(
 
     print("Committing release...")
     subprocess.run(
-        ["git", "add", "src/loopflow/__init__.py", "RELEASE_NOTES.md"],
+        ["git", "add", "src/loopflow/__init__.py", "RELEASE_NOTES.md", "docs/*.png"],
         cwd=ROOT,
         check=True,
     )
@@ -395,6 +421,7 @@ def main() -> int:
     parser.add_argument("--dmg-only", action="store_true", help="Only build and upload DMG (no PyPI)")
     parser.add_argument("--skip-dmg", action="store_true", help="Skip DMG build/upload")
     parser.add_argument("--skip-website", action="store_true", help="Skip website update/deploy")
+    parser.add_argument("--skip-screenshots", action="store_true", help="Skip screenshot generation")
     args = parser.parse_args()
 
     # Validate args
@@ -516,6 +543,7 @@ def main() -> int:
         print(f"  - Bump version: {state.version} → {new_version}")
         print("  - Run tests" if not args.skip_tests else "  - Skip tests")
         print("  - Verify CI passed" if not args.skip_ci else "  - Skip CI check")
+        print("  - Generate screenshots" if not args.skip_screenshots else "  - Skip screenshots")
         print("  - Generate release notes")
         print("  - Build package")
         print(f"  - Create branch release/v{new_version}")
@@ -523,7 +551,7 @@ def main() -> int:
         print("\nAfter PR merges, run again to finalize (tag, publish, DMG).")
         return 0
 
-    return _create_release_pr(args.bump, args.skip_tests, args.skip_ci)
+    return _create_release_pr(args.bump, args.skip_tests, args.skip_ci, args.skip_screenshots)
 
 
 if __name__ == "__main__":

@@ -70,11 +70,13 @@ struct LoopService {
             let flow = columnText(stmt, columnIndex["flow"])
             let area = areaValue.isEmpty ? "." : areaValue
 
-            let iteration = Int(sqlite3_column_int(stmt, columnIndex["iteration"] ?? 0))
-            let prLimit = Int(sqlite3_column_int(stmt, columnIndex["pr_limit"] ?? 0))
+            let iterationIndex = Int32(columnIndex["iteration"] ?? 0)
+            let prLimitIndex = Int32(columnIndex["pr_limit"] ?? 0)
+            let iteration = Int(sqlite3_column_int(stmt, iterationIndex))
+            let prLimit = Int(sqlite3_column_int(stmt, prLimitIndex))
 
             let mergeModeStr = columnText(stmt, columnIndex["merge_mode"]) ?? "pr"
-            let pidIndex = columnIndex["pid"] ?? 0
+            let pidIndex = Int32(columnIndex["pid"] ?? 0)
             let pid = sqlite3_column_type(stmt, pidIndex) != SQLITE_NULL
                 ? Int(sqlite3_column_int(stmt, pidIndex))
                 : nil
@@ -167,7 +169,7 @@ struct LoopService {
 
     private func columnText(_ stmt: OpaquePointer?, _ index: Int?) -> String? {
         guard let index else { return nil }
-        guard let ptr = sqlite3_column_text(stmt, index) else { return nil }
+        guard let ptr = sqlite3_column_text(stmt, Int32(index)) else { return nil }
         return String(cString: ptr)
     }
 

@@ -13,6 +13,8 @@ Maestro is a native Mac app that wraps the CLI. Point-and-click prompt selection
 
 ## Getting Started
 
+![Maestro main window](../maestro-main.png)
+
 ### Installation
 
 Download the latest release from GitHub releases or build from source:
@@ -104,6 +106,8 @@ Click **+** or use **⌘N** to create a new worktree. Enter a branch name or lea
 Right-click → **Delete** removes the worktree and its branch. You can also use `lfops wt prune` to clean up merged worktrees.
 
 ## Agents Panel
+
+![Maestro with loops](../maestro-loops.png)
 
 View and manage background agents.
 

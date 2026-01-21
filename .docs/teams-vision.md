@@ -1,24 +1,24 @@
-# Loopflow Orchestra
+# Loopflow Symphonia
 
 ## The Metaphor
 
-**Maestro** — You're the conductor. Agents are your musicians. You direct them to create software.
+**Concerto** — You're the conductor. Agents are your musicians. You direct them to create software.
 
-**Orchestra** — Engineers are the musicians. Each plays their instrument (Maestro + agents). Together you create one piece of software.
+**Symphonia** — Engineers are the musicians. Each plays their instrument (Concerto + agents). Together you create one piece of software.
 
-| | Maestro | Orchestra |
+| | Concerto | Symphonia |
 |---|---|---|
 | Music | The software | The software |
 | Sheet music | Prompts | Shared prompts |
 | Musicians | Agents | Engineers |
 | Conductor | You | — |
-| Instrument | — | Maestro + agents |
+| Instrument | — | Concerto + agents |
 
-In Orchestra, coordination is between humans—the engineers playing together. Each musician brings their own instrument (their Maestro, their agents). The challenge isn't directing agents; it's playing in harmony with other engineers.
+In Symphonia, coordination is between humans—the engineers playing together. Each musician brings their own instrument (their Concerto, their agents). The challenge isn't directing agents; it's playing in harmony with other engineers.
 
 The metaphor is a values reminder: play to serve the music, not yourself. The software is what matters.
 
-## What Orchestra Adds
+## What Symphonia Adds
 
 ### Shared sheet music
 
@@ -31,7 +31,7 @@ Prompts live in the repo. Everyone works from the same playbook. When someone im
   debug.md       # how we fix bugs
 ```
 
-This already exists in Loopflow v1. Orchestra makes it a team workflow, not just a personal one.
+This already exists in Loopflow v1. Symphonia makes it a team workflow, not just a personal one.
 
 ### Sections
 
@@ -45,7 +45,7 @@ carol/perf-fixes       # Carol conducting performance
 
 ### Quality gates
 
-CI and merge queues ensure the parts work together before shipping. Standard team infrastructure, not unique to Orchestra—but required for teams to work safely.
+CI and merge queues ensure the parts work together before shipping. Standard team infrastructure, not unique to Symphonia—but required for teams to work safely.
 
 ```
 PR created → CI runs
@@ -55,7 +55,7 @@ Main → Ship
 
 ### Visibility
 
-Who's working on what? What's the status? Orchestra shows the whole ensemble:
+Who's working on what? What's the status? Symphonia shows the whole ensemble:
 
 - Active worktrees across the team
 - Running agents and their progress
@@ -63,16 +63,16 @@ Who's working on what? What's the status? Orchestra shows the whole ensemble:
 
 ## What This Means for the MVP
 
-CI + merge queue is table stakes for teams. Not Orchestra-specific, but required before Orchestra makes sense.
+CI + merge queue is table stakes for teams. Not Symphonia-specific, but required before Symphonia makes sense.
 
 The MVP:
 1. CI runs tests on PRs
 2. Merge queue gates main
 3. `lfops land` submits to queue
 
-## Future: Hosted Orchestra
+## Future: Hosted Symphonia
 
-Today, each engineer runs agents locally. Future Orchestra could provide:
+Today, each engineer runs agents locally. Future Symphonia could provide:
 
 - **Shared compute** — agents run on Loopflow servers, not your laptop
 - **Team dashboard** — see all active work across the team
@@ -82,7 +82,7 @@ But that's later. The foundation is shared prompts + merge queue coordination.
 
 ## Open Questions
 
-1. **Is "Orchestra" the product name or just internal framing?**
+1. **Is "Symphonia" the product name or just internal framing?**
 
 2. **What visibility do teams need?** Worktree status? Agent output? Diff previews?
 

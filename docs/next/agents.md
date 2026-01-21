@@ -28,7 +28,7 @@ lfd status
 When you run tasks in auto mode, sessions are automatically logged to `~/.lf/lfd.db`. This enables:
 
 - Session history queries per worktree
-- Live status updates in Maestro
+- Live status updates in Concerto
 - `lfops status` to show running sessions
 
 Sessions are logged via fire-and-forget calls—if the daemon isn't running, tasks still execute normally; they just aren't tracked.

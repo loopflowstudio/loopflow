@@ -4,6 +4,7 @@ import SwiftUI
 
 struct LoopLiveOutput: View {
     let lines: [OutputLine]
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -26,7 +27,7 @@ struct LoopLiveOutput: View {
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .onChange(of: lines.count) { _, _ in
                 if let lastLine = lines.last {
-                    withAnimation(.easeOut(duration: 0.1)) {
+                    withAnimation(DesignAnimation.fast(reduceMotion)) {
                         proxy.scrollTo(lastLine.id, anchor: .bottom)
                     }
                 }

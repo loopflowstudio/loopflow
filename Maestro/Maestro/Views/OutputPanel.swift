@@ -7,6 +7,7 @@ struct OutputPanel: View {
     @State private var isExpanded = false
     @State private var selectedSessionId: String?
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var palette: LoopflowPalette {
         LoopflowPalette.make(for: colorScheme)
@@ -98,7 +99,7 @@ struct OutputPanel: View {
 
             // Expand/collapse toggle
             Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
+                withAnimation(DesignAnimation.standard(reduceMotion)) {
                     isExpanded.toggle()
                 }
             } label: {
@@ -107,6 +108,8 @@ struct OutputPanel: View {
             }
             .buttonStyle(.plain)
             .help(isExpanded ? "Collapse" : "Expand")
+            .accessibleButton("Toggle output panel", hint: isExpanded ? "Collapse" : "Expand")
+            .minHitTarget()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -135,7 +138,7 @@ struct OutputPanel: View {
             .onChange(of: appState.liveOutputBySession[sessionId]?.count) { _, _ in
                 // Auto-scroll to bottom
                 if let lastLine = appState.liveOutputBySession[sessionId]?.last {
-                    withAnimation {
+                    withAnimation(DesignAnimation.fast(reduceMotion)) {
                         proxy.scrollTo(lastLine.id, anchor: .bottom)
                     }
                 }

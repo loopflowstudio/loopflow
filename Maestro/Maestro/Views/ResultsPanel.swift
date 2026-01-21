@@ -12,6 +12,7 @@ struct ResultsPanel: View {
     @State private var diffContent: String?
     @State private var diffLoading = false
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var palette: LoopflowPalette {
         LoopflowPalette.make(for: colorScheme)
@@ -115,7 +116,7 @@ struct ResultsPanel: View {
                 }
 
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
+                    withAnimation(DesignAnimation.standard(reduceMotion)) {
                         isExpanded.toggle()
                     }
                 } label: {
@@ -230,7 +231,7 @@ struct ResultsPanel: View {
         VStack(alignment: .leading, spacing: 4) {
             // File header - clickable to expand
             Button {
-                withAnimation(.easeInOut(duration: 0.15)) {
+                withAnimation(DesignAnimation.fast(reduceMotion)) {
                     if expandedFiles.contains(index) {
                         expandedFiles.remove(index)
                     } else {
@@ -536,12 +537,14 @@ struct ResultsPanel: View {
             .help("Show results view")
 
             Button {
-                withAnimation { isExpanded.toggle() }
+                withAnimation(DesignAnimation.standard(reduceMotion)) { isExpanded.toggle() }
             } label: {
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.up")
                     .font(.caption)
             }
             .buttonStyle(.plain)
+            .accessibleButton("Toggle results panel", hint: isExpanded ? "Collapse" : "Expand")
+            .minHitTarget()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -568,7 +571,7 @@ struct ResultsPanel: View {
             .background(palette.surface)
             .onChange(of: lines.count) { _, _ in
                 if let lastLine = lines.last {
-                    withAnimation { proxy.scrollTo(lastLine.id, anchor: .bottom) }
+                    withAnimation(DesignAnimation.fast(reduceMotion)) { proxy.scrollTo(lastLine.id, anchor: .bottom) }
                 }
             }
         }

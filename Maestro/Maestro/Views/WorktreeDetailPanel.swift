@@ -7,6 +7,7 @@ struct WorktreeDetailPanel: View {
     let worktree: Worktree
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("commitsExpanded") private var commitsExpanded = true
     @AppStorage("filesExpanded") private var filesExpanded = true
     @AppStorage("launcherExpanded") private var launcherExpanded = false
@@ -160,6 +161,7 @@ struct WorktreeDetailPanel: View {
             .buttonStyle(DarkButtonStyle())
             .disabled(!worktree.hasDiff)
             .help("Land branch (creates PR if needed, rebases, marks ready, enables auto-merge)")
+            .accessibleButton("Land branch", hint: "Creates PR if needed, rebases, marks ready, enables auto-merge")
 
             Button {
                 openInIDE()
@@ -174,6 +176,7 @@ struct WorktreeDetailPanel: View {
             }
             .buttonStyle(DarkButtonStyle())
             .help("Open in \(ideApp.displayName)")
+            .accessibleButton("Open in \(ideApp.displayName)", hint: "Open worktree in code editor")
 
             Button {
                 openInTerminal()
@@ -188,6 +191,7 @@ struct WorktreeDetailPanel: View {
             }
             .buttonStyle(DarkButtonStyle())
             .help("Open in \(terminalApp.displayName)")
+            .accessibleButton("Open in \(terminalApp.displayName)", hint: "Open worktree in terminal")
 
             Spacer()
 
@@ -205,8 +209,8 @@ struct WorktreeDetailPanel: View {
                     .frame(minWidth: 70)
                 }
                 .buttonStyle(DarkButtonStyle())
-                .disabled(!worktree.hasDiff)
                 .help("View PR on GitHub")
+                .accessibleButton("View pull request", hint: "View pull request on GitHub")
             }
 
             // Abandon button
@@ -223,6 +227,7 @@ struct WorktreeDetailPanel: View {
             }
             .buttonStyle(DarkButtonStyle())
             .help("Abandon worktree")
+            .accessibleButton("Abandon worktree", hint: "Delete this worktree and its branch")
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
@@ -507,7 +512,7 @@ struct WorktreeDetailPanel: View {
     private var launcherSection: some View {
         VStack(spacing: 0) {
             Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
+                withAnimation(DesignAnimation.standard(reduceMotion)) {
                     launcherExpanded.toggle()
                 }
             } label: {
@@ -527,6 +532,7 @@ struct WorktreeDetailPanel: View {
             }
             .buttonStyle(.plain)
             .background(palette.surface)
+            .accessibleButton("Toggle launcher", hint: launcherExpanded ? "Collapse" : "Expand")
 
             if launcherExpanded {
                 CollapsedLauncher(appState: appState, worktree: worktree)

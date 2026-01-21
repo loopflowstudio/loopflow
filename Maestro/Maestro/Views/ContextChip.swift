@@ -26,6 +26,7 @@ struct ContextChip: View {
                 .foregroundStyle(isOn ? color : .secondary)
         }
         .buttonStyle(.plain)
+        .accessibleToggle("Include \(label)", isOn: isOn)
     }
 }
 
@@ -49,11 +50,15 @@ struct FileChip: View {
             }
             .buttonStyle(.plain)
             .opacity(0.6)
+            .accessibleButton("Remove \(name)")
+            .minHitTarget()
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .background(Capsule().fill(Color.orange.opacity(0.12)))
         .foregroundStyle(Color.orange)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Attached file: \(name)")
     }
 }
 
@@ -69,6 +74,8 @@ struct AddFileButton: View {
                 .background(Circle().fill(Color.primary.opacity(0.05)))
         }
         .buttonStyle(.plain)
+        .accessibleButton("Add file to context")
+        .minHitTarget()
     }
 }
 

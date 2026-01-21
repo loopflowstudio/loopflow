@@ -27,6 +27,15 @@ extension Color {
     }
 }
 
+// MARK: - Status Colors
+
+extension Color {
+    static let statusSuccess = Color.green
+    static let statusError = Color.red
+    static let statusWarning = Color.orange
+    static let statusInfo = Color.blue
+}
+
 struct LoopflowPalette {
     let background: Color
     let surface: Color

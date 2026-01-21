@@ -52,6 +52,9 @@ _SUPERPOWERS_PATHS = [
     Path.home() / "superpowers",
 ]
 
+# Default rams location (single-file skill at ~/.claude/commands/rams.md)
+_RAMS_PATH = Path.home() / ".claude" / "commands" / "rams.md"
+
 _REGISTRY_DEFAULT_BASE_URL = "https://skillregistry.io"
 _REGISTRY_DEFAULT_PREFIX = "sr"
 _REGISTRY_DEFAULT_TTL_SECONDS = 86400
@@ -295,6 +298,19 @@ def discover_skill_sources(
                         )
                         break
 
+    # Auto-detect rams if installed at ~/.claude/commands/rams.md
+    if "rams" not in seen_prefixes and _RAMS_PATH.exists():
+        sources.append(
+            SkillSource(
+                name="rams.ai",
+                prefix="rams",
+                path=_RAMS_PATH.parent,
+                skills=["rams"],
+                kind="single-file",
+            )
+        )
+        seen_prefixes.add("rams")
+
     if registry_config and registry_config.enabled:
         base_url = registry_config.base_url or _REGISTRY_DEFAULT_BASE_URL
         prefix = registry_config.prefix or _REGISTRY_DEFAULT_PREFIX
@@ -348,6 +364,12 @@ def find_skill(name: str, sources: list[SkillSource]) -> Skill | None:
                 source.cache_dir,
                 skill_name,
             )
+        elif source.kind == "single-file":
+            # Single-file skill: path is parent dir, skill name matches filename
+            if source.path:
+                candidate = source.path / f"{skill_name}.md"
+                if candidate.exists():
+                    prompt_path = candidate
         elif source.path:
             prompt_path = _find_skill_prompt_path(source.path, skill_name)
 

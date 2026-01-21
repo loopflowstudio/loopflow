@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from loopflow.lf.tokens import count_tokens
+
 
 @dataclass
 class Summary:
@@ -276,13 +278,6 @@ def _list_subdirectories(path: Path, repo_root: Path) -> list[Path]:
     return subdirs
 
 
-def _count_tokens(text: str) -> int:
-    """Count tokens using tiktoken."""
-    from loopflow.lf.tokens import count_tokens
-
-    return count_tokens(text)
-
-
 def _run_summarize_cli(prompt: str, model: str, repo_root: Path) -> str:
     """Run CLI agent to generate summary."""
     from loopflow.lf.config import parse_model
@@ -329,7 +324,7 @@ def generate_summary(
     """
     source_content = gather_source_content(path, repo_root, exclude)
     source_hash = compute_source_hash(path, repo_root)
-    content_tokens = _count_tokens(source_content)
+    content_tokens = count_tokens(source_content)
 
     # If source fits in budget, use it directly
     if content_tokens <= token_budget:
@@ -350,7 +345,7 @@ def generate_summary(
             subdir_data = []
             for subdir in subdirs:
                 subdir_content = gather_source_content(subdir, repo_root, exclude)
-                subdir_tokens = _count_tokens(subdir_content)
+                subdir_tokens = count_tokens(subdir_content)
                 subdir_data.append((subdir, subdir_tokens, subdir_content))
 
             # Bin-pack subdirs into groups that fit under model context
@@ -416,7 +411,7 @@ def generate_summary(
 
             # Concatenate all group summaries
             combined = "\n\n".join(sub_summaries)
-            combined_tokens = _count_tokens(combined)
+            combined_tokens = count_tokens(combined)
 
             # If combined fits in budget, use it directly
             if combined_tokens <= token_budget:

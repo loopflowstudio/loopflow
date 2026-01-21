@@ -1,10 +1,12 @@
 # Land Button as Primary Action
 
-A prominent Land button replaces PR as the primary shipping action in Maestro's worktree detail panel.
+A prominent Land button replaces PR as the primary shipping action in Maestro's worktree detail panel. Draft PRs are auto-created by lfd so a PR always exists when there's work to land.
 
 ## What to build
 
-Reorganize the quick actions bar: Land becomes the primary action button, PR becomes "View PR" (only visible when a PR exists).
+1. Reorganize quick actions bar: Land becomes primary, PR becomes "View PR"
+2. Move draft PR creation from Maestro to lfd (faster, works without Maestro open)
+3. Disable Land when diff is empty (not just when no commits)
 
 ## Current State
 
@@ -24,22 +26,41 @@ Reorganize the quick actions bar: Land becomes the primary action button, PR bec
 ```
 
 **Land button behavior:**
-- No PR → `lfops land --create-pr` (creates PR + enables auto-merge)
 - Draft PR → mark ready + `lfops land` (enables auto-merge)
 - Open PR → `lfops land` (enables auto-merge)
-- Always enabled when there are commits (aheadMain > 0)
+- Enabled when there's a diff to land (`hasDiff == true`)
+- Note: lfd auto-creates draft PRs, so a PR should always exist when there's work
 
 **View PR button:**
 - Only visible when `prNumber != nil`
+- Disabled when `hasDiff == false` (nothing to review)
 - Opens PR URL in browser
 - Shows PR number in label: "PR #42"
 
 ## Data Structures
 
-No new data structures. Uses existing `Worktree` properties:
+Add `hasDiff` to Worktree model (computed from existing `diffVsMain` JSON):
+
+```swift
+// Worktree.swift
+struct Worktree {
+    // ... existing properties ...
+    let hasDiff: Bool  // True if diff_vs_main has changes
+}
+
+extension Worktree {
+    init(from json: WorktreeJSON, ...) {
+        // ... existing init ...
+        let diffStats = json.workingTree?.diffVsMain
+        self.hasDiff = (diffStats?.added ?? 0) + (diffStats?.deleted ?? 0) > 0
+    }
+}
+```
+
+Uses existing properties:
 - `prNumber: Int?` - determines View PR visibility
 - `prState: PRState?` - determines Land button behavior
-- `aheadMain: Int` - determines if Land is enabled
+- `hasDiff: Bool` - determines if Land is enabled
 
 ## Key Functions
 
@@ -77,16 +98,13 @@ private var landButton: some View {
         .frame(minWidth: 70)
     }
     .buttonStyle(DarkButtonStyle())
-    .disabled(worktree.aheadMain == 0)
+    .disabled(!worktree.hasDiff)
     .help(landButtonHelp)
 }
 
 private var landButtonHelp: String {
-    if worktree.aheadMain == 0 {
-        return "No commits to land"
-    }
-    if worktree.prNumber == nil {
-        return "Create PR and enable auto-merge"
+    if !worktree.hasDiff {
+        return "No changes to land"
     }
     if worktree.prState == .draft {
         return "Mark PR ready and enable auto-merge"
@@ -108,7 +126,8 @@ private var viewPRButton: some View {
         .frame(minWidth: 70)
     }
     .buttonStyle(DarkButtonStyle())
-    .help("View PR on GitHub")
+    .disabled(!worktree.hasDiff)
+    .help(worktree.hasDiff ? "View PR on GitHub" : "No changes to review")
 }
 
 private func landBranch() {
@@ -137,13 +156,38 @@ func landBranch(for worktree: Worktree) async throws {
 // WorktreeService.swift
 
 func landBranch(in worktreePath: URL) async throws {
-    // Uses --create-pr to handle all cases:
-    // - No PR: creates PR + enables auto-merge
-    // - Draft PR: lfops land handles marking ready
-    // - Open PR: enables auto-merge
-    _ = try await runLfops(["land", "--create-pr"], in: worktreePath)
+    // lfd auto-creates draft PRs, so we just need to land
+    // lfops land handles: marking draft ready, enabling auto-merge
+    _ = try await runLfops(["land"], in: worktreePath)
 }
 ```
+
+```python
+# src/loopflow/lfd/scheduler.py
+
+async def auto_create_draft_prs(self, repo: Path) -> None:
+    """Create draft PRs for branches with pushed changes but no PR."""
+    worktrees = list_worktrees(repo)
+    for wt in worktrees:
+        if wt.branch in ("main", "master"):
+            continue
+        if wt.pr_number is not None:
+            continue
+        if not wt.has_diff:
+            continue
+        if not branch_is_pushed(wt.branch, repo):
+            continue
+        # Create draft PR
+        subprocess.run(
+            ["gh", "pr", "create", "--draft", "--fill"],
+            cwd=wt.path,
+            capture_output=True,
+        )
+```
+
+Remove from Maestro:
+- Delete `createDraftPRsIfNeeded` from `AppState.swift`
+- Delete call to it from `syncAndEnrich`
 
 ## UI Changes
 
@@ -161,24 +205,32 @@ After:
                               * only when prNumber != nil
 ```
 
-**Land button states:**
-- Disabled (gray): no commits (`aheadMain == 0`)
-- Enabled: has commits to land
+**Button states:**
+- Land: disabled when `hasDiff == false`
+- View PR: visible when `prNumber != nil`, disabled when `hasDiff == false`
 
 **Button styling:** Both use existing `DarkButtonStyle`. Land button in first position gives it visual prominence.
 
 ## Constraints
 
-- `lfops land --create-pr` must handle all cases (no PR, draft PR, open PR)
-- The View PR button must only appear when there's a PR to view
-- Land button must be disabled when there's nothing to land (no commits)
+- lfd must auto-create draft PRs for branches with pushed changes
+- `lfops land` must handle draft and open PRs (mark ready if draft, enable auto-merge)
+- View PR button only visible when PR exists, disabled when no diff
+- Land button disabled when no diff
+- `wt list --full` must be used to get `diff_vs_main` data
 
 ## Done when
 
+**Maestro:**
 1. Build succeeds: `cd Maestro && xcodebuild -scheme Maestro build`
 2. Land button appears first in quick actions bar
-3. Land button is disabled when `aheadMain == 0`
-4. View PR button only appears when PR exists
-5. Clicking Land on a branch with no PR creates PR and enables auto-merge
-6. Clicking Land on a branch with draft PR marks ready and enables auto-merge
-7. Clicking Land on a branch with open PR enables auto-merge
+3. Land button is disabled when `hasDiff == false`
+4. View PR button only visible when `prNumber != nil`
+5. View PR button is disabled when `hasDiff == false`
+6. Clicking Land on draft PR marks ready and enables auto-merge
+7. Clicking Land on open PR enables auto-merge
+8. `createDraftPRsIfNeeded` removed from AppState
+
+**lfd:**
+9. Draft PRs auto-created for branches with pushed changes and no PR
+10. Auto-draft runs on scheduler tick (same as other periodic tasks)

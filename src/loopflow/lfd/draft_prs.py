@@ -10,28 +10,6 @@ from loopflow.lf.git import find_main_repo
 from loopflow.lf.worktrees import list_all
 
 
-def _has_diff(worktree_path: Path, base_branch: str = "main") -> bool:
-    """Check if worktree has any diff against base branch."""
-    result = subprocess.run(
-        ["git", "diff", "--name-only", f"{base_branch}...HEAD"],
-        cwd=worktree_path,
-        capture_output=True,
-        text=True,
-    )
-    return bool(result.stdout.strip())
-
-
-def _branch_is_pushed(worktree_path: Path, branch: str) -> bool:
-    """Check if branch exists on remote."""
-    result = subprocess.run(
-        ["git", "ls-remote", "--heads", "origin", branch],
-        cwd=worktree_path,
-        capture_output=True,
-        text=True,
-    )
-    return bool(result.stdout.strip())
-
-
 def _create_draft_pr(worktree_path: Path) -> bool:
     """Create a draft PR for the branch. Returns True on success."""
     result = subprocess.run(

@@ -110,11 +110,12 @@ Use skills from external libraries alongside your own:
 
 ```bash
 lf sp:brainstorm: add user auth    # superpowers brainstorm
+lf sr:gog                          # SkillRegistry skill
 lf implement                        # loopflow implement
 lf sp:execute-plan                  # superpowers execution
 ```
 
-If `~/.superpowers` exists, it's auto-detected. See [Configuration](config.md#skill-sources).
+If `~/.superpowers` exists, it's auto-detected. SkillRegistry is opt-in via config. See [Configuration](config.md#skill-sources).
 
 ## Parallel features
 

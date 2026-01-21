@@ -18,6 +18,10 @@ yolo: false
 # Push commits to origin automatically
 push: false
 
+# SkillRegistry (remote skill directory)
+# skill_registry:
+#   enabled: true
+
 # Codebase summaries: LLM-generated overviews included in prompts
 # Run `lfops summarize -a` to generate/refresh all configured summaries
 # summaries:

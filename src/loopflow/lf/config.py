@@ -48,6 +48,16 @@ class SkillSourceConfig(BaseModel):
     path: str  # Supports ~ expansion
 
 
+class SkillRegistryConfig(BaseModel):
+    """SkillRegistry configuration."""
+
+    enabled: bool = False
+    base_url: str = "https://skillregistry.io"
+    prefix: str = "sr"
+    cache_ttl_seconds: int = 86400
+    cache_dir: Optional[str] = None
+
+
 class BranchNameConfig(BaseModel):
     """Configuration for branch name generation."""
 
@@ -96,6 +106,7 @@ class Config(BaseModel):
     summaries: list[SummaryConfig] = Field(default_factory=list)  # Summaries to include
     summary_tokens: int = 10000  # Default token budget for summaries
     skill_sources: list[SkillSourceConfig] = Field(default_factory=list)  # External skill libraries
+    skill_registry: SkillRegistryConfig = Field(default_factory=SkillRegistryConfig)
     work: Optional[WorkConfig] = None  # Work queue configuration
     branch_names: Optional[BranchNameConfig] = None  # Branch naming schema
     lint_check: Optional[str] = None  # Command to check if lint passes (exits 0 = pass)

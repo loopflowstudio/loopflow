@@ -102,6 +102,10 @@ yolo: false
 
 # Push commits to origin automatically
 push: false
+
+# SkillRegistry (remote skill directory)
+skill_registry:
+  enabled: false
 ```
 
 ## Phase 4: Optional extras
@@ -120,6 +124,15 @@ Check which agents are already installed. Only offer ones that aren't installed 
 Check if ~/.superpowers exists. If not:
 "Install superpowers skill library? Adds community prompts via `lf sp:` commands"
 - Yes: `git clone https://github.com/obra/superpowers ~/.superpowers`
+- No: skip
+
+Offer SkillRegistry (remote directory, no install):
+"Enable SkillRegistry? Adds remote skills via `lf sr:` commands"
+- Yes: update `.lf/config.yaml` with:
+  ```yaml
+  skill_registry:
+    enabled: true
+  ```
 - No: skip
 
 **IDE preferences:**

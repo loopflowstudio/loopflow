@@ -23,6 +23,7 @@ lf --list                    # show all available steps
 lf review                    # run .claude/commands/review.md
 lf implement: add auth       # pass arguments after colon
 lf sp:brainstorm             # run superpowers brainstorm skill
+lf sr:gog                    # run SkillRegistry skill
 lf : "fix the typo"          # inline prompt
 lf debug -v                  # paste clipboard, fix the bug
 ```
@@ -31,7 +32,7 @@ lf debug -v                  # paste clipboard, fix the bug
 
 Tasks are markdown files in these locations (searched in order):
 
-1. External skills — `<prefix>:<skill>` format (e.g., `sp:brainstorm`)
+1. External skills — `<prefix>:<skill>` format (e.g., `sp:brainstorm`, `sr:gog`)
 2. `.claude/commands/<step>.md` — preferred, portable
 3. `.lf/<step>.md` — local override
 4. Built-in steps — commit, debug, design, expand, explore, implement, init, iterate, lint, polish, rebase, reduce, refine, review, roadmap
@@ -156,9 +157,10 @@ lf review -c    # shows token breakdown, copies to clipboard
 
 ```bash
 lf sp:brainstorm    # run skill from superpowers
+lf sr:gog           # run SkillRegistry skill
 ```
 
-If `~/.superpowers` exists, it's auto-detected with prefix `sp`. See [Configuration](config.md) for custom skill sources.
+If `~/.superpowers` exists, it's auto-detected with prefix `sp`. SkillRegistry is opt-in via config. See [Configuration](config.md) for setup.
 
 ## See Also
 

@@ -251,6 +251,25 @@ summaries:
 
 Generate with `lfops summarize`. Cached in `.lf/summaries/`.
 
+### SkillRegistry
+
+Enable the SkillRegistry directory as a remote skill source.
+
+```yaml
+skill_registry:
+  enabled: true
+  prefix: sr
+  cache_ttl_seconds: 86400
+```
+
+Run registry skills by prefix:
+
+```bash
+lf sr:gog
+```
+
+Registry skills are cached under `~/.lf/skills/skillregistry/` with a `registry.json` index.
+
 ### Skill Sources
 
 External skill libraries that extend loopflow with additional steps.

@@ -83,6 +83,7 @@ Run `lf init` to install Claude Code, worktrunk, and configure preferences.
 
 **Skill Libraries**
 - [superpowers](https://github.com/obra/superpowers) — prompt library (`lf sp:<skill>`)
+- [SkillRegistry](https://skillregistry.io/) — remote skill directory (`lf sr:<skill>`)
 - [rams](https://rams.ai) — accessibility and visual design review
 
 ## Requirements

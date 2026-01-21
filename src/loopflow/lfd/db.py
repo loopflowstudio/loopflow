@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -584,8 +585,6 @@ def save_summary_db(
     db_path: Path | None = None,
 ) -> None:
     """Save a summary to the database."""
-    import uuid
-
     conn = _get_db(db_path)
     conn.execute(
         """

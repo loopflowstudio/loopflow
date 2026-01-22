@@ -1,12 +1,13 @@
-# v0.6.8
+# v0.6.9
 
-Shell integration for automatic directory switching after worktree creation, plus a reworked daemon loop API that uses area as the primary identifier with optional goal composition. Also adds a built-in lint step so `lfops land` works in any repo.
+This release renames Maestro to Concerto with a new app icon, adds the --web flag to launch Claude web sessions, and improves database reliability with automatic schema migration. Worktrees now push to create remote branches automatically.
 
 ## Changes
 
-- Add `lfops shell install` for auto-cd after `lfops wt create`
-- Make area the primary loop identifier in `lfd loop`, with goals as optional `-g` flags
-- Support composing multiple goals (e.g., `-g product-engineer -g designer`)
-- Inject adaptive mode automatically unless an explicit mode goal is specified
-- Add built-in `lint` step so `lfops land` works without a local lint command
-- Fast-path lint check in `lfops commit` before invoking agent
+- Add `--web` flag to `lf` command to launch Claude web sessions instead of CLI
+- Rename Maestro app to Concerto with new app icon
+- Auto-reset database on schema mismatch with migration support
+- Automatically push to create remote branch when creating worktrees
+- Add LoopflowCore shared Swift framework for code reuse across apps
+- Unify design system colors across Swift, web, and documentation
+- Handle binary content gracefully in git diffs

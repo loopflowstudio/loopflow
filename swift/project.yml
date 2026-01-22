@@ -15,6 +15,19 @@ packages:
     from: 0.10.0
 
 targets:
+  LoopflowCore:
+    type: framework
+    platform: macOS
+    sources:
+      - path: LoopflowCore
+        excludes:
+          - Info.plist
+    settings:
+      base:
+        INFOPLIST_FILE: LoopflowCore/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.loopflow.core
+        DEFINES_MODULE: YES
+
   Concerto:
     type: application
     platform: macOS
@@ -22,6 +35,8 @@ targets:
       - path: Concerto
         excludes:
           - Info.plist
+    dependencies:
+      - target: LoopflowCore
     settings:
       base:
         INFOPLIST_FILE: Concerto/Info.plist

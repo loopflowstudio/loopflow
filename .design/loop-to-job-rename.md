@@ -48,9 +48,8 @@ New migration to:
 |------|---------|
 | `LoopflowCore/Models/Loop.swift` → `Job.swift` | All types and properties |
 | `LoopflowCore/Services/LoopService.swift` → `JobService.swift` | Function names, SQL queries |
-| `Concerto/Views/LoopRow.swift` → `JobRow.swift` | Parameter names |
-| `Concerto/Views/LoopLiveOutput.swift` | Update references |
-| `Concerto/AppState.swift` | Property names |
+
+Concerto views (`LoopRow.swift`, `LoopLiveOutput.swift`, `AppState.swift`) keep original names and use backward compatibility typealiases (`Loop = Job`, `LoopService = JobService`, etc.).
 
 ### Tests
 
@@ -100,10 +99,11 @@ Single PR. No backward compatibility shims—this is internal tooling.
 
 ## Files Changed
 
-~35-40 files total:
-- 8 Python source files
-- 1 new migration file
-- 2 TypeScript files
-- 6 Swift files
-- 2 test files
-- 3 doc files
+17 files total:
+- 10 Python source files (including migration and models)
+- 2 Swift files (`Job.swift`, `JobService.swift`)
+- 2 TypeScript files (`job.ts` new, `loop.ts` updated with aliases)
+- 1 test file (`test_lfd_flows.py`)
+- 1 design doc
+
+Backward compatibility aliases allow existing code (Concerto views, CLI commands) to continue using `Loop` terminology while core models use `Job`.

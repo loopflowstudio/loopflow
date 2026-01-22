@@ -1,11 +1,23 @@
 """Configuration loading for loopflow."""
 
 import warnings
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+# Keys that combine lists from global + repo config
+_ADDITIVE_KEYS = {"context", "exclude", "skill_sources", "summaries"}
+
+
+@dataclass
+class AutopruneConfig:
+    """Auto-prune configuration for lfd daemon."""
+
+    enabled: bool = False
+    poll_interval_seconds: int = 60
 
 
 class IdeConfig(BaseModel):
@@ -102,6 +114,7 @@ class Config(BaseModel):
     work: Optional[WorkConfig] = None  # Work queue configuration
     branch_names: Optional[BranchNameConfig] = None  # Branch naming schema
     lint_check: Optional[str] = None  # Command to check if lint passes (exits 0 = pass)
+    autoprune: AutopruneConfig = Field(default_factory=AutopruneConfig)
 
     @field_validator("context", mode="before")
     @classmethod
@@ -140,6 +153,17 @@ class Config(BaseModel):
             return [v] if v else None
         return v if v else None
 
+    @field_validator("autoprune", mode="before")
+    @classmethod
+    def normalize_autoprune(cls, v):
+        if v is True:
+            return AutopruneConfig(enabled=True)
+        if v is False or v is None:
+            return AutopruneConfig(enabled=False)
+        if isinstance(v, dict):
+            return AutopruneConfig(**v)
+        return v
+
     @model_validator(mode="after")
     def merge_ignore_into_exclude(self) -> "Config":
         """Merge ignore into exclude (ignore is an alias)."""
@@ -155,42 +179,68 @@ class ConfigError(Exception):
     pass
 
 
-def load_config(repo_root: Path) -> Config | None:
-    """Load .lf/config.yaml. Returns None if not present."""
-    config_path = repo_root / ".lf" / "config.yaml"
-    if not config_path.exists():
+def _load_yaml_file(path: Path) -> dict | None:
+    """Load YAML file, returning None if not present or empty."""
+    if not path.exists():
         return None
-
     try:
-        data = yaml.safe_load(config_path.read_text())
+        data = yaml.safe_load(path.read_text())
     except yaml.YAMLError as e:
-        raise ConfigError(f"Invalid YAML in {config_path}:\n{e}")
+        raise ConfigError(f"Invalid YAML in {path}:\n{e}")
+    return data if data else None
 
-    if not data:
+
+def _merge_config_dicts(global_cfg: dict | None, repo_cfg: dict | None) -> dict:
+    """Merge global and repo config. Repo wins for scalars, additive keys combine."""
+    if not global_cfg:
+        return repo_cfg or {}
+    if not repo_cfg:
+        return global_cfg
+
+    merged = {**global_cfg}
+    for key, value in repo_cfg.items():
+        if key in _ADDITIVE_KEYS and key in merged and merged[key]:
+            merged[key] = merged[key] + value
+        else:
+            merged[key] = value
+    return merged
+
+
+def load_config(repo_root: Path | None) -> Config | None:
+    """Load config, merging global (~/.lf/config.yaml) with repo (.lf/config.yaml)."""
+    global_path = Path.home() / ".lf" / "config.yaml"
+    repo_path = repo_root / ".lf" / "config.yaml" if repo_root else None
+
+    global_data = _load_yaml_file(global_path)
+    repo_data = _load_yaml_file(repo_path) if repo_path else None
+
+    if not global_data and not repo_data:
         return None
 
-    if "flows" in data:
+    # Check for deprecated flows key in repo config
+    if repo_data and "flows" in repo_data:
         raise ConfigError(
-            f"Invalid config in {config_path}:\n"
+            f"Invalid config in {repo_path}:\n"
             "  'flows' is no longer supported in .lf/config.yaml.\n"
             "  Move flows to .lf/flows/<name>.py."
         )
 
+    merged = _merge_config_dicts(global_data, repo_data)
+
     try:
-        config = Config(**data)
+        config = Config(**merged)
     except Exception as e:
-        # Extract the useful part from Pydantic errors
         msg = str(e)
         if "validation error" in msg.lower():
-            # Simplify Pydantic's verbose output
             lines = msg.split("\n")
             errors = [
                 line.strip()
                 for line in lines[1:]
                 if line.strip() and not line.strip().startswith("For further")
             ]
-            raise ConfigError(f"Invalid config in {config_path}:\n" + "\n".join(errors))
-        raise ConfigError(f"Invalid config in {config_path}: {e}")
+            source = repo_path if repo_data else global_path
+            raise ConfigError(f"Invalid config in {source}:\n" + "\n".join(errors))
+        raise ConfigError(f"Invalid config: {e}")
 
     if config.include_tests_for:
         warnings.warn(

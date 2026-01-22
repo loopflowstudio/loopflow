@@ -13,8 +13,8 @@ Loopflow treats **prompts as artifacts**. Not chat logs. Not clipboard snippets.
 
 This extends to everything loopflow touches:
 
-- **Steps** live in `.claude/commands/`
-- **Config** lives in `.lf/`
+- **Steps** live in `.claude/commands/` or `.lf/steps/`
+- **Config** lives in `.lf/` (repo) or `~/.lf/` (global)
 - **Working state** lives in `.design/`
 - **Internal docs** live in `.docs/`
 
@@ -23,11 +23,24 @@ When something works, you can find it again. When something breaks, you can trac
 ## Folder Reference
 
 ```
-.claude/commands/     # Step prompts
-.lf/                  # Config and extensions
+~/.lf/                # Global config, steps, goals, flows
+.claude/commands/     # Step prompts (repo)
+.lf/                  # Config and extensions (repo)
 .design/              # Current PR working state
 .docs/                # Internal documentation
 docs/                 # Public documentation
+```
+
+### `~/.lf/` — Global Configuration
+
+User-wide defaults and content. Repo config overrides global for most settings; additive keys combine.
+
+```
+~/.lf/
+  config.yaml         # Global defaults
+  steps/              # Global steps
+  goals/              # Global goals
+  flows/              # Global flows
 ```
 
 ### `.claude/commands/` — Step Prompts
@@ -173,11 +186,17 @@ Run `lf -c` to preview exactly what context gets assembled.
 | `.design/` | PR scratchpad | **No** (cleared) | **Yes** |
 | `.docs/` | Forward-looking plans | Yes | **Yes** |
 | `docs/` | Public docs | Yes | No (opt-in) |
-| `.claude/commands/` | Step prompts | Yes | (step file only) |
+| `.claude/commands/` | Step prompts (repo) | Yes | (step file only) |
+| `.lf/steps/` | Step prompts (repo) | Yes | (step file only) |
 | `.lf/config.yaml` | Repo config | Yes | No |
 | `.lf/voices/` | Personas | Yes | (when `--voice`) |
 | `.lf/goals/` | Agent directives | Yes | (when agent uses) |
+| `.lf/flows/` | Flow definitions | Yes | No |
 | `.lf/summaries/` | Summaries | Gitignored | (when configured) |
+| `~/.lf/config.yaml` | Global config | Yes | No |
+| `~/.lf/steps/` | Global steps | Yes | (step file only) |
+| `~/.lf/goals/` | Global goals | Yes | (when agent uses) |
+| `~/.lf/flows/` | Global flows | Yes | No |
 
 **Auto-included:** Well-known guidance files (`README.md`, `STYLE.md`, `CLAUDE.md`, `AGENTS.md`), `.design/`, and `.docs/`. Not every `.md` file—`docs/` is opt-in.
 

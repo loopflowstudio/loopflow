@@ -45,22 +45,34 @@ def list_builtin_goals() -> list[str]:
     return sorted(p.stem for p in _GOALS_TEMPLATES_DIR.glob("*.md"))
 
 
-def load_goal(repo: Path, goal_name: str) -> Goal | None:
+def load_goal(repo: Path | None, goal_name: str) -> Goal | None:
     """Load and parse a goal file.
 
     Checks in order:
-    1. .lf/goals/{name}.md (user-defined)
-    2. templates/goals/{name}.md (builtin fallback)
+    1. .lf/goals/{name}.md (repo)
+    2. ~/.lf/goals/{name}.md (global)
+    3. templates/goals/{name}.md (builtin)
 
     Returns None if goal file doesn't exist.
     """
     if not goal_name:
         return None
 
-    # Check user-defined goal first
-    goal_path = repo / ".lf" / "goals" / f"{goal_name}.md"
-    if not goal_path.exists():
-        # Fall back to builtin templates
+    # Check repo goal first
+    goal_path = None
+    if repo:
+        repo_goal = repo / ".lf" / "goals" / f"{goal_name}.md"
+        if repo_goal.exists():
+            goal_path = repo_goal
+
+    # Check global goal
+    if not goal_path:
+        global_goal = Path.home() / ".lf" / "goals" / f"{goal_name}.md"
+        if global_goal.exists():
+            goal_path = global_goal
+
+    # Fall back to builtin templates
+    if not goal_path:
         builtin_path = _get_builtin_goal(goal_name)
         if builtin_path:
             goal_path = builtin_path
@@ -93,14 +105,20 @@ def load_goal_content(repo: Path, goal_name: str) -> str | None:
     return goal.content if goal else None
 
 
-def list_goals(repo: Path) -> list[str]:
-    """List available goal names in a repo (including builtins)."""
+def list_goals(repo: Path | None) -> list[str]:
+    """List available goal names (repo, global, and builtin)."""
     goals = set()
 
-    # User-defined goals
-    goals_dir = repo / ".lf" / "goals"
-    if goals_dir.exists():
-        goals.update(p.stem for p in goals_dir.glob("*.md"))
+    # Repo goals
+    if repo:
+        repo_goals_dir = repo / ".lf" / "goals"
+        if repo_goals_dir.exists():
+            goals.update(p.stem for p in repo_goals_dir.glob("*.md"))
+
+    # Global goals
+    global_goals_dir = Path.home() / ".lf" / "goals"
+    if global_goals_dir.exists():
+        goals.update(p.stem for p in global_goals_dir.glob("*.md"))
 
     # Builtin goals
     goals.update(list_builtin_goals())
@@ -108,13 +126,18 @@ def list_goals(repo: Path) -> list[str]:
     return sorted(goals)
 
 
-def goal_exists(repo: Path, goal_name: str) -> bool:
-    """Check if a goal file exists (user-defined or builtin)."""
+def goal_exists(repo: Path | None, goal_name: str) -> bool:
+    """Check if a goal file exists (repo, global, or builtin)."""
     if not goal_name:
         return False
-    # Check user-defined goal
-    goal_path = repo / ".lf" / "goals" / f"{goal_name}.md"
-    if goal_path.exists():
+    # Check repo goal
+    if repo:
+        repo_goal = repo / ".lf" / "goals" / f"{goal_name}.md"
+        if repo_goal.exists():
+            return True
+    # Check global goal
+    global_goal = Path.home() / ".lf" / "goals" / f"{goal_name}.md"
+    if global_goal.exists():
         return True
     # Check builtin goal
     return _get_builtin_goal(goal_name) is not None

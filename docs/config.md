@@ -71,6 +71,9 @@ context:
 exclude:
   - "*.test.ts"
   - node_modules
+
+branch_names:
+  schema: "{user}.{name}.{date}_{ts}"
 ```
 
 ## Flows
@@ -276,6 +279,21 @@ ide:
   cursor: true         # open Cursor editor
   workspace: app.code-workspace  # optional workspace file
 ```
+
+### Branch Names
+
+Customize branch naming for `lfops wt create`.
+
+```yaml
+branch_names:
+  schema: "{user}.{name}.{date}_{ts}"
+```
+
+Available placeholders:
+- `{name}` — short name passed to `lfops wt create`
+- `{user}` — git `user.name` (sanitized)
+- `{date}` — `YYYYMMDD`
+- `{ts}` — `YYYYMMDD_HHMM`
 
 ### Summaries
 

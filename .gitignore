@@ -6,7 +6,7 @@ __pycache__/
 .build/
 xcuserdata/
 .swiftpm/xcode/
-swift/Concerto.xcodeproj/
+swift/*.xcodeproj/
 swift/dist/
 
 # Claude Code (personal state)

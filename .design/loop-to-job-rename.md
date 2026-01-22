@@ -58,8 +58,7 @@ Concerto views (`LoopRow.swift`, `LoopLiveOutput.swift`, `AppState.swift`) keep 
 
 ### Docs
 
-- `docs/lfd.md` - Command examples
-- `docs/troubleshooting.md` - Examples
+Docs (`docs/lfd.md`, `docs/agents.md`, `docs/troubleshooting.md`) continue using `lfd loop` since the backwards compatibility alias exists. Future updates may migrate to `lfd job`.
 
 ## Decisions
 
@@ -87,23 +86,25 @@ Keep `lfd flow`, `lfd subscribe`, `lfd schedule` as-is. These describe behavior 
 
 `job_main` branches like `myarea-foo-bar-main` don't encode "loop" or "job" in the actual branch name, just in the field name. No branch rename needed.
 
-## Migration Strategy
+## Backwards Compatibility
 
-1. **Database migration first** - Rename tables and columns with ALTER statements
-2. **Python changes** - All model/function renames
-3. **Swift/TypeScript changes** - Frontend model updates
-4. **Test updates** - Fix imports and assertions
-5. **Doc updates** - Command examples
+The implementation provides comprehensive backwards compatibility:
 
-Single PR. No backward compatibility shims—this is internal tooling.
+**Python**: Type aliases (`Loop = Job`, `LoopRun = JobRun`) in all modules. Old files (`loops.py`, `loop_runner.py`) re-export from new files. Hidden CLI command `lfd loop` aliases to `lfd job`.
 
-## Files Changed
+**Swift**: Public typealiases (`Loop = Job`, `LoopService = JobService`, etc.) allow Concerto views to keep using `Loop` terminology.
 
-17 files total:
-- 10 Python source files (including migration and models)
+**TypeScript**: `loop.ts` re-exports all types from `job.ts` with both old and new names.
+
+**Database**: Migration detects existing table names and only runs if needed. Functions query for actual table names at runtime.
+
+## Implementation Summary
+
+All tests pass (536 Python tests). Swift framework builds successfully.
+
+Changes:
+- 10 Python files in `src/loopflow/lfd/`
 - 2 Swift files (`Job.swift`, `JobService.swift`)
-- 2 TypeScript files (`job.ts` new, `loop.ts` updated with aliases)
+- 2 TypeScript files (`job.ts`, `loop.ts`)
+- 1 migration (`m_2025_01_22_loop_to_job.py`)
 - 1 test file (`test_lfd_flows.py`)
-- 1 design doc
-
-Backward compatibility aliases allow existing code (Concerto views, CLI commands) to continue using `Loop` terminology while core models use `Job`.

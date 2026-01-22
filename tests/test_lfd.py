@@ -4,28 +4,8 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from loopflow.lfd.db import (
-    _get_db,
-    delete_loop,
-    get_latest_run_for_trigger,
-    get_loop,
-    get_loop_by_area_repo,
-    list_loops,
-    list_runs_for_trigger,
-    load_sessions,
-    load_sessions_for_repo,
-    load_sessions_for_worktree,
-    save_loop,
-    save_run,
-    save_session,
-    update_loop_iteration,
-    update_loop_pid,
-    update_loop_status,
-    update_run_pr,
-    update_run_status,
-    update_run_step,
-    update_session_status,
-)
+from loopflow.lfd.daemon.protocol import Event, Request, error, success
+from loopflow.lfd.db import _get_db
 from loopflow.lfd.migrations.registry import MIGRATIONS
 from loopflow.lfd.models import (
     Loop,
@@ -36,7 +16,31 @@ from loopflow.lfd.models import (
     SessionStatus,
     TriggerStatus,
 )
-from loopflow.lfd.protocol import Event, Request, error, success
+from loopflow.lfd.runs.loop import (
+    delete_loop,
+    get_loop,
+    get_loop_by_area_repo,
+    list_loops,
+    save_loop,
+    update_loop_iteration,
+    update_loop_pid,
+    update_loop_status,
+)
+from loopflow.lfd.runs.run import (
+    get_latest_run_for_trigger,
+    list_runs_for_trigger,
+    save_run,
+    update_run_pr,
+    update_run_status,
+    update_run_step,
+)
+from loopflow.lfd.runs.session import (
+    load_sessions,
+    load_sessions_for_repo,
+    load_sessions_for_worktree,
+    save_session,
+    update_session_status,
+)
 
 
 def test_session_serialization():
@@ -435,7 +439,7 @@ def test_server_handle_output_line_broadcasts_event():
     """output.line handler broadcasts event to subscribers."""
     import asyncio
 
-    from loopflow.lfd.server import Server
+    from loopflow.lfd.daemon.server import Server
 
     async def run_test():
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -473,7 +477,7 @@ def test_server_handle_output_line_missing_session_id():
     """output.line handler returns error for missing session_id."""
     import asyncio
 
-    from loopflow.lfd.server import Server
+    from loopflow.lfd.daemon.server import Server
 
     async def run_test():
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -493,7 +497,7 @@ def test_server_handle_output_line_missing_text():
     """output.line handler returns error for missing text."""
     import asyncio
 
-    from loopflow.lfd.server import Server
+    from loopflow.lfd.daemon.server import Server
 
     async def run_test():
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -513,7 +517,7 @@ def test_server_handle_output_line_allows_empty_text():
     """output.line handler accepts empty string for text (allows blank lines)."""
     import asyncio
 
-    from loopflow.lfd.server import Server
+    from loopflow.lfd.daemon.server import Server
 
     async def run_test():
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1018,7 +1022,7 @@ def test_db_save_loop_with_pid():
 
 def test_start_result_truthy_when_ok():
     """StartResult is truthy when ok=True."""
-    from loopflow.lfd.loops import StartResult
+    from loopflow.lfd.runs.loop import StartResult
 
     result = StartResult(True)
     assert result.ok is True
@@ -1029,7 +1033,7 @@ def test_start_result_truthy_when_ok():
 
 def test_start_result_falsy_when_not_ok():
     """StartResult is falsy when ok=False."""
-    from loopflow.lfd.loops import StartResult
+    from loopflow.lfd.runs.loop import StartResult
 
     result = StartResult(False, "already_running")
     assert result.ok is False
@@ -1039,7 +1043,7 @@ def test_start_result_falsy_when_not_ok():
 
 def test_start_result_with_outstanding():
     """StartResult includes outstanding count for waiting state."""
-    from loopflow.lfd.loops import StartResult
+    from loopflow.lfd.runs.loop import StartResult
 
     result = StartResult(False, "waiting", outstanding=5)
     assert not result
@@ -1052,7 +1056,7 @@ def test_start_result_with_outstanding():
 
 def test_scheduler_config_defaults():
     """SchedulerConfig has correct defaults."""
-    from loopflow.lfd.scheduler import SchedulerConfig
+    from loopflow.lfd.daemon.manager import ManagerConfig as SchedulerConfig
 
     config = SchedulerConfig()
     assert config.concurrency == 3
@@ -1061,7 +1065,7 @@ def test_scheduler_config_defaults():
 
 def test_scheduler_acquire_and_release():
     """Scheduler manages slots correctly."""
-    from loopflow.lfd.scheduler import Scheduler, SchedulerConfig
+    from loopflow.lfd.daemon.manager import Manager as Scheduler, ManagerConfig as SchedulerConfig
 
     config = SchedulerConfig(concurrency=2, global_pr_limit=100)
     scheduler = Scheduler(config)
@@ -1105,7 +1109,7 @@ def test_scheduler_acquire_and_release():
 
 def test_scheduler_release_nonexistent():
     """Releasing nonexistent run ID is safe."""
-    from loopflow.lfd.scheduler import Scheduler, SchedulerConfig
+    from loopflow.lfd.daemon.manager import Manager as Scheduler, ManagerConfig as SchedulerConfig
 
     config = SchedulerConfig(concurrency=2, global_pr_limit=100)
     scheduler = Scheduler(config)
@@ -1117,7 +1121,7 @@ def test_scheduler_release_nonexistent():
 
 def test_scheduler_get_status():
     """Scheduler returns correct status."""
-    from loopflow.lfd.scheduler import Scheduler, SchedulerConfig
+    from loopflow.lfd.daemon.manager import Manager as Scheduler, ManagerConfig as SchedulerConfig
 
     config = SchedulerConfig(concurrency=3, global_pr_limit=15)
     scheduler = Scheduler(config)
@@ -1140,7 +1144,7 @@ def test_scheduler_get_status():
 
 def test_scheduler_can_start_respects_concurrency():
     """can_start checks concurrency limit."""
-    from loopflow.lfd.scheduler import Scheduler, SchedulerConfig
+    from loopflow.lfd.daemon.manager import Manager as Scheduler, ManagerConfig as SchedulerConfig
 
     config = SchedulerConfig(concurrency=1, global_pr_limit=100)
     scheduler = Scheduler(config)
@@ -1162,7 +1166,7 @@ def test_scheduler_can_start_respects_concurrency():
 
 def test_scheduler_acquire_respects_global_limit():
     """acquire blocks when global outstanding exceeds limit."""
-    from loopflow.lfd.scheduler import Scheduler, SchedulerConfig
+    from loopflow.lfd.daemon.manager import Manager as Scheduler, ManagerConfig as SchedulerConfig
 
     config = SchedulerConfig(concurrency=2, global_pr_limit=1)
     scheduler = Scheduler(config)
@@ -1177,7 +1181,7 @@ def test_scheduler_thread_safety():
     """Scheduler is thread-safe for acquire/release."""
     import threading
 
-    from loopflow.lfd.scheduler import Scheduler, SchedulerConfig
+    from loopflow.lfd.daemon.manager import Manager as Scheduler, ManagerConfig as SchedulerConfig
 
     config = SchedulerConfig(concurrency=10, global_pr_limit=100)
     scheduler = Scheduler(config)
@@ -1211,7 +1215,7 @@ def test_scheduler_thread_safety():
 
 def test_schedule_triggers_within_grace_period():
     """Schedule triggers when missed time is within 24h grace period."""
-    from loopflow.lfd.schedule import should_trigger_cron
+    from loopflow.lfd.runs.schedule import should_trigger_cron
 
     # Cron for 9am daily, last run was yesterday
     last_run = datetime(2024, 1, 14, 9, 0, 0)
@@ -1225,7 +1229,7 @@ def test_schedule_skips_stale_beyond_grace_period():
     """Schedule does NOT trigger when missed time is beyond grace period."""
     from datetime import timedelta
 
-    from loopflow.lfd.schedule import should_trigger_cron
+    from loopflow.lfd.runs.schedule import should_trigger_cron
 
     # Use a short grace period for testing
     short_grace = timedelta(hours=1)
@@ -1242,7 +1246,7 @@ def test_schedule_grace_period_skips_very_old():
     """Schedule with 0 grace period skips any missed time."""
     from datetime import timedelta
 
-    from loopflow.lfd.schedule import should_trigger_cron
+    from loopflow.lfd.runs.schedule import should_trigger_cron
 
     # With zero grace period, only triggers if prev_time == now (impossible)
     last_run = datetime(2024, 1, 14, 9, 0, 0)
@@ -1254,7 +1258,7 @@ def test_schedule_grace_period_skips_very_old():
 
 def test_schedule_first_run_within_grace():
     """First schedule run triggers if within grace period."""
-    from loopflow.lfd.schedule import should_trigger_cron
+    from loopflow.lfd.runs.schedule import should_trigger_cron
 
     # No last_run (first time), should trigger if within grace
     result = should_trigger_cron("* * * * *", None)
@@ -1265,7 +1269,7 @@ def test_schedule_first_run_beyond_grace():
     """First schedule run skips if beyond grace period."""
     from datetime import timedelta
 
-    from loopflow.lfd.schedule import should_trigger_cron
+    from loopflow.lfd.runs.schedule import should_trigger_cron
 
     # No last_run, but zero grace period means prev_time is stale
     result = should_trigger_cron("* * * * *", None, grace_period=timedelta(seconds=0))
@@ -1277,7 +1281,7 @@ def test_schedule_first_run_beyond_grace():
 
 def test_iteration_branch_prefix_strips_main_suffix():
     """_iteration_branch_prefix strips -main suffix."""
-    from loopflow.lfd.loop_runner import _iteration_branch_prefix
+    from loopflow.lfd.execution.runner import _iteration_branch_prefix
 
     assert _iteration_branch_prefix("product-engineer-main") == "product-engineer"
     assert _iteration_branch_prefix("product-engineer-1-main") == "product-engineer-1"
@@ -1290,7 +1294,7 @@ def test_iteration_branch_prefix_strips_main_suffix():
 
 def test_iteration_branch_prefix_without_suffix():
     """_iteration_branch_prefix handles edge case without -main suffix."""
-    from loopflow.lfd.loop_runner import _iteration_branch_prefix
+    from loopflow.lfd.execution.runner import _iteration_branch_prefix
 
     # Shouldn't happen in practice, but function handles it gracefully
     assert _iteration_branch_prefix("product-engineer") == "product-engineer"
@@ -1301,7 +1305,7 @@ def test_iteration_branch_prefix_without_suffix():
 
 def test_generate_random_words_format():
     """_generate_random_words returns magical-musical format."""
-    from loopflow.lfd.loops import MAGICAL, MUSICAL, _generate_random_words
+    from loopflow.lfd.runs.loop import MAGICAL, MUSICAL, _generate_random_words
 
     words = _generate_random_words()
     parts = words.split("-")
@@ -1312,7 +1316,7 @@ def test_generate_random_words_format():
 
 def test_generate_random_words_produces_variety():
     """_generate_random_words produces different results over multiple calls."""
-    from loopflow.lfd.loops import _generate_random_words
+    from loopflow.lfd.runs.loop import _generate_random_words
 
     # Generate 20 word pairs, expect at least 5 unique
     results = {_generate_random_words() for _ in range(20)}
@@ -1321,7 +1325,7 @@ def test_generate_random_words_produces_variety():
 
 def test_word_lists_have_sufficient_variety():
     """Word lists have enough entries for good uniqueness."""
-    from loopflow.lfd.loops import MAGICAL, MUSICAL
+    from loopflow.lfd.runs.loop import MAGICAL, MUSICAL
 
     # 34 magical * 26 musical = 884 combinations
     assert len(MAGICAL) >= 30

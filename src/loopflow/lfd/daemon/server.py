@@ -9,18 +9,18 @@ from asyncio import StreamReader, StreamWriter
 from datetime import datetime
 from pathlib import Path
 
-from loopflow.lfd.db import (
-    list_loops,
+from loopflow.lfd.daemon.manager import Manager, load_manager_config
+from loopflow.lfd.daemon.protocol import Event, Request, Response, error, success
+from loopflow.lfd.db import update_dead_runs
+from loopflow.lfd.models import Session, SessionStatus, TriggerStatus
+from loopflow.lfd.runs.loop import list_loops
+from loopflow.lfd.runs.session import (
     load_sessions,
     load_sessions_for_repo,
     load_sessions_for_worktree,
     save_session,
-    update_dead_runs,
     update_session_status,
 )
-from loopflow.lfd.models import Session, SessionStatus, TriggerStatus
-from loopflow.lfd.protocol import Event, Request, Response, error, success
-from loopflow.lfd.scheduler import Scheduler, load_scheduler_config
 
 
 class Server:
@@ -30,7 +30,7 @@ class Server:
         self.subscriptions: dict[StreamWriter, list[str]] = {}
         self._running = False
         self._check_task: asyncio.Task | None = None
-        self.scheduler = Scheduler(load_scheduler_config())
+        self.manager = Manager(load_manager_config())
 
     async def start(self) -> None:
         self.socket_path.parent.mkdir(parents=True, exist_ok=True)
@@ -105,11 +105,11 @@ class Server:
         elif method == "output.line":
             return await self._handle_output_line(params)
         elif method == "scheduler.status":
-            return await self._handle_scheduler_status()
+            return await self._handle_manager_status()
         elif method == "scheduler.acquire":
-            return await self._handle_scheduler_acquire(params)
+            return await self._handle_manager_acquire(params)
         elif method == "scheduler.release":
-            return await self._handle_scheduler_release(params)
+            return await self._handle_manager_release(params)
         else:
             return error(f"Unknown method: {method}", request.id)
 
@@ -215,24 +215,24 @@ class Server:
         )
         return success({})
 
-    async def _handle_scheduler_status(self) -> Response:
-        """Return scheduler status."""
-        return success(self.scheduler.get_status())
+    async def _handle_manager_status(self) -> Response:
+        """Return manager status."""
+        return success(self.manager.get_status())
 
-    async def _handle_scheduler_acquire(self, params: dict) -> Response:
-        """Try to acquire a scheduler slot."""
+    async def _handle_manager_acquire(self, params: dict) -> Response:
+        """Try to acquire a manager slot."""
         run_id = params.get("run_id")
         if not run_id:
             return error("Missing 'run_id' parameter")
 
-        acquired, reason = self.scheduler.acquire(run_id)
+        acquired, reason = self.manager.acquire(run_id)
         if acquired:
             await self._broadcast(
                 Event(
                     "scheduler.slot.acquired",
                     {
                         "run_id": run_id,
-                        "slots_used": self.scheduler.slots_used(),
+                        "slots_used": self.manager.slots_used(),
                     },
                 )
             )
@@ -240,27 +240,27 @@ class Server:
             {
                 "acquired": acquired,
                 "reason": reason,
-                "slots_used": self.scheduler.slots_used(),
+                "slots_used": self.manager.slots_used(),
             }
         )
 
-    async def _handle_scheduler_release(self, params: dict) -> Response:
-        """Release a scheduler slot."""
+    async def _handle_manager_release(self, params: dict) -> Response:
+        """Release a manager slot."""
         run_id = params.get("run_id")
         if not run_id:
             return error("Missing 'run_id' parameter")
 
-        self.scheduler.release(run_id)
+        self.manager.release(run_id)
         await self._broadcast(
             Event(
                 "scheduler.slot.released",
                 {
                     "run_id": run_id,
-                    "slots_used": self.scheduler.slots_used(),
+                    "slots_used": self.manager.slots_used(),
                 },
             )
         )
-        return success({"slots_used": self.scheduler.slots_used()})
+        return success({"slots_used": self.manager.slots_used()})
 
     async def _broadcast(self, event: Event) -> None:
         message = (event.serialize() + "\n").encode()
@@ -277,8 +277,8 @@ class Server:
         """Periodically update dead processes and check triggers."""
         from loopflow.lfd.autoprune import AutopruneManager, get_repos_to_check
         from loopflow.lfd.draft_prs import run_draft_pr_check
-        from loopflow.lfd.schedule import run_schedule_check
-        from loopflow.lfd.subscribe import run_subscription_check
+        from loopflow.lfd.runs.schedule import run_schedule_check
+        from loopflow.lfd.runs.subscription import run_subscription_check
 
         autoprune_manager = AutopruneManager()
 
@@ -342,7 +342,7 @@ class Server:
 
 async def run_server(socket_path: Path) -> None:
     """Main daemon entry point. Runs until terminated."""
-    from loopflow.lfd.launchd import remove_pid, write_pid
+    from loopflow.lfd.daemon.launchd import remove_pid, write_pid
 
     server = Server(socket_path)
 

@@ -3,6 +3,9 @@
 
 import SwiftUI
 import LoopflowCore
+import os.log
+
+private let logger = Logger(subsystem: "com.loopflow.concerto", category: "screenshot")
 
 struct ScreenshotWindow: View {
     let mode: AppState.ScreenshotMode
@@ -66,9 +69,9 @@ struct ScreenshotWindow: View {
         let captureService = CaptureService()
         do {
             _ = try captureService.captureWindow(window, to: mode.outputPath)
-            print("Screenshot saved to: \(mode.outputPath)")
+            logger.info("screenshot saved to: \(mode.outputPath)")
         } catch {
-            print("Capture failed: \(error.localizedDescription)")
+            logger.error("capture failed: \(error.localizedDescription)")
         }
 
         // Exit the app

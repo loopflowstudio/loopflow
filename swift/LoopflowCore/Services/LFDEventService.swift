@@ -2,6 +2,9 @@
 
 import Foundation
 import Network
+import os.log
+
+private let logger = Logger(subsystem: "com.loopflow.concerto", category: "lfd-events")
 
 // Event types from lfd
 
@@ -59,16 +62,20 @@ public actor LFDEventService {
         self.onEvent = onEvent
         self.onConnectionChange = onConnectionChange
 
+        logger.warning("LFDEventService.subscribe() called")
         await connect()
         startReconnectLoop()
     }
 
     private func connect() async {
         // Check if socket exists before attempting connection
+        logger.debug("connect() checking socket at: \(self.socketPath.path)")
         guard FileManager.default.fileExists(atPath: socketPath.path) else {
+            logger.debug("socket does not exist")
             updateConnectionState(false)
             return
         }
+        logger.debug("socket exists, creating connection")
 
         let params = NWParameters()
         let endpoint = NWEndpoint.unix(path: socketPath.path)
@@ -88,15 +95,11 @@ public actor LFDEventService {
         }
 
         connection?.start(queue: .main)
+    }
 
-        // Wait briefly for connection to establish
-        try? await Task.sleep(for: .milliseconds(100))
-
-        // Only send subscribe if connection is ready
-        guard connection?.state == .ready else {
-            updateConnectionState(false)
-            return
-        }
+    private func handleConnected() {
+        logger.info("connected to lfd")
+        updateConnectionState(true)
 
         // Send subscribe request
         let patternsJson = patterns.map { "\"\($0)\"" }.joined(separator: ",")
@@ -107,10 +110,6 @@ public actor LFDEventService {
         receiveLoop()
     }
 
-    private func handleConnected() {
-        updateConnectionState(true)
-    }
-
     private func handleDisconnected() {
         connection?.cancel()
         connection = nil
@@ -119,6 +118,7 @@ public actor LFDEventService {
 
     private func updateConnectionState(_ connected: Bool) {
         guard _isConnected != connected else { return }
+        logger.debug("connection state changed: \(connected)")
         _isConnected = connected
         onConnectionChange?(connected)
     }

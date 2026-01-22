@@ -270,6 +270,14 @@ def create_with_schema(
         error = result.stderr.strip() or result.stdout.strip() or "Failed to create worktree"
         raise WorktreeError(error)
 
+    # Push to create remote branch with tracking
+    subprocess.run(
+        ["git", "push", "-u", "origin", branch_name],
+        cwd=worktree_path,
+        capture_output=True,
+        text=True,
+    )
+
     return worktree_path
 
 

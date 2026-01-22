@@ -11,7 +11,7 @@ body {
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
-/* Colors synced with loopflow Swift app (see COLORS.md) */
+/* Colors synced with loopflow Swift app (see VISUAL_DESIGN.md) */
 :root {
   --background: #FAF8F5;
   --foreground: #1A1A1A;

@@ -28,7 +28,7 @@ extension Color {
     }
 }
 
-// MARK: - Status Colors (synced with COLORS.md)
+// MARK: - Status Colors (synced with VISUAL_DESIGN.md)
 
 extension Color {
     static let statusSuccess = Color(hex: 0x2D6A4F)

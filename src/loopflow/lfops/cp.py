@@ -30,9 +30,7 @@ def register_commands(app: typer.Typer) -> None:
         exclude: list[str] = typer.Option(
             None, "-e", "-E", "--exclude", help="Patterns to exclude"
         ),
-        paste: bool = typer.Option(
-            False, "-v", "-V", "--paste", help="Include clipboard content"
-        ),
+        paste: bool = typer.Option(False, "-v", "-V", "--paste", help="Include clipboard content"),
         docs: Optional[bool] = typer.Option(
             None, "--lfdocs/--no-lfdocs", help="Include .docs/, .design/, and root .md files"
         ),
@@ -70,8 +68,8 @@ def register_commands(app: typer.Typer) -> None:
             include_diff_files = diff_files
         else:
             include_diff_files = config.diff_files if config else True
-        include_summaries = summaries if summaries is not None else bool(
-            config and config.summaries
+        include_summaries = (
+            summaries if summaries is not None else bool(config and config.summaries)
         )
 
         components = gather_prompt_components(

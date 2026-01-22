@@ -33,10 +33,10 @@ git diff main...HEAD --stat
 ## Style examples
 
 ```
-maestro: add session tracking daemon
+concerto: add session tracking daemon
 
 Sessions now write to SQLite and can be viewed via lf ops status.
-The maestro daemon provides a web UI for tailing logs across worktrees.
+The concerto daemon provides a web UI for tailing logs across worktrees.
 ```
 
 ```

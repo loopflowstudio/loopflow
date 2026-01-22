@@ -4,16 +4,16 @@ voice: artist
 > **Screenshots**: If running standalone, capture with Cmd+Shift+S first.
 > In the `ux` pipeline, uses screenshots from the ux-research step.
 >
-> **Build from this branch**: Run `cd Maestro && ./dev run` to build and launch
-> Maestro from the current branch. Don't use the installed app—it won't have your changes.
+> **Build from this branch**: Run `cd swift && ./dev run` to build and launch
+> Concerto from the current branch. Don't use the installed app—it won't have your changes.
 
-Compare Maestro against best-in-class tools and identify UX gaps.
+Compare Concerto against best-in-class tools and identify UX gaps.
 
-Read `Maestro/DESIGN.md` first—it contains comprehensive research on the tools and thinkers we're learning from.
+Read `swift/DESIGN.md` first—it contains comprehensive research on the tools and thinkers we're learning from.
 
 ## Inspiration Sources
 
-Study these products for patterns Maestro should adopt (detailed analysis in designprinciples.md):
+Study these products for patterns Concerto should adopt (detailed analysis in designprinciples.md):
 
 ### Figma
 - Performance obsession, multiplayer presence, professional respect
@@ -42,7 +42,7 @@ Study these products for patterns Maestro should adopt (detailed analysis in des
 
 ## Design Principles to Apply
 
-See `Maestro/DESIGN.md` for full research. Key principles:
+See `swift/DESIGN.md` for full research. Key principles:
 
 1. **Immediate Connection** (Bret Victor) — real-time feedback, no delays
 2. **Progressive Disclosure** (Notion, Stripe) — simple surface, infinite depth
@@ -70,7 +70,7 @@ These fall under principle #10: "Craft Signals Care."
 
 ## Gap Analysis
 
-For each area of Maestro, identify gaps:
+For each area of Concerto, identify gaps:
 
 1. **Welcome/Setup**: vs Figma onboarding, Notion templates
 2. **Prompt Input**: vs Cursor chat, Notion slash commands
@@ -92,7 +92,7 @@ Write analysis to `.design/ux-gaps.md`:
 - [ ] ...
 
 ## Welcome/Setup
-**Current**: Description of what Maestro does
+**Current**: Description of what Concerto does
 **Inspiration**: What Figma/Cursor/Notion do better
 **Gap**: Specific missing capability
 **Pattern to adopt**: Concrete suggestion

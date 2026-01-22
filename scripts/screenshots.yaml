@@ -1,15 +1,18 @@
-# Screenshot manifest for Maestro documentation
+# Screenshot manifest for Loopflow documentation
 # Run: python scripts/generate_screenshots.py
 
 repo: https://github.com/loopflowstudio/loopflow-demos
 local: ~/src/loopflow-demos
 
 screenshots:
-  # Main window - shows sidebar + prompt launcher
-  - name: maestro-main
-    window_size: [1200, 800]
-
-  # Main window with loops - shows running agent
-  - name: maestro-loops
+  # Main Concerto window - shows sidebar with loops
+  - name: concerto-main
+    type: swift
     window_size: [1200, 800]
     mock_loops: true
+
+  # Web client (future)
+  # - name: loopflow-web
+  #   type: web
+  #   url: http://localhost:3000
+  #   viewport: [1200, 800]

@@ -1,17 +1,17 @@
 ---
 voice: customer
 ---
-> **Before running**: Open Maestro, navigate to each screen you want reviewed,
-> and press Cmd+Shift+S to capture. Screenshots save to `/tmp/maestro-<timestamp>.png`.
+> **Before running**: Open Concerto, navigate to each screen you want reviewed,
+> and press Cmd+Shift+S to capture. Screenshots save to `/tmp/concerto-<timestamp>.png`.
 >
-> **Build from this branch**: Run `cd Maestro && ./dev run` to build and launch
-> Maestro from the current branch. Don't use the installed app—it won't have your changes.
+> **Build from this branch**: Run `cd swift && ./dev run` to build and launch
+> Concerto from the current branch. Don't use the installed app—it won't have your changes.
 
-Conduct user research by simulating three user profiles experiencing Maestro for the first time.
+Conduct user research by simulating three user profiles experiencing Concerto for the first time.
 
 ## Part 1: Screenshot Capture
 
-Use Maestro's debug capture (Debug menu or keyboard shortcut) to generate screenshots of key states:
+Use Concerto's debug capture (Debug menu or keyboard shortcut) to generate screenshots of key states:
 - Welcome/setup screen
 - Empty repo state (no worktrees)
 - Prompt input with various toggle states
@@ -42,7 +42,7 @@ Walk through as three personas:
 ### 2. Claude Code Power User
 - Uses `claude` CLI daily
 - Knows prompts, context management, worktrees
-- Trying Maestro to see if GUI is faster
+- Trying Concerto to see if GUI is faster
 - Expects: feature parity with CLI, plus visual benefits
 
 ### 3. Designer or PM

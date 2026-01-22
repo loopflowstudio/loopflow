@@ -198,7 +198,7 @@ def start(
 @app.command()
 def loop(
     flow: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
-    area: str = typer.Argument(..., help="Area of responsibility (e.g., Maestro/, src/, .)"),
+    area: str = typer.Argument(..., help="Area of responsibility (e.g., swift/, src/, .)"),
     goals: list[str] = typer.Option(None, "-g", "--goal", help="Goal to add (repeatable)"),
     limit: int = typer.Option(None, "-l", "--limit", help="PR limit override"),
     merge_mode: str = typer.Option(None, "--merge-mode", help="Merge mode: pr or land"),
@@ -207,13 +207,13 @@ def loop(
     """Start a continuous homeostasis loop.
 
     Flow is required - specifies which flow to run from .lf/flows/.
-    Area is required - scopes the work (e.g., Maestro/, src/, or . for whole repo).
+    Area is required - scopes the work (e.g., swift/, src/, or . for whole repo).
     Goals are optional - adaptive mode is implicit if no mode goal is specified.
 
     Examples:
-        lfd loop ship Maestro/                              # adaptive mode
-        lfd loop ship Maestro/ -g product-engineer          # adaptive + role
-        lfd loop ship Maestro/ -g product-engineer -g designer  # adaptive + roles
+        lfd loop ship swift/                              # adaptive mode
+        lfd loop ship swift/ -g product-engineer          # adaptive + role
+        lfd loop ship swift/ -g product-engineer -g designer  # adaptive + roles
         lfd loop ship .                                     # whole repo
     """
     c = _colors()
@@ -226,7 +226,7 @@ def loop(
     if not _is_area(area):
         typer.echo(
             f"{c['red']}Error:{c['reset']} '{area}' doesn't look like an area. "
-            "Use a path like Maestro/, src/, or . for whole repo.",
+            "Use a path like swift/, src/, or . for whole repo.",
             err=True,
         )
         typer.echo(f"\nDid you mean: lfd loop {area}/ ?")
@@ -297,15 +297,15 @@ def loop(
 @app.command()
 def flow(
     flow_name: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
-    area: str = typer.Argument(..., help="Area of responsibility (e.g., Maestro/, src/, .)"),
+    area: str = typer.Argument(..., help="Area of responsibility (e.g., swift/, src/, .)"),
     goals: list[str] = typer.Option(None, "-g", "--goal", help="Goal to add (repeatable)"),
     paste: bool = typer.Option(False, "-v", "--paste", help="Include clipboard as prompt"),
 ):
     """Start a one-off flow (runs once then stops).
 
     Examples:
-        lfd flow ship Maestro/                        # one-off adaptive iteration
-        lfd flow ship Maestro/ -g product-engineer    # with role
+        lfd flow ship swift/                        # one-off adaptive iteration
+        lfd flow ship swift/ -g product-engineer    # with role
         lfd flow ship . -v                            # whole repo with clipboard
     """
     c = _colors()
@@ -318,7 +318,7 @@ def flow(
     if not _is_area(area):
         typer.echo(
             f"{c['red']}Error:{c['reset']} '{area}' doesn't look like an area. "
-            "Use a path like Maestro/, src/, or . for whole repo.",
+            "Use a path like swift/, src/, or . for whole repo.",
             err=True,
         )
         raise typer.Exit(1)
@@ -366,7 +366,7 @@ def flow(
 @app.command()
 def subscribe(
     flow: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
-    area: str = typer.Argument(..., help="Area of responsibility (e.g., Maestro/, src/, .)"),
+    area: str = typer.Argument(..., help="Area of responsibility (e.g., swift/, src/, .)"),
     path: list[str] = typer.Option(
         ..., "-p", "-P", "--path", help="Paths to watch (repeatable, supports globs)"
     ),
@@ -410,7 +410,7 @@ def subscribe(
 @app.command()
 def schedule(
     flow: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
-    area: str = typer.Argument(..., help="Area of responsibility (e.g., Maestro/, src/, .)"),
+    area: str = typer.Argument(..., help="Area of responsibility (e.g., swift/, src/, .)"),
     cron_expr: str = typer.Argument(..., help="Cron expression (e.g., '0 9 * * *')"),
     goals: list[str] = typer.Option(None, "-g", "--goal", help="Goal to add (repeatable)"),
 ):

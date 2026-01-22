@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.loopflow.concerto</string>
+    <key>CFBundleName</key>
+    <string>Concerto</string>
+    <key>CFBundleDisplayName</key>
+    <string>Loopflow Concerto</string>
+    <key>CFBundleExecutable</key>
+    <string>Concerto</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>15.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>LSUIElement</key>
+    <false/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Concerto needs to control terminal applications to open worktrees and run commands.</string>
+    <key>NSAppleScriptEnabled</key>
+    <true/>
+    <key>OSAScriptingDefinition</key>
+    <string>Concerto.sdef</string>
+</dict>
+</plist>

@@ -15,14 +15,14 @@ jobs:
       - run: uv sync
       - run: uv run pytest tests/
 
-  maestro-test:
+  swift-test:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - name: Run Maestro SwiftUI tests
-        run: swift test --package-path Maestro
+      - name: Run Swift tests
+        run: swift test --package-path swift
 
-  maestro-ui-test:
+  concerto-ui-test:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -30,7 +30,7 @@ jobs:
         run: brew install xcodegen
       - name: Generate Xcode project
         run: xcodegen generate
-        working-directory: Maestro
-      - name: Run Maestro UI tests
-        run: xcodebuild test -project Maestro.xcodeproj -scheme Maestro -destination 'platform=macOS'
-        working-directory: Maestro
+        working-directory: swift
+      - name: Run Concerto UI tests
+        run: xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS'
+        working-directory: swift

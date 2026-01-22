@@ -87,9 +87,9 @@ pr: true
 Run a single iteration (one-shot).
 
 ```bash
-lfd flow <flow> <area>
-lfd flow ship Maestro/ -p spec.md
-lfd flow ship . -v
+lfd flow <area> --flow <flow>
+lfd flow src/ui/ --flow ship -p spec.md
+lfd flow . --flow ship -v
 ```
 
 Like `lfd loop` but stops after one iteration. Good for specific tasks.
@@ -106,7 +106,7 @@ Start multiple loops at once.
 
 ```bash
 lfd start                    # start all idle loops
-lfd start src/api/ Maestro/  # start specific areas
+lfd start src/api/ src/ui/  # start specific areas
 lfd start --all              # include waiting loops
 ```
 
@@ -138,9 +138,9 @@ When files change under the watched paths on main, triggers one iteration.
 Run on a cron schedule.
 
 ```bash
-lfd schedule <flow> <area> "<cron>"
-lfd schedule ship . "0 9 * * *"
-lfd schedule ship Maestro/ "0 10 * * MON"
+lfd schedule "<area>" "<cron>" --flow <flow>
+lfd schedule . "0 9 * * *" --flow ship
+lfd schedule src/ui/ "0 10 * * MON" --flow ship
 ```
 
 Schedules have a 24-hour grace period for laptops—if your computer wakes after the scheduled time but within 24 hours, it still runs.

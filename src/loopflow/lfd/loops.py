@@ -19,7 +19,7 @@ from loopflow.lfd.db import (
 from loopflow.lfd.models import Loop, LoopStatus, LoopType, area_to_slug
 from loopflow.lfd.process import is_process_running
 
-# Word lists for generating unique branch names (matches Maestro/NameGenerator.swift)
+# Word lists for generating unique branch names (matches swift/Concerto/NameGenerator.swift)
 MAGICAL = [
     "aurora",
     "cascade",
@@ -115,7 +115,7 @@ def _allocate_loop_main(repo: Path, area: str) -> str:
     """Return unique branch name based on area.
 
     Format: area-words-main
-    - With area: maestro-swift-river-main
+    - With area: concerto-swift-river-main
     - Root: root-swift-river-main
     """
     slug = area_to_slug(area)

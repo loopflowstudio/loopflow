@@ -21,7 +21,7 @@ The design doc is scaffolding—a checkpoint for recovery, not documentation for
 5. Run `git add .design/ && git commit -m "design: <branch>"` when done
 6. End session. Implementation happens via `lf implement`.
 
-**Important:** The `.design/` directory must be at the repository root, not in subdirectories. If working on files in a subdirectory like `Maestro/`, still write design docs to the root `.design/` folder.
+**Important:** The `.design/` directory must be at the repository root, not in subdirectories. If working on files in a subdirectory like `swift/`, still write design docs to the root `.design/` folder.
 
 Write as you go, not at the end. If the session crashes mid-design, the partial doc is still useful. Let writing inspire questions—gaps become obvious when you make things concrete.
 
@@ -49,7 +49,7 @@ def create_worktree(name: str) -> Worktree:
 - **What to build** — One sentence. What exists after this that doesn't exist now.
 - **Data structures** — Core types, sketched in code.
 - **Key functions** — Signatures with one-line intent.
-- **UI changes** — If adding config options or CLI flags, specify the Maestro UI updates. Skip only if explicitly infrastructure-only.
+- **UI changes** — If adding config options or CLI flags, specify the Concerto UI updates. Skip only if explicitly infrastructure-only.
 - **Constraints** — What would require rewriting if guessed wrong.
 - **Done when** — Verification command and expected output. Include UI verification if applicable.
 
@@ -57,7 +57,7 @@ def create_worktree(name: str) -> Worktree:
 
 When designing for this codebase:
 
-- **End-to-end by default.** Every feature that adds config options, CLI flags, or context sources must include Maestro UI updates. The Maestro app (under `Maestro/`) is the primary user interface—if users can't access a feature from the UI, it's incomplete. Infrastructure-only changes require explicit justification in the design doc (e.g., "Phase 1 of 2: backend only, UI in follow-up").
+- **End-to-end by default.** Every feature that adds config options, CLI flags, or context sources must include Concerto UI updates. The Concerto app (under `swift/`) is the primary user interface—if users can't access a feature from the UI, it's incomplete. Infrastructure-only changes require explicit justification in the design doc (e.g., "Phase 1 of 2: backend only, UI in follow-up").
 - **Worktrees are first-class.** Features should work across isolated worktrees. Don't assume a single working directory.
 - **Prompts are files, not config.** Task definitions live in `.claude/commands/` or `.lf/`. Don't design template systems or prompt builders.
 - **Design for auto mode.** Most tasks run headless. Don't require interactive confirmation for core flows.

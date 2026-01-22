@@ -47,13 +47,13 @@ These are specific to this codebase:
 
 ## End-to-end implementation
 
-If the design adds config options, CLI flags, or context sources, the implementation is incomplete without Maestro UI updates. Check the design doc for a "UI changes" section.
+If the design adds config options, CLI flags, or context sources, the implementation is incomplete without Concerto UI updates. Check the design doc for a "UI changes" section.
 
-Key Maestro files:
-- `Maestro/Maestro/Models/LoopflowConfig.swift` — Config model and YAML parsing
-- `Maestro/Maestro/AppState.swift` — App state, including toggle defaults
-- `Maestro/Maestro/Views/PromptLauncher.swift` — Launch UI with toggles and options
-- `Maestro/Maestro/Services/TokenEstimator.swift` — Token counting (if new context sources)
+Key Concerto files:
+- `swift/LoopflowCore/Models/LoopflowConfig.swift` — Config model and YAML parsing
+- `swift/Concerto/AppState.swift` — App state, including toggle defaults
+- `swift/Concerto/Views/PromptLauncher.swift` — Launch UI with toggles and options
+- `swift/LoopflowCore/Services/TokenEstimator.swift` — Token counting (if new context sources)
 
 If the design doc explicitly marks the feature as infrastructure-only, skip UI updates.
 

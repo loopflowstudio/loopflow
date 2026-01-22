@@ -37,7 +37,7 @@ Type "# Start a continuous loop"
 Enter
 Sleep 1s
 
-Type "lfd loop ship Maestro/"
+Type "lfd loop ship swift/"
 Enter
 Sleep 2s
 
@@ -59,7 +59,7 @@ Type "# Or run a single iteration"
 Enter
 Sleep 1s
 
-Type "lfd flow ship Maestro/ -p spec.md"
+Type "lfd flow ship swift/ -p spec.md"
 Enter
 Sleep 2s
 

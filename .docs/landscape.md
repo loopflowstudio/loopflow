@@ -121,7 +121,7 @@ What people want: launch agents → background processing → smart notification
 2. **Context is the hard problem** — better context management = competitive advantage
 3. **Don't compete with terminals** — Warp, Ghostty, iTerm are great. Let people use what they like.
 4. **Prompts as artifacts** — the gap is reusable, versioned prompts. Own that.
-5. **CLI first, GUI later** — "start with the model and a CLI first" (steipete). Maestro comes after CLI is solid.
+5. **CLI first, GUI later** — "start with the model and a CLI first" (steipete). Concerto comes after CLI is solid.
 6. **Build carefully** — Claude Code changes weekly. Stay portable, don't depend on internals.
 
 ---

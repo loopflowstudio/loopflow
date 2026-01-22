@@ -13,7 +13,7 @@ Define goals, review PRs when you wake. `lfd` runs agent loops in the background
 
 ```bash
 lfd install                      # one-time: install daemon
-lfd loop ship Maestro/           # start a loop
+lfd loop src/ --flow ship        # start a loop
 lfd status                       # check progress
 lfd prs <loop-id>                # see created PRs
 ```
@@ -40,9 +40,9 @@ Or run manually: `lfd serve`
 ## Continuous loops
 
 ```bash
-lfd loop ship Maestro/                   # run continuously
-lfd loop ship Maestro/ --limit 3         # max 3 outstanding PRs
-lfd loop ship Maestro/ --merge-mode land # auto-land to main
+lfd loop src/ --flow ship                   # run continuously
+lfd loop src/ --flow ship --limit 3         # max 3 outstanding PRs
+lfd loop src/ --flow ship --merge-mode land # auto-land to main
 ```
 
 When the PR limit is reached, the loop pauses until PRs are merged.
@@ -52,9 +52,9 @@ When the PR limit is reached, the loop pauses until PRs are merged.
 Run exactly one iteration:
 
 ```bash
-lfd flow ship Maestro/             # single iteration
-lfd flow ship Maestro/ -p spec.md  # with project file
-lfd flow ship Maestro/ -v          # with clipboard
+lfd flow src/ --flow ship             # single iteration
+lfd flow src/ --flow ship -p spec.md  # with project file
+lfd flow src/ --flow ship -v          # with clipboard
 ```
 
 ## Triggers
@@ -100,7 +100,7 @@ Status output:
 
 ```
 ID       TYPE       AREA                        STATUS     ITER  REPO
-abc1234  loop       Maestro/ [ship] [adaptive]  running    12    ~/repo
+abc1234  loop       src/ [ship] [adaptive]  running    12    ~/repo
 ```
 
 ## Goals
@@ -116,8 +116,8 @@ Each goal defines what the agent should accomplish, its quality bar, and iterati
 ## Merge mode
 
 ```bash
-lfd loop ship Maestro/ --merge-mode pr    # accumulate PRs (default)
-lfd loop ship Maestro/ --merge-mode land  # auto-land each iteration
+lfd loop src/ --flow ship --merge-mode pr    # accumulate PRs (default)
+lfd loop src/ --flow ship --merge-mode land  # auto-land each iteration
 ```
 
 ## Reference

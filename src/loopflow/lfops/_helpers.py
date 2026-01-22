@@ -191,7 +191,7 @@ def remove_worktree(
     # Update local base branch to match origin so wt correctly detects squash-merged branches
     sync_main_repo(main_repo, base_branch)
 
-    # Try wt first (emits events for Maestro)
+    # Try wt first (emits events for Concerto)
     result = subprocess.run(
         ["wt", "-C", str(main_repo), "remove", branch],
         cwd=main_repo,

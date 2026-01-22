@@ -239,14 +239,14 @@ def install_locally(repo_root: Path | None = None) -> tuple[bool, str]:
 
 
 def build_dmg(repo_root: Path | None = None) -> tuple[bool, str]:
-    """Build Maestro DMG. Returns (success, output)."""
+    """Build Concerto DMG. Returns (success, output)."""
     cwd = repo_root or Path.cwd()
-    maestro_dir = cwd / "Maestro"
+    swift_dir = cwd / "swift"
 
-    if not maestro_dir.exists():
-        return False, f"Maestro directory not found: {maestro_dir}"
+    if not swift_dir.exists():
+        return False, f"swift directory not found: {swift_dir}"
 
-    result = _run(["./dev", "release"], cwd=maestro_dir)
+    result = _run(["./dev", "release"], cwd=swift_dir)
     success = result.returncode == 0
     output = result.stdout + result.stderr
     return success, output
@@ -255,7 +255,7 @@ def build_dmg(repo_root: Path | None = None) -> tuple[bool, str]:
 def get_dmg_path(repo_root: Path | None = None) -> Path:
     """Get path to built DMG."""
     cwd = repo_root or Path.cwd()
-    return cwd / "Maestro" / "dist" / "LoopflowMaestro.dmg"
+    return cwd / "swift" / "dist" / "LoopflowConcerto.dmg"
 
 
 def _get_r2_client():
@@ -297,8 +297,8 @@ def upload_dmg(dmg_path: Path, version: str) -> tuple[bool, str]:
     except PublishError as e:
         return False, str(e)
 
-    versioned_key = f"LoopflowMaestro-{version}.dmg"
-    latest_key = "LoopflowMaestro-latest.dmg"
+    versioned_key = f"LoopflowConcerto-{version}.dmg"
+    latest_key = "LoopflowConcerto-latest.dmg"
 
     try:
         # Upload versioned file (cache forever)

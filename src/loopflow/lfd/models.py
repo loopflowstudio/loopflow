@@ -11,7 +11,7 @@ from loopflow.lf.models import SessionStatus as SessionStatus
 
 
 def area_to_slug(area: str) -> str:
-    """Convert area to slug: 'Maestro/' -> 'maestro', '.' -> 'root'."""
+    """Convert area to slug: 'swift/' -> 'swift', '.' -> 'root'."""
     if area == ".":
         return "root"
     return area.rstrip("/").split("/")[-1].lower()
@@ -51,7 +51,7 @@ class Loop:
 
     id: str
     type: LoopType
-    area: str  # PRIMARY identifier, required (e.g., "Maestro/", ".", "src/loopflow/")
+    area: str  # PRIMARY identifier, required (e.g., "swift/", ".", "src/loopflow/")
     repo: Path
     loop_main: str
     flow: str | None = None  # pipeline/flow name (e.g. "ship")

@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
-"""Generate Maestro screenshots for documentation.
+"""Generate Loopflow screenshots for documentation.
+
+Supports both Swift (Concerto) and web client captures.
 
 Usage:
     python scripts/generate_screenshots.py
     python scripts/generate_screenshots.py --output docs/
     python scripts/generate_screenshots.py --manifest scripts/screenshots.yaml
+    python scripts/generate_screenshots.py --web-only
+    python scripts/generate_screenshots.py --swift-only
 """
 
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 import yaml
 
@@ -18,16 +23,22 @@ import yaml
 @dataclass
 class Screenshot:
     name: str
+    type: Literal["swift", "web"] = "swift"
+    # Swift options
     window_size: tuple[int, int] | None = None
     select_branch: str | None = None
     mock_loops: bool = False
+    # Web options
+    url: str | None = None
+    viewport: tuple[int, int] | None = None
+    wait_for: str | None = None  # CSS selector to wait for
 
 
 @dataclass
 class Manifest:
     repo_url: str
     local_path: Path
-    screenshots: list[Screenshot]
+    screenshots: list[Screenshot] = field(default_factory=list)
 
 
 def load_manifest(path: Path) -> Manifest:
@@ -37,12 +48,17 @@ def load_manifest(path: Path) -> Manifest:
     screenshots = []
     for shot in data.get("screenshots", []):
         size = shot.get("window_size")
+        viewport = shot.get("viewport")
         screenshots.append(
             Screenshot(
                 name=shot["name"],
+                type=shot.get("type", "swift"),
                 window_size=tuple(size) if size else None,
                 select_branch=shot.get("select_branch"),
                 mock_loops=shot.get("mock_loops", False),
+                url=shot.get("url"),
+                viewport=tuple(viewport) if viewport else None,
+                wait_for=shot.get("wait_for"),
             )
         )
 
@@ -59,7 +75,6 @@ def setup_demo_repo(manifest: Manifest) -> Path:
     repo_path = manifest.local_path
 
     if not repo_path.exists():
-        # Convert HTTPS URL to SSH for cloning
         ssh_url = manifest.repo_url.replace("https://github.com/", "git@github.com:")
         if not ssh_url.endswith(".git"):
             ssh_url += ".git"
@@ -69,9 +84,8 @@ def setup_demo_repo(manifest: Manifest) -> Path:
             check=True,
         )
 
-    # Create worktrees if needed
     existing_worktrees = _list_worktrees(repo_path)
-    if len(existing_worktrees) <= 1:  # Only main
+    if len(existing_worktrees) <= 1:
         print("Creating demo worktrees...")
         _create_demo_worktrees(repo_path)
 
@@ -103,7 +117,6 @@ def _create_demo_worktrees(repo_path: Path) -> None:
             cwd=repo_path,
             check=True,
         )
-        # Make a commit to show ahead-of-main
         dummy_file = worktree_path / f"{branch}.txt"
         dummy_file.write_text(f"Demo file for {branch}\n")
         subprocess.run(["git", "add", "."], cwd=worktree_path, check=True)
@@ -114,54 +127,60 @@ def _create_demo_worktrees(repo_path: Path) -> None:
         )
 
 
-def find_maestro_executable() -> Path:
-    """Find the Maestro executable."""
-    # Check DerivedData for xcodebuild output
+def find_concerto_executable() -> Path:
+    """Find the Concerto executable."""
     derived_data = Path.home() / "Library/Developer/Xcode/DerivedData"
-    for d in derived_data.iterdir():
-        if d.name.startswith("Maestro-"):
-            release = d / "Build/Products/Release/Maestro"
-            if release.exists():
-                return release
+
+    # Check for Concerto or swift- (package name) builds
+    for pattern in ["Concerto-", "swift-"]:
+        for d in derived_data.iterdir():
+            if d.name.startswith(pattern):
+                for app_name in ["Concerto", "Concerto.app/Contents/MacOS/Concerto"]:
+                    release = d / "Build/Products/Release" / app_name
+                    debug = d / "Build/Products/Debug" / app_name
+                    if release.exists():
+                        return release
+                    if debug.exists():
+                        return debug
 
     # Try building
     repo_root = Path(__file__).parent.parent
-    maestro_dir = repo_root / "Maestro"
-    if maestro_dir.exists():
-        print("Building Maestro...")
+    swift_dir = repo_root / "swift"
+    if swift_dir.exists():
+        print("Building Concerto...")
         subprocess.run(
             [
                 "xcodebuild",
                 "-scheme",
-                "Maestro",
+                "Concerto",
                 "-configuration",
                 "Release",
                 "-destination",
                 "platform=macOS",
                 "build",
             ],
-            cwd=maestro_dir,
+            cwd=swift_dir,
             check=True,
             capture_output=True,
         )
         # Check again
         for d in derived_data.iterdir():
-            if d.name.startswith("Maestro-"):
-                release = d / "Build/Products/Release/Maestro"
+            if d.name.startswith("swift-"):
+                release = d / "Build/Products/Release/Concerto"
                 if release.exists():
                     return release
 
-    raise FileNotFoundError("Could not find Maestro. Build it first.")
+    raise FileNotFoundError("Could not find Concerto. Build it first with: xcodebuild -scheme Concerto -configuration Release -destination 'platform=macOS' build")
 
 
-def capture_screenshot(
+def capture_swift_screenshot(
     shot: Screenshot, repo_path: Path, output_dir: Path, executable: Path
 ) -> Path:
-    """Launch Maestro with --capture, wait for output."""
+    """Launch Concerto with --capture, wait for output."""
     output_path = output_dir / f"{shot.name}.png"
 
-    # Build args for Maestro
-    maestro_args = [
+    args = [
+        str(executable),
         "--capture",
         str(output_path),
         "--repo",
@@ -169,19 +188,15 @@ def capture_screenshot(
     ]
 
     if shot.window_size:
-        maestro_args.extend(["--size", f"{shot.window_size[0]}x{shot.window_size[1]}"])
+        args.extend(["--size", f"{shot.window_size[0]}x{shot.window_size[1]}"])
 
     if shot.select_branch:
-        maestro_args.extend(["--select", shot.select_branch])
+        args.extend(["--select", shot.select_branch])
 
     if shot.mock_loops:
-        maestro_args.append("--mock-loops")
+        args.append("--mock-loops")
 
-    # Run directly since it's a SwiftUI app executable
-    # The executable handles its own NSApplication lifecycle
-    args = [str(executable)] + maestro_args
-
-    print(f"Capturing {shot.name}...")
+    print(f"Capturing {shot.name} (Swift)...")
     result = subprocess.run(args, capture_output=True, text=True)
     if result.returncode != 0:
         print(f"  stderr: {result.stderr}")
@@ -189,14 +204,54 @@ def capture_screenshot(
     if not output_path.exists():
         raise RuntimeError(f"Screenshot not created: {output_path}")
 
-    print(f"  → {output_path}")
+    print(f"  -> {output_path}")
+    return output_path
+
+
+def capture_web_screenshot(shot: Screenshot, output_dir: Path) -> Path:
+    """Capture web screenshot using Playwright."""
+    output_path = output_dir / f"{shot.name}.png"
+
+    if not shot.url:
+        raise ValueError(f"Web screenshot {shot.name} requires a 'url' field")
+
+    # Check if playwright is available
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("  Playwright not installed. Install with: pip install playwright && playwright install chromium")
+        raise
+
+    print(f"Capturing {shot.name} (Web)...")
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        context = browser.new_context(
+            viewport={
+                "width": shot.viewport[0] if shot.viewport else 1200,
+                "height": shot.viewport[1] if shot.viewport else 800,
+            }
+        )
+        page = context.new_page()
+        page.goto(shot.url)
+
+        # Wait for content to load
+        if shot.wait_for:
+            page.wait_for_selector(shot.wait_for, timeout=10000)
+        else:
+            page.wait_for_load_state("networkidle")
+
+        page.screenshot(path=str(output_path))
+        browser.close()
+
+    print(f"  -> {output_path}")
     return output_path
 
 
 def main() -> None:
     import argparse
 
-    parser = argparse.ArgumentParser(description="Generate Maestro screenshots")
+    parser = argparse.ArgumentParser(description="Generate Loopflow screenshots")
     parser.add_argument(
         "--output",
         "-o",
@@ -211,9 +266,18 @@ def main() -> None:
         default=Path("scripts/screenshots.yaml"),
         help="Path to manifest file",
     )
+    parser.add_argument(
+        "--swift-only",
+        action="store_true",
+        help="Only capture Swift/Concerto screenshots",
+    )
+    parser.add_argument(
+        "--web-only",
+        action="store_true",
+        help="Only capture web screenshots",
+    )
     args = parser.parse_args()
 
-    # Find repo root
     script_dir = Path(__file__).parent
     repo_root = script_dir.parent
     manifest_path = repo_root / args.manifest
@@ -226,19 +290,44 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     manifest = load_manifest(manifest_path)
-    executable = find_maestro_executable()
-    repo_path = setup_demo_repo(manifest)
 
-    print(f"Using Maestro: {executable}")
-    print(f"Using repo: {repo_path}")
+    # Filter screenshots by type
+    screenshots = manifest.screenshots
+    if args.swift_only:
+        screenshots = [s for s in screenshots if s.type == "swift"]
+    elif args.web_only:
+        screenshots = [s for s in screenshots if s.type == "web"]
+
+    # Setup for Swift captures
+    swift_screenshots = [s for s in screenshots if s.type == "swift"]
+    web_screenshots = [s for s in screenshots if s.type == "web"]
+
+    executable = None
+    repo_path = None
+
+    if swift_screenshots:
+        executable = find_concerto_executable()
+        repo_path = setup_demo_repo(manifest)
+        print(f"Using Concerto: {executable}")
+        print(f"Using repo: {repo_path}")
+
     print(f"Output: {output_dir}")
     print()
 
-    for shot in manifest.screenshots:
-        capture_screenshot(shot, repo_path, output_dir, executable)
+    captured = 0
+    for shot in screenshots:
+        try:
+            if shot.type == "swift" and executable and repo_path:
+                capture_swift_screenshot(shot, repo_path, output_dir, executable)
+                captured += 1
+            elif shot.type == "web":
+                capture_web_screenshot(shot, output_dir)
+                captured += 1
+        except Exception as e:
+            print(f"  Error: {e}")
 
     print()
-    print(f"Done! {len(manifest.screenshots)} screenshots generated.")
+    print(f"Done! {captured}/{len(screenshots)} screenshots generated.")
 
 
 if __name__ == "__main__":

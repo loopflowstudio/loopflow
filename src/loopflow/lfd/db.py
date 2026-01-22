@@ -1,7 +1,12 @@
-"""SQLite database for lfd state."""
+"""SQLite database for lfd state.
+
+Schema changes: All schema changes must go through migrations in lfd/migrations/.
+Never ALTER tables here. See migrations/README.md.
+"""
 
 import json
 import sqlite3
+import sys
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -32,7 +37,7 @@ def _init_db(db_path: Path) -> None:
 
 
 def _get_db(db_path: Path | None = None) -> sqlite3.Connection:
-    """Get database connection."""
+    """Get database connection, auto-resetting on schema mismatch."""
     if db_path is None:
         db_path = DB_PATH
 
@@ -42,7 +47,18 @@ def _get_db(db_path: Path | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     _run_migrations(conn)
-    _ensure_loop_columns(conn)
+
+    mismatch = _check_schema(conn)
+    if mismatch:
+        conn.close()
+        print(f"[lfd] Schema mismatch: {mismatch}", file=sys.stderr)
+        print(f"[lfd] Resetting database: {db_path}", file=sys.stderr)
+        db_path.unlink()
+        _init_db(db_path)
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        _run_migrations(conn)
+
     return conn
 
 
@@ -66,22 +82,22 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
         )
         conn.commit()
 
+def _check_schema(conn: sqlite3.Connection) -> str | None:
+    """Check schema matches code expectations. Returns error message or None if OK."""
+    cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    tables = {row[0] for row in cursor.fetchall()}
 
-def _ensure_loop_columns(conn: sqlite3.Connection) -> None:
-    """Add missing columns to loops table for forward-compat."""
-    # Check if loops table exists first
-    cursor = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='loops'"
-    )
-    if not cursor.fetchone():
-        return  # Table doesn't exist yet; migrations will create it
+    required = {"sessions", "loops", "loop_runs", "summaries"}
+    missing = required - tables
 
-    cursor = conn.execute("PRAGMA table_info(loops)")
-    columns = {row["name"] for row in cursor.fetchall()}
+    if not missing:
+        return None
 
-    if "flow" not in columns:
-        conn.execute("ALTER TABLE loops ADD COLUMN flow TEXT")
-        conn.commit()
+    # Check for common mismatch: jobs/loops rename from branch switching
+    if "loops" in missing and "jobs" in tables:
+        return "found 'jobs' table but code expects 'loops' (branch switch?)"
+
+    return f"missing tables: {missing}"
 
 
 # Process status checks

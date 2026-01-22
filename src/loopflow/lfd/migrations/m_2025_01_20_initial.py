@@ -33,7 +33,8 @@ def apply(conn: sqlite3.Connection) -> None:
             goal TEXT,
             pid INTEGER,
             last_main_sha TEXT,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            flow TEXT
         );
 
         CREATE UNIQUE INDEX IF NOT EXISTS idx_loops_area_repo

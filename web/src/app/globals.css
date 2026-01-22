@@ -11,21 +11,26 @@ body {
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
+/* Colors synced with loopflow Swift app (see VISUAL_DESIGN.md) */
 :root {
-  --background: #faf8f5;
-  --foreground: #171717;
-  --accent: #722f37;
-  --accent-hover: #8b3d47;
-  --muted: #666;
-  --border: #e0e0e0;
+  --background: #FAF8F5;
+  --foreground: #1A1A1A;
+  --accent: #722F37;
+  --accent-hover: #8B3D47;
+  --muted: #6B6B6B;
+  --border: #E3DDD5;
+  --info: #0AB3CC;
+  --success: #2D6A4F;
+  --warning: #B0812A;
+  --error: #B45309;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #1a1a1a;
-    --foreground: #ededed;
-    --border: #333;
-    --muted: #888;
+    --background: #2B3036;
+    --foreground: #F5F1EA;
+    --border: #46505B;
+    --muted: #C8C1B8;
   }
 }
 

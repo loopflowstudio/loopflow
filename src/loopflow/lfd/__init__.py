@@ -25,8 +25,10 @@ from loopflow.lfd.db import (
     list_all_triggers,
     list_loops,
     list_runs_for_trigger,
-    save_loop,
 )
+from loopflow.lfd.launchd import install as launchd_install
+from loopflow.lfd.launchd import is_running
+from loopflow.lfd.launchd import uninstall as launchd_uninstall
 from loopflow.lfd.loops import (
     create_loop,
     create_schedule,
@@ -35,9 +37,6 @@ from loopflow.lfd.loops import (
     start_loop,
     stop_loop,
 )
-from loopflow.lfd.launchd import install as launchd_install
-from loopflow.lfd.launchd import is_running
-from loopflow.lfd.launchd import uninstall as launchd_uninstall
 from loopflow.lfd.models import Loop, MergeMode, Schedule, Subscription, Trigger, TriggerStatus
 from loopflow.lfd.server import run_server
 
@@ -445,7 +444,9 @@ def schedule(
     # Create schedule
     sched = create_schedule(area, repo, flow, cron_expr, goals=goals)
 
-    typer.echo(f"{c['green']}Scheduled{c['reset']} {c['bold']}{area}{c['reset']} ({sched.short_id()})")
+    typer.echo(
+        f"{c['green']}Scheduled{c['reset']} {c['bold']}{area}{c['reset']} ({sched.short_id()})"
+    )
     typer.echo(f"  Goals: {sched.goals_display}")
     typer.echo(f"  Flow: {sched.flow_display}")
     typer.echo(f"  Cron: {cron_expr}")
@@ -542,7 +543,8 @@ def status(
 
             typer.echo(
                 f"{trigger.short_id():<9} {type_name:<12} {display_str:<30} "
-                f"{status_c}{trigger.status.value:<10}{c['reset']} {trigger.iteration:<6} {repo_short}"
+                f"{status_c}{trigger.status.value:<10}{c['reset']} "
+                f"{trigger.iteration:<6} {repo_short}"
             )
 
 
@@ -571,9 +573,16 @@ def _print_trigger_detail(trigger: Trigger, c: dict[str, str]) -> None:
         typer.echo(f"\n  {c['dim']}Recent runs:{c['reset']}")
         for run in runs:
             from loopflow.lfd.models import RunStatus
-            run_status_c = c["green"] if run.status == RunStatus.COMPLETED else c["red"] if run.status == RunStatus.FAILED else c["dim"]
+
+            run_status_c = (
+                c["green"]
+                if run.status == RunStatus.COMPLETED
+                else c["red"]
+                if run.status == RunStatus.FAILED
+                else c["dim"]
+            )
             pr_info = f" → {run.pr_url}" if run.pr_url else ""
-            started = run.started_at.strftime('%Y-%m-%d %H:%M') if run.started_at else "pending"
+            started = run.started_at.strftime("%Y-%m-%d %H:%M") if run.started_at else "pending"
             typer.echo(
                 f"    #{run.iteration} {run_status_c}{run.status.value}{c['reset']}"
                 f" {started}{pr_info}"
@@ -646,9 +655,10 @@ def prs(
     typer.echo("")
 
     from loopflow.lfd.models import RunStatus
+
     for run in runs_with_prs:
         status_c = c["green"] if run.status == RunStatus.COMPLETED else c["red"]
-        started = run.started_at.strftime('%Y-%m-%d') if run.started_at else "?"
+        started = run.started_at.strftime("%Y-%m-%d") if run.started_at else "?"
         typer.echo(
             f"  #{run.iteration:<3} {status_c}{run.status.value:<10}{c['reset']} "
             f"{c['dim']}{started}{c['reset']}  {run.pr_url}"
@@ -670,7 +680,8 @@ def rm(
 
     if trigger.status == TriggerStatus.RUNNING:
         typer.echo(
-            f"{c['red']}Error:{c['reset']} Trigger is running. Stop it first with: lfd stop {trigger_id}",
+            f"{c['red']}Error:{c['reset']} Trigger is running. Stop it first with: "
+            f"lfd stop {trigger_id}",
             err=True,
         )
         raise typer.Exit(1)

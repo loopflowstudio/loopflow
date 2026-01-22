@@ -12,24 +12,21 @@ from loopflow.lf.context import find_worktree_root
 from loopflow.lfd.db import (
     get_loop,
     get_loop_by_area_repo,
-    get_subscription,
-    get_subscription_by_area_repo,
     get_schedule,
     get_schedule_by_area_repo,
-    list_runs_for_trigger,
+    get_subscription,
+    get_subscription_by_area_repo,
     save_loop,
-    save_subscription,
     save_schedule,
+    save_subscription,
     update_loop_pid,
     update_loop_status,
-    update_subscription_status,
     update_schedule_status,
+    update_subscription_status,
 )
 from loopflow.lfd.models import (
     Loop,
     MergeMode,
-    Run,
-    RunStatus,
     Schedule,
     Subscription,
     Trigger,
@@ -449,7 +446,7 @@ def start_subscription(subscription_id: str) -> StartResult:
 
     # Spawn a single iteration
     update_subscription_status(subscription_id, TriggerStatus.RUNNING)
-    proc = subprocess.Popen(
+    subprocess.Popen(
         [sys.executable, "-m", "loopflow.lfd.trigger_runner", "subscription", subscription_id],
         cwd=sub.repo,
         stdout=subprocess.DEVNULL,
@@ -477,7 +474,7 @@ def start_schedule(schedule_id: str) -> StartResult:
 
     # Spawn a single iteration
     update_schedule_status(schedule_id, TriggerStatus.RUNNING)
-    proc = subprocess.Popen(
+    subprocess.Popen(
         [sys.executable, "-m", "loopflow.lfd.trigger_runner", "schedule", schedule_id],
         cwd=schedule.repo,
         stdout=subprocess.DEVNULL,

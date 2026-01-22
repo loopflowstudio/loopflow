@@ -639,9 +639,7 @@ def run_iteration(
             voices=step_voices,
         )
         if not prompt_result:
-            update_run_status(
-                run.id, RunStatus.FAILED, error=f"Step file not found: {step_name}"
-            )
+            update_run_status(run.id, RunStatus.FAILED, error=f"Step file not found: {step_name}")
             _cleanup_worktree(loop.repo, worktree_path, branch)
             return False
 

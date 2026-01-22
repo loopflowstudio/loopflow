@@ -27,7 +27,9 @@ def apply(conn: sqlite3.Connection) -> None:
     if old_loops_exists and old_schema:
         # Rename old tables to preserve data for migration
         conn.execute("ALTER TABLE loops RENAME TO loops_old")
-        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='loop_runs'")
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='loop_runs'"
+        )
         if cursor.fetchone():
             conn.execute("ALTER TABLE loop_runs RENAME TO loop_runs_old")
 
@@ -238,7 +240,10 @@ def _migrate_old_data(conn: sqlite3.Connection) -> None:
             continue
 
         # Migrate runs for this trigger
-        cursor2 = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (old_runs_table,))
+        cursor2 = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (old_runs_table,),
+        )
         if not cursor2.fetchone():
             continue
 

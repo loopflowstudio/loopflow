@@ -318,22 +318,27 @@ def list_runs(
     where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
     params.append(limit)
 
-    cursor = conn.execute(
-        f"SELECT * FROM runs{where} ORDER BY created_at DESC LIMIT ?", params
-    )
+    cursor = conn.execute(f"SELECT * FROM runs{where} ORDER BY created_at DESC LIMIT ?", params)
 
     runs = [_run_from_row(dict(row)) for row in cursor]
     conn.close()
     return runs
 
 
-def list_runs_for_trigger(trigger_type: str, trigger_id: str, limit: int = 10, db_path: Path | None = None) -> list[Run]:
+def list_runs_for_trigger(
+    trigger_type: str,
+    trigger_id: str,
+    limit: int = 10,
+    db_path: Path | None = None,
+) -> list[Run]:
     """List runs spawned by a specific trigger."""
     parent = f"{trigger_type}:{trigger_id}"
     return list_runs(parent=parent, limit=limit, db_path=db_path)
 
 
-def get_latest_run_for_trigger(trigger_type: str, trigger_id: str, db_path: Path | None = None) -> Run | None:
+def get_latest_run_for_trigger(
+    trigger_type: str, trigger_id: str, db_path: Path | None = None
+) -> Run | None:
     """Get the most recent run for a trigger."""
     runs = list_runs_for_trigger(trigger_type, trigger_id, limit=1, db_path=db_path)
     return runs[0] if runs else None
@@ -365,7 +370,8 @@ def update_run_status(
         )
     else:
         cursor = conn.execute(
-            "UPDATE runs SET status = ?, ended_at = COALESCE(?, ended_at) WHERE id = ? OR id LIKE ?",
+            "UPDATE runs SET status = ?, ended_at = COALESCE(?, ended_at) "
+            "WHERE id = ? OR id LIKE ?",
             (status.value, ended_at, run_id, f"{run_id}%"),
         )
 
@@ -660,7 +666,9 @@ def get_subscription(sub_id: str, db_path: Path | None = None) -> Subscription |
     return _subscription_from_row(dict(row)) if row else None
 
 
-def get_subscription_by_area_repo(area: str, repo: Path, db_path: Path | None = None) -> Subscription | None:
+def get_subscription_by_area_repo(
+    area: str, repo: Path, db_path: Path | None = None
+) -> Subscription | None:
     """Get a subscription by area and repo."""
     conn = _get_db(db_path)
 
@@ -690,7 +698,9 @@ def list_subscriptions(repo: Path | None = None, db_path: Path | None = None) ->
     return subs
 
 
-def update_subscription_status(sub_id: str, status: TriggerStatus, db_path: Path | None = None) -> bool:
+def update_subscription_status(
+    sub_id: str, status: TriggerStatus, db_path: Path | None = None
+) -> bool:
     """Update a subscription's status."""
     conn = _get_db(db_path)
 
@@ -817,7 +827,9 @@ def get_schedule(schedule_id: str, db_path: Path | None = None) -> Schedule | No
     return _schedule_from_row(dict(row)) if row else None
 
 
-def get_schedule_by_area_repo(area: str, repo: Path, db_path: Path | None = None) -> Schedule | None:
+def get_schedule_by_area_repo(
+    area: str, repo: Path, db_path: Path | None = None
+) -> Schedule | None:
     """Get a schedule by area and repo."""
     conn = _get_db(db_path)
 
@@ -847,7 +859,9 @@ def list_schedules(repo: Path | None = None, db_path: Path | None = None) -> lis
     return schedules
 
 
-def update_schedule_status(schedule_id: str, status: TriggerStatus, db_path: Path | None = None) -> bool:
+def update_schedule_status(
+    schedule_id: str, status: TriggerStatus, db_path: Path | None = None
+) -> bool:
     """Update a schedule's status."""
     conn = _get_db(db_path)
 

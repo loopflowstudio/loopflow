@@ -7,9 +7,9 @@ from pathlib import Path
 from loopflow.lfd.db import (
     _get_db,
     delete_loop,
+    get_latest_run_for_trigger,
     get_loop,
     get_loop_by_area_repo,
-    get_latest_run_for_trigger,
     list_loops,
     list_runs_for_trigger,
     load_sessions,

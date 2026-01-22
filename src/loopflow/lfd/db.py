@@ -69,6 +69,13 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
 
 def _ensure_loop_columns(conn: sqlite3.Connection) -> None:
     """Add missing columns to loops table for forward-compat."""
+    # Check if loops table exists first
+    cursor = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='loops'"
+    )
+    if not cursor.fetchone():
+        return  # Table doesn't exist yet; migrations will create it
+
     cursor = conn.execute("PRAGMA table_info(loops)")
     columns = {row["name"] for row in cursor.fetchall()}
 

@@ -1,17 +1,47 @@
-// Loop model for lfd background loops.
-// Reads from ~/.lf/lfd.db (loops and loop_runs tables)
+// Job model for lfd background jobs.
+// Reads from ~/.lf/lfd.db (jobs and job_runs tables)
 
 import Foundation
 import SwiftUI
 
-public enum LoopType: String, Sendable, Codable {
-    case loop
-    case flow
-    case subscribe
-    case schedule
+// Execution mode: how many times the agent runs
+public enum ExecutionMode: String, Sendable, Codable {
+    case continuous  // Keep iterating until stopped
+    case oneShot = "one_shot"  // Run once, then done
 }
 
-public enum LoopStatus: String, Sendable, Codable {
+// Trigger type: what causes the agent to run
+public enum TriggerType: String, Sendable, Codable {
+    case manual   // Started explicitly
+    case pathset  // File changes on main
+    case cron     // Scheduled time
+}
+
+// Legacy type enum - combines execution mode and trigger
+// Kept for backwards compatibility with database
+public enum JobType: String, Sendable, Codable {
+    case loop      // CONTINUOUS + MANUAL
+    case flow      // ONE_SHOT + MANUAL
+    case subscribe // CONTINUOUS + PATHSET
+    case schedule  // CONTINUOUS + CRON
+
+    public var executionMode: ExecutionMode {
+        switch self {
+        case .flow: return .oneShot
+        default: return .continuous
+        }
+    }
+
+    public var triggerType: TriggerType {
+        switch self {
+        case .loop, .flow: return .manual
+        case .subscribe: return .pathset
+        case .schedule: return .cron
+        }
+    }
+}
+
+public enum JobStatus: String, Sendable, Codable {
     case idle
     case running
     case waiting
@@ -27,27 +57,27 @@ public enum LoopStatus: String, Sendable, Codable {
     }
 }
 
-public enum LoopMergeMode: String, Sendable, Codable {
+public enum JobMergeMode: String, Sendable, Codable {
     case pr
     case land
 }
 
-public struct Loop: Sendable, Identifiable, Hashable {
+public struct Job: Sendable, Identifiable, Hashable {
     public let id: String
-    public let type: LoopType
+    public let type: JobType
     public let area: String
     public let goals: [String]
     public let flow: String?
     public let repo: String
-    public let loopMain: String
-    public var status: LoopStatus
+    public let jobMain: String
+    public var status: JobStatus
     public var iteration: Int
     public var prLimit: Int
-    public var mergeMode: LoopMergeMode
+    public var mergeMode: JobMergeMode
     public var pid: Int?
     public var createdAt: Date
 
-    // Runtime state from loop_runs
+    // Runtime state from job_runs
     public var currentRunId: String?
     public var currentStep: String?
 
@@ -56,16 +86,16 @@ public struct Loop: Sendable, Identifiable, Hashable {
 
     public init(
         id: String,
-        type: LoopType,
+        type: JobType,
         area: String,
         goals: [String],
         flow: String? = nil,
         repo: String,
-        loopMain: String,
-        status: LoopStatus,
+        jobMain: String,
+        status: JobStatus,
         iteration: Int,
         prLimit: Int,
-        mergeMode: LoopMergeMode,
+        mergeMode: JobMergeMode,
         pid: Int? = nil,
         createdAt: Date,
         currentRunId: String? = nil,
@@ -78,7 +108,7 @@ public struct Loop: Sendable, Identifiable, Hashable {
         self.goals = goals
         self.flow = flow
         self.repo = repo
-        self.loopMain = loopMain
+        self.jobMain = jobMain
         self.status = status
         self.iteration = iteration
         self.prLimit = prLimit
@@ -121,17 +151,36 @@ public struct Loop: Sendable, Identifiable, Hashable {
     public var iterationText: String {
         iteration > 0 ? "iter \(iteration)" : ""
     }
+
+    // Semantic accessors (derived from type)
+    public var executionMode: ExecutionMode { type.executionMode }
+    public var triggerType: TriggerType { type.triggerType }
+    public var isOneShot: Bool { executionMode == .oneShot }
+    public var isTriggered: Bool { triggerType != .manual }
+
+    // Backwards compatibility property
+    public var loopMain: String { jobMain }
 }
 
-public struct LoopRun: Sendable, Identifiable {
+public struct JobRun: Sendable, Identifiable {
     public let id: String
-    public let loopId: String
+    public let jobId: String
     public let iteration: Int
-    public let status: LoopStatus
+    public let status: JobStatus
     public let startedAt: Date
     public var endedAt: Date?
     public var worktree: String?
     public var currentStep: String?
     public var error: String?
     public var prUrl: String?
+
+    // Backwards compatibility property
+    public var loopId: String { jobId }
 }
+
+// Backwards compatibility type aliases
+public typealias Loop = Job
+public typealias LoopType = JobType
+public typealias LoopStatus = JobStatus
+public typealias LoopMergeMode = JobMergeMode
+public typealias LoopRun = JobRun

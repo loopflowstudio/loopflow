@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from loopflow.lfd.db import (
-    list_loops,
+    list_jobs,
     load_sessions,
     load_sessions_for_repo,
     load_sessions_for_worktree,
@@ -18,9 +18,13 @@ from loopflow.lfd.db import (
     update_dead_runs,
     update_session_status,
 )
-from loopflow.lfd.models import LoopStatus, Session, SessionStatus
+from loopflow.lfd.models import JobStatus, Session, SessionStatus
 from loopflow.lfd.protocol import Event, Request, Response, error, success
 from loopflow.lfd.scheduler import Scheduler, load_scheduler_config
+
+# Backwards compatibility aliases
+list_loops = list_jobs
+LoopStatus = JobStatus
 
 
 class Server:
@@ -114,16 +118,19 @@ class Server:
             return error(f"Unknown method: {method}", request.id)
 
     async def _handle_status(self) -> Response:
-        loops = list_loops()
+        jobs = list_jobs()
         sessions = load_sessions(active_only=True)
-        running_loops = [lp for lp in loops if lp.status == LoopStatus.RUNNING]
+        running_jobs = [j for j in jobs if j.status == JobStatus.RUNNING]
 
         return success(
             {
                 "pid": os.getpid(),
-                "loops_defined": len(loops),
-                "loops_running": len(running_loops),
+                "jobs_defined": len(jobs),
+                "jobs_running": len(running_jobs),
                 "sessions_active": len(sessions),
+                # Backwards compat keys
+                "loops_defined": len(jobs),
+                "loops_running": len(running_jobs),
             }
         )
 
@@ -289,12 +296,12 @@ class Server:
 
                 # Check subscription triggers (file changes on main)
                 triggered_subs = run_subscription_check()
-                for loop_id in triggered_subs:
+                for job_id in triggered_subs:
                     await self._broadcast(
                         Event(
-                            "loop.triggered",
+                            "job.triggered",
                             {
-                                "loop_id": loop_id,
+                                "job_id": job_id,
                                 "trigger": "subscription",
                             },
                         )
@@ -302,12 +309,12 @@ class Server:
 
                 # Check schedule triggers (cron)
                 triggered_scheds = run_schedule_check()
-                for loop_id in triggered_scheds:
+                for job_id in triggered_scheds:
                     await self._broadcast(
                         Event(
-                            "loop.triggered",
+                            "job.triggered",
                             {
-                                "loop_id": loop_id,
+                                "job_id": job_id,
                                 "trigger": "schedule",
                             },
                         )

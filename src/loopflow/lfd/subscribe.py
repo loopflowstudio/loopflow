@@ -1,25 +1,32 @@
 """Subscription checking for lfd.
 
-Monitors file changes on main and triggers loops when pathsets are modified.
+Monitors file changes on main and triggers jobs when pathsets are modified.
 """
 
 import subprocess
 
-from loopflow.lfd.db import list_loops, update_loop_last_sha
-from loopflow.lfd.loops import start_loop
-from loopflow.lfd.models import Loop, LoopStatus, LoopType
+from loopflow.lfd.db import list_jobs, update_job_last_sha
+from loopflow.lfd.jobs import start_job
+from loopflow.lfd.models import Job, JobStatus, TriggerType
+
+# Backwards compatibility aliases
+Loop = Job
+LoopStatus = JobStatus
+list_loops = list_jobs
+update_loop_last_sha = update_job_last_sha
+start_loop = start_job
 
 
-def check_subscription(loop: Loop) -> bool:
+def check_subscription(job: Job) -> bool:
     """Check if subscription should trigger. Returns True if triggered.
 
     Updates last_main_sha as a side effect.
-    Caller must ensure loop.type == LoopType.SUBSCRIBE.
+    Caller must ensure job.trigger_type == TriggerType.PATHSET.
     """
-    if not loop.pathset:
+    if not job.pathset:
         return False
 
-    repo = loop.repo
+    repo = job.repo
 
     # Fetch main
     subprocess.run(["git", "fetch", "origin", "main"], cwd=repo, capture_output=True)
@@ -36,18 +43,18 @@ def check_subscription(loop: Loop) -> bool:
 
     current_sha = result.stdout.strip()
 
-    if current_sha == loop.last_main_sha:
+    if current_sha == job.last_main_sha:
         return False  # No change
 
-    if loop.last_main_sha is None:
+    if job.last_main_sha is None:
         # First run - set baseline, don't trigger
-        update_loop_last_sha(loop.id, current_sha)
+        update_job_last_sha(job.id, current_sha)
         return False
 
     # Check if pathset was modified
-    paths = [p.strip() for p in loop.pathset.split(",")]
+    paths = [p.strip() for p in job.pathset.split(",")]
     result = subprocess.run(
-        ["git", "diff", "--name-only", loop.last_main_sha, current_sha, "--"] + paths,
+        ["git", "diff", "--name-only", job.last_main_sha, current_sha, "--"] + paths,
         cwd=repo,
         capture_output=True,
         text=True,
@@ -56,29 +63,29 @@ def check_subscription(loop: Loop) -> bool:
     changed_files = result.stdout.strip()
     if not changed_files:
         # Main changed but not our paths
-        update_loop_last_sha(loop.id, current_sha)
+        update_job_last_sha(job.id, current_sha)
         return False
 
     # Trigger iteration - update SHA before starting
-    update_loop_last_sha(loop.id, current_sha)
+    update_job_last_sha(job.id, current_sha)
     return True
 
 
 def run_subscription_check() -> list[str]:
     """Check all subscriptions and trigger as needed.
 
-    Returns list of loop IDs that were triggered.
+    Returns list of job IDs that were triggered.
     """
     triggered = []
-    for loop in list_loops():
-        if loop.type != LoopType.SUBSCRIBE:
+    for job in list_jobs():
+        if job.trigger_type != TriggerType.PATHSET:
             continue
-        if loop.status == LoopStatus.RUNNING:
+        if job.status == JobStatus.RUNNING:
             continue  # Already running
 
-        if check_subscription(loop):
-            result = start_loop(loop.id)
+        if check_subscription(job):
+            result = start_job(job.id)
             if result:
-                triggered.append(loop.id)
+                triggered.append(job.id)
 
     return triggered

@@ -13,15 +13,21 @@ from pathlib import Path
 
 from loopflow.lfd.migrations.registry import MIGRATIONS
 from loopflow.lfd.models import (
-    Loop,
-    LoopRun,
-    LoopStatus,
-    LoopType,
+    Job,
+    JobRun,
+    JobStatus,
+    JobType,
     MergeMode,
     Session,
     SessionStatus,
 )
 from loopflow.lfd.process import is_process_running
+
+# Backwards compatibility aliases
+Loop = Job
+LoopRun = JobRun
+LoopStatus = JobStatus
+LoopType = JobType
 
 DB_PATH = Path.home() / ".lf" / "lfd.db"
 
@@ -104,16 +110,23 @@ def _check_schema(conn: sqlite3.Connection) -> str | None:
 
 
 def update_dead_runs(db_path: Path | None = None) -> int:
-    """Mark loops as idle if their process is no longer running."""
+    """Mark jobs as idle if their process is no longer running."""
     conn = _get_db(db_path)
 
-    cursor = conn.execute("SELECT id, pid FROM loops WHERE status = 'running' AND pid IS NOT NULL")
+    # Handle both pre and post migration table names
+    cursor = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('jobs', 'loops')"
+    )
+    tables = {row[0] for row in cursor.fetchall()}
+    table_name = "jobs" if "jobs" in tables else "loops"
+
+    cursor = conn.execute(f"SELECT id, pid FROM {table_name} WHERE status = 'running' AND pid IS NOT NULL")
 
     count = 0
     for row in cursor.fetchall():
         if not is_process_running(row["pid"]):
             conn.execute(
-                "UPDATE loops SET status = 'idle', pid = NULL WHERE id = ?",
+                f"UPDATE {table_name} SET status = 'idle', pid = NULL WHERE id = ?",
                 (row["id"],),
             )
             count += 1
@@ -261,101 +274,143 @@ def _session_from_row(row: dict) -> Session:
     )
 
 
-# Loop functions
+# Job functions
 
 
-def save_loop(loop: Loop, db_path: Path | None = None) -> None:
-    """Save or update a loop."""
+def _get_table_name(conn: sqlite3.Connection) -> str:
+    """Get the current table name (jobs or loops depending on migration status)."""
+    cursor = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('jobs', 'loops')"
+    )
+    tables = {row[0] for row in cursor.fetchall()}
+    return "jobs" if "jobs" in tables else "loops"
+
+
+def _get_column_name(conn: sqlite3.Connection, table: str, new_name: str, old_name: str) -> str:
+    """Get the current column name (new or old depending on migration status)."""
+    cursor = conn.execute(f"PRAGMA table_info({table})")
+    columns = {row["name"] for row in cursor.fetchall()}
+    return new_name if new_name in columns else old_name
+
+
+def save_job(job: Job, db_path: Path | None = None) -> None:
+    """Save or update a job."""
     conn = _get_db(db_path)
+    table = _get_table_name(conn)
+    main_col = _get_column_name(conn, table, "job_main", "loop_main")
+
     conn.execute(
-        """
-        INSERT OR REPLACE INTO loops
-        (id, type, area, repo, loop_main, goals, flow, status, iteration, pr_limit, merge_mode,
+        f"""
+        INSERT OR REPLACE INTO {table}
+        (id, type, area, repo, {main_col}, goals, flow, status, iteration, pr_limit, merge_mode,
          project_file, pathset, cron, goal, pid, last_main_sha, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            loop.id,
-            loop.type.value,
-            loop.area,
-            str(loop.repo),
-            loop.loop_main,
-            json.dumps(loop.goals) if loop.goals else None,
-            loop.flow,
-            loop.status.value,
-            loop.iteration,
-            loop.pr_limit,
-            loop.merge_mode.value,
-            loop.project_file,
-            loop.pathset,
-            loop.cron,
-            loop.goal_name,  # Legacy field
-            loop.pid,
-            loop.last_main_sha,
-            loop.created_at.isoformat(),
+            job.id,
+            job.type.value,
+            job.area,
+            str(job.repo),
+            job.job_main,
+            json.dumps(job.goals) if job.goals else None,
+            job.flow,
+            job.status.value,
+            job.iteration,
+            job.pr_limit,
+            job.merge_mode.value,
+            job.project_file,
+            job.pathset,
+            job.cron,
+            job.goal_name,  # Legacy field
+            job.pid,
+            job.last_main_sha,
+            job.created_at.isoformat(),
         ),
     )
     conn.commit()
     conn.close()
 
 
-def get_loop(loop_id: str, db_path: Path | None = None) -> Loop | None:
-    """Get a loop by ID (supports short IDs)."""
+# Backwards compatibility alias
+save_loop = save_job
+
+
+def get_job(job_id: str, db_path: Path | None = None) -> Job | None:
+    """Get a job by ID (supports short IDs)."""
     conn = _get_db(db_path)
+    table = _get_table_name(conn)
 
     # Try exact match first, then prefix match
-    cursor = conn.execute("SELECT * FROM loops WHERE id = ?", (loop_id,))
+    cursor = conn.execute(f"SELECT * FROM {table} WHERE id = ?", (job_id,))
     row = cursor.fetchone()
 
     if not row:
-        cursor = conn.execute("SELECT * FROM loops WHERE id LIKE ?", (f"{loop_id}%",))
+        cursor = conn.execute(f"SELECT * FROM {table} WHERE id LIKE ?", (f"{job_id}%",))
         row = cursor.fetchone()
 
     conn.close()
-    return _loop_from_row(dict(row)) if row else None
+    return _job_from_row(dict(row), conn) if row else None
 
 
-def get_loop_by_area_repo(
-    loop_type: LoopType,
+# Backwards compatibility alias
+get_loop = get_job
+
+
+def get_job_by_area_repo(
+    job_type: JobType,
     area: str,
     repo: Path,
     *,
     db_path: Path | None = None,
-) -> Loop | None:
-    """Get a loop by type, area, and repo."""
+) -> Job | None:
+    """Get a job by type, area, and repo."""
     conn = _get_db(db_path)
+    table = _get_table_name(conn)
+
     cursor = conn.execute(
-        "SELECT * FROM loops WHERE type = ? AND area = ? AND repo = ?",
-        (loop_type.value, area, str(repo)),
+        f"SELECT * FROM {table} WHERE type = ? AND area = ? AND repo = ?",
+        (job_type.value, area, str(repo)),
     )
     row = cursor.fetchone()
+    result = _job_from_row(dict(row), conn) if row else None
     conn.close()
-    return _loop_from_row(dict(row)) if row else None
+    return result
 
 
-def list_loops(repo: Path | None = None, db_path: Path | None = None) -> list[Loop]:
-    """List all loops, optionally filtered by repo."""
+# Backwards compatibility alias
+get_loop_by_area_repo = get_job_by_area_repo
+
+
+def list_jobs(repo: Path | None = None, db_path: Path | None = None) -> list[Job]:
+    """List all jobs, optionally filtered by repo."""
     conn = _get_db(db_path)
+    table = _get_table_name(conn)
 
     if repo:
         cursor = conn.execute(
-            "SELECT * FROM loops WHERE repo = ? ORDER BY created_at DESC",
+            f"SELECT * FROM {table} WHERE repo = ? ORDER BY created_at DESC",
             (str(repo),),
         )
     else:
-        cursor = conn.execute("SELECT * FROM loops ORDER BY created_at DESC")
+        cursor = conn.execute(f"SELECT * FROM {table} ORDER BY created_at DESC")
 
-    loops = [_loop_from_row(dict(row)) for row in cursor]
+    jobs = [_job_from_row(dict(row), conn) for row in cursor]
     conn.close()
-    return loops
+    return jobs
 
 
-def update_loop_status(loop_id: str, status: LoopStatus, db_path: Path | None = None) -> bool:
-    """Update a loop's status."""
+# Backwards compatibility alias
+list_loops = list_jobs
+
+
+def update_job_status(job_id: str, status: JobStatus, db_path: Path | None = None) -> bool:
+    """Update a job's status."""
     conn = _get_db(db_path)
+    table = _get_table_name(conn)
+
     cursor = conn.execute(
-        "UPDATE loops SET status = ? WHERE id = ? OR id LIKE ?",
-        (status.value, loop_id, f"{loop_id}%"),
+        f"UPDATE {table} SET status = ? WHERE id = ? OR id LIKE ?",
+        (status.value, job_id, f"{job_id}%"),
     )
     conn.commit()
     updated = cursor.rowcount > 0
@@ -363,12 +418,18 @@ def update_loop_status(loop_id: str, status: LoopStatus, db_path: Path | None = 
     return updated
 
 
-def update_loop_iteration(loop_id: str, iteration: int, db_path: Path | None = None) -> bool:
-    """Update a loop's iteration count."""
+# Backwards compatibility alias
+update_loop_status = update_job_status
+
+
+def update_job_iteration(job_id: str, iteration: int, db_path: Path | None = None) -> bool:
+    """Update a job's iteration count."""
     conn = _get_db(db_path)
+    table = _get_table_name(conn)
+
     cursor = conn.execute(
-        "UPDATE loops SET iteration = ? WHERE id = ? OR id LIKE ?",
-        (iteration, loop_id, f"{loop_id}%"),
+        f"UPDATE {table} SET iteration = ? WHERE id = ? OR id LIKE ?",
+        (iteration, job_id, f"{job_id}%"),
     )
     conn.commit()
     updated = cursor.rowcount > 0
@@ -376,12 +437,18 @@ def update_loop_iteration(loop_id: str, iteration: int, db_path: Path | None = N
     return updated
 
 
-def update_loop_pid(loop_id: str, pid: int | None, db_path: Path | None = None) -> bool:
-    """Update a loop's process ID."""
+# Backwards compatibility alias
+update_loop_iteration = update_job_iteration
+
+
+def update_job_pid(job_id: str, pid: int | None, db_path: Path | None = None) -> bool:
+    """Update a job's process ID."""
     conn = _get_db(db_path)
+    table = _get_table_name(conn)
+
     cursor = conn.execute(
-        "UPDATE loops SET pid = ? WHERE id = ? OR id LIKE ?",
-        (pid, loop_id, f"{loop_id}%"),
+        f"UPDATE {table} SET pid = ? WHERE id = ? OR id LIKE ?",
+        (pid, job_id, f"{job_id}%"),
     )
     conn.commit()
     updated = cursor.rowcount > 0
@@ -389,12 +456,18 @@ def update_loop_pid(loop_id: str, pid: int | None, db_path: Path | None = None) 
     return updated
 
 
-def update_loop_last_sha(loop_id: str, sha: str | None, db_path: Path | None = None) -> bool:
-    """Update a loop's last_main_sha (for subscribe loops)."""
+# Backwards compatibility alias
+update_loop_pid = update_job_pid
+
+
+def update_job_last_sha(job_id: str, sha: str | None, db_path: Path | None = None) -> bool:
+    """Update a job's last_main_sha (for subscribe jobs)."""
     conn = _get_db(db_path)
+    table = _get_table_name(conn)
+
     cursor = conn.execute(
-        "UPDATE loops SET last_main_sha = ? WHERE id = ? OR id LIKE ?",
-        (sha, loop_id, f"{loop_id}%"),
+        f"UPDATE {table} SET last_main_sha = ? WHERE id = ? OR id LIKE ?",
+        (sha, job_id, f"{job_id}%"),
     )
     conn.commit()
     updated = cursor.rowcount > 0
@@ -402,13 +475,20 @@ def update_loop_last_sha(loop_id: str, sha: str | None, db_path: Path | None = N
     return updated
 
 
-def delete_loop(loop_id: str, db_path: Path | None = None) -> bool:
-    """Delete a loop and its runs."""
+# Backwards compatibility alias
+update_loop_last_sha = update_job_last_sha
+
+
+def delete_job(job_id: str, db_path: Path | None = None) -> bool:
+    """Delete a job and its runs."""
     conn = _get_db(db_path)
+    table = _get_table_name(conn)
+    runs_table = "job_runs" if table == "jobs" else "loop_runs"
+    id_col = "job_id" if table == "jobs" else "loop_id"
 
     # Get full ID for foreign key deletes
     cursor = conn.execute(
-        "SELECT id FROM loops WHERE id = ? OR id LIKE ?", (loop_id, f"{loop_id}%")
+        f"SELECT id FROM {table} WHERE id = ? OR id LIKE ?", (job_id, f"{job_id}%")
     )
     row = cursor.fetchone()
     if not row:
@@ -418,8 +498,8 @@ def delete_loop(loop_id: str, db_path: Path | None = None) -> bool:
     full_id = row["id"]
 
     # Delete runs first
-    conn.execute("DELETE FROM loop_runs WHERE loop_id = ?", (full_id,))
-    cursor = conn.execute("DELETE FROM loops WHERE id = ?", (full_id,))
+    conn.execute(f"DELETE FROM {runs_table} WHERE {id_col} = ?", (full_id,))
+    cursor = conn.execute(f"DELETE FROM {table} WHERE id = ?", (full_id,))
 
     conn.commit()
     deleted = cursor.rowcount > 0
@@ -427,8 +507,12 @@ def delete_loop(loop_id: str, db_path: Path | None = None) -> bool:
     return deleted
 
 
-def _loop_from_row(row: dict) -> Loop:
-    """Convert database row to Loop."""
+# Backwards compatibility alias
+delete_loop = delete_job
+
+
+def _job_from_row(row: dict, conn: sqlite3.Connection | None = None) -> Job:
+    """Convert database row to Job."""
     # Handle legacy "auto" merge mode by mapping to PR
     merge_mode_str = row.get("merge_mode", "pr")
     if merge_mode_str == "auto":
@@ -441,15 +525,18 @@ def _loop_from_row(row: dict) -> Loop:
     # Handle area - could be in 'area' column or legacy 'goal' was used as area marker
     area = row.get("area") or "."
 
-    return Loop(
+    # Handle job_main vs loop_main column name
+    job_main = row.get("job_main") or row.get("loop_main", "")
+
+    return Job(
         id=row["id"],
-        type=LoopType(row["type"]),
+        type=JobType(row["type"]),
         area=area,
         repo=Path(row["repo"]),
-        loop_main=row["loop_main"],
+        job_main=job_main,
         goals=goals,
         flow=row.get("flow"),
-        status=LoopStatus(row["status"]),
+        status=JobStatus(row["status"]),
         iteration=row.get("iteration", 0),
         pr_limit=row.get("pr_limit", 5),
         merge_mode=MergeMode(merge_mode_str),
@@ -463,22 +550,30 @@ def _loop_from_row(row: dict) -> Loop:
     )
 
 
-# Loop run functions
+# Backwards compatibility alias
+_loop_from_row = _job_from_row
 
 
-def save_loop_run(run: LoopRun, db_path: Path | None = None) -> None:
-    """Save a loop run."""
+# Job run functions
+
+
+def save_job_run(run: JobRun, db_path: Path | None = None) -> None:
+    """Save a job run."""
     conn = _get_db(db_path)
+    table = _get_table_name(conn)
+    runs_table = "job_runs" if table == "jobs" else "loop_runs"
+    id_col = "job_id" if table == "jobs" else "loop_id"
+
     conn.execute(
-        """
-        INSERT OR REPLACE INTO loop_runs
-        (id, loop_id, iteration, status, started_at, ended_at,
+        f"""
+        INSERT OR REPLACE INTO {runs_table}
+        (id, {id_col}, iteration, status, started_at, ended_at,
          worktree, current_step, error, pr_url)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             run.id,
-            run.loop_id,
+            run.job_id,
             run.iteration,
             run.status.value,
             run.started_at.isoformat(),
@@ -493,13 +588,20 @@ def save_loop_run(run: LoopRun, db_path: Path | None = None) -> None:
     conn.close()
 
 
-def get_loop_runs(loop_id: str, limit: int = 10, db_path: Path | None = None) -> list[LoopRun]:
-    """Get runs for a loop."""
+# Backwards compatibility alias
+save_loop_run = save_job_run
+
+
+def get_job_runs(job_id: str, limit: int = 10, db_path: Path | None = None) -> list[JobRun]:
+    """Get runs for a job."""
     conn = _get_db(db_path)
+    table = _get_table_name(conn)
+    runs_table = "job_runs" if table == "jobs" else "loop_runs"
+    id_col = "job_id" if table == "jobs" else "loop_id"
 
     # Support short IDs
     cursor = conn.execute(
-        "SELECT id FROM loops WHERE id = ? OR id LIKE ?", (loop_id, f"{loop_id}%")
+        f"SELECT id FROM {table} WHERE id = ? OR id LIKE ?", (job_id, f"{job_id}%")
     )
     row = cursor.fetchone()
     if not row:
@@ -509,41 +611,51 @@ def get_loop_runs(loop_id: str, limit: int = 10, db_path: Path | None = None) ->
     full_id = row["id"]
 
     cursor = conn.execute(
-        "SELECT * FROM loop_runs WHERE loop_id = ? ORDER BY started_at DESC LIMIT ?",
+        f"SELECT * FROM {runs_table} WHERE {id_col} = ? ORDER BY started_at DESC LIMIT ?",
         (full_id, limit),
     )
-    runs = [_loop_run_from_row(dict(row)) for row in cursor]
+    runs = [_job_run_from_row(dict(row)) for row in cursor]
     conn.close()
     return runs
 
 
-def get_latest_loop_run(loop_id: str, db_path: Path | None = None) -> LoopRun | None:
-    """Get the most recent run for a loop."""
-    runs = get_loop_runs(loop_id, limit=1, db_path=db_path)
+# Backwards compatibility alias
+get_loop_runs = get_job_runs
+
+
+def get_latest_job_run(job_id: str, db_path: Path | None = None) -> JobRun | None:
+    """Get the most recent run for a job."""
+    runs = get_job_runs(job_id, limit=1, db_path=db_path)
     return runs[0] if runs else None
 
 
-def update_loop_run_status(
+# Backwards compatibility alias
+get_latest_loop_run = get_latest_job_run
+
+
+def update_job_run_status(
     run_id: str,
-    status: LoopStatus,
+    status: JobStatus,
     error: str | None = None,
     db_path: Path | None = None,
 ) -> bool:
-    """Update a loop run's status."""
+    """Update a job run's status."""
     conn = _get_db(db_path)
+    table = _get_table_name(conn)
+    runs_table = "job_runs" if table == "jobs" else "loop_runs"
 
     ended_at = None
-    if status in (LoopStatus.IDLE, LoopStatus.ERROR):
+    if status in (JobStatus.IDLE, JobStatus.ERROR):
         ended_at = datetime.now().isoformat()
 
     if error:
         cursor = conn.execute(
-            "UPDATE loop_runs SET status = ?, ended_at = ?, error = ? WHERE id = ?",
+            f"UPDATE {runs_table} SET status = ?, ended_at = ?, error = ? WHERE id = ?",
             (status.value, ended_at, error, run_id),
         )
     else:
         cursor = conn.execute(
-            "UPDATE loop_runs SET status = ?, ended_at = COALESCE(?, ended_at) WHERE id = ?",
+            f"UPDATE {runs_table} SET status = ?, ended_at = COALESCE(?, ended_at) WHERE id = ?",
             (status.value, ended_at, run_id),
         )
 
@@ -553,11 +665,18 @@ def update_loop_run_status(
     return updated
 
 
-def update_loop_run_step(run_id: str, step: str | None, db_path: Path | None = None) -> bool:
-    """Update the current step for a loop run."""
+# Backwards compatibility alias
+update_loop_run_status = update_job_run_status
+
+
+def update_job_run_step(run_id: str, step: str | None, db_path: Path | None = None) -> bool:
+    """Update the current step for a job run."""
     conn = _get_db(db_path)
+    table = _get_table_name(conn)
+    runs_table = "job_runs" if table == "jobs" else "loop_runs"
+
     cursor = conn.execute(
-        "UPDATE loop_runs SET current_step = ? WHERE id = ?",
+        f"UPDATE {runs_table} SET current_step = ? WHERE id = ?",
         (step, run_id),
     )
     conn.commit()
@@ -566,11 +685,18 @@ def update_loop_run_step(run_id: str, step: str | None, db_path: Path | None = N
     return updated
 
 
-def update_loop_run_pr(run_id: str, pr_url: str, db_path: Path | None = None) -> bool:
-    """Update the PR URL for a loop run."""
+# Backwards compatibility alias
+update_loop_run_step = update_job_run_step
+
+
+def update_job_run_pr(run_id: str, pr_url: str, db_path: Path | None = None) -> bool:
+    """Update the PR URL for a job run."""
     conn = _get_db(db_path)
+    table = _get_table_name(conn)
+    runs_table = "job_runs" if table == "jobs" else "loop_runs"
+
     cursor = conn.execute(
-        "UPDATE loop_runs SET pr_url = ? WHERE id = ?",
+        f"UPDATE {runs_table} SET pr_url = ? WHERE id = ?",
         (pr_url, run_id),
     )
     conn.commit()
@@ -579,13 +705,20 @@ def update_loop_run_pr(run_id: str, pr_url: str, db_path: Path | None = None) ->
     return updated
 
 
-def _loop_run_from_row(row: dict) -> LoopRun:
-    """Convert database row to LoopRun."""
-    return LoopRun(
+# Backwards compatibility alias
+update_loop_run_pr = update_job_run_pr
+
+
+def _job_run_from_row(row: dict) -> JobRun:
+    """Convert database row to JobRun."""
+    # Handle job_id vs loop_id column name
+    job_id = row.get("job_id") or row.get("loop_id", "")
+
+    return JobRun(
         id=row["id"],
-        loop_id=row["loop_id"],
+        job_id=job_id,
         iteration=row["iteration"],
-        status=LoopStatus(row["status"]),
+        status=JobStatus(row["status"]),
         started_at=datetime.fromisoformat(row["started_at"]),
         ended_at=datetime.fromisoformat(row["ended_at"]) if row.get("ended_at") else None,
         worktree=row.get("worktree"),
@@ -593,6 +726,10 @@ def _loop_run_from_row(row: dict) -> LoopRun:
         error=row.get("error"),
         pr_url=row.get("pr_url"),
     )
+
+
+# Backwards compatibility alias
+_loop_run_from_row = _job_run_from_row
 
 
 # Summary functions

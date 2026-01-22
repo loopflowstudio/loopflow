@@ -1,6 +1,6 @@
 """lfd: Loopflow daemon.
 
-Commands for managing agent loops.
+Commands for managing agent jobs.
 """
 
 import asyncio
@@ -16,22 +16,35 @@ from loopflow.lf.flows import load_flow
 from loopflow.lf.goals import goal_exists, list_goals, load_goal
 from loopflow.lf.logging import get_log_dir
 from loopflow.lfd.db import (
-    delete_loop,
-    get_loop,
-    get_loop_runs,
-    list_loops,
-    save_loop,
+    delete_job,
+    get_job,
+    get_job_runs,
+    list_jobs,
+    save_job,
 )
+from loopflow.lfd.jobs import create_job, get_wt_from_cwd, start_job, stop_job
 from loopflow.lfd.launchd import install as launchd_install
 from loopflow.lfd.launchd import is_running
 from loopflow.lfd.launchd import uninstall as launchd_uninstall
-from loopflow.lfd.loops import create_loop, get_wt_from_cwd, start_loop, stop_loop
-from loopflow.lfd.models import Loop, LoopStatus, LoopType, MergeMode
+from loopflow.lfd.models import Job, JobStatus, JobType, MergeMode
 from loopflow.lfd.server import run_server
+
+# Backwards compatibility aliases
+Loop = Job
+LoopStatus = JobStatus
+LoopType = JobType
+delete_loop = delete_job
+get_loop = get_job
+get_loop_runs = get_job_runs
+list_loops = list_jobs
+save_loop = save_job
+create_loop = create_job
+start_loop = start_job
+stop_loop = stop_job
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 
-app = typer.Typer(help="Loopflow daemon - agent loops")
+app = typer.Typer(help="Loopflow daemon - agent jobs")
 
 
 def _use_color() -> bool:
@@ -60,19 +73,19 @@ def _colors() -> dict[str, str]:
     }
 
 
-def _status_color(status: LoopStatus, c: dict[str, str]) -> str:
-    if status == LoopStatus.RUNNING:
+def _status_color(status: JobStatus, c: dict[str, str]) -> str:
+    if status == JobStatus.RUNNING:
         return c["green"]
-    elif status == LoopStatus.ERROR:
+    elif status == JobStatus.ERROR:
         return c["red"]
-    elif status == LoopStatus.WAITING:
+    elif status == JobStatus.WAITING:
         return c["yellow"]
     return c["dim"]
 
 
-def _loop_display(lp: Loop) -> str:
+def _job_display(job: Job) -> str:
     """Return area and goals for display."""
-    return f"{lp.area} [{lp.flow_display}] [{lp.goals_display}]"
+    return f"{job.area} [{job.flow_display}] [{job.goals_display}]"
 
 
 def _is_area(s: str) -> bool:
@@ -134,69 +147,69 @@ def uninstall():
 @app.command()
 def start(
     areas: list[str] = typer.Argument(None, help="Areas to start (all idle if omitted)"),
-    all_loops: bool = typer.Option(False, "--all", help="Include waiting loops"),
+    all_jobs: bool = typer.Option(False, "--all", help="Include waiting jobs"),
 ):
-    """Start multiple loops in parallel.
+    """Start multiple jobs in parallel.
 
-    Without arguments, starts all idle loops. With --all, also starts waiting loops.
+    Without arguments, starts all idle jobs. With --all, also starts waiting jobs.
     """
     c = _colors()
     repo = get_wt_from_cwd()
 
-    # Get loops to start
+    # Get jobs to start
     if areas:
         # Start specific areas
-        loops_to_start = []
+        jobs_to_start = []
         for area in areas:
-            lp = None
-            for loop in list_loops(repo=repo):
-                if loop.area == area:
-                    lp = loop
+            job = None
+            for j in list_jobs(repo=repo):
+                if j.area == area:
+                    job = j
                     break
-            if not lp:
+            if not job:
                 typer.echo(
-                    f"{c['yellow']}Warning:{c['reset']} Loop for '{area}' not found, skipping",
+                    f"{c['yellow']}Warning:{c['reset']} Job for '{area}' not found, skipping",
                     err=True,
                 )
             else:
-                loops_to_start.append(lp)
+                jobs_to_start.append(job)
     else:
-        # Start all eligible loops
-        loops_to_start = []
-        for lp in list_loops(repo=repo):
-            if lp.status == LoopStatus.IDLE:
-                loops_to_start.append(lp)
-            elif all_loops and lp.status == LoopStatus.WAITING:
-                loops_to_start.append(lp)
+        # Start all eligible jobs
+        jobs_to_start = []
+        for job in list_jobs(repo=repo):
+            if job.status == JobStatus.IDLE:
+                jobs_to_start.append(job)
+            elif all_jobs and job.status == JobStatus.WAITING:
+                jobs_to_start.append(job)
 
-    if not loops_to_start:
-        typer.echo(f"{c['dim']}No loops to start{c['reset']}")
+    if not jobs_to_start:
+        typer.echo(f"{c['dim']}No jobs to start{c['reset']}")
         return
 
-    # Start each loop
+    # Start each job
     started = 0
-    for lp in loops_to_start:
-        result = start_loop(lp.id)
+    for job in jobs_to_start:
+        result = start_job(job.id)
         if result:
-            msg = f"{c['green']}Started{c['reset']} {c['bold']}{lp.area}{c['reset']}"
-            typer.echo(f"{msg} ({lp.short_id()})")
+            msg = f"{c['green']}Started{c['reset']} {c['bold']}{job.area}{c['reset']}"
+            typer.echo(f"{msg} ({job.short_id()})")
             started += 1
         elif result.reason == "already_running":
-            typer.echo(f"{c['dim']}Already running:{c['reset']} {lp.area}")
+            typer.echo(f"{c['dim']}Already running:{c['reset']} {job.area}")
         elif result.reason == "waiting":
-            msg = f"{c['yellow']}Waiting:{c['reset']} {lp.area}"
+            msg = f"{c['yellow']}Waiting:{c['reset']} {job.area}"
             typer.echo(f"{msg} ({result.outstanding} outstanding)")
         else:
-            typer.echo(f"{c['red']}Failed:{c['reset']} {lp.area}")
+            typer.echo(f"{c['red']}Failed:{c['reset']} {job.area}")
 
-    typer.echo(f"\nStarted {started}/{len(loops_to_start)} loops")
+    typer.echo(f"\nStarted {started}/{len(jobs_to_start)} jobs")
 
 
-# Loop commands
+# Job commands (CLI names kept for user familiarity)
 
 
 @app.command()
-def loop(
+def job(
     flow: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
     area: str = typer.Argument(..., help="Area of responsibility (e.g., swift/, src/, .)"),
     goals: list[str] = typer.Option(None, "-g", "--goal", help="Goal to add (repeatable)"),
@@ -204,17 +217,17 @@ def loop(
     merge_mode: str = typer.Option(None, "--merge-mode", help="Merge mode: pr or land"),
     foreground: bool = typer.Option(False, "-f", "--foreground", help="Run in foreground"),
 ):
-    """Start a continuous homeostasis loop.
+    """Start a continuous homeostasis job.
 
     Flow is required - specifies which flow to run from .lf/flows/.
     Area is required - scopes the work (e.g., swift/, src/, or . for whole repo).
     Goals are optional - adaptive mode is implicit if no mode goal is specified.
 
     Examples:
-        lfd loop ship swift/                              # adaptive mode
-        lfd loop ship swift/ -g product-engineer          # adaptive + role
-        lfd loop ship swift/ -g product-engineer -g designer  # adaptive + roles
-        lfd loop ship .                                     # whole repo
+        lfd job ship swift/                              # adaptive mode
+        lfd job ship swift/ -g product-engineer          # adaptive + role
+        lfd job ship swift/ -g product-engineer -g designer  # adaptive + roles
+        lfd job ship .                                     # whole repo
     """
     c = _colors()
     repo = get_wt_from_cwd()
@@ -229,7 +242,7 @@ def loop(
             "Use a path like swift/, src/, or . for whole repo.",
             err=True,
         )
-        typer.echo(f"\nDid you mean: lfd loop {area}/ ?")
+        typer.echo(f"\nDid you mean: lfd job {area}/ ?")
         raise typer.Exit(1)
 
     goals = goals or []
@@ -253,45 +266,59 @@ def loop(
         typer.echo(f"{c['red']}Error:{c['reset']} merge-mode must be 'pr' or 'land'", err=True)
         raise typer.Exit(1)
 
-    # Create or get loop
-    lp = create_loop(LoopType.LOOP, area, repo, goals=goals, flow=flow)
+    # Create or get job
+    j = create_job(JobType.LOOP, area, repo, goals=goals, flow=flow)
 
     # Override settings if specified
     changed = False
     if limit is not None:
-        lp.pr_limit = limit
+        j.pr_limit = limit
         changed = True
     if merge_mode:
-        lp.merge_mode = MergeMode(merge_mode)
+        j.merge_mode = MergeMode(merge_mode)
         changed = True
     if changed:
-        save_loop(lp)
+        save_job(j)
 
     # Start it
-    result = start_loop(lp.id, foreground=foreground)
+    result = start_job(j.id, foreground=foreground)
     if result:
         if foreground:
-            msg = f"{c['green']}Completed{c['reset']} loop {c['bold']}{area}{c['reset']}"
-            typer.echo(f"{msg} ({lp.short_id()})")
+            msg = f"{c['green']}Completed{c['reset']} job {c['bold']}{area}{c['reset']}"
+            typer.echo(f"{msg} ({j.short_id()})")
         else:
-            msg = f"{c['green']}Started{c['reset']} loop {c['bold']}{area}{c['reset']}"
-            typer.echo(f"{msg} ({lp.short_id()})")
+            msg = f"{c['green']}Started{c['reset']} job {c['bold']}{area}{c['reset']}"
+            typer.echo(f"{msg} ({j.short_id()})")
             typer.echo(f"  Repo: {repo}")
-            typer.echo(f"  Loop main: {lp.loop_main}")
-            typer.echo(f"  Goals: {lp.goals_display}")
-            typer.echo(f"  Flow: {lp.flow_display}")
-            typer.echo(f"  PR limit: {lp.pr_limit}")
+            typer.echo(f"  Job main: {j.job_main}")
+            typer.echo(f"  Goals: {j.goals_display}")
+            typer.echo(f"  Flow: {j.flow_display}")
+            typer.echo(f"  PR limit: {j.pr_limit}")
     elif result.reason == "already_running":
-        typer.echo(f"Loop already running (PID {lp.pid})")
+        typer.echo(f"Job already running (PID {j.pid})")
         raise typer.Exit(1)
     elif result.reason == "waiting":
         msg = f"{c['yellow']}Waiting:{c['reset']} {result.outstanding} outstanding PRs"
-        typer.echo(f"{msg} (limit {lp.pr_limit})")
-        typer.echo(f"Run 'lfops land --squash' from {lp.loop_main} worktree to land work to main")
+        typer.echo(f"{msg} (limit {j.pr_limit})")
+        typer.echo(f"Run 'lfops land --squash' from {j.job_main} worktree to land work to main")
         raise typer.Exit(0)
     else:
-        typer.echo(f"{c['red']}Error:{c['reset']} Failed to start loop", err=True)
+        typer.echo(f"{c['red']}Error:{c['reset']} Failed to start job", err=True)
         raise typer.Exit(1)
+
+
+# Backwards compatibility alias
+@app.command(hidden=True)
+def loop(
+    flow: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
+    area: str = typer.Argument(..., help="Area of responsibility (e.g., swift/, src/, .)"),
+    goals: list[str] = typer.Option(None, "-g", "--goal", help="Goal to add (repeatable)"),
+    limit: int = typer.Option(None, "-l", "--limit", help="PR limit override"),
+    merge_mode: str = typer.Option(None, "--merge-mode", help="Merge mode: pr or land"),
+    foreground: bool = typer.Option(False, "-f", "--foreground", help="Run in foreground"),
+):
+    """Alias for 'job' command (deprecated)."""
+    job(flow, area, goals, limit, merge_mode, foreground)
 
 
 @app.command()
@@ -344,18 +371,18 @@ def flow(
                 f.write(result.stdout)
                 project_file = f.name
 
-    # Create or get loop
-    lp = create_loop(
-        LoopType.FLOW, area, repo, goals=goals, flow=flow_name, project_file=project_file
+    # Create or get job
+    j = create_job(
+        JobType.FLOW, area, repo, goals=goals, flow=flow_name, project_file=project_file
     )
 
     # Start it
-    if start_loop(lp.id):
+    if start_job(j.id):
         typer.echo(
-            f"{c['green']}Started{c['reset']} flow {c['bold']}{area}{c['reset']} ({lp.short_id()})"
+            f"{c['green']}Started{c['reset']} flow {c['bold']}{area}{c['reset']} ({j.short_id()})"
         )
-        typer.echo(f"  Goals: {lp.goals_display}")
-        typer.echo(f"  Flow: {lp.flow_display}")
+        typer.echo(f"  Goals: {j.goals_display}")
+        typer.echo(f"  Flow: {j.flow_display}")
         if paste:
             typer.echo("  Clipboard: included")
     else:
@@ -398,12 +425,12 @@ def subscribe(
     pathset = ",".join(path)
 
     # Create subscription
-    lp = create_loop(LoopType.SUBSCRIBE, area, repo, goals=goals, flow=flow, pathset=pathset)
+    j = create_job(JobType.SUBSCRIBE, area, repo, goals=goals, flow=flow, pathset=pathset)
 
     msg = f"{c['green']}Subscribed{c['reset']} {c['bold']}{area}{c['reset']} to {pathset}"
-    typer.echo(f"{msg} ({lp.short_id()})")
-    typer.echo(f"  Goals: {lp.goals_display}")
-    typer.echo(f"  Flow: {lp.flow_display}")
+    typer.echo(f"{msg} ({j.short_id()})")
+    typer.echo(f"  Goals: {j.goals_display}")
+    typer.echo(f"  Flow: {j.flow_display}")
     typer.echo("  Will run when paths change on main")
 
 
@@ -414,7 +441,7 @@ def schedule(
     cron_expr: str = typer.Argument(..., help="Cron expression (e.g., '0 9 * * *')"),
     goals: list[str] = typer.Option(None, "-g", "--goal", help="Goal to add (repeatable)"),
 ):
-    """Schedule a loop to run on cron."""
+    """Schedule a job to run on cron."""
     c = _colors()
     repo = get_wt_from_cwd()
     if not repo:
@@ -437,8 +464,8 @@ def schedule(
     flow = _validate_flow(repo, flow, c)
 
     # Create schedule
-    lp = create_loop(
-        LoopType.SCHEDULE,
+    j = create_job(
+        JobType.SCHEDULE,
         area,
         repo,
         goals=goals,
@@ -446,9 +473,9 @@ def schedule(
         cron=cron_expr,
     )
 
-    typer.echo(f"{c['green']}Scheduled{c['reset']} {c['bold']}{area}{c['reset']} ({lp.short_id()})")
-    typer.echo(f"  Goals: {lp.goals_display}")
-    typer.echo(f"  Flow: {lp.flow_display}")
+    typer.echo(f"{c['green']}Scheduled{c['reset']} {c['bold']}{area}{c['reset']} ({j.short_id()})")
+    typer.echo(f"  Goals: {j.goals_display}")
+    typer.echo(f"  Flow: {j.flow_display}")
     typer.echo(f"  Cron: {cron_expr}")
 
 
@@ -483,24 +510,24 @@ def _get_scheduler_status() -> dict | None:
 
 @app.command()
 def status(
-    loop_id: str = typer.Argument(None, help="Loop ID (optional, shows all if omitted)"),
-    ids_only: bool = typer.Option(False, "--ids", help="Print loop IDs only (for scripting)"),
+    job_id: str = typer.Argument(None, help="Job ID (optional, shows all if omitted)"),
+    ids_only: bool = typer.Option(False, "--ids", help="Print job IDs only (for scripting)"),
 ):
-    """Show status of loops."""
+    """Show status of jobs."""
     c = _colors()
 
     # Machine-readable output for scripting
     if ids_only:
-        for lp in list_loops():
-            typer.echo(lp.id)
+        for j in list_jobs():
+            typer.echo(j.id)
         return
 
-    if loop_id:
-        lp = get_loop(loop_id)
-        if not lp:
-            typer.echo(f"{c['red']}Error:{c['reset']} Loop '{loop_id}' not found", err=True)
+    if job_id:
+        j = get_job(job_id)
+        if not j:
+            typer.echo(f"{c['red']}Error:{c['reset']} Job '{job_id}' not found", err=True)
             raise typer.Exit(1)
-        _print_loop_detail(lp, c)
+        _print_job_detail(j, c)
     else:
         # Show scheduler status if daemon is running
         sched = _get_scheduler_status()
@@ -519,52 +546,52 @@ def status(
             )
             typer.echo("")
 
-        loops = list_loops()
-        if not loops:
-            typer.echo(f"{c['dim']}No loops configured{c['reset']}")
-            typer.echo("Start one with: lfd loop <goal>")
+        jobs = list_jobs()
+        if not jobs:
+            typer.echo(f"{c['dim']}No jobs configured{c['reset']}")
+            typer.echo("Start one with: lfd job <flow> <area>")
             return
 
         typer.echo(f"{'ID':<9} {'TYPE':<10} {'AREA':<30} {'STATUS':<10} {'ITER':<6} REPO")
         typer.echo("-" * 90)
 
-        for lp in loops:
-            status_c = _status_color(lp.status, c)
-            goal_str = _loop_display(lp)
+        for j in jobs:
+            status_c = _status_color(j.status, c)
+            goal_str = _job_display(j)
             if len(goal_str) > 30:
                 goal_str = goal_str[:27] + "..."
 
-            repo_short = str(lp.repo).replace(str(Path.home()), "~")
+            repo_short = str(j.repo).replace(str(Path.home()), "~")
             if len(repo_short) > 20:
                 repo_short = "..." + repo_short[-17:]
 
             typer.echo(
-                f"{lp.short_id():<9} {lp.type.value:<10} {goal_str:<30} "
-                f"{status_c}{lp.status.value:<10}{c['reset']} {lp.iteration:<6} {repo_short}"
+                f"{j.short_id():<9} {j.type.value:<10} {goal_str:<30} "
+                f"{status_c}{j.status.value:<10}{c['reset']} {j.iteration:<6} {repo_short}"
             )
 
 
-def _print_loop_detail(lp: Loop, c: dict[str, str]) -> None:
-    """Print detailed info for a single loop."""
-    status_c = _status_color(lp.status, c)
+def _print_job_detail(j: Job, c: dict[str, str]) -> None:
+    """Print detailed info for a single job."""
+    status_c = _status_color(j.status, c)
 
-    typer.echo(f"{c['bold']}{lp.area}{c['reset']} ({lp.short_id()})")
-    typer.echo(f"  Type: {lp.type.value}")
-    typer.echo(f"  Status: {status_c}{lp.status.value}{c['reset']}")
-    typer.echo(f"  Repo: {lp.repo}")
-    typer.echo(f"  Loop main: {lp.loop_main}")
-    typer.echo(f"  Goals: {lp.goals_display}")
-    typer.echo(f"  Flow: {lp.flow_display}")
-    typer.echo(f"  Iteration: {lp.iteration}")
-    if lp.project_file:
-        typer.echo(f"  Project: {lp.project_file}")
-    if lp.pathset:
-        typer.echo(f"  Pathset: {lp.pathset}")
-    if lp.cron:
-        typer.echo(f"  Cron: {lp.cron}")
+    typer.echo(f"{c['bold']}{j.area}{c['reset']} ({j.short_id()})")
+    typer.echo(f"  Type: {j.type.value}")
+    typer.echo(f"  Status: {status_c}{j.status.value}{c['reset']}")
+    typer.echo(f"  Repo: {j.repo}")
+    typer.echo(f"  Job main: {j.job_main}")
+    typer.echo(f"  Goals: {j.goals_display}")
+    typer.echo(f"  Flow: {j.flow_display}")
+    typer.echo(f"  Iteration: {j.iteration}")
+    if j.project_file:
+        typer.echo(f"  Project: {j.project_file}")
+    if j.pathset:
+        typer.echo(f"  Pathset: {j.pathset}")
+    if j.cron:
+        typer.echo(f"  Cron: {j.cron}")
 
     # Show recent runs
-    runs = get_loop_runs(lp.id, limit=5)
+    runs = get_job_runs(j.id, limit=5)
     if runs:
         typer.echo(f"\n  {c['dim']}Recent runs:{c['reset']}")
         for run in runs:
@@ -578,66 +605,66 @@ def _print_loop_detail(lp: Loop, c: dict[str, str]) -> None:
 
 @app.command()
 def stop(
-    loop_id: str = typer.Argument(None, help="Loop ID to stop (omit with --all)"),
-    all_loops: bool = typer.Option(False, "--all", help="Stop all running loops"),
+    job_id: str = typer.Argument(None, help="Job ID to stop (omit with --all)"),
+    all_jobs: bool = typer.Option(False, "--all", help="Stop all running jobs"),
     force: bool = typer.Option(False, "-f", "--force", help="Force kill (SIGKILL)"),
 ):
-    """Stop a running loop."""
+    """Stop a running job."""
     c = _colors()
 
-    if all_loops:
-        # Stop all running loops
+    if all_jobs:
+        # Stop all running jobs
         stopped = 0
-        for lp in list_loops():
-            if lp.status == LoopStatus.RUNNING:
-                if stop_loop(lp.id, force=force):
-                    msg = f"{c['yellow']}Stopped{c['reset']} {_loop_display(lp)}"
-                    typer.echo(f"{msg} ({lp.short_id()})")
+        for j in list_jobs():
+            if j.status == JobStatus.RUNNING:
+                if stop_job(j.id, force=force):
+                    msg = f"{c['yellow']}Stopped{c['reset']} {_job_display(j)}"
+                    typer.echo(f"{msg} ({j.short_id()})")
                     stopped += 1
         if stopped == 0:
-            typer.echo(f"{c['dim']}No running loops to stop{c['reset']}")
+            typer.echo(f"{c['dim']}No running jobs to stop{c['reset']}")
         else:
-            typer.echo(f"\nStopped {stopped} loop{'s' if stopped != 1 else ''}")
+            typer.echo(f"\nStopped {stopped} job{'s' if stopped != 1 else ''}")
         return
 
-    if not loop_id:
-        typer.echo(f"{c['red']}Error:{c['reset']} Provide a loop ID or use --all", err=True)
+    if not job_id:
+        typer.echo(f"{c['red']}Error:{c['reset']} Provide a job ID or use --all", err=True)
         raise typer.Exit(1)
 
-    lp = get_loop(loop_id)
-    if not lp:
-        typer.echo(f"{c['red']}Error:{c['reset']} Loop '{loop_id}' not found", err=True)
+    j = get_job(job_id)
+    if not j:
+        typer.echo(f"{c['red']}Error:{c['reset']} Job '{job_id}' not found", err=True)
         raise typer.Exit(1)
 
-    if stop_loop(lp.id, force=force):
-        msg = f"{c['yellow']}Stopped{c['reset']} {c['bold']}{_loop_display(lp)}{c['reset']}"
-        typer.echo(f"{msg} ({lp.short_id()})")
+    if stop_job(j.id, force=force):
+        msg = f"{c['yellow']}Stopped{c['reset']} {c['bold']}{_job_display(j)}{c['reset']}"
+        typer.echo(f"{msg} ({j.short_id()})")
     else:
-        typer.echo(f"{c['red']}Error:{c['reset']} Failed to stop loop", err=True)
+        typer.echo(f"{c['red']}Error:{c['reset']} Failed to stop job", err=True)
         raise typer.Exit(1)
 
 
 @app.command()
 def prs(
-    loop_id: str = typer.Argument(..., help="Loop ID"),
+    job_id: str = typer.Argument(..., help="Job ID"),
     limit: int = typer.Option(10, "-n", "--limit", help="Number of PRs to show"),
 ):
-    """Show PRs created by a loop."""
+    """Show PRs created by a job."""
     c = _colors()
 
-    lp = get_loop(loop_id)
-    if not lp:
-        typer.echo(f"{c['red']}Error:{c['reset']} Loop '{loop_id}' not found", err=True)
+    j = get_job(job_id)
+    if not j:
+        typer.echo(f"{c['red']}Error:{c['reset']} Job '{job_id}' not found", err=True)
         raise typer.Exit(1)
 
-    runs = get_loop_runs(lp.id, limit=limit)
+    runs = get_job_runs(j.id, limit=limit)
     runs_with_prs = [r for r in runs if r.pr_url]
 
     if not runs_with_prs:
-        typer.echo(f"{c['dim']}No PRs found for '{lp.area}'{c['reset']}")
+        typer.echo(f"{c['dim']}No PRs found for '{j.area}'{c['reset']}")
         return
 
-    typer.echo(f"{c['bold']}{lp.area}{c['reset']} PRs ({lp.short_id()})")
+    typer.echo(f"{c['bold']}{j.area}{c['reset']} PRs ({j.short_id()})")
     typer.echo("")
 
     for run in runs_with_prs:
@@ -650,53 +677,53 @@ def prs(
 
 @app.command()
 def rm(
-    loop_id: str = typer.Argument(..., help="Loop ID to remove"),
+    job_id: str = typer.Argument(..., help="Job ID to remove"),
     force: bool = typer.Option(False, "-f", "--force", help="Skip confirmation"),
 ):
-    """Remove a loop and its history."""
+    """Remove a job and its history."""
     c = _colors()
 
-    lp = get_loop(loop_id)
-    if not lp:
-        typer.echo(f"{c['red']}Error:{c['reset']} Loop '{loop_id}' not found", err=True)
+    j = get_job(job_id)
+    if not j:
+        typer.echo(f"{c['red']}Error:{c['reset']} Job '{job_id}' not found", err=True)
         raise typer.Exit(1)
 
-    if lp.status == LoopStatus.RUNNING:
+    if j.status == JobStatus.RUNNING:
         typer.echo(
-            f"{c['red']}Error:{c['reset']} Loop is running. Stop it first with: lfd stop {loop_id}",
+            f"{c['red']}Error:{c['reset']} Job is running. Stop it first with: lfd stop {job_id}",
             err=True,
         )
         raise typer.Exit(1)
 
     if not force:
-        confirm = typer.confirm(f"Delete loop '{lp.area}' ({lp.short_id()})?")
+        confirm = typer.confirm(f"Delete job '{j.area}' ({j.short_id()})?")
         if not confirm:
             raise typer.Abort()
 
-    if delete_loop(lp.id):
-        typer.echo(f"Deleted loop: {lp.area} ({lp.short_id()})")
+    if delete_job(j.id):
+        typer.echo(f"Deleted job: {j.area} ({j.short_id()})")
     else:
-        typer.echo(f"{c['red']}Error:{c['reset']} Failed to delete loop", err=True)
+        typer.echo(f"{c['red']}Error:{c['reset']} Failed to delete job", err=True)
         raise typer.Exit(1)
 
 
 @app.command()
 def logs(
-    loop_id: str = typer.Argument(..., help="Loop ID"),
+    job_id: str = typer.Argument(..., help="Job ID"),
     follow: bool = typer.Option(False, "-f", "--follow", help="Follow output (like tail -f)"),
     lines: int = typer.Option(50, "-n", "--lines", help="Number of lines to show"),
 ):
-    """Show logs for a loop's current run."""
+    """Show logs for a job's current run."""
     c = _colors()
-    lp = get_loop(loop_id)
-    if not lp:
-        typer.echo(f"{c['red']}Error:{c['reset']} Loop '{loop_id}' not found", err=True)
+    j = get_job(job_id)
+    if not j:
+        typer.echo(f"{c['red']}Error:{c['reset']} Job '{job_id}' not found", err=True)
         raise typer.Exit(1)
 
-    # Get latest run for this loop
-    runs = get_loop_runs(lp.id, limit=1)
+    # Get latest run for this job
+    runs = get_job_runs(j.id, limit=1)
     if not runs:
-        typer.echo(f"{c['dim']}No runs found for '{lp.area}'{c['reset']}")
+        typer.echo(f"{c['dim']}No runs found for '{j.area}'{c['reset']}")
         return
 
     run = runs[0]

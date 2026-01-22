@@ -4,12 +4,12 @@ voice: architect
 > **Screenshots**: If running standalone, capture with Cmd+Shift+S first.
 > In the `ux` pipeline, uses screenshots from the ux-research step.
 >
-> **Build from this branch**: Run `cd Maestro && ./dev run` to build and launch
-> Maestro from the current branch. Don't use the installed app—it won't have your changes.
+> **Build from this branch**: Run `cd swift && ./dev run` to build and launch
+> Concerto from the current branch. Don't use the installed app—it won't have your changes.
 
 Implement high-priority UX improvements based on research and gap analysis.
 
-Read `Maestro/DESIGN.md` for the design philosophy guiding these changes.
+Read `swift/DESIGN.md` for the design philosophy guiding these changes.
 
 ## Input
 
@@ -46,7 +46,7 @@ Prioritize improvements in this order:
 
 - **Small changes**: Each fix should be one commit's worth
 - **No redesigns**: Improve what exists, don't rebuild
-- **Test in Maestro**: Build and verify each change works
+- **Test in Concerto**: Build and verify each change works
 - **macOS conventions**: Follow platform patterns
 
 ## Process
@@ -55,9 +55,9 @@ For each improvement:
 
 1. Identify the specific file(s) to change
 2. Make the minimal edit
-3. Build and run: `cd Maestro && ./dev run`
+3. Build and run: `cd swift && ./dev run`
 4. Describe the before/after behavior
-5. Commit with message: `maestro: [area] short description`
+5. Commit with message: `concerto: [area] short description`
 
 ## Output
 

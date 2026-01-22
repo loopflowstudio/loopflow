@@ -17,14 +17,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
 WEBSITE_ROOT = ROOT.parent / "loopflowstudio" / "website"
-MAESTRO_RELEASE_PATH = WEBSITE_ROOT / "static" / "maestro-release.json"
+CONCERTO_RELEASE_PATH = WEBSITE_ROOT / "static" / "concerto-release.json"
 
 
 def update_website_release(version: str, public_url: str, dry_run: bool) -> bool:
     release = {
         "version": version,
-        "latest_url": f"{public_url}/LoopflowMaestro-latest.dmg",
-        "versioned_url": f"{public_url}/LoopflowMaestro-{version}.dmg",
+        "latest_url": f"{public_url}/LoopflowConcerto-latest.dmg",
+        "versioned_url": f"{public_url}/LoopflowConcerto-{version}.dmg",
         "published_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
 
@@ -33,13 +33,13 @@ def update_website_release(version: str, public_url: str, dry_run: bool) -> bool
         return False
 
     if dry_run:
-        print(f"Would update website release metadata at {MAESTRO_RELEASE_PATH}")
+        print(f"Would update website release metadata at {CONCERTO_RELEASE_PATH}")
         print(json.dumps(release, indent=2))
         print("Would deploy website via: python dev.py deploy --prod")
         return True
 
-    MAESTRO_RELEASE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    MAESTRO_RELEASE_PATH.write_text(json.dumps(release, indent=2) + "\n")
+    CONCERTO_RELEASE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CONCERTO_RELEASE_PATH.write_text(json.dumps(release, indent=2) + "\n")
     return deploy_website()
 
 
@@ -198,7 +198,7 @@ def _finalize_release(version: str, skip_dmg: bool, skip_website: bool) -> int:
 
     # Build and upload DMG
     if not skip_dmg:
-        print("Building Maestro DMG...")
+        print("Building Concerto DMG...")
         success, output = build_dmg(ROOT)
         if not success:
             print("DMG build failed (continuing):", file=sys.stderr)
@@ -240,7 +240,7 @@ def _finalize_release(version: str, skip_dmg: bool, skip_website: bool) -> int:
     print("https://pypi.org/project/loopflow/")
     if not skip_dmg:
         from loopflow.publish import R2_PUBLIC_URL
-        print(f"{R2_PUBLIC_URL}/LoopflowMaestro-{version}.dmg")
+        print(f"{R2_PUBLIC_URL}/LoopflowConcerto-{version}.dmg")
     return 0
 
 
@@ -444,14 +444,14 @@ def main() -> int:
         print(f"Current version: {version}")
 
         if args.dry_run:
-            print("Would build Maestro DMG")
-            print(f"Would upload DMG to {R2_PUBLIC_URL}/LoopflowMaestro-{version}.dmg")
-            print(f"Would upload DMG to {R2_PUBLIC_URL}/LoopflowMaestro-latest.dmg")
+            print("Would build Concerto DMG")
+            print(f"Would upload DMG to {R2_PUBLIC_URL}/LoopflowConcerto-{version}.dmg")
+            print(f"Would upload DMG to {R2_PUBLIC_URL}/LoopflowConcerto-latest.dmg")
             if not args.skip_website:
                 print("Would update website release metadata and deploy")
             return 0
 
-        print("Building Maestro DMG...")
+        print("Building Concerto DMG...")
         success, output = build_dmg(ROOT)
         if not success:
             print("DMG build failed:", file=sys.stderr)
@@ -468,7 +468,7 @@ def main() -> int:
             return 1
         print(output)
 
-        print(f"\nDMG published: {R2_PUBLIC_URL}/LoopflowMaestro-{version}.dmg")
+        print(f"\nDMG published: {R2_PUBLIC_URL}/LoopflowConcerto-{version}.dmg")
         if not args.skip_website:
             print("Updating website...")
             if not update_website_release(version, R2_PUBLIC_URL, dry_run=False):

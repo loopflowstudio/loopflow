@@ -1,7 +1,7 @@
 // Tests for ConfigLoader YAML parsing.
 
 import Testing
-@testable import Concerto
+@testable import LoopflowCore
 
 @Suite("Config Loader")
 struct ConfigLoaderTests {
@@ -44,42 +44,31 @@ struct ConfigLoaderTests {
 
     @Test("Returns correct terminal app")
     func terminalAppMapping() {
-        let warpConfig = LoopflowConfig(
-            agentModel: nil, interactive: nil, terminal: "warp",
-            ide: nil, workspace: nil, context: nil, exclude: nil,
-            push: nil, pr: nil, yolo: nil, chrome: nil,
-            docs: nil, diff: nil, diffFiles: nil, paste: nil, voice: nil, summaries: nil, skillSources: nil, work: nil
-        )
-        #expect(warpConfig.terminalApp == TerminalApp.warp)
+        let loader = ConfigLoader()
 
-        let itermConfig = LoopflowConfig(
-            agentModel: nil, interactive: nil, terminal: "iterm",
-            ide: nil, workspace: nil, context: nil, exclude: nil,
-            push: nil, pr: nil, yolo: nil, chrome: nil,
-            docs: nil, diff: nil, diffFiles: nil, paste: nil, voice: nil, summaries: nil, skillSources: nil, work: nil
-        )
-        #expect(itermConfig.terminalApp == TerminalApp.iterm)
+        let warpConfig = loader.parseYAML("terminal: warp")
+        #expect(warpConfig?.terminalApp == TerminalApp.warp)
 
-        let defaultConfig = LoopflowConfig(
-            agentModel: nil, interactive: nil, terminal: nil,
-            ide: nil, workspace: nil, context: nil, exclude: nil,
-            push: nil, pr: nil, yolo: nil, chrome: nil,
-            docs: nil, diff: nil, diffFiles: nil, paste: nil, voice: nil, summaries: nil, skillSources: nil, work: nil
-        )
-        #expect(defaultConfig.terminalApp == TerminalApp.warp)
+        let itermConfig = loader.parseYAML("terminal: iterm")
+        #expect(itermConfig?.terminalApp == TerminalApp.iterm)
+
+        let defaultConfig = loader.parseYAML("")
+        #expect(defaultConfig?.terminalApp == TerminalApp.warp)
     }
 
     @Test("isInteractive checks list correctly")
     func isInteractiveCheck() {
-        let config = LoopflowConfig(
-            agentModel: nil, interactive: ["design", "iterate"],
-            terminal: nil, ide: nil, workspace: nil, context: nil,
-            exclude: nil, push: nil, pr: nil, yolo: nil, chrome: nil,
-            docs: nil, diff: nil, diffFiles: nil, paste: nil, voice: nil, summaries: nil, skillSources: nil, work: nil
-        )
+        let loader = ConfigLoader()
+        let yaml = """
+        interactive:
+          - design
+          - iterate
+        """
 
-        #expect(config.isInteractive("design") == true)
-        #expect(config.isInteractive("iterate") == true)
-        #expect(config.isInteractive("implement") == false)
+        let config = loader.parseYAML(yaml)
+
+        #expect(config?.isInteractive("design") == true)
+        #expect(config?.isInteractive("iterate") == true)
+        #expect(config?.isInteractive("implement") == false)
     }
 }

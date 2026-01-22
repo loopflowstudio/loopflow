@@ -4,6 +4,7 @@ import SwiftUI
 import Testing
 import ViewInspector
 @testable import Concerto
+@testable import LoopflowCore
 
 @MainActor
 @Suite("Worktree Row View")

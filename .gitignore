@@ -6,8 +6,8 @@ __pycache__/
 .build/
 xcuserdata/
 .swiftpm/xcode/
-Maestro/Maestro.xcodeproj/
-Maestro/dist/
+swift/Concerto.xcodeproj/
+swift/dist/
 
 # Claude Code (personal state)
 .claude/settings.local.json

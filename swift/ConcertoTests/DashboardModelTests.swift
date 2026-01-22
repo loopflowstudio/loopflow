@@ -2,7 +2,7 @@
 
 import Foundation
 import Testing
-@testable import Concerto
+@testable import LoopflowCore
 
 @Suite("FileDiffStat Model")
 struct FileDiffStatTests {

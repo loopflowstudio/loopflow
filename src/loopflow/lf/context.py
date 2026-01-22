@@ -27,8 +27,8 @@ _TEMPLATES_DIR = Path(__file__).parent.parent / "templates" / "steps"
 
 # Global step locations to check (in order)
 _GLOBAL_STEP_PATHS = [
-    Path.home() / ".claude" / "commands",  # Keep for Claude Code compatibility
-    # Future: ~/.cursor/commands, ~/.codex/prompts, etc.
+    Path.home() / ".lf" / "steps",  # Global loopflow steps
+    Path.home() / ".claude" / "commands",  # Claude Code compatibility
 ]
 
 
@@ -333,13 +333,19 @@ def list_user_steps(repo_root: Path) -> list[str]:
     """Return names of user-defined steps in the repo."""
     steps = set()
 
-    # .claude/commands/*.md (keep for Claude Code compatibility)
+    # .claude/commands/*.md (Claude Code compatible)
     claude_dir = repo_root / ".claude" / "commands"
     if claude_dir.exists():
         for p in claude_dir.glob("*.md"):
             steps.add(p.stem)
 
-    # .lf/*.md
+    # .lf/steps/*.md
+    lf_steps_dir = repo_root / ".lf" / "steps"
+    if lf_steps_dir.exists():
+        for p in lf_steps_dir.glob("*.md"):
+            steps.add(p.stem)
+
+    # .lf/*.md (legacy)
     lf_dir = repo_root / ".lf"
     if lf_dir.exists():
         for p in lf_dir.glob("*.md"):
@@ -404,10 +410,12 @@ def gather_step(repo_root: Path | None, name: str, config=None) -> StepFile | No
 
     Search order:
     1. External skills (prefix:name format, e.g., sp:brainstorm)
-    2. .claude/commands/{name}.md (repo-local, Claude Code compatible)
-    3. .lf/{name}.md (repo-local)
-    4. ~/.claude/commands/{name}.md (global user steps)
-    5. templates/steps/{name}.md (builtin fallback)
+    2. .claude/commands/{name}.md (repo, Claude Code compatible)
+    3. .lf/steps/{name}.md (repo)
+    4. .lf/{name}.md (repo, legacy)
+    5. ~/.lf/steps/{name}.md (global)
+    6. ~/.claude/commands/{name}.md (global, Claude Code compatible)
+    7. templates/steps/{name}.md (builtin)
 
     Returns StepFile with parsed config, or None if not found.
     """
@@ -434,13 +442,19 @@ def gather_step(repo_root: Path | None, name: str, config=None) -> StepFile | No
         if content:
             return parse_step_file(name, content)
 
-        # Fall back to .lf directory
+        # Check .lf/steps/ directory
+        lf_steps_dir = repo_root / ".lf" / "steps"
+        content = _read_file_if_named(lf_steps_dir, f"{name}.md")
+        if content:
+            return parse_step_file(name, content)
+
+        # Legacy: check .lf/ directly (for backwards compatibility)
         lf_dir = repo_root / ".lf"
         content = _read_file_if_named(lf_dir, f"{name}.md")
         if content:
             return parse_step_file(name, content)
 
-    # Check global user steps (e.g., ~/.claude/commands/)
+    # Check global user steps
     for global_dir in _GLOBAL_STEP_PATHS:
         content = _read_file_if_named(global_dir, f"{name}.md")
         if content:

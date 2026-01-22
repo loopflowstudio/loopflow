@@ -168,10 +168,23 @@ def _coerce_flow(name: str, data: Any) -> FlowDef:
     raise ValueError(f"Flow '{name}' must return FlowDef, dict, or list")
 
 
-def load_flow(name: str, repo: Path) -> FlowDef | None:
-    """Load flow from .lf/flows/{name}.py."""
-    flow_path = repo / ".lf" / "flows" / f"{name}.py"
-    if not flow_path.exists():
+def load_flow(name: str, repo: Path | None) -> FlowDef | None:
+    """Load flow from .lf/flows/{name}.py (repo then global)."""
+    flow_path = None
+
+    # Check repo first
+    if repo:
+        repo_flow = repo / ".lf" / "flows" / f"{name}.py"
+        if repo_flow.exists():
+            flow_path = repo_flow
+
+    # Check global
+    if not flow_path:
+        global_flow = Path.home() / ".lf" / "flows" / f"{name}.py"
+        if global_flow.exists():
+            flow_path = global_flow
+
+    if not flow_path:
         return None
 
     module = _load_flow_module(name, flow_path)
@@ -207,18 +220,31 @@ def flow():
     return flow_path
 
 
-def list_flows(repo: Path) -> list[FlowDef]:
-    """List all flows in .lf/flows/."""
-    flows_dir = repo / ".lf" / "flows"
-    if not flows_dir.exists():
-        return []
-
+def list_flows(repo: Path | None) -> list[FlowDef]:
+    """List all flows (repo and global)."""
+    seen = set()
     flows = []
-    for path in flows_dir.glob("*.py"):
-        name = path.stem
-        flow = load_flow(name, repo)
-        if flow:
-            flows.append(flow)
+
+    # Repo flows
+    if repo:
+        repo_flows_dir = repo / ".lf" / "flows"
+        if repo_flows_dir.exists():
+            for path in repo_flows_dir.glob("*.py"):
+                name = path.stem
+                flow = load_flow(name, repo)
+                if flow:
+                    flows.append(flow)
+                    seen.add(name)
+
+    # Global flows (not already in repo)
+    global_flows_dir = Path.home() / ".lf" / "flows"
+    if global_flows_dir.exists():
+        for path in global_flows_dir.glob("*.py"):
+            name = path.stem
+            if name not in seen:
+                flow = load_flow(name, repo)
+                if flow:
+                    flows.append(flow)
 
     return flows
 

@@ -56,9 +56,10 @@ def gather_step(repo_root: Path, name: str, config: Config) -> StepFile:
     # 1. External skills (prefix:name format)
     # 2. .claude/commands/{name}.md  (repo, Claude Code compat)
     # 3. .lf/steps/{name}.md         (repo)
-    # 4. ~/.lf/steps/{name}.md       (global) ← NEW
-    # 5. ~/.claude/commands/{name}.md (global, Claude Code compat)
-    # 6. templates/steps/{name}.md   (builtin)
+    # 4. .lf/{name}.md               (repo, legacy)
+    # 5. ~/.lf/steps/{name}.md       (global) ← NEW
+    # 6. ~/.claude/commands/{name}.md (global, Claude Code compat)
+    # 7. templates/steps/{name}.md   (builtin)
 
 def load_goal(repo_root: Path, goal_name: str) -> Goal:
     """Search order: repo → global → builtin."""

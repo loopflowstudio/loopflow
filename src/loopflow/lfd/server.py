@@ -275,9 +275,12 @@ class Server:
 
     async def _periodic_check(self) -> None:
         """Periodically update dead processes and check triggers."""
+        from loopflow.lfd.autoprune import AutopruneManager, get_repos_to_check
         from loopflow.lfd.draft_prs import run_draft_pr_check
         from loopflow.lfd.schedule import run_schedule_check
         from loopflow.lfd.subscribe import run_subscription_check
+
+        autoprune_manager = AutopruneManager()
 
         while self._running:
             try:
@@ -322,6 +325,20 @@ class Server:
                             },
                         )
                     )
+
+                # Auto-prune merged worktrees
+                for repo in get_repos_to_check():
+                    pruned = autoprune_manager.check_and_prune(repo)
+                    for branch in pruned:
+                        await self._broadcast(
+                            Event(
+                                "worktree.pruned",
+                                {
+                                    "branch": branch,
+                                    "repo": str(repo),
+                                },
+                            )
+                        )
 
             except asyncio.CancelledError:
                 break

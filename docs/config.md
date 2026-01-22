@@ -5,7 +5,7 @@ title: Configuration
 
 # Configuration
 
-Configure loopflow via CLI flags or `.lf/config.yaml`. CLI flags override config for that run.
+Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), or repo config (`.lf/config.yaml`). Precedence: CLI flags > repo config > global config.
 
 ## Quick Reference
 
@@ -39,9 +39,24 @@ The token breakdown shows what's included:
 
 Defaults work well for most repos. Summaries require configuration.
 
-## Config File
+## Config Files
 
-Create `.lf/config.yaml` at your repo root:
+**Global config** (`~/.lf/config.yaml`) sets user-wide defaults. **Repo config** (`.lf/config.yaml`) overrides for that repo.
+
+For most settings, repo overrides global. For additive settings (`context`, `exclude`, `skill_sources`, `summaries`), lists combine from both.
+
+```yaml
+# ~/.lf/config.yaml (global)
+agent_model: claude:opus
+voice: concise
+
+# .lf/config.yaml (repo)
+agent_model: codex        # overrides global
+context:
+  - docs/api.md           # combined with global context
+```
+
+Example repo config:
 
 ```yaml
 agent_model: claude:opus
@@ -233,6 +248,23 @@ Skip permissions. Codex also disables sandboxing.
 | **Default** | `false` |
 
 Claude: `--dangerously-skip-permissions`. Codex: `--dangerously-bypass-approvals-and-sandbox`. Gemini: `--yolo`.
+
+### Autoprune
+
+Automatically remove worktrees when their PRs merge. Requires `lfd` daemon running.
+
+| | |
+|---|---|
+| **Config** | `autoprune: true` |
+| **Default** | `false` |
+
+With options:
+
+```yaml
+autoprune:
+  enabled: true
+  poll_interval_seconds: 60  # default
+```
 
 ### IDE
 

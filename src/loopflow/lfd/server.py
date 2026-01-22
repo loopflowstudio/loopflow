@@ -22,6 +22,7 @@ from loopflow.lfd.models import JobStatus, Session, SessionStatus
 from loopflow.lfd.protocol import Event, Request, Response, error, success
 from loopflow.lfd.scheduler import Scheduler, load_scheduler_config
 
+
 class Server:
     def __init__(self, socket_path: Path):
         self.socket_path = socket_path

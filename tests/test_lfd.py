@@ -651,9 +651,7 @@ def test_db_get_job_by_area_repo():
         )
         save_job(loop, db_path)
 
-        loaded = get_job_by_area_repo(
-            JobType.FLOW, "src/api/", Path("/tmp/repo"), db_path=db_path
-        )
+        loaded = get_job_by_area_repo(JobType.FLOW, "src/api/", Path("/tmp/repo"), db_path=db_path)
         assert loaded is not None
         assert loaded.id == "loop-1"
 

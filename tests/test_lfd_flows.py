@@ -192,12 +192,8 @@ class TestLoopCreation:
             ("loopflow.lfd.jobs._branch_exists", False),
             "loopflow.lfd.jobs._create_job_main_branch",
         )[0]:
-            loop1 = create_job(
-                JobType.FLOW, area="src/feature/", repo=temp_repo, flow=simple_flow
-            )
-            loop2 = create_job(
-                JobType.FLOW, area="src/feature/", repo=temp_repo, flow=simple_flow
-            )
+            loop1 = create_job(JobType.FLOW, area="src/feature/", repo=temp_repo, flow=simple_flow)
+            loop2 = create_job(JobType.FLOW, area="src/feature/", repo=temp_repo, flow=simple_flow)
 
         assert loop1.id == loop2.id
 

@@ -2,9 +2,34 @@
 
 Background service for session tracking and agent orchestration.
 
+## Usage
+
+```bash
+lfd install
+lfd loop ship src/
+lfd subscribe ship src/ -p src/
+lfd schedule ship . "0 9 * * *"
+lfd status
+```
+
+See `docs/lfd.md` for the full CLI reference.
+
+## Runs and Triggers
+
+Runs are execution instances of a flow. Triggers (loop, subscription, schedule) spawn
+runs and track their own status, iteration count, and PR limits.
+
+Parent encoding is stored on each run as `loop:<id>`, `subscription:<id>`, or
+`schedule:<id>` to keep the model portable.
+
 ## Database
 
 SQLite at `~/.lf/lfd.db` (WAL mode).
+
+### runs, loops, subscriptions, schedules
+
+Runs record each execution. Triggers store configuration and status for background
+spawning.
 
 ### sessions table
 | Column | Type | Description |

@@ -1004,7 +1004,7 @@ def test_db_save_loop_with_pid():
 
 def test_start_result_truthy_when_ok():
     """StartResult is truthy when ok=True."""
-    from loopflow.lfd.loops import StartResult
+    from loopflow.lfd.jobs import StartResult
 
     result = StartResult(True)
     assert result.ok is True
@@ -1015,7 +1015,7 @@ def test_start_result_truthy_when_ok():
 
 def test_start_result_falsy_when_not_ok():
     """StartResult is falsy when ok=False."""
-    from loopflow.lfd.loops import StartResult
+    from loopflow.lfd.jobs import StartResult
 
     result = StartResult(False, "already_running")
     assert result.ok is False
@@ -1025,7 +1025,7 @@ def test_start_result_falsy_when_not_ok():
 
 def test_start_result_with_outstanding():
     """StartResult includes outstanding count for waiting state."""
-    from loopflow.lfd.loops import StartResult
+    from loopflow.lfd.jobs import StartResult
 
     result = StartResult(False, "waiting", outstanding=5)
     assert not result
@@ -1284,7 +1284,7 @@ def test_schedule_first_run_beyond_grace():
 
 def test_iteration_branch_prefix_strips_main_suffix():
     """_iteration_branch_prefix strips -main suffix."""
-    from loopflow.lfd.loop_runner import _iteration_branch_prefix
+    from loopflow.lfd.job_runner import _iteration_branch_prefix
 
     assert _iteration_branch_prefix("product-engineer-main") == "product-engineer"
     assert _iteration_branch_prefix("product-engineer-1-main") == "product-engineer-1"
@@ -1297,7 +1297,7 @@ def test_iteration_branch_prefix_strips_main_suffix():
 
 def test_iteration_branch_prefix_without_suffix():
     """_iteration_branch_prefix handles edge case without -main suffix."""
-    from loopflow.lfd.loop_runner import _iteration_branch_prefix
+    from loopflow.lfd.job_runner import _iteration_branch_prefix
 
     # Shouldn't happen in practice, but function handles it gracefully
     assert _iteration_branch_prefix("product-engineer") == "product-engineer"
@@ -1308,7 +1308,7 @@ def test_iteration_branch_prefix_without_suffix():
 
 def test_generate_random_words_format():
     """_generate_random_words returns magical-musical format."""
-    from loopflow.lfd.loops import MAGICAL, MUSICAL, _generate_random_words
+    from loopflow.lfd.jobs import MAGICAL, MUSICAL, _generate_random_words
 
     words = _generate_random_words()
     parts = words.split("-")
@@ -1319,7 +1319,7 @@ def test_generate_random_words_format():
 
 def test_generate_random_words_produces_variety():
     """_generate_random_words produces different results over multiple calls."""
-    from loopflow.lfd.loops import _generate_random_words
+    from loopflow.lfd.jobs import _generate_random_words
 
     # Generate 20 word pairs, expect at least 5 unique
     results = {_generate_random_words() for _ in range(20)}
@@ -1328,7 +1328,7 @@ def test_generate_random_words_produces_variety():
 
 def test_word_lists_have_sufficient_variety():
     """Word lists have enough entries for good uniqueness."""
-    from loopflow.lfd.loops import MAGICAL, MUSICAL
+    from loopflow.lfd.jobs import MAGICAL, MUSICAL
 
     # 34 magical * 26 musical = 884 combinations
     assert len(MAGICAL) >= 30

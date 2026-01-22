@@ -7,7 +7,7 @@ from pathlib import Path
 import yaml
 
 from loopflow.lfd.db import list_loops
-from loopflow.lfd.loops import count_outstanding
+from loopflow.lfd.jobs import count_outstanding
 
 
 @dataclass

@@ -372,9 +372,7 @@ def flow(
                 project_file = f.name
 
     # Create or get job
-    j = create_job(
-        JobType.FLOW, area, repo, goals=goals, flow=flow_name, project_file=project_file
-    )
+    j = create_job(JobType.FLOW, area, repo, goals=goals, flow=flow_name, project_file=project_file)
 
     # Start it
     if start_job(j.id):

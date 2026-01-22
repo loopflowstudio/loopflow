@@ -10,9 +10,7 @@ DESCRIPTION = "Rename loops to jobs"
 
 def apply(conn: sqlite3.Connection) -> None:
     # Check if jobs table already exists (migration already applied)
-    cursor = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='jobs'"
-    )
+    cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='jobs'")
     if cursor.fetchone():
         return  # Already migrated
 
@@ -32,9 +30,7 @@ def apply(conn: sqlite3.Connection) -> None:
     conn.execute("DROP INDEX IF EXISTS idx_loop_runs_loop")
 
     # Create new indexes
-    conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_area_repo ON jobs(type, area, repo)"
-    )
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_area_repo ON jobs(type, area, repo)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_repo ON jobs(repo)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_job_runs_job ON job_runs(job_id)")

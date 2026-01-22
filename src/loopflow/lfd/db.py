@@ -120,7 +120,9 @@ def update_dead_runs(db_path: Path | None = None) -> int:
     tables = {row[0] for row in cursor.fetchall()}
     table_name = "jobs" if "jobs" in tables else "loops"
 
-    cursor = conn.execute(f"SELECT id, pid FROM {table_name} WHERE status = 'running' AND pid IS NOT NULL")
+    cursor = conn.execute(
+        f"SELECT id, pid FROM {table_name} WHERE status = 'running' AND pid IS NOT NULL"
+    )
 
     count = 0
     for row in cursor.fetchall():

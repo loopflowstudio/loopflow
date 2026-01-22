@@ -62,7 +62,7 @@ public actor LFDEventService {
         self.onEvent = onEvent
         self.onConnectionChange = onConnectionChange
 
-        logger.warning("LFDEventService.subscribe() called")
+        logger.debug("subscribe() called with patterns: \(patterns)")
         await connect()
         startReconnectLoop()
     }
@@ -72,10 +72,12 @@ public actor LFDEventService {
         logger.debug("connect() checking socket at: \(self.socketPath.path)")
         guard FileManager.default.fileExists(atPath: socketPath.path) else {
             logger.debug("socket does not exist")
+            LoggingService.append("socket not found at \(socketPath.path)", category: LoggingService.Category.lfd)
             updateConnectionState(false)
             return
         }
         logger.debug("socket exists, creating connection")
+        LoggingService.append("connecting to \(socketPath.path)", category: LoggingService.Category.lfd)
 
         let params = NWParameters()
         let endpoint = NWEndpoint.unix(path: socketPath.path)
@@ -99,6 +101,7 @@ public actor LFDEventService {
 
     private func handleConnected() {
         logger.info("connected to lfd")
+        LoggingService.append("connected", category: LoggingService.Category.lfd)
         updateConnectionState(true)
 
         // Send subscribe request
@@ -111,6 +114,8 @@ public actor LFDEventService {
     }
 
     private func handleDisconnected() {
+        logger.info("disconnected from lfd")
+        LoggingService.append("disconnected", category: LoggingService.Category.lfd)
         connection?.cancel()
         connection = nil
         updateConnectionState(false)

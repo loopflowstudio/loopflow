@@ -3,9 +3,6 @@
 import Foundation
 import SwiftUI
 import LoopflowCore
-import os.log
-
-private let logger = Logger(subsystem: "com.loopflow.concerto", category: "app-state")
 
 struct OutputLine: Identifiable {
     let id = UUID()
@@ -286,12 +283,9 @@ final class AppState {
 
         // Slow operations in background (don't block UI)
         Task {
-            // DEBUG: force stdout
-            FileHandle.standardOutput.write("[DEBUG] background task starting\n".data(using: .utf8)!)
             // Try to start daemon, but always subscribe (reconnect loop handles failures)
             let setupService = SetupService()
             try? await setupService.ensureDaemonRunning()
-            FileHandle.standardOutput.write("[DEBUG] calling startEventSubscription\n".data(using: .utf8)!)
             startEventSubscription()
 
             // Background enrichment: sync, loops, tokens, staleness
@@ -514,8 +508,10 @@ final class AppState {
     }
 
     func startEventSubscription() {
+        LoggingService.append("startEventSubscription called, eventService=\(eventService != nil)", category: LoggingService.Category.lfd)
         // Don't create duplicate subscriptions
         if eventService != nil { return }
+        LoggingService.append("creating LFDEventService", category: LoggingService.Category.lfd)
         eventService = LFDEventService()
 
         Task {

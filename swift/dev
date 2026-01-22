@@ -13,6 +13,8 @@ usage() {
     echo "  test       Build and run tests"
     echo "  ui-test    Generate Xcode project and run UI tests"
     echo "  run        Build and launch the app (installs to ~/Applications)"
+    echo "  run-debug  Build and run with stdout visible (for debugging)"
+    echo "  logs       Tail the app logs"
     echo "  clean      Remove dev app and reset permissions"
     echo "  xcode      Open in Xcode"
     echo "  release    Build release .app and .dmg"
@@ -57,9 +59,41 @@ case "${1:-help}" in
         cp .build/debug/Concerto "$APP_DIR/MacOS/"
         cp Concerto/Info.plist "$APP_DIR/"
         cp Concerto/Concerto.sdef "$APP_DIR/Resources/"
+        cp Concerto/AppIcon.icns "$APP_DIR/Resources/"
+
+        # Ad-hoc sign the app bundle (required for macOS to run it)
+        codesign --force --deep --sign - "$DEV_APP"
 
         # Launch from stable location
         open "$DEV_APP"
+        ;;
+    run-debug)
+        echo "Building and running Concerto (debug mode with logs)..."
+        swift build
+
+        APP_DIR="$DEV_APP/Contents"
+        mkdir -p "$APP_DIR/MacOS"
+        mkdir -p "$APP_DIR/Resources"
+        cp .build/debug/Concerto "$APP_DIR/MacOS/"
+        cp Concerto/Info.plist "$APP_DIR/"
+        cp Concerto/Concerto.sdef "$APP_DIR/Resources/"
+        cp Concerto/AppIcon.icns "$APP_DIR/Resources/"
+
+        codesign --force --deep --sign - "$DEV_APP"
+
+        # Run directly (not via open) so stdout/stderr go to terminal
+        echo "Logs: ~/Library/Logs/Concerto/"
+        echo "Press Ctrl+C to quit"
+        echo "---"
+        "$DEV_APP/Contents/MacOS/Concerto"
+        ;;
+    logs)
+        LOG_DIR="$HOME/Library/Logs/Concerto"
+        if [ -d "$LOG_DIR" ]; then
+            tail -f "$LOG_DIR"/*.log
+        else
+            echo "No logs yet. Run the app first."
+        fi
         ;;
     clean)
         echo "Removing dev app..."
@@ -87,10 +121,11 @@ case "${1:-help}" in
         mkdir -p "$APP_DIR/MacOS"
         mkdir -p "$APP_DIR/Resources"
 
-        # Copy binary, Info.plist, and sdef
+        # Copy binary, Info.plist, sdef, and icon
         cp .build/release/Concerto "$APP_DIR/MacOS/"
         cp Concerto/Info.plist "$APP_DIR/"
         cp Concerto/Concerto.sdef "$APP_DIR/Resources/"
+        cp Concerto/AppIcon.icns "$APP_DIR/Resources/"
 
         # Create PkgInfo
         echo -n "APPL????" > "$APP_DIR/PkgInfo"

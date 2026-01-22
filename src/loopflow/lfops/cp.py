@@ -11,10 +11,10 @@ from loopflow.lf.context import (
     format_prompt,
     gather_prompt_components,
 )
-from loopflow.lf.run import (
-    _copy_to_clipboard,
-    _trim_components_if_needed,
-    _warn_if_context_too_large,
+from loopflow.lf.output import (
+    copy_to_clipboard,
+    trim_components_if_needed,
+    warn_if_context_too_large,
 )
 from loopflow.lf.tokens import analyze_components
 
@@ -92,12 +92,12 @@ def register_commands(app: typer.Typer) -> None:
         if not include_docs:
             components.docs = []
 
-        components = _trim_components_if_needed(components)
+        components = trim_components_if_needed(components)
 
         prompt = format_prompt(components)
-        _copy_to_clipboard(prompt)
+        copy_to_clipboard(prompt)
 
         tree = analyze_components(components)
         typer.echo(tree.format())
-        _warn_if_context_too_large(tree)
+        warn_if_context_too_large(tree)
         typer.echo("\nCopied to clipboard.")

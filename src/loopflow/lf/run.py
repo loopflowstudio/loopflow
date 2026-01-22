@@ -14,11 +14,9 @@ from loopflow.lf.config import load_config, parse_model
 from loopflow.lf.context import (
     PromptComponents,
     find_worktree_root,
-    format_drop_label,
     format_prompt,
     gather_prompt_components,
     gather_step,
-    trim_prompt_components,
 )
 from loopflow.lf.flow import run_flow_def
 from loopflow.lf.flows import load_flow
@@ -31,7 +29,12 @@ from loopflow.lf.launcher import (
 )
 from loopflow.lf.logging import get_model_env, write_prompt_file
 from loopflow.lf.models import Session, SessionStatus, log_session_end, log_session_start
-from loopflow.lf.tokens import MAX_SAFE_TOKENS, analyze_components
+from loopflow.lf.output import (
+    copy_to_clipboard,
+    trim_components_if_needed,
+    warn_if_context_too_large,
+)
+from loopflow.lf.tokens import analyze_components
 from loopflow.lf.voices import VoiceNotFoundError, parse_voice_arg
 from loopflow.lf.worktrees import WorktreeError, create
 
@@ -49,41 +52,6 @@ def _open_web_client(backend: str) -> None:
     """Open the web client for the given backend."""
     url = WEB_CLIENTS.get(backend, WEB_CLIENTS["claude"])
     subprocess.run(["open", url], check=True)
-
-
-def _warn_if_context_too_large(tree) -> None:
-    """Warn user if prompt exceeds safe token limit."""
-    total_tokens = tree.total()
-    if total_tokens > MAX_SAFE_TOKENS:
-        typer.echo(
-            f"\033[33m⚠ Prompt is {total_tokens:,} tokens (limit ~{MAX_SAFE_TOKENS:,})\033[0m",
-            err=True,
-        )
-        files_node = tree.root.children.get("files")
-        if files_node and files_node.total_tokens() > MAX_SAFE_TOKENS * 0.5:
-            typer.echo(
-                "\033[33m  Large branch - try: --no-diff-files or -x <specific files>\033[0m",
-                err=True,
-            )
-        typer.echo(err=True)
-
-
-def _trim_components_if_needed(components: PromptComponents) -> PromptComponents:
-    """Trim prompt components to fit within the safe token limit."""
-    trimmed, dropped = trim_prompt_components(components, MAX_SAFE_TOKENS)
-    if dropped:
-        dropped_summary = ", ".join(format_drop_label(item) for item in dropped)
-        typer.echo(
-            f"\033[33m⚠ Context trimmed to fit {MAX_SAFE_TOKENS:,} tokens. "
-            f"Dropped: {dropped_summary}\033[0m",
-            err=True,
-        )
-    return trimmed
-
-
-def _copy_to_clipboard(text: str) -> None:
-    """Copy text to clipboard using pbcopy."""
-    subprocess.run(["pbcopy"], input=text.encode(), check=True)
 
 
 def _execute_step(
@@ -107,7 +75,7 @@ def _execute_step(
     tree = analyze_components(components)
     token_summary = tree.format()
 
-    _warn_if_context_too_large(tree)
+    warn_if_context_too_large(tree)
 
     main_repo = find_main_repo(repo_root) or repo_root
     run_mode = "interactive" if is_interactive else "auto"
@@ -266,7 +234,7 @@ def _launch_interactive_default(
     if not include_docs:
         components.docs = []
 
-    components = _trim_components_if_needed(components)
+    components = trim_components_if_needed(components)
 
     result_code = _execute_step(
         "chat",  # Step name for session tracking
@@ -466,14 +434,14 @@ def run(
     if not include_docs:
         components.docs = []
 
-    components = _trim_components_if_needed(components)
+    components = trim_components_if_needed(components)
 
     if copy or web:
         prompt = format_prompt(components)
-        _copy_to_clipboard(prompt)
+        copy_to_clipboard(prompt)
         tree = analyze_components(components)
         typer.echo(tree.format())
-        _warn_if_context_too_large(tree)
+        warn_if_context_too_large(tree)
         typer.echo("\nCopied to clipboard.")
         if web:
             _open_web_client(backend)
@@ -622,14 +590,14 @@ def inline(
     if not include_docs:
         components.docs = []
 
-    components = _trim_components_if_needed(components)
+    components = trim_components_if_needed(components)
 
     if copy or web:
         prompt_text = format_prompt(components)
-        _copy_to_clipboard(prompt_text)
+        copy_to_clipboard(prompt_text)
         tree = analyze_components(components)
         typer.echo(tree.format())
-        _warn_if_context_too_large(tree)
+        warn_if_context_too_large(tree)
         typer.echo("\nCopied to clipboard.")
         if web:
             _open_web_client(backend)
@@ -742,13 +710,13 @@ def flow(
             include_diff_files=config.diff_files if config else True,
             config=config,
         )
-        components = _trim_components_if_needed(components)
+        components = trim_components_if_needed(components)
         prompt = format_prompt(components)
-        _copy_to_clipboard(prompt)
+        copy_to_clipboard(prompt)
         tree = analyze_components(components)
         typer.echo(f"Flow '{name}' first step: {first_step}\n")
         typer.echo(tree.format())
-        _warn_if_context_too_large(tree)
+        warn_if_context_too_large(tree)
         typer.echo("\nCopied to clipboard.")
         if web:
             _open_web_client(backend)

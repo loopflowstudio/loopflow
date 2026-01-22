@@ -67,11 +67,10 @@ app = typer.Typer(
 )
 
 # Register top-level commands
+# lf is a prompt launcher - every command launches a prompt
 _run_ctx = {"allow_extra_args": True, "allow_interspersed_args": True}
 app.command(context_settings=_run_ctx)(run_module.run)
 app.command()(run_module.inline)
-app.command()(run_module.cp)
-app.command()(run_module.add)
 app.command(name="flow")(run_module.flow)
 
 
@@ -200,13 +199,11 @@ def _list_steps() -> None:
 
 def main():
     """Entry point that supports 'lf <step>' and 'lf <pipeline>' shorthand."""
+    # lf commands - all launch prompts
     known_commands = {
         "run",
         "inline",
-        "cp",
-        "add",
-        "pipeline",
-        "loop",
+        "flow",
         "--help",
         "-h",
     }

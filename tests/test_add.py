@@ -1,9 +1,9 @@
-"""Tests for add command."""
+"""Tests for lfops add command."""
 
 import pytest
 from typer.testing import CliRunner
 
-from loopflow.lf import app
+from loopflow.lfops.commands import app
 
 
 @pytest.fixture
@@ -14,7 +14,7 @@ def temp_repo(tmp_path):
 
 
 def test_add_creates_prompt_file(temp_repo, monkeypatch):
-    """lf add creates .claude/commands/<name>.md."""
+    """lfops add creates .claude/commands/<name>.md."""
     monkeypatch.chdir(temp_repo)
     runner = CliRunner()
 
@@ -32,7 +32,7 @@ def test_add_creates_prompt_file(temp_repo, monkeypatch):
 
 
 def test_add_errors_if_file_exists(temp_repo, monkeypatch):
-    """lf add errors when file already exists."""
+    """lfops add errors when file already exists."""
     commands_dir = temp_repo / ".claude" / "commands"
     commands_dir.mkdir(parents=True)
     (commands_dir / "review.md").write_text("existing")
@@ -46,7 +46,7 @@ def test_add_errors_if_file_exists(temp_repo, monkeypatch):
 
 
 def test_add_force_overwrites(temp_repo, monkeypatch):
-    """lf add -f overwrites existing file."""
+    """lfops add -f overwrites existing file."""
     commands_dir = temp_repo / ".claude" / "commands"
     commands_dir.mkdir(parents=True)
     (commands_dir / "review.md").write_text("existing")
@@ -61,7 +61,7 @@ def test_add_force_overwrites(temp_repo, monkeypatch):
 
 
 def test_add_requires_git_repo(tmp_path, monkeypatch):
-    """lf add requires a git repository."""
+    """lfops add requires a git repository."""
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
 

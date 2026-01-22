@@ -14,11 +14,9 @@ from loopflow.lf.config import load_config, parse_model
 from loopflow.lf.context import (
     PromptComponents,
     find_worktree_root,
-    format_drop_label,
     format_prompt,
     gather_prompt_components,
     gather_step,
-    trim_prompt_components,
 )
 from loopflow.lf.flow import run_flow_def
 from loopflow.lf.flows import load_flow
@@ -31,56 +29,29 @@ from loopflow.lf.launcher import (
 )
 from loopflow.lf.logging import get_model_env, write_prompt_file
 from loopflow.lf.models import Session, SessionStatus, log_session_end, log_session_start
-from loopflow.lf.tokens import MAX_SAFE_TOKENS, analyze_components
+from loopflow.lf.output import (
+    copy_to_clipboard,
+    trim_components_if_needed,
+    warn_if_context_too_large,
+)
+from loopflow.lf.tokens import analyze_components
 from loopflow.lf.voices import VoiceNotFoundError, parse_voice_arg
 from loopflow.lf.worktrees import WorktreeError, create
 
 ModelType = Optional[str]
 
-# Template for new prompt files created by `lf add`
-PROMPT_TEMPLATE = """\
----
-produces: <results>
----
-{name} step.
-
-{{args}}
-"""
+# Web client URLs for --web flag
+WEB_CLIENTS = {
+    "claude": "https://claude.ai/new",
+    "codex": "https://chatgpt.com",
+    "gemini": "https://aistudio.google.com/prompts/new_chat",
+}
 
 
-def _warn_if_context_too_large(tree) -> None:
-    """Warn user if prompt exceeds safe token limit."""
-    total_tokens = tree.total()
-    if total_tokens > MAX_SAFE_TOKENS:
-        typer.echo(
-            f"\033[33m⚠ Prompt is {total_tokens:,} tokens (limit ~{MAX_SAFE_TOKENS:,})\033[0m",
-            err=True,
-        )
-        files_node = tree.root.children.get("files")
-        if files_node and files_node.total_tokens() > MAX_SAFE_TOKENS * 0.5:
-            typer.echo(
-                "\033[33m  Large branch - try: --no-diff-files or -x <specific files>\033[0m",
-                err=True,
-            )
-        typer.echo(err=True)
-
-
-def _trim_components_if_needed(components: PromptComponents) -> PromptComponents:
-    """Trim prompt components to fit within the safe token limit."""
-    trimmed, dropped = trim_prompt_components(components, MAX_SAFE_TOKENS)
-    if dropped:
-        dropped_summary = ", ".join(format_drop_label(item) for item in dropped)
-        typer.echo(
-            f"\033[33m⚠ Context trimmed to fit {MAX_SAFE_TOKENS:,} tokens. "
-            f"Dropped: {dropped_summary}\033[0m",
-            err=True,
-        )
-    return trimmed
-
-
-def _copy_to_clipboard(text: str) -> None:
-    """Copy text to clipboard using pbcopy."""
-    subprocess.run(["pbcopy"], input=text.encode(), check=True)
+def _open_web_client(backend: str) -> None:
+    """Open the web client for the given backend."""
+    url = WEB_CLIENTS.get(backend, WEB_CLIENTS["claude"])
+    subprocess.run(["open", url], check=True)
 
 
 def _execute_step(
@@ -104,7 +75,7 @@ def _execute_step(
     tree = analyze_components(components)
     token_summary = tree.format()
 
-    _warn_if_context_too_large(tree)
+    warn_if_context_too_large(tree)
 
     main_repo = find_main_repo(repo_root) or repo_root
     run_mode = "interactive" if is_interactive else "auto"
@@ -263,7 +234,7 @@ def _launch_interactive_default(
     if not include_docs:
         components.docs = []
 
-    components = _trim_components_if_needed(components)
+    components = trim_components_if_needed(components)
 
     result_code = _execute_step(
         "chat",  # Step name for session tracking
@@ -290,6 +261,9 @@ def run(
     ),
     copy: bool = typer.Option(
         False, "-c", "-C", "--copy", help="Copy prompt to clipboard and show token breakdown"
+    ),
+    web: bool = typer.Option(
+        False, "--web", help="Copy to clipboard and open web client (claude.ai, chatgpt.com, etc.)"
     ),
     paste: Optional[bool] = typer.Option(
         None, "-v", "-V", "--paste/--no-paste", help="Include clipboard content in prompt"
@@ -407,7 +381,7 @@ def run(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
-    if not copy and not runner.is_available():
+    if not copy and not web and not runner.is_available():
         typer.echo(f"Error: '{backend}' CLI not found", err=True)
         raise typer.Exit(1)
 
@@ -460,15 +434,17 @@ def run(
     if not include_docs:
         components.docs = []
 
-    components = _trim_components_if_needed(components)
+    components = trim_components_if_needed(components)
 
-    if copy:
+    if copy or web:
         prompt = format_prompt(components)
-        _copy_to_clipboard(prompt)
+        copy_to_clipboard(prompt)
         tree = analyze_components(components)
         typer.echo(tree.format())
-        _warn_if_context_too_large(tree)
+        warn_if_context_too_large(tree)
         typer.echo("\nCopied to clipboard.")
+        if web:
+            _open_web_client(backend)
         raise typer.Exit(0)
 
     # Resolve chrome: CLI > frontmatter > config > default
@@ -507,6 +483,9 @@ def inline(
     path: list[str] = typer.Option(None, "-p", "-P", "--path", help="Additional files to include"),
     copy: bool = typer.Option(
         False, "-c", "-C", "--copy", help="Copy prompt to clipboard and show token breakdown"
+    ),
+    web: bool = typer.Option(
+        False, "--web", help="Copy to clipboard and open web client (claude.ai, chatgpt.com, etc.)"
     ),
     paste: Optional[bool] = typer.Option(
         None, "-v", "-V", "--paste/--no-paste", help="Include clipboard content in prompt"
@@ -565,7 +544,7 @@ def inline(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
-    if not copy and not runner.is_available():
+    if not copy and not web and not runner.is_available():
         typer.echo(f"Error: '{backend}' CLI not found", err=True)
         raise typer.Exit(1)
 
@@ -611,15 +590,17 @@ def inline(
     if not include_docs:
         components.docs = []
 
-    components = _trim_components_if_needed(components)
+    components = trim_components_if_needed(components)
 
-    if copy:
+    if copy or web:
         prompt_text = format_prompt(components)
-        _copy_to_clipboard(prompt_text)
+        copy_to_clipboard(prompt_text)
         tree = analyze_components(components)
         typer.echo(tree.format())
-        _warn_if_context_too_large(tree)
+        warn_if_context_too_large(tree)
         typer.echo("\nCopied to clipboard.")
+        if web:
+            _open_web_client(backend)
         raise typer.Exit(0)
 
     # Resolve chrome: CLI > config > default
@@ -644,103 +625,6 @@ def inline(
     raise typer.Exit(result_code)
 
 
-def cp(
-    paths: list[str] = typer.Argument(
-        None, help="Files or directories to include (e.g., src tests)"
-    ),
-    exclude: list[str] = typer.Option(None, "-e", "-E", "--exclude", help="Patterns to exclude"),
-    paste: bool = typer.Option(False, "-v", "-V", "--paste", help="Include clipboard content"),
-    docs: Optional[bool] = typer.Option(
-        None, "--lfdocs/--no-lfdocs", help="Include .docs/, .design/, and root .md files"
-    ),
-    diff: Optional[bool] = typer.Option(None, "--diff/--no-diff", help="Include raw branch diff"),
-    diff_files: Optional[bool] = typer.Option(
-        None, "--diff-files/--no-diff-files", help="Include files touched by branch"
-    ),
-    summaries: Optional[bool] = typer.Option(
-        None, "--summaries/--no-summaries", help="Include pre-generated codebase summaries"
-    ),
-):
-    """Copy file context to clipboard."""
-    repo_root = find_worktree_root()
-    if not repo_root:
-        # Use cwd as fallback for non-git usage
-        repo_root = Path.cwd()
-
-    config = load_config(repo_root) if (repo_root / ".lf" / "config.yaml").exists() else None
-
-    # Merge positional paths and config context
-    all_context = list(paths or [])
-    if config and config.context:
-        all_context.extend(config.context)
-
-    # Merge exclude patterns
-    exclude_patterns = list(exclude or [])
-    if config and config.exclude:
-        exclude_patterns.extend(config.exclude)
-
-    # Resolve flags (CLI overrides config)
-    include_docs = docs if docs is not None else (config.lfdocs if config else True)
-    include_diff = diff if diff is not None else (config.diff if config else False)
-    if diff_files is not None:
-        include_diff_files = diff_files
-    else:
-        include_diff_files = config.diff_files if config else True
-    include_summaries = summaries if summaries is not None else bool(config and config.summaries)
-
-    components = gather_prompt_components(
-        repo_root,
-        step=None,
-        context=all_context or None,
-        exclude=exclude_patterns or None,
-        paste=paste,
-        run_mode=None,
-        include_loopflow_doc=config.include_loopflow_doc if config else True,
-        include_diff=include_diff,
-        include_diff_files=include_diff_files,
-        include_summaries=include_summaries,
-        config=config,
-    )
-
-    # Apply docs flag
-    if not include_docs:
-        components.docs = []
-
-    components = _trim_components_if_needed(components)
-
-    prompt = format_prompt(components)
-    _copy_to_clipboard(prompt)
-
-    tree = analyze_components(components)
-    typer.echo(tree.format())
-    _warn_if_context_too_large(tree)
-    typer.echo("\nCopied to clipboard.")
-
-
-def add(
-    name: str = typer.Argument(help="Name for the new prompt (becomes filename and topic)"),
-    force: bool = typer.Option(False, "-f", "-F", "--force", help="Overwrite if exists"),
-):
-    """Create a new prompt file at .claude/commands/<name>.md"""
-    repo_root = find_worktree_root()
-    if not repo_root:
-        typer.echo("Error: must be in a git repository", err=True)
-        raise typer.Exit(1)
-
-    commands_dir = repo_root / ".claude" / "commands"
-    target = commands_dir / f"{name}.md"
-
-    if target.exists() and not force:
-        typer.echo(f"Error: {target.relative_to(repo_root)} already exists", err=True)
-        typer.echo("Use -f to overwrite", err=True)
-        raise typer.Exit(1)
-
-    commands_dir.mkdir(parents=True, exist_ok=True)
-    target.write_text(PROMPT_TEMPLATE.format(name=name.capitalize()))
-
-    typer.echo(f"Created {target.relative_to(repo_root)}")
-
-
 def flow(
     name: str = typer.Argument(help="Flow name from .lf/flows/"),
     path: list[str] = typer.Option(
@@ -752,6 +636,9 @@ def flow(
     pr: bool = typer.Option(None, "--pr", help="Open PR when done"),
     copy: bool = typer.Option(
         False, "-c", "-C", "--copy", help="Copy first step prompt to clipboard, show tokens"
+    ),
+    web: bool = typer.Option(
+        False, "--web", help="Copy to clipboard and open web client (claude.ai, chatgpt.com, etc.)"
     ),
     model: ModelType = typer.Option(
         None, "-m", "-M", "--model", help="Model to use (backend or backend:variant)"
@@ -786,7 +673,7 @@ def flow(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
-    if not copy and not runner.is_available():
+    if not copy and not web and not runner.is_available():
         typer.echo(f"Error: '{backend}' CLI not found", err=True)
         raise typer.Exit(1)
 
@@ -804,7 +691,7 @@ def flow(
 
     exclude = list(config.exclude) if config and config.exclude else None
 
-    if copy:
+    if copy or web:
         # Show tokens for first step in flow
         first_step = flow_def.steps[0].step if flow_def.steps else None
 
@@ -823,14 +710,16 @@ def flow(
             include_diff_files=config.diff_files if config else True,
             config=config,
         )
-        components = _trim_components_if_needed(components)
+        components = trim_components_if_needed(components)
         prompt = format_prompt(components)
-        _copy_to_clipboard(prompt)
+        copy_to_clipboard(prompt)
         tree = analyze_components(components)
         typer.echo(f"Flow '{name}' first step: {first_step}\n")
         typer.echo(tree.format())
-        _warn_if_context_too_large(tree)
+        warn_if_context_too_large(tree)
         typer.echo("\nCopied to clipboard.")
+        if web:
+            _open_web_client(backend)
         raise typer.Exit(0)
 
     push_enabled = config.push if config else False

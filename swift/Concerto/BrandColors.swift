@@ -3,18 +3,19 @@
 import SwiftUI
 
 extension Color {
-    static let loopflowBurgundy = Color(hex: 0x722f37)
-    static let loopflowBurgundyHover = Color(hex: 0x8b3d47)
+    static let loopflowBurgundy = Color(hex: 0x722F37)
+    static let loopflowBurgundyHover = Color(hex: 0x8B3D47)
     static let loopflowCream = Color(hex: 0xFAF8F5)
     static let loopflowCreamElevated = Color(hex: 0xFFFDFB)
     static let loopflowCreamMuted = Color(hex: 0xF3EEE7)
     static let loopflowSlate = Color(hex: 0x2B3036)
     static let loopflowSlateElevated = Color(hex: 0x343B44)
     static let loopflowSlateMuted = Color(hex: 0x3C4550)
-    static let loopflowText = Color(hex: 0x1a1a1a)
-    static let loopflowTextSecondary = Color(hex: 0x6b6b6b)
+    static let loopflowText = Color(hex: 0x1A1A1A)
+    static let loopflowTextSecondary = Color(hex: 0x6B6B6B)
     static let loopflowTextLight = Color(hex: 0xF5F1EA)
     static let loopflowTextSecondaryLight = Color(hex: 0xC8C1B8)
+    static let loopflowInfo = Color(hex: 0x0AB3CC)
 
     init(hex: UInt, alpha: Double = 1) {
         self.init(
@@ -27,13 +28,13 @@ extension Color {
     }
 }
 
-// MARK: - Status Colors
+// MARK: - Status Colors (synced with COLORS.md)
 
 extension Color {
-    static let statusSuccess = Color.green
-    static let statusError = Color.red
-    static let statusWarning = Color.orange
-    static let statusInfo = Color.blue
+    static let statusSuccess = Color(hex: 0x2D6A4F)
+    static let statusError = Color(hex: 0xB45309)
+    static let statusWarning = Color(hex: 0xB0812A)
+    static let statusInfo = Color.loopflowInfo
 }
 
 struct LoopflowPalette {

@@ -9,14 +9,6 @@ from loopflow.lfd.db import list_jobs, update_job_last_sha
 from loopflow.lfd.jobs import start_job
 from loopflow.lfd.models import Job, JobStatus, TriggerType
 
-# Backwards compatibility aliases
-Loop = Job
-LoopStatus = JobStatus
-list_loops = list_jobs
-update_loop_last_sha = update_job_last_sha
-start_loop = start_job
-
-
 def check_subscription(job: Job) -> bool:
     """Check if subscription should trigger. Returns True if triggered.
 

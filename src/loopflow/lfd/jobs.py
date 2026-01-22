@@ -19,16 +19,6 @@ from loopflow.lfd.db import (
 from loopflow.lfd.models import Job, JobStatus, JobType, area_to_slug
 from loopflow.lfd.process import is_process_running
 
-# Backwards compatibility aliases
-Loop = Job
-LoopStatus = JobStatus
-LoopType = JobType
-get_loop = get_job
-get_loop_by_area_repo = get_job_by_area_repo
-save_loop = save_job
-update_loop_pid = update_job_pid
-update_loop_status = update_job_status
-
 # Word lists for generating unique branch names (matches swift/Concerto/NameGenerator.swift)
 MAGICAL = [
     "aurora",
@@ -140,10 +130,6 @@ def _allocate_job_main(repo: Path, area: str) -> str:
     raise ValueError(f"Could not allocate personal-main branch for {slug}")
 
 
-# Backwards compatibility alias
-_allocate_loop_main = _allocate_job_main
-
-
 def _create_job_main_branch(repo: Path, branch: str) -> None:
     """Create personal-main branch from origin/main if it doesn't exist."""
     if _branch_exists(repo, branch):
@@ -161,10 +147,6 @@ def _create_job_main_branch(repo: Path, branch: str) -> None:
             cwd=repo,
             capture_output=True,
         )
-
-
-# Backwards compatibility alias
-_create_loop_main_branch = _create_job_main_branch
 
 
 def create_job(
@@ -217,10 +199,6 @@ def create_job(
 
     save_job(job)
     return job
-
-
-# Backwards compatibility alias
-create_loop = create_job
 
 
 def count_outstanding(job: Job) -> int:
@@ -306,10 +284,6 @@ def start_job(job_id: str, foreground: bool = False) -> StartResult:
         return StartResult(True)
 
 
-# Backwards compatibility alias
-start_loop = start_job
-
-
 def stop_job(job_id: str, force: bool = False) -> bool:
     """Stop a running job.
 
@@ -332,19 +306,11 @@ def stop_job(job_id: str, force: bool = False) -> bool:
     return True
 
 
-# Backwards compatibility alias
-stop_loop = stop_job
-
-
 def _run_job(job: Job) -> None:
     """Run the job execution until it should pause."""
     from loopflow.lfd.job_runner import run_job_iterations
 
     run_job_iterations(job)
-
-
-# Backwards compatibility alias
-_run_loop = _run_job
 
 
 def get_wt_from_cwd() -> Path | None:

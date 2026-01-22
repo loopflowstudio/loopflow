@@ -17,15 +17,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from loopflow.lf.flows import resolve_flow
-from loopflow.lfd.db import save_loop
+from loopflow.lfd.db import save_job
 from loopflow.lfd.job_runner import (
     _iteration_branch_prefix,
     _scheduler_acquire,
     _scheduler_release,
     run_iteration,
 )
-from loopflow.lfd.jobs import StartResult, count_outstanding, create_loop, start_loop
-from loopflow.lfd.models import Loop, LoopStatus, LoopType
+from loopflow.lfd.jobs import StartResult, count_outstanding, create_job, start_job
+from loopflow.lfd.models import Job, JobStatus, JobType
 
 # =============================================================================
 # Test Utilities
@@ -176,46 +176,46 @@ class TestLoopCreation:
         """Create a FLOW type loop."""
         with patch_many(
             ("loopflow.lfd.jobs._branch_exists", False),
-            "loopflow.lfd.jobs._create_loop_main_branch",
+            "loopflow.lfd.jobs._create_job_main_branch",
         )[0]:
-            loop = create_loop(LoopType.FLOW, area="src/feature/", repo=temp_repo, flow=simple_flow)
+            loop = create_job(JobType.FLOW, area="src/feature/", repo=temp_repo, flow=simple_flow)
 
-        assert loop.type == LoopType.FLOW
+        assert loop.type == JobType.FLOW
         assert loop.area == "src/feature/"
         assert loop.flow == simple_flow
-        assert loop.status == LoopStatus.IDLE
+        assert loop.status == JobStatus.IDLE
         assert loop.iteration == 0
 
-    def test_create_loop_reuses_existing(self, temp_repo, simple_flow):
+    def test_create_job_reuses_existing(self, temp_repo, simple_flow):
         """Creating loop with same area reuses existing."""
         with patch_many(
             ("loopflow.lfd.jobs._branch_exists", False),
-            "loopflow.lfd.jobs._create_loop_main_branch",
+            "loopflow.lfd.jobs._create_job_main_branch",
         )[0]:
-            loop1 = create_loop(
-                LoopType.FLOW, area="src/feature/", repo=temp_repo, flow=simple_flow
+            loop1 = create_job(
+                JobType.FLOW, area="src/feature/", repo=temp_repo, flow=simple_flow
             )
-            loop2 = create_loop(
-                LoopType.FLOW, area="src/feature/", repo=temp_repo, flow=simple_flow
+            loop2 = create_job(
+                JobType.FLOW, area="src/feature/", repo=temp_repo, flow=simple_flow
             )
 
         assert loop1.id == loop2.id
 
-    def test_create_loop_updates_goals(self, temp_repo, simple_flow):
+    def test_create_job_updates_goals(self, temp_repo, simple_flow):
         """Updating goals on existing loop persists changes."""
         with patch_many(
             ("loopflow.lfd.jobs._branch_exists", False),
-            "loopflow.lfd.jobs._create_loop_main_branch",
+            "loopflow.lfd.jobs._create_job_main_branch",
         )[0]:
-            create_loop(
-                LoopType.FLOW,
+            create_job(
+                JobType.FLOW,
                 area="src/feature/",
                 repo=temp_repo,
                 flow=simple_flow,
                 goals=["product-engineer"],
             )
-            loop2 = create_loop(
-                LoopType.FLOW,
+            loop2 = create_job(
+                JobType.FLOW,
                 area="src/feature/",
                 repo=temp_repo,
                 flow=simple_flow,
@@ -236,15 +236,15 @@ class TestRunIteration:
 
     def test_run_iteration_missing_flow_returns_false(self, temp_repo, temp_db):
         """Iteration fails if flow not specified."""
-        loop = Loop(
+        loop = Job(
             id="loop-1",
-            type=LoopType.FLOW,
+            type=JobType.FLOW,
             area="src/",
             repo=temp_repo,
-            loop_main="test-main",
+            job_main="test-main",
             flow=None,
         )
-        save_loop(loop, temp_db)
+        save_job(loop, temp_db)
 
         with patch_many(
             (
@@ -262,15 +262,15 @@ class TestRunIteration:
 
     def test_run_iteration_unknown_flow_returns_false(self, temp_repo, temp_db):
         """Iteration fails if flow doesn't exist."""
-        loop = Loop(
+        loop = Job(
             id="loop-1",
-            type=LoopType.FLOW,
+            type=JobType.FLOW,
             area="src/",
             repo=temp_repo,
-            loop_main="test-main",
+            job_main="test-main",
             flow="nonexistent",
         )
-        save_loop(loop, temp_db)
+        save_job(loop, temp_db)
 
         with patch_many(
             (
@@ -290,15 +290,15 @@ class TestRunIteration:
         """Iteration fails if worktree creation fails."""
         from loopflow.lf.worktrees import WorktreeError
 
-        loop = Loop(
+        loop = Job(
             id="loop-1",
-            type=LoopType.FLOW,
+            type=JobType.FLOW,
             area="src/",
             repo=temp_repo,
-            loop_main="test-main",
+            job_main="test-main",
             flow=simple_flow,
         )
-        save_loop(loop, temp_db)
+        save_job(loop, temp_db)
 
         def raise_error(*a, **k):
             raise WorktreeError("Failed")
@@ -352,19 +352,19 @@ class TestCountOutstanding:
 
     def test_count_outstanding_no_branch(self, temp_repo):
         """Returns 0 when branch doesn't exist."""
-        loop = Loop(
+        loop = Job(
             id="loop-1",
-            type=LoopType.LOOP,
+            type=JobType.LOOP,
             area="src/",
             repo=temp_repo,
-            loop_main="nonexistent-main",
+            job_main="nonexistent-main",
         )
         assert count_outstanding(loop) == 0
 
     def test_count_outstanding_with_commits(self, temp_repo):
         """Counts commits ahead of main."""
-        loop = Loop(
-            id="loop-1", type=LoopType.LOOP, area="src/", repo=temp_repo, loop_main="test-main"
+        loop = Job(
+            id="loop-1", type=JobType.LOOP, area="src/", repo=temp_repo, job_main="test-main"
         )
 
         with patch("subprocess.run") as mock_run:
@@ -380,23 +380,23 @@ class TestCountOutstanding:
 class TestStartLoop:
     """Test loop start logic."""
 
-    def test_start_loop_not_found(self):
+    def test_start_job_not_found(self):
         """Returns not_found for missing loop."""
         with patch_many(("loopflow.lfd.jobs.get_job", None))[0]:
-            result = start_loop("nonexistent")
+            result = start_job("nonexistent")
 
         assert not result
         assert result.reason == "not_found"
 
-    def test_start_loop_already_running(self, temp_repo):
+    def test_start_job_already_running(self, temp_repo):
         """Returns already_running if process is active."""
-        loop = Loop(
+        loop = Job(
             id="loop-1",
-            type=LoopType.LOOP,
+            type=JobType.LOOP,
             area="src/",
             repo=temp_repo,
-            loop_main="test-main",
-            status=LoopStatus.RUNNING,
+            job_main="test-main",
+            status=JobStatus.RUNNING,
             pid=12345,
         )
 
@@ -404,20 +404,20 @@ class TestStartLoop:
             ("loopflow.lfd.jobs.get_job", loop),
             ("loopflow.lfd.jobs.is_process_running", True),
         )[0]:
-            result = start_loop("loop-1")
+            result = start_job("loop-1")
 
         assert not result
         assert result.reason == "already_running"
 
-    def test_start_loop_waiting_pr_limit(self, temp_repo):
+    def test_start_job_waiting_pr_limit(self, temp_repo):
         """Returns waiting if PR limit reached."""
-        loop = Loop(
+        loop = Job(
             id="loop-1",
-            type=LoopType.LOOP,
+            type=JobType.LOOP,
             area="src/",
             repo=temp_repo,
-            loop_main="test-main",
-            status=LoopStatus.IDLE,
+            job_main="test-main",
+            status=JobStatus.IDLE,
             pr_limit=5,
         )
 
@@ -426,7 +426,7 @@ class TestStartLoop:
             ("loopflow.lfd.jobs.count_outstanding", 5),
             "loopflow.lfd.jobs.update_job_status",
         )[0]:
-            result = start_loop("loop-1")
+            result = start_job("loop-1")
 
         assert not result
         assert result.reason == "waiting"
@@ -494,12 +494,12 @@ class TestSubscribeTrigger:
         """Returns False when no pathset configured."""
         from loopflow.lfd.subscribe import check_subscription
 
-        loop = Loop(
+        loop = Job(
             id="loop-1",
-            type=LoopType.SUBSCRIBE,
+            type=JobType.SUBSCRIBE,
             area="src/",
             repo=temp_repo,
-            loop_main="test-main",
+            job_main="test-main",
             pathset=None,
         )
         assert check_subscription(loop) is False
@@ -508,12 +508,12 @@ class TestSubscribeTrigger:
         """First run sets baseline, doesn't trigger."""
         from loopflow.lfd.subscribe import check_subscription
 
-        loop = Loop(
+        loop = Job(
             id="loop-1",
-            type=LoopType.SUBSCRIBE,
+            type=JobType.SUBSCRIBE,
             area="src/",
             repo=temp_repo,
-            loop_main="test-main",
+            job_main="test-main",
             pathset="src/**/*.py",
             last_main_sha=None,
         )
@@ -523,7 +523,7 @@ class TestSubscribeTrigger:
                 MagicMock(returncode=0),
                 MagicMock(returncode=0, stdout="abc123\n"),
             ]
-            with patch("loopflow.lfd.subscribe.update_loop_last_sha"):
+            with patch("loopflow.lfd.subscribe.update_job_last_sha"):
                 result = check_subscription(loop)
 
         assert result is False
@@ -532,12 +532,12 @@ class TestSubscribeTrigger:
         """No trigger when SHA unchanged."""
         from loopflow.lfd.subscribe import check_subscription
 
-        loop = Loop(
+        loop = Job(
             id="loop-1",
-            type=LoopType.SUBSCRIBE,
+            type=JobType.SUBSCRIBE,
             area="src/",
             repo=temp_repo,
-            loop_main="test-main",
+            job_main="test-main",
             pathset="src/**/*.py",
             last_main_sha="abc123",
         )
@@ -555,12 +555,12 @@ class TestSubscribeTrigger:
         """Triggers when SHA changes and pathset matches."""
         from loopflow.lfd.subscribe import check_subscription
 
-        loop = Loop(
+        loop = Job(
             id="loop-1",
-            type=LoopType.SUBSCRIBE,
+            type=JobType.SUBSCRIBE,
             area="src/",
             repo=temp_repo,
-            loop_main="test-main",
+            job_main="test-main",
             pathset="src/**/*.py",
             last_main_sha="abc123",
         )
@@ -571,7 +571,7 @@ class TestSubscribeTrigger:
                 MagicMock(returncode=0, stdout="def456\n"),
                 MagicMock(returncode=0, stdout="src/feature.py\n"),
             ]
-            with patch("loopflow.lfd.subscribe.update_loop_last_sha"):
+            with patch("loopflow.lfd.subscribe.update_job_last_sha"):
                 result = check_subscription(loop)
 
         assert result is True
@@ -580,12 +580,12 @@ class TestSubscribeTrigger:
         """No trigger when SHA changes but pathset doesn't match."""
         from loopflow.lfd.subscribe import check_subscription
 
-        loop = Loop(
+        loop = Job(
             id="loop-1",
-            type=LoopType.SUBSCRIBE,
+            type=JobType.SUBSCRIBE,
             area="src/",
             repo=temp_repo,
-            loop_main="test-main",
+            job_main="test-main",
             pathset="src/**/*.py",
             last_main_sha="abc123",
         )
@@ -596,7 +596,7 @@ class TestSubscribeTrigger:
                 MagicMock(returncode=0, stdout="def456\n"),
                 MagicMock(returncode=0, stdout=""),
             ]
-            with patch("loopflow.lfd.subscribe.update_loop_last_sha"):
+            with patch("loopflow.lfd.subscribe.update_job_last_sha"):
                 result = check_subscription(loop)
 
         assert result is False
@@ -638,16 +638,16 @@ class TestFullIterationExecution:
 
     def test_iteration_creates_worktree(self, temp_repo, simple_flow, temp_db, with_goals):
         """Iteration creates a worktree for the branch."""
-        loop = Loop(
+        loop = Job(
             id="loop-1",
-            type=LoopType.FLOW,
+            type=JobType.FLOW,
             area="src/",
             repo=temp_repo,
-            loop_main="test-aurora-melody-main",
+            job_main="test-aurora-melody-main",
             flow=simple_flow,
             goals=["product-engineer"],
         )
-        save_loop(loop, temp_db)
+        save_job(loop, temp_db)
 
         worktrees = []
         original_make = self._make_worktree
@@ -676,16 +676,16 @@ class TestFullIterationExecution:
 
     def test_iteration_runs_all_steps(self, temp_repo, multi_step_flow, temp_db, with_goals):
         """Iteration runs all steps in order."""
-        loop = Loop(
+        loop = Job(
             id="loop-1",
-            type=LoopType.FLOW,
+            type=JobType.FLOW,
             area="src/",
             repo=temp_repo,
-            loop_main="test-aurora-melody-main",
+            job_main="test-aurora-melody-main",
             flow=multi_step_flow,
             goals=["product-engineer"],
         )
-        save_loop(loop, temp_db)
+        save_job(loop, temp_db)
 
         steps = []
 
@@ -705,16 +705,16 @@ class TestFullIterationExecution:
 
     def test_iteration_stops_on_step_failure(self, temp_repo, multi_step_flow, temp_db, with_goals):
         """Iteration stops and returns False when a step fails."""
-        loop = Loop(
+        loop = Job(
             id="loop-1",
-            type=LoopType.FLOW,
+            type=JobType.FLOW,
             area="src/",
             repo=temp_repo,
-            loop_main="test-main",
+            job_main="test-main",
             flow=multi_step_flow,
             goals=["product-engineer"],
         )
-        save_loop(loop, temp_db)
+        save_job(loop, temp_db)
 
         steps = []
 
@@ -731,16 +731,16 @@ class TestFullIterationExecution:
 
     def test_iteration_creates_pr_on_success(self, temp_repo, simple_flow, temp_db, with_goals):
         """Successful iteration creates PR."""
-        loop = Loop(
+        loop = Job(
             id="loop-1",
-            type=LoopType.FLOW,
+            type=JobType.FLOW,
             area="src/",
             repo=temp_repo,
-            loop_main="test-main",
+            job_main="test-main",
             flow=simple_flow,
             goals=["product-engineer"],
         )
-        save_loop(loop, temp_db)
+        save_job(loop, temp_db)
 
         prs = []
 
@@ -812,33 +812,33 @@ class TestLoopIterations:
             ("loopflow.lfd.job_runner.run_iteration", run_iteration_fn),
             ("loopflow.lfd.job_runner._scheduler_acquire", (True, None)),
             "loopflow.lfd.job_runner._scheduler_release",
-            "loopflow.lfd.job_runner.update_loop_iteration",
-            "loopflow.lfd.job_runner.update_loop_status",
-            "loopflow.lfd.job_runner.update_loop_pid",
+            "loopflow.lfd.job_runner.update_job_iteration",
+            "loopflow.lfd.job_runner.update_job_status",
+            "loopflow.lfd.job_runner.update_job_pid",
             "loopflow.lfd.job_runner.notify_event",
         ]
         if count_outstanding_fn:
             targets.append(("loopflow.lfd.job_runner.count_outstanding", count_outstanding_fn))
         return patch_many(*targets)
 
-    def test_run_loop_iterations_stops_at_pr_limit(
+    def test_run_job_iterations_stops_at_pr_limit(
         self, temp_repo, simple_flow, temp_db, with_goals
     ):
         """Loop stops when PR limit reached."""
-        from loopflow.lfd.job_runner import run_loop_iterations
+        from loopflow.lfd.job_runner import run_job_iterations
 
-        loop = Loop(
+        loop = Job(
             id="loop-1",
-            type=LoopType.LOOP,
+            type=JobType.LOOP,
             area="src/",
             repo=temp_repo,
-            loop_main="test-main",
+            job_main="test-main",
             flow=simple_flow,
             goals=["product-engineer"],
             pr_limit=2,
             iteration=0,
         )
-        save_loop(loop, temp_db)
+        save_job(loop, temp_db)
 
         iterations = []
 
@@ -850,25 +850,25 @@ class TestLoopIterations:
         stack, _ = self._loop_patches(mock_run, lambda _: next(outstanding))
 
         with stack:
-            run_loop_iterations(loop)
+            run_job_iterations(loop)
 
         assert len(iterations) == 2
 
-    def test_run_loop_iterations_flow_runs_once(self, temp_repo, simple_flow, temp_db, with_goals):
+    def test_run_job_iterations_flow_runs_once(self, temp_repo, simple_flow, temp_db, with_goals):
         """FLOW type runs exactly once."""
-        from loopflow.lfd.job_runner import run_loop_iterations
+        from loopflow.lfd.job_runner import run_job_iterations
 
-        loop = Loop(
+        loop = Job(
             id="loop-1",
-            type=LoopType.FLOW,
+            type=JobType.FLOW,
             area="src/",
             repo=temp_repo,
-            loop_main="test-main",
+            job_main="test-main",
             flow=simple_flow,
             goals=["product-engineer"],
             iteration=0,
         )
-        save_loop(loop, temp_db)
+        save_job(loop, temp_db)
 
         iterations = []
 
@@ -879,6 +879,6 @@ class TestLoopIterations:
         stack, _ = self._loop_patches(mock_run)
 
         with stack:
-            run_loop_iterations(loop)
+            run_job_iterations(loop)
 
         assert len(iterations) == 1

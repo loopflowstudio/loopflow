@@ -12,13 +12,6 @@ from loopflow.lfd.db import get_latest_job_run, list_jobs
 from loopflow.lfd.jobs import start_job
 from loopflow.lfd.models import Job, JobStatus, TriggerType
 
-# Backwards compatibility aliases
-Loop = Job
-LoopStatus = JobStatus
-get_latest_loop_run = get_latest_job_run
-list_loops = list_jobs
-start_loop = start_job
-
 # Grace period for missed schedules (laptop was asleep/off)
 SCHEDULE_GRACE_PERIOD = timedelta(hours=24)
 

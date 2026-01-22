@@ -23,12 +23,6 @@ from loopflow.lfd.models import (
 )
 from loopflow.lfd.process import is_process_running
 
-# Backwards compatibility aliases
-Loop = Job
-LoopRun = JobRun
-LoopStatus = JobStatus
-LoopType = JobType
-
 DB_PATH = Path.home() / ".lf" / "lfd.db"
 
 
@@ -333,10 +327,6 @@ def save_job(job: Job, db_path: Path | None = None) -> None:
     conn.close()
 
 
-# Backwards compatibility alias
-save_loop = save_job
-
-
 def get_job(job_id: str, db_path: Path | None = None) -> Job | None:
     """Get a job by ID (supports short IDs)."""
     conn = _get_db(db_path)
@@ -352,10 +342,6 @@ def get_job(job_id: str, db_path: Path | None = None) -> Job | None:
 
     conn.close()
     return _job_from_row(dict(row), conn) if row else None
-
-
-# Backwards compatibility alias
-get_loop = get_job
 
 
 def get_job_by_area_repo(
@@ -379,10 +365,6 @@ def get_job_by_area_repo(
     return result
 
 
-# Backwards compatibility alias
-get_loop_by_area_repo = get_job_by_area_repo
-
-
 def list_jobs(repo: Path | None = None, db_path: Path | None = None) -> list[Job]:
     """List all jobs, optionally filtered by repo."""
     conn = _get_db(db_path)
@@ -401,10 +383,6 @@ def list_jobs(repo: Path | None = None, db_path: Path | None = None) -> list[Job
     return jobs
 
 
-# Backwards compatibility alias
-list_loops = list_jobs
-
-
 def update_job_status(job_id: str, status: JobStatus, db_path: Path | None = None) -> bool:
     """Update a job's status."""
     conn = _get_db(db_path)
@@ -418,10 +396,6 @@ def update_job_status(job_id: str, status: JobStatus, db_path: Path | None = Non
     updated = cursor.rowcount > 0
     conn.close()
     return updated
-
-
-# Backwards compatibility alias
-update_loop_status = update_job_status
 
 
 def update_job_iteration(job_id: str, iteration: int, db_path: Path | None = None) -> bool:
@@ -439,10 +413,6 @@ def update_job_iteration(job_id: str, iteration: int, db_path: Path | None = Non
     return updated
 
 
-# Backwards compatibility alias
-update_loop_iteration = update_job_iteration
-
-
 def update_job_pid(job_id: str, pid: int | None, db_path: Path | None = None) -> bool:
     """Update a job's process ID."""
     conn = _get_db(db_path)
@@ -458,10 +428,6 @@ def update_job_pid(job_id: str, pid: int | None, db_path: Path | None = None) ->
     return updated
 
 
-# Backwards compatibility alias
-update_loop_pid = update_job_pid
-
-
 def update_job_last_sha(job_id: str, sha: str | None, db_path: Path | None = None) -> bool:
     """Update a job's last_main_sha (for subscribe jobs)."""
     conn = _get_db(db_path)
@@ -475,10 +441,6 @@ def update_job_last_sha(job_id: str, sha: str | None, db_path: Path | None = Non
     updated = cursor.rowcount > 0
     conn.close()
     return updated
-
-
-# Backwards compatibility alias
-update_loop_last_sha = update_job_last_sha
 
 
 def delete_job(job_id: str, db_path: Path | None = None) -> bool:
@@ -507,10 +469,6 @@ def delete_job(job_id: str, db_path: Path | None = None) -> bool:
     deleted = cursor.rowcount > 0
     conn.close()
     return deleted
-
-
-# Backwards compatibility alias
-delete_loop = delete_job
 
 
 def _job_from_row(row: dict, conn: sqlite3.Connection | None = None) -> Job:
@@ -552,10 +510,6 @@ def _job_from_row(row: dict, conn: sqlite3.Connection | None = None) -> Job:
     )
 
 
-# Backwards compatibility alias
-_loop_from_row = _job_from_row
-
-
 # Job run functions
 
 
@@ -590,10 +544,6 @@ def save_job_run(run: JobRun, db_path: Path | None = None) -> None:
     conn.close()
 
 
-# Backwards compatibility alias
-save_loop_run = save_job_run
-
-
 def get_job_runs(job_id: str, limit: int = 10, db_path: Path | None = None) -> list[JobRun]:
     """Get runs for a job."""
     conn = _get_db(db_path)
@@ -621,18 +571,10 @@ def get_job_runs(job_id: str, limit: int = 10, db_path: Path | None = None) -> l
     return runs
 
 
-# Backwards compatibility alias
-get_loop_runs = get_job_runs
-
-
 def get_latest_job_run(job_id: str, db_path: Path | None = None) -> JobRun | None:
     """Get the most recent run for a job."""
     runs = get_job_runs(job_id, limit=1, db_path=db_path)
     return runs[0] if runs else None
-
-
-# Backwards compatibility alias
-get_latest_loop_run = get_latest_job_run
 
 
 def update_job_run_status(
@@ -667,10 +609,6 @@ def update_job_run_status(
     return updated
 
 
-# Backwards compatibility alias
-update_loop_run_status = update_job_run_status
-
-
 def update_job_run_step(run_id: str, step: str | None, db_path: Path | None = None) -> bool:
     """Update the current step for a job run."""
     conn = _get_db(db_path)
@@ -687,10 +625,6 @@ def update_job_run_step(run_id: str, step: str | None, db_path: Path | None = No
     return updated
 
 
-# Backwards compatibility alias
-update_loop_run_step = update_job_run_step
-
-
 def update_job_run_pr(run_id: str, pr_url: str, db_path: Path | None = None) -> bool:
     """Update the PR URL for a job run."""
     conn = _get_db(db_path)
@@ -705,10 +639,6 @@ def update_job_run_pr(run_id: str, pr_url: str, db_path: Path | None = None) -> 
     updated = cursor.rowcount > 0
     conn.close()
     return updated
-
-
-# Backwards compatibility alias
-update_loop_run_pr = update_job_run_pr
 
 
 def _job_run_from_row(row: dict) -> JobRun:
@@ -728,10 +658,6 @@ def _job_run_from_row(row: dict) -> JobRun:
         error=row.get("error"),
         pr_url=row.get("pr_url"),
     )
-
-
-# Backwards compatibility alias
-_loop_run_from_row = _job_run_from_row
 
 
 # Summary functions

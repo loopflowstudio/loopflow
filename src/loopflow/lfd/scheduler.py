@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from loopflow.lfd.db import list_loops
+from loopflow.lfd.db import list_jobs
 from loopflow.lfd.jobs import count_outstanding
 
 
@@ -66,8 +66,8 @@ class Scheduler:
     def total_outstanding(self) -> int:
         """Total outstanding commits across all loops."""
         total = 0
-        for loop in list_loops():
-            total += count_outstanding(loop)
+        for job in list_jobs():
+            total += count_outstanding(job)
         return total
 
     def can_start(self) -> tuple[bool, str | None]:

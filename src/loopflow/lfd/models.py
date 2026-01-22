@@ -45,10 +45,6 @@ class JobType(Enum):
     SCHEDULE = "schedule"  # CONTINUOUS + CRON
 
 
-# Backwards compatibility alias
-LoopType = JobType
-
-
 def _job_type_to_mode_trigger(job_type: JobType) -> tuple[ExecutionMode, TriggerType]:
     """Convert legacy JobType to (ExecutionMode, TriggerType)."""
     mapping = {
@@ -81,10 +77,6 @@ class JobStatus(Enum):
     RUNNING = "running"  # Currently executing an iteration
     WAITING = "waiting"  # Paused (outstanding >= limit)
     ERROR = "error"  # Last iteration failed
-
-
-# Backwards compatibility alias
-LoopStatus = JobStatus
 
 
 class MergeMode(Enum):
@@ -217,10 +209,6 @@ class Job:
         self.job_main = value
 
 
-# Backwards compatibility alias
-Loop = Job
-
-
 @dataclass
 class JobRun:
     """A single iteration attempt."""
@@ -270,7 +258,3 @@ class JobRun:
     @loop_id.setter
     def loop_id(self, value: str) -> None:
         self.job_id = value
-
-
-# Backwards compatibility alias
-LoopRun = JobRun

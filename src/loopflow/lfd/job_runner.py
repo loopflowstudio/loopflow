@@ -54,19 +54,6 @@ from loopflow.lfd.db import (
 from loopflow.lfd.jobs import count_outstanding
 from loopflow.lfd.models import Job, JobRun, JobStatus
 
-# Backwards compatibility aliases
-Loop = Job
-LoopRun = JobRun
-LoopStatus = JobStatus
-get_loop = get_job
-save_loop_run = save_job_run
-update_loop_iteration = update_job_iteration
-update_loop_pid = update_job_pid
-update_loop_run_pr = update_job_run_pr
-update_loop_run_status = update_job_run_status
-update_loop_run_step = update_job_run_step
-update_loop_status = update_job_status
-
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 SCHEDULER_POLL_INTERVAL = 30  # seconds between slot checks
 
@@ -217,10 +204,6 @@ def run_job_iterations(job: Job) -> None:
     update_job_pid(job.id, None)
 
 
-# Backwards compatibility alias
-run_loop_iterations = run_job_iterations
-
-
 def _build_job_prompt(
     job: Job,
     effective_goals: list,
@@ -261,10 +244,6 @@ def _build_job_prompt(
     prompt = format_prompt(components)
 
     return prompt, step_file
-
-
-# Backwards compatibility alias
-_build_loop_prompt = _build_job_prompt
 
 
 def _run_collector_step(
@@ -357,10 +336,6 @@ def _build_job_inline_prompt(
     combined = f"{goal_section}\n\n---\n\n{step_content}"
     components = replace(components, step=(step_file, combined))
     return format_prompt(components)
-
-
-# Backwards compatibility alias
-_build_loop_inline_prompt = _build_job_inline_prompt
 
 
 def _run_fork_join_group(
@@ -793,10 +768,6 @@ def _create_pr_to_job_main(
     if result.returncode == 0:
         return result.stdout.strip()
     return None
-
-
-# Backwards compatibility alias
-_create_pr_to_loop_main = _create_pr_to_job_main
 
 
 def _auto_merge_pr(worktree_path: Path) -> bool:

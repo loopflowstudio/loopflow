@@ -29,19 +29,6 @@ from loopflow.lfd.launchd import uninstall as launchd_uninstall
 from loopflow.lfd.models import Job, JobStatus, JobType, MergeMode
 from loopflow.lfd.server import run_server
 
-# Backwards compatibility aliases
-Loop = Job
-LoopStatus = JobStatus
-LoopType = JobType
-delete_loop = delete_job
-get_loop = get_job
-get_loop_runs = get_job_runs
-list_loops = list_jobs
-save_loop = save_job
-create_loop = create_job
-start_loop = start_job
-stop_loop = stop_job
-
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 
 app = typer.Typer(help="Loopflow daemon - agent jobs")

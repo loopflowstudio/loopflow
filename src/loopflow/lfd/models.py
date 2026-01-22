@@ -17,244 +17,224 @@ def area_to_slug(area: str) -> str:
     return area.rstrip("/").split("/")[-1].lower()
 
 
-class ExecutionMode(Enum):
-    """How many times the agent runs."""
-
-    CONTINUOUS = "continuous"  # Keep iterating until stopped
-    ONE_SHOT = "one_shot"  # Run once, then done
+# Run: an execution instance of a Flow
 
 
-class TriggerType(Enum):
-    """What causes the agent to run."""
+class RunStatus(Enum):
+    """Status of a Run execution."""
 
-    MANUAL = "manual"  # Started explicitly
-    PATHSET = "pathset"  # File changes on main
-    CRON = "cron"  # Scheduled time
-
-
-class JobType(Enum):
-    """Legacy type enum - combines execution mode and trigger.
-
-    Deprecated: Use execution_mode and trigger_type instead.
-    Kept for backwards compatibility with database and API.
-    """
-
-    LOOP = "loop"  # CONTINUOUS + MANUAL
-    FLOW = "flow"  # ONE_SHOT + MANUAL
-    SUBSCRIBE = "subscribe"  # CONTINUOUS + PATHSET
-    SCHEDULE = "schedule"  # CONTINUOUS + CRON
-
-
-def _job_type_to_mode_trigger(job_type: JobType) -> tuple[ExecutionMode, TriggerType]:
-    """Convert legacy JobType to (ExecutionMode, TriggerType)."""
-    mapping = {
-        JobType.LOOP: (ExecutionMode.CONTINUOUS, TriggerType.MANUAL),
-        JobType.FLOW: (ExecutionMode.ONE_SHOT, TriggerType.MANUAL),
-        JobType.SUBSCRIBE: (ExecutionMode.CONTINUOUS, TriggerType.PATHSET),
-        JobType.SCHEDULE: (ExecutionMode.CONTINUOUS, TriggerType.CRON),
-    }
-    return mapping[job_type]
-
-
-def _mode_trigger_to_job_type(mode: ExecutionMode, trigger: TriggerType) -> JobType:
-    """Convert (ExecutionMode, TriggerType) to legacy JobType."""
-    mapping = {
-        (ExecutionMode.CONTINUOUS, TriggerType.MANUAL): JobType.LOOP,
-        (ExecutionMode.ONE_SHOT, TriggerType.MANUAL): JobType.FLOW,
-        (ExecutionMode.CONTINUOUS, TriggerType.PATHSET): JobType.SUBSCRIBE,
-        (ExecutionMode.CONTINUOUS, TriggerType.CRON): JobType.SCHEDULE,
-        # New combinations default to ONE_SHOT variants
-        (ExecutionMode.ONE_SHOT, TriggerType.PATHSET): JobType.SUBSCRIBE,
-        (ExecutionMode.ONE_SHOT, TriggerType.CRON): JobType.SCHEDULE,
-    }
-    return mapping[(mode, trigger)]
-
-
-class JobStatus(Enum):
-    """Runtime status of a job."""
-
-    IDLE = "idle"  # Not running
-    RUNNING = "running"  # Currently executing an iteration
-    WAITING = "waiting"  # Paused (outstanding >= limit)
-    ERROR = "error"  # Last iteration failed
-
-
-class MergeMode(Enum):
-    """How iteration branches merge to job-main."""
-
-    PR = "pr"  # Accumulate on job-main, human reviews and lands
-    LAND = "land"  # Auto-land to main after each iteration
+    PENDING = "pending"  # Created, not yet started
+    RUNNING = "running"  # Currently executing
+    COMPLETED = "completed"  # Finished successfully
+    FAILED = "failed"  # Finished with error
+    CANCELLED = "cancelled"  # Stopped before completion
 
 
 @dataclass
-class Job:
-    """A job configuration (area + flow + goals combination)."""
+class Run:
+    """An execution instance of a Flow.
+
+    Runs can be spawned by a trigger (Loop, Subscription, Schedule)
+    or created directly (no parent).
+    """
 
     id: str
-    type: JobType
-    area: str  # PRIMARY identifier, required (e.g., "swift/", ".", "src/loopflow/")
+    parent: str | None  # "loop:<id>" | "subscription:<id>" | "schedule:<id>" | None
+
+    flow: str  # Flow name (from .lf/flows/)
+    area: str  # Area of responsibility
     repo: Path
-    job_main: str
-    flow: str | None = None  # pipeline/flow name (e.g. "ship")
-    goals: list[str] = field(default_factory=list)  # goal names from -g flags
-    status: JobStatus = JobStatus.IDLE
-    iteration: int = 0
-    pr_limit: int = 5
-    merge_mode: MergeMode = MergeMode.PR
+    goals: list[str] = field(default_factory=list)
 
-    # Type-specific config
-    project_file: str | None = None  # for flow
-    pathset: str | None = None  # for subscribe (comma-separated)
-    cron: str | None = None  # for schedule
+    status: RunStatus = RunStatus.PENDING
+    iteration: int = 0  # Which iteration of parent (0 for direct runs)
 
-    # Legacy field for backwards compat (deprecated, use goals)
-    goal_name: str | None = None
+    worktree: str | None = None
+    branch: str | None = None
+    current_step: str | None = None
+    error: str | None = None
+    pr_url: str | None = None
 
-    pid: int | None = None  # process ID when running
-    last_main_sha: str | None = None  # for subscribe: last seen main SHA
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
     created_at: datetime = field(default_factory=datetime.now)
 
-    def __init__(
-        self,
-        id: str,
-        type: JobType,
-        area: str,
-        repo: Path,
-        job_main: str | None = None,
-        loop_main: str | None = None,  # backwards compat alias
-        flow: str | None = None,
-        goals: list[str] | None = None,
-        status: JobStatus = JobStatus.IDLE,
-        iteration: int = 0,
-        pr_limit: int = 5,
-        merge_mode: MergeMode = MergeMode.PR,
-        project_file: str | None = None,
-        pathset: str | None = None,
-        cron: str | None = None,
-        goal_name: str | None = None,
-        pid: int | None = None,
-        last_main_sha: str | None = None,
-        created_at: datetime | None = None,
-    ):
-        self.id = id
-        self.type = type
-        self.area = area
-        self.repo = repo
-        # Accept either job_main or loop_main (backwards compat)
-        self.job_main = job_main if job_main is not None else (loop_main or "")
-        self.flow = flow
-        self.goals = goals if goals is not None else []
-        self.status = status
-        self.iteration = iteration
-        self.pr_limit = pr_limit
-        self.merge_mode = merge_mode
-        self.project_file = project_file
-        self.pathset = pathset
-        self.cron = cron
-        self.goal_name = goal_name
-        self.pid = pid
-        self.last_main_sha = last_main_sha
-        self.created_at = created_at if created_at is not None else datetime.now()
-
     def short_id(self) -> str:
-        """Return first 7 chars of ID (like git)."""
         return self.id[:7]
 
     @property
-    def area_slug(self) -> str:
-        """Return area as a lowercase slug for display/naming."""
-        return area_to_slug(self.area)
+    def parent_type(self) -> str | None:
+        return parse_parent(self.parent)[0]
+
+    @property
+    def parent_id(self) -> str | None:
+        return parse_parent(self.parent)[1]
 
     @property
     def goals_display(self) -> str:
-        """Return goals as comma-separated string for display."""
         if not self.goals:
             return "adaptive"
         return ", ".join(self.goals)
 
     @property
     def flow_display(self) -> str:
-        """Return flow display string."""
         return self.flow or "default"
 
-    @property
-    def execution_mode(self) -> ExecutionMode:
-        """Whether this runs once or continuously."""
-        mode, _ = _job_type_to_mode_trigger(self.type)
-        return mode
 
-    @property
-    def trigger_type(self) -> TriggerType:
-        """What causes this to run."""
-        _, trigger = _job_type_to_mode_trigger(self.type)
-        return trigger
+def parse_parent(parent: str | None) -> tuple[str | None, str | None]:
+    """Parse parent string into (type, id) tuple."""
+    if not parent:
+        return None, None
+    kind, id = parent.split(":", 1)
+    return kind, id
 
-    @property
-    def is_one_shot(self) -> bool:
-        """True if this runs once and stops (FLOW type)."""
-        return self.execution_mode == ExecutionMode.ONE_SHOT
 
-    @property
-    def is_triggered(self) -> bool:
-        """True if this waits for external trigger (SUBSCRIBE, SCHEDULE)."""
-        return self.trigger_type != TriggerType.MANUAL
+# Trigger status (shared by Loop, Subscription, Schedule)
 
-    # Backwards compatibility: allow access via loop_main
-    @property
-    def loop_main(self) -> str:
-        return self.job_main
 
-    @loop_main.setter
-    def loop_main(self, value: str) -> None:
-        self.job_main = value
+class TriggerStatus(Enum):
+    """Runtime status of a trigger."""
+
+    IDLE = "idle"  # Not running
+    RUNNING = "running"  # Currently has an active Run
+    WAITING = "waiting"  # Paused (PR limit reached)
+    ERROR = "error"  # Last Run failed
+
+
+class MergeMode(Enum):
+    """How iteration branches merge to main."""
+
+    PR = "pr"  # Accumulate on trigger-main, human reviews and lands
+    LAND = "land"  # Auto-land to main after each iteration
+
+
+# Loop: continuously spawns Runs until stopped
 
 
 @dataclass
-class JobRun:
-    """A single iteration attempt."""
+class Loop:
+    """A continuous runner that spawns Runs."""
 
     id: str
-    job_id: str
-    iteration: int
-    status: JobStatus
-    started_at: datetime
-    ended_at: datetime | None = None
-    worktree: str | None = None
-    current_step: str | None = None
-    error: str | None = None
-    pr_url: str | None = None
+    flow: str
+    area: str
+    repo: Path
+    goals: list[str] = field(default_factory=list)
 
-    def __init__(
-        self,
-        id: str,
-        job_id: str | None = None,
-        loop_id: str | None = None,  # backwards compat alias
-        iteration: int = 0,
-        status: JobStatus = JobStatus.IDLE,
-        started_at: datetime | None = None,
-        ended_at: datetime | None = None,
-        worktree: str | None = None,
-        current_step: str | None = None,
-        error: str | None = None,
-        pr_url: str | None = None,
-    ):
-        self.id = id
-        # Accept either job_id or loop_id (backwards compat)
-        self.job_id = job_id if job_id is not None else (loop_id or "")
-        self.iteration = iteration
-        self.status = status
-        self.started_at = started_at if started_at is not None else datetime.now()
-        self.ended_at = ended_at
-        self.worktree = worktree
-        self.current_step = current_step
-        self.error = error
-        self.pr_url = pr_url
+    status: TriggerStatus = TriggerStatus.IDLE
+    iteration: int = 0
 
-    # Backwards compatibility
+    main_branch: str = ""  # Branch for accumulating work
+    pr_limit: int = 5
+    merge_mode: MergeMode = MergeMode.PR
+
+    pid: int | None = None
+    created_at: datetime = field(default_factory=datetime.now)
+
+    def short_id(self) -> str:
+        return self.id[:7]
+
     @property
-    def loop_id(self) -> str:
-        return self.job_id
+    def area_slug(self) -> str:
+        return area_to_slug(self.area)
 
-    @loop_id.setter
-    def loop_id(self, value: str) -> None:
-        self.job_id = value
+    @property
+    def goals_display(self) -> str:
+        if not self.goals:
+            return "adaptive"
+        return ", ".join(self.goals)
+
+    @property
+    def flow_display(self) -> str:
+        return self.flow or "default"
+
+
+# Subscription: spawns Run when pathset changes on main
+
+
+@dataclass
+class Subscription:
+    """A pathset watcher that spawns Runs when files change."""
+
+    id: str
+    flow: str
+    area: str
+    repo: Path
+    goals: list[str] = field(default_factory=list)
+
+    pathset: str = ""  # Comma-separated paths to watch
+    last_main_sha: str | None = None
+
+    status: TriggerStatus = TriggerStatus.IDLE
+    iteration: int = 0
+
+    main_branch: str = ""
+    pr_limit: int = 5
+    merge_mode: MergeMode = MergeMode.PR
+
+    pid: int | None = None
+    created_at: datetime = field(default_factory=datetime.now)
+
+    def short_id(self) -> str:
+        return self.id[:7]
+
+    @property
+    def area_slug(self) -> str:
+        return area_to_slug(self.area)
+
+    @property
+    def goals_display(self) -> str:
+        if not self.goals:
+            return "adaptive"
+        return ", ".join(self.goals)
+
+    @property
+    def flow_display(self) -> str:
+        return self.flow or "default"
+
+
+# Schedule: spawns Run on cron
+
+
+@dataclass
+class Schedule:
+    """A cron trigger that spawns Runs on schedule."""
+
+    id: str
+    flow: str
+    area: str
+    repo: Path
+    goals: list[str] = field(default_factory=list)
+
+    cron: str = ""  # Cron expression
+
+    status: TriggerStatus = TriggerStatus.IDLE
+    iteration: int = 0
+
+    main_branch: str = ""
+    pr_limit: int = 5
+    merge_mode: MergeMode = MergeMode.PR
+
+    pid: int | None = None
+    created_at: datetime = field(default_factory=datetime.now)
+
+    def short_id(self) -> str:
+        return self.id[:7]
+
+    @property
+    def area_slug(self) -> str:
+        return area_to_slug(self.area)
+
+    @property
+    def goals_display(self) -> str:
+        if not self.goals:
+            return "adaptive"
+        return ", ".join(self.goals)
+
+    @property
+    def flow_display(self) -> str:
+        return self.flow or "default"
+
+
+# Type alias for any trigger
+Trigger = Loop | Subscription | Schedule

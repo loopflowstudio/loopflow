@@ -1,6 +1,6 @@
 """Schedule checking for lfd.
 
-Evaluates cron expressions and triggers jobs on schedule.
+Evaluates cron expressions and triggers schedules on time.
 Designed for laptop use: missed schedules within 24h still trigger on wake.
 """
 
@@ -8,9 +8,9 @@ from datetime import datetime, timedelta
 
 from croniter import croniter
 
-from loopflow.lfd.db import get_latest_job_run, list_jobs
-from loopflow.lfd.jobs import start_job
-from loopflow.lfd.models import Job, JobStatus, TriggerType
+from loopflow.lfd.db import get_latest_run_for_trigger, list_schedules
+from loopflow.lfd.loops import start_schedule
+from loopflow.lfd.models import Schedule, TriggerStatus
 
 # Grace period for missed schedules (laptop was asleep/off)
 SCHEDULE_GRACE_PERIOD = timedelta(hours=24)
@@ -49,36 +49,31 @@ def should_trigger_cron(
     return prev_time > last_run
 
 
-def check_schedule(job: Job) -> bool:
-    """Check if scheduled job should trigger. Returns True if should trigger.
-
-    Caller must ensure job.trigger_type == TriggerType.CRON.
-    """
-    if not job.cron:
+def check_schedule(schedule: Schedule) -> bool:
+    """Check if schedule should trigger. Returns True if should trigger."""
+    if not schedule.cron:
         return False
 
     # Get last completed run
-    last_run = get_latest_job_run(job.id)
+    last_run = get_latest_run_for_trigger("schedule", schedule.id)
     last_time = last_run.ended_at if last_run else None
 
-    return should_trigger_cron(job.cron, last_time)
+    return should_trigger_cron(schedule.cron, last_time)
 
 
 def run_schedule_check() -> list[str]:
     """Check all schedules and trigger as needed.
 
-    Returns list of job IDs that were triggered.
+    Returns list of schedule IDs that were triggered.
     """
     triggered = []
-    for job in list_jobs():
-        if job.trigger_type != TriggerType.CRON:
-            continue
-        if job.status == JobStatus.RUNNING:
+    for schedule in list_schedules():
+        if schedule.status == TriggerStatus.RUNNING:
             continue  # Already running
 
-        if check_schedule(job):
-            result = start_job(job.id)
+        if check_schedule(schedule):
+            result = start_schedule(schedule.id)
             if result:
-                triggered.append(job.id)
+                triggered.append(schedule.id)
 
     return triggered

@@ -1,25 +1,24 @@
 """Subscription checking for lfd.
 
-Monitors file changes on main and triggers jobs when pathsets are modified.
+Monitors file changes on main and triggers subscriptions when pathsets are modified.
 """
 
 import subprocess
 
-from loopflow.lfd.db import list_jobs, update_job_last_sha
-from loopflow.lfd.jobs import start_job
-from loopflow.lfd.models import Job, JobStatus, TriggerType
+from loopflow.lfd.db import list_subscriptions, update_subscription_sha
+from loopflow.lfd.loops import start_subscription
+from loopflow.lfd.models import Subscription, TriggerStatus
 
 
-def check_subscription(job: Job) -> bool:
+def check_subscription(sub: Subscription) -> bool:
     """Check if subscription should trigger. Returns True if triggered.
 
     Updates last_main_sha as a side effect.
-    Caller must ensure job.trigger_type == TriggerType.PATHSET.
     """
-    if not job.pathset:
+    if not sub.pathset:
         return False
 
-    repo = job.repo
+    repo = sub.repo
 
     # Fetch main
     subprocess.run(["git", "fetch", "origin", "main"], cwd=repo, capture_output=True)
@@ -36,18 +35,18 @@ def check_subscription(job: Job) -> bool:
 
     current_sha = result.stdout.strip()
 
-    if current_sha == job.last_main_sha:
+    if current_sha == sub.last_main_sha:
         return False  # No change
 
-    if job.last_main_sha is None:
+    if sub.last_main_sha is None:
         # First run - set baseline, don't trigger
-        update_job_last_sha(job.id, current_sha)
+        update_subscription_sha(sub.id, current_sha)
         return False
 
     # Check if pathset was modified
-    paths = [p.strip() for p in job.pathset.split(",")]
+    paths = [p.strip() for p in sub.pathset.split(",")]
     result = subprocess.run(
-        ["git", "diff", "--name-only", job.last_main_sha, current_sha, "--"] + paths,
+        ["git", "diff", "--name-only", sub.last_main_sha, current_sha, "--"] + paths,
         cwd=repo,
         capture_output=True,
         text=True,
@@ -56,29 +55,27 @@ def check_subscription(job: Job) -> bool:
     changed_files = result.stdout.strip()
     if not changed_files:
         # Main changed but not our paths
-        update_job_last_sha(job.id, current_sha)
+        update_subscription_sha(sub.id, current_sha)
         return False
 
     # Trigger iteration - update SHA before starting
-    update_job_last_sha(job.id, current_sha)
+    update_subscription_sha(sub.id, current_sha)
     return True
 
 
 def run_subscription_check() -> list[str]:
     """Check all subscriptions and trigger as needed.
 
-    Returns list of job IDs that were triggered.
+    Returns list of subscription IDs that were triggered.
     """
     triggered = []
-    for job in list_jobs():
-        if job.trigger_type != TriggerType.PATHSET:
-            continue
-        if job.status == JobStatus.RUNNING:
+    for sub in list_subscriptions():
+        if sub.status == TriggerStatus.RUNNING:
             continue  # Already running
 
-        if check_subscription(job):
-            result = start_job(job.id)
+        if check_subscription(sub):
+            result = start_subscription(sub.id)
             if result:
-                triggered.append(job.id)
+                triggered.append(sub.id)
 
     return triggered

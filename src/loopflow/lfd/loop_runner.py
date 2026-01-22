@@ -1,6 +1,6 @@
-"""Job iteration runner for lfd.
+"""Loop iteration runner for lfd.
 
-Runs iterations of a job until the PR limit is reached or an error occurs.
+Runs iterations of a loop until the PR limit is reached or an error occurs.
 Can be invoked directly as a subprocess for background execution.
 
 When running in background, coordinates with the daemon scheduler to respect
@@ -42,17 +42,17 @@ from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
 from loopflow.lfd.client import notify_event
 from loopflow.lfd.db import (
-    get_job,
-    save_job_run,
-    update_job_iteration,
-    update_job_pid,
-    update_job_run_pr,
-    update_job_run_status,
-    update_job_run_step,
-    update_job_status,
+    get_loop,
+    save_run,
+    update_loop_iteration,
+    update_loop_pid,
+    update_loop_status,
+    update_run_pr,
+    update_run_status,
+    update_run_step,
 )
-from loopflow.lfd.jobs import count_outstanding
-from loopflow.lfd.models import Job, JobRun, JobStatus
+from loopflow.lfd.loops import count_outstanding
+from loopflow.lfd.models import Loop, Run, RunStatus, TriggerStatus
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 SCHEDULER_POLL_INTERVAL = 30  # seconds between slot checks
@@ -66,15 +66,15 @@ class _VariantResult:
     session_id: str
 
 
-def _iteration_branch_prefix(job_main: str) -> str:
-    """Derive iteration branch prefix from job-main.
+def _iteration_branch_prefix(main_branch: str) -> str:
+    """Derive iteration branch prefix from main branch.
 
     'product-engineer-main' → 'product-engineer'
     'product-engineer-1-main' → 'product-engineer-1'
     """
-    if job_main.endswith("-main"):
-        return job_main[:-5]
-    return job_main
+    if main_branch.endswith("-main"):
+        return main_branch[:-5]
+    return main_branch
 
 
 def _scheduler_call(method: str, params: dict | None = None) -> dict | None:
@@ -131,31 +131,26 @@ def _scheduler_release(run_id: str) -> None:
     _scheduler_call("scheduler.release", {"run_id": run_id})
 
 
-def run_job_iterations(job: Job) -> None:
-    """Run job iterations until PR limit is reached or error occurs.
-
-    For FLOW jobs, runs exactly one iteration then stops.
-    For LOOP jobs, runs continuously until pr_limit outstanding.
-    """
+def run_loop_iterations(loop: Loop) -> None:
+    """Run loop iterations until PR limit is reached or error occurs."""
     while True:
-        # Check if we should pause (per-job limit) - skip for one-shot which runs once
-        if not job.is_one_shot:
-            outstanding = count_outstanding(job)
-            if outstanding >= job.pr_limit:
-                update_job_status(job.id, JobStatus.WAITING)
-                notify_event(
-                    "job.waiting",
-                    {
-                        "job_id": job.id,
-                        "area": job.area,
-                        "outstanding": outstanding,
-                        "limit": job.pr_limit,
-                    },
-                )
-                break
+        # Check if we should pause (per-loop limit)
+        outstanding = count_outstanding(loop)
+        if outstanding >= loop.pr_limit:
+            update_loop_status(loop.id, TriggerStatus.WAITING)
+            notify_event(
+                "loop.waiting",
+                {
+                    "loop_id": loop.id,
+                    "area": loop.area,
+                    "outstanding": outstanding,
+                    "limit": loop.pr_limit,
+                },
+            )
+            break
 
         # Run one iteration
-        iteration = job.iteration + 1
+        iteration = loop.iteration + 1
         run_id = str(uuid.uuid4())
 
         # Wait for scheduler slot (global concurrency)
@@ -166,46 +161,41 @@ def run_job_iterations(job: Job) -> None:
             notify_event(
                 "scheduler.waiting",
                 {
-                    "job_id": job.id,
-                    "area": job.area,
+                    "loop_id": loop.id,
+                    "area": loop.area,
                     "reason": reason or "concurrency",
                 },
             )
             time.sleep(SCHEDULER_POLL_INTERVAL)
 
         try:
-            success = run_iteration(job, iteration, run_id)
+            success = run_iteration(loop, iteration, run_id)
             if success:
-                update_job_iteration(job.id, iteration)
-                job.iteration = iteration
+                update_loop_iteration(loop.id, iteration)
+                loop.iteration = iteration
             else:
-                update_job_status(job.id, JobStatus.ERROR)
+                update_loop_status(loop.id, TriggerStatus.ERROR)
                 break
         except Exception as e:
             notify_event(
-                "job.error",
+                "loop.error",
                 {
-                    "job_id": job.id,
-                    "area": job.area,
+                    "loop_id": loop.id,
+                    "area": loop.area,
                     "error": str(e),
                 },
             )
-            update_job_status(job.id, JobStatus.ERROR)
+            update_loop_status(loop.id, TriggerStatus.ERROR)
             break
         finally:
             _scheduler_release(run_id)
 
-        # One-shot jobs run exactly once then stop
-        if job.is_one_shot:
-            update_job_status(job.id, JobStatus.IDLE)
-            break
-
     # Clear pid when done
-    update_job_pid(job.id, None)
+    update_loop_pid(loop.id, None)
 
 
-def _build_job_prompt(
-    job: Job,
+def _build_loop_prompt(
+    loop: Loop,
     effective_goals: list,
     worktree_path: Path,
     step_name: str,
@@ -230,14 +220,6 @@ def _build_job_prompt(
 
     step_file, step_content = components.step
     goal_section = render_goals(effective_goals)
-
-    if job.is_one_shot and job.project_file:
-        try:
-            prompt_content = Path(job.project_file).read_text()
-        except OSError:
-            prompt_content = None
-        if prompt_content:
-            goal_section += f"\n\n<lf:prompt>\n{prompt_content}\n</lf:prompt>"
 
     combined = f"{goal_section}\n\n---\n\n{step_content}"
     components = replace(components, step=(step_file, combined))
@@ -304,8 +286,8 @@ def _cleanup_variant_worktrees(repo_root: Path, results: list[_VariantResult]) -
         remove_worktree(repo_root, r.worktree.name.split(".")[-1])
 
 
-def _build_job_inline_prompt(
-    job: Job,
+def _build_loop_inline_prompt(
+    loop: Loop,
     effective_goals: list,
     worktree_path: Path,
     inline_text: str,
@@ -325,21 +307,13 @@ def _build_job_inline_prompt(
     step_file, step_content = components.step
     goal_section = render_goals(effective_goals)
 
-    if job.is_one_shot and job.project_file:
-        try:
-            prompt_content = Path(job.project_file).read_text()
-        except OSError:
-            prompt_content = None
-        if prompt_content:
-            goal_section += f"\n\n<lf:prompt>\n{prompt_content}\n</lf:prompt>"
-
     combined = f"{goal_section}\n\n---\n\n{step_content}"
     components = replace(components, step=(step_file, combined))
     return format_prompt(components)
 
 
 def _run_fork_join_group(
-    job: Job,
+    loop: Loop,
     flow_name: str,
     worktree_path: Path,
     branch: str,
@@ -379,9 +353,9 @@ def _run_fork_join_group(
 
         wt_name = f"_fork-{branch.replace('/', '-')}-{label.replace(':', '-')}"
         try:
-            wt_path = create_worktree(job.repo, wt_name, base=branch)
+            wt_path = create_worktree(loop.repo, wt_name, base=branch)
         except Exception:
-            _cleanup_variant_worktrees(job.repo, results)
+            _cleanup_variant_worktrees(loop.repo, results)
             return 1
 
         subprocess.run(
@@ -391,8 +365,8 @@ def _run_fork_join_group(
         )
         subprocess.run(["git", "clean", "-fd"], cwd=wt_path, capture_output=True)
 
-        prompt_result = _build_job_prompt(
-            job,
+        prompt_result = _build_loop_prompt(
+            loop,
             effective_goals,
             wt_path,
             step.step,
@@ -400,12 +374,12 @@ def _run_fork_join_group(
             voices=step_voices,
         )
         if not prompt_result:
-            remove_worktree(job.repo, wt_path.name.split(".")[-1])
+            remove_worktree(loop.repo, wt_path.name.split(".")[-1])
             return 1
 
         prompt, _step_file = prompt_result
         session_id = str(uuid.uuid4())
-        step_label = f"{job.area}:{step.step}:{label}"
+        step_label = f"{loop.area}:{step.step}:{label}"
 
         exit_code = _run_collector_step(
             prompt,
@@ -423,18 +397,18 @@ def _run_fork_join_group(
 
     successes = [r for r in results if r.exit_code == 0]
     if not successes:
-        _cleanup_variant_worktrees(job.repo, results)
+        _cleanup_variant_worktrees(loop.repo, results)
         return 1
 
     fork_worktrees = [(r.label, r.worktree) for r in successes]
     join_prompt = build_join_prompt(
         collect_fork_diffs(fork_worktrees),
-        load_join_instructions(join_config.step, job.repo),
-        format_voice_section(join_config.voice, job.repo),
+        load_join_instructions(join_config.step, loop.repo),
+        format_voice_section(join_config.voice, loop.repo),
         flow_name,
     )
-    join_prompt = _build_job_inline_prompt(
-        job,
+    join_prompt = _build_loop_inline_prompt(
+        loop,
         effective_goals,
         worktree_path,
         join_prompt,
@@ -442,7 +416,7 @@ def _run_fork_join_group(
         voices=None,
     )
     if not join_prompt:
-        _cleanup_variant_worktrees(job.repo, results)
+        _cleanup_variant_worktrees(loop.repo, results)
         return 1
 
     join_backend = backend
@@ -457,85 +431,96 @@ def _run_fork_join_group(
         join_variant,
         skip_permissions,
         str(uuid.uuid4()),
-        f"{job.area}:join",
+        f"{loop.area}:join",
         autocommit=True,
     )
 
-    _cleanup_variant_worktrees(job.repo, results)
+    _cleanup_variant_worktrees(loop.repo, results)
     return join_result
 
 
-def run_iteration(job: Job, iteration: int, run_id: str | None = None) -> bool:
-    """Run a single iteration of the job.
+def run_iteration(
+    loop: Loop,
+    iteration: int,
+    run_id: str | None = None,
+    parent_type: str = "loop",
+) -> bool:
+    """Run a single iteration of a trigger.
 
     Args:
-        job: The job to run
+        loop: The trigger (Loop, Subscription, or Schedule) to run
         iteration: Iteration number
         run_id: Optional pre-allocated run ID (for scheduler coordination)
+        parent_type: Type prefix for parent ("loop", "subscription", "schedule")
 
     Returns True if successful, False on error.
     """
-    config = load_config(job.repo)
+    config = load_config(loop.repo)
 
-    # Create iteration branch from job-main
-    prefix = _iteration_branch_prefix(job.job_main)
+    # Create iteration branch from main_branch
+    prefix = _iteration_branch_prefix(loop.main_branch)
     branch = f"{prefix}/{iteration:03d}"
     try:
-        worktree_path = create_worktree(job.repo, branch, base=job.job_main)
+        worktree_path = create_worktree(loop.repo, branch, base=loop.main_branch)
     except WorktreeError as e:
-        notify_event("job.error", {"job_id": job.id, "error": f"Failed to create worktree: {e}"})
+        notify_event("loop.error", {"loop_id": loop.id, "error": f"Failed to create worktree: {e}"})
         return False
 
-    # Create job_run record
-    run = JobRun(
+    # Create run record
+    run = Run(
         id=run_id or str(uuid.uuid4()),
-        job_id=job.id,
+        parent=f"{parent_type}:{loop.id}",
+        flow=loop.flow,
+        area=loop.area,
+        repo=loop.repo,
+        goals=loop.goals,
+        status=RunStatus.RUNNING,
         iteration=iteration,
-        status=JobStatus.RUNNING,
-        started_at=datetime.now(),
         worktree=str(worktree_path),
+        branch=branch,
+        started_at=datetime.now(),
     )
-    save_job_run(run)
+    save_run(run)
 
     notify_event(
-        "job.started",
+        "loop.started",
         {
-            "job_id": job.id,
-            "area": job.area,
-            "goals": job.goals,
-            "flow": job.flow,
+            "loop_id": loop.id,
+            "area": loop.area,
+            "goals": loop.goals,
+            "flow": loop.flow,
             "iteration": iteration,
         },
     )
 
     # Build effective goals (inject adaptive if no mode present)
-    effective_goals = build_effective_goals(job.repo, job.goals)
+    effective_goals = build_effective_goals(loop.repo, loop.goals)
     if not effective_goals:
-        update_job_run_status(run.id, JobStatus.ERROR, error="No valid goals found")
+        update_run_status(run.id, RunStatus.FAILED, error="No valid goals found")
         return False
 
-    flow = job.flow
+    flow = loop.flow
     if not flow:
-        update_job_run_status(run.id, JobStatus.ERROR, error="Flow is required")
-        _cleanup_worktree(job.repo, worktree_path, branch)
+        update_run_status(run.id, RunStatus.FAILED, error="Flow is required")
+        _cleanup_worktree(loop.repo, worktree_path, branch)
         return False
 
     try:
-        flow_def = load_flow(flow, job.repo)
+        flow_def = load_flow(flow, loop.repo)
     except ValueError as exc:
-        update_job_run_status(run.id, JobStatus.ERROR, error=str(exc))
-        _cleanup_worktree(job.repo, worktree_path, branch)
+        update_run_status(run.id, RunStatus.FAILED, error=str(exc))
+        _cleanup_worktree(loop.repo, worktree_path, branch)
         return False
 
     if not flow_def:
-        update_job_run_status(run.id, JobStatus.ERROR, error=f"Unknown flow '{flow}'")
-        _cleanup_worktree(job.repo, worktree_path, branch)
+        update_run_status(run.id, RunStatus.FAILED, error=f"Unknown flow '{flow}'")
+        _cleanup_worktree(loop.repo, worktree_path, branch)
         return False
 
-    resolved = resolve_flow(flow_def, job.repo)
+    resolved = resolve_flow(flow_def, loop.repo)
     if not resolved:
-        update_job_run_status(run.id, JobStatus.ERROR, error=f"Empty flow '{flow}'")
-        _cleanup_worktree(job.repo, worktree_path, branch)
+        update_run_status(run.id, RunStatus.FAILED, error=f"Empty flow '{flow}'")
+        _cleanup_worktree(loop.repo, worktree_path, branch)
         return False
 
     # Get model configuration
@@ -544,12 +529,12 @@ def run_iteration(job: Job, iteration: int, run_id: str | None = None) -> bool:
 
     runner = get_runner(backend)
     if not runner.is_available():
-        update_job_run_status(run.id, JobStatus.ERROR, error=f"'{backend}' CLI not found")
+        update_run_status(run.id, RunStatus.FAILED, error=f"'{backend}' CLI not found")
         return False
 
     skip_permissions = config.yolo if config else False
 
-    context_paths = [job.area] if job.area != "." else None
+    context_paths = [loop.area] if loop.area != "." else None
     if not context_paths and effective_goals[0].area:
         context_paths = effective_goals[0].area
 
@@ -564,14 +549,14 @@ def run_iteration(job: Job, iteration: int, run_id: str | None = None) -> bool:
                 i += 1
 
             if i >= len(resolved) or resolved[i].join is None:
-                update_job_run_status(
-                    run.id, JobStatus.ERROR, error="Fork must be immediately followed by join"
+                update_run_status(
+                    run.id, RunStatus.FAILED, error="Fork must be immediately followed by join"
                 )
-                _cleanup_worktree(job.repo, worktree_path, branch)
+                _cleanup_worktree(loop.repo, worktree_path, branch)
                 return False
 
             result_code = _run_fork_join_group(
-                job,
+                loop,
                 flow_def.name,
                 worktree_path,
                 branch,
@@ -584,8 +569,8 @@ def run_iteration(job: Job, iteration: int, run_id: str | None = None) -> bool:
                 model_variant,
             )
             if result_code != 0:
-                update_job_run_status(run.id, JobStatus.ERROR, error="join failed")
-                _cleanup_worktree(job.repo, worktree_path, branch)
+                update_run_status(run.id, RunStatus.FAILED, error="join failed")
+                _cleanup_worktree(loop.repo, worktree_path, branch)
                 return False
 
             i += 1
@@ -602,19 +587,19 @@ def run_iteration(job: Job, iteration: int, run_id: str | None = None) -> bool:
                     skip_permissions,
                 )
             except RuntimeError as exc:
-                update_job_run_status(run.id, JobStatus.ERROR, error=str(exc))
-                _cleanup_worktree(job.repo, worktree_path, branch)
+                update_run_status(run.id, RunStatus.FAILED, error=str(exc))
+                _cleanup_worktree(loop.repo, worktree_path, branch)
                 return False
 
             branch_steps = step.choose.options[choice]
             branch_flow = FlowDef.from_dict(f"{flow_def.name}:{choice}", {"steps": branch_steps})
-            branch_resolved = resolve_flow(branch_flow, job.repo)
+            branch_resolved = resolve_flow(branch_flow, loop.repo)
             resolved = resolved[:i] + branch_resolved + resolved[i + 1 :]
             continue
 
         if step.join is not None:
-            update_job_run_status(run.id, JobStatus.ERROR, error="Join must follow fork")
-            _cleanup_worktree(job.repo, worktree_path, branch)
+            update_run_status(run.id, RunStatus.FAILED, error="Join must follow fork")
+            _cleanup_worktree(loop.repo, worktree_path, branch)
             return False
 
         if not step.step:
@@ -622,11 +607,11 @@ def run_iteration(job: Job, iteration: int, run_id: str | None = None) -> bool:
             continue
 
         step_name = step.step
-        update_job_run_step(run.id, step_name)
+        update_run_step(run.id, step_name)
         notify_event(
-            "job.step.started",
+            "loop.step.started",
             {
-                "job_id": job.id,
+                "loop_id": loop.id,
                 "step": step_name,
                 "iteration": iteration,
             },
@@ -645,8 +630,8 @@ def run_iteration(job: Job, iteration: int, run_id: str | None = None) -> bool:
             if step.config.voice:
                 step_voices = step.config.voice
 
-        prompt_result = _build_job_prompt(
-            job,
+        prompt_result = _build_loop_prompt(
+            loop,
             effective_goals,
             worktree_path,
             step_name,
@@ -654,10 +639,10 @@ def run_iteration(job: Job, iteration: int, run_id: str | None = None) -> bool:
             voices=step_voices,
         )
         if not prompt_result:
-            update_job_run_status(
-                run.id, JobStatus.ERROR, error=f"Step file not found: {step_name}"
+            update_run_status(
+                run.id, RunStatus.FAILED, error=f"Step file not found: {step_name}"
             )
-            _cleanup_worktree(job.repo, worktree_path, branch)
+            _cleanup_worktree(loop.repo, worktree_path, branch)
             return False
 
         prompt, _step_file = prompt_result
@@ -668,62 +653,62 @@ def run_iteration(job: Job, iteration: int, run_id: str | None = None) -> bool:
             step_variant,
             skip_permissions,
             run.id,
-            f"{job.area}:{step_name}",
+            f"{loop.area}:{step_name}",
         )
 
         notify_event(
-            "job.step.completed",
+            "loop.step.completed",
             {
-                "job_id": job.id,
+                "loop_id": loop.id,
                 "step": step_name,
                 "status": "completed" if result_code == 0 else "error",
             },
         )
 
         if result_code != 0:
-            update_job_run_status(run.id, JobStatus.ERROR, error=f"{step_name} failed")
-            _cleanup_worktree(job.repo, worktree_path, branch)
+            update_run_status(run.id, RunStatus.FAILED, error=f"{step_name} failed")
+            _cleanup_worktree(loop.repo, worktree_path, branch)
             return False
 
         i += 1
 
     # Clear current step
-    update_job_run_step(run.id, None)
+    update_run_step(run.id, None)
 
-    # Create PR to job-main and auto-merge (always)
-    pr_url = _create_pr_to_job_main(job, worktree_path, branch, iteration)
+    # Create PR to main_branch and auto-merge (always)
+    pr_url = _create_pr_to_main_branch(loop, worktree_path, branch, iteration)
     if pr_url:
-        update_job_run_pr(run.id, pr_url)
+        update_run_pr(run.id, pr_url)
         _auto_merge_pr(worktree_path)
 
-        # If LAND mode, also merge job-main to main
-        if job.merge_mode.value == "land":
-            _land_to_main(job)
+        # If LAND mode, also merge main_branch to main
+        if loop.merge_mode.value == "land":
+            _land_to_main(loop)
 
-    update_job_run_status(run.id, JobStatus.IDLE)
+    update_run_status(run.id, RunStatus.COMPLETED)
 
     notify_event(
-        "job.iteration.done",
+        "loop.iteration.done",
         {
-            "job_id": job.id,
-            "area": job.area,
-            "goals": job.goals,
-            "flow": job.flow,
+            "loop_id": loop.id,
+            "area": loop.area,
+            "goals": loop.goals,
+            "flow": loop.flow,
             "iteration": iteration,
             "pr_url": pr_url,
         },
     )
 
     # Cleanup worktree
-    _cleanup_worktree(job.repo, worktree_path, branch)
+    _cleanup_worktree(loop.repo, worktree_path, branch)
 
     return True
 
 
-def _create_pr_to_job_main(
-    job: Job, worktree_path: Path, branch: str, iteration: int
+def _create_pr_to_main_branch(
+    loop: Loop, worktree_path: Path, branch: str, iteration: int
 ) -> str | None:
-    """Push branch and create PR targeting job-main."""
+    """Push branch and create PR targeting main_branch."""
     # Push the branch
     result = subprocess.run(
         ["git", "push", "-u", "origin", branch],
@@ -737,17 +722,17 @@ def _create_pr_to_job_main(
     # Generate PR message
     try:
         message = generate_pr_message(worktree_path)
-        title = f"[{job.area_slug}] {message.title}"
+        title = f"[{loop.area_slug}] {message.title}"
         body = (
-            f"Job: {job.area} [{job.goals_display}]\n"
-            f"Flow: {job.flow_display}\n"
+            f"Loop: {loop.area} [{loop.goals_display}]\n"
+            f"Flow: {loop.flow_display}\n"
             f"Iteration: {iteration}\n\n{message.body}"
         )
     except Exception:
-        title = f"[{job.area_slug}] Iteration {iteration}"
+        title = f"[{loop.area_slug}] Iteration {iteration}"
         body = (
-            f"Job: {job.area} [{job.goals_display}]\n"
-            f"Flow: {job.flow_display}\n"
+            f"Loop: {loop.area} [{loop.goals_display}]\n"
+            f"Flow: {loop.flow_display}\n"
             f"Iteration: {iteration}"
         )
 
@@ -761,7 +746,7 @@ def _create_pr_to_job_main(
         "--body",
         body,
         "--base",
-        job.job_main,
+        loop.main_branch,
     ]
     result = subprocess.run(cmd, cwd=worktree_path, capture_output=True, text=True)
 
@@ -781,17 +766,17 @@ def _auto_merge_pr(worktree_path: Path) -> bool:
     return result.returncode == 0
 
 
-def _land_to_main(job: Job) -> str | None:
-    """Create or update PR from job-main → main, enable auto-merge.
+def _land_to_main(loop: Loop) -> str | None:
+    """Create or update PR from main_branch → main, enable auto-merge.
 
     Returns PR URL on success, None on failure.
     Works from main repo (not worktree, which gets deleted).
     Idempotent: existing PR just gets auto-merge re-enabled.
     """
-    repo = job.repo
+    repo = loop.repo
 
-    # Push job-main
-    subprocess.run(["git", "push", "origin", job.job_main], cwd=repo, capture_output=True)
+    # Push main_branch
+    subprocess.run(["git", "push", "origin", loop.main_branch], cwd=repo, capture_output=True)
 
     # Check for existing PR
     result = subprocess.run(
@@ -800,7 +785,7 @@ def _land_to_main(job: Job) -> str | None:
             "pr",
             "list",
             "--head",
-            job.job_main,
+            loop.main_branch,
             "--base",
             "main",
             "--json",
@@ -833,11 +818,11 @@ def _land_to_main(job: Job) -> str | None:
             "--base",
             "main",
             "--head",
-            job.job_main,
+            loop.main_branch,
             "--title",
-            f"[{job.area_slug}] Land accumulated work",
+            f"[{loop.area_slug}] Land accumulated work",
             "--body",
-            f"Auto-land from job: {job.area} [{job.goals_display}] (flow: {job.flow_display})",
+            f"Auto-land from loop: {loop.area} [{loop.goals_display}] (flow: {loop.flow_display})",
         ],
         cwd=repo,
         capture_output=True,
@@ -870,19 +855,19 @@ def _cleanup_worktree(repo: Path, worktree_path: Path, branch: str) -> None:
 
 
 def main() -> None:
-    """Entry point for background job runner."""
+    """Entry point for background loop runner."""
     if len(sys.argv) != 2:
-        print("Usage: python -m loopflow.lfd.job_runner <job_id>", file=sys.stderr)
+        print("Usage: python -m loopflow.lfd.loop_runner <loop_id>", file=sys.stderr)
         sys.exit(1)
 
-    job_id = sys.argv[1]
-    job = get_job(job_id)
+    loop_id = sys.argv[1]
+    loop = get_loop(loop_id)
 
-    if not job:
-        print(f"Job not found: {job_id}", file=sys.stderr)
+    if not loop:
+        print(f"Loop not found: {loop_id}", file=sys.stderr)
         sys.exit(1)
 
-    run_job_iterations(job)
+    run_loop_iterations(loop)
 
 
 if __name__ == "__main__":

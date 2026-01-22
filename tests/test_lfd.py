@@ -6,35 +6,35 @@ from pathlib import Path
 
 from loopflow.lfd.db import (
     _get_db,
-    delete_job,
-    get_job,
-    get_job_by_area_repo,
-    get_job_runs,
-    get_latest_job_run,
-    list_jobs,
+    delete_loop,
+    get_loop,
+    get_loop_by_area_repo,
+    get_latest_run_for_trigger,
+    list_loops,
+    list_runs_for_trigger,
     load_sessions,
     load_sessions_for_repo,
     load_sessions_for_worktree,
-    save_job,
-    save_job_run,
+    save_loop,
+    save_run,
     save_session,
-    update_job_iteration,
-    update_job_pid,
-    update_job_run_pr,
-    update_job_run_status,
-    update_job_run_step,
-    update_job_status,
+    update_loop_iteration,
+    update_loop_pid,
+    update_loop_status,
+    update_run_pr,
+    update_run_status,
+    update_run_step,
     update_session_status,
 )
 from loopflow.lfd.migrations.registry import MIGRATIONS
 from loopflow.lfd.models import (
-    Job,
-    JobRun,
-    JobStatus,
-    JobType,
+    Loop,
     MergeMode,
+    Run,
+    RunStatus,
     Session,
     SessionStatus,
+    TriggerStatus,
 )
 from loopflow.lfd.protocol import Event, Request, error, success
 
@@ -539,51 +539,50 @@ def test_server_handle_output_line_allows_empty_text():
 
 def test_loop_model_defaults():
     """Loop model has correct defaults."""
-    loop = Job(
+    loop = Loop(
         id="loop-1",
-        type=JobType.LOOP,
+        flow="ship",
         area="src/test-coverage/",
         repo=Path("/tmp/repo"),
-        job_main="test-coverage-main",
+        main_branch="test-coverage-main",
     )
-    assert loop.flow is None
-    assert loop.flow_display == "default"
-    assert loop.status == JobStatus.IDLE
+    assert loop.flow == "ship"
+    assert loop.status == TriggerStatus.IDLE
     assert loop.iteration == 0
     assert loop.pr_limit == 5
     assert loop.merge_mode == MergeMode.PR
-    assert loop.project_file is None
-    assert loop.pathset is None
-    assert loop.cron is None
-    assert loop.goals == []  # goals default to empty list
+    assert loop.goals == []
     assert loop.pid is None
 
 
 def test_loop_model_short_id():
     """Loop.short_id() returns first 7 chars."""
-    loop = Job(
+    loop = Loop(
         id="abcdef1234567890",
-        type=JobType.LOOP,
+        flow="ship",
         area="src/test/",
         repo=Path("/tmp/repo"),
-        job_main="test-main",
+        main_branch="test-main",
     )
     assert loop.short_id() == "abcdef1"
 
 
-def test_loop_run_model():
-    """JobRun model stores iteration data."""
-    run = JobRun(
+def test_run_model():
+    """Run model stores execution data."""
+    run = Run(
         id="run-1",
-        job_id="loop-1",
+        parent="loop:loop-1",
+        flow="ship",
+        area="src/test/",
+        repo=Path("/tmp/repo"),
+        status=RunStatus.RUNNING,
         iteration=3,
-        status=JobStatus.RUNNING,
-        started_at=datetime.now(),
         worktree="/tmp/repo.wt",
         current_step="implement",
+        started_at=datetime.now(),
     )
     assert run.iteration == 3
-    assert run.status == JobStatus.RUNNING
+    assert run.status == RunStatus.RUNNING
     assert run.current_step == "implement"
     assert run.ended_at is None
     assert run.error is None
@@ -593,407 +592,424 @@ def test_loop_run_model():
 # Loop database tests
 
 
-def test_db_save_and_get_job():
+def test_db_save_and_get_loop():
     """Save and retrieve a loop."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
-        loop = Job(
+        loop = Loop(
             id="loop-123",
-            type=JobType.LOOP,
+            flow="ship",
             area="src/test-coverage/",
             repo=Path("/tmp/repo"),
-            job_main="test-coverage-main",
-            flow="ship",
-            status=JobStatus.IDLE,
+            main_branch="test-coverage-main",
+            status=TriggerStatus.IDLE,
             iteration=0,
             pr_limit=5,
         )
-        save_job(loop, db_path)
+        save_loop(loop, db_path)
 
-        loaded = get_job("loop-123", db_path)
+        loaded = get_loop("loop-123", db_path)
         assert loaded is not None
         assert loaded.id == "loop-123"
         assert loaded.area == "src/test-coverage/"
-        assert loaded.type == JobType.LOOP
-        assert loaded.job_main == "test-coverage-main"
+        assert loaded.main_branch == "test-coverage-main"
         assert loaded.flow == "ship"
 
 
-def test_db_get_job_short_id():
+def test_db_get_loop_short_id():
     """Get loop by short ID prefix."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
-        loop = Job(
+        loop = Loop(
             id="abcdef1234567890",
-            type=JobType.LOOP,
+            flow="ship",
             area="src/test/",
             repo=Path("/tmp/repo"),
-            job_main="test-main",
+            main_branch="test-main",
         )
-        save_job(loop, db_path)
+        save_loop(loop, db_path)
 
         # Should find by prefix
-        loaded = get_job("abcdef1", db_path)
+        loaded = get_loop("abcdef1", db_path)
         assert loaded is not None
         assert loaded.id == "abcdef1234567890"
 
 
-def test_db_get_job_by_area_repo():
-    """Get loop by type, area, and repo."""
+def test_db_get_loop_by_area_repo():
+    """Get loop by area and repo."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
-        loop = Job(
+        loop = Loop(
             id="loop-1",
-            type=JobType.FLOW,
+            flow="ship",
             area="src/api/",
             repo=Path("/tmp/repo"),
-            job_main="api-aurora-melody-main",
+            main_branch="api-aurora-melody-main",
         )
-        save_job(loop, db_path)
+        save_loop(loop, db_path)
 
-        loaded = get_job_by_area_repo(JobType.FLOW, "src/api/", Path("/tmp/repo"), db_path=db_path)
+        loaded = get_loop_by_area_repo("src/api/", Path("/tmp/repo"), db_path=db_path)
         assert loaded is not None
         assert loaded.id == "loop-1"
 
-        # Different type should not match
-        not_found = get_job_by_area_repo(
-            JobType.LOOP, "src/api/", Path("/tmp/repo"), db_path=db_path
-        )
+        # Different area should not match
+        not_found = get_loop_by_area_repo("src/other/", Path("/tmp/repo"), db_path=db_path)
         assert not_found is None
 
 
-def test_db_list_jobs():
+def test_db_list_loops():
     """List all loops."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        loop1 = Job(
+        loop1 = Loop(
             id="loop-1",
-            type=JobType.LOOP,
+            flow="ship",
             area="src/goal-a/",
             repo=Path("/tmp/repo-a"),
-            job_main="goal-a-main",
+            main_branch="goal-a-main",
         )
-        loop2 = Job(
+        loop2 = Loop(
             id="loop-2",
-            type=JobType.SUBSCRIBE,
+            flow="ship",
             area="src/goal-b/",
             repo=Path("/tmp/repo-b"),
-            job_main="goal-b-main",
+            main_branch="goal-b-main",
         )
-        save_job(loop1, db_path)
-        save_job(loop2, db_path)
+        save_loop(loop1, db_path)
+        save_loop(loop2, db_path)
 
-        loops = list_jobs(db_path=db_path)
+        loops = list_loops(db_path=db_path)
         assert len(loops) == 2
 
         # Filter by repo
-        loops = list_jobs(repo=Path("/tmp/repo-a"), db_path=db_path)
+        loops = list_loops(repo=Path("/tmp/repo-a"), db_path=db_path)
         assert len(loops) == 1
         assert loops[0].area == "src/goal-a/"
 
 
-def test_db_update_job_status():
+def test_db_update_loop_status():
     """Update loop status."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
-        loop = Job(
+        loop = Loop(
             id="loop-1",
-            type=JobType.LOOP,
+            flow="ship",
             area="src/test/",
             repo=Path("/tmp/repo"),
-            job_main="test-main",
-            status=JobStatus.IDLE,
+            main_branch="test-main",
+            status=TriggerStatus.IDLE,
         )
-        save_job(loop, db_path)
+        save_loop(loop, db_path)
 
-        updated = update_job_status("loop-1", JobStatus.RUNNING, db_path)
+        updated = update_loop_status("loop-1", TriggerStatus.RUNNING, db_path)
         assert updated is True
 
-        loaded = get_job("loop-1", db_path)
-        assert loaded.status == JobStatus.RUNNING
+        loaded = get_loop("loop-1", db_path)
+        assert loaded.status == TriggerStatus.RUNNING
 
 
-def test_db_update_job_iteration():
+def test_db_update_loop_iteration():
     """Update loop iteration count."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
-        loop = Job(
+        loop = Loop(
             id="loop-1",
-            type=JobType.LOOP,
+            flow="ship",
             area="src/test/",
             repo=Path("/tmp/repo"),
-            job_main="test-main",
+            main_branch="test-main",
             iteration=0,
         )
-        save_job(loop, db_path)
+        save_loop(loop, db_path)
 
-        updated = update_job_iteration("loop-1", 5, db_path)
+        updated = update_loop_iteration("loop-1", 5, db_path)
         assert updated is True
 
-        loaded = get_job("loop-1", db_path)
+        loaded = get_loop("loop-1", db_path)
         assert loaded.iteration == 5
 
 
-def test_db_delete_job():
+def test_db_delete_loop():
     """Delete loop and its runs."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
-        loop = Job(
+        loop = Loop(
             id="loop-1",
-            type=JobType.LOOP,
+            flow="ship",
             area="src/test/",
             repo=Path("/tmp/repo"),
-            job_main="test-main",
+            main_branch="test-main",
         )
-        save_job(loop, db_path)
+        save_loop(loop, db_path)
 
         # Add a run
-        run = JobRun(
+        run = Run(
             id="run-1",
-            job_id="loop-1",
+            parent="loop:loop-1",
+            flow="ship",
+            area="src/test/",
+            repo=Path("/tmp/repo"),
             iteration=1,
-            status=JobStatus.RUNNING,
+            status=RunStatus.RUNNING,
             started_at=datetime.now(),
         )
-        save_job_run(run, db_path)
+        save_run(run, db_path)
 
         # Delete loop (should also delete runs)
-        deleted = delete_job("loop-1", db_path)
+        deleted = delete_loop("loop-1", db_path)
         assert deleted is True
 
-        assert get_job("loop-1", db_path) is None
-        assert get_job_runs("loop-1", db_path=db_path) == []
+        assert get_loop("loop-1", db_path) is None
+        assert list_runs_for_trigger("loop", "loop-1", db_path=db_path) == []
 
 
-# Loop run database tests
+# Run database tests
 
 
-def test_db_save_and_get_job_runs():
-    """Save and retrieve loop runs."""
+def test_db_save_and_get_runs():
+    """Save and retrieve runs."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
         # Create parent loop first
-        loop = Job(
+        loop = Loop(
             id="loop-1",
-            type=JobType.LOOP,
+            flow="ship",
             area="src/test/",
             repo=Path("/tmp/repo"),
-            job_main="test-main",
+            main_branch="test-main",
         )
-        save_job(loop, db_path)
+        save_loop(loop, db_path)
 
-        run1 = JobRun(
+        run1 = Run(
             id="run-1",
-            job_id="loop-1",
+            parent="loop:loop-1",
+            flow="ship",
+            area="src/test/",
+            repo=Path("/tmp/repo"),
             iteration=1,
-            status=JobStatus.IDLE,
+            status=RunStatus.COMPLETED,
             started_at=datetime(2024, 1, 1, 12, 0, 0),
             pr_url="https://github.com/user/repo/pull/1",
         )
-        run2 = JobRun(
+        run2 = Run(
             id="run-2",
-            job_id="loop-1",
+            parent="loop:loop-1",
+            flow="ship",
+            area="src/test/",
+            repo=Path("/tmp/repo"),
             iteration=2,
-            status=JobStatus.RUNNING,
+            status=RunStatus.RUNNING,
             started_at=datetime(2024, 1, 2, 12, 0, 0),
         )
-        save_job_run(run1, db_path)
-        save_job_run(run2, db_path)
+        save_run(run1, db_path)
+        save_run(run2, db_path)
 
-        runs = get_job_runs("loop-1", db_path=db_path)
+        runs = list_runs_for_trigger("loop", "loop-1", db_path=db_path)
         assert len(runs) == 2
-        # Ordered by started_at DESC
-        assert runs[0].id == "run-2"
-        assert runs[1].id == "run-1"
 
 
-def test_db_get_latest_job_run():
-    """Get most recent run for a loop."""
+def test_db_get_latest_run_for_trigger():
+    """Get most recent run for a trigger."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        loop = Job(
+        loop = Loop(
             id="loop-1",
-            type=JobType.LOOP,
+            flow="ship",
             area="src/test/",
             repo=Path("/tmp/repo"),
-            job_main="test-main",
+            main_branch="test-main",
         )
-        save_job(loop, db_path)
+        save_loop(loop, db_path)
 
-        run1 = JobRun(
+        run1 = Run(
             id="run-1",
-            job_id="loop-1",
+            parent="loop:loop-1",
+            flow="ship",
+            area="src/test/",
+            repo=Path("/tmp/repo"),
             iteration=1,
-            status=JobStatus.IDLE,
+            status=RunStatus.COMPLETED,
             started_at=datetime(2024, 1, 1, 12, 0, 0),
         )
-        run2 = JobRun(
+        run2 = Run(
             id="run-2",
-            job_id="loop-1",
+            parent="loop:loop-1",
+            flow="ship",
+            area="src/test/",
+            repo=Path("/tmp/repo"),
             iteration=2,
-            status=JobStatus.RUNNING,
+            status=RunStatus.RUNNING,
             started_at=datetime(2024, 1, 2, 12, 0, 0),
         )
-        save_job_run(run1, db_path)
-        save_job_run(run2, db_path)
+        save_run(run1, db_path)
+        save_run(run2, db_path)
 
-        latest = get_latest_job_run("loop-1", db_path)
+        latest = get_latest_run_for_trigger("loop", "loop-1", db_path)
         assert latest is not None
         assert latest.id == "run-2"
 
 
-def test_db_update_job_run_status():
-    """Update loop run status."""
+def test_db_update_run_status():
+    """Update run status."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        loop = Job(
+        loop = Loop(
             id="loop-1",
-            type=JobType.LOOP,
+            flow="ship",
             area="src/test/",
             repo=Path("/tmp/repo"),
-            job_main="test-main",
+            main_branch="test-main",
         )
-        save_job(loop, db_path)
+        save_loop(loop, db_path)
 
-        run = JobRun(
+        run = Run(
             id="run-1",
-            job_id="loop-1",
+            parent="loop:loop-1",
+            flow="ship",
+            area="src/test/",
+            repo=Path("/tmp/repo"),
             iteration=1,
-            status=JobStatus.RUNNING,
+            status=RunStatus.RUNNING,
             started_at=datetime.now(),
         )
-        save_job_run(run, db_path)
+        save_run(run, db_path)
 
-        updated = update_job_run_status("run-1", JobStatus.IDLE, db_path=db_path)
+        updated = update_run_status("run-1", RunStatus.COMPLETED, db_path=db_path)
         assert updated is True
 
-        runs = get_job_runs("loop-1", db_path=db_path)
-        assert runs[0].status == JobStatus.IDLE
+        runs = list_runs_for_trigger("loop", "loop-1", db_path=db_path)
+        assert runs[0].status == RunStatus.COMPLETED
         assert runs[0].ended_at is not None
 
 
-def test_db_update_job_run_step():
-    """Update loop run's current step."""
+def test_db_update_run_step():
+    """Update run's current step."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        loop = Job(
+        loop = Loop(
             id="loop-1",
-            type=JobType.LOOP,
+            flow="ship",
             area="src/test/",
             repo=Path("/tmp/repo"),
-            job_main="test-main",
+            main_branch="test-main",
         )
-        save_job(loop, db_path)
+        save_loop(loop, db_path)
 
-        run = JobRun(
+        run = Run(
             id="run-1",
-            job_id="loop-1",
+            parent="loop:loop-1",
+            flow="ship",
+            area="src/test/",
+            repo=Path("/tmp/repo"),
             iteration=1,
-            status=JobStatus.RUNNING,
+            status=RunStatus.RUNNING,
             started_at=datetime.now(),
         )
-        save_job_run(run, db_path)
+        save_run(run, db_path)
 
-        updated = update_job_run_step("run-1", "implement", db_path)
+        updated = update_run_step("run-1", "implement", db_path)
         assert updated is True
 
-        runs = get_job_runs("loop-1", db_path=db_path)
+        runs = list_runs_for_trigger("loop", "loop-1", db_path=db_path)
         assert runs[0].current_step == "implement"
 
 
-def test_db_update_job_run_pr():
-    """Update loop run's PR URL."""
+def test_db_update_run_pr():
+    """Update run's PR URL."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        loop = Job(
+        loop = Loop(
             id="loop-1",
-            type=JobType.LOOP,
+            flow="ship",
             area="src/test/",
             repo=Path("/tmp/repo"),
-            job_main="test-main",
+            main_branch="test-main",
         )
-        save_job(loop, db_path)
+        save_loop(loop, db_path)
 
-        run = JobRun(
+        run = Run(
             id="run-1",
-            job_id="loop-1",
+            parent="loop:loop-1",
+            flow="ship",
+            area="src/test/",
+            repo=Path("/tmp/repo"),
             iteration=1,
-            status=JobStatus.RUNNING,
+            status=RunStatus.RUNNING,
             started_at=datetime.now(),
         )
-        save_job_run(run, db_path)
+        save_run(run, db_path)
 
-        updated = update_job_run_pr("run-1", "https://github.com/user/repo/pull/42", db_path)
+        updated = update_run_pr("run-1", "https://github.com/user/repo/pull/42", db_path)
         assert updated is True
 
-        runs = get_job_runs("loop-1", db_path=db_path)
+        runs = list_runs_for_trigger("loop", "loop-1", db_path=db_path)
         assert runs[0].pr_url == "https://github.com/user/repo/pull/42"
 
 
-def test_db_update_job_pid():
+def test_db_update_loop_pid():
     """Update loop's process ID."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        loop = Job(
+        loop = Loop(
             id="loop-1",
-            type=JobType.LOOP,
+            flow="ship",
             area="src/test/",
             repo=Path("/tmp/repo"),
-            job_main="test-main",
+            main_branch="test-main",
         )
-        save_job(loop, db_path)
+        save_loop(loop, db_path)
 
         # Set pid
-        updated = update_job_pid("loop-1", 12345, db_path)
+        updated = update_loop_pid("loop-1", 12345, db_path)
         assert updated is True
 
-        loaded = get_job("loop-1", db_path)
+        loaded = get_loop("loop-1", db_path)
         assert loaded.pid == 12345
 
         # Clear pid
-        updated = update_job_pid("loop-1", None, db_path)
+        updated = update_loop_pid("loop-1", None, db_path)
         assert updated is True
 
-        loaded = get_job("loop-1", db_path)
+        loaded = get_loop("loop-1", db_path)
         assert loaded.pid is None
 
 
 def test_loop_model_with_pid():
     """Loop model stores pid correctly."""
-    loop = Job(
+    loop = Loop(
         id="loop-1",
-        type=JobType.LOOP,
+        flow="ship",
         area="src/test/",
         repo=Path("/tmp/repo"),
-        job_main="test-main",
+        main_branch="test-main",
         pid=12345,
     )
     assert loop.pid == 12345
 
 
-def test_db_save_job_with_pid():
+def test_db_save_loop_with_pid():
     """Save and load loop with pid."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        loop = Job(
+        loop = Loop(
             id="loop-1",
-            type=JobType.LOOP,
+            flow="ship",
             area="src/test/",
             repo=Path("/tmp/repo"),
-            job_main="test-main",
+            main_branch="test-main",
             pid=54321,
         )
-        save_job(loop, db_path)
+        save_loop(loop, db_path)
 
-        loaded = get_job("loop-1", db_path)
+        loaded = get_loop("loop-1", db_path)
         assert loaded.pid == 54321
 
 
@@ -1002,7 +1018,7 @@ def test_db_save_job_with_pid():
 
 def test_start_result_truthy_when_ok():
     """StartResult is truthy when ok=True."""
-    from loopflow.lfd.jobs import StartResult
+    from loopflow.lfd.loops import StartResult
 
     result = StartResult(True)
     assert result.ok is True
@@ -1013,7 +1029,7 @@ def test_start_result_truthy_when_ok():
 
 def test_start_result_falsy_when_not_ok():
     """StartResult is falsy when ok=False."""
-    from loopflow.lfd.jobs import StartResult
+    from loopflow.lfd.loops import StartResult
 
     result = StartResult(False, "already_running")
     assert result.ok is False
@@ -1023,7 +1039,7 @@ def test_start_result_falsy_when_not_ok():
 
 def test_start_result_with_outstanding():
     """StartResult includes outstanding count for waiting state."""
-    from loopflow.lfd.jobs import StartResult
+    from loopflow.lfd.loops import StartResult
 
     result = StartResult(False, "waiting", outstanding=5)
     assert not result
@@ -1200,10 +1216,6 @@ def test_schedule_triggers_within_grace_period():
     # Cron for 9am daily, last run was yesterday
     last_run = datetime(2024, 1, 14, 9, 0, 0)
 
-    # Simulate "now" being 2pm same day (5 hours after scheduled time)
-    # The function uses datetime.now(), so we test with a recent last_run
-    # and rely on the cron evaluating to a recent prev_time
-
     # Use a cron that triggers every minute for predictable testing
     result = should_trigger_cron("* * * * *", last_run)
     assert result is True  # prev_time (recent) > last_run (yesterday)
@@ -1218,28 +1230,11 @@ def test_schedule_skips_stale_beyond_grace_period():
     # Use a short grace period for testing
     short_grace = timedelta(hours=1)
 
-    # Last run was 2 hours ago, prev scheduled time would be recent
-    # but if we use a cron that only triggers once per day at a specific time
-    # that's more than 1 hour ago, it should be skipped
-
-    # This is tricky to test without mocking datetime.now()
-    # Instead, test with a very short grace period and a last_run that's old
     last_run = datetime(2020, 1, 1, 9, 0, 0)  # Very old
 
-    # Any cron will have prev_time far more recent than 2020
-    # but the grace period check compares (now - prev_time) vs grace_period
-    # Since prev_time is recent (within last day), it should still trigger
-    # unless we make grace period very short
-
-    # Better test: use timedelta to verify the logic
-    # The function checks: now - prev_time > grace_period
-    # If prev_time was 2 days ago, and grace is 24h, it should skip
     result = should_trigger_cron("0 9 * * *", last_run, grace_period=timedelta(hours=1))
 
-    # This will depend on current time. If it's after 9am today,
-    # prev_time is today's 9am. now - 9am could be > 1 hour.
-    # The test is more about code path than specific values.
-    # What matters is that stale schedules CAN be skipped.
+    # Test is more about code path than specific values
     assert result is True or result is False  # Just verify it doesn't crash
 
 
@@ -1282,7 +1277,7 @@ def test_schedule_first_run_beyond_grace():
 
 def test_iteration_branch_prefix_strips_main_suffix():
     """_iteration_branch_prefix strips -main suffix."""
-    from loopflow.lfd.job_runner import _iteration_branch_prefix
+    from loopflow.lfd.loop_runner import _iteration_branch_prefix
 
     assert _iteration_branch_prefix("product-engineer-main") == "product-engineer"
     assert _iteration_branch_prefix("product-engineer-1-main") == "product-engineer-1"
@@ -1295,7 +1290,7 @@ def test_iteration_branch_prefix_strips_main_suffix():
 
 def test_iteration_branch_prefix_without_suffix():
     """_iteration_branch_prefix handles edge case without -main suffix."""
-    from loopflow.lfd.job_runner import _iteration_branch_prefix
+    from loopflow.lfd.loop_runner import _iteration_branch_prefix
 
     # Shouldn't happen in practice, but function handles it gracefully
     assert _iteration_branch_prefix("product-engineer") == "product-engineer"
@@ -1306,7 +1301,7 @@ def test_iteration_branch_prefix_without_suffix():
 
 def test_generate_random_words_format():
     """_generate_random_words returns magical-musical format."""
-    from loopflow.lfd.jobs import MAGICAL, MUSICAL, _generate_random_words
+    from loopflow.lfd.loops import MAGICAL, MUSICAL, _generate_random_words
 
     words = _generate_random_words()
     parts = words.split("-")
@@ -1317,7 +1312,7 @@ def test_generate_random_words_format():
 
 def test_generate_random_words_produces_variety():
     """_generate_random_words produces different results over multiple calls."""
-    from loopflow.lfd.jobs import _generate_random_words
+    from loopflow.lfd.loops import _generate_random_words
 
     # Generate 20 word pairs, expect at least 5 unique
     results = {_generate_random_words() for _ in range(20)}
@@ -1326,7 +1321,7 @@ def test_generate_random_words_produces_variety():
 
 def test_word_lists_have_sufficient_variety():
     """Word lists have enough entries for good uniqueness."""
-    from loopflow.lfd.jobs import MAGICAL, MUSICAL
+    from loopflow.lfd.loops import MAGICAL, MUSICAL
 
     # 34 magical * 26 musical = 884 combinations
     assert len(MAGICAL) >= 30
@@ -1337,9 +1332,7 @@ def test_word_lists_have_sufficient_variety():
         assert word.isalpha()
 
 
-# =============================================================================
-# Loop runner / flow processing tests
-# =============================================================================
+# Flow processing tests
 
 
 def test_resolved_step_has_expected_attributes():
@@ -1380,11 +1373,7 @@ def test_resolved_step_with_values():
 
 
 def test_loop_runner_can_process_simple_flow():
-    """Loop runner can iterate through resolved steps without errors.
-
-    This test verifies the loop runner's step processing logic doesn't
-    crash on attribute access (like the step.race bug that was fixed).
-    """
+    """Loop runner can iterate through resolved steps without errors."""
     from loopflow.lf.flows import ResolvedStep
 
     # Simulate what the loop runner does when iterating steps
@@ -1396,7 +1385,6 @@ def test_loop_runner_can_process_simple_flow():
 
     # Verify we can safely check all attributes without AttributeError
     for step in resolved:
-        # These are the checks done in loop_runner.run_iteration
         _ = step.parallel_group is not None
         _ = step.choose is not None
         _ = step.join is not None

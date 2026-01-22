@@ -13,13 +13,16 @@ from pathlib import Path
 
 from loopflow.lfd.migrations.registry import MIGRATIONS
 from loopflow.lfd.models import (
-    Job,
-    JobRun,
-    JobStatus,
-    JobType,
+    Loop,
     MergeMode,
+    Run,
+    RunStatus,
+    Schedule,
     Session,
     SessionStatus,
+    Subscription,
+    Trigger,
+    TriggerStatus,
 )
 from loopflow.lfd.process import is_process_running
 
@@ -47,18 +50,6 @@ def _get_db(db_path: Path | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     _run_migrations(conn)
-
-    mismatch = _check_schema(conn)
-    if mismatch:
-        conn.close()
-        print(f"[lfd] Schema mismatch: {mismatch}", file=sys.stderr)
-        print(f"[lfd] Resetting database: {db_path}", file=sys.stderr)
-        db_path.unlink()
-        _init_db(db_path)
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        _run_migrations(conn)
-
     return conn
 
 
@@ -82,50 +73,26 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
         )
         conn.commit()
 
-def _check_schema(conn: sqlite3.Connection) -> str | None:
-    """Check schema matches code expectations. Returns error message or None if OK."""
-    cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    tables = {row[0] for row in cursor.fetchall()}
-
-    required = {"sessions", "loops", "loop_runs", "summaries"}
-    missing = required - tables
-
-    if not missing:
-        return None
-
-    # Check for common mismatch: jobs/loops rename from branch switching
-    if "loops" in missing and "jobs" in tables:
-        return "found 'jobs' table but code expects 'loops' (branch switch?)"
-
-    return f"missing tables: {missing}"
-
 
 # Process status checks
 
 
-def update_dead_runs(db_path: Path | None = None) -> int:
-    """Mark jobs as idle if their process is no longer running."""
+def update_dead_processes(db_path: Path | None = None) -> int:
+    """Mark triggers as idle if their process is no longer running."""
     conn = _get_db(db_path)
-
-    # Handle both pre and post migration table names
-    cursor = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('jobs', 'loops')"
-    )
-    tables = {row[0] for row in cursor.fetchall()}
-    table_name = "jobs" if "jobs" in tables else "loops"
-
-    cursor = conn.execute(
-        f"SELECT id, pid FROM {table_name} WHERE status = 'running' AND pid IS NOT NULL"
-    )
-
     count = 0
-    for row in cursor.fetchall():
-        if not is_process_running(row["pid"]):
-            conn.execute(
-                f"UPDATE {table_name} SET status = 'idle', pid = NULL WHERE id = ?",
-                (row["id"],),
-            )
-            count += 1
+
+    for table in ["loops", "subscriptions", "schedules"]:
+        cursor = conn.execute(
+            f"SELECT id, pid FROM {table} WHERE status = 'running' AND pid IS NOT NULL"
+        )
+        for row in cursor.fetchall():
+            if not is_process_running(row["pid"]):
+                conn.execute(
+                    f"UPDATE {table} SET status = 'idle', pid = NULL WHERE id = ?",
+                    (row["id"],),
+                )
+                count += 1
 
     conn.commit()
     conn.close()
@@ -270,127 +237,294 @@ def _session_from_row(row: dict) -> Session:
     )
 
 
-# Job functions
+# Runs
 
 
-def _get_table_name(conn: sqlite3.Connection) -> str:
-    """Get the current table name (jobs or loops depending on migration status)."""
-    cursor = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('jobs', 'loops')"
-    )
-    tables = {row[0] for row in cursor.fetchall()}
-    return "jobs" if "jobs" in tables else "loops"
-
-
-def _get_column_name(conn: sqlite3.Connection, table: str, new_name: str, old_name: str) -> str:
-    """Get the current column name (new or old depending on migration status)."""
-    cursor = conn.execute(f"PRAGMA table_info({table})")
-    columns = {row["name"] for row in cursor.fetchall()}
-    return new_name if new_name in columns else old_name
-
-
-def save_job(job: Job, db_path: Path | None = None) -> None:
-    """Save or update a job."""
+def save_run(run: Run, db_path: Path | None = None) -> None:
+    """Save or update a run."""
     conn = _get_db(db_path)
-    table = _get_table_name(conn)
-    main_col = _get_column_name(conn, table, "job_main", "loop_main")
 
     conn.execute(
-        f"""
-        INSERT OR REPLACE INTO {table}
-        (id, type, area, repo, {main_col}, goals, flow, status, iteration, pr_limit, merge_mode,
-         project_file, pathset, cron, goal, pid, last_main_sha, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        INSERT OR REPLACE INTO runs
+        (id, parent, flow, area, repo, goals, status, iteration,
+         worktree, branch, current_step, error, pr_url,
+         started_at, ended_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            job.id,
-            job.type.value,
-            job.area,
-            str(job.repo),
-            job.job_main,
-            json.dumps(job.goals) if job.goals else None,
-            job.flow,
-            job.status.value,
-            job.iteration,
-            job.pr_limit,
-            job.merge_mode.value,
-            job.project_file,
-            job.pathset,
-            job.cron,
-            job.goal_name,  # Legacy field
-            job.pid,
-            job.last_main_sha,
-            job.created_at.isoformat(),
+            run.id,
+            run.parent,
+            run.flow,
+            run.area,
+            str(run.repo),
+            json.dumps(run.goals) if run.goals else None,
+            run.status.value,
+            run.iteration,
+            run.worktree,
+            run.branch,
+            run.current_step,
+            run.error,
+            run.pr_url,
+            run.started_at.isoformat() if run.started_at else None,
+            run.ended_at.isoformat() if run.ended_at else None,
+            run.created_at.isoformat(),
         ),
     )
     conn.commit()
     conn.close()
 
 
-def get_job(job_id: str, db_path: Path | None = None) -> Job | None:
-    """Get a job by ID (supports short IDs)."""
+def get_run(run_id: str, db_path: Path | None = None) -> Run | None:
+    """Get a run by ID (supports short IDs)."""
     conn = _get_db(db_path)
-    table = _get_table_name(conn)
 
-    # Try exact match first, then prefix match
-    cursor = conn.execute(f"SELECT * FROM {table} WHERE id = ?", (job_id,))
+    cursor = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,))
     row = cursor.fetchone()
 
     if not row:
-        cursor = conn.execute(f"SELECT * FROM {table} WHERE id LIKE ?", (f"{job_id}%",))
+        cursor = conn.execute("SELECT * FROM runs WHERE id LIKE ?", (f"{run_id}%",))
         row = cursor.fetchone()
 
     conn.close()
-    return _job_from_row(dict(row), conn) if row else None
+    return _run_from_row(dict(row)) if row else None
 
 
-def get_job_by_area_repo(
-    job_type: JobType,
-    area: str,
-    repo: Path,
-    *,
+def list_runs(
+    repo: Path | None = None,
+    parent: str | None = None,
+    status: RunStatus | None = None,
+    limit: int = 50,
     db_path: Path | None = None,
-) -> Job | None:
-    """Get a job by type, area, and repo."""
+) -> list[Run]:
+    """List runs with optional filters."""
     conn = _get_db(db_path)
-    table = _get_table_name(conn)
+
+    conditions = []
+    params: list = []
+
+    if repo:
+        conditions.append("repo = ?")
+        params.append(str(repo))
+
+    if parent:
+        conditions.append("parent = ?")
+        params.append(parent)
+
+    if status:
+        conditions.append("status = ?")
+        params.append(status.value)
+
+    where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+    params.append(limit)
 
     cursor = conn.execute(
-        f"SELECT * FROM {table} WHERE type = ? AND area = ? AND repo = ?",
-        (job_type.value, area, str(repo)),
+        f"SELECT * FROM runs{where} ORDER BY created_at DESC LIMIT ?", params
+    )
+
+    runs = [_run_from_row(dict(row)) for row in cursor]
+    conn.close()
+    return runs
+
+
+def list_runs_for_trigger(trigger_type: str, trigger_id: str, limit: int = 10, db_path: Path | None = None) -> list[Run]:
+    """List runs spawned by a specific trigger."""
+    parent = f"{trigger_type}:{trigger_id}"
+    return list_runs(parent=parent, limit=limit, db_path=db_path)
+
+
+def get_latest_run_for_trigger(trigger_type: str, trigger_id: str, db_path: Path | None = None) -> Run | None:
+    """Get the most recent run for a trigger."""
+    runs = list_runs_for_trigger(trigger_type, trigger_id, limit=1, db_path=db_path)
+    return runs[0] if runs else None
+
+
+# Alias for backwards compatibility
+def update_dead_runs(db_path: Path | None = None) -> int:
+    """Mark triggers as idle if their process is no longer running."""
+    return update_dead_processes(db_path)
+
+
+def update_run_status(
+    run_id: str,
+    status: RunStatus,
+    error: str | None = None,
+    db_path: Path | None = None,
+) -> bool:
+    """Update a run's status."""
+    conn = _get_db(db_path)
+
+    ended_at = None
+    if status in (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED):
+        ended_at = datetime.now().isoformat()
+
+    if error:
+        cursor = conn.execute(
+            "UPDATE runs SET status = ?, ended_at = ?, error = ? WHERE id = ? OR id LIKE ?",
+            (status.value, ended_at, error, run_id, f"{run_id}%"),
+        )
+    else:
+        cursor = conn.execute(
+            "UPDATE runs SET status = ?, ended_at = COALESCE(?, ended_at) WHERE id = ? OR id LIKE ?",
+            (status.value, ended_at, run_id, f"{run_id}%"),
+        )
+
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    return updated
+
+
+def update_run_step(run_id: str, step: str | None, db_path: Path | None = None) -> bool:
+    """Update the current step for a run."""
+    conn = _get_db(db_path)
+
+    cursor = conn.execute(
+        "UPDATE runs SET current_step = ? WHERE id = ? OR id LIKE ?",
+        (step, run_id, f"{run_id}%"),
+    )
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    return updated
+
+
+def update_run_pr(run_id: str, pr_url: str, db_path: Path | None = None) -> bool:
+    """Update the PR URL for a run."""
+    conn = _get_db(db_path)
+
+    cursor = conn.execute(
+        "UPDATE runs SET pr_url = ? WHERE id = ? OR id LIKE ?",
+        (pr_url, run_id, f"{run_id}%"),
+    )
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    return updated
+
+
+def delete_run(run_id: str, db_path: Path | None = None) -> bool:
+    """Delete a run."""
+    conn = _get_db(db_path)
+
+    cursor = conn.execute("DELETE FROM runs WHERE id = ? OR id LIKE ?", (run_id, f"{run_id}%"))
+
+    conn.commit()
+    deleted = cursor.rowcount > 0
+    conn.close()
+    return deleted
+
+
+def _run_from_row(row: dict) -> Run:
+    """Convert database row to Run."""
+    goals_str = row.get("goals")
+    goals = json.loads(goals_str) if goals_str else []
+
+    return Run(
+        id=row["id"],
+        parent=row.get("parent"),
+        flow=row["flow"],
+        area=row["area"],
+        repo=Path(row["repo"]),
+        goals=goals,
+        status=RunStatus(row["status"]),
+        iteration=row.get("iteration", 0),
+        worktree=row.get("worktree"),
+        branch=row.get("branch"),
+        current_step=row.get("current_step"),
+        error=row.get("error"),
+        pr_url=row.get("pr_url"),
+        started_at=datetime.fromisoformat(row["started_at"]) if row.get("started_at") else None,
+        ended_at=datetime.fromisoformat(row["ended_at"]) if row.get("ended_at") else None,
+        created_at=datetime.fromisoformat(row["created_at"]),
+    )
+
+
+# Loops
+
+
+def save_loop(loop: Loop, db_path: Path | None = None) -> None:
+    """Save or update a loop."""
+    conn = _get_db(db_path)
+
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO loops
+        (id, flow, area, repo, goals, status, iteration,
+         main_branch, pr_limit, merge_mode, pid, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            loop.id,
+            loop.flow,
+            loop.area,
+            str(loop.repo),
+            json.dumps(loop.goals) if loop.goals else None,
+            loop.status.value,
+            loop.iteration,
+            loop.main_branch,
+            loop.pr_limit,
+            loop.merge_mode.value,
+            loop.pid,
+            loop.created_at.isoformat(),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_loop(loop_id: str, db_path: Path | None = None) -> Loop | None:
+    """Get a loop by ID (supports short IDs)."""
+    conn = _get_db(db_path)
+
+    cursor = conn.execute("SELECT * FROM loops WHERE id = ?", (loop_id,))
+    row = cursor.fetchone()
+
+    if not row:
+        cursor = conn.execute("SELECT * FROM loops WHERE id LIKE ?", (f"{loop_id}%",))
+        row = cursor.fetchone()
+
+    conn.close()
+    return _loop_from_row(dict(row)) if row else None
+
+
+def get_loop_by_area_repo(area: str, repo: Path, db_path: Path | None = None) -> Loop | None:
+    """Get a loop by area and repo."""
+    conn = _get_db(db_path)
+
+    cursor = conn.execute(
+        "SELECT * FROM loops WHERE area = ? AND repo = ?",
+        (area, str(repo)),
     )
     row = cursor.fetchone()
-    result = _job_from_row(dict(row), conn) if row else None
     conn.close()
-    return result
+    return _loop_from_row(dict(row)) if row else None
 
 
-def list_jobs(repo: Path | None = None, db_path: Path | None = None) -> list[Job]:
-    """List all jobs, optionally filtered by repo."""
+def list_loops(repo: Path | None = None, db_path: Path | None = None) -> list[Loop]:
+    """List all loops, optionally filtered by repo."""
     conn = _get_db(db_path)
-    table = _get_table_name(conn)
 
     if repo:
         cursor = conn.execute(
-            f"SELECT * FROM {table} WHERE repo = ? ORDER BY created_at DESC",
+            "SELECT * FROM loops WHERE repo = ? ORDER BY created_at DESC",
             (str(repo),),
         )
     else:
-        cursor = conn.execute(f"SELECT * FROM {table} ORDER BY created_at DESC")
+        cursor = conn.execute("SELECT * FROM loops ORDER BY created_at DESC")
 
-    jobs = [_job_from_row(dict(row), conn) for row in cursor]
+    loops = [_loop_from_row(dict(row)) for row in cursor]
     conn.close()
-    return jobs
+    return loops
 
 
-def update_job_status(job_id: str, status: JobStatus, db_path: Path | None = None) -> bool:
-    """Update a job's status."""
+def update_loop_status(loop_id: str, status: TriggerStatus, db_path: Path | None = None) -> bool:
+    """Update a loop's status."""
     conn = _get_db(db_path)
-    table = _get_table_name(conn)
 
     cursor = conn.execute(
-        f"UPDATE {table} SET status = ? WHERE id = ? OR id LIKE ?",
-        (status.value, job_id, f"{job_id}%"),
+        "UPDATE loops SET status = ? WHERE id = ? OR id LIKE ?",
+        (status.value, loop_id, f"{loop_id}%"),
     )
     conn.commit()
     updated = cursor.rowcount > 0
@@ -398,14 +532,13 @@ def update_job_status(job_id: str, status: JobStatus, db_path: Path | None = Non
     return updated
 
 
-def update_job_iteration(job_id: str, iteration: int, db_path: Path | None = None) -> bool:
-    """Update a job's iteration count."""
+def update_loop_iteration(loop_id: str, iteration: int, db_path: Path | None = None) -> bool:
+    """Update a loop's iteration count."""
     conn = _get_db(db_path)
-    table = _get_table_name(conn)
 
     cursor = conn.execute(
-        f"UPDATE {table} SET iteration = ? WHERE id = ? OR id LIKE ?",
-        (iteration, job_id, f"{job_id}%"),
+        "UPDATE loops SET iteration = ? WHERE id = ? OR id LIKE ?",
+        (iteration, loop_id, f"{loop_id}%"),
     )
     conn.commit()
     updated = cursor.rowcount > 0
@@ -413,14 +546,13 @@ def update_job_iteration(job_id: str, iteration: int, db_path: Path | None = Non
     return updated
 
 
-def update_job_pid(job_id: str, pid: int | None, db_path: Path | None = None) -> bool:
-    """Update a job's process ID."""
+def update_loop_pid(loop_id: str, pid: int | None, db_path: Path | None = None) -> bool:
+    """Update a loop's process ID."""
     conn = _get_db(db_path)
-    table = _get_table_name(conn)
 
     cursor = conn.execute(
-        f"UPDATE {table} SET pid = ? WHERE id = ? OR id LIKE ?",
-        (pid, job_id, f"{job_id}%"),
+        "UPDATE loops SET pid = ? WHERE id = ? OR id LIKE ?",
+        (pid, loop_id, f"{loop_id}%"),
     )
     conn.commit()
     updated = cursor.rowcount > 0
@@ -428,31 +560,13 @@ def update_job_pid(job_id: str, pid: int | None, db_path: Path | None = None) ->
     return updated
 
 
-def update_job_last_sha(job_id: str, sha: str | None, db_path: Path | None = None) -> bool:
-    """Update a job's last_main_sha (for subscribe jobs)."""
+def delete_loop(loop_id: str, db_path: Path | None = None) -> bool:
+    """Delete a loop and its runs."""
     conn = _get_db(db_path)
-    table = _get_table_name(conn)
 
+    # Get full ID
     cursor = conn.execute(
-        f"UPDATE {table} SET last_main_sha = ? WHERE id = ? OR id LIKE ?",
-        (sha, job_id, f"{job_id}%"),
-    )
-    conn.commit()
-    updated = cursor.rowcount > 0
-    conn.close()
-    return updated
-
-
-def delete_job(job_id: str, db_path: Path | None = None) -> bool:
-    """Delete a job and its runs."""
-    conn = _get_db(db_path)
-    table = _get_table_name(conn)
-    runs_table = "job_runs" if table == "jobs" else "loop_runs"
-    id_col = "job_id" if table == "jobs" else "loop_id"
-
-    # Get full ID for foreign key deletes
-    cursor = conn.execute(
-        f"SELECT id FROM {table} WHERE id = ? OR id LIKE ?", (job_id, f"{job_id}%")
+        "SELECT id FROM loops WHERE id = ? OR id LIKE ?", (loop_id, f"{loop_id}%")
     )
     row = cursor.fetchone()
     if not row:
@@ -462,8 +576,8 @@ def delete_job(job_id: str, db_path: Path | None = None) -> bool:
     full_id = row["id"]
 
     # Delete runs first
-    conn.execute(f"DELETE FROM {runs_table} WHERE {id_col} = ?", (full_id,))
-    cursor = conn.execute(f"DELETE FROM {table} WHERE id = ?", (full_id,))
+    conn.execute("DELETE FROM runs WHERE parent = ?", (f"loop:{full_id}",))
+    cursor = conn.execute("DELETE FROM loops WHERE id = ?", (full_id,))
 
     conn.commit()
     deleted = cursor.rowcount > 0
@@ -471,153 +585,275 @@ def delete_job(job_id: str, db_path: Path | None = None) -> bool:
     return deleted
 
 
-def _job_from_row(row: dict, conn: sqlite3.Connection | None = None) -> Job:
-    """Convert database row to Job."""
-    # Handle legacy "auto" merge mode by mapping to PR
+def _loop_from_row(row: dict) -> Loop:
+    """Convert database row to Loop."""
+    goals_str = row.get("goals")
+    goals = json.loads(goals_str) if goals_str else []
+
     merge_mode_str = row.get("merge_mode", "pr")
     if merge_mode_str == "auto":
         merge_mode_str = "pr"
 
-    # Parse goals JSON
-    goals_str = row.get("goals")
-    goals = json.loads(goals_str) if goals_str else []
-
-    # Handle area - could be in 'area' column or legacy 'goal' was used as area marker
-    area = row.get("area") or "."
-
-    # Handle job_main vs loop_main column name
-    job_main = row.get("job_main") or row.get("loop_main", "")
-
-    return Job(
+    return Loop(
         id=row["id"],
-        type=JobType(row["type"]),
-        area=area,
+        flow=row["flow"],
+        area=row["area"],
         repo=Path(row["repo"]),
-        job_main=job_main,
         goals=goals,
-        flow=row.get("flow"),
-        status=JobStatus(row["status"]),
+        status=TriggerStatus(row["status"]),
         iteration=row.get("iteration", 0),
+        main_branch=row.get("main_branch", ""),
         pr_limit=row.get("pr_limit", 5),
         merge_mode=MergeMode(merge_mode_str),
-        project_file=row.get("project_file"),
-        pathset=row.get("pathset"),
-        cron=row.get("cron"),
-        goal_name=row.get("goal"),  # Legacy field
         pid=row.get("pid"),
-        last_main_sha=row.get("last_main_sha"),
         created_at=datetime.fromisoformat(row["created_at"]),
     )
 
 
-# Job run functions
+# Subscriptions
 
 
-def save_job_run(run: JobRun, db_path: Path | None = None) -> None:
-    """Save a job run."""
+def save_subscription(sub: Subscription, db_path: Path | None = None) -> None:
+    """Save or update a subscription."""
     conn = _get_db(db_path)
-    table = _get_table_name(conn)
-    runs_table = "job_runs" if table == "jobs" else "loop_runs"
-    id_col = "job_id" if table == "jobs" else "loop_id"
 
     conn.execute(
-        f"""
-        INSERT OR REPLACE INTO {runs_table}
-        (id, {id_col}, iteration, status, started_at, ended_at,
-         worktree, current_step, error, pr_url)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        INSERT OR REPLACE INTO subscriptions
+        (id, flow, area, repo, goals, pathset, last_main_sha,
+         status, iteration, main_branch, pr_limit, merge_mode, pid, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            run.id,
-            run.job_id,
-            run.iteration,
-            run.status.value,
-            run.started_at.isoformat(),
-            run.ended_at.isoformat() if run.ended_at else None,
-            run.worktree,
-            run.current_step,
-            run.error,
-            run.pr_url,
+            sub.id,
+            sub.flow,
+            sub.area,
+            str(sub.repo),
+            json.dumps(sub.goals) if sub.goals else None,
+            sub.pathset,
+            sub.last_main_sha,
+            sub.status.value,
+            sub.iteration,
+            sub.main_branch,
+            sub.pr_limit,
+            sub.merge_mode.value,
+            sub.pid,
+            sub.created_at.isoformat(),
         ),
     )
     conn.commit()
     conn.close()
 
 
-def get_job_runs(job_id: str, limit: int = 10, db_path: Path | None = None) -> list[JobRun]:
-    """Get runs for a job."""
+def get_subscription(sub_id: str, db_path: Path | None = None) -> Subscription | None:
+    """Get a subscription by ID (supports short IDs)."""
     conn = _get_db(db_path)
-    table = _get_table_name(conn)
-    runs_table = "job_runs" if table == "jobs" else "loop_runs"
-    id_col = "job_id" if table == "jobs" else "loop_id"
 
-    # Support short IDs
+    cursor = conn.execute("SELECT * FROM subscriptions WHERE id = ?", (sub_id,))
+    row = cursor.fetchone()
+
+    if not row:
+        cursor = conn.execute("SELECT * FROM subscriptions WHERE id LIKE ?", (f"{sub_id}%",))
+        row = cursor.fetchone()
+
+    conn.close()
+    return _subscription_from_row(dict(row)) if row else None
+
+
+def get_subscription_by_area_repo(area: str, repo: Path, db_path: Path | None = None) -> Subscription | None:
+    """Get a subscription by area and repo."""
+    conn = _get_db(db_path)
+
     cursor = conn.execute(
-        f"SELECT id FROM {table} WHERE id = ? OR id LIKE ?", (job_id, f"{job_id}%")
+        "SELECT * FROM subscriptions WHERE area = ? AND repo = ?",
+        (area, str(repo)),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return _subscription_from_row(dict(row)) if row else None
+
+
+def list_subscriptions(repo: Path | None = None, db_path: Path | None = None) -> list[Subscription]:
+    """List all subscriptions, optionally filtered by repo."""
+    conn = _get_db(db_path)
+
+    if repo:
+        cursor = conn.execute(
+            "SELECT * FROM subscriptions WHERE repo = ? ORDER BY created_at DESC",
+            (str(repo),),
+        )
+    else:
+        cursor = conn.execute("SELECT * FROM subscriptions ORDER BY created_at DESC")
+
+    subs = [_subscription_from_row(dict(row)) for row in cursor]
+    conn.close()
+    return subs
+
+
+def update_subscription_status(sub_id: str, status: TriggerStatus, db_path: Path | None = None) -> bool:
+    """Update a subscription's status."""
+    conn = _get_db(db_path)
+
+    cursor = conn.execute(
+        "UPDATE subscriptions SET status = ? WHERE id = ? OR id LIKE ?",
+        (status.value, sub_id, f"{sub_id}%"),
+    )
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    return updated
+
+
+def update_subscription_sha(sub_id: str, sha: str | None, db_path: Path | None = None) -> bool:
+    """Update a subscription's last_main_sha."""
+    conn = _get_db(db_path)
+
+    cursor = conn.execute(
+        "UPDATE subscriptions SET last_main_sha = ? WHERE id = ? OR id LIKE ?",
+        (sha, sub_id, f"{sub_id}%"),
+    )
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    return updated
+
+
+def delete_subscription(sub_id: str, db_path: Path | None = None) -> bool:
+    """Delete a subscription and its runs."""
+    conn = _get_db(db_path)
+
+    cursor = conn.execute(
+        "SELECT id FROM subscriptions WHERE id = ? OR id LIKE ?", (sub_id, f"{sub_id}%")
     )
     row = cursor.fetchone()
     if not row:
         conn.close()
-        return []
+        return False
 
     full_id = row["id"]
 
-    cursor = conn.execute(
-        f"SELECT * FROM {runs_table} WHERE {id_col} = ? ORDER BY started_at DESC LIMIT ?",
-        (full_id, limit),
-    )
-    runs = [_job_run_from_row(dict(row)) for row in cursor]
+    conn.execute("DELETE FROM runs WHERE parent = ?", (f"subscription:{full_id}",))
+    cursor = conn.execute("DELETE FROM subscriptions WHERE id = ?", (full_id,))
+
+    conn.commit()
+    deleted = cursor.rowcount > 0
     conn.close()
-    return runs
+    return deleted
 
 
-def get_latest_job_run(job_id: str, db_path: Path | None = None) -> JobRun | None:
-    """Get the most recent run for a job."""
-    runs = get_job_runs(job_id, limit=1, db_path=db_path)
-    return runs[0] if runs else None
+def _subscription_from_row(row: dict) -> Subscription:
+    """Convert database row to Subscription."""
+    goals_str = row.get("goals")
+    goals = json.loads(goals_str) if goals_str else []
+
+    merge_mode_str = row.get("merge_mode", "pr")
+    if merge_mode_str == "auto":
+        merge_mode_str = "pr"
+
+    return Subscription(
+        id=row["id"],
+        flow=row["flow"],
+        area=row["area"],
+        repo=Path(row["repo"]),
+        goals=goals,
+        pathset=row.get("pathset", ""),
+        last_main_sha=row.get("last_main_sha"),
+        status=TriggerStatus(row["status"]),
+        iteration=row.get("iteration", 0),
+        main_branch=row.get("main_branch", ""),
+        pr_limit=row.get("pr_limit", 5),
+        merge_mode=MergeMode(merge_mode_str),
+        pid=row.get("pid"),
+        created_at=datetime.fromisoformat(row["created_at"]),
+    )
 
 
-def update_job_run_status(
-    run_id: str,
-    status: JobStatus,
-    error: str | None = None,
-    db_path: Path | None = None,
-) -> bool:
-    """Update a job run's status."""
+# Schedules
+
+
+def save_schedule(schedule: Schedule, db_path: Path | None = None) -> None:
+    """Save or update a schedule."""
     conn = _get_db(db_path)
-    table = _get_table_name(conn)
-    runs_table = "job_runs" if table == "jobs" else "loop_runs"
 
-    ended_at = None
-    if status in (JobStatus.IDLE, JobStatus.ERROR):
-        ended_at = datetime.now().isoformat()
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO schedules
+        (id, flow, area, repo, goals, cron,
+         status, iteration, main_branch, pr_limit, merge_mode, pid, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            schedule.id,
+            schedule.flow,
+            schedule.area,
+            str(schedule.repo),
+            json.dumps(schedule.goals) if schedule.goals else None,
+            schedule.cron,
+            schedule.status.value,
+            schedule.iteration,
+            schedule.main_branch,
+            schedule.pr_limit,
+            schedule.merge_mode.value,
+            schedule.pid,
+            schedule.created_at.isoformat(),
+        ),
+    )
+    conn.commit()
+    conn.close()
 
-    if error:
+
+def get_schedule(schedule_id: str, db_path: Path | None = None) -> Schedule | None:
+    """Get a schedule by ID (supports short IDs)."""
+    conn = _get_db(db_path)
+
+    cursor = conn.execute("SELECT * FROM schedules WHERE id = ?", (schedule_id,))
+    row = cursor.fetchone()
+
+    if not row:
+        cursor = conn.execute("SELECT * FROM schedules WHERE id LIKE ?", (f"{schedule_id}%",))
+        row = cursor.fetchone()
+
+    conn.close()
+    return _schedule_from_row(dict(row)) if row else None
+
+
+def get_schedule_by_area_repo(area: str, repo: Path, db_path: Path | None = None) -> Schedule | None:
+    """Get a schedule by area and repo."""
+    conn = _get_db(db_path)
+
+    cursor = conn.execute(
+        "SELECT * FROM schedules WHERE area = ? AND repo = ?",
+        (area, str(repo)),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return _schedule_from_row(dict(row)) if row else None
+
+
+def list_schedules(repo: Path | None = None, db_path: Path | None = None) -> list[Schedule]:
+    """List all schedules, optionally filtered by repo."""
+    conn = _get_db(db_path)
+
+    if repo:
         cursor = conn.execute(
-            f"UPDATE {runs_table} SET status = ?, ended_at = ?, error = ? WHERE id = ?",
-            (status.value, ended_at, error, run_id),
+            "SELECT * FROM schedules WHERE repo = ? ORDER BY created_at DESC",
+            (str(repo),),
         )
     else:
-        cursor = conn.execute(
-            f"UPDATE {runs_table} SET status = ?, ended_at = COALESCE(?, ended_at) WHERE id = ?",
-            (status.value, ended_at, run_id),
-        )
+        cursor = conn.execute("SELECT * FROM schedules ORDER BY created_at DESC")
 
-    conn.commit()
-    updated = cursor.rowcount > 0
+    schedules = [_schedule_from_row(dict(row)) for row in cursor]
     conn.close()
-    return updated
+    return schedules
 
 
-def update_job_run_step(run_id: str, step: str | None, db_path: Path | None = None) -> bool:
-    """Update the current step for a job run."""
+def update_schedule_status(schedule_id: str, status: TriggerStatus, db_path: Path | None = None) -> bool:
+    """Update a schedule's status."""
     conn = _get_db(db_path)
-    table = _get_table_name(conn)
-    runs_table = "job_runs" if table == "jobs" else "loop_runs"
 
     cursor = conn.execute(
-        f"UPDATE {runs_table} SET current_step = ? WHERE id = ?",
-        (step, run_id),
+        "UPDATE schedules SET status = ? WHERE id = ? OR id LIKE ?",
+        (status.value, schedule_id, f"{schedule_id}%"),
     )
     conn.commit()
     updated = cursor.rowcount > 0
@@ -625,39 +861,76 @@ def update_job_run_step(run_id: str, step: str | None, db_path: Path | None = No
     return updated
 
 
-def update_job_run_pr(run_id: str, pr_url: str, db_path: Path | None = None) -> bool:
-    """Update the PR URL for a job run."""
+def delete_schedule(schedule_id: str, db_path: Path | None = None) -> bool:
+    """Delete a schedule and its runs."""
     conn = _get_db(db_path)
-    table = _get_table_name(conn)
-    runs_table = "job_runs" if table == "jobs" else "loop_runs"
 
     cursor = conn.execute(
-        f"UPDATE {runs_table} SET pr_url = ? WHERE id = ?",
-        (pr_url, run_id),
+        "SELECT id FROM schedules WHERE id = ? OR id LIKE ?", (schedule_id, f"{schedule_id}%")
     )
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        return False
+
+    full_id = row["id"]
+
+    conn.execute("DELETE FROM runs WHERE parent = ?", (f"schedule:{full_id}",))
+    cursor = conn.execute("DELETE FROM schedules WHERE id = ?", (full_id,))
+
     conn.commit()
-    updated = cursor.rowcount > 0
+    deleted = cursor.rowcount > 0
     conn.close()
-    return updated
+    return deleted
 
 
-def _job_run_from_row(row: dict) -> JobRun:
-    """Convert database row to JobRun."""
-    # Handle job_id vs loop_id column name
-    job_id = row.get("job_id") or row.get("loop_id", "")
+def _schedule_from_row(row: dict) -> Schedule:
+    """Convert database row to Schedule."""
+    goals_str = row.get("goals")
+    goals = json.loads(goals_str) if goals_str else []
 
-    return JobRun(
+    merge_mode_str = row.get("merge_mode", "pr")
+    if merge_mode_str == "auto":
+        merge_mode_str = "pr"
+
+    return Schedule(
         id=row["id"],
-        job_id=job_id,
-        iteration=row["iteration"],
-        status=JobStatus(row["status"]),
-        started_at=datetime.fromisoformat(row["started_at"]),
-        ended_at=datetime.fromisoformat(row["ended_at"]) if row.get("ended_at") else None,
-        worktree=row.get("worktree"),
-        current_step=row.get("current_step"),
-        error=row.get("error"),
-        pr_url=row.get("pr_url"),
+        flow=row["flow"],
+        area=row["area"],
+        repo=Path(row["repo"]),
+        goals=goals,
+        cron=row.get("cron", ""),
+        status=TriggerStatus(row["status"]),
+        iteration=row.get("iteration", 0),
+        main_branch=row.get("main_branch", ""),
+        pr_limit=row.get("pr_limit", 5),
+        merge_mode=MergeMode(merge_mode_str),
+        pid=row.get("pid"),
+        created_at=datetime.fromisoformat(row["created_at"]),
     )
+
+
+# Convenience functions for all triggers
+
+
+def list_all_triggers(repo: Path | None = None, db_path: Path | None = None) -> list[Trigger]:
+    """List all triggers (loops, subscriptions, schedules) for a repo."""
+    triggers: list[Trigger] = []
+    triggers.extend(list_loops(repo, db_path))
+    triggers.extend(list_subscriptions(repo, db_path))
+    triggers.extend(list_schedules(repo, db_path))
+    return triggers
+
+
+def get_trigger(trigger_type: str, trigger_id: str, db_path: Path | None = None) -> Trigger | None:
+    """Get a trigger by type and ID."""
+    if trigger_type == "loop":
+        return get_loop(trigger_id, db_path)
+    elif trigger_type == "subscription":
+        return get_subscription(trigger_id, db_path)
+    elif trigger_type == "schedule":
+        return get_schedule(trigger_id, db_path)
+    return None
 
 
 # Summary functions

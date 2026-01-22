@@ -283,11 +283,10 @@ final class AppState {
 
         // Slow operations in background (don't block UI)
         Task {
-            // Start daemon and event subscription
+            // Try to start daemon, but always subscribe (reconnect loop handles failures)
             let setupService = SetupService()
-            if (try? await setupService.ensureDaemonRunning()) != nil {
-                startEventSubscription()
-            }
+            try? await setupService.ensureDaemonRunning()
+            startEventSubscription()
 
             // Background enrichment: sync, loops, tokens, staleness
             await syncAndEnrich()
@@ -509,6 +508,10 @@ final class AppState {
     }
 
     func startEventSubscription() {
+        LoggingService.append("startEventSubscription called, eventService=\(eventService != nil)", category: LoggingService.Category.lfd)
+        // Don't create duplicate subscriptions
+        if eventService != nil { return }
+        LoggingService.append("creating LFDEventService", category: LoggingService.Category.lfd)
         eventService = LFDEventService()
 
         Task {
@@ -743,7 +746,10 @@ final class AppState {
     }
 
     func connectLfd() async throws {
-        try await loopService.connectLfd()
+        // Try to install/start daemon if not running, but don't fail if it errors
+        try? await loopService.connectLfd()
+        // Start event subscription (has its own reconnect loop)
+        startEventSubscription()
     }
 
     func estimateTokens() async {

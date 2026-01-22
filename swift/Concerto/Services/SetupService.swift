@@ -114,17 +114,23 @@ struct SetupService {
     /// Ensure the loopflow daemon is running
     func ensureDaemonRunning() async throws {
         // Skip if lfd not installed
-        guard let lfdPath = findExecutable("lfd") else { return }
+        guard let lfdPath = findExecutable("lfd") else {
+            log("ensureDaemonRunning: lfd not found, skipping")
+            return
+        }
+        log("ensureDaemonRunning: lfd found at \(lfdPath)")
 
         let plistPath = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/LaunchAgents/com.loopflow.lfd.plist")
 
         if !FileManager.default.fileExists(atPath: plistPath.path) {
-            // Install daemon if plist doesn't exist
+            log("ensureDaemonRunning: plist not found, installing...")
             try await runCommand(lfdPath, args: ["install"])
         } else if !isDaemonRunning() {
-            // Load daemon if installed but not running
+            log("ensureDaemonRunning: plist exists but daemon not running, loading...")
             try await runCommand("/bin/launchctl", args: ["load", plistPath.path])
+        } else {
+            log("ensureDaemonRunning: daemon already running")
         }
     }
 

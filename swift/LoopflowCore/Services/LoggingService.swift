@@ -1,9 +1,15 @@
 import Foundation
 
 public enum LoggingService {
-    public static func append(_ message: String) {
+    public enum Category: String {
+        case worktrees
+        case lfd
+        case general
+    }
+
+    public static func append(_ message: String, category: Category = .worktrees) {
         do {
-            let url = logURL()
+            let url = logURL(for: category)
             try ensureLogDirectory(for: url)
             let timestamp = ISO8601DateFormatter().string(from: Date())
             let line = "\(timestamp) \(message.trimmingCharacters(in: .whitespacesAndNewlines))\n"
@@ -21,23 +27,26 @@ public enum LoggingService {
         }
     }
 
-    public static func read() -> String {
-        guard let data = try? Data(contentsOf: logURL()) else {
+    public static func read(category: Category = .worktrees) -> String {
+        guard let data = try? Data(contentsOf: logURL(for: category)) else {
             return ""
         }
         return String(data: data, encoding: .utf8) ?? ""
     }
 
-    public static func logPath() -> String {
-        logURL().path()
+    public static func logPath(category: Category = .worktrees) -> String {
+        logURL(for: category).path()
     }
 
-    private static func logURL() -> URL {
+    public static func logDirectory() -> URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library")
             .appendingPathComponent("Logs")
             .appendingPathComponent("Concerto")
-            .appendingPathComponent("worktrees.log")
+    }
+
+    private static func logURL(for category: Category) -> URL {
+        logDirectory().appendingPathComponent("\(category.rawValue).log")
     }
 
     private static func ensureLogDirectory(for url: URL) throws {

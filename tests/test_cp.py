@@ -1,11 +1,11 @@
-"""Tests for cp command."""
+"""Tests for lfops cp command."""
 
 from unittest.mock import patch
 
 import pytest
 from typer.testing import CliRunner
 
-from loopflow.lf import app
+from loopflow.lfops.commands import app
 
 
 @pytest.fixture
@@ -22,7 +22,7 @@ def test_cp_copies_docs_by_default(temp_repo, monkeypatch):
     monkeypatch.chdir(temp_repo)
     runner = CliRunner()
 
-    with patch("loopflow.lf.run._copy_to_clipboard") as mock_copy:
+    with patch("loopflow.lfops.cp._copy_to_clipboard") as mock_copy:
         result = runner.invoke(app, ["cp"])
 
     assert result.exit_code == 0
@@ -37,7 +37,7 @@ def test_cp_includes_context_files(temp_repo, monkeypatch):
     monkeypatch.chdir(temp_repo)
     runner = CliRunner()
 
-    with patch("loopflow.lf.run._copy_to_clipboard") as mock_copy:
+    with patch("loopflow.lfops.cp._copy_to_clipboard") as mock_copy:
         result = runner.invoke(app, ["cp", "main.py"])
 
     assert result.exit_code == 0
@@ -50,7 +50,7 @@ def test_cp_no_lfdocs_excludes_documentation(temp_repo, monkeypatch):
     monkeypatch.chdir(temp_repo)
     runner = CliRunner()
 
-    with patch("loopflow.lf.run._copy_to_clipboard") as mock_copy:
+    with patch("loopflow.lfops.cp._copy_to_clipboard") as mock_copy:
         result = runner.invoke(app, ["cp", "--no-lfdocs"])
 
     assert result.exit_code == 0
@@ -65,7 +65,7 @@ def test_cp_exclude_patterns(temp_repo, monkeypatch):
     monkeypatch.chdir(temp_repo)
     runner = CliRunner()
 
-    with patch("loopflow.lf.run._copy_to_clipboard") as mock_copy:
+    with patch("loopflow.lfops.cp._copy_to_clipboard") as mock_copy:
         result = runner.invoke(app, ["cp", "*.py", "-e", "test.py"])
 
     assert result.exit_code == 0
@@ -80,7 +80,7 @@ def test_cp_works_outside_git_repo(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
 
-    with patch("loopflow.lf.run._copy_to_clipboard") as mock_copy:
+    with patch("loopflow.lfops.cp._copy_to_clipboard") as mock_copy:
         result = runner.invoke(app, ["cp"])
 
     assert result.exit_code == 0
@@ -98,7 +98,7 @@ def test_cp_positional_args_as_context(temp_repo, monkeypatch):
     monkeypatch.chdir(temp_repo)
     runner = CliRunner()
 
-    with patch("loopflow.lf.run._copy_to_clipboard") as mock_copy:
+    with patch("loopflow.lfops.cp._copy_to_clipboard") as mock_copy:
         result = runner.invoke(app, ["cp", "src", "tests"])
 
     assert result.exit_code == 0

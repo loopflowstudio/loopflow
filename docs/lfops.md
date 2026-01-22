@@ -5,7 +5,41 @@ title: lfops Commands
 
 # lfops Commands
 
-Git workflow commands for shipping code.
+Operations and utilities. `lfops` handles everything that's not launching a prompt.
+
+## lfops cp
+
+Copy context to clipboard for use with web clients.
+
+```bash
+lfops cp                     # copy repo docs
+lfops cp src tests           # copy specific paths
+lfops cp -e "*.pyc"          # exclude patterns
+lfops cp --no-lfdocs         # skip repo docs
+```
+
+Options:
+
+| Flag | Description |
+|------|-------------|
+| `-e, --exclude` | Exclude patterns |
+| `-v, --paste` | Include current clipboard content |
+| `--lfdocs/--no-lfdocs` | Include/exclude repo docs |
+| `--diff/--no-diff` | Include raw branch diff |
+| `--diff-files/--no-diff-files` | Include files touched by branch |
+
+## lfops add
+
+Create a new prompt file.
+
+```bash
+lfops add my-task            # creates .claude/commands/my-task.md
+lfops add my-task -f         # overwrite if exists
+```
+
+---
+
+## Git Workflow
 
 ## lfops pr
 

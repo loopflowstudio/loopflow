@@ -5,7 +5,7 @@ title: lf Command Reference
 
 # lf Command Reference
 
-`lf` runs steps against AI coding agents. It assembles context (repo docs, diff, files) and passes everything to Claude, Codex, or Gemini.
+`lf` is a prompt launcher. Every command launches a prompt—assembling context and passing it to Claude, Codex, or Gemini.
 
 ## Basic Usage
 
@@ -88,6 +88,7 @@ Inside step files, `{args}` is replaced with whatever comes after the colon.
 | Flag | Description |
 |------|-------------|
 | `-c, --copy` | Copy assembled prompt to clipboard, show token breakdown |
+| `--web` | Copy to clipboard and open web client (claude.ai, chatgpt.com, etc.) |
 
 ## Browser Automation
 
@@ -151,6 +152,13 @@ lf implement --voice architect,concise
 
 ```bash
 lf review -c    # shows token breakdown, copies to clipboard
+```
+
+### Use web client instead of CLI
+
+```bash
+lf review --web    # copies to clipboard, opens claude.ai (or chatgpt.com for codex)
+lf : "fix the bug" --web -m codex    # opens chatgpt.com
 ```
 
 ### External skills

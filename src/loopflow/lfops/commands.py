@@ -8,9 +8,9 @@ from loopflow.lfops import abandon as abandon_module
 from loopflow.lfops import add as add_module
 from loopflow.lfops import commit as commit_module
 from loopflow.lfops import cp as cp_module
-from loopflow.lfops import next as next_module
 from loopflow.lfops import init as init_module
 from loopflow.lfops import land as land_module
+from loopflow.lfops import next as next_module
 from loopflow.lfops import pr as pr_module
 from loopflow.lfops import rebase as rebase_module
 from loopflow.lfops import shell as shell_module

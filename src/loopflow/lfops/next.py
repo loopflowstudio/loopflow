@@ -210,7 +210,7 @@ def register_commands(app: typer.Typer) -> None:
 
     @app.command("next")
     def next_cmd(
-        block: bool = typer.Option(False, "--block", help="Wait for merge before creating worktree"),
+        block: bool = typer.Option(False, "--block", help="Wait for merge before creating wt"),
         no_open: bool = typer.Option(False, "--no-open", help="Don't open terminal"),
         create_pr: bool = typer.Option(False, "-c", "--create-pr", help="Create PR if none exists"),
     ) -> None:

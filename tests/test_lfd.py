@@ -1726,9 +1726,7 @@ def test_summary_functions_work_after_schema_reset():
         # Create DB with wrong schema version (will trigger auto-reset)
         conn = sqlite3.connect(db_path)
         conn.execute("CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-        conn.execute(
-            "INSERT INTO _meta (key, value) VALUES ('schema_version', 'wrong-version')"
-        )
+        conn.execute("INSERT INTO _meta (key, value) VALUES ('schema_version', 'wrong-version')")
         conn.commit()
         conn.close()
 

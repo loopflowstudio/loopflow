@@ -15,12 +15,12 @@ from croniter import croniter
 from loopflow.lf.context import find_worktree_root
 from loopflow.lf.naming import branch_exists, generate_word_pair
 from loopflow.lfd.db import _get_db
-from loopflow.lfd.logging import trigger_log
+from loopflow.lfd.logging import stimulus_log
 from loopflow.lfd.models import (
     Agent,
-    AgentMode,
     AgentStatus,
     MergeMode,
+    Stimulus,
     agent_from_row,
     area_to_slug,
 )
@@ -41,10 +41,10 @@ def save_agent(agent: Agent, db_path: Path | None = None) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO agents
-        (id, repo, flow, voice, area, mode, status, iteration, main_branch,
-         pr_limit, merge_mode, pid, created_at, watch_paths, cron, last_main_sha,
+        (id, repo, flow, voice, area, stimulus_kind, stimulus_cron, status, iteration,
+         main_branch, pr_limit, merge_mode, pid, created_at, last_main_sha,
          consecutive_failures)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             agent.id,
@@ -52,7 +52,8 @@ def save_agent(agent: Agent, db_path: Path | None = None) -> None:
             agent.flow,
             json.dumps(agent.voice),
             json.dumps(agent.area),
-            agent.mode.value,
+            agent.stimulus.kind,
+            agent.stimulus.cron,
             agent.status.value,
             agent.iteration,
             agent.main_branch,
@@ -60,8 +61,6 @@ def save_agent(agent: Agent, db_path: Path | None = None) -> None:
             agent.merge_mode.value,
             agent.pid,
             agent.created_at.isoformat(),
-            agent.watch_paths,
-            agent.cron,
             agent.last_main_sha,
             agent.consecutive_failures,
         ),
@@ -254,15 +253,6 @@ def _create_main_branch(repo: Path, branch: str) -> None:
 # Operations
 
 
-def _determine_mode(watch_paths: str | None, cron: str | None) -> AgentMode:
-    """Determine agent mode from trigger config."""
-    if watch_paths:
-        return AgentMode.WATCH
-    if cron:
-        return AgentMode.CRON
-    return AgentMode.LOOP
-
-
 def create_agent(
     repo: Path,
     flow: str,
@@ -270,10 +260,12 @@ def create_agent(
     area: list[str],
     pr_limit: int = 5,
     merge_mode: MergeMode = MergeMode.PR,
-    watch_paths: str | None = None,
-    cron: str | None = None,
+    stimulus: Stimulus | None = None,
 ) -> Agent:
     """Create or update an agent."""
+    if stimulus is None:
+        stimulus = Stimulus("loop")
+
     existing = get_agent_by_area_repo(area, repo)
     if existing:
         changed = False
@@ -289,16 +281,8 @@ def create_agent(
         if existing.merge_mode != merge_mode:
             existing.merge_mode = merge_mode
             changed = True
-        if existing.watch_paths != watch_paths:
-            existing.watch_paths = watch_paths
-            changed = True
-        if existing.cron != cron:
-            existing.cron = cron
-            changed = True
-        # Update mode if trigger config changed
-        new_mode = _determine_mode(watch_paths, cron)
-        if existing.mode != new_mode:
-            existing.mode = new_mode
+        if existing.stimulus.kind != stimulus.kind or existing.stimulus.cron != stimulus.cron:
+            existing.stimulus = stimulus
             changed = True
         if changed:
             save_agent(existing)
@@ -307,21 +291,17 @@ def create_agent(
     main_branch = _allocate_main_branch(repo, area)
     _create_main_branch(repo, main_branch)
 
-    mode = _determine_mode(watch_paths, cron)
-
     agent = Agent(
         id=str(uuid.uuid4()),
         repo=repo,
         flow=flow,
         voice=voice,
         area=area,
-        mode=mode,
+        stimulus=stimulus,
         status=AgentStatus.IDLE,
         main_branch=main_branch,
         pr_limit=pr_limit,
         merge_mode=merge_mode,
-        watch_paths=watch_paths,
-        cron=cron,
     )
 
     save_agent(agent)
@@ -425,20 +405,20 @@ def _run_agent(agent: Agent) -> None:
     run_agent_iterations(agent)
 
 
-# Watch mode checking
+# Watch stimulus checking
 
 
-def should_trigger_watch(
+def should_activate_watch(
     watch_paths: list[str],
     last_sha: str | None,
     current_sha: str,
     changed_files: list[str],
 ) -> bool:
-    """Pure trigger logic for watch mode.
+    """Pure activation logic for watch stimulus.
 
-    Returns True if agent should trigger based on:
+    Returns True if agent should activate based on:
     - SHA changed from last_sha to current_sha
-    - At least one changed file matches watch_paths
+    - At least one changed file matches watch_paths (area)
     """
     if last_sha is None:
         return False
@@ -461,19 +441,21 @@ def should_trigger_watch(
     return False
 
 
-def check_watch(agent: Agent) -> bool:
-    """Check if watch-mode agent should run. Returns True if triggered."""
-    if not agent.watch_paths:
+def check_watch_stimulus(agent: Agent) -> bool:
+    """Check if watch-stimulus agent should run. Returns True if activated."""
+    if agent.stimulus.kind != "watch":
         return False
 
     repo = agent.repo
     short_id = agent.short_id()
+    # Use area as watch paths
+    watch_paths = agent.area
 
-    trigger_log.debug(f"[{short_id}] watch check: paths={agent.watch_paths}")
+    stimulus_log.debug(f"[{short_id}] watch check: area={agent.area_display}")
 
     result = subprocess.run(["git", "fetch", "origin", "main"], cwd=repo, capture_output=True)
     if result.returncode != 0:
-        trigger_log.warning(f"[{short_id}] git fetch failed: {result.stderr.decode()[:200]}")
+        stimulus_log.warning(f"[{short_id}] git fetch failed: {result.stderr.decode()[:200]}")
         return False
 
     result = subprocess.run(
@@ -483,11 +465,11 @@ def check_watch(agent: Agent) -> bool:
         text=True,
     )
     if result.returncode != 0:
-        trigger_log.warning(f"[{short_id}] git rev-parse failed")
+        stimulus_log.warning(f"[{short_id}] git rev-parse failed")
         return False
 
     current_sha = result.stdout.strip()
-    trigger_log.debug(
+    stimulus_log.debug(
         f"[{short_id}] SHA: last={agent.last_main_sha[:7] if agent.last_main_sha else 'None'} "
         f"current={current_sha[:7]}"
     )
@@ -496,52 +478,51 @@ def check_watch(agent: Agent) -> bool:
         return False
 
     if agent.last_main_sha is None:
-        trigger_log.info(f"[{short_id}] first check, recording baseline SHA {current_sha[:7]}")
+        stimulus_log.info(f"[{short_id}] first check, recording baseline SHA {current_sha[:7]}")
         update_agent_sha(agent.id, current_sha)
         return False
 
-    paths = [p.strip() for p in agent.watch_paths.split(",")]
     result = subprocess.run(
-        ["git", "diff", "--name-only", agent.last_main_sha, current_sha, "--"] + paths,
+        ["git", "diff", "--name-only", agent.last_main_sha, current_sha, "--"] + watch_paths,
         cwd=repo,
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
-        trigger_log.warning(f"[{short_id}] git diff failed")
+        stimulus_log.warning(f"[{short_id}] git diff failed")
         update_agent_sha(agent.id, current_sha)
         return False
 
     changed_files = [f for f in result.stdout.strip().split("\n") if f]
 
-    triggered = should_trigger_watch(paths, agent.last_main_sha, current_sha, changed_files)
+    activated = should_activate_watch(watch_paths, agent.last_main_sha, current_sha, changed_files)
 
-    if triggered:
-        trigger_log.info(
-            f"[{short_id}] TRIGGERED: {len(changed_files)} files changed in watch paths"
+    if activated:
+        stimulus_log.info(
+            f"[{short_id}] ACTIVATED: {len(changed_files)} files changed in area"
         )
         for f in changed_files[:5]:
-            trigger_log.debug(f"[{short_id}]   changed: {f}")
+            stimulus_log.debug(f"[{short_id}]   changed: {f}")
         if len(changed_files) > 5:
-            trigger_log.debug(f"[{short_id}]   ... and {len(changed_files) - 5} more")
+            stimulus_log.debug(f"[{short_id}]   ... and {len(changed_files) - 5} more")
     else:
-        trigger_log.debug(f"[{short_id}] no matching changes")
+        stimulus_log.debug(f"[{short_id}] no matching changes")
 
     update_agent_sha(agent.id, current_sha)
-    return triggered
+    return activated
 
 
-# Cron mode checking
+# Cron stimulus checking
 
 SCHEDULE_GRACE_PERIOD = timedelta(hours=24)
 
 
-def should_trigger_cron(
+def should_activate_cron(
     cron_expr: str,
     last_run: datetime | None,
     grace_period: timedelta = SCHEDULE_GRACE_PERIOD,
 ) -> bool:
-    """Check if cron should trigger based on last run time."""
+    """Check if cron should activate based on last run time."""
     now = datetime.now()
     cron = croniter(cron_expr, now)
 
@@ -556,75 +537,79 @@ def should_trigger_cron(
     return prev_time > last_run
 
 
-def check_cron(agent: Agent) -> bool:
-    """Check if cron-mode agent should run. Returns True if should trigger."""
-    if not agent.cron:
+def check_cron_stimulus(agent: Agent) -> bool:
+    """Check if cron-stimulus agent should run. Returns True if activated."""
+    if agent.stimulus.kind != "cron" or not agent.stimulus.cron:
         return False
 
     from loopflow.lfd.flow_run import get_latest_run_for_agent
 
     short_id = agent.short_id()
-    trigger_log.debug(f"[{short_id}] cron check: expr={agent.cron}")
+    stimulus_log.debug(f"[{short_id}] cron check: expr={agent.stimulus.cron}")
 
     last_run = get_latest_run_for_agent(agent.id)
     last_time = last_run.ended_at if last_run else None
 
-    triggered = should_trigger_cron(agent.cron, last_time)
+    activated = should_activate_cron(agent.stimulus.cron, last_time)
 
-    if triggered:
-        trigger_log.info(f"[{short_id}] TRIGGERED: cron={agent.cron} last_run={last_time}")
+    if activated:
+        stimulus_log.info(f"[{short_id}] ACTIVATED: cron={agent.stimulus.cron} last_run={last_time}")
     else:
-        trigger_log.debug(f"[{short_id}] not due: last_run={last_time}")
+        stimulus_log.debug(f"[{short_id}] not due: last_run={last_time}")
 
-    return triggered
+    return activated
 
 
-# Daemon check functions
+# Daemon stimulus check functions
 
 
 def run_watch_check() -> list[str]:
-    """Check all watch-mode agents and trigger as needed."""
+    """Check all watch-stimulus agents and activate as needed."""
     agents = list_agents()
-    watch_agents = [a for a in agents if a.watch_paths and a.status != AgentStatus.RUNNING]
-    trigger_log.debug(f"watch check: {len(watch_agents)} agents to check")
+    watch_agents = [
+        a for a in agents if a.stimulus.kind == "watch" and a.status != AgentStatus.RUNNING
+    ]
+    stimulus_log.debug(f"watch check: {len(watch_agents)} agents to check")
 
-    triggered = []
+    activated = []
     for agent in watch_agents:
         try:
-            if check_watch(agent):
+            if check_watch_stimulus(agent):
                 result = start_agent(agent.id)
                 if result:
-                    trigger_log.info(f"[{agent.short_id()}] started from watch trigger")
-                    triggered.append(agent.id)
+                    stimulus_log.info(f"[{agent.short_id()}] started from watch stimulus")
+                    activated.append(agent.id)
                 else:
-                    trigger_log.warning(
-                        f"[{agent.short_id()}] watch triggered but start failed: {result.reason}"
+                    stimulus_log.warning(
+                        f"[{agent.short_id()}] watch activated but start failed: {result.reason}"
                     )
         except Exception as e:
-            trigger_log.error(f"[{agent.short_id()}] watch check error: {e}")
+            stimulus_log.error(f"[{agent.short_id()}] watch check error: {e}")
 
-    return triggered
+    return activated
 
 
 def run_cron_check() -> list[str]:
-    """Check all cron-mode agents and trigger as needed."""
+    """Check all cron-stimulus agents and activate as needed."""
     agents = list_agents()
-    cron_agents = [a for a in agents if a.cron and a.status != AgentStatus.RUNNING]
-    trigger_log.debug(f"cron check: {len(cron_agents)} agents to check")
+    cron_agents = [
+        a for a in agents if a.stimulus.kind == "cron" and a.status != AgentStatus.RUNNING
+    ]
+    stimulus_log.debug(f"cron check: {len(cron_agents)} agents to check")
 
-    triggered = []
+    activated = []
     for agent in cron_agents:
         try:
-            if check_cron(agent):
+            if check_cron_stimulus(agent):
                 result = start_agent(agent.id)
                 if result:
-                    trigger_log.info(f"[{agent.short_id()}] started from cron trigger")
-                    triggered.append(agent.id)
+                    stimulus_log.info(f"[{agent.short_id()}] started from cron stimulus")
+                    activated.append(agent.id)
                 else:
-                    trigger_log.warning(
-                        f"[{agent.short_id()}] cron triggered but start failed: {result.reason}"
+                    stimulus_log.warning(
+                        f"[{agent.short_id()}] cron activated but start failed: {result.reason}"
                     )
         except Exception as e:
-            trigger_log.error(f"[{agent.short_id()}] cron check error: {e}")
+            stimulus_log.error(f"[{agent.short_id()}] cron check error: {e}")
 
-    return triggered
+    return activated

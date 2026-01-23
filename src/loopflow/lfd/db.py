@@ -14,6 +14,7 @@ from loopflow.lfd.migrations.registry import MIGRATIONS
 DB_PATH = Path.home() / ".lf" / "lfd.db"
 
 
+
 def _init_db(db_path: Path) -> None:
     """Initialize lfd.db with schema."""
     db_path.parent.mkdir(parents=True, exist_ok=True)

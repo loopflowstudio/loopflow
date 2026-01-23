@@ -22,7 +22,7 @@ public struct AgentService: @unchecked Sendable {
         let query = """
             SELECT id, flow, voice, area, repo, status, iteration,
                    main_branch, pr_limit, merge_mode, pid, created_at,
-                   watch_paths, cron, last_main_sha
+                   stimulus_kind, stimulus_cron, last_main_sha
             FROM agents
             WHERE repo = ?
             ORDER BY created_at DESC
@@ -62,12 +62,14 @@ public struct AgentService: @unchecked Sendable {
                 createdAt = dateFormatter.date(from: dateStr) ?? Date()
             }
 
-            let watchPaths = columnText(stmt, 12)
-            let cron = columnText(stmt, 13)
+            let stimulusKindStr = columnText(stmt, 12) ?? "loop"
+            let stimulusCron = columnText(stmt, 13)
             let lastMainSha = columnText(stmt, 14)
 
             let status = AgentStatus(rawValue: statusStr) ?? .idle
             let mergeMode = MergeMode(rawValue: mergeModeStr) ?? .pr
+            let stimulusKind = Stimulus.Kind(rawValue: stimulusKindStr) ?? .loop
+            let stimulus = Stimulus(kind: stimulusKind, cron: stimulusCron)
 
             let agent = Agent(
                 id: id,
@@ -75,6 +77,7 @@ public struct AgentService: @unchecked Sendable {
                 voice: voice,
                 area: area,
                 repo: repoPath,
+                stimulus: stimulus,
                 status: status,
                 iteration: iteration,
                 mainBranch: mainBranch,
@@ -82,8 +85,6 @@ public struct AgentService: @unchecked Sendable {
                 mergeMode: mergeMode,
                 pid: pid,
                 createdAt: createdAt,
-                watchPaths: watchPaths,
-                cron: cron,
                 lastMainSha: lastMainSha
             )
 

@@ -32,10 +32,11 @@ An agent is **flow × area × voice**.
 
 Area is the path you pass—not a file. It scopes what the agent sees and changes.
 
-| Agent Mode | Runs when |
-|------------|-----------|
+| Stimulus | Runs when |
+|----------|-----------|
+| **Once** | Single run (one-shot) |
 | **Loop** | Continuously until stopped |
-| **Watch** | Paths change on main |
+| **Watch** | Area changes on main |
 | **Cron** | On schedule |
 
 ---

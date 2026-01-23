@@ -107,7 +107,7 @@ def run_agent_iterations(agent: Agent) -> None:
     consecutive_failures = agent.consecutive_failures
 
     worker_log.info(
-        f"[{short_id}] starting: mode={agent.mode} flow={agent.flow} "
+        f"[{short_id}] starting: stimulus={agent.stimulus} flow={agent.flow} "
         f"area={agent.area_display} iteration={agent.iteration}"
     )
 

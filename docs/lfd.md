@@ -113,23 +113,22 @@ lfd start --all              # include waiting loops
 |------|-------------|
 | `-a, --all` | Include waiting loops (not just idle) |
 
-## Triggers
+## Stimulus Commands
 
 ### lfd subscribe
 
 Watch for file changes on main.
 
 ```bash
-lfd subscribe <flow> <area> -p <path>
-lfd subscribe ship src/api/ -p src/api
-lfd subscribe ship . -p schema.graphql -p src/resolvers
+lfd subscribe <flow> <area>
+lfd subscribe ship src/api/
+lfd subscribe ship docs/
 ```
 
-When files change under the watched paths on main, triggers one iteration.
+When files in the area change on main, activates one iteration. The area serves as both the context for the agent and the paths to watch.
 
 | Flag | Description |
 |------|-------------|
-| `-p, --path` | Path to watch (repeatable, required) |
 | `-v, --voice` | Voice to apply (repeatable) |
 
 ### lfd schedule

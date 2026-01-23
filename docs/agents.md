@@ -13,13 +13,24 @@ lfd loop ship src/api/ --voice architect
 
 This runs the `ship` flow on `src/api/` through the `architect` voice—continuously, creating PRs until you stop it.
 
-## The Three Modes
+## Stimulus Types
 
-| Mode | Runs when | Command |
-|------|-----------|---------|
+| Stimulus | Runs when | Command |
+|----------|-----------|---------|
+| **Once** | Single run | `lfd run` |
 | **Loop** | Continuously until stopped | `lfd loop` |
-| **Watch** | Paths change on main | `lfd subscribe` |
+| **Watch** | Area changes on main | `lfd subscribe` |
 | **Cron** | On schedule | `lfd schedule` |
+
+### Once
+
+Single execution. Run a flow once then stop.
+
+```bash
+lfd run ship swift/                       # one-off iteration
+lfd run ship swift/ -v product-engineer   # with a role
+lfd run ship . -c                         # whole repo with clipboard
+```
 
 ### Loop
 
@@ -35,12 +46,14 @@ When the PR limit is reached, the loop pauses until PRs are merged.
 
 ### Watch
 
-React to changes. When files change on main, run one iteration.
+React to changes. When files in the area change on main, activates one iteration.
 
 ```bash
-lfd subscribe ship src/api/ -p src/api
-lfd subscribe ship . -p schema.graphql -p src/resolvers
+lfd subscribe ship src/api/               # watch src/api/ for changes
+lfd subscribe ship docs/                  # watch docs/ for changes
 ```
+
+The area serves as both the context for the agent and the paths to watch.
 
 ### Cron
 
@@ -66,12 +79,12 @@ Or run manually: `lfd serve`
 
 ## One-Shot
 
-Run exactly one iteration:
+Run exactly one iteration using the once stimulus:
 
 ```bash
-lfd flow ship src/               # single iteration
-lfd flow ship src/ -p spec.md    # with project file
-lfd flow ship src/ -c            # with clipboard
+lfd run ship src/                # single iteration
+lfd run ship src/ -v architect   # with a voice
+lfd run ship src/ -c             # with clipboard
 ```
 
 ## Managing Agents
@@ -86,7 +99,7 @@ lfd rm <id>             # remove agent and history
 Status output:
 
 ```
-ID       TYPE       AREA                    STATUS     ITER  REPO
+ID       STIMULUS   AREA                    STATUS     ITER  REPO
 abc1234  loop       src/ [ship] [architect] running    12    ~/repo
 ```
 

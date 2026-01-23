@@ -46,4 +46,4 @@ def get_lfd_logger(name: str = "lfd") -> logging.Logger:
 # Module-level loggers for different components
 agent_log = get_lfd_logger("lfd.agent")
 worker_log = get_lfd_logger("lfd.worker")
-trigger_log = get_lfd_logger("lfd.trigger")
+stimulus_log = get_lfd_logger("lfd.stimulus")

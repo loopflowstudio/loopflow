@@ -564,13 +564,9 @@ def check_watch(agent: Agent) -> bool:
 
     trigger_log.debug(f"[{short_id}] watch check: paths={agent.watch_paths}")
 
-    result = subprocess.run(
-        ["git", "fetch", "origin", "main"], cwd=repo, capture_output=True
-    )
+    result = subprocess.run(["git", "fetch", "origin", "main"], cwd=repo, capture_output=True)
     if result.returncode != 0:
-        trigger_log.warning(
-            f"[{short_id}] git fetch failed: {result.stderr.decode()[:200]}"
-        )
+        trigger_log.warning(f"[{short_id}] git fetch failed: {result.stderr.decode()[:200]}")
         return False
 
     result = subprocess.run(

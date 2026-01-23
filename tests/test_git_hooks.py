@@ -21,12 +21,8 @@ from loopflow.lfd.git_hooks import (
 def _init_git_repo(path: Path) -> Path:
     """Initialize a git repo at path and return it."""
     subprocess.run(["git", "init"], cwd=path, capture_output=True)
-    subprocess.run(
-        ["git", "config", "user.email", "test@test.com"], cwd=path, capture_output=True
-    )
-    subprocess.run(
-        ["git", "config", "user.name", "Test"], cwd=path, capture_output=True
-    )
+    subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=path, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=path, capture_output=True)
     return path
 
 

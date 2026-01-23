@@ -27,6 +27,7 @@ from loopflow.lfd.flow_run import (
 from loopflow.lfd.migrations.registry import MIGRATIONS
 from loopflow.lfd.models import (
     Agent,
+    AgentMode,
     AgentStatus,
     FlowRun,
     FlowRunStatus,
@@ -634,6 +635,14 @@ def test_server_handle_output_line_allows_empty_text():
 
 def _make_agent(**kwargs) -> Agent:
     """Helper to create an Agent with test defaults."""
+    # Determine mode from trigger config if not explicitly set
+    if "mode" not in kwargs:
+        if kwargs.get("watch_paths"):
+            kwargs["mode"] = AgentMode.WATCH
+        elif kwargs.get("cron"):
+            kwargs["mode"] = AgentMode.CRON
+        else:
+            kwargs["mode"] = AgentMode.LOOP
     defaults = {
         "id": "test-id",
         "flow": "ship",
@@ -673,13 +682,13 @@ def test_agent_model_short_id():
 def test_agent_mode_property():
     """Agent.mode returns correct activation mode."""
     loop_agent = _make_agent()
-    assert loop_agent.mode == "loop"
+    assert loop_agent.mode == AgentMode.LOOP
 
     watch_agent = _make_agent(watch_paths="src/**/*.py")
-    assert watch_agent.mode == "watch"
+    assert watch_agent.mode == AgentMode.WATCH
 
     cron_agent = _make_agent(cron="0 9 * * *")
-    assert cron_agent.mode == "cron"
+    assert cron_agent.mode == AgentMode.CRON
 
 
 def test_run_model():

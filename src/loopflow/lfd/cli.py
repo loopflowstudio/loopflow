@@ -366,9 +366,13 @@ def run(
 
     # Start it in foreground (runs once)
     result = start_agent(agent.id, foreground=True)
+
+    # Clean up temporary agent
+    delete_agent(agent.id)
+
     if result:
         msg = f"{c['green']}Completed{c['reset']} run {c['bold']}{area}{c['reset']}"
-        typer.echo(f"{msg} ({agent.short_id()})")
+        typer.echo(msg)
     else:
         typer.echo(f"{c['red']}Error:{c['reset']} Failed to run", err=True)
         raise typer.Exit(1)

@@ -4,6 +4,12 @@
 import Foundation
 import SwiftUI
 
+public enum AgentMode: String, Sendable, Codable {
+    case loop
+    case watch
+    case cron
+}
+
 public enum AgentStatus: String, Sendable, Codable {
     case idle
     case running
@@ -32,6 +38,7 @@ public struct Agent: Sendable, Identifiable, Hashable {
     public let area: [String]
     public let repo: String
 
+    public var mode: AgentMode
     public var status: AgentStatus
     public var iteration: Int
 
@@ -42,7 +49,7 @@ public struct Agent: Sendable, Identifiable, Hashable {
     public var pid: Int?
     public var createdAt: Date
 
-    // Activation config (determines mode)
+    // Trigger config (for watch/cron modes)
     public var watchPaths: String?
     public var cron: String?
     public var lastMainSha: String?
@@ -53,6 +60,7 @@ public struct Agent: Sendable, Identifiable, Hashable {
         voice: [String] = [],
         area: [String] = ["."],
         repo: String,
+        mode: AgentMode = .loop,
         status: AgentStatus = .idle,
         iteration: Int = 0,
         mainBranch: String,
@@ -69,6 +77,7 @@ public struct Agent: Sendable, Identifiable, Hashable {
         self.voice = voice
         self.area = area
         self.repo = repo
+        self.mode = mode
         self.status = status
         self.iteration = iteration
         self.mainBranch = mainBranch
@@ -82,13 +91,6 @@ public struct Agent: Sendable, Identifiable, Hashable {
     }
 
     public var shortId: String { String(id.prefix(7)) }
-
-    /// Activation mode: 'watch', 'cron', or 'loop'
-    public var mode: String {
-        if watchPaths != nil { return "watch" }
-        if cron != nil { return "cron" }
-        return "loop"
-    }
 
     public var areaDisplay: String {
         area.first == "." ? "root" : area.joined(separator: ", ")

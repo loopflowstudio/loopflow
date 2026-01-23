@@ -553,7 +553,9 @@ def check_cron_stimulus(agent: Agent) -> bool:
     activated = should_activate_cron(agent.stimulus.cron, last_time)
 
     if activated:
-        stimulus_log.info(f"[{short_id}] ACTIVATED: cron={agent.stimulus.cron} last_run={last_time}")
+        stimulus_log.info(
+            f"[{short_id}] ACTIVATED: cron={agent.stimulus.cron} last_run={last_time}"
+        )
     else:
         stimulus_log.debug(f"[{short_id}] not due: last_run={last_time}")
 

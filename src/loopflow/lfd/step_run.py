@@ -1,18 +1,19 @@
-"""Session entity persistence.
+"""StepRun entity persistence.
 
-Sessions track interactive lf runs (not daemon-spawned runs).
-Legacy from before the Run model - kept for backwards compatibility.
+StepRuns track individual step executions, either:
+- Standalone (interactive `lf step` runs)
+- As part of a FlowRun (agent-spawned)
 """
 
 from datetime import datetime
 from pathlib import Path
 
 from loopflow.lfd.db import _get_db
-from loopflow.lfd.models import Session, SessionStatus
+from loopflow.lfd.models import StepRun, StepRunStatus
 
 
-def save_session(session: Session, db_path: Path | None = None) -> None:
-    """Save a session."""
+def save_step_run(step_run: StepRun, db_path: Path | None = None) -> None:
+    """Save a step run."""
     conn = _get_db(db_path)
 
     conn.execute(
@@ -22,16 +23,16 @@ def save_session(session: Session, db_path: Path | None = None) -> None:
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            session.id,
-            session.step,  # DB column is 'task' for backward compat
-            session.repo,
-            session.worktree,
-            session.status.value,
-            session.started_at.isoformat(),
-            session.ended_at.isoformat() if session.ended_at else None,
-            session.pid,
-            session.model,
-            session.run_mode,
+            step_run.id,
+            step_run.step,  # DB column is 'task' for backward compat
+            step_run.repo,
+            step_run.worktree,
+            step_run.status.value,
+            step_run.started_at.isoformat(),
+            step_run.ended_at.isoformat() if step_run.ended_at else None,
+            step_run.pid,
+            step_run.model,
+            step_run.run_mode,
         ),
     )
 
@@ -39,12 +40,12 @@ def save_session(session: Session, db_path: Path | None = None) -> None:
     conn.close()
 
 
-def load_sessions(
+def load_step_runs(
     repo: str | None = None,
     active_only: bool = False,
     db_path: Path | None = None,
-) -> list[Session]:
-    """Load sessions, optionally filtered by repo."""
+) -> list[StepRun]:
+    """Load step runs, optionally filtered by repo."""
     conn = _get_db(db_path)
 
     conditions = []
@@ -60,15 +61,15 @@ def load_sessions(
     where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
     cursor = conn.execute(f"SELECT * FROM sessions{where} ORDER BY started_at DESC", params)
 
-    sessions = [_session_from_row(dict(row)) for row in cursor]
+    step_runs = [_step_run_from_row(dict(row)) for row in cursor]
     conn.close()
-    return sessions
+    return step_runs
 
 
-def load_sessions_for_worktree(
+def load_step_runs_for_worktree(
     worktree: str, limit: int = 20, db_path: Path | None = None
-) -> list[Session]:
-    """Load recent sessions for a worktree path."""
+) -> list[StepRun]:
+    """Load recent step runs for a worktree path."""
     conn = _get_db(db_path)
 
     cursor = conn.execute(
@@ -76,15 +77,15 @@ def load_sessions_for_worktree(
         (worktree, limit),
     )
 
-    sessions = [_session_from_row(dict(row)) for row in cursor]
+    step_runs = [_step_run_from_row(dict(row)) for row in cursor]
     conn.close()
-    return sessions
+    return step_runs
 
 
-def load_sessions_for_repo(
+def load_step_runs_for_repo(
     repo: str, limit: int = 50, db_path: Path | None = None
-) -> list[Session]:
-    """Load recent sessions across all worktrees in a repo."""
+) -> list[StepRun]:
+    """Load recent step runs across all worktrees in a repo."""
     conn = _get_db(db_path)
 
     cursor = conn.execute(
@@ -92,24 +93,24 @@ def load_sessions_for_repo(
         (repo, limit),
     )
 
-    sessions = [_session_from_row(dict(row)) for row in cursor]
+    step_runs = [_step_run_from_row(dict(row)) for row in cursor]
     conn.close()
-    return sessions
+    return step_runs
 
 
-def update_session_status(
-    session_id: str, status: SessionStatus, db_path: Path | None = None
+def update_step_run_status(
+    step_run_id: str, status: StepRunStatus, db_path: Path | None = None
 ) -> bool:
-    """Update session status."""
+    """Update step run status."""
     conn = _get_db(db_path)
 
     ended_at = None
-    if status in (SessionStatus.COMPLETED, SessionStatus.ERROR):
+    if status in (StepRunStatus.COMPLETED, StepRunStatus.FAILED):
         ended_at = datetime.now().isoformat()
 
     cursor = conn.execute(
         "UPDATE sessions SET status = ?, ended_at = COALESCE(?, ended_at) WHERE id = ?",
-        (status.value, ended_at, session_id),
+        (status.value, ended_at, step_run_id),
     )
 
     conn.commit()
@@ -118,11 +119,11 @@ def update_session_status(
     return updated
 
 
-def delete_session(session_id: str, db_path: Path | None = None) -> bool:
-    """Delete a session from database."""
+def delete_step_run(step_run_id: str, db_path: Path | None = None) -> bool:
+    """Delete a step run from database."""
     conn = _get_db(db_path)
 
-    cursor = conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+    cursor = conn.execute("DELETE FROM sessions WHERE id = ?", (step_run_id,))
 
     conn.commit()
     deleted = cursor.rowcount > 0
@@ -130,17 +131,26 @@ def delete_session(session_id: str, db_path: Path | None = None) -> bool:
     return deleted
 
 
-def _session_from_row(row: dict) -> Session:
-    """Convert database row to Session."""
-    return Session(
+def _step_run_from_row(row: dict) -> StepRun:
+    """Convert database row to StepRun."""
+    return StepRun(
         id=row["id"],
         step=row["task"],  # DB column is 'task' for backward compat
         repo=row["repo"],
         worktree=row["worktree"],
-        status=SessionStatus(row["status"]),
+        status=StepRunStatus(row["status"]),
         started_at=datetime.fromisoformat(row["started_at"]),
         ended_at=datetime.fromisoformat(row["ended_at"]) if row.get("ended_at") else None,
         pid=row.get("pid"),
         model=row.get("model", "claude-code"),
         run_mode=row.get("run_mode", "auto"),
     )
+
+
+# Backwards compatibility aliases
+save_session = save_step_run
+load_sessions = load_step_runs
+load_sessions_for_worktree = load_step_runs_for_worktree
+load_sessions_for_repo = load_step_runs_for_repo
+update_session_status = update_step_run_status
+delete_session = delete_step_run

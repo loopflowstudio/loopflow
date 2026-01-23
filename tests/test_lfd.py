@@ -26,7 +26,7 @@ from loopflow.lfd.agent import (
     update_agent_pid,
     update_agent_status,
 )
-from loopflow.lfd.run import (
+from loopflow.lfd.flow_run import (
     get_latest_run_for_agent,
     list_runs_for_agent,
     save_run,
@@ -34,7 +34,7 @@ from loopflow.lfd.run import (
     update_run_status,
     update_run_step,
 )
-from loopflow.lfd.session import (
+from loopflow.lfd.step_run import (
     load_sessions,
     load_sessions_for_repo,
     load_sessions_for_worktree,
@@ -178,7 +178,7 @@ def test_migrations_cover_all_run_fields():
 
         run = Run(
             id="test-run-all-fields",
-            agent="agent-id",
+            agent_id="agent-id",
             flow="ship",
             area=["src/test/"],
             voice=["voice-a", "voice-b"],
@@ -199,7 +199,7 @@ def test_migrations_cover_all_run_fields():
         loaded = runs[0]
 
         assert loaded.id == run.id
-        assert loaded.agent == run.agent
+        assert loaded.agent_id == run.agent_id
         assert loaded.flow == run.flow
         assert loaded.area == run.area
         assert loaded.voice == run.voice
@@ -553,7 +553,7 @@ def test_run_model():
     """Run model stores execution data."""
     run = Run(
         id="run-1",
-        agent="agent-1",
+        agent_id="agent-1",
         flow="ship",
         area=["src/test/"],
         voice=["default"],
@@ -709,7 +709,7 @@ def test_db_delete_agent():
         # Add a run
         run = Run(
             id="run-1",
-            agent="agent-1",
+            agent_id="agent-1",
             flow="ship",
             area=["src/test/"],
             voice=["default"],
@@ -742,7 +742,7 @@ def test_db_save_and_get_runs():
 
         run1 = Run(
             id="run-1",
-            agent="agent-1",
+            agent_id="agent-1",
             flow="ship",
             area=["src/test/"],
             voice=["default"],
@@ -754,7 +754,7 @@ def test_db_save_and_get_runs():
         )
         run2 = Run(
             id="run-2",
-            agent="agent-1",
+            agent_id="agent-1",
             flow="ship",
             area=["src/test/"],
             voice=["default"],
@@ -780,7 +780,7 @@ def test_db_get_latest_run_for_agent():
 
         run1 = Run(
             id="run-1",
-            agent="agent-1",
+            agent_id="agent-1",
             flow="ship",
             area=["src/test/"],
             voice=["default"],
@@ -791,7 +791,7 @@ def test_db_get_latest_run_for_agent():
         )
         run2 = Run(
             id="run-2",
-            agent="agent-1",
+            agent_id="agent-1",
             flow="ship",
             area=["src/test/"],
             voice=["default"],
@@ -818,7 +818,7 @@ def test_db_update_run_status():
 
         run = Run(
             id="run-1",
-            agent="agent-1",
+            agent_id="agent-1",
             flow="ship",
             area=["src/test/"],
             voice=["default"],
@@ -847,7 +847,7 @@ def test_db_update_run_step():
 
         run = Run(
             id="run-1",
-            agent="agent-1",
+            agent_id="agent-1",
             flow="ship",
             area=["src/test/"],
             voice=["default"],
@@ -875,7 +875,7 @@ def test_db_update_run_pr():
 
         run = Run(
             id="run-1",
-            agent="agent-1",
+            agent_id="agent-1",
             flow="ship",
             area=["src/test/"],
             voice=["default"],

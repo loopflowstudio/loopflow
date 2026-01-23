@@ -14,7 +14,7 @@ from loopflow.lfd.daemon.protocol import Event, Request, Response, error, succes
 from loopflow.lfd.db import update_dead_processes
 from loopflow.lfd.models import AgentStatus, Session, SessionStatus
 from loopflow.lfd.agent import list_agents, run_cron_check, run_watch_check
-from loopflow.lfd.session import (
+from loopflow.lfd.step_run import (
     load_sessions,
     load_sessions_for_repo,
     load_sessions_for_worktree,

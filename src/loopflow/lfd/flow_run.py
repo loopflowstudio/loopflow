@@ -1,14 +1,14 @@
-"""Run entity persistence and operations."""
+"""FlowRun entity persistence and operations."""
 
 import json
 from datetime import datetime
 from pathlib import Path
 
 from loopflow.lfd.db import _get_db
-from loopflow.lfd.models import Run, RunStatus
+from loopflow.lfd.models import FlowRun, FlowRunStatus
 
 
-def save_run(run: Run, db_path: Path | None = None) -> None:
+def save_run(run: FlowRun, db_path: Path | None = None) -> None:
     """Save or update a run."""
     conn = _get_db(db_path)
 
@@ -22,7 +22,7 @@ def save_run(run: Run, db_path: Path | None = None) -> None:
         """,
         (
             run.id,
-            run.agent,
+            run.agent_id,
             run.flow,
             json.dumps(run.voice),
             json.dumps(run.area),
@@ -43,7 +43,7 @@ def save_run(run: Run, db_path: Path | None = None) -> None:
     conn.close()
 
 
-def get_run(run_id: str, db_path: Path | None = None) -> Run | None:
+def get_run(run_id: str, db_path: Path | None = None) -> FlowRun | None:
     """Get a run by ID (supports short IDs)."""
     conn = _get_db(db_path)
 
@@ -55,16 +55,16 @@ def get_run(run_id: str, db_path: Path | None = None) -> Run | None:
         row = cursor.fetchone()
 
     conn.close()
-    return run_from_row(dict(row)) if row else None
+    return flow_run_from_row(dict(row)) if row else None
 
 
 def list_runs(
     repo: Path | None = None,
     agent: str | None = None,
-    status: RunStatus | None = None,
+    status: FlowRunStatus | None = None,
     limit: int = 50,
     db_path: Path | None = None,
-) -> list[Run]:
+) -> list[FlowRun]:
     """List runs with optional filters."""
     conn = _get_db(db_path)
 
@@ -88,7 +88,7 @@ def list_runs(
 
     cursor = conn.execute(f"SELECT * FROM runs{where} ORDER BY created_at DESC LIMIT ?", params)
 
-    runs = [run_from_row(dict(row)) for row in cursor]
+    runs = [flow_run_from_row(dict(row)) for row in cursor]
     conn.close()
     return runs
 
@@ -97,12 +97,12 @@ def list_runs_for_agent(
     agent_id: str,
     limit: int = 10,
     db_path: Path | None = None,
-) -> list[Run]:
+) -> list[FlowRun]:
     """List runs spawned by a specific agent."""
     return list_runs(agent=agent_id, limit=limit, db_path=db_path)
 
 
-def get_latest_run_for_agent(agent_id: str, db_path: Path | None = None) -> Run | None:
+def get_latest_run_for_agent(agent_id: str, db_path: Path | None = None) -> FlowRun | None:
     """Get the most recent run for an agent."""
     runs = list_runs_for_agent(agent_id, limit=1, db_path=db_path)
     return runs[0] if runs else None
@@ -110,7 +110,7 @@ def get_latest_run_for_agent(agent_id: str, db_path: Path | None = None) -> Run 
 
 def update_run_status(
     run_id: str,
-    status: RunStatus,
+    status: FlowRunStatus,
     error: str | None = None,
     db_path: Path | None = None,
 ) -> bool:
@@ -118,7 +118,7 @@ def update_run_status(
     conn = _get_db(db_path)
 
     ended_at = None
-    if status in (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED):
+    if status in (FlowRunStatus.COMPLETED, FlowRunStatus.FAILED, FlowRunStatus.CANCELLED):
         ended_at = datetime.now().isoformat()
 
     if error:
@@ -179,22 +179,22 @@ def delete_run(run_id: str, db_path: Path | None = None) -> bool:
     return deleted
 
 
-def run_from_row(row: dict) -> Run:
-    """Convert database row to Run."""
+def flow_run_from_row(row: dict) -> FlowRun:
+    """Convert database row to FlowRun."""
     voice_str = row.get("voice")
     voice = json.loads(voice_str) if voice_str else ["default"]
 
     area_str = row.get("area")
     area = json.loads(area_str) if area_str else ["."]
 
-    return Run(
+    return FlowRun(
         id=row["id"],
-        agent=row.get("agent"),
+        agent_id=row.get("agent"),
         flow=row["flow"],
         voice=voice,
         area=area,
         repo=Path(row["repo"]),
-        status=RunStatus(row["status"]),
+        status=FlowRunStatus(row["status"]),
         iteration=row.get("iteration", 0),
         worktree=row.get("worktree"),
         branch=row.get("branch"),

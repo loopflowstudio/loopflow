@@ -35,8 +35,8 @@ from loopflow.lf.worktrees import WorktreeError
 from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
 from loopflow.lfd.daemon.client import notify_event
-from loopflow.lfd.models import Agent, Run, RunStatus
-from loopflow.lfd.run import (
+from loopflow.lfd.models import Agent, FlowRun, FlowRunStatus
+from loopflow.lfd.flow_run import (
     save_run,
     update_run_pr,
     update_run_status,
@@ -324,14 +324,14 @@ def run_iteration(
         notify_event("agent.error", {"agent_id": agent.id, "error": error_msg})
         return False
 
-    run = Run(
+    run = FlowRun(
         id=run_id or str(uuid.uuid4()),
-        agent=agent.id,
+        agent_id=agent.id,
         flow=agent.flow,
         voice=agent.voice,
         area=agent.area,
         repo=agent.repo,
-        status=RunStatus.RUNNING,
+        status=FlowFlowRunStatus.RUNNING,
         iteration=iteration,
         worktree=str(worktree_path),
         branch=branch,
@@ -352,30 +352,30 @@ def run_iteration(
 
     effective_voices = build_effective_voices(agent.repo, agent.voice)
     if not effective_voices:
-        update_run_status(run.id, RunStatus.FAILED, error="No valid voices found")
+        update_run_status(run.id, FlowRunStatus.FAILED, error="No valid voices found")
         return False
 
     flow = agent.flow
     if not flow:
-        update_run_status(run.id, RunStatus.FAILED, error="Flow is required")
+        update_run_status(run.id, FlowRunStatus.FAILED, error="Flow is required")
         _cleanup_worktree(agent.repo, worktree_path, branch)
         return False
 
     try:
         flow_def = load_flow(flow, agent.repo)
     except ValueError as exc:
-        update_run_status(run.id, RunStatus.FAILED, error=str(exc))
+        update_run_status(run.id, FlowRunStatus.FAILED, error=str(exc))
         _cleanup_worktree(agent.repo, worktree_path, branch)
         return False
 
     if not flow_def:
-        update_run_status(run.id, RunStatus.FAILED, error=f"Unknown flow '{flow}'")
+        update_run_status(run.id, FlowRunStatus.FAILED, error=f"Unknown flow '{flow}'")
         _cleanup_worktree(agent.repo, worktree_path, branch)
         return False
 
     resolved = resolve_flow(flow_def, agent.repo)
     if not resolved:
-        update_run_status(run.id, RunStatus.FAILED, error=f"Empty flow '{flow}'")
+        update_run_status(run.id, FlowRunStatus.FAILED, error=f"Empty flow '{flow}'")
         _cleanup_worktree(agent.repo, worktree_path, branch)
         return False
 
@@ -384,7 +384,7 @@ def run_iteration(
 
     runner = get_runner(backend)
     if not runner.is_available():
-        update_run_status(run.id, RunStatus.FAILED, error=f"'{backend}' CLI not found")
+        update_run_status(run.id, FlowRunStatus.FAILED, error=f"'{backend}' CLI not found")
         return False
 
     skip_permissions = config.yolo if config else False
@@ -406,7 +406,7 @@ def run_iteration(
 
             if i >= len(resolved) or resolved[i].join is None:
                 update_run_status(
-                    run.id, RunStatus.FAILED, error="Fork must be immediately followed by join"
+                    run.id, FlowRunStatus.FAILED, error="Fork must be immediately followed by join"
                 )
                 _cleanup_worktree(agent.repo, worktree_path, branch)
                 return False
@@ -425,7 +425,7 @@ def run_iteration(
                 model_variant,
             )
             if result_code != 0:
-                update_run_status(run.id, RunStatus.FAILED, error="join failed")
+                update_run_status(run.id, FlowRunStatus.FAILED, error="join failed")
                 _cleanup_worktree(agent.repo, worktree_path, branch)
                 return False
 
@@ -443,7 +443,7 @@ def run_iteration(
                     skip_permissions,
                 )
             except RuntimeError as exc:
-                update_run_status(run.id, RunStatus.FAILED, error=str(exc))
+                update_run_status(run.id, FlowRunStatus.FAILED, error=str(exc))
                 _cleanup_worktree(agent.repo, worktree_path, branch)
                 return False
 
@@ -454,7 +454,7 @@ def run_iteration(
             continue
 
         if step.join is not None:
-            update_run_status(run.id, RunStatus.FAILED, error="Join must follow fork")
+            update_run_status(run.id, FlowRunStatus.FAILED, error="Join must follow fork")
             _cleanup_worktree(agent.repo, worktree_path, branch)
             return False
 
@@ -495,7 +495,7 @@ def run_iteration(
             voices=step_voices,
         )
         if not prompt_result:
-            update_run_status(run.id, RunStatus.FAILED, error=f"Step file not found: {step_name}")
+            update_run_status(run.id, FlowRunStatus.FAILED, error=f"Step file not found: {step_name}")
             _cleanup_worktree(agent.repo, worktree_path, branch)
             return False
 
@@ -520,7 +520,7 @@ def run_iteration(
         )
 
         if result_code != 0:
-            update_run_status(run.id, RunStatus.FAILED, error=f"{step_name} failed")
+            update_run_status(run.id, FlowRunStatus.FAILED, error=f"{step_name} failed")
             _cleanup_worktree(agent.repo, worktree_path, branch)
             return False
 
@@ -536,7 +536,7 @@ def run_iteration(
         if agent.merge_mode.value == "land":
             _land_to_main(agent)
 
-    update_run_status(run.id, RunStatus.COMPLETED)
+    update_run_status(run.id, FlowRunStatus.COMPLETED)
 
     notify_event(
         "agent.iteration.done",

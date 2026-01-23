@@ -237,15 +237,3 @@ class PRPoller:
             except Exception:
                 # Don't let polling errors crash the daemon
                 pass
-
-
-# Global instance
-_poller: PRPoller | None = None
-
-
-def get_pr_poller() -> PRPoller:
-    """Get or create the global PR poller."""
-    global _poller
-    if _poller is None:
-        _poller = PRPoller()
-    return _poller

@@ -22,7 +22,7 @@ from loopflow.lfd.step_run import (
     update_step_run_status,
 )
 from loopflow.lfd.git_hooks import hooks_status, install_hooks
-from loopflow.lfd.pr_poller import get_pr_poller
+from loopflow.lfd.pr_poller import PRPoller
 from loopflow.lfd.worktree_state import get_worktree_state_service
 
 
@@ -35,7 +35,7 @@ class Server:
         self._check_task: asyncio.Task | None = None
         self._poller_task: asyncio.Task | None = None
         self.manager = Manager(load_manager_config())
-        self.pr_poller = get_pr_poller()
+        self.pr_poller = PRPoller()
 
     async def start(self) -> None:
         self.socket_path.parent.mkdir(parents=True, exist_ok=True)

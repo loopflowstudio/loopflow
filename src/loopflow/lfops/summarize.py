@@ -8,6 +8,26 @@ from pathlib import Path
 
 from loopflow.lf.tokens import count_tokens
 
+# Patterns for lfdocs content (excluded from summaries when lfdocs is on)
+LFDOCS_EXCLUDE_PATTERNS = [
+    ".docs/**",
+    ".design/**",
+    "*.md",  # Root .md files
+]
+
+
+def build_exclude_patterns(config) -> list[str] | None:
+    """Build exclude patterns list, including lfdocs patterns if lfdocs is enabled."""
+    if not config:
+        return None
+
+    patterns = list(config.exclude) if config.exclude else []
+
+    if config.lfdocs:
+        patterns.extend(LFDOCS_EXCLUDE_PATTERNS)
+
+    return patterns or None
+
 
 @dataclass
 class Summary:
@@ -123,6 +143,23 @@ def is_stale(summary: Summary, repo_root: Path) -> bool:
     """Check if source content changed since summary was generated."""
     current_hash = compute_source_hash(summary.path, repo_root)
     return current_hash != summary.source_hash
+
+
+def compute_subdir_hashes(path: Path, repo_root: Path) -> dict[str, str]:
+    """Compute hash for each top-level subdirectory under path."""
+    subdirs = _list_subdirectories(path, repo_root)
+    return {str(s): compute_source_hash(s, repo_root) for s in subdirs}
+
+
+def pathset_key(paths: list[Path]) -> str:
+    """Create a canonical key from a set of paths (sorted, comma-joined)."""
+    return ",".join(sorted(str(p) for p in paths))
+
+
+def pathset_hash(hashes: list[str]) -> str:
+    """Combine multiple hashes into one (for pathset cache validation)."""
+    combined = ":".join(sorted(hashes))
+    return hash_content(combined)
 
 
 def _list_files_at_commit(commit: str, path: Path, repo_root: Path) -> list[str]:
@@ -341,36 +378,45 @@ def generate_summary(
     if len(source_content) > RECURSIVE_THRESHOLD:
         subdirs = _list_subdirectories(path, repo_root)
         if len(subdirs) > 1:
-            # Measure each subdir's content size
+            # Compute per-subdir hashes to check cache freshness
+            subdir_hashes = compute_subdir_hashes(path, repo_root)
+
+            # Check cache for each subdir, gather content only for stale ones
+            # subdir_data: [(subdir, tokens, content_or_none, cached_summary_or_none, hash)]
             subdir_data = []
             for subdir in subdirs:
-                subdir_content = gather_source_content(subdir, repo_root, exclude)
-                subdir_tokens = count_tokens(subdir_content)
-                subdir_data.append((subdir, subdir_tokens, subdir_content))
+                subdir_hash = subdir_hashes.get(str(subdir))
+                cached = load_summary(subdir, repo_root, token_budget)
+
+                if cached and cached.source_hash == subdir_hash:
+                    # Fresh cache - use cached content size, skip gathering
+                    cached_tokens = count_tokens(cached.content)
+                    subdir_data.append((subdir, cached_tokens, None, cached, subdir_hash))
+                else:
+                    # Stale or missing - gather content
+                    subdir_content = gather_source_content(subdir, repo_root, exclude)
+                    subdir_tokens = count_tokens(subdir_content)
+                    subdir_data.append((subdir, subdir_tokens, subdir_content, None, subdir_hash))
 
             # Bin-pack subdirs into groups that fit under model context
-            # Model context limit for summarization (leave room for prompt overhead)
             MODEL_CONTEXT = 90000  # ~90k tokens safe for summarization
-            total_tokens = sum(t for _, t, _ in subdir_data)
+            total_tokens = sum(t for _, t, _, _, _ in subdir_data)
 
             # Sort by size descending for first-fit-decreasing bin packing
             subdir_data.sort(key=lambda x: x[1], reverse=True)
 
-            groups: list[list[tuple]] = []  # Each group is [(subdir, tokens, content), ...]
+            groups: list[list[tuple]] = []
 
             for item in subdir_data:
-                subdir, tokens, content = item
+                subdir, tokens, content, cached, subdir_hash = item
                 placed = False
 
-                # If single subdir exceeds model context, it needs recursive split
                 if tokens > MODEL_CONTEXT:
-                    # Recurse on this large subdir
                     groups.append([item])
                     placed = True
                 else:
-                    # Try to fit in existing group
                     for group in groups:
-                        group_tokens = sum(t for _, t, _ in group)
+                        group_tokens = sum(t for _, t, _, _, _ in group)
                         if group_tokens + tokens <= MODEL_CONTEXT:
                             group.append(item)
                             placed = True
@@ -383,31 +429,67 @@ def generate_summary(
             sub_summaries = []
 
             for group in groups:
-                group_tokens = sum(t for _, t, _ in group)
-                # Proportional budget based on group's share of total
+                group_tokens = sum(t for _, t, _, _, _ in group)
                 group_budget = max((group_tokens * token_budget) // total_tokens, 1000)
+                group_paths = [s for s, _, _, _, _ in group]
+                group_hashes = [h for _, _, _, _, h in group]
 
                 if len(group) == 1 and group[0][1] > MODEL_CONTEXT:
-                    # Single large subdir - recurse
-                    subdir, _, _ = group[0]
-                    sub_summary = generate_summary(subdir, repo_root, group_budget, model, exclude)
-                    sub_summaries.append(f"## {subdir}\n\n{sub_summary.content}")
-                else:
-                    # Group of subdirs - combine and summarize
-                    group_content = "\n\n".join(f"## {s}\n\n{c}" for s, _, c in group)
-
-                    if group_tokens <= group_budget:
-                        # Small enough to keep raw
-                        sub_summaries.append(group_content)
+                    # Single large subdir - recurse (may use internal caching)
+                    subdir, _, content, cached, subdir_hash = group[0]
+                    if cached:
+                        sub_summaries.append(f"## {subdir}\n\n{cached.content}")
                     else:
-                        # Summarize the group
-                        prompt_template = _load_summarize_prompt(repo_root)
-                        prompt = prompt_template.format(
-                            token_budget=group_budget, content=group_content
+                        sub_summary = generate_summary(
+                            subdir, repo_root, group_budget, model, exclude
                         )
-                        group_summary = _run_summarize_cli(prompt, model, repo_root)
-                        group_names = ", ".join(str(s) for s, _, _ in group)
-                        sub_summaries.append(f"## {group_names}\n\n{group_summary}")
+                        save_summary(sub_summary, repo_root)
+                        sub_summaries.append(f"## {subdir}\n\n{sub_summary.content}")
+                else:
+                    # Group of subdirs - use pathset caching
+                    pkey = pathset_key(group_paths)
+                    combined_hash = pathset_hash(group_hashes)
+
+                    # Check cache for this pathset
+                    cached_group = load_summary(Path(pkey), repo_root, token_budget)
+                    if cached_group and cached_group.source_hash == combined_hash:
+                        # Fresh cache - reuse
+                        sub_summaries.append(cached_group.content)
+                    else:
+                        # Stale or missing - regenerate
+                        # Build content from raw sources (we need fresh content for stale groups)
+                        parts = []
+                        for s, _, content, cached, _ in group:
+                            if content is not None:
+                                parts.append(f"## {s}\n\n{content}")
+                            elif cached:
+                                parts.append(f"## {s}\n\n{cached.content}")
+                        group_content = "\n\n".join(parts)
+
+                        if group_tokens <= group_budget:
+                            # Content fits in budget - use raw
+                            summary_content = group_content
+                            summary_model = "raw"
+                        else:
+                            # Summarize
+                            prompt_template = _load_summarize_prompt(repo_root)
+                            prompt = prompt_template.format(
+                                token_budget=group_budget, content=group_content
+                            )
+                            summary_content = _run_summarize_cli(prompt, model, repo_root)
+                            summary_model = model
+
+                        # Save under pathset key
+                        group_summary = Summary(
+                            path=Path(pkey),
+                            content=summary_content,
+                            token_budget=token_budget,
+                            source_hash=combined_hash,
+                            created_at=datetime.now(),
+                            model=summary_model,
+                        )
+                        save_summary(group_summary, repo_root)
+                        sub_summaries.append(summary_content)
 
             # Concatenate all group summaries
             combined = "\n\n".join(sub_summaries)
@@ -523,7 +605,7 @@ def register_commands(app) -> None:
                             repo_root,
                             token_budget,
                             summary_config.model,
-                            config.exclude if config else None,
+                            build_exclude_patterns(config),
                             force=force,
                         )
                         typer.echo(f"  {summary_config.path}: done ({len(summary.content)} chars)")
@@ -555,7 +637,7 @@ def register_commands(app) -> None:
                 repo_root,
                 tokens,
                 model,
-                config.exclude if config else None,
+                build_exclude_patterns(config),
                 force=force,
             )
         except Exception as e:

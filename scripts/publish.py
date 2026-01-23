@@ -139,13 +139,13 @@ def _is_on_pypi(version: str) -> bool:
 def _finalize_release(version: str, skip_dmg: bool, skip_website: bool) -> int:
     """Complete release: tag, publish to PyPI, build DMG."""
     from loopflow.publish import (
+        R2_PUBLIC_URL,
         build_dmg,
         build_package,
         get_dmg_path,
         install_locally,
         publish_package,
         upload_dmg,
-        R2_PUBLIC_URL,
     )
 
     print(f"Finalizing release v{version}...")
@@ -253,10 +253,10 @@ def _create_release_pr(
     """Create release PR with version bump."""
     from loopflow.lf.messages import generate_release_notes
     from loopflow.publish import (
-        bump_version,
         build_package,
-        check_publish_ready,
+        bump_version,
         check_ci_passed,
+        check_publish_ready,
         run_tests,
         write_version,
     )
@@ -431,11 +431,11 @@ def main() -> int:
 
     # Import here so --help works without dependencies
     from loopflow.publish import (
+        R2_PUBLIC_URL,
         build_dmg,
         get_dmg_path,
         get_version,
         upload_dmg,
-        R2_PUBLIC_URL,
     )
 
     # Handle DMG-only mode

@@ -27,6 +27,14 @@ class LfdModel(BaseModel):
     )
 
 
+class AgentMode(str, Enum):
+    """Activation mode of an agent."""
+
+    LOOP = "loop"
+    WATCH = "watch"
+    CRON = "cron"
+
+
 class AgentStatus(str, Enum):
     """Runtime status of an agent."""
 
@@ -46,10 +54,10 @@ class MergeMode(str, Enum):
 class Agent(LfdModel):
     """An AI coding agent.
 
-    Activation modes (derived from config):
-    - Continuous (default): runs when started until stopped or PR limit
+    Activation modes:
+    - Loop (default): runs when started until stopped or PR limit
     - Watch: runs when watch_paths change on main
-    - Scheduled: runs on cron schedule
+    - Cron: runs on cron schedule
     """
 
     id: str
@@ -58,6 +66,7 @@ class Agent(LfdModel):
     voice: list[str] = Field(min_length=1)
     area: list[str] = Field(min_length=1)
 
+    mode: AgentMode = AgentMode.LOOP
     status: AgentStatus = AgentStatus.IDLE
     iteration: int = 0
 
@@ -68,7 +77,7 @@ class Agent(LfdModel):
     pid: int | None = None
     created_at: datetime = Field(default_factory=datetime.now)
 
-    # Activation config (determines mode)
+    # Trigger config (for watch/cron modes)
     watch_paths: str | None = None
     cron: str | None = None
     last_main_sha: str | None = None
@@ -98,15 +107,6 @@ class Agent(LfdModel):
         return area_to_slug(self.area[0])
 
     @property
-    def mode(self) -> str:
-        """Return the activation mode: 'watch', 'cron', or 'loop'."""
-        if self.watch_paths:
-            return "watch"
-        if self.cron:
-            return "cron"
-        return "loop"
-
-    @property
     def voice_display(self) -> str:
         return ", ".join(self.voice)
 
@@ -127,12 +127,24 @@ def agent_from_row(row: dict) -> Agent:
     if merge_mode_str == "auto":
         merge_mode_str = "pr"
 
+    # Read mode from DB, with fallback for pre-migration rows
+    mode_str = row.get("mode")
+    if mode_str:
+        mode = AgentMode(mode_str)
+    elif row.get("watch_paths"):
+        mode = AgentMode.WATCH
+    elif row.get("cron"):
+        mode = AgentMode.CRON
+    else:
+        mode = AgentMode.LOOP
+
     return Agent(
         id=row["id"],
         repo=Path(row["repo"]),
         flow=row["flow"],
         voice=voice,
         area=area,
+        mode=mode,
         status=AgentStatus(row["status"]),
         iteration=row.get("iteration", 0),
         main_branch=row.get("main_branch", ""),

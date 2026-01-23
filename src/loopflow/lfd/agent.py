@@ -16,7 +16,14 @@ from croniter import croniter
 from loopflow.lf.context import find_worktree_root
 from loopflow.lfd.db import _get_db
 from loopflow.lfd.logging import trigger_log
-from loopflow.lfd.models import Agent, AgentStatus, MergeMode, agent_from_row, area_to_slug
+from loopflow.lfd.models import (
+    Agent,
+    AgentMode,
+    AgentStatus,
+    MergeMode,
+    agent_from_row,
+    area_to_slug,
+)
 
 
 def get_wt_from_cwd() -> Path | None:
@@ -103,10 +110,10 @@ def save_agent(agent: Agent, db_path: Path | None = None) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO agents
-        (id, repo, flow, voice, area, status, iteration, main_branch,
+        (id, repo, flow, voice, area, mode, status, iteration, main_branch,
          pr_limit, merge_mode, pid, created_at, watch_paths, cron, last_main_sha,
          consecutive_failures)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             agent.id,
@@ -114,6 +121,7 @@ def save_agent(agent: Agent, db_path: Path | None = None) -> None:
             agent.flow,
             json.dumps(agent.voice),
             json.dumps(agent.area),
+            agent.mode.value,
             agent.status.value,
             agent.iteration,
             agent.main_branch,
@@ -339,6 +347,15 @@ def _create_main_branch(repo: Path, branch: str) -> None:
 # Operations
 
 
+def _determine_mode(watch_paths: str | None, cron: str | None) -> AgentMode:
+    """Determine agent mode from trigger config."""
+    if watch_paths:
+        return AgentMode.WATCH
+    if cron:
+        return AgentMode.CRON
+    return AgentMode.LOOP
+
+
 def create_agent(
     repo: Path,
     flow: str,
@@ -371,6 +388,11 @@ def create_agent(
         if existing.cron != cron:
             existing.cron = cron
             changed = True
+        # Update mode if trigger config changed
+        new_mode = _determine_mode(watch_paths, cron)
+        if existing.mode != new_mode:
+            existing.mode = new_mode
+            changed = True
         if changed:
             save_agent(existing)
         return existing
@@ -378,12 +400,15 @@ def create_agent(
     main_branch = _allocate_main_branch(repo, area)
     _create_main_branch(repo, main_branch)
 
+    mode = _determine_mode(watch_paths, cron)
+
     agent = Agent(
         id=str(uuid.uuid4()),
         repo=repo,
         flow=flow,
         voice=voice,
         area=area,
+        mode=mode,
         status=AgentStatus.IDLE,
         main_branch=main_branch,
         pr_limit=pr_limit,

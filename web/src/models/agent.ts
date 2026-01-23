@@ -1,6 +1,8 @@
 // Agent - an autonomous AI coding agent.
 // Activation modes: loop (continuous), watch (on file change), cron (scheduled).
 
+export type AgentMode = 'loop' | 'watch' | 'cron'
+
 export type AgentStatus = 'idle' | 'running' | 'waiting' | 'error'
 
 export type MergeMode = 'pr' | 'land'
@@ -12,6 +14,7 @@ export interface Agent {
   area: string[]
   repo: string
 
+  mode: AgentMode
   status: AgentStatus
   iteration: number
 
@@ -22,7 +25,7 @@ export interface Agent {
   pid?: number
   createdAt: Date
 
-  // Activation config (determines mode)
+  // Trigger config (for watch/cron modes)
   watchPaths?: string
   cron?: string
   lastMainSha?: string
@@ -30,12 +33,6 @@ export interface Agent {
 
 export function agentShortId(agent: Agent): string {
   return agent.id.slice(0, 7)
-}
-
-export function agentMode(agent: Agent): 'watch' | 'cron' | 'loop' {
-  if (agent.watchPaths) return 'watch'
-  if (agent.cron) return 'cron'
-  return 'loop'
 }
 
 export function agentAreaDisplay(agent: Agent): string {

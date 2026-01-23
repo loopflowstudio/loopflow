@@ -274,10 +274,10 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
             if remote_ahead > 0:
                 # Branches diverged (e.g., after rebase) - force push safely
                 typer.echo("Branches diverged, force-pushing with lease...")
-                subprocess.run(["git", "push", "--force-with-lease"], cwd=repo_root, check=True)
+                subprocess.run(["git", "push", "--force-with-lease", "origin", "HEAD"], cwd=repo_root, check=True)
             else:
                 typer.echo("Pushing to origin...")
-                subprocess.run(["git", "push"], cwd=repo_root, check=True)
+                subprocess.run(["git", "push", "origin", "HEAD"], cwd=repo_root, check=True)
     else:
         if strict:
             typer.echo("Error: Branch not pushed (use without --strict to auto-push)", err=True)

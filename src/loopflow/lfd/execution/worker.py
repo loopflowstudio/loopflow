@@ -33,6 +33,22 @@ RETRY_BACKOFF_SECONDS = 30
 CIRCUIT_BREAKER_THRESHOLD = 5
 
 
+def _emit_circuit_breaker(agent: Agent, failures: int) -> None:
+    """Emit circuit breaker event and log error."""
+    worker_log.error(
+        f"[{agent.short_id()}] circuit breaker: {failures} consecutive failures"
+    )
+    notify_event(
+        "agent.circuit_breaker",
+        {
+            "agent_id": agent.id,
+            "area": agent.area_display,
+            "failures": failures,
+            "threshold": CIRCUIT_BREAKER_THRESHOLD,
+        },
+    )
+
+
 def _manager_call(method: str, params: dict | None = None) -> dict | None:
     """Make a synchronous call to the daemon manager.
 
@@ -99,18 +115,7 @@ def run_agent_iterations(agent: Agent) -> None:
 
     # Check circuit breaker on startup
     if consecutive_failures >= CIRCUIT_BREAKER_THRESHOLD:
-        worker_log.error(
-            f"[{short_id}] circuit breaker open: {consecutive_failures} consecutive failures"
-        )
-        notify_event(
-            "agent.circuit_breaker",
-            {
-                "agent_id": agent.id,
-                "area": agent.area_display,
-                "failures": consecutive_failures,
-                "threshold": CIRCUIT_BREAKER_THRESHOLD,
-            },
-        )
+        _emit_circuit_breaker(agent, consecutive_failures)
         update_agent_status(agent.id, AgentStatus.ERROR)
         update_agent_pid(agent.id, None)
         return
@@ -176,23 +181,8 @@ def run_agent_iterations(agent: Agent) -> None:
                 update_agent_consecutive_failures(agent.id, consecutive_failures)
 
                 if consecutive_failures >= CIRCUIT_BREAKER_THRESHOLD:
-                    worker_log.error(
-                        f"[{short_id}] circuit breaker triggered: "
-                        f"{consecutive_failures} >= {CIRCUIT_BREAKER_THRESHOLD}"
-                    )
-                    notify_event(
-                        "agent.circuit_breaker",
-                        {
-                            "agent_id": agent.id,
-                            "area": agent.area_display,
-                            "failures": consecutive_failures,
-                            "threshold": CIRCUIT_BREAKER_THRESHOLD,
-                        },
-                    )
-                    update_agent_status(agent.id, AgentStatus.ERROR)
-                    break
+                    _emit_circuit_breaker(agent, consecutive_failures)
 
-                # Non-circuit-breaker failure still stops the loop
                 update_agent_status(agent.id, AgentStatus.ERROR)
                 break
         except Exception as e:
@@ -215,18 +205,7 @@ def run_agent_iterations(agent: Agent) -> None:
             )
 
             if consecutive_failures >= CIRCUIT_BREAKER_THRESHOLD:
-                worker_log.error(
-                    f"[{short_id}] circuit breaker triggered after exception"
-                )
-                notify_event(
-                    "agent.circuit_breaker",
-                    {
-                        "agent_id": agent.id,
-                        "area": agent.area_display,
-                        "failures": consecutive_failures,
-                        "threshold": CIRCUIT_BREAKER_THRESHOLD,
-                    },
-                )
+                _emit_circuit_breaker(agent, consecutive_failures)
 
             update_agent_status(agent.id, AgentStatus.ERROR)
             break

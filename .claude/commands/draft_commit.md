@@ -4,7 +4,7 @@ produces: .lf/COMMIT
 ---
 Draft a commit message for landing this branch.
 
-You're writing for someone who sees this in `git log` or `git blame` and needs to understand intent without reading the diff. Outcome over process. Why over what. Searchable words someone would grep for.
+Write for someone reading `git log` or `git blame` who needs to understand intent without reading the diff. Outcome over process. Why over what. Searchable words someone would grep for.
 
 ## Input
 

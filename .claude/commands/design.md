@@ -6,11 +6,11 @@ Produce a short implementation spec that another LLM session can use to write a 
 
 If on main, create a feature branch first: `git checkout -b <feature-name>`.
 
-## Who reads this
+## Audience
 
-The design doc is a working document for both humans and LLMs. The implementing session will execute fairly literally—what you don't specify, it will guess. But the human will likely read and edit directly before implementation. Optimize for easy to manipulate, not just easy to execute. Clear sections they can delete, add to, or rearrange. Constraints they can tighten or loosen.
+The design doc is for both humans and agents. The implementing session executes fairly literally—what isn't specified gets guessed. The human will read and edit before implementation. Optimize for easy to manipulate: clear sections to delete, add, or rearrange. Constraints to tighten or loosen.
 
-The design doc is scaffolding—a checkpoint for recovery, not documentation for posterity. `lf ops pr land` deletes `.design/` contents.
+Design docs are scaffolding—checkpoints for recovery, not documentation for posterity. `lf ops pr land` deletes `.design/` contents.
 
 ## Workflow
 

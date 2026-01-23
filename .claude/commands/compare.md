@@ -6,7 +6,7 @@ Compare two implementations and recommend which to use.
 
 ## Goal
 
-Give the human an informed recommendation fast. They have two implementations and need to pick one—your job is to compress the decision. Be opinionated. A clear recommendation they can disagree with is better than a balanced analysis they have to interpret.
+Deliver an informed recommendation fast. Two implementations exist; one must be chosen. Compress the decision. Be opinionated. A clear recommendation that can be disagreed with beats a balanced analysis that requires interpretation.
 
 This task is typically invoked via `lf ops compare <branch-a> <branch-b>`, which injects the diffs below.
 

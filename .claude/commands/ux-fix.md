@@ -1,5 +1,6 @@
 ---
-voice: architect
+requires: .design/ux-research.md, .design/ux-gaps.md
+produces: code changes, .design/ux-fixes.md
 ---
 > **Screenshots**: If running standalone, capture with Cmd+Shift+S first.
 > In the `ux` pipeline, uses screenshots from the ux-research step.

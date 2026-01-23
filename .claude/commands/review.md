@@ -4,7 +4,7 @@ produces: .design/<branch>.md with verdict
 ---
 Review the diff on this branch and produce a written assessment.
 
-The goal is to put something in the human's hands quickly. A draft they can shape—add issues you missed, remove nitpicks they disagree with, adjust the verdict. You can always be re-invoked. Don't aim for comprehensive; aim for useful and fast.
+Put something in the human's hands quickly. A draft they can shape—add issues, remove nitpicks, adjust the verdict. Can be re-invoked. Aim for useful and fast, not comprehensive.
 
 The deliverable is a consolidated design document under `.design/`. Do not edit code files.
 

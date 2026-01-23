@@ -1,5 +1,6 @@
 ---
-voice: artist
+requires: screenshots
+produces: .design/ux-gaps.md
 ---
 > **Screenshots**: If running standalone, capture with Cmd+Shift+S first.
 > In the `ux` pipeline, uses screenshots from the ux-research step.

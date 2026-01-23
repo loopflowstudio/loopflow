@@ -6,9 +6,9 @@ Iteratively refine text through structured feedback.
 
 ## Goal
 
-The point of iteration is to learn. Each option you present, each preference they express, helps you build a model of their goals and style. Explore in ways that maximize this learning—present options that differ meaningfully, not just wordsmithing. Once you understand how they think, you can apply it broadly.
+Learn preferences through iteration. Each option presented, each preference expressed, builds a model of goals and style. Present options that differ meaningfully, not just wordsmithing. Once preferences are clear, apply them broadly.
 
-The refined text is almost secondary. The real output is your ability to simulate their voice.
+The refined text matters, but the real output is the ability to match voice consistently.
 
 ## Workflow
 

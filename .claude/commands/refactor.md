@@ -9,7 +9,7 @@ Co-design a re-architecture of existing functionality.
 
 Refactoring is redesign with constraints. The current implementation works—users depend on it. The question isn't "what's ideal?" but "what's better that we can actually get to?"
 
-This is a collaborative exploration. You map the territory, surface tradeoffs, and propose directions. The human decides which constraints to keep and which to break. Together you find a path that improves the structure without breaking what works.
+A collaborative exploration. Map the territory, surface tradeoffs, propose directions. The human decides which constraints to keep and which to break. Find a path that improves structure without breaking what works.
 
 ## Workflow
 
@@ -28,7 +28,7 @@ This is a collaborative exploration. You map the territory, surface tradeoffs, a
    - **Missing concept**: Code works around something that should exist but doesn't
    - **Leaky boundaries**: Internal details exposed to callers
 
-   State your diagnosis: "The friction is scattered responsibility—session state lives in three places and they drift out of sync."
+   State the diagnosis: "The friction is scattered responsibility—session state lives in three places and they drift out of sync."
 
 3. **Map the constraints**
 
@@ -64,7 +64,7 @@ This is a collaborative exploration. You map the territory, surface tradeoffs, a
    - Migration: Low—wrap existing code
    ```
 
-   Don't pick for them. Present the tradeoffs clearly. If they're unsure, ask what matters more: explicitness or convenience? Testability or simplicity?
+   Present tradeoffs clearly without picking. If unclear, ask what matters more: explicitness or convenience? Testability or simplicity?
 
 5. **Iterate on the design**
 

@@ -1,5 +1,5 @@
 ---
-voice: customer
+produces: .design/ux-research.md
 ---
 > **Before running**: Open Concerto, navigate to each screen you want reviewed,
 > and press Cmd+Shift+S to capture. Screenshots save to `/tmp/concerto-<timestamp>.png`.

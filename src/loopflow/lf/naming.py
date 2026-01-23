@@ -8,7 +8,6 @@ import random
 import subprocess
 from pathlib import Path
 
-
 # Word lists for generating unique branch names
 
 MAGICAL = [

@@ -136,7 +136,10 @@ def cycle(
                 typer.echo("Error: Could not find PR after creation", err=True)
                 return None
         else:
-            typer.echo("Error: No open PR found. Run 'lfops pr' first, or use --create-pr.", err=True)
+            typer.echo(
+                "Error: No open PR found. Run 'lfops pr' first, or use --create-pr.",
+                err=True,
+            )
             return None
 
     # Enable auto-merge
@@ -186,7 +189,10 @@ def cycle(
         try:
             remove_worktree(main_repo, branch, repo_root, base_branch)
         except Exception:
-            typer.echo("Warning: Could not remove old worktree. Run 'lfops wt prune' later.", err=True)
+            typer.echo(
+                "Warning: Could not remove old worktree. Run 'lfops wt prune' later.",
+                err=True,
+            )
 
     # Open terminal in new worktree
     if open_terminal:

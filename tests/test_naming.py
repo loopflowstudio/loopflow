@@ -33,18 +33,21 @@ def test_parse_branch_for_cycle_no_suffix():
 
 def test_parse_branch_for_cycle_with_suffix():
     """Branch with magical-musical suffix strips it."""
-    assert parse_branch_for_cycle("jack.auth.20260123_1112-aurora-melody") == "jack.auth.20260123_1112"
+    result = parse_branch_for_cycle("jack.auth.20260123_1112-aurora-melody")
+    assert result == "jack.auth.20260123_1112"
 
 
 def test_parse_branch_for_cycle_with_suffix_frost_cadence():
     """Another valid suffix is stripped."""
-    assert parse_branch_for_cycle("jack.auth.20260123_1112-frost-cadence") == "jack.auth.20260123_1112"
+    result = parse_branch_for_cycle("jack.auth.20260123_1112-frost-cadence")
+    assert result == "jack.auth.20260123_1112"
 
 
 def test_parse_branch_for_cycle_invalid_suffix_not_in_list():
     """Suffix with words not in lists is preserved."""
     # Words not in MAGICAL or MUSICAL
-    assert parse_branch_for_cycle("jack.auth.20260123_1112-foo-bar") == "jack.auth.20260123_1112-foo-bar"
+    result = parse_branch_for_cycle("jack.auth.20260123_1112-foo-bar")
+    assert result == "jack.auth.20260123_1112-foo-bar"
 
 
 def test_parse_branch_for_cycle_partial_match():

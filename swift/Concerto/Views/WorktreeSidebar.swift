@@ -581,42 +581,44 @@ struct WorktreeRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
+            HStack(spacing: 6) {
+                // CI status indicator
+                if let ci = worktree.ciStatus {
+                    Circle()
+                        .fill(ci.color)
+                        .frame(width: 8, height: 8)
+                        .help("CI: \(ci.rawValue)")
+                        .accessibilityIdentifier("worktree-ci-dot")
+                }
+
                 Text(worktree.displayName)
                     .fontWeight(.medium)
                     .foregroundStyle(worktree.staleness.isStale ? .white.opacity(0.5) : .white)
+                    .lineLimit(1)
                     .accessibilityIdentifier("worktree-branch")
                     .help(worktree.branch != worktree.displayName ? "Branch: \(worktree.branch)" : "")
+
+                Spacer()
+
+                statusPill
 
                 if worktree.staleness.isStale {
                     stalenessBadge
                 }
-
-                Spacer()
-
-                if isHovering {
-                    hoverActions
-                } else {
-                    statusBadge
-                }
             }
 
-            HStack(spacing: 4) {
-                Image(systemName: "arrow.turn.down.right")
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.3))
-
-                Text(worktree.commitsText)
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.6))
-                    .accessibilityIdentifier("worktree-commits")
-            }
+            // Secondary line: PR info
+            Text(worktree.commitsText)
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.5))
+                .lineLimit(1)
+                .accessibilityIdentifier("worktree-commits")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(isSelected ? Color.white.opacity(0.2) : (isHovering ? Color.white.opacity(0.1) : Color.clear))
+                .fill(isSelected ? Color.white.opacity(0.2) : (isHovering ? Color.white.opacity(0.08) : Color.clear))
         )
         .overlay(
             // Keyboard focus ring
@@ -690,150 +692,57 @@ struct WorktreeRow: View {
         }
     }
 
-    private var hoverActions: some View {
-        HStack(spacing: 8) {
-            Button {
-                onViewDiff()
-            } label: {
-                Image(systemName: "doc.text.magnifyingglass")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.7))
-            }
-            .buttonStyle(.plain)
-            .help("View diff against main")
-            .accessibleButton("View diff")
-            .minHitTarget()
-
-            // PR button: create or view based on current state
-            if worktree.prURL != nil {
-                Button {
-                    onViewPR()
-                } label: {
-                    Image(systemName: "arrow.up.right.square")
-                        .font(.caption)
-                        .foregroundStyle(.green)
-                }
-                .buttonStyle(.plain)
-                .help("View PR #\(worktree.prNumber ?? 0)")
-                .accessibleButton("View pull request \(worktree.prNumber ?? 0)")
-                .minHitTarget()
-            } else {
-                Button {
-                    onCreatePR()
-                } label: {
-                    Image(systemName: "plus.rectangle")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.7))
-                }
-                .buttonStyle(.plain)
-                .help("Create PR")
-                .accessibleButton("Create pull request")
-                .minHitTarget()
-            }
-
-            Button {
-                onOpenTerminal()
-            } label: {
-                Image(systemName: "terminal")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.7))
-            }
-            .buttonStyle(.plain)
-            .help("Open in \(terminalName)")
-            .accessibleButton("Open in \(terminalName)")
-            .minHitTarget()
-
-            Button {
-                onOpenIDE()
-            } label: {
-                Image(systemName: "curlybraces")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.7))
-            }
-            .buttonStyle(.plain)
-            .help("Open in \(ideName)")
-            .accessibleButton("Open in \(ideName)")
-            .minHitTarget()
-
-            // Land button - only visible when PR is open
-            if worktree.prState == .open {
-                Button {
-                    onLandPR()
-                } label: {
-                    Image(systemName: "airplane.arrival")
-                        .font(.caption)
-                        .foregroundStyle(.green)
-                }
-                .buttonStyle(.plain)
-                .help("Land PR")
-                .accessibleButton("Land pull request")
-                .minHitTarget()
-            }
-
-            // Abandon button
-            Button {
-                onDelete()
-            } label: {
-                Image(systemName: "trash")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.5))
-            }
-            .buttonStyle(.plain)
-            .help("Abandon worktree")
-            .accessibleButton("Delete worktree")
-            .minHitTarget()
-        }
-    }
-
-    private var statusBadge: some View {
-        HStack(spacing: 6) {
-            // CI status badge
-            if let ci = worktree.ciStatus {
-                Image(systemName: ci.icon)
-                    .font(.system(size: 10))
-                    .foregroundStyle(ci.color)
-                    .help("CI: \(ci.rawValue)")
-                    .accessibilityIdentifier("worktree-ci-badge")
-            }
-
-            if let step = worktree.lastCompletedStep ?? worktree.lastStep {
-                stageBadge(step)
-            }
-
-            // Commit count badge
-            if worktree.aheadMain > 0 {
-                Text("\(worktree.aheadMain)")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(Capsule().fill(.blue))
-                    .accessibilityLabel("\(worktree.aheadMain) commits ahead of main")
-                    .accessibilityIdentifier("worktree-ahead-badge")
-            }
-        }
-    }
-
-    private static let stageStyles: [String: (icon: String, color: Color)] = [
-        "design": ("lightbulb", .blue),
-        "implement": ("hammer", .loopflowBurgundy),
-        "review": ("magnifyingglass", .orange),
-        "polish": ("sparkles", .green),
-    ]
-
-    private func stageBadge(_ task: String) -> some View {
-        let style = Self.stageStyles[task] ?? ("circle", .gray)
-        return HStack(spacing: 3) {
-            Image(systemName: style.icon)
-                .font(.system(size: 8))
-            Text(task)
+    /// Single status pill showing the most important state
+    @ViewBuilder
+    private var statusPill: some View {
+        let (text, color) = statusInfo
+        if !text.isEmpty {
+            Text(text)
                 .font(.caption2)
+                .fontWeight(.medium)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(color.opacity(0.2))
+                .foregroundStyle(color)
+                .clipShape(Capsule())
+                .accessibilityIdentifier("worktree-status-pill")
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .background(style.color.opacity(0.2))
-        .foregroundStyle(style.color)
-        .clipShape(Capsule())
+    }
+
+    /// Determine status text and color based on worktree state
+    /// Priority: blocked > dirty > review > ready > stale
+    private var statusInfo: (String, Color) {
+        // CI failing = blocked
+        if worktree.ciStatus == .failing {
+            return ("blocked", .red)
+        }
+
+        // Uncommitted changes = dirty
+        if worktree.isDirty {
+            return ("dirty", .yellow)
+        }
+
+        // PR awaiting review
+        if worktree.prState == .open {
+            return ("review", .blue)
+        }
+
+        // Has a step in progress
+        if let step = worktree.lastStep, worktree.lastCompletedStep == nil {
+            return (step, .loopflowBurgundy)
+        }
+
+        // CI passing, clean = ready
+        if worktree.ciStatus == .passing && !worktree.staleness.isStale {
+            return ("ready", .green)
+        }
+
+        // Default: show last completed step if any
+        if let step = worktree.lastCompletedStep {
+            return (step, .green)
+        }
+
+        return ("", .clear)
     }
 
     @ViewBuilder

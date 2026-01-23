@@ -29,6 +29,11 @@ from loopflow.lfd.daemon.launchd import is_running
 from loopflow.lfd.daemon.launchd import uninstall as launchd_uninstall
 from loopflow.lfd.daemon.server import run_server
 from loopflow.lfd.flow_run import list_runs_for_agent
+from loopflow.lfd.git_hooks import (
+    hooks_status,
+    install_hooks,
+    uninstall_hooks,
+)
 from loopflow.lfd.models import Agent, AgentStatus, MergeMode
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
@@ -751,6 +756,81 @@ def logs(
     else:
         # Show last N lines
         subprocess.run(["tail", f"-{lines}", str(log_file)])
+
+
+# Git hooks commands
+
+hooks_app = typer.Typer(help="Git hook management")
+app.add_typer(hooks_app, name="hooks")
+
+
+@hooks_app.command("install")
+def hooks_install_cmd(
+    repo_path: str = typer.Argument(None, help="Repository path (default: current directory)"),
+):
+    """Install lfd notification hooks in a repository."""
+    c = _colors()
+
+    if repo_path:
+        repo = Path(repo_path).resolve()
+    else:
+        repo = get_wt_from_cwd()
+
+    if not repo:
+        typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    installed = install_hooks(repo)
+    if installed:
+        typer.echo(f"{c['green']}Installed{c['reset']} hooks: {', '.join(installed)}")
+    else:
+        typer.echo(f"{c['dim']}Hooks already installed{c['reset']}")
+
+
+@hooks_app.command("uninstall")
+def hooks_uninstall_cmd(
+    repo_path: str = typer.Argument(None, help="Repository path (default: current directory)"),
+):
+    """Remove lfd notification hooks from a repository."""
+    c = _colors()
+
+    if repo_path:
+        repo = Path(repo_path).resolve()
+    else:
+        repo = get_wt_from_cwd()
+
+    if not repo:
+        typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    removed = uninstall_hooks(repo)
+    if removed:
+        typer.echo(f"{c['yellow']}Removed{c['reset']} hooks: {', '.join(removed)}")
+    else:
+        typer.echo(f"{c['dim']}No hooks to remove{c['reset']}")
+
+
+@hooks_app.command("status")
+def hooks_status_cmd(
+    repo_path: str = typer.Argument(None, help="Repository path (default: current directory)"),
+):
+    """Check which lfd hooks are installed."""
+    c = _colors()
+
+    if repo_path:
+        repo = Path(repo_path).resolve()
+    else:
+        repo = get_wt_from_cwd()
+
+    if not repo:
+        typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    status = hooks_status(repo)
+    typer.echo(f"Hooks in {c['dim']}{repo}{c['reset']}")
+    for hook, installed in status.items():
+        icon = f"{c['green']}✓{c['reset']}" if installed else f"{c['dim']}✗{c['reset']}"
+        typer.echo(f"  {icon} {hook}")
 
 
 @app.command("list-voices")

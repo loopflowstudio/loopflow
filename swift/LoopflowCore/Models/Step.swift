@@ -69,9 +69,10 @@ public struct FlowStep: Sendable, Codable, Equatable, Identifiable {
 // MARK: - Step Execution
 
 /// StepRun represents a single execution of a step.
+/// Schema matches Python's lfd/models.py StepRun class.
 public struct StepRun: Sendable, Identifiable, Codable, Hashable {
     public let id: String
-    public let prompt: String
+    public let step: String  // matches Python schema (was "prompt")
     public let repo: String
     public let worktree: String
     public let status: String
@@ -81,7 +82,7 @@ public struct StepRun: Sendable, Identifiable, Codable, Hashable {
     public let runMode: String
 
     enum CodingKeys: String, CodingKey {
-        case id, prompt, repo, worktree, status, model
+        case id, step, repo, worktree, status, model
         case startedAt = "started_at"
         case endedAt = "ended_at"
         case runMode = "run_mode"

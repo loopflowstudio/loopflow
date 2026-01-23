@@ -74,7 +74,7 @@ public struct SessionService: @unchecked Sendable {
 
         while sqlite3_step(stmt) == SQLITE_ROW {
             guard let idPtr = sqlite3_column_text(stmt, 0),
-                  let promptPtr = sqlite3_column_text(stmt, 1),  // 'task' column → prompt
+                  let stepPtr = sqlite3_column_text(stmt, 1),  // 'task' column → step
                   let repoPtr = sqlite3_column_text(stmt, 2),
                   let worktreePtr = sqlite3_column_text(stmt, 3),
                   let statusPtr = sqlite3_column_text(stmt, 4),
@@ -83,7 +83,7 @@ public struct SessionService: @unchecked Sendable {
             }
 
             let id = String(cString: idPtr)
-            let prompt = String(cString: promptPtr)
+            let step = String(cString: stepPtr)
             let repo = String(cString: repoPtr)
             let worktree = String(cString: worktreePtr)
             let status = String(cString: statusPtr)
@@ -105,7 +105,7 @@ public struct SessionService: @unchecked Sendable {
 
             runs.append(StepRun(
                 id: id,
-                prompt: prompt,
+                step: step,
                 repo: repo,
                 worktree: worktree,
                 status: status,

@@ -105,14 +105,14 @@ final class AppState {
     var liveOutputBySession: [String: [OutputLine]] = [:]
     var activeSessionIds: Set<String> = []
     var activeWorktreePaths: Set<String> = []  // Worktree paths with running sessions
-    private var sessionWorktreeMap: [String: String] = [:]  // session ID → worktree path
+    private var stepRunWorktreeMap: [String: String] = [:]  // step run ID → worktree path
 
     // Results panel state
     var stepRunBaselines: [String: StepRunBaseline] = [:]  // step run ID → baseline
     var stepRunResults: [String: StepRunResult] = [:]  // step run ID → result
     var showResultsLog: Bool = false  // Toggle for streaming log view
-    private var sessionStepMap: [String: String] = [:]  // session ID → step/prompt name
-    private var sessionStartMap: [String: Date] = [:]  // session ID → start time
+    private var stepRunStepMap: [String: String] = [:]  // step run ID → step/prompt name
+    private var stepRunStartMap: [String: Date] = [:]  // step run ID → start time
     private var autoPruneInFlight: Bool = false
     private var autoSyncTask: Task<Void, Never>?
     private var listDebounceTask: Task<Void, Never>?
@@ -131,7 +131,7 @@ final class AppState {
     private let configLoader = ConfigLoader()
     private let promptService = PromptService()
     private let flowService = FlowService()
-    private let loopService = LoopService()
+    private let agentService = AgentService()
     private var eventService: LFDEventService?
     private let voiceService = VoiceService()
     private let contextPreviewService = ContextPreviewService()
@@ -589,14 +589,14 @@ final class AppState {
             liveOutputBySession[event.id] = []
             if let worktree = event.worktree {
                 activeWorktreePaths.insert(worktree)
-                sessionWorktreeMap[event.id] = worktree
+                stepRunWorktreeMap[event.id] = worktree
             }
 
             // Track step/prompt name and start time for results
             if let step = event.step {
-                sessionStepMap[event.id] = step
+                stepRunStepMap[event.id] = step
             }
-            sessionStartMap[event.id] = Date()
+            stepRunStartMap[event.id] = Date()
 
             // Capture baseline for results computation
             if let worktree = event.worktree {
@@ -612,7 +612,7 @@ final class AppState {
                             stepRunId: event.id,
                             step: event.step ?? "step",
                             worktree: worktree,
-                            startedAt: sessionStartMap[event.id] ?? Date()
+                            startedAt: stepRunStartMap[event.id] ?? Date()
                         )
                     }
                 }
@@ -620,9 +620,9 @@ final class AppState {
         } else if event.status == "completed" || event.status == "error" {
             activeSessionIds.remove(event.id)
             // Remove worktree from active set
-            if let worktree = sessionWorktreeMap.removeValue(forKey: event.id) {
+            if let worktree = stepRunWorktreeMap.removeValue(forKey: event.id) {
                 // Only remove if no other sessions running in same worktree
-                let otherSessionsInWorktree = sessionWorktreeMap.values.contains(worktree)
+                let otherSessionsInWorktree = stepRunWorktreeMap.values.contains(worktree)
                 if !otherSessionsInWorktree {
                     activeWorktreePaths.remove(worktree)
                 }
@@ -630,8 +630,8 @@ final class AppState {
 
             // Compute results
             if let baseline = stepRunBaselines[event.id] {
-                let step = sessionStepMap[event.id] ?? "step"
-                let startedAt = sessionStartMap[event.id] ?? Date()
+                let step = stepRunStepMap[event.id] ?? "step"
+                let startedAt = stepRunStartMap[event.id] ?? Date()
                 let status: StepRunResultStatus = event.status == "completed" ? .completed : .error
 
                 Task {
@@ -649,8 +649,8 @@ final class AppState {
             }
 
             // Clean up tracking maps
-            sessionStepMap.removeValue(forKey: event.id)
-            sessionStartMap.removeValue(forKey: event.id)
+            stepRunStepMap.removeValue(forKey: event.id)
+            stepRunStartMap.removeValue(forKey: event.id)
         }
     }
 
@@ -722,7 +722,7 @@ final class AppState {
     func refreshAgents() async {
         guard let repo = currentRepo else { return }
         do {
-            agents = try await loopService.listAgents(repo: repo)
+            agents = try await agentService.listAgents(repo: repo)
         } catch {
             agents = []
         }
@@ -735,7 +735,7 @@ final class AppState {
 
     func connectLfd() async throws {
         // Try to install/start daemon if not running, but don't fail if it errors
-        try? await loopService.connectLfd()
+        try? await agentService.connectLfd()
         // Start event subscription (has its own reconnect loop)
         startEventSubscription()
     }

@@ -1,9 +1,9 @@
-// Service for loading data from lfd.db SQLite database.
+// Service for loading Agent and FlowRun data from lfd.db SQLite database.
 
 import Foundation
 import SQLite3
 
-public struct LfdService: @unchecked Sendable {
+public struct AgentService: @unchecked Sendable {
     public init() {}
     private let dbPath = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".lf/lfd.db").path
@@ -243,7 +243,7 @@ public struct LfdService: @unchecked Sendable {
                 if process.terminationStatus == 0 {
                     continuation.resume()
                 } else {
-                    continuation.resume(throwing: LfdServiceError.commandFailed)
+                    continuation.resume(throwing: AgentServiceError.commandFailed)
                 }
             } catch {
                 continuation.resume(throwing: error)
@@ -252,7 +252,7 @@ public struct LfdService: @unchecked Sendable {
     }
 }
 
-public enum LfdServiceError: LocalizedError {
+public enum AgentServiceError: LocalizedError {
     case commandFailed
 
     public var errorDescription: String? {
@@ -262,9 +262,3 @@ public enum LfdServiceError: LocalizedError {
         }
     }
 }
-
-// Backwards compatibility aliases
-public typealias JobService = LfdService
-public typealias JobServiceError = LfdServiceError
-public typealias LoopService = LfdService
-public typealias LoopServiceError = LfdServiceError

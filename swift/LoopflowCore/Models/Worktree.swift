@@ -157,11 +157,11 @@ public struct Worktree: Sendable, Identifiable, Hashable, Codable {
     }
 
     public var lastStep: String? {
-        recentSteps.first?.prompt
+        recentSteps.first?.step
     }
 
     public var lastCompletedStep: String? {
-        recentSteps.first(where: { $0.isCompleted })?.prompt
+        recentSteps.first(where: { $0.isCompleted })?.step
     }
 
     /// Short name extracted from worktree path (e.g., "../repo.my-feature" → "my-feature").

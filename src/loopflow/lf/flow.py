@@ -27,7 +27,7 @@ from loopflow.lf.git import GitError, find_main_repo, open_pr
 from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lf.logging import write_prompt_file
 from loopflow.lf.messages import generate_pr_message
-from loopflow.lf.models import Session, SessionStatus, log_session_end, log_session_start
+from loopflow.lf.models import StepRun, StepRunStatus, log_step_run_end, log_step_run_start
 from loopflow.lf.tokens import MAX_SAFE_TOKENS, analyze_components
 from loopflow.lf.voices import load_voice
 from loopflow.lf.worktrees import create as create_worktree
@@ -116,18 +116,18 @@ def _run_step(
     prompt = format_prompt(components)
     prompt_file = write_prompt_file(prompt)
 
-    session = Session(
+    step_run = StepRun(
         id=str(uuid.uuid4()),
         step=params.step,
         repo=str(main_repo),
         worktree=str(repo_root),
-        status=SessionStatus.RUNNING,
+        status=StepRunStatus.RUNNING,
         started_at=datetime.now(),
         pid=None,
         model=params.backend,
         run_mode="auto",
     )
-    log_session_start(session)
+    log_step_run_start(step_run)
 
     command = build_model_command(
         params.backend,
@@ -145,7 +145,7 @@ def _run_step(
         "-m",
         "loopflow.lfd.execution.collector",
         "--session-id",
-        session.id,
+        step_run.id,
         "--step",
         params.step,
         "--repo-root",
@@ -164,8 +164,8 @@ def _run_step(
 
     os.unlink(prompt_file)
 
-    status = SessionStatus.COMPLETED if result_code == 0 else SessionStatus.ERROR
-    log_session_end(session.id, status)
+    status = StepRunStatus.COMPLETED if result_code == 0 else StepRunStatus.ERROR
+    log_step_run_end(step_run.id, status)
 
     if result_code != 0:
         print(f"\n[{params.step}] failed with exit code {result_code}")
@@ -186,18 +186,18 @@ def _run_inline_prompt(
     """Execute a prompt directly in the main worktree."""
     prompt_file = write_prompt_file(prompt)
 
-    session = Session(
+    step_run = StepRun(
         id=str(uuid.uuid4()),
         step=step_label,
         repo=str(main_repo),
         worktree=str(repo_root),
-        status=SessionStatus.RUNNING,
+        status=StepRunStatus.RUNNING,
         started_at=datetime.now(),
         pid=None,
         model=backend,
         run_mode="auto",
     )
-    log_session_start(session)
+    log_step_run_start(step_run)
 
     command = build_model_command(
         backend,
@@ -215,7 +215,7 @@ def _run_inline_prompt(
         "-m",
         "loopflow.lfd.execution.collector",
         "--session-id",
-        session.id,
+        step_run.id,
         "--step",
         step_label,
         "--repo-root",
@@ -233,8 +233,8 @@ def _run_inline_prompt(
 
     os.unlink(prompt_file)
 
-    status = SessionStatus.COMPLETED if result_code == 0 else SessionStatus.ERROR
-    log_session_end(session.id, status)
+    status = StepRunStatus.COMPLETED if result_code == 0 else StepRunStatus.ERROR
+    log_step_run_end(step_run.id, status)
 
     if result_code != 0:
         print(f"\n[{step_label}] failed with exit code {result_code}")
@@ -350,18 +350,18 @@ def _run_worktree_tasks(
         prompt = format_prompt(components)
         prompt_file = write_prompt_file(prompt)
 
-        session = Session(
+        step_run = StepRun(
             id=str(uuid.uuid4()),
             step=wt_task.step,
             repo=str(main_repo),
             worktree=str(wt_path),
-            status=SessionStatus.RUNNING,
+            status=StepRunStatus.RUNNING,
             started_at=datetime.now(),
             pid=None,
             model=wt_task.backend,
             run_mode="auto",
         )
-        log_session_start(session)
+        log_step_run_start(step_run)
 
         command = build_model_command(
             wt_task.backend,
@@ -379,7 +379,7 @@ def _run_worktree_tasks(
             "-m",
             "loopflow.lfd.execution.collector",
             "--session-id",
-            session.id,
+            step_run.id,
             "--step",
             wt_task.step,
             "--repo-root",
@@ -395,7 +395,7 @@ def _run_worktree_tasks(
 
         print(f"[{wt_task.label}] Starting in {wt_path.name}...")
         process = subprocess.Popen(collector_cmd, cwd=wt_path)
-        processes.append((wt_task, process, wt_path, prompt_file, session.id))
+        processes.append((wt_task, process, wt_path, prompt_file, step_run.id))
 
     # Wait for all to complete
     results: list[_WorktreeResult] = []
@@ -407,8 +407,8 @@ def _run_worktree_tasks(
         except OSError:
             pass
 
-        status = SessionStatus.COMPLETED if exit_code == 0 else SessionStatus.ERROR
-        log_session_end(session_id, status)
+        status = StepRunStatus.COMPLETED if exit_code == 0 else StepRunStatus.ERROR
+        log_step_run_end(session_id, status)
 
         results.append(_WorktreeResult(wt_task.label, wt_path, exit_code, session_id))
 

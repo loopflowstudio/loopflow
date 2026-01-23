@@ -145,12 +145,3 @@ def _step_run_from_row(row: dict) -> StepRun:
         model=row.get("model", "claude-code"),
         run_mode=row.get("run_mode", "auto"),
     )
-
-
-# Backwards compatibility aliases
-save_session = save_step_run
-load_sessions = load_step_runs
-load_sessions_for_worktree = load_step_runs_for_worktree
-load_sessions_for_repo = load_step_runs_for_repo
-update_session_status = update_step_run_status
-delete_session = delete_step_run

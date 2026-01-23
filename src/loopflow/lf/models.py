@@ -9,11 +9,6 @@ from loopflow.lfd.models import StepRun, StepRunStatus
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 
-# Backwards compatibility aliases
-Session = StepRun
-SessionStatus = StepRunStatus
-
-
 # StepRun logging (fire-and-forget communication with lfd daemon)
 
 
@@ -38,8 +33,3 @@ def log_step_run_start(step_run: StepRun) -> None:
 def log_step_run_end(step_run_id: str, status: StepRunStatus) -> None:
     """Tell lfd a step run ended. Fire-and-forget."""
     _send_fire_and_forget("sessions.end", {"session_id": step_run_id, "status": status.value})
-
-
-# Backwards compatibility aliases
-log_session_start = log_step_run_start
-log_session_end = log_step_run_end

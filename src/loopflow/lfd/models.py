@@ -251,10 +251,3 @@ class StepRun(LfdModel):
             model=data.get("model", "claude-code"),
             run_mode=data.get("run_mode", "auto"),
         )
-
-
-# Backwards compatibility aliases
-Run = FlowRun
-RunStatus = FlowRunStatus
-Session = StepRun
-SessionStatus = StepRunStatus

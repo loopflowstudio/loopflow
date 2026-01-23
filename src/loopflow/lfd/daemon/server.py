@@ -12,14 +12,14 @@ from pathlib import Path
 from loopflow.lfd.daemon.manager import Manager, load_manager_config
 from loopflow.lfd.daemon.protocol import Event, Request, Response, error, success
 from loopflow.lfd.db import update_dead_processes
-from loopflow.lfd.models import AgentStatus, Session, SessionStatus
+from loopflow.lfd.models import AgentStatus, StepRun, StepRunStatus
 from loopflow.lfd.agent import list_agents, run_cron_check, run_watch_check
 from loopflow.lfd.step_run import (
-    load_sessions,
-    load_sessions_for_repo,
-    load_sessions_for_worktree,
-    save_session,
-    update_session_status,
+    load_step_runs,
+    load_step_runs_for_repo,
+    load_step_runs_for_worktree,
+    save_step_run,
+    update_step_run_status,
 )
 
 
@@ -115,7 +115,7 @@ class Server:
 
     async def _handle_status(self) -> Response:
         agents = list_agents()
-        sessions = load_sessions(active_only=True)
+        sessions = load_step_runs(active_only=True)
         running_agents = [a for a in agents if a.status == AgentStatus.RUNNING]
 
         return success(
@@ -128,7 +128,7 @@ class Server:
         )
 
     async def _handle_sessions_list(self) -> Response:
-        sessions = load_sessions()
+        sessions = load_step_runs()
         return success([s.to_dict() for s in sessions])
 
     async def _handle_sessions_history(self, params: dict) -> Response:
@@ -138,11 +138,11 @@ class Server:
         limit = params.get("limit", 20)
 
         if worktree:
-            sessions = load_sessions_for_worktree(worktree, limit)
+            sessions = load_step_runs_for_worktree(worktree, limit)
         elif repo:
-            sessions = load_sessions_for_repo(repo, limit)
+            sessions = load_step_runs_for_repo(repo, limit)
         else:
-            sessions = load_sessions()[:limit]
+            sessions = load_step_runs()[:limit]
 
         return success([s.to_dict() for s in sessions])
 
@@ -152,8 +152,8 @@ class Server:
         if not session_data:
             return error("Missing 'session' parameter")
 
-        session = Session.from_dict(session_data)
-        save_session(session)
+        session = StepRun.from_dict(session_data)
+        save_step_run(session)
         await self._broadcast(
             Event(
                 "session.started",
@@ -174,8 +174,8 @@ class Server:
         if not session_id or not status_str:
             return error("Missing 'session_id' or 'status' parameter")
 
-        status = SessionStatus(status_str)
-        update_session_status(session_id, status)
+        status = StepRunStatus(status_str)
+        update_step_run_status(session_id, status)
         await self._broadcast(Event("session.ended", {"id": session_id, "status": status_str}))
         return success({"id": session_id})
 

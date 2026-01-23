@@ -28,7 +28,7 @@ from loopflow.lf.launcher import (
     get_runner,
 )
 from loopflow.lf.logging import get_model_env, write_prompt_file
-from loopflow.lf.models import Session, SessionStatus, log_session_end, log_session_start
+from loopflow.lf.models import StepRun, StepRunStatus, log_step_run_end, log_step_run_start
 from loopflow.lf.output import (
     copy_to_clipboard,
     trim_components_if_needed,
@@ -79,18 +79,18 @@ def _execute_step(
 
     main_repo = find_main_repo(repo_root) or repo_root
     run_mode = "interactive" if is_interactive else "auto"
-    session = Session(
+    step_run = StepRun(
         id=str(uuid.uuid4()),
         step=step_name,
         repo=str(main_repo),
         worktree=str(repo_root),
-        status=SessionStatus.RUNNING,
+        status=StepRunStatus.RUNNING,
         started_at=datetime.now(),
         pid=os.getpid() if not is_interactive else None,
         model=backend,
         run_mode=run_mode,
     )
-    log_session_start(session)
+    log_step_run_start(step_run)
 
     if is_interactive:
         command = build_model_interactive_command(
@@ -146,7 +146,7 @@ def _execute_step(
         "-m",
         "loopflow.lfd.execution.collector",
         "--session-id",
-        session.id,
+        step_run.id,
         "--step",
         step_name,
         "--repo-root",
@@ -172,8 +172,8 @@ def _execute_step(
     except OSError:
         pass  # Best effort cleanup
 
-    status = SessionStatus.COMPLETED if result_code == 0 else SessionStatus.ERROR
-    log_session_end(session.id, status)
+    status = StepRunStatus.COMPLETED if result_code == 0 else StepRunStatus.ERROR
+    log_step_run_end(step_run.id, status)
 
     return result_code
 

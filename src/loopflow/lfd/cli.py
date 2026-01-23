@@ -580,13 +580,13 @@ def _print_agent_detail(agent: Agent, c: dict[str, str]) -> None:
     if runs:
         typer.echo(f"\n  {c['dim']}Recent runs:{c['reset']}")
         for run in runs:
-            from loopflow.lfd.models import RunStatus
+            from loopflow.lfd.models import FlowRunStatus
 
             run_status_c = (
                 c["green"]
-                if run.status == RunStatus.COMPLETED
+                if run.status == FlowRunStatus.COMPLETED
                 else c["red"]
-                if run.status == RunStatus.FAILED
+                if run.status == FlowRunStatus.FAILED
                 else c["dim"]
             )
             pr_info = f" → {run.pr_url}" if run.pr_url else ""
@@ -661,10 +661,10 @@ def prs(
     typer.echo(f"{c['bold']}{agent.area_display}{c['reset']} PRs ({agent.short_id()})")
     typer.echo("")
 
-    from loopflow.lfd.models import RunStatus
+    from loopflow.lfd.models import FlowRunStatus
 
     for run in runs_with_prs:
-        status_c = c["green"] if run.status == RunStatus.COMPLETED else c["red"]
+        status_c = c["green"] if run.status == FlowRunStatus.COMPLETED else c["red"]
         started = run.started_at.strftime("%Y-%m-%d") if run.started_at else "?"
         typer.echo(
             f"  #{run.iteration:<3} {status_c}{run.status.value:<10}{c['reset']} "

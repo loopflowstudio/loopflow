@@ -1,0 +1,13 @@
+#!/bin/bash
+# Verify summarize flow works for loopflow repo
+
+set -e
+
+echo "=== Generating summaries ==="
+lfops summarize --all -f
+
+echo -e "\n=== Database entries ==="
+sqlite3 ~/.lf/lfd.db "SELECT repo, path, token_budget, length(content) as chars, model FROM summaries WHERE repo LIKE '%loopflow%';"
+
+echo -e "\n=== Token breakdown (copy mode shows context) ==="
+lf run review --copy 2>&1 | head -30

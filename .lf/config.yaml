@@ -15,4 +15,8 @@ push: true
 summary_tokens: 25000
 
 summaries:
-  - path: src/loopflow
+  - path: .
+    model: claude:sonnet
+
+branch_names:
+  schema: "{user}.{name}.{ts}"

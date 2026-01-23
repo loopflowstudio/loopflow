@@ -9,6 +9,28 @@ from pathlib import Path
 from loopflow.lf.tokens import count_tokens
 
 
+# Patterns for lfdocs content (excluded from summaries when lfdocs is on)
+LFDOCS_EXCLUDE_PATTERNS = [
+    ".docs/**",
+    ".design/**",
+    "*.md",  # Root .md files
+]
+
+
+def build_exclude_patterns(config) -> list[str] | None:
+    """Build exclude patterns list, including lfdocs patterns if lfdocs is enabled."""
+    if not config:
+        return None
+
+    patterns = list(config.exclude) if config.exclude else []
+
+    # When lfdocs is on, exclude those paths from summaries (they're already in context)
+    if config.lfdocs:
+        patterns.extend(LFDOCS_EXCLUDE_PATTERNS)
+
+    return patterns if patterns else None
+
+
 @dataclass
 class Summary:
     """A generated codebase summary."""
@@ -523,7 +545,7 @@ def register_commands(app) -> None:
                             repo_root,
                             token_budget,
                             summary_config.model,
-                            config.exclude if config else None,
+                            build_exclude_patterns(config),
                             force=force,
                         )
                         typer.echo(f"  {summary_config.path}: done ({len(summary.content)} chars)")
@@ -555,7 +577,7 @@ def register_commands(app) -> None:
                 repo_root,
                 tokens,
                 model,
-                config.exclude if config else None,
+                build_exclude_patterns(config),
                 force=force,
             )
         except Exception as e:

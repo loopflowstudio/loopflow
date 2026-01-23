@@ -1,7 +1,7 @@
 Create a reference summary of this content for LLM context.
 
 **OUTPUT BUDGET:**
-- ~{token_budget} tokens (~{char_target} characters, ~{word_target} words, ~{line_target} lines)
+- ~{token_budget} tokens
 
 This is a budget to USE. Include all useful content—if the source material is rich, use most of the budget. If the content summarizes cleanly in fewer tokens, that's fine too.
 

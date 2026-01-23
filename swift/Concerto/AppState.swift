@@ -189,14 +189,13 @@ final class AppState {
         loops = [
             Loop(
                 id: "mock-loop-1",
-                type: .loop,
-                area: "src/tests/",
-                goals: ["test-coverage"],
                 flow: "ship",
+                area: "src/tests/",
                 repo: currentRepo?.path ?? "/tmp/demo",
-                jobMain: "loop-test-coverage",
+                goals: ["test-coverage"],
                 status: .running,
                 iteration: 3,
+                mainBranch: "loop-test-coverage",
                 prLimit: 5,
                 mergeMode: .pr,
                 pid: 12345,
@@ -206,14 +205,13 @@ final class AppState {
             ),
             Loop(
                 id: "mock-loop-2",
-                type: .loop,
-                area: "docs/",
-                goals: ["docs-sync"],
                 flow: "ship",
+                area: "docs/",
                 repo: currentRepo?.path ?? "/tmp/demo",
-                jobMain: "loop-docs-sync",
+                goals: ["docs-sync"],
                 status: .idle,
                 iteration: 12,
+                mainBranch: "loop-docs-sync",
                 prLimit: 3,
                 mergeMode: .pr,
                 pid: nil,
@@ -740,7 +738,7 @@ final class AppState {
 
     func squashLandLoop(_ loop: Loop) async throws {
         guard let repo = currentRepo else { return }
-        try await loopService.squashLand(loop: loop, repoRoot: repo)
+        try await loopService.squashLand(trigger: .loop(loop), repoRoot: repo)
         await refreshLoops()
         listWorktrees()
     }

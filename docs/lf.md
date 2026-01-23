@@ -191,4 +191,4 @@ If `~/.superpowers` exists, it's auto-detected with prefix `sp`. SkillRegistry i
 
 ## See Also
 
-[Feature Workflow](workflow.md) · [Configuration](config.md) · [Quick Fix](quick-fix.md)
+[Get Started](getting-started.md) · [Configuration](config.md)

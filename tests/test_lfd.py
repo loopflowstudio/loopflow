@@ -2034,8 +2034,9 @@ def test_cron_trigger_hourly_recent_run():
     """Hourly cron with recent run → no trigger."""
     from loopflow.lfd.agent import should_trigger_cron
 
-    # Last run was 30 minutes ago, cron runs every hour
-    last_run = datetime.now() - timedelta(minutes=30)
+    # Last run was just now, cron runs every hour at :00
+    # Since last_run is after the most recent :00, should not trigger
+    last_run = datetime.now()
     result = should_trigger_cron("0 * * * *", last_run)
     assert result is False
 

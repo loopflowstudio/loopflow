@@ -59,7 +59,7 @@ Type "# Or run a single iteration"
 Enter
 Sleep 1s
 
-Type "lfd flow ship swift/ -p spec.md"
+Type "lfd run ship swift/"
 Enter
 Sleep 2s
 

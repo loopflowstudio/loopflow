@@ -4,7 +4,7 @@ import re
 
 from typer.testing import CliRunner
 
-from loopflow.lf import app
+from loopflow.lf.cli import app
 from loopflow.lfops import get_app
 
 

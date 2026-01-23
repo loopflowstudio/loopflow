@@ -6,7 +6,7 @@ Migrates from old loops/loop_runs tables if they exist.
 
 import sqlite3
 
-VERSION = "2025-01-22T00:00:00"
+VERSION = "2025-01-22T02:00:00"
 DESCRIPTION = "Create runs and triggers schema"
 
 

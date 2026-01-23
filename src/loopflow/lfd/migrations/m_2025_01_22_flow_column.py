@@ -8,9 +8,7 @@ DESCRIPTION = "add flow column to loops"
 
 def apply(conn: sqlite3.Connection) -> None:
     # Check if loops table exists
-    cursor = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='loops'"
-    )
+    cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='loops'")
     if not cursor.fetchone():
         return  # Table doesn't exist; initial migration will create it with all columns
 

@@ -137,88 +137,76 @@ def test_migrations_cover_all_loop_fields():
 
         loop = Loop(
             id="test-all-fields",
-            type=LoopType.FLOW,
+            flow="ship",
             area="src/test/",
             repo=Path("/tmp/repo"),
-            loop_main="test-main",
-            flow="ship",
             goals=["goal-a", "goal-b"],
-            status=LoopStatus.RUNNING,
+            status=TriggerStatus.RUNNING,
             iteration=5,
+            main_branch="test-main",
             pr_limit=10,
             merge_mode=MergeMode.LAND,
-            project_file="project.md",
-            pathset="src/**/*.py",
-            cron="0 9 * * *",
-            goal_name="legacy-goal",
             pid=12345,
-            last_main_sha="abc123",
         )
 
         save_loop(loop, db_path)
         loaded = get_loop("test-all-fields", db_path)
 
         assert loaded.id == loop.id
-        assert loaded.type == loop.type
+        assert loaded.flow == loop.flow
         assert loaded.area == loop.area
         assert loaded.repo == loop.repo
-        assert loaded.loop_main == loop.loop_main
-        assert loaded.flow == loop.flow
         assert loaded.goals == loop.goals
         assert loaded.status == loop.status
         assert loaded.iteration == loop.iteration
+        assert loaded.main_branch == loop.main_branch
         assert loaded.pr_limit == loop.pr_limit
         assert loaded.merge_mode == loop.merge_mode
-        assert loaded.project_file == loop.project_file
-        assert loaded.pathset == loop.pathset
-        assert loaded.cron == loop.cron
-        assert loaded.goal_name == loop.goal_name
         assert loaded.pid == loop.pid
-        assert loaded.last_main_sha == loop.last_main_sha
 
 
-def test_migrations_cover_all_loop_run_fields():
-    """Migrations create columns for all LoopRun model fields."""
+def test_migrations_cover_all_run_fields():
+    """Migrations create columns for all Run model fields."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        # Create parent loop first (foreign key)
-        loop = Loop(
-            id="parent-loop",
-            type=LoopType.LOOP,
+        run = Run(
+            id="test-run-all-fields",
+            parent="loop:parent-loop",
+            flow="ship",
             area="src/test/",
             repo=Path("/tmp/repo"),
-            loop_main="test-main",
-        )
-        save_loop(loop, db_path)
-
-        run = LoopRun(
-            id="test-run-all-fields",
-            loop_id="parent-loop",
+            goals=["goal-a", "goal-b"],
+            status=RunStatus.RUNNING,
             iteration=3,
-            status=LoopStatus.RUNNING,
-            started_at=datetime(2024, 1, 15, 10, 30, 0),
-            ended_at=datetime(2024, 1, 15, 11, 45, 0),
             worktree="/tmp/repo.worktree",
+            branch="feature-branch",
             current_step="implement",
             error="Something went wrong",
             pr_url="https://github.com/user/repo/pull/42",
+            started_at=datetime(2024, 1, 15, 10, 30, 0),
+            ended_at=datetime(2024, 1, 15, 11, 45, 0),
         )
 
-        save_loop_run(run, db_path)
-        runs = get_loop_runs("parent-loop", db_path=db_path)
+        save_run(run, db_path)
+        runs = list_runs_for_trigger("loop", "parent-loop", db_path=db_path)
         loaded = runs[0]
 
         assert loaded.id == run.id
-        assert loaded.loop_id == run.loop_id
-        assert loaded.iteration == run.iteration
+        assert loaded.parent == run.parent
+        assert loaded.flow == run.flow
+        assert loaded.area == run.area
+        assert loaded.repo == run.repo
+        assert loaded.goals == run.goals
         assert loaded.status == run.status
-        assert loaded.started_at == run.started_at
-        assert loaded.ended_at == run.ended_at
+        assert loaded.iteration == run.iteration
         assert loaded.worktree == run.worktree
+        assert loaded.branch == run.branch
         assert loaded.current_step == run.current_step
         assert loaded.error == run.error
         assert loaded.pr_url == run.pr_url
+        assert loaded.started_at == run.started_at
+        assert loaded.ended_at == run.ended_at
 
 
 def test_migrations_cover_all_session_fields():
@@ -284,42 +272,6 @@ def test_migrations_cover_summary_fields():
         assert loaded["source_hash"] == "abc123def456"
         assert loaded["model"] == "claude:sonnet"
         assert loaded["created_at"] is not None
-
-
-def test_schema_mismatch_auto_resets(capsys):
-    """Database auto-resets when schema doesn't match code expectations."""
-    import sqlite3
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "test.db"
-
-        # Create initial database
-        conn = _get_db(db_path)
-        conn.close()
-
-        # Simulate branch switch by renaming tables
-        conn = sqlite3.connect(db_path)
-        conn.execute("ALTER TABLE loops RENAME TO jobs")
-        conn.execute("ALTER TABLE loop_runs RENAME TO job_runs")
-        conn.commit()
-        conn.close()
-
-        # This should auto-reset and recreate correct schema
-        conn = _get_db(db_path)
-        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        tables = {row[0] for row in cursor.fetchall()}
-        conn.close()
-
-        # Verify correct tables exist after reset
-        assert "loops" in tables
-        assert "loop_runs" in tables
-        assert "jobs" not in tables
-        assert "job_runs" not in tables
-
-        # Verify warning was printed
-        captured = capsys.readouterr()
-        assert "Schema mismatch" in captured.err
-        assert "Resetting database" in captured.err
 
 
 def test_db_load_sessions_for_worktree():
@@ -1065,7 +1017,8 @@ def test_scheduler_config_defaults():
 
 def test_scheduler_acquire_and_release():
     """Scheduler manages slots correctly."""
-    from loopflow.lfd.daemon.manager import Manager as Scheduler, ManagerConfig as SchedulerConfig
+    from loopflow.lfd.daemon.manager import Manager as Scheduler
+    from loopflow.lfd.daemon.manager import ManagerConfig as SchedulerConfig
 
     config = SchedulerConfig(concurrency=2, global_pr_limit=100)
     scheduler = Scheduler(config)
@@ -1109,7 +1062,8 @@ def test_scheduler_acquire_and_release():
 
 def test_scheduler_release_nonexistent():
     """Releasing nonexistent run ID is safe."""
-    from loopflow.lfd.daemon.manager import Manager as Scheduler, ManagerConfig as SchedulerConfig
+    from loopflow.lfd.daemon.manager import Manager as Scheduler
+    from loopflow.lfd.daemon.manager import ManagerConfig as SchedulerConfig
 
     config = SchedulerConfig(concurrency=2, global_pr_limit=100)
     scheduler = Scheduler(config)
@@ -1121,7 +1075,8 @@ def test_scheduler_release_nonexistent():
 
 def test_scheduler_get_status():
     """Scheduler returns correct status."""
-    from loopflow.lfd.daemon.manager import Manager as Scheduler, ManagerConfig as SchedulerConfig
+    from loopflow.lfd.daemon.manager import Manager as Scheduler
+    from loopflow.lfd.daemon.manager import ManagerConfig as SchedulerConfig
 
     config = SchedulerConfig(concurrency=3, global_pr_limit=15)
     scheduler = Scheduler(config)
@@ -1144,7 +1099,8 @@ def test_scheduler_get_status():
 
 def test_scheduler_can_start_respects_concurrency():
     """can_start checks concurrency limit."""
-    from loopflow.lfd.daemon.manager import Manager as Scheduler, ManagerConfig as SchedulerConfig
+    from loopflow.lfd.daemon.manager import Manager as Scheduler
+    from loopflow.lfd.daemon.manager import ManagerConfig as SchedulerConfig
 
     config = SchedulerConfig(concurrency=1, global_pr_limit=100)
     scheduler = Scheduler(config)
@@ -1166,7 +1122,8 @@ def test_scheduler_can_start_respects_concurrency():
 
 def test_scheduler_acquire_respects_global_limit():
     """acquire blocks when global outstanding exceeds limit."""
-    from loopflow.lfd.daemon.manager import Manager as Scheduler, ManagerConfig as SchedulerConfig
+    from loopflow.lfd.daemon.manager import Manager as Scheduler
+    from loopflow.lfd.daemon.manager import ManagerConfig as SchedulerConfig
 
     config = SchedulerConfig(concurrency=2, global_pr_limit=1)
     scheduler = Scheduler(config)
@@ -1181,7 +1138,8 @@ def test_scheduler_thread_safety():
     """Scheduler is thread-safe for acquire/release."""
     import threading
 
-    from loopflow.lfd.daemon.manager import Manager as Scheduler, ManagerConfig as SchedulerConfig
+    from loopflow.lfd.daemon.manager import Manager as Scheduler
+    from loopflow.lfd.daemon.manager import ManagerConfig as SchedulerConfig
 
     config = SchedulerConfig(concurrency=10, global_pr_limit=100)
     scheduler = Scheduler(config)

@@ -501,6 +501,7 @@ def test_load_config_global_only(tmp_path, monkeypatch):
 
     # Patch home to point to our test global
     import pathlib
+
     original_home = pathlib.Path.home
 
     def mock_home():

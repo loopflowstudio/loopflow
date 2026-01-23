@@ -11,14 +11,13 @@ from datetime import datetime
 from pathlib import Path
 
 from loopflow.lfd.db import _get_db
-from loopflow.lfd.models import MergeMode, Subscription, TriggerStatus, area_to_slug
+from loopflow.lfd.models import MergeMode, Subscription, TriggerStatus
 from loopflow.lfd.runs.loop import (
     StartResult,
     _allocate_main_branch,
     _create_main_branch,
     count_outstanding,
 )
-
 
 # Persistence
 

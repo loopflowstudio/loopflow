@@ -73,6 +73,9 @@ class Agent(LfdModel):
     cron: str | None = None
     last_main_sha: str | None = None
 
+    # Circuit breaker
+    consecutive_failures: int = 0
+
     @field_validator("voice", mode="before")
     @classmethod
     def normalize_voice(cls, v):
@@ -140,6 +143,7 @@ def agent_from_row(row: dict) -> Agent:
         watch_paths=row.get("watch_paths"),
         cron=row.get("cron"),
         last_main_sha=row.get("last_main_sha"),
+        consecutive_failures=row.get("consecutive_failures", 0),
     )
 
 

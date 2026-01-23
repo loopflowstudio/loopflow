@@ -1,18 +1,26 @@
-# LFD Reliability: Remaining Phases
+# LFD Reliability
 
-Continue hardening watch, loop, and cron modes after foundation work is complete.
+Hardening for watch, loop, and cron agent modes.
 
-## Context
+## Status
 
-Phases 0-2 are implemented (schema isolation, state lifecycle, subprocess timeout). These phases focus on the trigger logic and operational hardening.
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 0-2 | Foundation (schema, lifecycle, timeout) | ✓ Done |
+| 3 | Watch mode trigger logic | ✓ Done (debounce TODO) |
+| 4 | Cron mode trigger logic | ✓ Done |
+| 5 | Loop mode resilience | ✓ Done (health endpoint TODO) |
+| 6 | Transaction boundaries | TODO |
+
+**Test coverage**: 107 tests in `test_lfd.py`
 
 ---
 
-## Phase 3: Watch Mode
+## Phase 3: Watch Mode ✓ (mostly complete)
 
 Reliable file-change detection.
 
-1. **Pure trigger function**
+1. **Pure trigger function** ✓
    ```python
    def should_trigger_watch(
        watch_paths: list[str],
@@ -22,27 +30,29 @@ Reliable file-change detection.
    ) -> bool:
    ```
 
-2. **Unit tests**
-   - No previous SHA → trigger
+2. **Unit tests** ✓ (11 tests)
+   - No previous SHA → no trigger (first run records baseline)
    - SHA same → no trigger
    - SHA different, no matching paths → no trigger
    - SHA different, matching paths → trigger
+   - Exact file match, glob patterns, multiple paths
+   - Trailing slash handling, partial path rejection
 
-3. **Handle git failures**
-   - `git fetch` fails → log, don't update SHA, don't trigger
-   - Never silently succeed when git failed
+3. **Handle git failures** ✓
+   - `git fetch` fails → return False, don't update SHA
+   - `git diff` fails → update SHA, return False
 
-4. **Debounce**
+4. **Debounce** (TODO)
    - Track `last_trigger_time` per agent
    - Don't re-trigger if < 5 min ago
 
 ---
 
-## Phase 4: Cron Mode
+## Phase 4: Cron Mode ✓ (mostly complete)
 
 Triggers exactly when expected.
 
-1. **Pure trigger function**
+1. **Pure trigger function** ✓ (already existed)
    ```python
    def should_trigger_cron(
        cron_expr: str,
@@ -51,31 +61,40 @@ Triggers exactly when expected.
    ) -> bool:
    ```
 
-2. **Fix 24-hour grace period**
-   - Current: prevents triggers for 24 hours after any run
-   - New: use `croniter.get_next(last_run_ended)`, compare to `now`
+2. **Grace period** ✓ (works correctly)
+   - Skips triggers beyond grace period (default 24h)
+   - First run triggers if within grace
 
-3. **Unit tests**
+3. **Unit tests** ✓ (10 tests)
    - `*/5 * * * *`, last run 6 min ago → trigger
    - Same, last run 2 min ago → no trigger
    - No previous run → trigger
+   - Stale beyond grace → no trigger
+   - Daily/hourly schedules
 
 ---
 
-## Phase 5: Loop Mode Hardening
+## Phase 5: Loop Mode Hardening ✓ (mostly complete)
 
 Recovers from transient failures.
 
-1. **Retry with backoff**
+1. **Retry with backoff** ✓
    - On failure: wait 30s, retry up to 3 times
    - 3rd failure: status=ERROR, stop loop
+   - Configurable: `MAX_RETRIES=3`, `RETRY_BACKOFF_SECONDS=30`
 
-2. **Track consecutive failures**
+2. **Track consecutive failures** ✓
    - New field: `consecutive_failures` on Agent
    - Reset to 0 on success
-   - Circuit breaker: > 5 failures → pause, notify
+   - Circuit breaker: >= 5 failures → pause, emit `agent.circuit_breaker` event
+   - Migration: `m_2025_01_23_consecutive_failures.py`
 
-3. **Health endpoint**
+3. **Comprehensive logging** ✓
+   - All agent operations logged to `~/.lf/logs/lfd.log`
+   - Separate loggers: `lfd.agent`, `lfd.worker`, `lfd.trigger`
+   - Full stack traces on exceptions
+
+4. **Health endpoint** (TODO)
    - `GET /health` → `{status: "ok", active: N, failed: M}`
 
 ---
@@ -102,23 +121,13 @@ Database operations are atomic.
 
 ---
 
-## Priority
+## Remaining Work
 
-| Phase | Effort | Risk Reduction |
-|-------|--------|----------------|
-| 3 | S | Medium |
-| 4 | S | Medium |
-| 5 | M | Medium |
-| 6 | M | High |
+| Item | Phase | Effort |
+|------|-------|--------|
+| Watch debounce (`last_trigger_time`) | 3 | S |
+| Health endpoint (`GET /health`) | 5 | S |
+| Transaction boundaries | 6 | M |
+| `lfd doctor` command | — | S |
 
-Phases 3 and 4 can be done in parallel. Phase 5 depends on 3+4. Phase 6 is independent.
-
----
-
-## Quick Wins
-
-Do anytime:
-
-- Replace remaining `except Exception: pass` with `except Exception as e: logger.warning(...)`
-- Add `--dry-run` to `check_watch` and `check_cron`
-- Add `lfd doctor`: check schema version, orphaned runs, dead PIDs
+Phase 6 is independent and can be done anytime.

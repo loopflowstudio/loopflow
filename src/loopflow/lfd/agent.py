@@ -1,5 +1,6 @@
 """Agent entity persistence and operations."""
 
+import fnmatch
 import json
 import os
 import random
@@ -14,6 +15,7 @@ from croniter import croniter
 
 from loopflow.lf.context import find_worktree_root
 from loopflow.lfd.db import _get_db
+from loopflow.lfd.logging import trigger_log
 from loopflow.lfd.models import Agent, AgentStatus, MergeMode, agent_from_row, area_to_slug
 
 
@@ -102,8 +104,9 @@ def save_agent(agent: Agent, db_path: Path | None = None) -> None:
         """
         INSERT OR REPLACE INTO agents
         (id, repo, flow, voice, area, status, iteration, main_branch,
-         pr_limit, merge_mode, pid, created_at, watch_paths, cron, last_main_sha)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         pr_limit, merge_mode, pid, created_at, watch_paths, cron, last_main_sha,
+         consecutive_failures)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             agent.id,
@@ -121,6 +124,7 @@ def save_agent(agent: Agent, db_path: Path | None = None) -> None:
             agent.watch_paths,
             agent.cron,
             agent.last_main_sha,
+            agent.consecutive_failures,
         ),
     )
     conn.commit()
@@ -224,6 +228,22 @@ def update_agent_sha(agent_id: str, sha: str | None, db_path: Path | None = None
     cursor = conn.execute(
         "UPDATE agents SET last_main_sha = ? WHERE id = ? OR id LIKE ?",
         (sha, agent_id, f"{agent_id}%"),
+    )
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    return updated
+
+
+def update_agent_consecutive_failures(
+    agent_id: str, failures: int, db_path: Path | None = None
+) -> bool:
+    """Update an agent's consecutive failure count."""
+    conn = _get_db(db_path)
+
+    cursor = conn.execute(
+        "UPDATE agents SET consecutive_failures = ? WHERE id = ? OR id LIKE ?",
+        (failures, agent_id, f"{agent_id}%"),
     )
     conn.commit()
     updated = cursor.rowcount > 0
@@ -476,14 +496,57 @@ def _run_agent(agent: Agent) -> None:
 # Watch mode checking
 
 
+def should_trigger_watch(
+    watch_paths: list[str],
+    last_sha: str | None,
+    current_sha: str,
+    changed_files: list[str],
+) -> bool:
+    """Pure trigger logic for watch mode.
+
+    Returns True if agent should trigger based on:
+    - SHA changed from last_sha to current_sha
+    - At least one changed file matches watch_paths
+    """
+    if last_sha is None:
+        return False
+
+    if current_sha == last_sha:
+        return False
+
+    if not changed_files:
+        return False
+
+    for changed in changed_files:
+        for pattern in watch_paths:
+            pattern = pattern.rstrip("/")
+            if changed == pattern or changed.startswith(pattern + "/"):
+                return True
+            if "*" in pattern:
+                if fnmatch.fnmatch(changed, pattern):
+                    return True
+
+    return False
+
+
 def check_watch(agent: Agent) -> bool:
     """Check if watch-mode agent should run. Returns True if triggered."""
     if not agent.watch_paths:
         return False
 
     repo = agent.repo
+    short_id = agent.short_id()
 
-    subprocess.run(["git", "fetch", "origin", "main"], cwd=repo, capture_output=True)
+    trigger_log.debug(f"[{short_id}] watch check: paths={agent.watch_paths}")
+
+    result = subprocess.run(
+        ["git", "fetch", "origin", "main"], cwd=repo, capture_output=True
+    )
+    if result.returncode != 0:
+        trigger_log.warning(
+            f"[{short_id}] git fetch failed: {result.stderr.decode()[:200]}"
+        )
+        return False
 
     result = subprocess.run(
         ["git", "rev-parse", "origin/main"],
@@ -492,14 +555,20 @@ def check_watch(agent: Agent) -> bool:
         text=True,
     )
     if result.returncode != 0:
+        trigger_log.warning(f"[{short_id}] git rev-parse failed")
         return False
 
     current_sha = result.stdout.strip()
+    trigger_log.debug(
+        f"[{short_id}] SHA: last={agent.last_main_sha[:7] if agent.last_main_sha else 'None'} "
+        f"current={current_sha[:7]}"
+    )
 
     if current_sha == agent.last_main_sha:
         return False
 
     if agent.last_main_sha is None:
+        trigger_log.info(f"[{short_id}] first check, recording baseline SHA {current_sha[:7]}")
         update_agent_sha(agent.id, current_sha)
         return False
 
@@ -510,14 +579,28 @@ def check_watch(agent: Agent) -> bool:
         capture_output=True,
         text=True,
     )
-
-    changed_files = result.stdout.strip()
-    if not changed_files:
+    if result.returncode != 0:
+        trigger_log.warning(f"[{short_id}] git diff failed")
         update_agent_sha(agent.id, current_sha)
         return False
 
+    changed_files = [f for f in result.stdout.strip().split("\n") if f]
+
+    triggered = should_trigger_watch(paths, agent.last_main_sha, current_sha, changed_files)
+
+    if triggered:
+        trigger_log.info(
+            f"[{short_id}] TRIGGERED: {len(changed_files)} files changed in watch paths"
+        )
+        for f in changed_files[:5]:
+            trigger_log.debug(f"[{short_id}]   changed: {f}")
+        if len(changed_files) > 5:
+            trigger_log.debug(f"[{short_id}]   ... and {len(changed_files) - 5} more")
+    else:
+        trigger_log.debug(f"[{short_id}] no matching changes")
+
     update_agent_sha(agent.id, current_sha)
-    return True
+    return triggered
 
 
 # Cron mode checking
@@ -552,10 +635,20 @@ def check_cron(agent: Agent) -> bool:
 
     from loopflow.lfd.flow_run import get_latest_run_for_agent
 
+    short_id = agent.short_id()
+    trigger_log.debug(f"[{short_id}] cron check: expr={agent.cron}")
+
     last_run = get_latest_run_for_agent(agent.id)
     last_time = last_run.ended_at if last_run else None
 
-    return should_trigger_cron(agent.cron, last_time)
+    triggered = should_trigger_cron(agent.cron, last_time)
+
+    if triggered:
+        trigger_log.info(f"[{short_id}] TRIGGERED: cron={agent.cron} last_run={last_time}")
+    else:
+        trigger_log.debug(f"[{short_id}] not due: last_run={last_time}")
+
+    return triggered
 
 
 # Daemon check functions
@@ -563,33 +656,47 @@ def check_cron(agent: Agent) -> bool:
 
 def run_watch_check() -> list[str]:
     """Check all watch-mode agents and trigger as needed."""
-    triggered = []
-    for agent in list_agents():
-        if agent.status == AgentStatus.RUNNING:
-            continue
-        if not agent.watch_paths:
-            continue
+    agents = list_agents()
+    watch_agents = [a for a in agents if a.watch_paths and a.status != AgentStatus.RUNNING]
+    trigger_log.debug(f"watch check: {len(watch_agents)} agents to check")
 
-        if check_watch(agent):
-            result = start_agent(agent.id)
-            if result:
-                triggered.append(agent.id)
+    triggered = []
+    for agent in watch_agents:
+        try:
+            if check_watch(agent):
+                result = start_agent(agent.id)
+                if result:
+                    trigger_log.info(f"[{agent.short_id()}] started from watch trigger")
+                    triggered.append(agent.id)
+                else:
+                    trigger_log.warning(
+                        f"[{agent.short_id()}] watch triggered but start failed: {result.reason}"
+                    )
+        except Exception as e:
+            trigger_log.error(f"[{agent.short_id()}] watch check error: {e}")
 
     return triggered
 
 
 def run_cron_check() -> list[str]:
     """Check all cron-mode agents and trigger as needed."""
-    triggered = []
-    for agent in list_agents():
-        if agent.status == AgentStatus.RUNNING:
-            continue
-        if not agent.cron:
-            continue
+    agents = list_agents()
+    cron_agents = [a for a in agents if a.cron and a.status != AgentStatus.RUNNING]
+    trigger_log.debug(f"cron check: {len(cron_agents)} agents to check")
 
-        if check_cron(agent):
-            result = start_agent(agent.id)
-            if result:
-                triggered.append(agent.id)
+    triggered = []
+    for agent in cron_agents:
+        try:
+            if check_cron(agent):
+                result = start_agent(agent.id)
+                if result:
+                    trigger_log.info(f"[{agent.short_id()}] started from cron trigger")
+                    triggered.append(agent.id)
+                else:
+                    trigger_log.warning(
+                        f"[{agent.short_id()}] cron triggered but start failed: {result.reason}"
+                    )
+        except Exception as e:
+            trigger_log.error(f"[{agent.short_id()}] cron check error: {e}")
 
     return triggered

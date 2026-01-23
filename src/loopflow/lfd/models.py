@@ -28,9 +28,6 @@ class LfdModel(BaseModel):
     )
 
 
-# Agent: an AI coding agent
-
-
 class AgentStatus(str, Enum):
     """Runtime status of an agent."""
 

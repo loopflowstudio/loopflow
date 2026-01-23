@@ -57,7 +57,7 @@ def collect_output(
             command, log_file, json_log, foreground, prompt, session_id, prefix
         )
 
-    # Session status is updated by the parent process via lfd client
+    # StepRun status is updated by the parent process via lfd client
 
     if autocommit and exit_code == 0 and task and repo_root:
         git_autocommit(repo_root, task, push=push)

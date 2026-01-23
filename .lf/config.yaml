@@ -9,7 +9,8 @@ skill_sources:
 context:
   - docs
   - .design
-ignore: "uv.lock"
+exclude:
+  - uv.lock
 push: true
 
 summary_tokens: 25000

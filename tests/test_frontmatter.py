@@ -192,35 +192,6 @@ def test_resolve_step_config_context_extends():
     assert resolved.context == ["README.md", "src/main.py"]
 
 
-def test_resolve_step_config_legacy_include_tests_for():
-    config = Config(include_tests_for=["polish", "implement"])
-    resolved = resolve_step_config(
-        step_name="polish",
-        global_config=config,
-        frontmatter=StepConfig(),
-        cli_interactive=None,
-        cli_auto=None,
-        cli_model=None,
-        cli_context=None,
-    )
-    assert "tests/**" in resolved.include
-
-
-def test_resolve_step_config_frontmatter_include_over_legacy():
-    config = Config(include_tests_for=["polish"])
-    resolved = resolve_step_config(
-        step_name="polish",
-        global_config=config,
-        frontmatter=StepConfig(include=["docs/**"]),
-        cli_interactive=None,
-        cli_auto=None,
-        cli_model=None,
-        cli_context=None,
-    )
-    # Frontmatter include takes precedence over legacy include_tests_for
-    assert resolved.include == ["docs/**"]
-
-
 def test_resolve_step_config_frontmatter_interactive_true():
     """External skills set interactive=True in frontmatter at load time."""
     resolved = resolve_step_config(

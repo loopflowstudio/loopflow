@@ -12,6 +12,7 @@ import typer
 
 from loopflow.lf.config import load_config, parse_model
 from loopflow.lf.context import (
+    ContextConfig,
     PromptComponents,
     find_worktree_root,
     format_prompt,
@@ -216,15 +217,15 @@ def _launch_interactive_default(
             repo_root,
             step=None,
             inline=None,
-            context=context,
-            exclude=list(config.exclude) if config and config.exclude else None,
-            paste=include_paste,
             run_mode="interactive",
-            include_loopflow_doc=config.include_loopflow_doc if config else True,
             voices=cli_voices or (config.voice if config else None),
-            include_diff=False,  # No diff without explicit step
-            include_diff_files=False,  # No diff files without step
-            include_summaries=include_summaries,
+            context_config=ContextConfig.for_interactive(
+                pathset=list(context) if context else [],
+                exclude=list(config.exclude) if config and config.exclude else [],
+                lfdocs=config.include_loopflow_doc if config else True,
+                summaries=include_summaries,
+                clipboard=include_paste,
+            ),
             config=config,
         )
     except VoiceNotFoundError as e:
@@ -413,16 +414,18 @@ def run(
         components = gather_prompt_components(
             repo_root,
             step,
-            context=resolved.context or None,
-            exclude=exclude_patterns or None,
             step_args=args,
-            paste=include_paste,
             run_mode="interactive" if is_interactive else "auto",
-            include_loopflow_doc=config.include_loopflow_doc if config else True,
             voices=resolved.voice or None,
-            include_diff=include_diff,
-            include_diff_files=include_diff_files,
-            include_summaries=include_summaries,
+            context_config=ContextConfig(
+                pathset=list(resolved.context) if resolved.context else [],
+                exclude=list(exclude_patterns) if exclude_patterns else [],
+                lfdocs=config.include_loopflow_doc if config else True,
+                diff=include_diff,
+                diff_files=include_diff_files,
+                summaries=include_summaries,
+                clipboard=include_paste,
+            ),
             config=config,
         )
     except VoiceNotFoundError as e:
@@ -568,15 +571,17 @@ def inline(
             repo_root,
             step=None,
             inline=prompt,
-            context=resolved.context or None,
-            exclude=exclude_patterns or None,
-            paste=include_paste,
             run_mode="interactive" if is_interactive else "auto",
-            include_loopflow_doc=config.include_loopflow_doc if config else True,
             voices=resolved.voice or None,
-            include_diff=include_diff,
-            include_diff_files=include_diff_files,
-            include_summaries=include_summaries,
+            context_config=ContextConfig(
+                pathset=list(resolved.context) if resolved.context else [],
+                exclude=list(exclude_patterns) if exclude_patterns else [],
+                lfdocs=config.include_loopflow_doc if config else True,
+                diff=include_diff,
+                diff_files=include_diff_files,
+                summaries=include_summaries,
+                clipboard=include_paste,
+            ),
             config=config,
         )
     except VoiceNotFoundError as e:
@@ -699,12 +704,13 @@ def flow(
         components = gather_prompt_components(
             repo_root,
             first_step,
-            context=all_context or None,
-            exclude=exclude,
-            include_tests_for=config.include_tests_for if config else None,
-            include_loopflow_doc=config.include_loopflow_doc if config else True,
-            include_diff=config.diff if config else False,
-            include_diff_files=config.diff_files if config else True,
+            context_config=ContextConfig(
+                pathset=list(all_context) if all_context else [],
+                exclude=list(exclude) if exclude else [],
+                lfdocs=config.include_loopflow_doc if config else True,
+                diff=config.diff if config else False,
+                diff_files=config.diff_files if config else True,
+            ),
             config=config,
         )
         components = trim_components_if_needed(components)

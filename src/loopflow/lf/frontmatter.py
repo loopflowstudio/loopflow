@@ -216,11 +216,9 @@ def resolve_step_config(
     else:
         exclude = []
 
-    # Resolve include: frontmatter > legacy include_tests_for > default
+    # Resolve include: frontmatter > default
     if frontmatter.include is not None:
         include = list(frontmatter.include)
-    elif global_config and global_config.include_tests_for:
-        include = ["tests/**"] if step_name in global_config.include_tests_for else []
     elif defaults.include is not None:
         include = list(defaults.include)
     else:

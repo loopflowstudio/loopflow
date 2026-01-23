@@ -6,6 +6,7 @@ import typer
 
 from loopflow.lf.config import load_config, parse_model
 from loopflow.lf.context import (
+    ContextConfig,
     find_worktree_root,
     format_prompt,
     gather_prompt_components,
@@ -70,10 +71,7 @@ def register_commands(app: typer.Typer) -> None:
         components = gather_prompt_components(
             repo_root,
             step="commit",
-            include_diff=True,
-            include_diff_files=False,
-            include_loopflow_doc=False,
-            include_summaries=False,
+            context_config=ContextConfig.for_commit(),
         )
         prompt = format_prompt(components)
 

@@ -9,6 +9,8 @@ from importlib import resources
 from pathlib import Path
 from typing import Optional
 
+from pydantic import BaseModel
+
 from loopflow.lf.design import gather_design_docs, gather_internal_docs
 from loopflow.lf.files import format_files, format_image_references, gather_docs, gather_files
 from loopflow.lf.frontmatter import StepFile, parse_step_file
@@ -65,6 +67,51 @@ class DroppedComponent:
     name: str | None
     tokens: int
     reason: str | None = None
+
+
+class ContextConfig(BaseModel):
+    """Specifies what context to include in a prompt."""
+
+    # Explicit file paths to include/exclude
+    pathset: list[str] = []
+    exclude: list[str] = []
+
+    # Flags for what kinds of context to include
+    lfdocs: bool = True
+    diff: bool = False
+    diff_files: bool = True
+    summaries: bool = True
+    clipboard: bool = False
+
+    @classmethod
+    def for_flow(
+        cls,
+        pathset: list[str] | None = None,
+        exclude: list[str] | None = None,
+    ) -> "ContextConfig":
+        return cls(pathset=pathset or [], exclude=exclude or [])
+
+    @classmethod
+    def for_commit(cls) -> "ContextConfig":
+        return cls(lfdocs=False, diff=True, diff_files=False, summaries=False)
+
+    @classmethod
+    def for_interactive(
+        cls,
+        pathset: list[str] | None = None,
+        exclude: list[str] | None = None,
+        lfdocs: bool = True,
+        summaries: bool = True,
+        clipboard: bool = True,
+    ) -> "ContextConfig":
+        return cls(
+            pathset=pathset or [],
+            exclude=exclude or [],
+            lfdocs=lfdocs,
+            diff_files=False,
+            summaries=summaries,
+            clipboard=clipboard,
+        )
 
 
 def format_drop_label(drop: DroppedComponent) -> str:
@@ -621,24 +668,21 @@ def gather_prompt_components(
     repo_root: Path,
     step: Optional[str] = None,
     inline: Optional[str] = None,
-    context: Optional[list[str]] = None,
-    exclude: Optional[list[str]] = None,
     step_args: Optional[list[str]] = None,
-    paste: bool = False,
-    include_tests_for: Optional[list[str]] = None,
     run_mode: Optional[str] = None,
-    include_loopflow_doc: bool = True,
     voices: Optional[list[str]] = None,
-    include_diff: bool = False,
-    include_diff_files: bool = True,
-    include_summaries: bool = True,
+    context_config: Optional[ContextConfig] = None,
     config=None,
 ) -> PromptComponents:
     """Gather all prompt components without assembling them."""
+    if context_config is None:
+        context_config = ContextConfig()
+
+    exclude = context_config.exclude or []
     docs = gather_docs(repo_root, repo_root, exclude)
 
     # Load bundled LOOPFLOW.md (system documentation)
-    loopflow_doc = _load_loopflow_doc() if include_loopflow_doc else None
+    loopflow_doc = _load_loopflow_doc() if context_config.lfdocs else None
 
     # Insert design docs and internal docs before repo docs
     # Order: .design/ (ephemeral), .docs/ (persistent internal), repo root .md files
@@ -648,7 +692,7 @@ def gather_prompt_components(
     if prefix_docs:
         docs[0:0] = prefix_docs
 
-    diff = gather_diff(repo_root, exclude) if include_diff else None
+    diff = gather_diff(repo_root, exclude) if context_config.diff else None
 
     step_result = None
     if inline:
@@ -675,22 +719,17 @@ def gather_prompt_components(
             step_result = (step, f"No step file found for '{step}'.")
 
     context_exclude = list(exclude) if exclude else []
-    if include_tests_for is not None:
-        step_name = step or "inline"
-        include_tests = step_name in set(include_tests_for)
-        if not include_tests and "tests/**" not in context_exclude:
-            context_exclude.append("tests/**")
 
     # Gather file paths (not content yet)
-    diff_file_paths = gather_diff_files(repo_root) if include_diff_files else []
-    context_paths = context or []
+    diff_file_paths = gather_diff_files(repo_root) if context_config.diff_files else []
+    pathset = context_config.pathset or []
 
-    # Merge: diff files first, then context paths not already in diff
+    # Merge: diff files first, then pathset not already in diff
     diff_set = set(diff_file_paths)
-    all_file_paths = diff_file_paths + [p for p in context_paths if p not in diff_set]
+    all_file_paths = diff_file_paths + [p for p in pathset if p not in diff_set]
     gather_result = gather_files(all_file_paths, repo_root, context_exclude)
 
-    clipboard = _read_clipboard() if paste else None
+    clipboard = _read_clipboard() if context_config.clipboard else None
 
     # Load voices if specified
     loaded_voices = None
@@ -700,7 +739,7 @@ def gather_prompt_components(
         ]
 
     # Load configured summaries
-    summaries = gather_summaries(repo_root, config) if include_summaries else None
+    summaries = gather_summaries(repo_root, config) if context_config.summaries else None
 
     return PromptComponents(
         run_mode=run_mode,
@@ -809,23 +848,17 @@ def build_prompt(
     repo_root: Path,
     step: Optional[str] = None,
     inline: Optional[str] = None,
-    context: Optional[list[str]] = None,
-    exclude: Optional[list[str]] = None,
-    include_tests_for: Optional[list[str]] = None,
     run_mode: Optional[str] = None,
-    include_loopflow_doc: bool = True,
     voices: Optional[list[str]] = None,
+    context_config: Optional[ContextConfig] = None,
 ) -> str:
     """Build the full prompt for an LLM session."""
     components = gather_prompt_components(
         repo_root,
         step,
         inline,
-        context,
-        exclude,
-        include_tests_for=include_tests_for,
         run_mode=run_mode,
-        include_loopflow_doc=include_loopflow_doc,
         voices=voices,
+        context_config=context_config,
     )
     return format_prompt(components)

@@ -1,39 +1,31 @@
 Create a reference summary of this content for LLM context.
 
-**OUTPUT BUDGET:**
-- ~{token_budget} tokens
-
-This is a budget to USE. Include all useful content—if the source material is rich, use most of the budget. If the content summarizes cleanly in fewer tokens, that's fine too.
-
-**What to include**: Full dataclass/model definitions with type hints. Function signatures with docstrings. Key configuration schemas. Important documentation passages quoted directly rather than paraphrased.
+**OUTPUT BUDGET:** ~{token_budget} tokens. Use most of it—this is a budget to spend, not a limit to avoid.
 
 ## What to Include
 
 **For code:**
-- Data structures with full type annotations (quote the dataclass/model definitions)
-- Public function signatures with docstrings
-- Module organization and file purposes
+- Data structures with full type annotations
+- Public function signatures AND their docstrings (include the docstring text)
 - Key constants, enums, and configuration schemas
+- Entry points and CLI commands with usage examples
 
 **For documentation:**
-- Key concepts and definitions (quote important passages)
+- Key concepts and definitions
 - Commands, APIs, and their usage examples
 - Configuration options and their effects
-- Architecture decisions and rationale
 
-**For any content:**
-- Preserve exact names, paths, commands, and terminology
+**Style:**
 - Quote directly rather than paraphrase when the original is clear
-- Include code blocks for anything that looks like code
+- Consolidate related definitions together
+- Preserve exact names, paths, commands, and terminology
+- Code blocks for anything that looks like code
+- Dense markdown, organized by topic/module
 
-## Format
-
-Dense markdown. Organize by topic/module. Use code blocks liberally.
-
-**Priority order when budget is limited:**
-1. Type definitions and schemas (direct quotes)
-2. Public APIs and commands
-3. Key documentation passages
+**Priority when budget is tight:**
+1. Type definitions and schemas
+2. Public APIs with docstrings
+3. CLI usage examples
 4. Implementation patterns
 
 <source>

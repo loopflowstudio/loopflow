@@ -30,7 +30,9 @@ def register_commands(app: typer.Typer) -> None:
         exclude: list[str] = typer.Option(
             None, "-e", "-E", "--exclude", help="Patterns to exclude"
         ),
-        clipboard: bool = typer.Option(False, "-c", "-C", "--clipboard", help="Include clipboard content"),
+        clipboard: bool = typer.Option(
+            False, "-c", "-C", "--clipboard", help="Include clipboard content"
+        ),
         docs: Optional[bool] = typer.Option(
             None, "--lfdocs/--no-lfdocs", help="Include .docs/, .design/, and root .md files"
         ),

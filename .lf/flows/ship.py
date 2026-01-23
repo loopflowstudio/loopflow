@@ -1,3 +1,4 @@
+from loopflow.lf.flows import Choose, Flow
 
 SHIP = Flow(
     Choose(
@@ -5,9 +6,18 @@ SHIP = Flow(
             "add_to_roadmap": Flow(
                 {
                     "fork": [
-                        {"step": "roadmap", "config": {"model": "claude", "voice": ["artist", "customer"]}},
-                        {"step": "roadmap", "config": {"model": "gemini", "voice": ["blunt", "executive"]}},
-                        {"step": "roadmap", "config": {"model": "codex", "voice": ["architect", "thorough"]}},
+                        {
+                            "step": "roadmap",
+                            "config": {"model": "claude", "voice": ["artist", "customer"]},
+                        },
+                        {
+                            "step": "roadmap",
+                            "config": {"model": "gemini", "voice": ["blunt", "executive"]},
+                        },
+                        {
+                            "step": "roadmap",
+                            "config": {"model": "codex", "voice": ["architect", "thorough"]},
+                        },
                     ]
                 },
                 {"join": {}},

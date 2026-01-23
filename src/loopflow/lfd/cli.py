@@ -1,6 +1,6 @@
 """lfd: Loopflow daemon.
 
-Commands for managing agent loops, subscriptions, and schedules.
+Commands for managing AI coding agents.
 """
 
 import asyncio
@@ -15,32 +15,25 @@ import typer
 from loopflow.lf.flows import load_flow
 from loopflow.lf.logging import get_log_dir
 from loopflow.lf.voices import list_voices, load_voice, voice_exists
+from loopflow.lfd.agent import (
+    create_agent,
+    delete_agent,
+    get_agent,
+    get_wt_from_cwd,
+    list_agents,
+    start_agent,
+    stop_agent,
+)
 from loopflow.lfd.daemon.launchd import install as launchd_install
 from loopflow.lfd.daemon.launchd import is_running
 from loopflow.lfd.daemon.launchd import uninstall as launchd_uninstall
 from loopflow.lfd.daemon.server import run_server
-from loopflow.lfd.db import list_all_triggers
-from loopflow.lfd.models import Loop, MergeMode, Schedule, Subscription, Trigger, TriggerStatus
-from loopflow.lfd.runs.loop import (
-    create_loop,
-    delete_loop,
-    get_loop,
-    get_wt_from_cwd,
-    list_loops,
-    start_loop,
-    stop_loop,
-)
-from loopflow.lfd.runs.run import list_runs_for_trigger
-from loopflow.lfd.runs.schedule import create_schedule, delete_schedule, get_schedule
-from loopflow.lfd.runs.subscription import (
-    create_subscription,
-    delete_subscription,
-    get_subscription,
-)
+from loopflow.lfd.flow_run import list_runs_for_agent
+from loopflow.lfd.models import Agent, AgentStatus, MergeMode
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 
-app = typer.Typer(help="Loopflow daemon - agent loops and triggers")
+app = typer.Typer(help="Loopflow daemon - AI coding agents")
 
 
 def _use_color() -> bool:
@@ -69,30 +62,32 @@ def _colors() -> dict[str, str]:
     }
 
 
-def _status_color(status: TriggerStatus, c: dict[str, str]) -> str:
-    if status == TriggerStatus.RUNNING:
+def _status_color(status: AgentStatus, c: dict[str, str]) -> str:
+    if status == AgentStatus.RUNNING:
         return c["green"]
-    elif status == TriggerStatus.ERROR:
+    elif status == AgentStatus.ERROR:
         return c["red"]
-    elif status == TriggerStatus.WAITING:
+    elif status == AgentStatus.WAITING:
         return c["yellow"]
     return c["dim"]
 
 
-def _trigger_display(trigger: Trigger) -> str:
-    """Return area and voices for display."""
-    return f"{trigger.area} [{trigger.flow_display}] [{trigger.voices_display}]"
+def _agent_display(agent: Agent) -> str:
+    """Return area, flow, and voice for display."""
+    return f"{agent.area_display} [{agent.flow}] [{agent.voice_display}]"
 
 
-def _trigger_type_name(trigger: Trigger) -> str:
-    """Return the type name for a trigger."""
-    if isinstance(trigger, Loop):
-        return "loop"
-    elif isinstance(trigger, Subscription):
-        return "subscription"
-    elif isinstance(trigger, Schedule):
-        return "schedule"
-    return "unknown"
+def _parse_voices(voices: list[str] | None) -> list[str]:
+    """Parse voice list, handling comma-separated values.
+
+    Accepts both: -v v1 -v v2 and -v v1,v2
+    """
+    if not voices:
+        return ["default"]
+    result = []
+    for v in voices:
+        result.extend(v.split(","))
+    return [x.strip() for x in result if x.strip()]
 
 
 def _is_area(s: str) -> bool:
@@ -154,86 +149,86 @@ def uninstall():
 @app.command()
 def start(
     areas: list[str] = typer.Argument(None, help="Areas to start (all idle if omitted)"),
-    all_triggers: bool = typer.Option(False, "--all", help="Include waiting triggers"),
+    all_agents: bool = typer.Option(False, "--all", help="Include waiting agents"),
 ):
-    """Start multiple loops in parallel.
+    """Start multiple agents in parallel.
 
-    Without arguments, starts all idle loops. With --all, also starts waiting loops.
+    Without arguments, starts all idle agents. With --all, also starts waiting agents.
     """
     c = _colors()
     repo = get_wt_from_cwd()
 
-    # Get loops to start
+    # Get agents to start
     if areas:
         # Start specific areas
-        loops_to_start = []
+        agents_to_start = []
         for area in areas:
-            loop = None
-            for lp in list_loops(repo=repo):
-                if lp.area == area:
-                    loop = lp
+            agent = None
+            for ag in list_agents(repo=repo):
+                if area in ag.area:
+                    agent = ag
                     break
-            if not loop:
+            if not agent:
                 typer.echo(
-                    f"{c['yellow']}Warning:{c['reset']} Loop for '{area}' not found, skipping",
+                    f"{c['yellow']}Warning:{c['reset']} Agent for '{area}' not found, skipping",
                     err=True,
                 )
             else:
-                loops_to_start.append(loop)
+                agents_to_start.append(agent)
     else:
-        # Start all eligible loops
-        loops_to_start = []
-        for loop in list_loops(repo=repo):
-            if loop.status == TriggerStatus.IDLE:
-                loops_to_start.append(loop)
-            elif all_triggers and loop.status == TriggerStatus.WAITING:
-                loops_to_start.append(loop)
+        # Start all eligible agents
+        agents_to_start = []
+        for agent in list_agents(repo=repo):
+            if agent.status == AgentStatus.IDLE:
+                agents_to_start.append(agent)
+            elif all_agents and agent.status == AgentStatus.WAITING:
+                agents_to_start.append(agent)
 
-    if not loops_to_start:
-        typer.echo(f"{c['dim']}No loops to start{c['reset']}")
+    if not agents_to_start:
+        typer.echo(f"{c['dim']}No agents to start{c['reset']}")
         return
 
-    # Start each loop
+    # Start each agent
     started = 0
-    for loop in loops_to_start:
-        result = start_loop(loop.id)
+    for agent in agents_to_start:
+        result = start_agent(agent.id)
         if result:
-            msg = f"{c['green']}Started{c['reset']} {c['bold']}{loop.area}{c['reset']}"
-            typer.echo(f"{msg} ({loop.short_id()})")
+            msg = f"{c['green']}Started{c['reset']} {c['bold']}{agent.area_display}{c['reset']}"
+            typer.echo(f"{msg} ({agent.short_id()})")
             started += 1
         elif result.reason == "already_running":
-            typer.echo(f"{c['dim']}Already running:{c['reset']} {loop.area}")
+            typer.echo(f"{c['dim']}Already running:{c['reset']} {agent.area_display}")
         elif result.reason == "waiting":
-            msg = f"{c['yellow']}Waiting:{c['reset']} {loop.area}"
+            msg = f"{c['yellow']}Waiting:{c['reset']} {agent.area_display}"
             typer.echo(f"{msg} ({result.outstanding} outstanding)")
         else:
-            typer.echo(f"{c['red']}Failed:{c['reset']} {loop.area}")
+            typer.echo(f"{c['red']}Failed:{c['reset']} {agent.area_display}")
 
-    typer.echo(f"\nStarted {started}/{len(loops_to_start)} loops")
+    typer.echo(f"\nStarted {started}/{len(agents_to_start)} agents")
 
 
-# Loop command
+# Agent commands
 
 
 @app.command()
 def loop(
     flow: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
     area: str = typer.Argument(..., help="Area of responsibility (e.g., swift/, src/, .)"),
-    voices: list[str] = typer.Option(None, "-v", "-V", "--voice", help="Voice to add (repeatable)"),
+    voices: list[str] = typer.Option(None, "-L", "--voice", help="Voice to add (repeatable)"),
     limit: int = typer.Option(None, "-l", "--limit", help="PR limit override"),
     merge_mode: str = typer.Option(None, "--merge-mode", help="Merge mode: pr or land"),
     foreground: bool = typer.Option(False, "-f", "--foreground", help="Run in foreground"),
 ):
-    """Start a continuous homeostasis loop.
+    """Start a continuous agent loop.
 
     Flow is required - specifies which flow to run from .lf/flows/.
     Area is required - scopes the work (e.g., swift/, src/, or . for whole repo).
-    Voices are optional - adaptive mode is implicit if no mode voice is specified.
+    Voices are optional - add personality/role voices.
 
     Examples:
-        lfd loop ship swift/                              # adaptive mode
-        lfd loop ship swift/ -v product-engineer          # adaptive + role
-        lfd loop ship swift/ -v product-engineer -v designer  # adaptive + roles
+        lfd loop ship swift/                              # default voice
+        lfd loop ship swift/ -L product-engineer          # with role
+        lfd loop ship swift/ -L product-engineer -L designer  # multiple roles
         lfd loop ship .                                   # whole repo
     """
     c = _colors()
@@ -252,11 +247,11 @@ def loop(
         typer.echo(f"\nDid you mean: lfd loop {flow} {area}/ ?")
         raise typer.Exit(1)
 
-    voices = voices or []
+    voice_list = _parse_voices(voices)
 
     # Validate voices exist
-    for voice_name in voices:
-        if not voice_exists(repo, voice_name):
+    for voice_name in voice_list:
+        if voice_name != "default" and not voice_exists(repo, voice_name):
             typer.echo(
                 f"{c['red']}Error:{c['reset']} Voice '{voice_name}' not found",
                 err=True,
@@ -273,36 +268,44 @@ def loop(
         typer.echo(f"{c['red']}Error:{c['reset']} merge-mode must be 'pr' or 'land'", err=True)
         raise typer.Exit(1)
 
-    # Create or get loop
+    # Create or get agent
     pr_limit = limit if limit is not None else 5
     mm = MergeMode(merge_mode) if merge_mode else MergeMode.PR
 
-    lp = create_loop(area, repo, flow, voices=voices, pr_limit=pr_limit, merge_mode=mm)
+    agent = create_agent(
+        repo=repo,
+        flow=flow,
+        voice=voice_list,
+        area=[area],
+        pr_limit=pr_limit,
+        merge_mode=mm,
+    )
 
     # Start it
-    result = start_loop(lp.id, foreground=foreground)
+    result = start_agent(agent.id, foreground=foreground)
     if result:
         if foreground:
             msg = f"{c['green']}Completed{c['reset']} loop {c['bold']}{area}{c['reset']}"
-            typer.echo(f"{msg} ({lp.short_id()})")
+            typer.echo(f"{msg} ({agent.short_id()})")
         else:
             msg = f"{c['green']}Started{c['reset']} loop {c['bold']}{area}{c['reset']}"
-            typer.echo(f"{msg} ({lp.short_id()})")
+            typer.echo(f"{msg} ({agent.short_id()})")
             typer.echo(f"  Repo: {repo}")
-            typer.echo(f"  Main branch: {lp.main_branch}")
-            typer.echo(f"  Voices: {lp.voices_display}")
-            typer.echo(f"  Flow: {lp.flow_display}")
-            typer.echo(f"  PR limit: {lp.pr_limit}")
+            typer.echo(f"  Main branch: {agent.main_branch}")
+            typer.echo(f"  Voices: {agent.voice_display}")
+            typer.echo(f"  Flow: {agent.flow}")
+            typer.echo(f"  PR limit: {agent.pr_limit}")
     elif result.reason == "already_running":
-        typer.echo(f"Loop already running (PID {lp.pid})")
+        typer.echo(f"Agent already running (PID {agent.pid})")
         raise typer.Exit(1)
     elif result.reason == "waiting":
         msg = f"{c['yellow']}Waiting:{c['reset']} {result.outstanding} outstanding PRs"
-        typer.echo(f"{msg} (limit {lp.pr_limit})")
-        typer.echo(f"Run 'lfops land --squash' from {lp.main_branch} worktree to land work to main")
+        typer.echo(f"{msg} (limit {agent.pr_limit})")
+        msg = f"Run 'lfops land --squash' from {agent.main_branch} worktree to land work"
+        typer.echo(msg)
         raise typer.Exit(0)
     else:
-        typer.echo(f"{c['red']}Error:{c['reset']} Failed to start loop", err=True)
+        typer.echo(f"{c['red']}Error:{c['reset']} Failed to start agent", err=True)
         raise typer.Exit(1)
 
 
@@ -310,15 +313,15 @@ def loop(
 def run(
     flow_name: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
     area: str = typer.Argument(..., help="Area of responsibility (e.g., swift/, src/, .)"),
-    voices: list[str] = typer.Option(None, "-v", "-V", "--voice", help="Voice to add (repeatable)"),
-    clipboard: bool = typer.Option(False, "-c", "-C", "--clipboard", help="Include clipboard"),
+    voices: list[str] = typer.Option(None, "-L", "--voice", help="Voice to add (repeatable)"),
+    paste: bool = typer.Option(False, "-v", "--paste", help="Include clipboard as prompt"),
 ):
     """Run a flow once (direct execution, no trigger).
 
     Examples:
-        lfd run ship swift/                        # one-off adaptive iteration
-        lfd run ship swift/ -v product-engineer    # with role
-        lfd run ship . -c                          # whole repo with clipboard
+        lfd run ship swift/                        # one-off iteration
+        lfd run ship swift/ -L product-engineer    # with role
+        lfd run ship . -v                          # whole repo with clipboard
     """
     c = _colors()
     repo = get_wt_from_cwd()
@@ -335,32 +338,30 @@ def run(
         )
         raise typer.Exit(1)
 
-    voices = voices or []
+    voice_list = _parse_voices(voices)
 
     # Validate voices exist
-    for voice_name in voices:
-        if not voice_exists(repo, voice_name):
+    for voice_name in voice_list:
+        if voice_name != "default" and not voice_exists(repo, voice_name):
             typer.echo(f"{c['red']}Error:{c['reset']} Voice '{voice_name}' not found", err=True)
             raise typer.Exit(1)
 
     flow_name = _validate_flow(repo, flow_name, c)
 
-    # Handle clipboard
-    if clipboard:
+    # Handle clipboard paste
+    if paste:
         result = subprocess.run(["pbpaste"], capture_output=True, text=True)
         if result.returncode == 0 and result.stdout.strip():
             typer.echo(f"{c['dim']}Clipboard content will be included{c['reset']}")
 
-    # For now, create a temporary loop and run it once
-    # TODO: Implement direct run without creating a loop
-    lp = create_loop(area, repo, flow_name, voices=voices)
+    # Create a temporary agent and run it once
+    agent = create_agent(repo=repo, flow=flow_name, voice=voice_list, area=[area])
 
     # Start it in foreground (runs once)
-    result = start_loop(lp.id, foreground=True)
+    result = start_agent(agent.id, foreground=True)
     if result:
-        typer.echo(
-            f"{c['green']}Completed{c['reset']} run {c['bold']}{area}{c['reset']} ({lp.short_id()})"
-        )
+        msg = f"{c['green']}Completed{c['reset']} run {c['bold']}{area}{c['reset']}"
+        typer.echo(f"{msg} ({agent.short_id()})")
     else:
         typer.echo(f"{c['red']}Error:{c['reset']} Failed to run", err=True)
         raise typer.Exit(1)
@@ -373,7 +374,7 @@ def subscribe(
     path: list[str] = typer.Option(
         ..., "-p", "-P", "--path", help="Paths to watch (repeatable, supports globs)"
     ),
-    voices: list[str] = typer.Option(None, "-v", "-V", "--voice", help="Voice to add (repeatable)"),
+    voices: list[str] = typer.Option(None, "-L", "--voice", help="Voice to add (repeatable)"),
 ):
     """Subscribe to path changes on main."""
     c = _colors()
@@ -389,9 +390,9 @@ def subscribe(
         )
         raise typer.Exit(1)
 
-    voices = voices or []
-    for voice_name in voices:
-        if not voice_exists(repo, voice_name):
+    voice_list = _parse_voices(voices)
+    for voice_name in voice_list:
+        if voice_name != "default" and not voice_exists(repo, voice_name):
             typer.echo(f"{c['red']}Error:{c['reset']} Voice '{voice_name}' not found", err=True)
             raise typer.Exit(1)
 
@@ -400,13 +401,19 @@ def subscribe(
     # Convert path list to comma-separated pathset
     pathset = ",".join(path)
 
-    # Create subscription
-    sub = create_subscription(area, repo, flow, pathset, voices=voices)
+    # Create agent with watch_paths
+    agent = create_agent(
+        repo=repo,
+        flow=flow,
+        voice=voice_list,
+        area=[area],
+        watch_paths=pathset,
+    )
 
     msg = f"{c['green']}Subscribed{c['reset']} {c['bold']}{area}{c['reset']} to {pathset}"
-    typer.echo(f"{msg} ({sub.short_id()})")
-    typer.echo(f"  Voices: {sub.voices_display}")
-    typer.echo(f"  Flow: {sub.flow_display}")
+    typer.echo(f"{msg} ({agent.short_id()})")
+    typer.echo(f"  Voices: {agent.voice_display}")
+    typer.echo(f"  Flow: {agent.flow}")
     typer.echo("  Will run when paths change on main")
 
 
@@ -415,7 +422,7 @@ def schedule(
     flow: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
     area: str = typer.Argument(..., help="Area of responsibility (e.g., swift/, src/, .)"),
     cron_expr: str = typer.Argument(..., help="Cron expression (e.g., '0 9 * * *')"),
-    voices: list[str] = typer.Option(None, "-v", "-V", "--voice", help="Voice to add (repeatable)"),
+    voices: list[str] = typer.Option(None, "-L", "--voice", help="Voice to add (repeatable)"),
 ):
     """Schedule a flow to run on cron."""
     c = _colors()
@@ -431,22 +438,28 @@ def schedule(
         )
         raise typer.Exit(1)
 
-    voices = voices or []
-    for voice_name in voices:
-        if not voice_exists(repo, voice_name):
+    voice_list = _parse_voices(voices)
+    for voice_name in voice_list:
+        if voice_name != "default" and not voice_exists(repo, voice_name):
             typer.echo(f"{c['red']}Error:{c['reset']} Voice '{voice_name}' not found", err=True)
             raise typer.Exit(1)
 
     flow = _validate_flow(repo, flow, c)
 
-    # Create schedule
-    sched = create_schedule(area, repo, flow, cron_expr, voices=voices)
+    # Create agent with cron
+    agent = create_agent(
+        repo=repo,
+        flow=flow,
+        voice=voice_list,
+        area=[area],
+        cron=cron_expr,
+    )
 
     typer.echo(
-        f"{c['green']}Scheduled{c['reset']} {c['bold']}{area}{c['reset']} ({sched.short_id()})"
+        f"{c['green']}Scheduled{c['reset']} {c['bold']}{area}{c['reset']} ({agent.short_id()})"
     )
-    typer.echo(f"  Voices: {sched.voices_display}")
-    typer.echo(f"  Flow: {sched.flow_display}")
+    typer.echo(f"  Voices: {agent.voice_display}")
+    typer.echo(f"  Flow: {agent.flow}")
     typer.echo(f"  Cron: {cron_expr}")
 
 
@@ -481,25 +494,25 @@ def _get_scheduler_status() -> dict | None:
 
 @app.command()
 def status(
-    trigger_id: str = typer.Argument(None, help="Trigger ID (optional, shows all if omitted)"),
-    ids_only: bool = typer.Option(False, "--ids", help="Print trigger IDs only (for scripting)"),
+    agent_id: str = typer.Argument(None, help="Agent ID (optional, shows all if omitted)"),
+    ids_only: bool = typer.Option(False, "--ids", help="Print agent IDs only (for scripting)"),
 ):
-    """Show status of loops, subscriptions, and schedules."""
+    """Show status of agents."""
     c = _colors()
 
     # Machine-readable output for scripting
     if ids_only:
-        for trigger in list_all_triggers():
-            typer.echo(trigger.id)
+        for agent in list_agents():
+            typer.echo(agent.id)
         return
 
-    if trigger_id:
-        # Try to find the trigger
-        trigger = get_loop(trigger_id) or get_subscription(trigger_id) or get_schedule(trigger_id)
-        if not trigger:
-            typer.echo(f"{c['red']}Error:{c['reset']} Trigger '{trigger_id}' not found", err=True)
+    if agent_id:
+        # Try to find the agent
+        agent = get_agent(agent_id)
+        if not agent:
+            typer.echo(f"{c['red']}Error:{c['reset']} Agent '{agent_id}' not found", err=True)
             raise typer.Exit(1)
-        _print_trigger_detail(trigger, c)
+        _print_agent_detail(agent, c)
     else:
         # Show scheduler status if daemon is running
         sched = _get_scheduler_status()
@@ -518,65 +531,62 @@ def status(
             )
             typer.echo("")
 
-        triggers = list_all_triggers()
-        if not triggers:
-            typer.echo(f"{c['dim']}No triggers configured{c['reset']}")
-            typer.echo("Start a loop with: lfd loop <flow> <area>")
+        agents = list_agents()
+        if not agents:
+            typer.echo(f"{c['dim']}No agents configured{c['reset']}")
+            typer.echo("Start an agent with: lfd loop <flow> <area>")
             return
 
-        typer.echo(f"{'ID':<9} {'TYPE':<12} {'AREA':<30} {'STATUS':<10} {'ITER':<6} REPO")
+        typer.echo(f"{'ID':<9} {'MODE':<12} {'AREA':<30} {'STATUS':<10} {'ITER':<6} REPO")
         typer.echo("-" * 95)
 
-        for trigger in triggers:
-            status_c = _status_color(trigger.status, c)
-            display_str = _trigger_display(trigger)
+        for agent in agents:
+            status_c = _status_color(agent.status, c)
+            display_str = _agent_display(agent)
             if len(display_str) > 30:
                 display_str = display_str[:27] + "..."
 
-            repo_short = str(trigger.repo).replace(str(Path.home()), "~")
+            repo_short = str(agent.repo).replace(str(Path.home()), "~")
             if len(repo_short) > 20:
                 repo_short = "..." + repo_short[-17:]
 
-            type_name = _trigger_type_name(trigger)
-
             typer.echo(
-                f"{trigger.short_id():<9} {type_name:<12} {display_str:<30} "
-                f"{status_c}{trigger.status.value:<10}{c['reset']} "
-                f"{trigger.iteration:<6} {repo_short}"
+                f"{agent.short_id():<9} {agent.mode:<12} {display_str:<30} "
+                f"{status_c}{agent.status.value:<10}{c['reset']} "
+                f"{agent.iteration:<6} {repo_short}"
             )
 
 
-def _print_trigger_detail(trigger: Trigger, c: dict[str, str]) -> None:
-    """Print detailed info for a single trigger."""
-    status_c = _status_color(trigger.status, c)
-    type_name = _trigger_type_name(trigger)
+def _print_agent_detail(agent: Agent, c: dict[str, str]) -> None:
+    """Print detailed info for an agent."""
+    status_c = _status_color(agent.status, c)
 
-    typer.echo(f"{c['bold']}{trigger.area}{c['reset']} ({trigger.short_id()})")
-    typer.echo(f"  Type: {type_name}")
-    typer.echo(f"  Status: {status_c}{trigger.status.value}{c['reset']}")
-    typer.echo(f"  Repo: {trigger.repo}")
-    typer.echo(f"  Main branch: {trigger.main_branch}")
-    typer.echo(f"  Voices: {trigger.voices_display}")
-    typer.echo(f"  Flow: {trigger.flow_display}")
-    typer.echo(f"  Iteration: {trigger.iteration}")
+    typer.echo(f"{c['bold']}{agent.area_display}{c['reset']} ({agent.short_id()})")
+    typer.echo(f"  Mode: {agent.mode}")
+    typer.echo(f"  Status: {status_c}{agent.status.value}{c['reset']}")
+    typer.echo(f"  Repo: {agent.repo}")
+    typer.echo(f"  Main branch: {agent.main_branch}")
+    typer.echo(f"  Voices: {agent.voice_display}")
+    typer.echo(f"  Flow: {agent.flow}")
+    typer.echo(f"  Iteration: {agent.iteration}")
 
-    if isinstance(trigger, Subscription):
-        typer.echo(f"  Pathset: {trigger.pathset}")
-    elif isinstance(trigger, Schedule):
-        typer.echo(f"  Cron: {trigger.cron}")
+    if agent.watch_paths:
+        typer.echo(f"  Watch paths: {agent.watch_paths}")
+    if agent.cron:
+        typer.echo(f"  Cron: {agent.cron}")
 
     # Show recent runs
-    runs = list_runs_for_trigger(type_name, trigger.id, limit=5)
+    runs = list_runs_for_agent(agent.id, limit=5)
     if runs:
         typer.echo(f"\n  {c['dim']}Recent runs:{c['reset']}")
         for run in runs:
-            from loopflow.lfd.models import RunStatus
+            from loopflow.lfd.models import FlowRunStatus
 
             run_status_c = (
                 c["green"]
-                if run.status == RunStatus.COMPLETED
+                if run.status == FlowRunStatus.COMPLETED
                 else c["red"]
-                if run.status == RunStatus.FAILED
+                if run.status == FlowRunStatus.FAILED
                 else c["dim"]
             )
             pr_info = f" → {run.pr_url}" if run.pr_url else ""
@@ -589,73 +599,72 @@ def _print_trigger_detail(trigger: Trigger, c: dict[str, str]) -> None:
 
 @app.command()
 def stop(
-    trigger_id: str = typer.Argument(None, help="Trigger ID to stop (omit with --all)"),
-    all_triggers: bool = typer.Option(False, "--all", help="Stop all running triggers"),
+    agent_id: str = typer.Argument(None, help="Agent ID to stop (omit with --all)"),
+    all_agents: bool = typer.Option(False, "--all", help="Stop all running agents"),
     force: bool = typer.Option(False, "-f", "--force", help="Force kill (SIGKILL)"),
 ):
-    """Stop a running loop."""
+    """Stop a running agent."""
     c = _colors()
 
-    if all_triggers:
-        # Stop all running loops
+    if all_agents:
+        # Stop all running agents
         stopped = 0
-        for loop in list_loops():
-            if loop.status == TriggerStatus.RUNNING:
-                if stop_loop(loop.id, force=force):
-                    msg = f"{c['yellow']}Stopped{c['reset']} {_trigger_display(loop)}"
-                    typer.echo(f"{msg} ({loop.short_id()})")
+        for agent in list_agents():
+            if agent.status == AgentStatus.RUNNING:
+                if stop_agent(agent.id, force=force):
+                    msg = f"{c['yellow']}Stopped{c['reset']} {_agent_display(agent)}"
+                    typer.echo(f"{msg} ({agent.short_id()})")
                     stopped += 1
         if stopped == 0:
-            typer.echo(f"{c['dim']}No running loops to stop{c['reset']}")
+            typer.echo(f"{c['dim']}No running agents to stop{c['reset']}")
         else:
-            typer.echo(f"\nStopped {stopped} loop{'s' if stopped != 1 else ''}")
+            typer.echo(f"\nStopped {stopped} agent{'s' if stopped != 1 else ''}")
         return
 
-    if not trigger_id:
-        typer.echo(f"{c['red']}Error:{c['reset']} Provide a trigger ID or use --all", err=True)
+    if not agent_id:
+        typer.echo(f"{c['red']}Error:{c['reset']} Provide an agent ID or use --all", err=True)
         raise typer.Exit(1)
 
-    loop = get_loop(trigger_id)
-    if not loop:
-        typer.echo(f"{c['red']}Error:{c['reset']} Loop '{trigger_id}' not found", err=True)
+    agent = get_agent(agent_id)
+    if not agent:
+        typer.echo(f"{c['red']}Error:{c['reset']} Agent '{agent_id}' not found", err=True)
         raise typer.Exit(1)
 
-    if stop_loop(loop.id, force=force):
-        msg = f"{c['yellow']}Stopped{c['reset']} {c['bold']}{_trigger_display(loop)}{c['reset']}"
-        typer.echo(f"{msg} ({loop.short_id()})")
+    if stop_agent(agent.id, force=force):
+        msg = f"{c['yellow']}Stopped{c['reset']} {c['bold']}{_agent_display(agent)}{c['reset']}"
+        typer.echo(f"{msg} ({agent.short_id()})")
     else:
-        typer.echo(f"{c['red']}Error:{c['reset']} Failed to stop loop", err=True)
+        typer.echo(f"{c['red']}Error:{c['reset']} Failed to stop agent", err=True)
         raise typer.Exit(1)
 
 
 @app.command()
 def prs(
-    trigger_id: str = typer.Argument(..., help="Trigger ID"),
+    agent_id: str = typer.Argument(..., help="Agent ID"),
     limit: int = typer.Option(10, "-n", "--limit", help="Number of PRs to show"),
 ):
-    """Show PRs created by a trigger."""
+    """Show PRs created by an agent."""
     c = _colors()
 
-    trigger = get_loop(trigger_id) or get_subscription(trigger_id) or get_schedule(trigger_id)
-    if not trigger:
-        typer.echo(f"{c['red']}Error:{c['reset']} Trigger '{trigger_id}' not found", err=True)
+    agent = get_agent(agent_id)
+    if not agent:
+        typer.echo(f"{c['red']}Error:{c['reset']} Agent '{agent_id}' not found", err=True)
         raise typer.Exit(1)
 
-    type_name = _trigger_type_name(trigger)
-    runs = list_runs_for_trigger(type_name, trigger.id, limit=limit)
+    runs = list_runs_for_agent(agent.id, limit=limit)
     runs_with_prs = [r for r in runs if r.pr_url]
 
     if not runs_with_prs:
-        typer.echo(f"{c['dim']}No PRs found for '{trigger.area}'{c['reset']}")
+        typer.echo(f"{c['dim']}No PRs found for '{agent.area_display}'{c['reset']}")
         return
 
-    typer.echo(f"{c['bold']}{trigger.area}{c['reset']} PRs ({trigger.short_id()})")
+    typer.echo(f"{c['bold']}{agent.area_display}{c['reset']} PRs ({agent.short_id()})")
     typer.echo("")
 
-    from loopflow.lfd.models import RunStatus
+    from loopflow.lfd.models import FlowRunStatus
 
     for run in runs_with_prs:
-        status_c = c["green"] if run.status == RunStatus.COMPLETED else c["red"]
+        status_c = c["green"] if run.status == FlowRunStatus.COMPLETED else c["red"]
         started = run.started_at.strftime("%Y-%m-%d") if run.started_at else "?"
         typer.echo(
             f"  #{run.iteration:<3} {status_c}{run.status.value:<10}{c['reset']} "
@@ -665,64 +674,54 @@ def prs(
 
 @app.command()
 def rm(
-    trigger_id: str = typer.Argument(..., help="Trigger ID to remove"),
+    agent_id: str = typer.Argument(..., help="Agent ID to remove"),
     force: bool = typer.Option(False, "-f", "--force", help="Skip confirmation"),
 ):
-    """Remove a trigger and its history."""
+    """Remove an agent and its history."""
     c = _colors()
 
-    trigger = get_loop(trigger_id) or get_subscription(trigger_id) or get_schedule(trigger_id)
-    if not trigger:
-        typer.echo(f"{c['red']}Error:{c['reset']} Trigger '{trigger_id}' not found", err=True)
+    agent = get_agent(agent_id)
+    if not agent:
+        typer.echo(f"{c['red']}Error:{c['reset']} Agent '{agent_id}' not found", err=True)
         raise typer.Exit(1)
 
-    if trigger.status == TriggerStatus.RUNNING:
+    if agent.status == AgentStatus.RUNNING:
         typer.echo(
-            f"{c['red']}Error:{c['reset']} Trigger is running. Stop it first with: "
-            f"lfd stop {trigger_id}",
+            f"{c['red']}Error:{c['reset']} Agent is running. Stop it first with: "
+            f"lfd stop {agent_id}",
             err=True,
         )
         raise typer.Exit(1)
 
     if not force:
-        confirm = typer.confirm(f"Delete trigger '{trigger.area}' ({trigger.short_id()})?")
+        confirm = typer.confirm(f"Delete agent '{agent.area_display}' ({agent.short_id()})?")
         if not confirm:
             raise typer.Abort()
 
-    # Delete based on type
-    deleted = False
-    if isinstance(trigger, Loop):
-        deleted = delete_loop(trigger.id)
-    elif isinstance(trigger, Subscription):
-        deleted = delete_subscription(trigger.id)
-    elif isinstance(trigger, Schedule):
-        deleted = delete_schedule(trigger.id)
-
-    if deleted:
-        typer.echo(f"Deleted: {trigger.area} ({trigger.short_id()})")
+    if delete_agent(agent.id):
+        typer.echo(f"Deleted: {agent.area_display} ({agent.short_id()})")
     else:
-        typer.echo(f"{c['red']}Error:{c['reset']} Failed to delete trigger", err=True)
+        typer.echo(f"{c['red']}Error:{c['reset']} Failed to delete agent", err=True)
         raise typer.Exit(1)
 
 
 @app.command()
 def logs(
-    trigger_id: str = typer.Argument(..., help="Trigger ID"),
+    agent_id: str = typer.Argument(..., help="Agent ID"),
     follow: bool = typer.Option(False, "-f", "--follow", help="Follow output (like tail -f)"),
     lines: int = typer.Option(50, "-n", "--lines", help="Number of lines to show"),
 ):
-    """Show logs for a trigger's current run."""
+    """Show logs for an agent's current run."""
     c = _colors()
-    trigger = get_loop(trigger_id) or get_subscription(trigger_id) or get_schedule(trigger_id)
-    if not trigger:
-        typer.echo(f"{c['red']}Error:{c['reset']} Trigger '{trigger_id}' not found", err=True)
+    agent = get_agent(agent_id)
+    if not agent:
+        typer.echo(f"{c['red']}Error:{c['reset']} Agent '{agent_id}' not found", err=True)
         raise typer.Exit(1)
 
-    # Get latest run for this trigger
-    type_name = _trigger_type_name(trigger)
-    runs = list_runs_for_trigger(type_name, trigger.id, limit=1)
+    # Get latest run for this agent
+    runs = list_runs_for_agent(agent.id, limit=1)
     if not runs:
-        typer.echo(f"{c['dim']}No runs found for '{trigger.area}'{c['reset']}")
+        typer.echo(f"{c['dim']}No runs found for '{agent.area_display}'{c['reset']}")
         return
 
     run = runs[0]

@@ -1,13 +1,11 @@
 """Data structures for lfd daemon."""
 
-from dataclasses import dataclass, field
+import json
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 
-# Re-export Session and SessionStatus from lf.models for backwards compatibility
-from loopflow.lf.models import Session as Session
-from loopflow.lf.models import SessionStatus as SessionStatus
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 def area_to_slug(area: str) -> str:
@@ -17,37 +15,160 @@ def area_to_slug(area: str) -> str:
     return area.rstrip("/").split("/")[-1].lower()
 
 
-# Run: an execution instance of a Flow
+# Shared base model
 
 
-class RunStatus(Enum):
-    """Status of a Run execution."""
+class LfdModel(BaseModel):
+    """Base model for lfd data structures."""
 
-    PENDING = "pending"  # Created, not yet started
-    RUNNING = "running"  # Currently executing
-    COMPLETED = "completed"  # Finished successfully
-    FAILED = "failed"  # Finished with error
-    CANCELLED = "cancelled"  # Stopped before completion
+    model_config = ConfigDict(
+        extra="forbid",
+        validate_assignment=True,
+    )
 
 
-@dataclass
-class Run:
-    """An execution instance of a Flow.
+class AgentStatus(str, Enum):
+    """Runtime status of an agent."""
 
-    Runs can be spawned by a trigger (Loop, Subscription, Schedule)
-    or created directly (no parent).
+    IDLE = "idle"
+    RUNNING = "running"
+    WAITING = "waiting"
+    ERROR = "error"
+
+
+class MergeMode(str, Enum):
+    """How iteration branches merge to main."""
+
+    PR = "pr"
+    LAND = "land"
+
+
+class Agent(LfdModel):
+    """An AI coding agent.
+
+    Activation modes (derived from config):
+    - Continuous (default): runs when started until stopped or PR limit
+    - Watch: runs when watch_paths change on main
+    - Scheduled: runs on cron schedule
     """
 
     id: str
-    parent: str | None  # "loop:<id>" | "subscription:<id>" | "schedule:<id>" | None
-
-    flow: str  # Flow name (from .lf/flows/)
-    area: str  # Area of responsibility
     repo: Path
-    goals: list[str] = field(default_factory=list)
+    flow: str
+    voice: list[str] = Field(min_length=1)
+    area: list[str] = Field(min_length=1)
 
-    status: RunStatus = RunStatus.PENDING
-    iteration: int = 0  # Which iteration of parent (0 for direct runs)
+    status: AgentStatus = AgentStatus.IDLE
+    iteration: int = 0
+
+    main_branch: str = ""
+    pr_limit: int = Field(default=5, ge=1)
+    merge_mode: MergeMode = MergeMode.PR
+
+    pid: int | None = None
+    created_at: datetime = Field(default_factory=datetime.now)
+
+    # Activation config (determines mode)
+    watch_paths: str | None = None
+    cron: str | None = None
+    last_main_sha: str | None = None
+
+    @field_validator("voice", mode="before")
+    @classmethod
+    def normalize_voice(cls, v):
+        if isinstance(v, str):
+            return [v]
+        return v
+
+    @field_validator("area", mode="before")
+    @classmethod
+    def normalize_area(cls, v):
+        if isinstance(v, str):
+            return [v]
+        return v
+
+    def short_id(self) -> str:
+        return self.id[:7]
+
+    @property
+    def area_slug(self) -> str:
+        return area_to_slug(self.area[0])
+
+    @property
+    def mode(self) -> str:
+        """Return the activation mode: 'watch', 'cron', or 'loop'."""
+        if self.watch_paths:
+            return "watch"
+        if self.cron:
+            return "cron"
+        return "loop"
+
+    @property
+    def voice_display(self) -> str:
+        return ", ".join(self.voice)
+
+    @property
+    def area_display(self) -> str:
+        return ", ".join(self.area)
+
+
+def agent_from_row(row: dict) -> Agent:
+    """Convert database row to Agent."""
+    voice_str = row.get("voice")
+    voice = json.loads(voice_str) if voice_str else ["default"]
+
+    area_str = row.get("area")
+    area = json.loads(area_str) if area_str else ["."]
+
+    merge_mode_str = row.get("merge_mode", "pr")
+    if merge_mode_str == "auto":
+        merge_mode_str = "pr"
+
+    return Agent(
+        id=row["id"],
+        repo=Path(row["repo"]),
+        flow=row["flow"],
+        voice=voice,
+        area=area,
+        status=AgentStatus(row["status"]),
+        iteration=row.get("iteration", 0),
+        main_branch=row.get("main_branch", ""),
+        pr_limit=row.get("pr_limit", 5),
+        merge_mode=MergeMode(merge_mode_str),
+        pid=row.get("pid"),
+        created_at=datetime.fromisoformat(row["created_at"]),
+        watch_paths=row.get("watch_paths"),
+        cron=row.get("cron"),
+        last_main_sha=row.get("last_main_sha"),
+    )
+
+
+# FlowRun: an execution instance of a Flow
+
+
+class FlowRunStatus(str, Enum):
+    """Status of a FlowRun execution."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class FlowRun(LfdModel):
+    """An execution instance of a Flow, spawned by an Agent."""
+
+    id: str
+    agent_id: str | None = None
+
+    flow: str
+    voice: list[str] = Field(min_length=1)
+    area: list[str] = Field(min_length=1)
+    repo: Path
+
+    status: FlowRunStatus = FlowRunStatus.PENDING
+    iteration: int = 0
 
     worktree: str | None = None
     branch: str | None = None
@@ -57,184 +178,72 @@ class Run:
 
     started_at: datetime | None = None
     ended_at: datetime | None = None
-    created_at: datetime = field(default_factory=datetime.now)
-
-    def short_id(self) -> str:
-        return self.id[:7]
-
-    @property
-    def parent_type(self) -> str | None:
-        return parse_parent(self.parent)[0]
-
-    @property
-    def parent_id(self) -> str | None:
-        return parse_parent(self.parent)[1]
-
-    @property
-    def goals_display(self) -> str:
-        if not self.goals:
-            return "adaptive"
-        return ", ".join(self.goals)
-
-    @property
-    def flow_display(self) -> str:
-        return self.flow or "default"
+    created_at: datetime = Field(default_factory=datetime.now)
 
 
-def parse_parent(parent: str | None) -> tuple[str | None, str | None]:
-    """Parse parent string into (type, id) tuple."""
-    if not parent:
-        return None, None
-    kind, id = parent.split(":", 1)
-    return kind, id
+# StepRun: an execution of a single step
 
 
-# Trigger status (shared by Loop, Subscription, Schedule)
+class StepRunStatus(str, Enum):
+    """Status of a StepRun execution."""
+
+    RUNNING = "running"
+    WAITING = "waiting"
+    COMPLETED = "completed"
+    FAILED = "failed"
 
 
-class TriggerStatus(Enum):
-    """Runtime status of a trigger."""
+class StepRun(LfdModel):
+    """An execution of a single step.
 
-    IDLE = "idle"  # Not running
-    RUNNING = "running"  # Currently has an active Run
-    WAITING = "waiting"  # Paused (PR limit reached)
-    ERROR = "error"  # Last Run failed
-
-
-class MergeMode(Enum):
-    """How iteration branches merge to main."""
-
-    PR = "pr"  # Accumulate on trigger-main, human reviews and lands
-    LAND = "land"  # Auto-land to main after each iteration
-
-
-# Loop: continuously spawns Runs until stopped
-
-
-@dataclass
-class Loop:
-    """A continuous runner that spawns Runs."""
+    Can belong to a FlowRun (agent-spawned) or be standalone (interactive).
+    """
 
     id: str
-    flow: str
-    area: str
-    repo: Path
-    goals: list[str] = field(default_factory=list)
+    step: str
+    repo: str
+    worktree: str
 
-    status: TriggerStatus = TriggerStatus.IDLE
-    iteration: int = 0
+    flow_run_id: str | None = None
+    agent_id: str | None = None
 
-    main_branch: str = ""  # Branch for accumulating work
-    pr_limit: int = 5
-    merge_mode: MergeMode = MergeMode.PR
-
-    pid: int | None = None
-    created_at: datetime = field(default_factory=datetime.now)
-
-    def short_id(self) -> str:
-        return self.id[:7]
-
-    @property
-    def area_slug(self) -> str:
-        return area_to_slug(self.area)
-
-    @property
-    def goals_display(self) -> str:
-        if not self.goals:
-            return "adaptive"
-        return ", ".join(self.goals)
-
-    @property
-    def flow_display(self) -> str:
-        return self.flow or "default"
-
-
-# Subscription: spawns Run when pathset changes on main
-
-
-@dataclass
-class Subscription:
-    """A pathset watcher that spawns Runs when files change."""
-
-    id: str
-    flow: str
-    area: str
-    repo: Path
-    goals: list[str] = field(default_factory=list)
-
-    pathset: str = ""  # Comma-separated paths to watch
-    last_main_sha: str | None = None
-
-    status: TriggerStatus = TriggerStatus.IDLE
-    iteration: int = 0
-
-    main_branch: str = ""
-    pr_limit: int = 5
-    merge_mode: MergeMode = MergeMode.PR
+    status: StepRunStatus = StepRunStatus.RUNNING
+    started_at: datetime = Field(default_factory=datetime.now)
+    ended_at: datetime | None = None
 
     pid: int | None = None
-    created_at: datetime = field(default_factory=datetime.now)
+    model: str = "claude-code"
+    run_mode: str = "auto"
 
-    def short_id(self) -> str:
-        return self.id[:7]
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "step": self.step,
+            "repo": self.repo,
+            "worktree": self.worktree,
+            "flow_run_id": self.flow_run_id,
+            "agent_id": self.agent_id,
+            "status": self.status.value,
+            "started_at": self.started_at.isoformat(),
+            "ended_at": self.ended_at.isoformat() if self.ended_at else None,
+            "pid": self.pid,
+            "model": self.model,
+            "run_mode": self.run_mode,
+        }
 
-    @property
-    def area_slug(self) -> str:
-        return area_to_slug(self.area)
-
-    @property
-    def goals_display(self) -> str:
-        if not self.goals:
-            return "adaptive"
-        return ", ".join(self.goals)
-
-    @property
-    def flow_display(self) -> str:
-        return self.flow or "default"
-
-
-# Schedule: spawns Run on cron
-
-
-@dataclass
-class Schedule:
-    """A cron trigger that spawns Runs on schedule."""
-
-    id: str
-    flow: str
-    area: str
-    repo: Path
-    goals: list[str] = field(default_factory=list)
-
-    cron: str = ""  # Cron expression
-
-    status: TriggerStatus = TriggerStatus.IDLE
-    iteration: int = 0
-
-    main_branch: str = ""
-    pr_limit: int = 5
-    merge_mode: MergeMode = MergeMode.PR
-
-    pid: int | None = None
-    created_at: datetime = field(default_factory=datetime.now)
-
-    def short_id(self) -> str:
-        return self.id[:7]
-
-    @property
-    def area_slug(self) -> str:
-        return area_to_slug(self.area)
-
-    @property
-    def goals_display(self) -> str:
-        if not self.goals:
-            return "adaptive"
-        return ", ".join(self.goals)
-
-    @property
-    def flow_display(self) -> str:
-        return self.flow or "default"
-
-
-# Type alias for any trigger
-Trigger = Loop | Subscription | Schedule
+    @classmethod
+    def from_dict(cls, data: dict) -> "StepRun":
+        return cls(
+            id=data["id"],
+            step=data["step"],
+            repo=data["repo"],
+            worktree=data["worktree"],
+            flow_run_id=data.get("flow_run_id"),
+            agent_id=data.get("agent_id"),
+            status=StepRunStatus(data["status"]),
+            started_at=datetime.fromisoformat(data["started_at"]),
+            ended_at=datetime.fromisoformat(data["ended_at"]) if data.get("ended_at") else None,
+            pid=data.get("pid"),
+            model=data.get("model", "claude-code"),
+            run_mode=data.get("run_mode", "auto"),
+        )

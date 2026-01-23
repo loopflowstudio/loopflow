@@ -21,7 +21,7 @@ struct WorktreeSidebar: View {
     @State private var compareLoading = false
     @State private var showingDiagnostics = false
     @State private var showingLandConfirmation = false
-    @State private var loopToLand: Loop?
+    @State private var agentToLand: Agent?
 
     // Keyboard navigation state
     @State private var keyboardFocusedId: String?
@@ -47,7 +47,7 @@ struct WorktreeSidebar: View {
                 flowsSection
             }
 
-            loopsSection
+            agentsSection
         }
         .background(Color.loopflowBurgundy)
         .sheet(isPresented: $showingNewWorktreeSheet) {
@@ -488,10 +488,10 @@ struct WorktreeSidebar: View {
         }
     }
 
-    private var loopsSection: some View {
+    private var agentsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("Loops")
+                Text("Agents")
                     .font(.caption)
                     .fontWeight(.medium)
                     .foregroundStyle(.white.opacity(0.7))
@@ -531,9 +531,9 @@ struct WorktreeSidebar: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.bottom, 12)
-            } else if appState.loops.isEmpty {
+            } else if appState.agents.isEmpty {
                 VStack(spacing: 4) {
-                    Text("No loops")
+                    Text("No agents")
                         .foregroundStyle(.white.opacity(0.5))
                         .font(.caption)
                 }
@@ -541,42 +541,19 @@ struct WorktreeSidebar: View {
                 .padding(.bottom, 12)
             } else {
                 LazyVStack(spacing: 4) {
-                    ForEach(appState.loops) { loop in
-                        LoopRow(
-                            loop: loop,
-                            isSelected: appState.selectedLoop?.id == loop.id,
-                            liveOutput: appState.liveOutput(for: loop),
-                            hasLandableWork: loop.commitsAhead > 0,
+                    ForEach(appState.agents) { agent in
+                        AgentRow(
+                            agent: agent,
+                            isSelected: appState.selectedAgent?.id == agent.id,
+                            liveOutput: appState.liveOutput(for: agent),
                             onSelect: {
-                                appState.selectedLoop = loop
-                            },
-                            onLand: {
-                                loopToLand = loop
-                                showingLandConfirmation = true
+                                appState.selectedAgent = agent
                             }
                         )
                     }
                 }
                 .padding(.horizontal, 8)
             }
-        }
-        .confirmationDialog(
-            "Land Loop",
-            isPresented: $showingLandConfirmation,
-            presenting: loopToLand
-        ) { loop in
-            Button("Land") {
-                Task {
-                    do {
-                        try await appState.squashLandLoop(loop)
-                    } catch {
-                        actionError = "Failed to land: \(error.localizedDescription)"
-                        showingActionError = true
-                    }
-                }
-            }
-        } message: { loop in
-            Text("Squash and land '\(loop.areaDisplay)' loop commits to main?")
         }
     }
 }

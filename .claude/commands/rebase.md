@@ -43,8 +43,10 @@ git rebase --continue
 
 ### 4. Verify and push
 ```bash
-# Verify nothing broke
-uv run pytest tests/
+# Verify nothing broke (see TESTING.md for all test suites)
+uv run pytest tests/                    # Python
+swift test --package-path swift         # Swift
+# Concerto UI tests if UI code involved in conflicts
 
 # Push the rebased branch
 git push --force-with-lease

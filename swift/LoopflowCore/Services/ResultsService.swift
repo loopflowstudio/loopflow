@@ -5,12 +5,12 @@ import Foundation
 public struct ResultsService: @unchecked Sendable {
     public init() {}
 
-    public func captureBaseline(sessionId: String, worktree: URL) async -> SessionBaseline {
+    public func captureBaseline(stepRunId: String, worktree: URL) async -> StepRunBaseline {
         let headSHA = await getHeadSHA(in: worktree)
         let dirtyFiles = await getDirtyFiles(in: worktree)
 
-        return SessionBaseline(
-            sessionId: sessionId,
+        return StepRunBaseline(
+            stepRunId: stepRunId,
             worktree: worktree.path(),
             headSHA: headSHA,
             dirtyFiles: dirtyFiles,
@@ -19,19 +19,19 @@ public struct ResultsService: @unchecked Sendable {
     }
 
     public func computeResults(
-        baseline: SessionBaseline,
+        baseline: StepRunBaseline,
         step: String,
-        status: SessionResultStatus,
+        status: StepRunResultStatus,
         startedAt: Date,
         endedAt: Date
-    ) async -> SessionResult {
+    ) async -> StepRunResult {
         let worktree = URL(fileURLWithPath: baseline.worktree)
         let currentSHA = await getHeadSHA(in: worktree)
         let newCommits = await getCommitMessages(from: baseline.headSHA, to: currentSHA, in: worktree)
         let filesChanged = await getChangedFiles(from: baseline.headSHA, in: worktree)
 
-        return SessionResult(
-            id: baseline.sessionId,
+        return StepRunResult(
+            id: baseline.stepRunId,
             step: step,
             worktree: baseline.worktree,
             status: status,

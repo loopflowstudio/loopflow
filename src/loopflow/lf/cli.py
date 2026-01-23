@@ -6,7 +6,7 @@ from pathlib import Path
 import typer
 import yaml
 
-from loopflow.lf import run as run_module
+from loopflow.lf import step as step_module
 from loopflow.lf.config import ConfigError, load_config
 from loopflow.lf.context import find_worktree_root, gather_step, list_all_steps
 from loopflow.lf.flows import list_flows, load_flow
@@ -69,9 +69,9 @@ app = typer.Typer(
 # Register top-level commands
 # lf is a prompt launcher - every command launches a prompt
 _run_ctx = {"allow_extra_args": True, "allow_interspersed_args": True}
-app.command(context_settings=_run_ctx)(run_module.run)
-app.command()(run_module.inline)
-app.command(name="flow")(run_module.flow)
+app.command(context_settings=_run_ctx)(step_module.run)
+app.command()(step_module.inline)
+app.command(name="flow")(step_module.flow)
 
 
 def _parse_frontmatter(content: str) -> dict:

@@ -45,7 +45,10 @@ If the conversation leads to a change, confirm before editing:
 
 Small fixes (typos, obvious bugs) can be made directly. Approach changes need explicit approval.
 
-If making changes, run tests afterward: `uv run pytest tests/`
+If making changes, run the relevant tests afterward (see TESTING.md):
+- Python: `uv run pytest tests/`
+- Swift: `swift test --package-path swift`
+- Concerto UI: `cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS'`
 
 ## Conversation style
 

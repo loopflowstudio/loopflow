@@ -33,9 +33,9 @@ struct ScreenshotWindow: View {
             await appState.openRepo(repoURL)
         }
 
-        // Configure mock loops if requested
+        // Configure mock agents if requested
         if mode.mockLoops {
-            appState.configureMockLoops()
+            appState.configureMockAgents()
         }
 
         // Select a specific worktree if requested

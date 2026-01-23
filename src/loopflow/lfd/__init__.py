@@ -1,4 +1,4 @@
 """lfd: Loopflow daemon.
 
-Commands for managing agent loops, subscriptions, and schedules.
+Commands for managing AI coding agents.
 """

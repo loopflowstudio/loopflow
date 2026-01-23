@@ -1,15 +1,13 @@
-// Row view for displaying a loop in the sidebar.
+// Row view for displaying an agent in the sidebar.
 
 import SwiftUI
 import LoopflowCore
 
-struct LoopRow: View {
-    let loop: Loop
+struct AgentRow: View {
+    let agent: Agent
     let isSelected: Bool
     let liveOutput: [OutputLine]
-    let hasLandableWork: Bool
     let onSelect: () -> Void
-    let onLand: () -> Void
 
     @State private var isHovering = false
 
@@ -17,52 +15,40 @@ struct LoopRow: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Circle()
-                    .fill(loop.status.color)
+                    .fill(agent.status.color)
                     .frame(width: 8, height: 8)
 
-                Text(loop.areaDisplay)
+                Text(agent.areaDisplay)
                     .fontWeight(.medium)
                     .foregroundStyle(.white)
 
                 Spacer()
 
-                if isHovering && hasLandableWork {
-                    Button {
-                        onLand()
-                    } label: {
-                        Text("Land")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.7))
-                    }
-                    .buttonStyle(.plain)
-                    .help("Squash and land to main")
-                } else {
-                    Text(loop.statusText)
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.6))
-                }
-            }
-
-            if !loop.detailText.isEmpty {
-                Text(loop.detailText)
+                Text(agent.statusText)
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.6))
             }
 
-            if !loop.iterationText.isEmpty {
+            if !agent.detailText.isEmpty {
+                Text(agent.detailText)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.6))
+            }
+
+            if !agent.iterationText.isEmpty {
                 HStack(spacing: 4) {
                     Image(systemName: "arrow.triangle.2.circlepath")
                         .font(.caption2)
                         .foregroundStyle(.white.opacity(0.3))
 
-                    Text(loop.iterationText)
+                    Text(agent.iterationText)
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.6))
                 }
             }
 
             // Live output when selected or running
-            if (isSelected || loop.status == .running) && !liveOutput.isEmpty {
+            if (isSelected || agent.status == .running) && !liveOutput.isEmpty {
                 LoopLiveOutput(lines: liveOutput)
                     .frame(height: 120)
             }
@@ -82,3 +68,6 @@ struct LoopRow: View {
         }
     }
 }
+
+// Backwards compatibility alias
+typealias LoopRow = AgentRow

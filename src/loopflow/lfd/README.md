@@ -53,11 +53,11 @@ See protocol.py for Request/Response/Event dataclasses.
 
 ## Fire-and-Forget Pattern
 
-Session logging uses `_send_fire_and_forget()` — synchronous socket with
+StepRun logging uses `_send_fire_and_forget()` — synchronous socket with
 0.5s timeout, fails silently. This prevents lfd availability from blocking
-task execution. If daemon is down, sessions aren't logged but tasks still run.
+task execution. If daemon is down, step runs aren't logged but tasks still run.
 
 ## Client Patterns
 
 - Async client: `DaemonClient` for CLI/tests (connect, call, subscribe)
-- Sync fire-and-forget: `log_session_start()`, `log_session_end()` for lf runner
+- Sync fire-and-forget: `log_step_run_start()`, `log_step_run_end()` for lf runner

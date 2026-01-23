@@ -1,7 +1,7 @@
 """Manager for coordinating parallel worker execution.
 
 The manager controls how many workers can run simultaneously and
-tracks global PR limits across all triggers.
+tracks global PR limits across all agents.
 """
 
 import threading
@@ -10,8 +10,8 @@ from pathlib import Path
 
 import yaml
 
-from loopflow.lfd.db import list_all_triggers
-from loopflow.lfd.runs.loop import count_outstanding
+from loopflow.lfd.agent import count_outstanding
+from loopflow.lfd.db import list_all_agents
 
 
 @dataclass
@@ -19,7 +19,7 @@ class ManagerConfig:
     """Configuration for the worker manager."""
 
     concurrency: int = 3  # Max parallel workers
-    global_pr_limit: int = 15  # Total outstanding across all triggers
+    global_pr_limit: int = 15  # Total outstanding across all agents
 
 
 def load_manager_config() -> ManagerConfig:
@@ -68,10 +68,10 @@ class Manager:
             return len(self._running)
 
     def total_outstanding(self) -> int:
-        """Total outstanding commits across all triggers."""
+        """Total outstanding commits across all agents."""
         total = 0
-        for trigger in list_all_triggers():
-            total += count_outstanding(trigger)
+        for agent in list_all_agents():
+            total += count_outstanding(agent)
         return total
 
     def can_start(self) -> tuple[bool, str | None]:
@@ -142,11 +142,3 @@ def reset_manager() -> None:
     """Reset the global manager (for testing)."""
     global _manager
     _manager = None
-
-
-# Backwards compatibility aliases
-Scheduler = Manager
-SchedulerConfig = ManagerConfig
-load_scheduler_config = load_manager_config
-get_scheduler = get_manager
-reset_scheduler = reset_manager

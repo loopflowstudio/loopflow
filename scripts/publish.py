@@ -105,7 +105,17 @@ def _tag_exists(version: str) -> bool:
 def _get_open_release_pr() -> tuple[str | None, str | None]:
     """Check for an open release PR. Returns (version, pr_url) or (None, None)."""
     result = subprocess.run(
-        ["gh", "pr", "list", "--head", "release/", "--json", "headRefName,url,state", "--limit", "10"],
+        [
+            "gh",
+            "pr",
+            "list",
+            "--head",
+            "release/",
+            "--json",
+            "headRefName,url,state",
+            "--limit",
+            "10",
+        ],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -240,6 +250,7 @@ def _finalize_release(version: str, skip_dmg: bool, skip_website: bool) -> int:
     print("https://pypi.org/project/loopflow/")
     if not skip_dmg:
         from loopflow.publish import R2_PUBLIC_URL
+
         print(f"{R2_PUBLIC_URL}/LoopflowConcerto-{version}.dmg")
     return 0
 
@@ -365,11 +376,17 @@ def _create_release_pr(
     pr_body = f"Release v{new_version}\n\n{release_notes_content}"
     result = subprocess.run(
         [
-            "gh", "pr", "create",
-            "--base", "main",
-            "--head", release_branch,
-            "--title", f"release: v{new_version}",
-            "--body", pr_body,
+            "gh",
+            "pr",
+            "create",
+            "--base",
+            "main",
+            "--head",
+            release_branch,
+            "--title",
+            f"release: v{new_version}",
+            "--body",
+            pr_body,
         ],
         cwd=ROOT,
         capture_output=True,
@@ -391,8 +408,15 @@ def _create_release_pr(
     )
     if result.returncode != 0:
         error_msg = result.stderr.strip() or result.stdout.strip()
-        if "auto merge is not allowed" in error_msg.lower() or "enablepullrequestautomerge" in error_msg.lower():
-            print("Auto-merge not enabled for this repo. Merge manually after CI passes.", file=sys.stderr)
+        auto_merge_disabled = (
+            "auto merge is not allowed" in error_msg.lower()
+            or "enablepullrequestautomerge" in error_msg.lower()
+        )
+        if auto_merge_disabled:
+            print(
+                "Auto-merge not enabled for this repo. Merge manually after CI passes.",
+                file=sys.stderr,
+            )
         else:
             print(f"Warning: Could not enable auto-merge: {error_msg}")
     else:
@@ -411,17 +435,26 @@ def _create_release_pr(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Publish loopflow to PyPI and DMG to R2. Idempotent: run twice (once to create PR, once after merge)."
+        description=(
+            "Publish loopflow to PyPI and DMG to R2. "
+            "Idempotent: run twice (once to create PR, once after merge)."
+        )
     )
     parser.add_argument("bump", nargs="?", choices=["patch", "minor", "major"], default="patch")
     parser.add_argument("-n", "--dry-run", action="store_true", help="Show what would be done")
-    parser.add_argument("--local", action="store_true", help="Build and install locally only (no publish)")
+    parser.add_argument(
+        "--local", action="store_true", help="Build and install locally only (no publish)"
+    )
     parser.add_argument("--skip-tests", action="store_true", help="Skip test run")
     parser.add_argument("--skip-ci", action="store_true", help="Skip CI check")
-    parser.add_argument("--dmg-only", action="store_true", help="Only build and upload DMG (no PyPI)")
+    parser.add_argument(
+        "--dmg-only", action="store_true", help="Only build and upload DMG (no PyPI)"
+    )
     parser.add_argument("--skip-dmg", action="store_true", help="Skip DMG build/upload")
     parser.add_argument("--skip-website", action="store_true", help="Skip website update/deploy")
-    parser.add_argument("--skip-screenshots", action="store_true", help="Skip screenshot generation")
+    parser.add_argument(
+        "--skip-screenshots", action="store_true", help="Skip screenshot generation"
+    )
     args = parser.parse_args()
 
     # Validate args
@@ -534,6 +567,7 @@ def main() -> int:
     # State 3: No release in progress → start new release
     if args.dry_run:
         from loopflow.publish import bump_version, check_publish_ready
+
         state = check_publish_ready(ROOT)
         if not state.ready:
             print(f"Error: {state.message}", file=sys.stderr)

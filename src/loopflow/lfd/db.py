@@ -59,64 +59,34 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
 
 
 def update_dead_processes(db_path: Path | None = None) -> int:
-    """Mark triggers as idle if their process is no longer running."""
+    """Mark agents as idle if their process is no longer running."""
     from loopflow.lfd.daemon.process import is_process_running
 
     conn = _get_db(db_path)
     count = 0
 
-    for table in ["loops", "subscriptions", "schedules"]:
-        cursor = conn.execute(
-            f"SELECT id, pid FROM {table} WHERE status = 'running' AND pid IS NOT NULL"
-        )
-        for row in cursor.fetchall():
-            if not is_process_running(row["pid"]):
-                conn.execute(
-                    f"UPDATE {table} SET status = 'idle', pid = NULL WHERE id = ?",
-                    (row["id"],),
-                )
-                count += 1
+    cursor = conn.execute("SELECT id, pid FROM agents WHERE status = 'running' AND pid IS NOT NULL")
+    for row in cursor.fetchall():
+        if not is_process_running(row["pid"]):
+            conn.execute(
+                "UPDATE agents SET status = 'idle', pid = NULL WHERE id = ?",
+                (row["id"],),
+            )
+            count += 1
 
     conn.commit()
     conn.close()
     return count
 
 
-# Alias for backwards compatibility
-def update_dead_runs(db_path: Path | None = None) -> int:
-    """Mark triggers as idle if their process is no longer running."""
-    return update_dead_processes(db_path)
+def list_all_agents(repo: Path | None = None, db_path: Path | None = None) -> list:
+    """List all agents for a repo."""
+    from loopflow.lfd.agent import list_agents
+
+    return list_agents(repo, db_path)
 
 
-def list_all_triggers(repo: Path | None = None, db_path: Path | None = None) -> list:
-    """List all triggers (loops, subscriptions, schedules) for a repo."""
-    from loopflow.lfd.runs.loop import list_loops
-    from loopflow.lfd.runs.schedule import list_schedules
-    from loopflow.lfd.runs.subscription import list_subscriptions
-
-    triggers: list = []
-    triggers.extend(list_loops(repo, db_path))
-    triggers.extend(list_subscriptions(repo, db_path))
-    triggers.extend(list_schedules(repo, db_path))
-    return triggers
-
-
-def get_trigger(trigger_type: str, trigger_id: str, db_path: Path | None = None):
-    """Get a trigger by type and ID."""
-    from loopflow.lfd.runs.loop import get_loop
-    from loopflow.lfd.runs.schedule import get_schedule
-    from loopflow.lfd.runs.subscription import get_subscription
-
-    if trigger_type == "loop":
-        return get_loop(trigger_id, db_path)
-    elif trigger_type == "subscription":
-        return get_subscription(trigger_id, db_path)
-    elif trigger_type == "schedule":
-        return get_schedule(trigger_id, db_path)
-    return None
-
-
-# Summary functions (not part of runs, kept here)
+# Summary functions
 
 
 def save_summary_db(

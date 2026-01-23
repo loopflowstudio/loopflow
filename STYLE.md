@@ -64,13 +64,15 @@ Use `uv` for all package management. Never use pip directly.
 
 ```bash
 uv sync                       # Install dependencies
-uv run pytest tests/          # Run tests
+uv run pytest tests/          # Run Python tests
 uv run lf agent --help        # Run commands
 
 # Or activate the venv
 source .venv/bin/activate
 pytest tests/
 ```
+
+See TESTING.md for the full test suite (Python, Swift, Concerto UI). CI runs all three.
 
 # Code Organization
 

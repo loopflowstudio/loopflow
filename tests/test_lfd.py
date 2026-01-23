@@ -4,60 +4,60 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
+from loopflow.lfd.agent import (
+    delete_agent,
+    get_agent,
+    get_agent_by_area_repo,
+    list_agents,
+    save_agent,
+    update_agent_iteration,
+    update_agent_pid,
+    update_agent_status,
+)
 from loopflow.lfd.daemon.protocol import Event, Request, error, success
 from loopflow.lfd.db import _get_db
-from loopflow.lfd.migrations.registry import MIGRATIONS
-from loopflow.lfd.models import (
-    Loop,
-    MergeMode,
-    Run,
-    RunStatus,
-    Session,
-    SessionStatus,
-    TriggerStatus,
-)
-from loopflow.lfd.runs.loop import (
-    delete_loop,
-    get_loop,
-    get_loop_by_area_repo,
-    list_loops,
-    save_loop,
-    update_loop_iteration,
-    update_loop_pid,
-    update_loop_status,
-)
-from loopflow.lfd.runs.run import (
-    get_latest_run_for_trigger,
-    list_runs_for_trigger,
+from loopflow.lfd.flow_run import (
+    get_latest_run_for_agent,
+    list_runs_for_agent,
     save_run,
     update_run_pr,
     update_run_status,
     update_run_step,
 )
-from loopflow.lfd.runs.session import (
-    load_sessions,
-    load_sessions_for_repo,
-    load_sessions_for_worktree,
-    save_session,
-    update_session_status,
+from loopflow.lfd.migrations.registry import MIGRATIONS
+from loopflow.lfd.models import (
+    Agent,
+    AgentStatus,
+    FlowRun,
+    FlowRunStatus,
+    MergeMode,
+    StepRun,
+    StepRunStatus,
+)
+from loopflow.lfd.step_run import (
+    load_step_runs,
+    load_step_runs_for_repo,
+    load_step_runs_for_worktree,
+    save_step_run,
+    update_step_run_status,
 )
 
 
 def test_session_serialization():
-    session = Session(
+    session = StepRun(
         id="sess-1",
         step="implement",
         repo="/tmp/repo",
         worktree="/tmp/repo.feature",
-        status=SessionStatus.RUNNING,
+        status=StepRunStatus.RUNNING,
         started_at=datetime(2024, 1, 1, 12, 0, 0),
         model="claude-code",
         run_mode="auto",
     )
     data = session.to_dict()
-    restored = Session.from_dict(data)
+    restored = StepRun.from_dict(data)
     assert restored.step == "implement"
-    assert restored.status == SessionStatus.RUNNING
+    assert restored.status == StepRunStatus.RUNNING
 
 
 def test_protocol_request_parse():
@@ -90,17 +90,17 @@ def test_protocol_event_serialize():
 def test_db_save_and_load_session():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
-        session = Session(
+        session = StepRun(
             id="sess-1",
             step="implement",
             repo="/tmp/repo",
             worktree="/tmp/repo.feature",
-            status=SessionStatus.RUNNING,
+            status=StepRunStatus.RUNNING,
             started_at=datetime.now(),
         )
-        save_session(session, db_path)
+        save_step_run(session, db_path)
 
-        sessions = load_sessions(db_path=db_path)
+        sessions = load_step_runs(db_path=db_path)
         assert len(sessions) == 1
         assert sessions[0].step == "implement"
 
@@ -130,39 +130,45 @@ def test_db_records_migrations():
 # =============================================================================
 
 
-def test_migrations_cover_all_loop_fields():
-    """Migrations create columns for all Loop model fields."""
+def test_migrations_cover_all_agent_fields():
+    """Migrations create columns for all Agent model fields."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        loop = Loop(
+        agent = Agent(
             id="test-all-fields",
             flow="ship",
-            area="src/test/",
+            area=["src/test/"],
+            voice=["voice-a", "voice-b"],
             repo=Path("/tmp/repo"),
-            goals=["goal-a", "goal-b"],
-            status=TriggerStatus.RUNNING,
+            status=AgentStatus.RUNNING,
             iteration=5,
             main_branch="test-main",
             pr_limit=10,
             merge_mode=MergeMode.LAND,
             pid=12345,
+            watch_paths="src/**/*.py",
+            cron="0 9 * * *",
+            last_main_sha="abc123",
         )
 
-        save_loop(loop, db_path)
-        loaded = get_loop("test-all-fields", db_path)
+        save_agent(agent, db_path)
+        loaded = get_agent("test-all-fields", db_path)
 
-        assert loaded.id == loop.id
-        assert loaded.flow == loop.flow
-        assert loaded.area == loop.area
-        assert loaded.repo == loop.repo
-        assert loaded.goals == loop.goals
-        assert loaded.status == loop.status
-        assert loaded.iteration == loop.iteration
-        assert loaded.main_branch == loop.main_branch
-        assert loaded.pr_limit == loop.pr_limit
-        assert loaded.merge_mode == loop.merge_mode
-        assert loaded.pid == loop.pid
+        assert loaded.id == agent.id
+        assert loaded.flow == agent.flow
+        assert loaded.area == agent.area
+        assert loaded.voice == agent.voice
+        assert loaded.repo == agent.repo
+        assert loaded.status == agent.status
+        assert loaded.iteration == agent.iteration
+        assert loaded.main_branch == agent.main_branch
+        assert loaded.pr_limit == agent.pr_limit
+        assert loaded.merge_mode == agent.merge_mode
+        assert loaded.pid == agent.pid
+        assert loaded.watch_paths == agent.watch_paths
+        assert loaded.cron == agent.cron
+        assert loaded.last_main_sha == agent.last_main_sha
 
 
 def test_migrations_cover_all_run_fields():
@@ -170,14 +176,14 @@ def test_migrations_cover_all_run_fields():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        run = Run(
+        run = FlowRun(
             id="test-run-all-fields",
-            parent="loop:parent-loop",
+            agent_id="agent-id",
             flow="ship",
-            area="src/test/",
+            area=["src/test/"],
+            voice=["voice-a", "voice-b"],
             repo=Path("/tmp/repo"),
-            goals=["goal-a", "goal-b"],
-            status=RunStatus.RUNNING,
+            status=FlowRunStatus.RUNNING,
             iteration=3,
             worktree="/tmp/repo.worktree",
             branch="feature-branch",
@@ -189,15 +195,15 @@ def test_migrations_cover_all_run_fields():
         )
 
         save_run(run, db_path)
-        runs = list_runs_for_trigger("loop", "parent-loop", db_path=db_path)
+        runs = list_runs_for_agent("agent-id", db_path=db_path)
         loaded = runs[0]
 
         assert loaded.id == run.id
-        assert loaded.parent == run.parent
+        assert loaded.agent_id == run.agent_id
         assert loaded.flow == run.flow
         assert loaded.area == run.area
+        assert loaded.voice == run.voice
         assert loaded.repo == run.repo
-        assert loaded.goals == run.goals
         assert loaded.status == run.status
         assert loaded.iteration == run.iteration
         assert loaded.worktree == run.worktree
@@ -214,12 +220,12 @@ def test_migrations_cover_all_session_fields():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        session = Session(
+        session = StepRun(
             id="test-session-all-fields",
             step="implement",
             repo="/tmp/repo",
             worktree="/tmp/repo.feature",
-            status=SessionStatus.RUNNING,
+            status=StepRunStatus.RUNNING,
             started_at=datetime(2024, 1, 15, 10, 30, 0),
             ended_at=datetime(2024, 1, 15, 11, 45, 0),
             pid=54321,
@@ -227,8 +233,8 @@ def test_migrations_cover_all_session_fields():
             run_mode="interactive",
         )
 
-        save_session(session, db_path)
-        sessions = load_sessions(db_path=db_path)
+        save_step_run(session, db_path)
+        sessions = load_step_runs(db_path=db_path)
         loaded = sessions[0]
 
         assert loaded.id == session.id
@@ -274,113 +280,113 @@ def test_migrations_cover_summary_fields():
         assert loaded["created_at"] is not None
 
 
-def test_db_load_sessions_for_worktree():
+def test_db_load_step_runs_for_worktree():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        session1 = Session(
+        session1 = StepRun(
             id="sess-1",
             step="implement",
             repo="/tmp/repo",
             worktree="/tmp/repo.feature-a",
-            status=SessionStatus.COMPLETED,
+            status=StepRunStatus.COMPLETED,
             started_at=datetime(2024, 1, 1, 12, 0, 0),
         )
-        session2 = Session(
+        session2 = StepRun(
             id="sess-2",
             step="review",
             repo="/tmp/repo",
             worktree="/tmp/repo.feature-a",
-            status=SessionStatus.COMPLETED,
+            status=StepRunStatus.COMPLETED,
             started_at=datetime(2024, 1, 2, 12, 0, 0),
         )
-        session3 = Session(
+        session3 = StepRun(
             id="sess-3",
             step="implement",
             repo="/tmp/repo",
             worktree="/tmp/repo.feature-b",
-            status=SessionStatus.COMPLETED,
+            status=StepRunStatus.COMPLETED,
             started_at=datetime.now(),
         )
 
-        save_session(session1, db_path)
-        save_session(session2, db_path)
-        save_session(session3, db_path)
+        save_step_run(session1, db_path)
+        save_step_run(session2, db_path)
+        save_step_run(session3, db_path)
 
-        sessions = load_sessions_for_worktree("/tmp/repo.feature-a", db_path=db_path)
+        sessions = load_step_runs_for_worktree("/tmp/repo.feature-a", db_path=db_path)
         assert len(sessions) == 2
         # Should be ordered by started_at DESC
         assert sessions[0].id == "sess-2"
         assert sessions[1].id == "sess-1"
 
 
-def test_db_load_sessions_for_repo():
+def test_db_load_step_runs_for_repo():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        session1 = Session(
+        session1 = StepRun(
             id="sess-1",
             step="implement",
             repo="/tmp/repo-a",
             worktree="/tmp/repo-a.feature",
-            status=SessionStatus.COMPLETED,
+            status=StepRunStatus.COMPLETED,
             started_at=datetime.now(),
         )
-        session2 = Session(
+        session2 = StepRun(
             id="sess-2",
             step="review",
             repo="/tmp/repo-b",
             worktree="/tmp/repo-b.feature",
-            status=SessionStatus.COMPLETED,
+            status=StepRunStatus.COMPLETED,
             started_at=datetime.now(),
         )
 
-        save_session(session1, db_path)
-        save_session(session2, db_path)
+        save_step_run(session1, db_path)
+        save_step_run(session2, db_path)
 
-        sessions = load_sessions_for_repo("/tmp/repo-a", db_path=db_path)
+        sessions = load_step_runs_for_repo("/tmp/repo-a", db_path=db_path)
         assert len(sessions) == 1
         assert sessions[0].id == "sess-1"
 
 
-def test_db_update_session_status():
+def test_db_update_step_run_status():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        session = Session(
+        session = StepRun(
             id="sess-1",
             step="implement",
             repo="/tmp/repo",
             worktree="/tmp/repo.feature",
-            status=SessionStatus.RUNNING,
+            status=StepRunStatus.RUNNING,
             started_at=datetime.now(),
         )
-        save_session(session, db_path)
+        save_step_run(session, db_path)
 
-        updated = update_session_status("sess-1", SessionStatus.COMPLETED, db_path)
+        updated = update_step_run_status("sess-1", StepRunStatus.COMPLETED, db_path)
         assert updated is True
 
-        sessions = load_sessions_for_worktree("/tmp/repo.feature", db_path=db_path)
+        sessions = load_step_runs_for_worktree("/tmp/repo.feature", db_path=db_path)
         assert len(sessions) == 1
-        assert sessions[0].status == SessionStatus.COMPLETED
+        assert sessions[0].status == StepRunStatus.COMPLETED
         assert sessions[0].ended_at is not None
 
 
-def test_db_update_session_status_nonexistent():
+def test_db_update_step_run_status_nonexistent():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         # Initialize DB by saving and then checking update
-        session = Session(
+        session = StepRun(
             id="sess-1",
             step="implement",
             repo="/tmp/repo",
             worktree="/tmp/repo.feature",
-            status=SessionStatus.RUNNING,
+            status=StepRunStatus.RUNNING,
             started_at=datetime.now(),
         )
-        save_session(session, db_path)
+        save_step_run(session, db_path)
 
-        updated = update_session_status("nonexistent", SessionStatus.COMPLETED, db_path)
+        updated = update_step_run_status("nonexistent", StepRunStatus.COMPLETED, db_path)
         assert updated is False
 
 
@@ -407,7 +413,7 @@ def test_server_handle_output_line_broadcasts_event():
             server._broadcast = mock_broadcast
 
             # Call the handler
-            params = {"session_id": "test-session-123", "text": "→ Read: foo.py"}
+            params = {"step_run_id": "test-step-run-123", "text": "→ Read: foo.py"}
             response = await server._handle_output_line(params)
 
             # Check response
@@ -418,15 +424,15 @@ def test_server_handle_output_line_broadcasts_event():
             assert len(broadcast_events) == 1
             event = broadcast_events[0]
             assert event.event == "output.line"
-            assert event.data["session_id"] == "test-session-123"
+            assert event.data["step_run_id"] == "test-step-run-123"
             assert event.data["text"] == "→ Read: foo.py"
             assert "timestamp" in event.data
 
     asyncio.run(run_test())
 
 
-def test_server_handle_output_line_missing_session_id():
-    """output.line handler returns error for missing session_id."""
+def test_server_handle_output_line_missing_step_run_id():
+    """output.line handler returns error for missing step_run_id."""
     import asyncio
 
     from loopflow.lfd.daemon.server import Server
@@ -440,7 +446,7 @@ def test_server_handle_output_line_missing_session_id():
             response = await server._handle_output_line(params)
 
             assert response.ok is False
-            assert "session_id" in response.error
+            assert "step_run_id" in response.error
 
     asyncio.run(run_test())
 
@@ -456,7 +462,7 @@ def test_server_handle_output_line_missing_text():
             socket_path = Path(tmpdir) / "test.sock"
             server = Server(socket_path)
 
-            params = {"session_id": "test-session-123"}
+            params = {"step_run_id": "test-step-run-123"}
             response = await server._handle_output_line(params)
 
             assert response.ok is False
@@ -480,7 +486,7 @@ def test_server_handle_output_line_allows_empty_text():
             server._broadcast = lambda e: broadcast_events.append(e) or asyncio.sleep(0)
 
             # Empty string should be allowed (it's a blank line in output)
-            params = {"session_id": "test-session-123", "text": ""}
+            params = {"step_run_id": "test-step-run-123", "text": ""}
             response = await server._handle_output_line(params)
 
             assert response.ok is True
@@ -490,234 +496,236 @@ def test_server_handle_output_line_allows_empty_text():
     asyncio.run(run_test())
 
 
-# Loop model tests
+# Agent model tests
 
 
-def test_loop_model_defaults():
-    """Loop model has correct defaults."""
-    loop = Loop(
-        id="loop-1",
+def _make_agent(**kwargs) -> Agent:
+    """Helper to create an Agent with test defaults."""
+    defaults = {
+        "id": "test-id",
+        "flow": "ship",
+        "area": ["src/test/"],
+        "voice": ["default"],
+        "repo": Path("/tmp/repo"),
+        "main_branch": "test-main",
+    }
+    defaults.update(kwargs)
+    return Agent(**defaults)
+
+
+def test_agent_model_defaults():
+    """Agent model has correct defaults."""
+    agent = Agent(
+        id="agent-1",
         flow="ship",
-        area="src/test-coverage/",
+        area=["src/test-coverage/"],
+        voice=["default"],
         repo=Path("/tmp/repo"),
         main_branch="test-coverage-main",
     )
-    assert loop.flow == "ship"
-    assert loop.status == TriggerStatus.IDLE
-    assert loop.iteration == 0
-    assert loop.pr_limit == 5
-    assert loop.merge_mode == MergeMode.PR
-    assert loop.goals == []
-    assert loop.pid is None
+    assert agent.flow == "ship"
+    assert agent.status == AgentStatus.IDLE
+    assert agent.iteration == 0
+    assert agent.pr_limit == 5
+    assert agent.merge_mode == MergeMode.PR
+    assert agent.pid is None
 
 
-def test_loop_model_short_id():
-    """Loop.short_id() returns first 7 chars."""
-    loop = Loop(
-        id="abcdef1234567890",
-        flow="ship",
-        area="src/test/",
-        repo=Path("/tmp/repo"),
-        main_branch="test-main",
-    )
-    assert loop.short_id() == "abcdef1"
+def test_agent_model_short_id():
+    """Agent.short_id() returns first 7 chars."""
+    agent = _make_agent(id="abcdef1234567890")
+    assert agent.short_id() == "abcdef1"
+
+
+def test_agent_mode_property():
+    """Agent.mode returns correct activation mode."""
+    loop_agent = _make_agent()
+    assert loop_agent.mode == "loop"
+
+    watch_agent = _make_agent(watch_paths="src/**/*.py")
+    assert watch_agent.mode == "watch"
+
+    cron_agent = _make_agent(cron="0 9 * * *")
+    assert cron_agent.mode == "cron"
 
 
 def test_run_model():
     """Run model stores execution data."""
-    run = Run(
+    run = FlowRun(
         id="run-1",
-        parent="loop:loop-1",
+        agent_id="agent-1",
         flow="ship",
-        area="src/test/",
+        area=["src/test/"],
+        voice=["default"],
         repo=Path("/tmp/repo"),
-        status=RunStatus.RUNNING,
+        status=FlowRunStatus.RUNNING,
         iteration=3,
         worktree="/tmp/repo.wt",
         current_step="implement",
         started_at=datetime.now(),
     )
     assert run.iteration == 3
-    assert run.status == RunStatus.RUNNING
+    assert run.status == FlowRunStatus.RUNNING
     assert run.current_step == "implement"
     assert run.ended_at is None
     assert run.error is None
     assert run.pr_url is None
 
 
-# Loop database tests
+# Agent database tests
 
 
-def test_db_save_and_get_loop():
-    """Save and retrieve a loop."""
+def test_db_save_and_get_agent():
+    """Save and retrieve an agent."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
-        loop = Loop(
-            id="loop-123",
-            flow="ship",
-            area="src/test-coverage/",
-            repo=Path("/tmp/repo"),
+        agent = _make_agent(
+            id="agent-123",
+            area=["src/test-coverage/"],
             main_branch="test-coverage-main",
-            status=TriggerStatus.IDLE,
+            status=AgentStatus.IDLE,
             iteration=0,
             pr_limit=5,
         )
-        save_loop(loop, db_path)
+        save_agent(agent, db_path)
 
-        loaded = get_loop("loop-123", db_path)
+        loaded = get_agent("agent-123", db_path)
         assert loaded is not None
-        assert loaded.id == "loop-123"
-        assert loaded.area == "src/test-coverage/"
+        assert loaded.id == "agent-123"
+        assert loaded.area == ["src/test-coverage/"]
         assert loaded.main_branch == "test-coverage-main"
         assert loaded.flow == "ship"
 
 
-def test_db_get_loop_short_id():
-    """Get loop by short ID prefix."""
+def test_db_get_agent_short_id():
+    """Get agent by short ID prefix."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
-        loop = Loop(
-            id="abcdef1234567890",
-            flow="ship",
-            area="src/test/",
-            repo=Path("/tmp/repo"),
-            main_branch="test-main",
-        )
-        save_loop(loop, db_path)
+        agent = _make_agent(id="abcdef1234567890")
+        save_agent(agent, db_path)
 
         # Should find by prefix
-        loaded = get_loop("abcdef1", db_path)
+        loaded = get_agent("abcdef1", db_path)
         assert loaded is not None
         assert loaded.id == "abcdef1234567890"
 
 
-def test_db_get_loop_by_area_repo():
-    """Get loop by area and repo."""
+def test_db_get_agent_by_area_repo():
+    """Get agent by area and repo."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
-        loop = Loop(
-            id="loop-1",
-            flow="ship",
-            area="src/api/",
-            repo=Path("/tmp/repo"),
+        agent = _make_agent(
+            id="agent-1",
+            area=["src/api/"],
             main_branch="api-aurora-melody-main",
         )
-        save_loop(loop, db_path)
+        save_agent(agent, db_path)
 
-        loaded = get_loop_by_area_repo("src/api/", Path("/tmp/repo"), db_path=db_path)
+        loaded = get_agent_by_area_repo(["src/api/"], Path("/tmp/repo"), db_path=db_path)
         assert loaded is not None
-        assert loaded.id == "loop-1"
+        assert loaded.id == "agent-1"
 
         # Different area should not match
-        not_found = get_loop_by_area_repo("src/other/", Path("/tmp/repo"), db_path=db_path)
+        not_found = get_agent_by_area_repo(["src/other/"], Path("/tmp/repo"), db_path=db_path)
         assert not_found is None
 
 
-def test_db_list_loops():
-    """List all loops."""
+def test_db_list_agents():
+    """List all agents."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        loop1 = Loop(
-            id="loop-1",
-            flow="ship",
-            area="src/goal-a/",
+        agent1 = _make_agent(
+            id="agent-1",
+            area=["src/goal-a/"],
             repo=Path("/tmp/repo-a"),
             main_branch="goal-a-main",
         )
-        loop2 = Loop(
-            id="loop-2",
-            flow="ship",
-            area="src/goal-b/",
+        agent2 = _make_agent(
+            id="agent-2",
+            area=["src/goal-b/"],
             repo=Path("/tmp/repo-b"),
             main_branch="goal-b-main",
         )
-        save_loop(loop1, db_path)
-        save_loop(loop2, db_path)
+        save_agent(agent1, db_path)
+        save_agent(agent2, db_path)
 
-        loops = list_loops(db_path=db_path)
-        assert len(loops) == 2
+        agents = list_agents(db_path=db_path)
+        assert len(agents) == 2
 
         # Filter by repo
-        loops = list_loops(repo=Path("/tmp/repo-a"), db_path=db_path)
-        assert len(loops) == 1
-        assert loops[0].area == "src/goal-a/"
+        agents = list_agents(repo=Path("/tmp/repo-a"), db_path=db_path)
+        assert len(agents) == 1
+        assert agents[0].area == ["src/goal-a/"]
 
 
-def test_db_update_loop_status():
-    """Update loop status."""
+def test_db_update_agent_status():
+    """Update agent status."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
-        loop = Loop(
-            id="loop-1",
-            flow="ship",
-            area="src/test/",
-            repo=Path("/tmp/repo"),
-            main_branch="test-main",
-            status=TriggerStatus.IDLE,
+        agent = _make_agent(
+            id="agent-1",
+            status=AgentStatus.IDLE,
         )
-        save_loop(loop, db_path)
+        save_agent(agent, db_path)
 
-        updated = update_loop_status("loop-1", TriggerStatus.RUNNING, db_path)
+        updated = update_agent_status("agent-1", AgentStatus.RUNNING, db_path)
         assert updated is True
 
-        loaded = get_loop("loop-1", db_path)
-        assert loaded.status == TriggerStatus.RUNNING
+        loaded = get_agent("agent-1", db_path)
+        assert loaded.status == AgentStatus.RUNNING
 
 
-def test_db_update_loop_iteration():
-    """Update loop iteration count."""
+def test_db_update_agent_iteration():
+    """Update agent iteration count."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
-        loop = Loop(
-            id="loop-1",
-            flow="ship",
-            area="src/test/",
-            repo=Path("/tmp/repo"),
-            main_branch="test-main",
+        agent = _make_agent(
+            id="agent-1",
             iteration=0,
         )
-        save_loop(loop, db_path)
+        save_agent(agent, db_path)
 
-        updated = update_loop_iteration("loop-1", 5, db_path)
+        updated = update_agent_iteration("agent-1", 5, db_path)
         assert updated is True
 
-        loaded = get_loop("loop-1", db_path)
+        loaded = get_agent("agent-1", db_path)
         assert loaded.iteration == 5
 
 
-def test_db_delete_loop():
-    """Delete loop and its runs."""
+def test_db_delete_agent():
+    """Delete agent and its runs."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
-        loop = Loop(
-            id="loop-1",
+        agent = _make_agent(
+            id="agent-1",
             flow="ship",
-            area="src/test/",
+            area=["src/test/"],
             repo=Path("/tmp/repo"),
             main_branch="test-main",
         )
-        save_loop(loop, db_path)
+        save_agent(agent, db_path)
 
         # Add a run
-        run = Run(
+        run = FlowRun(
             id="run-1",
-            parent="loop:loop-1",
+            agent_id="agent-1",
             flow="ship",
-            area="src/test/",
+            area=["src/test/"],
+            voice=["default"],
             repo=Path("/tmp/repo"),
             iteration=1,
-            status=RunStatus.RUNNING,
+            status=FlowRunStatus.RUNNING,
             started_at=datetime.now(),
         )
         save_run(run, db_path)
 
-        # Delete loop (should also delete runs)
-        deleted = delete_loop("loop-1", db_path)
+        # Delete agent (should also delete runs)
+        deleted = delete_agent("agent-1", db_path)
         assert deleted is True
 
-        assert get_loop("loop-1", db_path) is None
-        assert list_runs_for_trigger("loop", "loop-1", db_path=db_path) == []
+        assert get_agent("agent-1", db_path) is None
+        assert list_runs_for_agent("agent-1", db_path=db_path) == []
 
 
 # Run database tests
@@ -728,82 +736,74 @@ def test_db_save_and_get_runs():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        # Create parent loop first
-        loop = Loop(
-            id="loop-1",
-            flow="ship",
-            area="src/test/",
-            repo=Path("/tmp/repo"),
-            main_branch="test-main",
-        )
-        save_loop(loop, db_path)
+        # Create parent agent first
+        agent = _make_agent(id="agent-1")
+        save_agent(agent, db_path)
 
-        run1 = Run(
+        run1 = FlowRun(
             id="run-1",
-            parent="loop:loop-1",
+            agent_id="agent-1",
             flow="ship",
-            area="src/test/",
+            area=["src/test/"],
+            voice=["default"],
             repo=Path("/tmp/repo"),
             iteration=1,
-            status=RunStatus.COMPLETED,
+            status=FlowRunStatus.COMPLETED,
             started_at=datetime(2024, 1, 1, 12, 0, 0),
             pr_url="https://github.com/user/repo/pull/1",
         )
-        run2 = Run(
+        run2 = FlowRun(
             id="run-2",
-            parent="loop:loop-1",
+            agent_id="agent-1",
             flow="ship",
-            area="src/test/",
+            area=["src/test/"],
+            voice=["default"],
             repo=Path("/tmp/repo"),
             iteration=2,
-            status=RunStatus.RUNNING,
+            status=FlowRunStatus.RUNNING,
             started_at=datetime(2024, 1, 2, 12, 0, 0),
         )
         save_run(run1, db_path)
         save_run(run2, db_path)
 
-        runs = list_runs_for_trigger("loop", "loop-1", db_path=db_path)
+        runs = list_runs_for_agent("agent-1", db_path=db_path)
         assert len(runs) == 2
 
 
-def test_db_get_latest_run_for_trigger():
-    """Get most recent run for a trigger."""
+def test_db_get_latest_run_for_agent():
+    """Get most recent run for an agent."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        loop = Loop(
-            id="loop-1",
-            flow="ship",
-            area="src/test/",
-            repo=Path("/tmp/repo"),
-            main_branch="test-main",
-        )
-        save_loop(loop, db_path)
+        agent = _make_agent(id="agent-1")
+        save_agent(agent, db_path)
 
-        run1 = Run(
+        run1 = FlowRun(
             id="run-1",
-            parent="loop:loop-1",
+            agent_id="agent-1",
             flow="ship",
-            area="src/test/",
+            area=["src/test/"],
+            voice=["default"],
             repo=Path("/tmp/repo"),
             iteration=1,
-            status=RunStatus.COMPLETED,
+            status=FlowRunStatus.COMPLETED,
             started_at=datetime(2024, 1, 1, 12, 0, 0),
         )
-        run2 = Run(
+        run2 = FlowRun(
             id="run-2",
-            parent="loop:loop-1",
+            agent_id="agent-1",
             flow="ship",
-            area="src/test/",
+            area=["src/test/"],
+            voice=["default"],
             repo=Path("/tmp/repo"),
             iteration=2,
-            status=RunStatus.RUNNING,
+            status=FlowRunStatus.RUNNING,
             started_at=datetime(2024, 1, 2, 12, 0, 0),
         )
         save_run(run1, db_path)
         save_run(run2, db_path)
 
-        latest = get_latest_run_for_trigger("loop", "loop-1", db_path)
+        latest = get_latest_run_for_agent("agent-1", db_path)
         assert latest is not None
         assert latest.id == "run-2"
 
@@ -813,32 +813,27 @@ def test_db_update_run_status():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        loop = Loop(
-            id="loop-1",
-            flow="ship",
-            area="src/test/",
-            repo=Path("/tmp/repo"),
-            main_branch="test-main",
-        )
-        save_loop(loop, db_path)
+        agent = _make_agent(id="agent-1")
+        save_agent(agent, db_path)
 
-        run = Run(
+        run = FlowRun(
             id="run-1",
-            parent="loop:loop-1",
+            agent_id="agent-1",
             flow="ship",
-            area="src/test/",
+            area=["src/test/"],
+            voice=["default"],
             repo=Path("/tmp/repo"),
             iteration=1,
-            status=RunStatus.RUNNING,
+            status=FlowRunStatus.RUNNING,
             started_at=datetime.now(),
         )
         save_run(run, db_path)
 
-        updated = update_run_status("run-1", RunStatus.COMPLETED, db_path=db_path)
+        updated = update_run_status("run-1", FlowRunStatus.COMPLETED, db_path=db_path)
         assert updated is True
 
-        runs = list_runs_for_trigger("loop", "loop-1", db_path=db_path)
-        assert runs[0].status == RunStatus.COMPLETED
+        runs = list_runs_for_agent("agent-1", db_path=db_path)
+        assert runs[0].status == FlowRunStatus.COMPLETED
         assert runs[0].ended_at is not None
 
 
@@ -847,23 +842,18 @@ def test_db_update_run_step():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        loop = Loop(
-            id="loop-1",
-            flow="ship",
-            area="src/test/",
-            repo=Path("/tmp/repo"),
-            main_branch="test-main",
-        )
-        save_loop(loop, db_path)
+        agent = _make_agent(id="agent-1")
+        save_agent(agent, db_path)
 
-        run = Run(
+        run = FlowRun(
             id="run-1",
-            parent="loop:loop-1",
+            agent_id="agent-1",
             flow="ship",
-            area="src/test/",
+            area=["src/test/"],
+            voice=["default"],
             repo=Path("/tmp/repo"),
             iteration=1,
-            status=RunStatus.RUNNING,
+            status=FlowRunStatus.RUNNING,
             started_at=datetime.now(),
         )
         save_run(run, db_path)
@@ -871,7 +861,7 @@ def test_db_update_run_step():
         updated = update_run_step("run-1", "implement", db_path)
         assert updated is True
 
-        runs = list_runs_for_trigger("loop", "loop-1", db_path=db_path)
+        runs = list_runs_for_agent("agent-1", db_path=db_path)
         assert runs[0].current_step == "implement"
 
 
@@ -880,23 +870,18 @@ def test_db_update_run_pr():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        loop = Loop(
-            id="loop-1",
-            flow="ship",
-            area="src/test/",
-            repo=Path("/tmp/repo"),
-            main_branch="test-main",
-        )
-        save_loop(loop, db_path)
+        agent = _make_agent(id="agent-1")
+        save_agent(agent, db_path)
 
-        run = Run(
+        run = FlowRun(
             id="run-1",
-            parent="loop:loop-1",
+            agent_id="agent-1",
             flow="ship",
-            area="src/test/",
+            area=["src/test/"],
+            voice=["default"],
             repo=Path("/tmp/repo"),
             iteration=1,
-            status=RunStatus.RUNNING,
+            status=FlowRunStatus.RUNNING,
             started_at=datetime.now(),
         )
         save_run(run, db_path)
@@ -904,68 +889,48 @@ def test_db_update_run_pr():
         updated = update_run_pr("run-1", "https://github.com/user/repo/pull/42", db_path)
         assert updated is True
 
-        runs = list_runs_for_trigger("loop", "loop-1", db_path=db_path)
+        runs = list_runs_for_agent("agent-1", db_path=db_path)
         assert runs[0].pr_url == "https://github.com/user/repo/pull/42"
 
 
-def test_db_update_loop_pid():
-    """Update loop's process ID."""
+def test_db_update_agent_pid():
+    """Update agent's process ID."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        loop = Loop(
-            id="loop-1",
-            flow="ship",
-            area="src/test/",
-            repo=Path("/tmp/repo"),
-            main_branch="test-main",
-        )
-        save_loop(loop, db_path)
+        agent = _make_agent(id="agent-1")
+        save_agent(agent, db_path)
 
         # Set pid
-        updated = update_loop_pid("loop-1", 12345, db_path)
+        updated = update_agent_pid("agent-1", 12345, db_path)
         assert updated is True
 
-        loaded = get_loop("loop-1", db_path)
+        loaded = get_agent("agent-1", db_path)
         assert loaded.pid == 12345
 
         # Clear pid
-        updated = update_loop_pid("loop-1", None, db_path)
+        updated = update_agent_pid("agent-1", None, db_path)
         assert updated is True
 
-        loaded = get_loop("loop-1", db_path)
+        loaded = get_agent("agent-1", db_path)
         assert loaded.pid is None
 
 
-def test_loop_model_with_pid():
-    """Loop model stores pid correctly."""
-    loop = Loop(
-        id="loop-1",
-        flow="ship",
-        area="src/test/",
-        repo=Path("/tmp/repo"),
-        main_branch="test-main",
-        pid=12345,
-    )
-    assert loop.pid == 12345
+def test_agent_model_with_pid():
+    """Agent model stores pid correctly."""
+    agent = _make_agent(id="agent-1", pid=12345)
+    assert agent.pid == 12345
 
 
-def test_db_save_loop_with_pid():
-    """Save and load loop with pid."""
+def test_db_save_agent_with_pid():
+    """Save and load agent with pid."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        loop = Loop(
-            id="loop-1",
-            flow="ship",
-            area="src/test/",
-            repo=Path("/tmp/repo"),
-            main_branch="test-main",
-            pid=54321,
-        )
-        save_loop(loop, db_path)
+        agent = _make_agent(id="agent-1", pid=54321)
+        save_agent(agent, db_path)
 
-        loaded = get_loop("loop-1", db_path)
+        loaded = get_agent("agent-1", db_path)
         assert loaded.pid == 54321
 
 
@@ -974,7 +939,7 @@ def test_db_save_loop_with_pid():
 
 def test_start_result_truthy_when_ok():
     """StartResult is truthy when ok=True."""
-    from loopflow.lfd.runs.loop import StartResult
+    from loopflow.lfd.agent import StartResult
 
     result = StartResult(True)
     assert result.ok is True
@@ -985,7 +950,7 @@ def test_start_result_truthy_when_ok():
 
 def test_start_result_falsy_when_not_ok():
     """StartResult is falsy when ok=False."""
-    from loopflow.lfd.runs.loop import StartResult
+    from loopflow.lfd.agent import StartResult
 
     result = StartResult(False, "already_running")
     assert result.ok is False
@@ -995,7 +960,7 @@ def test_start_result_falsy_when_not_ok():
 
 def test_start_result_with_outstanding():
     """StartResult includes outstanding count for waiting state."""
-    from loopflow.lfd.runs.loop import StartResult
+    from loopflow.lfd.agent import StartResult
 
     result = StartResult(False, "waiting", outstanding=5)
     assert not result
@@ -1173,7 +1138,7 @@ def test_scheduler_thread_safety():
 
 def test_schedule_triggers_within_grace_period():
     """Schedule triggers when missed time is within 24h grace period."""
-    from loopflow.lfd.runs.schedule import should_trigger_cron
+    from loopflow.lfd.agent import should_trigger_cron
 
     # Cron for 9am daily, last run was yesterday
     last_run = datetime(2024, 1, 14, 9, 0, 0)
@@ -1187,7 +1152,7 @@ def test_schedule_skips_stale_beyond_grace_period():
     """Schedule does NOT trigger when missed time is beyond grace period."""
     from datetime import timedelta
 
-    from loopflow.lfd.runs.schedule import should_trigger_cron
+    from loopflow.lfd.agent import should_trigger_cron
 
     # Use a short grace period for testing
     short_grace = timedelta(hours=1)
@@ -1204,7 +1169,7 @@ def test_schedule_grace_period_skips_very_old():
     """Schedule with 0 grace period skips any missed time."""
     from datetime import timedelta
 
-    from loopflow.lfd.runs.schedule import should_trigger_cron
+    from loopflow.lfd.agent import should_trigger_cron
 
     # With zero grace period, only triggers if prev_time == now (impossible)
     last_run = datetime(2024, 1, 14, 9, 0, 0)
@@ -1216,7 +1181,7 @@ def test_schedule_grace_period_skips_very_old():
 
 def test_schedule_first_run_within_grace():
     """First schedule run triggers if within grace period."""
-    from loopflow.lfd.runs.schedule import should_trigger_cron
+    from loopflow.lfd.agent import should_trigger_cron
 
     # No last_run (first time), should trigger if within grace
     result = should_trigger_cron("* * * * *", None)
@@ -1227,7 +1192,7 @@ def test_schedule_first_run_beyond_grace():
     """First schedule run skips if beyond grace period."""
     from datetime import timedelta
 
-    from loopflow.lfd.runs.schedule import should_trigger_cron
+    from loopflow.lfd.agent import should_trigger_cron
 
     # No last_run, but zero grace period means prev_time is stale
     result = should_trigger_cron("* * * * *", None, grace_period=timedelta(seconds=0))
@@ -1263,7 +1228,7 @@ def test_iteration_branch_prefix_without_suffix():
 
 def test_generate_random_words_format():
     """_generate_random_words returns magical-musical format."""
-    from loopflow.lfd.runs.loop import MAGICAL, MUSICAL, _generate_random_words
+    from loopflow.lfd.agent import MAGICAL, MUSICAL, _generate_random_words
 
     words = _generate_random_words()
     parts = words.split("-")
@@ -1274,7 +1239,7 @@ def test_generate_random_words_format():
 
 def test_generate_random_words_produces_variety():
     """_generate_random_words produces different results over multiple calls."""
-    from loopflow.lfd.runs.loop import _generate_random_words
+    from loopflow.lfd.agent import _generate_random_words
 
     # Generate 20 word pairs, expect at least 5 unique
     results = {_generate_random_words() for _ in range(20)}
@@ -1283,7 +1248,7 @@ def test_generate_random_words_produces_variety():
 
 def test_word_lists_have_sufficient_variety():
     """Word lists have enough entries for good uniqueness."""
-    from loopflow.lfd.runs.loop import MAGICAL, MUSICAL
+    from loopflow.lfd.agent import MAGICAL, MUSICAL
 
     # 34 magical * 26 musical = 884 combinations
     assert len(MAGICAL) >= 30

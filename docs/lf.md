@@ -25,7 +25,7 @@ lf implement: add auth       # pass arguments after colon
 lf sp:brainstorm             # run superpowers brainstorm skill
 lf sr:gog                    # run SkillRegistry skill
 lf : "fix the typo"          # inline prompt
-lf debug -c                  # paste clipboard, fix the bug
+lf debug -v                  # paste clipboard, fix the bug
 ```
 
 ## Task Files
@@ -51,7 +51,7 @@ Inside step files, `{args}` is replaced with whatever comes after the colon.
 
 | Flag | Description |
 |------|-------------|
-| `-p FILE` | Add a file or directory to context |
+| `-x FILE` | Add a file or directory to context |
 | `--no-lfdocs` | Skip repo docs (README, STYLE, etc.) |
 | `--no-diff-files` | Skip files changed on this branch |
 | `--diff` | Include raw `git diff` output |
@@ -60,7 +60,7 @@ Inside step files, `{args}` is replaced with whatever comes after the colon.
 
 | Flag | Description |
 |------|-------------|
-| `-c, --clipboard` | Include clipboard content in prompt |
+| `-v, --paste` | Include clipboard content in prompt |
 
 ### Summaries
 
@@ -81,12 +81,13 @@ Inside step files, `{args}` is replaced with whatever comes after the colon.
 | Flag | Description |
 |------|-------------|
 | `-m, --model MODEL` | Choose model (e.g., `claude:opus`, `codex`, `gemini`) |
-| `-v, --voice VOICE` | Apply voice/persona (comma-separated for multiple) |
+| `--voice VOICE` | Apply voice/persona (comma-separated for multiple) |
 
 ## Output Flags
 
 | Flag | Description |
 |------|-------------|
+| `-c, --copy` | Copy assembled prompt to clipboard, show token breakdown |
 | `--web` | Copy to clipboard and open web client (claude.ai, chatgpt.com, etc.) |
 
 ## Browser Automation
@@ -112,8 +113,8 @@ These require explicit flags or config:
 | Context | How to enable |
 |---------|---------------|
 | **Raw diff** (line-by-line changes) | `--diff` |
-| **Clipboard** | `-c` / `--clipboard` |
-| **Extra files** | `-p FILE` |
+| **Clipboard** | `-v` / `--paste` |
+| **Extra files** | `-x FILE` |
 | **Summaries** | Configure in `.lf/config.yaml` |
 | **Chrome automation** | `--chrome` |
 
@@ -125,13 +126,13 @@ See [Configuration](config.md) for setting defaults via config file.
 
 ```bash
 # Run tests, copy the error
-lf debug -c
+lf debug -v
 ```
 
 ### Review with extra context
 
 ```bash
-lf review -p docs/api.md -p tests/
+lf review -x docs/api.md -x tests/
 ```
 
 ### Use a different model
@@ -143,14 +144,14 @@ lf implement -m codex: add caching
 ### Apply a voice
 
 ```bash
-lf review -v concise
-lf implement -v architect,concise
+lf review --voice concise
+lf implement --voice architect,concise
 ```
 
 ### Copy prompt without running
 
 ```bash
-lf review --web    # shows token breakdown, copies to clipboard, opens web client
+lf review -c    # shows token breakdown, copies to clipboard
 ```
 
 ### Use web client instead of CLI

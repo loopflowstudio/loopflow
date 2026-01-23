@@ -9,17 +9,17 @@ from asyncio import StreamReader, StreamWriter
 from datetime import datetime
 from pathlib import Path
 
+from loopflow.lfd.agent import list_agents, run_cron_check, run_watch_check
 from loopflow.lfd.daemon.manager import Manager, load_manager_config
 from loopflow.lfd.daemon.protocol import Event, Request, Response, error, success
-from loopflow.lfd.db import update_dead_runs
-from loopflow.lfd.models import Session, SessionStatus, TriggerStatus
-from loopflow.lfd.runs.loop import list_loops
-from loopflow.lfd.runs.session import (
-    load_sessions,
-    load_sessions_for_repo,
-    load_sessions_for_worktree,
-    save_session,
-    update_session_status,
+from loopflow.lfd.db import update_dead_processes
+from loopflow.lfd.models import AgentStatus, StepRun, StepRunStatus
+from loopflow.lfd.step_run import (
+    load_step_runs,
+    load_step_runs_for_repo,
+    load_step_runs_for_worktree,
+    save_step_run,
+    update_step_run_status,
 )
 
 
@@ -90,14 +90,14 @@ class Server:
 
         if method == "status":
             return await self._handle_status()
-        elif method == "sessions.list":
-            return await self._handle_sessions_list()
-        elif method == "sessions.history":
-            return await self._handle_sessions_history(params)
-        elif method == "sessions.start":
-            return await self._handle_sessions_start(params)
-        elif method == "sessions.end":
-            return await self._handle_sessions_end(params)
+        elif method == "step_runs.list":
+            return await self._handle_step_runs_list()
+        elif method == "step_runs.history":
+            return await self._handle_step_runs_history(params)
+        elif method == "step_runs.start":
+            return await self._handle_step_runs_start(params)
+        elif method == "step_runs.end":
+            return await self._handle_step_runs_end(params)
         elif method == "subscribe":
             return await self._handle_subscribe(params, writer)
         elif method == "notify":
@@ -114,70 +114,70 @@ class Server:
             return error(f"Unknown method: {method}", request.id)
 
     async def _handle_status(self) -> Response:
-        loops = list_loops()
-        sessions = load_sessions(active_only=True)
-        running_loops = [loop for loop in loops if loop.status == TriggerStatus.RUNNING]
+        agents = list_agents()
+        step_runs = load_step_runs(active_only=True)
+        running_agents = [a for a in agents if a.status == AgentStatus.RUNNING]
 
         return success(
             {
                 "pid": os.getpid(),
-                "loops_defined": len(loops),
-                "loops_running": len(running_loops),
-                "sessions_active": len(sessions),
+                "agents_defined": len(agents),
+                "agents_running": len(running_agents),
+                "step_runs_active": len(step_runs),
             }
         )
 
-    async def _handle_sessions_list(self) -> Response:
-        sessions = load_sessions()
-        return success([s.to_dict() for s in sessions])
+    async def _handle_step_runs_list(self) -> Response:
+        step_runs = load_step_runs()
+        return success([s.to_dict() for s in step_runs])
 
-    async def _handle_sessions_history(self, params: dict) -> Response:
-        """Return session history for a worktree or repo."""
+    async def _handle_step_runs_history(self, params: dict) -> Response:
+        """Return step run history for a worktree or repo."""
         worktree = params.get("worktree")
         repo = params.get("repo")
         limit = params.get("limit", 20)
 
         if worktree:
-            sessions = load_sessions_for_worktree(worktree, limit)
+            step_runs = load_step_runs_for_worktree(worktree, limit)
         elif repo:
-            sessions = load_sessions_for_repo(repo, limit)
+            step_runs = load_step_runs_for_repo(repo, limit)
         else:
-            sessions = load_sessions()[:limit]
+            step_runs = load_step_runs()[:limit]
 
-        return success([s.to_dict() for s in sessions])
+        return success([s.to_dict() for s in step_runs])
 
-    async def _handle_sessions_start(self, params: dict) -> Response:
-        """Record a session start."""
-        session_data = params.get("session")
-        if not session_data:
-            return error("Missing 'session' parameter")
+    async def _handle_step_runs_start(self, params: dict) -> Response:
+        """Record a step run start."""
+        step_run_data = params.get("step_run")
+        if not step_run_data:
+            return error("Missing 'step_run' parameter")
 
-        session = Session.from_dict(session_data)
-        save_session(session)
+        step_run = StepRun.from_dict(step_run_data)
+        save_step_run(step_run)
         await self._broadcast(
             Event(
-                "session.started",
+                "step_run.started",
                 {
-                    "id": session.id,
-                    "step": session.step,
-                    "worktree": session.worktree,
+                    "id": step_run.id,
+                    "step": step_run.step,
+                    "worktree": step_run.worktree,
                 },
             )
         )
-        return success({"id": session.id})
+        return success({"id": step_run.id})
 
-    async def _handle_sessions_end(self, params: dict) -> Response:
-        """Record a session end."""
-        session_id = params.get("session_id")
+    async def _handle_step_runs_end(self, params: dict) -> Response:
+        """Record a step run end."""
+        step_run_id = params.get("step_run_id")
         status_str = params.get("status")
 
-        if not session_id or not status_str:
-            return error("Missing 'session_id' or 'status' parameter")
+        if not step_run_id or not status_str:
+            return error("Missing 'step_run_id' or 'status' parameter")
 
-        status = SessionStatus(status_str)
-        update_session_status(session_id, status)
-        await self._broadcast(Event("session.ended", {"id": session_id, "status": status_str}))
-        return success({"id": session_id})
+        status = StepRunStatus(status_str)
+        update_step_run_status(step_run_id, status)
+        await self._broadcast(Event("step_run.ended", {"id": step_run_id, "status": status_str}))
+        return success({"id": step_run_id})
 
     async def _handle_subscribe(self, params: dict, writer: StreamWriter) -> Response:
         events = params.get("events", [])
@@ -197,17 +197,17 @@ class Server:
 
     async def _handle_output_line(self, params: dict) -> Response:
         """Accept output lines from collector and broadcast to subscribers."""
-        session_id = params.get("session_id")
+        step_run_id = params.get("step_run_id")
         text = params.get("text")
 
-        if not session_id or text is None:
-            return error("Missing 'session_id' or 'text' parameter")
+        if not step_run_id or text is None:
+            return error("Missing 'step_run_id' or 'text' parameter")
 
         await self._broadcast(
             Event(
                 "output.line",
                 {
-                    "session_id": session_id,
+                    "step_run_id": step_run_id,
                     "text": text,
                     "timestamp": datetime.now().isoformat(),
                 },
@@ -274,36 +274,34 @@ class Server:
                     self.subscriptions.pop(writer, None)
 
     async def _periodic_check(self) -> None:
-        """Periodically update dead processes and check triggers."""
+        """Periodically update dead processes and check agent triggers."""
         from loopflow.lfd.autoprune import AutopruneManager, get_repos_to_check
         from loopflow.lfd.draft_prs import run_draft_pr_check
-        from loopflow.lfd.runs.schedule import run_schedule_check
-        from loopflow.lfd.runs.subscription import run_subscription_check
 
         autoprune_manager = AutopruneManager()
 
         while self._running:
             try:
                 await asyncio.sleep(30)
-                update_dead_runs()
+                update_dead_processes()
 
-                # Check subscription triggers (file changes on main)
-                triggered_subs = run_subscription_check()
-                for sub_id in triggered_subs:
+                # Check watch-mode agents (file changes on main)
+                triggered_watch = run_watch_check()
+                for agent_id in triggered_watch:
                     await self._broadcast(
                         Event(
-                            "subscription.triggered",
-                            {"subscription_id": sub_id},
+                            "agent.triggered",
+                            {"agent_id": agent_id, "mode": "watch"},
                         )
                     )
 
-                # Check schedule triggers (cron)
-                triggered_scheds = run_schedule_check()
-                for schedule_id in triggered_scheds:
+                # Check cron-mode agents
+                triggered_cron = run_cron_check()
+                for agent_id in triggered_cron:
                     await self._broadcast(
                         Event(
-                            "schedule.triggered",
-                            {"schedule_id": schedule_id},
+                            "agent.triggered",
+                            {"agent_id": agent_id, "mode": "cron"},
                         )
                     )
 

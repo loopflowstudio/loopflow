@@ -17,8 +17,11 @@ One focused change, then stop. Verify tests pass. Focus on files this branch has
 1. Run `git diff main...HEAD --stat` to see which files this branch modified
 2. Read those files and identify what can be deleted or simplified
 3. Make one focused simplification
-4. Run `uv run pytest tests/` to verify behavior is preserved
-5. If tests pass, you're done
+4. Run ALL test suites to verify behavior is preserved (see TESTING.md):
+   - `uv run pytest tests/` — Python
+   - `swift test --package-path swift` — Swift (if Swift code changed)
+   - `cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS'` — Concerto UI (if UI code changed)
+5. If all tests pass, you're done
 
 ## Priority order
 

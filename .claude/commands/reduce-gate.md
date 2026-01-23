@@ -13,8 +13,11 @@ Make this change smaller. Not better architecture, not cleaner patterns—just l
 1. `git diff main...HEAD --stat` to see the diff scope
 2. Read the changed files
 3. Find one thing to eliminate: dead code, unnecessary abstraction, redundant logic
-4. Delete it. Run `uv run pytest tests/`
-5. If tests pass, done. If not, revert and try something else.
+4. Delete it. Run ALL test suites (see TESTING.md):
+   - `uv run pytest tests/` — Python
+   - `swift test --package-path swift` — Swift (if Swift code changed)
+   - `cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS'` — Concerto UI (if UI code changed)
+5. If all tests pass, done. If not, revert and try something else.
 
 ## What counts as reduction
 

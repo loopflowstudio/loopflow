@@ -74,7 +74,7 @@ final class AppState {
     var prompts: [PromptCard] = []
     var flows: [FlowDef] = []
     var voices: [Voice] = []
-    var loops: [Loop] = []
+    var agents: [Agent] = []
 
     // Prompt launcher state
     var selectedPrompt: PromptCard?
@@ -99,7 +99,7 @@ final class AppState {
     // Sidebar state
     var selectedWorktree: Worktree?
     var selectedFlow: FlowDef?
-    var selectedLoop: Loop?
+    var selectedAgent: Agent?
 
     // Live output state
     var liveOutputBySession: [String: [OutputLine]] = [:]
@@ -108,8 +108,8 @@ final class AppState {
     private var sessionWorktreeMap: [String: String] = [:]  // session ID → worktree path
 
     // Results panel state
-    var sessionBaselines: [String: SessionBaseline] = [:]  // session ID → baseline
-    var sessionResults: [String: SessionResult] = [:]  // session ID → result
+    var stepRunBaselines: [String: StepRunBaseline] = [:]  // step run ID → baseline
+    var stepRunResults: [String: StepRunResult] = [:]  // step run ID → result
     var showResultsLog: Bool = false  // Toggle for streaming log view
     private var sessionStepMap: [String: String] = [:]  // session ID → step/prompt name
     private var sessionStartMap: [String: Date] = [:]  // session ID → start time
@@ -154,7 +154,7 @@ final class AppState {
         prompts = []
         flows = []
         voices = []
-        loops = []
+        agents = []
         selectedWorktree = nil
         isLoading = false
         errorMessage = nil
@@ -185,33 +185,31 @@ final class AppState {
         }
     }
 
-    func configureMockLoops() {
-        loops = [
-            Loop(
-                id: "mock-loop-1",
+    func configureMockAgents() {
+        agents = [
+            Agent(
+                id: "mock-agent-1",
                 flow: "ship",
-                area: "src/tests/",
+                voice: [],
+                area: ["src/tests/"],
                 repo: currentRepo?.path ?? "/tmp/demo",
-                goals: ["test-coverage"],
                 status: .running,
                 iteration: 3,
-                mainBranch: "loop-test-coverage",
+                mainBranch: "agent-test-coverage",
                 prLimit: 5,
                 mergeMode: .pr,
                 pid: 12345,
-                createdAt: Date().addingTimeInterval(-3600),
-                currentRunId: "run-123",
-                currentStep: "implement"
+                createdAt: Date().addingTimeInterval(-3600)
             ),
-            Loop(
-                id: "mock-loop-2",
+            Agent(
+                id: "mock-agent-2",
                 flow: "ship",
-                area: "docs/",
+                voice: [],
+                area: ["docs/"],
                 repo: currentRepo?.path ?? "/tmp/demo",
-                goals: ["docs-sync"],
                 status: .idle,
                 iteration: 12,
-                mainBranch: "loop-docs-sync",
+                mainBranch: "agent-docs-sync",
                 prLimit: 3,
                 mergeMode: .pr,
                 pid: nil,
@@ -286,9 +284,9 @@ final class AppState {
             try? await setupService.ensureDaemonRunning()
             startEventSubscription()
 
-            // Background enrichment: sync, loops, tokens, staleness
+            // Background enrichment: sync, agents, tokens, staleness
             await syncAndEnrich()
-            await refreshLoops()
+            await refreshAgents()
             await estimateTokens()
         }
 
@@ -514,7 +512,7 @@ final class AppState {
 
         Task {
             await eventService?.subscribe(
-                to: ["worktree.*", "session.*", "output.line", "loop.*"],
+                to: ["worktree.*", "session.*", "output.line", "agent.*"],
                 onEvent: { [weak self] event in
                     Task { @MainActor in
                         switch event {
@@ -525,7 +523,7 @@ final class AppState {
                         case .output(let outputEvent):
                             self?.handleOutputEvent(outputEvent)
                         case .loop(_):
-                            await self?.refreshLoops()
+                            await self?.refreshAgents()
                         }
                     }
                 },
@@ -604,14 +602,14 @@ final class AppState {
             if let worktree = event.worktree {
                 Task {
                     let baseline = await resultsService.captureBaseline(
-                        sessionId: event.id,
+                        stepRunId: event.id,
                         worktree: URL(fileURLWithPath: worktree)
                     )
                     await MainActor.run {
-                        sessionBaselines[event.id] = baseline
+                        stepRunBaselines[event.id] = baseline
                         // Create running result entry
-                        sessionResults[event.id] = SessionResult.running(
-                            sessionId: event.id,
+                        stepRunResults[event.id] = StepRunResult.running(
+                            stepRunId: event.id,
                             step: event.step ?? "step",
                             worktree: worktree,
                             startedAt: sessionStartMap[event.id] ?? Date()
@@ -631,10 +629,10 @@ final class AppState {
             }
 
             // Compute results
-            if let baseline = sessionBaselines[event.id] {
+            if let baseline = stepRunBaselines[event.id] {
                 let step = sessionStepMap[event.id] ?? "step"
                 let startedAt = sessionStartMap[event.id] ?? Date()
-                let status: SessionResultStatus = event.status == "completed" ? .completed : .error
+                let status: StepRunResultStatus = event.status == "completed" ? .completed : .error
 
                 Task {
                     let result = await resultsService.computeResults(
@@ -645,7 +643,7 @@ final class AppState {
                         endedAt: Date()
                     )
                     await MainActor.run {
-                        sessionResults[event.id] = result
+                        stepRunResults[event.id] = result
                     }
                 }
             }
@@ -674,11 +672,11 @@ final class AppState {
 
     // MARK: - Results Panel
 
-    func loadDiffPreview(for sessionId: String, fileIndex: Int) async {
-        guard var result = sessionResults[sessionId],
+    func loadDiffPreview(for stepRunId: String, fileIndex: Int) async {
+        guard var result = stepRunResults[stepRunId],
               fileIndex < result.filesChanged.count,
               result.filesChanged[fileIndex].diffPreview == nil,
-              let baseline = sessionBaselines[sessionId] else { return }
+              let baseline = stepRunBaselines[stepRunId] else { return }
 
         let file = result.filesChanged[fileIndex]
         let worktree = URL(fileURLWithPath: result.worktree)
@@ -690,24 +688,24 @@ final class AppState {
         )
 
         result.filesChanged[fileIndex].diffPreview = preview
-        sessionResults[sessionId] = result
+        stepRunResults[stepRunId] = result
     }
 
     func clearCompletedResults() {
-        // Clear results for sessions that are complete (keep running ones)
-        for sessionId in sessionResults.keys {
-            if let result = sessionResults[sessionId], result.status != .running {
-                sessionResults.removeValue(forKey: sessionId)
-                sessionBaselines.removeValue(forKey: sessionId)
-                liveOutputBySession.removeValue(forKey: sessionId)
+        // Clear results for step runs that are complete (keep running ones)
+        for stepRunId in stepRunResults.keys {
+            if let result = stepRunResults[stepRunId], result.status != .running {
+                stepRunResults.removeValue(forKey: stepRunId)
+                stepRunBaselines.removeValue(forKey: stepRunId)
+                liveOutputBySession.removeValue(forKey: stepRunId)
             }
         }
     }
 
-    var currentSessionResult: SessionResult? {
+    var currentStepRunResult: StepRunResult? {
         // Filter by selected worktree if one is selected
-        let results = sessionResults.values
-        let filtered: [SessionResult]
+        let results = stepRunResults.values
+        let filtered: [StepRunResult]
 
         if let selectedPath = selectedWorktree?.path {
             filtered = results.filter { $0.worktree == selectedPath }
@@ -721,26 +719,18 @@ final class AppState {
             .first
     }
 
-    func refreshLoops() async {
+    func refreshAgents() async {
         guard let repo = currentRepo else { return }
         do {
-            loops = try await loopService.listLoops(repo: repo)
+            agents = try await loopService.listAgents(repo: repo)
         } catch {
-            loops = []
+            agents = []
         }
     }
 
-    func liveOutput(for loop: Loop) -> [OutputLine] {
-        // Loop runs use their run ID as session ID for output tracking
-        guard let runId = loop.currentRunId else { return [] }
-        return liveOutputBySession[runId] ?? []
-    }
-
-    func squashLandLoop(_ loop: Loop) async throws {
-        guard let repo = currentRepo else { return }
-        try await loopService.squashLand(trigger: .loop(loop), repoRoot: repo)
-        await refreshLoops()
-        listWorktrees()
+    func liveOutput(for agent: Agent) -> [OutputLine] {
+        // Agent runs use their ID as session ID for output tracking
+        return liveOutputBySession[agent.id] ?? []
     }
 
     func connectLfd() async throws {

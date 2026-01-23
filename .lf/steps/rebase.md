@@ -59,5 +59,5 @@ git push --force-with-lease
 git rebase --abort
 ```
 
-Then note what went wrong in `.design/questions.md` and stop.
+Then note what went wrong in `scratch/questions.md` and stop.
 

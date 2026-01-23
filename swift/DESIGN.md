@@ -613,7 +613,7 @@ These would require rewriting if guessed wrong:
 
 **Verification:**
 ```bash
-cat .design/designprinciples.md | head -100
+cat scratch/designprinciples.md | head -100
 # Should show comprehensive design principles document
 ```
 

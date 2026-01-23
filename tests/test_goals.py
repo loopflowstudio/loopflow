@@ -10,7 +10,7 @@ from loopflow.lf.goals import (
 
 
 def test_load_goal_user_defined(tmp_path):
-    """load_goal finds user-defined goal in .lf/goals/."""
+    """load_goal finds user-defined goal in lf/goals/."""
     repo = tmp_path / "repo"
     goals_dir = repo / ".lf" / "goals"
     goals_dir.mkdir(parents=True)

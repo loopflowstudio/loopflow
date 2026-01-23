@@ -4,7 +4,7 @@ diff_files: false
 ---
 Debug an error using the stacktrace or error message from clipboard.
 
-If clipboard is empty or no -v flag, ask what error to debug.
+If clipboard is empty or no -c flag, ask what error to debug.
 
 ## What makes a good fix
 
@@ -18,9 +18,9 @@ If clipboard is empty or no -v flag, ask what error to debug.
 
 ## Input
 
-Run with `-v` to include clipboard content:
+Run with `-c` to include clipboard content:
 ```bash
-lf debug -v
+lf debug -c
 ```
 
 Parse the error/stacktrace. Identify file and line. Check if the file was changed on this branch:

@@ -16,7 +16,9 @@ def temp_repo(tmp_path):
 
     lf = tmp_path / ".lf"
     lf.mkdir()
-    (lf / "implement.lf").write_text("Implement the feature.\n")
+    steps = lf / "steps"
+    steps.mkdir()
+    (steps / "implement.md").write_text("Implement the feature.\n")
 
     voices = lf / "voices"
     voices.mkdir()

@@ -28,13 +28,13 @@ def temp_repo(tmp_path):
     (tmp_path / ".git").mkdir()
     (tmp_path / "README.md").write_text("# Test Project\n")
     (tmp_path / "STYLE.md").write_text("# Style Guide\n")
-    design_dir = tmp_path / ".design"
-    design_dir.mkdir()
-    (design_dir / "plan.md").write_text("# Plan\n\nDo the thing.\n")
+    scratch_dir = tmp_path / "scratch"
+    scratch_dir.mkdir()
+    (scratch_dir / "plan.md").write_text("# Plan\n\nDo the thing.\n")
 
-    lf = tmp_path / ".lf"
-    lf.mkdir()
-    (lf / "implement.md").write_text("Implement the feature.\n")
+    steps = tmp_path / ".lf" / "steps"
+    steps.mkdir(parents=True, exist_ok=True)
+    (steps / "implement.md").write_text("Implement the feature.\n")
 
     return tmp_path
 
@@ -42,7 +42,7 @@ def temp_repo(tmp_path):
 def test_find_worktree_root_from_subdirectory(temp_repo):
     """Can find worktree root from any subdirectory."""
     subdir = temp_repo / "src" / "utils"
-    subdir.mkdir(parents=True)
+    subdir.mkdir(parents=True, exist_ok=True)
 
     assert find_worktree_root(temp_repo) == temp_repo
     assert find_worktree_root(subdir) == temp_repo
@@ -134,33 +134,36 @@ def test_build_prompt_inline_with_context(temp_repo):
     assert "print('hello')" in result
 
 
-def test_gather_step_prefers_claude_commands(temp_repo):
-    """Task file in .claude/commands/ is preferred over .lf/."""
+def test_gather_step_prefers_lf_steps(temp_repo):
+    """Task file in lf/steps/ is preferred over .claude/commands/."""
+    steps_dir = temp_repo / ".lf" / "steps"
+    steps_dir.mkdir(parents=True, exist_ok=True)
+    (steps_dir / "test.md").write_text("Task from lf/steps/\n")
+
     claude_dir = temp_repo / ".claude" / "commands"
-    claude_dir.mkdir(parents=True)
+    claude_dir.mkdir(parents=True, exist_ok=True)
     (claude_dir / "test.md").write_text("Task from .claude/commands/\n")
 
-    lf = temp_repo / ".lf"
-    (lf / "test.md").write_text("Task from .lf/\n")
+    result = gather_step(temp_repo, "test")
+    assert result.content == "Task from lf/steps/\n"
+
+
+def test_gather_step_finds_md_in_lf_steps(temp_repo):
+    """Task file with .md extension in lf/steps/ works."""
+    steps_dir = temp_repo / ".lf" / "steps"
+    steps_dir.mkdir(parents=True, exist_ok=True)
+    (steps_dir / "test.md").write_text("Task from lf/steps/ md file\n")
 
     result = gather_step(temp_repo, "test")
-    assert result.content == "Task from .claude/commands/\n"
-
-
-def test_gather_step_finds_md_in_lf(temp_repo):
-    """Task file with .md extension in .lf/ works."""
-    lf = temp_repo / ".lf"
-    (lf / "test.md").write_text("Task from .lf/ md file\n")
-
-    result = gather_step(temp_repo, "test")
-    assert result.content == "Task from .lf/ md file\n"
+    assert result.content == "Task from lf/steps/ md file\n"
 
 
 def test_gather_step_ignores_non_md_extensions(temp_repo):
     """Task files with non-.md extensions are not found."""
-    lf = temp_repo / ".lf"
-    (lf / "test.lf").write_text("Task from .lf file\n")
-    (lf / "test.txt").write_text("Task from .txt file\n")
+    steps_dir = temp_repo / ".lf" / "steps"
+    steps_dir.mkdir(parents=True, exist_ok=True)
+    (steps_dir / "test.lf").write_text("Task from .lf file\n")
+    (steps_dir / "test.txt").write_text("Task from .txt file\n")
 
     result = gather_step(temp_repo, "test")
     assert result is None  # Only .md is supported
@@ -178,7 +181,7 @@ def test_gather_prompt_components_returns_dataclass(temp_repo):
 
     assert isinstance(components, PromptComponents)
     assert components.repo_root == temp_repo
-    assert len(components.docs) == 3  # .design/plan + README, STYLE
+    assert len(components.docs) == 3  # scratch/plan + README, STYLE
     assert components.loopflow_doc is not None  # bundled system doc
     assert components.step == ("implement", "Implement the feature.\n")
 
@@ -305,7 +308,7 @@ def test_gather_step_falls_back_to_builtin(tmp_path):
     # Create empty repo
     (tmp_path / ".git").mkdir()
 
-    # No .lf/ or .claude/commands/ - should fall back to builtin
+    # No lf/steps/ or .claude/commands/ - should fall back to builtin
     result = gather_step(tmp_path, "design")
     assert result is not None
     assert result.name == "design"
@@ -315,9 +318,9 @@ def test_gather_step_falls_back_to_builtin(tmp_path):
 def test_gather_step_user_overrides_builtin(tmp_path):
     """User task file takes precedence over builtin."""
     (tmp_path / ".git").mkdir()
-    lf = tmp_path / ".lf"
-    lf.mkdir()
-    (lf / "design.md").write_text("My custom design task\n")
+    steps = tmp_path / ".lf" / "steps"
+    steps.mkdir(parents=True, exist_ok=True)
+    (steps / "design.md").write_text("My custom design task\n")
 
     result = gather_step(tmp_path, "design")
     assert result is not None
@@ -325,26 +328,24 @@ def test_gather_step_user_overrides_builtin(tmp_path):
 
 
 def test_list_user_steps_returns_user_tasks(tmp_path):
-    """list_user_steps returns tasks from .lf/ and .claude/commands/."""
+    """list_user_steps returns tasks from lf/steps/ and .claude/commands/."""
     (tmp_path / ".git").mkdir()
 
-    # .lf/ tasks
-    lf = tmp_path / ".lf"
-    lf.mkdir()
-    (lf / "custom.md").write_text("custom task")
-    (lf / "another.md").write_text("another task")
-    (lf / "config.yaml").write_text("not a task")
+    # lf/steps/ tasks
+    steps = tmp_path / ".lf" / "steps"
+    steps.mkdir(parents=True, exist_ok=True)
+    (steps / "custom.md").write_text("custom task")
+    (steps / "another.md").write_text("another task")
 
     # .claude/commands/ tasks
     claude = tmp_path / ".claude" / "commands"
-    claude.mkdir(parents=True)
+    claude.mkdir(parents=True, exist_ok=True)
     (claude / "third.md").write_text("third task")
 
     tasks = list_user_steps(tmp_path)
     assert "custom" in tasks
     assert "another" in tasks
     assert "third" in tasks
-    assert "config" not in tasks  # config.yaml should be excluded
 
 
 @patch("loopflow.lf.skills._RAMS_PATH", Path("/nonexistent/rams.md"))
@@ -355,10 +356,10 @@ def test_list_all_steps_separates_user_and_builtin(tmp_path):
     (tmp_path / ".git").mkdir()
 
     # Override one builtin
-    lf = tmp_path / ".lf"
-    lf.mkdir()
-    (lf / "design.md").write_text("custom design")
-    (lf / "custom.md").write_text("custom task")
+    steps = tmp_path / ".lf" / "steps"
+    steps.mkdir(parents=True, exist_ok=True)
+    (steps / "design.md").write_text("custom design")
+    (steps / "custom.md").write_text("custom task")
 
     user_tasks, global_tasks, builtin_only, external_skills = list_all_steps(tmp_path)
 
@@ -590,25 +591,25 @@ def _setup_task_template(tmp_path):
     """Helper to set up a repo with a task template."""
     (tmp_path / ".git").mkdir(exist_ok=True)
     (tmp_path / "README.md").write_text("# Test\n")
-    lf = tmp_path / ".lf"
-    lf.mkdir(exist_ok=True)
-    (lf / "compare.md").write_text(
+    steps = tmp_path / ".lf" / "steps"
+    steps.mkdir(parents=True, exist_ok=True)
+    (steps / "compare.md").write_text(
         "Compare {{name_a}} and {{name_b}}.\n\nDiff A:\n{{diff_a}}\n\nDiff B:\n{{diff_b}}\n"
     )
 
 
 # =============================================================================
-# Internal docs (.docs/) tests
+# Internal docs (roadmap/) tests
 # =============================================================================
 
 
 def test_internal_docs_auto_included(tmp_path):
-    """.docs/ markdown files are auto-included in context."""
+    """roadmap/ markdown files are auto-included in context."""
     (tmp_path / ".git").mkdir()
     (tmp_path / "README.md").write_text("# Test\n")
 
-    # Create .docs/ with some markdown files
-    internal_docs = tmp_path / ".docs"
+    # Create roadmap/ with some markdown files
+    internal_docs = tmp_path / "roadmap"
     internal_docs.mkdir()
     (internal_docs / "architecture.md").write_text("# Architecture\n\nHow it works.\n")
     (internal_docs / "decisions").mkdir()
@@ -617,7 +618,7 @@ def test_internal_docs_auto_included(tmp_path):
     components = gather_prompt_components(tmp_path, "implement")
     prompt = format_prompt(components)
 
-    # .docs/ files should be included
+    # roadmap/ files should be included
     assert "# Architecture" in prompt
     assert "How it works." in prompt
     assert "# ADR 001" in prompt
@@ -625,14 +626,14 @@ def test_internal_docs_auto_included(tmp_path):
 
 
 def test_internal_docs_empty_when_missing(tmp_path):
-    """.docs/ missing doesn't cause errors."""
+    """roadmap/ missing doesn't cause errors."""
     (tmp_path / ".git").mkdir()
     (tmp_path / "README.md").write_text("# Test\n")
 
     components = gather_prompt_components(tmp_path, step=None, inline="test")
     prompt = format_prompt(components)
 
-    # Should still work, just no .docs content
+    # Should still work, just no roadmap content
     assert "# Test" in prompt
 
 
@@ -657,27 +658,27 @@ def test_public_docs_not_auto_included(tmp_path):
 
 
 def test_internal_docs_before_root_docs(tmp_path):
-    """.docs/ appears before repo root .md files in context."""
+    """roadmap/ appears before repo root .md files in context."""
     (tmp_path / ".git").mkdir()
     (tmp_path / "README.md").write_text("# Root README\n")
 
-    design_dir = tmp_path / ".design"
-    design_dir.mkdir()
-    (design_dir / "plan.md").write_text("# Design Plan\n")
+    scratch_dir = tmp_path / "scratch"
+    scratch_dir.mkdir()
+    (scratch_dir / "plan.md").write_text("# Design Plan\n")
 
-    internal_docs = tmp_path / ".docs"
+    internal_docs = tmp_path / "roadmap"
     internal_docs.mkdir()
     (internal_docs / "context.md").write_text("# Internal Context\n")
 
     components = gather_prompt_components(tmp_path, step=None, inline="test")
 
-    # Check order: .design/, then .docs/, then root docs
+    # Check order: scratch/, then roadmap/, then root docs
     doc_paths = [str(p) for p, _ in components.docs]
-    design_idx = next(i for i, p in enumerate(doc_paths) if ".design" in p)
-    internal_idx = next(i for i, p in enumerate(doc_paths) if ".docs" in p)
+    scratch_idx = next(i for i, p in enumerate(doc_paths) if "scratch" in p)
+    internal_idx = next(i for i, p in enumerate(doc_paths) if "roadmap" in p)
     readme_idx = next(i for i, p in enumerate(doc_paths) if "README" in p)
 
-    assert design_idx < internal_idx < readme_idx
+    assert scratch_idx < internal_idx < readme_idx
 
 
 def test_trim_prompt_components_drops_oversize_diff_files(tmp_path):

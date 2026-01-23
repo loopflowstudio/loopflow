@@ -5,7 +5,7 @@ title: lfd Command Reference
 
 # lfd Command Reference
 
-`lfd` is the loopflow daemon. It runs agent loops in the background, managing goals, iterations, and PR limits.
+`lfd` is the loopflow daemon. It runs agent loops in the background, managing iterations and PR limits.
 
 ## Basic Usage
 
@@ -60,7 +60,7 @@ lfd loop ship src/api/
 lfd loop ship .
 ```
 
-Runs iterations until the PR limit is reached, then waits. Each iteration picks work based on the goal, runs a pipeline, and creates a PR.
+Runs iterations until the PR limit is reached, then waits. Each iteration runs the flow pipeline and creates a PR.
 
 Flows live in `.lf/flows/<name>.py`:
 
@@ -77,28 +77,27 @@ pr: true
 
 | Flag | Description |
 |------|-------------|
-| `-g, --goal` | Goal to add (repeatable) |
+| `-v, --voice` | Voice to apply (repeatable) |
 | `-l, --limit` | PR limit override (default: 5) |
 | `--merge-mode` | `pr` (accumulate) or `land` (auto-merge to main) |
 | `-f, --foreground` | Run in foreground instead of background |
 
-### lfd flow
+### lfd run
 
 Run a single iteration (one-shot).
 
 ```bash
-lfd flow <area> --flow <flow>
-lfd flow src/ui/ --flow ship -p spec.md
-lfd flow . --flow ship -v
+lfd run <flow> <area>
+lfd run ship src/ui/
+lfd run ship . -c
 ```
 
 Like `lfd loop` but stops after one iteration. Good for specific tasks.
 
 | Flag | Description |
 |------|-------------|
-| `-g, --goal` | Goal to add (repeatable) |
-| `-p, --project` | Project/prompt file to include |
-| `-v, --paste` | Include clipboard content |
+| `-v, --voice` | Voice to apply (repeatable) |
+| `-c, --clipboard` | Include clipboard content |
 
 ### lfd start
 
@@ -130,24 +129,24 @@ When files change under the watched paths on main, triggers one iteration.
 
 | Flag | Description |
 |------|-------------|
-| `-p, --path` | Path to watch (repeatable) |
-| `-g, --goal` | Goal to add (repeatable) |
+| `-p, --path` | Path to watch (repeatable, required) |
+| `-v, --voice` | Voice to apply (repeatable) |
 
 ### lfd schedule
 
 Run on a cron schedule.
 
 ```bash
-lfd schedule "<area>" "<cron>" --flow <flow>
-lfd schedule . "0 9 * * *" --flow ship
-lfd schedule src/ui/ "0 10 * * MON" --flow ship
+lfd schedule <flow> <area> "<cron>"
+lfd schedule ship . "0 9 * * *"
+lfd schedule ship src/ui/ "0 10 * * MON"
 ```
 
 Schedules have a 24-hour grace period for laptops—if your computer wakes after the scheduled time but within 24 hours, it still runs.
 
 | Flag | Description |
 |------|-------------|
-| `-g, --goal` | Goal to add (repeatable) |
+| `-v, --voice` | Voice to apply (repeatable) |
 
 ## Monitoring
 
@@ -164,36 +163,49 @@ Shows loop type, area, status, iteration count, and outstanding PRs.
 
 ### lfd prs
 
-Show PRs created by a loop.
+Show PRs created by an agent.
 
 ```bash
-lfd prs <loop-id>
-lfd prs <loop-id> -n 20
+lfd prs <agent-id>
+lfd prs <agent-id> -n 20
 ```
 
 | Flag | Description |
 |------|-------------|
 | `-n, --limit` | Number of PRs to show (default: 10) |
 
-### lfd list-goals
+### lfd logs
 
-Show available goals in the current repo.
+Show logs for an agent's current run.
 
 ```bash
-lfd list-goals
+lfd logs <agent-id>
+lfd logs <agent-id> -f         # follow output
+lfd logs <agent-id> -n 100     # show 100 lines
 ```
 
-Lists goals from `.lf/goals/` with their area and flow configuration.
+| Flag | Description |
+|------|-------------|
+| `-f, --follow` | Follow output (like tail -f) |
+| `-n, --lines` | Number of lines to show (default: 50) |
 
-## Managing Loops
+### lfd list-voices
+
+Show available voices in current repo.
+
+```bash
+lfd list-voices
+```
+
+## Managing Agents
 
 ### lfd stop
 
-Stop a running loop.
+Stop a running agent.
 
 ```bash
-lfd stop <loop-id>
-lfd stop <loop-id> --force
+lfd stop <agent-id>
+lfd stop <agent-id> --force
 ```
 
 | Flag | Description |
@@ -202,20 +214,16 @@ lfd stop <loop-id> --force
 
 ### lfd rm
 
-Remove a loop and its history.
+Remove an agent and its history.
 
 ```bash
-lfd rm <loop-id>
-lfd rm <loop-id> --force
+lfd rm <agent-id>
+lfd rm <agent-id> --force
 ```
 
 | Flag | Description |
 |------|-------------|
 | `-f, --force` | Skip confirmation prompt |
-
-## Goals
-
-Goals are markdown files in `.lf/goals/` describing what an agent should accomplish. See [Background Agents](agents.md) for details.
 
 ## See Also
 

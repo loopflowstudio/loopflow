@@ -1,6 +1,6 @@
 ---
 requires: code on branch
-produces: passing tests, .design/ updated
+produces: passing tests, scratch/ updated
 ---
 Fix issues and run tests before landing.
 
@@ -17,7 +17,7 @@ The deliverable is working, clean code that passes tests.
    - Review against any style guides in the repo
    - Fix bugs, style violations, and unnecessary complexity directly
    - Don't just note issues—fix them
-   - Rewrite the primary design doc in `.design/` to match the implementation
+   - Rewrite the primary design doc in `scratch/` to match the implementation
    - Update README and docs if the branch changes user-facing behavior or APIs
 
 2. **Test**

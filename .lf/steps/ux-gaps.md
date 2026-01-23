@@ -1,6 +1,6 @@
 ---
 requires: screenshots
-produces: .design/ux-gaps.md
+produces: scratch/ux-gaps.md
 ---
 > **Screenshots**: If running standalone, capture with Cmd+Shift+S first.
 > In the `ux` pipeline, uses screenshots from the ux-research step.
@@ -83,7 +83,7 @@ For each area of Concerto, identify gaps:
 
 ## Output
 
-Write analysis to `.design/ux-gaps.md`:
+Write analysis to `scratch/ux-gaps.md`:
 
 ```markdown
 # UX Gap Analysis

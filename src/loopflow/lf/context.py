@@ -372,16 +372,16 @@ def list_user_steps(repo_root: Path) -> list[str]:
     """Return names of user-defined steps in the repo."""
     steps = set()
 
+    # .lf/steps/*.md (preferred)
+    steps_dir = repo_root / ".lf" / "steps"
+    if steps_dir.exists():
+        for p in steps_dir.glob("*.md"):
+            steps.add(p.stem)
+
     # .claude/commands/*.md (Claude Code compatible)
     claude_dir = repo_root / ".claude" / "commands"
     if claude_dir.exists():
         for p in claude_dir.glob("*.md"):
-            steps.add(p.stem)
-
-    # .lf/steps/*.md
-    lf_steps_dir = repo_root / ".lf" / "steps"
-    if lf_steps_dir.exists():
-        for p in lf_steps_dir.glob("*.md"):
             steps.add(p.stem)
 
     # .lf/*.md (legacy)
@@ -449,12 +449,11 @@ def gather_step(repo_root: Path | None, name: str, config=None) -> StepFile | No
 
     Search order:
     1. External skills (prefix:name format, e.g., sp:brainstorm)
-    2. .claude/commands/{name}.md (repo, Claude Code compatible)
-    3. .lf/steps/{name}.md (repo)
-    4. .lf/{name}.md (repo, legacy)
-    5. ~/.lf/steps/{name}.md (global)
-    6. ~/.claude/commands/{name}.md (global, Claude Code compatible)
-    7. templates/steps/{name}.md (builtin)
+    2. .lf/steps/{name}.md (repo)
+    3. .claude/commands/{name}.md (repo, Claude Code compatible)
+    4. ~/.lf/steps/{name}.md (global)
+    5. ~/.claude/commands/{name}.md (global, Claude Code compatible)
+    6. templates/steps/{name}.md (builtin)
 
     Returns StepFile with parsed config, or None if not found.
     """
@@ -475,21 +474,15 @@ def gather_step(repo_root: Path | None, name: str, config=None) -> StepFile | No
             return step_file
 
     if repo_root:
-        # Check .claude/commands first (Claude Code compatible)
-        claude_dir = repo_root / ".claude" / "commands"
-        content = _read_file_if_named(claude_dir, f"{name}.md")
-        if content:
-            return parse_step_file(name, content)
-
-        # Check .lf/steps/ directory
+        # Check .lf/steps/ first
         lf_steps_dir = repo_root / ".lf" / "steps"
         content = _read_file_if_named(lf_steps_dir, f"{name}.md")
         if content:
             return parse_step_file(name, content)
 
-        # Legacy: check .lf/ directly (for backwards compatibility)
-        lf_dir = repo_root / ".lf"
-        content = _read_file_if_named(lf_dir, f"{name}.md")
+        # Check .claude/commands (Claude Code compatible)
+        claude_dir = repo_root / ".claude" / "commands"
+        content = _read_file_if_named(claude_dir, f"{name}.md")
         if content:
             return parse_step_file(name, content)
 
@@ -677,7 +670,7 @@ def gather_prompt_components(
     loopflow_doc = _load_loopflow_doc() if context_config.lfdocs else None
 
     # Insert design docs and internal docs before repo docs
-    # Order: .design/ (ephemeral), .docs/ (persistent internal), repo root .md files
+    # Order: scratch/ (ephemeral), roadmap/ (persistent internal), repo root .md files
     design_docs = gather_design_docs(repo_root)
     internal_docs = gather_internal_docs(repo_root)
     prefix_docs = design_docs + internal_docs
@@ -756,7 +749,7 @@ def format_prompt(components: PromptComponents) -> str:
         parts.append(
             "Run mode is auto (headless). Proceed without pausing for questions. "
             "If you need clarification, make the best assumption you can and append "
-            "any open questions to `.design/questions.md`."
+            "any open questions to `scratch/questions.md`."
         )
 
     if components.loopflow_doc:
@@ -794,7 +787,7 @@ def format_prompt(components: PromptComponents) -> str:
         docs_body = "\n\n".join(doc_parts)
         parts.append(
             "Repository documentation. Follow STYLE carefully. "
-            "May include design artifacts (.design/) and internal docs (.docs/).\n\n"
+            "May include design artifacts (scratch/) and internal docs (roadmap/).\n\n"
             f"<lf:docs>\n{docs_body}\n</lf:docs>"
         )
 

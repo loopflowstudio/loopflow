@@ -169,7 +169,7 @@ def _coerce_flow(name: str, data: Any) -> FlowDef:
 
 
 def load_flow(name: str, repo: Path | None) -> FlowDef | None:
-    """Load flow from .lf/flows/{name}.py (repo then global)."""
+    """Load flow from flows/{name}.py (repo then global)."""
     flow_path = None
 
     # Check repo first

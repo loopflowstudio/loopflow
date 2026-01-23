@@ -6,18 +6,18 @@ Build from approved roadmap specs.
 
 ## Where to read
 
-- `.docs/roadmap/` — see all planned work across all areas
-- `.docs/roadmap/<your-area>/` — items you own and are responsible for building
+- `roadmap/` — see all planned work across all areas
+- `roadmap/<your-area>/` — items you own and are responsible for building
 
 Look for items with `status: approved` in their frontmatter.
 
 ## Process
 
-1. Read `.docs/roadmap/<area>/` for approved items
+1. Read `roadmap/<area>/` for approved items
 2. Pick the item with the most leverage—where's the biggest gap between vision and implementation?
 3. Update the item's frontmatter to `status: in-progress`
 4. Build it using the implement → review → polish flow
-5. When done, update to `status: done` and move to `.docs/roadmap/_done/`
+5. When done, update to `status: done` and move to `roadmap/_done/`
 
 ## Picking work
 

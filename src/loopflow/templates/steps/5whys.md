@@ -1,6 +1,6 @@
 ---
 interactive: true
-produces: .design/5whys-<topic>.md
+produces: scratch/5whys-<topic>.md
 ---
 Perform root cause analysis on a bug, incident, or unexpected behavior using the 5 Whys technique. Produces a design doc that requires implementation.
 
@@ -25,7 +25,7 @@ Perform root cause analysis on a bug, incident, or unexpected behavior using the
 
 ## Output format
 
-Write to `.design/5whys-<topic>.md`:
+Write to `scratch/5whys-<topic>.md`:
 
 ```markdown
 # 5 Whys: <Problem>

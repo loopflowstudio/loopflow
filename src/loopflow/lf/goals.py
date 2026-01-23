@@ -217,7 +217,7 @@ def _detect_goal_kind(name: str, frontmatter: dict, content: str) -> GoalKind:
         "## Decision",
         "decide what mode",
         "deciding what to",
-        ".docs/roadmap/",
+        "roadmap/",
         "status: approved",
         "status: proposed",
     ]

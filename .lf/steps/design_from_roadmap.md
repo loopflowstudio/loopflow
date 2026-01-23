@@ -1,15 +1,15 @@
 ---
 interactive: false
-produces: .design/<slug>.md
+produces: scratch/<slug>.md
 ---
 Create a scoped project design from the most recent roadmap item.
 
 ## Steps
 
-1. Find the most recently modified roadmap item under `.docs/roadmap/**/*.md`.
-2. If none exist, write `.design/questions.md` explaining that no roadmap items were found and stop.
+1. Find the most recently modified roadmap item under `roadmap/**/*.md`.
+2. If none exist, write `scratch/questions.md` explaining that no roadmap items were found and stop.
 3. Read the roadmap item and extract its intent, area, and scope.
-4. Create `.design/<slug>.md` where `<slug>` is the roadmap filename without extension.
+4. Create `scratch/<slug>.md` where `<slug>` is the roadmap filename without extension.
 
 ## Output format
 
@@ -18,7 +18,7 @@ Create a scoped project design from the most recent roadmap item.
 
 ## Roadmap Source
 
-- Path: <.docs/roadmap/...>
+- Path: <roadmap/...>
 - Status: <status from frontmatter if present>
 - Area: <area from frontmatter if present>
 

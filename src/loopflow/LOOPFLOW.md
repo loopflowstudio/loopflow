@@ -36,18 +36,26 @@ In interactive mode, commit at natural breakpoints. Don't leave the branch in a 
 ## File Structure
 
 ```
-.claude/commands/
-  <step>.md        # prompt files (Claude Code compatible)
-
 .lf/
   config.yaml      # repo configuration
+  steps/           # step prompts
+  voices/          # personas
+  flows/           # flow definitions
 
-.design/
+.claude/commands/  # step prompts (Claude Code compatible)
+
+scratch/           # PR scratchpad (root only, cleared on merge)
   <branch>.md      # design doc for current branch
   questions.md     # open questions captured during runs
+
+roadmap/           # internal docs (persists)
+  vision.md        # where we're going
+  <area>/          # area-specific plans
 ```
 
-Keep `.design/<branch>.md` current as work progresses—what's done, what's left, what changed. Open questions go in `.design/questions.md`. Don't block on unknowns; capture them and keep moving.
+**scratch/** is for the current PR. Keep `scratch/<branch>.md` current as work progresses—what's done, what's left, what changed. Open questions go in `scratch/questions.md`. Don't block on unknowns; capture them and keep moving. Cleared automatically when the PR merges.
+
+**roadmap/** is for forward-looking plans that persist. Root `roadmap/` holds cross-cutting docs. Per-folder `roadmap/` (like `src/api/roadmap/`) holds area-specific plans. Including a path auto-includes its nested roadmap folders.
 
 ---
 
@@ -70,10 +78,10 @@ Prompts can require and produce specific artifacts. For example:
 
 | Prompt | Requires | Produces |
 |--------|----------|----------|
-| design | — | .design/<branch>.md |
-| implement | .design/<branch>.md | code, tests |
+| design | — | scratch/<branch>.md |
+| implement | scratch/<branch>.md | code, tests |
 | polish | code on branch | passing tests |
-| review | code on branch | verdict in .design/ |
+| review | code on branch | verdict in scratch/ |
 
 Common sequences:
 
@@ -93,4 +101,4 @@ These are examples. Check `.lf/flows/` for the actual pipelines configured in th
 
 ## Auto Mode Behavior
 
-In headless execution, prompts run without interactive input. Make best-effort assumptions and keep moving. Questions get captured in `.design/questions.md` for the next pass.
+In headless execution, prompts run without interactive input. Make best-effort assumptions and keep moving. Questions get captured in `scratch/questions.md` for the next pass.

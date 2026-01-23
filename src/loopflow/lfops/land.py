@@ -73,8 +73,8 @@ def _resolve_repos(worktree: str | None, strict: bool) -> tuple[Path, Path]:
 
 
 def _clear_design_and_push(repo_root: Path) -> bool:
-    """Delete .design/* contents, commit, push. Returns True if changes made."""
-    design_dir = repo_root / ".design"
+    """Delete scratch/* contents, commit, push. Returns True if changes made."""
+    design_dir = repo_root / "scratch"
     if not design_dir.exists():
         return False
 
@@ -89,7 +89,7 @@ def _clear_design_and_push(repo_root: Path) -> bool:
             shutil.rmtree(f)
 
     subprocess.run(["git", "add", "-A", str(design_dir)], cwd=repo_root, check=True)
-    subprocess.run(["git", "commit", "-m", "clear .design/"], cwd=repo_root, check=True)
+    subprocess.run(["git", "commit", "-m", "clear scratch/"], cwd=repo_root, check=True)
     subprocess.run(["git", "push"], cwd=repo_root, check=True)
     return True
 
@@ -109,7 +109,7 @@ def _squash_commits(repo_root: Path, base_ref: str, commit_msg: str) -> None:
     ).stdout.strip()
 
     subprocess.run(["git", "reset", "--soft", base_ref], cwd=repo_root, check=True)
-    design_dir = repo_root / ".design"
+    design_dir = repo_root / "scratch"
     if design_dir.exists():
         subprocess.run(["git", "add", "-A", str(design_dir)], cwd=repo_root, check=False)
 
@@ -372,10 +372,10 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
         typer.echo(f"Error: Cannot land {branch} onto itself", err=True)
         raise typer.Exit(1)
 
-    # Clear .design before merge so it never touches main
+    # Clear scratch/ before merge so it never touches main
     # Then update PR so it points to the new HEAD
     if _clear_design_and_push(repo_root):
-        typer.echo("Cleared .design/")
+        typer.echo("Cleared scratch/")
         subprocess.run(
             ["gh", "pr", "edit", str(pr_number), "--title", title, "--body", body],
             cwd=repo_root,
@@ -545,12 +545,12 @@ def _land_local(strict: bool, worktree: str | None) -> None:
         typer.echo(f"Error: Merge failed.\n{result.stderr}", err=True)
         raise typer.Exit(1)
 
-    # Clear .design artifacts
+    # Clear scratch/ artifacts
     if clear_design_artifacts(main_repo):
-        design_dir = main_repo / ".design"
+        design_dir = main_repo / "scratch"
         if design_dir.exists():
             subprocess.run(["git", "add", "-A", str(design_dir)], cwd=main_repo, check=True)
-        typer.echo("Removed .design contents")
+        typer.echo("Removed scratch/ contents")
 
     # Check there's something to commit
     result = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=main_repo)

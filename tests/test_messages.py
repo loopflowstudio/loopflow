@@ -25,7 +25,7 @@ def test_extract_json_ignores_placeholders_before_fence():
     # Use raw string to preserve escaped newlines as Claude would output them
     text = r"""Looking at the diff:
 
-1. New function `load_goal()` that loads from `.lf/goals/{name}.md`
+1. New function `load_goal()` that loads from `lf/goals/{name}.md`
 2. Updates to `design.md`
 
 ```json

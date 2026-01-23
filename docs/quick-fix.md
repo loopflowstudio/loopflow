@@ -12,14 +12,14 @@ One command. Context preloaded. Normal Claude Code session.
 ## How it works
 
 ```bash
-lf debug -v
+lf debug -c
 ```
 
 1. `lf` assembles context—repo docs, branch files, clipboard
 2. Passes everything to Claude Code
 3. You get an interactive session with context already loaded
 
-The `-v` flag pastes your clipboard. Copy an error, run the command, watch it fix.
+The `-c` flag pastes your clipboard. Copy an error, run the command, watch it fix.
 
 ## What's included
 
@@ -51,22 +51,22 @@ lf : "rename getUserById to findUserById everywhere"
 
 | Flag | What it adds |
 |------|--------------|
-| `-v` | Clipboard content |
-| `-x FILE` | Specific file or directory |
+| `-c` | Clipboard content |
+| `-p FILE` | Specific file or directory |
 | `--diff` | Raw `git diff` output |
 | `--no-lfdocs` | Skip repo docs |
 
 ```bash
-lf debug -v                           # paste clipboard
-lf : "explain this" -x src/auth.py    # add specific file
+lf debug -c                           # paste clipboard
+lf : "explain this" -p src/auth.py    # add specific file
 ```
 
 ## Different models
 
 ```bash
-lf debug -v -m codex        # use Codex instead
-lf debug -v -m gemini       # use Gemini
-lf debug -v -m claude:opus  # use Claude Opus
+lf debug -c -m codex        # use Codex instead
+lf debug -c -m gemini       # use Gemini
+lf debug -c -m claude:opus  # use Claude Opus
 ```
 
 Same context assembly, different backend.
@@ -83,4 +83,4 @@ Default is interactive. Auto mode is useful for chaining commands.
 
 ## Next
 
-Ready to build features? [Feature workflow →](workflow.md)
+Ready to build features? [Feature Workflow →](workflow.md)

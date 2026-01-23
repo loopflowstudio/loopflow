@@ -1,12 +1,12 @@
 ---
 requires: code on branch
-produces: .design/<branch>.md with verdict
+produces: scratch/<branch>.md with verdict
 ---
 Review the diff on this branch and produce a written assessment.
 
 The goal is to put something in the human's hands quickly. A draft they can shape—add issues you missed, remove nitpicks they disagree with, adjust the verdict. You can always be re-invoked. Don't aim for comprehensive; aim for useful and fast.
 
-The deliverable is a consolidated design document under `.design/`. Do not edit code files.
+The deliverable is a consolidated design document under `scratch/`. Do not edit code files.
 
 ## Workflow
 
@@ -14,10 +14,10 @@ The deliverable is a consolidated design document under `.design/`. Do not edit 
 2. Run `git diff` to see uncommitted changes
 3. Run `git log main..HEAD --oneline` to understand commit history
 4. Read any style guides in the repo
-5. Check `.docs/` for architecture context and prior decisions—evaluate choices against these
-6. Read existing `.design/*.md` files
-7. Write a single consolidated document to `.design/<branch-name>.md`
-8. Delete other `.design/*.md` files after consolidating
+5. Check `roadmap/` (root and area-specific) for architecture context and prior decisions
+6. Read existing `scratch/*.md` files
+7. Write a single consolidated document to `scratch/<branch-name>.md`
+8. Delete other `scratch/*.md` files after consolidating
 
 ## What to look for
 
@@ -41,7 +41,7 @@ When noting issues, be specific and actionable. "This is complex" is useless. "4
 
 ## Consolidating design docs
 
-Merge anything worth keeping from existing `.design/` docs. Be aggressive about culling:
+Merge anything worth keeping from existing `scratch/` docs. Be aggressive about culling:
 
 **Keep:** Decisions that explain non-obvious choices. User quotes that capture intent. "Not implemented" notes if still relevant.
 
@@ -49,7 +49,7 @@ Merge anything worth keeping from existing `.design/` docs. Be aggressive about 
 
 ## Output format
 
-Write `.design/<branch-name>.md`:
+Write `scratch/<branch-name>.md`:
 
 ```markdown
 # <Branch Name>
@@ -67,4 +67,4 @@ Write `.design/<branch-name>.md`:
 <Consolidated notes worth preserving. Skip if nothing non-obvious.>
 ```
 
-Delete other `.design/*.md` files after writing.
+Delete other `scratch/*.md` files after writing.

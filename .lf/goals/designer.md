@@ -20,7 +20,7 @@ Pick ONE focused design task from the area you're responsible for:
 
 Focus on depth over breadth. A single well-thought-out design is better than multiple shallow ones.
 
-**Output**: Create or update a design document in `.design/` that another engineer could implement from.
+**Output**: Create or update a design document in `scratch/` that another engineer could implement from.
 
 ## Quality Bar
 

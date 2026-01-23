@@ -38,7 +38,7 @@ Requires [worktrunk](https://github.com/loopflowstudio/worktrunk) for underlying
 lf design: add OAuth login
 ```
 
-Interactive session to explore the problem. Writes spec to `.design/<branch>.md`.
+Interactive session to explore the problem. Writes spec to `scratch/<branch>.md`.
 
 ### implement
 
@@ -46,7 +46,7 @@ Interactive session to explore the problem. Writes spec to `.design/<branch>.md`
 lf implement
 ```
 
-Reads `.design/<branch>.md` and builds it. Runs in auto mode by default.
+Reads `scratch/<branch>.md` and builds it. Runs in auto mode by default.
 
 ### lint
 
@@ -78,12 +78,12 @@ Tasks pass state through files:
 
 | Task | Reads | Writes |
 |------|-------|--------|
-| design | — | `.design/<branch>.md` |
-| implement | `.design/<branch>.md` | code |
+| design | — | `scratch/<branch>.md` |
+| implement | `scratch/<branch>.md` | code |
 | polish | code, tests | code |
-| review | code | `.design/review.md` |
+| review | code | `scratch/review.md` |
 
-The `.design/` folder is your PR scratchpad—cleared when the PR merges.
+The `scratch/` folder is your PR scratchpad—cleared when the PR merges.
 
 ## Shipping
 
@@ -133,4 +133,4 @@ lf implement: add auth
 
 ## Next
 
-Ready for autonomous agents? [Background agents →](agents.md)
+Ready for autonomous agents? [Background Agents →](agents.md)

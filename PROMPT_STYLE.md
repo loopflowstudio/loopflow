@@ -9,7 +9,7 @@ Every prompt starts with YAML frontmatter:
 ```yaml
 ---
 requires: diff vs main | existing code | none
-produces: .design/something.md | code changes | verdict
+produces: scratch/something.md | code changes | verdict
 interactive: true  # optional, default false
 ---
 ```

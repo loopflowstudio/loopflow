@@ -5,8 +5,8 @@ from pathlib import Path
 
 
 def gather_design_docs(repo_root: Path) -> list[tuple[Path, str]]:
-    """Gather design docs from .design/ for prompt context."""
-    design_dir = repo_root / ".design"
+    """Gather design docs from scratch/ for prompt context."""
+    design_dir = repo_root / "scratch"
     if not design_dir.is_dir():
         return []
 
@@ -18,13 +18,13 @@ def gather_design_docs(repo_root: Path) -> list[tuple[Path, str]]:
 
 
 def gather_internal_docs(repo_root: Path) -> list[tuple[Path, str]]:
-    """Gather internal docs from .docs/ for prompt context.
+    """Gather internal docs from roadmap/ for prompt context.
 
-    .docs/ contains forward-looking internal documentation:
-    architecture, decisions, context for agents. Unlike .design/
-    (ephemeral per-PR), .docs/ persists across merges.
+    roadmap/ contains forward-looking internal documentation:
+    architecture, decisions, context for agents. Unlike scratch/
+    (ephemeral per-PR), roadmap/ persists across merges.
     """
-    docs_dir = repo_root / ".docs"
+    docs_dir = repo_root / "roadmap"
     if not docs_dir.is_dir():
         return []
 
@@ -52,16 +52,16 @@ def load_goal(goal: str | Path, repo_root: Path) -> str | None:
 
 
 def has_design_artifacts(repo_root: Path) -> bool:
-    """Return True when .design contains any files or folders."""
-    design_dir = repo_root / ".design"
+    """Return True when scratch/ contains any files or folders."""
+    design_dir = repo_root / "scratch"
     if not design_dir.exists():
         return False
     return any(design_dir.iterdir())
 
 
 def clear_design_artifacts(repo_root: Path) -> bool:
-    """Remove .design contents while keeping the folder."""
-    design_dir = repo_root / ".design"
+    """Remove scratch/ contents while keeping the folder."""
+    design_dir = repo_root / "scratch"
     if design_dir.exists() and not design_dir.is_dir():
         design_dir.unlink()
         design_dir.mkdir(exist_ok=True)

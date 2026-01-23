@@ -25,19 +25,19 @@ lf implement: add auth       # pass arguments after colon
 lf sp:brainstorm             # run superpowers brainstorm skill
 lf sr:gog                    # run SkillRegistry skill
 lf : "fix the typo"          # inline prompt
-lf debug -v                  # paste clipboard, fix the bug
+lf debug -c                  # paste clipboard, fix the bug
 ```
 
-## Task Files
+## Steps
 
-Tasks are markdown files in these locations (searched in order):
+Steps are markdown files in these locations (searched in order):
 
 1. External skills — `<prefix>:<skill>` format (e.g., `sp:brainstorm`, `sr:gog`)
-2. `.claude/commands/<step>.md` — preferred, portable
-3. `.lf/<step>.md` — local override
-4. Built-in steps — commit, debug, design, expand, explore, implement, init, iterate, lint, polish, rebase, reduce, refine, review, roadmap
+2. `.lf/steps/<step>.md` — repo steps
+3. `.claude/commands/<step>.md` — Claude Code compatible
+4. Built-in steps — commit, debug, design, expand, explore, implement, init, iterate, lint, polish, rebase, reduce, refine, review
 
-### Task Arguments
+### Step Arguments
 
 ```bash
 lf implement: add user authentication
@@ -51,16 +51,17 @@ Inside step files, `{args}` is replaced with whatever comes after the colon.
 
 | Flag | Description |
 |------|-------------|
-| `-x FILE` | Add a file or directory to context |
-| `--no-lfdocs` | Skip repo docs (README, STYLE, etc.) |
-| `--no-diff-files` | Skip files changed on this branch |
-| `--diff` | Include raw `git diff` output |
+| `-p, --path FILE` | Add a file or directory to context |
+| `-w, --worktree NAME` | Create worktree and run step there |
+| `--lfdocs / --no-lfdocs` | Include roadmap/, scratch/, and root .md files (default: on) |
+| `--diff-files / --no-diff-files` | Include files touched by branch (default: on) |
+| `--diff / --no-diff` | Include raw `git diff` output |
 
 ### Clipboard
 
 | Flag | Description |
 |------|-------------|
-| `-v, --paste` | Include clipboard content in prompt |
+| `-c, --clipboard` | Include clipboard content in prompt |
 
 ### Summaries
 
@@ -81,21 +82,39 @@ Inside step files, `{args}` is replaced with whatever comes after the colon.
 | Flag | Description |
 |------|-------------|
 | `-m, --model MODEL` | Choose model (e.g., `claude:opus`, `codex`, `gemini`) |
-| `--voice VOICE` | Apply voice/persona (comma-separated for multiple) |
+| `-v, --voice VOICE` | Apply voice/persona (comma-separated for multiple) |
 
 ## Output Flags
 
 | Flag | Description |
 |------|-------------|
-| `-c, --copy` | Copy assembled prompt to clipboard, show token breakdown |
 | `--web` | Copy to clipboard and open web client (claude.ai, chatgpt.com, etc.) |
 
 ## Browser Automation
 
 | Flag | Description |
 |------|-------------|
-| `--chrome` | Enable Chrome browser automation |
-| `--no-chrome` | Disable Chrome automation |
+| `--chrome / --no-chrome` | Enable Chrome browser automation |
+
+## Running Flows
+
+Run a named flow (chains of steps):
+
+```bash
+lf flow <name>
+lf flow ship
+lf flow ship -w feature-branch
+```
+
+| Flag | Description |
+|------|-------------|
+| `-p, --path FILE` | Additional files for all steps |
+| `-w, --worktree NAME` | Create worktree and run flow there |
+| `-m, --model MODEL` | Model to use |
+| `--pr` | Open PR when done |
+| `--web` | Copy to clipboard and open web client |
+
+Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 
 ## What's Included by Default
 
@@ -103,7 +122,7 @@ Every step automatically includes:
 
 | Context | Default | How to disable |
 |---------|---------|----------------|
-| **Repo docs** (README, STYLE, etc.) | ✓ included | `--no-lfdocs` |
+| **lfdocs** (roadmap/, scratch/, root .md files) | ✓ included | `--no-lfdocs` |
 | **Branch files** (files you've changed) | ✓ included | `--no-diff-files` |
 
 ## What's Opt-In
@@ -113,8 +132,8 @@ These require explicit flags or config:
 | Context | How to enable |
 |---------|---------------|
 | **Raw diff** (line-by-line changes) | `--diff` |
-| **Clipboard** | `-v` / `--paste` |
-| **Extra files** | `-x FILE` |
+| **Clipboard** | `-c` / `--clipboard` |
+| **Extra files** | `-p FILE` |
 | **Summaries** | Configure in `.lf/config.yaml` |
 | **Chrome automation** | `--chrome` |
 
@@ -126,13 +145,13 @@ See [Configuration](config.md) for setting defaults via config file.
 
 ```bash
 # Run tests, copy the error
-lf debug -v
+lf debug -c
 ```
 
 ### Review with extra context
 
 ```bash
-lf review -x docs/api.md -x tests/
+lf review -p docs/api.md -p tests/
 ```
 
 ### Use a different model
@@ -144,8 +163,8 @@ lf implement -m codex: add caching
 ### Apply a voice
 
 ```bash
-lf review --voice concise
-lf implement --voice architect,concise
+lf review -v concise
+lf implement -v architect,concise
 ```
 
 ### Copy prompt without running

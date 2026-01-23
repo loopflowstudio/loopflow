@@ -1,6 +1,6 @@
 ---
 requires: none
-produces: .design/codebase-review.md
+produces: scratch/codebase-review.md
 ---
 Look at this codebase through a user's eyes—human or digital. Find the highest-leverage improvements.
 
@@ -16,7 +16,7 @@ Not an exhaustive audit. Clarity on where to focus, not a list of everything tha
 
 ## Output
 
-Write `.design/codebase-review.md`:
+Write `scratch/codebase-review.md`:
 
 ```markdown
 # Codebase Review

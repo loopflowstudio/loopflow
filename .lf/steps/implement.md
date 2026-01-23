@@ -1,7 +1,7 @@
 ---
 include:
   - tests/**
-requires: .design/<branch>.md
+requires: scratch/<branch>.md
 produces: code, tests
 ---
 Turn the design doc into working code.
@@ -10,11 +10,11 @@ Turn the design doc into working code.
 
 Produce a working first draft quickly. The human will review it, polish will clean it up, and you can be re-invoked if needed. Don't block on ambiguity—make the simplest choice and keep moving. Working code with rough edges beats perfect code that took too long.
 
-The design doc is under `.design/` and auto-included. It contains data structures, function signatures, constraints, and a "done when" verification step.
+The design doc is under `scratch/` and auto-included. It contains data structures, function signatures, constraints, and a "done when" verification step.
 
 ## Workflow
 
-1. Read the design doc in `.design/` to understand what to build
+1. Read the design doc in `scratch/` to understand what to build
 2. Read STYLE.md to understand code conventions
 3. Implement data structures first—get the core types right
 4. Implement functions one at a time, following the signatures in the design
@@ -29,13 +29,13 @@ The design doc is under `.design/` and auto-included. It contains data structure
 
 **Match existing patterns.** Before writing new code, find similar code nearby and match its style. If the codebase uses `@dataclass`, use `@dataclass`. If it uses type hints, use type hints.
 
-**Stay in scope.** Implement exactly what the design doc describes. If something should be added, note it in `.design/questions.md` but don't build it.
+**Stay in scope.** Implement exactly what the design doc describes. If something should be added, note it in `scratch/questions.md` but don't build it.
 
 **Tests prove it works.** Add tests for user-visible behavior. Don't test implementation details. Don't write tests that just verify mock calls—assert on actual results.
 
 **Skip obvious docstrings.** If the function name and types tell the whole story, don't repeat it in prose. No `Args:`/`Returns:` blocks.
 
-**Leave the design doc.** Don't delete `.design/*.md`. The review step and landing process handle cleanup.
+**Leave the design doc.** Don't delete `scratch/*.md`. The review step and landing process handle cleanup.
 
 ## Loopflow code conventions
 
@@ -62,7 +62,7 @@ If the design doc explicitly marks the feature as infrastructure-only, skip UI u
 
 ## If something's wrong
 
-If the design doc is unclear, make the simplest choice and move on. Note your assumption in `.design/questions.md`. The code can be rewritten if needed.
+If the design doc is unclear, make the simplest choice and move on. Note your assumption in `scratch/questions.md`. The code can be rewritten if needed.
 
 If implementation reveals a design flaw, note it but keep going. The design was scaffolding—reality should diverge when it makes sense.
 

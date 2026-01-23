@@ -73,13 +73,14 @@ struct WorktreeRowViewTests {
         #expect(try commitsText.string().contains("1 behind"))
     }
 
-    @Test("Worktree row shows ahead badge when ahead of main")
-    func showsAheadBadge() throws {
-        let worktree = makeWorktree(aheadMain: 3)
+    @Test("Worktree row shows status pill when CI passing")
+    func showsStatusPill() throws {
+        var worktree = makeWorktree(aheadMain: 3)
+        worktree.ciStatus = .passing
         let row = makeRow(worktree: worktree)
 
-        let badge = try row.inspect().find(viewWithAccessibilityIdentifier: "worktree-ahead-badge").text()
-        #expect(try badge.string() == "3")
+        let pill = try row.inspect().find(viewWithAccessibilityIdentifier: "worktree-status-pill").text()
+        #expect(try pill.string() == "ready")
     }
 
     @Test("Worktree row shows staleness badge when merged")

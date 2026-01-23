@@ -21,6 +21,8 @@ from loopflow.lfd.step_run import (
     save_step_run,
     update_step_run_status,
 )
+from loopflow.lfd.git_hooks import hooks_status, install_hooks
+from loopflow.lfd.pr_poller import get_pr_poller
 from loopflow.lfd.worktree_state import get_worktree_state_service
 
 
@@ -31,7 +33,9 @@ class Server:
         self.subscriptions: dict[StreamWriter, list[str]] = {}
         self._running = False
         self._check_task: asyncio.Task | None = None
+        self._poller_task: asyncio.Task | None = None
         self.manager = Manager(load_manager_config())
+        self.pr_poller = get_pr_poller()
 
     async def start(self) -> None:
         self.socket_path.parent.mkdir(parents=True, exist_ok=True)
@@ -45,6 +49,7 @@ class Server:
 
         self._running = True
         self._check_task = asyncio.create_task(self._periodic_check())
+        self._poller_task = asyncio.create_task(self._run_pr_poller())
 
         async with server:
             await server.serve_forever()
@@ -53,6 +58,8 @@ class Server:
         self._running = False
         if self._check_task:
             self._check_task.cancel()
+        if self._poller_task:
+            self._poller_task.cancel()
         for writer in list(self.clients):
             writer.close()
             await writer.wait_closed()
@@ -186,8 +193,42 @@ class Server:
         if not event_name:
             return error("Missing 'event' parameter")
 
+        # Special handling for git events from hooks
+        if event_name.startswith("git."):
+            return await self._handle_git_event(event_name, event_data)
+
         await self._broadcast(Event(event_name, event_data))
         return success({"event": event_name})
+
+    async def _handle_git_event(self, event_name: str, data: dict) -> Response:
+        """Handle git hook notifications with rich event emission."""
+        repo = data.get("repo")
+        branch = data.get("branch")
+
+        if not repo:
+            return error("Missing 'repo' in git event data")
+
+        repo_path = Path(repo)
+        service = get_worktree_state_service()
+        service.invalidate(repo_path)
+
+        # Emit rich event if we have a branch
+        if branch:
+            worktree_status = service.get_one(repo_path, branch)
+            reason = event_name.replace("git.", "")  # "commit", "checkout", etc.
+            await self._broadcast(
+                Event(
+                    "worktree.updated",
+                    {
+                        "branch": branch,
+                        "reason": reason,
+                        "repo": str(repo_path),
+                        "worktree": worktree_status,
+                    },
+                )
+            )
+
+        return success({"event": event_name, "branch": branch})
 
     async def _handle_output_line(self, params: dict) -> Response:
         """Accept output lines from collector and broadcast to subscribers."""
@@ -266,6 +307,14 @@ class Server:
         if not repo_path.exists():
             return error(f"Repository not found: {repo}")
 
+        # Auto-install git hooks if not present
+        try:
+            status = hooks_status(repo_path)
+            if not all(status.values()):
+                install_hooks(repo_path)
+        except Exception:
+            pass  # Don't fail worktree list if hook install fails
+
         try:
             service = get_worktree_state_service()
             worktrees = service.list_worktrees(repo_path)
@@ -309,6 +358,51 @@ class Server:
                     self.clients.discard(writer)
                     self.subscriptions.pop(writer, None)
 
+    async def _run_pr_poller(self) -> None:
+        """Background task for PR state polling."""
+        # Initialize: scan for existing open PRs to track
+        await self._init_pr_tracking()
+
+        service = get_worktree_state_service()
+
+        def get_worktree(repo: Path, branch: str) -> dict | None:
+            service.invalidate(repo)
+            return service.get_one(repo, branch)
+
+        await self.pr_poller.run(self._broadcast, get_worktree)
+
+    async def _init_pr_tracking(self) -> None:
+        """Scan existing worktrees and track any with open PRs."""
+        from loopflow.lfd.autoprune import get_repos_to_check
+
+        service = get_worktree_state_service()
+        for repo in get_repos_to_check():
+            try:
+                worktrees = service.list_worktrees(repo)
+                for wt in worktrees:
+                    ci_info = wt.get("ci", {})
+                    pr_url = ci_info.get("url")
+                    pr_state = ci_info.get("state")
+
+                    # Track open PRs for polling
+                    if pr_url and pr_state and pr_state.upper() == "OPEN":
+                        pr_number = self._extract_pr_number(pr_url)
+                        if pr_number:
+                            branch = wt.get("branch")
+                            if branch:
+                                self.pr_poller.track(repo, branch, pr_number)
+            except Exception:
+                pass  # Don't fail startup if one repo has issues
+
+    def _extract_pr_number(self, pr_url: str | None) -> int | None:
+        """Extract PR number from URL like https://github.com/org/repo/pull/123."""
+        if not pr_url:
+            return None
+        try:
+            return int(pr_url.rstrip("/").split("/")[-1])
+        except (ValueError, IndexError):
+            return None
+
     async def _periodic_check(self) -> None:
         """Periodically update dead processes and check agent triggers."""
         from loopflow.lfd.autoprune import AutopruneManager, get_repos_to_check
@@ -349,6 +443,13 @@ class Server:
                         # Include full worktree status for in-place UI updates
                         worktree_service.invalidate(repo)  # Refresh to get new PR info
                         worktree_status = worktree_service.get_one(repo, branch)
+
+                        # Track PR for CI polling
+                        pr_url = worktree_status.get("ci", {}).get("url") if worktree_status else None
+                        pr_number = self._extract_pr_number(pr_url)
+                        if pr_number:
+                            self.pr_poller.track(repo, branch, pr_number)
+
                         await self._broadcast(
                             Event(
                                 "worktree.updated",
@@ -365,6 +466,9 @@ class Server:
                 for repo in get_repos_to_check():
                     pruned = autoprune_manager.check_and_prune(repo)
                     for branch in pruned:
+                        # Stop tracking PR for pruned worktrees
+                        self.pr_poller.untrack(repo, branch)
+
                         await self._broadcast(
                             Event(
                                 "worktree.pruned",

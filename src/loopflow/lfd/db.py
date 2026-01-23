@@ -4,6 +4,7 @@ Connection management, migrations, and shared utilities.
 Entity-specific CRUD operations are in runs/*.py modules.
 """
 
+import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +12,23 @@ from pathlib import Path
 from loopflow.lfd.migrations.registry import MIGRATIONS
 
 DB_PATH = Path.home() / ".lf" / "lfd.db"
+
+# Schema version: increment when schema changes in incompatible ways.
+# This is separate from migrations - migrations are for data, this is for structure.
+SCHEMA_VERSION = "2025-01-23-v1"
+
+
+class SchemaMismatchError(Exception):
+    """Raised when database schema version doesn't match expected version."""
+
+    def __init__(self, expected: str, actual: str, db_path: Path):
+        self.expected = expected
+        self.actual = actual
+        self.db_path = db_path
+        super().__init__(
+            f"Schema mismatch: expected {expected}, got {actual}. "
+            f"Set LF_DB_RESET=1 to reset, or delete {db_path}"
+        )
 
 
 def _init_db(db_path: Path) -> None:
@@ -23,18 +41,78 @@ def _init_db(db_path: Path) -> None:
     conn.close()
 
 
-def _get_db(db_path: Path | None = None) -> sqlite3.Connection:
-    """Get database connection, auto-resetting on schema mismatch."""
+def reset_db(db_path: Path | None = None) -> None:
+    """Delete and recreate the database."""
     if db_path is None:
         db_path = DB_PATH
+    if db_path.exists():
+        db_path.unlink()
+    # Also remove WAL files
+    wal_path = db_path.with_suffix(".db-wal")
+    shm_path = db_path.with_suffix(".db-shm")
+    if wal_path.exists():
+        wal_path.unlink()
+    if shm_path.exists():
+        shm_path.unlink()
+    _init_db(db_path)
+
+
+def _get_db(
+    db_path: Path | None = None, reset_on_mismatch: bool | None = None
+) -> sqlite3.Connection:
+    """Get database connection."""
+    if db_path is None:
+        db_path = DB_PATH
+
+    if reset_on_mismatch is None:
+        reset_on_mismatch = os.environ.get("LF_DB_RESET", "").lower() in ("1", "true", "yes")
 
     if not db_path.exists():
         _init_db(db_path)
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+
+    # Check schema version
+    current_version = _get_schema_version(conn)
+    if current_version != SCHEMA_VERSION:
+        conn.close()
+        if reset_on_mismatch:
+            reset_db(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+        else:
+            raise SchemaMismatchError(SCHEMA_VERSION, current_version or "none", db_path)
+
     _run_migrations(conn)
     return conn
+
+
+def _get_schema_version(conn: sqlite3.Connection) -> str | None:
+    """Get current schema version from _meta table."""
+    try:
+        cursor = conn.execute("SELECT value FROM _meta WHERE key = 'schema_version'")
+        row = cursor.fetchone()
+        return row[0] if row else None
+    except sqlite3.OperationalError:
+        return None
+
+
+def _set_schema_version(conn: sqlite3.Connection, version: str) -> None:
+    """Set schema version in _meta table."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS _meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)",
+        (version,),
+    )
+    conn.commit()
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:
@@ -56,6 +134,8 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
             (migration.version, datetime.now().isoformat()),
         )
         conn.commit()
+    # Update schema version after successful migrations
+    _set_schema_version(conn, SCHEMA_VERSION)
 
 
 def update_dead_processes(db_path: Path | None = None) -> int:
@@ -98,29 +178,32 @@ def save_summary_db(
     model: str,
     db_path: Path | None = None,
 ) -> None:
-    """Save a summary to the database."""
+    """Save a summary to the database. Fails silently on DB errors."""
     import uuid
 
-    conn = _get_db(db_path)
-    conn.execute(
-        """
-        INSERT OR REPLACE INTO summaries
-        (id, repo, path, token_budget, source_hash, content, model, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            str(uuid.uuid4()),
-            repo,
-            path,
-            token_budget,
-            source_hash,
-            content,
-            model,
-            datetime.now().isoformat(),
-        ),
-    )
-    conn.commit()
-    conn.close()
+    try:
+        conn = _get_db(db_path)
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO summaries
+            (id, repo, path, token_budget, source_hash, content, model, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(uuid.uuid4()),
+                repo,
+                path,
+                token_budget,
+                source_hash,
+                content,
+                model,
+                datetime.now().isoformat(),
+            ),
+        )
+        conn.commit()
+        conn.close()
+    except (SchemaMismatchError, sqlite3.Error):
+        pass  # Graceful degradation: summaries are optional
 
 
 def load_summary_db(
@@ -129,32 +212,38 @@ def load_summary_db(
     token_budget: int,
     db_path: Path | None = None,
 ) -> dict | None:
-    """Load a summary from the database."""
-    conn = _get_db(db_path)
-    cursor = conn.execute(
-        "SELECT content, source_hash, model, created_at FROM summaries "
-        "WHERE repo = ? AND path = ? AND token_budget = ?",
-        (repo, path, token_budget),
-    )
-    row = cursor.fetchone()
-    conn.close()
+    """Load a summary from the database. Returns None on DB errors."""
+    try:
+        conn = _get_db(db_path)
+        cursor = conn.execute(
+            "SELECT content, source_hash, model, created_at FROM summaries "
+            "WHERE repo = ? AND path = ? AND token_budget = ?",
+            (repo, path, token_budget),
+        )
+        row = cursor.fetchone()
+        conn.close()
 
-    if not row:
-        return None
+        if not row:
+            return None
 
-    return {
-        "content": row["content"],
-        "source_hash": row["source_hash"],
-        "model": row["model"],
-        "created_at": row["created_at"],
-    }
+        return {
+            "content": row["content"],
+            "source_hash": row["source_hash"],
+            "model": row["model"],
+            "created_at": row["created_at"],
+        }
+    except (SchemaMismatchError, sqlite3.Error):
+        return None  # Graceful degradation: treat as cache miss
 
 
 def delete_summaries_for_repo(repo: str, db_path: Path | None = None) -> int:
-    """Delete all summaries for a repo."""
-    conn = _get_db(db_path)
-    cursor = conn.execute("DELETE FROM summaries WHERE repo = ?", (repo,))
-    conn.commit()
-    count = cursor.rowcount
-    conn.close()
-    return count
+    """Delete all summaries for a repo. Returns 0 on DB errors."""
+    try:
+        conn = _get_db(db_path)
+        cursor = conn.execute("DELETE FROM summaries WHERE repo = ?", (repo,))
+        conn.commit()
+        count = cursor.rowcount
+        conn.close()
+        return count
+    except (SchemaMismatchError, sqlite3.Error):
+        return 0  # Graceful degradation

@@ -13,6 +13,7 @@ from loopflow.lfd.daemon.manager import Manager, load_manager_config
 from loopflow.lfd.daemon.protocol import Event, Request, Response, error, success
 from loopflow.lfd.daemon.status import compute_status
 from loopflow.lfd.db import update_dead_processes
+from loopflow.lfd.flow_run import cleanup_stale_runs
 from loopflow.lfd.git_hooks import hooks_status, install_hooks
 from loopflow.lfd.models import StepRun, StepRunStatus
 from loopflow.lfd.pr_poller import PRPoller
@@ -41,6 +42,10 @@ class Server:
         self.socket_path.parent.mkdir(parents=True, exist_ok=True)
         if self.socket_path.exists():
             self.socket_path.unlink()
+
+        # Cleanup stale state from previous runs
+        update_dead_processes()
+        cleanup_stale_runs()
 
         server = await asyncio.start_unix_server(
             self._handle_client,
@@ -414,6 +419,7 @@ class Server:
             try:
                 await asyncio.sleep(30)
                 update_dead_processes()
+                cleanup_stale_runs()
 
                 # Check watch-mode agents (file changes on main)
                 triggered_watch = run_watch_check()

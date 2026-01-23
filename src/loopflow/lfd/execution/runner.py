@@ -85,6 +85,20 @@ def _build_loop_prompt(
     return prompt, step_file
 
 
+class StepTimeoutError(Exception):
+    """Raised when a step exceeds its timeout."""
+
+    def __init__(self, step_label: str, timeout: int, pid: int):
+        self.step_label = step_label
+        self.timeout = timeout
+        self.pid = pid
+        super().__init__(f"Step '{step_label}' timed out after {timeout}s (pid={pid})")
+
+
+# Default step timeout: 30 minutes
+DEFAULT_STEP_TIMEOUT = 30 * 60
+
+
 def _run_collector_step(
     prompt: str,
     worktree_path: Path,
@@ -95,7 +109,23 @@ def _run_collector_step(
     step_label: str,
     autocommit: bool = True,
     prefix: str | None = None,
+    timeout: int | None = None,
 ) -> int:
+    """Run a step via collector subprocess.
+
+    Args:
+        timeout: Max seconds to wait. None uses DEFAULT_STEP_TIMEOUT.
+                 0 means no timeout.
+
+    Returns:
+        Exit code from the collector process.
+
+    Raises:
+        StepTimeoutError: If step exceeds timeout.
+    """
+    if timeout is None:
+        timeout = DEFAULT_STEP_TIMEOUT
+
     prompt_file = write_prompt_file(prompt)
 
     command = build_model_command(
@@ -128,7 +158,18 @@ def _run_collector_step(
     collector_cmd.extend(["--", *command])
 
     process = subprocess.Popen(collector_cmd, cwd=worktree_path)
-    result_code = process.wait()
+
+    try:
+        result_code = process.wait(timeout=timeout if timeout > 0 else None)
+    except subprocess.TimeoutExpired:
+        # Kill the process group (collector and its children)
+        _kill_process_tree(process.pid)
+        process.wait()  # Reap the zombie
+        try:
+            Path(prompt_file).unlink()
+        except OSError:
+            pass
+        raise StepTimeoutError(step_label, timeout, process.pid)
 
     try:
         Path(prompt_file).unlink()
@@ -136,6 +177,24 @@ def _run_collector_step(
         pass
 
     return result_code
+
+
+def _kill_process_tree(pid: int) -> None:
+    """Kill a process and all its children."""
+    import os
+    import signal
+
+    try:
+        # Try to kill the process group first
+        os.killpg(os.getpgid(pid), signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+
+    # Also try direct kill in case process group kill failed
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
 
 
 class _VariantResult:
@@ -246,17 +305,23 @@ def _run_fork_join_group(
         step_run_id = str(uuid.uuid4())
         step_label = f"{agent.area_display}:{step.step}:{label}"
 
-        exit_code = _run_collector_step(
-            prompt,
-            wt_path,
-            step_backend,
-            step_variant,
-            skip_permissions,
-            step_run_id,
-            step_label,
-            autocommit=True,
-            prefix=f"[{label}] ",
-        )
+        try:
+            exit_code = _run_collector_step(
+                prompt,
+                wt_path,
+                step_backend,
+                step_variant,
+                skip_permissions,
+                step_run_id,
+                step_label,
+                autocommit=True,
+                prefix=f"[{label}] ",
+            )
+        except StepTimeoutError:
+            # Clean up and re-raise for caller to handle
+            _cleanup_variant_worktrees(agent.repo, results)
+            remove_worktree(agent.repo, wt_path.name.split(".")[-1])
+            raise
 
         results.append(_VariantResult(label, wt_path, exit_code, step_run_id))
 
@@ -289,16 +354,20 @@ def _run_fork_join_group(
     if join_config.agent_model:
         join_backend, join_variant = parse_model(join_config.agent_model)
 
-    join_result = _run_collector_step(
-        join_prompt,
-        worktree_path,
-        join_backend,
-        join_variant,
-        skip_permissions,
-        str(uuid.uuid4()),
-        f"{agent.area_display}:join",
-        autocommit=True,
-    )
+    try:
+        join_result = _run_collector_step(
+            join_prompt,
+            worktree_path,
+            join_backend,
+            join_variant,
+            skip_permissions,
+            str(uuid.uuid4()),
+            f"{agent.area_display}:join",
+            autocommit=True,
+        )
+    except StepTimeoutError:
+        _cleanup_variant_worktrees(agent.repo, results)
+        raise
 
     _cleanup_variant_worktrees(agent.repo, results)
     return join_result
@@ -411,19 +480,24 @@ def run_iteration(
                 _cleanup_worktree(agent.repo, worktree_path, branch)
                 return False
 
-            result_code = _run_fork_join_group(
-                agent,
-                flow_def.name,
-                worktree_path,
-                branch,
-                group_steps,
-                resolved[i].join.join,
-                context_paths,
-                effective_voices,
-                skip_permissions,
-                backend,
-                model_variant,
-            )
+            try:
+                result_code = _run_fork_join_group(
+                    agent,
+                    flow_def.name,
+                    worktree_path,
+                    branch,
+                    group_steps,
+                    resolved[i].join.join,
+                    context_paths,
+                    effective_voices,
+                    skip_permissions,
+                    backend,
+                    model_variant,
+                )
+            except StepTimeoutError as e:
+                update_run_status(run.id, FlowRunStatus.FAILED, error=str(e))
+                _cleanup_worktree(agent.repo, worktree_path, branch)
+                return False
             if result_code != 0:
                 update_run_status(run.id, FlowRunStatus.FAILED, error="join failed")
                 _cleanup_worktree(agent.repo, worktree_path, branch)
@@ -502,15 +576,28 @@ def run_iteration(
             return False
 
         prompt, _step_file = prompt_result
-        result_code = _run_collector_step(
-            prompt,
-            worktree_path,
-            step_backend,
-            step_variant,
-            skip_permissions,
-            run.id,
-            f"{agent.area_display}:{step_name}",
-        )
+        try:
+            result_code = _run_collector_step(
+                prompt,
+                worktree_path,
+                step_backend,
+                step_variant,
+                skip_permissions,
+                run.id,
+                f"{agent.area_display}:{step_name}",
+            )
+        except StepTimeoutError as e:
+            notify_event(
+                "agent.step.completed",
+                {
+                    "agent_id": agent.id,
+                    "step": step_name,
+                    "status": "timeout",
+                },
+            )
+            update_run_status(run.id, FlowRunStatus.FAILED, error=str(e))
+            _cleanup_worktree(agent.repo, worktree_path, branch)
+            return False
 
         notify_event(
             "agent.step.completed",

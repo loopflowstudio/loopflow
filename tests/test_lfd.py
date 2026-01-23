@@ -121,6 +121,139 @@ def test_db_records_migrations():
             assert row[1]  # applied_at timestamp exists
 
 
+def test_db_schema_version_recorded():
+    """Fresh DB records schema version in _meta table."""
+    from loopflow.lfd.db import SCHEMA_VERSION, _get_schema_version
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        conn = _get_db(db_path)
+        version = _get_schema_version(conn)
+        conn.close()
+
+        assert version == SCHEMA_VERSION
+
+
+def test_db_schema_mismatch_raises():
+    """Schema version mismatch raises SchemaMismatchError."""
+    import sqlite3
+
+    from loopflow.lfd.db import SchemaMismatchError
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+
+        # Create DB with wrong schema version
+        conn = sqlite3.connect(db_path)
+        conn.execute("CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        conn.execute("INSERT INTO _meta (key, value) VALUES ('schema_version', 'wrong-version')")
+        conn.commit()
+        conn.close()
+
+        # Should raise on mismatch
+        try:
+            _get_db(db_path, reset_on_mismatch=False)
+            assert False, "Should have raised SchemaMismatchError"
+        except SchemaMismatchError as e:
+            assert e.actual == "wrong-version"
+            assert "wrong-version" in str(e)
+
+
+def test_db_schema_mismatch_reset():
+    """Schema mismatch with reset_on_mismatch=True resets DB."""
+    import sqlite3
+
+    from loopflow.lfd.db import SCHEMA_VERSION, _get_schema_version
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+
+        # Create DB with wrong schema version and some data
+        conn = sqlite3.connect(db_path)
+        conn.execute("CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        conn.execute("INSERT INTO _meta (key, value) VALUES ('schema_version', 'old-version')")
+        conn.execute("CREATE TABLE old_table (id TEXT)")
+        conn.execute("INSERT INTO old_table VALUES ('old-data')")
+        conn.commit()
+        conn.close()
+
+        # Reset should clear and recreate
+        conn = _get_db(db_path, reset_on_mismatch=True)
+        version = _get_schema_version(conn)
+        assert version == SCHEMA_VERSION
+
+        # Old table should be gone
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='old_table'"
+        )
+        assert cursor.fetchone() is None
+        conn.close()
+
+
+def test_db_reset_via_env_var():
+    """LF_DB_RESET=1 env var triggers reset on mismatch."""
+    import os
+    import sqlite3
+
+    from loopflow.lfd.db import SCHEMA_VERSION, _get_schema_version
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+
+        # Create DB with wrong schema version
+        conn = sqlite3.connect(db_path)
+        conn.execute("CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        conn.execute("INSERT INTO _meta (key, value) VALUES ('schema_version', 'env-test-old')")
+        conn.commit()
+        conn.close()
+
+        # Set env var and try to connect (should reset)
+        old_val = os.environ.get("LF_DB_RESET")
+        try:
+            os.environ["LF_DB_RESET"] = "1"
+            conn = _get_db(db_path)  # No explicit reset_on_mismatch
+            version = _get_schema_version(conn)
+            assert version == SCHEMA_VERSION
+            conn.close()
+        finally:
+            if old_val is None:
+                os.environ.pop("LF_DB_RESET", None)
+            else:
+                os.environ["LF_DB_RESET"] = old_val
+
+
+def test_db_reset_function():
+    """reset_db() clears and recreates database."""
+    from loopflow.lfd.db import SCHEMA_VERSION, _get_schema_version, reset_db
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+
+        # Create initial DB with some data
+        conn = _get_db(db_path)
+        conn.execute(
+            "INSERT INTO agents (id, repo, flow, voice, area, status, iteration, "
+            "main_branch, pr_limit, merge_mode, created_at) "
+            "VALUES ('test', '/tmp', 'ship', '[]', '[]', 'idle', 0, 'main', 5, "
+            "'pr', '2024-01-01')"
+        )
+        conn.commit()
+        conn.close()
+
+        # Reset
+        reset_db(db_path)
+
+        # Should be fresh with correct schema version
+        conn = _get_db(db_path)
+        version = _get_schema_version(conn)
+        assert version == SCHEMA_VERSION
+
+        # Old data should be gone
+        cursor = conn.execute("SELECT COUNT(*) FROM agents")
+        assert cursor.fetchone()[0] == 0
+        conn.close()
+
+
 # =============================================================================
 # Migration completeness tests
 #
@@ -1352,3 +1485,325 @@ def test_loop_runner_handles_fork_join_groups():
         i += 1
 
     assert fork_groups_found == 1
+
+
+# =============================================================================
+# State lifecycle tests (Phase 1)
+# =============================================================================
+
+
+def test_cleanup_stale_runs_marks_orphaned():
+    """cleanup_stale_runs marks runs without agents as FAILED."""
+    from loopflow.lfd.flow_run import cleanup_stale_runs, get_run, save_run
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+
+        # Create a run with no agent
+        run = FlowRun(
+            id="orphan-run",
+            agent_id=None,
+            flow="ship",
+            area=["src/"],
+            voice=["default"],
+            repo=Path("/tmp/repo"),
+            status=FlowRunStatus.RUNNING,
+            started_at=datetime.now(),
+        )
+        save_run(run, db_path)
+
+        # Run cleanup
+        cleaned = cleanup_stale_runs(db_path)
+        assert cleaned == 1
+
+        # Verify run is now FAILED
+        updated = get_run("orphan-run", db_path)
+        assert updated.status == FlowRunStatus.FAILED
+        assert "Orphaned" in updated.error
+
+
+def test_cleanup_stale_runs_marks_dead_agent():
+    """cleanup_stale_runs marks runs with dead agent PID as FAILED."""
+    from loopflow.lfd.flow_run import cleanup_stale_runs, get_run, save_run
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+
+        # Create agent with non-existent PID
+        agent = _make_agent(id="agent-dead", pid=99999999)
+        save_agent(agent, db_path)
+
+        # Create run for that agent
+        run = FlowRun(
+            id="run-dead-agent",
+            agent_id="agent-dead",
+            flow="ship",
+            area=["src/"],
+            voice=["default"],
+            repo=Path("/tmp/repo"),
+            status=FlowRunStatus.RUNNING,
+            started_at=datetime.now(),
+        )
+        save_run(run, db_path)
+
+        # Run cleanup
+        cleaned = cleanup_stale_runs(db_path)
+        assert cleaned == 1
+
+        # Verify run is now FAILED
+        updated = get_run("run-dead-agent", db_path)
+        assert updated.status == FlowRunStatus.FAILED
+        assert "died" in updated.error
+
+
+def test_cleanup_stale_runs_skips_active():
+    """cleanup_stale_runs does not touch runs with live agents."""
+    import os
+
+    from loopflow.lfd.flow_run import cleanup_stale_runs, get_run, save_run
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+
+        # Create agent with current process PID (guaranteed to be alive)
+        agent = _make_agent(id="agent-alive", pid=os.getpid())
+        save_agent(agent, db_path)
+
+        # Create run for that agent
+        run = FlowRun(
+            id="run-active",
+            agent_id="agent-alive",
+            flow="ship",
+            area=["src/"],
+            voice=["default"],
+            repo=Path("/tmp/repo"),
+            status=FlowRunStatus.RUNNING,
+            started_at=datetime.now(),
+        )
+        save_run(run, db_path)
+
+        # Run cleanup
+        cleaned = cleanup_stale_runs(db_path)
+        assert cleaned == 0
+
+        # Verify run is still RUNNING
+        updated = get_run("run-active", db_path)
+        assert updated.status == FlowRunStatus.RUNNING
+
+
+def test_cleanup_stale_runs_handles_deleted_agent():
+    """cleanup_stale_runs marks runs whose agent was deleted."""
+    from loopflow.lfd.flow_run import cleanup_stale_runs, get_run, save_run
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+
+        # Create run referencing non-existent agent
+        run = FlowRun(
+            id="run-missing-agent",
+            agent_id="agent-that-was-deleted",
+            flow="ship",
+            area=["src/"],
+            voice=["default"],
+            repo=Path("/tmp/repo"),
+            status=FlowRunStatus.RUNNING,
+            started_at=datetime.now(),
+        )
+        save_run(run, db_path)
+
+        # Run cleanup
+        cleaned = cleanup_stale_runs(db_path)
+        assert cleaned == 1
+
+        # Verify run is now FAILED
+        updated = get_run("run-missing-agent", db_path)
+        assert updated.status == FlowRunStatus.FAILED
+        assert "no longer exists" in updated.error
+
+
+def test_mark_run_failed():
+    """mark_run_failed sets status to FAILED with error."""
+    from loopflow.lfd.flow_run import get_run, mark_run_failed, save_run
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+
+        run = FlowRun(
+            id="run-to-fail",
+            flow="ship",
+            area=["src/"],
+            voice=["default"],
+            repo=Path("/tmp/repo"),
+            status=FlowRunStatus.RUNNING,
+            started_at=datetime.now(),
+        )
+        save_run(run, db_path)
+
+        result = mark_run_failed("run-to-fail", "Something went wrong", db_path)
+        assert result is True
+
+        updated = get_run("run-to-fail", db_path)
+        assert updated.status == FlowRunStatus.FAILED
+        assert updated.error == "Something went wrong"
+        assert updated.ended_at is not None
+
+
+# =============================================================================
+# Subprocess lifecycle tests (Phase 2)
+# =============================================================================
+
+
+def test_step_timeout_error_properties():
+    """StepTimeoutError has expected attributes."""
+    from loopflow.lfd.execution.runner import StepTimeoutError
+
+    error = StepTimeoutError("implement", 30, 12345)
+    assert error.step_label == "implement"
+    assert error.timeout == 30
+    assert error.pid == 12345
+    assert "implement" in str(error)
+    assert "30s" in str(error)
+
+
+def test_step_timeout_handling():
+    """StepTimeoutError can be raised and caught."""
+    from loopflow.lfd.execution.runner import StepTimeoutError
+
+    def simulate_timeout():
+        raise StepTimeoutError("implement", 30, 12345)
+
+    try:
+        simulate_timeout()
+        assert False, "Should have raised"
+    except StepTimeoutError as e:
+        assert e.step_label == "implement"
+        assert e.timeout == 30
+        assert "timed out" in str(e)
+
+
+def test_default_step_timeout():
+    """DEFAULT_STEP_TIMEOUT is 30 minutes."""
+    from loopflow.lfd.execution.runner import DEFAULT_STEP_TIMEOUT
+
+    assert DEFAULT_STEP_TIMEOUT == 30 * 60
+
+
+def test_kill_process_tree_handles_missing_pid():
+    """_kill_process_tree doesn't crash on missing PID."""
+    from loopflow.lfd.execution.runner import _kill_process_tree
+
+    # Should not raise
+    _kill_process_tree(99999999)  # Non-existent PID
+
+
+# =============================================================================
+# Fire-and-forget logging tests (lf works without lfd)
+# =============================================================================
+
+
+def test_fire_and_forget_succeeds_without_daemon():
+    """Fire-and-forget logging doesn't raise when daemon isn't running.
+
+    This is critical: lf commands must work even when lfd daemon is not
+    running. The logging is best-effort and should never block the CLI.
+    """
+    from loopflow.lfd.step_run import log_step_run_end, log_step_run_start
+
+    step_run = StepRun(
+        id="test-no-daemon",
+        step="implement",
+        repo="/tmp/repo",
+        worktree="/tmp/repo.feature",
+        status=StepRunStatus.RUNNING,
+        started_at=datetime.now(),
+    )
+
+    # These should complete without raising, even with no daemon
+    log_step_run_start(step_run)
+    log_step_run_end(step_run.id, StepRunStatus.COMPLETED)
+
+    # If we got here without exception, the test passes
+
+
+def test_fire_and_forget_handles_connection_refused():
+    """Fire-and-forget handles socket connection errors gracefully."""
+    from loopflow.lfd.step_run import _send_fire_and_forget
+
+    # Should not raise, even with bad socket path
+    _send_fire_and_forget("test.method", {"key": "value"})
+
+
+def test_lfd_imports_have_no_side_effects():
+    """Importing lfd modules doesn't trigger database access.
+
+    This ensures lf can import lfd modules without requiring a database
+    or daemon to exist.
+    """
+    import sys
+
+    # Remove cached modules to test fresh import
+    modules_to_test = [
+        "loopflow.lfd.models",
+        "loopflow.lfd.step_run",
+    ]
+
+    for mod in modules_to_test:
+        if mod in sys.modules:
+            del sys.modules[mod]
+
+    # Fresh import should not raise or touch the database
+    from loopflow.lfd.models import StepRun as SR
+    from loopflow.lfd.models import StepRunStatus as SRS
+
+    # Verify we can create objects without database
+    step_run = SR(
+        id="test-import",
+        step="test",
+        repo="/tmp/repo",
+        worktree="/tmp/repo",
+        status=SRS.RUNNING,
+        started_at=datetime.now(),
+    )
+    assert step_run.id == "test-import"
+
+
+def test_summary_functions_handle_schema_mismatch():
+    """Summary DB functions return gracefully on schema mismatch.
+
+    This ensures lf commands work even when the database has an incompatible
+    schema version - summaries degrade to cache miss behavior.
+    """
+    import os
+    import sqlite3
+
+    from loopflow.lfd.db import delete_summaries_for_repo, load_summary_db, save_summary_db
+
+    # Ensure LF_DB_RESET is not set (test expects schema mismatch to NOT reset)
+    old_reset = os.environ.pop("LF_DB_RESET", None)
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "test.db"
+
+            # Create DB with wrong schema version (no migrations)
+            conn = sqlite3.connect(db_path)
+            conn.execute("CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            conn.execute(
+                "INSERT INTO _meta (key, value) VALUES ('schema_version', 'wrong-version')"
+            )
+            conn.commit()
+            conn.close()
+
+            # All of these should complete without raising
+            # load_summary_db should return None (cache miss)
+            result = load_summary_db("/tmp/repo", ".", 25000, db_path)
+            assert result is None
+
+            # save_summary_db should silently fail
+            save_summary_db("/tmp/repo", ".", 25000, "hash", "content", "model", db_path)
+
+            # delete_summaries_for_repo should return 0
+            count = delete_summaries_for_repo("/tmp/repo", db_path)
+            assert count == 0
+    finally:
+        if old_reset is not None:
+            os.environ["LF_DB_RESET"] = old_reset

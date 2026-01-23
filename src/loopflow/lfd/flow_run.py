@@ -205,3 +205,58 @@ def flow_run_from_row(row: dict) -> FlowRun:
         ended_at=datetime.fromisoformat(row["ended_at"]) if row.get("ended_at") else None,
         created_at=datetime.fromisoformat(row["created_at"]),
     )
+
+
+# Cleanup functions
+
+
+def mark_run_failed(run_id: str, error: str, db_path: Path | None = None) -> bool:
+    """Mark a run as failed. Always succeeds if run exists."""
+    return update_run_status(run_id, FlowRunStatus.FAILED, error=error, db_path=db_path)
+
+
+def cleanup_stale_runs(db_path: Path | None = None) -> int:
+    """Find RUNNING/PENDING runs with dead agent PIDs and mark as FAILED.
+
+    Returns the number of runs cleaned up.
+    """
+    from loopflow.lfd.agent import get_agent
+    from loopflow.lfd.daemon.process import is_process_running
+
+    conn = _get_db(db_path)
+
+    # Find runs in active states
+    cursor = conn.execute(
+        "SELECT id, agent FROM runs WHERE status IN (?, ?)",
+        (FlowRunStatus.RUNNING.value, FlowRunStatus.PENDING.value),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
+    cleaned = 0
+    for row in rows:
+        run_id = row["id"]
+        agent_id = row["agent"]
+
+        # No agent = orphaned run, mark as failed
+        if not agent_id:
+            mark_run_failed(run_id, "Orphaned run (no agent)", db_path)
+            cleaned += 1
+            continue
+
+        # Check if agent's process is alive
+        agent = get_agent(agent_id, db_path)
+        if not agent:
+            mark_run_failed(run_id, "Agent no longer exists", db_path)
+            cleaned += 1
+            continue
+
+        if agent.pid and is_process_running(agent.pid):
+            # Process is still running, leave it alone
+            continue
+
+        # Agent has no PID or PID is dead
+        mark_run_failed(run_id, "Agent process died", db_path)
+        cleaned += 1
+
+    return cleaned

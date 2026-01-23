@@ -2,7 +2,7 @@
 
 import sqlite3
 
-VERSION = "2025-01-23T05:00:00"
+VERSION = "2026-01-23T17:00:00"
 DESCRIPTION = "Rename mode/watch_paths/cron to stimulus_kind/stimulus_cron"
 
 

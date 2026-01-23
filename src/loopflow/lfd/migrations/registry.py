@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from loopflow.lfd.migrations import baseline
+from loopflow.lfd.migrations import m_2025_01_23_zz_stimulus as stimulus
 
 
 @dataclass
@@ -16,4 +17,5 @@ class Migration:
 
 MIGRATIONS = [
     Migration(baseline.SCHEMA_VERSION, baseline.DESCRIPTION, baseline.apply),
+    Migration(stimulus.VERSION, stimulus.DESCRIPTION, stimulus.apply),
 ]

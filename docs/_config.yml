@@ -6,12 +6,10 @@ plugins:
 
 header_pages:
   - index.md
-  - quick-fix.md
-  - workflow.md
   - agents.md
+  - getting-started.md
   - lf.md
   - lfops.md
   - lfd.md
   - config.md
-  - storage.md
   - troubleshooting.md

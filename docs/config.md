@@ -26,7 +26,18 @@ Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), or repo c
 
 Every step gets context assembled automatically. Run any command to see the breakdown:
 
-![Context assembly](context-demo.gif)
+```
+Tokens: 12,847
+
+files          6,892 █████
+  STYLE.md     2,854 ██
+  README.md      988 █
+  scratch/     3,050 ██
+diff_files     4,721 ███
+  src/auth.py  2,847 ██
+  tests/       1,874 █
+clipboard      1,234 █
+```
 
 The token breakdown shows what's included:
 

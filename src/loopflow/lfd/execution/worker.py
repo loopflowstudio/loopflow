@@ -35,9 +35,7 @@ CIRCUIT_BREAKER_THRESHOLD = 5
 
 def _emit_circuit_breaker(agent: Agent, failures: int) -> None:
     """Emit circuit breaker event and log error."""
-    worker_log.error(
-        f"[{agent.short_id()}] circuit breaker: {failures} consecutive failures"
-    )
+    worker_log.error(f"[{agent.short_id()}] circuit breaker: {failures} consecutive failures")
     notify_event(
         "agent.circuit_breaker",
         {
@@ -123,9 +121,7 @@ def run_agent_iterations(agent: Agent) -> None:
     while True:
         outstanding = count_outstanding(agent)
         if outstanding >= agent.pr_limit:
-            worker_log.info(
-                f"[{short_id}] waiting: {outstanding}/{agent.pr_limit} PRs outstanding"
-            )
+            worker_log.info(f"[{short_id}] waiting: {outstanding}/{agent.pr_limit} PRs outstanding")
             update_agent_status(agent.id, AgentStatus.WAITING)
             notify_event(
                 "agent.waiting",

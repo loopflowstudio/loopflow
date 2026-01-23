@@ -90,6 +90,10 @@ ID       TYPE       AREA                    STATUS     ITER  REPO
 abc1234  loop       src/ [ship] [architect] running    12    ~/repo
 ```
 
+## Next
+
+[Get Started →](getting-started.md)
+
 ## Reference
 
 [`lfd` commands](lfd.md) · [Configuration](config.md) · [Troubleshooting](troubleshooting.md)

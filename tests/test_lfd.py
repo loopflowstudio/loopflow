@@ -135,33 +135,8 @@ def test_db_schema_version_recorded():
         assert version == SCHEMA_VERSION
 
 
-def test_db_schema_mismatch_raises():
-    """Schema version mismatch raises SchemaMismatchError."""
-    import sqlite3
-
-    from loopflow.lfd.db import SchemaMismatchError
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "test.db"
-
-        # Create DB with wrong schema version
-        conn = sqlite3.connect(db_path)
-        conn.execute("CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-        conn.execute("INSERT INTO _meta (key, value) VALUES ('schema_version', 'wrong-version')")
-        conn.commit()
-        conn.close()
-
-        # Should raise on mismatch
-        try:
-            _get_db(db_path, reset_on_mismatch=False)
-            assert False, "Should have raised SchemaMismatchError"
-        except SchemaMismatchError as e:
-            assert e.actual == "wrong-version"
-            assert "wrong-version" in str(e)
-
-
-def test_db_schema_mismatch_reset():
-    """Schema mismatch with reset_on_mismatch=True resets DB."""
+def test_db_schema_mismatch_auto_resets():
+    """Schema version mismatch auto-resets the database."""
     import sqlite3
 
     from loopflow.lfd.db import SCHEMA_VERSION, _get_schema_version
@@ -178,8 +153,8 @@ def test_db_schema_mismatch_reset():
         conn.commit()
         conn.close()
 
-        # Reset should clear and recreate
-        conn = _get_db(db_path, reset_on_mismatch=True)
+        # Mismatch should auto-reset
+        conn = _get_db(db_path)
         version = _get_schema_version(conn)
         assert version == SCHEMA_VERSION
 
@@ -189,38 +164,6 @@ def test_db_schema_mismatch_reset():
         )
         assert cursor.fetchone() is None
         conn.close()
-
-
-def test_db_reset_via_env_var():
-    """LF_DB_RESET=1 env var triggers reset on mismatch."""
-    import os
-    import sqlite3
-
-    from loopflow.lfd.db import SCHEMA_VERSION, _get_schema_version
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "test.db"
-
-        # Create DB with wrong schema version
-        conn = sqlite3.connect(db_path)
-        conn.execute("CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-        conn.execute("INSERT INTO _meta (key, value) VALUES ('schema_version', 'env-test-old')")
-        conn.commit()
-        conn.close()
-
-        # Set env var and try to connect (should reset)
-        old_val = os.environ.get("LF_DB_RESET")
-        try:
-            os.environ["LF_DB_RESET"] = "1"
-            conn = _get_db(db_path)  # No explicit reset_on_mismatch
-            version = _get_schema_version(conn)
-            assert version == SCHEMA_VERSION
-            conn.close()
-        finally:
-            if old_val is None:
-                os.environ.pop("LF_DB_RESET", None)
-            else:
-                os.environ["LF_DB_RESET"] = old_val
 
 
 def test_db_reset_function():
@@ -1767,46 +1710,40 @@ def test_lfd_imports_have_no_side_effects():
     assert step_run.id == "test-import"
 
 
-def test_summary_functions_handle_schema_mismatch():
-    """Summary DB functions return gracefully on schema mismatch.
+def test_summary_functions_work_after_schema_reset():
+    """Summary DB functions work after schema mismatch triggers auto-reset.
 
-    This ensures lf commands work even when the database has an incompatible
-    schema version - summaries degrade to cache miss behavior.
+    This ensures summaries work correctly when the database needed to be
+    reset due to a schema version change.
     """
-    import os
     import sqlite3
 
     from loopflow.lfd.db import delete_summaries_for_repo, load_summary_db, save_summary_db
 
-    # Ensure LF_DB_RESET is not set (test expects schema mismatch to NOT reset)
-    old_reset = os.environ.pop("LF_DB_RESET", None)
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = Path(tmpdir) / "test.db"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
 
-            # Create DB with wrong schema version (no migrations)
-            conn = sqlite3.connect(db_path)
-            conn.execute("CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-            conn.execute(
-                "INSERT INTO _meta (key, value) VALUES ('schema_version', 'wrong-version')"
-            )
-            conn.commit()
-            conn.close()
+        # Create DB with wrong schema version (will trigger auto-reset)
+        conn = sqlite3.connect(db_path)
+        conn.execute("CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        conn.execute(
+            "INSERT INTO _meta (key, value) VALUES ('schema_version', 'wrong-version')"
+        )
+        conn.commit()
+        conn.close()
 
-            # All of these should complete without raising
-            # load_summary_db should return None (cache miss)
-            result = load_summary_db("/tmp/repo", ".", 25000, db_path)
-            assert result is None
+        # Save should work (triggers reset internally)
+        save_summary_db("/tmp/repo", ".", 25000, "hash", "content", "model", db_path)
 
-            # save_summary_db should silently fail
-            save_summary_db("/tmp/repo", ".", 25000, "hash", "content", "model", db_path)
+        # Load should find what we just saved
+        result = load_summary_db("/tmp/repo", ".", 25000, db_path)
+        assert result is not None
+        assert result["content"] == "content"
+        assert result["source_hash"] == "hash"
 
-            # delete_summaries_for_repo should return 0
-            count = delete_summaries_for_repo("/tmp/repo", db_path)
-            assert count == 0
-    finally:
-        if old_reset is not None:
-            os.environ["LF_DB_RESET"] = old_reset
+        # Delete should work
+        count = delete_summaries_for_repo("/tmp/repo", db_path)
+        assert count == 1
 
 
 # =============================================================================

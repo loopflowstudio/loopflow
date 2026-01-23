@@ -11,10 +11,11 @@ Arrange and conduct an agent orchestra.
 | **Voice** | Shapes judgment and perspective |
 | **Area** | Focuses on part of the codebase |
 
-| Agent Mode | Runs when |
-|------------|-----------|
+| Stimulus | Runs when |
+|----------|-----------|
+| **Once** | Single run (one-shot) |
 | **Loop** | Continuously until stopped |
-| **Watch** | Paths change on main |
+| **Watch** | Area changes on main |
 | **Cron** | On schedule |
 
 An agent is **flow × area × voice**.
@@ -65,7 +66,7 @@ Runs the `ship` flow on `src/` continuously, creating PRs until stopped.
 
 ```bash
 lfd loop ship src/ -v architect    # add a voice
-lfd watch ship docs/ -v writer     # run when docs/ changes
+lfd subscribe ship docs/ -v writer # activate when docs/ changes
 lfd status                         # see all agents
 ```
 

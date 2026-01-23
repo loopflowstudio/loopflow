@@ -1,9 +1,11 @@
 """Data structures for lfd daemon."""
 
 import json
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -27,12 +29,24 @@ class LfdModel(BaseModel):
     )
 
 
-class AgentMode(str, Enum):
-    """Activation mode of an agent."""
+@dataclass
+class Stimulus:
+    """Determines when an agent runs.
 
-    LOOP = "loop"
-    WATCH = "watch"
-    CRON = "cron"
+    Kinds:
+    - once: single run (one-shot)
+    - loop: continuously until stopped
+    - watch: when files in area change on main
+    - cron: on schedule
+    """
+
+    kind: Literal["once", "loop", "watch", "cron"]
+    cron: str | None = None
+
+    def __str__(self) -> str:
+        if self.kind == "cron" and self.cron:
+            return f"cron({self.cron})"
+        return self.kind
 
 
 class AgentStatus(str, Enum):
@@ -54,10 +68,11 @@ class MergeMode(str, Enum):
 class Agent(LfdModel):
     """An AI coding agent.
 
-    Activation modes:
-    - Loop (default): runs when started until stopped or PR limit
-    - Watch: runs when watch_paths change on main
-    - Cron: runs on cron schedule
+    Stimulus types:
+    - once: single run (one-shot)
+    - loop: runs when started until stopped or PR limit
+    - watch: runs when area changes on main
+    - cron: runs on schedule
     """
 
     id: str
@@ -66,7 +81,7 @@ class Agent(LfdModel):
     voice: list[str] = Field(min_length=1)
     area: list[str] = Field(min_length=1)
 
-    mode: AgentMode = AgentMode.LOOP
+    stimulus: Stimulus = Field(default_factory=lambda: Stimulus("loop"))
     status: AgentStatus = AgentStatus.IDLE
     iteration: int = 0
 
@@ -77,13 +92,17 @@ class Agent(LfdModel):
     pid: int | None = None
     created_at: datetime = Field(default_factory=datetime.now)
 
-    # Trigger config (for watch/cron modes)
-    watch_paths: str | None = None
-    cron: str | None = None
+    # Watch state
     last_main_sha: str | None = None
 
     # Circuit breaker
     consecutive_failures: int = 0
+
+    model_config = ConfigDict(
+        extra="forbid",
+        validate_assignment=True,
+        arbitrary_types_allowed=True,
+    )
 
     @field_validator("voice", mode="before")
     @classmethod
@@ -97,6 +116,17 @@ class Agent(LfdModel):
     def normalize_area(cls, v):
         if isinstance(v, str):
             return [v]
+        return v
+
+    @field_validator("stimulus", mode="before")
+    @classmethod
+    def normalize_stimulus(cls, v):
+        if isinstance(v, Stimulus):
+            return v
+        if isinstance(v, dict):
+            return Stimulus(kind=v.get("kind", "loop"), cron=v.get("cron"))
+        if isinstance(v, str):
+            return Stimulus(kind=v)
         return v
 
     def short_id(self) -> str:
@@ -127,16 +157,11 @@ def agent_from_row(row: dict) -> Agent:
     if merge_mode_str == "auto":
         merge_mode_str = "pr"
 
-    # Read mode from DB, with fallback for pre-migration rows
-    mode_str = row.get("mode")
-    if mode_str:
-        mode = AgentMode(mode_str)
-    elif row.get("watch_paths"):
-        mode = AgentMode.WATCH
-    elif row.get("cron"):
-        mode = AgentMode.CRON
-    else:
-        mode = AgentMode.LOOP
+    # Build stimulus from DB columns
+    stimulus = Stimulus(
+        kind=row.get("stimulus_kind", "loop"),
+        cron=row.get("stimulus_cron"),
+    )
 
     return Agent(
         id=row["id"],
@@ -144,7 +169,7 @@ def agent_from_row(row: dict) -> Agent:
         flow=row["flow"],
         voice=voice,
         area=area,
-        mode=mode,
+        stimulus=stimulus,
         status=AgentStatus(row["status"]),
         iteration=row.get("iteration", 0),
         main_branch=row.get("main_branch", ""),
@@ -152,8 +177,6 @@ def agent_from_row(row: dict) -> Agent:
         merge_mode=MergeMode(merge_mode_str),
         pid=row.get("pid"),
         created_at=datetime.fromisoformat(row["created_at"]),
-        watch_paths=row.get("watch_paths"),
-        cron=row.get("cron"),
         last_main_sha=row.get("last_main_sha"),
         consecutive_failures=row.get("consecutive_failures", 0),
     )

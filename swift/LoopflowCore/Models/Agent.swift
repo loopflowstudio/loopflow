@@ -1,13 +1,32 @@
 // Agent - an autonomous AI coding agent.
-// Activation modes: loop (continuous), watch (on file change), cron (scheduled).
+// Stimulus types: once (single run), loop (continuous), watch (on file change), cron (scheduled).
 
 import Foundation
 import SwiftUI
 
-public enum AgentMode: String, Sendable, Codable {
-    case loop
-    case watch
-    case cron
+/// Determines when an agent runs.
+public struct Stimulus: Sendable, Hashable, Codable {
+    public enum Kind: String, Sendable, Codable {
+        case once
+        case loop
+        case watch
+        case cron
+    }
+
+    public var kind: Kind
+    public var cron: String?
+
+    public init(kind: Kind, cron: String? = nil) {
+        self.kind = kind
+        self.cron = cron
+    }
+
+    public var description: String {
+        if kind == .cron, let cronExpr = cron {
+            return "cron(\(cronExpr))"
+        }
+        return kind.rawValue
+    }
 }
 
 public enum AgentStatus: String, Sendable, Codable {
@@ -38,7 +57,7 @@ public struct Agent: Sendable, Identifiable, Hashable {
     public let area: [String]
     public let repo: String
 
-    public var mode: AgentMode
+    public var stimulus: Stimulus
     public var status: AgentStatus
     public var iteration: Int
 
@@ -49,9 +68,7 @@ public struct Agent: Sendable, Identifiable, Hashable {
     public var pid: Int?
     public var createdAt: Date
 
-    // Trigger config (for watch/cron modes)
-    public var watchPaths: String?
-    public var cron: String?
+    // Watch state
     public var lastMainSha: String?
 
     public init(
@@ -60,7 +77,7 @@ public struct Agent: Sendable, Identifiable, Hashable {
         voice: [String] = [],
         area: [String] = ["."],
         repo: String,
-        mode: AgentMode = .loop,
+        stimulus: Stimulus = Stimulus(kind: .loop),
         status: AgentStatus = .idle,
         iteration: Int = 0,
         mainBranch: String,
@@ -68,8 +85,6 @@ public struct Agent: Sendable, Identifiable, Hashable {
         mergeMode: MergeMode = .pr,
         pid: Int? = nil,
         createdAt: Date = Date(),
-        watchPaths: String? = nil,
-        cron: String? = nil,
         lastMainSha: String? = nil
     ) {
         self.id = id
@@ -77,7 +92,7 @@ public struct Agent: Sendable, Identifiable, Hashable {
         self.voice = voice
         self.area = area
         self.repo = repo
-        self.mode = mode
+        self.stimulus = stimulus
         self.status = status
         self.iteration = iteration
         self.mainBranch = mainBranch
@@ -85,8 +100,6 @@ public struct Agent: Sendable, Identifiable, Hashable {
         self.mergeMode = mergeMode
         self.pid = pid
         self.createdAt = createdAt
-        self.watchPaths = watchPaths
-        self.cron = cron
         self.lastMainSha = lastMainSha
     }
 
@@ -120,5 +133,9 @@ public struct Agent: Sendable, Identifiable, Hashable {
     public var detailText: String {
         let parts = [flowDisplay, voiceDisplay].filter { !$0.isEmpty }
         return parts.joined(separator: " · ")
+    }
+
+    public var stimulusText: String {
+        stimulus.description
     }
 }

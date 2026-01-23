@@ -34,7 +34,7 @@ from loopflow.lfd.git_hooks import (
     install_hooks,
     uninstall_hooks,
 )
-from loopflow.lfd.models import Agent, AgentStatus, MergeMode
+from loopflow.lfd.models import Agent, AgentStatus, MergeMode, Stimulus
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 
@@ -224,7 +224,7 @@ def loop(
     merge_mode: str = typer.Option(None, "--merge-mode", help="Merge mode: pr or land"),
     foreground: bool = typer.Option(False, "-f", "--foreground", help="Run in foreground"),
 ):
-    """Start a continuous agent loop.
+    """Start a continuous agent loop (loop stimulus).
 
     Flow is required - specifies which flow to run from .lf/flows/.
     Area is required - scopes the work (e.g., swift/, src/, or . for whole repo).
@@ -284,6 +284,7 @@ def loop(
         area=[area],
         pr_limit=pr_limit,
         merge_mode=mm,
+        stimulus=Stimulus("loop"),
     )
 
     # Start it
@@ -323,7 +324,7 @@ def run(
         False, "-c", "-C", "--clipboard", help="Include clipboard content"
     ),
 ):
-    """Run a flow once (direct execution, no trigger).
+    """Run a flow once (once stimulus - single run).
 
     Examples:
         lfd run ship swift/                        # one-off iteration
@@ -361,8 +362,14 @@ def run(
         if result.returncode == 0 and result.stdout.strip():
             typer.echo(f"{c['dim']}Clipboard content will be included{c['reset']}")
 
-    # Create a temporary agent and run it once
-    agent = create_agent(repo=repo, flow=flow_name, voice=voice_list, area=[area])
+    # Create a temporary agent with once stimulus and run it
+    agent = create_agent(
+        repo=repo,
+        flow=flow_name,
+        voice=voice_list,
+        area=[area],
+        stimulus=Stimulus("once"),
+    )
 
     # Start it in foreground (runs once)
     result = start_agent(agent.id, foreground=True)
@@ -381,13 +388,18 @@ def run(
 @app.command()
 def subscribe(
     flow: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
-    area: str = typer.Argument(..., help="Area of responsibility (e.g., swift/, src/, .)"),
-    path: list[str] = typer.Option(
-        ..., "-p", "-P", "--path", help="Paths to watch (repeatable, supports globs)"
-    ),
-    voices: list[str] = typer.Option(None, "-L", "--voice", help="Voice to add (repeatable)"),
+    area: str = typer.Argument(..., help="Area to watch (e.g., swift/, src/api/)"),
+    voices: list[str] = typer.Option(None, "-v", "-V", "--voice", help="Voice to add (repeatable)"),
 ):
-    """Subscribe to path changes on main."""
+    """Subscribe to area changes on main (watch stimulus).
+
+    The area serves as both the context for the agent and the paths to watch.
+    When files in the area change on main, activates one iteration.
+
+    Examples:
+        lfd subscribe ship src/api/             # watch src/api/ for changes
+        lfd subscribe ship docs/                # watch docs/ for changes
+    """
     c = _colors()
     repo = get_wt_from_cwd()
     if not repo:
@@ -409,23 +421,20 @@ def subscribe(
 
     flow = _validate_flow(repo, flow, c)
 
-    # Convert path list to comma-separated pathset
-    pathset = ",".join(path)
-
-    # Create agent with watch_paths
+    # Create agent with watch stimulus - area is used as watch paths
     agent = create_agent(
         repo=repo,
         flow=flow,
         voice=voice_list,
         area=[area],
-        watch_paths=pathset,
+        stimulus=Stimulus("watch"),
     )
 
-    msg = f"{c['green']}Subscribed{c['reset']} {c['bold']}{area}{c['reset']} to {pathset}"
+    msg = f"{c['green']}Subscribed{c['reset']} {c['bold']}{area}{c['reset']}"
     typer.echo(f"{msg} ({agent.short_id()})")
     typer.echo(f"  Voices: {agent.voice_display}")
     typer.echo(f"  Flow: {agent.flow}")
-    typer.echo("  Will run when paths change on main")
+    typer.echo(f"  Activates when {area} changes on main")
 
 
 @app.command()
@@ -433,9 +442,14 @@ def schedule(
     flow: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
     area: str = typer.Argument(..., help="Area of responsibility (e.g., swift/, src/, .)"),
     cron_expr: str = typer.Argument(..., help="Cron expression (e.g., '0 9 * * *')"),
-    voices: list[str] = typer.Option(None, "-L", "--voice", help="Voice to add (repeatable)"),
+    voices: list[str] = typer.Option(None, "-v", "-V", "--voice", help="Voice to add (repeatable)"),
 ):
-    """Schedule a flow to run on cron."""
+    """Schedule a flow to run on cron (cron stimulus).
+
+    Examples:
+        lfd schedule ship . "0 9 * * *"           # 9am daily
+        lfd schedule ship src/ui/ "0 10 * * MON"  # 10am Mondays
+    """
     c = _colors()
     repo = get_wt_from_cwd()
     if not repo:
@@ -457,13 +471,13 @@ def schedule(
 
     flow = _validate_flow(repo, flow, c)
 
-    # Create agent with cron
+    # Create agent with cron stimulus
     agent = create_agent(
         repo=repo,
         flow=flow,
         voice=voice_list,
         area=[area],
-        cron=cron_expr,
+        stimulus=Stimulus("cron", cron=cron_expr),
     )
 
     typer.echo(
@@ -548,7 +562,7 @@ def status(
             typer.echo("Start an agent with: lfd loop <flow> <area>")
             return
 
-        typer.echo(f"{'ID':<9} {'MODE':<12} {'AREA':<30} {'STATUS':<10} {'ITER':<6} REPO")
+        typer.echo(f"{'ID':<9} {'STIMULUS':<12} {'AREA':<30} {'STATUS':<10} {'ITER':<6} REPO")
         typer.echo("-" * 95)
 
         for agent in agents:
@@ -562,7 +576,7 @@ def status(
                 repo_short = "..." + repo_short[-17:]
 
             typer.echo(
-                f"{agent.short_id():<9} {agent.mode.value:<12} {display_str:<30} "
+                f"{agent.short_id():<9} {str(agent.stimulus):<12} {display_str:<30} "
                 f"{status_c}{agent.status.value:<10}{c['reset']} "
                 f"{agent.iteration:<6} {repo_short}"
             )
@@ -573,18 +587,13 @@ def _print_agent_detail(agent: Agent, c: dict[str, str]) -> None:
     status_c = _status_color(agent.status, c)
 
     typer.echo(f"{c['bold']}{agent.area_display}{c['reset']} ({agent.short_id()})")
-    typer.echo(f"  Mode: {agent.mode.value}")
+    typer.echo(f"  Stimulus: {agent.stimulus}")
     typer.echo(f"  Status: {status_c}{agent.status.value}{c['reset']}")
     typer.echo(f"  Repo: {agent.repo}")
     typer.echo(f"  Main branch: {agent.main_branch}")
     typer.echo(f"  Voices: {agent.voice_display}")
     typer.echo(f"  Flow: {agent.flow}")
     typer.echo(f"  Iteration: {agent.iteration}")
-
-    if agent.watch_paths:
-        typer.echo(f"  Watch paths: {agent.watch_paths}")
-    if agent.cron:
-        typer.echo(f"  Cron: {agent.cron}")
 
     # Show recent runs
     runs = list_runs_for_agent(agent.id, limit=5)

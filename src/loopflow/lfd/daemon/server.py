@@ -330,7 +330,7 @@ class Server:
     async def _handle_worktrees_changed(self, params: dict) -> Response:
         """Handle notification that a worktree changed.
 
-        Called by CLI commands (wt create, lf run, etc.) to trigger rich events.
+        Called by CLI commands (wt create, lf run, etc.) to emit rich events.
         """
         repo = params.get("repo")
         branch = params.get("branch")
@@ -409,7 +409,7 @@ class Server:
             return None
 
     async def _periodic_check(self) -> None:
-        """Periodically update dead processes and check agent triggers."""
+        """Periodically update dead processes and check agent stimuli."""
         from loopflow.lfd.autoprune import AutopruneManager, get_repos_to_check
         from loopflow.lfd.draft_prs import run_draft_pr_check
 
@@ -421,23 +421,23 @@ class Server:
                 update_dead_processes()
                 cleanup_stale_runs()
 
-                # Check watch-mode agents (file changes on main)
-                triggered_watch = run_watch_check()
-                for agent_id in triggered_watch:
+                # Check watch stimulus agents (file changes on main)
+                activated_watch = run_watch_check()
+                for agent_id in activated_watch:
                     await self._broadcast(
                         Event(
-                            "agent.triggered",
-                            {"agent_id": agent_id, "mode": "watch"},
+                            "agent.activated",
+                            {"agent_id": agent_id, "stimulus": "watch"},
                         )
                     )
 
-                # Check cron-mode agents
-                triggered_cron = run_cron_check()
-                for agent_id in triggered_cron:
+                # Check cron stimulus agents
+                activated_cron = run_cron_check()
+                for agent_id in activated_cron:
                     await self._broadcast(
                         Event(
-                            "agent.triggered",
-                            {"agent_id": agent_id, "mode": "cron"},
+                            "agent.activated",
+                            {"agent_id": agent_id, "stimulus": "cron"},
                         )
                     )
 

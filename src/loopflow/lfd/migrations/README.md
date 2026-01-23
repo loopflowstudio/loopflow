@@ -1,6 +1,6 @@
 # Database Migrations
 
-All schema changes go through migrations. Each migration is a Python file in this directory.
+All schema changes go through migrations. The baseline contains the current schema; incremental migrations accumulate until the next consolidation.
 
 ## Adding a Migration
 
@@ -17,6 +17,25 @@ def apply(conn):
     if "foo" not in cols:
         conn.execute("ALTER TABLE bars ADD COLUMN foo TEXT")
 ```
+
+## Consolidating Migrations
+
+When incremental migrations accumulate, fold them into the baseline:
+
+1. Manually update `baseline.py` with the combined schema
+2. Run cleanup and commit:
+
+```bash
+./scripts/collapse_migrations.py --clean   # removes m_*.py, sets placeholder version
+git add -A && git commit -m "consolidate migrations"
+./scripts/collapse_migrations.py --finalize  # stamps with commit SHA
+git commit --amend --no-edit
+```
+
+The version uses **git commit timestamp + SHA** (`2026-01-23T16:39:43Z_abc1234`):
+- Ordered (ISO timestamps sort correctly)
+- Reproducible (from git, not local time)
+- Handles parallel development (no version collisions between branches)
 
 ## Rules
 

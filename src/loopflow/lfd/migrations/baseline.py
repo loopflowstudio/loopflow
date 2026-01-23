@@ -2,7 +2,7 @@
 
 import sqlite3
 
-SCHEMA_VERSION = "2026-01-23T19:26:17_b159a91"
+SCHEMA_VERSION = "2026-01-23T16:39:43Z_b159a91"
 DESCRIPTION = "baseline schema"
 
 

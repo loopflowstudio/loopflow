@@ -10,8 +10,7 @@ from pathlib import Path
 
 import yaml
 
-from loopflow.lfd.agent import count_outstanding
-from loopflow.lfd.db import list_all_agents
+from loopflow.lfd.agent import count_outstanding, list_agents
 
 
 @dataclass
@@ -70,7 +69,7 @@ class Manager:
     def total_outstanding(self) -> int:
         """Total outstanding commits across all agents."""
         total = 0
-        for agent in list_all_agents():
+        for agent in list_agents():
             total += count_outstanding(agent)
         return total
 

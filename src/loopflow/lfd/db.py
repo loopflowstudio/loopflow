@@ -134,13 +134,6 @@ def update_dead_processes(db_path: Path | None = None) -> int:
     return count
 
 
-def list_all_agents(repo: Path | None = None, db_path: Path | None = None) -> list:
-    """List all agents for a repo."""
-    from loopflow.lfd.agent import list_agents
-
-    return list_agents(repo, db_path)
-
-
 # Summary functions
 
 

@@ -1,6 +1,6 @@
 """Worker for continuous execution.
 
-Runs iterations of a trigger until stopped or paused.
+Runs iterations of an agent until stopped or paused.
 Coordinates with the daemon manager for global concurrency limits.
 """
 
@@ -13,16 +13,14 @@ from pathlib import Path
 
 from loopflow.lfd.daemon.client import notify_event
 from loopflow.lfd.execution.runner import run_iteration
-from loopflow.lfd.models import Loop, TriggerStatus
-from loopflow.lfd.runs.loop import (
+from loopflow.lfd.models import Agent, AgentStatus
+from loopflow.lfd.agent import (
     count_outstanding,
-    get_loop,
-    update_loop_iteration,
-    update_loop_pid,
-    update_loop_status,
+    get_agent,
+    update_agent_iteration,
+    update_agent_pid,
+    update_agent_status,
 )
-from loopflow.lfd.runs.schedule import get_schedule, update_schedule_status
-from loopflow.lfd.runs.subscription import get_subscription, update_subscription_status
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 MANAGER_POLL_INTERVAL = 30  # seconds between slot checks
@@ -82,24 +80,24 @@ def _manager_release(run_id: str) -> None:
     _manager_call("scheduler.release", {"run_id": run_id})
 
 
-def run_loop_iterations(loop: Loop) -> None:
-    """Run loop iterations until PR limit is reached or error occurs."""
+def run_agent_iterations(agent: Agent) -> None:
+    """Run agent iterations until PR limit is reached or error occurs."""
     while True:
-        outstanding = count_outstanding(loop)
-        if outstanding >= loop.pr_limit:
-            update_loop_status(loop.id, TriggerStatus.WAITING)
+        outstanding = count_outstanding(agent)
+        if outstanding >= agent.pr_limit:
+            update_agent_status(agent.id, AgentStatus.WAITING)
             notify_event(
-                "loop.waiting",
+                "agent.waiting",
                 {
-                    "loop_id": loop.id,
-                    "area": loop.area,
+                    "agent_id": agent.id,
+                    "area": agent.area_display,
                     "outstanding": outstanding,
-                    "limit": loop.pr_limit,
+                    "limit": agent.pr_limit,
                 },
             )
             break
 
-        iteration = loop.iteration + 1
+        iteration = agent.iteration + 1
         run_id = str(uuid.uuid4())
 
         # Wait for manager slot (global concurrency)
@@ -110,131 +108,57 @@ def run_loop_iterations(loop: Loop) -> None:
             notify_event(
                 "scheduler.waiting",
                 {
-                    "loop_id": loop.id,
-                    "area": loop.area,
+                    "agent_id": agent.id,
+                    "area": agent.area_display,
                     "reason": reason or "concurrency",
                 },
             )
             time.sleep(MANAGER_POLL_INTERVAL)
 
         try:
-            success = run_iteration(loop, iteration, run_id)
+            success = run_iteration(agent, iteration, run_id)
             if success:
-                update_loop_iteration(loop.id, iteration)
-                loop.iteration = iteration
+                update_agent_iteration(agent.id, iteration)
+                agent.iteration = iteration
             else:
-                update_loop_status(loop.id, TriggerStatus.ERROR)
+                update_agent_status(agent.id, AgentStatus.ERROR)
                 break
         except Exception as e:
             notify_event(
-                "loop.error",
+                "agent.error",
                 {
-                    "loop_id": loop.id,
-                    "area": loop.area,
+                    "agent_id": agent.id,
+                    "area": agent.area_display,
                     "error": str(e),
                 },
             )
-            update_loop_status(loop.id, TriggerStatus.ERROR)
+            update_agent_status(agent.id, AgentStatus.ERROR)
             break
         finally:
             _manager_release(run_id)
 
-    update_loop_pid(loop.id, None)
-
-
-def _trigger_to_loop(trigger) -> Loop:
-    """Convert a subscription or schedule to a Loop for run_iteration."""
-    return Loop(
-        id=trigger.id,
-        flow=trigger.flow,
-        area=trigger.area,
-        repo=trigger.repo,
-        goals=trigger.goals,
-        status=trigger.status,
-        iteration=trigger.iteration,
-        main_branch=trigger.main_branch,
-        pr_limit=trigger.pr_limit,
-        merge_mode=trigger.merge_mode,
-        pid=trigger.pid,
-        created_at=trigger.created_at,
-    )
-
-
-def run_subscription_iteration(subscription_id: str) -> bool:
-    """Run a single iteration for a subscription."""
-    sub = get_subscription(subscription_id)
-    if not sub:
-        return False
-
-    loop = _trigger_to_loop(sub)
-    iteration = sub.iteration + 1
-
-    try:
-        return run_iteration(loop, iteration, parent_type="subscription")
-    finally:
-        update_subscription_status(subscription_id, TriggerStatus.IDLE)
-
-
-def run_schedule_iteration(schedule_id: str) -> bool:
-    """Run a single iteration for a schedule."""
-    schedule = get_schedule(schedule_id)
-    if not schedule:
-        return False
-
-    loop = _trigger_to_loop(schedule)
-    iteration = schedule.iteration + 1
-
-    try:
-        return run_iteration(loop, iteration, parent_type="schedule")
-    finally:
-        update_schedule_status(schedule_id, TriggerStatus.IDLE)
+    update_agent_pid(agent.id, None)
 
 
 def main() -> None:
     """Entry point for background worker."""
-    if len(sys.argv) < 2:
-        print("Usage: python -m loopflow.lfd.execution.worker <type> [id]", file=sys.stderr)
+    if len(sys.argv) < 3:
+        print("Usage: python -m loopflow.lfd.execution.worker agent <agent_id>", file=sys.stderr)
         sys.exit(1)
 
-    trigger_type = sys.argv[1]
+    cmd = sys.argv[1]
+    agent_id = sys.argv[2]
 
-    if trigger_type == "loop":
-        if len(sys.argv) != 3:
-            print("Usage: python -m loopflow.lfd.execution.worker loop <loop_id>", file=sys.stderr)
-            sys.exit(1)
-
-        loop_id = sys.argv[2]
-        loop = get_loop(loop_id)
-
-        if not loop:
-            print(f"Loop not found: {loop_id}", file=sys.stderr)
-            sys.exit(1)
-
-        run_loop_iterations(loop)
-
-    elif trigger_type == "subscription":
-        if len(sys.argv) != 3:
-            print(
-                "Usage: python -m loopflow.lfd.execution.worker subscription <id>", file=sys.stderr
-            )
-            sys.exit(1)
-
-        subscription_id = sys.argv[2]
-        success = run_subscription_iteration(subscription_id)
-        sys.exit(0 if success else 1)
-
-    elif trigger_type == "schedule":
-        if len(sys.argv) != 3:
-            print("Usage: python -m loopflow.lfd.execution.worker schedule <id>", file=sys.stderr)
-            sys.exit(1)
-
-        schedule_id = sys.argv[2]
-        success = run_schedule_iteration(schedule_id)
-        sys.exit(0 if success else 1)
-
-    else:
-        print(f"Unknown trigger type: {trigger_type}", file=sys.stderr)
+    if cmd != "agent":
+        print(f"Unknown command: {cmd}", file=sys.stderr)
         sys.exit(1)
+
+    agent = get_agent(agent_id)
+    if not agent:
+        print(f"Agent not found: {agent_id}", file=sys.stderr)
+        sys.exit(1)
+
+    run_agent_iterations(agent)
 
 
 if __name__ == "__main__":

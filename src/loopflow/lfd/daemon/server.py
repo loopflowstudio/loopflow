@@ -11,9 +11,9 @@ from pathlib import Path
 
 from loopflow.lfd.daemon.manager import Manager, load_manager_config
 from loopflow.lfd.daemon.protocol import Event, Request, Response, error, success
-from loopflow.lfd.db import update_dead_runs
-from loopflow.lfd.models import Session, SessionStatus, TriggerStatus
-from loopflow.lfd.runs.loop import list_loops
+from loopflow.lfd.db import update_dead_processes
+from loopflow.lfd.models import AgentStatus, Session, SessionStatus
+from loopflow.lfd.agent import list_agents, run_cron_check, run_watch_check
 from loopflow.lfd.runs.session import (
     load_sessions,
     load_sessions_for_repo,
@@ -114,15 +114,15 @@ class Server:
             return error(f"Unknown method: {method}", request.id)
 
     async def _handle_status(self) -> Response:
-        loops = list_loops()
+        agents = list_agents()
         sessions = load_sessions(active_only=True)
-        running_loops = [loop for loop in loops if loop.status == TriggerStatus.RUNNING]
+        running_agents = [a for a in agents if a.status == AgentStatus.RUNNING]
 
         return success(
             {
                 "pid": os.getpid(),
-                "loops_defined": len(loops),
-                "loops_running": len(running_loops),
+                "agents_defined": len(agents),
+                "agents_running": len(running_agents),
                 "sessions_active": len(sessions),
             }
         )
@@ -274,36 +274,34 @@ class Server:
                     self.subscriptions.pop(writer, None)
 
     async def _periodic_check(self) -> None:
-        """Periodically update dead processes and check triggers."""
+        """Periodically update dead processes and check agent triggers."""
         from loopflow.lfd.autoprune import AutopruneManager, get_repos_to_check
         from loopflow.lfd.draft_prs import run_draft_pr_check
-        from loopflow.lfd.runs.schedule import run_schedule_check
-        from loopflow.lfd.runs.subscription import run_subscription_check
 
         autoprune_manager = AutopruneManager()
 
         while self._running:
             try:
                 await asyncio.sleep(30)
-                update_dead_runs()
+                update_dead_processes()
 
-                # Check subscription triggers (file changes on main)
-                triggered_subs = run_subscription_check()
-                for sub_id in triggered_subs:
+                # Check watch-mode agents (file changes on main)
+                triggered_watch = run_watch_check()
+                for agent_id in triggered_watch:
                     await self._broadcast(
                         Event(
-                            "subscription.triggered",
-                            {"subscription_id": sub_id},
+                            "agent.triggered",
+                            {"agent_id": agent_id, "mode": "watch"},
                         )
                     )
 
-                # Check schedule triggers (cron)
-                triggered_scheds = run_schedule_check()
-                for schedule_id in triggered_scheds:
+                # Check cron-mode agents
+                triggered_cron = run_cron_check()
+                for agent_id in triggered_cron:
                     await self._broadcast(
                         Event(
-                            "schedule.triggered",
-                            {"schedule_id": schedule_id},
+                            "agent.triggered",
+                            {"agent_id": agent_id, "mode": "cron"},
                         )
                     )
 

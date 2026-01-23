@@ -30,9 +30,7 @@ def register_commands(app: typer.Typer) -> None:
         exclude: list[str] = typer.Option(
             None, "-e", "-E", "--exclude", help="Patterns to exclude"
         ),
-        clipboard: bool = typer.Option(
-            False, "-c", "-C", "--clipboard", help="Include clipboard content"
-        ),
+        paste: bool = typer.Option(False, "-v", "-V", "--paste", help="Include clipboard content"),
         docs: Optional[bool] = typer.Option(
             None, "--lfdocs/--no-lfdocs", help="Include .docs/, .design/, and root .md files"
         ),
@@ -79,7 +77,7 @@ def register_commands(app: typer.Typer) -> None:
             step=None,
             context=all_context or None,
             exclude=exclude_patterns or None,
-            paste=clipboard,
+            paste=paste,
             run_mode=None,
             include_loopflow_doc=config.include_loopflow_doc if config else True,
             include_diff=include_diff,

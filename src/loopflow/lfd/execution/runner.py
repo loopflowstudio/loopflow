@@ -1,6 +1,6 @@
 """Core iteration runner for lfd.
 
-Executes a single iteration of any trigger type (Loop, Subscription, Schedule).
+Executes a single iteration of an Agent.
 """
 
 import json
@@ -35,7 +35,7 @@ from loopflow.lf.worktrees import WorktreeError
 from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
 from loopflow.lfd.daemon.client import notify_event
-from loopflow.lfd.models import Loop, Run, RunStatus
+from loopflow.lfd.models import Agent, Run, RunStatus
 from loopflow.lfd.runs.run import (
     save_run,
     update_run_pr,
@@ -52,7 +52,7 @@ def _iteration_branch_prefix(main_branch: str) -> str:
 
 
 def _build_loop_prompt(
-    loop: Loop,
+    agent: Agent,
     effective_voices: list,
     worktree_path: Path,
     step_name: str,
@@ -152,7 +152,7 @@ def _cleanup_variant_worktrees(repo_root: Path, results: list[_VariantResult]) -
 
 
 def _build_loop_inline_prompt(
-    loop: Loop,
+    agent: Agent,
     effective_voices: list,
     worktree_path: Path,
     inline_text: str,
@@ -178,7 +178,7 @@ def _build_loop_inline_prompt(
 
 
 def _run_fork_join_group(
-    loop: Loop,
+    agent: Agent,
     flow_name: str,
     worktree_path: Path,
     branch: str,
@@ -218,9 +218,9 @@ def _run_fork_join_group(
 
         wt_name = f"_fork-{branch.replace('/', '-')}-{label.replace(':', '-')}"
         try:
-            wt_path = create_worktree(loop.repo, wt_name, base=branch)
+            wt_path = create_worktree(agent.repo, wt_name, base=branch)
         except Exception:
-            _cleanup_variant_worktrees(loop.repo, results)
+            _cleanup_variant_worktrees(agent.repo, results)
             return 1
 
         subprocess.run(
@@ -231,7 +231,7 @@ def _run_fork_join_group(
         subprocess.run(["git", "clean", "-fd"], cwd=wt_path, capture_output=True)
 
         prompt_result = _build_loop_prompt(
-            loop,
+            agent,
             effective_voices,
             wt_path,
             step.step,
@@ -239,12 +239,12 @@ def _run_fork_join_group(
             voices=step_voices,
         )
         if not prompt_result:
-            remove_worktree(loop.repo, wt_path.name.split(".")[-1])
+            remove_worktree(agent.repo, wt_path.name.split(".")[-1])
             return 1
 
         prompt, _step_file = prompt_result
         session_id = str(uuid.uuid4())
-        step_label = f"{loop.area}:{step.step}:{label}"
+        step_label = f"{agent.area_display}:{step.step}:{label}"
 
         exit_code = _run_collector_step(
             prompt,
@@ -262,18 +262,18 @@ def _run_fork_join_group(
 
     successes = [r for r in results if r.exit_code == 0]
     if not successes:
-        _cleanup_variant_worktrees(loop.repo, results)
+        _cleanup_variant_worktrees(agent.repo, results)
         return 1
 
     fork_worktrees = [(r.label, r.worktree) for r in successes]
     join_prompt = build_join_prompt(
         collect_fork_diffs(fork_worktrees),
-        load_join_instructions(join_config.step, loop.repo),
-        format_voice_section(join_config.voice, loop.repo),
+        load_join_instructions(join_config.step, agent.repo),
+        format_voice_section(join_config.voice, agent.repo),
         flow_name,
     )
     join_prompt = _build_loop_inline_prompt(
-        loop,
+        agent,
         effective_voices,
         worktree_path,
         join_prompt,
@@ -281,7 +281,7 @@ def _run_fork_join_group(
         voices=None,
     )
     if not join_prompt:
-        _cleanup_variant_worktrees(loop.repo, results)
+        _cleanup_variant_worktrees(agent.repo, results)
         return 1
 
     join_backend = backend
@@ -296,42 +296,41 @@ def _run_fork_join_group(
         join_variant,
         skip_permissions,
         str(uuid.uuid4()),
-        f"{loop.area}:join",
+        f"{agent.area_display}:join",
         autocommit=True,
     )
 
-    _cleanup_variant_worktrees(loop.repo, results)
+    _cleanup_variant_worktrees(agent.repo, results)
     return join_result
 
 
 def run_iteration(
-    loop: Loop,
+    agent: Agent,
     iteration: int,
     run_id: str | None = None,
-    parent_type: str = "loop",
 ) -> bool:
-    """Run a single iteration of a trigger.
+    """Run a single iteration of an agent.
 
-    Works for any trigger type (Loop, Subscription, Schedule).
     Returns True if successful, False on error.
     """
-    config = load_config(loop.repo)
+    config = load_config(agent.repo)
 
-    prefix = _iteration_branch_prefix(loop.main_branch)
+    prefix = _iteration_branch_prefix(agent.main_branch)
     branch = f"{prefix}/{iteration:03d}"
     try:
-        worktree_path = create_worktree(loop.repo, branch, base=loop.main_branch)
+        worktree_path = create_worktree(agent.repo, branch, base=agent.main_branch)
     except WorktreeError as e:
-        notify_event("loop.error", {"loop_id": loop.id, "error": f"Failed to create worktree: {e}"})
+        error_msg = f"Failed to create worktree: {e}"
+        notify_event("agent.error", {"agent_id": agent.id, "error": error_msg})
         return False
 
     run = Run(
         id=run_id or str(uuid.uuid4()),
-        parent=f"{parent_type}:{loop.id}",
-        flow=loop.flow,
-        area=loop.area,
-        repo=loop.repo,
-        voices=loop.voices,
+        agent=agent.id,
+        flow=agent.flow,
+        voice=agent.voice,
+        area=agent.area,
+        repo=agent.repo,
         status=RunStatus.RUNNING,
         iteration=iteration,
         worktree=str(worktree_path),
@@ -341,43 +340,43 @@ def run_iteration(
     save_run(run)
 
     notify_event(
-        "loop.started",
+        "agent.started",
         {
-            "loop_id": loop.id,
-            "area": loop.area,
-            "voices": loop.voices,
-            "flow": loop.flow,
+            "agent_id": agent.id,
+            "area": agent.area_display,
+            "voice": agent.voice_display,
+            "flow": agent.flow,
             "iteration": iteration,
         },
     )
 
-    effective_voices = build_effective_voices(loop.repo, loop.voices)
+    effective_voices = build_effective_voices(agent.repo, agent.voice)
     if not effective_voices:
         update_run_status(run.id, RunStatus.FAILED, error="No valid voices found")
         return False
 
-    flow = loop.flow
+    flow = agent.flow
     if not flow:
         update_run_status(run.id, RunStatus.FAILED, error="Flow is required")
-        _cleanup_worktree(loop.repo, worktree_path, branch)
+        _cleanup_worktree(agent.repo, worktree_path, branch)
         return False
 
     try:
-        flow_def = load_flow(flow, loop.repo)
+        flow_def = load_flow(flow, agent.repo)
     except ValueError as exc:
         update_run_status(run.id, RunStatus.FAILED, error=str(exc))
-        _cleanup_worktree(loop.repo, worktree_path, branch)
+        _cleanup_worktree(agent.repo, worktree_path, branch)
         return False
 
     if not flow_def:
         update_run_status(run.id, RunStatus.FAILED, error=f"Unknown flow '{flow}'")
-        _cleanup_worktree(loop.repo, worktree_path, branch)
+        _cleanup_worktree(agent.repo, worktree_path, branch)
         return False
 
-    resolved = resolve_flow(flow_def, loop.repo)
+    resolved = resolve_flow(flow_def, agent.repo)
     if not resolved:
         update_run_status(run.id, RunStatus.FAILED, error=f"Empty flow '{flow}'")
-        _cleanup_worktree(loop.repo, worktree_path, branch)
+        _cleanup_worktree(agent.repo, worktree_path, branch)
         return False
 
     agent_model = config.agent_model if config else "claude:opus"
@@ -390,7 +389,8 @@ def run_iteration(
 
     skip_permissions = config.yolo if config else False
 
-    context_paths = [loop.area] if loop.area != "." else None
+    # Use first area as context path, or derive from first voice
+    context_paths = list(agent.area) if agent.area[0] != "." else None
     if not context_paths and effective_voices[0].area:
         context_paths = effective_voices[0].area
 
@@ -408,11 +408,11 @@ def run_iteration(
                 update_run_status(
                     run.id, RunStatus.FAILED, error="Fork must be immediately followed by join"
                 )
-                _cleanup_worktree(loop.repo, worktree_path, branch)
+                _cleanup_worktree(agent.repo, worktree_path, branch)
                 return False
 
             result_code = _run_fork_join_group(
-                loop,
+                agent,
                 flow_def.name,
                 worktree_path,
                 branch,
@@ -426,7 +426,7 @@ def run_iteration(
             )
             if result_code != 0:
                 update_run_status(run.id, RunStatus.FAILED, error="join failed")
-                _cleanup_worktree(loop.repo, worktree_path, branch)
+                _cleanup_worktree(agent.repo, worktree_path, branch)
                 return False
 
             i += 1
@@ -444,18 +444,18 @@ def run_iteration(
                 )
             except RuntimeError as exc:
                 update_run_status(run.id, RunStatus.FAILED, error=str(exc))
-                _cleanup_worktree(loop.repo, worktree_path, branch)
+                _cleanup_worktree(agent.repo, worktree_path, branch)
                 return False
 
             branch_steps = step.choose.options[choice]
             branch_flow = FlowDef.from_dict(f"{flow_def.name}:{choice}", {"steps": branch_steps})
-            branch_resolved = resolve_flow(branch_flow, loop.repo)
+            branch_resolved = resolve_flow(branch_flow, agent.repo)
             resolved = resolved[:i] + branch_resolved + resolved[i + 1 :]
             continue
 
         if step.join is not None:
             update_run_status(run.id, RunStatus.FAILED, error="Join must follow fork")
-            _cleanup_worktree(loop.repo, worktree_path, branch)
+            _cleanup_worktree(agent.repo, worktree_path, branch)
             return False
 
         if not step.step:
@@ -465,9 +465,9 @@ def run_iteration(
         step_name = step.step
         update_run_step(run.id, step_name)
         notify_event(
-            "loop.step.started",
+            "agent.step.started",
             {
-                "loop_id": loop.id,
+                "agent_id": agent.id,
                 "step": step_name,
                 "iteration": iteration,
             },
@@ -487,7 +487,7 @@ def run_iteration(
                 step_voices = step.config.voice
 
         prompt_result = _build_loop_prompt(
-            loop,
+            agent,
             effective_voices,
             worktree_path,
             step_name,
@@ -496,7 +496,7 @@ def run_iteration(
         )
         if not prompt_result:
             update_run_status(run.id, RunStatus.FAILED, error=f"Step file not found: {step_name}")
-            _cleanup_worktree(loop.repo, worktree_path, branch)
+            _cleanup_worktree(agent.repo, worktree_path, branch)
             return False
 
         prompt, _step_file = prompt_result
@@ -507,13 +507,13 @@ def run_iteration(
             step_variant,
             skip_permissions,
             run.id,
-            f"{loop.area}:{step_name}",
+            f"{agent.area_display}:{step_name}",
         )
 
         notify_event(
-            "loop.step.completed",
+            "agent.step.completed",
             {
-                "loop_id": loop.id,
+                "agent_id": agent.id,
                 "step": step_name,
                 "status": "completed" if result_code == 0 else "error",
             },
@@ -521,42 +521,42 @@ def run_iteration(
 
         if result_code != 0:
             update_run_status(run.id, RunStatus.FAILED, error=f"{step_name} failed")
-            _cleanup_worktree(loop.repo, worktree_path, branch)
+            _cleanup_worktree(agent.repo, worktree_path, branch)
             return False
 
         i += 1
 
     update_run_step(run.id, None)
 
-    pr_url = _create_pr_to_main_branch(loop, worktree_path, branch, iteration)
+    pr_url = _create_pr_to_main_branch(agent, worktree_path, branch, iteration)
     if pr_url:
         update_run_pr(run.id, pr_url)
         _auto_merge_pr(worktree_path)
 
-        if loop.merge_mode.value == "land":
-            _land_to_main(loop)
+        if agent.merge_mode.value == "land":
+            _land_to_main(agent)
 
     update_run_status(run.id, RunStatus.COMPLETED)
 
     notify_event(
-        "loop.iteration.done",
+        "agent.iteration.done",
         {
-            "loop_id": loop.id,
-            "area": loop.area,
-            "voices": loop.voices,
-            "flow": loop.flow,
+            "agent_id": agent.id,
+            "area": agent.area_display,
+            "voice": agent.voice_display,
+            "flow": agent.flow,
             "iteration": iteration,
             "pr_url": pr_url,
         },
     )
 
-    _cleanup_worktree(loop.repo, worktree_path, branch)
+    _cleanup_worktree(agent.repo, worktree_path, branch)
 
     return True
 
 
 def _create_pr_to_main_branch(
-    loop: Loop, worktree_path: Path, branch: str, iteration: int
+    agent: Agent, worktree_path: Path, branch: str, iteration: int
 ) -> str | None:
     """Push branch and create PR targeting main_branch."""
     result = subprocess.run(
@@ -570,17 +570,17 @@ def _create_pr_to_main_branch(
 
     try:
         message = generate_pr_message(worktree_path)
-        title = f"[{loop.area_slug}] {message.title}"
+        title = f"[{agent.area_slug}] {message.title}"
         body = (
-            f"Loop: {loop.area} [{loop.voices_display}]\n"
-            f"Flow: {loop.flow_display}\n"
+            f"Agent: {agent.area_display} [{agent.voice_display}]\n"
+            f"Flow: {agent.flow}\n"
             f"Iteration: {iteration}\n\n{message.body}"
         )
     except Exception:
-        title = f"[{loop.area_slug}] Iteration {iteration}"
+        title = f"[{agent.area_slug}] Iteration {iteration}"
         body = (
-            f"Loop: {loop.area} [{loop.voices_display}]\n"
-            f"Flow: {loop.flow_display}\n"
+            f"Agent: {agent.area_display} [{agent.voice_display}]\n"
+            f"Flow: {agent.flow}\n"
             f"Iteration: {iteration}"
         )
 
@@ -593,7 +593,7 @@ def _create_pr_to_main_branch(
         "--body",
         body,
         "--base",
-        loop.main_branch,
+        agent.main_branch,
     ]
     result = subprocess.run(cmd, cwd=worktree_path, capture_output=True, text=True)
 
@@ -613,11 +613,11 @@ def _auto_merge_pr(worktree_path: Path) -> bool:
     return result.returncode == 0
 
 
-def _land_to_main(loop: Loop) -> str | None:
+def _land_to_main(agent: Agent) -> str | None:
     """Create or update PR from main_branch to main, enable auto-merge."""
-    repo = loop.repo
+    repo = agent.repo
 
-    subprocess.run(["git", "push", "origin", loop.main_branch], cwd=repo, capture_output=True)
+    subprocess.run(["git", "push", "origin", agent.main_branch], cwd=repo, capture_output=True)
 
     result = subprocess.run(
         [
@@ -625,7 +625,7 @@ def _land_to_main(loop: Loop) -> str | None:
             "pr",
             "list",
             "--head",
-            loop.main_branch,
+            agent.main_branch,
             "--base",
             "main",
             "--json",
@@ -656,11 +656,12 @@ def _land_to_main(loop: Loop) -> str | None:
             "--base",
             "main",
             "--head",
-            loop.main_branch,
+            agent.main_branch,
             "--title",
-            f"[{loop.area_slug}] Land accumulated work",
+            f"[{agent.area_slug}] Land accumulated work",
             "--body",
-            f"Auto-land from loop: {loop.area} [{loop.voices_display}] (flow: {loop.flow_display})",
+            f"Auto-land from agent: {agent.area_display} [{agent.voice_display}] "
+            f"(flow: {agent.flow})",
         ],
         cwd=repo,
         capture_output=True,

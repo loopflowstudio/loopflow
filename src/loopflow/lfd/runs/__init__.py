@@ -1,7 +1,6 @@
-"""Run-centric domain for lfd.
+"""Run management for lfd.
 
-This package contains the core entities that represent work:
-- Run: an execution instance
-- Loop, Subscription, Schedule: parent types that spawn runs
-- Session: legacy tracking for interactive sessions
+This package tracks execution instances:
+- Run: an execution instance spawned by an agent
+- Session: tracking for interactive sessions
 """

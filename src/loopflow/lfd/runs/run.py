@@ -15,18 +15,18 @@ def save_run(run: Run, db_path: Path | None = None) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO runs
-        (id, parent, flow, area, repo, goals, status, iteration,
+        (id, agent, flow, voice, area, repo, status, iteration,
          worktree, branch, current_step, error, pr_url,
          started_at, ended_at, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             run.id,
-            run.parent,
+            run.agent,
             run.flow,
-            run.area,
+            json.dumps(run.voice),
+            json.dumps(run.area),
             str(run.repo),
-            json.dumps(run.goals) if run.goals else None,
             run.status.value,
             run.iteration,
             run.worktree,
@@ -55,12 +55,12 @@ def get_run(run_id: str, db_path: Path | None = None) -> Run | None:
         row = cursor.fetchone()
 
     conn.close()
-    return _run_from_row(dict(row)) if row else None
+    return run_from_row(dict(row)) if row else None
 
 
 def list_runs(
     repo: Path | None = None,
-    parent: str | None = None,
+    agent: str | None = None,
     status: RunStatus | None = None,
     limit: int = 50,
     db_path: Path | None = None,
@@ -75,9 +75,9 @@ def list_runs(
         conditions.append("repo = ?")
         params.append(str(repo))
 
-    if parent:
-        conditions.append("parent = ?")
-        params.append(parent)
+    if agent:
+        conditions.append("agent = ?")
+        params.append(agent)
 
     if status:
         conditions.append("status = ?")
@@ -88,27 +88,23 @@ def list_runs(
 
     cursor = conn.execute(f"SELECT * FROM runs{where} ORDER BY created_at DESC LIMIT ?", params)
 
-    runs = [_run_from_row(dict(row)) for row in cursor]
+    runs = [run_from_row(dict(row)) for row in cursor]
     conn.close()
     return runs
 
 
-def list_runs_for_trigger(
-    trigger_type: str,
-    trigger_id: str,
+def list_runs_for_agent(
+    agent_id: str,
     limit: int = 10,
     db_path: Path | None = None,
 ) -> list[Run]:
-    """List runs spawned by a specific trigger."""
-    parent = f"{trigger_type}:{trigger_id}"
-    return list_runs(parent=parent, limit=limit, db_path=db_path)
+    """List runs spawned by a specific agent."""
+    return list_runs(agent=agent_id, limit=limit, db_path=db_path)
 
 
-def get_latest_run_for_trigger(
-    trigger_type: str, trigger_id: str, db_path: Path | None = None
-) -> Run | None:
-    """Get the most recent run for a trigger."""
-    runs = list_runs_for_trigger(trigger_type, trigger_id, limit=1, db_path=db_path)
+def get_latest_run_for_agent(agent_id: str, db_path: Path | None = None) -> Run | None:
+    """Get the most recent run for an agent."""
+    runs = list_runs_for_agent(agent_id, limit=1, db_path=db_path)
     return runs[0] if runs else None
 
 
@@ -183,18 +179,21 @@ def delete_run(run_id: str, db_path: Path | None = None) -> bool:
     return deleted
 
 
-def _run_from_row(row: dict) -> Run:
+def run_from_row(row: dict) -> Run:
     """Convert database row to Run."""
-    goals_str = row.get("goals")
-    goals = json.loads(goals_str) if goals_str else []
+    voice_str = row.get("voice")
+    voice = json.loads(voice_str) if voice_str else ["default"]
+
+    area_str = row.get("area")
+    area = json.loads(area_str) if area_str else ["."]
 
     return Run(
         id=row["id"],
-        parent=row.get("parent"),
+        agent=row.get("agent"),
         flow=row["flow"],
-        area=row["area"],
+        voice=voice,
+        area=area,
         repo=Path(row["repo"]),
-        goals=goals,
         status=RunStatus(row["status"]),
         iteration=row.get("iteration", 0),
         worktree=row.get("worktree"),

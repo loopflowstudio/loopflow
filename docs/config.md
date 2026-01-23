@@ -16,9 +16,9 @@ Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), or repo c
 | Include lf docs | `--lfdocs` (default) | `lfdocs: true` |
 | Include branch files | `--diff-files` (default) | `diff_files: true` |
 | Include raw diff | `--diff` | `diff: true` |
-| Include clipboard | `-c, --clipboard` | — |
-| Add context files | `-p FILE` | `context: [FILE]` |
-| Voice/persona | `-v, --voice NAME` | `voice: NAME` |
+| Include clipboard | `-v, --paste` | — |
+| Add context files | `-x FILE` | `context: [FILE]` |
+| Voice/persona | `--voice NAME` | `voice: NAME` |
 | Chrome automation | `--chrome` | `chrome: true` |
 | Yolo mode (skip permissions) | — | `yolo: true` |
 
@@ -139,10 +139,10 @@ Paste content (errors, stack traces, context) into the prompt.
 
 | | |
 |---|---|
-| **CLI** | `-c, --clipboard` |
+| **CLI** | `-v, --paste` |
 | **Default** | not included |
 
-Use `-c` when debugging: copy an error, then `lf debug -c`.
+Use `-v` when debugging: copy an error, then `lf debug -v`.
 
 ### Raw Diff
 
@@ -162,7 +162,7 @@ Additional files always included in every step.
 
 | | |
 |---|---|
-| **CLI** | `-p FILE` (repeatable) |
+| **CLI** | `-x FILE` (repeatable) |
 | **Config** | `context: [src/schema.py, docs/api.md]` |
 
 CLI adds to config; config sets baseline for all steps.
@@ -215,7 +215,7 @@ Personas that shape how the agent responds.
 
 | | |
 |---|---|
-| **CLI** | `-v concise` or `-v architect,concise` |
+| **CLI** | `--voice concise` or `--voice architect,concise` |
 | **Config** | `voice: architect` or `voice: [architect, concise]` |
 
 Voice files live in `.lf/voices/` as markdown.

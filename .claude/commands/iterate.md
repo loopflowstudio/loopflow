@@ -15,8 +15,11 @@ Focus on the areas this branch has already modified. Incremental quality improve
 1. Run `git diff main...HEAD --stat` to see which files this branch modified
 2. Read those files and identify the highest-impact improvement
 3. Make one focused change—don't scatter effort across multiple areas
-4. Run `uv run pytest tests/` to verify nothing broke
-5. If tests pass, you're done. If not, fix what you broke.
+4. Run ALL test suites to verify nothing broke (see TESTING.md):
+   - `uv run pytest tests/` — Python
+   - `swift test --package-path swift` — Swift
+   - `cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS'` — Concerto UI (if UI code changed)
+5. If all tests pass, you're done. If not, fix what you broke.
 
 ## Priority order (within the branch's scope)
 

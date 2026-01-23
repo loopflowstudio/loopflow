@@ -11,15 +11,18 @@ Get this branch ready to merge. Fix obvious problems, make sure tests pass, clea
 ## Workflow
 
 1. `git diff main...HEAD` to see what changed
-2. Run `uv run pytest tests/` — fix any failures
+2. Run ALL test suites (see TESTING.md)—CI runs three, all must pass:
+   - `uv run pytest tests/` — Python tests
+   - `swift test --package-path swift` — Swift tests
+   - `cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS'` — Concerto UI tests
 3. Run `uv run ruff check --fix` — fix any lint errors
 4. Read through the diff for obvious issues
 5. Fix what you find, run tests again
-6. When tests pass and code is clean, done
+6. When ALL tests pass and code is clean, done
 
 ## What to fix
 
-- Failing tests
+- Failing tests (Python, Swift, AND Concerto UI—all three suites)
 - Lint errors
 - Typos in user-facing strings
 - Missing imports
@@ -39,7 +42,7 @@ Get this branch ready to merge. Fix obvious problems, make sure tests pass, clea
 
 **Don't refactor.** If something works and passes lint, leave it.
 
-**Tests are the gate.** If tests pass, stop looking for problems.
+**All tests are the gate.** If ALL three test suites pass (Python, Swift, Concerto UI), stop looking for problems.
 
 ## Output
 

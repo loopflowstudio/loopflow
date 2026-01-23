@@ -26,8 +26,13 @@ The deliverable is working, clean code that passes tests.
    - Run `lf lint` to check for lint and format issues
    - Fix any failures before proceeding to tests
 
-3. **Test**
-   - Run the full test suite: `./dev test` (runs both Python and Swift tests)
+3. **Test** (see TESTING.md for details)
+   - Run ALL test suites—CI runs three, all must pass:
+     ```bash
+     uv run pytest tests/                    # Python
+     swift test --package-path swift         # Swift
+     cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS'  # Concerto UI
+     ```
    - If tests fail, determine: broken test or broken code?
    - Fix failures one by one, running single tests while debugging
 
@@ -43,8 +48,9 @@ The deliverable is working, clean code that passes tests.
    - Simplify tests that are complex but don't prove user value
 
    For component-specific testing:
-   - Python only: `./dev py`
-   - Swift only: `./dev swift`
+   - Python only: `uv run pytest tests/`
+   - Swift only: `swift test --package-path swift`
+   - Concerto UI only: `cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS'`
 
 ## What to fix
 

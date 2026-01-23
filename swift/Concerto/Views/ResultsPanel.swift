@@ -23,7 +23,7 @@ struct ResultsPanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let result = appState.currentSessionResult {
+            if let result = appState.currentStepRunResult {
                 resultView(result)
             } else if !appState.liveOutputBySession.isEmpty && appState.showResultsLog {
                 // Fallback to legacy output view if toggled
@@ -34,7 +34,7 @@ struct ResultsPanel: View {
             }
         }
         .sheet(isPresented: $showingDiffSheet) {
-            if let result = appState.currentSessionResult {
+            if let result = appState.currentStepRunResult {
                 ResultsDiffSheet(
                     step: result.step,
                     diffContent: diffContent,
@@ -48,7 +48,7 @@ struct ResultsPanel: View {
     // MARK: - Result View
 
     @ViewBuilder
-    private func resultView(_ result: SessionResult) -> some View {
+    private func resultView(_ result: StepRunResult) -> some View {
         VStack(spacing: 0) {
             resultHeader(result)
 
@@ -71,7 +71,7 @@ struct ResultsPanel: View {
         }
     }
 
-    private func resultHeader(_ result: SessionResult) -> some View {
+    private func resultHeader(_ result: StepRunResult) -> some View {
         HStack(spacing: 8) {
             // Status indicator
             statusIcon(result.status)
@@ -138,7 +138,7 @@ struct ResultsPanel: View {
         .background(palette.surface)
     }
 
-    private func copyOutput(_ result: SessionResult) {
+    private func copyOutput(_ result: StepRunResult) {
         var output = ""
         if let lines = appState.liveOutputBySession[result.id] {
             output = lines.map { $0.text }.joined(separator: "\n")
@@ -150,7 +150,7 @@ struct ResultsPanel: View {
     }
 
     @ViewBuilder
-    private func statusIcon(_ status: SessionResultStatus) -> some View {
+    private func statusIcon(_ status: StepRunResultStatus) -> some View {
         switch status {
         case .running:
             ProgressView()
@@ -168,7 +168,7 @@ struct ResultsPanel: View {
     }
 
     @ViewBuilder
-    private func resultContent(_ result: SessionResult) -> some View {
+    private func resultContent(_ result: StepRunResult) -> some View {
         if appState.showResultsLog {
             // Show legacy streaming log
             if let lines = appState.liveOutputBySession[result.id] {
@@ -207,7 +207,7 @@ struct ResultsPanel: View {
 
     // MARK: - Files Changed
 
-    private func filesChangedSection(_ result: SessionResult) -> some View {
+    private func filesChangedSection(_ result: StepRunResult) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("\(result.filesChanged.count) file\(result.filesChanged.count == 1 ? "" : "s") changed")
@@ -228,7 +228,7 @@ struct ResultsPanel: View {
         }
     }
 
-    private func fileRow(_ file: FileChange, index: Int, result: SessionResult) -> some View {
+    private func fileRow(_ file: FileChange, index: Int, result: StepRunResult) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             // File header - clickable to expand
             Button {
@@ -420,7 +420,7 @@ struct ResultsPanel: View {
 
     // MARK: - Actions
 
-    private func actionButtons(_ result: SessionResult) -> some View {
+    private func actionButtons(_ result: StepRunResult) -> some View {
         HStack(spacing: 12) {
             Button {
                 openInTerminal(result.worktree)
@@ -449,7 +449,7 @@ struct ResultsPanel: View {
         try? terminalLauncher.launchTerminal(terminal, at: URL(fileURLWithPath: worktreePath))
     }
 
-    private func viewFullDiff(_ result: SessionResult) {
+    private func viewFullDiff(_ result: StepRunResult) {
         diffContent = nil
         diffLoading = true
         showingDiffSheet = true

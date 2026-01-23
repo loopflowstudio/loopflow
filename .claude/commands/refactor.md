@@ -79,7 +79,7 @@ A collaborative exploration. Map the territory, surface tradeoffs, propose direc
 
    When direction is clear:
    - Make one structural change
-   - Run tests
+   - Run all relevant tests (see TESTING.md for the full suite)
    - Commit if green
    - Repeat
 

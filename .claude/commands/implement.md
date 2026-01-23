@@ -18,7 +18,10 @@ The design doc is under `.design/` and auto-included. It contains data structure
 2. Read STYLE.md to understand code conventions
 3. Implement data structures first—get the core types right
 4. Implement functions one at a time, following the signatures in the design
-5. Run `uv run pytest tests/` to verify nothing broke
+5. Run ALL test suites to verify nothing broke (see TESTING.md):
+   - `uv run pytest tests/` — Python
+   - `swift test --package-path swift` — Swift
+   - `cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS'` — Concerto UI (if UI code changed)
 6. Run the "done when" check from the design doc
 7. Do not commit—leave that to the caller or pipeline
 

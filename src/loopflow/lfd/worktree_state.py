@@ -4,24 +4,11 @@ Provides cached worktree status including staleness detection.
 Concerto calls this instead of running multiple git commands.
 """
 
-import json
-import subprocess
 import time
-from dataclasses import dataclass
 from pathlib import Path
 
-from loopflow.lf.worktrees import Worktree, is_merged, list_all
+from loopflow.lf.worktrees import is_merged, list_all
 from loopflow.lfd.step_run import load_step_runs_for_worktree
-
-
-@dataclass
-class WorktreeStatus:
-    """Worktree with computed staleness and recent steps."""
-
-    worktree: Worktree
-    staleness: str | None  # "merged", "remote_deleted", "inactive", or None
-    staleness_days: int | None  # days inactive, if applicable
-    recent_steps: list[dict]  # Recent step runs for this worktree
 
 
 class WorktreeStateService:

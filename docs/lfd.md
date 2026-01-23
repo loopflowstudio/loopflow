@@ -12,7 +12,7 @@ title: lfd Command Reference
 ```bash
 lfd                          # show status (default)
 lfd loop <flow> <area>       # start continuous loop
-lfd flow <flow> <area>       # run single iteration
+lfd run <flow> <area>        # run single iteration
 lfd status                   # show all loops
 ```
 
@@ -64,41 +64,34 @@ Runs iterations until the PR limit is reached, then waits. Each iteration picks 
 
 Flows live in `.lf/flows/<name>.py`:
 
-```yaml
----
-steps:
-  - implement
-  - rebase
-  - polish
-  - draft_commit
-pr: true
----
+```python
+def flow():
+    return Flow(["implement", "rebase", "polish", "draft_commit"])
 ```
 
 | Flag | Description |
 |------|-------------|
-| `-g, --goal` | Goal to add (repeatable) |
+| `-v, --voice` | Voice to add (repeatable) |
 | `-l, --limit` | PR limit override (default: 5) |
 | `--merge-mode` | `pr` (accumulate) or `land` (auto-merge to main) |
 | `-f, --foreground` | Run in foreground instead of background |
 
-### lfd flow
+### lfd run
 
 Run a single iteration (one-shot).
 
 ```bash
-lfd flow <area> --flow <flow>
-lfd flow src/ui/ --flow ship -p spec.md
-lfd flow . --flow ship -v
+lfd run <flow> <area>
+lfd run ship src/ui/
+lfd run ship . -c
 ```
 
 Like `lfd loop` but stops after one iteration. Good for specific tasks.
 
 | Flag | Description |
 |------|-------------|
-| `-g, --goal` | Goal to add (repeatable) |
-| `-p, --project` | Project/prompt file to include |
-| `-v, --paste` | Include clipboard content |
+| `-v, --voice` | Voice to add (repeatable) |
+| `-c, --clipboard` | Include clipboard content |
 
 ### lfd start
 
@@ -131,23 +124,23 @@ When files change under the watched paths on main, triggers one iteration.
 | Flag | Description |
 |------|-------------|
 | `-p, --path` | Path to watch (repeatable) |
-| `-g, --goal` | Goal to add (repeatable) |
+| `-v, --voice` | Voice to add (repeatable) |
 
 ### lfd schedule
 
 Run on a cron schedule.
 
 ```bash
-lfd schedule "<area>" "<cron>" --flow <flow>
-lfd schedule . "0 9 * * *" --flow ship
-lfd schedule src/ui/ "0 10 * * MON" --flow ship
+lfd schedule <flow> <area> "<cron>"
+lfd schedule ship . "0 9 * * *"
+lfd schedule ship src/ui/ "0 10 * * MON"
 ```
 
 Schedules have a 24-hour grace period for laptops—if your computer wakes after the scheduled time but within 24 hours, it still runs.
 
 | Flag | Description |
 |------|-------------|
-| `-g, --goal` | Goal to add (repeatable) |
+| `-v, --voice` | Voice to add (repeatable) |
 
 ## Monitoring
 

@@ -13,7 +13,7 @@ Define goals, review PRs when you wake. `lfd` runs agent loops in the background
 
 ```bash
 lfd install                      # one-time: install daemon
-lfd loop src/ --flow ship        # start a loop
+lfd loop ship src/               # start a loop
 lfd status                       # check progress
 lfd prs <loop-id>                # see created PRs
 ```
@@ -40,21 +40,20 @@ Or run manually: `lfd serve`
 ## Continuous loops
 
 ```bash
-lfd loop src/ --flow ship                   # run continuously
-lfd loop src/ --flow ship --limit 3         # max 3 outstanding PRs
-lfd loop src/ --flow ship --merge-mode land # auto-land to main
+lfd loop ship src/                   # run continuously
+lfd loop ship src/ --limit 3         # max 3 outstanding PRs
+lfd loop ship src/ --merge-mode land # auto-land to main
 ```
 
 When the PR limit is reached, the loop pauses until PRs are merged.
 
-## One-shot flows
+## One-shot runs
 
 Run exactly one iteration:
 
 ```bash
-lfd flow src/ --flow ship             # single iteration
-lfd flow src/ --flow ship -p spec.md  # with project file
-lfd flow src/ --flow ship -v          # with clipboard
+lfd run ship src/                # single iteration
+lfd run ship src/ -v             # with clipboard
 ```
 
 ## Triggers
@@ -116,8 +115,8 @@ Each goal defines what the agent should accomplish, its quality bar, and iterati
 ## Merge mode
 
 ```bash
-lfd loop src/ --flow ship --merge-mode pr    # accumulate PRs (default)
-lfd loop src/ --flow ship --merge-mode land  # auto-land each iteration
+lfd loop ship src/ --merge-mode pr    # accumulate PRs (default)
+lfd loop ship src/ --merge-mode land  # auto-land each iteration
 ```
 
 ## Reference

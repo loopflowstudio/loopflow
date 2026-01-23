@@ -1,70 +1,60 @@
-# polishbig: Support flags without step name
+# polishbig
 
-Make `lf -m codex` and `lf --web` work without requiring a step/prompt argument.
+Docs updates, flag refactoring, and module reorganization.
 
-## What to build
+## Review
 
-`lf` with flags but no step name should launch an interactive session with those flags applied. Currently requires a step name when any flags are present.
+**Verdict:** Needs work
 
-## Current behavior
+The branch has substantial doc fixes and a flag refactoring that improves CLI ergonomics. However, there are issues that should be addressed before shipping.
 
-```bash
-lf                    # ✓ works → lf run --interactive
-lf review             # ✓ works → lf run review
-lf -m codex           # ✗ fails → "No step or flow named '-m'"
-lf --web              # ✗ fails → "No step or flow named '--web'"
-lf -m codex review    # ✓ works (step comes after flag)
-```
+### Issues
 
-## Desired behavior
+1. **README out of sync** — README.md still shows `lfd loop src/ --flow ship` but the docs and code now use `lfd loop ship src/` (flow before area). The README fix is uncommitted.
 
-```bash
-lf -m codex           # launch interactive codex session
-lf --web              # copy docs context to clipboard, open claude.ai
-lf -m codex --web     # copy docs context to clipboard, open chatgpt.com
-lf -v                 # interactive session with clipboard pasted
-```
+2. **Incomplete flag mapping in docs/lfd.md** — Changed `-g, --goal` to `-v, --voice` but the semantics don't match. Goals and voices are different concepts. Looking at the actual code in `cli.py:222-226`, the flag is genuinely for voices now, but the design doc and help text still reference the old behavior in places.
 
-## Data structures
+3. **Example in lfd.md uses wrong flag** — Line 237 shows `-L product-engineer` but the flag was changed to `-v, --voice`. The `-L` alias doesn't exist.
 
-No new types needed. The change is in argument parsing.
+4. **Missing test coverage** — `tests/test_cli_ops.py` import changed from `loopflow.lf` to `loopflow.lf.cli`, but there are no tests for the new flag behavior (`lf -m codex`, `lf --web` without step).
 
-## Key functions
+5. **docs/lfd.md shows YAML flow format** — The committed change in `.design/polish-priorities.md` says this was fixed to Python, but the file still shows:
+   ```yaml
+   ---
+   steps:
+     - implement
+   ...
+   ```
+   The git diff shows this was actually changed to Python format, so this is correct—the `.design/polish-priorities.md` tracking doc needs updating since it was already done.
 
-```python
-# src/loopflow/lf/__init__.py
+### Minor
 
-def main():
-    ...
-    if len(sys.argv) > 1:
-        first_arg = sys.argv[1]
+- The `lfops wt list` command documented in `.design/polish-priorities.md` doesn't appear in `docs/lfops.md` or the actual changes.
+- `lfops wt ci` and `lfops abandon` mentioned as documented but not visible in the diff.
 
-        # NEW: If first arg is a flag, prepend "run" so typer parses it
-        if first_arg.startswith("-"):
-            sys.argv.insert(1, "run")
-        elif first_arg == ":":
-            ...
-```
+## Design notes
 
-The `run` command already handles `step=None` via `_launch_interactive_default()`.
+### Flag refactoring rationale
 
-## Constraints
+The flag changes improve mnemonics:
+- `-c` for clipboard (was `-v` for "paste")
+- `-v` for voice (was `-L`)
+- Removed `-c, --copy` (redundant with `--web`)
 
-- Must preserve existing behavior for all current patterns
-- `lf :` must still work for inline prompts
-- `lf step: args` must still work
-- Flag order shouldn't matter: `lf -m codex -v` and `lf -v -m codex` both work
+This follows the STYLE.md guidance on CLI flag naming: "Prefer lowercase short flags (`-p`, `-c`), support uppercase as aliases."
 
-## Done when
+### Module reorganization
 
-```bash
-# All pass:
-lf -m codex           # launches codex interactive (or exits 0 with token breakdown if --copy implied)
-lf --web              # copies to clipboard, opens claude.ai
-lf -m codex --web     # copies to clipboard, opens chatgpt.com
-lf -v                 # interactive with clipboard
-lf -c                 # shows token breakdown, copies to clipboard
-lf                    # still works (interactive claude)
-lf review             # still works
-lf review -m codex    # still works
-```
+CLI code moved to dedicated `cli.py` files:
+- `src/loopflow/lf/__init__.py` → `src/loopflow/lf/cli.py`
+- `src/loopflow/lfd/__init__.py` → `src/loopflow/lfd/cli.py`
+
+This keeps `__init__.py` clean per STYLE.md: "Keep `__init__.py` files empty. They exist only to mark directories as packages."
+
+### What's left from polish-priorities.md
+
+Tracked items not addressed:
+- Priority 2: `-p/--path` vs `context:` config naming inconsistency
+- Priority 3: Missing module READMEs
+- Priority 4: Advanced flow features undocumented
+- Priority 5: docs/next/ "Coming soon" content stale

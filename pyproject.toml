@@ -47,8 +47,8 @@ dev = [
 ]
 
 [project.scripts]
-lf = "loopflow.lf:main"
-lfd = "loopflow.lfd:main"
+lf = "loopflow.lf.cli:main"
+lfd = "loopflow.lfd.cli:main"
 lfops = "loopflow.lfops:main"
 lfwork = "loopflow.lfwork:main"
 

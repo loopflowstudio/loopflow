@@ -23,7 +23,7 @@ Options:
 | Flag | Description |
 |------|-------------|
 | `-e, --exclude` | Exclude patterns |
-| `-v, --paste` | Include current clipboard content |
+| `-c, --clipboard` | Include current clipboard content |
 | `--lfdocs/--no-lfdocs` | Include/exclude repo docs |
 | `--diff/--no-diff` | Include raw branch diff |
 | `--diff-files/--no-diff-files` | Include files touched by branch |
@@ -131,7 +131,54 @@ lfops sync
 
 Fetches `origin/main` and updates your local main branch. Safe to run from any worktree.
 
-## lfops wt prune
+## Worktree Commands
+
+### lfops wt create
+
+Create a worktree with schema-based branch name.
+
+```bash
+lfops wt create my-feature       # create worktree
+lfops wt create my-feature -b develop  # from different base
+```
+
+Creates a worktree at `../repo.my-feature` with a branch name following your configured schema.
+
+| Flag | Description |
+|------|-------------|
+| `-b, --base` | Base branch (defaults to main) |
+
+### lfops wt list
+
+List worktrees with metadata.
+
+```bash
+lfops wt list              # JSON output
+lfops wt list --full       # detailed output
+```
+
+| Flag | Description |
+|------|-------------|
+| `--format` | Output format (default: json) |
+| `--full` | Include full details |
+| `--no-sync` | Skip syncing base branch first |
+
+### lfops wt ci
+
+Show CI status for the current branch.
+
+```bash
+lfops wt ci               # show status
+lfops wt ci -w            # watch until complete
+lfops wt ci -l            # show logs for failures
+```
+
+| Flag | Description |
+|------|-------------|
+| `-w, --watch` | Watch until complete |
+| `-l, --logs` | Show logs for failed checks |
+
+### lfops wt prune
 
 Remove worktrees whose branches have been merged.
 
@@ -143,12 +190,27 @@ lfops wt prune --force   # skip confirmation
 
 Finds worktrees where the PR was merged or the branch is an ancestor of `origin/main` (handles squash merges). Never prunes main/master or dirty worktrees.
 
-Options:
-
 | Flag | Description |
 |------|-------------|
 | `-n, --dry-run` | Show what would be pruned without removing |
 | `-f, --force` | Skip confirmation prompt |
+
+---
+
+## lfops abandon
+
+Abandon a branch: close PR, remove worktree, delete branch.
+
+```bash
+lfops abandon my-feature
+lfops abandon my-feature -f  # skip confirmation
+```
+
+Use when you want to completely discard a branch and its associated work.
+
+| Flag | Description |
+|------|-------------|
+| `-f, --force` | Skip confirmation, abandon even with uncommitted changes |
 
 ## Typical Workflow
 

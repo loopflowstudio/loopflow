@@ -43,7 +43,7 @@ lfops pr
 Define goals, review PRs when you wake.
 
 ```bash
-lfd loop src/ --flow ship
+lfd loop ship src/
 ```
 
 ![loops demo](loops-demo.gif)

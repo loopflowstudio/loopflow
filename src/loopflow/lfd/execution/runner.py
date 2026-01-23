@@ -3,7 +3,6 @@
 Executes a single iteration of an Agent.
 """
 
-import json
 import subprocess
 import sys
 import uuid
@@ -36,8 +35,6 @@ from loopflow.lf.worktrees import WorktreeError, get_path
 from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
 from loopflow.lfd.daemon.client import notify_event
-from loopflow.lfops._helpers import get_default_branch
-from loopflow.lfops.next import move_worktree
 from loopflow.lfd.flow_run import (
     save_run,
     update_run_pr,
@@ -45,6 +42,8 @@ from loopflow.lfd.flow_run import (
     update_run_step,
 )
 from loopflow.lfd.models import Agent, FlowRun, FlowRunStatus
+from loopflow.lfops._helpers import get_default_branch
+from loopflow.lfops.next import move_worktree
 
 
 def _iteration_branch_prefix(main_branch: str) -> str:
@@ -400,12 +399,16 @@ def run_iteration(
         branch = generate_next_branch(area_slug, agent.repo)
         worktree_path = get_path(agent.repo, area_slug)
         try:
-            subprocess.run(
-                ["git", "worktree", "add", "-b", branch, str(worktree_path), f"origin/{base_branch}"],
-                cwd=agent.repo,
-                capture_output=True,
-                check=True,
-            )
+            git_cmd = [
+                "git",
+                "worktree",
+                "add",
+                "-b",
+                branch,
+                str(worktree_path),
+                f"origin/{base_branch}",
+            ]
+            subprocess.run(git_cmd, cwd=agent.repo, capture_output=True, check=True)
             subprocess.run(
                 ["git", "push", "-u", "origin", branch],
                 cwd=worktree_path,
@@ -710,5 +713,3 @@ def _enable_auto_merge(worktree_path: Path) -> bool:
         text=True,
     )
     return result.returncode == 0
-
-

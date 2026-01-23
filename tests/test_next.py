@@ -132,9 +132,7 @@ def test_next_moves_worktree_in_place(tmp_path):
                             "loopflow.lfops.next.parse_branch_base",
                             return_value="jack.auth.20260123_1112",
                         ):
-                            with patch(
-                                "loopflow.lfops.next.move_worktree", return_value=True
-                            ):
+                            with patch("loopflow.lfops.next.move_worktree", return_value=True):
                                 with patch("loopflow.lfops.next.write_directive"):
                                     result = next_worktree(
                                         repo,

@@ -170,7 +170,7 @@ Every step sees: `README.md`, `STYLE.md`, `CLAUDE.md`, `scratch/`, `roadmap/`, a
 
 ## Next
 
-[Get Started →](getting-started.md)
+[Background Agents →](agents.md)
 
 ## Reference
 

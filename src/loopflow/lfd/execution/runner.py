@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from loopflow.lf.config import load_config, parse_model
-from loopflow.lf.context import format_prompt, gather_prompt_components
+from loopflow.lf.context import ContextConfig, format_prompt, gather_prompt_components
 from loopflow.lf.flow import (
     build_join_prompt,
     choose_branch,
@@ -67,9 +67,9 @@ def _build_loop_prompt(
     components = gather_prompt_components(
         worktree_path,
         step=step_name,
-        context=merged_context or None,
         run_mode="auto",
         voices=voices,
+        context_config=ContextConfig(pathset=merged_context),
     )
 
     if not components.step:
@@ -162,9 +162,9 @@ def _build_loop_inline_prompt(
     components = gather_prompt_components(
         worktree_path,
         inline=inline_text,
-        context=context_paths,
         run_mode="auto",
         voices=voices,
+        context_config=ContextConfig(pathset=context_paths),
     )
     if not components.step:
         return None

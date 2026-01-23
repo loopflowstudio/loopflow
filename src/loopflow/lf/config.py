@@ -1,12 +1,11 @@
 """Configuration loading for loopflow."""
 
-import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 
 # Keys that combine lists from global + repo config
 _ADDITIVE_KEYS = {"context", "exclude", "skill_sources", "summaries"}
@@ -97,8 +96,6 @@ class Config(BaseModel):
     land: str = "gh"  # "gh" (GitHub PR merge) or "local" (local squash-merge)
     context: list[str] = Field(default_factory=list)
     exclude: list[str] = Field(default_factory=list)
-    ignore: list[str] = Field(default_factory=list)  # Alias for exclude, merged on load
-    include_tests_for: Optional[list[str]] = None
     ide: IdeConfig = Field(default_factory=IdeConfig)
     interactive: list[str] = Field(default_factory=list)  # Tasks that default to interactive
     include_loopflow_doc: bool = True  # Include bundled LOOPFLOW.md in prompts
@@ -130,20 +127,6 @@ class Config(BaseModel):
             return v.split()
         return v
 
-    @field_validator("ignore", mode="before")
-    @classmethod
-    def split_ignore_string(cls, v):
-        if isinstance(v, str):
-            return v.split()
-        return v
-
-    @field_validator("include_tests_for", mode="before")
-    @classmethod
-    def split_include_tests_for_string(cls, v):
-        if isinstance(v, str):
-            return v.split()
-        return v
-
     @field_validator("voice", mode="before")
     @classmethod
     def normalize_voice(cls, v):
@@ -163,14 +146,6 @@ class Config(BaseModel):
         if isinstance(v, dict):
             return AutopruneConfig(**v)
         return v
-
-    @model_validator(mode="after")
-    def merge_ignore_into_exclude(self) -> "Config":
-        """Merge ignore into exclude (ignore is an alias)."""
-        if self.ignore:
-            self.exclude = list(set(self.exclude + self.ignore))
-            self.ignore = []
-        return self
 
 
 class ConfigError(Exception):
@@ -241,16 +216,5 @@ def load_config(repo_root: Path | None) -> Config | None:
             source = repo_path if repo_data else global_path
             raise ConfigError(f"Invalid config in {source}:\n" + "\n".join(errors))
         raise ConfigError(f"Invalid config: {e}")
-
-    if config.include_tests_for:
-        warnings.warn(
-            "include_tests_for is deprecated. Use per-prompt frontmatter instead:\n"
-            "---\n"
-            "include:\n"
-            "  - tests/**\n"
-            "---",
-            DeprecationWarning,
-            stacklevel=2,
-        )
 
     return config

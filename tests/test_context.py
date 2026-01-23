@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from loopflow.lf.context import (
+    ContextConfig,
     PromptComponents,
     _get_builtin_step,
     build_prompt,
@@ -93,10 +94,12 @@ def test_build_prompt_with_voices(temp_repo):
 
 
 def test_build_prompt_includes_context_files(temp_repo):
-    """Context files passed via -c appear in output."""
+    """Context files passed via pathset appear in output."""
     (temp_repo / "main.py").write_text("print('hello')\n")
 
-    result = build_prompt(temp_repo, "implement", context=["main.py"])
+    result = build_prompt(
+        temp_repo, "implement", context_config=ContextConfig(pathset=["main.py"])
+    )
 
     assert "Reference files" in result
     assert "<lf:files>" in result
@@ -120,7 +123,12 @@ def test_build_prompt_inline_with_context(temp_repo):
     """Inline prompt works with context files."""
     (temp_repo / "main.py").write_text("print('hello')\n")
 
-    result = build_prompt(temp_repo, step=None, inline="add tests", context=["main.py"])
+    result = build_prompt(
+        temp_repo,
+        step=None,
+        inline="add tests",
+        context_config=ContextConfig(pathset=["main.py"]),
+    )
 
     assert "<lf:step>" in result
     assert "add tests" in result
@@ -178,12 +186,14 @@ def test_gather_prompt_components_returns_dataclass(temp_repo):
 
 
 def test_gather_prompt_components_includes_context(temp_repo):
-    """gather_prompt_components captures context files in diff_files (merged)."""
+    """gather_prompt_components captures pathset files in diff_files (merged)."""
     (temp_repo / "main.py").write_text("print('hello')")
 
-    components = gather_prompt_components(temp_repo, "implement", context=["main.py"])
+    components = gather_prompt_components(
+        temp_repo, "implement", context_config=ContextConfig(pathset=["main.py"])
+    )
 
-    # Context files are merged into diff_files (deduped at load time)
+    # Pathset files are merged into diff_files (deduped at load time)
     main_files = [(p, c) for p, c in components.diff_files if p.name == "main.py"]
     assert len(main_files) == 1
     path, content = main_files[0]
@@ -220,7 +230,9 @@ def test_format_prompt_with_all_components(temp_repo):
     """format_prompt includes all component types."""
     (temp_repo / "main.py").write_text("print('hello')")
 
-    components = gather_prompt_components(temp_repo, "implement", context=["main.py"])
+    components = gather_prompt_components(
+        temp_repo, "implement", context_config=ContextConfig(pathset=["main.py"])
+    )
     formatted = format_prompt(components)
 
     assert "<lf:docs>" in formatted
@@ -243,8 +255,10 @@ def test_gather_prompt_components_deduplicates_diff_and_context(temp_repo, monke
     components = gather_prompt_components(
         temp_repo,
         "implement",
-        context=["shared.py", "context_only.py"],  # shared.py overlaps with diff
-        include_diff_files=True,
+        context_config=ContextConfig(
+            pathset=["shared.py", "context_only.py"],  # shared.py overlaps with diff
+            diff_files=True,
+        ),
     )
 
     # All three files should appear, each exactly once

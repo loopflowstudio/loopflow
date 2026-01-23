@@ -7,6 +7,7 @@ import typer
 
 from loopflow.lf.config import load_config
 from loopflow.lf.context import (
+    ContextConfig,
     find_worktree_root,
     format_prompt,
     gather_prompt_components,
@@ -75,14 +76,16 @@ def register_commands(app: typer.Typer) -> None:
         components = gather_prompt_components(
             repo_root,
             step=None,
-            context=all_context or None,
-            exclude=exclude_patterns or None,
-            paste=paste,
             run_mode=None,
-            include_loopflow_doc=config.include_loopflow_doc if config else True,
-            include_diff=include_diff,
-            include_diff_files=include_diff_files,
-            include_summaries=include_summaries,
+            context_config=ContextConfig(
+                pathset=list(all_context) if all_context else [],
+                exclude=list(exclude_patterns) if exclude_patterns else [],
+                lfdocs=config.include_loopflow_doc if config else True,
+                diff=include_diff,
+                diff_files=include_diff_files,
+                summaries=include_summaries,
+                clipboard=paste,
+            ),
             config=config,
         )
 

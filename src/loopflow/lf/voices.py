@@ -1,16 +1,70 @@
 """Voice file loading for agent judgment and perspective."""
 
+import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from loopflow.lf.goals import _parse_frontmatter
+_FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 
 # Path to bundled builtin voice templates
 _VOICES_TEMPLATES_DIR = Path(__file__).parent.parent / "templates" / "voices"
 
 # Builtin mode voices (decide what to work on)
 _BUILTIN_MODES = {"adaptive", "roadmap", "build", "simplify"}
+
+
+def _parse_frontmatter(text: str) -> tuple[dict, str]:
+    """Parse YAML frontmatter from markdown text.
+
+    Returns (frontmatter_dict, body_content).
+    """
+    match = _FRONTMATTER_PATTERN.match(text)
+    if not match:
+        return {}, text
+
+    frontmatter_text = match.group(1)
+    body = text[match.end() :].strip()
+
+    # Simple YAML parsing (no external dependency)
+    result: dict = {}
+    current_key = None
+
+    for line in frontmatter_text.split("\n"):
+        line = line.rstrip()
+        if not line or line.startswith("#"):
+            continue
+
+        # List item continuation
+        if line.startswith("  - ") and current_key:
+            if current_key not in result:
+                result[current_key] = []
+            result[current_key].append(line[4:].strip())
+            continue
+
+        if ":" in line:
+            key, _, value = line.partition(":")
+            key = key.strip()
+            value = value.strip()
+            current_key = key
+
+            if not value:
+                continue
+
+            # Inline list: [a, b, c]
+            if value.startswith("[") and value.endswith("]"):
+                items = value[1:-1].split(",")
+                result[key] = [item.strip() for item in items if item.strip()]
+            elif value.lower() in ("true", "yes"):
+                result[key] = True
+            elif value.lower() in ("false", "no"):
+                result[key] = False
+            elif value.isdigit():
+                result[key] = int(value)
+            else:
+                result[key] = value
+
+    return result, body
 
 
 class VoiceKind(Enum):
@@ -50,22 +104,34 @@ def list_builtin_voices() -> list[str]:
     return sorted(p.stem for p in _VOICES_TEMPLATES_DIR.glob("*.md"))
 
 
-def load_voice(repo: Path, voice_name: str) -> Voice | None:
+def load_voice(repo: Path | None, voice_name: str) -> Voice | None:
     """Load and parse a voice file.
 
     Checks in order:
-    1. voices/{name}.md (user-defined)
-    2. templates/voices/{name}.md (builtin fallback)
+    1. .lf/voices/{name}.md (repo)
+    2. ~/.lf/voices/{name}.md (global)
+    3. templates/voices/{name}.md (builtin)
 
     Returns None if voice file doesn't exist.
     """
     if not voice_name:
         return None
 
-    # Check user-defined voice first
-    voice_path = repo / ".lf" / "voices" / f"{voice_name}.md"
-    if not voice_path.exists():
-        # Fall back to builtin templates
+    # Check repo voice first
+    voice_path = None
+    if repo:
+        repo_voice = repo / ".lf" / "voices" / f"{voice_name}.md"
+        if repo_voice.exists():
+            voice_path = repo_voice
+
+    # Check global voice
+    if not voice_path:
+        global_voice = Path.home() / ".lf" / "voices" / f"{voice_name}.md"
+        if global_voice.exists():
+            voice_path = global_voice
+
+    # Fall back to builtin templates
+    if not voice_path:
         builtin_path = _get_builtin_voice(voice_name)
         if builtin_path:
             voice_path = builtin_path
@@ -98,14 +164,20 @@ def load_voice_content(repo: Path, voice_name: str) -> str | None:
     return voice.content if voice else None
 
 
-def list_voices(repo: Path) -> list[str]:
-    """List available voice names in a repo (including builtins)."""
+def list_voices(repo: Path | None) -> list[str]:
+    """List available voice names (repo, global, and builtin)."""
     voices = set()
 
-    # User-defined voices
-    voices_dir = repo / ".lf" / "voices"
-    if voices_dir.exists():
-        voices.update(p.stem for p in voices_dir.glob("*.md"))
+    # Repo voices
+    if repo:
+        repo_voices_dir = repo / ".lf" / "voices"
+        if repo_voices_dir.exists():
+            voices.update(p.stem for p in repo_voices_dir.glob("*.md"))
+
+    # Global voices
+    global_voices_dir = Path.home() / ".lf" / "voices"
+    if global_voices_dir.exists():
+        voices.update(p.stem for p in global_voices_dir.glob("*.md"))
 
     # Builtin voices
     voices.update(list_builtin_voices())
@@ -113,13 +185,18 @@ def list_voices(repo: Path) -> list[str]:
     return sorted(voices)
 
 
-def voice_exists(repo: Path, voice_name: str) -> bool:
-    """Check if a voice file exists (user-defined or builtin)."""
+def voice_exists(repo: Path | None, voice_name: str) -> bool:
+    """Check if a voice file exists (repo, global, or builtin)."""
     if not voice_name:
         return False
-    # Check user-defined voice
-    voice_path = repo / ".lf" / "voices" / f"{voice_name}.md"
-    if voice_path.exists():
+    # Check repo voice
+    if repo:
+        repo_voice = repo / ".lf" / "voices" / f"{voice_name}.md"
+        if repo_voice.exists():
+            return True
+    # Check global voice
+    global_voice = Path.home() / ".lf" / "voices" / f"{voice_name}.md"
+    if global_voice.exists():
         return True
     # Check builtin voice
     return _get_builtin_voice(voice_name) is not None

@@ -5,11 +5,12 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
+from enum import Enum
 from importlib import resources
 from pathlib import Path
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from loopflow.lf.design import gather_design_docs, gather_internal_docs
 from loopflow.lf.files import format_files, format_image_references, gather_docs, gather_files
@@ -69,39 +70,72 @@ class DroppedComponent:
     reason: str | None = None
 
 
+class DiffMode(str, Enum):
+    """How to include branch changes in context."""
+
+    FILES = "files"  # Full content of changed files (default for steps)
+    DIFF = "diff"  # Raw unified diff (for commits)
+    NONE = "none"  # Neither
+
+
+# Default paths always included unless explicitly excluded
+_DEFAULT_FILE_PATHS = ["scratch/", "roadmap/", "*.md"]
+
+
+class FilesetConfig(BaseModel):
+    """Configuration for file context.
+
+    Default paths (scratch/, roadmap/, *.md) are always included unless excluded.
+    The paths field is additive to defaults.
+    """
+
+    paths: list[str] = Field(default_factory=list)  # Additive to defaults
+    exclude: list[str] = Field(default_factory=list)  # Removes from defaults + paths
+    token_limit: int | None = None  # If set, summarize files exceeding this
+
+
 class ContextConfig(BaseModel):
     """Specifies what context to include in a prompt."""
 
-    # Explicit file paths to include/exclude
-    pathset: list[str] = []
-    exclude: list[str] = []
+    # Branch work
+    diff_mode: DiffMode = DiffMode.FILES
 
-    # Flags for what kinds of context to include
+    # User files (defaults: scratch/, roadmap/, *.md)
+    files: FilesetConfig = Field(default_factory=FilesetConfig)
+
+    # Bundled LOOPFLOW.md system documentation
     lfdocs: bool = True
-    diff: bool = False
-    diff_files: bool = True
-    summaries: bool = True
+
+    # Extras
     clipboard: bool = False
 
     @classmethod
     def for_commit(cls) -> "ContextConfig":
-        return cls(lfdocs=False, diff=True, diff_files=False, summaries=False)
+        """Minimal context for commit message generation."""
+        return cls(
+            diff_mode=DiffMode.DIFF,
+            files=FilesetConfig(exclude=["scratch/", "roadmap/", "*.md"]),
+            lfdocs=False,
+        )
 
     @classmethod
     def for_interactive(
         cls,
-        pathset: list[str] | None = None,
+        paths: list[str] | None = None,
         exclude: list[str] | None = None,
         lfdocs: bool = True,
-        summaries: bool = True,
+        token_limit: int | None = None,
         clipboard: bool = True,
     ) -> "ContextConfig":
+        """Context for interactive sessions with explicit files."""
         return cls(
-            pathset=pathset or [],
-            exclude=exclude or [],
+            diff_mode=DiffMode.NONE,
+            files=FilesetConfig(
+                paths=paths or [],
+                exclude=exclude or [],
+                token_limit=token_limit,
+            ),
             lfdocs=lfdocs,
-            diff_files=False,
-            summaries=summaries,
             clipboard=clipboard,
         )
 
@@ -663,7 +697,7 @@ def gather_prompt_components(
     if context_config is None:
         context_config = ContextConfig()
 
-    exclude = context_config.exclude or []
+    exclude = context_config.files.exclude or []
     docs = gather_docs(repo_root, repo_root, exclude)
 
     # Load bundled LOOPFLOW.md (system documentation)
@@ -677,7 +711,10 @@ def gather_prompt_components(
     if prefix_docs:
         docs[0:0] = prefix_docs
 
-    diff = gather_diff(repo_root, exclude) if context_config.diff else None
+    # Gather diff based on mode
+    diff = None
+    if context_config.diff_mode == DiffMode.DIFF:
+        diff = gather_diff(repo_root, exclude)
 
     step_result = None
     if inline:
@@ -705,13 +742,15 @@ def gather_prompt_components(
 
     context_exclude = list(exclude) if exclude else []
 
-    # Gather file paths (not content yet)
-    diff_file_paths = gather_diff_files(repo_root) if context_config.diff_files else []
-    pathset = context_config.pathset or []
+    # Gather file paths based on diff_mode
+    diff_file_paths = []
+    if context_config.diff_mode == DiffMode.FILES:
+        diff_file_paths = gather_diff_files(repo_root)
 
-    # Merge: diff files first, then pathset not already in diff
+    # Add explicit paths (additive to diff files)
+    explicit_paths = context_config.files.paths or []
     diff_set = set(diff_file_paths)
-    all_file_paths = diff_file_paths + [p for p in pathset if p not in diff_set]
+    all_file_paths = diff_file_paths + [p for p in explicit_paths if p not in diff_set]
     gather_result = gather_files(all_file_paths, repo_root, context_exclude)
 
     clipboard = _read_clipboard() if context_config.clipboard else None
@@ -723,8 +762,8 @@ def gather_prompt_components(
             load_voice(repo_root, name) for name in voices if load_voice(repo_root, name)
         ]
 
-    # Load configured summaries
-    summaries = gather_summaries(repo_root, config) if context_config.summaries else None
+    # Load configured summaries (always include if config has them)
+    summaries = gather_summaries(repo_root, config)
 
     return PromptComponents(
         run_mode=run_mode,
@@ -737,7 +776,7 @@ def gather_prompt_components(
         loopflow_doc=loopflow_doc,
         voices=loaded_voices,
         image_files=gather_result.image_files or None,
-        summaries=summaries,
+        summaries=summaries if summaries else None,
     )
 
 

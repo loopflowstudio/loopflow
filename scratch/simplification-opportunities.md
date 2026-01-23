@@ -4,70 +4,37 @@
 
 Loopflow is a **prompt orchestration layer** for AI coding agents. It assembles context, stores prompts as reusable artifacts, and passes them to Claude Code, Codex, or Gemini. The core value: reproducible, composable prompts that chain together—each step reads what the previous one wrote, then hands off cleanly.
 
-## Opportunity 1: Goals and Voices are the same concept
+## ~~Opportunity 1: Goals and Voices are the same concept~~ DONE
 
-**Misalignment**: The product exposes one concept ("voice") but the codebase maintains two parallel implementations.
+Consolidated in this branch. Deleted `goals.py`, `templates/goals/`, and `test_goals.py`. All code now uses `voices.py` exclusively with global voice support (~/.lf/voices/).
 
-**Symptom**:
-- `lf/goals.py` (276 lines) and `lf/voices.py` (235 lines) are nearly identical
-- Both have `GoalKind`/`VoiceKind` enums with same values (ROLE, MODE)
-- Both have the same loading logic: repo → global → builtin
-- Both have identical heuristic detection (`_detect_goal_kind` / `_detect_voice_kind`)
-- Both have `needs_adaptive()`, `resolve_*()`, `build_effective_*()`, `render_*()`
-- `templates/goals/` and `templates/voices/` contain identical files (adaptive.md is byte-for-byte the same)
-- The only difference: `goals.py` imports from `voices.py` for `_parse_frontmatter`
+## ~~Opportunity 2: Context assembly has too many flags doing the same thing~~ DONE
 
-**Realignment**:
-- Delete `goals.py` entirely
-- Remove `templates/goals/` directory
-- All code uses `voices.py` exclusively
+Consolidated in this branch. Replaced scattered boolean flags with structured config:
 
-**Cascade**:
-- ~275 lines of code removed
-- No more confusion about whether to use "goal" or "voice"
-- One search path instead of two
-- Config validation gets simpler (no `goal` vs `voice` ambiguity)
-- Migration references in `lfd/migrations/` can drop goal-related schema
-
-## Opportunity 2: Context assembly has too many flags doing the same thing
-
-**Misalignment**: Context assembly evolved organically with features added via boolean flags. The product wants "assemble relevant context automatically"—but the architecture is "check 8 conditionals to see what's included."
-
-**Symptom**: `ContextConfig` has flags that create exponential combinations:
 ```python
+class DiffMode(str, Enum):
+    FILES = "files"    # full content of changed files (default)
+    DIFF = "diff"      # raw unified diff (for commits)
+    NONE = "none"      # neither
+
+class FilesetConfig(BaseModel):
+    paths: list[str] = []           # additive to defaults (scratch/, roadmap/, *.md)
+    exclude: list[str] = []         # removes from defaults + paths
+    token_limit: int | None = None  # if set, summarize files exceeding this
+
 class ContextConfig(BaseModel):
-    pathset: list[str] = []        # files to add
-    exclude: list[str] = []        # files to remove
-    lfdocs: bool = True            # include root .md + roadmap/ + scratch/
-    diff: bool = False             # include raw diff
-    diff_files: bool = True        # include files touched by branch
-    summaries: bool = True         # include pre-generated summaries
-    clipboard: bool = False        # include pasted content
+    diff_mode: DiffMode = DiffMode.FILES
+    files: FilesetConfig = FilesetConfig()
+    lfdocs: bool = True             # bundled LOOPFLOW.md system doc
+    clipboard: bool = False
 ```
 
-These flags combine in `gather_prompt_components()` (90+ lines of conditional gathering) and `format_prompt()` (85+ lines of conditional formatting). The trimming logic in `trim_prompt_components()` has to reason about all combinations.
-
-Meanwhile, the product's mental model is simpler:
-- **docs**: static project knowledge (STYLE.md, README.md, roadmap/)
-- **work**: what you're changing (scratch/, branch files)
-- **extra**: clipboard, explicit paths
-
-**Realignment**: Replace flags with a single `ContextMode` enum:
-```python
-class ContextMode(Enum):
-    FULL = "full"        # docs + work + summaries (default for steps)
-    MINIMAL = "minimal"  # work only (for commits)
-    CUSTOM = "custom"    # explicit pathset, no auto-gather
-```
-
-Most users want `FULL`. The complexity exists to support edge cases that could be handled by `CUSTOM` + explicit paths.
-
-**Cascade**:
-- `gather_prompt_components()` becomes 3 clear branches instead of flag soup
-- Token trimming gets simpler: drop summaries first, then docs, then work
-- CLI flags collapse: `--mode minimal` instead of `--no-lfdocs --no-diff-files --no-summaries`
-- Factory methods (`for_commit`, `for_interactive`) become mode selection
-- Context display shows mode, not flag matrix
+Key simplifications:
+- `diff` + `diff_files` booleans → single `diff_mode` enum (FILES, DIFF, NONE)
+- `pathset` + `exclude` + `summaries` → hierarchical `FilesetConfig` with `token_limit`
+- Default paths (scratch/, roadmap/, *.md) are implicit, user adds/removes
+- CLI stays flat (`--diff-mode`, `--paths`, `--exclude`), config is structured
 
 ## Opportunity 3: Three layers of step resolution
 

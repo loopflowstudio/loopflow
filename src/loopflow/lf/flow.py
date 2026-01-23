@@ -16,6 +16,7 @@ import yaml
 from loopflow.lf.config import parse_model
 from loopflow.lf.context import (
     ContextConfig,
+    FilesetConfig,
     format_drop_label,
     format_prompt,
     gather_prompt_components,
@@ -98,7 +99,9 @@ def _run_step(
         params.step,
         run_mode="auto",
         voices=params.voices,
-        context_config=ContextConfig(pathset=params.context or [], exclude=exclude or []),
+        context_config=ContextConfig(
+            files=FilesetConfig(paths=params.context or [], exclude=exclude or [])
+        ),
     )
     components, dropped = trim_prompt_components(components, MAX_SAFE_TOKENS)
     if dropped:
@@ -325,7 +328,9 @@ def _run_worktree_tasks(
             wt_task.step,
             run_mode="auto",
             voices=wt_task.voices,
-            context_config=ContextConfig(pathset=wt_task.context or [], exclude=exclude or []),
+            context_config=ContextConfig(
+                files=FilesetConfig(paths=wt_task.context or [], exclude=exclude or [])
+            ),
         )
         components, dropped = trim_prompt_components(components, MAX_SAFE_TOKENS)
         if dropped:

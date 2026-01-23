@@ -3,6 +3,8 @@
 import shutil
 from pathlib import Path
 
+from loopflow.lf.voices import load_voice_content
+
 
 def gather_design_docs(repo_root: Path) -> list[tuple[Path, str]]:
     """Gather design docs from scratch/ for prompt context."""
@@ -35,19 +37,18 @@ def gather_internal_docs(repo_root: Path) -> list[tuple[Path, str]]:
     return docs
 
 
-def load_goal(goal: str | Path, repo_root: Path) -> str | None:
-    """Load goal content from .lf/goals/{name}.md or a direct path."""
-    goal_str = str(goal)
+def load_voice(voice: str | Path, repo_root: Path) -> str | None:
+    """Load voice content from .lf/voices/{name}.md or a direct path."""
+    voice_str = str(voice)
 
-    # If it's just a name (no path separator), look in .lf/goals/
-    if "/" not in goal_str and "\\" not in goal_str:
-        goal_path = repo_root / ".lf" / "goals" / f"{goal_str}.md"
-    else:
-        # It's a path, resolve relative to repo root
-        goal_path = repo_root / goal_str
+    # If it's just a name (no path separator), use voice loading
+    if "/" not in voice_str and "\\" not in voice_str:
+        return load_voice_content(repo_root, voice_str)
 
-    if goal_path.exists() and goal_path.is_file():
-        return goal_path.read_text()
+    # It's a path, resolve relative to repo root
+    voice_path = repo_root / voice_str
+    if voice_path.exists() and voice_path.is_file():
+        return voice_path.read_text()
     return None
 
 

@@ -8,6 +8,8 @@ import typer
 from loopflow.lf.config import load_config
 from loopflow.lf.context import (
     ContextConfig,
+    DiffMode,
+    FilesetConfig,
     find_worktree_root,
     format_prompt,
     gather_prompt_components,
@@ -37,14 +39,8 @@ def register_commands(app: typer.Typer) -> None:
         docs: Optional[bool] = typer.Option(
             None, "--lfdocs/--no-lfdocs", help="Include roadmap/, scratch/, and root .md files"
         ),
-        diff: Optional[bool] = typer.Option(
-            None, "--diff/--no-diff", help="Include raw branch diff"
-        ),
-        diff_files: Optional[bool] = typer.Option(
-            None, "--diff-files/--no-diff-files", help="Include files touched by branch"
-        ),
-        summaries: Optional[bool] = typer.Option(
-            None, "--summaries/--no-summaries", help="Include pre-generated codebase summaries"
+        diff_mode: Optional[str] = typer.Option(
+            None, "--diff-mode", help="How to include branch changes: files, diff, or none"
         ),
     ):
         """Copy file context to clipboard for use with web clients."""
@@ -66,26 +62,27 @@ def register_commands(app: typer.Typer) -> None:
 
         # Resolve flags (CLI overrides config)
         include_docs = docs if docs is not None else (config.lfdocs if config else True)
-        include_diff = diff if diff is not None else (config.diff if config else False)
-        if diff_files is not None:
-            include_diff_files = diff_files
-        else:
-            include_diff_files = config.diff_files if config else True
-        include_summaries = (
-            summaries if summaries is not None else bool(config and config.summaries)
-        )
+
+        # Resolve diff_mode: CLI > config > default
+        resolved_diff_mode = DiffMode.FILES  # default
+        if diff_mode is not None:
+            resolved_diff_mode = DiffMode(diff_mode)
+        elif config and not config.diff_files:
+            resolved_diff_mode = DiffMode.NONE
+        elif config and config.diff:
+            resolved_diff_mode = DiffMode.DIFF
 
         components = gather_prompt_components(
             repo_root,
             step=None,
             run_mode=None,
             context_config=ContextConfig(
-                pathset=list(all_context) if all_context else [],
-                exclude=list(exclude_patterns) if exclude_patterns else [],
+                diff_mode=resolved_diff_mode,
+                files=FilesetConfig(
+                    paths=list(all_context) if all_context else [],
+                    exclude=list(exclude_patterns) if exclude_patterns else [],
+                ),
                 lfdocs=config.include_loopflow_doc if config else True,
-                diff=include_diff,
-                diff_files=include_diff_files,
-                summaries=include_summaries,
                 clipboard=clipboard,
             ),
             config=config,

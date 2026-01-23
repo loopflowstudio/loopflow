@@ -12,6 +12,9 @@ public struct WorktreeEvent: Sendable {
     public let name: String
     public let branch: String?
     public let path: String?
+    public let reason: String?
+    public let repo: String?
+    public let worktree: Worktree?  // Full status for in-place updates (rich events)
 }
 
 public struct SessionEvent: Sendable {
@@ -170,17 +173,28 @@ public actor LFDEventService {
 
     private nonisolated static func parseEvent(name: String, data: [String: Any]) -> LFDEvent {
         if name.hasPrefix("worktree.") {
+            // Parse rich worktree data if present (lfd sends full status for in-place updates)
+            var worktree: Worktree? = nil
+            if let worktreeData = data["worktree"] as? [String: Any],
+               let jsonData = try? JSONSerialization.data(withJSONObject: worktreeData),
+               let worktreeJSON = try? JSONDecoder().decode(WorktreeJSON.self, from: jsonData) {
+                worktree = Worktree(from: worktreeJSON)
+            }
+
             return .worktree(WorktreeEvent(
                 name: name,
                 branch: data["branch"] as? String,
-                path: data["path"] as? String
+                path: data["path"] as? String,
+                reason: data["reason"] as? String,
+                repo: data["repo"] as? String,
+                worktree: worktree
             ))
         }
 
         if name.hasPrefix("session.") {
             return .session(SessionEvent(
                 id: data["id"] as? String ?? "",
-                step: data["task"] as? String,  // daemon sends "task", we call it "step"
+                step: data["step"] as? String,
                 status: data["status"] as? String,
                 worktree: data["worktree"] as? String
             ))
@@ -208,7 +222,7 @@ public actor LFDEventService {
         }
 
         // Default to worktree event for unknown patterns
-        return .worktree(WorktreeEvent(name: name, branch: nil, path: nil))
+        return .worktree(WorktreeEvent(name: name, branch: nil, path: nil, reason: nil, repo: nil, worktree: nil))
     }
 
     private func handleEvent(_ event: LFDEvent) {

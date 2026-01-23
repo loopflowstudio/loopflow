@@ -185,7 +185,7 @@ public struct Worktree: Sendable, Identifiable, Hashable, Codable {
     }
 }
 
-// JSON structure from `wt list --format json --full`
+// JSON structure from `wt list --format json --full` and lfd /worktrees endpoint
 public struct WorktreeJSON: Sendable, Codable {
     public let branch: String
     public let path: String
@@ -199,6 +199,11 @@ public struct WorktreeJSON: Sendable, Codable {
     public let ci: CIJSON?
     public let prunable: Bool?
 
+    // lfd-specific fields (not in wt CLI output)
+    public let staleness: String?
+    public let stalenessDays: Int?
+    public let recentSteps: [StepRunJSON]?
+
     enum CodingKeys: String, CodingKey {
         case branch, path, kind
         case baseBranch = "base_branch"
@@ -208,7 +213,18 @@ public struct WorktreeJSON: Sendable, Codable {
         case remote
         case operationState = "operation_state"
         case ci, prunable
+        case staleness
+        case stalenessDays = "staleness_days"
+        case recentSteps = "recent_steps"
     }
+}
+
+public struct StepRunJSON: Sendable, Codable {
+    public let id: String
+    public let step: String
+    public let status: String
+    public let startedAt: String?
+    public let endedAt: String?
 }
 
 public struct WorkingTreeJSON: Sendable, Codable {
@@ -288,8 +304,30 @@ public extension Worktree {
         let diffStats = json.workingTree?.diffVsMain
         self.hasDiff = (diffStats?.added ?? 0) + (diffStats?.deleted ?? 0) > 0
 
-        self.recentSteps = recentSteps
-        if json.prunable == true {
+        // Use provided recentSteps, or parse from JSON if available (lfd response)
+        if !recentSteps.isEmpty {
+            self.recentSteps = recentSteps
+        } else if let jsonSteps = json.recentSteps {
+            self.recentSteps = jsonSteps.map { StepRun(from: $0) }
+        } else {
+            self.recentSteps = []
+        }
+
+        // Parse staleness from lfd response or prunable flag
+        if let stalenessStr = json.staleness {
+            switch stalenessStr {
+            case "merged":
+                self.staleness = .merged
+            case "remote_deleted":
+                self.staleness = .remoteDeleted
+            default:
+                if let days = json.stalenessDays {
+                    self.staleness = .inactive(days: days)
+                } else {
+                    self.staleness = .active
+                }
+            }
+        } else if json.prunable == true {
             self.staleness = .merged
         }
     }

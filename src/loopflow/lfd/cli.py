@@ -214,7 +214,7 @@ def start(
 def loop(
     flow: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
     area: str = typer.Argument(..., help="Area of responsibility (e.g., swift/, src/, .)"),
-    voices: list[str] = typer.Option(None, "-L", "--voice", help="Voice to add (repeatable)"),
+    voices: list[str] = typer.Option(None, "-v", "-V", "--voice", help="Voice to add (repeatable)"),
     limit: int = typer.Option(None, "-l", "--limit", help="PR limit override"),
     merge_mode: str = typer.Option(None, "--merge-mode", help="Merge mode: pr or land"),
     foreground: bool = typer.Option(False, "-f", "--foreground", help="Run in foreground"),
@@ -227,8 +227,8 @@ def loop(
 
     Examples:
         lfd loop ship swift/                              # default voice
-        lfd loop ship swift/ -L product-engineer          # with role
-        lfd loop ship swift/ -L product-engineer -L designer  # multiple roles
+        lfd loop ship swift/ -v product-engineer          # with role
+        lfd loop ship swift/ -v product-engineer -v designer  # multiple roles
         lfd loop ship .                                   # whole repo
     """
     c = _colors()
@@ -313,15 +313,17 @@ def loop(
 def run(
     flow_name: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
     area: str = typer.Argument(..., help="Area of responsibility (e.g., swift/, src/, .)"),
-    voices: list[str] = typer.Option(None, "-L", "--voice", help="Voice to add (repeatable)"),
-    paste: bool = typer.Option(False, "-v", "--paste", help="Include clipboard as prompt"),
+    voices: list[str] = typer.Option(None, "-v", "-V", "--voice", help="Voice to add (repeatable)"),
+    clipboard: bool = typer.Option(
+        False, "-c", "-C", "--clipboard", help="Include clipboard content"
+    ),
 ):
     """Run a flow once (direct execution, no trigger).
 
     Examples:
         lfd run ship swift/                        # one-off iteration
-        lfd run ship swift/ -L product-engineer    # with role
-        lfd run ship . -v                          # whole repo with clipboard
+        lfd run ship swift/ -v product-engineer    # with role
+        lfd run ship . -c                          # whole repo with clipboard
     """
     c = _colors()
     repo = get_wt_from_cwd()
@@ -348,8 +350,8 @@ def run(
 
     flow_name = _validate_flow(repo, flow_name, c)
 
-    # Handle clipboard paste
-    if paste:
+    # Handle clipboard
+    if clipboard:
         result = subprocess.run(["pbpaste"], capture_output=True, text=True)
         if result.returncode == 0 and result.stdout.strip():
             typer.echo(f"{c['dim']}Clipboard content will be included{c['reset']}")

@@ -31,9 +31,11 @@ def register_commands(app: typer.Typer) -> None:
         exclude: list[str] = typer.Option(
             None, "-e", "-E", "--exclude", help="Patterns to exclude"
         ),
-        paste: bool = typer.Option(False, "-v", "-V", "--paste", help="Include clipboard content"),
+        clipboard: bool = typer.Option(
+            False, "-c", "-C", "--clipboard", help="Include clipboard content"
+        ),
         docs: Optional[bool] = typer.Option(
-            None, "--lfdocs/--no-lfdocs", help="Include .docs/, .design/, and root .md files"
+            None, "--lfdocs/--no-lfdocs", help="Include roadmap/, scratch/, and root .md files"
         ),
         diff: Optional[bool] = typer.Option(
             None, "--diff/--no-diff", help="Include raw branch diff"
@@ -84,7 +86,7 @@ def register_commands(app: typer.Typer) -> None:
                 diff=include_diff,
                 diff_files=include_diff_files,
                 summaries=include_summaries,
-                clipboard=paste,
+                clipboard=clipboard,
             ),
             config=config,
         )

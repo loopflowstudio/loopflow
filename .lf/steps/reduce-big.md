@@ -1,6 +1,6 @@
 ---
 requires: none
-produces: .design/simplification-opportunities.md
+produces: scratch/simplification-opportunities.md
 ---
 Find the highest-leverage simplifications across the codebase.
 
@@ -20,7 +20,7 @@ The question isn't "what's messy?" but "what would change if we rebuilt around w
    - Data structures shaped for old requirements
    - Code that translates between what exists and what's needed
 4. Identify 2-3 places where realignment would cascade into simplification
-5. Write `.design/simplification-opportunities.md`
+5. Write `scratch/simplification-opportunities.md`
 
 ## Signs of misalignment
 
@@ -43,7 +43,7 @@ The question isn't "what's messy?" but "what would change if we rebuilt around w
 
 ## Output
 
-Write `.design/simplification-opportunities.md`:
+Write `scratch/simplification-opportunities.md`:
 
 ```markdown
 # Simplification Opportunities

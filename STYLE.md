@@ -9,8 +9,8 @@ This is the governing document of the loopflow codebase. Humans and LLMs alike a
 - Return `None` for "not found"; raise exceptions for "shouldn't happen"
 - No `Args:`/`Returns:` docstrings—if types are clear, skip the docstring
 - Mock side effects, but don't test mock wiring
-- Design docs go under `.design/`; `lf ops pr land` removes `.design/*` contents
-- Auto runs are headless: make best-effort assumptions and append open questions to `.design/questions.md`
+- Design docs go under `scratch/`; `lf ops pr land` removes `scratch/*` contents
+- Auto runs are headless: make best-effort assumptions and append open questions to `scratch/questions.md`
 
 ## File-Type Guidelines
 
@@ -30,15 +30,18 @@ When writing CLI code with Typer:
 - Default to sensible behavior (e.g., whole repo as context)
 
 When editing `README.md` files:
-- Start with Usage and example commands
-- Don't duplicate what's in the source code
+- Examples first, explanation after—show `lf debug -c`, then say what it does
+- Action-focused tables: "What it does" not "What it is"
+- Terse prose around code blocks—the code speaks
+- One good example beats three similar ones
+- No preamble: "Assembles context" not "Loopflow assembles context for you"
 - Write for users, not maintainers
 - Update when adding or changing user-facing features
 
-When editing docs in `.design/`:
+When editing docs in `scratch/`:
 - Focus on what's left to build, not what's done
-- `lf review` writes its assessment under `.design/`
-- `lf ops pr land` removes `.design/*` contents automatically
+- `lf review` writes its assessment under `scratch/`
+- `lf ops pr land` removes `scratch/*` contents automatically
 
 # Goals
 
@@ -164,7 +167,28 @@ def open_warp(path: Path) -> None:
 
 Give each module a `README.md` for users. Use inline comments for maintainers. Don't duplicate what's in the code.
 
-Start features with a design doc under `.design/`. After implementation, `lf review` writes its assessment under `.design/`. `lf ops pr land` removes `.design/*` contents—by then, the code and its README should speak for themselves.
+Start features with a design doc under `scratch/`. After implementation, `lf review` writes its assessment under `scratch/`. `lf ops pr land` removes `scratch/*` contents—by then, the code and its README should speak for themselves.
+
+## User-Facing Documentation
+
+User docs follow the same principles as prompts (see PROMPT_STYLE.md):
+
+**Direct and imperative.** State what something does, not what it is. "Runs a prompt with assembled context" beats "A step is a markdown file containing instructions."
+
+**Examples carry the weight.** Code blocks are the primary content. Prose exists to connect them. If you can cut a paragraph and the examples still make sense, cut it.
+
+**Tables for reference, not education.** Tables work for quick lookup once you understand the concepts. Lead with examples that teach.
+
+**No throat-clearing.** Cut "In order to...", "You can use...", "This allows you to...". Just show it.
+
+```markdown
+# Bad
+In order to run a step with clipboard content, you can use the -c flag.
+This allows you to paste an error and have the agent fix it.
+
+# Good
+lf debug -c    # paste an error, watch it fix
+```
 
 # Testing
 

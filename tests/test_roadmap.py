@@ -13,7 +13,7 @@ from loopflow.lf.roadmap import (
 
 
 def test_load_roadmap_empty_when_no_directory(tmp_path):
-    """load_roadmap returns empty roadmap when .docs/roadmap/ doesn't exist."""
+    """load_roadmap returns empty roadmap when roadmap/ doesn't exist."""
     repo = tmp_path / "repo"
     repo.mkdir()
 
@@ -25,7 +25,7 @@ def test_load_roadmap_empty_when_no_directory(tmp_path):
 def test_load_roadmap_finds_items(tmp_path):
     """load_roadmap finds markdown files in area directories."""
     repo = tmp_path / "repo"
-    roadmap_dir = repo / ".docs" / "roadmap" / "api"
+    roadmap_dir = repo / "roadmap" / "api"
     roadmap_dir.mkdir(parents=True)
     (roadmap_dir / "rate-limiting.md").write_text("""---
 status: approved
@@ -48,7 +48,7 @@ Implement rate limiting for the API.
 def test_load_roadmap_skips_done_directory(tmp_path):
     """load_roadmap ignores the _done/ archive directory."""
     repo = tmp_path / "repo"
-    roadmap_dir = repo / ".docs" / "roadmap"
+    roadmap_dir = repo / "roadmap"
     api_dir = roadmap_dir / "api"
     done_dir = roadmap_dir / "_done"
     api_dir.mkdir(parents=True)
@@ -65,7 +65,7 @@ def test_load_roadmap_skips_done_directory(tmp_path):
 def test_load_roadmap_extracts_title_from_h1(tmp_path):
     """Title is extracted from first H1 in body."""
     repo = tmp_path / "repo"
-    roadmap_dir = repo / ".docs" / "roadmap" / "core"
+    roadmap_dir = repo / "roadmap" / "core"
     roadmap_dir.mkdir(parents=True)
     (roadmap_dir / "feature.md").write_text("""---
 status: proposed
@@ -84,7 +84,7 @@ Some description.
 def test_load_roadmap_uses_filename_as_fallback_title(tmp_path):
     """Title falls back to slugified filename when no H1."""
     repo = tmp_path / "repo"
-    roadmap_dir = repo / ".docs" / "roadmap" / "ui"
+    roadmap_dir = repo / "roadmap" / "ui"
     roadmap_dir.mkdir(parents=True)
     (roadmap_dir / "dark-mode.md").write_text("---\nstatus: proposed\n---\nNo heading here")
 
@@ -96,7 +96,7 @@ def test_load_roadmap_uses_filename_as_fallback_title(tmp_path):
 def test_roadmap_for_area(tmp_path):
     """Roadmap.for_area filters by area."""
     repo = tmp_path / "repo"
-    roadmap_dir = repo / ".docs" / "roadmap"
+    roadmap_dir = repo / "roadmap"
     (roadmap_dir / "api").mkdir(parents=True)
     (roadmap_dir / "ui").mkdir(parents=True)
     (roadmap_dir / "api" / "one.md").write_text("---\nstatus: proposed\narea: api\n---\n# One")
@@ -112,7 +112,7 @@ def test_roadmap_for_area(tmp_path):
 def test_roadmap_by_status(tmp_path):
     """Roadmap.by_status filters by status."""
     repo = tmp_path / "repo"
-    roadmap_dir = repo / ".docs" / "roadmap" / "api"
+    roadmap_dir = repo / "roadmap" / "api"
     roadmap_dir.mkdir(parents=True)
     (roadmap_dir / "approved.md").write_text("---\nstatus: approved\n---\n# Approved")
     (roadmap_dir / "proposed.md").write_text("---\nstatus: proposed\n---\n# Proposed")
@@ -127,7 +127,7 @@ def test_roadmap_by_status(tmp_path):
 def test_roadmap_depth(tmp_path):
     """Roadmap.depth counts approved items."""
     repo = tmp_path / "repo"
-    roadmap_dir = repo / ".docs" / "roadmap" / "api"
+    roadmap_dir = repo / "roadmap" / "api"
     roadmap_dir.mkdir(parents=True)
     (roadmap_dir / "a.md").write_text("---\nstatus: approved\n---\n# A")
     (roadmap_dir / "b.md").write_text("---\nstatus: approved\n---\n# B")
@@ -142,7 +142,7 @@ def test_roadmap_depth(tmp_path):
 def test_list_areas(tmp_path):
     """list_areas returns area directory names."""
     repo = tmp_path / "repo"
-    roadmap_dir = repo / ".docs" / "roadmap"
+    roadmap_dir = repo / "roadmap"
     (roadmap_dir / "api").mkdir(parents=True)
     (roadmap_dir / "ui").mkdir(parents=True)
     (roadmap_dir / "_done").mkdir(parents=True)
@@ -195,7 +195,7 @@ def test_approve_item(tmp_path):
 
 
 def test_start_item(tmp_path):
-    """start_item marks in-progress and copies to .design/."""
+    """start_item marks in-progress and copies to scratch/."""
     repo = tmp_path / "repo"
     repo.mkdir()
     item = create_item(repo, "api", "test", "Test Feature", "Content")
@@ -203,9 +203,9 @@ def test_start_item(tmp_path):
     start_item(item, "my-branch", repo)
 
     assert item.status == "in-progress"
-    design_path = repo / ".design" / "my-branch.md"
-    assert design_path.exists()
-    assert "Test Feature" in design_path.read_text()
+    scratch_path = repo / "scratch" / "my-branch.md"
+    assert scratch_path.exists()
+    assert "Test Feature" in scratch_path.read_text()
 
 
 def test_complete_item_moves_to_done(tmp_path):
@@ -218,7 +218,7 @@ def test_complete_item_moves_to_done(tmp_path):
     complete_item(item, repo)
 
     assert not original_path.exists()
-    done_path = repo / ".docs" / "roadmap" / "_done" / "test.md"
+    done_path = repo / "roadmap" / "_done" / "test.md"
     assert done_path.exists()
 
 
@@ -234,7 +234,7 @@ def test_format_roadmap_list_empty():
 def test_format_roadmap_list_groups_by_area(tmp_path):
     """format_roadmap_list groups items by area and status."""
     repo = tmp_path / "repo"
-    roadmap_dir = repo / ".docs" / "roadmap"
+    roadmap_dir = repo / "roadmap"
     (roadmap_dir / "api").mkdir(parents=True)
     (roadmap_dir / "ui").mkdir(parents=True)
     (roadmap_dir / "api" / "one.md").write_text("---\nstatus: approved\n---\n# One")
@@ -252,7 +252,7 @@ def test_format_roadmap_list_groups_by_area(tmp_path):
 def test_load_roadmap_handles_missing_frontmatter(tmp_path):
     """Items without frontmatter default to proposed status."""
     repo = tmp_path / "repo"
-    roadmap_dir = repo / ".docs" / "roadmap" / "api"
+    roadmap_dir = repo / "roadmap" / "api"
     roadmap_dir.mkdir(parents=True)
     (roadmap_dir / "no-frontmatter.md").write_text("# Just a heading\n\nNo frontmatter here.")
 
@@ -265,7 +265,7 @@ def test_load_roadmap_handles_missing_frontmatter(tmp_path):
 def test_load_roadmap_validates_status(tmp_path):
     """Invalid status values default to proposed."""
     repo = tmp_path / "repo"
-    roadmap_dir = repo / ".docs" / "roadmap" / "api"
+    roadmap_dir = repo / "roadmap" / "api"
     roadmap_dir.mkdir(parents=True)
     (roadmap_dir / "bad-status.md").write_text("---\nstatus: invalid\n---\n# Test")
 

@@ -1,11 +1,10 @@
 """Voice file loading for agent judgment and perspective."""
 
-import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-_FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
+from loopflow.lf.goals import _parse_frontmatter
 
 # Path to bundled builtin voice templates
 _VOICES_TEMPLATES_DIR = Path(__file__).parent.parent / "templates" / "voices"
@@ -55,7 +54,7 @@ def load_voice(repo: Path, voice_name: str) -> Voice | None:
     """Load and parse a voice file.
 
     Checks in order:
-    1. .lf/voices/{name}.md (user-defined)
+    1. voices/{name}.md (user-defined)
     2. templates/voices/{name}.md (builtin fallback)
 
     Returns None if voice file doesn't exist.
@@ -126,59 +125,6 @@ def voice_exists(repo: Path, voice_name: str) -> bool:
     return _get_builtin_voice(voice_name) is not None
 
 
-def _parse_frontmatter(text: str) -> tuple[dict, str]:
-    """Parse YAML frontmatter from markdown text.
-
-    Returns (frontmatter_dict, body_content).
-    """
-    match = _FRONTMATTER_PATTERN.match(text)
-    if not match:
-        return {}, text
-
-    frontmatter_text = match.group(1)
-    body = text[match.end() :].strip()
-
-    # Simple YAML parsing (no external dependency)
-    result: dict = {}
-    current_key = None
-
-    for line in frontmatter_text.split("\n"):
-        line = line.rstrip()
-        if not line or line.startswith("#"):
-            continue
-
-        # List item continuation
-        if line.startswith("  - ") and current_key:
-            if current_key not in result:
-                result[current_key] = []
-            result[current_key].append(line[4:].strip())
-            continue
-
-        if ":" in line:
-            key, _, value = line.partition(":")
-            key = key.strip()
-            value = value.strip()
-            current_key = key
-
-            if not value:
-                continue
-
-            # Inline list: [a, b, c]
-            if value.startswith("[") and value.endswith("]"):
-                items = value[1:-1].split(",")
-                result[key] = [item.strip() for item in items if item.strip()]
-            elif value.lower() in ("true", "yes"):
-                result[key] = True
-            elif value.lower() in ("false", "no"):
-                result[key] = False
-            elif value.isdigit():
-                result[key] = int(value)
-            else:
-                result[key] = value
-
-    return result, body
-
-
 # Voice kind detection and composition
 
 
@@ -200,7 +146,7 @@ def _detect_voice_kind(name: str, frontmatter: dict, content: str) -> VoiceKind:
         "## Decision",
         "decide what mode",
         "deciding what to",
-        ".docs/roadmap/",
+        "roadmap/",
         "status: approved",
         "status: proposed",
     ]

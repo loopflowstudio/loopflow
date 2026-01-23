@@ -42,8 +42,8 @@ class Roadmap:
 
 
 def load_roadmap(repo: Path) -> Roadmap:
-    """Load all roadmap items from .docs/roadmap/."""
-    roadmap_dir = repo / ".docs" / "roadmap"
+    """Load all roadmap items from roadmap/."""
+    roadmap_dir = repo / "roadmap"
     if not roadmap_dir.exists():
         return Roadmap(items=[])
 
@@ -113,7 +113,7 @@ def _parse_roadmap_item(path: Path, area: str) -> RoadmapItem | None:
 
 def list_areas(repo: Path) -> list[str]:
     """List all areas in the roadmap."""
-    roadmap_dir = repo / ".docs" / "roadmap"
+    roadmap_dir = repo / "roadmap"
     if not roadmap_dir.exists():
         return []
 
@@ -125,12 +125,12 @@ def list_areas(repo: Path) -> list[str]:
 
 
 def start_item(item: RoadmapItem, branch: str, repo: Path) -> None:
-    """Mark item in-progress, copy to .design/<branch>.md."""
+    """Mark item in-progress, copy to scratch/<branch>.md."""
     # Update status in file
     _update_item_status(item, "in-progress")
 
-    # Copy to .design/
-    design_dir = repo / ".design"
+    # Copy to scratch/
+    design_dir = repo / "scratch"
     design_dir.mkdir(exist_ok=True)
     design_path = design_dir / f"{branch}.md"
 
@@ -140,7 +140,7 @@ def start_item(item: RoadmapItem, branch: str, repo: Path) -> None:
 
 
 def complete_item(item: RoadmapItem, repo: Path) -> None:
-    """Move to _done/, clean up .design/."""
+    """Move to _done/, clean up scratch/."""
     # Create _done directory if needed
     done_dir = item.path.parent.parent / "_done"
     done_dir.mkdir(exist_ok=True)
@@ -202,7 +202,7 @@ def _update_item_status(
 
 def create_item(repo: Path, area: str, name: str, title: str, content: str) -> RoadmapItem:
     """Create a new roadmap item."""
-    roadmap_dir = repo / ".docs" / "roadmap" / area
+    roadmap_dir = repo / "roadmap" / area
     roadmap_dir.mkdir(parents=True, exist_ok=True)
 
     # Slugify name
@@ -237,7 +237,7 @@ created_at: {now.isoformat()}
 def format_roadmap_list(roadmap: Roadmap) -> str:
     """Format roadmap for display."""
     if not roadmap.items:
-        return "No roadmap items found in .docs/roadmap/"
+        return "No roadmap items found in roadmap/"
 
     lines = []
 

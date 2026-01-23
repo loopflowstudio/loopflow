@@ -92,7 +92,7 @@ Reduce context:
 ```bash
 lf review --no-lfdocs           # skip repo docs
 lf review --no-diff-files       # skip branch files
-lf review -x specific-file.py   # include only what you need
+lf review -p specific-file.py   # include only what you need
 ```
 
 Use summaries for large codebases:
@@ -118,12 +118,6 @@ Check installation:
 ```bash
 lfops doctor
 ```
-
-## Goal not found
-
-**Symptom:** `lfd loop <flow> <area> -g <goal>` fails with "goal not found".
-
-Goals must be in `.lf/goals/`. Check with `ls .lf/goals/` or see [Background Agents](agents.md) for how to create one.
 
 ## See Also
 

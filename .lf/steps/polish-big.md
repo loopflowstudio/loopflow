@@ -1,6 +1,6 @@
 ---
 requires: none
-produces: updated docs, .design/polish-priorities.md
+produces: updated docs, scratch/polish-priorities.md
 ---
 Survey the codebase's rough edges. What would make it feel more finished?
 
@@ -24,7 +24,7 @@ If something can be fixed directly, fix it. Don't suggest work that could just b
    - Where it occurs
    - What a user would experience
    - What the fix would involve
-6. Write `.design/polish-priorities.md` with prioritized recommendations
+6. Write `scratch/polish-priorities.md` with prioritized recommendations
 
 ## What to update immediately
 
@@ -48,7 +48,7 @@ If something can be fixed directly, fix it. Don't suggest work that could just b
 
 1. **Immediate updates**: Make doc fixes directly. Commit them.
 
-2. **Write `.design/polish-priorities.md`**:
+2. **Write `scratch/polish-priorities.md`**:
 
 ```markdown
 # Polish Priorities

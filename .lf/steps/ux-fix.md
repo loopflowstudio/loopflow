@@ -1,6 +1,6 @@
 ---
-requires: .design/ux-research.md, .design/ux-gaps.md
-produces: code changes, .design/ux-fixes.md
+requires: scratch/ux-research.md, scratch/ux-gaps.md
+produces: code changes, scratch/ux-fixes.md
 ---
 > **Screenshots**: If running standalone, capture with Cmd+Shift+S first.
 > In the `ux` pipeline, uses screenshots from the ux-research step.
@@ -15,8 +15,8 @@ Read `swift/DESIGN.md` for the design philosophy guiding these changes.
 ## Input
 
 Read the research artifacts:
-- `.design/ux-research.md` - User pain points by profile
-- `.design/ux-gaps.md` - Gaps vs Figma/Cursor/Notion
+- `scratch/ux-research.md` - User pain points by profile
+- `scratch/ux-gaps.md` - Gaps vs Figma/Cursor/Notion
 
 ## Focus Areas
 
@@ -62,7 +62,7 @@ For each improvement:
 
 ## Output
 
-After making changes, update `.design/ux-fixes.md`:
+After making changes, update `scratch/ux-fixes.md`:
 
 ```markdown
 # UX Fixes Applied

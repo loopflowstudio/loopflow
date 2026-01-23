@@ -28,7 +28,7 @@ from loopflow.lf.launcher import (
     build_model_interactive_command,
     get_runner,
 )
-from loopflow.lf.logging import get_model_env, write_prompt_file
+from loopflow.lf.logging import write_prompt_file
 from loopflow.lf.output import (
     copy_to_clipboard,
     trim_components_if_needed,
@@ -186,7 +186,7 @@ def _launch_interactive_default(
     context: list[str] | None = None,
     model: str | None = None,
     voice: str | None = None,
-    paste: bool | None = None,
+    clipboard: bool | None = None,
     docs: bool | None = None,
     summaries: bool | None = None,
 ) -> None:
@@ -208,7 +208,7 @@ def _launch_interactive_default(
     cli_voices = parse_voice_arg(voice)
 
     # Resolve flags
-    include_paste = paste if paste is not None else (config.paste if config else False)
+    include_clipboard = clipboard if clipboard is not None else (config.paste if config else False)
     include_docs = docs if docs is not None else (config.lfdocs if config else True)
     include_summaries = summaries if summaries is not None else bool(config and config.summaries)
 
@@ -224,7 +224,7 @@ def _launch_interactive_default(
                 exclude=list(config.exclude) if config and config.exclude else [],
                 lfdocs=config.include_loopflow_doc if config else True,
                 summaries=include_summaries,
-                clipboard=include_paste,
+                clipboard=include_clipboard,
             ),
             config=config,
         )
@@ -261,17 +261,14 @@ def run(
     worktree: str = typer.Option(
         None, "-w", "-W", "--worktree", help="Create worktree and run step there"
     ),
-    copy: bool = typer.Option(
-        False, "-c", "-C", "--copy", help="Copy prompt to clipboard and show token breakdown"
-    ),
     web: bool = typer.Option(
         False, "--web", help="Copy to clipboard and open web client (claude.ai, chatgpt.com, etc.)"
     ),
-    paste: Optional[bool] = typer.Option(
-        None, "-v", "-V", "--paste/--no-paste", help="Include clipboard content in prompt"
+    clipboard: Optional[bool] = typer.Option(
+        None, "-c", "-C", "--clipboard/--no-clipboard", help="Include clipboard content in prompt"
     ),
     docs: Optional[bool] = typer.Option(
-        None, "--lfdocs/--no-lfdocs", help="Include .docs/, .design/, and root .md files"
+        None, "--lfdocs/--no-lfdocs", help="Include roadmap/, scratch/, and root .md files"
     ),
     diff: Optional[bool] = typer.Option(
         None, "--diff/--no-diff", help="Include raw branch diff against main"
@@ -286,9 +283,6 @@ def run(
         None, "-m", "-M", "--model", help="Model to use (backend or backend:variant)"
     ),
     voice: str = typer.Option(None, "-v", "-V", "--voice", help="Voices to use (comma-separated)"),
-    parallel: str = typer.Option(
-        None, "--parallel", help="Run parallel with multiple models (e.g., 'claude,codex')"
-    ),
     chrome: Optional[bool] = typer.Option(
         None, "--chrome/--no-chrome", help="Enable Chrome browser automation"
     ),
@@ -301,33 +295,8 @@ def run(
         if worktree:
             typer.echo("Error: --worktree requires a git repository", err=True)
             raise typer.Exit(1)
-        if parallel:
-            typer.echo("Error: --parallel requires a git repository", err=True)
-            raise typer.Exit(1)
         # Use cwd as fallback for non-git usage
         repo_root = Path.cwd()
-
-    # Handle parallel execution (creates persistent worktrees)
-    if parallel:
-        models = [m.strip() for m in parallel.split(",")]
-        for model_name in models:
-            wt_name = f"{step}-{model_name}"
-            cmd = ["lf", step, "-w", wt_name, "--model", model_name, "-a"]
-            if ctx.args:
-                cmd.extend(ctx.args)
-            if path:
-                for p in path:
-                    cmd.extend(["-p", p])
-
-            subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                env=get_model_env(),
-            )
-            typer.echo(f"Started {wt_name}")
-
-        raise typer.Exit(0)
 
     config = load_config(repo_root)
 
@@ -348,7 +317,7 @@ def run(
             context=list(path) if path else None,
             model=model,
             voice=voice,
-            paste=paste,
+            clipboard=clipboard,
             docs=docs,
             summaries=summaries,
         )
@@ -381,7 +350,7 @@ def run(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
-    if not copy and not web and not runner.is_available():
+    if not web and not runner.is_available():
         typer.echo(f"Error: '{backend}' CLI not found", err=True)
         raise typer.Exit(1)
 
@@ -394,8 +363,8 @@ def run(
         if pattern in exclude_patterns:
             exclude_patterns.remove(pattern)
 
-    # Resolve paste/docs/diff/diff_files/summaries flags (CLI > frontmatter > config > default)
-    include_paste = paste if paste is not None else (config.paste if config else False)
+    # Resolve clipboard/docs/diff/diff_files/summaries flags (CLI > frontmatter > config > default)
+    include_clipboard = clipboard if clipboard is not None else (config.paste if config else False)
     include_docs = docs if docs is not None else (config.lfdocs if config else True)
     include_diff = diff if diff is not None else (config.diff if config else False)
     # diff_files: CLI > frontmatter > config > default
@@ -424,7 +393,7 @@ def run(
                 diff=include_diff,
                 diff_files=include_diff_files,
                 summaries=include_summaries,
-                clipboard=include_paste,
+                clipboard=include_clipboard,
             ),
             config=config,
         )
@@ -438,15 +407,14 @@ def run(
 
     components = trim_components_if_needed(components)
 
-    if copy or web:
+    if web:
         prompt = format_prompt(components)
         copy_to_clipboard(prompt)
         tree = analyze_components(components)
         typer.echo(tree.format())
         warn_if_context_too_large(tree)
         typer.echo("\nCopied to clipboard.")
-        if web:
-            _open_web_client(backend)
+        _open_web_client(backend)
         raise typer.Exit(0)
 
     # Resolve chrome: CLI > frontmatter > config > default
@@ -483,17 +451,14 @@ def inline(
         False, "-i", "-I", "--interactive", help="Override to run in interactive mode"
     ),
     path: list[str] = typer.Option(None, "-p", "-P", "--path", help="Additional files to include"),
-    copy: bool = typer.Option(
-        False, "-c", "-C", "--copy", help="Copy prompt to clipboard and show token breakdown"
-    ),
     web: bool = typer.Option(
         False, "--web", help="Copy to clipboard and open web client (claude.ai, chatgpt.com, etc.)"
     ),
-    paste: Optional[bool] = typer.Option(
-        None, "-v", "-V", "--paste/--no-paste", help="Include clipboard content in prompt"
+    clipboard: Optional[bool] = typer.Option(
+        None, "-c", "-C", "--clipboard/--no-clipboard", help="Include clipboard content in prompt"
     ),
     docs: Optional[bool] = typer.Option(
-        None, "--lfdocs/--no-lfdocs", help="Include .docs/, .design/, and root .md files"
+        None, "--lfdocs/--no-lfdocs", help="Include roadmap/, scratch/, and root .md files"
     ),
     diff: Optional[bool] = typer.Option(
         None, "--diff/--no-diff", help="Include raw branch diff against main"
@@ -544,7 +509,7 @@ def inline(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
-    if not copy and not web and not runner.is_available():
+    if not web and not runner.is_available():
         typer.echo(f"Error: '{backend}' CLI not found", err=True)
         raise typer.Exit(1)
 
@@ -556,8 +521,8 @@ def inline(
         if pattern in exclude_patterns:
             exclude_patterns.remove(pattern)
 
-    # Resolve paste/docs/diff/diff_files/summaries flags (CLI overrides config)
-    include_paste = paste if paste is not None else (config.paste if config else False)
+    # Resolve clipboard/docs/diff/diff_files/summaries flags (CLI overrides config)
+    include_clipboard = clipboard if clipboard is not None else (config.paste if config else False)
     include_docs = docs if docs is not None else (config.lfdocs if config else True)
     include_diff = diff if diff is not None else (config.diff if config else False)
     if diff_files is not None:
@@ -580,7 +545,7 @@ def inline(
                 diff=include_diff,
                 diff_files=include_diff_files,
                 summaries=include_summaries,
-                clipboard=include_paste,
+                clipboard=include_clipboard,
             ),
             config=config,
         )
@@ -594,15 +559,14 @@ def inline(
 
     components = trim_components_if_needed(components)
 
-    if copy or web:
+    if web:
         prompt_text = format_prompt(components)
         copy_to_clipboard(prompt_text)
         tree = analyze_components(components)
         typer.echo(tree.format())
         warn_if_context_too_large(tree)
         typer.echo("\nCopied to clipboard.")
-        if web:
-            _open_web_client(backend)
+        _open_web_client(backend)
         raise typer.Exit(0)
 
     # Resolve chrome: CLI > config > default
@@ -636,9 +600,6 @@ def flow(
         None, "-w", "-W", "--worktree", help="Create worktree and run flow there"
     ),
     pr: bool = typer.Option(None, "--pr", help="Open PR when done"),
-    copy: bool = typer.Option(
-        False, "-c", "-C", "--copy", help="Copy first step prompt to clipboard, show tokens"
-    ),
     web: bool = typer.Option(
         False, "--web", help="Copy to clipboard and open web client (claude.ai, chatgpt.com, etc.)"
     ),
@@ -675,7 +636,7 @@ def flow(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
 
-    if not copy and not web and not runner.is_available():
+    if not web and not runner.is_available():
         typer.echo(f"Error: '{backend}' CLI not found", err=True)
         raise typer.Exit(1)
 
@@ -693,7 +654,7 @@ def flow(
 
     exclude = list(config.exclude) if config and config.exclude else None
 
-    if copy or web:
+    if web:
         # Show tokens for first step in flow
         first_step = flow_def.steps[0].step if flow_def.steps else None
 
@@ -721,8 +682,7 @@ def flow(
         typer.echo(tree.format())
         warn_if_context_too_large(tree)
         typer.echo("\nCopied to clipboard.")
-        if web:
-            _open_web_client(backend)
+        _open_web_client(backend)
         raise typer.Exit(0)
 
     push_enabled = config.push if config else False

@@ -29,7 +29,7 @@ from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lf.logging import write_prompt_file
 from loopflow.lf.messages import generate_pr_message
 from loopflow.lf.tokens import MAX_SAFE_TOKENS, analyze_components
-from loopflow.lf.voices import load_voice
+from loopflow.lf.voices import format_voice_section
 from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
 from loopflow.lfd.models import StepRun, StepRunStatus
@@ -499,24 +499,6 @@ def _run_fork_join_group(
     return result_code
 
 
-def format_voice_section(voice_names: list[str] | None, repo_root: Path) -> str | None:
-    """Format voice content for inclusion in prompts."""
-    if not voice_names:
-        return None
-
-    voices = [load_voice(repo_root, name) for name in voice_names if load_voice(repo_root, name)]
-    if not voices:
-        return None
-    if len(voices) == 1:
-        voice = voices[0]
-        return f"<lf:voice:{voice.name}>\n{voice.content}\n</lf:voice:{voice.name}>"
-
-    voice_parts = [
-        f"<lf:voice:{voice.name}>\n{voice.content}\n</lf:voice:{voice.name}>" for voice in voices
-    ]
-    return f"<lf:voices>\n{chr(10).join(voice_parts)}\n</lf:voices>"
-
-
 def load_join_instructions(step_name: str | None, repo_root: Path) -> str | None:
     """Load instructions for the join step."""
     name = step_name or "synthesize"
@@ -570,7 +552,7 @@ def build_join_prompt(
         "Synthesize the best parts of all forks into a single changeset here.",
         "Do NOT edit the forked worktrees directly.",
         "After applying the changes, commit the result.",
-        f"Write a short summary to .design/joins/{flow_name}.md if that file makes sense.",
+        f"Write a short summary to scratch/joins/{flow_name}.md if that file makes sense.",
         "",
         "Forked worktrees:",
     ]
@@ -678,7 +660,7 @@ def _build_choose_prompt(
         [
             "",
             "Decide which option to run based on repository state.",
-            "Inspect .docs/roadmap and .design as needed.",
+            "Inspect roadmap/roadmap and .design as needed.",
             "",
             f"Write your decision to {output_path} with this frontmatter:",
             "---",
@@ -702,7 +684,7 @@ def choose_branch(
     skip_permissions: bool,
 ) -> str:
     """Run a choose step and return the selected branch name."""
-    output_path = Path(choose.output or f".design/choices/{flow_name}.md")
+    output_path = Path(choose.output or f"scratch/choices/{flow_name}.md")
     if not output_path.is_absolute():
         output_path = repo_root / output_path
     output_path.parent.mkdir(parents=True, exist_ok=True)

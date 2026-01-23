@@ -16,8 +16,8 @@ Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), or repo c
 | Include lf docs | `--lfdocs` (default) | `lfdocs: true` |
 | Include branch files | `--diff-files` (default) | `diff_files: true` |
 | Include raw diff | `--diff` | `diff: true` |
-| Include clipboard | `-v, --paste` | — |
-| Add context files | `-x FILE` | `context: [FILE]` |
+| Include clipboard | `-c, --clipboard` | — |
+| Add context files | `-p FILE` | `context: [FILE]` |
 | Voice/persona | `--voice NAME` | `voice: NAME` |
 | Chrome automation | `--chrome` | `chrome: true` |
 | Yolo mode (skip permissions) | — | `yolo: true` |
@@ -32,10 +32,10 @@ The token breakdown shows what's included:
 
 | Section | What it contains | Config |
 |---------|------------------|--------|
-| **files** | `.docs/`, `.design/`, root `.md` files | `lfdocs: true` (default) |
+| **files** | `roadmap/`, `scratch/`, root `.md` files | `lfdocs: true` (default) |
 | **diff_files** | Files changed on this branch | `diff_files: true` (default) |
 | **summary** | Token-limited codebase overviews | `summaries:` in config |
-| **clipboard** | Pasted content (errors, context) | `-v` flag |
+| **clipboard** | Pasted content (errors, context) | `-c` flag |
 
 Defaults work well for most repos. Summaries require configuration.
 
@@ -91,7 +91,7 @@ def flow():
 
 ### LF Docs (files)
 
-`.docs/`, `.design/`, and root markdown files.
+`roadmap/`, `scratch/`, and root markdown files.
 
 | | |
 |---|---|
@@ -99,7 +99,7 @@ def flow():
 | **Config** | `lfdocs: true` |
 | **Default** | `true` (included) |
 
-Includes README.md, STYLE.md, and similar guidance files. Also auto-includes `.design/` (current PR scratchpad) and `.docs/` (internal docs). See [File Storage](storage.md) for the full list.
+Includes README.md, STYLE.md, and similar guidance files. Also auto-includes `scratch/` (current PR scratchpad) and `roadmap/` (internal docs).
 
 ### Branch Files (diff_files)
 
@@ -139,10 +139,10 @@ Paste content (errors, stack traces, context) into the prompt.
 
 | | |
 |---|---|
-| **CLI** | `-v, --paste` |
+| **CLI** | `-c, --clipboard` |
 | **Default** | not included |
 
-Use `-v` when debugging: copy an error, then `lf debug -v`.
+Use `-c` when debugging: copy an error, then `lf debug -c`.
 
 ### Raw Diff
 
@@ -162,7 +162,7 @@ Additional files always included in every step.
 
 | | |
 |---|---|
-| **CLI** | `-x FILE` (repeatable) |
+| **CLI** | `-p FILE` (repeatable) |
 | **Config** | `context: [src/schema.py, docs/api.md]` |
 
 CLI adds to config; config sets baseline for all steps.
@@ -308,7 +308,7 @@ summaries:
     tokens: 5000
 ```
 
-Generate with `lfops summarize`. Cached in `.lf/summaries/`.
+Generate with `lfops summarize`.
 
 ### SkillRegistry
 

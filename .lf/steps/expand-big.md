@@ -1,6 +1,6 @@
 ---
 requires: none
-produces: .design/expansion-opportunities.md
+produces: scratch/expansion-opportunities.md
 ---
 Where could this codebase go next? What's the natural evolution?
 
@@ -15,7 +15,7 @@ This is strategic thinking, not roadmap planning. Identify directions worth expl
 1. Explore the codebase: what does it do, who uses it, what's the core value
 2. Look at how it's being used (README examples, test cases, CLI help)
 3. Identify 2-3 expansion directions that extend the core value
-4. Write `.design/expansion-opportunities.md`
+4. Write `scratch/expansion-opportunities.md`
 
 ## What makes a good expansion
 
@@ -36,7 +36,7 @@ This is strategic thinking, not roadmap planning. Identify directions worth expl
 
 ## Output
 
-Write `.design/expansion-opportunities.md`:
+Write `scratch/expansion-opportunities.md`:
 
 ```markdown
 # Expansion Opportunities

@@ -1,6 +1,6 @@
 ---
 interactive: true
-produces: .design/<branch>.md
+produces: scratch/<branch>.md
 ---
 Produce a short implementation spec that another LLM session can use to write a first draft.
 
@@ -15,10 +15,10 @@ The design doc is scaffolding—a checkpoint for recovery, not documentation for
 ## Workflow
 
 1. Run `git branch --show-current` to confirm you're on a feature branch (not `main`)
-2. Check `.docs/` for architecture notes, prior decisions, or context that informs this design
-3. Create `.design/<feature-name>.md` early—after the first exchange or two
+2. Check `roadmap/` for architecture notes, prior decisions, or context that informs this design
+3. Create `scratch/<feature-name>.md` early—after the first exchange or two
 4. Write as you go, refining with each conversation turn
-5. Run `git add .design/ && git commit -m "design: <branch>"` when done
+5. Run `git add scratch/ && git commit -m "design: <branch>"` when done
 6. End session. Implementation happens separately.
 
 Write as you go, not at the end. If the session crashes mid-design, the partial doc is still useful. Let writing inspire questions—gaps become obvious when you make things concrete.

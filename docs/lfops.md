@@ -23,10 +23,11 @@ Options:
 | Flag | Description |
 |------|-------------|
 | `-e, --exclude` | Exclude patterns |
-| `-v, --paste` | Include current clipboard content |
-| `--lfdocs/--no-lfdocs` | Include/exclude repo docs |
-| `--diff/--no-diff` | Include raw branch diff |
-| `--diff-files/--no-diff-files` | Include files touched by branch |
+| `-c, --clipboard` | Include current clipboard content |
+| `--lfdocs / --no-lfdocs` | Include roadmap/, scratch/, and root .md files |
+| `--diff / --no-diff` | Include raw branch diff |
+| `--diff-files / --no-diff-files` | Include files touched by branch |
+| `--summaries / --no-summaries` | Include pre-generated codebase summaries |
 
 ## lfops add
 
@@ -89,15 +90,13 @@ lfops doctor
 
 Verifies that required tools are installed and working.
 
-## lfops status
+## lfops version
 
-Show running sessions.
+Show loopflow version.
 
 ```bash
-lfops status
+lfops version
 ```
-
-Lists any tasks currently running in auto mode.
 
 ## lfops summarize
 
@@ -109,7 +108,7 @@ lfops summarize -t 20000 src   # With specific token budget
 lfops summarize -a             # Regenerate all configured summaries
 ```
 
-Creates pre-generated LLM summaries for large codebases. Summaries are cached in `.lf/summaries/` and included in context when configured.
+Creates pre-generated LLM summaries for large codebases. Summaries are cached and included in context when configured.
 
 ## lfops rebase
 
@@ -131,7 +130,48 @@ lfops sync
 
 Fetches `origin/main` and updates your local main branch. Safe to run from any worktree.
 
-## lfops wt prune
+## lfops wt
+
+Worktree helper commands.
+
+### lfops wt create
+
+Create worktree with schema-based branch name.
+
+```bash
+lfops wt create my-feature       # creates ../repo.my-feature
+lfops wt create my-feature -b develop   # from develop instead of main
+```
+
+| Flag | Description |
+|------|-------------|
+| `-b, --base` | Base branch (default: main) |
+
+### lfops wt switch
+
+Switch to a worktree by its short directory name.
+
+```bash
+lfops wt switch my-feature       # switches to ../repo.my-feature
+```
+
+### lfops wt list
+
+List worktrees with prunable metadata.
+
+```bash
+lfops wt list
+```
+
+### lfops wt ci
+
+Show CI status for the current branch.
+
+```bash
+lfops wt ci
+```
+
+### lfops wt prune
 
 Remove worktrees whose branches have been merged.
 
@@ -143,22 +183,46 @@ lfops wt prune --force   # skip confirmation
 
 Finds worktrees where the PR was merged or the branch is an ancestor of `origin/main` (handles squash merges). Never prunes main/master or dirty worktrees.
 
-Options:
-
 | Flag | Description |
 |------|-------------|
 | `-n, --dry-run` | Show what would be pruned without removing |
 | `-f, --force` | Skip confirmation prompt |
 
+## lfops abandon
+
+Abandon a branch: close PR, remove worktree, delete branch.
+
+```bash
+lfops abandon feature-branch
+lfops abandon feature-branch --force   # skip confirmation
+```
+
+| Flag | Description |
+|------|-------------|
+| `-f, --force` | Skip confirmation and force abandon with uncommitted changes |
+
+## lfops shell
+
+Shell integration setup.
+
+```bash
+lfops shell init       # print shell integration code
+lfops shell install    # install to shell config file
+```
+
+Adds the `wt` function for quick worktree switching: `wt my-feature` switches to `../repo.my-feature`.
+
 ## Typical Workflow
 
 ```bash
-lfops wt create my-feature       # create worktree with schema-based branch
+lfops wt create my-feature       # create worktree (../repo.my-feature)
+lfops wt switch my-feature       # switch to worktree from another
 # ... work on feature ...
 lfops commit                     # commit with generated message
 lfops pr                         # open PR (CI runs automatically)
 # ... address review feedback ...
 lfops commit -p                  # commit and push
+lfops wt ci                      # check CI status
 lfops land                       # submit to merge queue
 # ... wait for CI to pass and merge ...
 lfops wt prune                   # cleanup merged worktrees

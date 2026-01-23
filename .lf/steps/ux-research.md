@@ -1,5 +1,5 @@
 ---
-produces: .design/ux-research.md
+produces: scratch/ux-research.md
 ---
 > **Before running**: Open Concerto, navigate to each screen you want reviewed,
 > and press Cmd+Shift+S to capture. Screenshots save to `/tmp/concerto-<timestamp>.png`.
@@ -18,7 +18,7 @@ Use Concerto's debug capture (Debug menu or keyboard shortcut) to generate scree
 - Running state
 - Error states
 
-Save to `.design/screenshots/` with descriptive names.
+Save to `scratch/screenshots/` with descriptive names.
 
 ## Part 2: Visual Audit
 
@@ -62,7 +62,7 @@ Be specific. Quote what they see. Note exact UI elements that confuse or delight
 
 ## Output
 
-Write findings to `.design/ux-research.md`:
+Write findings to `scratch/ux-research.md`:
 
 ```markdown
 # UX Research

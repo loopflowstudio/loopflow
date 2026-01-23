@@ -105,5 +105,5 @@ A collaborative exploration. Map the territory, surface tradeoffs, propose direc
 ## Output
 
 - Refactored code, committed incrementally
-- Updated `.design/<branch>.md` if the approach warrants documentation
-- Notes in `.design/questions.md` for deferred decisions
+- Updated `scratch/<branch>.md` if the approach warrants documentation
+- Notes in `scratch/questions.md` for deferred decisions

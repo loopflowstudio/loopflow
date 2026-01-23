@@ -1,61 +1,73 @@
 # Loopflow
 
+Arrange and conduct an agent orchestra.
+
+## The Model
+
+| Primitive | What it does |
+|-----------|--------------|
+| **Step** | Runs a prompt with assembled context |
+| **Flow** | Chains steps together |
+| **Voice** | Shapes judgment and perspective |
+| **Area** | Focuses on part of the codebase |
+
+| Agent Mode | Runs when |
+|------------|-----------|
+| **Loop** | Continuously until stopped |
+| **Watch** | Paths change on main |
+| **Cron** | On schedule |
+
+An agent is **flow × area × voice**.
+
+## Steps
+
 ```bash
-lf review
+lf debug -c
 ```
 
-Assembles context and prompts for AI coding agents. Steps are markdown files—versioned, reusable, shareable.
-
-## Step
-
-Copy an error, watch it fix.
-
-```bash
-lf debug -v
-
-Tokens: 33,017
-
-files          20,850 ████████████
-  docs         17,978 ██████████
-  STYLE.md      2,158 █
-  README.md       475 ▏
-docs           11,004 ██████
-loopflow          657 ▏
-task              506 ▏
-clipboard         342 ▏
-```
-
-Loopflow assembles context from your repo—docs, style guides, the current diff—and packages it with a task prompt. The token profile shows what's going in. This context is what makes the agent effective.
-
-Tasks are markdown files in `.claude/commands/` or `.lf/`. Run by name:
+Assembles context (docs, style guides, branch diff) and runs the prompt. `-c` adds your clipboard.
 
 ```bash
 lf review                 # run review.md
 lf implement: add auth    # pass arguments
+lf debug -i               # interactive (you guide)
+lf polish -a              # autonomous (runs to completion)
 ```
 
-## Flow
+Steps live in `.lf/steps/`.
 
-Design, implement, polish, ship.
+## Flows
 
 ```bash
-lf design: add user auth
-lf implement
-lf polish
-lfops pr
+lf flow ship              # design → implement → polish
 ```
 
-![workflow demo](docs/workflow-demo.gif)
-
-## Loop
-
-Define goals, review PRs when you wake.
+Or chain manually:
 
 ```bash
-lfd loop src/ --flow ship
+lf design: add user auth && lf implement && lf polish && lfops pr
 ```
 
-![loops demo](docs/loops-demo.gif)
+Define flows in `.lf/flows/ship.py`:
+
+```python
+def flow():
+    return Flow("design", "implement", "polish")
+```
+
+## Agents
+
+```bash
+lfd loop ship src/
+```
+
+Runs the `ship` flow on `src/` continuously, creating PRs until stopped.
+
+```bash
+lfd loop ship src/ -v architect    # add a voice
+lfd watch ship docs/ -v writer     # run when docs/ changes
+lfd status                         # see all agents
+```
 
 ## Install
 
@@ -63,13 +75,9 @@ lfd loop src/ --flow ship
 uv tool install loopflow
 ```
 
-Built-in tasks included. Works immediately with Claude Code.
+Built-in steps and flows included. `lf init` sets up Claude Code and preferences.
 
-Run `lf init` to install Claude Code, worktrunk, and configure preferences.
-
-## Documentation
-
-[Read the docs →](docs/index.md)
+[Documentation →](docs/index.md)
 
 ## Integrations
 

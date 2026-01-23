@@ -10,8 +10,8 @@ from loopflow.lf.tokens import count_tokens
 
 # Patterns for lfdocs content (excluded from summaries when lfdocs is on)
 LFDOCS_EXCLUDE_PATTERNS = [
-    ".docs/**",
-    ".design/**",
+    "roadmap/**",
+    "scratch/**",
     "*.md",  # Root .md files
 ]
 
@@ -208,8 +208,6 @@ def gather_source_content(path: Path, repo_root: Path, exclude: list[str] | None
         file_path = repo_root / filepath
         if excluded_paths and _is_ignored(file_path, repo_root, excluded_paths):
             continue
-        if ".lf/summaries" in filepath:
-            continue
         # Skip binary files by extension
         if is_binary(file_path):
             continue
@@ -253,8 +251,6 @@ def _gather_source_content_working_dir(
             continue
 
         rel = p.relative_to(repo_root)
-        if ".lf/summaries" in str(rel):
-            continue
         parts.append(f"# {rel}\n\n```\n{content}\n```")
 
     return "\n\n".join(parts)

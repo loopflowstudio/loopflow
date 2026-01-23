@@ -1,6 +1,6 @@
 ---
 interactive: true
-produces: .design/<branch>.md
+produces: scratch/<branch>.md
 ---
 Produce a short implementation spec that another LLM session can use to write a first draft.
 
@@ -10,18 +10,18 @@ If on main, create a feature branch first: `git checkout -b <feature-name>`.
 
 The design doc is for both humans and agents. The implementing session executes fairly literally—what isn't specified gets guessed. The human will read and edit before implementation. Optimize for easy to manipulate: clear sections to delete, add, or rearrange. Constraints to tighten or loosen.
 
-Design docs are scaffolding—checkpoints for recovery, not documentation for posterity. `lf ops pr land` deletes `.design/` contents.
+Design docs are scaffolding—checkpoints for recovery, not documentation for posterity. `lf ops pr land` deletes `scratch/` contents.
 
 ## Workflow
 
 1. Run `git branch --show-current` to confirm you're on a feature branch (not `main`)
 2. Find the repository root with `git rev-parse --show-toplevel`
-3. Create design doc at **repository root**: `<repo-root>/.design/<feature-name>.md` early—after the first exchange or two
+3. Create design doc at **repository root**: `<repo-root>/scratch/<feature-name>.md` early—after the first exchange or two
 4. Write as you go, refining with each conversation turn
-5. Run `git add .design/ && git commit -m "design: <branch>"` when done
+5. Run `git add scratch/ && git commit -m "design: <branch>"` when done
 6. End session. Implementation happens via `lf implement`.
 
-**Important:** The `.design/` directory must be at the repository root, not in subdirectories. If working on files in a subdirectory like `swift/`, still write design docs to the root `.design/` folder.
+**Important:** The `scratch/` directory must be at the repository root, not in subdirectories. If working on files in a subdirectory like `swift/`, still write design docs to the root `scratch/` folder.
 
 Write as you go, not at the end. If the session crashes mid-design, the partial doc is still useful. Let writing inspire questions—gaps become obvious when you make things concrete.
 

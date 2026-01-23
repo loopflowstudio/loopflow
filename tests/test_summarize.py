@@ -224,19 +224,6 @@ def test_gather_source_content_working_dir_excludes_patterns(temp_repo):
     assert "test code" not in content
 
 
-def test_gather_source_content_working_dir_skips_summaries(temp_repo):
-    """Doesn't include .lf/summaries/ content."""
-    summaries = temp_repo / ".lf" / "summaries"
-    summaries.mkdir(parents=True)
-    (summaries / "cached.md").write_text("old summary")
-    (temp_repo / "src.py").write_text("source")
-
-    content = _gather_source_content_working_dir(Path("."), temp_repo)
-
-    assert "old summary" not in content
-    assert "source" in content
-
-
 # =============================================================================
 # Config integration
 # =============================================================================

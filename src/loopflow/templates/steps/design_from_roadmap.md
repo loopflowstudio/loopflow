@@ -6,7 +6,7 @@ Create a scoped project design from the most recent roadmap item.
 
 ## Steps
 
-1. Find the most recently modified roadmap item under `roadmap/**/*.md`.
+1. Find the most recently modified roadmap item under `*/roadmap/*.md` (area-specific roadmaps).
 2. If none exist, write `scratch/questions.md` explaining that no roadmap items were found and stop.
 3. Read the roadmap item and extract its intent, area, and scope.
 4. Create `scratch/<slug>.md` where `<slug>` is the roadmap filename without extension.

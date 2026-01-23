@@ -37,6 +37,50 @@ def gather_internal_docs(repo_root: Path) -> list[tuple[Path, str]]:
     return docs
 
 
+def _area_parent_paths(area: str) -> list[str]:
+    """Return all parent paths for an area.
+
+    For area="a/b/c", returns ["a", "a/b", "a/b/c"].
+    """
+    parts = area.strip("/").split("/")
+    paths = []
+    for i in range(len(parts)):
+        paths.append("/".join(parts[: i + 1]))
+    return paths
+
+
+def gather_area_docs(repo_root: Path, area: str) -> list[tuple[Path, str]]:
+    """Gather docs from area and all parent areas.
+
+    For area="a/b/c", includes:
+    - a/*.md and a/roadmap/**/*.md
+    - a/b/*.md and a/b/roadmap/**/*.md
+    - a/b/c/*.md and a/b/c/roadmap/**/*.md
+    """
+    docs = []
+    seen = set()
+
+    for parent in _area_parent_paths(area):
+        parent_dir = repo_root / parent
+
+        # Direct .md files in the area directory
+        if parent_dir.is_dir():
+            for path in sorted(parent_dir.glob("*.md")):
+                if path.is_file() and path not in seen:
+                    seen.add(path)
+                    docs.append((path, path.read_text()))
+
+        # Area-specific roadmap
+        roadmap_dir = parent_dir / "roadmap"
+        if roadmap_dir.is_dir():
+            for path in sorted(roadmap_dir.rglob("*.md")):
+                if path.is_file() and path not in seen:
+                    seen.add(path)
+                    docs.append((path, path.read_text()))
+
+    return docs
+
+
 def load_voice(voice: str | Path, repo_root: Path) -> str | None:
     """Load voice content from .lf/voices/{name}.md or a direct path."""
     voice_str = str(voice)

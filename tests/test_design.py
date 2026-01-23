@@ -3,7 +3,9 @@
 from pathlib import Path
 
 from loopflow.lf.design import (
+    _area_parent_paths,
     clear_design_artifacts,
+    gather_area_docs,
     gather_design_docs,
     gather_internal_docs,
     has_design_artifacts,
@@ -172,3 +174,96 @@ def test_load_voice_with_path_object(tmp_path):
 
     assert content is not None
     assert "# Refactor Voice" in content
+
+
+# =============================================================================
+# Area docs tests
+# =============================================================================
+
+
+def test_area_parent_paths_single():
+    """_area_parent_paths returns single path for simple area."""
+    assert _area_parent_paths("lf") == ["lf"]
+
+
+def test_area_parent_paths_nested():
+    """_area_parent_paths returns all parent paths."""
+    assert _area_parent_paths("a/b/c") == ["a", "a/b", "a/b/c"]
+
+
+def test_area_parent_paths_handles_slashes():
+    """_area_parent_paths handles leading/trailing slashes."""
+    assert _area_parent_paths("/a/b/") == ["a", "a/b"]
+
+
+def test_gather_area_docs_includes_direct_md(tmp_path):
+    """gather_area_docs includes .md files directly in area folders."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "lf").mkdir()
+    (repo_root / "lf" / "README.md").write_text("# LF docs")
+    (repo_root / "lf" / "cli").mkdir()
+    (repo_root / "lf" / "cli" / "GUIDE.md").write_text("# CLI guide")
+
+    docs = gather_area_docs(repo_root, "lf/cli")
+
+    names = [p.name for p, _ in docs]
+    assert "README.md" in names  # from lf/
+    assert "GUIDE.md" in names  # from lf/cli/
+
+
+def test_gather_area_docs_includes_roadmap(tmp_path):
+    """gather_area_docs includes roadmap/ under each area."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "lf").mkdir()
+    (repo_root / "lf" / "roadmap").mkdir()
+    (repo_root / "lf" / "roadmap" / "feature.md").write_text("# Feature plan")
+    (repo_root / "lf" / "cli").mkdir()
+    (repo_root / "lf" / "cli" / "roadmap").mkdir()
+    (repo_root / "lf" / "cli" / "roadmap" / "refactor.md").write_text("# CLI refactor")
+
+    docs = gather_area_docs(repo_root, "lf/cli")
+
+    names = [p.name for p, _ in docs]
+    assert "feature.md" in names  # from lf/roadmap/
+    assert "refactor.md" in names  # from lf/cli/roadmap/
+
+
+def test_gather_area_docs_nested_roadmap(tmp_path):
+    """gather_area_docs includes nested docs within roadmap/."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "lf").mkdir()
+    (repo_root / "lf" / "roadmap").mkdir()
+    (repo_root / "lf" / "roadmap" / "decisions").mkdir()
+    (repo_root / "lf" / "roadmap" / "decisions" / "adr-001.md").write_text("# ADR")
+
+    docs = gather_area_docs(repo_root, "lf")
+
+    names = [p.name for p, _ in docs]
+    assert "adr-001.md" in names
+
+
+def test_gather_area_docs_empty_when_no_area_exists(tmp_path):
+    """gather_area_docs returns empty list when area doesn't exist."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    docs = gather_area_docs(repo_root, "nonexistent/area")
+
+    assert docs == []
+
+
+def test_gather_area_docs_no_duplicates(tmp_path):
+    """gather_area_docs doesn't include the same file twice."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "lf").mkdir()
+    (repo_root / "lf" / "README.md").write_text("# LF")
+
+    docs = gather_area_docs(repo_root, "lf")
+
+    # Should only appear once
+    readme_count = sum(1 for p, _ in docs if p.name == "README.md")
+    assert readme_count == 1

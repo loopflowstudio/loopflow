@@ -12,7 +12,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from loopflow.lf.design import gather_design_docs, gather_internal_docs
+from loopflow.lf.design import gather_area_docs, gather_design_docs, gather_internal_docs
 from loopflow.lf.files import format_files, format_image_references, gather_docs, gather_files
 from loopflow.lf.frontmatter import StepFile, parse_step_file
 from loopflow.lf.skills import (
@@ -92,6 +92,7 @@ class FilesetConfig(BaseModel):
     paths: list[str] = Field(default_factory=list)  # Additive to defaults
     exclude: list[str] = Field(default_factory=list)  # Removes from defaults + paths
     token_limit: int | None = None  # If set, summarize files exceeding this
+    parent_docs: bool = True  # Include docs from parent area paths
 
 
 class ContextConfig(BaseModel):
@@ -102,6 +103,11 @@ class ContextConfig(BaseModel):
 
     # User files (defaults: scratch/, roadmap/, *.md)
     files: FilesetConfig = Field(default_factory=FilesetConfig)
+
+    # Area path (e.g., "lf/cli" or "concerto/ui")
+    # When set with parent_docs=True, includes parent area docs:
+    # area="a/b/c" includes a/*.md, a/roadmap/, a/b/*.md, a/b/roadmap/, etc.
+    area: str | None = None
 
     # Bundled LOOPFLOW.md system documentation
     lfdocs: bool = True
@@ -704,10 +710,16 @@ def gather_prompt_components(
     loopflow_doc = _load_loopflow_doc() if context_config.lfdocs else None
 
     # Insert design docs and internal docs before repo docs
-    # Order: scratch/ (ephemeral), roadmap/ (persistent internal), repo root .md files
+    # Order: scratch/ (ephemeral), roadmap/ (persistent internal), area docs, repo root .md files
     design_docs = gather_design_docs(repo_root)
     internal_docs = gather_internal_docs(repo_root)
-    prefix_docs = design_docs + internal_docs
+
+    # Gather area-specific docs if area is set and parent_docs is enabled
+    area_docs = []
+    if context_config.area and context_config.files.parent_docs:
+        area_docs = gather_area_docs(repo_root, context_config.area)
+
+    prefix_docs = design_docs + internal_docs + area_docs
     if prefix_docs:
         docs[0:0] = prefix_docs
 

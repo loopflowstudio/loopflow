@@ -30,7 +30,7 @@ from loopflow.lf.flows import (
 from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lf.logging import write_prompt_file
 from loopflow.lf.messages import generate_pr_message
-from loopflow.lf.voices import build_effective_voices, render_voices
+from loopflow.lf.voices import render_voices, resolve_voices
 from loopflow.lf.worktrees import WorktreeError
 from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
@@ -419,10 +419,8 @@ def run_iteration(
         },
     )
 
-    effective_voices = build_effective_voices(agent.repo, agent.voice)
-    if not effective_voices:
-        update_run_status(run.id, FlowRunStatus.FAILED, error="No valid voices found")
-        return False
+    effective_voices = resolve_voices(agent.repo, agent.voice)
+    # Voices are optional - proceed even if none specified
 
     flow = agent.flow
     if not flow:
@@ -458,10 +456,8 @@ def run_iteration(
 
     skip_permissions = config.yolo if config else False
 
-    # Use first area as context path, or derive from first voice
+    # Use agent's area as context paths
     context_paths = list(agent.area) if agent.area[0] != "." else None
-    if not context_paths and effective_voices[0].area:
-        context_paths = effective_voices[0].area
 
     i = 0
     while i < len(resolved):

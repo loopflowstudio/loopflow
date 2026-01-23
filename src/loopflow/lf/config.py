@@ -104,6 +104,7 @@ class Config(BaseModel):
     diff_files: bool = True  # Include full content of files touched by branch
     paste: bool = False  # Include clipboard content by default
     voice: Optional[list[str]] = None  # Default voices for all tasks
+    area: Optional[str] = None  # Default area for parent doc inclusion (e.g., "lf/cli")
     summaries: list[SummaryConfig] = Field(default_factory=list)  # Summaries to include
     summary_tokens: int = 10000  # Default token budget for summaries
     skill_sources: list[SkillSourceConfig] = Field(default_factory=list)  # External skill libraries

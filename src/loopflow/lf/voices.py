@@ -2,16 +2,12 @@
 
 import re
 from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
 
 _FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 
 # Path to bundled builtin voice templates
 _VOICES_TEMPLATES_DIR = Path(__file__).parent.parent / "templates" / "voices"
-
-# Builtin mode voices (decide what to work on)
-_BUILTIN_MODES = {"adaptive", "roadmap", "build", "simplify"}
 
 
 def _parse_frontmatter(text: str) -> tuple[dict, str]:
@@ -67,22 +63,16 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
     return result, body
 
 
-class VoiceKind(Enum):
-    """Whether a voice is a role (how to judge) or mode (what to decide)."""
-
-    ROLE = "role"
-    MODE = "mode"
-
-
 @dataclass
 class Voice:
-    """A parsed voice file."""
+    """A parsed voice file.
+
+    Voices define *how* to approach work (judgment, style, perspective).
+    They don't specify *where* (area) or *what* (flow) - those are separate dimensions.
+    """
 
     name: str
     content: str
-    area: list[str]  # Default pathset
-    pipeline: str  # Default pipeline
-    kind: VoiceKind = VoiceKind.ROLE  # Default to role
 
 
 class VoiceNotFoundError(Exception):
@@ -139,23 +129,9 @@ def load_voice(repo: Path | None, voice_name: str) -> Voice | None:
             return None
 
     text = voice_path.read_text()
-    frontmatter, content = _parse_frontmatter(text)
+    _frontmatter, content = _parse_frontmatter(text)
 
-    # Parse area as list
-    area = frontmatter.get("area", [])
-    if isinstance(area, str):
-        area = [a.strip() for a in area.split(",") if a.strip()]
-
-    # Determine kind
-    kind = _detect_voice_kind(voice_name, frontmatter, content)
-
-    return Voice(
-        name=voice_name,
-        content=content,
-        area=area,
-        pipeline=frontmatter.get("pipeline", "ship"),
-        kind=kind,
-    )
+    return Voice(name=voice_name, content=content)
 
 
 def load_voice_content(repo: Path, voice_name: str) -> str | None:
@@ -202,43 +178,6 @@ def voice_exists(repo: Path | None, voice_name: str) -> bool:
     return _get_builtin_voice(voice_name) is not None
 
 
-# Voice kind detection and composition
-
-
-def _detect_voice_kind(name: str, frontmatter: dict, content: str) -> VoiceKind:
-    """Infer kind from frontmatter or content heuristics."""
-    # Explicit frontmatter takes precedence
-    if "kind" in frontmatter:
-        kind_str = frontmatter["kind"].lower()
-        if kind_str == "mode":
-            return VoiceKind.MODE
-        return VoiceKind.ROLE
-
-    # Builtin modes
-    if name in _BUILTIN_MODES:
-        return VoiceKind.MODE
-
-    # Heuristic: if content talks about deciding what to do, it's a mode
-    mode_patterns = [
-        "## Decision",
-        "decide what mode",
-        "deciding what to",
-        "roadmap/",
-        "status: approved",
-        "status: proposed",
-    ]
-    for pattern in mode_patterns:
-        if pattern in content:
-            return VoiceKind.MODE
-
-    return VoiceKind.ROLE
-
-
-def needs_adaptive(voices: list[Voice]) -> bool:
-    """True if no mode voice present—adaptive should be injected."""
-    return not any(voice.kind == VoiceKind.MODE for voice in voices)
-
-
 def resolve_voices(repo: Path, voice_names: list[str]) -> list[Voice]:
     """Load and resolve voice names to Voice objects."""
     voices = []
@@ -249,35 +188,11 @@ def resolve_voices(repo: Path, voice_names: list[str]) -> list[Voice]:
     return voices
 
 
-def build_effective_voices(repo: Path, voice_names: list[str]) -> list[Voice]:
-    """Build final voice list, injecting adaptive if needed.
-
-    - If voice_names is empty → [adaptive]
-    - If only roles → [adaptive] + roles
-    - If any mode present → voices as-is (no adaptive injection)
-    """
-    voices = resolve_voices(repo, voice_names)
-
-    if needs_adaptive(voices):
-        adaptive = load_voice(repo, "adaptive")
-        if adaptive:
-            voices = [adaptive] + voices
-
-    return voices
-
-
 def render_voices(voices: list[Voice]) -> str:
-    """Combine voices into single prompt. Modes first, then roles."""
-    # Sort: modes first, then roles
-    modes = [voice for voice in voices if voice.kind == VoiceKind.MODE]
-    roles = [voice for voice in voices if voice.kind == VoiceKind.ROLE]
-    ordered = modes + roles
-
-    parts = []
-    for voice in ordered:
-        tag = "mode" if voice.kind == VoiceKind.MODE else "voice"
-        parts.append(f"<lf:{tag}:{voice.name}>\n{voice.content}\n</lf:{tag}:{voice.name}>")
-
+    """Combine voices into single prompt."""
+    parts = [
+        f"<lf:voice:{voice.name}>\n{voice.content}\n</lf:voice:{voice.name}>" for voice in voices
+    ]
     return "\n\n".join(parts)
 
 

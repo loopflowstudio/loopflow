@@ -57,13 +57,10 @@ def reset_db(db_path: Path | None = None) -> None:
     _init_db(db_path)
 
 
-def _get_db(db_path: Path | None = None, reset_on_mismatch: bool | None = None) -> sqlite3.Connection:
-    """Get database connection.
-
-    Args:
-        db_path: Path to database file. Defaults to ~/.lf/lfd.db.
-        reset_on_mismatch: If True, reset DB on schema mismatch. If None, check LF_DB_RESET env var.
-    """
+def _get_db(
+    db_path: Path | None = None, reset_on_mismatch: bool | None = None
+) -> sqlite3.Connection:
+    """Get database connection."""
     if db_path is None:
         db_path = DB_PATH
 
@@ -181,29 +178,32 @@ def save_summary_db(
     model: str,
     db_path: Path | None = None,
 ) -> None:
-    """Save a summary to the database."""
+    """Save a summary to the database. Fails silently on DB errors."""
     import uuid
 
-    conn = _get_db(db_path)
-    conn.execute(
-        """
-        INSERT OR REPLACE INTO summaries
-        (id, repo, path, token_budget, source_hash, content, model, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            str(uuid.uuid4()),
-            repo,
-            path,
-            token_budget,
-            source_hash,
-            content,
-            model,
-            datetime.now().isoformat(),
-        ),
-    )
-    conn.commit()
-    conn.close()
+    try:
+        conn = _get_db(db_path)
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO summaries
+            (id, repo, path, token_budget, source_hash, content, model, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(uuid.uuid4()),
+                repo,
+                path,
+                token_budget,
+                source_hash,
+                content,
+                model,
+                datetime.now().isoformat(),
+            ),
+        )
+        conn.commit()
+        conn.close()
+    except (SchemaMismatchError, sqlite3.Error):
+        pass  # Graceful degradation: summaries are optional
 
 
 def load_summary_db(
@@ -212,32 +212,38 @@ def load_summary_db(
     token_budget: int,
     db_path: Path | None = None,
 ) -> dict | None:
-    """Load a summary from the database."""
-    conn = _get_db(db_path)
-    cursor = conn.execute(
-        "SELECT content, source_hash, model, created_at FROM summaries "
-        "WHERE repo = ? AND path = ? AND token_budget = ?",
-        (repo, path, token_budget),
-    )
-    row = cursor.fetchone()
-    conn.close()
+    """Load a summary from the database. Returns None on DB errors."""
+    try:
+        conn = _get_db(db_path)
+        cursor = conn.execute(
+            "SELECT content, source_hash, model, created_at FROM summaries "
+            "WHERE repo = ? AND path = ? AND token_budget = ?",
+            (repo, path, token_budget),
+        )
+        row = cursor.fetchone()
+        conn.close()
 
-    if not row:
-        return None
+        if not row:
+            return None
 
-    return {
-        "content": row["content"],
-        "source_hash": row["source_hash"],
-        "model": row["model"],
-        "created_at": row["created_at"],
-    }
+        return {
+            "content": row["content"],
+            "source_hash": row["source_hash"],
+            "model": row["model"],
+            "created_at": row["created_at"],
+        }
+    except (SchemaMismatchError, sqlite3.Error):
+        return None  # Graceful degradation: treat as cache miss
 
 
 def delete_summaries_for_repo(repo: str, db_path: Path | None = None) -> int:
-    """Delete all summaries for a repo."""
-    conn = _get_db(db_path)
-    cursor = conn.execute("DELETE FROM summaries WHERE repo = ?", (repo,))
-    conn.commit()
-    count = cursor.rowcount
-    conn.close()
-    return count
+    """Delete all summaries for a repo. Returns 0 on DB errors."""
+    try:
+        conn = _get_db(db_path)
+        cursor = conn.execute("DELETE FROM summaries WHERE repo = ?", (repo,))
+        conn.commit()
+        count = cursor.rowcount
+        conn.close()
+        return count
+    except (SchemaMismatchError, sqlite3.Error):
+        return 0  # Graceful degradation

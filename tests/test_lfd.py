@@ -183,7 +183,9 @@ def test_db_schema_mismatch_reset():
         assert version == SCHEMA_VERSION
 
         # Old table should be gone
-        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='old_table'")
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='old_table'"
+        )
         assert cursor.fetchone() is None
         conn.close()
 
@@ -229,7 +231,12 @@ def test_db_reset_function():
 
         # Create initial DB with some data
         conn = _get_db(db_path)
-        conn.execute("INSERT INTO agents (id, repo, flow, voice, area, status, iteration, main_branch, pr_limit, merge_mode, created_at) VALUES ('test', '/tmp', 'ship', '[]', '[]', 'idle', 0, 'main', 5, 'pr', '2024-01-01')")
+        conn.execute(
+            "INSERT INTO agents (id, repo, flow, voice, area, status, iteration, "
+            "main_branch, pr_limit, merge_mode, created_at) "
+            "VALUES ('test', '/tmp', 'ship', '[]', '[]', 'idle', 0, 'main', 5, "
+            "'pr', '2024-01-01')"
+        )
         conn.commit()
         conn.close()
 
@@ -1687,3 +1694,116 @@ def test_kill_process_tree_handles_missing_pid():
 
     # Should not raise
     _kill_process_tree(99999999)  # Non-existent PID
+
+
+# =============================================================================
+# Fire-and-forget logging tests (lf works without lfd)
+# =============================================================================
+
+
+def test_fire_and_forget_succeeds_without_daemon():
+    """Fire-and-forget logging doesn't raise when daemon isn't running.
+
+    This is critical: lf commands must work even when lfd daemon is not
+    running. The logging is best-effort and should never block the CLI.
+    """
+    from loopflow.lfd.step_run import log_step_run_end, log_step_run_start
+
+    step_run = StepRun(
+        id="test-no-daemon",
+        step="implement",
+        repo="/tmp/repo",
+        worktree="/tmp/repo.feature",
+        status=StepRunStatus.RUNNING,
+        started_at=datetime.now(),
+    )
+
+    # These should complete without raising, even with no daemon
+    log_step_run_start(step_run)
+    log_step_run_end(step_run.id, StepRunStatus.COMPLETED)
+
+    # If we got here without exception, the test passes
+
+
+def test_fire_and_forget_handles_connection_refused():
+    """Fire-and-forget handles socket connection errors gracefully."""
+    from loopflow.lfd.step_run import _send_fire_and_forget
+
+    # Should not raise, even with bad socket path
+    _send_fire_and_forget("test.method", {"key": "value"})
+
+
+def test_lfd_imports_have_no_side_effects():
+    """Importing lfd modules doesn't trigger database access.
+
+    This ensures lf can import lfd modules without requiring a database
+    or daemon to exist.
+    """
+    import sys
+
+    # Remove cached modules to test fresh import
+    modules_to_test = [
+        "loopflow.lfd.models",
+        "loopflow.lfd.step_run",
+    ]
+
+    for mod in modules_to_test:
+        if mod in sys.modules:
+            del sys.modules[mod]
+
+    # Fresh import should not raise or touch the database
+    from loopflow.lfd.models import StepRun as SR
+    from loopflow.lfd.models import StepRunStatus as SRS
+
+    # Verify we can create objects without database
+    step_run = SR(
+        id="test-import",
+        step="test",
+        repo="/tmp/repo",
+        worktree="/tmp/repo",
+        status=SRS.RUNNING,
+        started_at=datetime.now(),
+    )
+    assert step_run.id == "test-import"
+
+
+def test_summary_functions_handle_schema_mismatch():
+    """Summary DB functions return gracefully on schema mismatch.
+
+    This ensures lf commands work even when the database has an incompatible
+    schema version - summaries degrade to cache miss behavior.
+    """
+    import os
+    import sqlite3
+
+    from loopflow.lfd.db import delete_summaries_for_repo, load_summary_db, save_summary_db
+
+    # Ensure LF_DB_RESET is not set (test expects schema mismatch to NOT reset)
+    old_reset = os.environ.pop("LF_DB_RESET", None)
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "test.db"
+
+            # Create DB with wrong schema version (no migrations)
+            conn = sqlite3.connect(db_path)
+            conn.execute("CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            conn.execute(
+                "INSERT INTO _meta (key, value) VALUES ('schema_version', 'wrong-version')"
+            )
+            conn.commit()
+            conn.close()
+
+            # All of these should complete without raising
+            # load_summary_db should return None (cache miss)
+            result = load_summary_db("/tmp/repo", ".", 25000, db_path)
+            assert result is None
+
+            # save_summary_db should silently fail
+            save_summary_db("/tmp/repo", ".", 25000, "hash", "content", "model", db_path)
+
+            # delete_summaries_for_repo should return 0
+            count = delete_summaries_for_repo("/tmp/repo", db_path)
+            assert count == 0
+    finally:
+        if old_reset is not None:
+            os.environ["LF_DB_RESET"] = old_reset

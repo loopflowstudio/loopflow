@@ -1360,10 +1360,10 @@ def test_iteration_branch_prefix_without_suffix():
 
 
 def test_generate_random_words_format():
-    """_generate_random_words returns magical-musical format."""
-    from loopflow.lfd.agent import MAGICAL, MUSICAL, _generate_random_words
+    """generate_word_pair returns magical-musical format."""
+    from loopflow.lf.naming import MAGICAL, MUSICAL, generate_word_pair
 
-    words = _generate_random_words()
+    words = generate_word_pair()
     parts = words.split("-")
     assert len(parts) == 2
     assert parts[0] in MAGICAL
@@ -1371,17 +1371,17 @@ def test_generate_random_words_format():
 
 
 def test_generate_random_words_produces_variety():
-    """_generate_random_words produces different results over multiple calls."""
-    from loopflow.lfd.agent import _generate_random_words
+    """generate_word_pair produces different results over multiple calls."""
+    from loopflow.lf.naming import generate_word_pair
 
     # Generate 20 word pairs, expect at least 5 unique
-    results = {_generate_random_words() for _ in range(20)}
+    results = {generate_word_pair() for _ in range(20)}
     assert len(results) >= 5  # Should be much higher with 34*26 combinations
 
 
 def test_word_lists_have_sufficient_variety():
     """Word lists have enough entries for good uniqueness."""
-    from loopflow.lfd.agent import MAGICAL, MUSICAL
+    from loopflow.lf.naming import MAGICAL, MUSICAL
 
     # 34 magical * 26 musical = 884 combinations
     assert len(MAGICAL) >= 30

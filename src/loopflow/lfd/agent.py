@@ -3,7 +3,6 @@
 import fnmatch
 import json
 import os
-import random
 import signal
 import subprocess
 import sys
@@ -14,6 +13,7 @@ from pathlib import Path
 from croniter import croniter
 
 from loopflow.lf.context import find_worktree_root
+from loopflow.lf.naming import branch_exists, generate_word_pair
 from loopflow.lfd.db import _get_db
 from loopflow.lfd.logging import trigger_log
 from loopflow.lfd.models import (
@@ -29,75 +29,6 @@ from loopflow.lfd.models import (
 def get_wt_from_cwd() -> Path | None:
     """Get the worktree path from current working directory."""
     return find_worktree_root()
-
-
-# Word lists for generating unique branch names
-
-MAGICAL = [
-    "aurora",
-    "cascade",
-    "crystal",
-    "drift",
-    "echo",
-    "ember",
-    "fern",
-    "flume",
-    "frost",
-    "glade",
-    "grove",
-    "haze",
-    "ivy",
-    "jade",
-    "luna",
-    "mist",
-    "nova",
-    "opal",
-    "petal",
-    "prism",
-    "rain",
-    "ripple",
-    "sage",
-    "shade",
-    "spark",
-    "star",
-    "stone",
-    "storm",
-    "tide",
-    "vale",
-    "wave",
-    "wisp",
-    "wren",
-    "zephyr",
-]
-
-MUSICAL = [
-    "allegro",
-    "aria",
-    "ballad",
-    "cadence",
-    "canon",
-    "chord",
-    "coda",
-    "duet",
-    "forte",
-    "fugue",
-    "harmony",
-    "hymn",
-    "lilt",
-    "lyric",
-    "melody",
-    "motif",
-    "opus",
-    "prelude",
-    "refrain",
-    "rondo",
-    "sonata",
-    "tempo",
-    "trill",
-    "tune",
-    "verse",
-    "waltz",
-]
 
 
 # Persistence
@@ -285,30 +216,6 @@ def delete_agent(agent_id: str, db_path: Path | None = None) -> bool:
 # Branch management
 
 
-def _generate_random_words() -> str:
-    """Generate a random magical-musical pair like 'aurora-melody'."""
-    magical = random.choice(MAGICAL)
-    musical = random.choice(MUSICAL)
-    return f"{magical}-{musical}"
-
-
-def _branch_exists(repo: Path, branch: str) -> bool:
-    """Check if a branch exists locally or on origin."""
-    result = subprocess.run(
-        ["git", "rev-parse", "--verify", f"refs/heads/{branch}"],
-        cwd=repo,
-        capture_output=True,
-    )
-    if result.returncode == 0:
-        return True
-    result = subprocess.run(
-        ["git", "rev-parse", "--verify", f"refs/remotes/origin/{branch}"],
-        cwd=repo,
-        capture_output=True,
-    )
-    return result.returncode == 0
-
-
 def _allocate_main_branch(repo: Path, area: list[str]) -> str:
     """Allocate a unique branch name for an agent's main branch."""
     if area:
@@ -317,9 +224,9 @@ def _allocate_main_branch(repo: Path, area: list[str]) -> str:
         slug = "root"
 
     for _ in range(100):
-        words = _generate_random_words()
+        words = generate_word_pair()
         candidate = f"{slug}-{words}-main"
-        if not _branch_exists(repo, candidate):
+        if not branch_exists(repo, candidate):
             return candidate
 
     raise ValueError(f"Could not allocate main branch for {slug}")
@@ -327,7 +234,7 @@ def _allocate_main_branch(repo: Path, area: list[str]) -> str:
 
 def _create_main_branch(repo: Path, branch: str) -> None:
     """Create main branch from origin/main if it doesn't exist."""
-    if _branch_exists(repo, branch):
+    if branch_exists(repo, branch):
         return
     subprocess.run(["git", "fetch", "origin", "main"], cwd=repo, capture_output=True)
     result = subprocess.run(

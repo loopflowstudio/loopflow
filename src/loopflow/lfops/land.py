@@ -257,7 +257,10 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
             text=True,
         )
         upstream_branch = result.stdout.strip() if result.returncode == 0 else ""
-        upstream_name = upstream_branch.split("/", 1)[-1] if "/" in upstream_branch else upstream_branch
+        if "/" in upstream_branch:
+            upstream_name = upstream_branch.split("/", 1)[-1]
+        else:
+            upstream_name = upstream_branch
         upstream_matches = upstream_name == branch
 
         result = subprocess.run(

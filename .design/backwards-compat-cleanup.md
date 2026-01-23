@@ -61,94 +61,86 @@ Implements Opportunities 1 and 2 from `.design/simplification-opportunities.md`.
 
 ## Part 2: Consolidate Context Assembly
 
-### Step 2a: Create ContextSpec Pydantic model
+### Step 2a: Create ContextConfig Pydantic model
 
 **File:** `src/loopflow/lf/context.py`
 
-Add import and class (following codebase pattern from config.py, flows.py):
+Added import and class (following codebase pattern from config.py, flows.py):
 
 ```python
 from pydantic import BaseModel
 
-class ContextSpec(BaseModel):
+class ContextConfig(BaseModel):
     """Specifies what context to include in a prompt."""
+
+    # Explicit file paths to include/exclude
+    pathset: list[str] = []
+    exclude: list[str] = []
+
+    # Flags for what kinds of context to include
     lfdocs: bool = True
     diff: bool = False
     diff_files: bool = True
     summaries: bool = True
-    paste: bool = False
+    clipboard: bool = False
 
     @classmethod
-    def for_flow(cls) -> "ContextSpec":
-        return cls(lfdocs=True, diff=False, diff_files=True, summaries=True, paste=False)
+    def for_commit(cls) -> "ContextConfig":
+        return cls(lfdocs=False, diff=True, diff_files=False, summaries=False)
 
     @classmethod
-    def for_commit(cls) -> "ContextSpec":
-        return cls(lfdocs=False, diff=True, diff_files=False, summaries=False, paste=False)
-
-    @classmethod
-    def for_interactive(cls) -> "ContextSpec":
-        return cls(lfdocs=True, diff=False, diff_files=False, summaries=True, paste=False)
+    def for_interactive(
+        cls,
+        pathset: list[str] | None = None,
+        exclude: list[str] | None = None,
+        lfdocs: bool = True,
+        summaries: bool = True,
+        clipboard: bool = True,
+    ) -> "ContextConfig":
+        return cls(
+            pathset=pathset or [],
+            exclude=exclude or [],
+            lfdocs=lfdocs,
+            diff_files=False,
+            summaries=summaries,
+            clipboard=clipboard,
+        )
 ```
 
 ### Step 2b: Update gather_prompt_components signature
 
 **File:** `src/loopflow/lf/context.py`
 
-Change from:
-```python
-def gather_prompt_components(
-    repo_root: Path,
-    step: Optional[str] = None,
-    ...
-    include_loopflow_doc: bool = True,
-    include_diff: bool = False,
-    include_diff_files: bool = True,
-    include_summaries: bool = True,
-    ...
-) -> PromptComponents:
-```
+Changed signature to accept `context_config: ContextConfig | None`:
 
-To:
 ```python
 def gather_prompt_components(
     repo_root: Path,
     step: Optional[str] = None,
     inline: Optional[str] = None,
-    context: Optional[list[str]] = None,
-    exclude: Optional[list[str]] = None,
     step_args: Optional[list[str]] = None,
-    paste: bool = False,
     run_mode: Optional[str] = None,
     voices: Optional[list[str]] = None,
-    spec: Optional[ContextSpec] = None,
+    context_config: ContextConfig | None = None,
     config=None,
 ) -> PromptComponents:
     """
-    If spec is None, uses ContextSpec() defaults.
-    Individual bool params (paste) override spec for convenience.
+    If context_config is None, uses ContextConfig() defaults.
     """
-    if spec is None:
-        spec = ContextSpec()
-    # Use spec.lfdocs, spec.diff, spec.diff_files, spec.summaries internally
+    if context_config is None:
+        context_config = ContextConfig()
+    # Use context_config.lfdocs, .diff, .diff_files, .summaries, .clipboard internally
 ```
 
-### Step 2c: Update call sites
+### Step 2c: Updated call sites
 
-**11 call sites to update:**
+All call sites now use `context_config=ContextConfig(...)` or factory methods:
 
-| File | Current | New |
-|------|---------|-----|
-| `step.py:215` | `include_diff_files=False, include_loopflow_doc=...` | `spec=ContextSpec.for_interactive()` |
-| `step.py:413` | `include_diff=..., include_diff_files=...` | `spec=ContextSpec(diff=include_diff, diff_files=include_diff_files, ...)` |
-| `step.py:567` | defaults | `spec=ContextSpec()` (or omit) |
-| `step.py:699` | defaults | `spec=ContextSpec.for_flow()` |
-| `flow.py:95` | `include_loopflow_doc=True, include_diff=False, ...` | `spec=ContextSpec.for_flow()` |
-| `flow.py:327` | defaults | `spec=ContextSpec.for_flow()` |
-| `commit.py:70` | `include_diff=True, include_diff_files=False, ...` | `spec=ContextSpec.for_commit()` |
-| `runner.py:67` | defaults | `spec=ContextSpec.for_flow()` |
-| `runner.py:162` | defaults | `spec=ContextSpec.for_flow()` |
-| `context.py:820` | pass-through | `spec=spec` (accept spec param in build_prompt) |
+- `step.py`: Uses `ContextConfig.for_interactive()` for interactive mode, `ContextConfig()` for flows
+- `flow.py`: Uses `ContextConfig()` with explicit settings
+- `commit.py`: Uses `ContextConfig.for_commit()`
+- `runner.py`: Uses `ContextConfig()` defaults
+- `cp.py`: Uses `ContextConfig.for_interactive()` for clipboard/copy operations
 
 ---
 

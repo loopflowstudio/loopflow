@@ -5,6 +5,7 @@ import fnmatch
 import json
 import os
 import signal
+import time
 from asyncio import StreamReader, StreamWriter
 from datetime import datetime
 from pathlib import Path
@@ -23,6 +24,14 @@ from loopflow.lfd.runs.session import (
 )
 
 
+def _find_executable() -> Path | None:
+    """Find the lfd executable path."""
+    global_path = Path.home() / ".local" / "bin" / "lfd"
+    if global_path.exists():
+        return global_path
+    return None
+
+
 class Server:
     def __init__(self, socket_path: Path):
         self.socket_path = socket_path
@@ -31,6 +40,10 @@ class Server:
         self._running = False
         self._check_task: asyncio.Task | None = None
         self.manager = Manager(load_manager_config())
+
+        # Track executable for auto-restart on update
+        self._started_at = time.time()
+        self._executable = _find_executable()
 
     async def start(self) -> None:
         self.socket_path.parent.mkdir(parents=True, exist_ok=True)
@@ -273,9 +286,16 @@ class Server:
                     self.clients.discard(writer)
                     self.subscriptions.pop(writer, None)
 
+    def _should_restart(self) -> bool:
+        """Check if executable has been updated since daemon started."""
+        if not self._executable or not self._executable.exists():
+            return False
+        return self._executable.stat().st_mtime > self._started_at
+
     async def _periodic_check(self) -> None:
         """Periodically update dead processes and check triggers."""
         from loopflow.lfd.autoprune import AutopruneManager, get_repos_to_check
+        from loopflow.lfd.daemon.launchd import restart
         from loopflow.lfd.draft_prs import run_draft_pr_check
         from loopflow.lfd.runs.schedule import run_schedule_check
         from loopflow.lfd.runs.subscription import run_subscription_check
@@ -285,6 +305,13 @@ class Server:
         while self._running:
             try:
                 await asyncio.sleep(30)
+
+                # Auto-restart if binary was updated
+                if self._should_restart():
+                    await self._broadcast(Event("daemon.restarting", {"reason": "binary_updated"}))
+                    restart()
+                    return  # Process will be replaced
+
                 update_dead_runs()
 
                 # Check subscription triggers (file changes on main)

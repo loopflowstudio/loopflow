@@ -13,7 +13,9 @@ from loopflow.lfd.daemon.manager import Manager, load_manager_config
 from loopflow.lfd.daemon.protocol import Event, Request, Response, error, success
 from loopflow.lfd.daemon.status import compute_status
 from loopflow.lfd.db import update_dead_processes
+from loopflow.lfd.git_hooks import hooks_status, install_hooks
 from loopflow.lfd.models import StepRun, StepRunStatus
+from loopflow.lfd.pr_poller import PRPoller
 from loopflow.lfd.step_run import (
     load_step_runs,
     load_step_runs_for_repo,
@@ -21,8 +23,6 @@ from loopflow.lfd.step_run import (
     save_step_run,
     update_step_run_status,
 )
-from loopflow.lfd.git_hooks import hooks_status, install_hooks
-from loopflow.lfd.pr_poller import PRPoller
 from loopflow.lfd.worktree_state import get_worktree_state_service
 
 
@@ -445,7 +445,9 @@ class Server:
                         worktree_status = worktree_service.get_one(repo, branch)
 
                         # Track PR for CI polling
-                        pr_url = worktree_status.get("ci", {}).get("url") if worktree_status else None
+                        pr_url = (
+                            worktree_status.get("ci", {}).get("url") if worktree_status else None
+                        )
                         pr_number = self._extract_pr_number(pr_url)
                         if pr_number:
                             self.pr_poller.track(repo, branch, pr_number)

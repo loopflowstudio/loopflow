@@ -256,12 +256,12 @@ src/loopflow/lfd/
 
 ## Success Criteria
 
-- [ ] `git commit` triggers Concerto update within 1s
-- [ ] `git checkout` triggers Concerto update within 1s
-- [ ] CI completion triggers Concerto update within 30s
-- [ ] PR merge triggers worktree marked stale within 5min
-- [ ] Hooks coexist with existing hooks
-- [ ] No errors when lfd not running (hooks exit gracefully)
+- [x] `git commit` triggers Concerto update within 1s
+- [x] `git checkout` triggers Concerto update within 1s
+- [x] CI completion triggers Concerto update within 30s
+- [x] PR merge triggers worktree marked stale within 5min
+- [x] Hooks coexist with existing hooks
+- [x] No errors when lfd not running (hooks exit gracefully)
 
 ---
 

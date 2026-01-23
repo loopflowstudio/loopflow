@@ -24,16 +24,16 @@ from loopflow.lfd.agent import (
     start_agent,
     stop_agent,
 )
-from loopflow.lfd.git_hooks import (
-    hooks_status,
-    install_hooks,
-    uninstall_hooks,
-)
 from loopflow.lfd.daemon.launchd import install as launchd_install
 from loopflow.lfd.daemon.launchd import is_running
 from loopflow.lfd.daemon.launchd import uninstall as launchd_uninstall
 from loopflow.lfd.daemon.server import run_server
 from loopflow.lfd.flow_run import list_runs_for_agent
+from loopflow.lfd.git_hooks import (
+    hooks_status,
+    install_hooks,
+    uninstall_hooks,
+)
 from loopflow.lfd.models import Agent, AgentStatus, MergeMode
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"

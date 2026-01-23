@@ -8,7 +8,7 @@ import asyncio
 import json
 import subprocess
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Coroutine
 
@@ -156,9 +156,7 @@ class PRPoller:
 
             # Poll in executor to not block
             loop = asyncio.get_event_loop()
-            pr_data = await loop.run_in_executor(
-                None, _poll_pr, state.repo, state.branch
-            )
+            pr_data = await loop.run_in_executor(None, _poll_pr, state.repo, state.branch)
 
             state.last_poll = now
 

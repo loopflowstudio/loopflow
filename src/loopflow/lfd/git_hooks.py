@@ -4,7 +4,6 @@ Installs hooks that notify lfd when git operations complete.
 Hooks are appended to existing hooks, not replaced.
 """
 
-import os
 import stat
 import subprocess
 from pathlib import Path
@@ -12,21 +11,21 @@ from pathlib import Path
 HOOK_MARKER = "# lfd-hook-start"
 HOOK_END_MARKER = "# lfd-hook-end"
 
-HOOK_TEMPLATE = '''
+HOOK_TEMPLATE = """
 {marker}
 # Notify lfd of git operations (loopflow)
 _lfd_notify() {{
-    local socket="$HOME/.lf/lfd.sock"
-    local repo branch event="$1"
+    local socket="$HOME/.lf/lfd.sock" event="$1" repo branch
     repo="$(git rev-parse --show-toplevel 2>/dev/null)" || return
     branch="$(git branch --show-current 2>/dev/null)"
     [ -S "$socket" ] || return
-    printf '{{"method":"notify","params":{{"event":"git.%s","data":{{"repo":"%s","branch":"%s"}}}}}}\\n' \\
-        "$event" "$repo" "$branch" | nc -U "$socket" 2>/dev/null &
+    local msg='{{"method":"notify","params":{{"event":"git.'
+    msg+="$event"'","data":{{"repo":"'"$repo"'","branch":"'"$branch"'"}}}}}}'
+    printf '%s\\n' "$msg" | nc -U "$socket" 2>/dev/null &
 }}
 _lfd_notify "{event}"
 {end_marker}
-'''
+"""
 
 HOOK_EVENTS = {
     "post-commit": "commit",

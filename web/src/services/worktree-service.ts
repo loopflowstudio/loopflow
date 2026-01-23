@@ -12,9 +12,9 @@ export class WorktreeService {
   }
 
   async list(): Promise<Worktree[]> {
-    const data = await this.client.get<WorktreeJSON[]>('/worktrees')
+    const response = await this.client.get<{ worktrees: WorktreeJSON[] }>('/worktrees')
 
-    return data.map((json): Worktree => ({
+    return response.worktrees.map((json): Worktree => ({
       path: json.path,
       branch: json.branch,
       baseBranch: json.base_branch,

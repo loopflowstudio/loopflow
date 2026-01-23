@@ -358,17 +358,21 @@ class Server:
                 pass
 
 
-async def run_server(socket_path: Path) -> None:
+async def run_server(socket_path: Path, http_port: int = 8765) -> None:
     """Main daemon entry point. Runs until terminated."""
+    from loopflow.lfd.daemon.http_server import start_http_server
     from loopflow.lfd.daemon.launchd import remove_pid, write_pid
 
     server = Server(socket_path)
+    http_server = None
 
     # Write PID file for process tracking
     write_pid()
 
     async def shutdown():
         await server.stop()
+        if http_server:
+            await http_server.stop()
         remove_pid()
 
     loop = asyncio.get_event_loop()
@@ -376,6 +380,11 @@ async def run_server(socket_path: Path) -> None:
         loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown()))
 
     try:
+        # Start HTTP server alongside socket server
+        http_server = await start_http_server(http_port)
+
         await server.start()
     finally:
+        if http_server:
+            await http_server.stop()
         remove_pid()

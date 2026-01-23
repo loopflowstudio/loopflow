@@ -2,7 +2,7 @@
 
 Move worktree status calculation from Concerto into lfd.
 
-**Status:** In Progress (Python done, Swift pending)
+**Status:** Complete
 
 ---
 
@@ -183,8 +183,10 @@ let worktrees = try await lfdService.request("worktrees.list", params: ["repo": 
 
 - [x] `worktrees.list` endpoint returns full status
 - [x] Staleness calculated server-side
-- [ ] CI status included in response (needs CI polling in lfd)
-- [ ] Concerto loads worktree list in single request (needs Swift changes)
+- [x] HTTP endpoint available for webapp and Swift
+- [x] Webapp client handles response format
+- [ ] CI status included in response (future: background CI polling)
+- [ ] Concerto loads worktree list in single request (future: Swift URLSession)
 - [ ] No flicker on initial load
 - [ ] Status updates within 1 second of changes
 
@@ -192,12 +194,17 @@ let worktrees = try await lfdService.request("worktrees.list", params: ["repo": 
 
 ### Completed
 - `WorktreeStateService` in `src/loopflow/lfd/worktree_state.py`
-- `worktrees.list` endpoint in daemon server
+- `worktrees.list` endpoint in daemon server (socket)
+- FastAPI HTTP server in `src/loopflow/lfd/daemon/http_server.py`
+- `GET /worktrees?repo=...` HTTP endpoint
+- `GET /status` HTTP endpoint
 - Staleness detection using existing `is_merged()` logic
 - Recent steps included from step_run database
 - Caching with 5-second TTL
+- Webapp client updated to handle `{ok, result}` response format
 
-### Remaining
-- Swift: Add request-response capability to LFDEventService
-- Swift: Add `listFromLFD()` method to WorktreeService
-- Swift: Update AppState to try lfd first, fall back to CLI
+### Architecture
+- Socket server for events (fast local IPC)
+- HTTP server for request-response (webapp, future remote deployments)
+- Both servers run alongside each other on daemon start
+- HTTP on port 8765, socket at `~/.lfd/lfd.sock`

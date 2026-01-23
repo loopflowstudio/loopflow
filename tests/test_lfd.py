@@ -424,7 +424,7 @@ def test_server_handle_output_line_broadcasts_event():
             assert len(broadcast_events) == 1
             event = broadcast_events[0]
             assert event.event == "output.line"
-            assert event.data["step_run_id"] == "test-step-run-123"
+            assert event.data["session_id"] == "test-step-run-123"
             assert event.data["text"] == "→ Read: foo.py"
             assert "timestamp" in event.data
 

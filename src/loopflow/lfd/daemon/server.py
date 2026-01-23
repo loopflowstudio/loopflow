@@ -156,10 +156,10 @@ class Server:
         save_step_run(step_run)
         await self._broadcast(
             Event(
-                "step_run.started",
+                "session.started",
                 {
                     "id": step_run.id,
-                    "step": step_run.step,
+                    "task": step_run.step,
                     "worktree": step_run.worktree,
                 },
             )
@@ -176,7 +176,7 @@ class Server:
 
         status = StepRunStatus(status_str)
         update_step_run_status(step_run_id, status)
-        await self._broadcast(Event("step_run.ended", {"id": step_run_id, "status": status_str}))
+        await self._broadcast(Event("session.ended", {"id": step_run_id, "status": status_str}))
         return success({"id": step_run_id})
 
     async def _handle_subscribe(self, params: dict, writer: StreamWriter) -> Response:
@@ -207,7 +207,7 @@ class Server:
             Event(
                 "output.line",
                 {
-                    "step_run_id": step_run_id,
+                    "session_id": step_run_id,
                     "text": text,
                     "timestamp": datetime.now().isoformat(),
                 },

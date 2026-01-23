@@ -27,10 +27,10 @@ from loopflow.lf.flows import (
     load_flow,
     resolve_flow,
 )
-from loopflow.lf.goals import build_effective_goals, render_goals
 from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lf.logging import write_prompt_file
 from loopflow.lf.messages import generate_pr_message
+from loopflow.lf.voices import build_effective_voices, render_voices
 from loopflow.lf.worktrees import WorktreeError
 from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
@@ -53,7 +53,7 @@ def _iteration_branch_prefix(main_branch: str) -> str:
 
 def _build_loop_prompt(
     loop: Loop,
-    effective_goals: list,
+    effective_voices: list,
     worktree_path: Path,
     step_name: str,
     context_paths: list[str] | None,
@@ -76,9 +76,9 @@ def _build_loop_prompt(
         return None
 
     step_file, step_content = components.step
-    goal_section = render_goals(effective_goals)
+    voice_section = render_voices(effective_voices)
 
-    combined = f"{goal_section}\n\n---\n\n{step_content}"
+    combined = f"{voice_section}\n\n---\n\n{step_content}"
     components = replace(components, step=(step_file, combined))
     prompt = format_prompt(components)
 
@@ -153,7 +153,7 @@ def _cleanup_variant_worktrees(repo_root: Path, results: list[_VariantResult]) -
 
 def _build_loop_inline_prompt(
     loop: Loop,
-    effective_goals: list,
+    effective_voices: list,
     worktree_path: Path,
     inline_text: str,
     context_paths: list[str] | None,
@@ -170,9 +170,9 @@ def _build_loop_inline_prompt(
         return None
 
     step_file, step_content = components.step
-    goal_section = render_goals(effective_goals)
+    voice_section = render_voices(effective_voices)
 
-    combined = f"{goal_section}\n\n---\n\n{step_content}"
+    combined = f"{voice_section}\n\n---\n\n{step_content}"
     components = replace(components, step=(step_file, combined))
     return format_prompt(components)
 
@@ -185,7 +185,7 @@ def _run_fork_join_group(
     steps: list[ResolvedStep],
     join_config: JoinConfig,
     context_paths: list[str] | None,
-    effective_goals: list,
+    effective_voices: list,
     skip_permissions: bool,
     backend: str,
     model_variant: str | None,
@@ -232,7 +232,7 @@ def _run_fork_join_group(
 
         prompt_result = _build_loop_prompt(
             loop,
-            effective_goals,
+            effective_voices,
             wt_path,
             step.step,
             step_context or None,
@@ -274,7 +274,7 @@ def _run_fork_join_group(
     )
     join_prompt = _build_loop_inline_prompt(
         loop,
-        effective_goals,
+        effective_voices,
         worktree_path,
         join_prompt,
         context_paths,
@@ -331,7 +331,7 @@ def run_iteration(
         flow=loop.flow,
         area=loop.area,
         repo=loop.repo,
-        goals=loop.goals,
+        voices=loop.voices,
         status=RunStatus.RUNNING,
         iteration=iteration,
         worktree=str(worktree_path),
@@ -345,15 +345,15 @@ def run_iteration(
         {
             "loop_id": loop.id,
             "area": loop.area,
-            "goals": loop.goals,
+            "voices": loop.voices,
             "flow": loop.flow,
             "iteration": iteration,
         },
     )
 
-    effective_goals = build_effective_goals(loop.repo, loop.goals)
-    if not effective_goals:
-        update_run_status(run.id, RunStatus.FAILED, error="No valid goals found")
+    effective_voices = build_effective_voices(loop.repo, loop.voices)
+    if not effective_voices:
+        update_run_status(run.id, RunStatus.FAILED, error="No valid voices found")
         return False
 
     flow = loop.flow
@@ -391,8 +391,8 @@ def run_iteration(
     skip_permissions = config.yolo if config else False
 
     context_paths = [loop.area] if loop.area != "." else None
-    if not context_paths and effective_goals[0].area:
-        context_paths = effective_goals[0].area
+    if not context_paths and effective_voices[0].area:
+        context_paths = effective_voices[0].area
 
     i = 0
     while i < len(resolved):
@@ -419,7 +419,7 @@ def run_iteration(
                 group_steps,
                 resolved[i].join.join,
                 context_paths,
-                effective_goals,
+                effective_voices,
                 skip_permissions,
                 backend,
                 model_variant,
@@ -488,7 +488,7 @@ def run_iteration(
 
         prompt_result = _build_loop_prompt(
             loop,
-            effective_goals,
+            effective_voices,
             worktree_path,
             step_name,
             step_context or None,
@@ -543,7 +543,7 @@ def run_iteration(
         {
             "loop_id": loop.id,
             "area": loop.area,
-            "goals": loop.goals,
+            "voices": loop.voices,
             "flow": loop.flow,
             "iteration": iteration,
             "pr_url": pr_url,
@@ -572,14 +572,14 @@ def _create_pr_to_main_branch(
         message = generate_pr_message(worktree_path)
         title = f"[{loop.area_slug}] {message.title}"
         body = (
-            f"Loop: {loop.area} [{loop.goals_display}]\n"
+            f"Loop: {loop.area} [{loop.voices_display}]\n"
             f"Flow: {loop.flow_display}\n"
             f"Iteration: {iteration}\n\n{message.body}"
         )
     except Exception:
         title = f"[{loop.area_slug}] Iteration {iteration}"
         body = (
-            f"Loop: {loop.area} [{loop.goals_display}]\n"
+            f"Loop: {loop.area} [{loop.voices_display}]\n"
             f"Flow: {loop.flow_display}\n"
             f"Iteration: {iteration}"
         )
@@ -660,7 +660,7 @@ def _land_to_main(loop: Loop) -> str | None:
             "--title",
             f"[{loop.area_slug}] Land accumulated work",
             "--body",
-            f"Auto-land from loop: {loop.area} [{loop.goals_display}] (flow: {loop.flow_display})",
+            f"Auto-land from loop: {loop.area} [{loop.voices_display}] (flow: {loop.flow_display})",
         ],
         cwd=repo,
         capture_output=True,

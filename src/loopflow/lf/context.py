@@ -693,7 +693,11 @@ def gather_prompt_components(
     clipboard = _read_clipboard() if paste else None
 
     # Load voices if specified
-    loaded_voices = [load_voice(name, repo_root) for name in voices] if voices else None
+    loaded_voices = None
+    if voices:
+        loaded_voices = [
+            load_voice(repo_root, name) for name in voices if load_voice(repo_root, name)
+        ]
 
     # Load configured summaries
     summaries = gather_summaries(repo_root, config) if include_summaries else None
@@ -737,12 +741,14 @@ def format_prompt(components: PromptComponents) -> str:
         # Voices go between "The step." header and the actual step content
         if components.voices:
             if len(components.voices) == 1:
-                v = components.voices[0]
-                voice_section = f"<lf:voice:{v.name}>\n{v.content}\n</lf:voice:{v.name}>"
+                voice = components.voices[0]
+                voice_section = (
+                    f"<lf:voice:{voice.name}>\n{voice.content}\n</lf:voice:{voice.name}>"
+                )
             else:
                 voice_parts = [
-                    f"<lf:voice:{v.name}>\n{v.content}\n</lf:voice:{v.name}>"
-                    for v in components.voices
+                    f"<lf:voice:{voice.name}>\n{voice.content}\n</lf:voice:{voice.name}>"
+                    for voice in components.voices
                 ]
                 voice_section = f"<lf:voices>\n{chr(10).join(voice_parts)}\n</lf:voices>"
             parts.append(f"The step.\n\n{voice_section}\n\n{step_tag}")

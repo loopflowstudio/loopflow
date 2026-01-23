@@ -284,7 +284,7 @@ def run(
         None, "-m", "-M", "--model", help="Model to use (backend or backend:variant)"
     ),
     voice: str = typer.Option(
-        None, "--voice", help="Voice(s) to use (comma-separated, e.g., 'architect,concise')"
+        None, "-L", "--voice", help="Voice(es) to use (comma-separated, e.g., 'architect,concise')"
     ),
     parallel: str = typer.Option(
         None, "--parallel", help="Run parallel with multiple models (e.g., 'claude,codex')"
@@ -506,7 +506,7 @@ def inline(
         None, "-m", "-M", "--model", help="Model to use (backend or backend:variant)"
     ),
     voice: str = typer.Option(
-        None, "--voice", help="Voice(s) to use (comma-separated, e.g., 'architect,concise')"
+        None, "-L", "--voice", help="Voice(es) to use (comma-separated, e.g., 'architect,concise')"
     ),
     chrome: Optional[bool] = typer.Option(
         None, "--chrome/--no-chrome", help="Enable Chrome browser automation"

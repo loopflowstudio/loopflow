@@ -289,7 +289,13 @@ class Server:
         service = get_worktree_state_service()
         service.invalidate(repo_path)
 
-        await self._broadcast_worktree_event("worktree.updated", branch, reason, repo_path)
+        # Build event with full worktree status for in-place UI updates
+        data: dict = {"branch": branch, "reason": reason, "repo": str(repo_path)}
+        worktree_status = service.get_one(repo_path, branch)
+        if worktree_status:
+            data["worktree"] = worktree_status
+
+        await self._broadcast(Event("worktree.updated", data))
         return success({"branch": branch, "reason": reason})
 
     async def _broadcast(self, event: Event) -> None:
@@ -302,28 +308,6 @@ class Server:
                 except Exception:
                     self.clients.discard(writer)
                     self.subscriptions.pop(writer, None)
-
-    async def _broadcast_worktree_event(
-        self,
-        event_name: str,
-        branch: str,
-        reason: str,
-        repo: Path | None = None,
-    ) -> None:
-        """Broadcast a worktree event with optional full status.
-
-        If repo is provided, includes full worktree status for in-place UI updates.
-        """
-        data: dict = {"branch": branch, "reason": reason}
-
-        if repo:
-            data["repo"] = str(repo)
-            service = get_worktree_state_service()
-            worktree_status = service.get_one(repo, branch)
-            if worktree_status:
-                data["worktree"] = worktree_status
-
-        await self._broadcast(Event(event_name, data))
 
     async def _periodic_check(self) -> None:
         """Periodically update dead processes and check agent triggers."""

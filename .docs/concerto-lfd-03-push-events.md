@@ -204,7 +204,6 @@ case .worktreeEvent(let event):
 - `server.py` emits rich events with `worktree` field for `draft_pr_created`
 - `WorktreeStateService.get_one()` retrieves single worktree status
 - `worktrees.changed` method for CLI to notify daemon
-- `_broadcast_worktree_event()` helper for consistent event emission
 
 **Swift:**
 - `WorktreeEvent` struct has `reason`, `repo`, `worktree` fields

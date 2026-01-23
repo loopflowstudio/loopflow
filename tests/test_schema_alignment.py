@@ -6,7 +6,6 @@ Python models are the source of truth. Swift and TypeScript should mirror them e
 import re
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).parent.parent
 
 
@@ -106,9 +105,7 @@ class TestStepRunSchema:
 
     def test_steprun_python_fields(self):
         """Python StepRun has expected fields."""
-        fields = extract_python_fields(
-            "StepRun", REPO_ROOT / "src/loopflow/lfd/models.py"
-        )
+        fields = extract_python_fields("StepRun", REPO_ROOT / "src/loopflow/lfd/models.py")
         # Core fields that must exist
         assert "id" in fields
         assert "step" in fields
@@ -118,9 +115,7 @@ class TestStepRunSchema:
 
     def test_steprun_swift_matches_python(self):
         """Swift StepRun fields match Python schema."""
-        python_fields = extract_python_fields(
-            "StepRun", REPO_ROOT / "src/loopflow/lfd/models.py"
-        )
+        python_fields = extract_python_fields("StepRun", REPO_ROOT / "src/loopflow/lfd/models.py")
         swift_fields = extract_swift_fields(
             "StepRun", REPO_ROOT / "swift/LoopflowCore/Models/Step.swift"
         )
@@ -134,12 +129,8 @@ class TestStepRunSchema:
 
     def test_steprun_typescript_matches_python(self):
         """TypeScript StepRun fields match Python schema."""
-        python_fields = extract_python_fields(
-            "StepRun", REPO_ROOT / "src/loopflow/lfd/models.py"
-        )
-        ts_fields = extract_typescript_fields(
-            "StepRun", REPO_ROOT / "web/src/models/step.ts"
-        )
+        python_fields = extract_python_fields("StepRun", REPO_ROOT / "src/loopflow/lfd/models.py")
+        ts_fields = extract_typescript_fields("StepRun", REPO_ROOT / "web/src/models/step.ts")
 
         # TypeScript should have these core fields from Python
         core_fields = {"id", "step", "repo", "worktree", "status", "startedAt", "model", "runMode"}
@@ -152,9 +143,7 @@ class TestAgentSchema:
 
     def test_agent_python_fields(self):
         """Python Agent has expected fields."""
-        fields = extract_python_fields(
-            "Agent", REPO_ROOT / "src/loopflow/lfd/models.py"
-        )
+        fields = extract_python_fields("Agent", REPO_ROOT / "src/loopflow/lfd/models.py")
         assert "id" in fields
         assert "repo" in fields
         assert "flow" in fields
@@ -164,9 +153,7 @@ class TestAgentSchema:
 
     def test_agent_swift_matches_python(self):
         """Swift Agent fields match Python schema."""
-        python_fields = extract_python_fields(
-            "Agent", REPO_ROOT / "src/loopflow/lfd/models.py"
-        )
+        python_fields = extract_python_fields("Agent", REPO_ROOT / "src/loopflow/lfd/models.py")
         swift_fields = extract_swift_fields(
             "Agent", REPO_ROOT / "swift/LoopflowCore/Models/Agent.swift"
         )
@@ -180,9 +167,7 @@ class TestAgentSchema:
 
     def test_agent_typescript_matches_python(self):
         """TypeScript Agent fields match Python schema."""
-        ts_fields = extract_typescript_fields(
-            "Agent", REPO_ROOT / "web/src/models/agent.ts"
-        )
+        ts_fields = extract_typescript_fields("Agent", REPO_ROOT / "web/src/models/agent.ts")
 
         core_fields = {"id", "repo", "flow", "voice", "area", "status", "iteration"}
         missing = core_fields - ts_fields
@@ -194,9 +179,7 @@ class TestFlowRunSchema:
 
     def test_flowrun_python_fields(self):
         """Python FlowRun has expected fields."""
-        fields = extract_python_fields(
-            "FlowRun", REPO_ROOT / "src/loopflow/lfd/models.py"
-        )
+        fields = extract_python_fields("FlowRun", REPO_ROOT / "src/loopflow/lfd/models.py")
         assert "id" in fields
         assert "flow" in fields
         assert "repo" in fields
@@ -214,9 +197,7 @@ class TestFlowRunSchema:
 
     def test_flowrun_typescript_matches_python(self):
         """TypeScript FlowRun fields match Python schema."""
-        ts_fields = extract_typescript_fields(
-            "FlowRun", REPO_ROOT / "web/src/models/flow-run.ts"
-        )
+        ts_fields = extract_typescript_fields("FlowRun", REPO_ROOT / "web/src/models/flow-run.ts")
 
         core_fields = {"id", "flow", "repo", "status", "iteration"}
         missing = core_fields - ts_fields

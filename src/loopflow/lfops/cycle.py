@@ -10,7 +10,7 @@ import typer
 from loopflow.lf.context import find_worktree_root
 from loopflow.lf.git import find_main_repo, get_current_branch
 from loopflow.lf.naming import generate_cycle_branch, parse_branch_for_cycle
-from loopflow.lf.worktrees import create_with_schema, get_path
+from loopflow.lf.worktrees import get_path
 from loopflow.lfops._helpers import get_default_branch, remove_worktree
 from loopflow.lfops.shell import write_directive
 

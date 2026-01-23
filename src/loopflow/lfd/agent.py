@@ -550,7 +550,7 @@ def check_cron(agent: Agent) -> bool:
     if not agent.cron:
         return False
 
-    from loopflow.lfd.runs.run import get_latest_run_for_agent
+    from loopflow.lfd.run import get_latest_run_for_agent
 
     last_run = get_latest_run_for_agent(agent.id)
     last_time = last_run.ended_at if last_run else None

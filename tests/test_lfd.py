@@ -26,7 +26,7 @@ from loopflow.lfd.agent import (
     update_agent_pid,
     update_agent_status,
 )
-from loopflow.lfd.runs.run import (
+from loopflow.lfd.run import (
     get_latest_run_for_agent,
     list_runs_for_agent,
     save_run,
@@ -34,7 +34,7 @@ from loopflow.lfd.runs.run import (
     update_run_status,
     update_run_step,
 )
-from loopflow.lfd.runs.session import (
+from loopflow.lfd.session import (
     load_sessions,
     load_sessions_for_repo,
     load_sessions_for_worktree,

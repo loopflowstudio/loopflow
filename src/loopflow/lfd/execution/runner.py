@@ -36,7 +36,7 @@ from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
 from loopflow.lfd.daemon.client import notify_event
 from loopflow.lfd.models import Agent, Run, RunStatus
-from loopflow.lfd.runs.run import (
+from loopflow.lfd.run import (
     save_run,
     update_run_pr,
     update_run_status,

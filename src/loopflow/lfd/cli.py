@@ -29,7 +29,7 @@ from loopflow.lfd.agent import (
     start_agent,
     stop_agent,
 )
-from loopflow.lfd.runs.run import list_runs_for_agent
+from loopflow.lfd.run import list_runs_for_agent
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 

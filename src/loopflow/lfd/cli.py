@@ -562,7 +562,7 @@ def status(
                 repo_short = "..." + repo_short[-17:]
 
             typer.echo(
-                f"{agent.short_id():<9} {agent.mode:<12} {display_str:<30} "
+                f"{agent.short_id():<9} {agent.mode.value:<12} {display_str:<30} "
                 f"{status_c}{agent.status.value:<10}{c['reset']} "
                 f"{agent.iteration:<6} {repo_short}"
             )
@@ -573,7 +573,7 @@ def _print_agent_detail(agent: Agent, c: dict[str, str]) -> None:
     status_c = _status_color(agent.status, c)
 
     typer.echo(f"{c['bold']}{agent.area_display}{c['reset']} ({agent.short_id()})")
-    typer.echo(f"  Mode: {agent.mode}")
+    typer.echo(f"  Mode: {agent.mode.value}")
     typer.echo(f"  Status: {status_c}{agent.status.value}{c['reset']}")
     typer.echo(f"  Repo: {agent.repo}")
     typer.echo(f"  Main branch: {agent.main_branch}")

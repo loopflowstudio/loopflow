@@ -4,31 +4,14 @@ Connection management, migrations, and shared utilities.
 Entity-specific CRUD operations are in runs/*.py modules.
 """
 
-import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+from loopflow.lfd.migrations.baseline import SCHEMA_VERSION
 from loopflow.lfd.migrations.registry import MIGRATIONS
 
 DB_PATH = Path.home() / ".lf" / "lfd.db"
-
-# Schema version: increment when schema changes in incompatible ways.
-# This is separate from migrations - migrations are for data, this is for structure.
-SCHEMA_VERSION = "2025-01-23-v1"
-
-
-class SchemaMismatchError(Exception):
-    """Raised when database schema version doesn't match expected version."""
-
-    def __init__(self, expected: str, actual: str, db_path: Path):
-        self.expected = expected
-        self.actual = actual
-        self.db_path = db_path
-        super().__init__(
-            f"Schema mismatch: expected {expected}, got {actual}. "
-            f"Set LF_DB_RESET=1 to reset, or delete {db_path}"
-        )
 
 
 def _init_db(db_path: Path) -> None:
@@ -57,15 +40,10 @@ def reset_db(db_path: Path | None = None) -> None:
     _init_db(db_path)
 
 
-def _get_db(
-    db_path: Path | None = None, reset_on_mismatch: bool | None = None
-) -> sqlite3.Connection:
-    """Get database connection."""
+def _get_db(db_path: Path | None = None) -> sqlite3.Connection:
+    """Get database connection. Resets on schema mismatch."""
     if db_path is None:
         db_path = DB_PATH
-
-    if reset_on_mismatch is None:
-        reset_on_mismatch = os.environ.get("LF_DB_RESET", "").lower() in ("1", "true", "yes")
 
     if not db_path.exists():
         _init_db(db_path)
@@ -73,16 +51,13 @@ def _get_db(
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
 
-    # Check schema version
+    # Check schema version - reset on any mismatch
     current_version = _get_schema_version(conn)
     if current_version != SCHEMA_VERSION:
         conn.close()
-        if reset_on_mismatch:
-            reset_db(db_path)
-            conn = sqlite3.connect(db_path)
-            conn.row_factory = sqlite3.Row
-        else:
-            raise SchemaMismatchError(SCHEMA_VERSION, current_version or "none", db_path)
+        reset_db(db_path)
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
 
     _run_migrations(conn)
     return conn
@@ -159,13 +134,6 @@ def update_dead_processes(db_path: Path | None = None) -> int:
     return count
 
 
-def list_all_agents(repo: Path | None = None, db_path: Path | None = None) -> list:
-    """List all agents for a repo."""
-    from loopflow.lfd.agent import list_agents
-
-    return list_agents(repo, db_path)
-
-
 # Summary functions
 
 
@@ -202,7 +170,7 @@ def save_summary_db(
         )
         conn.commit()
         conn.close()
-    except (SchemaMismatchError, sqlite3.Error):
+    except sqlite3.Error:
         pass  # Graceful degradation: summaries are optional
 
 
@@ -232,7 +200,7 @@ def load_summary_db(
             "model": row["model"],
             "created_at": row["created_at"],
         }
-    except (SchemaMismatchError, sqlite3.Error):
+    except sqlite3.Error:
         return None  # Graceful degradation: treat as cache miss
 
 
@@ -245,5 +213,5 @@ def delete_summaries_for_repo(repo: str, db_path: Path | None = None) -> int:
         count = cursor.rowcount
         conn.close()
         return count
-    except (SchemaMismatchError, sqlite3.Error):
+    except sqlite3.Error:
         return 0  # Graceful degradation

@@ -1,8 +1,10 @@
-import importlib
+"""Migration registry."""
+
 import sqlite3
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Callable
+
+from loopflow.lfd.migrations import baseline
 
 
 @dataclass
@@ -12,12 +14,6 @@ class Migration:
     apply: Callable[[sqlite3.Connection], None]
 
 
-def load_migrations() -> list[Migration]:
-    migrations = []
-    for file in sorted(Path(__file__).parent.glob("m_*.py")):
-        mod = importlib.import_module(f".{file.stem}", __package__)
-        migrations.append(Migration(mod.VERSION, mod.DESCRIPTION, mod.apply))
-    return migrations
-
-
-MIGRATIONS = load_migrations()
+MIGRATIONS = [
+    Migration(baseline.SCHEMA_VERSION, baseline.DESCRIPTION, baseline.apply),
+]

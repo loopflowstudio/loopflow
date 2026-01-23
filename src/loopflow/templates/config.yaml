@@ -15,6 +15,10 @@ exclude:
 # Skip permissions; Codex also disables sandboxing (only use in trusted repos)
 yolo: false
 
+# Branch naming schema for worktree creation
+# branch_names:
+#   schema: "{user}.{name}.{date}_{ts}"
+
 # Push commits to origin automatically
 push: false
 

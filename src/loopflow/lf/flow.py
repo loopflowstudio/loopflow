@@ -64,7 +64,7 @@ def _build_step_params(
         if config.context:
             step_context.extend(config.context)
         if config.voice:
-            step_voices = [config.voice]
+            step_voices = config.voice
 
     return _StepParams(
         step=step,
@@ -512,12 +512,16 @@ def format_voice_section(voice_names: list[str] | None, repo_root: Path) -> str 
     if not voice_names:
         return None
 
-    voices = [load_voice(name, repo_root) for name in voice_names]
+    voices = [load_voice(repo_root, name) for name in voice_names if load_voice(repo_root, name)]
+    if not voices:
+        return None
     if len(voices) == 1:
-        v = voices[0]
-        return f"<lf:voice:{v.name}>\n{v.content}\n</lf:voice:{v.name}>"
+        voice = voices[0]
+        return f"<lf:voice:{voice.name}>\n{voice.content}\n</lf:voice:{voice.name}>"
 
-    voice_parts = [f"<lf:voice:{v.name}>\n{v.content}\n</lf:voice:{v.name}>" for v in voices]
+    voice_parts = [
+        f"<lf:voice:{voice.name}>\n{voice.content}\n</lf:voice:{voice.name}>" for voice in voices
+    ]
     return f"<lf:voices>\n{chr(10).join(voice_parts)}\n</lf:voices>"
 
 

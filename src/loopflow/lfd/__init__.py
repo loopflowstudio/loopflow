@@ -13,8 +13,8 @@ from pathlib import Path
 import typer
 
 from loopflow.lf.flows import load_flow
-from loopflow.lf.goals import goal_exists, list_goals, load_goal
 from loopflow.lf.logging import get_log_dir
+from loopflow.lf.voices import list_voices, load_voice, voice_exists
 from loopflow.lfd.daemon.launchd import install as launchd_install
 from loopflow.lfd.daemon.launchd import is_running
 from loopflow.lfd.daemon.launchd import uninstall as launchd_uninstall
@@ -80,8 +80,8 @@ def _status_color(status: TriggerStatus, c: dict[str, str]) -> str:
 
 
 def _trigger_display(trigger: Trigger) -> str:
-    """Return area and goals for display."""
-    return f"{trigger.area} [{trigger.flow_display}] [{trigger.goals_display}]"
+    """Return area and voices for display."""
+    return f"{trigger.area} [{trigger.flow_display}] [{trigger.voices_display}]"
 
 
 def _trigger_type_name(trigger: Trigger) -> str:
@@ -219,7 +219,7 @@ def start(
 def loop(
     flow: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
     area: str = typer.Argument(..., help="Area of responsibility (e.g., swift/, src/, .)"),
-    goals: list[str] = typer.Option(None, "-g", "--goal", help="Goal to add (repeatable)"),
+    voices: list[str] = typer.Option(None, "-L", "--voice", help="Voice to add (repeatable)"),
     limit: int = typer.Option(None, "-l", "--limit", help="PR limit override"),
     merge_mode: str = typer.Option(None, "--merge-mode", help="Merge mode: pr or land"),
     foreground: bool = typer.Option(False, "-f", "--foreground", help="Run in foreground"),
@@ -228,12 +228,12 @@ def loop(
 
     Flow is required - specifies which flow to run from .lf/flows/.
     Area is required - scopes the work (e.g., swift/, src/, or . for whole repo).
-    Goals are optional - adaptive mode is implicit if no mode goal is specified.
+    Voices are optional - adaptive mode is implicit if no mode voice is specified.
 
     Examples:
         lfd loop ship swift/                              # adaptive mode
-        lfd loop ship swift/ -g product-engineer          # adaptive + role
-        lfd loop ship swift/ -g product-engineer -g designer  # adaptive + roles
+        lfd loop ship swift/ -L product-engineer          # adaptive + role
+        lfd loop ship swift/ -L product-engineer -L designer  # adaptive + roles
         lfd loop ship .                                   # whole repo
     """
     c = _colors()
@@ -252,18 +252,18 @@ def loop(
         typer.echo(f"\nDid you mean: lfd loop {flow} {area}/ ?")
         raise typer.Exit(1)
 
-    goals = goals or []
+    voices = voices or []
 
-    # Validate goals exist
-    for goal_name in goals:
-        if not goal_exists(repo, goal_name):
+    # Validate voices exist
+    for voice_name in voices:
+        if not voice_exists(repo, voice_name):
             typer.echo(
-                f"{c['red']}Error:{c['reset']} Goal '{goal_name}' not found",
+                f"{c['red']}Error:{c['reset']} Voice '{voice_name}' not found",
                 err=True,
             )
-            available = list_goals(repo)
+            available = list_voices(repo)
             if available:
-                typer.echo(f"Available goals: {', '.join(available)}")
+                typer.echo(f"Available voices: {', '.join(available)}")
             raise typer.Exit(1)
 
     flow = _validate_flow(repo, flow, c)
@@ -277,7 +277,7 @@ def loop(
     pr_limit = limit if limit is not None else 5
     mm = MergeMode(merge_mode) if merge_mode else MergeMode.PR
 
-    lp = create_loop(area, repo, flow, goals=goals, pr_limit=pr_limit, merge_mode=mm)
+    lp = create_loop(area, repo, flow, voices=voices, pr_limit=pr_limit, merge_mode=mm)
 
     # Start it
     result = start_loop(lp.id, foreground=foreground)
@@ -290,7 +290,7 @@ def loop(
             typer.echo(f"{msg} ({lp.short_id()})")
             typer.echo(f"  Repo: {repo}")
             typer.echo(f"  Main branch: {lp.main_branch}")
-            typer.echo(f"  Goals: {lp.goals_display}")
+            typer.echo(f"  Voices: {lp.voices_display}")
             typer.echo(f"  Flow: {lp.flow_display}")
             typer.echo(f"  PR limit: {lp.pr_limit}")
     elif result.reason == "already_running":
@@ -310,14 +310,14 @@ def loop(
 def run(
     flow_name: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
     area: str = typer.Argument(..., help="Area of responsibility (e.g., swift/, src/, .)"),
-    goals: list[str] = typer.Option(None, "-g", "--goal", help="Goal to add (repeatable)"),
+    voices: list[str] = typer.Option(None, "-L", "--voice", help="Voice to add (repeatable)"),
     paste: bool = typer.Option(False, "-v", "--paste", help="Include clipboard as prompt"),
 ):
     """Run a flow once (direct execution, no trigger).
 
     Examples:
         lfd run ship swift/                        # one-off adaptive iteration
-        lfd run ship swift/ -g product-engineer    # with role
+        lfd run ship swift/ -L product-engineer    # with role
         lfd run ship . -v                          # whole repo with clipboard
     """
     c = _colors()
@@ -335,12 +335,12 @@ def run(
         )
         raise typer.Exit(1)
 
-    goals = goals or []
+    voices = voices or []
 
-    # Validate goals exist
-    for goal_name in goals:
-        if not goal_exists(repo, goal_name):
-            typer.echo(f"{c['red']}Error:{c['reset']} Goal '{goal_name}' not found", err=True)
+    # Validate voices exist
+    for voice_name in voices:
+        if not voice_exists(repo, voice_name):
+            typer.echo(f"{c['red']}Error:{c['reset']} Voice '{voice_name}' not found", err=True)
             raise typer.Exit(1)
 
     flow_name = _validate_flow(repo, flow_name, c)
@@ -353,7 +353,7 @@ def run(
 
     # For now, create a temporary loop and run it once
     # TODO: Implement direct run without creating a loop
-    lp = create_loop(area, repo, flow_name, goals=goals)
+    lp = create_loop(area, repo, flow_name, voices=voices)
 
     # Start it in foreground (runs once)
     result = start_loop(lp.id, foreground=True)
@@ -373,7 +373,7 @@ def subscribe(
     path: list[str] = typer.Option(
         ..., "-p", "-P", "--path", help="Paths to watch (repeatable, supports globs)"
     ),
-    goals: list[str] = typer.Option(None, "-g", "--goal", help="Goal to add (repeatable)"),
+    voices: list[str] = typer.Option(None, "-L", "--voice", help="Voice to add (repeatable)"),
 ):
     """Subscribe to path changes on main."""
     c = _colors()
@@ -389,10 +389,10 @@ def subscribe(
         )
         raise typer.Exit(1)
 
-    goals = goals or []
-    for goal_name in goals:
-        if not goal_exists(repo, goal_name):
-            typer.echo(f"{c['red']}Error:{c['reset']} Goal '{goal_name}' not found", err=True)
+    voices = voices or []
+    for voice_name in voices:
+        if not voice_exists(repo, voice_name):
+            typer.echo(f"{c['red']}Error:{c['reset']} Voice '{voice_name}' not found", err=True)
             raise typer.Exit(1)
 
     flow = _validate_flow(repo, flow, c)
@@ -401,11 +401,11 @@ def subscribe(
     pathset = ",".join(path)
 
     # Create subscription
-    sub = create_subscription(area, repo, flow, pathset, goals=goals)
+    sub = create_subscription(area, repo, flow, pathset, voices=voices)
 
     msg = f"{c['green']}Subscribed{c['reset']} {c['bold']}{area}{c['reset']} to {pathset}"
     typer.echo(f"{msg} ({sub.short_id()})")
-    typer.echo(f"  Goals: {sub.goals_display}")
+    typer.echo(f"  Voices: {sub.voices_display}")
     typer.echo(f"  Flow: {sub.flow_display}")
     typer.echo("  Will run when paths change on main")
 
@@ -415,7 +415,7 @@ def schedule(
     flow: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
     area: str = typer.Argument(..., help="Area of responsibility (e.g., swift/, src/, .)"),
     cron_expr: str = typer.Argument(..., help="Cron expression (e.g., '0 9 * * *')"),
-    goals: list[str] = typer.Option(None, "-g", "--goal", help="Goal to add (repeatable)"),
+    voices: list[str] = typer.Option(None, "-L", "--voice", help="Voice to add (repeatable)"),
 ):
     """Schedule a flow to run on cron."""
     c = _colors()
@@ -431,21 +431,21 @@ def schedule(
         )
         raise typer.Exit(1)
 
-    goals = goals or []
-    for goal_name in goals:
-        if not goal_exists(repo, goal_name):
-            typer.echo(f"{c['red']}Error:{c['reset']} Goal '{goal_name}' not found", err=True)
+    voices = voices or []
+    for voice_name in voices:
+        if not voice_exists(repo, voice_name):
+            typer.echo(f"{c['red']}Error:{c['reset']} Voice '{voice_name}' not found", err=True)
             raise typer.Exit(1)
 
     flow = _validate_flow(repo, flow, c)
 
     # Create schedule
-    sched = create_schedule(area, repo, flow, cron_expr, goals=goals)
+    sched = create_schedule(area, repo, flow, cron_expr, voices=voices)
 
     typer.echo(
         f"{c['green']}Scheduled{c['reset']} {c['bold']}{area}{c['reset']} ({sched.short_id()})"
     )
-    typer.echo(f"  Goals: {sched.goals_display}")
+    typer.echo(f"  Voices: {sched.voices_display}")
     typer.echo(f"  Flow: {sched.flow_display}")
     typer.echo(f"  Cron: {cron_expr}")
 
@@ -556,7 +556,7 @@ def _print_trigger_detail(trigger: Trigger, c: dict[str, str]) -> None:
     typer.echo(f"  Status: {status_c}{trigger.status.value}{c['reset']}")
     typer.echo(f"  Repo: {trigger.repo}")
     typer.echo(f"  Main branch: {trigger.main_branch}")
-    typer.echo(f"  Goals: {trigger.goals_display}")
+    typer.echo(f"  Voices: {trigger.voices_display}")
     typer.echo(f"  Flow: {trigger.flow_display}")
     typer.echo(f"  Iteration: {trigger.iteration}")
 
@@ -752,41 +752,43 @@ def logs(
         subprocess.run(["tail", f"-{lines}", str(log_file)])
 
 
-@app.command("list-goals")
-def list_goals_cmd():
-    """Show available goals in current repo."""
+@app.command("list-voices")
+def list_voices_cmd():
+    """Show available voices in current repo."""
     c = _colors()
     repo = get_wt_from_cwd()
     if not repo:
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
 
-    goals_dir = repo / ".lf" / "goals"
-    if not goals_dir.exists():
-        typer.echo(f"{c['dim']}No goals directory found at {goals_dir}{c['reset']}")
-        typer.echo("Create one with: mkdir -p .lf/goals && echo '# My Goal' > .lf/goals/my-goal.md")
+    voices_dir = repo / ".lf" / "voices"
+    if not voices_dir.exists():
+        typer.echo(f"{c['dim']}No voices directory found at {voices_dir}{c['reset']}")
+        typer.echo(
+            "Create one with: mkdir -p .lf/voices && echo '# My Voice' > .lf/voices/my-voice.md"
+        )
         return
 
-    goals = list_goals(repo)
-    if not goals:
-        typer.echo(f"{c['dim']}No goals found in {goals_dir}{c['reset']}")
+    all_voices = list_voices(repo)
+    if not all_voices:
+        typer.echo(f"{c['dim']}No voices found in {voices_dir}{c['reset']}")
         return
 
-    typer.echo(f"Goals in {c['dim']}{goals_dir}/{c['reset']}")
+    typer.echo(f"Voices in {c['dim']}{voices_dir}/{c['reset']}")
     typer.echo("")
 
-    for goal_name in goals:
-        goal = load_goal(repo, goal_name)
-        if goal:
-            area_str = f"area: [{', '.join(goal.area)}]" if goal.area else ""
-            pipeline_str = f"pipeline: {goal.pipeline}" if goal.pipeline else ""
+    for voice_name in all_voices:
+        voice = load_voice(repo, voice_name)
+        if voice:
+            area_str = f"area: [{', '.join(voice.area)}]" if voice.area else ""
+            pipeline_str = f"pipeline: {voice.pipeline}" if voice.pipeline else ""
             details = "  ".join(filter(None, [area_str, pipeline_str]))
-            typer.echo(f"  {c['bold']}{goal_name:<20}{c['reset']} {c['dim']}{details}{c['reset']}")
+            typer.echo(f"  {c['bold']}{voice_name:<20}{c['reset']} {c['dim']}{details}{c['reset']}")
         else:
-            typer.echo(f"  {c['bold']}{goal_name:<20}{c['reset']}")
+            typer.echo(f"  {c['bold']}{voice_name:<20}{c['reset']}")
 
     typer.echo("")
-    typer.echo(f"{len(goals)} goal{'s' if len(goals) != 1 else ''} found")
+    typer.echo(f"{len(all_voices)} voice{'es' if len(all_voices) != 1 else ''} found")
 
 
 def main() -> None:

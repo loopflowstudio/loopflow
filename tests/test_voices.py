@@ -5,7 +5,7 @@ import pytest
 from loopflow.lf.config import Config
 from loopflow.lf.context import format_prompt, gather_prompt_components
 from loopflow.lf.frontmatter import StepConfig, parse_step_file, resolve_step_config
-from loopflow.lf.voices import Voice, VoiceNotFoundError, load_voice, parse_voice_arg
+from loopflow.lf.voices import Voice, load_voice, parse_voice_arg
 
 
 @pytest.fixture
@@ -32,32 +32,27 @@ def temp_repo(tmp_path):
 
 
 def test_load_voice_returns_voice_dataclass(temp_repo):
-    voice = load_voice("architect", temp_repo)
+    voice = load_voice(temp_repo, "architect")
     assert isinstance(voice, Voice)
     assert voice.name == "architect"
     assert "architect's perspective" in voice.content
 
 
 def test_load_voice_strips_whitespace(temp_repo):
-    voice = load_voice("concise", temp_repo)
+    voice = load_voice(temp_repo, "concise")
     assert voice.content == "Be concise. One sentence where possible."
 
 
-def test_load_voice_raises_when_not_found(temp_repo):
-    with pytest.raises(VoiceNotFoundError) as exc_info:
-        load_voice("nonexistent", temp_repo)
-    assert "nonexistent" in str(exc_info.value)
-    assert "Available:" in str(exc_info.value)
-    assert "architect" in str(exc_info.value)
+def test_load_voice_returns_none_when_not_found(temp_repo):
+    voice = load_voice(temp_repo, "nonexistent")
+    assert voice is None
 
 
-def test_load_voice_suggests_path_when_no_voices_exist(tmp_path):
+def test_load_voice_returns_none_when_no_voices_exist(tmp_path):
     (tmp_path / ".git").mkdir()
     (tmp_path / ".lf").mkdir()
-
-    with pytest.raises(VoiceNotFoundError) as exc_info:
-        load_voice("test", tmp_path)
-    assert "Create it at:" in str(exc_info.value)
+    voice = load_voice(tmp_path, "test")
+    assert voice is None
 
 
 # parse_voice_arg tests

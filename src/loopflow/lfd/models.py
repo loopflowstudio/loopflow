@@ -158,21 +158,10 @@ def agent_from_row(row: dict) -> Agent:
         merge_mode_str = "pr"
 
     # Build stimulus from DB columns
-    stimulus_kind = row.get("stimulus_kind")
-    stimulus_cron = row.get("stimulus_cron")
-
-    if stimulus_kind:
-        stimulus = Stimulus(kind=stimulus_kind, cron=stimulus_cron)
-    else:
-        # Fallback for pre-migration rows
-        if row.get("cron"):
-            stimulus = Stimulus(kind="cron", cron=row.get("cron"))
-        elif row.get("mode") == "watch":
-            stimulus = Stimulus(kind="watch")
-        elif row.get("mode") == "cron":
-            stimulus = Stimulus(kind="cron", cron=row.get("cron"))
-        else:
-            stimulus = Stimulus(kind="loop")
+    stimulus = Stimulus(
+        kind=row.get("stimulus_kind", "loop"),
+        cron=row.get("stimulus_cron"),
+    )
 
     return Agent(
         id=row["id"],

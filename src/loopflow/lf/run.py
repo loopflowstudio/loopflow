@@ -144,7 +144,7 @@ def _execute_step(
     collector_cmd = [
         sys.executable,
         "-m",
-        "loopflow.lfd.collector",
+        "loopflow.lfd.execution.collector",
         "--session-id",
         session.id,
         "--step",

@@ -16,4 +16,3 @@ summary_tokens: 25000
 
 summaries:
   - path: src/loopflow
-    model: claude

@@ -76,7 +76,7 @@ pytest tests/
 
 Follow PEP8. Consistency with existing code matters more than any specific rule.
 
-Keep `__init__.py` files empty. They exist only to mark directories as packages.
+Keep `__init__.py` files empty. They exist only to mark directories as packages. Don't use them for re-exports—import from the actual module (`from loopflow.lfd.runs.loop import create_loop`) not from package-level re-exports (`from loopflow.lfd.runs import create_loop`). A docstring describing the package contents is fine.
 
 Keep information in one place. Version numbers, configuration, documentation—each piece of information should have a single source of truth. Don't duplicate versions in `__init__.py` and `pyproject.toml`. Don't copy FAQs into multiple READMEs. If something needs to appear in multiple places, generate it or reference the source.
 

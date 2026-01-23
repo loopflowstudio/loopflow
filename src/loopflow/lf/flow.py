@@ -143,7 +143,7 @@ def _run_step(
     collector_cmd = [
         sys.executable,
         "-m",
-        "loopflow.lfd.collector",
+        "loopflow.lfd.execution.collector",
         "--session-id",
         session.id,
         "--step",
@@ -213,7 +213,7 @@ def _run_inline_prompt(
     collector_cmd = [
         sys.executable,
         "-m",
-        "loopflow.lfd.collector",
+        "loopflow.lfd.execution.collector",
         "--session-id",
         session.id,
         "--step",
@@ -377,7 +377,7 @@ def _run_worktree_tasks(
         collector_cmd = [
             sys.executable,
             "-m",
-            "loopflow.lfd.collector",
+            "loopflow.lfd.execution.collector",
             "--session-id",
             session.id,
             "--step",

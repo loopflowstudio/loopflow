@@ -1,19 +1,13 @@
-"""Loop iteration runner for lfd.
+"""Core iteration runner for lfd.
 
-Runs iterations of a loop until the PR limit is reached or an error occurs.
-Can be invoked directly as a subprocess for background execution.
-
-When running in background, coordinates with the daemon scheduler to respect
-global concurrency and PR limits.
+Executes a single iteration of any trigger type (Loop, Subscription, Schedule).
 """
 
 import json
-import socket
 import subprocess
 import sys
-import time
 import uuid
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -40,168 +34,21 @@ from loopflow.lf.messages import generate_pr_message
 from loopflow.lf.worktrees import WorktreeError
 from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
-from loopflow.lfd.client import notify_event
-from loopflow.lfd.db import (
-    get_loop,
-    save_loop_run,
-    update_loop_iteration,
-    update_loop_pid,
-    update_loop_run_pr,
-    update_loop_run_status,
-    update_loop_run_step,
-    update_loop_status,
+from loopflow.lfd.daemon.client import notify_event
+from loopflow.lfd.models import Loop, Run, RunStatus
+from loopflow.lfd.runs.run import (
+    save_run,
+    update_run_pr,
+    update_run_status,
+    update_run_step,
 )
-from loopflow.lfd.loops import count_outstanding
-from loopflow.lfd.models import Loop, LoopRun, LoopStatus, LoopType
-
-SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
-SCHEDULER_POLL_INTERVAL = 30  # seconds between slot checks
 
 
-@dataclass
-class _VariantResult:
-    label: str
-    worktree: Path
-    exit_code: int
-    session_id: str
-
-
-def _iteration_branch_prefix(loop_main: str) -> str:
-    """Derive iteration branch prefix from loop-main.
-
-    'product-engineer-main' → 'product-engineer'
-    'product-engineer-1-main' → 'product-engineer-1'
-    """
-    if loop_main.endswith("-main"):
-        return loop_main[:-5]
-    return loop_main
-
-
-def _scheduler_call(method: str, params: dict | None = None) -> dict | None:
-    """Make a synchronous call to the daemon scheduler.
-
-    Returns the result dict on success, None on connection failure.
-    """
-    if not SOCKET_PATH.exists():
-        return None
-
-    try:
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(5.0)
-        sock.connect(str(SOCKET_PATH))
-
-        request = {"method": method}
-        if params:
-            request["params"] = params
-
-        sock.sendall((json.dumps(request) + "\n").encode())
-
-        response_data = b""
-        while b"\n" not in response_data:
-            chunk = sock.recv(1024)
-            if not chunk:
-                break
-            response_data += chunk
-
-        sock.close()
-
-        if response_data:
-            response = json.loads(response_data.decode().strip())
-            if response.get("ok"):
-                return response.get("result", {})
-        return None
-    except Exception:
-        return None
-
-
-def _scheduler_acquire(run_id: str) -> tuple[bool, str | None]:
-    """Try to acquire a scheduler slot.
-
-    Returns (acquired, reason) when the daemon is available.
-    """
-    result = _scheduler_call("scheduler.acquire", {"run_id": run_id})
-    if result is None:
-        # Daemon not running, allow iteration (standalone mode)
-        return True, None
-    return result.get("acquired", False), result.get("reason")
-
-
-def _scheduler_release(run_id: str) -> None:
-    """Release a scheduler slot."""
-    _scheduler_call("scheduler.release", {"run_id": run_id})
-
-
-def run_loop_iterations(loop: Loop) -> None:
-    """Run loop iterations until PR limit is reached or error occurs.
-
-    For FLOW loops, runs exactly one iteration then stops.
-    For LOOP loops, runs continuously until pr_limit outstanding.
-    """
-    while True:
-        # Check if we should pause (per-loop limit) - skip for FLOW which runs once
-        if loop.type != LoopType.FLOW:
-            outstanding = count_outstanding(loop)
-            if outstanding >= loop.pr_limit:
-                update_loop_status(loop.id, LoopStatus.WAITING)
-                notify_event(
-                    "loop.waiting",
-                    {
-                        "loop_id": loop.id,
-                        "area": loop.area,
-                        "outstanding": outstanding,
-                        "limit": loop.pr_limit,
-                    },
-                )
-                break
-
-        # Run one iteration
-        iteration = loop.iteration + 1
-        run_id = str(uuid.uuid4())
-
-        # Wait for scheduler slot (global concurrency)
-        while True:
-            acquired, reason = _scheduler_acquire(run_id)
-            if acquired:
-                break
-            notify_event(
-                "scheduler.waiting",
-                {
-                    "loop_id": loop.id,
-                    "area": loop.area,
-                    "reason": reason or "concurrency",
-                },
-            )
-            time.sleep(SCHEDULER_POLL_INTERVAL)
-
-        try:
-            success = run_iteration(loop, iteration, run_id)
-            if success:
-                update_loop_iteration(loop.id, iteration)
-                loop.iteration = iteration
-            else:
-                update_loop_status(loop.id, LoopStatus.ERROR)
-                break
-        except Exception as e:
-            notify_event(
-                "loop.error",
-                {
-                    "loop_id": loop.id,
-                    "area": loop.area,
-                    "error": str(e),
-                },
-            )
-            update_loop_status(loop.id, LoopStatus.ERROR)
-            break
-        finally:
-            _scheduler_release(run_id)
-
-        # FLOW loops run exactly once then stop
-        if loop.type == LoopType.FLOW:
-            update_loop_status(loop.id, LoopStatus.IDLE)
-            break
-
-    # Clear pid when done
-    update_loop_pid(loop.id, None)
+def _iteration_branch_prefix(main_branch: str) -> str:
+    """Derive iteration branch prefix from main branch."""
+    if main_branch.endswith("-main"):
+        return main_branch[:-5]
+    return main_branch
 
 
 def _build_loop_prompt(
@@ -230,14 +77,6 @@ def _build_loop_prompt(
 
     step_file, step_content = components.step
     goal_section = render_goals(effective_goals)
-
-    if loop.type == LoopType.FLOW and loop.project_file:
-        try:
-            prompt_content = Path(loop.project_file).read_text()
-        except OSError:
-            prompt_content = None
-        if prompt_content:
-            goal_section += f"\n\n<lf:prompt>\n{prompt_content}\n</lf:prompt>"
 
     combined = f"{goal_section}\n\n---\n\n{step_content}"
     components = replace(components, step=(step_file, combined))
@@ -272,7 +111,7 @@ def _run_collector_step(
     collector_cmd = [
         sys.executable,
         "-m",
-        "loopflow.lfd.collector",
+        "loopflow.lfd.execution.collector",
         "--session-id",
         session_id,
         "--step",
@@ -297,6 +136,14 @@ def _run_collector_step(
         pass
 
     return result_code
+
+
+class _VariantResult:
+    def __init__(self, label: str, worktree: Path, exit_code: int, session_id: str):
+        self.label = label
+        self.worktree = worktree
+        self.exit_code = exit_code
+        self.session_id = session_id
 
 
 def _cleanup_variant_worktrees(repo_root: Path, results: list[_VariantResult]) -> None:
@@ -324,14 +171,6 @@ def _build_loop_inline_prompt(
 
     step_file, step_content = components.step
     goal_section = render_goals(effective_goals)
-
-    if loop.type == LoopType.FLOW and loop.project_file:
-        try:
-            prompt_content = Path(loop.project_file).read_text()
-        except OSError:
-            prompt_content = None
-        if prompt_content:
-            goal_section += f"\n\n<lf:prompt>\n{prompt_content}\n</lf:prompt>"
 
     combined = f"{goal_section}\n\n---\n\n{step_content}"
     components = replace(components, step=(step_file, combined))
@@ -465,37 +304,41 @@ def _run_fork_join_group(
     return join_result
 
 
-def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool:
-    """Run a single iteration of the loop.
+def run_iteration(
+    loop: Loop,
+    iteration: int,
+    run_id: str | None = None,
+    parent_type: str = "loop",
+) -> bool:
+    """Run a single iteration of a trigger.
 
-    Args:
-        loop: The loop to run
-        iteration: Iteration number
-        run_id: Optional pre-allocated run ID (for scheduler coordination)
-
+    Works for any trigger type (Loop, Subscription, Schedule).
     Returns True if successful, False on error.
     """
     config = load_config(loop.repo)
 
-    # Create iteration branch from loop-main
-    prefix = _iteration_branch_prefix(loop.loop_main)
+    prefix = _iteration_branch_prefix(loop.main_branch)
     branch = f"{prefix}/{iteration:03d}"
     try:
-        worktree_path = create_worktree(loop.repo, branch, base=loop.loop_main)
+        worktree_path = create_worktree(loop.repo, branch, base=loop.main_branch)
     except WorktreeError as e:
         notify_event("loop.error", {"loop_id": loop.id, "error": f"Failed to create worktree: {e}"})
         return False
 
-    # Create loop_run record
-    run = LoopRun(
+    run = Run(
         id=run_id or str(uuid.uuid4()),
-        loop_id=loop.id,
+        parent=f"{parent_type}:{loop.id}",
+        flow=loop.flow,
+        area=loop.area,
+        repo=loop.repo,
+        goals=loop.goals,
+        status=RunStatus.RUNNING,
         iteration=iteration,
-        status=LoopStatus.RUNNING,
-        started_at=datetime.now(),
         worktree=str(worktree_path),
+        branch=branch,
+        started_at=datetime.now(),
     )
-    save_loop_run(run)
+    save_run(run)
 
     notify_event(
         "loop.started",
@@ -508,43 +351,41 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
         },
     )
 
-    # Build effective goals (inject adaptive if no mode present)
     effective_goals = build_effective_goals(loop.repo, loop.goals)
     if not effective_goals:
-        update_loop_run_status(run.id, LoopStatus.ERROR, error="No valid goals found")
+        update_run_status(run.id, RunStatus.FAILED, error="No valid goals found")
         return False
 
     flow = loop.flow
     if not flow:
-        update_loop_run_status(run.id, LoopStatus.ERROR, error="Flow is required")
+        update_run_status(run.id, RunStatus.FAILED, error="Flow is required")
         _cleanup_worktree(loop.repo, worktree_path, branch)
         return False
 
     try:
         flow_def = load_flow(flow, loop.repo)
     except ValueError as exc:
-        update_loop_run_status(run.id, LoopStatus.ERROR, error=str(exc))
+        update_run_status(run.id, RunStatus.FAILED, error=str(exc))
         _cleanup_worktree(loop.repo, worktree_path, branch)
         return False
 
     if not flow_def:
-        update_loop_run_status(run.id, LoopStatus.ERROR, error=f"Unknown flow '{flow}'")
+        update_run_status(run.id, RunStatus.FAILED, error=f"Unknown flow '{flow}'")
         _cleanup_worktree(loop.repo, worktree_path, branch)
         return False
 
     resolved = resolve_flow(flow_def, loop.repo)
     if not resolved:
-        update_loop_run_status(run.id, LoopStatus.ERROR, error=f"Empty flow '{flow}'")
+        update_run_status(run.id, RunStatus.FAILED, error=f"Empty flow '{flow}'")
         _cleanup_worktree(loop.repo, worktree_path, branch)
         return False
 
-    # Get model configuration
     agent_model = config.agent_model if config else "claude:opus"
     backend, model_variant = parse_model(agent_model)
 
     runner = get_runner(backend)
     if not runner.is_available():
-        update_loop_run_status(run.id, LoopStatus.ERROR, error=f"'{backend}' CLI not found")
+        update_run_status(run.id, RunStatus.FAILED, error=f"'{backend}' CLI not found")
         return False
 
     skip_permissions = config.yolo if config else False
@@ -564,8 +405,8 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
                 i += 1
 
             if i >= len(resolved) or resolved[i].join is None:
-                update_loop_run_status(
-                    run.id, LoopStatus.ERROR, error="Fork must be immediately followed by join"
+                update_run_status(
+                    run.id, RunStatus.FAILED, error="Fork must be immediately followed by join"
                 )
                 _cleanup_worktree(loop.repo, worktree_path, branch)
                 return False
@@ -584,7 +425,7 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
                 model_variant,
             )
             if result_code != 0:
-                update_loop_run_status(run.id, LoopStatus.ERROR, error="join failed")
+                update_run_status(run.id, RunStatus.FAILED, error="join failed")
                 _cleanup_worktree(loop.repo, worktree_path, branch)
                 return False
 
@@ -602,7 +443,7 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
                     skip_permissions,
                 )
             except RuntimeError as exc:
-                update_loop_run_status(run.id, LoopStatus.ERROR, error=str(exc))
+                update_run_status(run.id, RunStatus.FAILED, error=str(exc))
                 _cleanup_worktree(loop.repo, worktree_path, branch)
                 return False
 
@@ -613,7 +454,7 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
             continue
 
         if step.join is not None:
-            update_loop_run_status(run.id, LoopStatus.ERROR, error="Join must follow fork")
+            update_run_status(run.id, RunStatus.FAILED, error="Join must follow fork")
             _cleanup_worktree(loop.repo, worktree_path, branch)
             return False
 
@@ -622,7 +463,7 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
             continue
 
         step_name = step.step
-        update_loop_run_step(run.id, step_name)
+        update_run_step(run.id, step_name)
         notify_event(
             "loop.step.started",
             {
@@ -654,9 +495,7 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
             voices=step_voices,
         )
         if not prompt_result:
-            update_loop_run_status(
-                run.id, LoopStatus.ERROR, error=f"Step file not found: {step_name}"
-            )
+            update_run_status(run.id, RunStatus.FAILED, error=f"Step file not found: {step_name}")
             _cleanup_worktree(loop.repo, worktree_path, branch)
             return False
 
@@ -681,26 +520,23 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
         )
 
         if result_code != 0:
-            update_loop_run_status(run.id, LoopStatus.ERROR, error=f"{step_name} failed")
+            update_run_status(run.id, RunStatus.FAILED, error=f"{step_name} failed")
             _cleanup_worktree(loop.repo, worktree_path, branch)
             return False
 
         i += 1
 
-    # Clear current step
-    update_loop_run_step(run.id, None)
+    update_run_step(run.id, None)
 
-    # Create PR to loop-main and auto-merge (always)
-    pr_url = _create_pr_to_loop_main(loop, worktree_path, branch, iteration)
+    pr_url = _create_pr_to_main_branch(loop, worktree_path, branch, iteration)
     if pr_url:
-        update_loop_run_pr(run.id, pr_url)
+        update_run_pr(run.id, pr_url)
         _auto_merge_pr(worktree_path)
 
-        # If LAND mode, also merge loop-main to main
         if loop.merge_mode.value == "land":
             _land_to_main(loop)
 
-    update_loop_run_status(run.id, LoopStatus.IDLE)
+    update_run_status(run.id, RunStatus.COMPLETED)
 
     notify_event(
         "loop.iteration.done",
@@ -714,17 +550,15 @@ def run_iteration(loop: Loop, iteration: int, run_id: str | None = None) -> bool
         },
     )
 
-    # Cleanup worktree
     _cleanup_worktree(loop.repo, worktree_path, branch)
 
     return True
 
 
-def _create_pr_to_loop_main(
+def _create_pr_to_main_branch(
     loop: Loop, worktree_path: Path, branch: str, iteration: int
 ) -> str | None:
-    """Push branch and create PR targeting loop-main."""
-    # Push the branch
+    """Push branch and create PR targeting main_branch."""
     result = subprocess.run(
         ["git", "push", "-u", "origin", branch],
         cwd=worktree_path,
@@ -734,7 +568,6 @@ def _create_pr_to_loop_main(
     if result.returncode != 0:
         return None
 
-    # Generate PR message
     try:
         message = generate_pr_message(worktree_path)
         title = f"[{loop.area_slug}] {message.title}"
@@ -751,7 +584,6 @@ def _create_pr_to_loop_main(
             f"Iteration: {iteration}"
         )
 
-    # Create PR
     cmd = [
         "gh",
         "pr",
@@ -761,7 +593,7 @@ def _create_pr_to_loop_main(
         "--body",
         body,
         "--base",
-        loop.loop_main,
+        loop.main_branch,
     ]
     result = subprocess.run(cmd, cwd=worktree_path, capture_output=True, text=True)
 
@@ -782,25 +614,18 @@ def _auto_merge_pr(worktree_path: Path) -> bool:
 
 
 def _land_to_main(loop: Loop) -> str | None:
-    """Create or update PR from loop-main → main, enable auto-merge.
-
-    Returns PR URL on success, None on failure.
-    Works from main repo (not worktree, which gets deleted).
-    Idempotent: existing PR just gets auto-merge re-enabled.
-    """
+    """Create or update PR from main_branch to main, enable auto-merge."""
     repo = loop.repo
 
-    # Push loop-main
-    subprocess.run(["git", "push", "origin", loop.loop_main], cwd=repo, capture_output=True)
+    subprocess.run(["git", "push", "origin", loop.main_branch], cwd=repo, capture_output=True)
 
-    # Check for existing PR
     result = subprocess.run(
         [
             "gh",
             "pr",
             "list",
             "--head",
-            loop.loop_main,
+            loop.main_branch,
             "--base",
             "main",
             "--json",
@@ -815,7 +640,6 @@ def _land_to_main(loop: Loop) -> str | None:
     existing = json.loads(result.stdout) if result.returncode == 0 and result.stdout.strip() else []
 
     if existing:
-        # PR exists - ensure auto-merge is enabled
         pr_number = existing[0]["number"]
         subprocess.run(
             ["gh", "pr", "merge", str(pr_number), "--squash", "--auto"],
@@ -824,7 +648,6 @@ def _land_to_main(loop: Loop) -> str | None:
         )
         return existing[0]["url"]
 
-    # Create new PR
     result = subprocess.run(
         [
             "gh",
@@ -833,7 +656,7 @@ def _land_to_main(loop: Loop) -> str | None:
             "--base",
             "main",
             "--head",
-            loop.loop_main,
+            loop.main_branch,
             "--title",
             f"[{loop.area_slug}] Land accumulated work",
             "--body",
@@ -848,7 +671,6 @@ def _land_to_main(loop: Loop) -> str | None:
 
     pr_url = result.stdout.strip()
 
-    # Enable auto-merge on the new PR
     subprocess.run(["gh", "pr", "merge", "--squash", "--auto"], cwd=repo, capture_output=True)
 
     return pr_url
@@ -861,29 +683,8 @@ def _cleanup_worktree(repo: Path, worktree_path: Path, branch: str) -> None:
     except Exception:
         pass
 
-    # Delete remote branch
     subprocess.run(
         ["git", "push", "origin", "--delete", branch],
         cwd=repo,
         capture_output=True,
     )
-
-
-def main() -> None:
-    """Entry point for background loop runner."""
-    if len(sys.argv) != 2:
-        print("Usage: python -m loopflow.lfd.loop_runner <loop_id>", file=sys.stderr)
-        sys.exit(1)
-
-    loop_id = sys.argv[1]
-    loop = get_loop(loop_id)
-
-    if not loop:
-        print(f"Loop not found: {loop_id}", file=sys.stderr)
-        sys.exit(1)
-
-    run_loop_iterations(loop)
-
-
-if __name__ == "__main__":
-    main()

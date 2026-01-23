@@ -1,15 +1,15 @@
-// Service for loading loops from lfd.db SQLite database.
+// Service for loading jobs from lfd.db SQLite database.
 
 import Foundation
 import SQLite3
 
-public struct LoopService: @unchecked Sendable {
+public struct JobService: @unchecked Sendable {
     public init() {}
     private let dbPath = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".lf/lfd.db").path
 
-    public func listLoops(repo: URL) async throws -> [Loop] {
-        var loops: [Loop] = []
+    public func listJobs(repo: URL) async throws -> [Job] {
+        var jobs: [Job] = []
 
         var db: OpaquePointer?
         guard sqlite3_open(dbPath, &db) == SQLITE_OK else {
@@ -17,14 +17,18 @@ public struct LoopService: @unchecked Sendable {
         }
         defer { sqlite3_close(db) }
 
-        let columns = ensureLoopColumns(db: db)
+        // Detect table name (jobs vs loops for migration compatibility)
+        let tableName = detectTableName(db: db)
+        let mainColumn = tableName == "jobs" ? "job_main" : "loop_main"
+
+        let columns = ensureJobColumns(db: db, tableName: tableName)
         var selectColumns = ["id", "type", "area", "goals", "flow"]
         if columns.contains("goal") {
             selectColumns.append("goal")
         }
         selectColumns.append(contentsOf: [
             "repo",
-            "loop_main",
+            mainColumn,
             "status",
             "iteration",
             "pr_limit",
@@ -35,7 +39,7 @@ public struct LoopService: @unchecked Sendable {
 
         let query = """
             SELECT \(selectColumns.joined(separator: ", "))
-            FROM loops
+            FROM \(tableName)
             WHERE repo = ?
             ORDER BY created_at DESC
         """
@@ -57,7 +61,7 @@ public struct LoopService: @unchecked Sendable {
             guard let id = columnText(stmt, columnIndex["id"]),
                   let typeStr = columnText(stmt, columnIndex["type"]),
                   let repoPath = columnText(stmt, columnIndex["repo"]),
-                  let loopMain = columnText(stmt, columnIndex["loop_main"]),
+                  let jobMain = columnText(stmt, columnIndex[mainColumn]),
                   let statusStr = columnText(stmt, columnIndex["status"]) else {
                 continue
             }
@@ -87,18 +91,18 @@ public struct LoopService: @unchecked Sendable {
                 createdAt = dateFormatter.date(from: dateStr) ?? ISO8601DateFormatter().date(from: dateStr) ?? Date()
             }
 
-            let type = LoopType(rawValue: typeStr) ?? .loop
-            let status = LoopStatus(rawValue: statusStr) ?? .idle
-            let mergeMode = LoopMergeMode(rawValue: mergeModeStr) ?? .pr
+            let type = JobType(rawValue: typeStr) ?? .loop
+            let status = JobStatus(rawValue: statusStr) ?? .idle
+            let mergeMode = JobMergeMode(rawValue: mergeModeStr) ?? .pr
 
-            var loop = Loop(
+            var job = Job(
                 id: id,
                 type: type,
                 area: area,
                 goals: goals,
                 flow: flow,
                 repo: repoPath,
-                loopMain: loopMain,
+                jobMain: jobMain,
                 status: status,
                 iteration: iteration,
                 prLimit: prLimit,
@@ -109,27 +113,50 @@ public struct LoopService: @unchecked Sendable {
 
             // Get current run info if running
             if status == .running {
-                if let runInfo = getCurrentRun(db: db, loopId: id) {
-                    loop.currentRunId = runInfo.id
-                    loop.currentStep = runInfo.currentStep
+                if let runInfo = getCurrentRun(db: db, jobId: id, tableName: tableName) {
+                    job.currentRunId = runInfo.id
+                    job.currentStep = runInfo.currentStep
                 }
             }
 
             // Check commits ahead of main
-            if let commits = try? await getCommitsAhead(branch: loopMain, in: URL(fileURLWithPath: repoPath)) {
-                loop.commitsAhead = commits
+            if let commits = try? await getCommitsAhead(branch: jobMain, in: URL(fileURLWithPath: repoPath)) {
+                job.commitsAhead = commits
             }
 
-            loops.append(loop)
+            jobs.append(job)
         }
 
-        return loops
+        return jobs
     }
 
-    private func ensureLoopColumns(db: OpaquePointer?) -> Set<String> {
+    private func detectTableName(db: OpaquePointer?) -> String {
+        guard let db else { return "loops" }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db,
+            "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('jobs', 'loops')",
+            -1,
+            &stmt,
+            nil
+        ) == SQLITE_OK else {
+            return "loops"
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        var tables: Set<String> = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let namePtr = sqlite3_column_text(stmt, 0) {
+                tables.insert(String(cString: namePtr))
+            }
+        }
+        return tables.contains("jobs") ? "jobs" : "loops"
+    }
+
+    private func ensureJobColumns(db: OpaquePointer?, tableName: String) -> Set<String> {
         guard let db else { return [] }
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "PRAGMA table_info(loops)", -1, &stmt, nil) == SQLITE_OK else {
+        guard sqlite3_prepare_v2(db, "PRAGMA table_info(\(tableName))", -1, &stmt, nil) == SQLITE_OK else {
             return []
         }
         defer { sqlite3_finalize(stmt) }
@@ -142,15 +169,15 @@ public struct LoopService: @unchecked Sendable {
         }
 
         if !columns.contains("area") {
-            sqlite3_exec(db, "ALTER TABLE loops ADD COLUMN area TEXT", nil, nil, nil)
+            sqlite3_exec(db, "ALTER TABLE \(tableName) ADD COLUMN area TEXT", nil, nil, nil)
             columns.insert("area")
         }
         if !columns.contains("goals") {
-            sqlite3_exec(db, "ALTER TABLE loops ADD COLUMN goals TEXT", nil, nil, nil)
+            sqlite3_exec(db, "ALTER TABLE \(tableName) ADD COLUMN goals TEXT", nil, nil, nil)
             columns.insert("goals")
         }
         if !columns.contains("flow") {
-            sqlite3_exec(db, "ALTER TABLE loops ADD COLUMN flow TEXT", nil, nil, nil)
+            sqlite3_exec(db, "ALTER TABLE \(tableName) ADD COLUMN flow TEXT", nil, nil, nil)
             columns.insert("flow")
         }
         return columns
@@ -182,8 +209,8 @@ public struct LoopService: @unchecked Sendable {
         return Int(result.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
     }
 
-    public func getLoopRuns(loopId: String, limit: Int = 10) async throws -> [LoopRun] {
-        var runs: [LoopRun] = []
+    public func getJobRuns(jobId: String, limit: Int = 10) async throws -> [JobRun] {
+        var runs: [JobRun] = []
 
         var db: OpaquePointer?
         guard sqlite3_open(dbPath, &db) == SQLITE_OK else {
@@ -191,11 +218,15 @@ public struct LoopService: @unchecked Sendable {
         }
         defer { sqlite3_close(db) }
 
+        // Detect table name for migration compatibility
+        let runsTable = detectRunsTableName(db: db)
+        let idColumn = runsTable == "job_runs" ? "job_id" : "loop_id"
+
         let query = """
-            SELECT id, loop_id, iteration, status, started_at, ended_at,
+            SELECT id, \(idColumn), iteration, status, started_at, ended_at,
                    worktree, current_step, error, pr_url
-            FROM loop_runs
-            WHERE loop_id = ? OR loop_id LIKE ?
+            FROM \(runsTable)
+            WHERE \(idColumn) = ? OR \(idColumn) LIKE ?
             ORDER BY started_at DESC
             LIMIT ?
         """
@@ -206,8 +237,8 @@ public struct LoopService: @unchecked Sendable {
         }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_text(stmt, 1, loopId, -1, nil)
-        sqlite3_bind_text(stmt, 2, "\(loopId)%", -1, nil)
+        sqlite3_bind_text(stmt, 1, jobId, -1, nil)
+        sqlite3_bind_text(stmt, 2, "\(jobId)%", -1, nil)
         sqlite3_bind_int(stmt, 3, Int32(limit))
 
         let dateFormatter = ISO8601DateFormatter()
@@ -215,19 +246,19 @@ public struct LoopService: @unchecked Sendable {
 
         while sqlite3_step(stmt) == SQLITE_ROW {
             guard let idPtr = sqlite3_column_text(stmt, 0),
-                  let loopIdPtr = sqlite3_column_text(stmt, 1),
+                  let jobIdPtr = sqlite3_column_text(stmt, 1),
                   let statusPtr = sqlite3_column_text(stmt, 3),
                   let startedAtPtr = sqlite3_column_text(stmt, 4) else {
                 continue
             }
 
             let id = String(cString: idPtr)
-            let runLoopId = String(cString: loopIdPtr)
+            let runJobId = String(cString: jobIdPtr)
             let iteration = Int(sqlite3_column_int(stmt, 2))
             let statusStr = String(cString: statusPtr)
             let startedAtStr = String(cString: startedAtPtr)
 
-            let status = LoopStatus(rawValue: statusStr) ?? .idle
+            let status = JobStatus(rawValue: statusStr) ?? .idle
             let startedAt = dateFormatter.date(from: startedAtStr) ?? Date()
 
             var endedAt: Date?
@@ -240,9 +271,9 @@ public struct LoopService: @unchecked Sendable {
             let error = sqlite3_column_text(stmt, 8).map { String(cString: $0) }
             let prUrl = sqlite3_column_text(stmt, 9).map { String(cString: $0) }
 
-            runs.append(LoopRun(
+            runs.append(JobRun(
                 id: id,
-                loopId: runLoopId,
+                jobId: runJobId,
                 iteration: iteration,
                 status: status,
                 startedAt: startedAt,
@@ -257,19 +288,42 @@ public struct LoopService: @unchecked Sendable {
         return runs
     }
 
-    public func squashLand(loop: Loop, repoRoot: URL) async throws {
-        guard loop.commitsAhead > 0 else {
-            throw LoopServiceError.nothingToLand
+    private func detectRunsTableName(db: OpaquePointer?) -> String {
+        guard let db else { return "loop_runs" }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db,
+            "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('job_runs', 'loop_runs')",
+            -1,
+            &stmt,
+            nil
+        ) == SQLITE_OK else {
+            return "loop_runs"
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        var tables: Set<String> = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let namePtr = sqlite3_column_text(stmt, 0) {
+                tables.insert(String(cString: namePtr))
+            }
+        }
+        return tables.contains("job_runs") ? "job_runs" : "loop_runs"
+    }
+
+    public func squashLand(job: Job, repoRoot: URL) async throws {
+        guard job.commitsAhead > 0 else {
+            throw JobServiceError.nothingToLand
         }
 
         // Checkout main
         _ = try await runGitCommand(["checkout", "main"], in: repoRoot)
 
         // Merge --squash
-        _ = try await runGitCommand(["merge", "--squash", loop.loopMain], in: repoRoot)
+        _ = try await runGitCommand(["merge", "--squash", job.jobMain], in: repoRoot)
 
         // Commit with generated message
-        let commitMessage = "loop(\(loop.areaDisplay)): land \(loop.commitsAhead) commits"
+        let commitMessage = "job(\(job.areaDisplay)): land \(job.commitsAhead) commits"
         _ = try await runGitCommand(["commit", "-m", commitMessage], in: repoRoot)
 
         // Push
@@ -280,10 +334,13 @@ public struct LoopService: @unchecked Sendable {
         try await runShellCommand(["lfd", "install"])
     }
 
-    private func getCurrentRun(db: OpaquePointer?, loopId: String) -> (id: String, currentStep: String?)? {
+    private func getCurrentRun(db: OpaquePointer?, jobId: String, tableName: String) -> (id: String, currentStep: String?)? {
+        let runsTable = tableName == "jobs" ? "job_runs" : "loop_runs"
+        let idColumn = tableName == "jobs" ? "job_id" : "loop_id"
+
         let query = """
-            SELECT id, current_step FROM loop_runs
-            WHERE loop_id = ? AND status = 'running'
+            SELECT id, current_step FROM \(runsTable)
+            WHERE \(idColumn) = ? AND status = 'running'
             ORDER BY started_at DESC LIMIT 1
         """
 
@@ -293,7 +350,7 @@ public struct LoopService: @unchecked Sendable {
         }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_text(stmt, 1, loopId, -1, nil)
+        sqlite3_bind_text(stmt, 1, jobId, -1, nil)
 
         if sqlite3_step(stmt) == SQLITE_ROW,
            let idPtr = sqlite3_column_text(stmt, 0) {
@@ -326,7 +383,7 @@ public struct LoopService: @unchecked Sendable {
                 if process.terminationStatus == 0 {
                     continuation.resume(returning: output)
                 } else {
-                    continuation.resume(throwing: LoopServiceError.gitCommandFailed(output))
+                    continuation.resume(throwing: JobServiceError.gitCommandFailed(output))
                 }
             } catch {
                 continuation.resume(throwing: error)
@@ -346,16 +403,29 @@ public struct LoopService: @unchecked Sendable {
                 if process.terminationStatus == 0 {
                     continuation.resume()
                 } else {
-                    continuation.resume(throwing: LoopServiceError.commandFailed)
+                    continuation.resume(throwing: JobServiceError.commandFailed)
                 }
             } catch {
                 continuation.resume(throwing: error)
             }
         }
     }
+
+    // Backwards compatibility methods
+    public func listLoops(repo: URL) async throws -> [Job] {
+        try await listJobs(repo: repo)
+    }
+
+    public func getLoopRuns(loopId: String, limit: Int = 10) async throws -> [JobRun] {
+        try await getJobRuns(jobId: loopId, limit: limit)
+    }
+
+    public func squashLand(loop: Job, repoRoot: URL) async throws {
+        try await squashLand(job: loop, repoRoot: repoRoot)
+    }
 }
 
-public enum LoopServiceError: LocalizedError {
+public enum JobServiceError: LocalizedError {
     case nothingToLand
     case gitCommandFailed(String)
     case commandFailed
@@ -371,3 +441,7 @@ public enum LoopServiceError: LocalizedError {
         }
     }
 }
+
+// Backwards compatibility alias
+public typealias LoopService = JobService
+public typealias LoopServiceError = JobServiceError

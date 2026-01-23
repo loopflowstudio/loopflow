@@ -1,4 +1,4 @@
-"""Cycle command: land current PR, create fresh worktree in same space."""
+"""Next command: land current PR, create fresh worktree in same space."""
 
 import json
 import subprocess
@@ -9,7 +9,7 @@ import typer
 
 from loopflow.lf.context import find_worktree_root
 from loopflow.lf.git import find_main_repo, get_current_branch
-from loopflow.lf.naming import generate_cycle_branch, parse_branch_for_cycle
+from loopflow.lf.naming import generate_next_branch, parse_branch_base
 from loopflow.lf.worktrees import get_path
 from loopflow.lfops._helpers import get_default_branch, remove_worktree
 from loopflow.lfops.shell import write_directive
@@ -102,23 +102,23 @@ def _open_terminal(path: Path) -> None:
     subprocess.run(["open", f"warp://action/new_window?path={path}"])
 
 
-def cycle(
+def next_worktree(
     repo_root: Path,
     branch: str,
-    wait: bool = True,
+    block: bool = False,
     open_terminal: bool = True,
     create_pr: bool = False,
 ) -> Path | None:
     """Land current branch, create new worktree with magical-musical suffix.
 
-    Returns path to new worktree, or None if cycle failed.
+    Returns path to new worktree, or None if failed.
     """
     main_repo = find_main_repo(repo_root) or repo_root
     base_branch = get_default_branch(main_repo)
 
     # Check we're not on main
     if branch in (base_branch, "main", "master"):
-        typer.echo(f"Error: Cannot cycle from {branch}", err=True)
+        typer.echo(f"Error: Cannot run next from {branch}", err=True)
         return None
 
     # Get or create PR
@@ -147,14 +147,14 @@ def cycle(
     if not _enable_auto_merge(repo_root, pr_number):
         typer.echo("Warning: Could not enable auto-merge", err=True)
 
-    # Wait for merge
+    # Wait for merge if blocking
     merged = False
-    if wait:
+    if block:
         merged = _wait_for_merge(repo_root, pr_number)
 
     # Generate new branch name
-    base_name = parse_branch_for_cycle(branch)
-    new_branch = generate_cycle_branch(base_name, main_repo)
+    base_name = parse_branch_base(branch)
+    new_branch = generate_next_branch(base_name, main_repo)
 
     # Create new worktree
     typer.echo(f"Creating worktree {new_branch}...")
@@ -206,25 +206,24 @@ def cycle(
 
 
 def register_commands(app: typer.Typer) -> None:
-    """Register cycle command on the app."""
+    """Register next command on the app."""
 
-    @app.command("cycle")
-    def cycle_cmd(
-        no_wait: bool = typer.Option(
-            False, "--no-wait", help="Submit to merge queue without waiting"
-        ),
+    @app.command("next")
+    def next_cmd(
+        block: bool = typer.Option(False, "--block", help="Wait for merge before creating worktree"),
         no_open: bool = typer.Option(False, "--no-open", help="Don't open terminal"),
         create_pr: bool = typer.Option(False, "-c", "--create-pr", help="Create PR if none exists"),
     ) -> None:
         """Land current PR, create fresh worktree in same space.
 
-        Enables auto-merge on the PR, waits for merge, removes the old worktree,
-        and creates a new one with a magical-musical suffix (e.g., aurora-melody).
+        Enables auto-merge on the PR, creates a new worktree with a magical-musical
+        suffix (e.g., aurora-melody). Use --block to wait for merge and clean up
+        the old worktree.
 
         Example:
-            lfops cycle                # land PR, create next worktree
-            lfops cycle --no-wait      # submit to merge queue, don't wait
-            lfops cycle --create-pr    # create PR if none exists, then cycle
+            lfops next                 # land PR, create next worktree
+            lfops next --block         # wait for merge, then create worktree
+            lfops next --create-pr     # create PR if none exists, then next
         """
         repo_root = find_worktree_root()
         if not repo_root:
@@ -236,10 +235,10 @@ def register_commands(app: typer.Typer) -> None:
             typer.echo("Error: Not on a branch (detached HEAD)", err=True)
             raise typer.Exit(1)
 
-        result = cycle(
+        result = next_worktree(
             repo_root,
             branch,
-            wait=not no_wait,
+            block=block,
             open_terminal=not no_open,
             create_pr=create_pr,
         )

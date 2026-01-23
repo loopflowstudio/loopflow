@@ -1,7 +1,7 @@
 """Branch naming utilities for loopflow.
 
 Provides word lists and functions for generating branch names with magical-musical
-suffixes, used by both `lfops cycle` and agent creation.
+suffixes, used by both `lfops next` and agent creation.
 """
 
 import random
@@ -101,11 +101,11 @@ def branch_exists(repo: Path, branch: str) -> bool:
     return result.returncode == 0
 
 
-def parse_branch_for_cycle(branch: str) -> str:
-    """Extract base branch name for cycling.
+def parse_branch_base(branch: str) -> str:
+    """Extract base branch name for next iteration.
 
     If branch ends with a magical-musical pair, strip it.
-    Otherwise use as-is (first cycle).
+    Otherwise use as-is (first iteration).
 
     Examples:
         'jack.auth.20260123_1112' → 'jack.auth.20260123_1112'
@@ -120,8 +120,8 @@ def parse_branch_for_cycle(branch: str) -> str:
     return branch
 
 
-def generate_cycle_branch(base: str, repo: Path) -> str:
-    """Generate unique branch name for next cycle.
+def generate_next_branch(base: str, repo: Path) -> str:
+    """Generate unique branch name for next iteration.
 
     Appends magical-musical pair, retries if exists.
     """

@@ -1,10 +1,10 @@
-# lfops cycle: Land and Continue
+# lfops next: Land and Continue
 
 Atomic operation: land current worktree, create fresh one in the same "space."
 
 ## What to build
 
-`lfops cycle` — merges the current PR, waits for it to land, cleans up the worktree, and creates a new one preserving the working context (branch prefix, area, voice).
+`lfops next` — merges the current PR, waits for it to land, cleans up the worktree, and creates a new one preserving the working context (branch prefix, area, voice).
 
 ## The "space" concept
 
@@ -26,12 +26,12 @@ For manual use, space is **inferred from the current branch**:
 
 ## Two modes
 
-### 1. Manual cycling (user-invoked)
+### 1. Manual (user-invoked)
 
 ```bash
 # Working on jack.auth.20260123_1112
-lfops cycle                     # land PR, create ...-aurora-melody
-lfops cycle --no-wait           # submit to queue, don't wait for merge
+lfops next                      # land PR, create ...-aurora-melody
+lfops next --no-wait            # submit to queue, don't wait for merge
 ```
 
 The command:
@@ -50,7 +50,7 @@ The command:
 - Returns
 
 These are **different flows**:
-- Manual cycle: PR → real main, wait for CI, then continue
+- Manual next: PR → real main, wait for CI, then continue
 - Loop iteration: instant merge to personal-main, batch-land later
 
 **Don't unify the core.** But **do share naming utilities** — the word lists and branch generation move to `loopflow/lf/naming.py`.
@@ -75,7 +75,7 @@ Use `_generate_random_words()` which returns `f"{magical}-{musical}"`.
 
 ## Key decisions
 
-**Wait for merge?** Default: wait (blocks until PR merges). `--no-wait` for fire-and-forget.
+**Wait for merge?** Default: fire-and-forget (non-blocking). `--block` to wait for merge.
 
 **What if CI fails?** Abort cycle, stay in current worktree. User fixes and retries.
 
@@ -93,18 +93,18 @@ def generate_word_pair() -> str:
     """Generate magical-musical pair like 'aurora-melody'."""
     return f"{random.choice(MAGICAL)}-{random.choice(MUSICAL)}"
 
-def parse_branch_for_cycle(branch: str) -> str:
-    """Extract base branch name for cycling.
+def parse_branch_base(branch: str) -> str:
+    """Extract base branch name for next iteration.
 
     If branch ends with magical-musical pair, strip it.
-    Otherwise use as-is (first cycle).
+    Otherwise use as-is (first iteration).
 
     'jack.auth.20260123_1112' → 'jack.auth.20260123_1112'
     'jack.auth.20260123_1112-aurora-melody' → 'jack.auth.20260123_1112'
     """
 
-def generate_cycle_branch(base: str, repo: Path) -> str:
-    """Generate unique branch name for next cycle.
+def generate_next_branch(base: str, repo: Path) -> str:
+    """Generate unique branch name for next iteration.
 
     Appends magical-musical pair, retries if exists.
     """
@@ -120,10 +120,10 @@ Then update `agent.py` to import from `naming.py` instead of defining locally.
 ## Key function
 
 ```python
-def cycle(
+def next_worktree(
     repo: Path,
     branch: str,
-    wait: bool = True,          # wait for merge
+    block: bool = False,        # wait for merge
     open_terminal: bool = True,
 ) -> Path:
     """Land current branch, create new worktree with magical-musical suffix.
@@ -135,15 +135,22 @@ def cycle(
 ## CLI
 
 ```bash
-lfops cycle                    # land + create next (aurora-melody, etc.)
-lfops cycle --no-wait          # submit to merge queue, don't wait
-lfops cycle --no-open          # don't open terminal
-lfops cycle --create-pr        # create PR if none exists, then cycle
+lfops next                     # land + create next (aurora-melody, etc.)
+lfops next --block             # wait for merge before creating worktree
+lfops next --no-open           # don't open terminal
+lfops next --create-pr         # create PR if none exists, then next
 ```
 
 ## UI changes
 
-**CLI output:**
+**CLI output (default, non-blocking):**
+```
+Enabling auto-merge for PR #42...
+Creating worktree jack.auth.20260123_1112-aurora-melody...
+Opening terminal...
+```
+
+**CLI output (with --block):**
 ```
 Enabling auto-merge for PR #42...
 Waiting for merge... (Ctrl+C to continue without waiting)
@@ -153,7 +160,7 @@ Creating worktree jack.auth.20260123_1112-aurora-melody...
 Opening terminal...
 ```
 
-**No Concerto changes needed** — cycle is a terminal operation.
+**No Concerto changes needed** — next is a terminal operation.
 
 ## Worktree cleanup
 
@@ -162,7 +169,7 @@ After merge completes:
 2. New worktree is created
 3. User ends up in new worktree
 
-If `--no-wait`: old worktree stays until user runs `lfops wt prune` manually.
+Without `--block`: old worktree stays until user runs `lfops wt prune` manually (or merge completes and you prune later).
 
 ## Constraints
 
@@ -174,13 +181,20 @@ If `--no-wait`: old worktree stays until user runs `lfops wt prune` manually.
 
 ```bash
 # Starting on jack.auth.20260123_1112
-lfops cycle
+lfops next
 
 # Output:
 # Submitting PR #42 to merge queue...
-# Waiting for merge... done
 # Creating worktree jack.auth.20260123_1112-aurora-melody
 # Opening terminal...
 
 pwd  # /Users/jack/src/loopflow.jack.auth.20260123_1112-aurora-melody
+
+# With --block:
+lfops next --block
+# Submitting PR #42 to merge queue...
+# Waiting for merge... done
+# Removing worktree jack.auth.20260123_1112...
+# Creating worktree jack.auth.20260123_1112-aurora-melody...
+# Opening terminal...
 ```

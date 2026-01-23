@@ -5,9 +5,9 @@ from unittest.mock import MagicMock, patch
 from loopflow.lf.naming import (
     MAGICAL,
     MUSICAL,
-    generate_cycle_branch,
+    generate_next_branch,
     generate_word_pair,
-    parse_branch_for_cycle,
+    parse_branch_base,
 )
 
 
@@ -26,55 +26,55 @@ def test_generate_word_pair_randomness():
     assert len(results) > 1  # Very unlikely to get same pair 20 times
 
 
-def test_parse_branch_for_cycle_no_suffix():
+def test_parse_branch_base_no_suffix():
     """Branch without magical-musical suffix returns as-is."""
-    assert parse_branch_for_cycle("jack.auth.20260123_1112") == "jack.auth.20260123_1112"
+    assert parse_branch_base("jack.auth.20260123_1112") == "jack.auth.20260123_1112"
 
 
-def test_parse_branch_for_cycle_with_suffix():
+def test_parse_branch_base_with_suffix():
     """Branch with magical-musical suffix strips it."""
-    result = parse_branch_for_cycle("jack.auth.20260123_1112-aurora-melody")
+    result = parse_branch_base("jack.auth.20260123_1112-aurora-melody")
     assert result == "jack.auth.20260123_1112"
 
 
-def test_parse_branch_for_cycle_with_suffix_frost_cadence():
+def test_parse_branch_base_with_suffix_frost_cadence():
     """Another valid suffix is stripped."""
-    result = parse_branch_for_cycle("jack.auth.20260123_1112-frost-cadence")
+    result = parse_branch_base("jack.auth.20260123_1112-frost-cadence")
     assert result == "jack.auth.20260123_1112"
 
 
-def test_parse_branch_for_cycle_invalid_suffix_not_in_list():
+def test_parse_branch_base_invalid_suffix_not_in_list():
     """Suffix with words not in lists is preserved."""
     # Words not in MAGICAL or MUSICAL
-    result = parse_branch_for_cycle("jack.auth.20260123_1112-foo-bar")
+    result = parse_branch_base("jack.auth.20260123_1112-foo-bar")
     assert result == "jack.auth.20260123_1112-foo-bar"
 
 
-def test_parse_branch_for_cycle_partial_match():
+def test_parse_branch_base_partial_match():
     """Only magical-musical pair counts as suffix."""
     # aurora is magical but "something" is not musical
-    assert parse_branch_for_cycle("jack.auth-aurora-something") == "jack.auth-aurora-something"
+    assert parse_branch_base("jack.auth-aurora-something") == "jack.auth-aurora-something"
 
 
-def test_parse_branch_for_cycle_simple_branch():
+def test_parse_branch_base_simple_branch():
     """Simple branch name without dots."""
-    assert parse_branch_for_cycle("feature-branch") == "feature-branch"
+    assert parse_branch_base("feature-branch") == "feature-branch"
 
 
-def test_parse_branch_for_cycle_recursive():
-    """Parsing a cycled branch returns same base."""
+def test_parse_branch_base_recursive():
+    """Parsing a branch with suffix returns same base."""
     base = "jack.auth.20260123_1112"
-    cycled = f"{base}-aurora-melody"
-    assert parse_branch_for_cycle(cycled) == base
-    # Second cycle would produce different suffix but same base
-    cycled2 = f"{base}-frost-cadence"
-    assert parse_branch_for_cycle(cycled2) == base
+    with_suffix = f"{base}-aurora-melody"
+    assert parse_branch_base(with_suffix) == base
+    # Different suffix still yields same base
+    with_suffix2 = f"{base}-frost-cadence"
+    assert parse_branch_base(with_suffix2) == base
 
 
-def test_generate_cycle_branch_appends_suffix():
+def test_generate_next_branch_appends_suffix():
     """Cycle branch gets magical-musical suffix."""
     with patch("loopflow.lf.naming.branch_exists", return_value=False):
-        result = generate_cycle_branch("jack.auth.20260123_1112", MagicMock())
+        result = generate_next_branch("jack.auth.20260123_1112", MagicMock())
     assert result.startswith("jack.auth.20260123_1112-")
     # Should have magical-musical suffix
     suffix = result.split("-", 3)[-2:]  # Last two hyphen-separated parts
@@ -82,7 +82,7 @@ def test_generate_cycle_branch_appends_suffix():
     assert suffix[1] in MUSICAL
 
 
-def test_generate_cycle_branch_retries_on_collision():
+def test_generate_next_branch_retries_on_collision():
     """Retries when branch already exists."""
     call_count = [0]
 
@@ -92,17 +92,17 @@ def test_generate_cycle_branch_retries_on_collision():
         return call_count[0] < 4
 
     with patch("loopflow.lf.naming.branch_exists", side_effect=mock_exists):
-        result = generate_cycle_branch("test", MagicMock())
+        result = generate_next_branch("test", MagicMock())
 
     assert call_count[0] == 4
     assert result.startswith("test-")
 
 
-def test_generate_cycle_branch_raises_on_exhaustion():
+def test_generate_next_branch_raises_on_exhaustion():
     """Raises ValueError if can't find unique branch after 100 attempts."""
     with patch("loopflow.lf.naming.branch_exists", return_value=True):
         try:
-            generate_cycle_branch("test", MagicMock())
+            generate_next_branch("test", MagicMock())
             assert False, "Should have raised ValueError"
         except ValueError as e:
             assert "Could not generate unique branch" in str(e)

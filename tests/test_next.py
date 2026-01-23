@@ -1,15 +1,15 @@
-"""Tests for cycle command."""
+"""Tests for next command."""
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from loopflow.lfops.cycle import (
+from loopflow.lfops.next import (
     _enable_auto_merge,
     _get_pr_number,
     _get_pr_state,
-    cycle,
+    next_worktree,
 )
 
 
@@ -71,55 +71,55 @@ def test_enable_auto_merge_failure():
     assert result is False
 
 
-def test_cycle_fails_on_main_branch():
-    """Cannot cycle from main branch."""
-    with patch("loopflow.lfops.cycle.find_main_repo", return_value=Path("/repo")):
-        with patch("loopflow.lfops.cycle.get_default_branch", return_value="main"):
-            result = cycle(Path("/repo"), "main", wait=False, open_terminal=False)
+def test_next_fails_on_main_branch():
+    """Cannot run next from main branch."""
+    with patch("loopflow.lfops.next.find_main_repo", return_value=Path("/repo")):
+        with patch("loopflow.lfops.next.get_default_branch", return_value="main"):
+            result = next_worktree(Path("/repo"), "main", block=False, open_terminal=False)
     assert result is None
 
 
-def test_cycle_fails_without_pr():
+def test_next_fails_without_pr():
     """Fails when no PR exists and create_pr not set."""
-    with patch("loopflow.lfops.cycle.find_main_repo", return_value=Path("/repo")):
-        with patch("loopflow.lfops.cycle.get_default_branch", return_value="main"):
-            with patch("loopflow.lfops.cycle._get_pr_number", return_value=None):
-                result = cycle(
+    with patch("loopflow.lfops.next.find_main_repo", return_value=Path("/repo")):
+        with patch("loopflow.lfops.next.get_default_branch", return_value="main"):
+            with patch("loopflow.lfops.next._get_pr_number", return_value=None):
+                result = next_worktree(
                     Path("/repo"),
                     "feature-branch",
-                    wait=False,
+                    block=False,
                     open_terminal=False,
                     create_pr=False,
                 )
     assert result is None
 
 
-def test_cycle_creates_worktree_with_suffix(tmp_path):
+def test_next_creates_worktree_with_suffix(tmp_path):
     """Creates new worktree with magical-musical suffix."""
     repo = tmp_path / "repo"
     repo.mkdir()
 
-    with patch("loopflow.lfops.cycle.find_main_repo", return_value=repo):
-        with patch("loopflow.lfops.cycle.get_default_branch", return_value="main"):
-            with patch("loopflow.lfops.cycle._get_pr_number", return_value=42):
-                with patch("loopflow.lfops.cycle._enable_auto_merge", return_value=True):
-                    with patch("loopflow.lfops.cycle._wait_for_merge", return_value=False):
+    with patch("loopflow.lfops.next.find_main_repo", return_value=repo):
+        with patch("loopflow.lfops.next.get_default_branch", return_value="main"):
+            with patch("loopflow.lfops.next._get_pr_number", return_value=42):
+                with patch("loopflow.lfops.next._enable_auto_merge", return_value=True):
+                    with patch("loopflow.lfops.next._wait_for_merge", return_value=False):
                         with patch(
-                            "loopflow.lfops.cycle.generate_cycle_branch",
+                            "loopflow.lfops.next.generate_next_branch",
                             return_value="jack.auth.20260123_1112-aurora-melody",
                         ):
                             with patch(
-                                "loopflow.lfops.cycle.parse_branch_for_cycle",
+                                "loopflow.lfops.next.parse_branch_base",
                                 return_value="jack.auth.20260123_1112",
                             ):
                                 with patch("subprocess.run") as mock_run:
                                     # git worktree add succeeds
                                     mock_run.return_value = MagicMock(returncode=0)
-                                    with patch("loopflow.lfops.cycle.write_directive"):
-                                        result = cycle(
+                                    with patch("loopflow.lfops.next.write_directive"):
+                                        result = next_worktree(
                                             repo,
                                             "jack.auth.20260123_1112",
-                                            wait=False,
+                                            block=False,
                                             open_terminal=False,
                                         )
 

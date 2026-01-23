@@ -12,47 +12,9 @@ import argparse
 import json
 import subprocess
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
-WEBSITE_ROOT = ROOT.parent / "loopflowstudio" / "website"
-CONCERTO_RELEASE_PATH = WEBSITE_ROOT / "static" / "concerto-release.json"
-
-
-def update_website_release(version: str, public_url: str, dry_run: bool) -> bool:
-    release = {
-        "version": version,
-        "latest_url": f"{public_url}/LoopflowConcerto-latest.dmg",
-        "versioned_url": f"{public_url}/LoopflowConcerto-{version}.dmg",
-        "published_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-    }
-
-    if not WEBSITE_ROOT.exists():
-        print(f"Website repo not found at {WEBSITE_ROOT}. Skipping website update.")
-        return False
-
-    if dry_run:
-        print(f"Would update website release metadata at {CONCERTO_RELEASE_PATH}")
-        print(json.dumps(release, indent=2))
-        print("Would deploy website via: python dev.py deploy --prod")
-        return True
-
-    CONCERTO_RELEASE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CONCERTO_RELEASE_PATH.write_text(json.dumps(release, indent=2) + "\n")
-    return deploy_website()
-
-
-def deploy_website() -> bool:
-    try:
-        subprocess.run(
-            ["python", "dev.py", "deploy", "--prod"],
-            cwd=WEBSITE_ROOT,
-            check=True,
-        )
-    except subprocess.CalledProcessError:
-        return False
-    return True
 
 
 # --- Screenshot generation ---
@@ -135,21 +97,24 @@ def _get_open_release_pr() -> tuple[str | None, str | None]:
 
 def _is_on_pypi(version: str) -> bool:
     """Check if version is already on PyPI."""
-    result = subprocess.run(
-        ["pip", "index", "versions", "loopflow"],
-        capture_output=True,
-        text=True,
-    )
-    return f"({version})" in result.stdout or version in result.stdout
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(
+            "https://pypi.org/pypi/loopflow/json", timeout=10
+        ) as response:
+            data = json.loads(response.read())
+            return version in data.get("releases", {})
+    except Exception:
+        return False
 
 
 # --- Release phases ---
 
 
-def _finalize_release(version: str, skip_dmg: bool, skip_website: bool) -> int:
+def _finalize_release(version: str, skip_dmg: bool) -> int:
     """Complete release: tag, publish to PyPI, build DMG."""
     from loopflow.publish import (
-        R2_PUBLIC_URL,
         build_dmg,
         build_package,
         get_dmg_path,
@@ -223,11 +188,6 @@ def _finalize_release(version: str, skip_dmg: bool, skip_website: bool) -> int:
                 print(output, file=sys.stderr)
             else:
                 print(output)
-                if not skip_website:
-                    print("Updating website...")
-                    if not update_website_release(version, R2_PUBLIC_URL, dry_run=False):
-                        print("Website update failed.", file=sys.stderr)
-                        return 1
 
     # Install locally
     print("Installing locally...")
@@ -451,9 +411,13 @@ def main() -> int:
         "--dmg-only", action="store_true", help="Only build and upload DMG (no PyPI)"
     )
     parser.add_argument("--skip-dmg", action="store_true", help="Skip DMG build/upload")
-    parser.add_argument("--skip-website", action="store_true", help="Skip website update/deploy")
     parser.add_argument(
         "--skip-screenshots", action="store_true", help="Skip screenshot generation"
+    )
+    parser.add_argument(
+        "--version",
+        type=str,
+        help="Explicitly specify version to finalize (bypasses state detection)",
     )
     args = parser.parse_args()
 
@@ -480,8 +444,6 @@ def main() -> int:
             print("Would build Concerto DMG")
             print(f"Would upload DMG to {R2_PUBLIC_URL}/LoopflowConcerto-{version}.dmg")
             print(f"Would upload DMG to {R2_PUBLIC_URL}/LoopflowConcerto-latest.dmg")
-            if not args.skip_website:
-                print("Would update website release metadata and deploy")
             return 0
 
         print("Building Concerto DMG...")
@@ -502,11 +464,6 @@ def main() -> int:
         print(output)
 
         print(f"\nDMG published: {R2_PUBLIC_URL}/LoopflowConcerto-{version}.dmg")
-        if not args.skip_website:
-            print("Updating website...")
-            if not update_website_release(version, R2_PUBLIC_URL, dry_run=False):
-                print("Website update failed.", file=sys.stderr)
-                return 1
         return 0
 
     # Handle --local mode: build and install only
@@ -536,6 +493,20 @@ def main() -> int:
 
     # --- Idempotent release flow: detect state and act accordingly ---
 
+    # Handle explicit --version: bypass state detection and finalize directly
+    if args.version:
+        version = args.version.lstrip("v")
+        print(f"Finalizing specified version v{version}...")
+        if args.dry_run:
+            print(f"Would finalize release v{version}:")
+            print("  - Tag and push (if not exists)")
+            print("  - Publish to PyPI (if not published)")
+            if not args.skip_dmg:
+                print("  - Build and upload DMG")
+            print("  - Install locally")
+            return 0
+        return _finalize_release(version, args.skip_dmg)
+
     print("Checking release state...")
 
     # State 1: Release commit on main, not yet tagged/published → finalize
@@ -554,7 +525,7 @@ def main() -> int:
             print("  - Install locally")
             return 0
 
-        return _finalize_release(release_version, args.skip_dmg, args.skip_website)
+        return _finalize_release(release_version, args.skip_dmg)
 
     # State 2: Open release PR exists → tell user to wait
     pr_version, pr_url = _get_open_release_pr()

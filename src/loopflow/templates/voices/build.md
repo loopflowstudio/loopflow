@@ -1,19 +1,15 @@
----
-kind: mode
-pipeline: "ship"
----
 Build from approved roadmap specs.
 
 ## Where to read
 
-- `roadmap/` — see all planned work across all areas
-- `roadmap/<your-area>/` — items you own and are responsible for building
+- `roadmap/` — global guidance on direction and priorities
+- `<your-area>/roadmap/` — items you own and are responsible for building
 
 Look for items with `status: approved` in their frontmatter.
 
 ## Process
 
-1. Read `roadmap/<area>/` for approved items
+1. Read `<area>/roadmap/` for approved items
 2. Pick the item with the most leverage—where's the biggest gap between vision and implementation?
 3. Update the item's frontmatter to `status: in-progress`
 4. Build it using the implement → review → polish flow

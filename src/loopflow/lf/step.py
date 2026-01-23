@@ -13,6 +13,8 @@ import typer
 from loopflow.lf.config import load_config, parse_model
 from loopflow.lf.context import (
     ContextConfig,
+    DiffMode,
+    FilesetConfig,
     PromptComponents,
     find_worktree_root,
     format_prompt,
@@ -188,7 +190,6 @@ def _launch_interactive_default(
     voice: str | None = None,
     clipboard: bool | None = None,
     docs: bool | None = None,
-    summaries: bool | None = None,
 ) -> None:
     """Launch interactive claude with docs context (no step)."""
     agent_model = model or (config.agent_model if config else "claude:opus")
@@ -210,7 +211,6 @@ def _launch_interactive_default(
     # Resolve flags
     include_clipboard = clipboard if clipboard is not None else (config.paste if config else False)
     include_docs = docs if docs is not None else (config.lfdocs if config else True)
-    include_summaries = summaries if summaries is not None else bool(config and config.summaries)
 
     try:
         components = gather_prompt_components(
@@ -220,10 +220,9 @@ def _launch_interactive_default(
             run_mode="interactive",
             voices=cli_voices or (config.voice if config else None),
             context_config=ContextConfig.for_interactive(
-                pathset=list(context) if context else [],
+                paths=list(context) if context else [],
                 exclude=list(config.exclude) if config and config.exclude else [],
                 lfdocs=config.include_loopflow_doc if config else True,
-                summaries=include_summaries,
                 clipboard=include_clipboard,
             ),
             config=config,
@@ -270,14 +269,8 @@ def run(
     docs: Optional[bool] = typer.Option(
         None, "--lfdocs/--no-lfdocs", help="Include roadmap/, scratch/, and root .md files"
     ),
-    diff: Optional[bool] = typer.Option(
-        None, "--diff/--no-diff", help="Include raw branch diff against main"
-    ),
-    diff_files: Optional[bool] = typer.Option(
-        None, "--diff-files/--no-diff-files", help="Include files touched by branch"
-    ),
-    summaries: Optional[bool] = typer.Option(
-        None, "--summaries/--no-summaries", help="Include pre-generated codebase summaries"
+    diff_mode: Optional[str] = typer.Option(
+        None, "--diff-mode", help="How to include branch changes: files, diff, or none"
     ),
     model: ModelType = typer.Option(
         None, "-m", "-M", "--model", help="Model to use (backend or backend:variant)"
@@ -319,7 +312,6 @@ def run(
             voice=voice,
             clipboard=clipboard,
             docs=docs,
-            summaries=summaries,
         )
 
     # Gather step file to get frontmatter config
@@ -363,20 +355,20 @@ def run(
         if pattern in exclude_patterns:
             exclude_patterns.remove(pattern)
 
-    # Resolve clipboard/docs/diff/diff_files/summaries flags (CLI > frontmatter > config > default)
+    # Resolve clipboard/docs flags (CLI > config > default)
     include_clipboard = clipboard if clipboard is not None else (config.paste if config else False)
     include_docs = docs if docs is not None else (config.lfdocs if config else True)
-    include_diff = diff if diff is not None else (config.diff if config else False)
-    # diff_files: CLI > frontmatter > config > default
-    if diff_files is not None:
-        include_diff_files = diff_files
-    elif frontmatter.diff_files is not None:
-        include_diff_files = frontmatter.diff_files
-    elif config:
-        include_diff_files = config.diff_files
-    else:
-        include_diff_files = True
-    include_summaries = summaries if summaries is not None else bool(config and config.summaries)
+
+    # Resolve diff_mode: CLI > frontmatter > config > default
+    resolved_diff_mode = DiffMode.FILES  # default
+    if diff_mode is not None:
+        resolved_diff_mode = DiffMode(diff_mode)
+    elif frontmatter.diff_files is False:
+        resolved_diff_mode = DiffMode.NONE
+    elif config and not config.diff_files:
+        resolved_diff_mode = DiffMode.NONE
+    elif config and config.diff:
+        resolved_diff_mode = DiffMode.DIFF
 
     args = ctx.args or None
     try:
@@ -387,12 +379,13 @@ def run(
             run_mode="interactive" if is_interactive else "auto",
             voices=resolved.voice or None,
             context_config=ContextConfig(
-                pathset=list(resolved.context) if resolved.context else [],
-                exclude=list(exclude_patterns) if exclude_patterns else [],
+                diff_mode=resolved_diff_mode,
+                files=FilesetConfig(
+                    paths=list(resolved.context) if resolved.context else [],
+                    exclude=list(exclude_patterns) if exclude_patterns else [],
+                ),
+                area=resolved.area,
                 lfdocs=config.include_loopflow_doc if config else True,
-                diff=include_diff,
-                diff_files=include_diff_files,
-                summaries=include_summaries,
                 clipboard=include_clipboard,
             ),
             config=config,
@@ -460,14 +453,8 @@ def inline(
     docs: Optional[bool] = typer.Option(
         None, "--lfdocs/--no-lfdocs", help="Include roadmap/, scratch/, and root .md files"
     ),
-    diff: Optional[bool] = typer.Option(
-        None, "--diff/--no-diff", help="Include raw branch diff against main"
-    ),
-    diff_files: Optional[bool] = typer.Option(
-        None, "--diff-files/--no-diff-files", help="Include files touched by branch"
-    ),
-    summaries: Optional[bool] = typer.Option(
-        None, "--summaries/--no-summaries", help="Include pre-generated codebase summaries"
+    diff_mode: Optional[str] = typer.Option(
+        None, "--diff-mode", help="How to include branch changes: files, diff, or none"
     ),
     model: ModelType = typer.Option(
         None, "-m", "-M", "--model", help="Model to use (backend or backend:variant)"
@@ -521,15 +508,18 @@ def inline(
         if pattern in exclude_patterns:
             exclude_patterns.remove(pattern)
 
-    # Resolve clipboard/docs/diff/diff_files/summaries flags (CLI overrides config)
+    # Resolve clipboard/docs flags (CLI overrides config)
     include_clipboard = clipboard if clipboard is not None else (config.paste if config else False)
     include_docs = docs if docs is not None else (config.lfdocs if config else True)
-    include_diff = diff if diff is not None else (config.diff if config else False)
-    if diff_files is not None:
-        include_diff_files = diff_files
-    else:
-        include_diff_files = config.diff_files if config else True
-    include_summaries = summaries if summaries is not None else bool(config and config.summaries)
+
+    # Resolve diff_mode: CLI > config > default
+    resolved_diff_mode = DiffMode.FILES  # default
+    if diff_mode is not None:
+        resolved_diff_mode = DiffMode(diff_mode)
+    elif config and not config.diff_files:
+        resolved_diff_mode = DiffMode.NONE
+    elif config and config.diff:
+        resolved_diff_mode = DiffMode.DIFF
 
     try:
         components = gather_prompt_components(
@@ -539,12 +529,13 @@ def inline(
             run_mode="interactive" if is_interactive else "auto",
             voices=resolved.voice or None,
             context_config=ContextConfig(
-                pathset=list(resolved.context) if resolved.context else [],
-                exclude=list(exclude_patterns) if exclude_patterns else [],
+                diff_mode=resolved_diff_mode,
+                files=FilesetConfig(
+                    paths=list(resolved.context) if resolved.context else [],
+                    exclude=list(exclude_patterns) if exclude_patterns else [],
+                ),
+                area=resolved.area,
                 lfdocs=config.include_loopflow_doc if config else True,
-                diff=include_diff,
-                diff_files=include_diff_files,
-                summaries=include_summaries,
                 clipboard=include_clipboard,
             ),
             config=config,
@@ -662,15 +653,23 @@ def flow(
             typer.echo("Error: Flow has no steps", err=True)
             raise typer.Exit(1)
 
+        # Determine diff_mode from config
+        flow_diff_mode = DiffMode.FILES
+        if config and not config.diff_files:
+            flow_diff_mode = DiffMode.NONE
+        elif config and config.diff:
+            flow_diff_mode = DiffMode.DIFF
+
         components = gather_prompt_components(
             repo_root,
             first_step,
             context_config=ContextConfig(
-                pathset=list(all_context) if all_context else [],
-                exclude=list(exclude) if exclude else [],
+                diff_mode=flow_diff_mode,
+                files=FilesetConfig(
+                    paths=list(all_context) if all_context else [],
+                    exclude=list(exclude) if exclude else [],
+                ),
                 lfdocs=config.include_loopflow_doc if config else True,
-                diff=config.diff if config else False,
-                diff_files=config.diff_files if config else True,
             ),
             config=config,
         )

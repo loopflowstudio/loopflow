@@ -1,15 +1,15 @@
 ---
 interactive: true
-produces: roadmap/<area>/<item>.md
+produces: <area>/roadmap/<item>.md
 ---
 Propose a new roadmap item.
 
 ## Process
 
-1. Read `roadmap/` to understand the project's vision and direction
+1. Read `roadmap/` to understand the project's global direction and priorities
 2. Consider the user's request: {args}
 3. Evaluate honestly: where does this fit in the vision?
-4. Create a roadmap item at `roadmap/<area>/<slug>.md`
+4. Create a roadmap item at `<area>/roadmap/<slug>.md`
 
 ## Output format
 

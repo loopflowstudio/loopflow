@@ -7,6 +7,8 @@ import pytest
 
 from loopflow.lf.context import (
     ContextConfig,
+    DiffMode,
+    FilesetConfig,
     PromptComponents,
     _get_builtin_step,
     build_prompt,
@@ -97,7 +99,8 @@ def test_build_prompt_includes_context_files(temp_repo):
     """Context files passed via pathset appear in output."""
     (temp_repo / "main.py").write_text("print('hello')\n")
 
-    result = build_prompt(temp_repo, "implement", context_config=ContextConfig(pathset=["main.py"]))
+    config = ContextConfig(files=FilesetConfig(paths=["main.py"]))
+    result = build_prompt(temp_repo, "implement", context_config=config)
 
     assert "Reference files" in result
     assert "<lf:files>" in result
@@ -125,7 +128,7 @@ def test_build_prompt_inline_with_context(temp_repo):
         temp_repo,
         step=None,
         inline="add tests",
-        context_config=ContextConfig(pathset=["main.py"]),
+        context_config=ContextConfig(files=FilesetConfig(paths=["main.py"])),
     )
 
     assert "<lf:step>" in result
@@ -191,7 +194,7 @@ def test_gather_prompt_components_includes_context(temp_repo):
     (temp_repo / "main.py").write_text("print('hello')")
 
     components = gather_prompt_components(
-        temp_repo, "implement", context_config=ContextConfig(pathset=["main.py"])
+        temp_repo, "implement", context_config=ContextConfig(files=FilesetConfig(paths=["main.py"]))
     )
 
     # Pathset files are merged into diff_files (deduped at load time)
@@ -232,7 +235,7 @@ def test_format_prompt_with_all_components(temp_repo):
     (temp_repo / "main.py").write_text("print('hello')")
 
     components = gather_prompt_components(
-        temp_repo, "implement", context_config=ContextConfig(pathset=["main.py"])
+        temp_repo, "implement", context_config=ContextConfig(files=FilesetConfig(paths=["main.py"]))
     )
     formatted = format_prompt(components)
 
@@ -257,8 +260,9 @@ def test_gather_prompt_components_deduplicates_diff_and_context(temp_repo, monke
         temp_repo,
         "implement",
         context_config=ContextConfig(
-            pathset=["shared.py", "context_only.py"],  # shared.py overlaps with diff
-            diff_files=True,
+            diff_mode=DiffMode.FILES,
+            # shared.py overlaps with diff
+            files=FilesetConfig(paths=["shared.py", "context_only.py"]),
         ),
     )
 

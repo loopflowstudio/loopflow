@@ -14,7 +14,7 @@ import typer
 
 from loopflow.lf.flows import load_flow
 from loopflow.lf.logging import get_log_dir
-from loopflow.lf.voices import list_voices, load_voice, voice_exists
+from loopflow.lf.voices import list_voices, voice_exists
 from loopflow.lfd.agent import (
     create_agent,
     delete_agent,
@@ -859,14 +859,7 @@ def list_voices_cmd():
     typer.echo("")
 
     for voice_name in all_voices:
-        voice = load_voice(repo, voice_name)
-        if voice:
-            area_str = f"area: [{', '.join(voice.area)}]" if voice.area else ""
-            pipeline_str = f"pipeline: {voice.pipeline}" if voice.pipeline else ""
-            details = "  ".join(filter(None, [area_str, pipeline_str]))
-            typer.echo(f"  {c['bold']}{voice_name:<20}{c['reset']} {c['dim']}{details}{c['reset']}")
-        else:
-            typer.echo(f"  {c['bold']}{voice_name:<20}{c['reset']}")
+        typer.echo(f"  {c['bold']}{voice_name}{c['reset']}")
 
     typer.echo("")
     typer.echo(f"{len(all_voices)} voice{'s' if len(all_voices) != 1 else ''} found")

@@ -22,6 +22,7 @@ class StepConfig(BaseModel):
     chrome: bool | None = None  # Enable Chrome integration for Claude Code
     diff_files: bool | None = None  # Include files changed on branch
     context: list[str] | None = None  # Additional context files (from flow overrides)
+    area: str | None = None  # Area path for parent doc inclusion (e.g., "lf/cli")
 
     @field_validator("voice", mode="before")
     @classmethod
@@ -69,6 +70,7 @@ class ResolvedStepConfig:
     model: str
     context: list[str]
     voice: list[str]
+    area: str | None = None
 
 
 def parse_step_file(name: str, text: str) -> StepFile:
@@ -180,6 +182,7 @@ def resolve_step_config(
     cli_model: str | None,
     cli_context: list[str] | None,
     cli_voice: list[str] | None = None,
+    cli_area: str | None = None,
 ) -> ResolvedStepConfig:
     """Merge configs: CLI > frontmatter > global > defaults."""
     defaults = get_step_defaults()
@@ -247,6 +250,16 @@ def resolve_step_config(
     if include:
         exclude = [item for item in exclude if item not in include]
 
+    # Resolve area: CLI > frontmatter > global > default
+    if cli_area:
+        area = cli_area
+    elif frontmatter.area:
+        area = frontmatter.area
+    elif global_config and hasattr(global_config, "area") and global_config.area:
+        area = global_config.area
+    else:
+        area = None
+
     return ResolvedStepConfig(
         interactive=interactive,
         include=include,
@@ -254,4 +267,5 @@ def resolve_step_config(
         model=model,
         context=context,
         voice=voice,
+        area=area,
     )

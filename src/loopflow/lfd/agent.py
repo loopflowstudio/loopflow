@@ -42,9 +42,9 @@ def save_agent(agent: Agent, db_path: Path | None = None) -> None:
         """
         INSERT OR REPLACE INTO agents
         (id, repo, flow, voice, area, mode, status, iteration, main_branch,
-         pr_limit, merge_mode, pid, created_at, watch_paths, cron, last_main_sha,
-         consecutive_failures)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         worktree, branch, pr_limit, merge_mode, pid, created_at, watch_paths,
+         cron, last_main_sha, consecutive_failures)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             agent.id,
@@ -56,6 +56,8 @@ def save_agent(agent: Agent, db_path: Path | None = None) -> None:
             agent.status.value,
             agent.iteration,
             agent.main_branch,
+            str(agent.worktree) if agent.worktree else None,
+            agent.branch,
             agent.pr_limit,
             agent.merge_mode.value,
             agent.pid,
@@ -183,6 +185,25 @@ def update_agent_consecutive_failures(
     cursor = conn.execute(
         "UPDATE agents SET consecutive_failures = ? WHERE id = ? OR id LIKE ?",
         (failures, agent_id, f"{agent_id}%"),
+    )
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    return updated
+
+
+def update_agent_worktree_branch(
+    agent_id: str,
+    worktree: Path | None,
+    branch: str | None,
+    db_path: Path | None = None,
+) -> bool:
+    """Update an agent's worktree path and current branch."""
+    conn = _get_db(db_path)
+
+    cursor = conn.execute(
+        "UPDATE agents SET worktree = ?, branch = ? WHERE id = ? OR id LIKE ?",
+        (str(worktree) if worktree else None, branch, agent_id, f"{agent_id}%"),
     )
     conn.commit()
     updated = cursor.rowcount > 0

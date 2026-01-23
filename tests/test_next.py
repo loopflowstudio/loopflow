@@ -3,20 +3,13 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from loopflow.lfops.next import (
     _enable_auto_merge,
     _get_pr_number,
     _get_pr_state,
+    move_worktree,
     next_worktree,
 )
-
-
-@pytest.fixture
-def mock_repo(tmp_path):
-    """Create a mock repo directory."""
-    return tmp_path / "repo"
 
 
 def test_get_pr_number_returns_number():
@@ -94,8 +87,36 @@ def test_next_fails_without_pr():
     assert result is None
 
 
-def test_next_creates_worktree_with_suffix(tmp_path):
-    """Creates new worktree with magical-musical suffix."""
+def test_move_worktree_success():
+    """move_worktree removes and recreates at same path."""
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0)
+        result = move_worktree(
+            Path("/main"),
+            Path("/main/worktree"),
+            "new-branch",
+            "main",
+        )
+    assert result is True
+    # Should call: remove, add, push
+    assert mock_run.call_count == 3
+
+
+def test_move_worktree_fails_on_remove():
+    """move_worktree returns False if remove fails."""
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=1)
+        result = move_worktree(
+            Path("/main"),
+            Path("/main/worktree"),
+            "new-branch",
+            "main",
+        )
+    assert result is False
+
+
+def test_next_moves_worktree_in_place(tmp_path):
+    """next_worktree returns same path (moves in place)."""
     repo = tmp_path / "repo"
     repo.mkdir()
 
@@ -103,26 +124,25 @@ def test_next_creates_worktree_with_suffix(tmp_path):
         with patch("loopflow.lfops.next.get_default_branch", return_value="main"):
             with patch("loopflow.lfops.next._get_pr_number", return_value=42):
                 with patch("loopflow.lfops.next._enable_auto_merge", return_value=True):
-                    with patch("loopflow.lfops.next._wait_for_merge", return_value=False):
+                    with patch(
+                        "loopflow.lfops.next.generate_next_branch",
+                        return_value="jack.auth.20260123_1112-aurora-melody",
+                    ):
                         with patch(
-                            "loopflow.lfops.next.generate_next_branch",
-                            return_value="jack.auth.20260123_1112-aurora-melody",
+                            "loopflow.lfops.next.parse_branch_base",
+                            return_value="jack.auth.20260123_1112",
                         ):
                             with patch(
-                                "loopflow.lfops.next.parse_branch_base",
-                                return_value="jack.auth.20260123_1112",
+                                "loopflow.lfops.next.move_worktree", return_value=True
                             ):
-                                with patch("subprocess.run") as mock_run:
-                                    # git worktree add succeeds
-                                    mock_run.return_value = MagicMock(returncode=0)
-                                    with patch("loopflow.lfops.next.write_directive"):
-                                        result = next_worktree(
-                                            repo,
-                                            "jack.auth.20260123_1112",
-                                            block=False,
-                                            open_terminal=False,
-                                        )
+                                with patch("loopflow.lfops.next.write_directive"):
+                                    result = next_worktree(
+                                        repo,
+                                        "jack.auth.20260123_1112",
+                                        block=False,
+                                        open_terminal=False,
+                                    )
 
     assert result is not None
-    # Worktree path should be sibling to repo
-    assert result.parent == repo.parent
+    # Returns same path - worktree moved in place
+    assert result == repo

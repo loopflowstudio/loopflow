@@ -72,8 +72,12 @@ def update_version_in_file(version: str) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="Manage baseline schema version")
-    parser.add_argument("--clean", action="store_true", help="Remove m_*.py and set placeholder version")
-    parser.add_argument("--finalize", action="store_true", help="Update version to current commit SHA")
+    parser.add_argument(
+        "--clean", action="store_true", help="Remove m_*.py and set placeholder version"
+    )
+    parser.add_argument(
+        "--finalize", action="store_true", help="Update version to current commit SHA"
+    )
     args = parser.parse_args()
 
     if not args.clean and not args.finalize:

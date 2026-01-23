@@ -20,7 +20,7 @@ Concerto's worktree UI flickers and lags. Root causes:
 | # | Project | Status | Scope |
 |---|---------|--------|-------|
 | 1 | [Protocol Alignment](./concerto-lfd-01-protocol.md) | **Complete** | Fix event names and field mappings |
-| 2 | [Worktree State Service](./concerto-lfd-02-worktree-state.md) | **Next** | Move status calculation into lfd |
+| 2 | [Worktree State Service](./concerto-lfd-02-worktree-state.md) | **In Progress** | Move status calculation into lfd |
 | 3 | [Push-Based Events](./concerto-lfd-03-push-events.md) | Future | Rich events with full worktree status |
 | 4 | [Atomic UI Updates](./concerto-lfd-04-atomic-updates.md) | Future | Single-pass rendering in Concerto |
 | 5 | [Simplified WorktreeRow](./concerto-lfd-05-worktree-row.md) | Future | Remove hover buttons, better summary |

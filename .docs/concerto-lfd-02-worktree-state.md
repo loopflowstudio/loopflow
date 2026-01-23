@@ -2,7 +2,7 @@
 
 Move worktree status calculation from Concerto into lfd.
 
-**Status:** Next
+**Status:** In Progress (Python done, Swift pending)
 
 ---
 
@@ -181,9 +181,23 @@ let worktrees = try await lfdService.request("worktrees.list", params: ["repo": 
 
 ## Done When
 
-- [ ] `worktrees.list` endpoint returns full status
-- [ ] Staleness calculated server-side
-- [ ] CI status included in response
-- [ ] Concerto loads worktree list in single request
+- [x] `worktrees.list` endpoint returns full status
+- [x] Staleness calculated server-side
+- [ ] CI status included in response (needs CI polling in lfd)
+- [ ] Concerto loads worktree list in single request (needs Swift changes)
 - [ ] No flicker on initial load
 - [ ] Status updates within 1 second of changes
+
+## Progress
+
+### Completed
+- `WorktreeStateService` in `src/loopflow/lfd/worktree_state.py`
+- `worktrees.list` endpoint in daemon server
+- Staleness detection using existing `is_merged()` logic
+- Recent steps included from step_run database
+- Caching with 5-second TTL
+
+### Remaining
+- Swift: Add request-response capability to LFDEventService
+- Swift: Add `listFromLFD()` method to WorktreeService
+- Swift: Update AppState to try lfd first, fall back to CLI

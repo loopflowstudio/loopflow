@@ -21,6 +21,7 @@ from loopflow.lfd.step_run import (
     save_step_run,
     update_step_run_status,
 )
+from loopflow.lfd.worktree_state import get_worktree_state_service
 
 
 class Server:
@@ -110,6 +111,8 @@ class Server:
             return await self._handle_manager_acquire(params)
         elif method == "scheduler.release":
             return await self._handle_manager_release(params)
+        elif method == "worktrees.list":
+            return await self._handle_worktrees_list(params)
         else:
             return error(f"Unknown method: {method}", request.id)
 
@@ -261,6 +264,23 @@ class Server:
             )
         )
         return success({"slots_used": self.manager.slots_used()})
+
+    async def _handle_worktrees_list(self, params: dict) -> Response:
+        """Return worktree list with staleness and recent steps."""
+        repo = params.get("repo")
+        if not repo:
+            return error("Missing 'repo' parameter")
+
+        repo_path = Path(repo)
+        if not repo_path.exists():
+            return error(f"Repository not found: {repo}")
+
+        try:
+            service = get_worktree_state_service()
+            worktrees = service.list_worktrees(repo_path)
+            return success({"worktrees": worktrees})
+        except Exception as e:
+            return error(f"Failed to list worktrees: {e}")
 
     async def _broadcast(self, event: Event) -> None:
         message = (event.serialize() + "\n").encode()

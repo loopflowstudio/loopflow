@@ -14,6 +14,7 @@ from loopflow.lf.git import find_main_repo
 from loopflow.lf.worktrees import (
     create_with_schema,
     find_merged,
+    get_path,
     list_all,
     merge_diagnostics,
     remove,
@@ -74,6 +75,46 @@ def register_commands(app: typer.Typer) -> None:
             # Shell integration not active - print manual cd command
             typer.echo(f"\ncd {path}")
             typer.echo("\nTip: Run 'lfops shell install' for auto-cd after worktree creation")
+
+    @wt_app.command("switch")
+    def switch_worktree(
+        name: Annotated[str, typer.Argument(help="Worktree name (directory suffix)")],
+    ) -> None:
+        """Switch to a worktree by its short directory name.
+
+        Finds worktree by matching the directory suffix. For example,
+        'concerto' matches '../loopflow.concerto'.
+
+        Example:
+            lfops wt switch concerto
+            # Switches to ../loopflow.concerto
+        """
+        repo_root = find_main_repo()
+        if not repo_root:
+            typer.echo("Error: Not in a git repository", err=True)
+            raise typer.Exit(1)
+
+        # Find worktree by directory name
+        target_path = get_path(repo_root, name)
+        if not target_path.exists():
+            # Try matching against existing worktrees
+            worktrees = list_all(repo_root)
+            matches = [wt for wt in worktrees if wt.path.name.endswith(f".{name}")]
+            if len(matches) == 1:
+                target_path = matches[0].path
+            elif len(matches) > 1:
+                typer.echo(f"Error: Multiple worktrees match '{name}':", err=True)
+                for wt in matches:
+                    typer.echo(f"  {wt.path.name}", err=True)
+                raise typer.Exit(1)
+            else:
+                typer.echo(f"Error: No worktree found for '{name}'", err=True)
+                typer.echo(f"Expected: {target_path}")
+                raise typer.Exit(1)
+
+        # Write cd directive for shell integration
+        if not write_directive(f"cd {target_path}"):
+            typer.echo(f"cd {target_path}")
 
     @wt_app.command("ci")
     def ci_status(

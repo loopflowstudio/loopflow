@@ -1,12 +1,13 @@
-# v0.6.10
+# v0.6.11
 
-Adds flexible branch naming templates, global config with auto-pruning for merged worktrees, and new prompt variants for quality gates and codebase-wide analysis. Also renames 'loop' to 'job' across the daemon and aligns Swift/TypeScript models with the Python schema.
+This release adds watch and cron trigger support for background agents with automatic retry and circuit breaker protection. It also simplifies context configuration by consolidating goals into voices and replacing multiple diff flags with a single `--diff-mode` option.
 
 ## Changes
 
-- Add `branch_names.schema` config for custom worktree branch naming (e.g., `{user}.{name}.{date}`)
-- Add global config support and auto-prune for merged worktrees
-- Add gate prompt variants (`-gate` suffix) for fast inner-loop quality checks
-- Add big prompt variants (`-big` suffix) for strategic codebase-wide assessment
-- Rename `loop` to `job` in lfd daemon
-- Align Swift and TypeScript models with Python runs/triggers schema
+- Add watch mode for file-change triggered agents with glob pattern support
+- Add cron mode improvements for scheduled agent triggers
+- Add retry with exponential backoff (3 retries, 30s) and circuit breaker (trips after 5 failures)
+- Consolidate goals into voices with global voice support via `~/.lf/voices/`
+- Replace `--diff/--diff-files` flags with single `--diff-mode` option (FILES, DIFF, NONE)
+- Add explicit agent mode field (`loop`, `watch`, `cron`) to data model
+- Clean up temporary agents after `lfd run` completes

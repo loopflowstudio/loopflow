@@ -5,11 +5,16 @@ StepRuns track individual step executions, either:
 - As part of a FlowRun (agent-spawned)
 """
 
+import json
+import socket
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from loopflow.lfd.db import _get_db
 from loopflow.lfd.models import StepRun, StepRunStatus
+
+SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 
 
 def save_step_run(step_run: StepRun, db_path: Path | None = None) -> None:
@@ -18,13 +23,13 @@ def save_step_run(step_run: StepRun, db_path: Path | None = None) -> None:
 
     conn.execute(
         """
-        INSERT OR REPLACE INTO sessions
-        (id, task, repo, worktree, status, started_at, ended_at, pid, model, run_mode)
+        INSERT OR REPLACE INTO step_runs
+        (id, step, repo, worktree, status, started_at, ended_at, pid, model, run_mode)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             step_run.id,
-            step_run.step,  # DB column is 'task' for backward compat
+            step_run.step,
             step_run.repo,
             step_run.worktree,
             step_run.status.value,
@@ -59,7 +64,7 @@ def load_step_runs(
         conditions.append("status IN ('running', 'waiting')")
 
     where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
-    cursor = conn.execute(f"SELECT * FROM sessions{where} ORDER BY started_at DESC", params)
+    cursor = conn.execute(f"SELECT * FROM step_runs{where} ORDER BY started_at DESC", params)
 
     step_runs = [_step_run_from_row(dict(row)) for row in cursor]
     conn.close()
@@ -73,7 +78,7 @@ def load_step_runs_for_worktree(
     conn = _get_db(db_path)
 
     cursor = conn.execute(
-        "SELECT * FROM sessions WHERE worktree = ? ORDER BY started_at DESC LIMIT ?",
+        "SELECT * FROM step_runs WHERE worktree = ? ORDER BY started_at DESC LIMIT ?",
         (worktree, limit),
     )
 
@@ -89,7 +94,7 @@ def load_step_runs_for_repo(
     conn = _get_db(db_path)
 
     cursor = conn.execute(
-        "SELECT * FROM sessions WHERE repo = ? ORDER BY started_at DESC LIMIT ?",
+        "SELECT * FROM step_runs WHERE repo = ? ORDER BY started_at DESC LIMIT ?",
         (repo, limit),
     )
 
@@ -109,7 +114,7 @@ def update_step_run_status(
         ended_at = datetime.now().isoformat()
 
     cursor = conn.execute(
-        "UPDATE sessions SET status = ?, ended_at = COALESCE(?, ended_at) WHERE id = ?",
+        "UPDATE step_runs SET status = ?, ended_at = COALESCE(?, ended_at) WHERE id = ?",
         (status.value, ended_at, step_run_id),
     )
 
@@ -123,7 +128,7 @@ def delete_step_run(step_run_id: str, db_path: Path | None = None) -> bool:
     """Delete a step run from database."""
     conn = _get_db(db_path)
 
-    cursor = conn.execute("DELETE FROM sessions WHERE id = ?", (step_run_id,))
+    cursor = conn.execute("DELETE FROM step_runs WHERE id = ?", (step_run_id,))
 
     conn.commit()
     deleted = cursor.rowcount > 0
@@ -135,7 +140,7 @@ def _step_run_from_row(row: dict) -> StepRun:
     """Convert database row to StepRun."""
     return StepRun(
         id=row["id"],
-        step=row["task"],  # DB column is 'task' for backward compat
+        step=row["step"],
         repo=row["repo"],
         worktree=row["worktree"],
         status=StepRunStatus(row["status"]),
@@ -145,3 +150,29 @@ def _step_run_from_row(row: dict) -> StepRun:
         model=row.get("model", "claude-code"),
         run_mode=row.get("run_mode", "auto"),
     )
+
+
+# Fire-and-forget logging to lfd daemon
+
+
+def _send_fire_and_forget(method: str, params: dict[str, Any]) -> None:
+    """Send a request to lfd without waiting for response. Fails silently."""
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(0.5)
+        sock.connect(str(SOCKET_PATH))
+        request = json.dumps({"method": method, "params": params}) + "\n"
+        sock.sendall(request.encode())
+        sock.close()
+    except Exception:
+        pass  # Fire-and-forget: don't block on errors
+
+
+def log_step_run_start(step_run: StepRun) -> None:
+    """Tell lfd a step run started. Fire-and-forget."""
+    _send_fire_and_forget("sessions.start", {"session": step_run.to_dict()})
+
+
+def log_step_run_end(step_run_id: str, status: StepRunStatus) -> None:
+    """Tell lfd a step run ended. Fire-and-forget."""
+    _send_fire_and_forget("sessions.end", {"session_id": step_run_id, "status": status.value})

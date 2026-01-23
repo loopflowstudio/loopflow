@@ -12,7 +12,9 @@ Loopflow assembles context and prompts for AI coding agents. Users run steps (ma
 - `collector.py` parameter named `task` but represents a step name
 - `session_id` used where `step_run_id` is more accurate
 - Mixed terminology in logs, comments, and user-facing messages
-- `lf/models.py` has `_send_fire_and_forget("output.line", {"session_id": ...})`
+- Protocol layer uses `sessions.*` methods (e.g., `sessions.end`) while models are `StepRun`
+- `lf/models.py` sends `{"session_id": step_run_id}` — parameter is renamed but protocol key isn't
+- Database migration renames table to `step_runs` but protocol hasn't caught up
 
 **Realignment**: Use consistent terminology everywhere:
 - "step" = a prompt definition (markdown file)

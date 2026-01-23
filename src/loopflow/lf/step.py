@@ -28,7 +28,6 @@ from loopflow.lf.launcher import (
     get_runner,
 )
 from loopflow.lf.logging import get_model_env, write_prompt_file
-from loopflow.lf.models import StepRun, StepRunStatus, log_step_run_end, log_step_run_start
 from loopflow.lf.output import (
     copy_to_clipboard,
     trim_components_if_needed,
@@ -37,6 +36,8 @@ from loopflow.lf.output import (
 from loopflow.lf.tokens import analyze_components
 from loopflow.lf.voices import VoiceNotFoundError, parse_voice_arg
 from loopflow.lf.worktrees import WorktreeError, create
+from loopflow.lfd.models import StepRun, StepRunStatus
+from loopflow.lfd.step_run import log_step_run_end, log_step_run_start
 
 ModelType = Optional[str]
 
@@ -145,7 +146,7 @@ def _execute_step(
         sys.executable,
         "-m",
         "loopflow.lfd.execution.collector",
-        "--session-id",
+        "--step-run-id",
         step_run.id,
         "--step",
         step_name,
@@ -172,7 +173,7 @@ def _execute_step(
     except OSError:
         pass  # Best effort cleanup
 
-    status = StepRunStatus.COMPLETED if result_code == 0 else StepRunStatus.ERROR
+    status = StepRunStatus.COMPLETED if result_code == 0 else StepRunStatus.FAILED
     log_step_run_end(step_run.id, status)
 
     return result_code

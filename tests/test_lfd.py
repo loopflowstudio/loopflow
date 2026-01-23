@@ -413,7 +413,7 @@ def test_server_handle_output_line_broadcasts_event():
             server._broadcast = mock_broadcast
 
             # Call the handler
-            params = {"session_id": "test-session-123", "text": "→ Read: foo.py"}
+            params = {"step_run_id": "test-step-run-123", "text": "→ Read: foo.py"}
             response = await server._handle_output_line(params)
 
             # Check response
@@ -424,15 +424,15 @@ def test_server_handle_output_line_broadcasts_event():
             assert len(broadcast_events) == 1
             event = broadcast_events[0]
             assert event.event == "output.line"
-            assert event.data["session_id"] == "test-session-123"
+            assert event.data["step_run_id"] == "test-step-run-123"
             assert event.data["text"] == "→ Read: foo.py"
             assert "timestamp" in event.data
 
     asyncio.run(run_test())
 
 
-def test_server_handle_output_line_missing_session_id():
-    """output.line handler returns error for missing session_id."""
+def test_server_handle_output_line_missing_step_run_id():
+    """output.line handler returns error for missing step_run_id."""
     import asyncio
 
     from loopflow.lfd.daemon.server import Server
@@ -446,7 +446,7 @@ def test_server_handle_output_line_missing_session_id():
             response = await server._handle_output_line(params)
 
             assert response.ok is False
-            assert "session_id" in response.error
+            assert "step_run_id" in response.error
 
     asyncio.run(run_test())
 
@@ -462,7 +462,7 @@ def test_server_handle_output_line_missing_text():
             socket_path = Path(tmpdir) / "test.sock"
             server = Server(socket_path)
 
-            params = {"session_id": "test-session-123"}
+            params = {"step_run_id": "test-step-run-123"}
             response = await server._handle_output_line(params)
 
             assert response.ok is False
@@ -486,7 +486,7 @@ def test_server_handle_output_line_allows_empty_text():
             server._broadcast = lambda e: broadcast_events.append(e) or asyncio.sleep(0)
 
             # Empty string should be allowed (it's a blank line in output)
-            params = {"session_id": "test-session-123", "text": ""}
+            params = {"step_run_id": "test-step-run-123", "text": ""}
             response = await server._handle_output_line(params)
 
             assert response.ok is True

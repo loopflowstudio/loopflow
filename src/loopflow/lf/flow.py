@@ -27,11 +27,12 @@ from loopflow.lf.git import GitError, find_main_repo, open_pr
 from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lf.logging import write_prompt_file
 from loopflow.lf.messages import generate_pr_message
-from loopflow.lf.models import StepRun, StepRunStatus, log_step_run_end, log_step_run_start
 from loopflow.lf.tokens import MAX_SAFE_TOKENS, analyze_components
 from loopflow.lf.voices import load_voice
 from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
+from loopflow.lfd.models import StepRun, StepRunStatus
+from loopflow.lfd.step_run import log_step_run_end, log_step_run_start
 
 
 @dataclass
@@ -144,7 +145,7 @@ def _run_step(
         sys.executable,
         "-m",
         "loopflow.lfd.execution.collector",
-        "--session-id",
+        "--step-run-id",
         step_run.id,
         "--step",
         params.step,
@@ -164,7 +165,7 @@ def _run_step(
 
     os.unlink(prompt_file)
 
-    status = StepRunStatus.COMPLETED if result_code == 0 else StepRunStatus.ERROR
+    status = StepRunStatus.COMPLETED if result_code == 0 else StepRunStatus.FAILED
     log_step_run_end(step_run.id, status)
 
     if result_code != 0:
@@ -214,7 +215,7 @@ def _run_inline_prompt(
         sys.executable,
         "-m",
         "loopflow.lfd.execution.collector",
-        "--session-id",
+        "--step-run-id",
         step_run.id,
         "--step",
         step_label,
@@ -233,7 +234,7 @@ def _run_inline_prompt(
 
     os.unlink(prompt_file)
 
-    status = StepRunStatus.COMPLETED if result_code == 0 else StepRunStatus.ERROR
+    status = StepRunStatus.COMPLETED if result_code == 0 else StepRunStatus.FAILED
     log_step_run_end(step_run.id, status)
 
     if result_code != 0:
@@ -378,7 +379,7 @@ def _run_worktree_tasks(
             sys.executable,
             "-m",
             "loopflow.lfd.execution.collector",
-            "--session-id",
+            "--step-run-id",
             step_run.id,
             "--step",
             wt_task.step,
@@ -407,7 +408,7 @@ def _run_worktree_tasks(
         except OSError:
             pass
 
-        status = StepRunStatus.COMPLETED if exit_code == 0 else StepRunStatus.ERROR
+        status = StepRunStatus.COMPLETED if exit_code == 0 else StepRunStatus.FAILED
         log_step_run_end(session_id, status)
 
         results.append(_WorktreeResult(wt_task.label, wt_path, exit_code, session_id))

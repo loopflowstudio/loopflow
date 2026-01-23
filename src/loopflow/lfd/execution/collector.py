@@ -1,4 +1,4 @@
-"""Collector subprocess for capturing agent output to SQLite."""
+"""Collector subprocess for capturing agent output."""
 
 import argparse
 import itertools
@@ -19,18 +19,18 @@ from loopflow.lf.logging import (
     open_log_file,
     write_log_line,
 )
-from loopflow.lf.models import _send_fire_and_forget
+from loopflow.lfd.step_run import _send_fire_and_forget
 
 
-def _send_output_line(session_id: str, text: str) -> None:
+def _send_output_line(step_run_id: str, text: str) -> None:
     """Send output line to lfd for live streaming. Fire-and-forget."""
-    _send_fire_and_forget("output.line", {"session_id": session_id, "text": text})
+    _send_fire_and_forget("output.line", {"step_run_id": step_run_id, "text": text})
 
 
 def collect_output(
-    session_id: str,
+    step_run_id: str,
     command: list[str],
-    task: str | None,
+    step: str | None,
     repo_root: Path | None,
     autocommit: bool,
     push: bool,
@@ -41,26 +41,26 @@ def collect_output(
     prefix: str | None = None,
 ) -> int:
     """Run command and collect output to log files."""
-    log_file = open_log_file(repo_root, session_id)
-    json_log = open_json_log(repo_root, session_id)
+    log_file = open_log_file(repo_root, step_run_id)
+    json_log = open_json_log(repo_root, step_run_id)
 
     # Show startup header with token breakdown
     if foreground and token_summary:
-        _print_startup_header(task, token_summary)
+        _print_startup_header(step, token_summary)
 
     if interactive:
         exit_code = _run_interactive(
-            command, log_file, json_log, foreground, prompt, session_id, prefix
+            command, log_file, json_log, foreground, prompt, step_run_id, prefix
         )
     else:
         exit_code = _run_streaming(
-            command, log_file, json_log, foreground, prompt, session_id, prefix
+            command, log_file, json_log, foreground, prompt, step_run_id, prefix
         )
 
     # StepRun status is updated by the parent process via lfd client
 
-    if autocommit and exit_code == 0 and task and repo_root:
-        git_autocommit(repo_root, task, push=push)
+    if autocommit and exit_code == 0 and step and repo_root:
+        git_autocommit(repo_root, step, push=push)
 
     if log_file:
         log_file.close()
@@ -73,7 +73,7 @@ def collect_output(
 def main():
     """Entry point for collector subprocess."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--session-id", required=True)
+    parser.add_argument("--step-run-id", required=True)
     parser.add_argument("--step", default=None)
     parser.add_argument("--repo-root", default=None)
     parser.add_argument("--autocommit", action="store_true")
@@ -116,7 +116,7 @@ def main():
 
     repo_root = Path(args.repo_root).resolve() if args.repo_root else None
     exit_code = collect_output(
-        args.session_id,
+        args.step_run_id,
         command,
         args.step,
         repo_root,
@@ -131,10 +131,10 @@ def main():
     sys.exit(exit_code)
 
 
-def _print_startup_header(task: str | None, token_summary: str) -> None:
+def _print_startup_header(step: str | None, token_summary: str) -> None:
     """Print startup header with token breakdown."""
-    task_name = task or "inline"
-    print(f"\033[90m━━━ {task_name} ━━━\033[0m", file=sys.stderr)
+    step_name = step or "inline"
+    print(f"\033[90m━━━ {step_name} ━━━\033[0m", file=sys.stderr)
     # Print token summary in dim
     for line in token_summary.split("\n"):
         print(f"\033[90m{line}\033[0m", file=sys.stderr)
@@ -180,7 +180,7 @@ def _run_streaming(
     json_log,
     foreground: bool,
     prompt: str | None = None,
-    session_id: str | None = None,
+    step_run_id: str | None = None,
     prefix: str | None = None,
 ) -> int:
     """Run a non-interactive command and stream output to logs.
@@ -244,8 +244,8 @@ def _run_streaming(
             write_log_line(log_file, display_line)
             if foreground:
                 print(display_line, flush=True)
-            if session_id:
-                _send_output_line(session_id, display_line)
+            if step_run_id:
+                _send_output_line(step_run_id, display_line)
 
     # Stop spinner if no output was received
     if spinner and first_output:
@@ -260,7 +260,7 @@ def _run_interactive(
     json_log,
     foreground: bool,
     prompt: str | None = None,
-    session_id: str | None = None,
+    step_run_id: str | None = None,
     prefix: str | None = None,
 ) -> int:
     """Run an interactive command using pty.spawn.
@@ -282,8 +282,8 @@ def _run_interactive(
             if log_file:
                 for line in decoded.splitlines():
                     write_log_line(log_file, line)
-                    if session_id:
-                        _send_output_line(session_id, line)
+                    if step_run_id:
+                        _send_output_line(step_run_id, line)
         return data
 
     # Remove API keys so CLIs use subscriptions instead of API credits
@@ -358,7 +358,6 @@ def _format_stream_line(line: str) -> list[str]:
         content = event.get("content", "")
         return [content] if content else []
 
-    # Unknown events are filtered rather than dumped as JSON
     # Codex event schema (item.*)
     if event_type in ("item.started", "item.completed"):
         item = event.get("item") or {}

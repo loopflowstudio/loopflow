@@ -1,8 +1,8 @@
-// Data structures for session results panel.
+// Data structures for step run results panel.
 
 import Foundation
 
-public enum SessionResultStatus: String, Sendable {
+public enum StepRunResultStatus: String, Sendable {
     case running
     case completed
     case error
@@ -24,19 +24,19 @@ public struct FileChange: Sendable, Identifiable {
     public var diffPreview: String?  // First ~20 lines of diff, loaded lazily
 }
 
-public struct SessionBaseline: Sendable {
-    public let sessionId: String
+public struct StepRunBaseline: Sendable {
+    public let stepRunId: String
     public let worktree: String
     public let headSHA: String
     public let dirtyFiles: [String]
     public let timestamp: Date
 }
 
-public struct SessionResult: Sendable, Identifiable {
-    public let id: String  // session ID
+public struct StepRunResult: Sendable, Identifiable {
+    public let id: String  // step run ID
     public let step: String
     public let worktree: String
-    public let status: SessionResultStatus
+    public let status: StepRunResultStatus
     public let startedAt: Date
     public let endedAt: Date
     public var duration: TimeInterval { endedAt.timeIntervalSince(startedAt) }
@@ -57,9 +57,9 @@ public struct SessionResult: Sendable, Identifiable {
         filesChanged.reduce(0) { $0 + $1.linesRemoved }
     }
 
-    public static func running(sessionId: String, step: String, worktree: String, startedAt: Date) -> SessionResult {
-        SessionResult(
-            id: sessionId,
+    public static func running(stepRunId: String, step: String, worktree: String, startedAt: Date) -> StepRunResult {
+        StepRunResult(
+            id: stepRunId,
             step: step,
             worktree: worktree,
             status: .running,

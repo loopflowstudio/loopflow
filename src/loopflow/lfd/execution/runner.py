@@ -91,7 +91,7 @@ def _run_collector_step(
     backend: str,
     model_variant: str | None,
     skip_permissions: bool,
-    session_id: str,
+    step_run_id: str,
     step_label: str,
     autocommit: bool = True,
     prefix: str | None = None,
@@ -112,8 +112,8 @@ def _run_collector_step(
         sys.executable,
         "-m",
         "loopflow.lfd.execution.collector",
-        "--session-id",
-        session_id,
+        "--step-run-id",
+        step_run_id,
         "--step",
         step_label,
         "--repo-root",
@@ -139,11 +139,11 @@ def _run_collector_step(
 
 
 class _VariantResult:
-    def __init__(self, label: str, worktree: Path, exit_code: int, session_id: str):
+    def __init__(self, label: str, worktree: Path, exit_code: int, step_run_id: str):
         self.label = label
         self.worktree = worktree
         self.exit_code = exit_code
-        self.session_id = session_id
+        self.step_run_id = step_run_id
 
 
 def _cleanup_variant_worktrees(repo_root: Path, results: list[_VariantResult]) -> None:
@@ -243,7 +243,7 @@ def _run_fork_join_group(
             return 1
 
         prompt, _step_file = prompt_result
-        session_id = str(uuid.uuid4())
+        step_run_id = str(uuid.uuid4())
         step_label = f"{agent.area_display}:{step.step}:{label}"
 
         exit_code = _run_collector_step(
@@ -252,13 +252,13 @@ def _run_fork_join_group(
             step_backend,
             step_variant,
             skip_permissions,
-            session_id,
+            step_run_id,
             step_label,
             autocommit=True,
             prefix=f"[{label}] ",
         )
 
-        results.append(_VariantResult(label, wt_path, exit_code, session_id))
+        results.append(_VariantResult(label, wt_path, exit_code, step_run_id))
 
     successes = [r for r in results if r.exit_code == 0]
     if not successes:

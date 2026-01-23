@@ -90,14 +90,14 @@ class Server:
 
         if method == "status":
             return await self._handle_status()
-        elif method == "sessions.list":
-            return await self._handle_sessions_list()
-        elif method == "sessions.history":
-            return await self._handle_sessions_history(params)
-        elif method == "sessions.start":
-            return await self._handle_sessions_start(params)
-        elif method == "sessions.end":
-            return await self._handle_sessions_end(params)
+        elif method == "step_runs.list":
+            return await self._handle_step_runs_list()
+        elif method == "step_runs.history":
+            return await self._handle_step_runs_history(params)
+        elif method == "step_runs.start":
+            return await self._handle_step_runs_start(params)
+        elif method == "step_runs.end":
+            return await self._handle_step_runs_end(params)
         elif method == "subscribe":
             return await self._handle_subscribe(params, writer)
         elif method == "notify":
@@ -115,7 +115,7 @@ class Server:
 
     async def _handle_status(self) -> Response:
         agents = list_agents()
-        sessions = load_step_runs(active_only=True)
+        step_runs = load_step_runs(active_only=True)
         running_agents = [a for a in agents if a.status == AgentStatus.RUNNING]
 
         return success(
@@ -123,61 +123,61 @@ class Server:
                 "pid": os.getpid(),
                 "agents_defined": len(agents),
                 "agents_running": len(running_agents),
-                "sessions_active": len(sessions),
+                "step_runs_active": len(step_runs),
             }
         )
 
-    async def _handle_sessions_list(self) -> Response:
-        sessions = load_step_runs()
-        return success([s.to_dict() for s in sessions])
+    async def _handle_step_runs_list(self) -> Response:
+        step_runs = load_step_runs()
+        return success([s.to_dict() for s in step_runs])
 
-    async def _handle_sessions_history(self, params: dict) -> Response:
-        """Return session history for a worktree or repo."""
+    async def _handle_step_runs_history(self, params: dict) -> Response:
+        """Return step run history for a worktree or repo."""
         worktree = params.get("worktree")
         repo = params.get("repo")
         limit = params.get("limit", 20)
 
         if worktree:
-            sessions = load_step_runs_for_worktree(worktree, limit)
+            step_runs = load_step_runs_for_worktree(worktree, limit)
         elif repo:
-            sessions = load_step_runs_for_repo(repo, limit)
+            step_runs = load_step_runs_for_repo(repo, limit)
         else:
-            sessions = load_step_runs()[:limit]
+            step_runs = load_step_runs()[:limit]
 
-        return success([s.to_dict() for s in sessions])
+        return success([s.to_dict() for s in step_runs])
 
-    async def _handle_sessions_start(self, params: dict) -> Response:
-        """Record a session start."""
-        session_data = params.get("session")
-        if not session_data:
-            return error("Missing 'session' parameter")
+    async def _handle_step_runs_start(self, params: dict) -> Response:
+        """Record a step run start."""
+        step_run_data = params.get("step_run")
+        if not step_run_data:
+            return error("Missing 'step_run' parameter")
 
-        session = StepRun.from_dict(session_data)
-        save_step_run(session)
+        step_run = StepRun.from_dict(step_run_data)
+        save_step_run(step_run)
         await self._broadcast(
             Event(
-                "session.started",
+                "step_run.started",
                 {
-                    "id": session.id,
-                    "step": session.step,
-                    "worktree": session.worktree,
+                    "id": step_run.id,
+                    "step": step_run.step,
+                    "worktree": step_run.worktree,
                 },
             )
         )
-        return success({"id": session.id})
+        return success({"id": step_run.id})
 
-    async def _handle_sessions_end(self, params: dict) -> Response:
-        """Record a session end."""
-        session_id = params.get("session_id")
+    async def _handle_step_runs_end(self, params: dict) -> Response:
+        """Record a step run end."""
+        step_run_id = params.get("step_run_id")
         status_str = params.get("status")
 
-        if not session_id or not status_str:
-            return error("Missing 'session_id' or 'status' parameter")
+        if not step_run_id or not status_str:
+            return error("Missing 'step_run_id' or 'status' parameter")
 
         status = StepRunStatus(status_str)
-        update_step_run_status(session_id, status)
-        await self._broadcast(Event("session.ended", {"id": session_id, "status": status_str}))
-        return success({"id": session_id})
+        update_step_run_status(step_run_id, status)
+        await self._broadcast(Event("step_run.ended", {"id": step_run_id, "status": status_str}))
+        return success({"id": step_run_id})
 
     async def _handle_subscribe(self, params: dict, writer: StreamWriter) -> Response:
         events = params.get("events", [])
@@ -197,17 +197,17 @@ class Server:
 
     async def _handle_output_line(self, params: dict) -> Response:
         """Accept output lines from collector and broadcast to subscribers."""
-        session_id = params.get("session_id")
+        step_run_id = params.get("step_run_id")
         text = params.get("text")
 
-        if not session_id or text is None:
-            return error("Missing 'session_id' or 'text' parameter")
+        if not step_run_id or text is None:
+            return error("Missing 'step_run_id' or 'text' parameter")
 
         await self._broadcast(
             Event(
                 "output.line",
                 {
-                    "session_id": session_id,
+                    "step_run_id": step_run_id,
                     "text": text,
                     "timestamp": datetime.now().isoformat(),
                 },

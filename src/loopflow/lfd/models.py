@@ -235,7 +235,7 @@ class StepRun(LfdModel):
     def from_dict(cls, data: dict) -> "StepRun":
         return cls(
             id=data["id"],
-            step=data.get("step") or data.get("task", ""),
+            step=data["step"],
             repo=data["repo"],
             worktree=data["worktree"],
             flow_run_id=data.get("flow_run_id"),

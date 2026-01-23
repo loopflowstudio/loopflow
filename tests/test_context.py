@@ -97,9 +97,7 @@ def test_build_prompt_includes_context_files(temp_repo):
     """Context files passed via pathset appear in output."""
     (temp_repo / "main.py").write_text("print('hello')\n")
 
-    result = build_prompt(
-        temp_repo, "implement", context_config=ContextConfig(pathset=["main.py"])
-    )
+    result = build_prompt(temp_repo, "implement", context_config=ContextConfig(pathset=["main.py"]))
 
     assert "Reference files" in result
     assert "<lf:files>" in result

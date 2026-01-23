@@ -4,6 +4,12 @@
 
 export type ConnectionMode = 'local' | 'teams'
 
+interface LfdResponse<T> {
+  ok: boolean
+  result: T | null
+  error: string | null
+}
+
 export interface LfdClientConfig {
   mode: ConnectionMode
   baseUrl?: string  // For teams mode
@@ -28,7 +34,11 @@ export class LfdClient {
       throw new Error(`LFD request failed: ${response.status}`)
     }
 
-    return response.json()
+    const json = await response.json() as LfdResponse<T>
+    if (!json.ok) {
+      throw new Error(json.error ?? 'LFD request failed')
+    }
+    return json.result as T
   }
 
   async post<T>(path: string, body?: unknown): Promise<T> {
@@ -45,7 +55,11 @@ export class LfdClient {
       throw new Error(`LFD request failed: ${response.status}`)
     }
 
-    return response.json()
+    const json = await response.json() as LfdResponse<T>
+    if (!json.ok) {
+      throw new Error(json.error ?? 'LFD request failed')
+    }
+    return json.result as T
   }
 
   // WebSocket for real-time events

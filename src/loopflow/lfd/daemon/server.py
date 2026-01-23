@@ -3,17 +3,17 @@
 import asyncio
 import fnmatch
 import json
-import os
 import signal
 from asyncio import StreamReader, StreamWriter
 from datetime import datetime
 from pathlib import Path
 
-from loopflow.lfd.agent import list_agents, run_cron_check, run_watch_check
+from loopflow.lfd.agent import run_cron_check, run_watch_check
 from loopflow.lfd.daemon.manager import Manager, load_manager_config
 from loopflow.lfd.daemon.protocol import Event, Request, Response, error, success
+from loopflow.lfd.daemon.status import compute_status
 from loopflow.lfd.db import update_dead_processes
-from loopflow.lfd.models import AgentStatus, StepRun, StepRunStatus
+from loopflow.lfd.models import StepRun, StepRunStatus
 from loopflow.lfd.step_run import (
     load_step_runs,
     load_step_runs_for_repo,
@@ -21,6 +21,7 @@ from loopflow.lfd.step_run import (
     save_step_run,
     update_step_run_status,
 )
+from loopflow.lfd.worktree_state import get_worktree_state_service
 
 
 class Server:
@@ -110,22 +111,13 @@ class Server:
             return await self._handle_manager_acquire(params)
         elif method == "scheduler.release":
             return await self._handle_manager_release(params)
+        elif method == "worktrees.list":
+            return await self._handle_worktrees_list(params)
         else:
             return error(f"Unknown method: {method}", request.id)
 
     async def _handle_status(self) -> Response:
-        agents = list_agents()
-        step_runs = load_step_runs(active_only=True)
-        running_agents = [a for a in agents if a.status == AgentStatus.RUNNING]
-
-        return success(
-            {
-                "pid": os.getpid(),
-                "agents_defined": len(agents),
-                "agents_running": len(running_agents),
-                "step_runs_active": len(step_runs),
-            }
-        )
+        return success(compute_status())
 
     async def _handle_step_runs_list(self) -> Response:
         step_runs = load_step_runs()
@@ -156,10 +148,10 @@ class Server:
         save_step_run(step_run)
         await self._broadcast(
             Event(
-                "step_run.started",
+                "session.started",
                 {
                     "id": step_run.id,
-                    "step": step_run.step,
+                    "task": step_run.step,
                     "worktree": step_run.worktree,
                 },
             )
@@ -176,7 +168,7 @@ class Server:
 
         status = StepRunStatus(status_str)
         update_step_run_status(step_run_id, status)
-        await self._broadcast(Event("step_run.ended", {"id": step_run_id, "status": status_str}))
+        await self._broadcast(Event("session.ended", {"id": step_run_id, "status": status_str}))
         return success({"id": step_run_id})
 
     async def _handle_subscribe(self, params: dict, writer: StreamWriter) -> Response:
@@ -207,7 +199,7 @@ class Server:
             Event(
                 "output.line",
                 {
-                    "step_run_id": step_run_id,
+                    "session_id": step_run_id,
                     "text": text,
                     "timestamp": datetime.now().isoformat(),
                 },
@@ -261,6 +253,23 @@ class Server:
             )
         )
         return success({"slots_used": self.manager.slots_used()})
+
+    async def _handle_worktrees_list(self, params: dict) -> Response:
+        """Return worktree list with staleness and recent steps."""
+        repo = params.get("repo")
+        if not repo:
+            return error("Missing 'repo' parameter")
+
+        repo_path = Path(repo)
+        if not repo_path.exists():
+            return error(f"Repository not found: {repo}")
+
+        try:
+            service = get_worktree_state_service()
+            worktrees = service.list_worktrees(repo_path)
+            return success({"worktrees": worktrees})
+        except Exception as e:
+            return error(f"Failed to list worktrees: {e}")
 
     async def _broadcast(self, event: Event) -> None:
         message = (event.serialize() + "\n").encode()
@@ -338,17 +347,21 @@ class Server:
                 pass
 
 
-async def run_server(socket_path: Path) -> None:
+async def run_server(socket_path: Path, http_port: int = 8765) -> None:
     """Main daemon entry point. Runs until terminated."""
+    from loopflow.lfd.daemon.http_server import start_http_server
     from loopflow.lfd.daemon.launchd import remove_pid, write_pid
 
     server = Server(socket_path)
+    http_server = None
 
     # Write PID file for process tracking
     write_pid()
 
     async def shutdown():
         await server.stop()
+        if http_server:
+            await http_server.stop()
         remove_pid()
 
     loop = asyncio.get_event_loop()
@@ -356,6 +369,11 @@ async def run_server(socket_path: Path) -> None:
         loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown()))
 
     try:
+        # Start HTTP server alongside socket server
+        http_server = await start_http_server(http_port)
+
         await server.start()
     finally:
+        if http_server:
+            await http_server.stop()
         remove_pid()

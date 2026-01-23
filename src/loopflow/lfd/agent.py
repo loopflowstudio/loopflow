@@ -498,9 +498,7 @@ def check_watch_stimulus(agent: Agent) -> bool:
     activated = should_activate_watch(watch_paths, agent.last_main_sha, current_sha, changed_files)
 
     if activated:
-        stimulus_log.info(
-            f"[{short_id}] ACTIVATED: {len(changed_files)} files changed in area"
-        )
+        stimulus_log.info(f"[{short_id}] ACTIVATED: {len(changed_files)} files changed in area")
         for f in changed_files[:5]:
             stimulus_log.debug(f"[{short_id}]   changed: {f}")
         if len(changed_files) > 5:

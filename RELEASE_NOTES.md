@@ -1,13 +1,12 @@
-# v0.6.9
+# v0.6.10
 
-This release renames Maestro to Concerto with a new app icon, adds the --web flag to launch Claude web sessions, and improves database reliability with automatic schema migration. Worktrees now push to create remote branches automatically.
+Adds flexible branch naming templates, global config with auto-pruning for merged worktrees, and new prompt variants for quality gates and codebase-wide analysis. Also renames 'loop' to 'job' across the daemon and aligns Swift/TypeScript models with the Python schema.
 
 ## Changes
 
-- Add `--web` flag to `lf` command to launch Claude web sessions instead of CLI
-- Rename Maestro app to Concerto with new app icon
-- Auto-reset database on schema mismatch with migration support
-- Automatically push to create remote branch when creating worktrees
-- Add LoopflowCore shared Swift framework for code reuse across apps
-- Unify design system colors across Swift, web, and documentation
-- Handle binary content gracefully in git diffs
+- Add `branch_names.schema` config for custom worktree branch naming (e.g., `{user}.{name}.{date}`)
+- Add global config support and auto-prune for merged worktrees
+- Add gate prompt variants (`-gate` suffix) for fast inner-loop quality checks
+- Add big prompt variants (`-big` suffix) for strategic codebase-wide assessment
+- Rename `loop` to `job` in lfd daemon
+- Align Swift and TypeScript models with Python runs/triggers schema

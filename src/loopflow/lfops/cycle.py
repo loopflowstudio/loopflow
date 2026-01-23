@@ -214,9 +214,7 @@ def register_commands(app: typer.Typer) -> None:
             False, "--no-wait", help="Submit to merge queue without waiting"
         ),
         no_open: bool = typer.Option(False, "--no-open", help="Don't open terminal"),
-        create_pr: bool = typer.Option(
-            False, "-c", "--create-pr", help="Create PR if none exists"
-        ),
+        create_pr: bool = typer.Option(False, "-c", "--create-pr", help="Create PR if none exists"),
     ) -> None:
         """Land current PR, create fresh worktree in same space.
 

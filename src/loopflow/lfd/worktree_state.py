@@ -40,6 +40,18 @@ class WorktreeStateService:
         self._cache_time[repo_key] = now
         return result
 
+    def get_one(self, repo: Path, branch: str) -> dict | None:
+        """Get status for a single worktree by branch name.
+
+        Returns cached status if available, otherwise refreshes cache.
+        Returns None if branch not found.
+        """
+        worktrees = self.list_worktrees(repo)
+        for wt in worktrees:
+            if wt["branch"] == branch:
+                return wt
+        return None
+
     def invalidate(self, repo: Path, branch: str | None = None) -> None:
         """Invalidate cache for a repo (optionally just one branch)."""
         repo_key = str(repo.resolve())

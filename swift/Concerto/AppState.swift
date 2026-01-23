@@ -361,12 +361,15 @@ final class AppState {
         // Sync with remote
         _ = try? await worktreeService.sync(in: repo)
 
-        // Refresh list
+        // Refresh list (lfd provides staleness + CI, CLI fallback needs separate enrichment)
         await _listWorktrees()
 
-        // Enrich with slow operations (staleness, CI)
-        await detectStaleness()
-        await fetchCIStatus()
+        // Skip staleness/CI detection when lfd is available (already included in response)
+        let lfdAvailable = await LFDClient.shared.isAvailable
+        if !lfdAvailable {
+            await detectStaleness()
+            await fetchCIStatus()
+        }
     }
 
     private func detectStaleness() async {
@@ -516,8 +519,8 @@ final class AppState {
                 onEvent: { [weak self] event in
                     Task { @MainActor in
                         switch event {
-                        case .worktree:
-                            self?.listWorktrees()
+                        case .worktree(let worktreeEvent):
+                            self?.handleWorktreeEvent(worktreeEvent)
                         case .session(let sessionEvent):
                             self?.handleSessionEvent(sessionEvent)
                         case .output(let outputEvent):
@@ -534,6 +537,34 @@ final class AppState {
                 }
             )
         }
+    }
+
+    private func handleWorktreeEvent(_ event: WorktreeEvent) {
+        // Handle pruned events - remove worktree from list
+        if event.name == "worktree.pruned", let branch = event.branch {
+            worktrees.removeAll { $0.branch == branch }
+            if selectedWorktree?.branch == branch {
+                selectedWorktree = nil
+            }
+            return
+        }
+
+        // If event includes full worktree status, update in-place (no re-fetch needed)
+        if let updatedWorktree = event.worktree, let branch = event.branch {
+            if let index = worktrees.firstIndex(where: { $0.branch == branch }) {
+                worktrees[index] = updatedWorktree
+                if selectedWorktree?.branch == branch {
+                    selectedWorktree = updatedWorktree
+                }
+            } else {
+                // New worktree - add to list
+                worktrees.append(updatedWorktree)
+            }
+            return
+        }
+
+        // Fall back to full refresh if event doesn't include status
+        listWorktrees()
     }
 
     func refreshVoices() {

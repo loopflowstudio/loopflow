@@ -2,7 +2,7 @@
 
 Eliminate multi-pass rendering. Single update to worktrees array.
 
-**Status:** Future (after Projects 2-3)
+**Status:** Partial (lfd path done)
 
 ---
 
@@ -176,8 +176,38 @@ Use Instruments to verify:
 
 ## Done When
 
-- [ ] Initial load: single render after data arrives
-- [ ] Event updates: single render per event batch
-- [ ] No visible flicker during load or updates
-- [ ] Render count matches actual data changes
-- [ ] Smooth scrolling in worktree list
+- [x] Initial load: single render after data arrives (when lfd available)
+- [x] Event updates: single render per event (in-place updates)
+- [x] No visible flicker during load or updates (when lfd available)
+- [ ] Render count matches actual data changes (needs verification)
+- [ ] Smooth scrolling in worktree list (needs verification)
+- [ ] CLI fallback path also uses atomic updates (future)
+
+## Progress
+
+### Completed (Phase 1: lfd path)
+
+**Single-fetch loading:**
+- `WorktreeService.list()` calls lfd HTTP endpoint (`GET /worktrees`)
+- Returns full status including staleness, CI, recent steps in one response
+- `AppState.syncAndEnrich()` skips enrichment when lfd available
+- No multi-pass rendering when lfd is running
+
+**In-place event updates:**
+- `handleWorktreeEvent()` updates worktree array in-place
+- Rich events include full worktree status
+- Single render per event (no full refresh)
+
+### Remaining
+
+**CLI fallback path:**
+- Still has multi-pass rendering (list → staleness → CI)
+- Consider: remove fallback entirely when lfd is required
+
+**Verification:**
+- Add render count logging to confirm improvement
+- Profile with Instruments for layout thrashing
+
+**Batch updates (Phase 3):**
+- Not yet implemented
+- Needed for rapid events (multiple commits)

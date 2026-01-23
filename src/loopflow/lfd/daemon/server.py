@@ -113,6 +113,8 @@ class Server:
             return await self._handle_manager_release(params)
         elif method == "worktrees.list":
             return await self._handle_worktrees_list(params)
+        elif method == "worktrees.changed":
+            return await self._handle_worktrees_changed(params)
         else:
             return error(f"Unknown method: {method}", request.id)
 
@@ -151,7 +153,7 @@ class Server:
                 "session.started",
                 {
                     "id": step_run.id,
-                    "task": step_run.step,
+                    "step": step_run.step,
                     "worktree": step_run.worktree,
                 },
             )
@@ -271,6 +273,25 @@ class Server:
         except Exception as e:
             return error(f"Failed to list worktrees: {e}")
 
+    async def _handle_worktrees_changed(self, params: dict) -> Response:
+        """Handle notification that a worktree changed.
+
+        Called by CLI commands (wt create, lf run, etc.) to trigger rich events.
+        """
+        repo = params.get("repo")
+        branch = params.get("branch")
+        reason = params.get("reason", "changed")
+
+        if not repo or not branch:
+            return error("Missing 'repo' or 'branch' parameter")
+
+        repo_path = Path(repo)
+        service = get_worktree_state_service()
+        service.invalidate(repo_path)
+
+        await self._broadcast_worktree_event("worktree.updated", branch, reason, repo_path)
+        return success({"branch": branch, "reason": reason})
+
     async def _broadcast(self, event: Event) -> None:
         message = (event.serialize() + "\n").encode()
         for writer, patterns in list(self.subscriptions.items()):
@@ -281,6 +302,28 @@ class Server:
                 except Exception:
                     self.clients.discard(writer)
                     self.subscriptions.pop(writer, None)
+
+    async def _broadcast_worktree_event(
+        self,
+        event_name: str,
+        branch: str,
+        reason: str,
+        repo: Path | None = None,
+    ) -> None:
+        """Broadcast a worktree event with optional full status.
+
+        If repo is provided, includes full worktree status for in-place UI updates.
+        """
+        data: dict = {"branch": branch, "reason": reason}
+
+        if repo:
+            data["repo"] = str(repo)
+            service = get_worktree_state_service()
+            worktree_status = service.get_one(repo, branch)
+            if worktree_status:
+                data["worktree"] = worktree_status
+
+        await self._broadcast(Event(event_name, data))
 
     async def _periodic_check(self) -> None:
         """Periodically update dead processes and check agent triggers."""
@@ -315,17 +358,24 @@ class Server:
                     )
 
                 # Auto-create draft PRs for pushed branches
-                created_prs = run_draft_pr_check()
-                for branch in created_prs:
-                    await self._broadcast(
-                        Event(
-                            "worktree.updated",
-                            {
-                                "branch": branch,
-                                "reason": "draft_pr_created",
-                            },
+                worktree_service = get_worktree_state_service()
+                for repo in get_repos_to_check():
+                    created_prs = run_draft_pr_check(repo)
+                    for branch in created_prs:
+                        # Include full worktree status for in-place UI updates
+                        worktree_service.invalidate(repo)  # Refresh to get new PR info
+                        worktree_status = worktree_service.get_one(repo, branch)
+                        await self._broadcast(
+                            Event(
+                                "worktree.updated",
+                                {
+                                    "branch": branch,
+                                    "reason": "draft_pr_created",
+                                    "repo": str(repo),
+                                    "worktree": worktree_status,
+                                },
+                            )
                         )
-                    )
 
                 # Auto-prune merged worktrees
                 for repo in get_repos_to_check():

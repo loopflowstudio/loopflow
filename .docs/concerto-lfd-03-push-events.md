@@ -2,7 +2,7 @@
 
 Rich events that push full worktree status on changes.
 
-**Status:** Future (after Project 2)
+**Status:** Phase 1 Complete
 
 ---
 
@@ -187,8 +187,38 @@ case .worktreeEvent(let event):
 
 ## Done When
 
-- [ ] `worktree.updated` events include full status
-- [ ] Concerto updates in-place (no full refresh)
-- [ ] Git commits trigger status updates within 1 second
-- [ ] CI status changes push to UI within poll interval
-- [ ] No flicker on status changes
+- [x] `worktree.updated` events include full status (when reason=draft_pr_created)
+- [x] Concerto updates in-place (no full refresh when event includes worktree)
+- [x] `worktree.pruned` events handled with in-place removal
+- [x] `WorktreeEvent` struct includes optional `worktree: Worktree?` field
+- [x] `AppState.handleWorktreeEvent()` updates in-place or falls back to refresh
+- [ ] Git commits trigger status updates within 1 second (Phase 2: git hooks)
+- [ ] CI status changes push to UI within poll interval (Phase 2)
+- [ ] No flicker on status changes (mostly done - flicker only on events without status)
+
+## Progress
+
+### Phase 1: Rich events from existing triggers (Complete)
+
+**Python:**
+- `server.py` emits rich events with `worktree` field for `draft_pr_created`
+- `WorktreeStateService.get_one()` retrieves single worktree status
+- `worktrees.changed` method for CLI to notify daemon
+- `_broadcast_worktree_event()` helper for consistent event emission
+
+**Swift:**
+- `WorktreeEvent` struct has `reason`, `repo`, `worktree` fields
+- `LFDEventService.parseEvent()` parses full worktree from event data
+- `AppState.handleWorktreeEvent()` updates in-place when status available
+- Falls back to `listWorktrees()` if event doesn't include status
+
+### Phase 2: Git hook integration (Future)
+
+Not yet implemented. Requires:
+- lfd installs git hooks on first connection
+- Hooks notify lfd of git operations
+- lfd refreshes affected worktree, emits rich event
+
+### Phase 3: Filesystem watching (Future)
+
+Not yet implemented. Alternative to hooks.

@@ -21,8 +21,8 @@ Concerto's worktree UI flickers and lags. Root causes:
 |---|---------|--------|-------|
 | 1 | [Protocol Alignment](./concerto-lfd-01-protocol.md) | **Complete** | Fix event names and field mappings |
 | 2 | [Worktree State Service](./concerto-lfd-02-worktree-state.md) | **Complete** | Move status calculation into lfd |
-| 3 | [Push-Based Events](./concerto-lfd-03-push-events.md) | Future | Rich events with full worktree status |
-| 4 | [Atomic UI Updates](./concerto-lfd-04-atomic-updates.md) | Future | Single-pass rendering in Concerto |
+| 3 | [Push-Based Events](./concerto-lfd-03-push-events.md) | **Phase 1 Complete** | Rich events with full worktree status |
+| 4 | [Atomic UI Updates](./concerto-lfd-04-atomic-updates.md) | **Partial** | Single-pass rendering (lfd path done) |
 | 5 | [Simplified WorktreeRow](./concerto-lfd-05-worktree-row.md) | Future | Remove hover buttons, better summary |
 
 ---
@@ -59,11 +59,11 @@ Concerto's worktree UI flickers and lags. Root causes:
 
 | Aspect | Current | Target |
 |--------|---------|--------|
-| Worktree status | Concerto calls `wt list`, then enriches | lfd maintains, pushes changes |
-| Staleness | Concerto runs 4+ git commands/worktree | lfd calculates, includes in status |
-| CI status | Concerto polls `gh pr checks` sequentially | lfd polls in background, pushes updates |
-| Session events | Broken (namespace mismatch) | Working (aligned protocol) |
-| UI updates | Multi-pass (flicker) | Atomic (no flicker) |
+| Worktree status | ✅ Concerto calls lfd HTTP, single response | lfd maintains, pushes changes |
+| Staleness | ✅ lfd calculates, includes in response | Same |
+| CI status | ✅ Included in lfd response (from PR state) | lfd polls in background, pushes updates |
+| Session events | ✅ Working (protocol aligned) | Same |
+| UI updates | ⚠️ Single-pass when lfd available | Atomic (no flicker) |
 | Hover buttons | 6 buttons on every row | Context menu or 0-1 primary action |
 
 ---
@@ -92,12 +92,13 @@ Projects 2-3 can partially overlap. Projects 4-5 depend on 2-3.
 
 ## Success Criteria
 
-- [ ] Concerto connects to lfd and receives events
-- [ ] Worktree list loads without flicker
-- [ ] Status updates appear within 1 second of git operations
-- [ ] CI status appears without sequential delay
-- [ ] WorktreeRow shows essential info at a glance
-- [ ] No hover button overload
+- [x] Concerto connects to lfd and receives events
+- [x] Worktree list loads without flicker (when lfd available)
+- [x] CI status appears without sequential delay (included in lfd response)
+- [x] Concerto updates in-place for events with full status
+- [ ] Status updates appear within 1 second of git operations (needs git hooks)
+- [ ] WorktreeRow shows essential info at a glance (Project 5)
+- [ ] No hover button overload (Project 5)
 
 ---
 

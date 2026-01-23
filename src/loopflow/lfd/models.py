@@ -8,7 +8,6 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-
 def area_to_slug(area: str) -> str:
     """Convert area to slug: 'swift/' -> 'swift', '.' -> 'root'."""
     if area == ".":

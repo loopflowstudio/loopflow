@@ -35,13 +35,13 @@ from loopflow.lf.worktrees import WorktreeError
 from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
 from loopflow.lfd.daemon.client import notify_event
-from loopflow.lfd.models import Agent, FlowRun, FlowRunStatus
 from loopflow.lfd.flow_run import (
     save_run,
     update_run_pr,
     update_run_status,
     update_run_step,
 )
+from loopflow.lfd.models import Agent, FlowRun, FlowRunStatus
 
 
 def _iteration_branch_prefix(main_branch: str) -> str:
@@ -331,7 +331,7 @@ def run_iteration(
         voice=agent.voice,
         area=agent.area,
         repo=agent.repo,
-        status=FlowFlowRunStatus.RUNNING,
+        status=FlowRunStatus.RUNNING,
         iteration=iteration,
         worktree=str(worktree_path),
         branch=branch,
@@ -495,7 +495,9 @@ def run_iteration(
             voices=step_voices,
         )
         if not prompt_result:
-            update_run_status(run.id, FlowRunStatus.FAILED, error=f"Step file not found: {step_name}")
+            update_run_status(
+                run.id, FlowRunStatus.FAILED, error=f"Step file not found: {step_name}"
+            )
             _cleanup_worktree(agent.repo, worktree_path, branch)
             return False
 

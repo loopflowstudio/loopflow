@@ -11,9 +11,6 @@ import time
 import uuid
 from pathlib import Path
 
-from loopflow.lfd.daemon.client import notify_event
-from loopflow.lfd.execution.runner import run_iteration
-from loopflow.lfd.models import Agent, AgentStatus
 from loopflow.lfd.agent import (
     count_outstanding,
     get_agent,
@@ -21,6 +18,9 @@ from loopflow.lfd.agent import (
     update_agent_pid,
     update_agent_status,
 )
+from loopflow.lfd.daemon.client import notify_event
+from loopflow.lfd.execution.runner import run_iteration
+from loopflow.lfd.models import Agent, AgentStatus
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 MANAGER_POLL_INTERVAL = 30  # seconds between slot checks

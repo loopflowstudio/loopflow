@@ -15,11 +15,6 @@ import typer
 from loopflow.lf.flows import load_flow
 from loopflow.lf.logging import get_log_dir
 from loopflow.lf.voices import list_voices, load_voice, voice_exists
-from loopflow.lfd.daemon.launchd import install as launchd_install
-from loopflow.lfd.daemon.launchd import is_running
-from loopflow.lfd.daemon.launchd import uninstall as launchd_uninstall
-from loopflow.lfd.daemon.server import run_server
-from loopflow.lfd.models import Agent, AgentStatus, MergeMode
 from loopflow.lfd.agent import (
     create_agent,
     delete_agent,
@@ -29,7 +24,12 @@ from loopflow.lfd.agent import (
     start_agent,
     stop_agent,
 )
+from loopflow.lfd.daemon.launchd import install as launchd_install
+from loopflow.lfd.daemon.launchd import is_running
+from loopflow.lfd.daemon.launchd import uninstall as launchd_uninstall
+from loopflow.lfd.daemon.server import run_server
 from loopflow.lfd.flow_run import list_runs_for_agent
+from loopflow.lfd.models import Agent, AgentStatus, MergeMode
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 

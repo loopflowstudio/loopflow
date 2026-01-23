@@ -170,7 +170,10 @@ def find_concerto_executable() -> Path:
                 if release.exists():
                     return release
 
-    raise FileNotFoundError("Could not find Concerto. Build it first with: xcodebuild -scheme Concerto -configuration Release -destination 'platform=macOS' build")
+    raise FileNotFoundError(
+        "Could not find Concerto. Build it first with: "
+        "xcodebuild -scheme Concerto -configuration Release -destination 'platform=macOS' build"
+    )
 
 
 def capture_swift_screenshot(
@@ -219,7 +222,10 @@ def capture_web_screenshot(shot: Screenshot, output_dir: Path) -> Path:
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        print("  Playwright not installed. Install with: pip install playwright && playwright install chromium")
+        print(
+            "  Playwright not installed. "
+            "Install with: pip install playwright && playwright install chromium"
+        )
         raise
 
     print(f"Capturing {shot.name} (Web)...")
@@ -300,7 +306,6 @@ def main() -> None:
 
     # Setup for Swift captures
     swift_screenshots = [s for s in screenshots if s.type == "swift"]
-    web_screenshots = [s for s in screenshots if s.type == "web"]
 
     executable = None
     repo_path = None

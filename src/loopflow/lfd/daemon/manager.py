@@ -10,8 +10,8 @@ from pathlib import Path
 
 import yaml
 
-from loopflow.lfd.db import list_all_agents
 from loopflow.lfd.agent import count_outstanding
+from loopflow.lfd.db import list_all_agents
 
 
 @dataclass

@@ -29,7 +29,7 @@ from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lf.logging import write_prompt_file
 from loopflow.lf.messages import generate_pr_message
 from loopflow.lf.tokens import MAX_SAFE_TOKENS, analyze_components
-from loopflow.lf.voices import format_voice_section, load_voice
+from loopflow.lf.voices import format_voice_section
 from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
 from loopflow.lfd.models import StepRun, StepRunStatus

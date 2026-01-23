@@ -98,7 +98,7 @@ def _run_step(
         params.step,
         run_mode="auto",
         voices=params.voices,
-        context_config=ContextConfig.for_flow(pathset=params.context, exclude=exclude),
+        context_config=ContextConfig(pathset=params.context or [], exclude=exclude or []),
     )
     components, dropped = trim_prompt_components(components, MAX_SAFE_TOKENS)
     if dropped:
@@ -325,7 +325,7 @@ def _run_worktree_tasks(
             wt_task.step,
             run_mode="auto",
             voices=wt_task.voices,
-            context_config=ContextConfig.for_flow(pathset=wt_task.context, exclude=exclude),
+            context_config=ContextConfig(pathset=wt_task.context or [], exclude=exclude or []),
         )
         components, dropped = trim_prompt_components(components, MAX_SAFE_TOKENS)
         if dropped:

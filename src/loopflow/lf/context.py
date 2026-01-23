@@ -84,14 +84,6 @@ class ContextConfig(BaseModel):
     clipboard: bool = False
 
     @classmethod
-    def for_flow(
-        cls,
-        pathset: list[str] | None = None,
-        exclude: list[str] | None = None,
-    ) -> "ContextConfig":
-        return cls(pathset=pathset or [], exclude=exclude or [])
-
-    @classmethod
     def for_commit(cls) -> "ContextConfig":
         return cls(lfdocs=False, diff=True, diff_files=False, summaries=False)
 

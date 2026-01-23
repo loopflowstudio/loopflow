@@ -69,7 +69,7 @@ def _build_loop_prompt(
         step=step_name,
         run_mode="auto",
         voices=voices,
-        context_config=ContextConfig.for_flow(pathset=merged_context),
+        context_config=ContextConfig(pathset=merged_context),
     )
 
     if not components.step:
@@ -164,7 +164,7 @@ def _build_loop_inline_prompt(
         inline=inline_text,
         run_mode="auto",
         voices=voices,
-        context_config=ContextConfig.for_flow(pathset=context_paths),
+        context_config=ContextConfig(pathset=context_paths),
     )
     if not components.step:
         return None

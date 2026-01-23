@@ -176,27 +176,11 @@ def test_trigger_background_refresh_skips_if_locked(temp_repo, temp_lf_dir):
     mock_popen.assert_not_called()
 
 
-def test_trigger_background_refresh_cleans_stale_lock(temp_repo, temp_lf_dir):
-    """Removes stale lock and proceeds with refresh."""
+@pytest.mark.parametrize("lock_content", ["999999999", "not_a_pid"])
+def test_trigger_background_refresh_cleans_stale_lock(temp_repo, temp_lf_dir, lock_content):
+    """Removes stale or invalid lock and proceeds with refresh."""
     lock_file = temp_lf_dir / ".refresh.lock"
-    # Use a PID that definitely doesn't exist
-    lock_file.write_text("999999999")
-
-    with patch.object(Path, "home", return_value=temp_lf_dir.parent):
-        with patch("loopflow.lf.context.subprocess.Popen") as mock_popen:
-            mock_popen.return_value.pid = 12345
-            _trigger_background_refresh(temp_repo)
-
-    # Should spawn new process
-    mock_popen.assert_called_once()
-    # Lock should have new PID
-    assert lock_file.read_text() == "12345"
-
-
-def test_trigger_background_refresh_cleans_invalid_lock(temp_repo, temp_lf_dir):
-    """Removes lock with invalid content and proceeds."""
-    lock_file = temp_lf_dir / ".refresh.lock"
-    lock_file.write_text("not_a_pid")
+    lock_file.write_text(lock_content)
 
     with patch.object(Path, "home", return_value=temp_lf_dir.parent):
         with patch("loopflow.lf.context.subprocess.Popen") as mock_popen:
@@ -224,12 +208,6 @@ def test_pathset_key_multiple_paths_sorted():
     assert result == "docs,swift,tests"
 
 
-def test_pathset_key_already_sorted():
-    """Already sorted paths work correctly."""
-    result = pathset_key([Path("a"), Path("b"), Path("c")])
-    assert result == "a,b,c"
-
-
 def test_pathset_key_nested_paths():
     """Nested paths are handled correctly."""
     result = pathset_key([Path("src/loopflow"), Path("src/lfd")])
@@ -240,13 +218,6 @@ def test_pathset_hash_single_hash():
     """Single hash returns a valid hash."""
     result = pathset_hash(["abc123"])
     assert len(result) == 16  # hash_content returns 16 chars
-
-
-def test_pathset_hash_multiple_hashes():
-    """Multiple hashes combine deterministically."""
-    result1 = pathset_hash(["hash1", "hash2", "hash3"])
-    result2 = pathset_hash(["hash1", "hash2", "hash3"])
-    assert result1 == result2
 
 
 def test_pathset_hash_order_independent():

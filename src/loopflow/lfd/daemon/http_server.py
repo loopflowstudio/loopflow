@@ -5,7 +5,6 @@ for clients that prefer HTTP (webapp, simpler Swift integration).
 """
 
 import asyncio
-import os
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +13,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from loopflow.lfd.daemon.status import compute_status
 from loopflow.lfd.worktree_state import get_worktree_state_service
 
 # Default port - matches webapp's expected default
@@ -57,23 +57,7 @@ async def list_worktrees(repo: str = Query(..., description="Repository path")):
 @app.get("/status", response_model=LFDResponse)
 async def get_status():
     """Basic health check and daemon status."""
-    from loopflow.lfd.agent import list_agents
-    from loopflow.lfd.models import AgentStatus
-    from loopflow.lfd.step_run import load_step_runs
-
-    agents = list_agents()
-    step_runs = load_step_runs(active_only=True)
-    running_agents = [a for a in agents if a.status == AgentStatus.RUNNING]
-
-    return LFDResponse(
-        ok=True,
-        result={
-            "pid": os.getpid(),
-            "agents_defined": len(agents),
-            "agents_running": len(running_agents),
-            "step_runs_active": len(step_runs),
-        },
-    )
+    return LFDResponse(ok=True, result=compute_status())
 
 
 class UvicornServer:

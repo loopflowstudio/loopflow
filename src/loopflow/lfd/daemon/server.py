@@ -3,17 +3,17 @@
 import asyncio
 import fnmatch
 import json
-import os
 import signal
 from asyncio import StreamReader, StreamWriter
 from datetime import datetime
 from pathlib import Path
 
-from loopflow.lfd.agent import list_agents, run_cron_check, run_watch_check
+from loopflow.lfd.agent import run_cron_check, run_watch_check
 from loopflow.lfd.daemon.manager import Manager, load_manager_config
 from loopflow.lfd.daemon.protocol import Event, Request, Response, error, success
+from loopflow.lfd.daemon.status import compute_status
 from loopflow.lfd.db import update_dead_processes
-from loopflow.lfd.models import AgentStatus, StepRun, StepRunStatus
+from loopflow.lfd.models import StepRun, StepRunStatus
 from loopflow.lfd.step_run import (
     load_step_runs,
     load_step_runs_for_repo,
@@ -117,18 +117,7 @@ class Server:
             return error(f"Unknown method: {method}", request.id)
 
     async def _handle_status(self) -> Response:
-        agents = list_agents()
-        step_runs = load_step_runs(active_only=True)
-        running_agents = [a for a in agents if a.status == AgentStatus.RUNNING]
-
-        return success(
-            {
-                "pid": os.getpid(),
-                "agents_defined": len(agents),
-                "agents_running": len(running_agents),
-                "step_runs_active": len(step_runs),
-            }
-        )
+        return success(compute_status())
 
     async def _handle_step_runs_list(self) -> Response:
         step_runs = load_step_runs()

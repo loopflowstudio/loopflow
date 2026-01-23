@@ -104,7 +104,9 @@ class WorktreeStateService:
                     "ahead": wt.ahead_remote,
                     "behind": wt.behind_remote,
                 },
-                "operation_state": "rebase" if wt.is_rebasing else ("merge" if wt.is_merging else None),
+                "operation_state": (
+                    "rebase" if wt.is_rebasing else ("merge" if wt.is_merging else None)
+                ),
                 "ci": {
                     "source": "pr" if wt.pr_url else None,
                     "url": wt.pr_url,

@@ -33,12 +33,22 @@ export type StepStatus = 'running' | 'completed' | 'error'
 
 export interface StepRun {
   id: string
-  prompt: string
-  worktreePath: string
+  step: string  // matches Python schema
+  repo: string
+  worktree: string  // matches Python schema (was worktreePath)
   status: StepStatus
   startedAt: Date
   endedAt?: Date
-  isCompleted: boolean
+  model: string
+  runMode: string
+}
+
+export function stepRunIsCompleted(run: StepRun): boolean {
+  return run.status === 'completed'
+}
+
+export function stepRunIsRunning(run: StepRun): boolean {
+  return run.status === 'running'
 }
 
 export interface FileChange {
@@ -52,7 +62,7 @@ export interface FileChange {
 
 export interface StepResult {
   id: string
-  prompt: string
+  step: string  // matches Python schema
   worktree: string
   status: StepStatus
   startedAt: Date

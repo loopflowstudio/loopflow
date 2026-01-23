@@ -1,4 +1,4 @@
-// Service for capturing git state and computing session results.
+// Service for capturing git state and computing step run results.
 
 import Foundation
 

@@ -249,6 +249,17 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
     has_upstream_branch = result.returncode == 0
 
     if has_upstream_branch:
+        # Check if upstream matches the local branch name
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "@{u}"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+        )
+        upstream_branch = result.stdout.strip() if result.returncode == 0 else ""
+        upstream_name = upstream_branch.split("/", 1)[-1] if "/" in upstream_branch else upstream_branch
+        upstream_matches = upstream_name == branch
+
         result = subprocess.run(
             ["git", "rev-list", "@{u}..HEAD", "--count"],
             cwd=repo_root,
@@ -264,20 +275,21 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
             text=True,
         )
         remote_ahead = int(result.stdout.strip()) if result.returncode == 0 else 0
-        if unpushed > 0:
+        if unpushed > 0 or not upstream_matches:
             if strict:
                 typer.echo(
                     "Error: Unpushed commits (use without --strict to auto-push)",
                     err=True,
                 )
                 raise typer.Exit(1)
-            if remote_ahead > 0:
+            if remote_ahead > 0 and upstream_matches:
                 # Branches diverged (e.g., after rebase) - force push safely
                 typer.echo("Branches diverged, force-pushing with lease...")
                 subprocess.run(["git", "push", "--force-with-lease"], cwd=repo_root, check=True)
             else:
+                # Push to same-named branch on origin (handles mismatched upstream)
                 typer.echo("Pushing to origin...")
-                subprocess.run(["git", "push"], cwd=repo_root, check=True)
+                subprocess.run(["git", "push", "-u", "origin", branch], cwd=repo_root, check=True)
     else:
         if strict:
             typer.echo("Error: Branch not pushed (use without --strict to auto-push)", err=True)

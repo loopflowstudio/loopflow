@@ -1,12 +1,13 @@
-from loopflow.lf.flows import Flow, Fork, Synthesize
+from loopflow.lf.flows import Flow, Fork
 
 
 def flow():
     return Flow(
         Fork(
-            {"step": "roadmap", "voice": "infra-engineer"},
-            {"step": "roadmap", "voice": "designer"},
-            {"step": "roadmap", "voice": "product-engineer"},
+            {"goal": "infra-engineer"},
+            {"goal": "designer"},
+            {"goal": "product-engineer"},
+            step="roadmap",
+            synthesize={"goal": "ceo"},
         ),
-        Synthesize(goal="ceo"),
     )

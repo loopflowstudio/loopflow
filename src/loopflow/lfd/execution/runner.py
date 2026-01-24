@@ -8,7 +8,7 @@ import json
 import subprocess
 import sys
 import uuid
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -27,14 +27,13 @@ from loopflow.lf.flows import (
     Fork,
     ForkAgent,
     Step,
-    Synthesize,
     build_step_dag,
     load_flow,
 )
+from loopflow.lf.goals import resolve_goals
 from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lf.logging import write_prompt_file
 from loopflow.lf.messages import generate_pr_message
-from loopflow.lf.goals import format_goal_section, resolve_goals
 from loopflow.lf.worktrees import WorktreeError
 from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
@@ -46,6 +45,15 @@ from loopflow.lfd.flow_run import (
     update_run_step,
 )
 from loopflow.lfd.models import Agent, FlowRun, FlowRunStatus
+
+
+@dataclass
+class IterationResult:
+    """Result of running a single agent iteration."""
+
+    success: bool
+    worktree: Path | None = None
+    branch: str | None = None
 
 
 def _iteration_branch_prefix(main_branch: str) -> str:
@@ -300,7 +308,6 @@ def _run_fork_synthesize(
     worktree_path: Path,
     branch: str,
     fork: Fork,
-    synth: Synthesize,
     context_paths: list[str] | None,
     effective_goals: list,
     skip_permissions: bool,
@@ -435,7 +442,8 @@ def _run_fork_synthesize(
         _cleanup_fork_worktrees(agent.repo, results)
         return 1
 
-    instructions = load_synthesize_instructions(synth.step, agent.repo, synth.prompt)
+    synth_prompt_override = fork.synthesize.prompt if fork.synthesize else None
+    instructions = load_synthesize_instructions(agent.repo, synth_prompt_override)
     synth_prompt = build_synthesize_prompt(results, instructions, base_commit)
     synth_prompt = _build_loop_inline_prompt(
         agent,
@@ -472,11 +480,8 @@ def run_iteration(
     agent: Agent,
     iteration: int,
     run_id: str | None = None,
-) -> bool:
-    """Run a single iteration of an agent.
-
-    Returns True if successful, False on error.
-    """
+) -> IterationResult:
+    """Run a single iteration of an agent."""
     config = load_config(agent.repo)
 
     prefix = _iteration_branch_prefix(agent.main_branch)
@@ -486,7 +491,7 @@ def run_iteration(
     except WorktreeError as e:
         error_msg = f"Failed to create worktree: {e}"
         notify_event("agent.error", {"agent_id": agent.id, "error": error_msg})
-        return False
+        return IterationResult(success=False)
 
     run = FlowRun(
         id=run_id or str(uuid.uuid4()),
@@ -521,25 +526,25 @@ def run_iteration(
     if not flow:
         update_run_status(run.id, FlowRunStatus.FAILED, error="Flow is required")
         _cleanup_worktree(agent.repo, worktree_path, branch)
-        return False
+        return IterationResult(success=False)
 
     try:
         flow_def = load_flow(flow, agent.repo)
     except ValueError as exc:
         update_run_status(run.id, FlowRunStatus.FAILED, error=str(exc))
         _cleanup_worktree(agent.repo, worktree_path, branch)
-        return False
+        return IterationResult(success=False)
 
     if not flow_def:
         update_run_status(run.id, FlowRunStatus.FAILED, error=f"Unknown flow '{flow}'")
         _cleanup_worktree(agent.repo, worktree_path, branch)
-        return False
+        return IterationResult(success=False)
 
-    items: list[Step | Fork | Synthesize | Choose] = list(flow_def.steps)
+    items: list[Step | Fork | Choose] = list(flow_def.steps)
     if not items:
         update_run_status(run.id, FlowRunStatus.FAILED, error=f"Empty flow '{flow}'")
         _cleanup_worktree(agent.repo, worktree_path, branch)
-        return False
+        return IterationResult(success=False)
 
     agent_model = config.agent_model if config else "claude:opus"
     backend, model_variant = parse_model(agent_model)
@@ -547,7 +552,7 @@ def run_iteration(
     runner = get_runner(backend)
     if not runner.is_available():
         update_run_status(run.id, FlowRunStatus.FAILED, error=f"'{backend}' CLI not found")
-        return False
+        return IterationResult(success=False)
 
     skip_permissions = config.yolo if config else False
 
@@ -597,7 +602,7 @@ def run_iteration(
                             run.id, FlowRunStatus.FAILED, error=f"Step file not found: {step_name}"
                         )
                         _cleanup_worktree(agent.repo, worktree_path, branch)
-                        return False
+                        return IterationResult(success=False)
 
                     prompt, _step_file = prompt_result
                     try:
@@ -621,7 +626,7 @@ def run_iteration(
                         )
                         update_run_status(run.id, FlowRunStatus.FAILED, error=str(e))
                         _cleanup_worktree(agent.repo, worktree_path, branch)
-                        return False
+                        return IterationResult(success=False)
 
                     notify_event(
                         "agent.step.completed",
@@ -635,7 +640,7 @@ def run_iteration(
                     if result_code != 0:
                         update_run_status(run.id, FlowRunStatus.FAILED, error=f"{step_name} failed")
                         _cleanup_worktree(agent.repo, worktree_path, branch)
-                        return False
+                        return IterationResult(success=False)
                     continue
 
                 base_branch = _current_branch(worktree_path) or branch
@@ -697,7 +702,7 @@ def run_iteration(
                         remove_worktree(agent.repo, wt_path.name.split(".")[-1])
                     update_run_status(run.id, FlowRunStatus.FAILED, error="Parallel step failed")
                     _cleanup_worktree(agent.repo, worktree_path, branch)
-                    return False
+                    return IterationResult(success=False)
 
                 for _, wt_path, _ in results:
                     merge_branch = _current_branch(wt_path) or wt_path.name
@@ -706,7 +711,7 @@ def run_iteration(
                             remove_worktree(agent.repo, cleanup_path.name.split(".")[-1])
                         update_run_status(run.id, FlowRunStatus.FAILED, error="Merge failed")
                         _cleanup_worktree(agent.repo, worktree_path, branch)
-                        return False
+                        return IterationResult(success=False)
 
                 for _, wt_path, _ in results:
                     remove_worktree(agent.repo, wt_path.name.split(".")[-1])
@@ -714,14 +719,6 @@ def run_iteration(
             continue
 
         if isinstance(item, Fork):
-            if i + 1 >= len(items) or not isinstance(items[i + 1], Synthesize):
-                update_run_status(
-                    run.id,
-                    FlowRunStatus.FAILED,
-                    error="Fork must be immediately followed by synthesize",
-                )
-                _cleanup_worktree(agent.repo, worktree_path, branch)
-                return False
             try:
                 result_code = _run_fork_synthesize(
                     agent,
@@ -729,7 +726,6 @@ def run_iteration(
                     worktree_path,
                     branch,
                     item,
-                    items[i + 1],
                     context_paths,
                     effective_goals,
                     skip_permissions,
@@ -739,19 +735,14 @@ def run_iteration(
             except StepTimeoutError as e:
                 update_run_status(run.id, FlowRunStatus.FAILED, error=str(e))
                 _cleanup_worktree(agent.repo, worktree_path, branch)
-                return False
+                return IterationResult(success=False)
             if result_code != 0:
                 update_run_status(run.id, FlowRunStatus.FAILED, error="synthesize failed")
                 _cleanup_worktree(agent.repo, worktree_path, branch)
-                return False
+                return IterationResult(success=False)
 
-            i += 2
+            i += 1
             continue
-
-        if isinstance(item, Synthesize):
-            update_run_status(run.id, FlowRunStatus.FAILED, error="Synthesize must follow fork")
-            _cleanup_worktree(agent.repo, worktree_path, branch)
-            return False
 
         if isinstance(item, Choose):
             try:
@@ -766,7 +757,7 @@ def run_iteration(
             except RuntimeError as exc:
                 update_run_status(run.id, FlowRunStatus.FAILED, error=str(exc))
                 _cleanup_worktree(agent.repo, worktree_path, branch)
-                return False
+                return IterationResult(success=False)
 
             items = items[:i] + item.options[choice] + items[i + 1 :]
             continue
@@ -799,7 +790,7 @@ def run_iteration(
 
     _cleanup_worktree(agent.repo, worktree_path, branch)
 
-    return True
+    return IterationResult(success=True, worktree=worktree_path, branch=branch)
 
 
 def _create_pr_to_main_branch(

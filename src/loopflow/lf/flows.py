@@ -1,6 +1,7 @@
 """Flow DAG loading and execution for agents."""
 
-from dataclasses import dataclass, field as dataclass_field
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from importlib import util as importlib_util
 from pathlib import Path
 from types import ModuleType
@@ -128,7 +129,7 @@ def _parse_flow_items(items: Iterable[Any]) -> list[FlowItem]:
 
 
 def _parse_flow_item(item: Any) -> FlowItem:
-    if isinstance(item, (Step, Fork, Synthesize, Choose)):
+    if isinstance(item, (Step, Fork, Choose)):
         return item
     if isinstance(item, str):
         return Step(name=item)
@@ -142,23 +143,19 @@ def _parse_flow_item(item: Any) -> FlowItem:
             agents = item["fork"]
             if not isinstance(agents, list):
                 raise ValueError("fork must be a list of agents")
-            return Fork(*agents)
-        if "synthesize" in item:
-            synth = item["synthesize"]
-            if isinstance(synth, Synthesize):
-                return synth
-            if isinstance(synth, str):
-                return Synthesize(step=synth)
-            if isinstance(synth, dict):
-                return Synthesize(step=synth.get("step"), prompt=synth.get("prompt"))
-            return Synthesize()
+            return Fork(
+                *agents,
+                step=item.get("step"),
+                model=item.get("model"),
+                synthesize=item.get("synthesize"),
+            )
         if "step" in item or "name" in item:
             name = item.get("name") or item.get("step")
             return Step(
                 name=name,
                 after=item.get("after"),
                 model=item.get("model"),
-                voice=item.get("voice"),
+                goal=item.get("goal"),
             )
     raise ValueError(f"Unsupported flow item: {item!r}")
 
@@ -173,36 +170,40 @@ def _parse_fork_agent(agent: Any) -> ForkAgent:
 
 def _step_to_data(step: FlowItem) -> dict | str:
     if isinstance(step, Step):
-        if not step.after and not step.model and not step.voice:
+        if not step.after and not step.model and not step.goal:
             return step.name
         data: dict[str, Any] = {"step": step.name}
         if step.after:
             data["after"] = step.after
         if step.model:
             data["model"] = step.model
-        if step.voice:
-            data["voice"] = step.voice
+        if step.goal:
+            data["goal"] = step.goal
         return data
     if isinstance(step, Fork):
-        return {
+        result: dict[str, Any] = {
             "fork": [
                 {
                     "step": agent.step,
                     "flow": agent.flow,
-                    "voice": agent.voice,
+                    "goal": agent.goal,
                     "model": agent.model,
                     "area": agent.area,
                 }
                 for agent in step.agents
             ]
         }
-    if isinstance(step, Synthesize):
-        payload: dict[str, Any] = {}
         if step.step:
-            payload["step"] = step.step
-        if step.prompt:
-            payload["prompt"] = step.prompt
-        return {"synthesize": payload}
+            result["step"] = step.step
+        if step.model:
+            result["model"] = step.model
+        if step.synthesize:
+            result["synthesize"] = {
+                "goal": step.synthesize.goal,
+                "area": step.synthesize.area,
+                "prompt": step.synthesize.prompt,
+            }
+        return result
     if isinstance(step, Choose):
         return {"choose": step.model_dump(exclude_none=True)}
     raise ValueError(f"Unsupported step type: {type(step)}")
@@ -249,11 +250,11 @@ def _load_flow_module(name: str, path: Path) -> ModuleType:
         raise ValueError(f"Flow '{name}' failed to load")
 
     module = importlib_util.module_from_spec(spec)
+    # Inject flow primitives for backwards compat (prefer explicit imports)
     module.__dict__["Flow"] = Flow
     module.__dict__["Step"] = Step
     module.__dict__["Fork"] = Fork
     module.__dict__["ForkAgent"] = ForkAgent
-    module.__dict__["Synthesize"] = Synthesize
     module.__dict__["Choose"] = Choose
     spec.loader.exec_module(module)
     return module

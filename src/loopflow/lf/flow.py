@@ -29,9 +29,9 @@ from loopflow.lf.flows import (
     FlowDef,
     Fork,
     ForkAgent,
-    Synthesize,
     Step,
     StepDAG,
+    SynthesizeConfig,
     build_step_dag,
     load_flow,
 )
@@ -45,7 +45,7 @@ from loopflow.lf.worktrees import remove as remove_worktree
 from loopflow.lfd.models import StepRun, StepRunStatus
 from loopflow.lfd.step_run import log_step_run_end, log_step_run_start
 
-FlowItem = Step | Fork | Synthesize | Choose
+FlowItem = Step | Fork | Choose
 
 
 @dataclass
@@ -56,7 +56,7 @@ class _StepParams:
     backend: str
     model_variant: str | None
     context: list[str] | None
-    voices: list[str] | None
+    goals: list[str] | None
 
 
 def _build_step_params(
@@ -69,7 +69,7 @@ def _build_step_params(
     step_backend = backend
     step_variant = model_variant
     step_context = list(context) if context else []
-    step_voices = [step.voice] if step.voice else None
+    step_goals = [step.goal] if step.goal else None
 
     if step.model:
         step_backend, step_variant = parse_model(step.model)
@@ -79,7 +79,7 @@ def _build_step_params(
         backend=step_backend,
         model_variant=step_variant,
         context=step_context or None,
-        voices=step_voices,
+        goals=step_goals,
     )
 
 
@@ -103,7 +103,7 @@ def _run_step(
         repo_root,
         params.step,
         run_mode="auto",
-        voices=params.voices,
+        goals=params.goals,
         context_config=ContextConfig(
             files=FilesetConfig(paths=params.context or [], exclude=exclude or [])
         ),
@@ -289,7 +289,7 @@ class _WorktreeTask:
     backend: str
     model_variant: str | None
     context: list[str] | None
-    voices: list[str] | None
+    goals: list[str] | None
 
 
 @dataclass
@@ -338,7 +338,7 @@ def _run_worktree_tasks(
             wt_path,
             wt_task.step,
             run_mode="auto",
-            voices=wt_task.voices,
+            goals=wt_task.goals,
             context_config=ContextConfig(
                 files=FilesetConfig(paths=wt_task.context or [], exclude=exclude or [])
             ),
@@ -480,7 +480,7 @@ def run_fork(
         subprocess.run(["git", "clean", "-fd"], cwd=wt_path, capture_output=True)
 
         if agent.step:
-            step = Step(name=agent.step, model=agent.model, voice=agent.voice)
+            step = Step(name=agent.step, model=agent.model, goal=agent.goal)
             params = _build_step_params(step, backend, model_variant, context)
             exit_code = _run_step(
                 params,
@@ -538,7 +538,7 @@ def run_fork(
 
 
 def run_synthesize(
-    synth: Synthesize,
+    synth: SynthesizeConfig | None,
     fork_results: list[ForkResult],
     base_commit: str,
     target_worktree: Path,
@@ -549,9 +549,10 @@ def run_synthesize(
     chrome: bool = False,
 ) -> int:
     """Review fork diffs against base, write unified result + analysis to target."""
+    synth_prompt = synth.prompt if synth else None
     prompt = build_synthesize_prompt(
         fork_results,
-        load_synthesize_instructions(synth.step, target_worktree, synth.prompt),
+        load_synthesize_instructions(target_worktree, synth_prompt),
         base_commit,
     )
     return _run_inline_prompt(
@@ -574,7 +575,6 @@ def cleanup_fork_worktrees(results: list[ForkResult], parent_worktree: Path) -> 
 
 
 def load_synthesize_instructions(
-    step_name: str | None,
     repo_root: Path,
     prompt_override: str | None,
 ) -> str | None:
@@ -582,8 +582,7 @@ def load_synthesize_instructions(
     if prompt_override:
         return prompt_override.strip()
 
-    name = step_name or "synthesize"
-    step_file = gather_step(repo_root, name)
+    step_file = gather_step(repo_root, "synthesize")
     if not step_file:
         return None
 
@@ -671,7 +670,7 @@ def build_synthesize_prompt(
         lines.append(f"### Fork {index}")
         lines.append(
             "Config: "
-            f"step={config.step}, flow={config.flow}, voice={config.voice}, "
+            f"step={config.step}, flow={config.flow}, goal={config.goal}, "
             f"model={config.model}, area={config.area}"
         )
         lines.append(f"Status: {result.status}")
@@ -907,7 +906,7 @@ def run_flow_def(
                             backend=params.backend,
                             model_variant=params.model_variant,
                             context=params.context,
-                            voices=params.voices,
+                            goals=params.goals,
                         )
                     )
 
@@ -935,10 +934,6 @@ def run_flow_def(
 
         if isinstance(item, Fork):
             step_num += 1
-            if i + 1 >= len(items) or not isinstance(items[i + 1], Synthesize):
-                print("Error: fork must be immediately followed by synthesize")
-                return 1
-
             base_commit = _git_rev_parse(repo_root, "HEAD")
             fork_results = run_fork(
                 item,
@@ -957,9 +952,8 @@ def run_flow_def(
                 cleanup_fork_worktrees(fork_results, repo_root)
                 return 1
 
-            synth = items[i + 1]
             result_code = run_synthesize(
-                synth,
+                item.synthesize,
                 fork_results,
                 base_commit,
                 repo_root,
@@ -974,12 +968,8 @@ def run_flow_def(
             if result_code != 0:
                 return result_code
 
-            i += 2
+            i += 1
             continue
-
-        if isinstance(item, Synthesize):
-            print("Error: synthesize must follow fork")
-            return 1
 
         if isinstance(item, Choose):
             choice = choose_branch(

@@ -8,7 +8,6 @@ from loopflow.lf.flows import (
     FlowDef,
     Fork,
     Step,
-    Synthesize,
     build_step_dag,
     load_flow,
     save_flow,
@@ -19,7 +18,7 @@ def test_flow_from_dict_parses_steps():
     data = {
         "steps": [
             "design",
-            {"step": "implement", "model": "codex", "voice": "architect"},
+            {"step": "implement", "model": "codex", "goal": "architect"},
             {"step": "review", "after": "design"},
         ]
     }
@@ -28,7 +27,7 @@ def test_flow_from_dict_parses_steps():
     assert isinstance(flow.steps[0], Step)
     assert flow.steps[0].name == "design"
     assert flow.steps[1].model == "codex"
-    assert flow.steps[1].voice == "architect"
+    assert flow.steps[1].goal == "architect"
     assert flow.steps[2].after == "design"
 
 
@@ -85,7 +84,7 @@ def flow():
         ]
 
 
-def test_load_flow_with_fork_and_synthesize():
+def test_load_flow_with_fork():
     with tempfile.TemporaryDirectory() as tmpdir:
         repo = Path(tmpdir)
         flows_dir = repo / ".lf" / "flows"
@@ -96,10 +95,11 @@ def test_load_flow_with_fork_and_synthesize():
 def flow():
     return Flow(
         Fork(
-            {"step": "implement", "voice": "architect"},
-            {"step": "implement", "voice": "pragmatist"},
+            {"goal": "architect"},
+            {"goal": "pragmatist"},
+            step="implement",
+            synthesize={"goal": "reviewer"},
         ),
-        Synthesize(),
     )
 """
         )
@@ -107,7 +107,8 @@ def flow():
         flow = load_flow("race", repo)
         assert flow is not None
         assert isinstance(flow.steps[0], Fork)
-        assert isinstance(flow.steps[1], Synthesize)
+        assert flow.steps[0].step == "implement"
+        assert flow.steps[0].synthesize.goal == "reviewer"
 
 
 def test_save_flow_roundtrip():
@@ -117,8 +118,7 @@ def test_save_flow_roundtrip():
             name="test",
             steps=[
                 Step("design"),
-                Step("implement", model="codex", voice="architect"),
-                Synthesize(),
+                Step("implement", model="codex", goal="architect"),
             ],
         )
 
@@ -129,4 +129,3 @@ def test_save_flow_roundtrip():
         assert loaded is not None
         assert isinstance(loaded.steps[0], Step)
         assert loaded.steps[1].model == "codex"
-        assert isinstance(loaded.steps[2], Synthesize)

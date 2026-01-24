@@ -27,6 +27,7 @@ from loopflow.lf.context import (
 from loopflow.lf.flows import (
     Choose,
     FlowDef,
+    FlowItem,
     Fork,
     ForkAgent,
     Synthesize,
@@ -44,8 +45,6 @@ from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
 from loopflow.lfd.models import StepRun, StepRunStatus
 from loopflow.lfd.step_run import log_step_run_end, log_step_run_start
-
-FlowItem = Step | Fork | Synthesize | Choose
 
 
 @dataclass

@@ -115,7 +115,9 @@ def _format_step_list() -> str:
     if flows:
         lines.append(f"{c['cyan']}{c['bold']}FLOWS{c['reset']}")
         for flow in sorted(flows, key=lambda f: f.name):
-            chain = f" {c['dim']}→{c['reset']} ".join(step.step for step in flow.steps if step.step)
+            chain = f" {c['dim']}→{c['reset']} ".join(
+                step.name for step in flow.steps if hasattr(step, "name")
+            )
             lines.append(f"  {c['bold']}{flow.name:<14}{c['reset']} {c['dim']}{chain}{c['reset']}")
         lines.append("")
 

@@ -20,6 +20,32 @@ lf debug -c                       # fix it
 
 ---
 
+## Why Flows?
+
+Steps are atomic. Flows are how work actually gets done.
+
+**Linear flows** chain steps with automatic commits:
+```
+design → implement → polish
+```
+
+**Parallel flows** branch and join:
+```
+design ──┬──> impl-api ──┬──> integrate
+         └──> impl-ui ───┘
+```
+
+**Fork/Synthesize** explores multiple approaches:
+```
+Fork ──┬──> impl (architect)  ──┐
+       ├──> impl (pragmatist) ──┼──> Synthesize
+       └──> impl (codex)      ──┘
+```
+
+The synthesizer doesn't just pick a winner—it documents why approaches differed.
+
+---
+
 ## The Model
 
 | Atom | What it does | File |

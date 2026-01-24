@@ -14,6 +14,45 @@ Arrange and conduct an agent orchestra.
 
 An agent is **area × goal × flow × stimulus**.
 
+## Flows
+
+```bash
+lf flow ship: add user auth
+```
+
+`ship` runs design → implement → polish, committing between each step.
+
+### Built-in Flows
+
+| Flow | What it does |
+|------|--------------|
+| `ship` | Design, build, polish — full feature workflow |
+| `quick` | Build and polish — skip design for small changes |
+| `iterate` | Review, fix, polish — improve existing code |
+| `reduce` | Simplify bloated code |
+| `roadmap` | Roadmap → design planning |
+
+### Race Different Approaches
+
+```bash
+lf flow race: add caching
+```
+
+Define `race` in `.lf/flows/race.py`:
+
+```python
+def flow():
+    return Flow(
+        Fork(
+            {"step": "implement", "voice": "architect"},
+            {"step": "implement", "voice": "pragmatist"},
+        ),
+        Synthesize(),
+    )
+```
+
+Runs the same task in parallel and synthesizes the best result, writing analysis to `scratch/synthesis.md`.
+
 ## Steps
 
 ```bash
@@ -30,25 +69,6 @@ lf polish -a              # autonomous (runs to completion)
 ```
 
 Steps live in `.lf/steps/`.
-
-## Flows
-
-```bash
-lf flow ship              # design → implement → polish
-```
-
-Or chain manually:
-
-```bash
-lf design: add user auth && lf implement && lf polish && lfops pr
-```
-
-Define flows in `.lf/flows/ship.py`:
-
-```python
-def flow():
-    return Flow("design", "implement", "polish")
-```
 
 ## Agents
 

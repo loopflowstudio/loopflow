@@ -1,2 +1,5 @@
+from loopflow.lf.flows import Flow
+
+
 def flow():
-    return Flow("roadmap", "design")  # noqa: F821
+    return Flow("roadmap", "design")

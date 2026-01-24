@@ -262,7 +262,7 @@ RECURSIVE_THRESHOLD = 400000
 
 def _load_summarize_prompt(repo_root: Path) -> str:
     """Load summarize prompt, checking for override first."""
-    from loopflow.lf.builtins import get_builtin_prompt
+    from loopflow.lf.builtins.prompts import get_builtin_prompt
 
     override = repo_root / ".lf" / "SUMMARIZE.md"
     if override.exists():

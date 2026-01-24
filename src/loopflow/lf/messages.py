@@ -7,7 +7,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from loopflow.lf.builtins import get_builtin_prompt
+from loopflow.lf.builtins.prompts import get_builtin_prompt
 from loopflow.lf.config import load_config, parse_model
 from loopflow.lf.context import gather_diff, gather_docs
 from loopflow.lf.launcher import build_claude_command, build_codex_command

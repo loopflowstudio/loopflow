@@ -54,7 +54,8 @@ class Synthesize:
 
     step: str | None = None  # custom synthesizer step
     prompt: str | None = None  # inline prompt override
-    # If neither: use built-in synthesizer
+    voice: str | None = None  # voice for synthesis
+    # If none specified: use built-in synthesizer
 
 
 class Flow(list):

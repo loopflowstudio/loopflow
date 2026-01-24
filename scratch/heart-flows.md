@@ -390,24 +390,136 @@ Fork/Synthesize introduces parallel execution. Concerto needs:
 
 Minimal: CLI-only for v1. Concerto support in follow-up.
 
+## Code Architecture
+
+### Current Structure
+
+```
+src/loopflow/
+├── lf/
+│   ├── flows.py      # Flow data structures, loading, resolution
+│   ├── flow.py       # Flow execution (runs steps, handles fork/join)
+│   ├── step.py       # Step file loading
+│   └── builtins/     # Built-in steps
+└── lfd/
+    └── execution/    # Agent execution (collector, runner, worker)
+```
+
+### Changes Needed
+
+**`lf/flows.py`** — Add new data structures:
+- `Step` with `after` for explicit dependencies (rename existing `FlowStep`)
+- `Fork` (parallel agent spawn) — replaces current `fork` field on FlowStep
+- `Synthesize` (join fork results) — extends current `Join`
+- Keep `Flow`, `Choose` as-is
+
+**`lf/flow.py`** — Extend execution:
+- Add DAG builder from step list (infer linear ordering when no `after`)
+- Add topological sort
+- Extend `_run_fork_join_group` for new Fork/Synthesize semantics
+- Add synthesis analysis output to `scratch/synthesis.md`
+
+**`lf/builtins/flows/`** — New directory for built-in flows:
+```
+src/loopflow/lf/builtins/flows/
+├── __init__.py
+├── ship.py
+├── quick.py
+├── iterate.py
+├── reduce.py
+└── README.md
+```
+
+Update `load_flow()` in `flows.py` to check builtins after repo/global.
+
+### Folder READMEs
+
+**`.lf/flows/README.md`** (user-facing, created by `lf init`):
+```markdown
+# Flows
+
+Define flows as Python files. Each flow returns a `Flow` with steps.
+
+## Example
+
+```python
+# .lf/flows/ship.py
+def flow():
+    return Flow("design", "implement", "polish")
+```
+
+Run with `lf flow ship`.
+
+## Parallel Branches
+
+```python
+def flow():
+    return Flow(
+        Step("design"),
+        Step("impl-api", after="design"),
+        Step("impl-ui", after="design"),
+        Step("integrate", after=["impl-api", "impl-ui"]),
+    )
+```
+
+## Fork/Synthesize
+
+```python
+def flow():
+    return Flow(
+        Fork(
+            {"step": "implement", "voice": "architect"},
+            {"step": "implement", "model": "codex"},
+        ),
+        Synthesize(),
+    )
+```
+
+See docs for more: https://loopflow.dev/docs/flows
+```
+
+**`src/loopflow/lf/builtins/flows/README.md`** (developer-facing):
+```markdown
+# Built-in Flows
+
+Flows shipped with loopflow. Available everywhere without user configuration.
+
+| Flow | Steps | Use case |
+|------|-------|----------|
+| ship | design → implement → polish | Full feature workflow |
+| quick | implement → polish | Fast iteration |
+| iterate | review → implement → polish | Improve existing code |
+| reduce | reduce → polish | Simplify bloated code |
+| roadmap | roadmap → design | Strategic planning |
+
+## Adding a Built-in Flow
+
+1. Create `{name}.py` with a `flow()` function
+2. Return a `Flow` with steps
+3. Update this README
+
+Fork failure handling is undefined for v1. Document edge cases here as they're discovered.
+```
+
 ## Implementation Path
 
 **Phase 1: DAG execution model**
-- Refactor Flow from list to DAG
-- Add `Step` with `after` for explicit dependencies
-- Implement topological sort execution
+- Refactor `FlowStep` → `Step` with `after` field
+- Add DAG builder to `flows.py`
+- Implement topological sort in `flow.py`
 - Parallel branches get branched worktrees
 
 **Phase 2: Built-in flows**
-- Add `loopflow/flows/` with ship, quick, iterate, reduce
-- Update flow loading to check built-ins after repo flows
-- No new primitives, just shipped content
+- Create `src/loopflow/lf/builtins/flows/`
+- Add ship, quick, iterate, reduce, roadmap
+- Update `load_flow()` to check builtins
+- Generate `.lf/flows/README.md` in `lf init`
 
 **Phase 3: Fork/Synthesize**
-- Add `Fork` and `Synthesize` to flow DSL
-- Implement `run_fork()` — parallel worktree creation + agent execution
-- Implement `run_synthesize()` — context assembly + built-in prompt
-- Wire into flow runner
+- Add `Fork` and `Synthesize` to `flows.py`
+- Extend `_run_fork_join_group` for new semantics
+- Add synthesis analysis to `scratch/synthesis.md`
+- Write built-in synthesizer step
 
 ## Use Cases: Model Experimentation
 
@@ -461,6 +573,111 @@ def flow():
 ```
 
 Four approaches: architect-claude, architect-codex, pragmatist-claude, pragmatist-codex. Synthesizer picks the best.
+
+## Documentation Strategy
+
+Update README and docs to showcase flows as the power feature, not just "step chaining."
+
+### README Changes
+
+Lead with the exciting stuff. Current README shows steps first, flows second. Flip it:
+
+```markdown
+## Flows
+
+Run a complete workflow with one command:
+
+```bash
+lf flow ship: add user auth
+```
+
+`ship` runs design → implement → polish, committing between each step.
+
+### Built-in Flows
+
+| Flow | What it does |
+|------|--------------|
+| `ship` | Design, build, polish — full feature workflow |
+| `quick` | Build and polish — skip design for small changes |
+| `iterate` | Review, fix, polish — improve existing code |
+| `race` | Try multiple approaches, pick the best |
+
+### Race Different Models
+
+```bash
+lf flow race: add caching
+```
+
+Runs the same task with Claude, Codex, and different voices in parallel. Synthesizes the best approach. You get the winning implementation *and* a `scratch/synthesis.md` explaining what each tried.
+```
+
+### docs/index.md Changes
+
+Add a "Why Flows?" section early:
+
+```markdown
+## Why Flows?
+
+Steps are atomic. Flows are how work actually gets done.
+
+**Linear flows** chain steps with automatic commits:
+```
+design → implement → polish
+```
+
+**Parallel flows** branch and join:
+```
+design ──┬──> impl-api ──┬──> integrate
+         └──> impl-ui ───┘
+```
+
+**Fork/Synthesize** explores multiple approaches:
+```
+Fork ──┬──> impl (architect)  ──┐
+       ├──> impl (pragmatist) ──┼──> Synthesize
+       └──> impl (codex)      ──┘
+```
+
+The synthesizer doesn't just pick a winner—it documents *why* approaches differed.
+```
+
+### Key Messaging
+
+1. **Flows are the product.** Steps are building blocks. Flows are what users run.
+
+2. **Built-ins are good defaults.** Users don't need to write flows to get value. `lf flow ship` just works.
+
+3. **Fork/Synthesize is the differentiator.** No other tool does parallel agent exploration with synthesis analysis. This is the "wow" feature.
+
+4. **Model racing is concrete.** "Race Claude vs Codex" is immediately understandable and compelling.
+
+5. **Analysis is the point.** The synthesis doc isn't just a side effect—it's how you learn which model/voice works best for your codebase.
+
+### Example-First Documentation
+
+Every flow concept gets a runnable example before explanation:
+
+```markdown
+## Parallel Branches
+
+```bash
+lf flow parallel: add dashboard
+```
+
+Where `parallel.py` is:
+
+```python
+def flow():
+    return Flow(
+        Step("design"),
+        Step("impl-api", after="design"),
+        Step("impl-ui", after="design"),
+        Step("integrate", after=["impl-api", "impl-ui"]),
+    )
+```
+
+API and UI implementation run in parallel, then integrate.
+```
 
 ## Decisions
 

@@ -75,9 +75,7 @@ def _build_loop_prompt(
         return None
 
     step_file, step_content = components.step
-    goal_parts = [
-        f"<lf:goal:{g.name}>\n{g.content}\n</lf:goal:{g.name}>" for g in effective_goals
-    ]
+    goal_parts = [f"<lf:goal:{g.name}>\n{g.content}\n</lf:goal:{g.name}>" for g in effective_goals]
     goal_section = "\n\n".join(goal_parts)
     combined = f"{goal_section}\n\n---\n\n{step_content}"
     components = replace(components, step=(step_file, combined))
@@ -230,8 +228,8 @@ def _build_loop_inline_prompt(
         return None
 
     step_file, step_content = components.step
-    goal_section = render_goals(effective_goals)
-
+    goal_parts = [f"<lf:goal:{g.name}>\n{g.content}\n</lf:goal:{g.name}>" for g in effective_goals]
+    goal_section = "\n\n".join(goal_parts)
     combined = f"{goal_section}\n\n---\n\n{step_content}"
     components = replace(components, step=(step_file, combined))
     return format_prompt(components)

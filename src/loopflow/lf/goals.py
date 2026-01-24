@@ -182,12 +182,6 @@ def resolve_goals(repo: Path, goal_names: list[str]) -> list[Goal]:
     return goals
 
 
-def render_goals(goals: list[Goal]) -> str:
-    """Combine goals into single prompt."""
-    parts = [f"<lf:goal:{goal.name}>\n{goal.content}\n</lf:goal:{goal.name}>" for goal in goals]
-    return "\n\n".join(parts)
-
-
 def parse_goal_arg(goal_arg: str | None) -> list[str]:
     """Parse 'a,b,c' into ['a', 'b', 'c']. Returns [] if None or empty."""
     if not goal_arg:

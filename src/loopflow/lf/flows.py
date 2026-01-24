@@ -1,7 +1,6 @@
 """Flow DAG loading and execution for agents."""
 
-from dataclasses import dataclass
-from dataclasses import field as dataclass_field
+from dataclasses import dataclass, field as dataclass_field
 from importlib import util as importlib_util
 from pathlib import Path
 from types import ModuleType
@@ -54,8 +53,7 @@ class Synthesize:
 
     step: str | None = None  # custom synthesizer step
     prompt: str | None = None  # inline prompt override
-    voice: str | None = None  # voice for synthesis
-    # If none specified: use built-in synthesizer
+    # If neither: use built-in synthesizer
 
 
 class Flow(list):

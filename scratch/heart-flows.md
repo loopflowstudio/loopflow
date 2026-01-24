@@ -4,8 +4,97 @@ Make writing and using flows fun.
 
 ## What to build
 
-1. **Built-in flows** — Ship flows that encode best practices out of the box
-2. **Fork/Synthesize** — First dynamic flow construct: spawn N agents, collect outputs, synthesize
+1. **DAG-based flows** — Steps form a directed acyclic graph, not a list
+2. **Built-in flows** — Ship flows that encode best practices out of the box
+3. **Fork/Synthesize** — Parallel branches that join naturally in the DAG
+
+## Research: Workflow Orchestration Patterns
+
+Studied: [Prefect](https://www.prefect.io/), [Hamilton](https://hamilton.apache.org/), [Dagster](https://dagster.io), Airflow, Temporal.
+
+### Key Lessons
+
+**Prefect 2/3 removed rigid DAGs.** Real workflows don't fit pre-planned graphs. They embraced native Python control flow—if/else, loops, dynamic task spawning. Dependencies are implicit via data flow: task B uses result of task A = B depends on A.
+
+**Hamilton's elegance: deps via parameter names.** Function `B(A: int)` automatically depends on function `A()`. Zero boilerplate. But requires naming discipline.
+
+**Airflow's pain points:**
+- Top-level code parsed every 30 seconds (performance killer)
+- Heavy infrastructure (scheduler, executor, metadata DB)
+- Cross-DAG deps → monolithic mess
+- Testing is "extremely difficult"
+- Steep learning curve with Airflow-specific concepts
+
+**Dagster middle ground:** Explicit `deps=[upstream]` or implicit via params. Asset-centric rather than task-centric.
+
+### Our Domain is Different
+
+Data pipeline tools pass data between steps. Our steps share a **git worktree**:
+- "Dependencies" mean ordering, not data flow
+- Steps mutate shared state (files in worktree)
+- Fork/Synthesize is parallel *exploration*, not parallel *processing*
+- Most real flows are linear
+
+### Design Implications
+
+1. **Don't force rigid DAGs.** Most flows are linear chains. Don't make users declare graphs for simple cases.
+2. **Implicit ordering by default.** Steps run in declared order unless specified otherwise.
+3. **DAG when needed.** Explicit deps for parallel branches: `after=["step-a", "step-b"]`
+4. **Fork/Synthesize as primitives.** Not just "parallel nodes"—actual parallel agent exploration with synthesis.
+
+## Flow as DAG
+
+Flows are directed acyclic graphs. Simple cases use implicit linear ordering. Complex cases use explicit dependencies.
+
+### Linear Flows (Common Case)
+
+Most flows are chains. Keep them simple:
+
+```python
+def flow():
+    return Flow("design", "implement", "polish")
+```
+
+Steps run in order. No graph declaration needed.
+
+### Parallel Branches (When Needed)
+
+Use `after` for explicit dependencies:
+
+```python
+def flow():
+    return Flow(
+        Step("design"),
+        Step("impl-api", after="design"),
+        Step("impl-ui", after="design"),
+        Step("integrate", after=["impl-api", "impl-ui"]),
+        Step("polish", after="integrate"),
+    )
+```
+
+```
+design ──┬──> impl-api ──┬──> integrate ──> polish
+         └──> impl-ui ───┘
+```
+
+### Step Configuration
+
+Each step can override model, voice:
+
+```python
+Flow(
+    Step("design", model="claude"),
+    Step("implement", model="codex", after="design"),
+    Step("review", model="claude", voice="critic", after="implement"),
+)
+```
+
+### Execution Model
+
+1. Build DAG from steps (linear if no `after` specified)
+2. Topological sort
+3. Execute in parallel where deps allow
+4. Sequential steps share worktree; parallel steps get branched worktrees
 
 ## Built-in Flows
 
@@ -29,16 +118,24 @@ Fork spawns N agents in parallel. Each runs independently in its own worktree. S
 
 ```python
 def flow():
-    return Flow([
+    return Flow(
         "design",
-        Fork([
+        Fork(
             {"step": "implement", "voice": "architect"},
             {"step": "implement", "voice": "pragmatist"},
             {"step": "implement", "model": "codex"},
-        ]),
+        ),
         Synthesize(),
         "polish",
-    ])
+    )
+```
+
+In the DAG, Fork creates parallel branches that Synthesize joins:
+
+```
+design ──> Fork ──┬──> impl (architect)  ──┐
+                  ├──> impl (pragmatist) ──┼──> Synthesize ──> polish
+                  └──> impl (codex)      ──┘
 ```
 
 ### Fork Semantics
@@ -129,35 +226,58 @@ Optional `--keep-forks` flag for debugging, but default is delete.
 
 ```python
 @dataclass
-class FlowStep:
-    """A step with optional overrides."""
-    step: str
+class Step:
+    """A step with optional overrides and dependencies."""
+    name: str
+    after: str | list[str] | None = None  # None = follows previous step
     model: str | None = None
     voice: str | None = None
 
 @dataclass
+class ForkAgent:
+    """Configuration for one agent in a Fork."""
+    step: str | None = None      # single step
+    flow: str | None = None      # or full flow
+    voice: str | None = None
+    model: str | None = None
+    area: str | None = None      # defaults to parent's area
+
+@dataclass
 class Fork:
+    """Spawn parallel agents."""
     agents: list[ForkAgent]
-    # Always parallel, limit 5
+    # Max 5 agents for v1
+
+    def __init__(self, *agents):
+        self.agents = [ForkAgent(**a) if isinstance(a, dict) else a for a in agents]
 
 @dataclass
 class Synthesize:
+    """Join fork results into unified output."""
     step: str | None = None     # custom synthesizer step
-    prompt: str | None = None   # inline prompt
+    prompt: str | None = None   # inline prompt override
     # If neither: use built-in synthesizer
-```
 
-Flow steps can be strings or dicts:
-
-```python
 @dataclass
 class Flow:
-    steps: list[str | dict | FlowStep | Fork | Synthesize]
+    """DAG of steps, forks, and synthesizes."""
+    steps: list[str | Step | Fork | Synthesize]
+
+    def __init__(self, *steps):
+        self.steps = [self._parse(s) for s in steps]
+
+    def _parse(self, s):
+        if isinstance(s, str):
+            return Step(name=s)
+        if isinstance(s, dict):
+            return Step(**s)
+        return s
 ```
 
-When parsing:
-- `"implement"` → FlowStep(step="implement")
-- `{"step": "implement", "model": "codex"}` → FlowStep(step="implement", model="codex")
+**Parsing rules:**
+- `"implement"` → `Step(name="implement")`
+- `{"step": "implement", "model": "codex"}` → `Step(name="implement", model="codex")`
+- `Step(...)`, `Fork(...)`, `Synthesize(...)` pass through
 
 ## Key Functions
 
@@ -230,16 +350,30 @@ lf flow ship
 lf flow quick
 lf flow iterate
 
+# Parallel branches work
+cat > .lf/flows/parallel.py << 'EOF'
+def flow():
+    return Flow(
+        Step("design"),
+        Step("impl-api", after="design"),
+        Step("impl-ui", after="design"),
+        Step("integrate", after=["impl-api", "impl-ui"]),
+    )
+EOF
+
+lf flow parallel: add dashboard
+# design runs, then impl-api and impl-ui in parallel, then integrate
+
 # Fork/Synthesize works
 cat > .lf/flows/race.py << 'EOF'
 def flow():
-    return Flow([
-        Fork([
+    return Flow(
+        Fork(
             {"step": "implement", "voice": "architect"},
             {"step": "implement", "voice": "pragmatist"},
-        ]),
+        ),
         Synthesize(),
-    ])
+    )
 EOF
 
 lf flow race: add caching
@@ -258,12 +392,18 @@ Minimal: CLI-only for v1. Concerto support in follow-up.
 
 ## Implementation Path
 
-**Phase 1: Built-in flows**
+**Phase 1: DAG execution model**
+- Refactor Flow from list to DAG
+- Add `Step` with `after` for explicit dependencies
+- Implement topological sort execution
+- Parallel branches get branched worktrees
+
+**Phase 2: Built-in flows**
 - Add `loopflow/flows/` with ship, quick, iterate, reduce
 - Update flow loading to check built-ins after repo flows
 - No new primitives, just shipped content
 
-**Phase 2: Fork/Synthesize**
+**Phase 3: Fork/Synthesize**
 - Add `Fork` and `Synthesize` to flow DSL
 - Implement `run_fork()` — parallel worktree creation + agent execution
 - Implement `run_synthesize()` — context assembly + built-in prompt
@@ -277,14 +417,14 @@ Fork the same task across models, see which approach wins:
 
 ```python
 def flow():
-    return Flow([
-        Fork([
+    return Flow(
+        Fork(
             {"step": "implement", "model": "claude"},
             {"step": "implement", "model": "codex"},
             {"step": "implement", "model": "gemini"},
-        ]),
+        ),
         Synthesize(),
-    ])
+    )
 ```
 
 The synthesis analysis documents how each model approached the problem—valuable signal for understanding model strengths.
@@ -295,24 +435,12 @@ Different models excel at different tasks. Claude for judgment and design, Codex
 
 ```python
 def flow():
-    return Flow([
-        {"step": "design", "model": "claude"},
-        {"step": "implement", "model": "codex"},
-        {"step": "review", "model": "claude"},
-        {"step": "polish", "model": "claude"},
-    ])
-```
-
-This requires steps to accept per-step model overrides. Flow steps become either:
-- `str` — step name, uses flow default model
-- `dict` — step config with optional `model`, `voice`, etc.
-
-```python
-@dataclass
-class FlowStep:
-    step: str
-    model: str | None = None
-    voice: str | None = None
+    return Flow(
+        Step("design", model="claude"),
+        Step("implement", model="codex"),
+        Step("review", model="claude"),
+        Step("polish", model="claude"),
+    )
 ```
 
 ### Voice × Model Matrix
@@ -320,12 +448,16 @@ class FlowStep:
 Combine voice and model variation for maximum exploration:
 
 ```python
-Fork([
-    {"step": "implement", "voice": "architect", "model": "claude"},
-    {"step": "implement", "voice": "architect", "model": "codex"},
-    {"step": "implement", "voice": "pragmatist", "model": "claude"},
-    {"step": "implement", "voice": "pragmatist", "model": "codex"},
-])
+def flow():
+    return Flow(
+        Fork(
+            {"step": "implement", "voice": "architect", "model": "claude"},
+            {"step": "implement", "voice": "architect", "model": "codex"},
+            {"step": "implement", "voice": "pragmatist", "model": "claude"},
+            {"step": "implement", "voice": "pragmatist", "model": "codex"},
+        ),
+        Synthesize(),
+    )
 ```
 
 Four approaches: architect-claude, architect-codex, pragmatist-claude, pragmatist-codex. Synthesizer picks the best.

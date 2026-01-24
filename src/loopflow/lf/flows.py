@@ -18,7 +18,7 @@ class Step:
     name: str
     after: str | list[str] | None = None  # None = follows previous step
     model: str | None = None
-    voice: str | None = None
+    goal: str | None = None
 
 
 @dataclass
@@ -27,33 +27,45 @@ class ForkAgent:
 
     step: str | None = None  # single step
     flow: str | None = None  # or full flow
-    voice: str | None = None
+    goal: str | None = None
     model: str | None = None
     area: str | None = None  # defaults to parent's area
 
 
 @dataclass
+class SynthesizeConfig:
+    """Config for synthesis after fork."""
+
+    goal: str | None = None
+    area: str | None = None
+    prompt: str | None = None
+
+
+@dataclass
 class Fork:
-    """Spawn parallel agents."""
+    """Spawn parallel agents with synthesis."""
 
     agents: list[ForkAgent] = dataclass_field(default_factory=list)
+    step: str | None = None  # apply to all agents
+    model: str | None = None  # apply to all agents
+    synthesize: SynthesizeConfig | None = None
 
-    def __init__(self, *agents):
+    def __init__(
+        self,
+        *agents,
+        step: str | None = None,
+        model: str | None = None,
+        synthesize: dict | None = None,
+    ):
         parsed = []
         for agent in agents:
             parsed.append(_parse_fork_agent(agent))
         if len(parsed) > MAX_FORK_AGENTS:
             raise ValueError(f"Fork limited to {MAX_FORK_AGENTS} agents, got {len(parsed)}")
         self.agents = parsed
-
-
-@dataclass
-class Synthesize:
-    """Join fork results into unified output."""
-
-    step: str | None = None  # custom synthesizer step
-    prompt: str | None = None  # inline prompt override
-    # If neither: use built-in synthesizer
+        self.step = step
+        self.model = model
+        self.synthesize = SynthesizeConfig(**synthesize) if synthesize else None
 
 
 class Flow(list):
@@ -84,7 +96,7 @@ class Choose(BaseModel):
         return self
 
 
-FlowItem = Step | Fork | Synthesize | Choose
+FlowItem = Step | Fork | Choose
 
 
 @dataclass

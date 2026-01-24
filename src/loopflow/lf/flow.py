@@ -30,9 +30,9 @@ from loopflow.lf.flows import (
     FlowItem,
     Fork,
     ForkAgent,
-    Synthesize,
     Step,
     StepDAG,
+    Synthesize,
     build_step_dag,
     load_flow,
 )

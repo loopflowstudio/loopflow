@@ -24,11 +24,10 @@ from loopflow.lf.flow import (
 )
 from loopflow.lf.flows import (
     Choose,
-    FlowDef,
     Fork,
     ForkAgent,
-    Synthesize,
     Step,
+    Synthesize,
     build_step_dag,
     load_flow,
 )
@@ -426,7 +425,10 @@ def _run_fork_synthesize(
         )
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(fork.agents)) as executor:
-        futures = [executor.submit(_run_agent, config, i + 1) for i, config in enumerate(fork.agents)]
+        futures = [
+            executor.submit(_run_agent, config, i + 1)
+            for i, config in enumerate(fork.agents)
+        ]
         for future in futures:
             results.append(future.result())
 

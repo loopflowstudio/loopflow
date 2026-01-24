@@ -5,11 +5,10 @@ from pathlib import Path
 
 from loopflow.lf.flow import topological_batches
 from loopflow.lf.flows import (
-    Flow,
     FlowDef,
     Fork,
-    Synthesize,
     Step,
+    Synthesize,
     build_step_dag,
     load_flow,
     save_flow,

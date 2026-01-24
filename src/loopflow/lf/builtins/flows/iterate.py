@@ -1,2 +1,2 @@
 def flow():
-    return Flow("review", "implement", "polish")
+    return Flow("review", "implement", "polish")  # noqa: F821

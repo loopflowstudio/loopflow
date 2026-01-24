@@ -1,2 +1,2 @@
 def flow():
-    return Flow("reduce", "polish")
+    return Flow("reduce", "polish")  # noqa: F821

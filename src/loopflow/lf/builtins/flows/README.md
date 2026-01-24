@@ -2,13 +2,10 @@
 
 Flows shipped with loopflow. Available everywhere without user configuration.
 
-| Flow | Steps | Use case |
-|------|-------|----------|
+| Flow | Structure | Use case |
+|------|-----------|----------|
 | ship | implement → reduce → polish | Full feature workflow |
-| quick | implement → polish | Fast iteration |
-| iterate | review → implement → polish | Improve existing code |
-| reduce | reduce → polish | Simplify bloated code |
-| roadmap | Fork(roadmap×3) → Synthesize | Strategic planning with multiple perspectives |
+| roadmap | Fork(roadmap×3, synthesize) | Strategic planning with multiple perspectives |
 
 ## Adding a Built-in Flow
 

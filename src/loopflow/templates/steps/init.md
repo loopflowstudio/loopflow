@@ -141,16 +141,17 @@ def flow():
     )
 ```
 
-## Fork/Synthesize
+## Fork with Synthesis
 
 ```python
 def flow():
     return Flow(
         Fork(
-            {"step": "implement", "voice": "architect"},
-            {"step": "implement", "model": "codex"},
+            {"goal": "product-engineer"},
+            {"goal": "designer"},
+            step="implement",
+            synthesize={},
         ),
-        Synthesize(),
     )
 ```
 

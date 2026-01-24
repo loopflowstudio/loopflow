@@ -35,11 +35,11 @@ design ──┬──> impl-api ──┬──> integrate
          └──> impl-ui ───┘
 ```
 
-**Fork/Synthesize** explores multiple approaches:
+**Fork** explores multiple approaches and synthesizes:
 ```
-Fork ──┬──> impl (architect)  ──┐
-       ├──> impl (pragmatist) ──┼──> Synthesize
-       └──> impl (codex)      ──┘
+Fork ──┬──> impl (product-engineer) ──┐
+       ├──> impl (designer)         ──┼──> synthesize
+       └──> impl (infra-engineer)   ──┘
 ```
 
 The synthesizer doesn't just pick a winner—it documents why approaches differed.

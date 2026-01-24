@@ -27,10 +27,7 @@ lf flow ship: add user auth
 | Flow | What it does |
 |------|--------------|
 | `ship` | Design, build, polish — full feature workflow |
-| `quick` | Build and polish — skip design for small changes |
-| `iterate` | Review, fix, polish — improve existing code |
-| `reduce` | Simplify bloated code |
-| `roadmap` | Roadmap → design planning |
+| `roadmap` | Strategic planning with multiple perspectives |
 
 ### Race Different Approaches
 
@@ -44,14 +41,15 @@ Define `race` in `.lf/flows/race.py`:
 def flow():
     return Flow(
         Fork(
-            {"step": "implement", "voice": "architect"},
-            {"step": "implement", "voice": "pragmatist"},
+            {"goal": "product-engineer"},
+            {"goal": "designer"},
+            step="implement",
+            synthesize={},
         ),
-        Synthesize(),
     )
 ```
 
-Runs the same task in parallel and synthesizes the best result, writing analysis to `scratch/synthesis.md`.
+Runs the same step with different goals in parallel and synthesizes the best result.
 
 ## Steps
 

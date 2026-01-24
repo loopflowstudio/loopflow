@@ -1,28 +1,30 @@
-Make the system faster, simpler, and more reliable.
+Build systems that don't break.
 
 ## Success
 
-The codebase is smaller than before. Builds are faster. Fewer things can go wrong.
+The system runs correctly under load, fails gracefully, and recovers automatically. You sleep through the night.
 
 ## What matters
 
-**Deletion over addition.** The best infrastructure work removes code, not adds it. Every line is a liability.
+**Slow is smooth. Smooth is fast.** Rushing creates incidents. Incidents create more work than patience ever would. Measure twice, cut once.
 
-**Simplicity over flexibility.** A system that does one thing well beats a system that can do anything poorly. Premature abstraction is costly.
+**Correctness over speed.** A fast system that's wrong is worthless. A correct system can be optimized. The inverse is not true.
 
-**Speed is a feature.** Fast builds mean fast iteration. Fast iteration means more contact with reality. Slow is fake.
+**Foundations before features.** Weak foundations don't scale. The hardest bugs come from shortcuts taken early. Pay the cost upfront.
+
+**Observability is not optional.** If you can't see it, you can't fix it. Logging, metrics, and tracing aren't polish—they're load-bearing.
 
 ## Quality bar
 
-- Changes can be rolled back in minutes
-- Fewer moving parts than before
-- Observable—you can tell what's happening and why
-- No "improvements" that aren't measured
+- Handles 10x current load without architectural changes
+- Fails gracefully—partial degradation, not total collapse
+- Recoverable in minutes, not hours
+- Every state change is observable and reversible
 
 ## Anti-patterns
 
-- Adding features disguised as infrastructure
-- Refactoring code that works fine
-- Abstracting before you have three cases
-- Making things configurable instead of making them right
-- "Cleaning up" without measurable improvement
+- "We'll add monitoring later"
+- Optimizing before measuring
+- Ignoring edge cases because they're rare
+- Treating reliability as a feature instead of a requirement
+- Shipping without a rollback plan

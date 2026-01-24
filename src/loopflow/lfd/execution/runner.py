@@ -3,6 +3,7 @@
 Executes a single iteration of an Agent.
 """
 
+import json
 import subprocess
 import sys
 import uuid
@@ -28,7 +29,7 @@ from loopflow.lf.flows import (
 from loopflow.lf.goals import format_goal_section, resolve_goals
 from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lf.logging import write_prompt_file
-from loopflow.lf.naming import generate_next_branch
+from loopflow.lf.naming import branch_exists, generate_next_branch
 from loopflow.lf.worktrees import WorktreeError, get_path
 from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
@@ -617,8 +618,8 @@ def run_iteration(
 
     update_run_step(run.id, None)
 
-    # Create PR from iteration branch to main
-    pr_url = _create_iteration_pr(agent, worktree_path, branch, iteration, base_branch)
+    # Complete iteration: squash to agent.main, checkpoint, PR to main
+    pr_url = _complete_iteration(agent, worktree_path, branch, iteration, base_branch)
     if pr_url:
         update_run_pr(run.id, pr_url)
 
@@ -645,19 +646,162 @@ def run_iteration(
     return True, worktree_path, new_branch
 
 
-def _create_iteration_pr(
+def _close_agent_prs(agent: Agent) -> None:
+    """Close any open PRs from this agent's iteration branches."""
+    result = subprocess.run(
+        ["gh", "pr", "list", "--state", "open", "--json", "number,headRefName"],
+        cwd=agent.repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return
+
+    try:
+        prs = json.loads(result.stdout)
+        # Close PRs from this agent's iteration branches (name.word-word pattern)
+        for pr in prs:
+            head = pr["headRefName"]
+            if head.startswith(f"{agent.name}.") and head != agent.main_branch:
+                close_cmd = [
+                    "gh",
+                    "pr",
+                    "close",
+                    str(pr["number"]),
+                    "--comment",
+                    "Superseded by newer iteration",
+                ]
+                subprocess.run(close_cmd, cwd=agent.repo, capture_output=True)
+    except (json.JSONDecodeError, KeyError):
+        pass
+
+
+def _ensure_agent_main_branch(agent: Agent, base_branch: str) -> bool:
+    """Ensure the agent's main branch exists, creating from base if needed."""
+    main_branch = agent.main_branch
+    if branch_exists(agent.repo, main_branch):
+        return True
+
+    # Create agent.main from base branch
+    result = subprocess.run(
+        ["git", "branch", main_branch, f"origin/{base_branch}"],
+        cwd=agent.repo,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        return False
+
+    # Push to origin
+    result = subprocess.run(
+        ["git", "push", "-u", "origin", main_branch],
+        cwd=agent.repo,
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def _complete_iteration(
     agent: Agent, worktree_path: Path, branch: str, iteration: int, base_branch: str
 ) -> str | None:
-    """Create PR from iteration branch directly to main."""
-    # Push the branch
+    """Complete iteration: squash merge to agent.main, checkpoint, PR to main.
+
+    Flow:
+    1. Push iteration branch
+    2. Squash merge iteration → agent.main (git only, no GitHub PR)
+    3. Push agent.main to origin
+    4. Create checkpoint tag
+    5. PR from checkpoint → main
+    """
+    main_branch = agent.main_branch
+    checkpoint_tag = f"{agent.name}.checkpoint.{iteration:03d}"
+
+    # Push the iteration branch
     subprocess.run(
         ["git", "push", "-u", "origin", branch],
         cwd=worktree_path,
         capture_output=True,
     )
 
+    # Ensure agent.main exists
+    if not _ensure_agent_main_branch(agent, base_branch):
+        return None
+
+    # Fetch latest agent.main
+    subprocess.run(
+        ["git", "fetch", "origin", main_branch],
+        cwd=agent.repo,
+        capture_output=True,
+    )
+
+    # Squash merge iteration branch into agent.main (git only)
+    # First checkout agent.main
+    subprocess.run(
+        ["git", "checkout", main_branch],
+        cwd=agent.repo,
+        capture_output=True,
+    )
+
+    # Reset to origin/agent.main to ensure we're up to date
+    subprocess.run(
+        ["git", "reset", "--hard", f"origin/{main_branch}"],
+        cwd=agent.repo,
+        capture_output=True,
+    )
+
+    # Squash merge the iteration branch
+    result = subprocess.run(
+        ["git", "merge", "--squash", branch],
+        cwd=agent.repo,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        return None
+
+    # Commit the squash merge
+    commit_msg = (
+        f"[{agent.name}] Iteration {iteration}\n\nGoal: {agent.goal_display}\nFlow: {agent.flow}"
+    )
+    result = subprocess.run(
+        ["git", "commit", "-m", commit_msg],
+        cwd=agent.repo,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        return None
+
+    # Push agent.main
+    result = subprocess.run(
+        ["git", "push", "origin", main_branch],
+        cwd=agent.repo,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        return None
+
+    # Create checkpoint tag
+    subprocess.run(
+        ["git", "tag", checkpoint_tag, main_branch],
+        cwd=agent.repo,
+        capture_output=True,
+    )
+
+    # Push the tag
+    subprocess.run(
+        ["git", "push", "origin", checkpoint_tag],
+        cwd=agent.repo,
+        capture_output=True,
+    )
+
+    # Close any existing PRs from this agent (superseded by this iteration)
+    _close_agent_prs(agent)
+
+    # Create PR from iteration branch to main
     title = f"[{agent.name}] Iteration {iteration}"
-    body = f"Agent: {agent.name} [{agent.goal_display}]\nFlow: {agent.flow}\nIteration: {iteration}"
+    body = (
+        f"Agent: {agent.name} [{agent.goal_display}]\n"
+        f"Flow: {agent.flow}\nIteration: {iteration}\n\n"
+        f"Checkpoint: {checkpoint_tag}"
+    )
 
     cmd = [
         "gh",

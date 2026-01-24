@@ -26,7 +26,7 @@ from loopflow.lf.flows import (
     load_flow,
     resolve_flow,
 )
-from loopflow.lf.goals import format_goal_section, render_goals, resolve_goals
+from loopflow.lf.goals import format_goal_section, resolve_goals
 from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lf.logging import write_prompt_file
 from loopflow.lf.messages import generate_pr_message
@@ -75,8 +75,10 @@ def _build_loop_prompt(
         return None
 
     step_file, step_content = components.step
-    goal_section = render_goals(effective_goals)
-
+    goal_parts = [
+        f"<lf:goal:{g.name}>\n{g.content}\n</lf:goal:{g.name}>" for g in effective_goals
+    ]
+    goal_section = "\n\n".join(goal_parts)
     combined = f"{goal_section}\n\n---\n\n{step_content}"
     components = replace(components, step=(step_file, combined))
     prompt = format_prompt(components)

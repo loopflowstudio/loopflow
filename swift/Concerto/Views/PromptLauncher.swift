@@ -63,7 +63,7 @@ struct PromptLauncher: View {
                 modeAndAdvancedRow
                 if showAdvancedOptions {
                     modelSelector
-                    voiceSelector
+                    goalSelector
                     contextBar
                     commandPreview
                 }
@@ -476,20 +476,20 @@ struct PromptLauncher: View {
         .frame(minWidth: 220)
     }
 
-    // MARK: - Voice Selector
+    // MARK: - Goal Selector
 
-    @State private var showingVoicePicker = false
+    @State private var showingGoalPicker = false
 
-    private var voiceSelector: some View {
+    private var goalSelector: some View {
         HStack(spacing: 8) {
-            Text("Voice")
+            Text("Goal")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            // Selected voice chips
-            if appState.selectedVoices.isEmpty {
+            // Selected goal chips
+            if appState.selectedGoals.isEmpty {
                 Button {
-                    showingVoicePicker = true
+                    showingGoalPicker = true
                 } label: {
                     Text("None")
                         .font(.system(size: 13))
@@ -502,18 +502,18 @@ struct PromptLauncher: View {
                         )
                 }
                 .buttonStyle(.plain)
-                .popover(isPresented: $showingVoicePicker) {
-                    voicePickerPopover()
+                .popover(isPresented: $showingGoalPicker) {
+                    goalPickerPopover()
                 }
             } else {
                 HStack(spacing: 6) {
-                    ForEach(appState.selectedVoices) { voice in
-                        voiceChip(voice)
+                    ForEach(appState.selectedGoals) { goal in
+                        goalChip(goal)
                     }
 
-                    if appState.voices.count > appState.selectedVoices.count {
+                    if appState.goals.count > appState.selectedGoals.count {
                         Button {
-                            showingVoicePicker = true
+                            showingGoalPicker = true
                         } label: {
                             Image(systemName: "plus")
                                 .font(.caption)
@@ -522,8 +522,8 @@ struct PromptLauncher: View {
                                 .background(Circle().fill(Color.primary.opacity(0.05)))
                         }
                         .buttonStyle(.plain)
-                        .popover(isPresented: $showingVoicePicker) {
-                            voicePickerPopover()
+                        .popover(isPresented: $showingGoalPicker) {
+                            goalPickerPopover()
                         }
                     }
                 }
@@ -533,13 +533,13 @@ struct PromptLauncher: View {
         }
     }
 
-    private func voiceChip(_ voice: Voice) -> some View {
+    private func goalChip(_ goal: Goal) -> some View {
         HStack(spacing: 4) {
-            Text(voice.displayName)
+            Text(goal.displayName)
                 .font(.caption)
                 .fontWeight(.medium)
             Button {
-                appState.selectedVoices.removeAll { $0.id == voice.id }
+                appState.selectedGoals.removeAll { $0.id == goal.id }
             } label: {
                 Image(systemName: "xmark")
                     .font(.caption2)
@@ -552,21 +552,21 @@ struct PromptLauncher: View {
         .foregroundStyle(Color.accentColor)
     }
 
-    private func voicePickerPopover() -> some View {
+    private func goalPickerPopover() -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Available Voices")
+            Text("Available Goals")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 12)
                 .padding(.top, 12)
                 .padding(.bottom, 8)
 
-            if appState.voices.isEmpty {
+            if appState.goals.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("No voices configured")
+                    Text("No goals configured")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text("Add .md files to .lf/voices/ to create personas that shape how the agent responds.")
+                    Text("Add .md files to .lf/goals/ to create personas that shape how the agent responds.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -575,19 +575,19 @@ struct PromptLauncher: View {
                 .padding(.bottom, 12)
                 .frame(maxWidth: 220)
             } else {
-                ForEach(appState.voices) { voice in
-                    let isSelected = appState.selectedVoices.contains(voice)
+                ForEach(appState.goals) { goal in
+                    let isSelected = appState.selectedGoals.contains(goal)
                     Button {
                         if isSelected {
-                            appState.selectedVoices.removeAll { $0.id == voice.id }
+                            appState.selectedGoals.removeAll { $0.id == goal.id }
                         } else {
-                            appState.selectedVoices.append(voice)
+                            appState.selectedGoals.append(goal)
                         }
                     } label: {
                         HStack {
                             Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                                 .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
-                            Text(voice.displayName)
+                            Text(goal.displayName)
                                 .fontWeight(.medium)
                             Spacer()
                         }
@@ -834,7 +834,7 @@ struct PromptLauncher: View {
                     .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .help("Model, voice, context toggles, and command preview")
+                .help("Model, goal, context toggles, and command preview")
                 .accessibleButton("Toggle advanced options", hint: showAdvancedOptions ? "Collapse" : "Expand")
             }
 

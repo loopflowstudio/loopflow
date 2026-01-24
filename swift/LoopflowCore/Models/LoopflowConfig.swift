@@ -2,8 +2,8 @@
 
 import Foundation
 
-/// Voice config that handles both single string and array formats in YAML.
-public enum VoiceConfig: Sendable, Codable {
+/// Goal config that handles both single string and array formats in YAML.
+public enum GoalConfig: Sendable, Codable {
     case single(String)
     case multiple([String])
 
@@ -22,7 +22,7 @@ public enum VoiceConfig: Sendable, Codable {
             self = .multiple(multiple)
         } else {
             throw DecodingError.typeMismatch(
-                VoiceConfig.self,
+                GoalConfig.self,
                 DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Expected string or array of strings")
             )
         }
@@ -94,7 +94,7 @@ public struct LoopflowConfig: Sendable, Codable {
     public let diff: Bool?
     public let diffFiles: Bool?
     public let paste: Bool?
-    public let voice: VoiceConfig?
+    public let goal: GoalConfig?
     public let summaries: [SummaryConfig]?
     public let skillSources: [SkillSourceConfig]?
     public let work: WorkConfig?
@@ -103,12 +103,12 @@ public struct LoopflowConfig: Sendable, Codable {
         case agentModel = "agent_model"
         case diffFiles = "diff_files"
         case skillSources = "skill_sources"
-        case interactive, terminal, ide, workspace, context, exclude, push, pr, yolo, chrome, docs, diff, paste, voice, summaries, work
+        case interactive, terminal, ide, workspace, context, exclude, push, pr, yolo, chrome, docs, diff, paste, goal, summaries, work
     }
 
-    /// Voice config can be a single string or array of strings in YAML.
-    public var voiceNames: [String] {
-        voice?.names ?? []
+    /// Goal config can be a single string or array of strings in YAML.
+    public var goalNames: [String] {
+        goal?.names ?? []
     }
 
     public var terminalApp: TerminalApp {

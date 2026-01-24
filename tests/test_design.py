@@ -9,7 +9,7 @@ from loopflow.lf.design import (
     gather_design_docs,
     gather_internal_docs,
     has_design_artifacts,
-    load_voice,
+    load_goal,
 )
 
 
@@ -119,61 +119,61 @@ def test_gather_internal_docs_sorted(tmp_path):
 
 
 # =============================================================================
-# Voice loading tests
+# Goal loading tests
 # =============================================================================
 
 
-def test_load_voice_by_name(tmp_path):
-    """load_voice finds voice by name in lf/voices/."""
+def test_load_goal_by_name(tmp_path):
+    """load_goal finds goal by name in lf/goals/."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    voices_dir = repo_root / ".lf" / "voices"
-    voices_dir.mkdir(parents=True)
-    (voices_dir / "test-coverage.md").write_text("# Test Coverage\n\nImprove coverage.\n")
+    goals_dir = repo_root / ".lf" / "goals"
+    goals_dir.mkdir(parents=True)
+    (goals_dir / "test-coverage.md").write_text("# Test Coverage\n\nImprove coverage.\n")
 
-    content = load_voice("test-coverage", repo_root)
+    content = load_goal("test-coverage", repo_root)
 
     assert content is not None
     assert "# Test Coverage" in content
     assert "Improve coverage." in content
 
 
-def test_load_voice_by_path(tmp_path):
-    """load_voice finds voice by explicit path."""
+def test_load_goal_by_path(tmp_path):
+    """load_goal finds goal by explicit path."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    voices_dir = repo_root / ".lf" / "voices"
-    voices_dir.mkdir(parents=True)
-    (voices_dir / "security.md").write_text("# Security Voice\n")
+    goals_dir = repo_root / ".lf" / "goals"
+    goals_dir.mkdir(parents=True)
+    (goals_dir / "security.md").write_text("# Security Goal\n")
 
-    content = load_voice(".lf/voices/security.md", repo_root)
+    content = load_goal(".lf/goals/security.md", repo_root)
 
     assert content is not None
-    assert "# Security Voice" in content
+    assert "# Security Goal" in content
 
 
-def test_load_voice_returns_none_when_missing(tmp_path):
-    """load_voice returns None for non-existent voice."""
+def test_load_goal_returns_none_when_missing(tmp_path):
+    """load_goal returns None for non-existent goal."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
 
-    content = load_voice("nonexistent", repo_root)
+    content = load_goal("nonexistent", repo_root)
 
     assert content is None
 
 
-def test_load_voice_with_path_object(tmp_path):
-    """load_voice accepts Path objects."""
+def test_load_goal_with_path_object(tmp_path):
+    """load_goal accepts Path objects."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    voices_dir = repo_root / ".lf" / "voices"
-    voices_dir.mkdir(parents=True)
-    (voices_dir / "refactor.md").write_text("# Refactor Voice\n")
+    goals_dir = repo_root / ".lf" / "goals"
+    goals_dir.mkdir(parents=True)
+    (goals_dir / "refactor.md").write_text("# Refactor Goal\n")
 
-    content = load_voice(Path(".lf/voices/refactor.md"), repo_root)
+    content = load_goal(Path(".lf/goals/refactor.md"), repo_root)
 
     assert content is not None
-    assert "# Refactor Voice" in content
+    assert "# Refactor Goal" in content
 
 
 # =============================================================================

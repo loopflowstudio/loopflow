@@ -264,48 +264,48 @@ def test_parse_model_unknown_backend():
     assert parse_model("unknown") == ("unknown", None)
 
 
-def test_load_config_voice_as_string(temp_repo):
-    """voice as string is converted to single-item list."""
+def test_load_config_goal_as_string(temp_repo):
+    """goal as string is converted to single-item list."""
     config_yaml = temp_repo / ".lf" / "config.yaml"
-    config_yaml.write_text("voice: architect\n")
+    config_yaml.write_text("goal: architect\n")
 
     config = load_config(temp_repo)
 
     assert config is not None
-    assert config.voice == ["architect"]
+    assert config.goal == ["architect"]
 
 
-def test_load_config_voice_as_list(temp_repo):
-    """voice as YAML list works."""
+def test_load_config_goal_as_list(temp_repo):
+    """goal as YAML list works."""
     config_yaml = temp_repo / ".lf" / "config.yaml"
-    config_yaml.write_text("voice:\n  - architect\n  - concise\n")
+    config_yaml.write_text("goal:\n  - architect\n  - concise\n")
 
     config = load_config(temp_repo)
 
     assert config is not None
-    assert config.voice == ["architect", "concise"]
+    assert config.goal == ["architect", "concise"]
 
 
-def test_load_config_voice_defaults_none(temp_repo):
-    """voice defaults to None when not set."""
+def test_load_config_goal_defaults_none(temp_repo):
+    """goal defaults to None when not set."""
     config_yaml = temp_repo / ".lf" / "config.yaml"
     config_yaml.write_text("yolo: false\n")
 
     config = load_config(temp_repo)
 
     assert config is not None
-    assert config.voice is None
+    assert config.goal is None
 
 
-def test_load_config_voice_empty_string(temp_repo):
-    """voice as empty string is converted to None."""
+def test_load_config_goal_empty_string(temp_repo):
+    """goal as empty string is converted to None."""
     config_yaml = temp_repo / ".lf" / "config.yaml"
-    config_yaml.write_text("voice: ''\n")
+    config_yaml.write_text("goal: ''\n")
 
     config = load_config(temp_repo)
 
     assert config is not None
-    assert config.voice is None
+    assert config.goal is None
 
 
 # =============================================================================

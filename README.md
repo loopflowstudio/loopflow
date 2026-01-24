@@ -8,7 +8,7 @@ Arrange and conduct an agent orchestra.
 |-----------|--------------|
 | **Step** | Runs a prompt with assembled context |
 | **Flow** | Chains steps together |
-| **Voice** | Shapes judgment and perspective |
+| **Goal** | Shapes judgment and perspective |
 | **Area** | Focuses on part of the codebase |
 
 | Stimulus | Runs when |
@@ -18,7 +18,7 @@ Arrange and conduct an agent orchestra.
 | **Watch** | Area changes on main |
 | **Cron** | On schedule |
 
-An agent is **flow × area × voice**.
+An agent is **flow × area × goal**.
 
 ## Steps
 
@@ -65,8 +65,8 @@ lfd loop ship src/
 Runs the `ship` flow on `src/` continuously, creating PRs until stopped.
 
 ```bash
-lfd loop ship src/ -v architect    # add a voice
-lfd subscribe ship docs/ -v writer # activate when docs/ changes
+lfd loop ship src/ -g architect    # add a goal
+lfd subscribe ship docs/ -g writer # activate when docs/ changes
 lfd status                         # see all agents
 ```
 

@@ -2,8 +2,8 @@
 
 import sqlite3
 
-SCHEMA_VERSION = "2026-01-23T16:39:43Z_b159a91"
-DESCRIPTION = "baseline schema"
+SCHEMA_VERSION = "2026-01-23T00:00:00_baseline"
+DESCRIPTION = "baseline schema (voice → goal rename)"
 
 
 def apply(conn: sqlite3.Connection) -> None:
@@ -14,7 +14,7 @@ def apply(conn: sqlite3.Connection) -> None:
             id TEXT PRIMARY KEY,
             repo TEXT NOT NULL,
             flow TEXT NOT NULL,
-            voice TEXT NOT NULL,  -- JSON array
+            goal TEXT NOT NULL,  -- JSON array
             area TEXT NOT NULL,   -- JSON array
 
             mode TEXT NOT NULL DEFAULT 'loop',  -- loop, watch, cron
@@ -47,7 +47,7 @@ def apply(conn: sqlite3.Connection) -> None:
             agent TEXT,  -- agent ID (nullable for one-off runs)
 
             flow TEXT NOT NULL,
-            voice TEXT NOT NULL,  -- JSON array
+            goal TEXT NOT NULL,  -- JSON array
             area TEXT NOT NULL,   -- JSON array
             repo TEXT NOT NULL,
 

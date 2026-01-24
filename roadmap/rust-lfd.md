@@ -35,7 +35,7 @@ Reimplement everything in Rust, including prompt assembly and agent launching.
 **Requires:**
 - Duplicate all context assembly logic
 - Reimplement flow/step loading
-- Reimplement voice rendering
+- Reimplement goal rendering
 - Maintain two implementations forever
 
 **Verdict:** Too expensive. The coupling exists for good reason—lfd *orchestrates* lf's capabilities.

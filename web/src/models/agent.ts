@@ -10,7 +10,7 @@ export type MergeMode = 'pr' | 'land'
 export interface Agent {
   id: string
   flow: string
-  voice: string[]
+  goal: string[]
   area: string[]
   repo: string
 
@@ -39,8 +39,8 @@ export function agentAreaDisplay(agent: Agent): string {
   return agent.area[0] === '.' ? 'root' : agent.area.join(', ')
 }
 
-export function agentVoiceDisplay(agent: Agent): string {
-  return agent.voice.length === 0 ? 'default' : agent.voice.join(', ')
+export function agentGoalDisplay(agent: Agent): string {
+  return agent.goal.length === 0 ? 'default' : agent.goal.join(', ')
 }
 
 export function agentFlowDisplay(agent: Agent): string {

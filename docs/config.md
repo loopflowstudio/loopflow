@@ -18,7 +18,7 @@ Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), or repo c
 | Include raw diff | `--diff` | `diff: true` |
 | Include clipboard | `-c, --clipboard` | — |
 | Add context files | `-p FILE` | `context: [FILE]` |
-| Voice/persona | `--voice NAME` | `voice: NAME` |
+| Goal/persona | `--goal NAME` | `goal: NAME` |
 | Chrome automation | `--chrome` | `chrome: true` |
 | Yolo mode (skip permissions) | — | `yolo: true` |
 
@@ -59,7 +59,7 @@ For most settings, repo overrides global. For additive settings (`context`, `exc
 ```yaml
 # ~/.lf/config.yaml (global)
 agent_model: claude:opus
-voice: concise
+goal: concise
 
 # .lf/config.yaml (repo)
 agent_model: codex        # overrides global
@@ -73,7 +73,7 @@ Example repo config:
 agent_model: claude:opus
 push: true
 
-voice: architect
+goal: architect
 
 context:
   - src/schema.py
@@ -220,16 +220,16 @@ interactive: true
 
 CLI flags override the frontmatter default.
 
-### Voice
+### Goal
 
 Personas that shape how the agent responds.
 
 | | |
 |---|---|
-| **CLI** | `--voice concise` or `--voice architect,concise` |
-| **Config** | `voice: architect` or `voice: [architect, concise]` |
+| **CLI** | `--goal concise` or `--goal architect,concise` |
+| **Config** | `goal: architect` or `goal: [architect, concise]` |
 
-Voice files live in `.lf/voices/` as markdown.
+Goal files live in `.lf/goals/` as markdown.
 
 ### Chrome
 

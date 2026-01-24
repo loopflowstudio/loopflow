@@ -82,7 +82,7 @@ Inside step files, `{args}` is replaced with whatever comes after the colon.
 | Flag | Description |
 |------|-------------|
 | `-m, --model MODEL` | Choose model (e.g., `claude:opus`, `codex`, `gemini`) |
-| `-v, --voice VOICE` | Apply voice/persona (comma-separated for multiple) |
+| `-g, --goal GOAL` | Apply goal/persona (comma-separated for multiple) |
 
 ## Output Flags
 
@@ -160,11 +160,11 @@ lf review -p docs/api.md -p tests/
 lf implement -m codex: add caching
 ```
 
-### Apply a voice
+### Apply a goal
 
 ```bash
-lf review -v concise
-lf implement -v architect,concise
+lf review -g concise
+lf implement -g architect,concise
 ```
 
 ### Copy prompt without running

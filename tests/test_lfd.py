@@ -176,7 +176,7 @@ def test_db_reset_function():
         # Create initial DB with some data
         conn = _get_db(db_path)
         conn.execute(
-            "INSERT INTO agents (id, repo, flow, voice, area, status, iteration, "
+            "INSERT INTO agents (id, repo, flow, goal, area, status, iteration, "
             "main_branch, pr_limit, merge_mode, created_at) "
             "VALUES ('test', '/tmp', 'ship', '[]', '[]', 'idle', 0, 'main', 5, "
             "'pr', '2024-01-01')"
@@ -216,7 +216,7 @@ def test_migrations_cover_all_agent_fields():
             id="test-all-fields",
             flow="ship",
             area=["src/test/"],
-            voice=["voice-a", "voice-b"],
+            goal=["goal-a", "goal-b"],
             repo=Path("/tmp/repo"),
             status=AgentStatus.RUNNING,
             iteration=5,
@@ -234,7 +234,7 @@ def test_migrations_cover_all_agent_fields():
         assert loaded.id == agent.id
         assert loaded.flow == agent.flow
         assert loaded.area == agent.area
-        assert loaded.voice == agent.voice
+        assert loaded.goal == agent.goal
         assert loaded.repo == agent.repo
         assert loaded.status == agent.status
         assert loaded.iteration == agent.iteration
@@ -257,7 +257,7 @@ def test_migrations_cover_all_run_fields():
             agent_id="agent-id",
             flow="ship",
             area=["src/test/"],
-            voice=["voice-a", "voice-b"],
+            goal=["goal-a", "goal-b"],
             repo=Path("/tmp/repo"),
             status=FlowRunStatus.RUNNING,
             iteration=3,
@@ -278,7 +278,7 @@ def test_migrations_cover_all_run_fields():
         assert loaded.agent_id == run.agent_id
         assert loaded.flow == run.flow
         assert loaded.area == run.area
-        assert loaded.voice == run.voice
+        assert loaded.goal == run.goal
         assert loaded.repo == run.repo
         assert loaded.status == run.status
         assert loaded.iteration == run.iteration
@@ -587,7 +587,7 @@ def _make_agent(**kwargs) -> Agent:
         "id": "test-id",
         "flow": "ship",
         "area": ["src/test/"],
-        "voice": ["default"],
+        "goal": ["default"],
         "repo": Path("/tmp/repo"),
         "main_branch": "test-main",
     }
@@ -601,7 +601,7 @@ def test_agent_model_defaults():
         id="agent-1",
         flow="ship",
         area=["src/test-coverage/"],
-        voice=["default"],
+        goal=["default"],
         repo=Path("/tmp/repo"),
         main_branch="test-coverage-main",
     )
@@ -639,7 +639,7 @@ def test_run_model():
         agent_id="agent-1",
         flow="ship",
         area=["src/test/"],
-        voice=["default"],
+        goal=["default"],
         repo=Path("/tmp/repo"),
         status=FlowRunStatus.RUNNING,
         iteration=3,
@@ -795,7 +795,7 @@ def test_db_delete_agent():
             agent_id="agent-1",
             flow="ship",
             area=["src/test/"],
-            voice=["default"],
+            goal=["default"],
             repo=Path("/tmp/repo"),
             iteration=1,
             status=FlowRunStatus.RUNNING,
@@ -828,7 +828,7 @@ def test_db_save_and_get_runs():
             agent_id="agent-1",
             flow="ship",
             area=["src/test/"],
-            voice=["default"],
+            goal=["default"],
             repo=Path("/tmp/repo"),
             iteration=1,
             status=FlowRunStatus.COMPLETED,
@@ -840,7 +840,7 @@ def test_db_save_and_get_runs():
             agent_id="agent-1",
             flow="ship",
             area=["src/test/"],
-            voice=["default"],
+            goal=["default"],
             repo=Path("/tmp/repo"),
             iteration=2,
             status=FlowRunStatus.RUNNING,
@@ -866,7 +866,7 @@ def test_db_get_latest_run_for_agent():
             agent_id="agent-1",
             flow="ship",
             area=["src/test/"],
-            voice=["default"],
+            goal=["default"],
             repo=Path("/tmp/repo"),
             iteration=1,
             status=FlowRunStatus.COMPLETED,
@@ -877,7 +877,7 @@ def test_db_get_latest_run_for_agent():
             agent_id="agent-1",
             flow="ship",
             area=["src/test/"],
-            voice=["default"],
+            goal=["default"],
             repo=Path("/tmp/repo"),
             iteration=2,
             status=FlowRunStatus.RUNNING,
@@ -904,7 +904,7 @@ def test_db_update_run_status():
             agent_id="agent-1",
             flow="ship",
             area=["src/test/"],
-            voice=["default"],
+            goal=["default"],
             repo=Path("/tmp/repo"),
             iteration=1,
             status=FlowRunStatus.RUNNING,
@@ -933,7 +933,7 @@ def test_db_update_run_step():
             agent_id="agent-1",
             flow="ship",
             area=["src/test/"],
-            voice=["default"],
+            goal=["default"],
             repo=Path("/tmp/repo"),
             iteration=1,
             status=FlowRunStatus.RUNNING,
@@ -961,7 +961,7 @@ def test_db_update_run_pr():
             agent_id="agent-1",
             flow="ship",
             area=["src/test/"],
-            voice=["default"],
+            goal=["default"],
             repo=Path("/tmp/repo"),
             iteration=1,
             status=FlowRunStatus.RUNNING,
@@ -1446,7 +1446,7 @@ def test_cleanup_stale_runs_marks_orphaned():
             agent_id=None,
             flow="ship",
             area=["src/"],
-            voice=["default"],
+            goal=["default"],
             repo=Path("/tmp/repo"),
             status=FlowRunStatus.RUNNING,
             started_at=datetime.now(),
@@ -1480,7 +1480,7 @@ def test_cleanup_stale_runs_marks_dead_agent():
             agent_id="agent-dead",
             flow="ship",
             area=["src/"],
-            voice=["default"],
+            goal=["default"],
             repo=Path("/tmp/repo"),
             status=FlowRunStatus.RUNNING,
             started_at=datetime.now(),
@@ -1516,7 +1516,7 @@ def test_cleanup_stale_runs_skips_active():
             agent_id="agent-alive",
             flow="ship",
             area=["src/"],
-            voice=["default"],
+            goal=["default"],
             repo=Path("/tmp/repo"),
             status=FlowRunStatus.RUNNING,
             started_at=datetime.now(),
@@ -1545,7 +1545,7 @@ def test_cleanup_stale_runs_handles_deleted_agent():
             agent_id="agent-that-was-deleted",
             flow="ship",
             area=["src/"],
-            voice=["default"],
+            goal=["default"],
             repo=Path("/tmp/repo"),
             status=FlowRunStatus.RUNNING,
             started_at=datetime.now(),
@@ -1573,7 +1573,7 @@ def test_mark_run_failed():
             id="run-to-fail",
             flow="ship",
             area=["src/"],
-            voice=["default"],
+            goal=["default"],
             repo=Path("/tmp/repo"),
             status=FlowRunStatus.RUNNING,
             started_at=datetime.now(),

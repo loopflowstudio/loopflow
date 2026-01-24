@@ -21,8 +21,8 @@ from loopflow.lf.skills import (
     list_all_skills,
     load_skill_prompt,
 )
+from loopflow.lf.goals import Goal, load_goal
 from loopflow.lf.tokens import count_tokens
-from loopflow.lf.voices import Voice, load_voice
 from loopflow.lfops.summarize import is_stale, load_summary
 
 # Path to bundled builtin templates
@@ -55,7 +55,7 @@ class PromptComponents:
     repo_root: Path
     clipboard: ClipboardContent | None = None
     loopflow_doc: str | None = None  # Bundled system documentation
-    voices: list[Voice] | None = None
+    goals: list[Goal] | None = None
     image_files: list[Path] | None = None  # Images for visual context
     summaries: list[tuple[Path, str]] | None = None  # Pre-generated summaries
 
@@ -695,7 +695,7 @@ def gather_prompt_components(
     inline: Optional[str] = None,
     step_args: Optional[list[str]] = None,
     run_mode: Optional[str] = None,
-    voices: Optional[list[str]] = None,
+    goals: Optional[list[str]] = None,
     context_config: Optional[ContextConfig] = None,
     config=None,
 ) -> PromptComponents:
@@ -767,11 +767,11 @@ def gather_prompt_components(
 
     clipboard = _read_clipboard() if context_config.clipboard else None
 
-    # Load voices if specified
-    loaded_voices = None
-    if voices:
-        loaded_voices = [
-            load_voice(repo_root, name) for name in voices if load_voice(repo_root, name)
+    # Load goals if specified
+    loaded_goals = None
+    if goals:
+        loaded_goals = [
+            load_goal(repo_root, name) for name in goals if load_goal(repo_root, name)
         ]
 
     # Load configured summaries (always include if config has them)
@@ -786,7 +786,7 @@ def gather_prompt_components(
         repo_root=repo_root,
         clipboard=clipboard,
         loopflow_doc=loopflow_doc,
-        voices=loaded_voices,
+        goals=loaded_goals,
         image_files=gather_result.image_files or None,
         summaries=summaries if summaries else None,
     )
@@ -813,20 +813,20 @@ def format_prompt(components: PromptComponents) -> str:
         else:
             step_tag = f"<lf:step:{name}>\n{content}\n</lf:step:{name}>"
 
-        # Voices go between "The step." header and the actual step content
-        if components.voices:
-            if len(components.voices) == 1:
-                voice = components.voices[0]
-                voice_section = (
-                    f"<lf:voice:{voice.name}>\n{voice.content}\n</lf:voice:{voice.name}>"
+        # Goals go between "The step." header and the actual step content
+        if components.goals:
+            if len(components.goals) == 1:
+                goal = components.goals[0]
+                goal_section = (
+                    f"<lf:goal:{goal.name}>\n{goal.content}\n</lf:goal:{goal.name}>"
                 )
             else:
-                voice_parts = [
-                    f"<lf:voice:{voice.name}>\n{voice.content}\n</lf:voice:{voice.name}>"
-                    for voice in components.voices
+                goal_parts = [
+                    f"<lf:goal:{goal.name}>\n{goal.content}\n</lf:goal:{goal.name}>"
+                    for goal in components.goals
                 ]
-                voice_section = f"<lf:voices>\n{chr(10).join(voice_parts)}\n</lf:voices>"
-            parts.append(f"The step.\n\n{voice_section}\n\n{step_tag}")
+                goal_section = f"<lf:goals>\n{chr(10).join(goal_parts)}\n</lf:goals>"
+            parts.append(f"The step.\n\n{goal_section}\n\n{step_tag}")
         else:
             parts.append(f"The step.\n\n{step_tag}")
 
@@ -885,7 +885,7 @@ def build_prompt(
     step: Optional[str] = None,
     inline: Optional[str] = None,
     run_mode: Optional[str] = None,
-    voices: Optional[list[str]] = None,
+    goals: Optional[list[str]] = None,
     context_config: Optional[ContextConfig] = None,
 ) -> str:
     """Build the full prompt for an LLM session."""
@@ -894,7 +894,7 @@ def build_prompt(
         step,
         inline,
         run_mode=run_mode,
-        voices=voices,
+        goals=goals,
         context_config=context_config,
     )
     return format_prompt(components)

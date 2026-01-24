@@ -76,16 +76,18 @@ class Agent(LfdModel):
     """
 
     id: str
+    name: str  # unique name, used for worktree/branch naming
     repo: Path
     flow: str
     goal: list[str] = Field(min_length=1)
-    area: list[str] = Field(min_length=1)
+    area: list[str] = Field(min_length=1)  # context focus only
 
     stimulus: Stimulus = Field(default_factory=lambda: Stimulus("loop"))
     status: AgentStatus = AgentStatus.IDLE
     iteration: int = 0
 
-    main_branch: str = ""
+    worktree: Path | None = None  # persistent worktree location
+    branch: str | None = None  # current branch name
     pr_limit: int = Field(default=5, ge=1)
     merge_mode: MergeMode = MergeMode.PR
 
@@ -97,6 +99,9 @@ class Agent(LfdModel):
 
     # Circuit breaker
     consecutive_failures: int = 0
+
+    # Activation queue
+    pending_activations: int = 0
 
     model_config = ConfigDict(
         extra="forbid",
@@ -133,8 +138,9 @@ class Agent(LfdModel):
         return self.id[:7]
 
     @property
-    def area_slug(self) -> str:
-        return area_to_slug(self.area[0])
+    def main_branch(self) -> str:
+        """Main branch is {name}.main."""
+        return f"{self.name}.main"
 
     @property
     def goal_display(self) -> str:
@@ -163,8 +169,12 @@ def agent_from_row(row: dict) -> Agent:
         cron=row.get("stimulus_cron"),
     )
 
+    worktree_str = row.get("worktree")
+    worktree = Path(worktree_str) if worktree_str else None
+
     return Agent(
         id=row["id"],
+        name=row["name"],
         repo=Path(row["repo"]),
         flow=row["flow"],
         goal=goal,
@@ -172,13 +182,15 @@ def agent_from_row(row: dict) -> Agent:
         stimulus=stimulus,
         status=AgentStatus(row["status"]),
         iteration=row.get("iteration", 0),
-        main_branch=row.get("main_branch", ""),
+        worktree=worktree,
+        branch=row.get("branch"),
         pr_limit=row.get("pr_limit", 5),
         merge_mode=MergeMode(merge_mode_str),
         pid=row.get("pid"),
         created_at=datetime.fromisoformat(row["created_at"]),
         last_main_sha=row.get("last_main_sha"),
         consecutive_failures=row.get("consecutive_failures", 0),
+        pending_activations=row.get("pending_activations", 0),
     )
 
 

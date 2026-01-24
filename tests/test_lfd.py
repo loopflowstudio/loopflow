@@ -176,9 +176,9 @@ def test_db_reset_function():
         # Create initial DB with some data
         conn = _get_db(db_path)
         conn.execute(
-            "INSERT INTO agents (id, repo, flow, goal, area, status, iteration,"
-            "main_branch, pr_limit, merge_mode, created_at) "
-            "VALUES ('test', '/tmp', 'ship', '[]', '[]', 'idle', 0, 'main', 5, "
+            "INSERT INTO agents (id, name, repo, flow, goal, area, status, iteration,"
+            "pr_limit, merge_mode, created_at) "
+            "VALUES ('test', 'test-agent', '/tmp', 'ship', '[]', '[]', 'idle', 0, 5, "
             "'pr', '2024-01-01')"
         )
         conn.commit()
@@ -214,13 +214,13 @@ def test_migrations_cover_all_agent_fields():
 
         agent = Agent(
             id="test-all-fields",
+            name="aurora-melody",
             flow="ship",
             area=["src/test/"],
             goal=["goal-a", "goal-b"],
             repo=Path("/tmp/repo"),
             status=AgentStatus.RUNNING,
             iteration=5,
-            main_branch="test-main",
             pr_limit=10,
             merge_mode=MergeMode.LAND,
             pid=12345,
@@ -232,13 +232,14 @@ def test_migrations_cover_all_agent_fields():
         loaded = get_agent("test-all-fields", db_path)
 
         assert loaded.id == agent.id
+        assert loaded.name == agent.name
         assert loaded.flow == agent.flow
         assert loaded.area == agent.area
         assert loaded.goal == agent.goal
         assert loaded.repo == agent.repo
         assert loaded.status == agent.status
         assert loaded.iteration == agent.iteration
-        assert loaded.main_branch == agent.main_branch
+        assert loaded.main_branch == "aurora-melody.main"  # computed
         assert loaded.pr_limit == agent.pr_limit
         assert loaded.merge_mode == agent.merge_mode
         assert loaded.pid == agent.pid
@@ -585,11 +586,11 @@ def _make_agent(**kwargs) -> Agent:
             kwargs["stimulus"] = Stimulus("loop")
     defaults = {
         "id": "test-id",
+        "name": "test-agent",
         "flow": "ship",
         "area": ["src/test/"],
         "goal": ["default"],
         "repo": Path("/tmp/repo"),
-        "main_branch": "test-main",
     }
     defaults.update(kwargs)
     return Agent(**defaults)
@@ -599,11 +600,11 @@ def test_agent_model_defaults():
     """Agent model has correct defaults."""
     agent = Agent(
         id="agent-1",
+        name="test-coverage",
         flow="ship",
         area=["src/test-coverage/"],
         goal=["default"],
         repo=Path("/tmp/repo"),
-        main_branch="test-coverage-main",
     )
     assert agent.flow == "ship"
     assert agent.status == AgentStatus.IDLE
@@ -611,6 +612,7 @@ def test_agent_model_defaults():
     assert agent.pr_limit == 5
     assert agent.merge_mode == MergeMode.PR
     assert agent.pid is None
+    assert agent.main_branch == "test-coverage.main"
 
 
 def test_agent_model_short_id():
@@ -664,8 +666,8 @@ def test_db_save_and_get_agent():
         db_path = Path(tmpdir) / "test.db"
         agent = _make_agent(
             id="agent-123",
+            name="test-coverage",
             area=["src/test-coverage/"],
-            main_branch="test-coverage-main",
             status=AgentStatus.IDLE,
             iteration=0,
             pr_limit=5,
@@ -676,7 +678,8 @@ def test_db_save_and_get_agent():
         assert loaded is not None
         assert loaded.id == "agent-123"
         assert loaded.area == ["src/test-coverage/"]
-        assert loaded.main_branch == "test-coverage-main"
+        assert loaded.name == "test-coverage"
+        assert loaded.main_branch == "test-coverage.main"
         assert loaded.flow == "ship"
 
 
@@ -699,8 +702,8 @@ def test_db_get_agent_by_area_repo():
         db_path = Path(tmpdir) / "test.db"
         agent = _make_agent(
             id="agent-1",
+            name="api-aurora-melody",
             area=["src/api/"],
-            main_branch="api-aurora-melody-main",
         )
         save_agent(agent, db_path)
 
@@ -720,15 +723,15 @@ def test_db_list_agents():
 
         agent1 = _make_agent(
             id="agent-1",
+            name="goal-a",
             area=["src/goal-a/"],
             repo=Path("/tmp/repo-a"),
-            main_branch="goal-a-main",
         )
         agent2 = _make_agent(
             id="agent-2",
+            name="goal-b",
             area=["src/goal-b/"],
             repo=Path("/tmp/repo-b"),
-            main_branch="goal-b-main",
         )
         save_agent(agent1, db_path)
         save_agent(agent2, db_path)
@@ -782,10 +785,10 @@ def test_db_delete_agent():
         db_path = Path(tmpdir) / "test.db"
         agent = _make_agent(
             id="agent-1",
+            name="test-agent",
             flow="ship",
             area=["src/test/"],
             repo=Path("/tmp/repo"),
-            main_branch="test-main",
         )
         save_agent(agent, db_path)
 
@@ -1271,30 +1274,6 @@ def test_schedule_first_run_beyond_grace():
     # No last_run, but zero grace period means prev_time is stale
     result = should_activate_cron("* * * * *", None, grace_period=timedelta(seconds=0))
     assert result is False
-
-
-# Iteration branch prefix tests
-
-
-def test_iteration_branch_prefix_strips_main_suffix():
-    """_iteration_branch_prefix strips -main suffix."""
-    from loopflow.lfd.execution.runner import _iteration_branch_prefix
-
-    assert _iteration_branch_prefix("product-engineer-main") == "product-engineer"
-    assert _iteration_branch_prefix("product-engineer-1-main") == "product-engineer-1"
-    assert _iteration_branch_prefix("test-main") == "test"
-    # New format with random words
-    branch = "product-engineer-swift-river-main"
-    assert _iteration_branch_prefix(branch) == "product-engineer-swift-river"
-    assert _iteration_branch_prefix("test-api-calm-brook-main") == "test-api-calm-brook"
-
-
-def test_iteration_branch_prefix_without_suffix():
-    """_iteration_branch_prefix handles edge case without -main suffix."""
-    from loopflow.lfd.execution.runner import _iteration_branch_prefix
-
-    # Shouldn't happen in practice, but function handles it gracefully
-    assert _iteration_branch_prefix("product-engineer") == "product-engineer"
 
 
 # Random word generation tests

@@ -18,9 +18,10 @@ from loopflow.lfd.agent import (
     update_agent_iteration,
     update_agent_pid,
     update_agent_status,
+    update_agent_worktree_branch,
 )
 from loopflow.lfd.daemon.client import notify_event
-from loopflow.lfd.execution.runner import run_iteration
+from loopflow.lfd.execution.runner import IterationResult, run_iteration
 from loopflow.lfd.logging import worker_log
 from loopflow.lfd.models import Agent, AgentStatus
 
@@ -156,8 +157,8 @@ def run_agent_iterations(agent: Agent) -> None:
             time.sleep(MANAGER_POLL_INTERVAL)
 
         try:
-            success = _run_with_retry(agent, iteration, run_id)
-            if success:
+            result = _run_with_retry(agent, iteration, run_id)
+            if result.success:
                 worker_log.info(f"[{short_id}] iteration {iteration} completed successfully")
                 # Reset failures on success
                 if consecutive_failures > 0:
@@ -167,6 +168,13 @@ def run_agent_iterations(agent: Agent) -> None:
 
                 update_agent_iteration(agent.id, iteration)
                 agent.iteration = iteration
+
+                # Update agent's worktree/branch for next iteration
+                if result.worktree and result.branch:
+                    update_agent_worktree_branch(agent.id, result.worktree, result.branch)
+                    agent.worktree = result.worktree
+                    agent.branch = result.branch
+                    worker_log.info(f"[{short_id}] moved to branch {result.branch}")
             else:
                 # Increment failures
                 consecutive_failures += 1
@@ -212,7 +220,7 @@ def run_agent_iterations(agent: Agent) -> None:
     update_agent_pid(agent.id, None)
 
 
-def _run_with_retry(agent: Agent, iteration: int, run_id: str) -> bool:
+def _run_with_retry(agent: Agent, iteration: int, run_id: str) -> IterationResult:
     """Run iteration with retry and backoff."""
     short_id = agent.short_id()
     last_error = None
@@ -220,11 +228,11 @@ def _run_with_retry(agent: Agent, iteration: int, run_id: str) -> bool:
     for attempt in range(MAX_RETRIES):
         try:
             worker_log.debug(f"[{short_id}] attempt {attempt + 1}/{MAX_RETRIES}")
-            success = run_iteration(agent, iteration, run_id)
-            if success:
-                return True
+            result = run_iteration(agent, iteration, run_id)
+            if result.success:
+                return result
 
-            # run_iteration returned False (failure without exception)
+            # run_iteration returned failure
             if attempt < MAX_RETRIES - 1:
                 worker_log.warning(
                     f"[{short_id}] attempt {attempt + 1} failed, "
@@ -243,7 +251,7 @@ def _run_with_retry(agent: Agent, iteration: int, run_id: str) -> bool:
                 time.sleep(RETRY_BACKOFF_SECONDS)
             else:
                 worker_log.error(f"[{short_id}] all {MAX_RETRIES} attempts failed")
-                return False
+                return IterationResult(success=False)
 
         except Exception as e:
             last_error = e
@@ -272,7 +280,7 @@ def _run_with_retry(agent: Agent, iteration: int, run_id: str) -> bool:
     # All retries exhausted
     if last_error:
         raise last_error
-    return False
+    return IterationResult(success=False)
 
 
 def main() -> None:

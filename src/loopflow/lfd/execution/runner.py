@@ -7,7 +7,7 @@ import json
 import subprocess
 import sys
 import uuid
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -29,8 +29,8 @@ from loopflow.lf.flows import (
 from loopflow.lf.goals import format_goal_section, resolve_goals
 from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lf.logging import write_prompt_file
-from loopflow.lf.messages import generate_pr_message
-from loopflow.lf.worktrees import WorktreeError
+from loopflow.lf.naming import branch_exists, generate_next_branch
+from loopflow.lf.worktrees import WorktreeError, get_path
 from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
 from loopflow.lfd.daemon.client import notify_event
@@ -41,13 +41,17 @@ from loopflow.lfd.flow_run import (
     update_run_step,
 )
 from loopflow.lfd.models import Agent, FlowRun, FlowRunStatus
+from loopflow.lfops._helpers import get_default_branch
+from loopflow.lfops.next import move_worktree
 
 
-def _iteration_branch_prefix(main_branch: str) -> str:
-    """Derive iteration branch prefix from main branch."""
-    if main_branch.endswith("-main"):
-        return main_branch[:-5]
-    return main_branch
+@dataclass
+class IterationResult:
+    """Result of running a single agent iteration."""
+
+    success: bool
+    worktree: Path | None = None
+    branch: str | None = None
 
 
 def _build_loop_prompt(
@@ -376,21 +380,39 @@ def run_iteration(
     agent: Agent,
     iteration: int,
     run_id: str | None = None,
-) -> bool:
-    """Run a single iteration of an agent.
-
-    Returns True if successful, False on error.
-    """
+) -> IterationResult:
+    """Run a single iteration of an agent."""
     config = load_config(agent.repo)
+    base_branch = get_default_branch(agent.repo)
 
-    prefix = _iteration_branch_prefix(agent.main_branch)
-    branch = f"{prefix}/{iteration:03d}"
-    try:
-        worktree_path = create_worktree(agent.repo, branch, base=agent.main_branch)
-    except WorktreeError as e:
-        error_msg = f"Failed to create worktree: {e}"
-        notify_event("agent.error", {"agent_id": agent.id, "error": error_msg})
-        return False
+    # Use agent's persistent worktree, or create on first iteration
+    if agent.worktree and agent.worktree.exists():
+        worktree_path = agent.worktree
+        branch = agent.branch
+    else:
+        # First iteration: generate initial branch and create worktree
+        branch = generate_next_branch(agent.name, agent.repo)
+        worktree_path = get_path(agent.repo, agent.name)
+        try:
+            git_cmd = [
+                "git",
+                "worktree",
+                "add",
+                "-b",
+                branch,
+                str(worktree_path),
+                f"origin/{base_branch}",
+            ]
+            subprocess.run(git_cmd, cwd=agent.repo, capture_output=True, check=True)
+            subprocess.run(
+                ["git", "push", "-u", "origin", branch],
+                cwd=worktree_path,
+                capture_output=True,
+            )
+        except (subprocess.CalledProcessError, WorktreeError) as e:
+            error_msg = f"Failed to create worktree: {e}"
+            notify_event("agent.error", {"agent_id": agent.id, "error": error_msg})
+            return IterationResult(success=False)
 
     run = FlowRun(
         id=run_id or str(uuid.uuid4()),
@@ -424,26 +446,22 @@ def run_iteration(
     flow = agent.flow
     if not flow:
         update_run_status(run.id, FlowRunStatus.FAILED, error="Flow is required")
-        _cleanup_worktree(agent.repo, worktree_path, branch)
-        return False
+        return IterationResult(success=False)
 
     try:
         flow_def = load_flow(flow, agent.repo)
     except ValueError as exc:
         update_run_status(run.id, FlowRunStatus.FAILED, error=str(exc))
-        _cleanup_worktree(agent.repo, worktree_path, branch)
-        return False
+        return IterationResult(success=False)
 
     if not flow_def:
         update_run_status(run.id, FlowRunStatus.FAILED, error=f"Unknown flow '{flow}'")
-        _cleanup_worktree(agent.repo, worktree_path, branch)
-        return False
+        return IterationResult(success=False)
 
     resolved = resolve_flow(flow_def, agent.repo)
     if not resolved:
         update_run_status(run.id, FlowRunStatus.FAILED, error=f"Empty flow '{flow}'")
-        _cleanup_worktree(agent.repo, worktree_path, branch)
-        return False
+        return IterationResult(success=False)
 
     agent_model = config.agent_model if config else "claude:opus"
     backend, model_variant = parse_model(agent_model)
@@ -451,7 +469,7 @@ def run_iteration(
     runner = get_runner(backend)
     if not runner.is_available():
         update_run_status(run.id, FlowRunStatus.FAILED, error=f"'{backend}' CLI not found")
-        return False
+        return IterationResult(success=False)
 
     skip_permissions = config.yolo if config else False
 
@@ -472,8 +490,7 @@ def run_iteration(
                 update_run_status(
                     run.id, FlowRunStatus.FAILED, error="Fork must be immediately followed by join"
                 )
-                _cleanup_worktree(agent.repo, worktree_path, branch)
-                return False
+                return IterationResult(success=False)
 
             try:
                 result_code = _run_fork_join_group(
@@ -491,12 +508,10 @@ def run_iteration(
                 )
             except StepTimeoutError as e:
                 update_run_status(run.id, FlowRunStatus.FAILED, error=str(e))
-                _cleanup_worktree(agent.repo, worktree_path, branch)
-                return False
+                return IterationResult(success=False)
             if result_code != 0:
                 update_run_status(run.id, FlowRunStatus.FAILED, error="join failed")
-                _cleanup_worktree(agent.repo, worktree_path, branch)
-                return False
+                return IterationResult(success=False)
 
             i += 1
             continue
@@ -513,8 +528,7 @@ def run_iteration(
                 )
             except RuntimeError as exc:
                 update_run_status(run.id, FlowRunStatus.FAILED, error=str(exc))
-                _cleanup_worktree(agent.repo, worktree_path, branch)
-                return False
+                return IterationResult(success=False)
 
             branch_steps = step.choose.options[choice]
             branch_flow = FlowDef.from_dict(f"{flow_def.name}:{choice}", {"steps": branch_steps})
@@ -524,8 +538,7 @@ def run_iteration(
 
         if step.join is not None:
             update_run_status(run.id, FlowRunStatus.FAILED, error="Join must follow fork")
-            _cleanup_worktree(agent.repo, worktree_path, branch)
-            return False
+            return IterationResult(success=False)
 
         if not step.step:
             i += 1
@@ -567,8 +580,7 @@ def run_iteration(
             update_run_status(
                 run.id, FlowRunStatus.FAILED, error=f"Step file not found: {step_name}"
             )
-            _cleanup_worktree(agent.repo, worktree_path, branch)
-            return False
+            return IterationResult(success=False)
 
         prompt, _step_file = prompt_result
         try:
@@ -591,8 +603,7 @@ def run_iteration(
                 },
             )
             update_run_status(run.id, FlowRunStatus.FAILED, error=str(e))
-            _cleanup_worktree(agent.repo, worktree_path, branch)
-            return False
+            return IterationResult(success=False)
 
         notify_event(
             "agent.step.completed",
@@ -605,20 +616,16 @@ def run_iteration(
 
         if result_code != 0:
             update_run_status(run.id, FlowRunStatus.FAILED, error=f"{step_name} failed")
-            _cleanup_worktree(agent.repo, worktree_path, branch)
-            return False
+            return IterationResult(success=False)
 
         i += 1
 
     update_run_step(run.id, None)
 
-    pr_url = _create_pr_to_main_branch(agent, worktree_path, branch, iteration)
+    # Complete iteration: squash to agent.main, checkpoint, PR to main
+    pr_url = _complete_iteration(agent, worktree_path, branch, iteration, base_branch)
     if pr_url:
         update_run_pr(run.id, pr_url)
-        _auto_merge_pr(worktree_path)
-
-        if agent.merge_mode.value == "land":
-            _land_to_main(agent)
 
     update_run_status(run.id, FlowRunStatus.COMPLETED)
 
@@ -634,39 +641,171 @@ def run_iteration(
         },
     )
 
-    _cleanup_worktree(agent.repo, worktree_path, branch)
+    # Move worktree to new branch for next iteration
+    new_branch = generate_next_branch(agent.name, agent.repo)
+    if not move_worktree(agent.repo, worktree_path, new_branch, base_branch):
+        notify_event("agent.error", {"agent_id": agent.id, "error": "Failed to move worktree"})
+        return IterationResult(success=True, worktree=worktree_path)  # couldn't prep for next
 
-    return True
+    return IterationResult(success=True, worktree=worktree_path, branch=new_branch)
 
 
-def _create_pr_to_main_branch(
-    agent: Agent, worktree_path: Path, branch: str, iteration: int
-) -> str | None:
-    """Push branch and create PR targeting main_branch."""
+def _close_agent_prs(agent: Agent) -> None:
+    """Close any open PRs from this agent's iteration branches."""
     result = subprocess.run(
-        ["git", "push", "-u", "origin", branch],
-        cwd=worktree_path,
+        ["gh", "pr", "list", "--state", "open", "--json", "number,headRefName"],
+        cwd=agent.repo,
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
-        return None
+        return
 
     try:
-        message = generate_pr_message(worktree_path)
-        title = f"[{agent.area_slug}] {message.title}"
-        body = (
-            f"Agent: {agent.area_display} [{agent.goal_display}]\n"
-            f"Flow: {agent.flow}\n"
-            f"Iteration: {iteration}\n\n{message.body}"
-        )
-    except Exception:
-        title = f"[{agent.area_slug}] Iteration {iteration}"
-        body = (
-            f"Agent: {agent.area_display} [{agent.goal_display}]\n"
-            f"Flow: {agent.flow}\n"
-            f"Iteration: {iteration}"
-        )
+        prs = json.loads(result.stdout)
+        # Close PRs from this agent's iteration branches (name.word-word pattern)
+        for pr in prs:
+            head = pr["headRefName"]
+            if head.startswith(f"{agent.name}.") and head != agent.main_branch:
+                close_cmd = [
+                    "gh",
+                    "pr",
+                    "close",
+                    str(pr["number"]),
+                    "--comment",
+                    "Superseded by newer iteration",
+                ]
+                subprocess.run(close_cmd, cwd=agent.repo, capture_output=True)
+    except (json.JSONDecodeError, KeyError):
+        pass
+
+
+def _ensure_agent_main_branch(agent: Agent, base_branch: str) -> bool:
+    """Ensure the agent's main branch exists, creating from base if needed."""
+    main_branch = agent.main_branch
+    if branch_exists(agent.repo, main_branch):
+        return True
+
+    # Create agent.main from base branch
+    result = subprocess.run(
+        ["git", "branch", main_branch, f"origin/{base_branch}"],
+        cwd=agent.repo,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        return False
+
+    # Push to origin
+    result = subprocess.run(
+        ["git", "push", "-u", "origin", main_branch],
+        cwd=agent.repo,
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def _complete_iteration(
+    agent: Agent, worktree_path: Path, branch: str, iteration: int, base_branch: str
+) -> str | None:
+    """Complete iteration: squash merge to agent.main, checkpoint, PR to main.
+
+    Flow:
+    1. Push iteration branch
+    2. Squash merge iteration → agent.main (git only, no GitHub PR)
+    3. Push agent.main to origin
+    4. Create checkpoint tag
+    5. PR from checkpoint → main
+    """
+    main_branch = agent.main_branch
+    checkpoint_tag = f"{agent.name}.checkpoint.{iteration:03d}"
+
+    # Push the iteration branch
+    subprocess.run(
+        ["git", "push", "-u", "origin", branch],
+        cwd=worktree_path,
+        capture_output=True,
+    )
+
+    # Ensure agent.main exists
+    if not _ensure_agent_main_branch(agent, base_branch):
+        return None
+
+    # Fetch latest agent.main
+    subprocess.run(
+        ["git", "fetch", "origin", main_branch],
+        cwd=agent.repo,
+        capture_output=True,
+    )
+
+    # Squash merge iteration branch into agent.main (git only)
+    # First checkout agent.main
+    subprocess.run(
+        ["git", "checkout", main_branch],
+        cwd=agent.repo,
+        capture_output=True,
+    )
+
+    # Reset to origin/agent.main to ensure we're up to date
+    subprocess.run(
+        ["git", "reset", "--hard", f"origin/{main_branch}"],
+        cwd=agent.repo,
+        capture_output=True,
+    )
+
+    # Squash merge the iteration branch
+    result = subprocess.run(
+        ["git", "merge", "--squash", branch],
+        cwd=agent.repo,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        return None
+
+    # Commit the squash merge
+    commit_msg = (
+        f"[{agent.name}] Iteration {iteration}\n\nGoal: {agent.goal_display}\nFlow: {agent.flow}"
+    )
+    result = subprocess.run(
+        ["git", "commit", "-m", commit_msg],
+        cwd=agent.repo,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        return None
+
+    # Push agent.main
+    result = subprocess.run(
+        ["git", "push", "origin", main_branch],
+        cwd=agent.repo,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        return None
+
+    # Create checkpoint tag
+    subprocess.run(
+        ["git", "tag", checkpoint_tag, main_branch],
+        cwd=agent.repo,
+        capture_output=True,
+    )
+
+    # Push the tag
+    subprocess.run(
+        ["git", "push", "origin", checkpoint_tag],
+        cwd=agent.repo,
+        capture_output=True,
+    )
+
+    # Close any existing PRs from this agent (superseded by this iteration)
+    _close_agent_prs(agent)
+
+    # Create PR from iteration branch to main
+    title = f"[{agent.name}] Iteration {iteration}"
+    body = (
+        f"Agent: {agent.name} [{agent.goal_display}]\n"
+        f"Flow: {agent.flow}\nIteration: {iteration}\n\n"
+        f"Checkpoint: {checkpoint_tag}"
+    )
 
     cmd = [
         "gh",
@@ -677,99 +816,19 @@ def _create_pr_to_main_branch(
         "--body",
         body,
         "--base",
-        agent.main_branch,
+        base_branch,
+        "--head",
+        branch,
     ]
-    result = subprocess.run(cmd, cwd=worktree_path, capture_output=True, text=True)
+    result = subprocess.run(cmd, cwd=agent.repo, capture_output=True, text=True)
 
     if result.returncode == 0:
-        return result.stdout.strip()
-    return None
-
-
-def _auto_merge_pr(worktree_path: Path) -> bool:
-    """Auto-merge the current PR."""
-    result = subprocess.run(
-        ["gh", "pr", "merge", "--squash", "--delete-branch"],
-        cwd=worktree_path,
-        capture_output=True,
-        text=True,
-    )
-    return result.returncode == 0
-
-
-def _land_to_main(agent: Agent) -> str | None:
-    """Create or update PR from main_branch to main, enable auto-merge."""
-    repo = agent.repo
-
-    subprocess.run(["git", "push", "origin", agent.main_branch], cwd=repo, capture_output=True)
-
-    result = subprocess.run(
-        [
-            "gh",
-            "pr",
-            "list",
-            "--head",
-            agent.main_branch,
-            "--base",
-            "main",
-            "--json",
-            "number,url",
-            "--state",
-            "open",
-        ],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-    )
-    existing = json.loads(result.stdout) if result.returncode == 0 and result.stdout.strip() else []
-
-    if existing:
-        pr_number = existing[0]["number"]
+        pr_url = result.stdout.strip()
+        # Enable auto-merge
         subprocess.run(
-            ["gh", "pr", "merge", str(pr_number), "--squash", "--auto"],
-            cwd=repo,
+            ["gh", "pr", "merge", pr_url, "--squash", "--auto"],
+            cwd=agent.repo,
             capture_output=True,
         )
-        return existing[0]["url"]
-
-    result = subprocess.run(
-        [
-            "gh",
-            "pr",
-            "create",
-            "--base",
-            "main",
-            "--head",
-            agent.main_branch,
-            "--title",
-            f"[{agent.area_slug}] Land accumulated work",
-            "--body",
-            f"Auto-land from agent: {agent.area_display} [{agent.goal_display}] "
-            f"(flow: {agent.flow})",
-        ],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        return None
-
-    pr_url = result.stdout.strip()
-
-    subprocess.run(["gh", "pr", "merge", "--squash", "--auto"], cwd=repo, capture_output=True)
-
-    return pr_url
-
-
-def _cleanup_worktree(repo: Path, worktree_path: Path, branch: str) -> None:
-    """Remove worktree and delete branch."""
-    try:
-        remove_worktree(repo, branch)
-    except Exception:
-        pass
-
-    subprocess.run(
-        ["git", "push", "origin", "--delete", branch],
-        cwd=repo,
-        capture_output=True,
-    )
+        return pr_url
+    return None

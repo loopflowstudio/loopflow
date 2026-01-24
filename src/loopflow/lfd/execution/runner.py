@@ -7,7 +7,7 @@ import json
 import subprocess
 import sys
 import uuid
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -43,6 +43,15 @@ from loopflow.lfd.flow_run import (
 from loopflow.lfd.models import Agent, FlowRun, FlowRunStatus
 from loopflow.lfops._helpers import get_default_branch
 from loopflow.lfops.next import move_worktree
+
+
+@dataclass
+class IterationResult:
+    """Result of running a single agent iteration."""
+
+    success: bool
+    worktree: Path | None = None
+    branch: str | None = None
 
 
 def _build_loop_prompt(
@@ -371,13 +380,8 @@ def run_iteration(
     agent: Agent,
     iteration: int,
     run_id: str | None = None,
-) -> tuple[bool, Path | None, str | None]:
-    """Run a single iteration of an agent.
-
-    Returns (success, worktree_path, new_branch).
-    - worktree_path: the agent's worktree (same path, persists across iterations)
-    - new_branch: the branch after moving (for next iteration)
-    """
+) -> IterationResult:
+    """Run a single iteration of an agent."""
     config = load_config(agent.repo)
     base_branch = get_default_branch(agent.repo)
 
@@ -408,7 +412,7 @@ def run_iteration(
         except (subprocess.CalledProcessError, WorktreeError) as e:
             error_msg = f"Failed to create worktree: {e}"
             notify_event("agent.error", {"agent_id": agent.id, "error": error_msg})
-            return False, None, None
+            return IterationResult(success=False)
 
     run = FlowRun(
         id=run_id or str(uuid.uuid4()),
@@ -442,22 +446,22 @@ def run_iteration(
     flow = agent.flow
     if not flow:
         update_run_status(run.id, FlowRunStatus.FAILED, error="Flow is required")
-        return False, None, None
+        return IterationResult(success=False)
 
     try:
         flow_def = load_flow(flow, agent.repo)
     except ValueError as exc:
         update_run_status(run.id, FlowRunStatus.FAILED, error=str(exc))
-        return False, None, None
+        return IterationResult(success=False)
 
     if not flow_def:
         update_run_status(run.id, FlowRunStatus.FAILED, error=f"Unknown flow '{flow}'")
-        return False, None, None
+        return IterationResult(success=False)
 
     resolved = resolve_flow(flow_def, agent.repo)
     if not resolved:
         update_run_status(run.id, FlowRunStatus.FAILED, error=f"Empty flow '{flow}'")
-        return False, None, None
+        return IterationResult(success=False)
 
     agent_model = config.agent_model if config else "claude:opus"
     backend, model_variant = parse_model(agent_model)
@@ -465,7 +469,7 @@ def run_iteration(
     runner = get_runner(backend)
     if not runner.is_available():
         update_run_status(run.id, FlowRunStatus.FAILED, error=f"'{backend}' CLI not found")
-        return False, None, None
+        return IterationResult(success=False)
 
     skip_permissions = config.yolo if config else False
 
@@ -486,7 +490,7 @@ def run_iteration(
                 update_run_status(
                     run.id, FlowRunStatus.FAILED, error="Fork must be immediately followed by join"
                 )
-                return False, None, None
+                return IterationResult(success=False)
 
             try:
                 result_code = _run_fork_join_group(
@@ -504,10 +508,10 @@ def run_iteration(
                 )
             except StepTimeoutError as e:
                 update_run_status(run.id, FlowRunStatus.FAILED, error=str(e))
-                return False, None, None
+                return IterationResult(success=False)
             if result_code != 0:
                 update_run_status(run.id, FlowRunStatus.FAILED, error="join failed")
-                return False, None, None
+                return IterationResult(success=False)
 
             i += 1
             continue
@@ -524,7 +528,7 @@ def run_iteration(
                 )
             except RuntimeError as exc:
                 update_run_status(run.id, FlowRunStatus.FAILED, error=str(exc))
-                return False, None, None
+                return IterationResult(success=False)
 
             branch_steps = step.choose.options[choice]
             branch_flow = FlowDef.from_dict(f"{flow_def.name}:{choice}", {"steps": branch_steps})
@@ -534,7 +538,7 @@ def run_iteration(
 
         if step.join is not None:
             update_run_status(run.id, FlowRunStatus.FAILED, error="Join must follow fork")
-            return False, None, None
+            return IterationResult(success=False)
 
         if not step.step:
             i += 1
@@ -576,7 +580,7 @@ def run_iteration(
             update_run_status(
                 run.id, FlowRunStatus.FAILED, error=f"Step file not found: {step_name}"
             )
-            return False, None, None
+            return IterationResult(success=False)
 
         prompt, _step_file = prompt_result
         try:
@@ -599,7 +603,7 @@ def run_iteration(
                 },
             )
             update_run_status(run.id, FlowRunStatus.FAILED, error=str(e))
-            return False, None, None
+            return IterationResult(success=False)
 
         notify_event(
             "agent.step.completed",
@@ -612,7 +616,7 @@ def run_iteration(
 
         if result_code != 0:
             update_run_status(run.id, FlowRunStatus.FAILED, error=f"{step_name} failed")
-            return False, None, None
+            return IterationResult(success=False)
 
         i += 1
 
@@ -641,9 +645,9 @@ def run_iteration(
     new_branch = generate_next_branch(agent.name, agent.repo)
     if not move_worktree(agent.repo, worktree_path, new_branch, base_branch):
         notify_event("agent.error", {"agent_id": agent.id, "error": "Failed to move worktree"})
-        return True, worktree_path, None  # Iteration succeeded, but couldn't prep for next
+        return IterationResult(success=True, worktree=worktree_path)  # couldn't prep for next
 
-    return True, worktree_path, new_branch
+    return IterationResult(success=True, worktree=worktree_path, branch=new_branch)
 
 
 def _close_agent_prs(agent: Agent) -> None:

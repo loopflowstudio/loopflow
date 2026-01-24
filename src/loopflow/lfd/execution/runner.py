@@ -28,8 +28,7 @@ from loopflow.lf.flows import (
 from loopflow.lf.goals import format_goal_section, resolve_goals
 from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lf.logging import write_prompt_file
-from loopflow.lf.messages import generate_pr_message
-from loopflow.lf.naming import generate_next_branch, parse_branch_base
+from loopflow.lf.naming import generate_next_branch
 from loopflow.lf.worktrees import WorktreeError, get_path
 from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
@@ -387,9 +386,8 @@ def run_iteration(
         branch = agent.branch
     else:
         # First iteration: generate initial branch and create worktree
-        area_slug = agent.area_slug
-        branch = generate_next_branch(area_slug, agent.repo)
-        worktree_path = get_path(agent.repo, area_slug)
+        branch = generate_next_branch(agent.name, agent.repo)
+        worktree_path = get_path(agent.repo, agent.name)
         try:
             git_cmd = [
                 "git",
@@ -619,11 +617,10 @@ def run_iteration(
 
     update_run_step(run.id, None)
 
-    # Create PR targeting main
-    pr_url = _create_pr_to_main(agent, worktree_path, branch, iteration, base_branch)
+    # Create PR from iteration branch to main
+    pr_url = _create_iteration_pr(agent, worktree_path, branch, iteration, base_branch)
     if pr_url:
         update_run_pr(run.id, pr_url)
-        _enable_auto_merge(worktree_path)
 
     update_run_status(run.id, FlowRunStatus.COMPLETED)
 
@@ -640,8 +637,7 @@ def run_iteration(
     )
 
     # Move worktree to new branch for next iteration
-    base_name = parse_branch_base(branch)
-    new_branch = generate_next_branch(base_name, agent.repo)
+    new_branch = generate_next_branch(agent.name, agent.repo)
     if not move_worktree(agent.repo, worktree_path, new_branch, base_branch):
         notify_event("agent.error", {"agent_id": agent.id, "error": "Failed to move worktree"})
         return True, worktree_path, None  # Iteration succeeded, but couldn't prep for next
@@ -649,34 +645,19 @@ def run_iteration(
     return True, worktree_path, new_branch
 
 
-def _create_pr_to_main(
+def _create_iteration_pr(
     agent: Agent, worktree_path: Path, branch: str, iteration: int, base_branch: str
 ) -> str | None:
-    """Push branch and create PR targeting base branch (usually main)."""
-    result = subprocess.run(
+    """Create PR from iteration branch directly to main."""
+    # Push the branch
+    subprocess.run(
         ["git", "push", "-u", "origin", branch],
         cwd=worktree_path,
         capture_output=True,
-        text=True,
     )
-    if result.returncode != 0:
-        return None
 
-    try:
-        message = generate_pr_message(worktree_path)
-        title = f"[{agent.area_slug}] {message.title}"
-        body = (
-            f"Agent: {agent.area_display} [{agent.goal_display}]\n"
-            f"Flow: {agent.flow}\n"
-            f"Iteration: {iteration}\n\n{message.body}"
-        )
-    except Exception:
-        title = f"[{agent.area_slug}] Iteration {iteration}"
-        body = (
-            f"Agent: {agent.area_display} [{agent.goal_display}]\n"
-            f"Flow: {agent.flow}\n"
-            f"Iteration: {iteration}"
-        )
+    title = f"[{agent.name}] Iteration {iteration}"
+    body = f"Agent: {agent.name} [{agent.goal_display}]\nFlow: {agent.flow}\nIteration: {iteration}"
 
     cmd = [
         "gh",
@@ -688,20 +669,18 @@ def _create_pr_to_main(
         body,
         "--base",
         base_branch,
+        "--head",
+        branch,
     ]
-    result = subprocess.run(cmd, cwd=worktree_path, capture_output=True, text=True)
+    result = subprocess.run(cmd, cwd=agent.repo, capture_output=True, text=True)
 
     if result.returncode == 0:
-        return result.stdout.strip()
+        pr_url = result.stdout.strip()
+        # Enable auto-merge
+        subprocess.run(
+            ["gh", "pr", "merge", pr_url, "--squash", "--auto"],
+            cwd=agent.repo,
+            capture_output=True,
+        )
+        return pr_url
     return None
-
-
-def _enable_auto_merge(worktree_path: Path) -> bool:
-    """Enable auto-merge on the current PR (squash when CI passes)."""
-    result = subprocess.run(
-        ["gh", "pr", "merge", "--squash", "--auto"],
-        cwd=worktree_path,
-        capture_output=True,
-        text=True,
-    )
-    return result.returncode == 0

@@ -12,16 +12,18 @@ def apply(conn: sqlite3.Connection) -> None:
         -- Agents: AI coding agents with loop/watch/cron modes
         CREATE TABLE IF NOT EXISTS agents (
             id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,   -- unique name, used for worktree/branch naming
             repo TEXT NOT NULL,
             flow TEXT NOT NULL,
             goal TEXT NOT NULL,  -- JSON array
-            area TEXT NOT NULL,   -- JSON array
+            area TEXT NOT NULL,   -- JSON array (context focus only)
 
             mode TEXT NOT NULL DEFAULT 'loop',  -- loop, watch, cron
             status TEXT NOT NULL DEFAULT 'idle',
             iteration INTEGER NOT NULL DEFAULT 0,
 
-            main_branch TEXT NOT NULL,
+            worktree TEXT,        -- persistent worktree path
+            branch TEXT,          -- current branch name
             pr_limit INTEGER NOT NULL DEFAULT 5,
             merge_mode TEXT NOT NULL DEFAULT 'pr',
 
@@ -34,7 +36,8 @@ def apply(conn: sqlite3.Connection) -> None:
             last_main_sha TEXT,   -- last seen SHA on main (watch mode)
 
             -- Resilience
-            consecutive_failures INTEGER NOT NULL DEFAULT 0
+            consecutive_failures INTEGER NOT NULL DEFAULT 0,
+            pending_activations INTEGER NOT NULL DEFAULT 0
         );
 
         CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_area_repo ON agents(area, repo);

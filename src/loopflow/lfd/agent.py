@@ -22,7 +22,6 @@ from loopflow.lfd.models import (
     MergeMode,
     Stimulus,
     agent_from_row,
-    area_to_slug,
 )
 
 
@@ -41,13 +40,14 @@ def save_agent(agent: Agent, db_path: Path | None = None) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO agents
-        (id, repo, flow, goal, area, stimulus_kind, stimulus_cron, status, iteration,
-         main_branch, worktree, branch, pr_limit, merge_mode, pid, created_at,
+        (id, name, repo, flow, goal, area, stimulus_kind, stimulus_cron, status, iteration,
+         worktree, branch, pr_limit, merge_mode, pid, created_at,
          last_main_sha, consecutive_failures, pending_activations)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             agent.id,
+            agent.name,
             str(agent.repo),
             agent.flow,
             json.dumps(agent.goal),
@@ -56,7 +56,6 @@ def save_agent(agent: Agent, db_path: Path | None = None) -> None:
             agent.stimulus.cron,
             agent.status.value,
             agent.iteration,
-            agent.main_branch,
             str(agent.worktree) if agent.worktree else None,
             agent.branch,
             agent.pr_limit,
@@ -250,42 +249,19 @@ def delete_agent(agent_id: str, db_path: Path | None = None) -> bool:
     return deleted
 
 
-# Branch management
+# Agent naming
 
 
-def _allocate_main_branch(repo: Path, area: list[str]) -> str:
-    """Allocate a unique branch name for an agent's main branch."""
-    if area:
-        slug = area_to_slug(area[0])
-    else:
-        slug = "root"
-
+def _generate_agent_name(repo: Path) -> str:
+    """Generate a unique agent name using word pairs."""
     for _ in range(100):
         words = generate_word_pair()
-        candidate = f"{slug}-{words}-main"
-        if not branch_exists(repo, candidate):
-            return candidate
+        # Check that {name}.main branch doesn't exist
+        main_branch = f"{words}.main"
+        if not branch_exists(repo, main_branch):
+            return words
 
-    raise ValueError(f"Could not allocate main branch for {slug}")
-
-
-def _create_main_branch(repo: Path, branch: str) -> None:
-    """Create main branch from origin/main if it doesn't exist."""
-    if branch_exists(repo, branch):
-        return
-    subprocess.run(["git", "fetch", "origin", "main"], cwd=repo, capture_output=True)
-    result = subprocess.run(
-        ["git", "branch", branch, "origin/main"],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        subprocess.run(
-            ["git", "branch", branch, "main"],
-            cwd=repo,
-            capture_output=True,
-        )
+    raise ValueError("Could not generate unique agent name")
 
 
 # Operations
@@ -296,6 +272,7 @@ def create_agent(
     flow: str,
     goal: list[str],
     area: list[str],
+    name: str | None = None,
     pr_limit: int = 5,
     merge_mode: MergeMode = MergeMode.PR,
     stimulus: Stimulus | None = None,
@@ -326,18 +303,17 @@ def create_agent(
             save_agent(existing)
         return existing
 
-    main_branch = _allocate_main_branch(repo, area)
-    _create_main_branch(repo, main_branch)
+    agent_name = name or _generate_agent_name(repo)
 
     agent = Agent(
         id=str(uuid.uuid4()),
+        name=agent_name,
         repo=repo,
         flow=flow,
         goal=goal,
         area=area,
         stimulus=stimulus,
         status=AgentStatus.IDLE,
-        main_branch=main_branch,
         pr_limit=pr_limit,
         merge_mode=merge_mode,
     )

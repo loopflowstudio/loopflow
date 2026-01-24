@@ -102,31 +102,40 @@ def branch_exists(repo: Path, branch: str) -> bool:
 
 
 def parse_branch_base(branch: str) -> str:
-    """Extract base branch name for next iteration.
+    """Extract base branch name (agent name) for next iteration.
 
-    If branch ends with a magical-musical pair, strip it.
-    Otherwise use as-is (first iteration).
+    If branch ends with .word1-word2 pattern, strip it.
+    If branch ends with .main, strip it.
+    Otherwise use as-is.
 
     Examples:
-        'jack.auth.20260123_1112' → 'jack.auth.20260123_1112'
-        'jack.auth.20260123_1112-aurora-melody' → 'jack.auth.20260123_1112'
+        'my-feature.main' → 'my-feature'
+        'my-feature.nova-waltz' → 'my-feature'
+        'my-feature' → 'my-feature'
     """
-    # Check if branch ends with -word-word pattern where both words are in our lists
-    parts = branch.rsplit("-", 2)
-    if len(parts) == 3:
-        base, word1, word2 = parts
-        if word1 in MAGICAL and word2 in MUSICAL:
-            return base
+    # Check if branch ends with .main
+    if branch.endswith(".main"):
+        return branch[:-5]
+    # Check if branch ends with .word1-word2 pattern
+    if "." in branch:
+        base, suffix = branch.rsplit(".", 1)
+        if "-" in suffix:
+            word1, word2 = suffix.split("-", 1)
+            if word1 in MAGICAL and word2 in MUSICAL:
+                return base
     return branch
 
 
 def generate_next_branch(base: str, repo: Path) -> str:
     """Generate unique branch name for next iteration.
 
-    Appends magical-musical pair, retries if exists.
+    Appends .word1-word2 suffix, retries if exists.
+
+    Examples:
+        'my-feature' → 'my-feature.nova-waltz'
     """
     for _ in range(100):
-        candidate = f"{base}-{generate_word_pair()}"
+        candidate = f"{base}.{generate_word_pair()}"
         if not branch_exists(repo, candidate):
             return candidate
 

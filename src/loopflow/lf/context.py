@@ -15,13 +15,13 @@ from pydantic import BaseModel, Field
 from loopflow.lf.design import gather_area_docs, gather_design_docs, gather_internal_docs
 from loopflow.lf.files import format_files, format_image_references, gather_docs, gather_files
 from loopflow.lf.frontmatter import StepFile, parse_step_file
+from loopflow.lf.goals import Goal, load_goal
 from loopflow.lf.skills import (
     discover_skill_sources,
     find_skill,
     list_all_skills,
     load_skill_prompt,
 )
-from loopflow.lf.goals import Goal, load_goal
 from loopflow.lf.tokens import count_tokens
 from loopflow.lfops.summarize import is_stale, load_summary
 

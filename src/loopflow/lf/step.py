@@ -25,6 +25,7 @@ from loopflow.lf.flow import run_flow_def
 from loopflow.lf.flows import load_flow
 from loopflow.lf.frontmatter import StepConfig, resolve_step_config
 from loopflow.lf.git import find_main_repo
+from loopflow.lf.goals import GoalNotFoundError, parse_goal_arg
 from loopflow.lf.launcher import (
     build_model_command,
     build_model_interactive_command,
@@ -36,7 +37,6 @@ from loopflow.lf.output import (
     trim_components_if_needed,
     warn_if_context_too_large,
 )
-from loopflow.lf.goals import GoalNotFoundError, parse_goal_arg
 from loopflow.lf.tokens import analyze_components
 from loopflow.lf.worktrees import WorktreeError, create
 from loopflow.lfd.models import StepRun, StepRunStatus

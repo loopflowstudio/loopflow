@@ -426,8 +426,7 @@ def _run_fork_synthesize(
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(fork.agents)) as executor:
         futures = [
-            executor.submit(_run_agent, config, i + 1)
-            for i, config in enumerate(fork.agents)
+            executor.submit(_run_agent, config, i + 1) for i, config in enumerate(fork.agents)
         ]
         for future in futures:
             results.append(future.result())

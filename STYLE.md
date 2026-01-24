@@ -87,6 +87,8 @@ Keep information in one place. Version numbers, configuration, documentation—e
 
 Put imports at the top of the file. Declare dependencies in `pyproject.toml` and assume they're available.
 
+Prefer explicit imports over magic. Don't inject names into module namespaces to save one import line—it breaks linters, IDE autocomplete, and confuses readers. If a module needs `Flow`, it should `from loopflow.lf.flows import Flow`. Standard Python beats clever patterns that fight tooling.
+
 Keep one implementation. Avoid `v2_`, `_old`, `_new`, `_backup` prefixes and suffixes—look up old versions in git. If you're tempted to keep both old and new code around, delete the old version and commit. You can always get it back from git if needed.
 
 Don't maintain backwards compatibility unless explicitly required. If a config format or API changes, migrate everything to the new format—don't write code that handles both old and new. Backwards compatibility is for production databases and published APIs with external users, not internal config files. Unless the design doc specifies a migration path, assume we don't want compatibility shims.

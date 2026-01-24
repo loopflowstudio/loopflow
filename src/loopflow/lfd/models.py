@@ -86,6 +86,8 @@ class Agent(LfdModel):
     iteration: int = 0
 
     main_branch: str = ""
+    worktree: Path | None = None  # persistent worktree location
+    branch: str | None = None  # current branch name
     pr_limit: int = Field(default=5, ge=1)
     merge_mode: MergeMode = MergeMode.PR
 
@@ -97,6 +99,10 @@ class Agent(LfdModel):
 
     # Circuit breaker
     consecutive_failures: int = 0
+
+    # Activation queue
+    pending_activations: int = 0
+    buffer_mode: str = "combine"  # "combine" (default) or "queue"
 
     model_config = ConfigDict(
         extra="forbid",
@@ -163,6 +169,9 @@ def agent_from_row(row: dict) -> Agent:
         cron=row.get("stimulus_cron"),
     )
 
+    worktree_str = row.get("worktree")
+    worktree = Path(worktree_str) if worktree_str else None
+
     return Agent(
         id=row["id"],
         repo=Path(row["repo"]),
@@ -173,12 +182,16 @@ def agent_from_row(row: dict) -> Agent:
         status=AgentStatus(row["status"]),
         iteration=row.get("iteration", 0),
         main_branch=row.get("main_branch", ""),
+        worktree=worktree,
+        branch=row.get("branch"),
         pr_limit=row.get("pr_limit", 5),
         merge_mode=MergeMode(merge_mode_str),
         pid=row.get("pid"),
         created_at=datetime.fromisoformat(row["created_at"]),
         last_main_sha=row.get("last_main_sha"),
         consecutive_failures=row.get("consecutive_failures", 0),
+        pending_activations=row.get("pending_activations", 0),
+        buffer_mode=row.get("buffer_mode", "combine"),
     )
 
 

@@ -42,9 +42,9 @@ def save_agent(agent: Agent, db_path: Path | None = None) -> None:
         """
         INSERT OR REPLACE INTO agents
         (id, repo, flow, goal, area, stimulus_kind, stimulus_cron, status, iteration,
-         main_branch, pr_limit, merge_mode, pid, created_at, last_main_sha,
-         consecutive_failures)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         main_branch, worktree, branch, pr_limit, merge_mode, pid, created_at,
+         last_main_sha, consecutive_failures, pending_activations, buffer_mode)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             agent.id,
@@ -57,12 +57,16 @@ def save_agent(agent: Agent, db_path: Path | None = None) -> None:
             agent.status.value,
             agent.iteration,
             agent.main_branch,
+            str(agent.worktree) if agent.worktree else None,
+            agent.branch,
             agent.pr_limit,
             agent.merge_mode.value,
             agent.pid,
             agent.created_at.isoformat(),
             agent.last_main_sha,
             agent.consecutive_failures,
+            agent.pending_activations,
+            agent.buffer_mode,
         ),
     )
     conn.commit()
@@ -182,6 +186,41 @@ def update_agent_consecutive_failures(
     cursor = conn.execute(
         "UPDATE agents SET consecutive_failures = ? WHERE id = ? OR id LIKE ?",
         (failures, agent_id, f"{agent_id}%"),
+    )
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    return updated
+
+
+def update_agent_worktree_branch(
+    agent_id: str,
+    worktree: Path | None,
+    branch: str | None,
+    db_path: Path | None = None,
+) -> bool:
+    """Update an agent's worktree path and current branch."""
+    conn = _get_db(db_path)
+
+    cursor = conn.execute(
+        "UPDATE agents SET worktree = ?, branch = ? WHERE id = ? OR id LIKE ?",
+        (str(worktree) if worktree else None, branch, agent_id, f"{agent_id}%"),
+    )
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    return updated
+
+
+def update_agent_pending_activations(
+    agent_id: str, pending: int, db_path: Path | None = None
+) -> bool:
+    """Update an agent's pending activations count."""
+    conn = _get_db(db_path)
+
+    cursor = conn.execute(
+        "UPDATE agents SET pending_activations = ? WHERE id = ? OR id LIKE ?",
+        (pending, agent_id, f"{agent_id}%"),
     )
     conn.commit()
     updated = cursor.rowcount > 0
@@ -513,6 +552,7 @@ def check_watch_stimulus(agent: Agent) -> bool:
 # Cron stimulus checking
 
 SCHEDULE_GRACE_PERIOD = timedelta(hours=24)
+MAX_PENDING_ACTIVATIONS = 10
 
 
 def should_activate_cron(
@@ -563,26 +603,54 @@ def check_cron_stimulus(agent: Agent) -> bool:
 # Daemon stimulus check functions
 
 
+def _queue_activation(agent: Agent) -> bool:
+    """Queue an activation for a busy agent. Returns True if queued."""
+    if agent.pending_activations >= MAX_PENDING_ACTIVATIONS:
+        stimulus_log.warning(
+            f"[{agent.short_id()}] pending activations at max ({MAX_PENDING_ACTIVATIONS}), dropping"
+        )
+        return False
+
+    if agent.buffer_mode == "combine":
+        # Combine mode: only queue if nothing pending (idempotent)
+        if agent.pending_activations == 0:
+            update_agent_pending_activations(agent.id, 1)
+            stimulus_log.info(f"[{agent.short_id()}] queued activation (combine mode)")
+            return True
+        stimulus_log.debug(f"[{agent.short_id()}] already has pending activation (combine mode)")
+        return False
+    else:
+        # Queue mode: always increment
+        new_pending = agent.pending_activations + 1
+        update_agent_pending_activations(agent.id, new_pending)
+        stimulus_log.info(f"[{agent.short_id()}] queued activation (queue, now {new_pending})")
+        return True
+
+
 def run_watch_check() -> list[str]:
-    """Check all watch-stimulus agents and activate as needed."""
+    """Check all watch-stimulus agents and activate or queue as needed."""
     agents = list_agents()
-    watch_agents = [
-        a for a in agents if a.stimulus.kind == "watch" and a.status != AgentStatus.RUNNING
-    ]
+    watch_agents = [a for a in agents if a.stimulus.kind == "watch"]
     stimulus_log.debug(f"watch check: {len(watch_agents)} agents to check")
 
     activated = []
     for agent in watch_agents:
         try:
             if check_watch_stimulus(agent):
-                result = start_agent(agent.id)
-                if result:
-                    stimulus_log.info(f"[{agent.short_id()}] started from watch stimulus")
-                    activated.append(agent.id)
+                if agent.status in (AgentStatus.RUNNING, AgentStatus.WAITING):
+                    # Agent is busy, queue the activation
+                    _queue_activation(agent)
                 else:
-                    stimulus_log.warning(
-                        f"[{agent.short_id()}] watch activated but start failed: {result.reason}"
-                    )
+                    # Agent is idle, start it
+                    result = start_agent(agent.id)
+                    if result:
+                        stimulus_log.info(f"[{agent.short_id()}] started from watch stimulus")
+                        activated.append(agent.id)
+                    else:
+                        stimulus_log.warning(
+                            f"[{agent.short_id()}] watch activated but start failed: "
+                            f"{result.reason}"
+                        )
         except Exception as e:
             stimulus_log.error(f"[{agent.short_id()}] watch check error: {e}")
 
@@ -590,25 +658,28 @@ def run_watch_check() -> list[str]:
 
 
 def run_cron_check() -> list[str]:
-    """Check all cron-stimulus agents and activate as needed."""
+    """Check all cron-stimulus agents and activate or queue as needed."""
     agents = list_agents()
-    cron_agents = [
-        a for a in agents if a.stimulus.kind == "cron" and a.status != AgentStatus.RUNNING
-    ]
+    cron_agents = [a for a in agents if a.stimulus.kind == "cron"]
     stimulus_log.debug(f"cron check: {len(cron_agents)} agents to check")
 
     activated = []
     for agent in cron_agents:
         try:
             if check_cron_stimulus(agent):
-                result = start_agent(agent.id)
-                if result:
-                    stimulus_log.info(f"[{agent.short_id()}] started from cron stimulus")
-                    activated.append(agent.id)
+                if agent.status in (AgentStatus.RUNNING, AgentStatus.WAITING):
+                    # Agent is busy, queue the activation
+                    _queue_activation(agent)
                 else:
-                    stimulus_log.warning(
-                        f"[{agent.short_id()}] cron activated but start failed: {result.reason}"
-                    )
+                    # Agent is idle, start it
+                    result = start_agent(agent.id)
+                    if result:
+                        stimulus_log.info(f"[{agent.short_id()}] started from cron stimulus")
+                        activated.append(agent.id)
+                    else:
+                        stimulus_log.warning(
+                            f"[{agent.short_id()}] cron activated but start failed: {result.reason}"
+                        )
         except Exception as e:
             stimulus_log.error(f"[{agent.short_id()}] cron check error: {e}")
 

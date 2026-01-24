@@ -102,6 +102,46 @@ def _open_terminal(path: Path) -> None:
     subprocess.run(["open", f"warp://action/new_window?path={path}"])
 
 
+def move_worktree(
+    main_repo: Path,
+    worktree_path: Path,
+    new_branch: str,
+    base_branch: str,
+) -> bool:
+    """Move a worktree to a new branch by removing and recreating at same path.
+
+    Returns True if successful.
+    """
+    # Remove current worktree
+    result = subprocess.run(
+        ["git", "worktree", "remove", "--force", str(worktree_path)],
+        cwd=main_repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return False
+
+    # Create new worktree at the same path with new branch
+    result = subprocess.run(
+        ["git", "worktree", "add", "-b", new_branch, str(worktree_path), f"origin/{base_branch}"],
+        cwd=main_repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return False
+
+    # Push to create remote branch with tracking
+    subprocess.run(
+        ["git", "push", "-u", "origin", new_branch],
+        cwd=worktree_path,
+        capture_output=True,
+    )
+
+    return True
+
+
 def next_worktree(
     repo_root: Path,
     branch: str,

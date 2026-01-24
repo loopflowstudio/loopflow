@@ -1273,30 +1273,6 @@ def test_schedule_first_run_beyond_grace():
     assert result is False
 
 
-# Iteration branch prefix tests
-
-
-def test_iteration_branch_prefix_strips_main_suffix():
-    """_iteration_branch_prefix strips -main suffix."""
-    from loopflow.lfd.execution.runner import _iteration_branch_prefix
-
-    assert _iteration_branch_prefix("product-engineer-main") == "product-engineer"
-    assert _iteration_branch_prefix("product-engineer-1-main") == "product-engineer-1"
-    assert _iteration_branch_prefix("test-main") == "test"
-    # New format with random words
-    branch = "product-engineer-swift-river-main"
-    assert _iteration_branch_prefix(branch) == "product-engineer-swift-river"
-    assert _iteration_branch_prefix("test-api-calm-brook-main") == "test-api-calm-brook"
-
-
-def test_iteration_branch_prefix_without_suffix():
-    """_iteration_branch_prefix handles edge case without -main suffix."""
-    from loopflow.lfd.execution.runner import _iteration_branch_prefix
-
-    # Shouldn't happen in practice, but function handles it gracefully
-    assert _iteration_branch_prefix("product-engineer") == "product-engineer"
-
-
 # Random word generation tests
 
 

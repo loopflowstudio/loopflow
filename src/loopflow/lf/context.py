@@ -771,7 +771,7 @@ def gather_prompt_components(
     loaded_goals = None
     if goals:
         loaded_goals = [
-            load_goal(repo_root, name) for name in goals if load_goal(repo_root, name)
+            goal for name in goals if (goal := load_goal(repo_root, name))
         ]
 
     # Load configured summaries (always include if config has them)

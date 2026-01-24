@@ -147,7 +147,7 @@ class TestAgentSchema:
         assert "id" in fields
         assert "repo" in fields
         assert "flow" in fields
-        assert "voice" in fields
+        assert "goal" in fields
         assert "area" in fields
         assert "status" in fields
 
@@ -161,7 +161,7 @@ class TestAgentSchema:
         python_camel = to_camel_case(python_fields)
 
         # Swift should have these core fields
-        core_fields = {"id", "repo", "flow", "voice", "area", "status", "iteration"}
+        core_fields = {"id", "repo", "flow", "goal", "area", "status", "iteration"}
         missing = core_fields - swift_fields
         assert not missing, f"Swift Agent missing fields: {missing}"
 
@@ -169,7 +169,7 @@ class TestAgentSchema:
         """TypeScript Agent fields match Python schema."""
         ts_fields = extract_typescript_fields("Agent", REPO_ROOT / "web/src/models/agent.ts")
 
-        core_fields = {"id", "repo", "flow", "voice", "area", "status", "iteration"}
+        core_fields = {"id", "repo", "flow", "goal", "area", "status", "iteration"}
         missing = core_fields - ts_fields
         assert not missing, f"TypeScript Agent missing fields: {missing}"
 

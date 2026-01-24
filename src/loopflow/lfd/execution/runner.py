@@ -17,7 +17,6 @@ from loopflow.lf.flow import (
     build_join_prompt,
     choose_branch,
     collect_fork_diffs,
-    format_voice_section,
     load_join_instructions,
 )
 from loopflow.lf.flows import (
@@ -27,10 +26,10 @@ from loopflow.lf.flows import (
     load_flow,
     resolve_flow,
 )
+from loopflow.lf.goals import format_goal_section, resolve_goals
 from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lf.logging import write_prompt_file
 from loopflow.lf.messages import generate_pr_message
-from loopflow.lf.voices import render_voices, resolve_voices
 from loopflow.lf.worktrees import WorktreeError
 from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
@@ -53,12 +52,12 @@ def _iteration_branch_prefix(main_branch: str) -> str:
 
 def _build_loop_prompt(
     agent: Agent,
-    effective_voices: list,
+    effective_goals: list,
     worktree_path: Path,
     step_name: str,
     context_paths: list[str] | None,
     extra_context: list[str] | None = None,
-    voices: list[str] | None = None,
+    goals: list[str] | None = None,
 ) -> tuple[str, str] | None:
     merged_context = list(context_paths) if context_paths else []
     if extra_context:
@@ -68,7 +67,7 @@ def _build_loop_prompt(
         worktree_path,
         step=step_name,
         run_mode="auto",
-        voices=voices,
+        goals=goals,
         context_config=ContextConfig(pathset=merged_context),
     )
 
@@ -76,9 +75,9 @@ def _build_loop_prompt(
         return None
 
     step_file, step_content = components.step
-    voice_section = render_voices(effective_voices)
-
-    combined = f"{voice_section}\n\n---\n\n{step_content}"
+    goal_parts = [f"<lf:goal:{g.name}>\n{g.content}\n</lf:goal:{g.name}>" for g in effective_goals]
+    goal_section = "\n\n".join(goal_parts)
+    combined = f"{goal_section}\n\n---\n\n{step_content}"
     components = replace(components, step=(step_file, combined))
     prompt = format_prompt(components)
 
@@ -212,26 +211,26 @@ def _cleanup_variant_worktrees(repo_root: Path, results: list[_VariantResult]) -
 
 def _build_loop_inline_prompt(
     agent: Agent,
-    effective_voices: list,
+    effective_goals: list,
     worktree_path: Path,
     inline_text: str,
     context_paths: list[str] | None,
-    voices: list[str] | None = None,
+    goals: list[str] | None = None,
 ) -> str | None:
     components = gather_prompt_components(
         worktree_path,
         inline=inline_text,
         run_mode="auto",
-        voices=voices,
+        goals=goals,
         context_config=ContextConfig(pathset=context_paths),
     )
     if not components.step:
         return None
 
     step_file, step_content = components.step
-    voice_section = render_voices(effective_voices)
-
-    combined = f"{voice_section}\n\n---\n\n{step_content}"
+    goal_parts = [f"<lf:goal:{g.name}>\n{g.content}\n</lf:goal:{g.name}>" for g in effective_goals]
+    goal_section = "\n\n".join(goal_parts)
+    combined = f"{goal_section}\n\n---\n\n{step_content}"
     components = replace(components, step=(step_file, combined))
     return format_prompt(components)
 
@@ -244,7 +243,7 @@ def _run_fork_join_group(
     steps: list[ResolvedStep],
     join_config: JoinConfig,
     context_paths: list[str] | None,
-    effective_voices: list,
+    effective_goals: list,
     skip_permissions: bool,
     backend: str,
     model_variant: str | None,
@@ -259,15 +258,15 @@ def _run_fork_join_group(
         step_backend = backend
         step_variant = model_variant
         step_context = list(context_paths) if context_paths else []
-        step_voices = None
+        step_goals = None
 
         if step.config:
             if step.config.model:
                 step_backend, step_variant = parse_model(step.config.model)
             if step.config.context:
                 step_context.extend(step.config.context)
-            if step.config.voice:
-                step_voices = step.config.voice
+            if step.config.goal:
+                step_goals = step.config.goal
 
         label_base = step.step
         label_counts[label_base] = label_counts.get(label_base, 0) + 1
@@ -291,11 +290,11 @@ def _run_fork_join_group(
 
         prompt_result = _build_loop_prompt(
             agent,
-            effective_voices,
+            effective_goals,
             wt_path,
             step.step,
             step_context or None,
-            voices=step_voices,
+            goals=step_goals,
         )
         if not prompt_result:
             remove_worktree(agent.repo, wt_path.name.split(".")[-1])
@@ -334,16 +333,16 @@ def _run_fork_join_group(
     join_prompt = build_join_prompt(
         collect_fork_diffs(fork_worktrees),
         load_join_instructions(join_config.step, agent.repo),
-        format_voice_section(join_config.voice, agent.repo),
+        format_goal_section(join_config.goal, agent.repo),
         flow_name,
     )
     join_prompt = _build_loop_inline_prompt(
         agent,
-        effective_voices,
+        effective_goals,
         worktree_path,
         join_prompt,
         context_paths,
-        voices=None,
+        goals=None,
     )
     if not join_prompt:
         _cleanup_variant_worktrees(agent.repo, results)
@@ -397,7 +396,7 @@ def run_iteration(
         id=run_id or str(uuid.uuid4()),
         agent_id=agent.id,
         flow=agent.flow,
-        voice=agent.voice,
+        goal=agent.goal,
         area=agent.area,
         repo=agent.repo,
         status=FlowRunStatus.RUNNING,
@@ -413,14 +412,14 @@ def run_iteration(
         {
             "agent_id": agent.id,
             "area": agent.area_display,
-            "voice": agent.voice_display,
+            "goal": agent.goal_display,
             "flow": agent.flow,
             "iteration": iteration,
         },
     )
 
-    effective_voices = resolve_voices(agent.repo, agent.voice)
-    # Voices are optional - proceed even if none specified
+    effective_goals = resolve_goals(agent.repo, agent.goal)
+    # Goals are optional - proceed even if none specified
 
     flow = agent.flow
     if not flow:
@@ -485,7 +484,7 @@ def run_iteration(
                     group_steps,
                     resolved[i].join.join,
                     context_paths,
-                    effective_voices,
+                    effective_goals,
                     skip_permissions,
                     backend,
                     model_variant,
@@ -546,23 +545,23 @@ def run_iteration(
         step_backend = backend
         step_variant = model_variant
         step_context = list(context_paths) if context_paths else []
-        step_voices = None
+        step_goals = None
 
         if step.config:
             if step.config.model:
                 step_backend, step_variant = parse_model(step.config.model)
             if step.config.context:
                 step_context.extend(step.config.context)
-            if step.config.voice:
-                step_voices = step.config.voice
+            if step.config.goal:
+                step_goals = step.config.goal
 
         prompt_result = _build_loop_prompt(
             agent,
-            effective_voices,
+            effective_goals,
             worktree_path,
             step_name,
             step_context or None,
-            voices=step_voices,
+            goals=step_goals,
         )
         if not prompt_result:
             update_run_status(
@@ -628,7 +627,7 @@ def run_iteration(
         {
             "agent_id": agent.id,
             "area": agent.area_display,
-            "voice": agent.voice_display,
+            "goal": agent.goal_display,
             "flow": agent.flow,
             "iteration": iteration,
             "pr_url": pr_url,
@@ -657,14 +656,14 @@ def _create_pr_to_main_branch(
         message = generate_pr_message(worktree_path)
         title = f"[{agent.area_slug}] {message.title}"
         body = (
-            f"Agent: {agent.area_display} [{agent.voice_display}]\n"
+            f"Agent: {agent.area_display} [{agent.goal_display}]\n"
             f"Flow: {agent.flow}\n"
             f"Iteration: {iteration}\n\n{message.body}"
         )
     except Exception:
         title = f"[{agent.area_slug}] Iteration {iteration}"
         body = (
-            f"Agent: {agent.area_display} [{agent.voice_display}]\n"
+            f"Agent: {agent.area_display} [{agent.goal_display}]\n"
             f"Flow: {agent.flow}\n"
             f"Iteration: {iteration}"
         )
@@ -745,7 +744,7 @@ def _land_to_main(agent: Agent) -> str | None:
             "--title",
             f"[{agent.area_slug}] Land accumulated work",
             "--body",
-            f"Auto-land from agent: {agent.area_display} [{agent.voice_display}] "
+            f"Auto-land from agent: {agent.area_display} [{agent.goal_display}] "
             f"(flow: {agent.flow})",
         ],
         cwd=repo,

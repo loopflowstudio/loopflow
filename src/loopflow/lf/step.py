@@ -25,6 +25,7 @@ from loopflow.lf.flow import run_flow_def
 from loopflow.lf.flows import load_flow
 from loopflow.lf.frontmatter import StepConfig, resolve_step_config
 from loopflow.lf.git import find_main_repo
+from loopflow.lf.goals import parse_goal_arg
 from loopflow.lf.launcher import (
     build_model_command,
     build_model_interactive_command,
@@ -37,7 +38,6 @@ from loopflow.lf.output import (
     warn_if_context_too_large,
 )
 from loopflow.lf.tokens import analyze_components
-from loopflow.lf.voices import VoiceNotFoundError, parse_voice_arg
 from loopflow.lf.worktrees import WorktreeError, create
 from loopflow.lfd.models import StepRun, StepRunStatus
 from loopflow.lfd.step_run import log_step_run_end, log_step_run_start
@@ -187,7 +187,7 @@ def _launch_interactive_default(
     config,
     context: list[str] | None = None,
     model: str | None = None,
-    voice: str | None = None,
+    goal: str | None = None,
     clipboard: bool | None = None,
     docs: bool | None = None,
 ) -> None:
@@ -206,30 +206,26 @@ def _launch_interactive_default(
         raise typer.Exit(1)
 
     skip_permissions = config.yolo if config else False
-    cli_voices = parse_voice_arg(voice)
+    cli_goals = parse_goal_arg(goal)
 
     # Resolve flags
     include_clipboard = clipboard if clipboard is not None else (config.paste if config else False)
     include_docs = docs if docs is not None else (config.lfdocs if config else True)
 
-    try:
-        components = gather_prompt_components(
-            repo_root,
-            step=None,
-            inline=None,
-            run_mode="interactive",
-            voices=cli_voices or (config.voice if config else None),
-            context_config=ContextConfig.for_interactive(
-                paths=list(context) if context else [],
-                exclude=list(config.exclude) if config and config.exclude else [],
-                lfdocs=config.include_loopflow_doc if config else True,
-                clipboard=include_clipboard,
-            ),
-            config=config,
-        )
-    except VoiceNotFoundError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
+    components = gather_prompt_components(
+        repo_root,
+        step=None,
+        inline=None,
+        run_mode="interactive",
+        goals=cli_goals or (config.goal if config else None),
+        context_config=ContextConfig.for_interactive(
+            paths=list(context) if context else [],
+            exclude=list(config.exclude) if config and config.exclude else [],
+            lfdocs=config.include_loopflow_doc if config else True,
+            clipboard=include_clipboard,
+        ),
+        config=config,
+    )
 
     # Apply docs flag
     if not include_docs:
@@ -275,7 +271,7 @@ def run(
     model: ModelType = typer.Option(
         None, "-m", "-M", "--model", help="Model to use (backend or backend:variant)"
     ),
-    voice: str = typer.Option(None, "-v", "-V", "--voice", help="Voices to use (comma-separated)"),
+    goal: str = typer.Option(None, "-g", "-G", "--goal", help="Goals to use (comma-separated)"),
     chrome: Optional[bool] = typer.Option(
         None, "--chrome/--no-chrome", help="Enable Chrome browser automation"
     ),
@@ -309,7 +305,7 @@ def run(
             config,
             context=list(path) if path else None,
             model=model,
-            voice=voice,
+            goal=goal,
             clipboard=clipboard,
             docs=docs,
         )
@@ -318,8 +314,8 @@ def run(
     step_file = gather_step(repo_root, step, config)
     frontmatter = step_file.config if step_file else StepConfig()
 
-    # Parse voice arg
-    cli_voices = parse_voice_arg(voice)
+    # Parse goal arg
+    cli_goals = parse_goal_arg(goal)
 
     # Resolve config: CLI > frontmatter > global > defaults
     resolved = resolve_step_config(
@@ -330,7 +326,7 @@ def run(
         cli_auto=True if auto else None,
         cli_model=model,
         cli_context=list(path) if path else None,
-        cli_voice=cli_voices or None,
+        cli_goal=cli_goals or None,
     )
 
     is_interactive = resolved.interactive
@@ -371,28 +367,24 @@ def run(
         resolved_diff_mode = DiffMode.DIFF
 
     args = ctx.args or None
-    try:
-        components = gather_prompt_components(
-            repo_root,
-            step,
-            step_args=args,
-            run_mode="interactive" if is_interactive else "auto",
-            voices=resolved.voice or None,
-            context_config=ContextConfig(
-                diff_mode=resolved_diff_mode,
-                files=FilesetConfig(
-                    paths=list(resolved.context) if resolved.context else [],
-                    exclude=list(exclude_patterns) if exclude_patterns else [],
-                ),
-                area=resolved.area,
-                lfdocs=config.include_loopflow_doc if config else True,
-                clipboard=include_clipboard,
+    components = gather_prompt_components(
+        repo_root,
+        step,
+        step_args=args,
+        run_mode="interactive" if is_interactive else "auto",
+        goals=resolved.goal or None,
+        context_config=ContextConfig(
+            diff_mode=resolved_diff_mode,
+            files=FilesetConfig(
+                paths=list(resolved.context) if resolved.context else [],
+                exclude=list(exclude_patterns) if exclude_patterns else [],
             ),
-            config=config,
-        )
-    except VoiceNotFoundError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
+            area=resolved.area,
+            lfdocs=config.include_loopflow_doc if config else True,
+            clipboard=include_clipboard,
+        ),
+        config=config,
+    )
 
     # Apply docs flag
     if not include_docs:
@@ -459,7 +451,7 @@ def inline(
     model: ModelType = typer.Option(
         None, "-m", "-M", "--model", help="Model to use (backend or backend:variant)"
     ),
-    voice: str = typer.Option(None, "-v", "-V", "--voice", help="Voices to use (comma-separated)"),
+    goal: str = typer.Option(None, "-g", "-G", "--goal", help="Goals to use (comma-separated)"),
     chrome: Optional[bool] = typer.Option(
         None, "--chrome/--no-chrome", help="Enable Chrome browser automation"
     ),
@@ -472,8 +464,8 @@ def inline(
 
     config = load_config(repo_root) if (repo_root / ".lf" / "config.yaml").exists() else None
 
-    # Parse voice arg
-    cli_voices = parse_voice_arg(voice)
+    # Parse goal arg
+    cli_goals = parse_goal_arg(goal)
 
     # Resolve config for inline prompts (no frontmatter)
     resolved = resolve_step_config(
@@ -484,7 +476,7 @@ def inline(
         cli_auto=True if auto else None,
         cli_model=model,
         cli_context=list(path) if path else None,
-        cli_voice=cli_voices or None,
+        cli_goal=cli_goals or None,
     )
 
     is_interactive = resolved.interactive
@@ -521,28 +513,24 @@ def inline(
     elif config and config.diff:
         resolved_diff_mode = DiffMode.DIFF
 
-    try:
-        components = gather_prompt_components(
-            repo_root,
-            step=None,
-            inline=prompt,
-            run_mode="interactive" if is_interactive else "auto",
-            voices=resolved.voice or None,
-            context_config=ContextConfig(
-                diff_mode=resolved_diff_mode,
-                files=FilesetConfig(
-                    paths=list(resolved.context) if resolved.context else [],
-                    exclude=list(exclude_patterns) if exclude_patterns else [],
-                ),
-                area=resolved.area,
-                lfdocs=config.include_loopflow_doc if config else True,
-                clipboard=include_clipboard,
+    components = gather_prompt_components(
+        repo_root,
+        step=None,
+        inline=prompt,
+        run_mode="interactive" if is_interactive else "auto",
+        goals=resolved.goal or None,
+        context_config=ContextConfig(
+            diff_mode=resolved_diff_mode,
+            files=FilesetConfig(
+                paths=list(resolved.context) if resolved.context else [],
+                exclude=list(exclude_patterns) if exclude_patterns else [],
             ),
-            config=config,
-        )
-    except VoiceNotFoundError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
+            area=resolved.area,
+            lfdocs=config.include_loopflow_doc if config else True,
+            clipboard=include_clipboard,
+        ),
+        config=config,
+    )
 
     # Apply docs flag
     if not include_docs:

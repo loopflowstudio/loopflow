@@ -18,15 +18,15 @@ class StepConfig(BaseModel):
     include: list[str] | None = None
     exclude: list[str] | None = None
     model: str | None = None
-    voice: list[str] | None = None
+    goal: list[str] | None = None
     chrome: bool | None = None  # Enable Chrome integration for Claude Code
     diff_files: bool | None = None  # Include files changed on branch
     context: list[str] | None = None  # Additional context files (from flow overrides)
     area: str | None = None  # Area path for parent doc inclusion (e.g., "lf/cli")
 
-    @field_validator("voice", mode="before")
+    @field_validator("goal", mode="before")
     @classmethod
-    def _normalize_voice(cls, value):
+    def _normalize_goal(cls, value):
         if value is None or value == "":
             return None
         if isinstance(value, str):
@@ -69,7 +69,7 @@ class ResolvedStepConfig:
     exclude: list[str]
     model: str
     context: list[str]
-    voice: list[str]
+    goal: list[str]
     area: str | None = None
 
 
@@ -181,7 +181,7 @@ def resolve_step_config(
     cli_auto: bool | None,
     cli_model: str | None,
     cli_context: list[str] | None,
-    cli_voice: list[str] | None = None,
+    cli_goal: list[str] | None = None,
     cli_area: str | None = None,
 ) -> ResolvedStepConfig:
     """Merge configs: CLI > frontmatter > global > defaults."""
@@ -227,15 +227,15 @@ def resolve_step_config(
     else:
         include = []
 
-    # Resolve voice: CLI > frontmatter > global > default
-    if cli_voice:
-        voice = list(cli_voice)
-    elif frontmatter.voice:
-        voice = list(frontmatter.voice)
-    elif global_config and global_config.voice:
-        voice = list(global_config.voice)
+    # Resolve goal: CLI > frontmatter > global > default
+    if cli_goal:
+        goal = list(cli_goal)
+    elif frontmatter.goal:
+        goal = list(frontmatter.goal)
+    elif global_config and global_config.goal:
+        goal = list(global_config.goal)
     else:
-        voice = []
+        goal = []
 
     # Resolve context: global context + frontmatter + CLI
     context: list[str] = []
@@ -266,6 +266,6 @@ def resolve_step_config(
         exclude=exclude,
         model=model,
         context=context,
-        voice=voice,
+        goal=goal,
         area=area,
     )

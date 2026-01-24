@@ -13,8 +13,8 @@ from pathlib import Path
 import typer
 
 from loopflow.lf.flows import load_flow
+from loopflow.lf.goals import goal_exists, list_goals
 from loopflow.lf.logging import get_log_dir
-from loopflow.lf.voices import list_voices, voice_exists
 from loopflow.lfd.agent import (
     create_agent,
     delete_agent,
@@ -78,20 +78,20 @@ def _status_color(status: AgentStatus, c: dict[str, str]) -> str:
 
 
 def _agent_display(agent: Agent) -> str:
-    """Return area, flow, and voice for display."""
-    return f"{agent.area_display} [{agent.flow}] [{agent.voice_display}]"
+    """Return area, flow, and goal for display."""
+    return f"{agent.area_display} [{agent.flow}] [{agent.goal_display}]"
 
 
-def _parse_voices(voices: list[str] | None) -> list[str]:
-    """Parse voice list, handling comma-separated values.
+def _parse_goals(goals: list[str] | None) -> list[str]:
+    """Parse goal list, handling comma-separated values.
 
-    Accepts both: -v v1 -v v2 and -v v1,v2
+    Accepts both: -g g1 -g g2 and -g g1,g2
     """
-    if not voices:
+    if not goals:
         return ["default"]
     result = []
-    for v in voices:
-        result.extend(v.split(","))
+    for g in goals:
+        result.extend(g.split(","))
     return [x.strip() for x in result if x.strip()]
 
 
@@ -219,7 +219,7 @@ def start(
 def loop(
     flow: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
     area: str = typer.Argument(..., help="Area of responsibility (e.g., swift/, src/, .)"),
-    voices: list[str] = typer.Option(None, "-v", "-V", "--voice", help="Voice to add (repeatable)"),
+    goals: list[str] = typer.Option(None, "-g", "-G", "--goal", help="Goal to add (repeatable)"),
     limit: int = typer.Option(None, "-l", "--limit", help="PR limit override"),
     merge_mode: str = typer.Option(None, "--merge-mode", help="Merge mode: pr or land"),
     foreground: bool = typer.Option(False, "-f", "--foreground", help="Run in foreground"),
@@ -228,12 +228,12 @@ def loop(
 
     Flow is required - specifies which flow to run from .lf/flows/.
     Area is required - scopes the work (e.g., swift/, src/, or . for whole repo).
-    Voices are optional - add personality/role voices.
+    Goals are optional - add personality/role goals.
 
     Examples:
-        lfd loop ship swift/                              # default voice
-        lfd loop ship swift/ -v product-engineer          # with role
-        lfd loop ship swift/ -v product-engineer -v designer  # multiple roles
+        lfd loop ship swift/                              # default goal
+        lfd loop ship swift/ -g product-engineer          # with role
+        lfd loop ship swift/ -g product-engineer -g designer  # multiple roles
         lfd loop ship .                                   # whole repo
     """
     c = _colors()
@@ -252,18 +252,18 @@ def loop(
         typer.echo(f"\nDid you mean: lfd loop {flow} {area}/ ?")
         raise typer.Exit(1)
 
-    voice_list = _parse_voices(voices)
+    goal_list = _parse_goals(goals)
 
-    # Validate voices exist
-    for voice_name in voice_list:
-        if voice_name != "default" and not voice_exists(repo, voice_name):
+    # Validate goals exist
+    for goal_name in goal_list:
+        if goal_name != "default" and not goal_exists(repo, goal_name):
             typer.echo(
-                f"{c['red']}Error:{c['reset']} Voice '{voice_name}' not found",
+                f"{c['red']}Error:{c['reset']} Goal '{goal_name}' not found",
                 err=True,
             )
-            available = list_voices(repo)
+            available = list_goals(repo)
             if available:
-                typer.echo(f"Available voices: {', '.join(available)}")
+                typer.echo(f"Available goals: {', '.join(available)}")
             raise typer.Exit(1)
 
     flow = _validate_flow(repo, flow, c)
@@ -280,7 +280,7 @@ def loop(
     agent = create_agent(
         repo=repo,
         flow=flow,
-        voice=voice_list,
+        goal=goal_list,
         area=[area],
         pr_limit=pr_limit,
         merge_mode=mm,
@@ -298,7 +298,7 @@ def loop(
             typer.echo(f"{msg} ({agent.short_id()})")
             typer.echo(f"  Repo: {repo}")
             typer.echo(f"  Main branch: {agent.main_branch}")
-            typer.echo(f"  Voices: {agent.voice_display}")
+            typer.echo(f"  Goals: {agent.goal_display}")
             typer.echo(f"  Flow: {agent.flow}")
             typer.echo(f"  PR limit: {agent.pr_limit}")
     elif result.reason == "already_running":
@@ -319,7 +319,7 @@ def loop(
 def run(
     flow_name: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
     area: str = typer.Argument(..., help="Area of responsibility (e.g., swift/, src/, .)"),
-    voices: list[str] = typer.Option(None, "-v", "-V", "--voice", help="Voice to add (repeatable)"),
+    goals: list[str] = typer.Option(None, "-g", "-G", "--goal", help="Goal to add (repeatable)"),
     clipboard: bool = typer.Option(
         False, "-c", "-C", "--clipboard", help="Include clipboard content"
     ),
@@ -328,7 +328,7 @@ def run(
 
     Examples:
         lfd run ship swift/                        # one-off iteration
-        lfd run ship swift/ -v product-engineer    # with role
+        lfd run ship swift/ -g product-engineer    # with role
         lfd run ship . -c                          # whole repo with clipboard
     """
     c = _colors()
@@ -346,12 +346,12 @@ def run(
         )
         raise typer.Exit(1)
 
-    voice_list = _parse_voices(voices)
+    goal_list = _parse_goals(goals)
 
-    # Validate voices exist
-    for voice_name in voice_list:
-        if voice_name != "default" and not voice_exists(repo, voice_name):
-            typer.echo(f"{c['red']}Error:{c['reset']} Voice '{voice_name}' not found", err=True)
+    # Validate goals exist
+    for goal_name in goal_list:
+        if goal_name != "default" and not goal_exists(repo, goal_name):
+            typer.echo(f"{c['red']}Error:{c['reset']} Goal '{goal_name}' not found", err=True)
             raise typer.Exit(1)
 
     flow_name = _validate_flow(repo, flow_name, c)
@@ -366,7 +366,7 @@ def run(
     agent = create_agent(
         repo=repo,
         flow=flow_name,
-        voice=voice_list,
+        goal=goal_list,
         area=[area],
         stimulus=Stimulus("once"),
     )
@@ -389,7 +389,7 @@ def run(
 def subscribe(
     flow: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
     area: str = typer.Argument(..., help="Area to watch (e.g., swift/, src/api/)"),
-    voices: list[str] = typer.Option(None, "-v", "-V", "--voice", help="Voice to add (repeatable)"),
+    goals: list[str] = typer.Option(None, "-g", "-G", "--goal", help="Goal to add (repeatable)"),
 ):
     """Subscribe to area changes on main (watch stimulus).
 
@@ -413,10 +413,10 @@ def subscribe(
         )
         raise typer.Exit(1)
 
-    voice_list = _parse_voices(voices)
-    for voice_name in voice_list:
-        if voice_name != "default" and not voice_exists(repo, voice_name):
-            typer.echo(f"{c['red']}Error:{c['reset']} Voice '{voice_name}' not found", err=True)
+    goal_list = _parse_goals(goals)
+    for goal_name in goal_list:
+        if goal_name != "default" and not goal_exists(repo, goal_name):
+            typer.echo(f"{c['red']}Error:{c['reset']} Goal '{goal_name}' not found", err=True)
             raise typer.Exit(1)
 
     flow = _validate_flow(repo, flow, c)
@@ -425,14 +425,14 @@ def subscribe(
     agent = create_agent(
         repo=repo,
         flow=flow,
-        voice=voice_list,
+        goal=goal_list,
         area=[area],
         stimulus=Stimulus("watch"),
     )
 
     msg = f"{c['green']}Subscribed{c['reset']} {c['bold']}{area}{c['reset']}"
     typer.echo(f"{msg} ({agent.short_id()})")
-    typer.echo(f"  Voices: {agent.voice_display}")
+    typer.echo(f"  Goals: {agent.goal_display}")
     typer.echo(f"  Flow: {agent.flow}")
     typer.echo(f"  Activates when {area} changes on main")
 
@@ -442,7 +442,7 @@ def schedule(
     flow: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
     area: str = typer.Argument(..., help="Area of responsibility (e.g., swift/, src/, .)"),
     cron_expr: str = typer.Argument(..., help="Cron expression (e.g., '0 9 * * *')"),
-    voices: list[str] = typer.Option(None, "-v", "-V", "--voice", help="Voice to add (repeatable)"),
+    goals: list[str] = typer.Option(None, "-g", "-G", "--goal", help="Goal to add (repeatable)"),
 ):
     """Schedule a flow to run on cron (cron stimulus).
 
@@ -463,10 +463,10 @@ def schedule(
         )
         raise typer.Exit(1)
 
-    voice_list = _parse_voices(voices)
-    for voice_name in voice_list:
-        if voice_name != "default" and not voice_exists(repo, voice_name):
-            typer.echo(f"{c['red']}Error:{c['reset']} Voice '{voice_name}' not found", err=True)
+    goal_list = _parse_goals(goals)
+    for goal_name in goal_list:
+        if goal_name != "default" and not goal_exists(repo, goal_name):
+            typer.echo(f"{c['red']}Error:{c['reset']} Goal '{goal_name}' not found", err=True)
             raise typer.Exit(1)
 
     flow = _validate_flow(repo, flow, c)
@@ -475,7 +475,7 @@ def schedule(
     agent = create_agent(
         repo=repo,
         flow=flow,
-        voice=voice_list,
+        goal=goal_list,
         area=[area],
         stimulus=Stimulus("cron", cron=cron_expr),
     )
@@ -483,7 +483,7 @@ def schedule(
     typer.echo(
         f"{c['green']}Scheduled{c['reset']} {c['bold']}{area}{c['reset']} ({agent.short_id()})"
     )
-    typer.echo(f"  Voices: {agent.voice_display}")
+    typer.echo(f"  Goals: {agent.goal_display}")
     typer.echo(f"  Flow: {agent.flow}")
     typer.echo(f"  Cron: {cron_expr}")
 
@@ -591,7 +591,7 @@ def _print_agent_detail(agent: Agent, c: dict[str, str]) -> None:
     typer.echo(f"  Status: {status_c}{agent.status.value}{c['reset']}")
     typer.echo(f"  Repo: {agent.repo}")
     typer.echo(f"  Main branch: {agent.main_branch}")
-    typer.echo(f"  Voices: {agent.voice_display}")
+    typer.echo(f"  Goals: {agent.goal_display}")
     typer.echo(f"  Flow: {agent.flow}")
     typer.echo(f"  Iteration: {agent.iteration}")
 
@@ -846,36 +846,34 @@ def hooks_status_cmd(
         typer.echo(f"  {icon} {hook}")
 
 
-@app.command("list-voices")
-def list_voices_cmd():
-    """Show available voices in current repo."""
+@app.command("list-goals")
+def list_goals_cmd():
+    """Show available goals in current repo."""
     c = _colors()
     repo = get_wt_from_cwd()
     if not repo:
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
 
-    voices_dir = repo / ".lf" / "voices"
-    if not voices_dir.exists():
-        typer.echo(f"{c['dim']}No voices directory found at {voices_dir}{c['reset']}")
-        typer.echo(
-            "Create one with: mkdir -p .lf/voices && echo '# My Voice' > .lf/voices/my-voice.md"
-        )
+    goals_dir = repo / ".lf" / "goals"
+    if not goals_dir.exists():
+        typer.echo(f"{c['dim']}No goals directory found at {goals_dir}{c['reset']}")
+        typer.echo("Create one with: mkdir -p .lf/goals && echo '# My Goal' > .lf/goals/my-goal.md")
         return
 
-    all_voices = list_voices(repo)
-    if not all_voices:
-        typer.echo(f"{c['dim']}No voices found in {voices_dir}{c['reset']}")
+    all_goals = list_goals(repo)
+    if not all_goals:
+        typer.echo(f"{c['dim']}No goals found in {goals_dir}{c['reset']}")
         return
 
-    typer.echo(f"Voices in {c['dim']}{voices_dir}/{c['reset']}")
+    typer.echo(f"Goals in {c['dim']}{goals_dir}/{c['reset']}")
     typer.echo("")
 
-    for voice_name in all_voices:
-        typer.echo(f"  {c['bold']}{voice_name}{c['reset']}")
+    for goal_name in all_goals:
+        typer.echo(f"  {c['bold']}{goal_name}{c['reset']}")
 
     typer.echo("")
-    typer.echo(f"{len(all_voices)} voice{'s' if len(all_voices) != 1 else ''} found")
+    typer.echo(f"{len(all_goals)} goal{'s' if len(all_goals) != 1 else ''} found")
 
 
 def main() -> None:

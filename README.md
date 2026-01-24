@@ -4,21 +4,15 @@ Arrange and conduct an agent orchestra.
 
 ## The Model
 
-| Primitive | What it does |
-|-----------|--------------|
+| Atom | What it does |
+|------|--------------|
 | **Step** | Runs a prompt with assembled context |
 | **Flow** | Chains steps together |
-| **Voice** | Shapes judgment and perspective |
+| **Goal** | Shapes judgment and intent |
 | **Area** | Focuses on part of the codebase |
+| **Stimulus** | When to run: once, loop, watch, cron |
 
-| Stimulus | Runs when |
-|----------|-----------|
-| **Once** | Single run (one-shot) |
-| **Loop** | Continuously until stopped |
-| **Watch** | Area changes on main |
-| **Cron** | On schedule |
-
-An agent is **flow × area × voice**.
+An agent is **area × goal × flow × stimulus**.
 
 ## Steps
 
@@ -65,9 +59,16 @@ lfd loop ship src/
 Runs the `ship` flow on `src/` continuously, creating PRs until stopped.
 
 ```bash
-lfd loop ship src/ -v architect    # add a voice
-lfd subscribe ship docs/ -v writer # activate when docs/ changes
-lfd status                         # see all agents
+lfd loop ship src/ -g product-engineer  # add a goal
+lfd subscribe ship docs/ -g designer    # activate when docs/ changes
+lfd status                              # see all agents
+```
+
+Goals compose. The first sets intent. Additional goals add perspective.
+
+```bash
+lf review -g designer                     # design quality focus
+lf review -g product-engineer,designer    # product focus + design perspective
 ```
 
 ## Install

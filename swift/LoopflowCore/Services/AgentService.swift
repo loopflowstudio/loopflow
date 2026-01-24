@@ -20,7 +20,7 @@ public struct AgentService: @unchecked Sendable {
         defer { sqlite3_close(db) }
 
         let query = """
-            SELECT id, flow, voice, area, repo, status, iteration,
+            SELECT id, flow, goal, area, repo, status, iteration,
                    main_branch, pr_limit, merge_mode, pid, created_at,
                    stimulus_kind, stimulus_cron, last_main_sha
             FROM agents
@@ -48,7 +48,7 @@ public struct AgentService: @unchecked Sendable {
                 continue
             }
 
-            let voice = decodeStringArray(columnText(stmt, 2))
+            let goal = decodeStringArray(columnText(stmt, 2))
             let area = decodeStringArray(columnText(stmt, 3))
             let iteration = Int(sqlite3_column_int(stmt, 6))
             let prLimit = Int(sqlite3_column_int(stmt, 8))
@@ -74,7 +74,7 @@ public struct AgentService: @unchecked Sendable {
             let agent = Agent(
                 id: id,
                 flow: flow,
-                voice: voice,
+                goal: goal,
                 area: area,
                 repo: repoPath,
                 stimulus: stimulus,
@@ -106,7 +106,7 @@ public struct AgentService: @unchecked Sendable {
         defer { sqlite3_close(db) }
 
         var query = """
-            SELECT id, agent_id, flow, area, repo, voice, status, iteration,
+            SELECT id, agent_id, flow, area, repo, goal, status, iteration,
                    worktree, branch, current_step, error, pr_url,
                    started_at, ended_at, created_at
             FROM runs
@@ -155,7 +155,7 @@ public struct AgentService: @unchecked Sendable {
 
             let agentId = columnText(stmt, 1)
             let area = columnText(stmt, 3) ?? "."
-            let voice = decodeStringArray(columnText(stmt, 5))
+            let goal = decodeStringArray(columnText(stmt, 5))
             let iteration = Int(sqlite3_column_int(stmt, 7))
             let worktree = columnText(stmt, 8)
             let branch = columnText(stmt, 9)
@@ -186,7 +186,7 @@ public struct AgentService: @unchecked Sendable {
                 flow: flow,
                 area: area,
                 repo: repoPath,
-                voice: voice,
+                goal: goal,
                 status: status,
                 iteration: iteration,
                 worktree: worktree,

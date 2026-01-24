@@ -41,7 +41,7 @@ def save_agent(agent: Agent, db_path: Path | None = None) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO agents
-        (id, repo, flow, voice, area, stimulus_kind, stimulus_cron, status, iteration,
+        (id, repo, flow, goal, area, stimulus_kind, stimulus_cron, status, iteration,
          main_branch, pr_limit, merge_mode, pid, created_at, last_main_sha,
          consecutive_failures)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -50,7 +50,7 @@ def save_agent(agent: Agent, db_path: Path | None = None) -> None:
             agent.id,
             str(agent.repo),
             agent.flow,
-            json.dumps(agent.voice),
+            json.dumps(agent.goal),
             json.dumps(agent.area),
             agent.stimulus.kind,
             agent.stimulus.cron,
@@ -256,7 +256,7 @@ def _create_main_branch(repo: Path, branch: str) -> None:
 def create_agent(
     repo: Path,
     flow: str,
-    voice: list[str],
+    goal: list[str],
     area: list[str],
     pr_limit: int = 5,
     merge_mode: MergeMode = MergeMode.PR,
@@ -269,8 +269,8 @@ def create_agent(
     existing = get_agent_by_area_repo(area, repo)
     if existing:
         changed = False
-        if set(existing.voice) != set(voice):
-            existing.voice = voice
+        if set(existing.goal) != set(goal):
+            existing.goal = goal
             changed = True
         if existing.flow != flow:
             existing.flow = flow
@@ -295,7 +295,7 @@ def create_agent(
         id=str(uuid.uuid4()),
         repo=repo,
         flow=flow,
-        voice=voice,
+        goal=goal,
         area=area,
         stimulus=stimulus,
         status=AgentStatus.IDLE,

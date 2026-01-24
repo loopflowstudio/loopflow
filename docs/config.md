@@ -18,7 +18,7 @@ Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), or repo c
 | Include raw diff | `--diff` | `diff: true` |
 | Include clipboard | `-c, --clipboard` | — |
 | Add context files | `-p FILE` | `context: [FILE]` |
-| Voice/persona | `--voice NAME` | `voice: NAME` |
+| Goal (judgment/intent) | `--goal NAME` | `goal: NAME` |
 | Chrome automation | `--chrome` | `chrome: true` |
 | Yolo mode (skip permissions) | — | `yolo: true` |
 
@@ -59,7 +59,7 @@ For most settings, repo overrides global. For additive settings (`context`, `exc
 ```yaml
 # ~/.lf/config.yaml (global)
 agent_model: claude:opus
-voice: concise
+goal: product-engineer
 
 # .lf/config.yaml (repo)
 agent_model: codex        # overrides global
@@ -73,7 +73,7 @@ Example repo config:
 agent_model: claude:opus
 push: true
 
-voice: architect
+goal: product-engineer
 
 context:
   - src/schema.py
@@ -220,16 +220,16 @@ interactive: true
 
 CLI flags override the frontmatter default.
 
-### Voice
+### Goal
 
-Personas that shape how the agent responds.
+Goals shape judgment and intent—how the agent approaches work.
 
 | | |
 |---|---|
-| **CLI** | `--voice concise` or `--voice architect,concise` |
-| **Config** | `voice: architect` or `voice: [architect, concise]` |
+| **CLI** | `--goal designer` or `--goal product-engineer,designer` |
+| **Config** | `goal: product-engineer` or `goal: [product-engineer, designer]` |
 
-Voice files live in `.lf/voices/` as markdown.
+Goal files live in `.lf/goals/` as markdown. Built-in goals: `adapt`, `roadmap`, `ship`, `product-engineer`, `designer`, `infra-engineer`, `ceo`.
 
 ### Chrome
 

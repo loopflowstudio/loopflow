@@ -15,7 +15,7 @@ def save_run(run: FlowRun, db_path: Path | None = None) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO runs
-        (id, agent, flow, voice, area, repo, status, iteration,
+        (id, agent, flow, goal, area, repo, status, iteration,
          worktree, branch, current_step, error, pr_url,
          started_at, ended_at, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -24,7 +24,7 @@ def save_run(run: FlowRun, db_path: Path | None = None) -> None:
             run.id,
             run.agent_id,
             run.flow,
-            json.dumps(run.voice),
+            json.dumps(run.goal),
             json.dumps(run.area),
             str(run.repo),
             run.status.value,
@@ -181,8 +181,8 @@ def delete_run(run_id: str, db_path: Path | None = None) -> bool:
 
 def flow_run_from_row(row: dict) -> FlowRun:
     """Convert database row to FlowRun."""
-    voice_str = row.get("voice")
-    voice = json.loads(voice_str) if voice_str else ["default"]
+    goal_str = row.get("goal")
+    goal = json.loads(goal_str) if goal_str else ["default"]
 
     area_str = row.get("area")
     area = json.loads(area_str) if area_str else ["."]
@@ -191,7 +191,7 @@ def flow_run_from_row(row: dict) -> FlowRun:
         id=row["id"],
         agent_id=row.get("agent"),
         flow=row["flow"],
-        voice=voice,
+        goal=goal,
         area=area,
         repo=Path(row["repo"]),
         status=FlowRunStatus(row["status"]),

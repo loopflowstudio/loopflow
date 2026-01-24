@@ -50,6 +50,48 @@ Not every prompt needs every section. Short prompts can skip Goal if the opening
 
 **Active voice.** "Write the review" not "The review should be written."
 
+## Goals
+
+Goals shape judgment and intent—how an agent approaches work. They're different from steps (which define tasks) and flows (which chain steps).
+
+### Structure
+
+Goals follow a consistent pattern:
+
+1. **Opening line**: What this goal is for. Direct, imperative.
+2. **Success**: What "done" looks like. Specific enough to know when you've achieved it.
+3. **The substance**: Principles, questions, or perspective. NOT numbered process steps.
+4. **Quality bar**: Standards for the output.
+5. **Anti-patterns**: Common failure modes to avoid. All goals should have these.
+
+### Two kinds of goals
+
+**Action goals** (adapt, roadmap, ship): What mode to operate in. These can reference loopflow-specific process—reading `roadmap/`, updating frontmatter status, choosing between modes. They're about *using the system*.
+
+**Perspective goals** (product-engineer, designer, infra-engineer, ceo): How to think. These should be broad and transferable—they'd make sense at any company. Focus on judgment, values, and trade-offs. Minimal process.
+
+### Principles over process
+
+Goals primarily provide judgment, not workflow. Detailed process belongs in flows and steps.
+
+"Where's the biggest gap between vision and implementation?" is a goal. "1. Read the roadmap. 2. Pick an item. 3. Update status to in-progress. 4. Build it. 5. Update status to done." is process—that belongs in a flow.
+
+Action goals can include light process for system navigation. Perspective goals should be almost purely principles.
+
+### Abstraction level
+
+**Loopflow system concepts are fine:** `roadmap/`, `scratch/`, frontmatter, areas, flows—these are part of how loopflow works and belong in goals.
+
+**Product-specific details should be abstracted:** Don't write "use `.monospacedDigit()` for numbers"—write "ensure numeric data is readable." Don't write "44pt tap targets"—write "touch targets big enough for humans on mobile, LLMs using browser tools, or any other user type."
+
+The goal should work for any codebase using loopflow, not just the one where it was written.
+
+### Voice
+
+Goals should feel opinionated. "Slow is fake." "Errors of omission kill." "Sunk cost is sunk."
+
+Use direct statements and sharp questions. Avoid hedging ("consider whether...", "you might want to...").
+
 ## Gate vs Big prompts
 
 Two modes for the same concern:

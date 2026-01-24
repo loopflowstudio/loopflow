@@ -26,11 +26,11 @@ from loopflow.lf.context import (
 from loopflow.lf.flows import Choose, FlowDef, JoinConfig, ResolvedStep, resolve_flow
 from loopflow.lf.frontmatter import StepConfig
 from loopflow.lf.git import GitError, find_main_repo, open_pr
+from loopflow.lf.goals import format_goal_section
 from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lf.logging import write_prompt_file
 from loopflow.lf.messages import generate_pr_message
 from loopflow.lf.tokens import MAX_SAFE_TOKENS, analyze_components
-from loopflow.lf.voices import format_voice_section
 from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
 from loopflow.lfd.models import StepRun, StepRunStatus
@@ -45,7 +45,7 @@ class _StepParams:
     backend: str
     model_variant: str | None
     context: list[str] | None
-    voices: list[str] | None
+    goals: list[str] | None
 
 
 def _build_step_params(
@@ -59,22 +59,22 @@ def _build_step_params(
     step_backend = backend
     step_variant = model_variant
     step_context = list(context) if context else []
-    step_voices = None
+    step_goals = None
 
     if config:
         if config.model:
             step_backend, step_variant = parse_model(config.model)
         if config.context:
             step_context.extend(config.context)
-        if config.voice:
-            step_voices = config.voice
+        if config.goal:
+            step_goals = config.goal
 
     return _StepParams(
         step=step,
         backend=step_backend,
         model_variant=step_variant,
         context=step_context or None,
-        voices=step_voices,
+        goals=step_goals,
     )
 
 
@@ -98,7 +98,7 @@ def _run_step(
         repo_root,
         params.step,
         run_mode="auto",
-        voices=params.voices,
+        goals=params.goals,
         context_config=ContextConfig(
             files=FilesetConfig(paths=params.context or [], exclude=exclude or [])
         ),
@@ -284,7 +284,7 @@ class _WorktreeTask:
     backend: str
     model_variant: str | None
     context: list[str] | None
-    voices: list[str] | None
+    goals: list[str] | None
 
 
 @dataclass
@@ -327,7 +327,7 @@ def _run_worktree_tasks(
             wt_path,
             wt_task.step,
             run_mode="auto",
-            voices=wt_task.voices,
+            goals=wt_task.goals,
             context_config=ContextConfig(
                 files=FilesetConfig(paths=wt_task.context or [], exclude=exclude or [])
             ),
@@ -463,7 +463,7 @@ def _run_fork_join_group(
                 backend=params.backend,
                 model_variant=params.model_variant,
                 context=params.context,
-                voices=params.voices,
+                goals=params.goals,
             )
         )
 
@@ -481,7 +481,7 @@ def _run_fork_join_group(
     join_prompt = build_join_prompt(
         collect_fork_diffs(fork_worktrees),
         load_join_instructions(join_config.step, repo_root),
-        format_voice_section(join_config.voice, repo_root),
+        format_goal_section(join_config.goal, repo_root),
         flow_name,
     )
     join_backend = backend
@@ -548,7 +548,7 @@ def collect_fork_diffs(worktrees: list[tuple[str, Path]]) -> list[dict]:
 def build_join_prompt(
     diffs: list[dict],
     instructions: str | None,
-    voice_section: str | None,
+    goal_section: str | None,
     flow_name: str,
 ) -> str:
     """Build prompt for joining forked diffs on the main worktree."""
@@ -596,8 +596,8 @@ def build_join_prompt(
         )
 
     body = "\n".join(lines)
-    if voice_section:
-        return f"The voice.\n\n{voice_section}\n\n{body}"
+    if goal_section:
+        return f"The goal.\n\n{goal_section}\n\n{body}"
     return body
 
 

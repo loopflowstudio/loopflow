@@ -77,7 +77,7 @@ pr: true
 
 | Flag | Description |
 |------|-------------|
-| `-v, --voice` | Voice to apply (repeatable) |
+| `-g, --goal` | Goal to apply (repeatable) |
 | `-l, --limit` | PR limit override (default: 5) |
 | `--merge-mode` | `pr` (accumulate) or `land` (auto-merge to main) |
 | `-f, --foreground` | Run in foreground instead of background |
@@ -96,7 +96,7 @@ Like `lfd loop` but stops after one iteration. Good for specific tasks.
 
 | Flag | Description |
 |------|-------------|
-| `-v, --voice` | Voice to apply (repeatable) |
+| `-g, --goal` | Goal to apply (repeatable) |
 | `-c, --clipboard` | Include clipboard content |
 
 ### lfd start
@@ -129,7 +129,7 @@ When files in the area change on main, activates one iteration. The area serves 
 
 | Flag | Description |
 |------|-------------|
-| `-v, --voice` | Voice to apply (repeatable) |
+| `-g, --goal` | Goal to apply (repeatable) |
 
 ### lfd schedule
 
@@ -145,7 +145,7 @@ Schedules have a 24-hour grace period for laptops—if your computer wakes after
 
 | Flag | Description |
 |------|-------------|
-| `-v, --voice` | Voice to apply (repeatable) |
+| `-g, --goal` | Goal to apply (repeatable) |
 
 ## Monitoring
 
@@ -188,12 +188,12 @@ lfd logs <agent-id> -n 100     # show 100 lines
 | `-f, --follow` | Follow output (like tail -f) |
 | `-n, --lines` | Number of lines to show (default: 50) |
 
-### lfd list-voices
+### lfd list-goals
 
-Show available voices in current repo.
+Show available goals in current repo.
 
 ```bash
-lfd list-voices
+lfd list-goals
 ```
 
 ## Managing Agents

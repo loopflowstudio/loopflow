@@ -103,7 +103,7 @@ class Config(BaseModel):
     diff: bool = False  # Include raw branch diff against main
     diff_files: bool = True  # Include full content of files touched by branch
     paste: bool = False  # Include clipboard content by default
-    voice: Optional[list[str]] = None  # Default voices for all tasks
+    goal: Optional[list[str]] = None  # Default goals for all tasks
     area: Optional[str] = None  # Default area for parent doc inclusion (e.g., "lf/cli")
     summaries: list[SummaryConfig] = Field(default_factory=list)  # Summaries to include
     summary_tokens: int = 10000  # Default token budget for summaries
@@ -128,9 +128,9 @@ class Config(BaseModel):
             return v.split()
         return v
 
-    @field_validator("voice", mode="before")
+    @field_validator("goal", mode="before")
     @classmethod
-    def normalize_voice(cls, v):
+    def normalize_goal(cls, v):
         if v is None:
             return None
         if isinstance(v, str):

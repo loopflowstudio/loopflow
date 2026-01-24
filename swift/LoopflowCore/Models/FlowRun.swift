@@ -28,7 +28,7 @@ public struct FlowRun: Sendable, Identifiable {
     public let flow: String
     public let area: String
     public let repo: String
-    public let voice: [String]
+    public let goal: [String]
 
     public var status: FlowRunStatus
     public var iteration: Int
@@ -49,7 +49,7 @@ public struct FlowRun: Sendable, Identifiable {
         flow: String,
         area: String,
         repo: String,
-        voice: [String] = [],
+        goal: [String] = [],
         status: FlowRunStatus = .pending,
         iteration: Int = 0,
         worktree: String? = nil,
@@ -66,7 +66,7 @@ public struct FlowRun: Sendable, Identifiable {
         self.flow = flow
         self.area = area
         self.repo = repo
-        self.voice = voice
+        self.goal = goal
         self.status = status
         self.iteration = iteration
         self.worktree = worktree
@@ -85,8 +85,8 @@ public struct FlowRun: Sendable, Identifiable {
         area == "." ? "root" : area
     }
 
-    public var voiceDisplay: String {
-        voice.isEmpty ? "default" : voice.joined(separator: ", ")
+    public var goalDisplay: String {
+        goal.isEmpty ? "default" : goal.joined(separator: ", ")
     }
 
     public var flowDisplay: String {

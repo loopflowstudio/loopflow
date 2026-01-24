@@ -104,7 +104,7 @@ Run agents overnight, review PRs when you wake.
 lfd loop ship src/
 ```
 
-An agent is **flow × area × voice**. [Learn more →](agents.md)
+An agent is **area × goal × flow × stimulus**. [Learn more →](agents.md)
 
 ---
 

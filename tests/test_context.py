@@ -83,15 +83,15 @@ def test_build_prompt_handles_missing_task(temp_repo):
     assert "No step file found" in result
 
 
-def test_build_prompt_with_voices(temp_repo):
-    """build_prompt passes voices through to formatting."""
-    voices_dir = temp_repo / ".lf" / "voices"
-    voices_dir.mkdir(parents=True, exist_ok=True)
-    (voices_dir / "concise.md").write_text("Be concise.")
+def test_build_prompt_with_goals(temp_repo):
+    """build_prompt passes goals through to formatting."""
+    goals_dir = temp_repo / ".lf" / "goals"
+    goals_dir.mkdir(parents=True, exist_ok=True)
+    (goals_dir / "concise.md").write_text("Be concise.")
 
-    result = build_prompt(temp_repo, "implement", voices=["concise"])
+    result = build_prompt(temp_repo, "implement", goals=["concise"])
 
-    assert "<lf:voice:concise>" in result
+    assert "<lf:goal:concise>" in result
     assert "Be concise." in result
 
 
@@ -698,7 +698,7 @@ def test_trim_prompt_components_drops_oversize_diff_files(tmp_path):
         repo_root=tmp_path,
         clipboard=None,
         loopflow_doc=None,
-        voices=None,
+        goals=None,
         image_files=None,
         summaries=None,
     )
@@ -734,7 +734,7 @@ def test_trim_prompt_components_keeps_small_diff_files(tmp_path):
         repo_root=tmp_path,
         clipboard=None,
         loopflow_doc=None,
-        voices=None,
+        goals=None,
         image_files=None,
         summaries=None,
     )

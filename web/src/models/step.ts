@@ -3,7 +3,7 @@
 
 export interface StepConfig {
   model?: string
-  voice?: string
+  goal?: string
   context?: string[]
 }
 
@@ -18,7 +18,7 @@ export function stepConfigIsEmpty(config?: StepConfig): boolean {
   if (!config) return true
   return (
     config.model === undefined &&
-    config.voice === undefined &&
+    config.goal === undefined &&
     (config.context === undefined || config.context.length === 0)
   )
 }

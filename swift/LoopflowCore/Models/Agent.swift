@@ -53,7 +53,7 @@ public enum MergeMode: String, Sendable, Codable {
 public struct Agent: Sendable, Identifiable, Hashable {
     public let id: String
     public let flow: String
-    public let voice: [String]
+    public let goal: [String]
     public let area: [String]
     public let repo: String
 
@@ -74,7 +74,7 @@ public struct Agent: Sendable, Identifiable, Hashable {
     public init(
         id: String,
         flow: String,
-        voice: [String] = [],
+        goal: [String] = [],
         area: [String] = ["."],
         repo: String,
         stimulus: Stimulus = Stimulus(kind: .loop),
@@ -89,7 +89,7 @@ public struct Agent: Sendable, Identifiable, Hashable {
     ) {
         self.id = id
         self.flow = flow
-        self.voice = voice
+        self.goal = goal
         self.area = area
         self.repo = repo
         self.stimulus = stimulus
@@ -109,8 +109,8 @@ public struct Agent: Sendable, Identifiable, Hashable {
         area.first == "." ? "root" : area.joined(separator: ", ")
     }
 
-    public var voiceDisplay: String {
-        voice.isEmpty ? "default" : voice.joined(separator: ", ")
+    public var goalDisplay: String {
+        goal.isEmpty ? "default" : goal.joined(separator: ", ")
     }
 
     public var flowDisplay: String {
@@ -131,7 +131,7 @@ public struct Agent: Sendable, Identifiable, Hashable {
     }
 
     public var detailText: String {
-        let parts = [flowDisplay, voiceDisplay].filter { !$0.isEmpty }
+        let parts = [flowDisplay, goalDisplay].filter { !$0.isEmpty }
         return parts.joined(separator: " · ")
     }
 

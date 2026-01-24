@@ -33,7 +33,7 @@ class JoinConfig(BaseModel):
 
     step: str | None = None
     agent_model: str | None = None
-    voice: list[str] | None = None
+    goal: list[str] | None = None
 
     @model_validator(mode="before")
     @classmethod

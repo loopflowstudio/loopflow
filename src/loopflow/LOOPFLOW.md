@@ -39,7 +39,7 @@ In interactive mode, commit at natural breakpoints. Don't leave the branch in a 
 .lf/
   config.yaml      # repo configuration
   steps/           # step prompts
-  voices/          # personas
+  goals/           # judgment and intent
   flows/           # flow definitions
 
 .claude/commands/  # step prompts (Claude Code compatible)

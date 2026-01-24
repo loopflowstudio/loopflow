@@ -14,7 +14,7 @@ def apply(conn: sqlite3.Connection) -> None:
             id TEXT PRIMARY KEY,
             repo TEXT NOT NULL,
             flow TEXT NOT NULL,
-            voice TEXT NOT NULL,  -- JSON array
+            goal TEXT NOT NULL,  -- JSON array
             area TEXT NOT NULL,   -- JSON array
 
             mode TEXT NOT NULL DEFAULT 'loop',  -- loop, watch, cron
@@ -47,7 +47,7 @@ def apply(conn: sqlite3.Connection) -> None:
             agent TEXT,  -- agent ID (nullable for one-off runs)
 
             flow TEXT NOT NULL,
-            voice TEXT NOT NULL,  -- JSON array
+            goal TEXT NOT NULL,  -- JSON array
             area TEXT NOT NULL,   -- JSON array
             repo TEXT NOT NULL,
 

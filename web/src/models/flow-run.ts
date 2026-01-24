@@ -9,7 +9,7 @@ export interface FlowRun {
   flow: string
   area: string
   repo: string
-  voice: string[]
+  goal: string[]
 
   status: FlowRunStatus
   iteration: number
@@ -33,8 +33,8 @@ export function flowRunAreaDisplay(run: FlowRun): string {
   return run.area === '.' ? 'root' : run.area
 }
 
-export function flowRunVoiceDisplay(run: FlowRun): string {
-  return run.voice.length === 0 ? 'default' : run.voice.join(', ')
+export function flowRunGoalDisplay(run: FlowRun): string {
+  return run.goal.length === 0 ? 'default' : run.goal.join(', ')
 }
 
 export function flowRunFlowDisplay(run: FlowRun): string {

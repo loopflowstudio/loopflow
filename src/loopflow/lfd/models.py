@@ -78,7 +78,7 @@ class Agent(LfdModel):
     id: str
     repo: Path
     flow: str
-    voice: list[str] = Field(min_length=1)
+    goal: list[str] = Field(min_length=1)
     area: list[str] = Field(min_length=1)
 
     stimulus: Stimulus = Field(default_factory=lambda: Stimulus("loop"))
@@ -104,9 +104,9 @@ class Agent(LfdModel):
         arbitrary_types_allowed=True,
     )
 
-    @field_validator("voice", mode="before")
+    @field_validator("goal", mode="before")
     @classmethod
-    def normalize_voice(cls, v):
+    def normalize_goal(cls, v):
         if isinstance(v, str):
             return [v]
         return v
@@ -137,8 +137,8 @@ class Agent(LfdModel):
         return area_to_slug(self.area[0])
 
     @property
-    def voice_display(self) -> str:
-        return ", ".join(self.voice)
+    def goal_display(self) -> str:
+        return ", ".join(self.goal)
 
     @property
     def area_display(self) -> str:
@@ -147,8 +147,9 @@ class Agent(LfdModel):
 
 def agent_from_row(row: dict) -> Agent:
     """Convert database row to Agent."""
-    voice_str = row.get("voice")
-    voice = json.loads(voice_str) if voice_str else ["default"]
+    # Support both old "voice" and new "goal" column names for migration
+    goal_str = row.get("goal") or row.get("voice")
+    goal = json.loads(goal_str) if goal_str else ["default"]
 
     area_str = row.get("area")
     area = json.loads(area_str) if area_str else ["."]
@@ -167,7 +168,7 @@ def agent_from_row(row: dict) -> Agent:
         id=row["id"],
         repo=Path(row["repo"]),
         flow=row["flow"],
-        voice=voice,
+        goal=goal,
         area=area,
         stimulus=stimulus,
         status=AgentStatus(row["status"]),
@@ -202,7 +203,7 @@ class FlowRun(LfdModel):
     agent_id: str | None = None
 
     flow: str
-    voice: list[str] = Field(min_length=1)
+    goal: list[str] = Field(min_length=1)
     area: list[str] = Field(min_length=1)
     repo: Path
 

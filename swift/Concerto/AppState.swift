@@ -73,12 +73,12 @@ final class AppState {
     var worktrees: [Worktree] = []
     var prompts: [PromptCard] = []
     var flows: [FlowDef] = []
-    var voices: [Voice] = []
+    var goals: [Goal] = []
     var agents: [Agent] = []
 
     // Prompt launcher state
     var selectedPrompt: PromptCard?
-    var selectedVoices: [Voice] = []
+    var selectedGoals: [Goal] = []
     var selectedModel: AgentModel?  // nil means use config default
     var promptArgs: String = ""
     var includeDocs: Bool = true
@@ -133,7 +133,7 @@ final class AppState {
     private let flowService = FlowService()
     private let agentService = AgentService()
     private var eventService: LFDEventService?
-    private let voiceService = VoiceService()
+    private let goalService = GoalService()
     private let contextPreviewService = ContextPreviewService()
     private let resultsService = ResultsService()
 
@@ -153,7 +153,7 @@ final class AppState {
         config = nil
         prompts = []
         flows = []
-        voices = []
+        goals = []
         agents = []
         selectedWorktree = nil
         isLoading = false
@@ -190,7 +190,7 @@ final class AppState {
             Agent(
                 id: "mock-agent-1",
                 flow: "ship",
-                voice: [],
+                goal: [],
                 area: ["src/tests/"],
                 repo: currentRepo?.path ?? "/tmp/demo",
                 status: .running,
@@ -204,7 +204,7 @@ final class AppState {
             Agent(
                 id: "mock-agent-2",
                 flow: "ship",
-                voice: [],
+                goal: [],
                 area: ["docs/"],
                 repo: currentRepo?.path ?? "/tmp/demo",
                 status: .idle,
@@ -264,11 +264,11 @@ final class AppState {
             let t2 = CFAbsoluteTimeGetCurrent()
             prompts = try promptService.loadPrompts(from: url, config: config)
             flows = flowService.loadFlows(from: url)
-            refreshVoices()
+            refreshGoals()
             LoggingService.append("openRepo.prompts elapsed=\(Int((CFAbsoluteTimeGetCurrent() - t2) * 1000))ms")
 
-            if let voiceNames = config?.voiceNames, !voiceNames.isEmpty {
-                selectedVoices = voices.filter { voiceNames.contains($0.name) }
+            if let goalNames = config?.goalNames, !goalNames.isEmpty {
+                selectedGoals = goals.filter { goalNames.contains($0.name) }
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -567,9 +567,9 @@ final class AppState {
         listWorktrees()
     }
 
-    func refreshVoices() {
+    func refreshGoals() {
         guard let repo = currentRepo else { return }
-        voices = voiceService.loadVoices(from: repo)
+        goals = goalService.loadGoals(from: repo)
     }
 
     func refreshFlows() {
@@ -880,11 +880,11 @@ final class AppState {
             }
         }
 
-        // Voices
-        if !selectedVoices.isEmpty {
-            let voiceNames = selectedVoices.map { $0.name }.joined(separator: ",")
-            parts.append("--voice")
-            parts.append(voiceNames)
+        // Goals
+        if !selectedGoals.isEmpty {
+            let goalNames = selectedGoals.map { $0.name }.joined(separator: ",")
+            parts.append("--goal")
+            parts.append(goalNames)
         }
 
         // Model (only include if different from config default)

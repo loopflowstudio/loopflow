@@ -212,16 +212,16 @@ def flow():
         assert resolved[3].step == "land"
 
 
-def test_step_config_voice():
-    """StepConfig supports voice field."""
-    config = StepConfig(model="claude:opus", voice=["architect"])
+def test_step_config_goal():
+    """StepConfig supports goal field."""
+    config = StepConfig(model="claude:opus", goal=["architect"])
     data = config.to_dict()
 
     assert data["model"] == "claude:opus"
-    assert data["voice"] == ["architect"]
+    assert data["goal"] == ["architect"]
 
     restored = StepConfig.from_dict(data)
-    assert restored.voice == ["architect"]
+    assert restored.goal == ["architect"]
 
 
 def test_step_config_context():
@@ -236,13 +236,13 @@ def test_step_config_context():
 
 
 def test_flow_step_with_full_config():
-    """FlowStep preserves voice and context in config."""
+    """FlowStep preserves goal and context in config."""
     step = FlowStep.from_dict(
         {
             "step": "implement",
             "config": {
                 "model": "claude:opus",
-                "voice": "architect",
+                "goal": "architect",
                 "context": ["src/models.py"],
             },
         }
@@ -251,13 +251,13 @@ def test_flow_step_with_full_config():
     assert step.step == "implement"
     assert step.config is not None
     assert step.config.model == "claude:opus"
-    assert step.config.voice == ["architect"]
+    assert step.config.goal == ["architect"]
     assert step.config.context == ["src/models.py"]
 
     # Round-trip
     data = step.to_dict()
     restored = FlowStep.from_dict(data)
-    assert restored.config.voice == ["architect"]
+    assert restored.config.goal == ["architect"]
     assert restored.config.context == ["src/models.py"]
 
 
@@ -277,7 +277,7 @@ def flow():
                 "step": "implement",
                 "config": {
                     "model": "claude:opus",
-                    "voice": "architect",
+                    "goal": "architect",
                     "context": ["src/schema.py"],
                 },
             },
@@ -298,7 +298,7 @@ def flow():
         assert flow.steps[1].step == "implement"
         assert flow.steps[1].config is not None
         assert flow.steps[1].config.model == "claude:opus"
-        assert flow.steps[1].config.voice == ["architect"]
+        assert flow.steps[1].config.goal == ["architect"]
         assert flow.steps[1].config.context == ["src/schema.py"]
 
         # Third step has no config
@@ -319,7 +319,7 @@ def test_save_flow():
                     step="implement",
                     config=StepConfig(
                         model="claude:opus",
-                        voice=["architect"],
+                        goal=["architect"],
                         context=["src/main.py"],
                     ),
                 ),
@@ -336,7 +336,7 @@ def test_save_flow():
         assert loaded is not None
         assert len(loaded.steps) == 3
         assert loaded.steps[1].config.model == "claude:opus"
-        assert loaded.steps[1].config.voice == ["architect"]
+        assert loaded.steps[1].config.goal == ["architect"]
         assert loaded.steps[1].config.context == ["src/main.py"]
 
 

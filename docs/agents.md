@@ -5,13 +5,13 @@ title: Background Agents
 
 # Background Agents
 
-An agent is **flow × area × voice**.
+An agent is **area × goal × flow × stimulus**.
 
 ```bash
-lfd loop ship src/api/ --voice architect
+lfd loop ship src/api/ --goal architect
 ```
 
-This runs the `ship` flow on `src/api/` through the `architect` voice—continuously, creating PRs until you stop it.
+This runs the `ship` flow on `src/api/` through the `architect` goal—continuously, creating PRs until you stop it.
 
 ## Stimulus Types
 
@@ -28,7 +28,7 @@ Single execution. Run a flow once then stop.
 
 ```bash
 lfd run ship swift/                       # one-off iteration
-lfd run ship swift/ -v product-engineer   # with a role
+lfd run ship swift/ -g product-engineer   # with a role
 lfd run ship . -c                         # whole repo with clipboard
 ```
 
@@ -83,7 +83,7 @@ Run exactly one iteration using the once stimulus:
 
 ```bash
 lfd run ship src/                # single iteration
-lfd run ship src/ -v architect   # with a voice
+lfd run ship src/ -g architect   # with a goal
 lfd run ship src/ -c             # with clipboard
 ```
 

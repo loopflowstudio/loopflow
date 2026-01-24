@@ -22,13 +22,15 @@ lf debug -c                       # fix it
 
 ## The Model
 
-| Primitive | What it does | File |
-|-----------|--------------|------|
+| Atom | What it does | File |
+|------|--------------|------|
 | **Step** | Runs a prompt with assembled context | `.lf/steps/*.md` |
 | **Flow** | Chains steps together | `.lf/flows/*.py` |
-| **Voice** | Shapes judgment and perspective | `.lf/voices/*.md` |
+| **Goal** | Shapes judgment and intent | `.lf/goals/*.md` |
+| **Area** | Focuses on part of the codebase | path argument |
+| **Stimulus** | When to run: once, loop, watch, cron | command |
 
-An agent is **flow × area × voice**.
+An agent is **area × goal × flow × stimulus**.
 
 Area is the path you pass—not a file. It scopes what the agent sees and changes.
 
@@ -93,12 +95,12 @@ lf design: add auth && lf implement && lf polish
 
 ---
 
-## Voice
+## Goal
 
 Shapes how the agent judges and responds.
 
 ```markdown
-# .lf/voices/architect.md
+# .lf/goals/architect.md
 
 You are a software architect. You care about:
 - System boundaries and interfaces
@@ -110,11 +112,11 @@ When implementing, ask: what's the right seam?
 ```
 
 ```bash
-lf review --voice architect
-lf review --voice architect,concise    # stack multiple
+lf review --goal architect
+lf review --goal architect,concise    # stack multiple
 ```
 
-Voices compose. An `architect` voice defines success criteria. A `concise` voice shapes communication style. Stack them to get both.
+Goals compose. An `architect` goal defines success criteria. A `concise` goal shapes communication style. Stack them to get both.
 
 ---
 
@@ -127,10 +129,10 @@ lfd loop ship src/api/        # work on src/api/
 lfd loop ship .               # work on everything
 ```
 
-Combined with flow and voice, area defines the agent's mission:
+Combined with flow and goal, area defines the agent's mission:
 
 ```bash
-lfd loop ship src/api/ --voice architect
+lfd loop ship src/api/ --goal architect
 ```
 
 ---
@@ -141,7 +143,7 @@ lfd loop ship src/api/ --voice architect
 .lf/                      # Repo config and extensions
   config.yaml             # Model, context defaults
   steps/                  # Step prompts (preferred)
-  voices/                 # Personas
+  goals/                  # Judgment and intent
   flows/                  # Flow definitions
 .claude/commands/         # Steps (Claude Code compatible)
 scratch/                  # PR scratchpad (cleared on merge)

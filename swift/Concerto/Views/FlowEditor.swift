@@ -162,7 +162,7 @@ struct StepEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var promptName: String = ""
     @State private var model: String = ""
-    @State private var voice: String = ""
+    @State private var goal: String = ""
     @State private var contextText: String = ""
 
     var body: some View {
@@ -192,7 +192,7 @@ struct StepEditorSheet: View {
 
                 Section("Config Overrides") {
                     TextField("Model (e.g., claude:opus)", text: $model)
-                    TextField("Voice", text: $voice)
+                    TextField("Goal", text: $goal)
                     TextField("Context paths (comma-separated)", text: $contextText)
                         .font(.system(size: 12, design: .monospaced))
                 }
@@ -215,7 +215,7 @@ struct StepEditorSheet: View {
         promptName = step.prompt
 
         model = step.config?.model ?? ""
-        voice = step.config?.voice ?? ""
+        goal = step.config?.goal ?? ""
         contextText = step.config?.context?.joined(separator: ", ") ?? ""
     }
 
@@ -228,12 +228,12 @@ struct StepEditorSheet: View {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
 
-        if model.isEmpty && voice.isEmpty && contextPaths.isEmpty {
+        if model.isEmpty && goal.isEmpty && contextPaths.isEmpty {
             step.config = nil
         } else {
             step.config = StepConfig(
                 model: model.isEmpty ? nil : model,
-                voice: voice.isEmpty ? nil : voice,
+                goal: goal.isEmpty ? nil : goal,
                 context: contextPaths.isEmpty ? nil : contextPaths
             )
         }
@@ -337,7 +337,7 @@ struct NewFlowSheet: View {
         name: "ship",
         steps: [
             Step(prompt: "design"),
-            Step(prompt: "implement", config: StepConfig(model: "claude:opus", voice: "architect")),
+            Step(prompt: "implement", config: StepConfig(model: "claude:opus", goal: "architect")),
             Step(prompt: "review"),
             Step(prompt: "polish"),
         ]

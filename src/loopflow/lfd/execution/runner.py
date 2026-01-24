@@ -46,13 +46,6 @@ from loopflow.lfops._helpers import get_default_branch
 from loopflow.lfops.next import move_worktree
 
 
-def _iteration_branch_prefix(main_branch: str) -> str:
-    """Derive iteration branch prefix from main branch."""
-    if main_branch.endswith("-main"):
-        return main_branch[:-5]
-    return main_branch
-
-
 def _build_loop_prompt(
     agent: Agent,
     effective_voices: list,
@@ -417,7 +410,7 @@ def run_iteration(
         except (subprocess.CalledProcessError, WorktreeError) as e:
             error_msg = f"Failed to create worktree: {e}"
             notify_event("agent.error", {"agent_id": agent.id, "error": error_msg})
-            return False, None, None, None
+            return False, None, None
 
     run = FlowRun(
         id=run_id or str(uuid.uuid4()),

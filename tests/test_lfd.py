@@ -5,12 +5,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from loopflow.lfd.agent import (
+    MAX_PENDING_ACTIVATIONS,
     delete_agent,
     get_agent,
     get_agent_by_area_repo,
     list_agents,
     save_agent,
     update_agent_iteration,
+    update_agent_pending_activations,
     update_agent_pid,
     update_agent_status,
 )
@@ -1275,30 +1277,6 @@ def test_schedule_first_run_beyond_grace():
     assert result is False
 
 
-# Iteration branch prefix tests
-
-
-def test_iteration_branch_prefix_strips_main_suffix():
-    """_iteration_branch_prefix strips -main suffix."""
-    from loopflow.lfd.execution.runner import _iteration_branch_prefix
-
-    assert _iteration_branch_prefix("product-engineer-main") == "product-engineer"
-    assert _iteration_branch_prefix("product-engineer-1-main") == "product-engineer-1"
-    assert _iteration_branch_prefix("test-main") == "test"
-    # New format with random words
-    branch = "product-engineer-swift-river-main"
-    assert _iteration_branch_prefix(branch) == "product-engineer-swift-river"
-    assert _iteration_branch_prefix("test-api-calm-brook-main") == "test-api-calm-brook"
-
-
-def test_iteration_branch_prefix_without_suffix():
-    """_iteration_branch_prefix handles edge case without -main suffix."""
-    from loopflow.lfd.execution.runner import _iteration_branch_prefix
-
-    # Shouldn't happen in practice, but function handles it gracefully
-    assert _iteration_branch_prefix("product-engineer") == "product-engineer"
-
-
 # Random word generation tests
 
 
@@ -2077,3 +2055,82 @@ def test_agent_model_with_consecutive_failures():
     """Agent model accepts consecutive_failures parameter."""
     agent = _make_agent(consecutive_failures=10)
     assert agent.consecutive_failures == 10
+
+
+# Activation queue tests
+
+
+def test_agent_model_activation_queue_defaults():
+    """Agent model has activation queue defaults."""
+    agent = _make_agent()
+    assert agent.pending_activations == 0
+    assert agent.buffer_mode == "combine"
+
+
+def test_agent_model_with_activation_queue():
+    """Agent model accepts activation queue parameters."""
+    agent = _make_agent(pending_activations=3, buffer_mode="queue")
+    assert agent.pending_activations == 3
+    assert agent.buffer_mode == "queue"
+
+
+def test_update_agent_pending_activations():
+    """Can update agent's pending activations."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+
+        agent = _make_agent(id="agent-pa", pending_activations=0)
+        save_agent(agent, db_path)
+
+        # Increment pending
+        updated = update_agent_pending_activations("agent-pa", 3, db_path)
+        assert updated is True
+
+        loaded = get_agent("agent-pa", db_path)
+        assert loaded.pending_activations == 3
+
+        # Decrement pending
+        updated = update_agent_pending_activations("agent-pa", 2, db_path)
+        assert updated is True
+
+        loaded = get_agent("agent-pa", db_path)
+        assert loaded.pending_activations == 2
+
+
+def test_agent_buffer_mode_save_load():
+    """Buffer mode persists through save/load cycle."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+
+        agent = _make_agent(id="agent-bm", buffer_mode="queue")
+        save_agent(agent, db_path)
+
+        loaded = get_agent("agent-bm", db_path)
+        assert loaded.buffer_mode == "queue"
+
+
+def test_max_pending_activations_constant():
+    """MAX_PENDING_ACTIVATIONS is defined."""
+    assert MAX_PENDING_ACTIVATIONS == 10
+
+
+def test_migrations_cover_activation_queue():
+    """Migrations include activation queue columns."""
+    from loopflow.lfd.migrations.registry import MIGRATIONS
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        import sqlite3
+
+        db_path = Path(tmpdir) / "test.db"
+        conn = sqlite3.connect(db_path)
+
+        # Apply all migrations
+        for migration in MIGRATIONS:
+            migration.apply(conn)
+
+        cursor = conn.execute("PRAGMA table_info(agents)")
+        columns = {row[1] for row in cursor.fetchall()}
+        conn.close()
+
+        assert "pending_activations" in columns
+        assert "buffer_mode" in columns

@@ -87,6 +87,10 @@ class Agent(LfdModel):
     # Circuit breaker
     consecutive_failures: int = 0
 
+    # Activation queue
+    pending_activations: int = 0
+    buffer_mode: str = "combine"  # "combine" (default) or "queue"
+
     @field_validator("voice", mode="before")
     @classmethod
     def normalize_voice(cls, v):
@@ -163,6 +167,8 @@ def agent_from_row(row: dict) -> Agent:
         cron=row.get("cron"),
         last_main_sha=row.get("last_main_sha"),
         consecutive_failures=row.get("consecutive_failures", 0),
+        pending_activations=row.get("pending_activations", 0),
+        buffer_mode=row.get("buffer_mode", "combine"),
     )
 
 

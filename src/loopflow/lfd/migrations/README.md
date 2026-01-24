@@ -5,18 +5,32 @@ All schema changes go through migrations. The baseline contains the current sche
 ## Adding a Migration
 
 1. Create `m_YYYY_MM_DD_description.py`
-2. Define `VERSION` (ISO timestamp), `DESCRIPTION`, and `apply(conn)`
+2. Define `VERSION` (ISO timestamp after baseline), `DESCRIPTION`, and `apply(conn)`
 3. Make it idempotent—check before modifying
+4. **Register in `registry.py`**—migrations won't run unless registered
 
 ```python
-VERSION = "2025-01-23T00:00:00"
+# m_2026_01_23_add_foo.py
+VERSION = "2026-01-23T12:00:00Z"
 DESCRIPTION = "add foo column to bars"
 
 def apply(conn):
-    cols = {r["name"] for r in conn.execute("PRAGMA table_info(bars)")}
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(bars)")}
     if "foo" not in cols:
         conn.execute("ALTER TABLE bars ADD COLUMN foo TEXT")
 ```
+
+```python
+# registry.py
+from loopflow.lfd.migrations import baseline, m_2026_01_23_add_foo
+
+MIGRATIONS = [
+    Migration(baseline.SCHEMA_VERSION, baseline.DESCRIPTION, baseline.apply),
+    Migration(m_2026_01_23_add_foo.VERSION, m_2026_01_23_add_foo.DESCRIPTION, m_2026_01_23_add_foo.apply),
+]
+```
+
+**Important:** Migration `VERSION` must sort after `baseline.SCHEMA_VERSION` (use ISO timestamps with Z suffix).
 
 ## Consolidating Migrations
 
@@ -40,6 +54,8 @@ The version uses **git commit timestamp + SHA** (`2026-01-23T16:39:43Z_abc1234`)
 ## Rules
 
 - **All schema changes go through migrations.** Never ALTER tables in runtime code.
+- **Never modify baseline.py directly.** New columns = new migration. Baseline only changes during consolidation.
 - **Make migrations idempotent.** Check if the change is needed before applying.
 - **One migration per change.** Don't modify existing migration files.
+- **Register all migrations.** Unregistered migrations won't run.
 - **Migrations are one-way.** No rollback support—branch switching may require `rm ~/.lf/lfd.db`.

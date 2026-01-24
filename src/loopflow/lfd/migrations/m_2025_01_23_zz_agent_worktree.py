@@ -6,7 +6,7 @@ Agents maintain a single persistent worktree, cycling through branches via `next
 
 import sqlite3
 
-VERSION = "2025-01-23T05:00:00"
+VERSION = "2026-01-23T17:00:00Z"
 DESCRIPTION = "Add worktree and branch to agents"
 
 

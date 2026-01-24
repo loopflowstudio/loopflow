@@ -16,6 +16,7 @@ from loopflow.lfd.agent import (
     get_agent,
     update_agent_consecutive_failures,
     update_agent_iteration,
+    update_agent_pending_activations,
     update_agent_pid,
     update_agent_status,
     update_agent_worktree_branch,
@@ -23,7 +24,7 @@ from loopflow.lfd.agent import (
 from loopflow.lfd.daemon.client import notify_event
 from loopflow.lfd.execution.runner import run_iteration
 from loopflow.lfd.logging import worker_log
-from loopflow.lfd.models import Agent, AgentStatus
+from loopflow.lfd.models import Agent, AgentMode, AgentStatus
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 MANAGER_POLL_INTERVAL = 30  # seconds between slot checks
@@ -176,6 +177,25 @@ def run_agent_iterations(agent: Agent) -> None:
                     agent.branch = new_branch
                     if new_branch:
                         worker_log.info(f"[{short_id}] moved to branch {new_branch}")
+
+                # Mode-specific continuation logic
+                if agent.mode == AgentMode.LOOP:
+                    # Loop mode: always continue
+                    pass
+                else:
+                    # Watch/Cron: check pending activations
+                    agent = get_agent(agent.id)
+                    if agent and agent.pending_activations > 0:
+                        update_agent_pending_activations(agent.id, agent.pending_activations - 1)
+                        worker_log.info(
+                            f"[{short_id}] processing queued activation "
+                            f"({agent.pending_activations - 1} remaining)"
+                        )
+                    else:
+                        # No pending activations, go IDLE
+                        worker_log.info(f"[{short_id}] no pending activations, going idle")
+                        update_agent_status(agent.id, AgentStatus.IDLE)
+                        break
             else:
                 # Increment failures
                 consecutive_failures += 1

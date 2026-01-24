@@ -43,8 +43,8 @@ def save_agent(agent: Agent, db_path: Path | None = None) -> None:
         INSERT OR REPLACE INTO agents
         (id, repo, flow, voice, area, mode, status, iteration, main_branch,
          worktree, branch, pr_limit, merge_mode, pid, created_at, watch_paths,
-         cron, last_main_sha, consecutive_failures)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         cron, last_main_sha, consecutive_failures, pending_activations, buffer_mode)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             agent.id,
@@ -66,6 +66,8 @@ def save_agent(agent: Agent, db_path: Path | None = None) -> None:
             agent.cron,
             agent.last_main_sha,
             agent.consecutive_failures,
+            agent.pending_activations,
+            agent.buffer_mode,
         ),
     )
     conn.commit()
@@ -185,6 +187,22 @@ def update_agent_consecutive_failures(
     cursor = conn.execute(
         "UPDATE agents SET consecutive_failures = ? WHERE id = ? OR id LIKE ?",
         (failures, agent_id, f"{agent_id}%"),
+    )
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    return updated
+
+
+def update_agent_pending_activations(
+    agent_id: str, pending: int, db_path: Path | None = None
+) -> bool:
+    """Update an agent's pending activations count."""
+    conn = _get_db(db_path)
+
+    cursor = conn.execute(
+        "UPDATE agents SET pending_activations = ? WHERE id = ? OR id LIKE ?",
+        (pending, agent_id, f"{agent_id}%"),
     )
     conn.commit()
     updated = cursor.rowcount > 0
@@ -555,6 +573,7 @@ def check_watch(agent: Agent) -> bool:
 # Cron mode checking
 
 SCHEDULE_GRACE_PERIOD = timedelta(hours=24)
+MAX_PENDING_ACTIVATIONS = 10
 
 
 def should_trigger_cron(
@@ -603,24 +622,53 @@ def check_cron(agent: Agent) -> bool:
 # Daemon check functions
 
 
+def _queue_activation(agent: Agent) -> bool:
+    """Queue an activation for a busy agent. Returns True if queued."""
+    if agent.pending_activations >= MAX_PENDING_ACTIVATIONS:
+        trigger_log.warning(
+            f"[{agent.short_id()}] pending activations at max ({MAX_PENDING_ACTIVATIONS}), dropping"
+        )
+        return False
+
+    if agent.buffer_mode == "combine":
+        # Combine mode: only queue if nothing pending (idempotent)
+        if agent.pending_activations == 0:
+            update_agent_pending_activations(agent.id, 1)
+            trigger_log.info(f"[{agent.short_id()}] queued activation (combine mode)")
+            return True
+        trigger_log.debug(f"[{agent.short_id()}] already has pending activation (combine mode)")
+        return False
+    else:
+        # Queue mode: always increment
+        new_pending = agent.pending_activations + 1
+        update_agent_pending_activations(agent.id, new_pending)
+        trigger_log.info(f"[{agent.short_id()}] queued activation (queue, now {new_pending})")
+        return True
+
+
 def run_watch_check() -> list[str]:
-    """Check all watch-mode agents and trigger as needed."""
+    """Check all watch-mode agents and trigger or queue as needed."""
     agents = list_agents()
-    watch_agents = [a for a in agents if a.watch_paths and a.status != AgentStatus.RUNNING]
+    watch_agents = [a for a in agents if a.watch_paths]
     trigger_log.debug(f"watch check: {len(watch_agents)} agents to check")
 
     triggered = []
     for agent in watch_agents:
         try:
             if check_watch(agent):
-                result = start_agent(agent.id)
-                if result:
-                    trigger_log.info(f"[{agent.short_id()}] started from watch trigger")
-                    triggered.append(agent.id)
+                if agent.status in (AgentStatus.RUNNING, AgentStatus.WAITING):
+                    # Agent is busy, queue the activation
+                    _queue_activation(agent)
                 else:
-                    trigger_log.warning(
-                        f"[{agent.short_id()}] watch triggered but start failed: {result.reason}"
-                    )
+                    # Agent is idle, start it
+                    result = start_agent(agent.id)
+                    if result:
+                        trigger_log.info(f"[{agent.short_id()}] started from watch activation")
+                        triggered.append(agent.id)
+                    else:
+                        trigger_log.warning(
+                            f"[{agent.short_id()}] watch activated but failed: {result.reason}"
+                        )
         except Exception as e:
             trigger_log.error(f"[{agent.short_id()}] watch check error: {e}")
 
@@ -628,23 +676,28 @@ def run_watch_check() -> list[str]:
 
 
 def run_cron_check() -> list[str]:
-    """Check all cron-mode agents and trigger as needed."""
+    """Check all cron-mode agents and trigger or queue as needed."""
     agents = list_agents()
-    cron_agents = [a for a in agents if a.cron and a.status != AgentStatus.RUNNING]
+    cron_agents = [a for a in agents if a.cron]
     trigger_log.debug(f"cron check: {len(cron_agents)} agents to check")
 
     triggered = []
     for agent in cron_agents:
         try:
             if check_cron(agent):
-                result = start_agent(agent.id)
-                if result:
-                    trigger_log.info(f"[{agent.short_id()}] started from cron trigger")
-                    triggered.append(agent.id)
+                if agent.status in (AgentStatus.RUNNING, AgentStatus.WAITING):
+                    # Agent is busy, queue the activation
+                    _queue_activation(agent)
                 else:
-                    trigger_log.warning(
-                        f"[{agent.short_id()}] cron triggered but start failed: {result.reason}"
-                    )
+                    # Agent is idle, start it
+                    result = start_agent(agent.id)
+                    if result:
+                        trigger_log.info(f"[{agent.short_id()}] started from cron activation")
+                        triggered.append(agent.id)
+                    else:
+                        trigger_log.warning(
+                            f"[{agent.short_id()}] cron activated but start failed: {result.reason}"
+                        )
         except Exception as e:
             trigger_log.error(f"[{agent.short_id()}] cron check error: {e}")
 

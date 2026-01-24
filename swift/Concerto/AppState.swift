@@ -260,7 +260,7 @@ final class AppState {
                 selectedWorktree = worktrees.first { $0.branch != "main" }
             }
 
-            // Load prompts and voices (fast, local files)
+            // Load prompts and goals (fast, local files)
             let t2 = CFAbsoluteTimeGetCurrent()
             prompts = try promptService.loadPrompts(from: url, config: config)
             flows = flowService.loadFlows(from: url)

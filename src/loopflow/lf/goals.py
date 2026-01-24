@@ -75,12 +75,6 @@ class Goal:
     content: str
 
 
-class GoalNotFoundError(Exception):
-    """Raised when a goal file doesn't exist."""
-
-    pass
-
-
 def _get_builtin_goal(name: str) -> Path | None:
     """Return path to bundled goal template if it exists."""
     builtin = _GOALS_TEMPLATES_DIR / f"{name}.md"
@@ -190,9 +184,7 @@ def resolve_goals(repo: Path, goal_names: list[str]) -> list[Goal]:
 
 def render_goals(goals: list[Goal]) -> str:
     """Combine goals into single prompt."""
-    parts = [
-        f"<lf:goal:{goal.name}>\n{goal.content}\n</lf:goal:{goal.name}>" for goal in goals
-    ]
+    parts = [f"<lf:goal:{goal.name}>\n{goal.content}\n</lf:goal:{goal.name}>" for goal in goals]
     return "\n\n".join(parts)
 
 
@@ -217,9 +209,7 @@ def format_goal_section(goal_names: list[str] | None, repo_root: Path) -> str | 
     if not loaded:
         return None
 
-    parts = [
-        f"<lf:goal:{goal.name}>\n{goal.content}\n</lf:goal:{goal.name}>" for goal in loaded
-    ]
+    parts = [f"<lf:goal:{goal.name}>\n{goal.content}\n</lf:goal:{goal.name}>" for goal in loaded]
 
     if len(parts) == 1:
         return parts[0]

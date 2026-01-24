@@ -26,11 +26,11 @@ from loopflow.lf.context import (
 from loopflow.lf.flows import Choose, FlowDef, JoinConfig, ResolvedStep, resolve_flow
 from loopflow.lf.frontmatter import StepConfig
 from loopflow.lf.git import GitError, find_main_repo, open_pr
+from loopflow.lf.goals import format_goal_section
 from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lf.logging import write_prompt_file
 from loopflow.lf.messages import generate_pr_message
 from loopflow.lf.tokens import MAX_SAFE_TOKENS, analyze_components
-from loopflow.lf.goals import format_goal_section
 from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
 from loopflow.lfd.models import StepRun, StepRunStatus

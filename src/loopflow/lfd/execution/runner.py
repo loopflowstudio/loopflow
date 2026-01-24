@@ -19,7 +19,6 @@ from loopflow.lf.flow import (
     collect_fork_diffs,
     load_join_instructions,
 )
-from loopflow.lf.goals import format_goal_section
 from loopflow.lf.flows import (
     FlowDef,
     JoinConfig,
@@ -27,10 +26,10 @@ from loopflow.lf.flows import (
     load_flow,
     resolve_flow,
 )
+from loopflow.lf.goals import format_goal_section, render_goals, resolve_goals
 from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lf.logging import write_prompt_file
 from loopflow.lf.messages import generate_pr_message
-from loopflow.lf.goals import render_goals, resolve_goals
 from loopflow.lf.worktrees import WorktreeError
 from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree

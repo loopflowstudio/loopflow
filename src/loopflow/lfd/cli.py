@@ -13,8 +13,8 @@ from pathlib import Path
 import typer
 
 from loopflow.lf.flows import load_flow
-from loopflow.lf.logging import get_log_dir
 from loopflow.lf.goals import goal_exists, list_goals
+from loopflow.lf.logging import get_log_dir
 from loopflow.lfd.agent import (
     create_agent,
     delete_agent,
@@ -858,9 +858,7 @@ def list_goals_cmd():
     goals_dir = repo / ".lf" / "goals"
     if not goals_dir.exists():
         typer.echo(f"{c['dim']}No goals directory found at {goals_dir}{c['reset']}")
-        typer.echo(
-            "Create one with: mkdir -p .lf/goals && echo '# My Goal' > .lf/goals/my-goal.md"
-        )
+        typer.echo("Create one with: mkdir -p .lf/goals && echo '# My Goal' > .lf/goals/my-goal.md")
         return
 
     all_goals = list_goals(repo)

@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from loopflow.lf.design import gather_area_docs, gather_design_docs, gather_internal_docs
 from loopflow.lf.files import format_files, format_image_references, gather_docs, gather_files
 from loopflow.lf.frontmatter import StepFile, parse_step_file
+from loopflow.lf.goals import Goal, load_goal
 from loopflow.lf.skills import (
     discover_skill_sources,
     find_skill,
@@ -22,7 +23,6 @@ from loopflow.lf.skills import (
     load_skill_prompt,
 )
 from loopflow.lf.tokens import count_tokens
-from loopflow.lf.goals import Goal, load_goal
 from loopflow.lfops.summarize import is_stale, load_summary
 
 # Path to bundled builtin templates
@@ -770,9 +770,7 @@ def gather_prompt_components(
     # Load goals if specified
     loaded_goals = None
     if goals:
-        loaded_goals = [
-            load_goal(repo_root, name) for name in goals if load_goal(repo_root, name)
-        ]
+        loaded_goals = [load_goal(repo_root, name) for name in goals if load_goal(repo_root, name)]
 
     # Load configured summaries (always include if config has them)
     summaries = gather_summaries(repo_root, config)
@@ -817,9 +815,7 @@ def format_prompt(components: PromptComponents) -> str:
         if components.goals:
             if len(components.goals) == 1:
                 goal = components.goals[0]
-                goal_section = (
-                    f"<lf:goal:{goal.name}>\n{goal.content}\n</lf:goal:{goal.name}>"
-                )
+                goal_section = f"<lf:goal:{goal.name}>\n{goal.content}\n</lf:goal:{goal.name}>"
             else:
                 goal_parts = [
                     f"<lf:goal:{goal.name}>\n{goal.content}\n</lf:goal:{goal.name}>"

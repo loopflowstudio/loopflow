@@ -1,5 +1,6 @@
 """Flow execution for chaining steps."""
 
+import concurrent.futures
 import os
 import platform
 import re
@@ -23,10 +24,18 @@ from loopflow.lf.context import (
     gather_step,
     trim_prompt_components,
 )
-from loopflow.lf.flows import Choose, FlowDef, JoinConfig, ResolvedStep, resolve_flow
-from loopflow.lf.frontmatter import StepConfig
+from loopflow.lf.flows import (
+    Choose,
+    FlowDef,
+    Fork,
+    ForkAgent,
+    Step,
+    StepDAG,
+    SynthesizeConfig,
+    build_step_dag,
+    load_flow,
+)
 from loopflow.lf.git import GitError, find_main_repo, open_pr
-from loopflow.lf.goals import format_goal_section
 from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lf.logging import write_prompt_file
 from loopflow.lf.messages import generate_pr_message
@@ -35,6 +44,8 @@ from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
 from loopflow.lfd.models import StepRun, StepRunStatus
 from loopflow.lfd.step_run import log_step_run_end, log_step_run_start
+
+FlowItem = Step | Fork | Choose
 
 
 @dataclass
@@ -49,28 +60,22 @@ class _StepParams:
 
 
 def _build_step_params(
-    step: str,
-    config: StepConfig | None,
+    step: Step,
     backend: str,
     model_variant: str | None,
     context: list[str] | None,
 ) -> _StepParams:
-    """Build step params by applying config overrides to defaults."""
+    """Build step params by applying overrides to defaults."""
     step_backend = backend
     step_variant = model_variant
     step_context = list(context) if context else []
-    step_goals = None
+    step_goals = [step.goal] if step.goal else None
 
-    if config:
-        if config.model:
-            step_backend, step_variant = parse_model(config.model)
-        if config.context:
-            step_context.extend(config.context)
-        if config.goal:
-            step_goals = config.goal
+    if step.model:
+        step_backend, step_variant = parse_model(step.model)
 
     return _StepParams(
-        step=step,
+        step=step.name,
         backend=step_backend,
         model_variant=step_variant,
         context=step_context or None,
@@ -293,6 +298,7 @@ class _WorktreeResult:
 
     label: str
     worktree: Path
+    branch: str
     exit_code: int
     session_id: str
 
@@ -300,6 +306,7 @@ class _WorktreeResult:
 def _run_worktree_tasks(
     tasks: list[_WorktreeTask],
     repo_root: Path,
+    base_branch: str,
     main_repo: Path,
     exclude: list[str] | None,
     skip_permissions: bool,
@@ -312,15 +319,19 @@ def _run_worktree_tasks(
         label_short = wt_task.label.replace(":", "-")
         wt_name = f"{wt_task.wt_prefix}-{label_short}-{uuid.uuid4().hex[:8]}"
         try:
-            wt_path = create_worktree(repo_root, wt_name)
+            wt_path = create_worktree(repo_root, wt_name, base=base_branch)
         except Exception as e:
             print(f"[{wt_task.label}] Failed to create worktree: {e}")
             for _, proc, wt, _, _ in processes:
                 proc.terminate()
                 remove_worktree(repo_root, wt.name.split(".")[-1])
-            return [_WorktreeResult(wt_task.label, repo_root, 1, "")]
+            return [_WorktreeResult(wt_task.label, repo_root, "", 1, "")]
 
-        subprocess.run(["git", "reset", "--hard"], cwd=wt_path, capture_output=True)
+        subprocess.run(
+            ["git", "reset", "--hard", base_branch],
+            cwd=wt_path,
+            capture_output=True,
+        )
         subprocess.run(["git", "clean", "-fd"], cwd=wt_path, capture_output=True)
 
         components = gather_prompt_components(
@@ -407,7 +418,8 @@ def _run_worktree_tasks(
         status = StepRunStatus.COMPLETED if exit_code == 0 else StepRunStatus.FAILED
         log_step_run_end(session_id, status)
 
-        results.append(_WorktreeResult(wt_task.label, wt_path, exit_code, session_id))
+        branch = _current_branch(wt_path) or wt_path.name
+        results.append(_WorktreeResult(wt_task.label, wt_path, branch, exit_code, session_id))
 
         if exit_code != 0:
             print(f"[{wt_task.label}] failed with exit code {exit_code}")
@@ -420,98 +432,188 @@ def _run_worktree_tasks(
 def _cleanup_worktrees(repo_root: Path, results: list[_WorktreeResult]) -> None:
     """Remove temporary worktrees from results."""
     for r in results:
+        if r.worktree == repo_root or not r.branch:
+            continue
         wt_name = r.worktree.name.split(".")[-1]
         remove_worktree(repo_root, wt_name)
 
 
-def _run_fork_join_group(
-    steps: list[ResolvedStep],
-    join_config: JoinConfig,
+@dataclass
+class ForkResult:
+    worktree: Path
+    config: ForkAgent
+    diff: str
+    status: str
+    scratch_notes: str
+
+
+def run_fork(
+    fork: Fork,
+    base_commit: str,
+    parent_worktree: Path,
     flow_name: str,
-    repo_root: Path,
     main_repo: Path,
     exclude: list[str] | None,
     skip_permissions: bool,
     backend: str,
     model_variant: str | None,
     context: list[str] | None,
-    group_num: int,
-    total_groups: int,
+    chrome: bool = False,
+) -> list[ForkResult]:
+    """Create worktrees from base_commit, run each agent in parallel, return results."""
+    base_branch = _current_branch(parent_worktree) or "HEAD"
+    results: list[ForkResult] = []
+
+    def _run_agent(agent: ForkAgent, index: int) -> tuple[ForkAgent, Path, int]:
+        label = f"fork-{flow_name}-{index}"
+        try:
+            wt_path = create_worktree(parent_worktree, label, base=base_branch)
+        except Exception as exc:
+            print(f"[{label}] Failed to create worktree: {exc}")
+            return agent, parent_worktree, 1
+
+        subprocess.run(
+            ["git", "reset", "--hard", base_branch],
+            cwd=wt_path,
+            capture_output=True,
+        )
+        subprocess.run(["git", "clean", "-fd"], cwd=wt_path, capture_output=True)
+
+        if agent.step:
+            step = Step(name=agent.step, model=agent.model, goal=agent.goal)
+            params = _build_step_params(step, backend, model_variant, context)
+            exit_code = _run_step(
+                params,
+                wt_path,
+                main_repo,
+                exclude,
+                skip_permissions,
+                False,
+                index,
+                len(fork.agents),
+                chrome=chrome,
+            )
+            return agent, wt_path, exit_code
+
+        if agent.flow:
+            flow_def = load_flow(agent.flow, parent_worktree)
+            if not flow_def:
+                print(f"[{label}] Unknown flow: {agent.flow}")
+                return agent, wt_path, 1
+            exit_code = run_flow_def(
+                flow_def,
+                wt_path,
+                context=context,
+                exclude=exclude,
+                skip_permissions=skip_permissions,
+                push_enabled=False,
+                pr_enabled=False,
+                backend=backend,
+                model_variant=model_variant,
+                chrome=chrome,
+            )
+            return agent, wt_path, exit_code
+
+        print(f"[{label}] Fork agent must set step or flow")
+        return agent, wt_path, 1
+
+    futures = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(fork.agents)) as executor:
+        for index, agent in enumerate(fork.agents, 1):
+            futures.append(executor.submit(_run_agent, agent, index))
+        for future in futures:
+            agent, wt_path, exit_code = future.result()
+            diff = _run_git(wt_path, ["diff", f"{base_commit}..HEAD"])
+            results.append(
+                ForkResult(
+                    worktree=wt_path,
+                    config=agent,
+                    diff=diff,
+                    status="completed" if exit_code == 0 else "failed",
+                    scratch_notes=_read_scratch_notes(wt_path),
+                )
+            )
+
+    return results
+
+
+def run_synthesize(
+    synth: SynthesizeConfig | None,
+    fork_results: list[ForkResult],
+    base_commit: str,
+    target_worktree: Path,
+    main_repo: Path,
+    skip_permissions: bool,
+    backend: str,
+    model_variant: str | None,
     chrome: bool = False,
 ) -> int:
-    """Run fork steps in temporary worktrees, then join results."""
-    step_names = [s.step or "step" for s in steps]
-    print(f"\n{'=' * 60}")
-    print(f"[{group_num}/{total_groups}] Fork: {', '.join(step_names)}")
-    print(f"{'=' * 60}\n")
-
-    label_counts: dict[str, int] = {}
-    wt_tasks = []
-    for step in steps:
-        params = _build_step_params(step.step, step.config, backend, model_variant, context)
-        label_base = params.step or "step"
-        label_counts[label_base] = label_counts.get(label_base, 0) + 1
-        label = label_base
-        if label_counts[label_base] > 1:
-            label = f"{label_base}:{label_counts[label_base]}"
-
-        wt_tasks.append(
-            _WorktreeTask(
-                step=params.step,
-                label=label,
-                wt_prefix="_fork",
-                backend=params.backend,
-                model_variant=params.model_variant,
-                context=params.context,
-                goals=params.goals,
-            )
-        )
-
-    results = _run_worktree_tasks(
-        wt_tasks, repo_root, main_repo, exclude, skip_permissions, chrome=chrome
+    """Review fork diffs against base, write unified result + analysis to target."""
+    synth_prompt = synth.prompt if synth else None
+    prompt = build_synthesize_prompt(
+        fork_results,
+        load_synthesize_instructions(target_worktree, synth_prompt),
+        base_commit,
     )
-    successes = [r for r in results if r.exit_code == 0]
-
-    if not successes:
-        print("\nAll forked steps failed, nothing to join")
-        _cleanup_worktrees(repo_root, results)
-        return 1
-
-    fork_worktrees = [(r.label, r.worktree) for r in successes]
-    join_prompt = build_join_prompt(
-        collect_fork_diffs(fork_worktrees),
-        load_join_instructions(join_config.step, repo_root),
-        format_goal_section(join_config.goal, repo_root),
-        flow_name,
-    )
-    join_backend = backend
-    join_variant = model_variant
-    if join_config.agent_model:
-        join_backend, join_variant = parse_model(join_config.agent_model)
-
-    result_code = _run_inline_prompt(
-        join_prompt,
-        f"join:{flow_name}",
-        repo_root,
+    return _run_inline_prompt(
+        prompt,
+        "synthesize",
+        target_worktree,
         main_repo,
-        join_backend,
-        join_variant,
+        backend,
+        model_variant,
         skip_permissions,
         chrome=chrome,
     )
-    _cleanup_worktrees(repo_root, results)
-
-    return result_code
 
 
-def load_join_instructions(step_name: str | None, repo_root: Path) -> str | None:
-    """Load instructions for the join step."""
-    name = step_name or "synthesize"
-    step_file = gather_step(repo_root, name)
+def cleanup_fork_worktrees(results: list[ForkResult], parent_worktree: Path) -> None:
+    """Delete temporary fork worktrees after synthesis."""
+    for result in results:
+        wt_name = result.worktree.name.split(".")[-1]
+        remove_worktree(parent_worktree, wt_name)
+
+
+def load_synthesize_instructions(
+    repo_root: Path,
+    prompt_override: str | None,
+) -> str | None:
+    """Load instructions for the synthesizer step."""
+    if prompt_override:
+        return prompt_override.strip()
+
+    step_file = gather_step(repo_root, "synthesize")
     if not step_file:
         return None
 
     return step_file.content.strip() or None
+
+
+def _read_scratch_notes(worktree: Path) -> str:
+    scratch_dir = worktree / "scratch"
+    if not scratch_dir.exists():
+        return ""
+
+    notes = []
+    for path in sorted(scratch_dir.glob("*.md")):
+        try:
+            contents = path.read_text().strip()
+        except OSError:
+            continue
+        if contents:
+            notes.append(f"## {path.name}\n{contents}")
+    return "\n\n".join(notes)
+
+
+def _current_branch(worktree: Path) -> str | None:
+    result = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=worktree,
+        capture_output=True,
+        text=True,
+    )
+    branch = result.stdout.strip()
+    return branch or None
 
 
 def _run_git(worktree: Path, args: list[str]) -> str:
@@ -524,103 +626,121 @@ def _run_git(worktree: Path, args: list[str]) -> str:
     return result.stdout if result.returncode == 0 else ""
 
 
-def collect_fork_diffs(worktrees: list[tuple[str, Path]]) -> list[dict]:
-    """Collect diffs from forked worktrees. Takes list of (label, path) tuples."""
-    diffs = []
-    for label, worktree in worktrees:
-        diff_text = _run_git(worktree, ["diff", "--stat"])
-        full_diff = _run_git(worktree, ["diff"])
-        if not diff_text.strip() and not full_diff.strip():
-            diff_text = _run_git(worktree, ["show", "--stat", "--format=", "HEAD"])
-            full_diff = _run_git(worktree, ["show", "--format=", "HEAD"])
-
-        diffs.append(
-            {
-                "label": label,
-                "worktree": str(worktree),
-                "summary": diff_text.strip() or "(no diff)",
-                "diff": full_diff,
-            }
-        )
-    return diffs
+def _git_rev_parse(worktree: Path, ref: str) -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", ref],
+        cwd=worktree,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ref
 
 
-def build_join_prompt(
-    diffs: list[dict],
+def _merge_branch(worktree: Path, branch: str) -> bool:
+    result = subprocess.run(
+        ["git", "merge", "--no-edit", branch],
+        cwd=worktree,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        error = result.stderr.strip() or result.stdout.strip()
+        print(f"Merge failed for {branch}: {error}")
+        return False
+    return True
+
+
+def build_synthesize_prompt(
+    results: list[ForkResult],
     instructions: str | None,
-    goal_section: str | None,
-    flow_name: str,
+    base_commit: str,
 ) -> str:
-    """Build prompt for joining forked diffs on the main worktree."""
+    """Build prompt for synthesizing fork results on the main worktree."""
     lines = [
-        "You are joining changes from multiple forked worktrees into the current worktree.",
-        "Synthesize the best parts of all forks into a single changeset here.",
+        "You have multiple implementations of the same task from forked agents.",
+        "Analyze differences, write synthesis notes, then produce a unified result here.",
+        "Write analysis to scratch/synthesis.md before applying code changes.",
         "Do NOT edit the forked worktrees directly.",
-        "After applying the changes, commit the result.",
-        f"Write a short summary to scratch/joins/{flow_name}.md if that file makes sense.",
         "",
-        "Forked worktrees:",
+        "## Fork Results",
     ]
 
-    for d in diffs:
-        lines.append(f"- {d['label']}: {d['worktree']}")
-
-    lines.extend(["", "Diffs from each fork:"])
-
-    for i, d in enumerate(diffs, 1):
-        lines.append(f"## Fork {i}: {d['label']}")
+    for index, result in enumerate(results, 1):
+        config = result.config
+        lines.append(f"### Fork {index}")
+        lines.append(
+            "Config: "
+            f"step={config.step}, flow={config.flow}, goal={config.goal}, "
+            f"model={config.model}, area={config.area}"
+        )
+        lines.append(f"Status: {result.status}")
+        lines.append(f"Worktree: {result.worktree}")
         lines.append("")
-        lines.append("Summary of changes:")
-        lines.append("```")
-        lines.append(d["summary"])
-        lines.append("```")
-        lines.append("")
-        lines.append("Full diff:")
+        if result.scratch_notes:
+            lines.append("Scratch notes:")
+            lines.append("```")
+            lines.append(result.scratch_notes)
+            lines.append("```")
+            lines.append("")
+        lines.append("Diff:")
         lines.append("```diff")
-        diff_lines = d["diff"].split("\n")
+        diff_lines = result.diff.split("\n")
         if len(diff_lines) > 200:
             lines.extend(diff_lines[:200])
             lines.append(f"... ({len(diff_lines) - 200} more lines)")
         else:
-            lines.append(d["diff"])
+            lines.append(result.diff)
         lines.append("```")
         lines.append("")
 
     if instructions:
         lines.extend(
             [
-                "## Join instructions",
+                "## Instructions",
                 instructions,
                 "",
             ]
         )
 
-    body = "\n".join(lines)
-    if goal_section:
-        return f"The goal.\n\n{goal_section}\n\n{body}"
-    return body
+    lines.append(f"(Base commit: {base_commit})")
+
+    return "\n".join(lines)
 
 
-def _count_logical_steps(resolved: list[ResolvedStep]) -> int:
-    """Count logical steps (fork groups count as 1)."""
+def topological_batches(dag: StepDAG) -> list[list[Step]]:
+    """Return batches of steps that can run in parallel."""
+    remaining = set(dag.steps.keys())
+    deps = {name: set(values) for name, values in dag.dependencies.items()}
+    order_index = {name: index for index, name in enumerate(dag.order)}
+    batches: list[list[Step]] = []
+
+    while remaining:
+        ready = [name for name in remaining if not deps[name]]
+        if not ready:
+            raise ValueError("Cycle detected in flow steps")
+        ready.sort(key=order_index.get)
+        batches.append([dag.steps[name] for name in ready])
+        for name in ready:
+            remaining.remove(name)
+            for dep_set in deps.values():
+                dep_set.discard(name)
+
+    return batches
+
+
+def _count_logical_steps(items: list[FlowItem]) -> int:
+    """Count logical steps (parallel batches count as 1)."""
     count = 0
-    seen_groups: set[int] = set()
     i = 0
-    while i < len(resolved):
-        step = resolved[i]
-        if step.parallel_group is not None:
-            group = step.parallel_group
-            if group not in seen_groups:
-                seen_groups.add(group)
-                count += 1
-            while i < len(resolved) and resolved[i].parallel_group == group:
+    while i < len(items):
+        item = items[i]
+        if isinstance(item, Step):
+            phase = []
+            while i < len(items) and isinstance(items[i], Step):
+                phase.append(items[i])
                 i += 1
-            if i < len(resolved) and resolved[i].join is not None:
-                i += 1
-            continue
-        if step.join is not None:
-            count += 1
-            i += 1
+            dag = build_step_dag(phase)
+            count += len(topological_batches(dag))
             continue
         count += 1
         i += 1
@@ -657,7 +777,7 @@ def _build_choose_prompt(
     ]
     for key, steps in options.items():
         steps_str = ", ".join(
-            s if isinstance(s, str) else getattr(s, "step", str(s)) for s in steps
+            s if isinstance(s, str) else getattr(s, "name", str(s)) for s in steps
         )
         lines.append(f"- {key}: {steps_str}")
 
@@ -739,83 +859,133 @@ def run_flow_def(
         return 1
 
     main_repo = find_main_repo(repo_root) or repo_root
-    resolved = resolve_flow(flow, repo_root)
-    total = _count_logical_steps(resolved)
+    items: list[FlowItem] = list(flow.steps)
+    total = _count_logical_steps(items)
 
     i = 0
     step_num = 0
-    while i < len(resolved):
-        step = resolved[i]
-        step_num += 1
+    while i < len(items):
+        item = items[i]
 
-        if step.parallel_group is not None:
-            # Collect all steps in this parallel group
-            group_steps = []
-            group = step.parallel_group
-            while i < len(resolved) and resolved[i].parallel_group == group:
-                group_steps.append(resolved[i])
+        if isinstance(item, Step):
+            phase: list[Step] = []
+            while i < len(items) and isinstance(items[i], Step):
+                phase.append(items[i])
                 i += 1
-            if i >= len(resolved) or resolved[i].join is None:
-                print("Error: fork must be immediately followed by join")
-                return 1
 
-            join_config = resolved[i].join.join
-            result_code = _run_fork_join_group(
-                group_steps,
-                join_config,
-                flow.name,
+            dag = build_step_dag(phase)
+            batches = topological_batches(dag)
+            for batch in batches:
+                step_num += 1
+                if len(batch) == 1:
+                    params = _build_step_params(batch[0], backend, model_variant, context)
+                    result_code = _run_step(
+                        params,
+                        repo_root,
+                        main_repo,
+                        exclude,
+                        skip_permissions,
+                        should_push,
+                        step_num,
+                        total,
+                        chrome=chrome,
+                    )
+                    if result_code != 0:
+                        return result_code
+                    continue
+
+                base_branch = _current_branch(repo_root) or "HEAD"
+                wt_tasks = []
+                for step in batch:
+                    params = _build_step_params(step, backend, model_variant, context)
+                    wt_tasks.append(
+                        _WorktreeTask(
+                            step=params.step,
+                            label=params.step,
+                            wt_prefix="_parallel",
+                            backend=params.backend,
+                            model_variant=params.model_variant,
+                            context=params.context,
+                            goals=params.goals,
+                        )
+                    )
+
+                results = _run_worktree_tasks(
+                    wt_tasks,
+                    repo_root,
+                    base_branch,
+                    main_repo,
+                    exclude,
+                    skip_permissions,
+                    chrome=chrome,
+                )
+                if any(r.exit_code != 0 for r in results):
+                    _cleanup_worktrees(repo_root, results)
+                    return 1
+
+                for result in results:
+                    if not _merge_branch(repo_root, result.branch):
+                        _cleanup_worktrees(repo_root, results)
+                        return 1
+
+                _cleanup_worktrees(repo_root, results)
+
+            continue
+
+        if isinstance(item, Fork):
+            step_num += 1
+            base_commit = _git_rev_parse(repo_root, "HEAD")
+            fork_results = run_fork(
+                item,
+                base_commit,
                 repo_root,
+                flow.name,
                 main_repo,
                 exclude,
                 skip_permissions,
                 backend,
                 model_variant,
                 context,
-                step_num,
-                total,
                 chrome=chrome,
             )
+            if not fork_results or not any(result.status == "completed" for result in fork_results):
+                cleanup_fork_worktrees(fork_results, repo_root)
+                return 1
+
+            result_code = run_synthesize(
+                item.synthesize,
+                fork_results,
+                base_commit,
+                repo_root,
+                main_repo,
+                skip_permissions,
+                backend,
+                model_variant,
+                chrome=chrome,
+            )
+            cleanup_fork_worktrees(fork_results, repo_root)
+
             if result_code != 0:
                 return result_code
 
             i += 1
             continue
-        elif step.choose is not None:
+
+        if isinstance(item, Choose):
             choice = choose_branch(
-                step.choose,
+                item,
                 flow.name,
                 repo_root,
                 backend,
                 model_variant,
                 skip_permissions,
             )
-            branch_steps = step.choose.options[choice]
-            branch_flow = FlowDef.from_dict(f"{flow.name}:{choice}", {"steps": branch_steps})
-            branch_resolved = resolve_flow(branch_flow, repo_root)
-            resolved = resolved[:i] + branch_resolved + resolved[i + 1 :]
-            total = _count_logical_steps(resolved)
+            branch_steps = item.options[choice]
+            items = items[:i] + branch_steps + items[i + 1 :]
+            total = _count_logical_steps(items)
             continue
-        elif step.join is not None:
-            print("Error: join must follow fork")
-            return 1
-        else:
-            # Sequential step
-            params = _build_step_params(step.step, step.config, backend, model_variant, context)
-            result_code = _run_step(
-                params,
-                repo_root,
-                main_repo,
-                exclude,
-                skip_permissions,
-                should_push,
-                step_num,
-                total,
-                chrome=chrome,
-            )
-            if result_code != 0:
-                return result_code
 
-            i += 1
+        i += 1
 
     _finalize_flow(flow.name, repo_root, should_pr)
     return 0

@@ -81,6 +81,11 @@ If no `.lf/config.yaml`:
 - Yes: create the config file (see template below)
 - No: skip
 
+If no `.lf/flows/README.md`:
+- Ask: "Create flow README? This documents flow syntax in .lf/flows/README.md"
+- Yes: create the README from the template below
+- No: skip
+
 Config template:
 ```yaml
 # Loopflow configuration
@@ -106,6 +111,51 @@ push: false
 # SkillRegistry (remote skill directory)
 skill_registry:
   enabled: false
+```
+
+Flows README template:
+```markdown
+# Flows
+
+Define flows as Python files. Each flow returns a `Flow` with steps.
+
+## Example
+
+```python
+# .lf/flows/ship.py
+def flow():
+    return Flow("design", "implement", "polish")
+```
+
+Run with `lf flow ship`.
+
+## Parallel Branches
+
+```python
+def flow():
+    return Flow(
+        Step("design"),
+        Step("impl-api", after="design"),
+        Step("impl-ui", after="design"),
+        Step("integrate", after=["impl-api", "impl-ui"]),
+    )
+```
+
+## Fork with Synthesis
+
+```python
+def flow():
+    return Flow(
+        Fork(
+            {"goal": "product-engineer"},
+            {"goal": "designer"},
+            step="implement",
+            synthesize={},
+        ),
+    )
+```
+
+See docs for more: https://loopflow.dev/docs/flows
 ```
 
 ## Phase 4: Optional extras

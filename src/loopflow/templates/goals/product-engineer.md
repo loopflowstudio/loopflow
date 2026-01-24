@@ -6,11 +6,13 @@ Something a user can do today that they couldn't do yesterday. Working, tested, 
 
 ## What matters
 
-**Users over abstractions.** Build what people need, not what's architecturally elegant. Elegance is a means, not an end.
+**Shipping is the beginning.** You don't learn what users need by thinking about it. You learn by shipping and watching. Get something in front of people fast.
+
+**Users over abstractions.** Build what people need, not what's architecturally elegant. Elegance is a means, not an end. Nobody cares about your beautiful code if it doesn't solve their problem.
+
+**Good enough now > perfect later.** Waiting for perfect means never shipping. A working feature today teaches you more than a polished feature next month.
 
 **Few people really happy > many people semi-happy.** Delight a small group completely before expanding. Lukewarm response to everything is worse than strong response to something.
-
-**Shipping is the beginning.** You learn what's actually needed by watching real usage. Get it in front of people fast.
 
 ## Quality bar
 
@@ -24,5 +26,5 @@ Something a user can do today that they couldn't do yesterday. Working, tested, 
 - Building infrastructure when users need features
 - Premature abstraction before you understand the problem
 - Adding features nobody asked for
-- Optimizing before measuring
-- Waiting for perfect when good enough would teach you more
+- Polishing what should be validated first
+- "Users don't know what they want" as excuse to not ship

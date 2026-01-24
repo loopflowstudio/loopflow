@@ -43,8 +43,8 @@ def save_agent(agent: Agent, db_path: Path | None = None) -> None:
         INSERT OR REPLACE INTO agents
         (id, repo, flow, goal, area, stimulus_kind, stimulus_cron, status, iteration,
          main_branch, worktree, branch, pr_limit, merge_mode, pid, created_at,
-         last_main_sha, consecutive_failures, pending_activations, buffer_mode)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         last_main_sha, consecutive_failures, pending_activations)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             agent.id,
@@ -66,7 +66,6 @@ def save_agent(agent: Agent, db_path: Path | None = None) -> None:
             agent.last_main_sha,
             agent.consecutive_failures,
             agent.pending_activations,
-            agent.buffer_mode,
         ),
     )
     conn.commit()
@@ -604,27 +603,22 @@ def check_cron_stimulus(agent: Agent) -> bool:
 
 
 def _queue_activation(agent: Agent) -> bool:
-    """Queue an activation for a busy agent. Returns True if queued."""
+    """Queue an activation for a busy agent. Returns True if queued.
+
+    Uses combine semantics: only one pending activation at a time (idempotent).
+    """
     if agent.pending_activations >= MAX_PENDING_ACTIVATIONS:
         stimulus_log.warning(
             f"[{agent.short_id()}] pending activations at max ({MAX_PENDING_ACTIVATIONS}), dropping"
         )
         return False
 
-    if agent.buffer_mode == "combine":
-        # Combine mode: only queue if nothing pending (idempotent)
-        if agent.pending_activations == 0:
-            update_agent_pending_activations(agent.id, 1)
-            stimulus_log.info(f"[{agent.short_id()}] queued activation (combine mode)")
-            return True
-        stimulus_log.debug(f"[{agent.short_id()}] already has pending activation (combine mode)")
-        return False
-    else:
-        # Queue mode: always increment
-        new_pending = agent.pending_activations + 1
-        update_agent_pending_activations(agent.id, new_pending)
-        stimulus_log.info(f"[{agent.short_id()}] queued activation (queue, now {new_pending})")
+    if agent.pending_activations == 0:
+        update_agent_pending_activations(agent.id, 1)
+        stimulus_log.info(f"[{agent.short_id()}] queued activation")
         return True
+    stimulus_log.debug(f"[{agent.short_id()}] already has pending activation")
+    return False
 
 
 def run_watch_check() -> list[str]:

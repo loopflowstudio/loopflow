@@ -858,9 +858,7 @@ def list_goals_cmd():
     goals_dir = repo / ".lf" / "goals"
     if not goals_dir.exists():
         typer.echo(f"{c['dim']}No goals directory found at {goals_dir}{c['reset']}")
-        typer.echo(
-            "Create one with: mkdir -p .lf/goals && echo '# My Goal' > .lf/goals/my-goal.md"
-        )
+        typer.echo("Create one with: mkdir -p .lf/goals && echo '# My Goal' > .lf/goals/my-goal.md")
         return
 
     all_goals = list_goals(repo)

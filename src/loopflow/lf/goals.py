@@ -190,9 +190,7 @@ def resolve_goals(repo: Path, goal_names: list[str]) -> list[Goal]:
 
 def render_goals(goals: list[Goal]) -> str:
     """Combine goals into single prompt."""
-    parts = [
-        f"<lf:goal:{goal.name}>\n{goal.content}\n</lf:goal:{goal.name}>" for goal in goals
-    ]
+    parts = [f"<lf:goal:{goal.name}>\n{goal.content}\n</lf:goal:{goal.name}>" for goal in goals]
     return "\n\n".join(parts)
 
 
@@ -217,9 +215,7 @@ def format_goal_section(goal_names: list[str] | None, repo_root: Path) -> str | 
     if not loaded:
         return None
 
-    parts = [
-        f"<lf:goal:{goal.name}>\n{goal.content}\n</lf:goal:{goal.name}>" for goal in loaded
-    ]
+    parts = [f"<lf:goal:{goal.name}>\n{goal.content}\n</lf:goal:{goal.name}>" for goal in loaded]
 
     if len(parts) == 1:
         return parts[0]

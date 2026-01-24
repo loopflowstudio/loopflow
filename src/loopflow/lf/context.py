@@ -770,9 +770,7 @@ def gather_prompt_components(
     # Load goals if specified
     loaded_goals = None
     if goals:
-        loaded_goals = [
-            goal for name in goals if (goal := load_goal(repo_root, name))
-        ]
+        loaded_goals = [goal for name in goals if (goal := load_goal(repo_root, name))]
 
     # Load configured summaries (always include if config has them)
     summaries = gather_summaries(repo_root, config)
@@ -817,9 +815,7 @@ def format_prompt(components: PromptComponents) -> str:
         if components.goals:
             if len(components.goals) == 1:
                 goal = components.goals[0]
-                goal_section = (
-                    f"<lf:goal:{goal.name}>\n{goal.content}\n</lf:goal:{goal.name}>"
-                )
+                goal_section = f"<lf:goal:{goal.name}>\n{goal.content}\n</lf:goal:{goal.name}>"
             else:
                 goal_parts = [
                     f"<lf:goal:{goal.name}>\n{goal.content}\n</lf:goal:{goal.name}>"

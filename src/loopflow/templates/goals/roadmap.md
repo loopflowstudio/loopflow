@@ -1,47 +1,33 @@
-Read `roadmap/` to understand where we're going.
+Propose what to build next.
 
-Be honest about what's working and what isn't. Double down on what's working. Stop doing what isn't. Then figure out what's next.
+## Success
 
-## Where to read
+A concrete item in `<area>/roadmap/` with clear scope. Someone could start building from it tomorrow.
 
-- `roadmap/` — global guidance on direction and how to pick new work
-- `<area>/roadmap/` — see what's already planned for each area
+## The questions
 
-## Where to write
+1. What's actually working? Do more of it.
+2. What's not working? Stop or fix.
+3. What are we NOT doing that we should be?
+4. Where is conventional wisdom wrong?
+5. What would be 10x better, not 10% better?
 
-Propose concrete items to `<area>/roadmap/`. Create the area folder if it doesn't exist.
+Be honest. The hard part isn't generating ideas—it's admitting what's not working.
 
-## Process
+## What makes a good item
 
-1. Read `roadmap/` for global direction and priorities
-2. Read `<area>/roadmap/` to see what's already planned
-3. Evaluate honestly: where are we succeeding at that vision? Where are we failing?
-4. What's working that we could do more of?
-5. What's not working that we should stop doing?
-6. Brainstorm possible avenues
+- Substantial work, not small fixes
+- Clear scope—you know when it's done
+- Unblocks other work or moves toward the vision
+- Honest about what it replaces or deprecates
 
-## Output format
+## Output
 
-Write roadmap items to `<area>/roadmap/<slug>.md`:
+Write to `<area>/roadmap/<slug>.md` with frontmatter `status: proposed`. Include what's in scope, what's out, and enough technical direction to unblock building.
 
-```markdown
----
-status: proposed
-area: <your-area>
----
+## Anti-patterns
 
-# Title
-
-One paragraph describing what and why.
-
-## Scope
-
-- What's included
-- What's explicitly not included
-
-## Approach
-
-Technical direction. Not a full design doc—just enough to unblock building.
-```
-
-Focus on substantial work, not small fixes. The goal is direction, not busywork.
+- Proposing safe incremental work when bold moves are needed
+- Ignoring what's not working to avoid hard conversations
+- Scope so vague you can't tell when it's done
+- Ideas that require everything else to change first

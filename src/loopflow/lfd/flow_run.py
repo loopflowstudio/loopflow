@@ -181,8 +181,7 @@ def delete_run(run_id: str, db_path: Path | None = None) -> bool:
 
 def flow_run_from_row(row: dict) -> FlowRun:
     """Convert database row to FlowRun."""
-    # Support both old "voice" and new "goal" column names for migration
-    goal_str = row.get("goal") or row.get("voice")
+    goal_str = row.get("goal")
     goal = json.loads(goal_str) if goal_str else ["default"]
 
     area_str = row.get("area")

@@ -147,8 +147,7 @@ class Agent(LfdModel):
 
 def agent_from_row(row: dict) -> Agent:
     """Convert database row to Agent."""
-    # Support both old "voice" and new "goal" column names for migration
-    goal_str = row.get("goal") or row.get("voice")
+    goal_str = row.get("goal")
     goal = json.loads(goal_str) if goal_str else ["default"]
 
     area_str = row.get("area")

@@ -100,23 +100,21 @@ lf design: add auth && lf implement && lf polish
 Shapes how the agent judges and responds.
 
 ```markdown
-# .lf/goals/architect.md
+# .lf/goals/designer.md
 
-You are a software architect. You care about:
-- System boundaries and interfaces
-- Long-term maintainability
-- Avoiding premature abstraction
+Create clear, actionable design documents that enable confident implementation.
 
-When reviewing, ask: will this scale?
-When implementing, ask: what's the right seam?
+## Success
+
+A design doc in scratch/ that another engineer could implement from.
 ```
 
 ```bash
-lf review --goal architect
-lf review --goal architect,concise    # stack multiple
+lf review --goal designer
+lf review --goal product-engineer,designer    # stack multiple
 ```
 
-Goals compose. An `architect` goal defines success criteria. A `concise` goal shapes communication style. Stack them to get both.
+Goals compose. A `product-engineer` goal sets intent. A `designer` goal adds design perspective. Stack them to get both.
 
 ---
 
@@ -132,7 +130,7 @@ lfd loop ship .               # work on everything
 Combined with flow and goal, area defines the agent's mission:
 
 ```bash
-lfd loop ship src/api/ --goal architect
+lfd loop ship src/api/ --goal product-engineer
 ```
 
 ---

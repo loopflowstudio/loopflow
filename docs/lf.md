@@ -163,8 +163,8 @@ lf implement -m codex: add caching
 ### Apply a goal
 
 ```bash
-lf review -g concise
-lf implement -g architect,concise
+lf review -g designer
+lf implement -g product-engineer,designer
 ```
 
 ### Copy prompt without running

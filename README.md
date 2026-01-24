@@ -59,16 +59,16 @@ lfd loop ship src/
 Runs the `ship` flow on `src/` continuously, creating PRs until stopped.
 
 ```bash
-lfd loop ship src/ -g architect    # add a goal
-lfd subscribe ship docs/ -g writer # activate when docs/ changes
-lfd status                         # see all agents
+lfd loop ship src/ -g product-engineer  # add a goal
+lfd subscribe ship docs/ -g designer    # activate when docs/ changes
+lfd status                              # see all agents
 ```
 
-Goals compose. The first goal sets intent. Additional goals shape style.
+Goals compose. The first sets intent. Additional goals add perspective.
 
 ```bash
-lf review -g architect           # goal: architectural quality
-lf review -g architect,concise   # intent + style modifier
+lf review -g designer                     # design quality focus
+lf review -g product-engineer,designer    # product focus + design perspective
 ```
 
 ## Install

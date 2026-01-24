@@ -8,15 +8,15 @@ SHIP = Flow(
                     "fork": [
                         {
                             "step": "roadmap",
-                            "config": {"model": "claude", "goal": ["artist", "customer"]},
+                            "config": {"model": "claude", "goal": ["product-engineer"]},
                         },
                         {
                             "step": "roadmap",
-                            "config": {"model": "gemini", "goal": ["blunt", "executive"]},
+                            "config": {"model": "gemini", "goal": ["ceo"]},
                         },
                         {
                             "step": "roadmap",
-                            "config": {"model": "codex", "goal": ["architect", "thorough"]},
+                            "config": {"model": "codex", "goal": ["designer"]},
                         },
                     ]
                 },

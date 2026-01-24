@@ -6,6 +6,23 @@ Rename "Primitives" → "Atoms". Promote Stimulus to an Atom. Rename Voice → G
 
 Restructure the README's conceptual model. Rename Primitives → Atoms, Voice → Goal. Promote Stimulus to an Atom. An agent becomes **area × goal × flow × stimulus**.
 
+## Built-in Goals
+
+**Action goals** (what to do):
+- `adapt` — decide what mode to operate in based on current state
+- `roadmap` — propose new work based on where we're going
+- `ship` — build from approved roadmap specs
+
+**Perspective goals** (how to approach it):
+- `product-engineer` — ship working features that solve real user problems
+- `designer` — create clear, actionable design documents
+- `infra-engineer` — maintain a fast, reliable development pipeline
+- `ceo` — make high-leverage decisions about what to build and why
+
+Each goal has clear **success criteria** (what "done" looks like).
+
+Voices will return later as an "advanced" use case for personas and communication style.
+
 ## Changes
 
 ### 1. README model table
@@ -46,11 +63,11 @@ An agent is **area × goal × flow × stimulus**.
 
 Explain in README:
 
-> Goals compose. The first goal sets intent. Additional goals shape style.
+> Goals compose. The first sets intent. Additional goals add perspective.
 
 ```bash
-lf review -g architect           # goal: architectural quality
-lf review -g architect,concise   # intent + style modifier
+lf review -g designer                     # design quality focus
+lf review -g product-engineer,designer    # product focus + design perspective
 ```
 
 ### 3. CLI flag rename
@@ -63,6 +80,7 @@ lf review -g architect,concise   # intent + style modifier
 ### 4. Directory rename
 
 `.lf/voices/` → `.lf/goals/`
+`templates/voices/` → `templates/goals/`
 
 ### 5. Docs updates
 
@@ -77,6 +95,7 @@ All docs that reference "voice" get updated to "goal":
 
 - Must update all references atomically—no mixed terminology
 - No backwards compatibility—clean break, no deprecated aliases
+- All examples use actual built-in goals, not placeholder names
 
 ## Done when
 
@@ -84,10 +103,9 @@ All docs that reference "voice" get updated to "goal":
 grep -r "voice" docs/ README.md .lf/ --include="*.md" --include="*.yaml"
 # Returns nothing (or only the word in unrelated contexts)
 
-lf review -g architect
+lf review -g designer
 # Works
 
-lfd loop ship src/ -g architect
+lfd loop ship src/ -g product-engineer
 # Works
 ```
-

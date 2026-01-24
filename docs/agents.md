@@ -8,10 +8,10 @@ title: Background Agents
 An agent is **area × goal × flow × stimulus**.
 
 ```bash
-lfd loop ship src/api/ --goal architect
+lfd loop ship src/api/ --goal product-engineer
 ```
 
-This runs the `ship` flow on `src/api/` through the `architect` goal—continuously, creating PRs until you stop it.
+This runs the `ship` flow on `src/api/` with the `product-engineer` goal—continuously, creating PRs until you stop it.
 
 ## Stimulus Types
 
@@ -28,7 +28,7 @@ Single execution. Run a flow once then stop.
 
 ```bash
 lfd run ship swift/                       # one-off iteration
-lfd run ship swift/ -g product-engineer   # with a role
+lfd run ship swift/ -g product-engineer   # with a goal
 lfd run ship . -c                         # whole repo with clipboard
 ```
 
@@ -82,9 +82,9 @@ Or run manually: `lfd serve`
 Run exactly one iteration using the once stimulus:
 
 ```bash
-lfd run ship src/                # single iteration
-lfd run ship src/ -g architect   # with a goal
-lfd run ship src/ -c             # with clipboard
+lfd run ship src/                       # single iteration
+lfd run ship src/ -g product-engineer   # with a goal
+lfd run ship src/ -c                    # with clipboard
 ```
 
 ## Managing Agents
@@ -99,8 +99,8 @@ lfd rm <id>             # remove agent and history
 Status output:
 
 ```
-ID       STIMULUS   AREA                    STATUS     ITER  REPO
-abc1234  loop       src/ [ship] [architect] running    12    ~/repo
+ID       STIMULUS   AREA                             STATUS     ITER  REPO
+abc1234  loop       src/ [ship] [product-engineer]  running    12    ~/repo
 ```
 
 ## Next

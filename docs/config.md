@@ -59,7 +59,7 @@ For most settings, repo overrides global. For additive settings (`context`, `exc
 ```yaml
 # ~/.lf/config.yaml (global)
 agent_model: claude:opus
-goal: concise
+goal: product-engineer
 
 # .lf/config.yaml (repo)
 agent_model: codex        # overrides global
@@ -73,7 +73,7 @@ Example repo config:
 agent_model: claude:opus
 push: true
 
-goal: architect
+goal: product-engineer
 
 context:
   - src/schema.py
@@ -226,10 +226,10 @@ Goals shape judgment and intent—how the agent approaches work.
 
 | | |
 |---|---|
-| **CLI** | `--goal concise` or `--goal architect,concise` |
-| **Config** | `goal: architect` or `goal: [architect, concise]` |
+| **CLI** | `--goal designer` or `--goal product-engineer,designer` |
+| **Config** | `goal: product-engineer` or `goal: [product-engineer, designer]` |
 
-Goal files live in `.lf/goals/` as markdown.
+Goal files live in `.lf/goals/` as markdown. Built-in goals: `adapt`, `roadmap`, `ship`, `product-engineer`, `designer`, `infra-engineer`, `ceo`.
 
 ### Chrome
 

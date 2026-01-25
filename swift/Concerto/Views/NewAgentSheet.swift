@@ -437,12 +437,23 @@ struct NewAgentSheet: View {
     @Bindable var appState: AppState
     @Environment(\.dismiss) private var dismiss
 
-    @State private var description = ""
+    @State private var goalText = ""
     @State private var name = ""
+    @State private var selectedFlow = "design"
     @State private var selectedAreas: [String] = []
     @State private var isCreating = false
     @State private var errorMessage: String?
-    @FocusState private var isDescriptionFocused: Bool
+    @FocusState private var isGoalFocused: Bool
+
+    private var availableFlows: [String] {
+        let flowNames = appState.flows.map(\.name)
+        // Always include design as an option, plus any configured flows
+        var flows = ["design"]
+        for name in flowNames where !flows.contains(name) {
+            flows.append(name)
+        }
+        return flows
+    }
 
     var body: some View {
         VStack(spacing: 20) {
@@ -450,21 +461,30 @@ struct NewAgentSheet: View {
                 .font(.headline)
 
             VStack(alignment: .leading, spacing: 16) {
-                // Description field
+                // 1. Area picker (first per official order: area × goal × flow × stimulus)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("What do you want to work on?")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        Text("Area")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if selectedAreas.isEmpty {
+                            Text("– select a folder")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
 
-                    TextField("Add OAuth login, fix the login bug, etc.", text: $description)
-                        .textFieldStyle(.roundedBorder)
-                        .focused($isDescriptionFocused)
+                    TokenAreaPicker(
+                        repoURL: appState.currentRepo,
+                        excludePatterns: appState.config?.exclude ?? [],
+                        selectedAreas: $selectedAreas
+                    )
                 }
 
-                // Name field (optional)
+                // 2. Goal input - ChatGPT style large text area
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
-                        Text("Name")
+                        Text("Goal")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Text("(optional)")
@@ -472,21 +492,60 @@ struct NewAgentSheet: View {
                             .foregroundStyle(.tertiary)
                     }
 
-                    TextField("Auto-generates if empty", text: $name)
-                        .textFieldStyle(.roundedBorder)
+                    TextEditor(text: $goalText)
+                        .font(.body)
+                        .scrollContentBackground(.hidden)
+                        .padding(8)
+                        .frame(minHeight: 80, maxHeight: 120)
+                        .background(Color(nsColor: .textBackgroundColor))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(Color.primary.opacity(0.15), lineWidth: 1)
+                        )
+                        .overlay(alignment: .topLeading) {
+                            if goalText.isEmpty {
+                                Text("Add OAuth login, fix the login bug, refactor auth...")
+                                    .foregroundStyle(.tertiary)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 16)
+                                    .allowsHitTesting(false)
+                            }
+                        }
+                        .focused($isGoalFocused)
                 }
 
-                // Area picker with tokens
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Area")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                // 3. Flow and Name row
+                HStack(spacing: 12) {
+                    // Flow picker
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Flow")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
 
-                    TokenAreaPicker(
-                        repoURL: appState.currentRepo,
-                        excludePatterns: appState.config?.exclude ?? [],
-                        selectedAreas: $selectedAreas
-                    )
+                        Picker("", selection: $selectedFlow) {
+                            ForEach(availableFlows, id: \.self) { flow in
+                                Text(flow).tag(flow)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 120)
+                    }
+
+                    // Name field (optional)
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Name")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("(optional)")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+
+                        TextField("Auto-generates", text: $name)
+                            .textFieldStyle(.roundedBorder)
+                    }
                 }
             }
 
@@ -513,9 +572,9 @@ struct NewAgentSheet: View {
             }
         }
         .padding(24)
-        .frame(width: 440)
+        .frame(width: 460)
         .onAppear {
-            isDescriptionFocused = true
+            isGoalFocused = true
         }
     }
 
@@ -524,12 +583,14 @@ struct NewAgentSheet: View {
         errorMessage = nil
 
         let areas = selectedAreas.isEmpty ? ["."] : selectedAreas
+        let goal = goalText.trimmingCharacters(in: .whitespacesAndNewlines)
 
         Task {
             do {
                 try await appState.createAgent(
                     name: name,
-                    description: description,
+                    flow: selectedFlow,
+                    goal: goal.isEmpty ? nil : goal,
                     areas: areas
                 )
                 dismiss()

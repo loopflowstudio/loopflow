@@ -200,12 +200,21 @@ struct ContentView: View {
         } else if let agent = appState.selectedAgent {
             // Show agent detail panel when an agent is selected
             AgentDetailPanel(appState: appState, agent: agent)
-        } else if let worktree = appState.selectedWorktree {
-            // Fallback: show worktree detail panel for legacy worktrees
-            WorktreeDetailPanel(appState: appState, worktree: worktree)
         } else {
-            // No agent or worktree selected - show prompt launcher centered
-            PromptLauncher(appState: appState)
+            // No agent selected - show empty state
+            // Orphan worktrees (without agents) are intentionally hidden
+            VStack(spacing: 16) {
+                Image(systemName: "cpu")
+                    .font(.system(size: 48))
+                    .foregroundStyle(.tertiary)
+                Text("Select an agent")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+                Text("Or create one to get started")
+                    .font(.subheadline)
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }

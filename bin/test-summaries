@@ -44,7 +44,7 @@ repo = Path(".")
 config = load_config(repo)
 exclude = build_exclude_patterns(config)
 
-dirs = ["src", "swift", "tests", "docs", ".claude", "web", "scripts"]
+dirs = ["src", "swift", "tests", "docs", ".claude", "scripts"]
 total = 0
 data = []
 

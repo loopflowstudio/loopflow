@@ -2,12 +2,15 @@
 // Shown instead of OutputPanel when the embeddedTerminal feature flag is enabled.
 
 import SwiftUI
+import LoopflowCore
 
 struct EmbeddedTerminalPanel: View {
     @Bindable var appState: AppState
     @State private var isExpanded = false
     @StateObject private var ghosttyManager = GhosttyManager.shared
+    @State private var terminalHeight: CGFloat = 250
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var palette: LoopflowPalette {
         LoopflowPalette.make(for: colorScheme)
@@ -32,7 +35,7 @@ struct EmbeddedTerminalPanel: View {
     }
 
     private var effectiveWorktree: String? {
-        appState.selectedWorktree?.path
+        appState.selectedWorktree?.path ?? appState.currentRepo?.path()
     }
 
     private var terminalHeader: some View {
@@ -81,7 +84,7 @@ struct EmbeddedTerminalPanel: View {
 
             // Expand/collapse toggle
             Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
+                withAnimation(DesignAnimation.standard(reduceMotion)) {
                     isExpanded.toggle()
                 }
             } label: {
@@ -90,6 +93,8 @@ struct EmbeddedTerminalPanel: View {
             }
             .buttonStyle(.plain)
             .help(isExpanded ? "Collapse" : "Expand")
+            .accessibleButton("Toggle terminal panel", hint: isExpanded ? "Collapse" : "Expand")
+            .minHitTarget()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -102,8 +107,29 @@ struct EmbeddedTerminalPanel: View {
             workingDirectory: worktree,
             manager: ghosttyManager
         )
-        .frame(height: 200)
+        .frame(height: terminalHeight)
         .background(Color.black)
+        .overlay(alignment: .bottom) {
+            // Resize handle
+            Rectangle()
+                .fill(Color.clear)
+                .frame(height: 8)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture()
+                        .onChanged { value in
+                            let newHeight = terminalHeight + value.translation.height
+                            terminalHeight = max(100, min(500, newHeight))
+                        }
+                )
+                .onHover { hovering in
+                    if hovering {
+                        NSCursor.resizeUpDown.push()
+                    } else {
+                        NSCursor.pop()
+                    }
+                }
+        }
     }
 }
 

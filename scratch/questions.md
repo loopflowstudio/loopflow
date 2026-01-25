@@ -28,3 +28,8 @@
    - Display error message?
    - Auto-disable the feature flag?
    - Log warning on startup?
+
+5. **Integration point** — The EmbeddedTerminalPanel exists but is not yet integrated into the main UI (ContentView or WorktreeDetailPanel). The design states it should replace OutputPanel, but OutputPanel itself isn't integrated into the current UI. Where should the terminal panel be shown?
+   - Bottom panel of the main window
+   - Replace the launcher section in WorktreeDetailPanel
+   - Add as a tab in the detail area

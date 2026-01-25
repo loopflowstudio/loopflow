@@ -7,6 +7,7 @@ import LoopflowCore
 struct AgentRow: View {
     let agent: Agent
     let isSelected: Bool
+    var isKeyboardFocused: Bool = false
     let liveOutput: [OutputLine]
     let onSelect: () -> Void
 
@@ -63,6 +64,15 @@ struct AgentRow: View {
                         .font(.caption)
                         .foregroundStyle(.yellow.opacity(0.7))
                 }
+
+                if agent.stimulus.kind == .cron, let cron = agent.stimulus.cron {
+                    Text("•")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.3))
+                    Text(formatCron(cron))
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.5))
+                }
             }
 
             // Live output when selected or running
@@ -76,6 +86,11 @@ struct AgentRow: View {
         .background(
             RoundedRectangle(cornerRadius: 8)
                 .fill(isSelected ? Color.white.opacity(0.2) : (isHovering ? Color.white.opacity(0.08) : Color.clear))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.accentColor, lineWidth: 2)
+                .opacity(isKeyboardFocused && !isSelected ? 1 : 0)
         )
         .contentShape(Rectangle())
         .onHover { hovering in
@@ -101,6 +116,15 @@ struct AgentRow: View {
         case .completed: return "Completed"
         case .error: return "Error"
         }
+    }
+
+    private func formatCron(_ cron: String) -> String {
+        if cron.hasPrefix("0 9 * * *") {
+            return "9am daily"
+        } else if cron.hasPrefix("0 9 * * MON-FRI") {
+            return "9am weekdays"
+        }
+        return cron
     }
 }
 

@@ -2,62 +2,30 @@
 
 Arrange and conduct an agent orchestra.
 
-## The Model
+## Agents
 
-| Atom | What it does |
+|  | What it does |
 |------|--------------|
-| **Step** | Runs a prompt with assembled context |
-| **Flow** | Chains steps together |
-| **Goal** | Shapes judgment and intent |
-| **Area** | Focuses on part of the codebase |
-| **Stimulus** | When to run: once, loop, watch, cron |
+| **Flow** | Pipeline of steps (design -> implement -> reduce -> polish) |
+| **Goal** | Defines success, tone, and quality |
+| **Area** | Subsection of codebase passsed in as context and scope for changes |
+| **Stimulus** | How agents get run: cron, file changes, or loops |
 
-An agent is **area × goal × flow × stimulus**.
-
-## Flows
-
-```bash
-lf flow ship: add user auth
-```
-
-`ship` runs design → implement → polish, committing between each step.
-
-### Built-in Flows
-
-| Flow | What it does |
-|------|--------------|
-| `ship` | Design, build, polish — full feature workflow |
-| `roadmap` | Strategic planning with multiple perspectives |
-
-### Race Different Approaches
-
-```bash
-lf flow race: add caching
-```
-
-Define `race` in `.lf/flows/race.py`:
-
-```python
-def flow():
-    return Flow(
-        Fork(
-            {"goal": "product-engineer"},
-            {"goal": "designer"},
-            step="implement",
-            synthesize={},
-        ),
-    )
-```
-
-Runs the same step with different goals in parallel and synthesizes the best result.
+An agent is configured by these dimensions: **area × goal × flow × stimulus**.
 
 ## Steps
+
+Steps are the building blocks of flows and can also be used for small, atomic changes.
 
 ```bash
 lf debug -c
 ```
 
-Assembles context (docs, style guides, branch diff) and runs the prompt. `-c` adds your clipboard.
+Thris runs the `debug` prompt, loading the clipboard (`-c`) as context on what to debug. 
+
+## Flows
+
+Steps can be chained together to make flows. You can try it manually on the commandline:
 
 ```bash
 lf review                 # run review.md
@@ -66,9 +34,23 @@ lf debug -i               # interactive (you guide)
 lf polish -a              # autonomous (runs to completion)
 ```
 
-Steps live in `.lf/steps/`.
+But you can also define pre-configured flows to be reused by agents.
 
-## Agents
+```bash
+lf flow ship: add user auth
+```
+
+### Built-in Flows
+
+| Flow | What it does |
+|------|--------------|
+| `ship` | Design, implement, simplify, polish — full feature workflow |
+| `roadmap` | Strategic planning with multiple perspectives |
+
+
+## Running Agents
+
+Once you have played with chaining steps into flows, you're ready to start playing with agents.
 
 ```bash
 lfd loop ship src/
@@ -82,11 +64,11 @@ lfd subscribe ship docs/ -g designer    # activate when docs/ changes
 lfd status                              # see all agents
 ```
 
-Goals compose. The first sets intent. Additional goals add perspective.
+You can compose multiple goals to add additional nuance or perspectives.
 
 ```bash
-lf review -g designer                     # design quality focus
-lf review -g product-engineer,designer    # product focus + design perspective
+lf review -g designer,product-engineer
+lf review -g ceo    
 ```
 
 ## Install

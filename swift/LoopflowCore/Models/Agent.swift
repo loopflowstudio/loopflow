@@ -133,40 +133,6 @@ public struct Agent: Sendable, Identifiable, Hashable {
         self.lastMainSha = lastMainSha
     }
 
-    // Legacy initializer for backwards compatibility with existing database code
-    public init(
-        id: String,
-        flow: String,
-        goal: [String] = [],
-        area: [String] = ["."],
-        repo: String,
-        stimulus: Stimulus = Stimulus(kind: .loop),
-        status: AgentStatus = .idle,
-        iteration: Int = 0,
-        mainBranch: String,
-        prLimit: Int = 5,
-        mergeMode: MergeMode = .pr,
-        pid: Int? = nil,
-        createdAt: Date = Date(),
-        lastMainSha: String? = nil
-    ) {
-        self.id = id
-        self.name = ""
-        self.flow = flow
-        self.goal = goal
-        self.area = area
-        self.repo = repo
-        self.stimulus = stimulus
-        self.status = status
-        self.iteration = iteration
-        self.worktreePath = nil
-        self.branch = mainBranch
-        self.prLimit = prLimit
-        self.mergeMode = mergeMode
-        self.pid = pid
-        self.createdAt = createdAt
-        self.lastMainSha = lastMainSha
-    }
 
     public var shortId: String { String(id.prefix(7)) }
 

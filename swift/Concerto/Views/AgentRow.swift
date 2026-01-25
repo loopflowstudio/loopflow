@@ -127,6 +127,3 @@ struct AgentRow: View {
         return cron
     }
 }
-
-// Backwards compatibility alias
-typealias LoopRow = AgentRow

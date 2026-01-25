@@ -30,16 +30,17 @@ public struct OutputEvent: Sendable {
     public let timestamp: Date
 }
 
-public struct LoopEvent: Sendable {
+public struct AgentEvent: Sendable {
     public let name: String
-    public let loopId: String?
+    public let agentId: String?
+    public let stimulus: String?
 }
 
 public enum LFDEvent: Sendable {
     case worktree(WorktreeEvent)
     case session(SessionEvent)
     case output(OutputEvent)
-    case loop(LoopEvent)
+    case agent(AgentEvent)
 }
 
 public actor LFDEventService {
@@ -214,10 +215,11 @@ public actor LFDEventService {
             ))
         }
 
-        if name.hasPrefix("loop.") {
-            return .loop(LoopEvent(
+        if name.hasPrefix("agent.") {
+            return .agent(AgentEvent(
                 name: name,
-                loopId: data["loop_id"] as? String ?? data["id"] as? String
+                agentId: data["agent_id"] as? String ?? data["id"] as? String,
+                stimulus: data["stimulus"] as? String
             ))
         }
 

@@ -11,7 +11,7 @@ struct FlowPicker: View {
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var inputText: String = ""
-    @State private var selectedFlowName: String = "ship"
+    @State private var selectedFlowName: String = ""
     @State private var isRunning = false
     @State private var errorMessage: String?
     @State private var showingError = false
@@ -46,16 +46,10 @@ struct FlowPicker: View {
                         ForEach(appState.flows) { flow in
                             Text(flow.name).tag(flow.name)
                         }
-                        // Include common defaults if not in flows
-                        if !appState.flows.contains(where: { $0.name == "ship" }) {
-                            Text("ship").tag("ship")
-                        }
-                        if !appState.flows.contains(where: { $0.name == "debug" }) {
-                            Text("debug").tag("debug")
-                        }
                     }
                     .pickerStyle(.menu)
                     .frame(minWidth: 100)
+                    .disabled(appState.flows.isEmpty)
                 }
 
                 Spacer()
@@ -129,21 +123,22 @@ struct FlowPicker: View {
                 }
             )
         }
+        .onAppear {
+            if selectedFlowName.isEmpty, let first = appState.flows.first {
+                selectedFlowName = first.name
+            }
+        }
     }
 
     private var stimulusHelpText: String {
-        switch selectedFlowName {
-        case "ship":
-            return "The ship flow implements features, runs tests, and creates PRs."
-        case "debug":
-            return "The debug flow investigates and fixes bugs."
-        case "polish":
-            return "The polish flow improves code quality and adds tests."
-        case "design":
-            return "The design flow creates or updates design documents."
-        default:
+        if appState.flows.isEmpty {
+            return "No flows defined. Add flows to .lf/flows/ in your repo."
+        }
+        guard let flow = appState.flows.first(where: { $0.name == selectedFlowName }) else {
             return "Select a flow to run on this agent."
         }
+        let stepNames = flow.steps.map(\.prompt).joined(separator: " → ")
+        return stepNames.isEmpty ? "Run the \(flow.name) flow." : stepNames
     }
 
     private func runFlow(stimulus: Stimulus.Kind) {

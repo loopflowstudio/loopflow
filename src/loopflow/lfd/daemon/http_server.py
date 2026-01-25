@@ -13,7 +13,10 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from loopflow.lfd.agent import create_agent, list_agents
+from loopflow.lfd.daemon.client import _notify_event
 from loopflow.lfd.daemon.status import compute_status
+from loopflow.lfd.models import Stimulus
 from loopflow.lfd.worktree_state import get_worktree_state_service
 
 # Default port - matches webapp's expected default
@@ -58,6 +61,96 @@ async def list_worktrees(repo: str = Query(..., description="Repository path")):
 async def get_status():
     """Basic health check and daemon status."""
     return LFDResponse(ok=True, result=compute_status())
+
+
+@app.get("/agents", response_model=LFDResponse)
+async def get_agents(repo: str = Query(..., description="Repository path")):
+    """List agents for a repository."""
+    repo_path = Path(repo)
+    if not repo_path.exists():
+        raise HTTPException(status_code=404, detail=f"Repository not found: {repo}")
+
+    try:
+        agents = list_agents(repo=repo_path)
+        return LFDResponse(
+            ok=True,
+            result={
+                "agents": [
+                    {
+                        "id": a.id,
+                        "name": a.name,
+                        "flow": a.flow,
+                        "goal": a.goal,
+                        "area": a.area,
+                        "repo": str(a.repo),
+                        "stimulus": {"kind": a.stimulus.kind, "cron": a.stimulus.cron},
+                        "status": a.status.value,
+                        "iteration": a.iteration,
+                        "worktree": str(a.worktree) if a.worktree else None,
+                        "branch": a.branch,
+                        "pr_limit": a.pr_limit,
+                        "merge_mode": a.merge_mode.value,
+                        "pid": a.pid,
+                        "created_at": a.created_at.isoformat(),
+                    }
+                    for a in agents
+                ]
+            },
+        )
+    except Exception as e:
+        return LFDResponse(ok=False, error=str(e))
+
+
+class CreateAgentRequest(BaseModel):
+    name: str | None = None
+    flow: str = "ship"
+    goal: list[str] = ["default"]
+    area: list[str] = ["."]
+
+
+@app.post("/agents", response_model=LFDResponse)
+async def post_agent(
+    repo: str = Query(..., description="Repository path"), request: CreateAgentRequest = None
+):
+    """Create a new agent."""
+    repo_path = Path(repo)
+    if not repo_path.exists():
+        raise HTTPException(status_code=404, detail=f"Repository not found: {repo}")
+
+    try:
+        agent = create_agent(
+            repo=repo_path,
+            flow=request.flow if request else "ship",
+            goal=request.goal if request else ["default"],
+            area=request.area if request else ["."],
+            name=request.name if request else None,
+            stimulus=Stimulus(kind="once"),
+        )
+
+        # Notify subscribers of new agent
+        await _notify_event("agent.created", {"agent_id": agent.id, "name": agent.name})
+
+        return LFDResponse(
+            ok=True,
+            result={
+                "agent": {
+                    "id": agent.id,
+                    "name": agent.name,
+                    "flow": agent.flow,
+                    "goal": agent.goal,
+                    "area": agent.area,
+                    "repo": str(agent.repo),
+                    "stimulus": {"kind": agent.stimulus.kind, "cron": agent.stimulus.cron},
+                    "status": agent.status.value,
+                    "iteration": agent.iteration,
+                    "worktree": str(agent.worktree) if agent.worktree else None,
+                    "branch": agent.branch,
+                    "created_at": agent.created_at.isoformat(),
+                }
+            },
+        )
+    except Exception as e:
+        return LFDResponse(ok=False, error=str(e))
 
 
 class UvicornServer:

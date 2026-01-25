@@ -577,7 +577,7 @@ final class AppState {
                             self?.handleSessionEvent(sessionEvent)
                         case .output(let outputEvent):
                             self?.handleOutputEvent(outputEvent)
-                        case .loop(_):
+                        case .agent(_):
                             await self?.refreshAgents()
                         }
                     }

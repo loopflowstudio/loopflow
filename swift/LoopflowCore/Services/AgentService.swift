@@ -20,8 +20,8 @@ public struct AgentService: @unchecked Sendable {
         defer { sqlite3_close(db) }
 
         let query = """
-            SELECT id, flow, goal, area, repo, status, iteration,
-                   main_branch, pr_limit, merge_mode, pid, created_at,
+            SELECT id, name, flow, goal, area, repo, status, iteration,
+                   worktree, branch, pr_limit, merge_mode, pid, created_at,
                    stimulus_kind, stimulus_cron, last_main_sha
             FROM agents
             WHERE repo = ?
@@ -41,30 +41,32 @@ public struct AgentService: @unchecked Sendable {
 
         while sqlite3_step(stmt) == SQLITE_ROW {
             guard let id = columnText(stmt, 0),
-                  let flow = columnText(stmt, 1),
-                  let repoPath = columnText(stmt, 4),
-                  let statusStr = columnText(stmt, 5),
-                  let mainBranch = columnText(stmt, 7) else {
+                  let flow = columnText(stmt, 2),
+                  let repoPath = columnText(stmt, 5),
+                  let statusStr = columnText(stmt, 6) else {
                 continue
             }
 
-            let goal = decodeStringArray(columnText(stmt, 2))
-            let area = decodeStringArray(columnText(stmt, 3))
-            let iteration = Int(sqlite3_column_int(stmt, 6))
-            let prLimit = Int(sqlite3_column_int(stmt, 8))
-            let mergeModeStr = columnText(stmt, 9) ?? "pr"
-            let pid = sqlite3_column_type(stmt, 10) != SQLITE_NULL
-                ? Int(sqlite3_column_int(stmt, 10))
+            let name = columnText(stmt, 1) ?? ""
+            let goal = decodeStringArray(columnText(stmt, 3))
+            let area = decodeStringArray(columnText(stmt, 4))
+            let iteration = Int(sqlite3_column_int(stmt, 7))
+            let worktreePath = columnText(stmt, 8)
+            let branch = columnText(stmt, 9)
+            let prLimit = Int(sqlite3_column_int(stmt, 10))
+            let mergeModeStr = columnText(stmt, 11) ?? "pr"
+            let pid = sqlite3_column_type(stmt, 12) != SQLITE_NULL
+                ? Int(sqlite3_column_int(stmt, 12))
                 : nil
 
             var createdAt = Date()
-            if let dateStr = columnText(stmt, 11) {
+            if let dateStr = columnText(stmt, 13) {
                 createdAt = dateFormatter.date(from: dateStr) ?? Date()
             }
 
-            let stimulusKindStr = columnText(stmt, 12) ?? "loop"
-            let stimulusCron = columnText(stmt, 13)
-            let lastMainSha = columnText(stmt, 14)
+            let stimulusKindStr = columnText(stmt, 14) ?? "loop"
+            let stimulusCron = columnText(stmt, 15)
+            let lastMainSha = columnText(stmt, 16)
 
             let status = AgentStatus(rawValue: statusStr) ?? .idle
             let mergeMode = MergeMode(rawValue: mergeModeStr) ?? .pr
@@ -73,6 +75,7 @@ public struct AgentService: @unchecked Sendable {
 
             let agent = Agent(
                 id: id,
+                name: name,
                 flow: flow,
                 goal: goal,
                 area: area,
@@ -80,7 +83,8 @@ public struct AgentService: @unchecked Sendable {
                 stimulus: stimulus,
                 status: status,
                 iteration: iteration,
-                mainBranch: mainBranch,
+                worktreePath: worktreePath,
+                branch: branch,
                 prLimit: prLimit,
                 mergeMode: mergeMode,
                 pid: pid,
@@ -214,25 +218,72 @@ public struct AgentService: @unchecked Sendable {
     }
 
     public func createAgent(name: String, description: String, area: String, repo: URL) async throws -> Agent {
-        // Create agent via lfd create command
-        // For now, create a local agent model. Full lfd integration will follow.
-        let id = UUID().uuidString
+        // Create agent via lfd HTTP API
+        let baseURL = URL(string: "http://127.0.0.1:8765")!
+        var components = URLComponents(url: baseURL.appendingPathComponent("agents"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "repo", value: repo.path)]
+
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let body: [String: Any] = [
+            "name": name.isEmpty ? NSNull() : name,
+            "flow": "ship",
+            "goal": ["default"],
+            "area": area.isEmpty ? ["."] : [area]
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            throw AgentServiceError.commandFailed
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let ok = json["ok"] as? Bool, ok,
+              let result = json["result"] as? [String: Any],
+              let agentData = result["agent"] as? [String: Any] else {
+            throw AgentServiceError.commandFailed
+        }
+
+        return parseAgentFromJSON(agentData)
+    }
+
+    private func parseAgentFromJSON(_ json: [String: Any]) -> Agent {
+        let dateFormatter = ISO8601DateFormatter()
+        dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        let stimulus: Stimulus
+        if let stimDict = json["stimulus"] as? [String: Any] {
+            let kind = Stimulus.Kind(rawValue: stimDict["kind"] as? String ?? "once") ?? .once
+            stimulus = Stimulus(kind: kind, cron: stimDict["cron"] as? String)
+        } else {
+            stimulus = Stimulus(kind: .once)
+        }
+
+        var createdAt = Date()
+        if let dateStr = json["created_at"] as? String {
+            createdAt = dateFormatter.date(from: dateStr) ?? Date()
+        }
+
         return Agent(
-            id: id,
-            name: name,
-            flow: "ship",
-            goal: [],
-            area: area.isEmpty ? ["."] : [area],
-            repo: repo.path,
-            stimulus: Stimulus(kind: .manual),
-            status: .idle,
-            iteration: 0,
-            worktreePath: nil,
-            branch: nil,
-            prLimit: 5,
-            mergeMode: .pr,
-            pid: nil,
-            createdAt: Date()
+            id: json["id"] as? String ?? UUID().uuidString,
+            name: json["name"] as? String ?? "",
+            flow: json["flow"] as? String ?? "ship",
+            goal: json["goal"] as? [String] ?? [],
+            area: json["area"] as? [String] ?? ["."],
+            repo: json["repo"] as? String ?? "",
+            stimulus: stimulus,
+            status: AgentStatus(rawValue: json["status"] as? String ?? "idle") ?? .idle,
+            iteration: json["iteration"] as? Int ?? 0,
+            worktreePath: json["worktree"] as? String,
+            branch: json["branch"] as? String,
+            prLimit: json["pr_limit"] as? Int ?? 5,
+            mergeMode: MergeMode(rawValue: json["merge_mode"] as? String ?? "pr") ?? .pr,
+            pid: json["pid"] as? Int,
+            createdAt: createdAt
         )
     }
 

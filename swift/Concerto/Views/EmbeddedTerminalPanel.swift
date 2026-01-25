@@ -1,5 +1,4 @@
 // Embedded terminal panel using Ghostty.
-// Shown instead of OutputPanel when the embeddedTerminal feature flag is enabled.
 
 import SwiftUI
 import LoopflowCore

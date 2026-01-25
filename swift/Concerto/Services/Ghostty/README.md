@@ -262,22 +262,20 @@ let manager = Unmanaged<GhosttyManager>.fromOpaque(userdata!).takeUnretainedValu
 
 ## Our Integration (Concerto)
 
-We need:
+Components:
 
-1. **GhosttyManager** - Similar to Ghostty.App, wraps the app-level state
-2. **GhosttyTerminalView** - NSViewRepresentable wrapping an NSView with Metal rendering
-3. **Conditional compilation** - Use `#if GHOSTTY_ENABLED` flag
+1. **GhosttyManager** - Singleton wrapping the app-level state, handles initialization and surface creation
+2. **GhosttyTerminalView** - SwiftUI view using NSViewRepresentable to bridge GhosttyMetalView
+3. **GhosttyMetalView** - NSView subclass with NSTextInputClient for IME, input handling, context menu
 
-### Current Issue
-
-The `GHOSTTY_ENABLED` flag is being passed to the compiler, but the code is still using the stub. This suggests the module may not be properly linked or the conditional compilation isn't working as expected.
-
-### Debugging Steps
-
-1. Verify `import GhosttyKit` succeeds (compile errors if not)
-2. Add logging at the start of the real implementation
-3. Check that the xcframework is properly linked (not just search path)
-4. Ensure clean build (delete DerivedData)
+Features implemented:
+- CADisplayLink for rendering (modern macOS 14+ API)
+- Full keyboard input with Ctrl+C/D/Z, Esc, tmux support
+- NSTextInputClient for IME/composition (Japanese, Korean, etc.)
+- Right-click context menu with Copy/Paste/Clear
+- Cmd+C/V for copy/paste
+- Mouse tracking with exit detection
+- Loopflow cream-on-burgundy color scheme
 
 ## File Structure
 

@@ -45,7 +45,6 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
         view.workingDirectory = workingDirectory
         view.command = command
 
-        // Initialize manager if needed
         if case .uninitialized = manager.state {
             manager.initialize()
         }
@@ -54,23 +53,26 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: GhosttyMetalView, context: Context) {
-        // Update size from SwiftUI
         nsView.sizeDidChange(size)
 
-        // Create surface if manager is ready and we have a valid size
         if case .ready = manager.state, nsView.surface == nil, size.width > 0, size.height > 0 {
             nsView.createSurface(manager: manager)
         }
     }
 }
 
-final class GhosttyMetalView: NSView {
+// MARK: - GhosttyMetalView
+
+final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     var workingDirectory: String = ""
     var command: String?
     nonisolated(unsafe) var surface: ghostty_surface_t?
 
     private nonisolated(unsafe) var displayLink: CADisplayLink?
     private var trackingArea: NSTrackingArea?
+    private var _markedText = NSMutableAttributedString()
+    private var _markedRange = NSRange(location: NSNotFound, length: 0)
+    private var _selectedRange = NSRange(location: 0, length: 0)
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -85,20 +87,12 @@ final class GhosttyMetalView: NSView {
     private func setupView() {
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.cgColor
-        // Ensure layer resizes with view
         layerContentsRedrawPolicy = .onSetNeedsDisplay
         autoresizingMask = [.width, .height]
     }
 
     func createSurface(manager: GhosttyManager) {
-        guard surface == nil else {
-            print("[GhosttyMetalView] Surface already exists")
-            return
-        }
-
-        print("[GhosttyMetalView] Creating surface...")
-        print("[GhosttyMetalView] workingDirectory: \(workingDirectory)")
-        print("[GhosttyMetalView] frame: \(frame)")
+        guard surface == nil else { return }
 
         surface = manager.createSurface(
             workingDirectory: workingDirectory,
@@ -106,30 +100,23 @@ final class GhosttyMetalView: NSView {
             view: self
         )
 
-        if let surface {
-            print("[GhosttyMetalView] Surface created: \(surface)")
-            // Set content scale and size immediately
+        if surface != nil {
             updateContentScale()
             updateSurfaceSize()
             setupDisplayLink()
             setupTrackingArea()
-        } else {
-            print("[GhosttyMetalView] Failed to create surface")
         }
     }
 
     private func setupDisplayLink() {
-        print("[GhosttyMetalView] Setting up CADisplayLink...")
-
         let link = displayLink(target: self, selector: #selector(displayLinkFired))
         link.add(to: .main, forMode: .common)
         displayLink = link
-
-        print("[GhosttyMetalView] CADisplayLink started")
     }
 
     @objc private func displayLinkFired(_ link: CADisplayLink) {
-        draw()
+        guard let surface else { return }
+        ghostty_surface_draw(surface)
     }
 
     private func setupTrackingArea() {
@@ -141,16 +128,6 @@ final class GhosttyMetalView: NSView {
         )
         addTrackingArea(area)
         trackingArea = area
-    }
-
-    private var drawCount = 0
-    private func draw() {
-        guard let surface else { return }
-        drawCount += 1
-        if drawCount <= 5 || drawCount % 60 == 0 {
-            print("[GhosttyMetalView] draw() called, count: \(drawCount)")
-        }
-        ghostty_surface_draw(surface)
     }
 
     override func updateTrackingAreas() {
@@ -189,14 +166,12 @@ final class GhosttyMetalView: NSView {
 
     private func updateContentScale() {
         guard let surface else { return }
-        // Use window scale if available, otherwise use main screen scale
         let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
         ghostty_surface_set_content_scale(surface, scale, scale)
     }
 
     private func updateSurfaceSize() {
         guard let surface else { return }
-        // Convert to backing (pixel) coordinates for retina displays
         let backingSize = convertToBacking(bounds).size
         guard backingSize.width > 0, backingSize.height > 0 else { return }
         ghostty_surface_set_size(surface, UInt32(backingSize.width), UInt32(backingSize.height))
@@ -205,11 +180,28 @@ final class GhosttyMetalView: NSView {
     func sizeDidChange(_ newSize: CGSize) {
         guard newSize.width > 0, newSize.height > 0 else { return }
         setFrameSize(newSize)
-        // Also update content scale in case window changed
         updateContentScale()
     }
 
-    // MARK: - Input Handling
+    // MARK: - Keyboard Input
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard let surface else { return super.performKeyEquivalent(with: event) }
+
+        let mods = event.modifierFlags
+        // Handle Cmd+C (copy), Cmd+V (paste) ourselves
+        if mods.contains(.command) {
+            if event.charactersIgnoringModifiers == "c" {
+                return copySelection()
+            } else if event.charactersIgnoringModifiers == "v" {
+                return pasteFromClipboard()
+            }
+        }
+
+        // Let other command shortcuts through to the terminal (e.g., tmux prefix)
+        let key = translateKey(event)
+        return ghostty_surface_key(surface, key)
+    }
 
     override func keyDown(with event: NSEvent) {
         guard let surface else {
@@ -217,21 +209,23 @@ final class GhosttyMetalView: NSView {
             return
         }
 
-        let mods = event.modifierFlags
+        // Use interpretKeyEvents for IME support
+        interpretKeyEvents([event])
 
-        // Don't pass text for control key combinations - let Ghostty handle them
-        let hasControlMods = mods.contains(.control) || mods.contains(.command)
+        // For non-IME keys, send directly to Ghostty
+        if _markedRange.location == NSNotFound {
+            var key = translateKey(event)
 
-        if hasControlMods {
-            // Control/command combinations: just send keycode + mods
-            let key = translateKey(event)
-            _ = ghostty_surface_key(surface, key)
-        } else {
-            // Regular keys: include the text
-            let characters = event.characters ?? ""
-            characters.withCString { textPtr in
-                var key = translateKey(event)
-                key.text = textPtr
+            // For control combinations, don't include text
+            let mods = event.modifierFlags
+            if mods.contains(.control) || mods.contains(.command) {
+                _ = ghostty_surface_key(surface, key)
+            } else if let chars = event.characters, !chars.isEmpty {
+                chars.withCString { textPtr in
+                    key.text = textPtr
+                    _ = ghostty_surface_key(surface, key)
+                }
+            } else {
                 _ = ghostty_surface_key(surface, key)
             }
         }
@@ -249,11 +243,127 @@ final class GhosttyMetalView: NSView {
     }
 
     override func flagsChanged(with event: NSEvent) {
-        // Handle modifier key changes
-        super.flagsChanged(with: event)
+        guard let surface else {
+            super.flagsChanged(with: event)
+            return
+        }
+
+        // Detect which modifier changed and send appropriate key event
+        var key = ghostty_input_key_s()
+        key.mods = translateMods(event.modifierFlags)
+        key.keycode = UInt32(event.keyCode)
+
+        // Determine if this is a press or release based on the specific flag
+        let isPress: Bool
+        switch event.keyCode {
+        case 0x39: // Caps Lock
+            isPress = event.modifierFlags.contains(.capsLock)
+        case 0x38, 0x3C: // Shift
+            isPress = event.modifierFlags.contains(.shift)
+        case 0x3B, 0x3E: // Control
+            isPress = event.modifierFlags.contains(.control)
+        case 0x3A, 0x3D: // Option
+            isPress = event.modifierFlags.contains(.option)
+        case 0x37, 0x36: // Command
+            isPress = event.modifierFlags.contains(.command)
+        default:
+            isPress = true
+        }
+
+        key.action = isPress ? GHOSTTY_ACTION_PRESS : GHOSTTY_ACTION_RELEASE
+        _ = ghostty_surface_key(surface, key)
     }
 
+    // MARK: - NSTextInputClient
+
+    func insertText(_ string: Any, replacementRange: NSRange) {
+        guard let surface else { return }
+
+        unmarkText()
+
+        let text: String
+        if let attrString = string as? NSAttributedString {
+            text = attrString.string
+        } else if let str = string as? String {
+            text = str
+        } else {
+            return
+        }
+
+        text.withCString { ptr in
+            ghostty_surface_text(surface, ptr, UInt(text.utf8.count))
+        }
+    }
+
+    func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        if let attrString = string as? NSAttributedString {
+            _markedText = NSMutableAttributedString(attributedString: attrString)
+        } else if let str = string as? String {
+            _markedText = NSMutableAttributedString(string: str)
+        }
+
+        _selectedRange = selectedRange
+        _markedRange = NSRange(location: 0, length: _markedText.length)
+
+        // Send preedit to Ghostty
+        if let surface, _markedText.length > 0 {
+            _markedText.string.withCString { ptr in
+                ghostty_surface_preedit(surface, ptr, UInt(_markedText.string.utf8.count))
+            }
+        }
+    }
+
+    func unmarkText() {
+        _markedText = NSMutableAttributedString()
+        _markedRange = NSRange(location: NSNotFound, length: 0)
+
+        // Clear preedit
+        if let surface {
+            ghostty_surface_preedit(surface, nil, 0)
+        }
+    }
+
+    func selectedRange() -> NSRange {
+        _selectedRange
+    }
+
+    func markedRange() -> NSRange {
+        _markedRange
+    }
+
+    func hasMarkedText() -> Bool {
+        _markedRange.location != NSNotFound
+    }
+
+    func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? {
+        nil
+    }
+
+    func validAttributesForMarkedText() -> [NSAttributedString.Key] {
+        []
+    }
+
+    func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
+        guard let surface else { return .zero }
+
+        var x: Double = 0, y: Double = 0, w: Double = 0, h: Double = 0
+        ghostty_surface_ime_point(surface, &x, &y, &w, &h)
+
+        let point = NSPoint(x: x, y: bounds.height - y - h)
+        let windowPoint = convert(point, to: nil)
+        let screenPoint = window?.convertPoint(toScreen: windowPoint) ?? windowPoint
+
+        return NSRect(x: screenPoint.x, y: screenPoint.y, width: w, height: h)
+    }
+
+    func characterIndex(for point: NSPoint) -> Int {
+        0
+    }
+
+    // MARK: - Mouse Input
+
     override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
         guard let surface else { return }
         _ = ghostty_surface_mouse_button(
             surface,
@@ -273,6 +383,33 @@ final class GhosttyMetalView: NSView {
         )
     }
 
+    override func rightMouseDown(with event: NSEvent) {
+        guard let surface else { return }
+
+        // Send to terminal first
+        let consumed = ghostty_surface_mouse_button(
+            surface,
+            GHOSTTY_MOUSE_PRESS,
+            GHOSTTY_MOUSE_RIGHT,
+            translateMods(event.modifierFlags)
+        )
+
+        // If terminal didn't consume it, show context menu
+        if !consumed {
+            showContextMenu(at: event.locationInWindow)
+        }
+    }
+
+    override func rightMouseUp(with event: NSEvent) {
+        guard let surface else { return }
+        _ = ghostty_surface_mouse_button(
+            surface,
+            GHOSTTY_MOUSE_RELEASE,
+            GHOSTTY_MOUSE_RIGHT,
+            translateMods(event.modifierFlags)
+        )
+    }
+
     override func mouseMoved(with event: NSEvent) {
         guard let surface else { return }
         let point = convert(event.locationInWindow, from: nil)
@@ -282,6 +419,12 @@ final class GhosttyMetalView: NSView {
 
     override func mouseDragged(with event: NSEvent) {
         mouseMoved(with: event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        guard let surface else { return }
+        // Send -1, -1 to indicate mouse left the view
+        ghostty_surface_mouse_pos(surface, -1, -1, translateMods(event.modifierFlags))
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -300,6 +443,68 @@ final class GhosttyMetalView: NSView {
         )
     }
 
+    // MARK: - Context Menu
+
+    private func showContextMenu(at point: NSPoint) {
+        let menu = NSMenu()
+
+        let copyItem = NSMenuItem(title: "Copy", action: #selector(copyAction), keyEquivalent: "c")
+        copyItem.target = self
+        menu.addItem(copyItem)
+
+        let pasteItem = NSMenuItem(title: "Paste", action: #selector(pasteAction), keyEquivalent: "v")
+        pasteItem.target = self
+        menu.addItem(pasteItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        let clearItem = NSMenuItem(title: "Clear", action: #selector(clearAction), keyEquivalent: "")
+        clearItem.target = self
+        menu.addItem(clearItem)
+
+        let screenPoint = convert(point, to: nil)
+        menu.popUp(positioning: nil, at: screenPoint, in: self)
+    }
+
+    @objc private func copyAction() {
+        _ = copySelection()
+    }
+
+    @objc private func pasteAction() {
+        _ = pasteFromClipboard()
+    }
+
+    @objc private func clearAction() {
+        guard let surface else { return }
+        // Send clear screen sequence
+        "clear\n".withCString { ptr in
+            ghostty_surface_text(surface, ptr, 6)
+        }
+    }
+
+    // MARK: - Copy/Paste
+
+    private func copySelection() -> Bool {
+        // The selection is handled by Ghostty's write_clipboard_cb callback
+        // For now, return false to let the system handle it
+        return false
+    }
+
+    private func pasteFromClipboard() -> Bool {
+        guard let surface else { return false }
+
+        guard let string = NSPasteboard.general.string(forType: .string) else {
+            return false
+        }
+
+        string.withCString { ptr in
+            ghostty_surface_text(surface, ptr, UInt(string.utf8.count))
+        }
+        return true
+    }
+
+    // MARK: - Key Translation
+
     private func translateKey(_ event: NSEvent) -> ghostty_input_key_s {
         var key = ghostty_input_key_s()
         key.action = GHOSTTY_ACTION_PRESS
@@ -307,8 +512,12 @@ final class GhosttyMetalView: NSView {
         key.consumed_mods = GHOSTTY_MODS_NONE
         key.keycode = UInt32(event.keyCode)
         key.text = nil
-        key.unshifted_codepoint = 0
-        key.composing = false
+        key.composing = hasMarkedText()
+
+        // Get unshifted codepoint for proper key identification
+        if let chars = event.charactersIgnoringModifiers, let scalar = chars.unicodeScalars.first {
+            key.unshifted_codepoint = scalar.value
+        }
 
         return key
     }

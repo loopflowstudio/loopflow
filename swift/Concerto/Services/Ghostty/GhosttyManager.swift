@@ -7,9 +7,6 @@ import SwiftUI
 #if GHOSTTY_ENABLED
 import GhosttyKit
 
-// Compile-time marker: Real GhosttyKit implementation
-private let _ghosttyImplementation = "real"
-
 @MainActor
 final class GhosttyManager: ObservableObject {
     enum State: Equatable {
@@ -73,45 +70,29 @@ final class GhosttyManager: ObservableObject {
     }
 
     func initialize() {
-        guard state == .uninitialized else {
-            print("[GhosttyManager] Already initialized, state: \(state)")
-            return
-        }
+        guard state == .uninitialized else { return }
         state = .initializing
-        print("[GhosttyManager] Starting initialization...")
 
-        // Initialize Ghostty library first
+        // Initialize Ghostty library
         let initResult = ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv)
         guard initResult == GHOSTTY_SUCCESS else {
-            let error = "ghostty_init failed with code \(initResult)"
-            print("[GhosttyManager] \(error)")
-            state = .failed(error)
+            state = .failed("ghostty_init failed with code \(initResult)")
             return
         }
-        print("[GhosttyManager] ghostty_init succeeded")
 
         // Create configuration
         guard let cfg = ghostty_config_new() else {
-            let error = "Failed to create Ghostty config"
-            print("[GhosttyManager] \(error)")
-            state = .failed(error)
+            state = .failed("Failed to create Ghostty config")
             return
         }
-        print("[GhosttyManager] Config created")
 
-        // Write Loopflow theme to temp file and load it
-        let configPath = writeLoopflowConfig()
-        if let path = configPath {
-            path.withCString { pathPtr in
-                ghostty_config_load_file(cfg, pathPtr)
-            }
-            print("[GhosttyManager] Loaded Loopflow theme from \(path)")
+        // Load Loopflow theme first, then user defaults
+        if let path = writeLoopflowConfig() {
+            path.withCString { ghostty_config_load_file(cfg, $0) }
         }
-
         ghostty_config_load_default_files(cfg)
         ghostty_config_finalize(cfg)
         self.config = cfg
-        print("[GhosttyManager] Config finalized")
 
         // Create runtime config with callbacks
         var runtimeConfig = ghostty_runtime_config_s()
@@ -124,42 +105,24 @@ final class GhosttyManager: ObservableObject {
                 manager.tick()
             }
         }
-        runtimeConfig.action_cb = { app, target, action in
-            // Handle actions from the terminal
-            return false
-        }
-        runtimeConfig.read_clipboard_cb = { userdata, clipboard, state in
-            // Clipboard read callback - minimal implementation
-        }
-        runtimeConfig.confirm_read_clipboard_cb = { userdata, str, state, request in
-            // Confirm clipboard read - minimal implementation
-        }
-        runtimeConfig.write_clipboard_cb = { userdata, clipboard, content, len, confirm in
-            guard let content else { return }
-            // Write to system clipboard
+        runtimeConfig.action_cb = { _, _, _ in false }
+        runtimeConfig.read_clipboard_cb = { _, _, _ in }
+        runtimeConfig.confirm_read_clipboard_cb = { _, _, _, _ in }
+        runtimeConfig.write_clipboard_cb = { _, _, content, len, _ in
+            guard let content, len > 0, let data = content.pointee.data else { return }
             let pasteboard = NSPasteboard.general
             pasteboard.clearContents()
-            if len > 0, let data = content.pointee.data {
-                let text = String(cString: data)
-                pasteboard.setString(text, forType: .string)
-            }
+            pasteboard.setString(String(cString: data), forType: .string)
         }
-        runtimeConfig.close_surface_cb = { userdata, processAlive in
-            // Surface close callback
-        }
-        print("[GhosttyManager] Runtime config prepared")
+        runtimeConfig.close_surface_cb = { _, _ in }
 
-        // Create the app
         guard let ghosttyApp = ghostty_app_new(&runtimeConfig, cfg) else {
-            let error = "Failed to create Ghostty app (ghostty_app_new returned nil)"
-            print("[GhosttyManager] \(error)")
-            state = .failed(error)
+            state = .failed("Failed to create Ghostty app")
             return
         }
 
         self.app = ghosttyApp
         state = .ready
-        print("[GhosttyManager] Initialized successfully!")
     }
 
     func tick() {
@@ -172,17 +135,8 @@ final class GhosttyManager: ObservableObject {
         command: String? = nil,
         view: NSView
     ) -> ghostty_surface_t? {
-        print("[GhosttyManager] createSurface called")
-        guard let app else {
-            print("[GhosttyManager] createSurface: app is nil")
-            return nil
-        }
-        guard case .ready = state else {
-            print("[GhosttyManager] createSurface: state is not ready (\(state))")
-            return nil
-        }
+        guard let app, case .ready = state else { return nil }
 
-        print("[GhosttyManager] Creating surface config...")
         var surfaceConfig = ghostty_surface_config_new()
         surfaceConfig.userdata = Unmanaged.passUnretained(view).toOpaque()
         surfaceConfig.platform_tag = GHOSTTY_PLATFORM_MACOS
@@ -220,9 +174,6 @@ final class GhosttyManager: ObservableObject {
 }
 
 #else
-
-// Compile-time marker: Stub implementation
-private let _ghosttyImplementation = "stub"
 
 // Stub implementation when GhosttyKit is not available
 @MainActor

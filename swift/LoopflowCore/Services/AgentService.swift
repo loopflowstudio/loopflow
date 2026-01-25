@@ -217,7 +217,7 @@ public struct AgentService: @unchecked Sendable {
         try await runShellCommand(["lfd", "install"])
     }
 
-    public func createAgent(name: String, description: String, area: String, repo: URL) async throws -> Agent {
+    public func createAgent(name: String, description: String, areas: [String], repo: URL) async throws -> Agent {
         // Create agent via lfd HTTP API
         let baseURL = URL(string: "http://127.0.0.1:8765")!
         var components = URLComponents(url: baseURL.appendingPathComponent("agents"), resolvingAgainstBaseURL: false)!
@@ -227,11 +227,12 @@ public struct AgentService: @unchecked Sendable {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
+        let requestAreas = areas.isEmpty ? ["."] : areas
         let body: [String: Any] = [
             "name": name.isEmpty ? NSNull() : name,
             "flow": "ship",
             "goal": ["default"],
-            "area": area.isEmpty ? ["."] : [area]
+            "area": requestAreas
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 

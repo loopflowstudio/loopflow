@@ -816,7 +816,7 @@ final class AppState {
         }
     }
 
-    func createAgent(name: String, description: String, area: String) async throws {
+    func createAgent(name: String, description: String, areas: [String]) async throws {
         guard let repo = currentRepo else { return }
 
         // Generate name if empty
@@ -826,7 +826,7 @@ final class AppState {
         let agent = try await agentService.createAgent(
             name: agentName,
             description: description,
-            area: area,
+            areas: areas,
             repo: repo
         )
 

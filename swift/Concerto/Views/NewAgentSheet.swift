@@ -3,153 +3,210 @@
 import SwiftUI
 import LoopflowCore
 
-// MARK: - Typeahead Item
+// MARK: - Area Token Chip
 
-struct TypeaheadItem: Identifiable, Equatable {
-    let id: String
-    let label: String
-    let icon: String
-    let section: String
-    var subtitle: String?
-}
+struct AreaChip: View {
+    let path: String
+    let onRemove: () -> Void
 
-// MARK: - Typeahead Dropdown
+    @State private var isHovered = false
 
-struct TypeaheadDropdown: View {
-    let items: [TypeaheadItem]
-    let selectedId: String?
-    let onSelect: (TypeaheadItem) -> Void
-
-    @State private var hoveredId: String?
-
-    private var groupedItems: [(section: String, items: [TypeaheadItem])] {
-        var sections: [String] = []
-        var groups: [String: [TypeaheadItem]] = [:]
-
-        for item in items {
-            if groups[item.section] == nil {
-                sections.append(item.section)
-                groups[item.section] = []
-            }
-            groups[item.section]?.append(item)
+    private var displayPath: String {
+        if path == "." { return "." }
+        // Truncate long paths: show last 30 chars with ellipsis
+        if path.count > 30 {
+            return "…" + String(path.suffix(28))
         }
-
-        return sections.compactMap { section in
-            guard let items = groups[section] else { return nil }
-            return (section: section, items: items)
-        }
+        return path
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(groupedItems.enumerated()), id: \.element.section) { index, group in
-                if index > 0 {
-                    Divider()
-                        .padding(.vertical, 4)
-                }
-
-                // Section header
-                Text(group.section)
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.top, index == 0 ? 8 : 4)
-                    .padding(.bottom, 4)
-
-                // Items
-                ForEach(group.items) { item in
-                    TypeaheadRow(
-                        item: item,
-                        isHovered: hoveredId == item.id,
-                        isSelected: selectedId == item.id
-                    )
-                    .onTapGesture {
-                        onSelect(item)
-                    }
-                    .onHover { hovering in
-                        hoveredId = hovering ? item.id : nil
-                    }
-                }
-            }
-        }
-        .padding(.bottom, 8)
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.12), radius: 8, y: 4)
-    }
-}
-
-struct TypeaheadRow: View {
-    let item: TypeaheadItem
-    let isHovered: Bool
-    let isSelected: Bool
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: item.icon)
-                .font(.system(size: 14))
+        HStack(spacing: 4) {
+            Image(systemName: path == "." ? "house" : "folder")
+                .font(.system(size: 10))
                 .foregroundStyle(.secondary)
-                .frame(width: 20)
 
-            Text(item.label)
-                .font(.body)
+            Text(displayPath)
+                .font(.system(size: 12))
+                .lineLimit(1)
 
-            if let subtitle = item.subtitle {
-                Text("·")
-                    .foregroundStyle(.tertiary)
-                Text(subtitle)
-                    .font(.body)
-                    .foregroundStyle(.tertiary)
-            }
-
-            Spacer()
-
-            if isSelected {
-                Image(systemName: "checkmark")
-                    .font(.caption)
+            Button {
+                onRemove()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(.secondary)
             }
+            .buttonStyle(.plain)
+            .opacity(isHovered ? 1 : 0.6)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(isHovered ? Color.primary.opacity(0.06) : Color.clear)
-        .contentShape(Rectangle())
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color.primary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .onHover { isHovered = $0 }
+        .help(path) // Full path on hover
     }
 }
 
-// MARK: - New Agent Sheet
+// MARK: - Ghost Text Field (Fish-style autocomplete)
 
-struct NewAgentSheet: View {
-    @Bindable var appState: AppState
-    @Environment(\.dismiss) private var dismiss
+struct GhostTextField: NSViewRepresentable {
+    @Binding var text: String
+    let ghost: String
+    let placeholder: String
+    let onTab: () -> Void
+    let onEnter: () -> Void
+    let onBackspace: () -> Void
 
-    @State private var description = ""
-    @State private var name = ""
-    @State private var areaSearchText = "."
-    @State private var isAreaDropdownVisible = false
-    @State private var isCreating = false
-    @State private var errorMessage: String?
-    @FocusState private var isDescriptionFocused: Bool
-    @FocusState private var isAreaFocused: Bool
+    func makeNSView(context: Context) -> NSTextField {
+        let field = NSTextField()
+        field.isBordered = true
+        field.bezelStyle = .roundedBezel
+        field.focusRingType = .exterior
+        field.placeholderString = placeholder
+        field.delegate = context.coordinator
+        field.font = .systemFont(ofSize: 13)
+        return field
+    }
 
-    private var availableAreas: [String] {
-        guard let repo = appState.currentRepo else { return ["."] }
+    func updateNSView(_ nsView: NSTextField, context: Context) {
+        if nsView.stringValue != text {
+            nsView.stringValue = text
+        }
+
+        // Update ghost text as attributed string
+        let fullText = NSMutableAttributedString(
+            string: text,
+            attributes: [.foregroundColor: NSColor.labelColor]
+        )
+
+        if !ghost.isEmpty && !text.isEmpty {
+            let ghostPart = NSAttributedString(
+                string: ghost,
+                attributes: [.foregroundColor: NSColor.tertiaryLabelColor]
+            )
+            fullText.append(ghostPart)
+        }
+
+        // Only update if different to avoid cursor jumping
+        if nsView.attributedStringValue.string != fullText.string {
+            nsView.attributedStringValue = fullText
+            // Keep cursor at end of real text
+            nsView.currentEditor()?.selectedRange = NSRange(location: text.count, length: 0)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    class Coordinator: NSObject, NSTextFieldDelegate {
+        var parent: GhostTextField
+
+        init(_ parent: GhostTextField) {
+            self.parent = parent
+        }
+
+        func controlTextDidChange(_ obj: Notification) {
+            guard let field = obj.object as? NSTextField else { return }
+            // Extract only the real text (not ghost)
+            let fullString = field.stringValue
+            if fullString.hasPrefix(parent.text) && fullString.count > parent.text.count {
+                // User might have accepted ghost somehow, update text
+                parent.text = String(fullString.prefix(while: { _ in true }))
+            } else {
+                parent.text = fullString
+            }
+        }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            if commandSelector == #selector(NSResponder.insertTab(_:)) {
+                parent.onTab()
+                return true
+            }
+            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                parent.onEnter()
+                return true
+            }
+            if commandSelector == #selector(NSResponder.deleteBackward(_:)) {
+                if parent.text.isEmpty {
+                    parent.onBackspace()
+                    return true
+                }
+            }
+            return false
+        }
+    }
+}
+
+// MARK: - Suggestion Chip
+
+struct SuggestionChip: View {
+    let path: String
+    let isDirectory: Bool
+    let onSelect: () -> Void
+
+    @State private var isHovered = false
+
+    private var displayName: String {
+        if path == "." { return ". (root)" }
+        let name = (path as NSString).lastPathComponent
+        return isDirectory ? name + "/" : name
+    }
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 4) {
+                Image(systemName: path == "." ? "house" : "folder")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+
+                Text(displayName)
+                    .font(.system(size: 12))
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(isHovered ? Color.primary.opacity(0.1) : Color.primary.opacity(0.04))
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .help(path)
+    }
+}
+
+// MARK: - Token Area Picker
+
+struct TokenAreaPicker: View {
+    let repoURL: URL?
+    let excludePatterns: [String]
+    @Binding var selectedAreas: [String]
+
+    @State private var inputText = ""
+    @FocusState private var isFocused: Bool
+
+    // Get children of a directory path
+    private func childrenOf(_ parentPath: String) -> [String] {
+        guard let repo = repoURL else { return [] }
+
+        let parentURL: URL
+        if parentPath.isEmpty || parentPath == "." {
+            parentURL = repo
+        } else {
+            parentURL = repo.appendingPathComponent(parentPath)
+        }
+
         let fm = FileManager.default
         guard let contents = try? fm.contentsOfDirectory(
-            at: repo,
+            at: parentURL,
             includingPropertiesForKeys: [.isDirectoryKey]
         ) else {
-            return ["."]
+            return []
         }
 
-        var areas: [String] = []
-        let excludePatterns = appState.config?.exclude ?? []
-
+        var children: [String] = []
         for item in contents {
             let name = item.lastPathComponent
             guard !name.hasPrefix(".") else { continue }
@@ -165,50 +222,227 @@ struct NewAgentSheet: View {
 
             let isDir = (try? item.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
             if isDir {
-                areas.append(name)
+                let fullPath = parentPath.isEmpty || parentPath == "."
+                    ? name
+                    : parentPath + "/" + name
+                children.append(fullPath)
+            }
+        }
+        return children.sorted()
+    }
+
+    private func isDirectory(_ path: String) -> Bool {
+        guard let repo = repoURL else { return false }
+        if path == "." { return true }
+        let url = repo.appendingPathComponent(path)
+        var isDir: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
+    }
+
+    // Find ghost completion for current input
+    private var ghostCompletion: String {
+        if inputText.isEmpty { return "" }
+
+        // Parse current input: "src/au" -> parent="src", partial="au"
+        let components = inputText.split(separator: "/", omittingEmptySubsequences: false)
+        let partial = String(components.last ?? "")
+        let parentPath = components.dropLast().joined(separator: "/")
+
+        // Get children of parent
+        let candidates: [String]
+        if parentPath.isEmpty {
+            // Top level: include "." and root folders
+            candidates = ["."] + childrenOf(".")
+        } else {
+            candidates = childrenOf(parentPath)
+        }
+
+        // Find first match starting with partial
+        for candidate in candidates {
+            let candidateName = (candidate as NSString).lastPathComponent
+            if candidateName.lowercased().hasPrefix(partial.lowercased()) && candidateName != partial {
+                // Return the completion part only
+                return String(candidateName.dropFirst(partial.count))
             }
         }
 
-        return areas.sorted()
+        return ""
     }
 
-    private var typeaheadItems: [TypeaheadItem] {
-        var items: [TypeaheadItem] = []
+    // Suggestions to show below the input
+    private var suggestions: [String] {
+        // Parse current input
+        let components = inputText.split(separator: "/", omittingEmptySubsequences: false)
+        let partial = String(components.last ?? "")
+        let parentPath = components.dropLast().joined(separator: "/")
 
-        // Root is always first in its own section
-        let showRoot = areaSearchText.isEmpty ||
-                       areaSearchText == "." ||
-                       "root".contains(areaSearchText.lowercased())
-
-        if showRoot {
-            items.append(TypeaheadItem(
-                id: ".",
-                label: ".",
-                icon: "house",
-                section: "Root",
-                subtitle: "entire repository"
-            ))
+        // Get candidates
+        var candidates: [String]
+        if inputText.isEmpty {
+            candidates = ["."] + childrenOf(".")
+        } else if inputText == "." {
+            candidates = ["."]
+        } else {
+            candidates = childrenOf(parentPath.isEmpty ? "." : parentPath)
         }
 
-        // Filter folders
-        let folders = availableAreas.filter { area in
-            if areaSearchText.isEmpty || areaSearchText == "." {
-                return true
+        // Filter by partial match
+        if !partial.isEmpty {
+            candidates = candidates.filter {
+                let name = ($0 as NSString).lastPathComponent
+                return name.lowercased().contains(partial.lowercased())
             }
-            return area.lowercased().contains(areaSearchText.lowercased())
         }
 
-        for folder in folders.prefix(7) {
-            items.append(TypeaheadItem(
-                id: folder,
-                label: folder,
-                icon: "folder",
-                section: "Folders"
-            ))
-        }
+        // Exclude already selected
+        candidates = candidates.filter { !selectedAreas.contains($0) }
 
-        return items
+        return Array(candidates.prefix(8))
     }
+
+    private func acceptGhost() {
+        guard !ghostCompletion.isEmpty else {
+            // No ghost, but if input is valid path, maybe descend
+            if isDirectory(inputText) && !inputText.hasSuffix("/") && inputText != "." {
+                inputText += "/"
+            }
+            return
+        }
+
+        inputText += ghostCompletion
+
+        // If it's a directory, add slash to continue
+        if isDirectory(inputText) && inputText != "." {
+            inputText += "/"
+        }
+    }
+
+    private func commitToken() {
+        let path = inputText.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !path.isEmpty else { return }
+
+        let finalPath = path.isEmpty ? "." : path
+
+        if !selectedAreas.contains(finalPath) {
+            selectedAreas.append(finalPath)
+        }
+        inputText = ""
+    }
+
+    private func removeLastToken() {
+        guard !selectedAreas.isEmpty else { return }
+        selectedAreas.removeLast()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Token input area
+            HStack(spacing: 4) {
+                // Existing chips
+                ForEach(selectedAreas, id: \.self) { area in
+                    AreaChip(path: area) {
+                        selectedAreas.removeAll { $0 == area }
+                    }
+                }
+
+                // Ghost text input
+                GhostTextField(
+                    text: $inputText,
+                    ghost: ghostCompletion,
+                    placeholder: selectedAreas.isEmpty ? "." : "",
+                    onTab: acceptGhost,
+                    onEnter: commitToken,
+                    onBackspace: removeLastToken
+                )
+                .frame(minWidth: 60, maxWidth: .infinity)
+                .frame(height: 22)
+            }
+            .padding(6)
+            .background(Color(nsColor: .textBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color.primary.opacity(0.15), lineWidth: 1)
+            )
+
+            // Suggestions below
+            if !suggestions.isEmpty {
+                FlowLayout(spacing: 4) {
+                    ForEach(suggestions, id: \.self) { path in
+                        SuggestionChip(
+                            path: path,
+                            isDirectory: isDirectory(path)
+                        ) {
+                            if !selectedAreas.contains(path) {
+                                selectedAreas.append(path)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Flow Layout (for wrapping chips)
+
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 4
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let result = arrangeSubviews(proposal: proposal, subviews: subviews)
+        return result.size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = arrangeSubviews(proposal: proposal, subviews: subviews)
+
+        for (index, subview) in subviews.enumerated() {
+            guard index < result.positions.count else { continue }
+            let position = result.positions[index]
+            subview.place(at: CGPoint(x: bounds.minX + position.x, y: bounds.minY + position.y), proposal: .unspecified)
+        }
+    }
+
+    private func arrangeSubviews(proposal: ProposedViewSize, subviews: Subviews) -> (size: CGSize, positions: [CGPoint]) {
+        let maxWidth = proposal.width ?? .infinity
+        var positions: [CGPoint] = []
+        var currentX: CGFloat = 0
+        var currentY: CGFloat = 0
+        var lineHeight: CGFloat = 0
+        var totalWidth: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+
+            if currentX + size.width > maxWidth && currentX > 0 {
+                currentX = 0
+                currentY += lineHeight + spacing
+                lineHeight = 0
+            }
+
+            positions.append(CGPoint(x: currentX, y: currentY))
+            lineHeight = max(lineHeight, size.height)
+            currentX += size.width + spacing
+            totalWidth = max(totalWidth, currentX - spacing)
+        }
+
+        return (CGSize(width: totalWidth, height: currentY + lineHeight), positions)
+    }
+}
+
+// MARK: - New Agent Sheet
+
+struct NewAgentSheet: View {
+    @Bindable var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var description = ""
+    @State private var name = ""
+    @State private var selectedAreas: [String] = []
+    @State private var isCreating = false
+    @State private var errorMessage: String?
+    @FocusState private var isDescriptionFocused: Bool
 
     var body: some View {
         VStack(spacing: 20) {
@@ -242,47 +476,17 @@ struct NewAgentSheet: View {
                         .textFieldStyle(.roundedBorder)
                 }
 
-                // Area picker with typeahead
+                // Area picker with tokens
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Area")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    TextField(".", text: $areaSearchText)
-                        .textFieldStyle(.roundedBorder)
-                        .focused($isAreaFocused)
-                        .onChange(of: isAreaFocused) { _, focused in
-                            withAnimation(.easeOut(duration: 0.15)) {
-                                isAreaDropdownVisible = focused
-                            }
-                        }
-                        .onChange(of: areaSearchText) { _, _ in
-                            if !isAreaDropdownVisible && isAreaFocused {
-                                isAreaDropdownVisible = true
-                            }
-                        }
-                        .onSubmit {
-                            if let first = typeaheadItems.first {
-                                areaSearchText = first.id
-                            }
-                            isAreaDropdownVisible = false
-                        }
-                        .overlay(alignment: .topLeading) {
-                            if isAreaDropdownVisible && !typeaheadItems.isEmpty {
-                                TypeaheadDropdown(
-                                    items: typeaheadItems,
-                                    selectedId: areaSearchText,
-                                    onSelect: { item in
-                                        areaSearchText = item.id
-                                        isAreaDropdownVisible = false
-                                        isAreaFocused = false
-                                    }
-                                )
-                                .frame(minWidth: 280)
-                                .offset(y: 36)
-                            }
-                        }
-                        .zIndex(100)
+                    TokenAreaPicker(
+                        repoURL: appState.currentRepo,
+                        excludePatterns: appState.config?.exclude ?? [],
+                        selectedAreas: $selectedAreas
+                    )
                 }
             }
 
@@ -309,7 +513,7 @@ struct NewAgentSheet: View {
             }
         }
         .padding(24)
-        .frame(width: 400)
+        .frame(width: 440)
         .onAppear {
             isDescriptionFocused = true
         }
@@ -319,12 +523,14 @@ struct NewAgentSheet: View {
         isCreating = true
         errorMessage = nil
 
+        let areas = selectedAreas.isEmpty ? ["."] : selectedAreas
+
         Task {
             do {
                 try await appState.createAgent(
                     name: name,
                     description: description,
-                    area: areaSearchText
+                    areas: areas
                 )
                 dismiss()
             } catch {

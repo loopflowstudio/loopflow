@@ -1591,7 +1591,10 @@ def test_watch_trigger_should_trigger_cases():
     assert should_activate_watch(["src/main.py"], "abc", "def", ["src/main.py"]) is True
 
     # Multiple watch paths, one matches
-    assert should_activate_watch(["src/api/", "src/models/"], "abc", "def", ["src/models/user.py"]) is True
+    assert (
+        should_activate_watch(["src/api/", "src/models/"], "abc", "def", ["src/models/user.py"])
+        is True
+    )
 
     # Glob pattern match
     assert should_activate_watch(["src/**/*.py"], "abc", "def", ["src/deep/file.py"]) is True
@@ -1615,7 +1618,10 @@ def test_cron_trigger_no_trigger_cases():
     assert should_activate_cron("0 * * * *", now) is False
 
     # Beyond grace period (zero grace = never trigger stale)
-    assert should_activate_cron("* * * * *", now - timedelta(days=30), timedelta(seconds=0)) is False
+    assert (
+        should_activate_cron("* * * * *", now - timedelta(days=30), timedelta(seconds=0))
+        is False
+    )
 
     # First run but beyond grace period
     assert should_activate_cron("* * * * *", None, timedelta(seconds=0)) is False

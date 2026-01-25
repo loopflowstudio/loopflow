@@ -22,7 +22,8 @@ let package = Package(
         ),
         .binaryTarget(
             name: "GhosttyKit",
-            path: "../vendor/ghostty/macos/GhosttyKit.xcframework"
+            url: "https://bin.loopflow.studio/GhosttyKit-061a0ae.xcframework.zip",
+            checksum: "1bbc50b79356ccf2a1e22b96d34a1fcd1c4b4a31c6e88756f9b3683c1a5532ca"
         ),
         .executableTarget(
             name: "Concerto",

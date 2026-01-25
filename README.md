@@ -39,7 +39,7 @@ To start building something new try:
 lf design
 ```
 
-This will trigger an interactive session with a coding agent primed to design somethign new in your codebase with you.
+This will trigger an interactive session with a coding agent primed to design something new in your codebase with you.
 
 ## Flows
 
@@ -64,10 +64,10 @@ Once you have played with chaining steps into flows, you're ready to start playi
 lfd create engbot --area src/ --goal product-engineer --flow ship
 ```
 
-Runs the `ship` flow on `src/` continuously using the `product-engineer` prompt to guide direciton, creating PRs until stopped.
+Runs the `ship` flow on `src/` continuously using the `product-engineer` prompt to guide direction, creating PRs until stopped.
 
 ```bash
-lfd loop engbot      # keep shipping continusally
+lfd loop engbot      # keep shipping continuously
 lfd subscribe ship designs/ -g designer   # or only ship when new designs arrive
 ```
 

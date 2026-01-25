@@ -1619,8 +1619,7 @@ def test_cron_trigger_no_trigger_cases():
 
     # Beyond grace period (zero grace = never trigger stale)
     assert (
-        should_activate_cron("* * * * *", now - timedelta(days=30), timedelta(seconds=0))
-        is False
+        should_activate_cron("* * * * *", now - timedelta(days=30), timedelta(seconds=0)) is False
     )
 
     # First run but beyond grace period

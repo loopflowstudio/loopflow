@@ -106,6 +106,7 @@ class TestStepRunSchema:
         missing = core_fields - swift_fields
         assert not missing, f"Swift StepRun missing fields: {missing}"
 
+
 class TestAgentSchema:
     """Agent schema alignment tests."""
 
@@ -132,6 +133,7 @@ class TestAgentSchema:
         core_fields = {"id", "repo", "flow", "goal", "area", "status", "iteration"}
         missing = core_fields - swift_fields
         assert not missing, f"Swift Agent missing fields: {missing}"
+
 
 class TestFlowRunSchema:
     """FlowRun schema alignment tests."""

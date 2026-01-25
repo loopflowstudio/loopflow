@@ -37,8 +37,9 @@ targets:
           - Info.plist
     dependencies:
       - target: LoopflowCore
-      - framework: ../vendor/ghostty/macos/GhosttyKit.xcframework
-        embed: false
+      # GhosttyKit is available via SPM binary target. For local development with
+      # GhosttyKit, use `swift build` or add the framework manually after building
+      # with: cd vendor/ghostty && zig build -Doptimize=ReleaseFast
       - sdk: Carbon.framework
       - sdk: QuartzCore.framework
       - sdk: Metal.framework
@@ -49,13 +50,8 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         PRODUCT_BUNDLE_IDENTIFIER: com.loopflow.concerto
         CODE_SIGN_STYLE: Automatic
-        # GhosttyKit framework search path for when it's available
-        # Build with Zig first: cd vendor/ghostty && zig build -Doptimize=ReleaseFast
-        FRAMEWORK_SEARCH_PATHS: "$(inherited) $(PROJECT_DIR)/../vendor/ghostty/macos"
-        # Enable GhosttyKit compilation flag
-        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) GHOSTTY_ENABLED"
-        # Link C++ standard library for Ghostty
-        OTHER_LDFLAGS: "-lc++"
+        # GhosttyKit is disabled in Xcode project - use SPM build for full terminal support
+        # To enable locally, build Ghostty and add GHOSTTY_ENABLED to compilation conditions
 
   ConcertoTests:
     type: bundle.unit-test

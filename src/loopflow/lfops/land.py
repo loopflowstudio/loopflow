@@ -349,20 +349,16 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
     else:
         pr_number = pr_data.get("number")
         base_branch = pr_data.get("baseRefName", "main").strip()
-        if create_pr:
-            # Regenerate and update PR title/body
-            typer.echo("Updating PR...")
-            message = generate_pr_message(repo_root)
-            title = message.title
-            body = message.body
-            subprocess.run(
-                ["gh", "pr", "edit", str(pr_number), "--title", title, "--body", body],
-                cwd=repo_root,
-                check=True,
-            )
-        else:
-            title = pr_data.get("title", "").strip()
-            body = pr_data.get("body", "").strip()
+        # Always regenerate PR title/body to reflect latest changes
+        typer.echo("Refreshing PR...")
+        message = generate_pr_message(repo_root)
+        title = message.title
+        body = message.body
+        subprocess.run(
+            ["gh", "pr", "edit", str(pr_number), "--title", title, "--body", body],
+            cwd=repo_root,
+            check=True,
+        )
 
     if not title:
         typer.echo("Error: PR has no title", err=True)

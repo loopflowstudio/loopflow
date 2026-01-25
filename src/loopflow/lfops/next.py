@@ -9,6 +9,7 @@ import typer
 
 from loopflow.lf.context import find_worktree_root
 from loopflow.lf.git import find_main_repo, get_current_branch
+from loopflow.lf.messages import generate_pr_message
 from loopflow.lf.naming import generate_next_branch, parse_branch_base
 from loopflow.lf.worktrees import get_path
 from loopflow.lfops._helpers import get_default_branch, remove_worktree
@@ -42,20 +43,22 @@ def _get_pr_state(repo_root: Path, pr_number: int) -> str | None:
 
 
 def _enable_auto_merge(repo_root: Path, pr_number: int) -> bool:
-    """Enable auto-merge on a PR. Returns True if successful."""
-    # Get PR title for squash commit message
-    result = subprocess.run(
-        ["gh", "pr", "view", str(pr_number), "--json", "title,body"],
+    """Enable auto-merge on a PR. Returns True if successful.
+
+    Regenerates the PR title/body to reflect latest changes before merging.
+    """
+    # Regenerate PR message to reflect latest changes
+    typer.echo("Refreshing PR...")
+    message = generate_pr_message(repo_root)
+    title = message.title
+    body = message.body
+
+    # Update the PR
+    subprocess.run(
+        ["gh", "pr", "edit", str(pr_number), "--title", title, "--body", body],
         cwd=repo_root,
         capture_output=True,
-        text=True,
     )
-    if result.returncode != 0:
-        return False
-
-    pr_data = json.loads(result.stdout)
-    title = pr_data.get("title", "")
-    body = pr_data.get("body", "")
 
     merge_cmd = [
         "gh",

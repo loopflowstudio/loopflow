@@ -219,10 +219,15 @@ def generate_pr_message_from_diff(repo_root: Path, diff: str | None) -> CommitMe
     return _generate_message(repo_root, prompt, "pr message")
 
 
-def _get_commits_since_tag(repo_root: Path, tag: str) -> str | None:
-    """Get commit log since a tag."""
+def _get_commits_since_tag(repo_root: Path, tag: str, full: bool = False) -> str | None:
+    """Get commit log since a tag. If full=True, include commit bodies."""
+    if full:
+        # Full messages: subject + body, separated by blank lines
+        fmt = "%s%n%b"
+    else:
+        fmt = "%s"
     result = subprocess.run(
-        ["git", "log", f"{tag}..HEAD", "--oneline"],
+        ["git", "log", f"{tag}..HEAD", f"--format={fmt}"],
         cwd=repo_root,
         capture_output=True,
         text=True,
@@ -236,8 +241,8 @@ def _get_base_tag_for_release(old_version: str, new_version: str) -> str:
     """Determine the base tag for release notes based on bump type.
 
     For patch bumps: use old_version (e.g., 0.6.5 → 0.6.6 uses v0.6.5)
-    For minor bumps: use first patch of old minor (e.g., 0.6.5 → 0.7.0 uses v0.6.1)
-    For major bumps: use first patch of old major (e.g., 0.6.5 → 1.0.0 uses v0.1.0)
+    For minor bumps: use first release of old minor (e.g., 0.6.11 → 0.7.0 uses v0.6.0)
+    For major bumps: use first release of old major (e.g., 0.6.5 → 1.0.0 uses v0.0.0)
     """
     old_parts = [int(x) for x in old_version.split(".")]
     new_parts = [int(x) for x in new_version.split(".")]
@@ -250,11 +255,11 @@ def _get_base_tag_for_release(old_version: str, new_version: str) -> str:
 
     # Major bump: summarize all changes since start of old major version
     if new_major > old_major:
-        return f"v{old_major}.1.0"
+        return f"v{old_major}.0.0"
 
     # Minor bump: summarize all changes since start of old minor version
     if new_minor > old_minor:
-        return f"v{old_major}.{old_minor}.1"
+        return f"v{old_major}.{old_minor}.0"
 
     # Patch bump: just changes since old version
     return f"v{old_version}"
@@ -278,13 +283,17 @@ def _parse_release_notes(output: str) -> ReleaseNotes:
 def generate_release_notes(repo_root: Path, old_version: str, new_version: str) -> ReleaseNotes:
     """Generate release notes from commits since last tag via CLI."""
     base_tag = _get_base_tag_for_release(old_version, new_version)
-    commits = _get_commits_since_tag(repo_root, base_tag)
+
+    # For minor/major releases, include full commit messages
+    is_minor_or_major = base_tag != f"v{old_version}"
+    commits = _get_commits_since_tag(repo_root, base_tag, full=is_minor_or_major)
     task_prompt = get_builtin_prompt("release_notes")
 
     parts = [f"Version bump: {old_version} → {new_version}"]
-    if base_tag != f"v{old_version}":
+    if is_minor_or_major:
         release_type = "major" if new_version.split(".")[0] > old_version.split(".")[0] else "minor"
         parts.append(f"This is a {release_type} release summarizing all changes since {base_tag}.")
+        parts.append("Use git diff and read files to understand the full impact of these changes.")
     if commits:
         parts.append(f"<commits>\n{commits}\n</commits>")
     parts.append(f"<task>\n{task_prompt}\n</task>")

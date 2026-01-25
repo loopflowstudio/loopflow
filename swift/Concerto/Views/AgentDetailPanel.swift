@@ -425,18 +425,26 @@ struct AgentDetailPanel: View {
                 .fontWeight(.medium)
                 .foregroundStyle(.secondary)
 
-            let output = appState.liveOutput(for: agent)
-            if output.isEmpty {
-                Text("Waiting for output...")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
-                    .background(palette.background)
+            if Flags.embeddedTerminal, let path = agent.worktreePath {
+                // Use embedded Ghostty terminal when feature flag is enabled
+                GhosttyTerminalView(workingDirectory: path)
+                    .frame(height: 200)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
-                LoopLiveOutput(lines: output)
-                    .frame(height: 120)
+                // Default text-based output
+                let output = appState.liveOutput(for: agent)
+                if output.isEmpty {
+                    Text("Waiting for output...")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(palette.background)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                } else {
+                    LoopLiveOutput(lines: output)
+                        .frame(height: 120)
+                }
             }
         }
     }

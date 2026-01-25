@@ -43,6 +43,9 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         PRODUCT_BUNDLE_IDENTIFIER: com.loopflow.concerto
         CODE_SIGN_STYLE: Automatic
+        # GhosttyKit framework search path for when it's available
+        # Build with Zig first: cd vendor/ghostty && zig build -Doptimize=ReleaseFast
+        FRAMEWORK_SEARCH_PATHS: "$(inherited) $(PROJECT_DIR)/../vendor/ghostty/macos"
 
   ConcertoTests:
     type: bundle.unit-test

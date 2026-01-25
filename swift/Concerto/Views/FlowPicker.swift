@@ -70,6 +70,14 @@ struct FlowPicker: View {
                 .toggleStyle(.checkbox)
                 .help("Run in embedded terminal with interactive input")
 
+                // Interactive toggle
+                Toggle(isOn: $isInteractive) {
+                    Text("Interactive")
+                        .font(.caption)
+                }
+                .toggleStyle(.checkbox)
+                .help("Run in embedded terminal with interactive input")
+
                 Spacer()
 
                 // Run button

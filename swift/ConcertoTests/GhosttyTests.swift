@@ -9,9 +9,11 @@ import Testing
 struct GhosttyManagerTests {
 
     @Test("shared instance exists")
+    @MainActor
     func sharedInstance() {
-        let manager = GhosttyManager.shared
-        #expect(manager != nil)
+        // Verify the shared instance is accessible (it's non-optional so this confirms it works)
+        _ = GhosttyManager.shared
+        #expect(true) // If we got here, the shared instance exists
     }
 
     @Test("initial state is uninitialized")

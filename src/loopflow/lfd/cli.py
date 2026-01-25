@@ -273,7 +273,7 @@ def create(
     typer.echo("")
     typer.echo("Configure before running:")
     typer.echo(f"  lfd area {agent.name} src/")
-    typer.echo(f"  lfd goal {agent.name} \"fix lint errors\"")
+    typer.echo(f'  lfd goal {agent.name} "fix lint errors"')
     typer.echo(f"  lfd flow {agent.name} ship")
     typer.echo("")
     typer.echo(f"Then run: lfd loop {agent.name}")

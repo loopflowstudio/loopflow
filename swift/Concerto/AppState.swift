@@ -100,6 +100,9 @@ final class AppState {
     var selectedAgent: Agent?
     var selectedFlow: Flow?
 
+    // Interactive session state (one session at a time for MVP)
+    var activeSession: InteractiveSession?
+
     // Computed: worktree for selected agent (worktrees are implementation details)
     var selectedWorktree: Worktree? {
         get {
@@ -895,6 +898,26 @@ final class AppState {
     func liveOutput(for agent: Agent) -> [OutputLine] {
         // Agent runs use their ID as session ID for output tracking
         return liveOutputBySession[agent.id] ?? []
+    }
+
+    // MARK: - Interactive Sessions
+
+    func launchInteractiveSession(agent: Agent, step: String) {
+        guard let worktreePath = agent.worktreePath else { return }
+
+        activeSession = InteractiveSession(
+            agentId: agent.id,
+            step: step,
+            worktreePath: worktreePath
+        )
+    }
+
+    func endInteractiveSession() {
+        activeSession = nil
+    }
+
+    func hasActiveSession(for agent: Agent) -> Bool {
+        activeSession?.agentId == agent.id
     }
 
     func connectLfd() async throws {

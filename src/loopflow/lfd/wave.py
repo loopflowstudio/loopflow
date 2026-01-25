@@ -14,6 +14,7 @@ from croniter import croniter
 
 from loopflow.lf.context import find_worktree_root
 from loopflow.lf.naming import branch_exists, generate_word_pair
+from loopflow.lf.worktrees import create as create_worktree, WorktreeError
 from loopflow.lfd.db import _get_db
 from loopflow.lfd.logging import stimulus_log
 from loopflow.lfd.models import (
@@ -300,6 +301,7 @@ def create_wave(
     If name is provided and a wave with that name exists in the repo,
     returns the existing wave without modification (use update_wave for changes).
 
+    Creates a worktree immediately so the wave is ready for interactive sessions.
     """
     if stimulus is None:
         stimulus = Stimulus("loop")
@@ -312,6 +314,13 @@ def create_wave(
 
     wave_name = name or _generate_wave_name(repo)
 
+    # Create worktree immediately so wave is ready for interactive sessions
+    main_branch = f"{wave_name}.main"
+    try:
+        worktree_path = create_worktree(repo, main_branch)
+    except WorktreeError:
+        worktree_path = None
+
     wave = Wave(
         id=str(uuid.uuid4()),
         name=wave_name,
@@ -323,6 +332,8 @@ def create_wave(
         status=WaveStatus.IDLE,
         pr_limit=pr_limit,
         merge_mode=merge_mode,
+        worktree=worktree_path,
+        branch=main_branch if worktree_path else None,
     )
 
     save_wave(wave)

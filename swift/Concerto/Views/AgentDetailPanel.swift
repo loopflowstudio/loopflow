@@ -30,6 +30,41 @@ struct AgentDetailPanel: View {
     }
 
     var body: some View {
+        Group {
+            // Show interactive session view when active, otherwise config view
+            if appState.hasActiveSession(for: agent), let session = appState.activeSession {
+                InteractiveSessionView(session: session, appState: appState)
+            } else {
+                configView
+            }
+        }
+        .background(palette.background)
+        .onAppear {
+            loadData()
+        }
+        .onChange(of: agent.id) {
+            loadData()
+        }
+        .alert("Error", isPresented: $showingActionError) {
+            Button("OK") { actionError = nil }
+        } message: {
+            Text(actionError ?? "An error occurred")
+        }
+        .confirmationDialog(
+            "Stop Agent",
+            isPresented: $showingStopConfirmation
+        ) {
+            Button("Stop", role: .destructive) {
+                stopAgent()
+            }
+        } message: {
+            Text("Stop '\(agent.displayName)'? It can be restarted later.")
+        }
+    }
+
+    // MARK: - Config View
+
+    private var configView: some View {
         VStack(spacing: 0) {
             header
 
@@ -58,28 +93,6 @@ struct AgentDetailPanel: View {
                 }
                 .padding(20)
             }
-        }
-        .background(palette.background)
-        .onAppear {
-            loadData()
-        }
-        .onChange(of: agent.id) {
-            loadData()
-        }
-        .alert("Error", isPresented: $showingActionError) {
-            Button("OK") { actionError = nil }
-        } message: {
-            Text(actionError ?? "An error occurred")
-        }
-        .confirmationDialog(
-            "Stop Agent",
-            isPresented: $showingStopConfirmation
-        ) {
-            Button("Stop", role: .destructive) {
-                stopAgent()
-            }
-        } message: {
-            Text("Stop '\(agent.displayName)'? It can be restarted later.")
         }
     }
 

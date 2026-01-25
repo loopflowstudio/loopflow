@@ -73,6 +73,29 @@ public enum MergeMode: String, Sendable, Codable {
     case land
 }
 
+/// An interactive session running in the embedded terminal.
+public struct InteractiveSession: Sendable, Identifiable {
+    public let id: String
+    public let agentId: String
+    public let step: String
+    public let worktreePath: String
+    public let startedAt: Date
+
+    public init(
+        id: String = UUID().uuidString,
+        agentId: String,
+        step: String,
+        worktreePath: String,
+        startedAt: Date = Date()
+    ) {
+        self.id = id
+        self.agentId = agentId
+        self.step = step
+        self.worktreePath = worktreePath
+        self.startedAt = startedAt
+    }
+}
+
 public struct Agent: Sendable, Identifiable, Hashable {
     public let id: String
     public var name: String  // User-visible name (e.g., "swift-falcon")

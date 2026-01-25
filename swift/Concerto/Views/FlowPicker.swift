@@ -11,6 +11,7 @@ struct FlowPicker: View {
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var selectedFlowName: String = ""
+    @State private var isInteractive = false
     @State private var isRunning = false
     @State private var isSaving = false
     @State private var errorMessage: String?
@@ -60,25 +61,37 @@ struct FlowPicker: View {
                 .frame(minWidth: 140)
                 .disabled(appState.flows.isEmpty)
 
+                // Interactive toggle
+                Toggle(isOn: $isInteractive) {
+                    Text("Interactive")
+                        .font(.caption)
+                }
+                .toggleStyle(.checkbox)
+                .help("Run in embedded terminal with interactive input")
+
                 Spacer()
 
                 // Run button
                 Button {
-                    runExperiment()
+                    if isInteractive {
+                        launchInteractiveSession()
+                    } else {
+                        runExperiment()
+                    }
                 } label: {
                     HStack(spacing: 4) {
                         if isRunning {
                             ProgressView()
                                 .scaleEffect(0.7)
                         } else {
-                            Image(systemName: "play.fill")
+                            Image(systemName: isInteractive ? "terminal" : "play.fill")
                                 .font(.caption)
                         }
                         Text("Run")
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(isRunning || selectedFlowName.isEmpty || !agent.isConfigured)
+                .disabled(isRunning || selectedFlowName.isEmpty || !agent.isConfigured || (isInteractive && agent.worktreePath == nil))
 
                 // Set as default button
                 if selectedFlowName != agent.flow && !selectedFlowName.isEmpty {
@@ -175,6 +188,11 @@ struct FlowPicker: View {
                 isRunning = false
             }
         }
+    }
+
+    private func launchInteractiveSession() {
+        guard !selectedFlowName.isEmpty, agent.worktreePath != nil else { return }
+        appState.launchInteractiveSession(agent: agent, step: selectedFlowName)
     }
 
     private func setAsDefault() {

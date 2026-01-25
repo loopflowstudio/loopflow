@@ -23,12 +23,14 @@ struct AgentRow: View {
                     .font(.system(size: 10))
                     .foregroundStyle(agent.statusIndicator.color)
                     .help(statusHelpText)
+                    .accessibilityIdentifier("agent-status")
 
                 // Display name (user-visible name, not area)
                 Text(agent.displayName)
                     .fontWeight(.medium)
                     .foregroundStyle(.white)
                     .lineLimit(1)
+                    .accessibilityIdentifier("agent-name")
 
                 Spacer()
 
@@ -58,6 +60,7 @@ struct AgentRow: View {
                         .background(Color.white.opacity(0.15))
                         .foregroundStyle(.white.opacity(0.7))
                         .clipShape(Capsule())
+                        .accessibilityIdentifier("agent-flow")
                 }
             }
 
@@ -66,6 +69,7 @@ struct AgentRow: View {
                 Text(agent.areaDisplay)
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.5))
+                    .accessibilityIdentifier("agent-area")
 
                 if !agent.iterationText.isEmpty {
                     Text("•")
@@ -74,6 +78,7 @@ struct AgentRow: View {
                     Text(agent.iterationText)
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.5))
+                        .accessibilityIdentifier("agent-iteration")
                 }
 
                 if agent.status == .waiting {
@@ -83,6 +88,7 @@ struct AgentRow: View {
                     Text("PR limit")
                         .font(.caption)
                         .foregroundStyle(.yellow.opacity(0.7))
+                        .accessibilityIdentifier("agent-pr-limit")
                 }
 
                 if agent.stimulus.kind == .cron, let cron = agent.stimulus.cron {
@@ -92,6 +98,7 @@ struct AgentRow: View {
                     Text(formatCron(cron))
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.5))
+                        .accessibilityIdentifier("agent-cron")
                 }
             }
 

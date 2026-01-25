@@ -102,7 +102,9 @@ def get_agent_by_area_repo(
     return agent_from_row(dict(row)) if row else None
 
 
-def get_agent_by_name(name: str, repo: Path | None = None, db_path: Path | None = None) -> Agent | None:
+def get_agent_by_name(
+    name: str, repo: Path | None = None, db_path: Path | None = None
+) -> Agent | None:
     """Get an agent by name, optionally filtered by repo."""
     conn = _get_db(db_path)
 

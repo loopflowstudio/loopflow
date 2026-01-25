@@ -99,7 +99,7 @@ struct FlowPicker: View {
                         }
                     }
                     .menuStyle(.borderedButton)
-                    .disabled(isRunning || !isConfigured)
+                    .disabled(isRunning || !agent.isConfigured)
                 }
             }
 

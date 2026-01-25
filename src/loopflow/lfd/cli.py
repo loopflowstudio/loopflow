@@ -13,7 +13,7 @@ from pathlib import Path
 import typer
 
 from loopflow.lf.flows import load_flow
-from loopflow.lf.goals import goal_exists, list_goals
+from loopflow.lf.goals import list_goals
 from loopflow.lf.logging import get_log_dir
 from loopflow.lfd.agent import (
     create_agent,
@@ -266,7 +266,9 @@ def create(
 
     agent = create_agent(repo=repo, name=name)
 
-    typer.echo(f"{c['green']}Created{c['reset']} {c['bold']}{agent.name}{c['reset']} ({agent.short_id()})")
+    typer.echo(
+        f"{c['green']}Created{c['reset']} {c['bold']}{agent.name}{c['reset']} ({agent.short_id()})"
+    )
     typer.echo(f"  Repo: {repo}")
     typer.echo("")
     typer.echo("Configure before running:")

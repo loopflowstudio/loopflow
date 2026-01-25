@@ -284,7 +284,19 @@ def _run_with_retry(agent: Agent, iteration: int, run_id: str) -> IterationResul
 
 
 def main() -> None:
-    """Entry point for background worker."""
+    """Entry point for background worker.
+
+    Usage: python -m loopflow.lfd.execution.worker agent <agent_id> [overrides]
+
+    Optional overrides (one-time, don't modify agent config):
+      --area <areas>       comma-separated areas
+      --goal <goals>       comma-separated goals
+      --flow <flow>        flow or step name
+      --stimulus <kind>    once, loop, watch, cron
+      --cron <expr>        cron expression (when stimulus=cron)
+    """
+    from loopflow.lfd.models import Stimulus
+
     if len(sys.argv) < 3:
         print("Usage: python -m loopflow.lfd.execution.worker agent <agent_id>", file=sys.stderr)
         sys.exit(1)
@@ -300,6 +312,34 @@ def main() -> None:
     if not agent:
         print(f"Agent not found: {agent_id}", file=sys.stderr)
         sys.exit(1)
+
+    # Parse override args
+    args = sys.argv[3:]
+    i = 0
+    cron_expr = None
+    stimulus_kind = None
+
+    while i < len(args):
+        if args[i] == "--area" and i + 1 < len(args):
+            agent.area = args[i + 1].split(",")
+            i += 2
+        elif args[i] == "--goal" and i + 1 < len(args):
+            agent.goal = args[i + 1].split(",")
+            i += 2
+        elif args[i] == "--flow" and i + 1 < len(args):
+            agent.flow = args[i + 1]
+            i += 2
+        elif args[i] == "--stimulus" and i + 1 < len(args):
+            stimulus_kind = args[i + 1]
+            i += 2
+        elif args[i] == "--cron" and i + 1 < len(args):
+            cron_expr = args[i + 1]
+            i += 2
+        else:
+            i += 1
+
+    if stimulus_kind:
+        agent.stimulus = Stimulus(kind=stimulus_kind, cron=cron_expr)
 
     run_agent_iterations(agent)
 

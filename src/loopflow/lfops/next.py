@@ -1,6 +1,5 @@
 """Next command: land current PR, create fresh worktree in same space."""
 
-import json
 import subprocess
 import time
 from pathlib import Path

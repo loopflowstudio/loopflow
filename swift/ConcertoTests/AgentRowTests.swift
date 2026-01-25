@@ -11,8 +11,8 @@ import ViewInspector
 struct AgentRowViewTests {
     private func makeAgent(
         name: String = "swift-falcon",
-        flow: String = "ship",
         area: [String]? = ["src/"],
+        flow: String = "ship",
         status: AgentStatus = .idle,
         iteration: Int = 0,
         stimulus: Stimulus = Stimulus(kind: .manual)
@@ -20,8 +20,8 @@ struct AgentRowViewTests {
         Agent(
             id: "test-agent-id",
             name: name,
-            flow: flow,
             area: area,
+            flow: flow,
             repo: "/tmp/repo",
             stimulus: stimulus,
             status: status,

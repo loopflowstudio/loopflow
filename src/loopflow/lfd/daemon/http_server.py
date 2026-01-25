@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from loopflow import __version__
 from loopflow.lfd.agent import (
+    clone_agent,
     create_agent,
     delete_agent,
     get_agent,
@@ -122,12 +123,76 @@ async def get_health():
     )
 
 
+@app.get("/flows", response_model=LFDResponse)
+async def get_flows(repo: str = Query(..., description="Repository path")):
+    """List available flows and steps for a repository."""
+    from loopflow.lf.flows import FlowItem, Fork, Step, list_flows, list_steps
+
+    repo_path = Path(repo)
+    if not repo_path.exists():
+        raise HTTPException(status_code=404, detail=f"Repository not found: {repo}")
+
+    def step_names(items: list[FlowItem]) -> list[str]:
+        """Extract step names from flow items."""
+        names = []
+        for item in items:
+            if isinstance(item, Step):
+                names.append(item.name)
+            elif isinstance(item, Fork):
+                names.append("(fork)")
+            else:
+                names.append("(choose)")
+        return names
+
+    try:
+        flows = list_flows(repo_path)
+        steps = list_steps(repo_path)
+
+        return LFDResponse(
+            ok=True,
+            result={
+                "flows": [
+                    {
+                        "name": f.name,
+                        "type": "flow",
+                        "steps": step_names(f.steps),
+                    }
+                    for f in flows
+                ],
+                "steps": [{"name": s, "type": "step"} for s in steps],
+            },
+        )
+    except Exception as e:
+        return LFDResponse(ok=False, error=str(e))
+
+
+def _normalize_repo_path(repo: Path) -> Path:
+    """Normalize repo path - resolve worktrees to main repo."""
+    import subprocess
+
+    result = subprocess.run(
+        ["git", "rev-parse", "--git-common-dir"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return repo
+    git_dir = Path(result.stdout.strip())
+    if not git_dir.is_absolute():
+        git_dir = (repo / git_dir).resolve()
+    return git_dir.parent
+
+
 @app.get("/agents", response_model=LFDResponse)
 async def get_agents(repo: str = Query(..., description="Repository path")):
     """List agents for a repository."""
     repo_path = Path(repo)
     if not repo_path.exists():
         raise HTTPException(status_code=404, detail=f"Repository not found: {repo}")
+
+    # Normalize to main repo (worktrees resolve to their main repo)
+    repo_path = _normalize_repo_path(repo_path)
 
     try:
         agents = list_agents(repo=repo_path)
@@ -172,11 +237,12 @@ def _agent_to_dict(agent) -> dict:
     return {
         "id": agent.id,
         "name": agent.name,
-        "flow": agent.flow,
-        "goal": agent.goal,
         "area": agent.area,
-        "repo": str(agent.repo),
+        "goal": agent.goal,
+        "flow": agent.flow,
         "stimulus": {"kind": agent.stimulus.kind, "cron": agent.stimulus.cron},
+        "paused": agent.paused,
+        "repo": str(agent.repo),
         "status": agent.status.value,
         "iteration": agent.iteration,
         "worktree": str(agent.worktree) if agent.worktree else None,
@@ -200,11 +266,14 @@ async def post_agent(
     if not repo_path.exists():
         raise HTTPException(status_code=404, detail=f"Repository not found: {repo}")
 
+    # Normalize to main repo (worktrees resolve to their main repo)
+    repo_path = _normalize_repo_path(repo_path)
+
     try:
         agent = create_agent(
             repo=repo_path,
             name=request.name if request else None,
-            flow=request.flow if request and request.flow else "ship",
+            flow=request.flow if request and request.flow else "design",
             goal=request.goal if request else None,
             area=request.area if request else None,
             stimulus=Stimulus(kind="once"),
@@ -218,28 +287,43 @@ async def post_agent(
         return LFDResponse(ok=False, error=str(e))
 
 
+class StimulusUpdate(BaseModel):
+    kind: str  # once, loop, watch, cron
+    cron: str | None = None
+
+
 class UpdateAgentRequest(BaseModel):
     area: list[str] | None = None
     goal: list[str] | None = None
     flow: str | None = None
+    stimulus: StimulusUpdate | None = None
+    paused: bool | None = None
 
 
 @app.patch("/agents/{agent_id}", response_model=LFDResponse)
 async def patch_agent(agent_id: str, request: UpdateAgentRequest):
     """Update an agent's configuration.
 
-    Accepts any subset of fields: area, goal, flow.
+    Accepts any subset of fields: area, goal, flow, stimulus, paused.
+    Stimulus is an object: {kind: "once"|"loop"|"watch"|"cron", cron?: string}
     """
     try:
         agent = get_agent(agent_id)
         if not agent:
             raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
 
+        # Build stimulus if provided
+        stimulus = None
+        if request.stimulus:
+            stimulus = Stimulus(kind=request.stimulus.kind, cron=request.stimulus.cron)
+
         updated = update_agent(
             agent_id,
             area=request.area,
             goal=request.goal,
             flow=request.flow,
+            stimulus=stimulus,
+            paused=request.paused,
         )
 
         if not updated:
@@ -292,41 +376,85 @@ async def delete_agent_by_id(agent_id: str):
         return LFDResponse(ok=False, error=str(e))
 
 
-class RunAgentRequest(BaseModel):
-    stimulus: str = "once"  # once, loop, watch, cron
-    cron: str | None = None
-    path: str | None = None  # optional watch path override
+class CloneAgentRequest(BaseModel):
+    name: str | None = None  # optional name for clone
 
 
-@app.post("/agents/{agent_id}/run", response_model=LFDResponse)
-async def run_agent(agent_id: str, request: RunAgentRequest = None):
-    """Run an agent.
+@app.post("/agents/{agent_id}/clone", response_model=LFDResponse)
+async def clone_agent_endpoint(agent_id: str, request: CloneAgentRequest | None = None):
+    """Clone an agent with a new name.
 
-    Validates configuration before starting:
-    - area must be set (required)
-    - flow uses default if not set
-
-    Stimulus can be: once, loop, watch, cron.
+    Creates a copy with same config but fresh state (paused, no worktree).
     """
     try:
         agent = get_agent(agent_id)
         if not agent:
             raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
 
-        # Validate: area must be set
-        if agent.area is None:
-            return LFDResponse(ok=False, error="Agent has no area configured. Set area first.")
+        name = request.name if request else None
+        cloned = clone_agent(agent_id, name=name)
 
-        # Update stimulus
-        stim_kind = request.stimulus if request else "once"
-        stim_cron = request.cron if request and stim_kind == "cron" else None
-        update_agent(agent_id, stimulus=Stimulus(kind=stim_kind, cron=stim_cron))
+        if not cloned:
+            return LFDResponse(ok=False, error="Failed to clone agent")
 
-        # Start the agent
-        result = start_agent(agent_id)
+        # Notify subscribers
+        await _notify_event("agent.created", {"agent_id": cloned.id, "name": cloned.name})
+
+        return LFDResponse(ok=True, result={"agent": _agent_to_dict(cloned)})
+    except HTTPException:
+        raise
+    except Exception as e:
+        return LFDResponse(ok=False, error=str(e))
+
+
+class RunAgentRequest(BaseModel):
+    """Optional overrides for a single run (doesn't change agent config)."""
+
+    area: list[str] | None = None
+    goal: list[str] | None = None
+    flow: str | None = None
+    stimulus: StimulusUpdate | None = None
+
+
+@app.post("/agents/{agent_id}/run", response_model=LFDResponse)
+async def run_agent(agent_id: str, request: RunAgentRequest | None = None):
+    """Run an agent.
+
+    Optional body params are one-time overrides for this run only.
+    Order: area, goal, flow, stimulus - any can be overridden.
+
+    These overrides do NOT modify the agent's persistent configuration.
+    """
+    try:
+        agent = get_agent(agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
+
+        # Build overrides dict
+        overrides = {}
+        if request:
+            if request.area is not None:
+                overrides["area"] = request.area
+            if request.goal is not None:
+                overrides["goal"] = request.goal
+            if request.flow is not None:
+                overrides["flow"] = request.flow
+            if request.stimulus is not None:
+                overrides["stimulus"] = Stimulus(
+                    kind=request.stimulus.kind, cron=request.stimulus.cron
+                )
+
+        # Check area (from agent or override)
+        effective_area = overrides.get("area", agent.area)
+        if effective_area is None:
+            return LFDResponse(
+                ok=False, error="No area configured. Set area first or pass as override."
+            )
+
+        # Start the agent with optional overrides
+        result = start_agent(agent_id, **overrides)
 
         if result:
-            # Notify subscribers
             await _notify_event("agent.started", {"agent_id": agent_id})
             return LFDResponse(ok=True, result={"started": True, "agent_id": agent_id})
         else:

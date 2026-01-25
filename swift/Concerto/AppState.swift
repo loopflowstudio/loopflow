@@ -72,7 +72,7 @@ final class AppState {
     var config: LoopflowConfig?
     var worktrees: [Worktree] = []
     var prompts: [PromptCard] = []
-    var flows: [FlowDef] = []
+    var flows: [Flow] = []
     var goals: [Goal] = []
     var agents: [Agent] = []
 
@@ -98,7 +98,7 @@ final class AppState {
 
     // Sidebar state - agent is primary selection
     var selectedAgent: Agent?
-    var selectedFlow: FlowDef?
+    var selectedFlow: Flow?
 
     // Computed: worktree for selected agent (worktrees are implementation details)
     var selectedWorktree: Worktree? {
@@ -202,11 +202,12 @@ final class AppState {
             Agent(
                 id: "mock-agent-1",
                 name: "swift-falcon",
-                flow: "ship",
-                goal: [],
                 area: ["src/auth"],
+                goal: [],
+                flow: "ship",
                 repo: currentRepo?.path ?? "/tmp/demo",
                 stimulus: Stimulus(kind: .loop),
+                paused: false,
                 status: .running,
                 iteration: 3,
                 worktreePath: nil,
@@ -219,11 +220,12 @@ final class AppState {
             Agent(
                 id: "mock-agent-2",
                 name: "crystal-melody",
-                flow: "ship",
-                goal: ["product-engineer"],
                 area: ["src/api"],
+                goal: ["product-engineer"],
+                flow: "ship",
                 repo: currentRepo?.path ?? "/tmp/demo",
                 stimulus: Stimulus(kind: .loop),
+                paused: false,
                 status: .waiting,
                 iteration: 5,
                 worktreePath: nil,
@@ -236,11 +238,12 @@ final class AppState {
             Agent(
                 id: "mock-agent-3",
                 name: "Quick fix",
-                flow: "debug",
-                goal: [],
                 area: ["."],
+                goal: [],
+                flow: "debug",
                 repo: currentRepo?.path ?? "/tmp/demo",
                 stimulus: Stimulus(kind: .manual),
+                paused: true,
                 status: .idle,
                 iteration: 0,
                 worktreePath: nil,
@@ -253,11 +256,12 @@ final class AppState {
             Agent(
                 id: "mock-agent-4",
                 name: "Nightly polish",
-                flow: "polish",
-                goal: [],
                 area: ["."],
+                goal: [],
+                flow: "polish",
                 repo: currentRepo?.path ?? "/tmp/demo",
                 stimulus: Stimulus(kind: .cron, cron: "0 9 * * *"),
+                paused: true,
                 status: .idle,
                 iteration: 12,
                 worktreePath: nil,
@@ -315,7 +319,7 @@ final class AppState {
             // Load prompts and goals (fast, local files)
             let t2 = CFAbsoluteTimeGetCurrent()
             prompts = try promptService.loadPrompts(from: url, config: config)
-            flows = flowService.loadFlows(from: url)
+            flows = flowService.loadFlows(from: url)  // Sync fallback
             refreshGoals()
             LoggingService.append("openRepo.prompts elapsed=\(Int((CFAbsoluteTimeGetCurrent() - t2) * 1000))ms")
 
@@ -336,9 +340,10 @@ final class AppState {
             try? await setupService.ensureDaemonRunning()
             startEventSubscription()
 
-            // Background enrichment: sync, agents, tokens, staleness
+            // Background enrichment: sync, agents, flows, tokens, staleness
             await syncAndEnrich()
             await refreshAgents()
+            await refreshFlowsAsync()  // Load flows from API (includes builtins and steps)
             await estimateTokens()
         }
 
@@ -629,9 +634,17 @@ final class AppState {
         flows = flowService.loadFlows(from: repo)
     }
 
+    func refreshFlowsAsync() async {
+        guard let repo = currentRepo else { return }
+        let loaded = await flowService.loadFlowsAsync(from: repo)
+        if !loaded.isEmpty {
+            flows = loaded
+        }
+    }
+
     func createFlow(name: String) {
         guard let repo = currentRepo else { return }
-        let newFlow = FlowDef(name: name, steps: [])
+        let newFlow = Flow(name: name, steps: [])
         do {
             try flowService.saveFlow(newFlow, in: repo)
             refreshFlows()
@@ -641,7 +654,7 @@ final class AppState {
         }
     }
 
-    func saveFlow(_ flow: FlowDef) {
+    func saveFlow(_ flow: Flow) {
         guard let repo = currentRepo else { return }
         do {
             try flowService.saveFlow(flow, in: repo)
@@ -651,7 +664,7 @@ final class AppState {
         }
     }
 
-    func deleteFlow(_ flow: FlowDef) {
+    func deleteFlow(_ flow: Flow) {
         guard let repo = currentRepo else { return }
         do {
             try flowService.deleteFlow(named: flow.name, in: repo)
@@ -830,12 +843,19 @@ final class AppState {
         selectedAgent = agent
     }
 
-    func runAgentFlow(agent: Agent, flow: String, stimulus: Stimulus.Kind, args: String = "") async throws {
-        try await agentService.runFlow(
+    func runAgent(
+        agent: Agent,
+        area: [String]? = nil,
+        goal: [String]? = nil,
+        flow: String? = nil,
+        stimulus: Stimulus? = nil
+    ) async throws {
+        try await agentService.run(
             agentId: agent.id,
+            area: area,
+            goal: goal,
             flow: flow,
-            stimulus: stimulus,
-            args: args
+            stimulus: stimulus
         )
 
         await refreshAgents()
@@ -843,6 +863,32 @@ final class AppState {
 
     func stopAgent(_ agent: Agent) async throws {
         try await agentService.stopAgent(agentId: agent.id)
+        await refreshAgents()
+    }
+
+    func cloneAgent(_ agent: Agent) async throws -> Agent {
+        let cloned = try await agentService.cloneAgent(agentId: agent.id)
+        agents.insert(cloned, at: 0)
+        selectedAgent = cloned
+        return cloned
+    }
+
+    func updateAgent(
+        _ agent: Agent,
+        area: [String]? = nil,
+        goal: [String]? = nil,
+        flow: String? = nil,
+        stimulus: Stimulus? = nil,
+        paused: Bool? = nil
+    ) async throws {
+        _ = try await agentService.updateAgent(
+            agentId: agent.id,
+            area: area,
+            goal: goal,
+            flow: flow,
+            stimulus: stimulus,
+            paused: paused
+        )
         await refreshAgents()
     }
 
@@ -917,7 +963,7 @@ final class AppState {
         )
     }
 
-    func buildCommand(flow: FlowDef? = nil) -> String {
+    func buildCommand(flow: Flow? = nil) -> String {
         var parts = ["lf"]
 
         // If running a flow, just use the flow name

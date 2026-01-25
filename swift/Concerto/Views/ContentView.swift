@@ -23,7 +23,7 @@ struct ContentView: View {
         LoopflowPalette.make(for: colorScheme)
     }
 
-    private func flowEditorBinding(_ flow: FlowDef) -> some View {
+    private func flowEditorBinding(_ flow: Flow) -> some View {
         FlowEditor(
             flow: Binding(
                 get: { appState.selectedFlow ?? flow },

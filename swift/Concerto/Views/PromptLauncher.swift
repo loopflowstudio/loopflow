@@ -24,7 +24,7 @@ struct PromptLauncher: View {
     private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     // Track whether a flow is selected (vs a step)
-    @State private var selectedFlow: FlowDef?
+    @State private var selectedFlow: Flow?
 
     // Parse input into prompt name and args
     private var parsedInput: (prompt: String?, args: String) {
@@ -115,7 +115,7 @@ struct PromptLauncher: View {
         return appState.prompts.filter { $0.name.lowercased().contains(taskSearchText.lowercased()) }
     }
 
-    private var filteredFlows: [FlowDef] {
+    private var filteredFlows: [Flow] {
         guard Flags.beta else { return [] }
         if taskSearchText.isEmpty {
             return appState.flows
@@ -336,7 +336,7 @@ struct PromptLauncher: View {
         selectPromptFromMenu(prompt)
     }
 
-    private func selectFlowFromDropdown(_ flow: FlowDef) {
+    private func selectFlowFromDropdown(_ flow: Flow) {
         taskSearchText = flow.name
         isTaskSearchFocused = false
         taskFieldFocused = false

@@ -1,4 +1,4 @@
-// Service for loading and saving flow YAML files in .lf/flows/.
+// Service for loading flows and steps from lfd API.
 
 import Foundation
 
@@ -9,18 +9,73 @@ public struct FlowService: @unchecked Sendable {
         case directoryNotFound
         case parseError(String)
         case writeError(String)
+        case apiError(String)
 
         var errorDescription: String? {
             switch self {
             case .directoryNotFound: return "Flows directory not found"
             case .parseError(let msg): return "Failed to parse flow: \(msg)"
             case .writeError(let msg): return "Failed to save flow: \(msg)"
+            case .apiError(let msg): return "API error: \(msg)"
             }
         }
     }
 
-    /// Load all flows from .lf/flows/.
-    public func loadFlows(from repoURL: URL) -> [FlowDef] {
+    /// Load all flows and steps from lfd API.
+    /// Returns flows first (prioritized), then steps. Steps have type=.step.
+    public func loadFlowsAsync(from repoURL: URL) async -> [Flow] {
+        let baseURL = URL(string: "http://127.0.0.1:8765")!
+        var components = URLComponents(url: baseURL.appendingPathComponent("flows"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "repo", value: repoURL.path)]
+
+        guard let url = components.url else { return [] }
+
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                return []
+            }
+
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let ok = json["ok"] as? Bool, ok,
+                  let result = json["result"] as? [String: Any] else {
+                return []
+            }
+
+            var allFlows: [Flow] = []
+
+            // Parse flows (multi-step)
+            if let flowsData = result["flows"] as? [[String: Any]] {
+                for flowDict in flowsData {
+                    guard let name = flowDict["name"] as? String else { continue }
+                    let stepNames = flowDict["steps"] as? [String] ?? []
+                    let steps = stepNames.map { Step(prompt: $0) }
+                    allFlows.append(Flow(name: name, steps: steps, type: .flow))
+                }
+            }
+
+            // Parse steps (single-step, type=.step)
+            if let stepsData = result["steps"] as? [[String: Any]] {
+                for stepDict in stepsData {
+                    guard let name = stepDict["name"] as? String else { continue }
+                    // Steps become single-step flows with type=.step
+                    allFlows.append(Flow(name: name, steps: [Step(prompt: name)], type: .step))
+                }
+            }
+
+            // Sort: flows first, then steps (both alphabetically)
+            let flows = allFlows.filter { $0.type == .flow }.sorted { $0.name < $1.name }
+            let steps = allFlows.filter { $0.type == .step }.sorted { $0.name < $1.name }
+            return flows + steps
+
+        } catch {
+            return []
+        }
+    }
+
+    /// Synchronous fallback - load from YAML files only.
+    public func loadFlows(from repoURL: URL) -> [Flow] {
         let flowsDir = repoURL.appendingPathComponent(".lf/flows")
 
         guard FileManager.default.fileExists(atPath: flowsDir.path()) else {
@@ -34,7 +89,7 @@ public struct FlowService: @unchecked Sendable {
             return []
         }
 
-        var flows: [FlowDef] = []
+        var flows: [Flow] = []
         for url in contents where url.pathExtension == "yaml" {
             if let flow = loadFlow(from: url) {
                 flows.append(flow)
@@ -45,7 +100,7 @@ public struct FlowService: @unchecked Sendable {
     }
 
     /// Load a single flow from a YAML file.
-    public func loadFlow(from url: URL) -> FlowDef? {
+    public func loadFlow(from url: URL) -> Flow? {
         guard let contents = try? String(contentsOf: url, encoding: .utf8) else {
             return nil
         }
@@ -55,13 +110,13 @@ public struct FlowService: @unchecked Sendable {
     }
 
     /// Load a flow by name from .lf/flows/{name}.yaml.
-    public func loadFlow(named name: String, in repoURL: URL) -> FlowDef? {
+    public func loadFlow(named name: String, in repoURL: URL) -> Flow? {
         let flowURL = repoURL.appendingPathComponent(".lf/flows/\(name).yaml")
         return loadFlow(from: flowURL)
     }
 
     /// Save a flow to .lf/flows/{name}.yaml.
-    public func saveFlow(_ flow: FlowDef, in repoURL: URL) throws {
+    public func saveFlow(_ flow: Flow, in repoURL: URL) throws {
         let flowsDir = repoURL.appendingPathComponent(".lf/flows")
 
         // Create directory if needed
@@ -85,7 +140,7 @@ public struct FlowService: @unchecked Sendable {
 
     // MARK: - YAML Parsing
 
-    public func parseFlowYAML(_ contents: String, name: String) -> FlowDef? {
+    public func parseFlowYAML(_ contents: String, name: String) -> Flow? {
         var steps: [Step] = []
         var inSteps = false
         var currentPrompt: String?
@@ -215,10 +270,10 @@ public struct FlowService: @unchecked Sendable {
             steps.append(step)
         }
 
-        return FlowDef(name: name, steps: steps)
+        return Flow(name: name, steps: steps)
     }
 
-    public func serializeFlowYAML(_ flow: FlowDef) -> String {
+    public func serializeFlowYAML(_ flow: Flow) -> String {
         var lines: [String] = ["steps:"]
 
         for step in flow.steps {

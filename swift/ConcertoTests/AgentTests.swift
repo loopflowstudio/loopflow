@@ -26,8 +26,8 @@ struct AgentModelTests {
         let agent = Agent(
             id: "test-id",
             name: "",
-            flow: "ship",
             area: ["src/auth"],
+            flow: "ship",
             repo: "/tmp/repo"
         )
 
@@ -39,8 +39,8 @@ struct AgentModelTests {
         let agent = Agent(
             id: "test-id",
             name: "",
-            flow: "debug",
             area: ["."],
+            flow: "debug",
             repo: "/tmp/repo"
         )
 
@@ -52,8 +52,8 @@ struct AgentModelTests {
         let agent = Agent(
             id: "test-id",
             name: "",
-            flow: "",
             area: nil,
+            flow: "",
             repo: "/tmp/repo"
         )
 
@@ -209,8 +209,8 @@ struct AgentModelTests {
     func detailTextCombines() {
         let agent = Agent(
             id: "test",
-            flow: "ship",
             area: ["src/"],
+            flow: "ship",
             repo: "/tmp",
             stimulus: Stimulus(kind: .loop)
         )
@@ -222,8 +222,8 @@ struct AgentModelTests {
     func detailTextOmitsManual() {
         let agent = Agent(
             id: "test",
-            flow: "debug",
             area: ["."],
+            flow: "debug",
             repo: "/tmp",
             stimulus: Stimulus(kind: .manual)
         )

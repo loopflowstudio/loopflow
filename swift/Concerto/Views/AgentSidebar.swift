@@ -14,6 +14,83 @@ struct AgentSidebar: View {
     @State private var keyboardFocusedId: String?
     @FocusState private var isSidebarFocused: Bool
 
+    // MARK: - Agent Sections
+
+    /// Agents that need immediate attention (blocked, errors)
+    private var blockedAgents: [Agent] {
+        appState.agents.filter { $0.status == .error }
+    }
+
+    /// Agents with open PRs awaiting review
+    private var prAgents: [Agent] {
+        appState.agents.filter { agent in
+            agent.status != .error && pendingPR(for: agent) != nil
+        }
+    }
+
+    /// Actively running agents (no PRs pending)
+    private var activeAgents: [Agent] {
+        appState.agents.filter { agent in
+            (agent.status == .running || agent.status == .waiting) &&
+            agent.status != .error &&
+            pendingPR(for: agent) == nil
+        }
+    }
+
+    /// Idle agents
+    private var idleAgents: [Agent] {
+        appState.agents.filter { agent in
+            agent.status == .idle && pendingPR(for: agent) == nil
+        }
+    }
+
+    /// All agents in display order (for keyboard navigation)
+    private var allAgentsInOrder: [Agent] {
+        blockedAgents + prAgents + activeAgents + idleAgents
+    }
+
+    /// Returns PR info if agent has an open PR awaiting review
+    private func pendingPR(for agent: Agent) -> (number: Int, url: URL?)? {
+        guard let path = agent.worktreePath,
+              let worktree = appState.worktrees.first(where: { $0.path == path }),
+              let prNumber = worktree.prNumber,
+              worktree.prState == .open else {
+            return nil
+        }
+        return (number: prNumber, url: worktree.prURL)
+    }
+
+    private func sectionHeader(_ title: String, icon: String, color: Color) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 9))
+                .foregroundStyle(color)
+            Text(title)
+                .font(.caption2)
+                .fontWeight(.medium)
+                .foregroundStyle(.white.opacity(0.6))
+        }
+        .padding(.leading, 8)
+        .padding(.top, 12)
+        .padding(.bottom, 4)
+    }
+
+    private func agentRows(_ agents: [Agent]) -> some View {
+        ForEach(agents) { agent in
+            AgentRow(
+                agent: agent,
+                isSelected: appState.selectedAgent?.id == agent.id,
+                isKeyboardFocused: keyboardFocusedId == agent.id,
+                liveOutput: appState.liveOutput(for: agent),
+                pendingPR: pendingPR(for: agent),
+                onSelect: {
+                    appState.selectedAgent = agent
+                    keyboardFocusedId = agent.id
+                }
+            )
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -179,18 +256,29 @@ struct AgentSidebar: View {
 
     private var agentList: some View {
         ScrollView {
-            LazyVStack(spacing: 4) {
-                ForEach(appState.agents) { agent in
-                    AgentRow(
-                        agent: agent,
-                        isSelected: appState.selectedAgent?.id == agent.id,
-                        isKeyboardFocused: keyboardFocusedId == agent.id,
-                        liveOutput: appState.liveOutput(for: agent),
-                        onSelect: {
-                            appState.selectedAgent = agent
-                            keyboardFocusedId = agent.id
-                        }
-                    )
+            LazyVStack(alignment: .leading, spacing: 4) {
+                // Blocked section
+                if !blockedAgents.isEmpty {
+                    sectionHeader("Needs Attention", icon: "exclamationmark.triangle.fill", color: .orange)
+                    agentRows(blockedAgents)
+                }
+
+                // Open PRs section
+                if !prAgents.isEmpty {
+                    sectionHeader("Open PRs", icon: "arrow.triangle.pull", color: .green)
+                    agentRows(prAgents)
+                }
+
+                // Active section
+                if !activeAgents.isEmpty {
+                    sectionHeader("Active", icon: "circle.fill", color: .blue)
+                    agentRows(activeAgents)
+                }
+
+                // Idle section
+                if !idleAgents.isEmpty {
+                    sectionHeader("Idle", icon: "circle", color: .white.opacity(0.5))
+                    agentRows(idleAgents)
                 }
             }
             .padding(.horizontal, 8)
@@ -216,7 +304,7 @@ struct AgentSidebar: View {
     }
 
     private func moveFocus(_ delta: Int) {
-        let agents = appState.agents
+        let agents = allAgentsInOrder
         guard !agents.isEmpty else { return }
 
         if let currentId = keyboardFocusedId,

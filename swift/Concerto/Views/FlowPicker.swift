@@ -19,10 +19,35 @@ struct FlowPicker: View {
 
     private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
+    /// Agent requires area configuration before running
+    private var isConfigured: Bool {
+        !agent.area.isEmpty
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Run a flow")
                 .font(.headline)
+
+            // Configuration required warning
+            if !isConfigured {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Area not configured")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                        Text("Use `lfd agent update \(agent.id) --area src/` to set the working area")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.orange.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
 
             // Optional description/goal input
             VStack(alignment: .leading, spacing: 6) {
@@ -71,7 +96,7 @@ struct FlowPicker: View {
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(isRunning)
+                    .disabled(isRunning || !isConfigured)
 
                     Menu {
                         Button {
@@ -99,7 +124,7 @@ struct FlowPicker: View {
                         }
                     }
                     .menuStyle(.borderedButton)
-                    .disabled(isRunning)
+                    .disabled(isRunning || !isConfigured)
                 }
             }
 

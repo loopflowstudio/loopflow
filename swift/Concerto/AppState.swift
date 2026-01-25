@@ -816,20 +816,14 @@ final class AppState {
         }
     }
 
-    func createAgent(name: String, flow: String, goal: String?, areas: [String]) async throws {
+    func createAgent(name: String) async throws {
         guard let repo = currentRepo else { return }
 
         // Generate name if empty
         let agentName = name.isEmpty ? NameGenerator.generate() : name
 
-        // Create agent via lfd with stimulus: manual
-        let agent = try await agentService.createAgent(
-            name: agentName,
-            flow: flow,
-            goal: goal,
-            areas: areas,
-            repo: repo
-        )
+        // Create agent via lfd - starts with defaults, user configures later
+        let agent = try await agentService.createAgent(name: agentName, repo: repo)
 
         // Add to list and select
         agents.insert(agent, at: 0)

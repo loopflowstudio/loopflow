@@ -217,8 +217,9 @@ public struct AgentService: @unchecked Sendable {
         try await runShellCommand(["lfd", "install"])
     }
 
-    public func createAgent(name: String, flow: String, goal: String?, areas: [String], repo: URL) async throws -> Agent {
-        // Create agent via lfd HTTP API
+    public func createAgent(name: String, repo: URL) async throws -> Agent {
+        // Create agent via lfd HTTP API with minimal config
+        // User configures area, goal, flow in detail panel before running
         let baseURL = URL(string: "http://127.0.0.1:8765")!
         var components = URLComponents(url: baseURL.appendingPathComponent("agents"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "repo", value: repo.path)]
@@ -227,15 +228,12 @@ public struct AgentService: @unchecked Sendable {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let requestAreas = areas.isEmpty ? ["."] : areas
-        // Goal can be an inline string or a preset name
-        let goalValue: [String] = goal.map { [$0] } ?? []
-
+        // Create with name only - area/goal/flow configured later
         let body: [String: Any] = [
             "name": name.isEmpty ? NSNull() : name,
-            "flow": flow,
-            "goal": goalValue,
-            "area": requestAreas
+            "flow": "ship",  // Default flow
+            "goal": [] as [String],
+            "area": [] as [String]  // Empty = not configured yet
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 

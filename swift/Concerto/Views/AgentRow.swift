@@ -2,6 +2,7 @@
 // Uses status indicators from design: ● Running, ◐ Waiting, ○ Idle, ◷ Scheduled, ✓ Completed, ✗ Error
 
 import SwiftUI
+import AppKit
 import LoopflowCore
 
 struct AgentRow: View {
@@ -9,6 +10,7 @@ struct AgentRow: View {
     let isSelected: Bool
     var isKeyboardFocused: Bool = false
     let liveOutput: [OutputLine]
+    var pendingPR: (number: Int, url: URL?)? = nil  // PR awaiting review
     let onSelect: () -> Void
 
     @State private var isHovering = false
@@ -30,15 +32,33 @@ struct AgentRow: View {
 
                 Spacer()
 
-                // Flow badge
-                Text(agent.flowDisplay)
-                    .font(.caption2)
-                    .fontWeight(.medium)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.white.opacity(0.15))
-                    .foregroundStyle(.white.opacity(0.7))
-                    .clipShape(Capsule())
+                // PR badge (if pending review) or Flow badge
+                if let pr = pendingPR {
+                    Button {
+                        if let url = pr.url {
+                            NSWorkspace.shared.open(url)
+                        }
+                    } label: {
+                        Text("PR #\(pr.number)")
+                            .font(.caption2)
+                            .fontWeight(.medium)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.green.opacity(0.3))
+                            .foregroundStyle(.green)
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Text(agent.flowDisplay)
+                        .font(.caption2)
+                        .fontWeight(.medium)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.white.opacity(0.15))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .clipShape(Capsule())
+                }
             }
 
             // Secondary info line

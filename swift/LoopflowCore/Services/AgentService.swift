@@ -289,7 +289,7 @@ public struct AgentService: @unchecked Sendable {
         )
     }
 
-    public func runFlow(agentId: String, flow: String, stimulus: Stimulus.Kind, args: String, repo: URL) async throws {
+    public func runFlow(agentId: String, flow: String, stimulus: Stimulus.Kind, args: String) async throws {
         // Run flow for agent via lfd
         var command = ["lfd"]
         switch stimulus {

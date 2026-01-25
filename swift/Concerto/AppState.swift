@@ -836,14 +836,11 @@ final class AppState {
     }
 
     func runAgentFlow(agent: Agent, flow: String, stimulus: Stimulus.Kind, args: String = "") async throws {
-        guard let repo = currentRepo else { return }
-
         try await agentService.runFlow(
             agentId: agent.id,
             flow: flow,
             stimulus: stimulus,
-            args: args,
-            repo: repo
+            args: args
         )
 
         await refreshAgents()

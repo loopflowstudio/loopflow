@@ -299,8 +299,6 @@ def create_agent(
     If name is provided and an agent with that name exists in the repo,
     returns the existing agent without modification (use update_agent for changes).
 
-    If area is provided and an agent with that area exists in the repo,
-    returns the existing agent without modification.
     """
     if stimulus is None:
         stimulus = Stimulus("loop")
@@ -308,12 +306,6 @@ def create_agent(
     # Check for existing agent by name
     if name:
         existing = get_agent_by_name(name, repo)
-        if existing:
-            return existing
-
-    # Check for existing agent by area (backward compatibility)
-    if area:
-        existing = get_agent_by_area_repo(area, repo)
         if existing:
             return existing
 

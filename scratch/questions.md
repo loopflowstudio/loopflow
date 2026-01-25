@@ -3,6 +3,7 @@
 ## Open Questions
 
 1. **Backward Compatibility**: The old flow-centric commands (`lfd loop ship swift/`) no longer work. Should we add backward-compatible aliases or is the clean break intentional?
+   - Note: `create_agent()` no longer reuses agents by area (name-only).
 
 2. **Watch Path Override**: The design mentions `--path` option for `watch` command to override watch path from area. This is implemented but not tested. Should we add integration tests for watch stimulus with path override?
 

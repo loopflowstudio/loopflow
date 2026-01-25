@@ -20,11 +20,28 @@ let package = Package(
             name: "LoopflowCore",
             path: "LoopflowCore"
         ),
+        .binaryTarget(
+            name: "GhosttyKit",
+            path: "../vendor/ghostty/macos/GhosttyKit.xcframework"
+        ),
         .executableTarget(
             name: "Concerto",
-            dependencies: ["LoopflowCore"],
+            dependencies: [
+                "LoopflowCore",
+                "GhosttyKit"
+            ],
             path: "Concerto",
-            exclude: ["Info.plist", "Concerto.sdef"]
+            exclude: ["Info.plist", "Concerto.sdef"],
+            swiftSettings: [
+                .define("GHOSTTY_ENABLED")
+            ],
+            linkerSettings: [
+                .linkedFramework("Carbon"),
+                .linkedFramework("QuartzCore"),
+                .linkedFramework("Metal"),
+                .linkedFramework("IOKit"),
+                .linkedLibrary("c++")
+            ]
         ),
         .executableTarget(
             name: "Symphonia",

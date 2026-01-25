@@ -425,13 +425,11 @@ struct AgentDetailPanel: View {
                 .fontWeight(.medium)
                 .foregroundStyle(.secondary)
 
-            if Flags.embeddedTerminal, let path = agent.worktreePath {
-                // Use embedded Ghostty terminal when feature flag is enabled
+            if let path = agent.worktreePath {
                 GhosttyTerminalView(workingDirectory: path)
                     .frame(height: 200)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
-                // Default text-based output
                 let output = appState.liveOutput(for: agent)
                 if output.isEmpty {
                     Text("Waiting for output...")

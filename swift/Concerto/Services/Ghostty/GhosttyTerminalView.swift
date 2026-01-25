@@ -4,10 +4,10 @@
 import SwiftUI
 import AppKit
 
-#if canImport(GhosttyKit)
+#if GHOSTTY_ENABLED
 import GhosttyKit
 
-struct GhosttyTerminalView: NSViewRepresentable {
+struct GhosttyTerminalView: View {
     let workingDirectory: String
     let command: String?
     @ObservedObject var manager: GhosttyManager
@@ -22,6 +22,24 @@ struct GhosttyTerminalView: NSViewRepresentable {
         self.manager = manager
     }
 
+    var body: some View {
+        GeometryReader { geo in
+            GhosttyTerminalRepresentable(
+                workingDirectory: workingDirectory,
+                command: command,
+                size: geo.size,
+                manager: manager
+            )
+        }
+    }
+}
+
+struct GhosttyTerminalRepresentable: NSViewRepresentable {
+    let workingDirectory: String
+    let command: String?
+    let size: CGSize
+    @ObservedObject var manager: GhosttyManager
+
     func makeNSView(context: Context) -> GhosttyMetalView {
         let view = GhosttyMetalView()
         view.workingDirectory = workingDirectory
@@ -32,17 +50,15 @@ struct GhosttyTerminalView: NSViewRepresentable {
             manager.initialize()
         }
 
-        // Create surface when manager is ready
-        if case .ready = manager.state {
-            view.createSurface(manager: manager)
-        }
-
         return view
     }
 
     func updateNSView(_ nsView: GhosttyMetalView, context: Context) {
-        // Create surface if manager just became ready
-        if case .ready = manager.state, nsView.surface == nil {
+        // Update size from SwiftUI
+        nsView.sizeDidChange(size)
+
+        // Create surface if manager is ready and we have a valid size
+        if case .ready = manager.state, nsView.surface == nil, size.width > 0, size.height > 0 {
             nsView.createSurface(manager: manager)
         }
     }
@@ -51,9 +67,9 @@ struct GhosttyTerminalView: NSViewRepresentable {
 final class GhosttyMetalView: NSView {
     var workingDirectory: String = ""
     var command: String?
-    var surface: ghostty_surface_t?
+    nonisolated(unsafe) var surface: ghostty_surface_t?
 
-    private var displayLink: CVDisplayLink?
+    private nonisolated(unsafe) var displayLink: CADisplayLink?
     private var trackingArea: NSTrackingArea?
 
     override init(frame frameRect: NSRect) {
@@ -69,10 +85,20 @@ final class GhosttyMetalView: NSView {
     private func setupView() {
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.cgColor
+        // Ensure layer resizes with view
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
+        autoresizingMask = [.width, .height]
     }
 
     func createSurface(manager: GhosttyManager) {
-        guard surface == nil else { return }
+        guard surface == nil else {
+            print("[GhosttyMetalView] Surface already exists")
+            return
+        }
+
+        print("[GhosttyMetalView] Creating surface...")
+        print("[GhosttyMetalView] workingDirectory: \(workingDirectory)")
+        print("[GhosttyMetalView] frame: \(frame)")
 
         surface = manager.createSurface(
             workingDirectory: workingDirectory,
@@ -80,29 +106,30 @@ final class GhosttyMetalView: NSView {
             view: self
         )
 
-        if surface != nil {
+        if let surface {
+            print("[GhosttyMetalView] Surface created: \(surface)")
+            // Set content scale and size immediately
+            updateContentScale()
+            updateSurfaceSize()
             setupDisplayLink()
             setupTrackingArea()
+        } else {
+            print("[GhosttyMetalView] Failed to create surface")
         }
     }
 
     private func setupDisplayLink() {
-        var link: CVDisplayLink?
-        CVDisplayLinkCreateWithActiveCGDisplays(&link)
-        guard let link else { return }
+        print("[GhosttyMetalView] Setting up CADisplayLink...")
 
-        let opaqueView = Unmanaged.passUnretained(self).toOpaque()
-        CVDisplayLinkSetOutputCallback(link, { _, _, _, _, _, userdata -> CVReturn in
-            guard let userdata else { return kCVReturnSuccess }
-            let view = Unmanaged<GhosttyMetalView>.fromOpaque(userdata).takeUnretainedValue()
-            DispatchQueue.main.async {
-                view.draw()
-            }
-            return kCVReturnSuccess
-        }, opaqueView)
-
-        CVDisplayLinkStart(link)
+        let link = displayLink(target: self, selector: #selector(displayLinkFired))
+        link.add(to: .main, forMode: .common)
         displayLink = link
+
+        print("[GhosttyMetalView] CADisplayLink started")
+    }
+
+    @objc private func displayLinkFired(_ link: CADisplayLink) {
+        draw()
     }
 
     private func setupTrackingArea() {
@@ -116,8 +143,13 @@ final class GhosttyMetalView: NSView {
         trackingArea = area
     }
 
+    private var drawCount = 0
     private func draw() {
         guard let surface else { return }
+        drawCount += 1
+        if drawCount <= 5 || drawCount % 60 == 0 {
+            print("[GhosttyMetalView] draw() called, count: \(drawCount)")
+        }
         ghostty_surface_draw(surface)
     }
 
@@ -156,15 +188,25 @@ final class GhosttyMetalView: NSView {
     }
 
     private func updateContentScale() {
-        guard let surface, let window else { return }
-        let scale = window.backingScaleFactor
+        guard let surface else { return }
+        // Use window scale if available, otherwise use main screen scale
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
         ghostty_surface_set_content_scale(surface, scale, scale)
     }
 
     private func updateSurfaceSize() {
         guard let surface else { return }
-        let size = bounds.size
-        ghostty_surface_set_size(surface, UInt32(size.width), UInt32(size.height))
+        // Convert to backing (pixel) coordinates for retina displays
+        let backingSize = convertToBacking(bounds).size
+        guard backingSize.width > 0, backingSize.height > 0 else { return }
+        ghostty_surface_set_size(surface, UInt32(backingSize.width), UInt32(backingSize.height))
+    }
+
+    func sizeDidChange(_ newSize: CGSize) {
+        guard newSize.width > 0, newSize.height > 0 else { return }
+        setFrameSize(newSize)
+        // Also update content scale in case window changed
+        updateContentScale()
     }
 
     // MARK: - Input Handling
@@ -175,8 +217,24 @@ final class GhosttyMetalView: NSView {
             return
         }
 
-        let key = translateKey(event)
-        _ = ghostty_surface_key(surface, key)
+        let mods = event.modifierFlags
+
+        // Don't pass text for control key combinations - let Ghostty handle them
+        let hasControlMods = mods.contains(.control) || mods.contains(.command)
+
+        if hasControlMods {
+            // Control/command combinations: just send keycode + mods
+            let key = translateKey(event)
+            _ = ghostty_surface_key(surface, key)
+        } else {
+            // Regular keys: include the text
+            let characters = event.characters ?? ""
+            characters.withCString { textPtr in
+                var key = translateKey(event)
+                key.text = textPtr
+                _ = ghostty_surface_key(surface, key)
+            }
+        }
     }
 
     override func keyUp(with event: NSEvent) {
@@ -197,7 +255,6 @@ final class GhosttyMetalView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         guard let surface else { return }
-        let point = convert(event.locationInWindow, from: nil)
         _ = ghostty_surface_mouse_button(
             surface,
             GHOSTTY_MOUSE_PRESS,
@@ -247,12 +304,11 @@ final class GhosttyMetalView: NSView {
         var key = ghostty_input_key_s()
         key.action = GHOSTTY_ACTION_PRESS
         key.mods = translateMods(event.modifierFlags)
+        key.consumed_mods = GHOSTTY_MODS_NONE
         key.keycode = UInt32(event.keyCode)
-        key.key = GHOSTTY_KEY_UNIDENTIFIED
-
-        if let chars = event.characters, !chars.isEmpty {
-            key.composing = false
-        }
+        key.text = nil
+        key.unshifted_codepoint = 0
+        key.composing = false
 
         return key
     }
@@ -280,11 +336,9 @@ final class GhosttyMetalView: NSView {
     }
 
     deinit {
-        if let displayLink {
-            CVDisplayLinkStop(displayLink)
-        }
+        displayLink?.invalidate()
         if let surface {
-            GhosttyManager.shared.destroySurface(surface)
+            ghostty_surface_free(surface)
         }
     }
 }

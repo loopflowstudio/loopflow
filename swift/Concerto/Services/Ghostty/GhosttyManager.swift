@@ -4,12 +4,15 @@
 import Foundation
 import SwiftUI
 
-#if canImport(GhosttyKit)
+#if GHOSTTY_ENABLED
 import GhosttyKit
+
+// Compile-time marker: Real GhosttyKit implementation
+private let _ghosttyImplementation = "real"
 
 @MainActor
 final class GhosttyManager: ObservableObject {
-    enum State {
+    enum State: Equatable {
         case uninitialized
         case initializing
         case ready
@@ -18,26 +21,97 @@ final class GhosttyManager: ObservableObject {
 
     @Published private(set) var state: State = .uninitialized
 
-    private var app: ghostty_app_t?
-    private var config: ghostty_config_t?
+    private nonisolated(unsafe) var app: ghostty_app_t?
+    private nonisolated(unsafe) var config: ghostty_config_t?
 
     static let shared = GhosttyManager()
 
+    // Loopflow color scheme
+    private static let loopflowConfig = """
+    # Loopflow Terminal Theme - Cream on Burgundy
+    background = #4A1A2C
+    foreground = #F5E6D3
+    cursor-color = #F5E6D3
+    selection-background = #6B2D42
+    selection-foreground = #F5E6D3
+
+    # Palette - muted tones complementing burgundy
+    palette = 0=#2A0F18
+    palette = 1=#C75B75
+    palette = 2=#8B9A6B
+    palette = 3=#D4A574
+    palette = 4=#7B8FA8
+    palette = 5=#A67B93
+    palette = 6=#7FAFAF
+    palette = 7=#E8D4C4
+
+    # Bright variants
+    palette = 8=#4A2A38
+    palette = 9=#E87B95
+    palette = 10=#ABB97B
+    palette = 11=#E8C594
+    palette = 12=#9BAFC8
+    palette = 13=#C69BB3
+    palette = 14=#9FCFCF
+    palette = 15=#F5E6D3
+
+    font-size = 13
+    """
+
     private init() {}
 
+    private func writeLoopflowConfig() -> String? {
+        let tempDir = FileManager.default.temporaryDirectory
+        let configPath = tempDir.appendingPathComponent("concerto-ghostty-config")
+        do {
+            try Self.loopflowConfig.write(to: configPath, atomically: true, encoding: .utf8)
+            return configPath.path
+        } catch {
+            print("[GhosttyManager] Failed to write config: \(error)")
+            return nil
+        }
+    }
+
     func initialize() {
-        guard state == .uninitialized else { return }
+        guard state == .uninitialized else {
+            print("[GhosttyManager] Already initialized, state: \(state)")
+            return
+        }
         state = .initializing
+        print("[GhosttyManager] Starting initialization...")
+
+        // Initialize Ghostty library first
+        let initResult = ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv)
+        guard initResult == GHOSTTY_SUCCESS else {
+            let error = "ghostty_init failed with code \(initResult)"
+            print("[GhosttyManager] \(error)")
+            state = .failed(error)
+            return
+        }
+        print("[GhosttyManager] ghostty_init succeeded")
 
         // Create configuration
         guard let cfg = ghostty_config_new() else {
-            state = .failed("Failed to create Ghostty config")
+            let error = "Failed to create Ghostty config"
+            print("[GhosttyManager] \(error)")
+            state = .failed(error)
             return
+        }
+        print("[GhosttyManager] Config created")
+
+        // Write Loopflow theme to temp file and load it
+        let configPath = writeLoopflowConfig()
+        if let path = configPath {
+            path.withCString { pathPtr in
+                ghostty_config_load_file(cfg, pathPtr)
+            }
+            print("[GhosttyManager] Loaded Loopflow theme from \(path)")
         }
 
         ghostty_config_load_default_files(cfg)
         ghostty_config_finalize(cfg)
         self.config = cfg
+        print("[GhosttyManager] Config finalized")
 
         // Create runtime config with callbacks
         var runtimeConfig = ghostty_runtime_config_s()
@@ -73,15 +147,19 @@ final class GhosttyManager: ObservableObject {
         runtimeConfig.close_surface_cb = { userdata, processAlive in
             // Surface close callback
         }
+        print("[GhosttyManager] Runtime config prepared")
 
         // Create the app
         guard let ghosttyApp = ghostty_app_new(&runtimeConfig, cfg) else {
-            state = .failed("Failed to create Ghostty app")
+            let error = "Failed to create Ghostty app (ghostty_app_new returned nil)"
+            print("[GhosttyManager] \(error)")
+            state = .failed(error)
             return
         }
 
         self.app = ghosttyApp
         state = .ready
+        print("[GhosttyManager] Initialized successfully!")
     }
 
     func tick() {
@@ -94,15 +172,24 @@ final class GhosttyManager: ObservableObject {
         command: String? = nil,
         view: NSView
     ) -> ghostty_surface_t? {
-        guard let app, case .ready = state else { return nil }
+        print("[GhosttyManager] createSurface called")
+        guard let app else {
+            print("[GhosttyManager] createSurface: app is nil")
+            return nil
+        }
+        guard case .ready = state else {
+            print("[GhosttyManager] createSurface: state is not ready (\(state))")
+            return nil
+        }
 
+        print("[GhosttyManager] Creating surface config...")
         var surfaceConfig = ghostty_surface_config_new()
         surfaceConfig.userdata = Unmanaged.passUnretained(view).toOpaque()
         surfaceConfig.platform_tag = GHOSTTY_PLATFORM_MACOS
         surfaceConfig.platform = ghostty_platform_u(
             macos: ghostty_platform_macos_s(nsview: Unmanaged.passUnretained(view).toOpaque())
         )
-        surfaceConfig.scale_factor = NSScreen.main?.backingScaleFactor ?? 2.0
+        surfaceConfig.scale_factor = Double(NSScreen.main?.backingScaleFactor ?? 2.0)
 
         return workingDirectory.withCString { wdPtr in
             surfaceConfig.working_directory = wdPtr
@@ -134,10 +221,13 @@ final class GhosttyManager: ObservableObject {
 
 #else
 
+// Compile-time marker: Stub implementation
+private let _ghosttyImplementation = "stub"
+
 // Stub implementation when GhosttyKit is not available
 @MainActor
 final class GhosttyManager: ObservableObject {
-    enum State {
+    enum State: Equatable {
         case uninitialized
         case initializing
         case ready

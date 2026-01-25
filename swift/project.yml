@@ -37,6 +37,12 @@ targets:
           - Info.plist
     dependencies:
       - target: LoopflowCore
+      - framework: ../vendor/ghostty/macos/GhosttyKit.xcframework
+        embed: false
+      - sdk: Carbon.framework
+      - sdk: QuartzCore.framework
+      - sdk: Metal.framework
+      - sdk: IOKit.framework
     settings:
       base:
         INFOPLIST_FILE: Concerto/Info.plist
@@ -46,6 +52,10 @@ targets:
         # GhosttyKit framework search path for when it's available
         # Build with Zig first: cd vendor/ghostty && zig build -Doptimize=ReleaseFast
         FRAMEWORK_SEARCH_PATHS: "$(inherited) $(PROJECT_DIR)/../vendor/ghostty/macos"
+        # Enable GhosttyKit compilation flag
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) GHOSTTY_ENABLED"
+        # Link C++ standard library for Ghostty
+        OTHER_LDFLAGS: "-lc++"
 
   ConcertoTests:
     type: bundle.unit-test

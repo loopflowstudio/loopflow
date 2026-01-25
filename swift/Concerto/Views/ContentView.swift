@@ -1,4 +1,4 @@
-// Main content view with sidebar and worktree detail panel.
+// Main content view with agent sidebar and detail panel.
 
 import SwiftUI
 import LoopflowCore
@@ -49,7 +49,7 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            WorktreeSidebar(appState: appState)
+            AgentSidebar(appState: appState)
                 .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 360)
         } detail: {
             if appState.isLoading {
@@ -91,7 +91,7 @@ struct ContentView: View {
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
-                .help("Refresh workspaces and tasks")
+                .help("Refresh agents and worktrees")
             }
         }
         .background(palette.background)
@@ -125,9 +125,9 @@ struct ContentView: View {
         var actions: [PaletteAction] = []
 
         // Global actions
-        actions.append(PaletteAction("New Workspace", icon: "plus.square", shortcut: "⌘N") {
-            // Post notification or use environment to trigger sheet
-            NotificationCenter.default.post(name: .showNewWorktreeSheet, object: nil)
+        actions.append(PaletteAction("New Agent", icon: "plus.square", shortcut: "⌘N") {
+            // Post notification to trigger new agent sheet
+            NotificationCenter.default.post(name: .showNewAgentSheet, object: nil)
         })
 
         actions.append(PaletteAction("Focus Prompt", icon: "text.cursor", shortcut: "⌘L") {
@@ -197,11 +197,14 @@ struct ContentView: View {
     private var detailContent: some View {
         if Flags.beta, let flow = appState.selectedFlow {
             flowEditorBinding(flow)
+        } else if let agent = appState.selectedAgent {
+            // Show agent detail panel when an agent is selected
+            AgentDetailPanel(appState: appState, agent: agent)
         } else if let worktree = appState.selectedWorktree {
-            // Show worktree detail panel when a worktree is selected
+            // Fallback: show worktree detail panel for legacy worktrees
             WorktreeDetailPanel(appState: appState, worktree: worktree)
         } else {
-            // No worktree selected - show prompt launcher centered
+            // No agent or worktree selected - show prompt launcher centered
             PromptLauncher(appState: appState)
         }
     }

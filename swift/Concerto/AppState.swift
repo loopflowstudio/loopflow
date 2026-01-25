@@ -96,10 +96,22 @@ final class AppState {
     var contextPreview: ContextPreview = .empty
     var excludedFiles: Set<String> = []  // Files excluded via preview panel
 
-    // Sidebar state
-    var selectedWorktree: Worktree?
-    var selectedFlow: FlowDef?
+    // Sidebar state - agent is primary selection
     var selectedAgent: Agent?
+    var selectedFlow: FlowDef?
+
+    // Computed: worktree for selected agent (worktrees are implementation details)
+    var selectedWorktree: Worktree? {
+        get {
+            guard let agent = selectedAgent,
+                  let path = agent.worktreePath else { return _selectedWorktree }
+            return worktrees.first { $0.path == path } ?? _selectedWorktree
+        }
+        set {
+            _selectedWorktree = newValue
+        }
+    }
+    private var _selectedWorktree: Worktree?
 
     // Live output state
     var liveOutputBySession: [String: [OutputLine]] = [:]
@@ -189,13 +201,16 @@ final class AppState {
         agents = [
             Agent(
                 id: "mock-agent-1",
+                name: "swift-falcon",
                 flow: "ship",
                 goal: [],
-                area: ["src/tests/"],
+                area: ["src/auth"],
                 repo: currentRepo?.path ?? "/tmp/demo",
+                stimulus: Stimulus(kind: .loop),
                 status: .running,
                 iteration: 3,
-                mainBranch: "agent-test-coverage",
+                worktreePath: nil,
+                branch: "agent-auth-feature",
                 prLimit: 5,
                 mergeMode: .pr,
                 pid: 12345,
@@ -203,17 +218,54 @@ final class AppState {
             ),
             Agent(
                 id: "mock-agent-2",
+                name: "crystal-melody",
                 flow: "ship",
-                goal: [],
-                area: ["docs/"],
+                goal: ["product-engineer"],
+                area: ["src/api"],
                 repo: currentRepo?.path ?? "/tmp/demo",
-                status: .idle,
-                iteration: 12,
-                mainBranch: "agent-docs-sync",
+                stimulus: Stimulus(kind: .loop),
+                status: .waiting,
+                iteration: 5,
+                worktreePath: nil,
+                branch: "agent-api-refactor",
                 prLimit: 3,
                 mergeMode: .pr,
                 pid: nil,
+                createdAt: Date().addingTimeInterval(-7200)
+            ),
+            Agent(
+                id: "mock-agent-3",
+                name: "Quick fix",
+                flow: "debug",
+                goal: [],
+                area: ["."],
+                repo: currentRepo?.path ?? "/tmp/demo",
+                stimulus: Stimulus(kind: .manual),
+                status: .idle,
+                iteration: 0,
+                worktreePath: nil,
+                branch: nil,
+                prLimit: 5,
+                mergeMode: .pr,
+                pid: nil,
                 createdAt: Date().addingTimeInterval(-86400)
+            ),
+            Agent(
+                id: "mock-agent-4",
+                name: "Nightly polish",
+                flow: "polish",
+                goal: [],
+                area: ["."],
+                repo: currentRepo?.path ?? "/tmp/demo",
+                stimulus: Stimulus(kind: .cron, cron: "0 9 * * *"),
+                status: .idle,
+                iteration: 12,
+                worktreePath: nil,
+                branch: nil,
+                prLimit: 5,
+                mergeMode: .pr,
+                pid: nil,
+                createdAt: Date().addingTimeInterval(-172800)
             )
         ]
         lfdConnected = true
@@ -754,9 +806,52 @@ final class AppState {
         guard let repo = currentRepo else { return }
         do {
             agents = try await agentService.listAgents(repo: repo)
+            // Update selected agent if it exists in the refreshed list
+            if let selected = selectedAgent,
+               let updated = agents.first(where: { $0.id == selected.id }) {
+                selectedAgent = updated
+            }
         } catch {
             agents = []
         }
+    }
+
+    func createAgent(name: String, description: String, area: String) async throws {
+        guard let repo = currentRepo else { return }
+
+        // Generate name if empty
+        let agentName = name.isEmpty ? NameGenerator.generate() : name
+
+        // Create agent via lfd with stimulus: manual
+        let agent = try await agentService.createAgent(
+            name: agentName,
+            description: description,
+            area: area,
+            repo: repo
+        )
+
+        // Add to list and select
+        agents.insert(agent, at: 0)
+        selectedAgent = agent
+    }
+
+    func runAgentFlow(agent: Agent, flow: String, stimulus: Stimulus.Kind, args: String = "") async throws {
+        guard let repo = currentRepo else { return }
+
+        try await agentService.runFlow(
+            agentId: agent.id,
+            flow: flow,
+            stimulus: stimulus,
+            args: args,
+            repo: repo
+        )
+
+        await refreshAgents()
+    }
+
+    func stopAgent(_ agent: Agent) async throws {
+        try await agentService.stopAgent(agentId: agent.id)
+        await refreshAgents()
     }
 
     func liveOutput(for agent: Agent) -> [OutputLine] {

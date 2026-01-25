@@ -1,4 +1,5 @@
 // Row view for displaying an agent in the sidebar.
+// Uses status indicators from design: ● Running, ◐ Waiting, ○ Idle, ◷ Scheduled, ✓ Completed, ✗ Error
 
 import SwiftUI
 import LoopflowCore
@@ -13,51 +14,68 @@ struct AgentRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Circle()
-                    .fill(agent.status.color)
-                    .frame(width: 8, height: 8)
+            HStack(spacing: 8) {
+                // Status indicator using design system icons
+                Image(systemName: agent.statusIndicator.icon)
+                    .font(.system(size: 10))
+                    .foregroundStyle(agent.statusIndicator.color)
+                    .help(statusHelpText)
 
-                Text(agent.areaDisplay)
+                // Display name (user-visible name, not area)
+                Text(agent.displayName)
                     .fontWeight(.medium)
                     .foregroundStyle(.white)
+                    .lineLimit(1)
 
                 Spacer()
 
-                Text(agent.statusText)
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.6))
+                // Flow badge
+                Text(agent.flowDisplay)
+                    .font(.caption2)
+                    .fontWeight(.medium)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.white.opacity(0.15))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .clipShape(Capsule())
             }
 
-            if !agent.detailText.isEmpty {
-                Text(agent.detailText)
+            // Secondary info line
+            HStack(spacing: 4) {
+                Text(agent.areaDisplay)
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.6))
-            }
+                    .foregroundStyle(.white.opacity(0.5))
 
-            if !agent.iterationText.isEmpty {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.caption2)
+                if !agent.iterationText.isEmpty {
+                    Text("•")
+                        .font(.caption)
                         .foregroundStyle(.white.opacity(0.3))
-
                     Text(agent.iterationText)
                         .font(.caption)
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(.white.opacity(0.5))
+                }
+
+                if agent.status == .waiting {
+                    Text("•")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.3))
+                    Text("PR limit")
+                        .font(.caption)
+                        .foregroundStyle(.yellow.opacity(0.7))
                 }
             }
 
             // Live output when selected or running
             if (isSelected || agent.status == .running) && !liveOutput.isEmpty {
                 LoopLiveOutput(lines: liveOutput)
-                    .frame(height: 120)
+                    .frame(height: 80)
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(isSelected ? Color.white.opacity(0.2) : (isHovering ? Color.white.opacity(0.1) : Color.clear))
+                .fill(isSelected ? Color.white.opacity(0.2) : (isHovering ? Color.white.opacity(0.08) : Color.clear))
         )
         .contentShape(Rectangle())
         .onHover { hovering in
@@ -65,6 +83,23 @@ struct AgentRow: View {
         }
         .onTapGesture {
             onSelect()
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Agent: \(agent.displayName)")
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    }
+
+    private var statusHelpText: String {
+        switch agent.status {
+        case .running: return "Running"
+        case .waiting: return "Waiting (PR limit reached)"
+        case .idle:
+            if agent.stimulus.kind == .cron {
+                return "Scheduled"
+            }
+            return "Idle"
+        case .completed: return "Completed"
+        case .error: return "Error"
         }
     }
 }

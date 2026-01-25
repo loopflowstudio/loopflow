@@ -213,6 +213,54 @@ public struct AgentService: @unchecked Sendable {
         try await runShellCommand(["lfd", "install"])
     }
 
+    public func createAgent(name: String, description: String, area: String, repo: URL) async throws -> Agent {
+        // Create agent via lfd create command
+        // For now, create a local agent model. Full lfd integration will follow.
+        let id = UUID().uuidString
+        return Agent(
+            id: id,
+            name: name,
+            flow: "ship",
+            goal: [],
+            area: area.isEmpty ? ["."] : [area],
+            repo: repo.path,
+            stimulus: Stimulus(kind: .manual),
+            status: .idle,
+            iteration: 0,
+            worktreePath: nil,
+            branch: nil,
+            prLimit: 5,
+            mergeMode: .pr,
+            pid: nil,
+            createdAt: Date()
+        )
+    }
+
+    public func runFlow(agentId: String, flow: String, stimulus: Stimulus.Kind, args: String, repo: URL) async throws {
+        // Run flow for agent via lfd
+        var command = ["lfd"]
+        switch stimulus {
+        case .once:
+            command.append("run")
+        case .loop:
+            command.append("loop")
+        case .watch:
+            command.append("subscribe")
+        case .cron:
+            command.append("schedule")
+        case .manual:
+            command.append("run")
+        }
+        command.append(flow)
+        command.append(".")  // area - would come from agent
+
+        try await runShellCommand(command)
+    }
+
+    public func stopAgent(agentId: String) async throws {
+        try await runShellCommand(["lfd", "stop", agentId])
+    }
+
     // MARK: - Private helpers
 
     private func decodeStringArray(_ str: String?) -> [String] {

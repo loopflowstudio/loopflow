@@ -1,6 +1,6 @@
-"""Tests to ensure schema alignment between Python, Swift, and TypeScript models.
+"""Tests to ensure schema alignment between Python and Swift models.
 
-Python models are the source of truth. Swift and TypeScript should mirror them exactly.
+Python models are the source of truth. Swift should mirror them exactly.
 """
 
 import re
@@ -56,28 +56,7 @@ def extract_swift_fields(struct_name: str, file_path: Path) -> set[str]:
     return fields
 
 
-def extract_typescript_fields(interface_name: str, file_path: Path) -> set[str]:
-    """Extract field names from a TypeScript interface."""
-    content = file_path.read_text()
-
-    # Find the interface definition
-    pattern = rf"export interface {interface_name}\s*\{{([^}}]+)\}}"
-    match = re.search(pattern, content, re.DOTALL)
-    if not match:
-        return set()
-
-    interface_body = match.group(1)
-    fields = set()
-
-    # Match field declarations: name: Type or name?: Type
-    field_pattern = r"(\w+)\??\s*:"
-    for match in re.finditer(field_pattern, interface_body):
-        fields.add(match.group(1))
-
-    return fields
-
-
-# Field name mappings for snake_case (Python) to camelCase (Swift/TS)
+# Field name mappings for snake_case (Python) to camelCase (Swift)
 PYTHON_TO_CAMEL = {
     "started_at": "startedAt",
     "ended_at": "endedAt",
@@ -127,16 +106,6 @@ class TestStepRunSchema:
         missing = core_fields - swift_fields
         assert not missing, f"Swift StepRun missing fields: {missing}"
 
-    def test_steprun_typescript_matches_python(self):
-        """TypeScript StepRun fields match Python schema."""
-        python_fields = extract_python_fields("StepRun", REPO_ROOT / "src/loopflow/lfd/models.py")
-        ts_fields = extract_typescript_fields("StepRun", REPO_ROOT / "web/src/models/step.ts")
-
-        # TypeScript should have these core fields from Python
-        core_fields = {"id", "step", "repo", "worktree", "status", "startedAt", "model", "runMode"}
-        missing = core_fields - ts_fields
-        assert not missing, f"TypeScript StepRun missing fields: {missing}"
-
 
 class TestAgentSchema:
     """Agent schema alignment tests."""
@@ -165,14 +134,6 @@ class TestAgentSchema:
         missing = core_fields - swift_fields
         assert not missing, f"Swift Agent missing fields: {missing}"
 
-    def test_agent_typescript_matches_python(self):
-        """TypeScript Agent fields match Python schema."""
-        ts_fields = extract_typescript_fields("Agent", REPO_ROOT / "web/src/models/agent.ts")
-
-        core_fields = {"id", "repo", "flow", "goal", "area", "status", "iteration"}
-        missing = core_fields - ts_fields
-        assert not missing, f"TypeScript Agent missing fields: {missing}"
-
 
 class TestFlowRunSchema:
     """FlowRun schema alignment tests."""
@@ -194,11 +155,3 @@ class TestFlowRunSchema:
         core_fields = {"id", "flow", "repo", "status", "iteration"}
         missing = core_fields - swift_fields
         assert not missing, f"Swift FlowRun missing fields: {missing}"
-
-    def test_flowrun_typescript_matches_python(self):
-        """TypeScript FlowRun fields match Python schema."""
-        ts_fields = extract_typescript_fields("FlowRun", REPO_ROOT / "web/src/models/flow-run.ts")
-
-        core_fields = {"id", "flow", "repo", "status", "iteration"}
-        missing = core_fields - ts_fields
-        assert not missing, f"TypeScript FlowRun missing fields: {missing}"

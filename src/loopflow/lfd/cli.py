@@ -13,16 +13,18 @@ from pathlib import Path
 import typer
 
 from loopflow.lf.flows import load_flow
-from loopflow.lf.goals import goal_exists, list_goals
+from loopflow.lf.goals import list_goals
 from loopflow.lf.logging import get_log_dir
 from loopflow.lfd.agent import (
     create_agent,
     delete_agent,
     get_agent,
+    get_agent_by_name,
     get_wt_from_cwd,
     list_agents,
     start_agent,
     stop_agent,
+    update_agent,
 )
 from loopflow.lfd.daemon.launchd import install as launchd_install
 from loopflow.lfd.daemon.launchd import is_running
@@ -215,26 +217,39 @@ def start(
 # Agent commands
 
 
-@app.command()
-def loop(
-    flow: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
-    area: str = typer.Argument(..., help="Area of responsibility (e.g., swift/, src/, .)"),
-    goals: list[str] = typer.Option(None, "-g", "-G", "--goal", help="Goal to add (repeatable)"),
-    limit: int = typer.Option(None, "-l", "--limit", help="PR limit override"),
-    merge_mode: str = typer.Option(None, "--merge-mode", help="Merge mode: pr or land"),
-    foreground: bool = typer.Option(False, "-f", "--foreground", help="Run in foreground"),
-):
-    """Start a continuous agent loop (loop stimulus).
+def _resolve_agent(name_or_id: str, repo: Path, c: dict[str, str]) -> Agent | None:
+    """Resolve agent by name or ID. Returns None if not found."""
+    # Try by name first
+    agent = get_agent_by_name(name_or_id, repo)
+    if agent:
+        return agent
+    # Then try by ID
+    return get_agent(name_or_id)
 
-    Flow is required - specifies which flow to run from .lf/flows/.
-    Area is required - scopes the work (e.g., swift/, src/, or . for whole repo).
-    Goals are optional - add personality/role goals.
+
+def _validate_agent_for_run(agent: Agent, c: dict[str, str]) -> None:
+    """Validate agent has required config for running. Exits on error."""
+    if agent.area is None:
+        typer.echo(
+            f"{c['red']}Error:{c['reset']} Agent '{agent.name}' has no area configured",
+            err=True,
+        )
+        typer.echo(f"Set area with: lfd area {agent.name} <path>")
+        raise typer.Exit(1)
+
+
+@app.command()
+def create(
+    name: str = typer.Argument(None, help="Agent name (generated if omitted)"),
+):
+    """Create a new agent.
+
+    Creates an agent with the given name (or generates one).
+    Configure with `lfd area`, `lfd goal`, `lfd flow` before running.
 
     Examples:
-        lfd loop ship swift/                              # default goal
-        lfd loop ship swift/ -g product-engineer          # with role
-        lfd loop ship swift/ -g product-engineer -g designer  # multiple roles
-        lfd loop ship .                                   # whole repo
+        lfd create                    # create with generated name
+        lfd create swift-falcon       # create with specific name
     """
     c = _colors()
     repo = get_wt_from_cwd()
@@ -242,62 +257,259 @@ def loop(
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
 
-    # Validate area looks like a path
-    if not _is_area(area):
-        typer.echo(
-            f"{c['red']}Error:{c['reset']} '{area}' doesn't look like an area. "
-            "Use a path like swift/, src/, or . for whole repo.",
-            err=True,
-        )
-        typer.echo(f"\nDid you mean: lfd loop {flow} {area}/ ?")
+    # Check if name already exists
+    if name:
+        existing = get_agent_by_name(name, repo)
+        if existing:
+            typer.echo(f"Agent '{name}' already exists ({existing.short_id()})")
+            return
+
+    agent = create_agent(repo=repo, name=name)
+
+    typer.echo(
+        f"{c['green']}Created{c['reset']} {c['bold']}{agent.name}{c['reset']} ({agent.short_id()})"
+    )
+    typer.echo(f"  Repo: {repo}")
+    typer.echo("")
+    typer.echo("Configure before running:")
+    typer.echo(f"  lfd area {agent.name} src/")
+    typer.echo(f'  lfd goal {agent.name} "fix lint errors"')
+    typer.echo(f"  lfd flow {agent.name} ship")
+    typer.echo("")
+    typer.echo(f"Then run: lfd loop {agent.name}")
+
+
+@app.command()
+def area(
+    name: str = typer.Argument(..., help="Agent name or ID"),
+    paths: list[str] = typer.Argument(..., help="Area paths (e.g., src/, swift/)"),
+):
+    """Set the working area for an agent.
+
+    Examples:
+        lfd area swift-falcon src/
+        lfd area swift-falcon src/ tests/
+    """
+    c = _colors()
+    repo = get_wt_from_cwd()
+    if not repo:
+        typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
 
-    goal_list = _parse_goals(goals)
+    agent = _resolve_agent(name, repo, c)
+    if not agent:
+        typer.echo(f"{c['red']}Error:{c['reset']} Agent '{name}' not found", err=True)
+        raise typer.Exit(1)
 
-    # Validate goals exist
-    for goal_name in goal_list:
-        if goal_name != "default" and not goal_exists(repo, goal_name):
-            typer.echo(
-                f"{c['red']}Error:{c['reset']} Goal '{goal_name}' not found",
-                err=True,
-            )
-            available = list_goals(repo)
-            if available:
-                typer.echo(f"Available goals: {', '.join(available)}")
+    updated = update_agent(agent.id, area=paths)
+    if updated:
+        typer.echo(f"Set area: {', '.join(paths)}")
+    else:
+        typer.echo(f"{c['red']}Error:{c['reset']} Failed to update agent", err=True)
+        raise typer.Exit(1)
+
+
+@app.command()
+def goal(
+    name: str = typer.Argument(..., help="Agent name or ID"),
+    goal_text: str = typer.Argument(..., help="Goal (inline text or preset name)"),
+):
+    """Set the goal for an agent.
+
+    Examples:
+        lfd goal swift-falcon "fix lint errors"
+        lfd goal swift-falcon product-engineer
+    """
+    c = _colors()
+    repo = get_wt_from_cwd()
+    if not repo:
+        typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    agent = _resolve_agent(name, repo, c)
+    if not agent:
+        typer.echo(f"{c['red']}Error:{c['reset']} Agent '{name}' not found", err=True)
+        raise typer.Exit(1)
+
+    updated = update_agent(agent.id, goal=[goal_text])
+    if updated:
+        typer.echo(f"Set goal: {goal_text}")
+    else:
+        typer.echo(f"{c['red']}Error:{c['reset']} Failed to update agent", err=True)
+        raise typer.Exit(1)
+
+
+@app.command("flow")
+def set_flow(
+    name: str = typer.Argument(..., help="Agent name or ID"),
+    flow_name: str = typer.Argument(..., help="Flow name (from .lf/flows/)"),
+):
+    """Set the flow for an agent.
+
+    Examples:
+        lfd flow swift-falcon ship
+        lfd flow swift-falcon polish
+    """
+    c = _colors()
+    repo = get_wt_from_cwd()
+    if not repo:
+        typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    agent = _resolve_agent(name, repo, c)
+    if not agent:
+        typer.echo(f"{c['red']}Error:{c['reset']} Agent '{name}' not found", err=True)
+        raise typer.Exit(1)
+
+    # Validate flow exists
+    flow_name = _validate_flow(repo, flow_name, c)
+
+    updated = update_agent(agent.id, flow=flow_name)
+    if updated:
+        typer.echo(f"Set flow: {flow_name}")
+    else:
+        typer.echo(f"{c['red']}Error:{c['reset']} Failed to update agent", err=True)
+        raise typer.Exit(1)
+
+
+@app.command()
+def show(
+    name: str = typer.Argument(..., help="Agent name or ID"),
+):
+    """Show details for an agent.
+
+    Examples:
+        lfd show swift-falcon
+    """
+    c = _colors()
+    repo = get_wt_from_cwd()
+
+    agent = _resolve_agent(name, repo, c) if repo else get_agent(name)
+    if not agent:
+        typer.echo(f"{c['red']}Error:{c['reset']} Agent '{name}' not found", err=True)
+        raise typer.Exit(1)
+
+    _print_agent_detail(agent, c)
+
+
+@app.command("list")
+def list_cmd():
+    """List all agents.
+
+    Examples:
+        lfd list
+    """
+    c = _colors()
+    repo = get_wt_from_cwd()
+
+    agents = list_agents(repo=repo)
+    if not agents:
+        typer.echo(f"{c['dim']}No agents configured{c['reset']}")
+        typer.echo("Create an agent with: lfd create")
+        return
+
+    typer.echo(f"{'NAME':<20} {'AREA':<20} {'STATUS':<10} {'STIMULUS':<12} ID")
+    typer.echo("-" * 75)
+
+    for agent in agents:
+        status_c = _status_color(agent.status, c)
+        area_str = agent.area_display if agent.area else f"{c['dim']}(not set){c['reset']}"
+        if len(area_str) > 20:
+            area_str = area_str[:17] + "..."
+
+        name_str = agent.name
+        if len(name_str) > 20:
+            name_str = name_str[:17] + "..."
+
+        typer.echo(
+            f"{name_str:<20} {area_str:<20} "
+            f"{status_c}{agent.status.value:<10}{c['reset']} "
+            f"{str(agent.stimulus):<12} {agent.short_id()}"
+        )
+
+
+@app.command()
+def loop(
+    name: str = typer.Argument(..., help="Agent name or ID"),
+    area_opt: str = typer.Option(None, "--area", "-a", help="Set area (creates agent if needed)"),
+    goal_opt: str = typer.Option(None, "--goal", "-g", help="Set goal"),
+    flow_opt: str = typer.Option(None, "--flow", help="Set flow"),
+    limit: int = typer.Option(None, "-l", "--limit", help="PR limit override"),
+    merge_mode: str = typer.Option(None, "--merge-mode", help="Merge mode: pr or land"),
+    foreground: bool = typer.Option(False, "-f", "--foreground", help="Run in foreground"),
+):
+    """Start a continuous agent loop (loop stimulus).
+
+    Agent name is required. Creates the agent if it doesn't exist and --area is provided.
+    Validates that area is configured before starting.
+
+    Examples:
+        lfd loop swift-falcon                             # run existing agent
+        lfd loop swift-falcon --area src/                 # create + set area + run
+        lfd loop swift-falcon --area src/ --goal "fix lint"
+    """
+    c = _colors()
+    repo = get_wt_from_cwd()
+    if not repo:
+        typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    # Get or create agent
+    agent = _resolve_agent(name, repo, c)
+    if not agent:
+        if area_opt:
+            # Create new agent with options
+            agent = create_agent(repo=repo, name=name)
+        else:
+            typer.echo(f"{c['red']}Error:{c['reset']} Agent '{name}' not found", err=True)
+            typer.echo(f"Create with: lfd create {name}")
             raise typer.Exit(1)
 
-    flow = _validate_flow(repo, flow, c)
+    # Apply options if provided
+    if area_opt:
+        update_agent(agent.id, area=[area_opt])
+        agent.area = [area_opt]
+    if goal_opt:
+        update_agent(agent.id, goal=[goal_opt])
+        agent.goal = [goal_opt]
+    if flow_opt:
+        flow_opt = _validate_flow(repo, flow_opt, c)
+        update_agent(agent.id, flow=flow_opt)
+        agent.flow = flow_opt
 
     # Validate merge_mode if specified
     if merge_mode and merge_mode not in ("pr", "land"):
         typer.echo(f"{c['red']}Error:{c['reset']} merge-mode must be 'pr' or 'land'", err=True)
         raise typer.Exit(1)
 
-    # Create or get agent
-    pr_limit = limit if limit is not None else 5
-    mm = MergeMode(merge_mode) if merge_mode else MergeMode.PR
+    if limit is not None:
+        update_agent(agent.id, pr_limit=limit)
+    if merge_mode:
+        update_agent(agent.id, merge_mode=MergeMode(merge_mode))
 
-    agent = create_agent(
-        repo=repo,
-        flow=flow,
-        goal=goal_list,
-        area=[area],
-        pr_limit=pr_limit,
-        merge_mode=mm,
-        stimulus=Stimulus("loop"),
-    )
+    # Update stimulus to loop
+    update_agent(agent.id, stimulus=Stimulus("loop"))
+
+    # Validate agent is configured
+    _validate_agent_for_run(agent, c)
+
+    # Validate flow exists
+    _validate_flow(repo, agent.flow, c)
+
+    # Refresh agent after updates
+    agent = get_agent(agent.id)
 
     # Start it
     result = start_agent(agent.id, foreground=foreground)
     if result:
         if foreground:
-            msg = f"{c['green']}Completed{c['reset']} loop {c['bold']}{area}{c['reset']}"
+            msg = f"{c['green']}Completed{c['reset']} loop {c['bold']}{agent.name}{c['reset']}"
             typer.echo(f"{msg} ({agent.short_id()})")
         else:
-            msg = f"{c['green']}Started{c['reset']} loop {c['bold']}{area}{c['reset']}"
+            msg = f"{c['green']}Started{c['reset']} loop {c['bold']}{agent.name}{c['reset']}"
             typer.echo(f"{msg} ({agent.short_id()})")
             typer.echo(f"  Repo: {repo}")
-            typer.echo(f"  Main branch: {agent.main_branch}")
+            typer.echo(f"  Area: {agent.area_display}")
             typer.echo(f"  Goals: {agent.goal_display}")
             typer.echo(f"  Flow: {agent.flow}")
             typer.echo(f"  PR limit: {agent.pr_limit}")
@@ -307,8 +519,7 @@ def loop(
     elif result.reason == "waiting":
         msg = f"{c['yellow']}Waiting:{c['reset']} {result.outstanding} outstanding PRs"
         typer.echo(f"{msg} (limit {agent.pr_limit})")
-        msg = f"Run 'lfops land --squash' from {agent.main_branch} worktree to land work"
-        typer.echo(msg)
+        typer.echo("Run 'lfops land --squash' to land work")
         raise typer.Exit(0)
     else:
         typer.echo(f"{c['red']}Error:{c['reset']} Failed to start agent", err=True)
@@ -317,19 +528,19 @@ def loop(
 
 @app.command()
 def run(
-    flow_name: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
-    area: str = typer.Argument(..., help="Area of responsibility (e.g., swift/, src/, .)"),
-    goals: list[str] = typer.Option(None, "-g", "-G", "--goal", help="Goal to add (repeatable)"),
-    clipboard: bool = typer.Option(
-        False, "-c", "-C", "--clipboard", help="Include clipboard content"
-    ),
+    name: str = typer.Argument(..., help="Agent name or ID"),
+    area_opt: str = typer.Option(None, "--area", "-a", help="Set area (creates agent if needed)"),
+    goal_opt: str = typer.Option(None, "--goal", "-g", help="Set goal"),
+    flow_opt: str = typer.Option(None, "--flow", help="Set flow"),
 ):
-    """Run a flow once (once stimulus - single run).
+    """Run an agent once (once stimulus - single run).
+
+    Agent name is required. Creates the agent if it doesn't exist and --area is provided.
 
     Examples:
-        lfd run ship swift/                        # one-off iteration
-        lfd run ship swift/ -g product-engineer    # with role
-        lfd run ship . -c                          # whole repo with clipboard
+        lfd run swift-falcon                             # run existing agent once
+        lfd run swift-falcon --area src/                 # create + set area + run once
+        lfd run swift-falcon --area src/ --goal "fix lint"
     """
     c = _colors()
     repo = get_wt_from_cwd()
@@ -337,48 +548,45 @@ def run(
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
 
-    # Validate area looks like a path
-    if not _is_area(area):
-        typer.echo(
-            f"{c['red']}Error:{c['reset']} '{area}' doesn't look like an area. "
-            "Use a path like swift/, src/, or . for whole repo.",
-            err=True,
-        )
-        raise typer.Exit(1)
-
-    goal_list = _parse_goals(goals)
-
-    # Validate goals exist
-    for goal_name in goal_list:
-        if goal_name != "default" and not goal_exists(repo, goal_name):
-            typer.echo(f"{c['red']}Error:{c['reset']} Goal '{goal_name}' not found", err=True)
+    # Get or create agent
+    agent = _resolve_agent(name, repo, c)
+    if not agent:
+        if area_opt:
+            agent = create_agent(repo=repo, name=name)
+        else:
+            typer.echo(f"{c['red']}Error:{c['reset']} Agent '{name}' not found", err=True)
+            typer.echo(f"Create with: lfd create {name}")
             raise typer.Exit(1)
 
-    flow_name = _validate_flow(repo, flow_name, c)
+    # Apply options if provided
+    if area_opt:
+        update_agent(agent.id, area=[area_opt])
+        agent.area = [area_opt]
+    if goal_opt:
+        update_agent(agent.id, goal=[goal_opt])
+        agent.goal = [goal_opt]
+    if flow_opt:
+        flow_opt = _validate_flow(repo, flow_opt, c)
+        update_agent(agent.id, flow=flow_opt)
+        agent.flow = flow_opt
 
-    # Handle clipboard
-    if clipboard:
-        result = subprocess.run(["pbpaste"], capture_output=True, text=True)
-        if result.returncode == 0 and result.stdout.strip():
-            typer.echo(f"{c['dim']}Clipboard content will be included{c['reset']}")
+    # Update stimulus to once
+    update_agent(agent.id, stimulus=Stimulus("once"))
 
-    # Create a temporary agent with once stimulus and run it
-    agent = create_agent(
-        repo=repo,
-        flow=flow_name,
-        goal=goal_list,
-        area=[area],
-        stimulus=Stimulus("once"),
-    )
+    # Validate agent is configured
+    _validate_agent_for_run(agent, c)
+
+    # Validate flow exists
+    _validate_flow(repo, agent.flow, c)
+
+    # Refresh agent after updates
+    agent = get_agent(agent.id)
 
     # Start it in foreground (runs once)
     result = start_agent(agent.id, foreground=True)
 
-    # Clean up temporary agent
-    delete_agent(agent.id)
-
     if result:
-        msg = f"{c['green']}Completed{c['reset']} run {c['bold']}{area}{c['reset']}"
+        msg = f"{c['green']}Completed{c['reset']} run {c['bold']}{agent.name}{c['reset']}"
         typer.echo(msg)
     else:
         typer.echo(f"{c['red']}Error:{c['reset']} Failed to run", err=True)
@@ -386,19 +594,22 @@ def run(
 
 
 @app.command()
-def subscribe(
-    flow: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
-    area: str = typer.Argument(..., help="Area to watch (e.g., swift/, src/api/)"),
-    goals: list[str] = typer.Option(None, "-g", "-G", "--goal", help="Goal to add (repeatable)"),
+def watch(
+    name: str = typer.Argument(..., help="Agent name or ID"),
+    area_opt: str = typer.Option(None, "--area", "-a", help="Set area (creates agent if needed)"),
+    path_opt: str = typer.Option(None, "--path", "-p", help="Watch path (defaults to area)"),
+    goal_opt: str = typer.Option(None, "--goal", "-g", help="Set goal"),
+    flow_opt: str = typer.Option(None, "--flow", help="Set flow"),
 ):
-    """Subscribe to area changes on main (watch stimulus).
+    """Watch for changes on origin/main (watch stimulus).
 
-    The area serves as both the context for the agent and the paths to watch.
-    When files in the area change on main, activates one iteration.
+    Triggers when files in the watched path change on main.
+    Watch path defaults to area but can be overridden.
 
     Examples:
-        lfd subscribe ship src/api/             # watch src/api/ for changes
-        lfd subscribe ship docs/                # watch docs/ for changes
+        lfd watch swift-falcon                            # watch existing agent
+        lfd watch swift-falcon --area src/                # create + set area + watch
+        lfd watch swift-falcon --area src/ --path tests/  # watch tests/, work on src/
     """
     c = _colors()
     repo = get_wt_from_cwd()
@@ -406,49 +617,63 @@ def subscribe(
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
 
-    if not _is_area(area):
-        typer.echo(
-            f"{c['red']}Error:{c['reset']} '{area}' doesn't look like an area.",
-            err=True,
-        )
-        raise typer.Exit(1)
-
-    goal_list = _parse_goals(goals)
-    for goal_name in goal_list:
-        if goal_name != "default" and not goal_exists(repo, goal_name):
-            typer.echo(f"{c['red']}Error:{c['reset']} Goal '{goal_name}' not found", err=True)
+    # Get or create agent
+    agent = _resolve_agent(name, repo, c)
+    if not agent:
+        if area_opt:
+            agent = create_agent(repo=repo, name=name)
+        else:
+            typer.echo(f"{c['red']}Error:{c['reset']} Agent '{name}' not found", err=True)
+            typer.echo(f"Create with: lfd create {name}")
             raise typer.Exit(1)
 
-    flow = _validate_flow(repo, flow, c)
+    # Apply options if provided
+    if area_opt:
+        update_agent(agent.id, area=[area_opt])
+        agent.area = [area_opt]
+    if goal_opt:
+        update_agent(agent.id, goal=[goal_opt])
+        agent.goal = [goal_opt]
+    if flow_opt:
+        flow_opt = _validate_flow(repo, flow_opt, c)
+        update_agent(agent.id, flow=flow_opt)
+        agent.flow = flow_opt
 
-    # Create agent with watch stimulus - area is used as watch paths
-    agent = create_agent(
-        repo=repo,
-        flow=flow,
-        goal=goal_list,
-        area=[area],
-        stimulus=Stimulus("watch"),
-    )
+    # Update stimulus to watch
+    update_agent(agent.id, stimulus=Stimulus("watch"))
 
-    msg = f"{c['green']}Subscribed{c['reset']} {c['bold']}{area}{c['reset']}"
+    # Validate agent is configured
+    _validate_agent_for_run(agent, c)
+
+    # Validate flow exists
+    _validate_flow(repo, agent.flow, c)
+
+    # Refresh agent after updates
+    agent = get_agent(agent.id)
+
+    watch_path = path_opt or agent.area_display
+    msg = f"{c['green']}Watching{c['reset']} {c['bold']}{agent.name}{c['reset']}"
     typer.echo(f"{msg} ({agent.short_id()})")
+    typer.echo(f"  Area: {agent.area_display}")
     typer.echo(f"  Goals: {agent.goal_display}")
     typer.echo(f"  Flow: {agent.flow}")
-    typer.echo(f"  Activates when {area} changes on main")
+    typer.echo(f"  Activates when {watch_path} changes on main")
 
 
-@app.command()
-def schedule(
-    flow: str = typer.Argument(..., help="Flow to run (from .lf/flows/<name>.py)"),
-    area: str = typer.Argument(..., help="Area of responsibility (e.g., swift/, src/, .)"),
+@app.command("cron")
+def cron_cmd(
+    name: str = typer.Argument(..., help="Agent name or ID"),
     cron_expr: str = typer.Argument(..., help="Cron expression (e.g., '0 9 * * *')"),
-    goals: list[str] = typer.Option(None, "-g", "-G", "--goal", help="Goal to add (repeatable)"),
+    area_opt: str = typer.Option(None, "--area", "-a", help="Set area (creates agent if needed)"),
+    goal_opt: str = typer.Option(None, "--goal", "-g", help="Set goal"),
+    flow_opt: str = typer.Option(None, "--flow", help="Set flow"),
 ):
-    """Schedule a flow to run on cron (cron stimulus).
+    """Schedule an agent to run on cron (cron stimulus).
 
     Examples:
-        lfd schedule ship . "0 9 * * *"           # 9am daily
-        lfd schedule ship src/ui/ "0 10 * * MON"  # 10am Mondays
+        lfd cron swift-falcon "0 9 * * *"                # run at 9am daily
+        lfd cron swift-falcon "0 9 * * *" --area src/    # create + set area + schedule
+        lfd cron swift-falcon "0 10 * * MON"             # run at 10am Mondays
     """
     c = _colors()
     repo = get_wt_from_cwd()
@@ -456,33 +681,43 @@ def schedule(
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
 
-    if not _is_area(area):
-        typer.echo(
-            f"{c['red']}Error:{c['reset']} '{area}' doesn't look like an area.",
-            err=True,
-        )
-        raise typer.Exit(1)
-
-    goal_list = _parse_goals(goals)
-    for goal_name in goal_list:
-        if goal_name != "default" and not goal_exists(repo, goal_name):
-            typer.echo(f"{c['red']}Error:{c['reset']} Goal '{goal_name}' not found", err=True)
+    # Get or create agent
+    agent = _resolve_agent(name, repo, c)
+    if not agent:
+        if area_opt:
+            agent = create_agent(repo=repo, name=name)
+        else:
+            typer.echo(f"{c['red']}Error:{c['reset']} Agent '{name}' not found", err=True)
+            typer.echo(f"Create with: lfd create {name}")
             raise typer.Exit(1)
 
-    flow = _validate_flow(repo, flow, c)
+    # Apply options if provided
+    if area_opt:
+        update_agent(agent.id, area=[area_opt])
+        agent.area = [area_opt]
+    if goal_opt:
+        update_agent(agent.id, goal=[goal_opt])
+        agent.goal = [goal_opt]
+    if flow_opt:
+        flow_opt = _validate_flow(repo, flow_opt, c)
+        update_agent(agent.id, flow=flow_opt)
+        agent.flow = flow_opt
 
-    # Create agent with cron stimulus
-    agent = create_agent(
-        repo=repo,
-        flow=flow,
-        goal=goal_list,
-        area=[area],
-        stimulus=Stimulus("cron", cron=cron_expr),
-    )
+    # Update stimulus to cron
+    update_agent(agent.id, stimulus=Stimulus("cron", cron=cron_expr))
 
-    typer.echo(
-        f"{c['green']}Scheduled{c['reset']} {c['bold']}{area}{c['reset']} ({agent.short_id()})"
-    )
+    # Validate agent is configured
+    _validate_agent_for_run(agent, c)
+
+    # Validate flow exists
+    _validate_flow(repo, agent.flow, c)
+
+    # Refresh agent after updates
+    agent = get_agent(agent.id)
+
+    msg = f"{c['green']}Scheduled{c['reset']} {c['bold']}{agent.name}{c['reset']}"
+    typer.echo(f"{msg} ({agent.short_id()})")
+    typer.echo(f"  Area: {agent.area_display}")
     typer.echo(f"  Goals: {agent.goal_display}")
     typer.echo(f"  Flow: {agent.flow}")
     typer.echo(f"  Cron: {cron_expr}")
@@ -517,6 +752,35 @@ def _get_scheduler_status() -> dict | None:
         return None
 
 
+def _get_daemon_health() -> dict | None:
+    """Get daemon health from HTTP endpoint."""
+    try:
+        import urllib.request
+
+        req = urllib.request.Request("http://127.0.0.1:8765/health", method="GET")
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            import json
+
+            data = json.loads(resp.read().decode())
+            if data.get("ok"):
+                return data.get("result")
+        return None
+    except Exception:
+        return None
+
+
+def _format_uptime(seconds: int) -> str:
+    """Format uptime in human-readable form."""
+    if seconds < 60:
+        return f"{seconds}s"
+    elif seconds < 3600:
+        return f"{seconds // 60}m"
+    elif seconds < 86400:
+        return f"{seconds // 3600}h {(seconds % 3600) // 60}m"
+    else:
+        return f"{seconds // 86400}d {(seconds % 86400) // 3600}h"
+
+
 @app.command()
 def status(
     agent_id: str = typer.Argument(None, help="Agent ID (optional, shows all if omitted)"),
@@ -539,6 +803,19 @@ def status(
             raise typer.Exit(1)
         _print_agent_detail(agent, c)
     else:
+        # Show daemon health
+        health = _get_daemon_health()
+        if health:
+            uptime = _format_uptime(health.get("uptime_seconds", 0))
+            version = health.get("version", "?")
+            pid = health.get("pid", "?")
+            status_line = f"v{version}, pid {pid}, up {uptime}"
+            typer.echo(f"Daemon: {c['green']}healthy{c['reset']} ({status_line})")
+        else:
+            typer.echo(f"Daemon: {c['red']}not running{c['reset']}")
+            typer.echo(f"  {c['dim']}Start with: lfd install{c['reset']}")
+        typer.echo("")
+
         # Show scheduler status if daemon is running
         sched = _get_scheduler_status()
         if sched:

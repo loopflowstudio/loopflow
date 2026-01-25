@@ -1,5 +1,5 @@
 // Agent - an autonomous AI coding agent.
-// Stimulus types: once (single run), loop (continuous), watch (on file change), cron (scheduled).
+// Stimulus types: manual (interactive), once (single run), loop (continuous), watch (on file change), cron (scheduled).
 
 import Foundation
 import SwiftUI
@@ -7,6 +7,7 @@ import SwiftUI
 /// Determines when an agent runs.
 public struct Stimulus: Sendable, Hashable, Codable {
     public enum Kind: String, Sendable, Codable {
+        case manual  // User-triggered, interactive work
         case once
         case loop
         case watch
@@ -27,20 +28,42 @@ public struct Stimulus: Sendable, Hashable, Codable {
         }
         return kind.rawValue
     }
+
+    public var icon: String {
+        switch kind {
+        case .manual: return "circle"  // ○ Idle
+        case .once: return "play.circle"
+        case .loop: return "circle.fill"  // ● Running
+        case .watch: return "eye.circle"
+        case .cron: return "clock"  // ◷ Scheduled
+        }
+    }
 }
 
 public enum AgentStatus: String, Sendable, Codable {
     case idle
     case running
     case waiting
+    case completed
     case error
 
     public var color: Color {
         switch self {
         case .running: return .green
-        case .waiting: return .blue
+        case .waiting: return .yellow
         case .idle: return .gray
+        case .completed: return .green
         case .error: return .red
+        }
+    }
+
+    public var icon: String {
+        switch self {
+        case .running: return "circle.fill"  // ●
+        case .waiting: return "circle.lefthalf.filled"  // ◐
+        case .idle: return "circle"  // ○
+        case .completed: return "checkmark.circle.fill"  // ✓
+        case .error: return "xmark.circle.fill"  // ✗
         }
     }
 }
@@ -52,19 +75,22 @@ public enum MergeMode: String, Sendable, Codable {
 
 public struct Agent: Sendable, Identifiable, Hashable {
     public let id: String
-    public let flow: String
-    public let goal: [String]
-    public let area: [String]
+    public var name: String  // User-visible name (e.g., "swift-falcon")
+    public var flow: String
+    public var goal: [String]?  // Optional, validated at run-time
+    public var area: [String]?  // Optional, validated at run-time
     public let repo: String
 
     public var stimulus: Stimulus
     public var status: AgentStatus
     public var iteration: Int
 
-    public var mainBranch: String
+    // Hidden implementation details
+    public var worktreePath: String?  // Path to the worktree (renamed from mainBranch)
+    public var branch: String?  // Git branch (auto-generated)
+
     public var prLimit: Int
     public var mergeMode: MergeMode
-
     public var pid: Int?
     public var createdAt: Date
 
@@ -73,14 +99,16 @@ public struct Agent: Sendable, Identifiable, Hashable {
 
     public init(
         id: String,
-        flow: String,
-        goal: [String] = [],
-        area: [String] = ["."],
+        name: String = "",
+        flow: String = "ship",
+        goal: [String]? = nil,
+        area: [String]? = nil,
         repo: String,
-        stimulus: Stimulus = Stimulus(kind: .loop),
+        stimulus: Stimulus = Stimulus(kind: .manual),
         status: AgentStatus = .idle,
         iteration: Int = 0,
-        mainBranch: String,
+        worktreePath: String? = nil,
+        branch: String? = nil,
         prLimit: Int = 5,
         mergeMode: MergeMode = .pr,
         pid: Int? = nil,
@@ -88,6 +116,7 @@ public struct Agent: Sendable, Identifiable, Hashable {
         lastMainSha: String? = nil
     ) {
         self.id = id
+        self.name = name
         self.flow = flow
         self.goal = goal
         self.area = area
@@ -95,7 +124,8 @@ public struct Agent: Sendable, Identifiable, Hashable {
         self.stimulus = stimulus
         self.status = status
         self.iteration = iteration
-        self.mainBranch = mainBranch
+        self.worktreePath = worktreePath
+        self.branch = branch
         self.prLimit = prLimit
         self.mergeMode = mergeMode
         self.pid = pid
@@ -103,18 +133,43 @@ public struct Agent: Sendable, Identifiable, Hashable {
         self.lastMainSha = lastMainSha
     }
 
+    /// Check if agent has required config for running.
+    public var isConfigured: Bool {
+        area != nil
+    }
+
+
     public var shortId: String { String(id.prefix(7)) }
 
+    /// User-visible display name. Uses the name if set, otherwise generates from area/flow.
+    public var displayName: String {
+        if !name.isEmpty { return name }
+        return generateNameFromInput()
+    }
+
+    private func generateNameFromInput() -> String {
+        // Generate a display name from the agent's configuration
+        let areaStr: String
+        if let firstArea = area?.first {
+            areaStr = firstArea == "." ? "root" : firstArea
+        } else {
+            areaStr = "root"
+        }
+        return "\(areaStr) · \(flow.isEmpty ? "default" : flow)"
+    }
+
     public var areaDisplay: String {
-        area.first == "." ? "root" : area.joined(separator: ", ")
+        guard let area = area else { return "" }
+        return area.first == "." ? "." : area.joined(separator: ", ")
     }
 
     public var goalDisplay: String {
-        goal.isEmpty ? "default" : goal.joined(separator: ", ")
+        guard let goal = goal else { return "" }
+        return goal.isEmpty ? "" : goal.joined(separator: ", ")
     }
 
     public var flowDisplay: String {
-        flow.isEmpty ? "default" : flow
+        flow.isEmpty ? "ship" : flow
     }
 
     public var statusText: String {
@@ -122,6 +177,7 @@ public struct Agent: Sendable, Identifiable, Hashable {
         case .running: return "Running"
         case .waiting: return "Waiting"
         case .idle: return "Idle"
+        case .completed: return "Completed"
         case .error: return "Error"
         }
     }
@@ -131,11 +187,33 @@ public struct Agent: Sendable, Identifiable, Hashable {
     }
 
     public var detailText: String {
-        let parts = [flowDisplay, goalDisplay].filter { !$0.isEmpty }
+        var parts: [String] = []
+        if !areaDisplay.isEmpty { parts.append(areaDisplay) }
+        if !flowDisplay.isEmpty { parts.append(flowDisplay) }
+        if stimulus.kind != .manual { parts.append(stimulus.kind.rawValue) }
         return parts.joined(separator: " · ")
     }
 
     public var stimulusText: String {
         stimulus.description
+    }
+
+    /// Status indicator combining status and stimulus
+    public var statusIndicator: (icon: String, color: Color) {
+        switch status {
+        case .running:
+            return ("circle.fill", .green)
+        case .waiting:
+            return ("circle.lefthalf.filled", .yellow)
+        case .error:
+            return ("xmark.circle.fill", .red)
+        case .completed:
+            return ("checkmark.circle.fill", .green)
+        case .idle:
+            if stimulus.kind == .cron {
+                return ("clock", .gray)
+            }
+            return ("circle", .gray)
+        }
     }
 }

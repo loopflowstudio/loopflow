@@ -21,8 +21,8 @@ def apply(conn: sqlite3.Connection) -> None:
             name TEXT NOT NULL,   -- unique name, used for worktree/branch naming
             repo TEXT NOT NULL,
             flow TEXT NOT NULL,
-            goal TEXT NOT NULL,  -- JSON array
-            area TEXT NOT NULL,   -- JSON array (context focus only)
+            goal TEXT,            -- JSON array (optional, validated at run-time)
+            area TEXT,            -- JSON array (optional, validated at run-time)
 
             mode TEXT NOT NULL DEFAULT 'loop',  -- loop, watch, cron
             status TEXT NOT NULL DEFAULT 'idle',
@@ -46,7 +46,6 @@ def apply(conn: sqlite3.Connection) -> None:
             pending_activations INTEGER NOT NULL DEFAULT 0
         );
 
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_area_repo ON agents(area, repo);
         CREATE INDEX IF NOT EXISTS idx_agents_repo ON agents(repo);
         CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
 
@@ -56,8 +55,8 @@ def apply(conn: sqlite3.Connection) -> None:
             agent TEXT,  -- agent ID (nullable for one-off runs)
 
             flow TEXT NOT NULL,
-            goal TEXT NOT NULL,  -- JSON array
-            area TEXT NOT NULL,   -- JSON array
+            goal TEXT,            -- JSON array (nullable)
+            area TEXT,            -- JSON array (nullable)
             repo TEXT NOT NULL,
 
             status TEXT NOT NULL DEFAULT 'pending',

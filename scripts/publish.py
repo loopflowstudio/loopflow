@@ -12,7 +12,26 @@ import argparse
 import json
 import subprocess
 import sys
+import urllib.request
 from pathlib import Path
+
+from loopflow.lf.messages import generate_release_notes
+from loopflow.publish import (
+    R2_PUBLIC_URL,
+    build_dmg,
+    build_package,
+    bump_version,
+    check_ci_passed,
+    check_publish_ready,
+    get_dmg_path,
+    get_version,
+    install_locally,
+    publish_package,
+    restart_daemon,
+    run_tests,
+    upload_dmg,
+    write_version,
+)
 
 ROOT = Path(__file__).parent.parent
 
@@ -97,8 +116,6 @@ def _get_open_release_pr() -> tuple[str | None, str | None]:
 
 def _is_on_pypi(version: str) -> bool:
     """Check if version is already on PyPI."""
-    import urllib.request
-
     try:
         with urllib.request.urlopen(
             "https://pypi.org/pypi/loopflow/json", timeout=10
@@ -114,15 +131,6 @@ def _is_on_pypi(version: str) -> bool:
 
 def _finalize_release(version: str, skip_dmg: bool) -> int:
     """Complete release: tag, publish to PyPI, build DMG."""
-    from loopflow.publish import (
-        build_dmg,
-        build_package,
-        get_dmg_path,
-        install_locally,
-        publish_package,
-        upload_dmg,
-    )
-
     print(f"Finalizing release v{version}...")
 
     # Update local main to match origin
@@ -209,8 +217,6 @@ def _finalize_release(version: str, skip_dmg: bool) -> int:
     print(f"\nReleased v{version}")
     print("https://pypi.org/project/loopflow/")
     if not skip_dmg:
-        from loopflow.publish import R2_PUBLIC_URL
-
         print(f"{R2_PUBLIC_URL}/LoopflowConcerto-{version}.dmg")
     return 0
 
@@ -222,16 +228,6 @@ def _create_release_pr(
     skip_screenshots: bool,
 ) -> int:
     """Create release PR with version bump."""
-    from loopflow.lf.messages import generate_release_notes
-    from loopflow.publish import (
-        build_package,
-        bump_version,
-        check_ci_passed,
-        check_publish_ready,
-        run_tests,
-        write_version,
-    )
-
     # Step 1: Preflight checks
     print("Checking publish readiness...")
     state = check_publish_ready(ROOT)
@@ -426,15 +422,6 @@ def main() -> int:
         print("Error: --dmg-only and --skip-dmg are mutually exclusive", file=sys.stderr)
         return 1
 
-    # Import here so --help works without dependencies
-    from loopflow.publish import (
-        R2_PUBLIC_URL,
-        build_dmg,
-        get_dmg_path,
-        get_version,
-        upload_dmg,
-    )
-
     # Handle DMG-only mode
     if args.dmg_only:
         version = get_version()
@@ -466,12 +453,10 @@ def main() -> int:
         print(f"\nDMG published: {R2_PUBLIC_URL}/LoopflowConcerto-{version}.dmg")
         return 0
 
-    # Handle --local mode: build and install only
+    # Handle --local mode: build, install, and restart daemon
     if args.local:
-        from loopflow.publish import build_package, install_locally
-
         if args.dry_run:
-            print("Would build package and install locally")
+            print("Would build package, install locally, and restart daemon")
             return 0
 
         print("Building package...")
@@ -489,6 +474,14 @@ def main() -> int:
             print(output, file=sys.stderr)
             return 1
         print("Installed locally.")
+
+        print("Restarting daemon...")
+        success, message = restart_daemon()
+        if success:
+            print(message)
+        else:
+            print(f"Warning: {message}", file=sys.stderr)
+
         return 0
 
     # --- Idempotent release flow: detect state and act accordingly ---
@@ -537,8 +530,6 @@ def main() -> int:
 
     # State 3: No release in progress → start new release
     if args.dry_run:
-        from loopflow.publish import bump_version, check_publish_ready
-
         state = check_publish_ready(ROOT)
         if not state.ready:
             print(f"Error: {state.message}", file=sys.stderr)

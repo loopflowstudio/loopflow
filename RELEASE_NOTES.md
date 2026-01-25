@@ -1,13 +1,13 @@
-# v0.6.11
+# v0.7.0
 
-This release adds watch and cron trigger support for background agents with automatic retry and circuit breaker protection. It also simplifies context configuration by consolidating goals into voices and replacing multiple diff flags with a single `--diff-mode` option.
+This release introduces DAG-based flow execution with fork/synthesize patterns, a redesigned Concerto UI centered on agents with sidebar navigation and detail panels, and persistent agent worktrees that survive across iterations. The daemon now automatically resets on schema mismatch and consolidates migrations into a baseline schema.
 
 ## Changes
 
-- Add watch mode for file-change triggered agents with glob pattern support
-- Add cron mode improvements for scheduled agent triggers
-- Add retry with exponential backoff (3 retries, 30s) and circuit breaker (trips after 5 failures)
-- Consolidate goals into voices with global voice support via `~/.lf/voices/`
-- Replace `--diff/--diff-files` flags with single `--diff-mode` option (FILES, DIFF, NONE)
-- Add explicit agent mode field (`loop`, `watch`, `cron`) to data model
-- Clean up temporary agents after `lfd run` completes
+- Add DAG-based flow execution with `fork` and `synthesize` steps for parallel agent workflows
+- Redesign Concerto UI with agent-centric sidebar, detail panel, and flow picker
+- Persist agent worktrees across iterations and move branch on completion
+- Add `lfops cycle` command to land PR and continue work in fresh worktree
+- Consolidate database migrations into baseline schema with auto-reset on mismatch
+- Rename `voice` to `goal` and `trigger/mode` to `stimulus` throughout codebase
+- Remove website deploy from publish workflow; add `--version` flag using PyPI API

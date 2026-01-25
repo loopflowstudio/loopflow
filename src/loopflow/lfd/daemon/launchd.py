@@ -82,6 +82,10 @@ def _generate_plist() -> str:
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>ExitTimeOut</key>
+    <integer>30</integer>
     <key>StandardOutPath</key>
     <string>{log_path}</string>
     <key>StandardErrorPath</key>
@@ -132,27 +136,65 @@ def remove_pid() -> None:
     PID_PATH.unlink(missing_ok=True)
 
 
+def _kill_orphan_lfd(port: int = 8765) -> None:
+    """Kill orphan lfd processes on the HTTP port.
+
+    Only kills processes that are actually lfd (checks command line).
+    This handles cases where a dev `uv run lfd serve` or crashed daemon
+    left an orphan process holding the port.
+    """
+    # Find PIDs on the port
+    result = subprocess.run(
+        ["lsof", "-ti", f":{port}"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return
+
+    for pid_str in result.stdout.strip().split("\n"):
+        try:
+            pid = int(pid_str)
+            # Check if it's actually lfd by reading /proc or ps
+            ps_result = subprocess.run(
+                ["ps", "-p", str(pid), "-o", "command="],
+                capture_output=True,
+                text=True,
+            )
+            if ps_result.returncode == 0:
+                cmd = ps_result.stdout.strip()
+                # Only kill if it looks like lfd
+                if "lfd" in cmd or "loopflow" in cmd:
+                    os.kill(pid, 9)
+        except (ValueError, ProcessLookupError):
+            pass
+
+    time.sleep(0.3)
+
+
 def install() -> bool:
     """Install the launchd plist and start the daemon.
 
     Uses bootout/bootstrap for proper service lifecycle.
     If already installed, unloads first to pick up any plist changes.
+    Kills any orphan processes on the HTTP port before starting.
     """
     PLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    # Always bootout first to ensure clean state (ignores errors if not loaded)
+    # Write new plist first
+    plist_content = _generate_plist()
+    PLIST_PATH.write_text(plist_content)
+
+    # Bootout to stop the managed service (if running)
     subprocess.run(
         ["launchctl", "bootout", _get_service_target()],
         capture_output=True,
     )
+    time.sleep(0.3)
 
-    # Wait for launchd to fully unload the service
-    time.sleep(0.5)
-
-    # Write new plist
-    plist_content = _generate_plist()
-    PLIST_PATH.write_text(plist_content)
+    # Kill any orphan lfd processes on the port (from dev runs, crashed daemons, etc.)
+    _kill_orphan_lfd()
 
     # Bootstrap the service
     result = subprocess.run(
@@ -161,11 +203,14 @@ def install() -> bool:
     )
 
     if result.returncode != 0:
+        # Bootstrap can fail if KeepAlive already restarted the service
+        if is_running():
+            return True
         return False
 
-    # Wait for service to start (may take a moment to register)
-    for i in range(20):  # Increased from 10 to 20
-        time.sleep(0.2)  # Increased from 0.1 to 0.2
+    # Wait for service to start
+    for _ in range(20):
+        time.sleep(0.2)
         if is_running():
             return True
 

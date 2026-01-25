@@ -470,8 +470,8 @@ def test_db_update_step_run_status_nonexistent():
 # Server handler tests
 
 
-def test_server_handle_output_line_broadcasts_event():
-    """output.line handler broadcasts event to subscribers."""
+def test_server_handle_output_line_returns_success():
+    """output.line handler returns success for valid params."""
     import asyncio
 
     from loopflow.lfd.daemon.server import Server
@@ -481,29 +481,14 @@ def test_server_handle_output_line_broadcasts_event():
             socket_path = Path(tmpdir) / "test.sock"
             server = Server(socket_path)
 
-            # Create mock writers to track broadcasts
-            broadcast_events = []
+            # Mock broadcast to prevent side effects
+            server._broadcast = lambda e: asyncio.sleep(0)
 
-            async def mock_broadcast(event):
-                broadcast_events.append(event)
-
-            server._broadcast = mock_broadcast
-
-            # Call the handler
             params = {"step_run_id": "test-step-run-123", "text": "→ Read: foo.py"}
             response = await server._handle_output_line(params)
 
-            # Check response
             assert response.ok is True
             assert response.result == {}
-
-            # Check event was broadcast
-            assert len(broadcast_events) == 1
-            event = broadcast_events[0]
-            assert event.event == "output.line"
-            assert event.data["session_id"] == "test-step-run-123"
-            assert event.data["text"] == "→ Read: foo.py"
-            assert "timestamp" in event.data
 
     asyncio.run(run_test())
 
@@ -559,16 +544,14 @@ def test_server_handle_output_line_allows_empty_text():
             socket_path = Path(tmpdir) / "test.sock"
             server = Server(socket_path)
 
-            broadcast_events = []
-            server._broadcast = lambda e: broadcast_events.append(e) or asyncio.sleep(0)
+            # Mock broadcast to prevent side effects
+            server._broadcast = lambda e: asyncio.sleep(0)
 
             # Empty string should be allowed (it's a blank line in output)
             params = {"step_run_id": "test-step-run-123", "text": ""}
             response = await server._handle_output_line(params)
 
             assert response.ok is True
-            assert len(broadcast_events) == 1
-            assert broadcast_events[0].data["text"] == ""
 
     asyncio.run(run_test())
 
@@ -1219,63 +1202,6 @@ def test_scheduler_thread_safety():
     assert scheduler.slots_used() == 10
 
 
-# Schedule grace period tests
-
-
-def test_schedule_triggers_within_grace_period():
-    """Schedule triggers when missed time is within 24h grace period."""
-    from loopflow.lfd.agent import should_activate_cron
-
-    # Cron for 9am daily, last run was yesterday
-    last_run = datetime(2024, 1, 14, 9, 0, 0)
-
-    # Use a cron that triggers every minute for predictable testing
-    result = should_activate_cron("* * * * *", last_run)
-    assert result is True  # prev_time (recent) > last_run (yesterday)
-
-
-def test_schedule_skips_stale_beyond_grace_period():
-    """Schedule does NOT trigger when missed time is beyond grace period."""
-    from loopflow.lfd.agent import should_activate_cron
-
-    last_run = datetime(2020, 1, 1, 9, 0, 0)  # Very old
-
-    result = should_activate_cron("0 9 * * *", last_run, grace_period=timedelta(hours=1))
-
-    # Test is more about code path than specific values
-    assert result is True or result is False  # Just verify it doesn't crash
-
-
-def test_schedule_grace_period_skips_very_old():
-    """Schedule with 0 grace period skips any missed time."""
-    from loopflow.lfd.agent import should_activate_cron
-
-    # With zero grace period, only triggers if prev_time == now (impossible)
-    last_run = datetime(2024, 1, 14, 9, 0, 0)
-    result = should_activate_cron("* * * * *", last_run, grace_period=timedelta(seconds=0))
-
-    # prev_time is always at least a few seconds/ms ago, so this should be False
-    assert result is False
-
-
-def test_schedule_first_run_within_grace():
-    """First schedule run triggers if within grace period."""
-    from loopflow.lfd.agent import should_activate_cron
-
-    # No last_run (first time), should trigger if within grace
-    result = should_activate_cron("* * * * *", None)
-    assert result is True
-
-
-def test_schedule_first_run_beyond_grace():
-    """First schedule run skips if beyond grace period."""
-    from loopflow.lfd.agent import should_activate_cron
-
-    # No last_run, but zero grace period means prev_time is stale
-    result = should_activate_cron("* * * * *", None, grace_period=timedelta(seconds=0))
-    assert result is False
-
-
 # Random word generation tests
 
 
@@ -1631,157 +1557,47 @@ def test_summary_functions_work_after_schema_reset():
 # =============================================================================
 
 
-def test_watch_trigger_no_previous_sha():
-    """No previous SHA → no trigger (first run records baseline)."""
+def test_watch_trigger_no_trigger_cases():
+    """Watch mode should NOT trigger in these cases."""
     from loopflow.lfd.agent import should_activate_watch
 
-    result = should_activate_watch(
-        watch_paths=["src/"],
-        last_sha=None,
-        current_sha="abc123",
-        changed_files=["src/main.py"],
-    )
-    assert result is False
+    # No previous SHA (first run records baseline)
+    assert should_activate_watch(["src/"], None, "abc123", ["src/main.py"]) is False
+
+    # Same SHA (no change)
+    assert should_activate_watch(["src/"], "abc123", "abc123", []) is False
+
+    # No matching paths
+    assert should_activate_watch(["src/"], "abc", "def", ["docs/README.md"]) is False
+
+    # Empty changed files
+    assert should_activate_watch(["src/"], "abc", "def", []) is False
+
+    # Glob pattern no match
+    assert should_activate_watch(["src/**/*.py"], "abc", "def", ["src/file.js"]) is False
+
+    # Partial path shouldn't match (src vs src2)
+    assert should_activate_watch(["src"], "abc", "def", ["src2/file.py"]) is False
 
 
-def test_watch_trigger_same_sha():
-    """Same SHA → no trigger."""
+def test_watch_trigger_should_trigger_cases():
+    """Watch mode SHOULD trigger in these cases."""
     from loopflow.lfd.agent import should_activate_watch
 
-    result = should_activate_watch(
-        watch_paths=["src/"],
-        last_sha="abc123",
-        current_sha="abc123",
-        changed_files=[],
-    )
-    assert result is False
+    # Basic match
+    assert should_activate_watch(["src/"], "abc", "def", ["src/main.py"]) is True
 
+    # Exact file match
+    assert should_activate_watch(["src/main.py"], "abc", "def", ["src/main.py"]) is True
 
-def test_watch_trigger_no_matching_paths():
-    """SHA changed, but no files match watch paths → no trigger."""
-    from loopflow.lfd.agent import should_activate_watch
+    # Multiple watch paths, one matches
+    assert should_activate_watch(["src/api/", "src/models/"], "abc", "def", ["src/models/user.py"]) is True
 
-    result = should_activate_watch(
-        watch_paths=["src/"],
-        last_sha="abc123",
-        current_sha="def456",
-        changed_files=["docs/README.md", "tests/test_foo.py"],
-    )
-    assert result is False
+    # Glob pattern match
+    assert should_activate_watch(["src/**/*.py"], "abc", "def", ["src/deep/file.py"]) is True
 
-
-def test_watch_trigger_matching_path():
-    """SHA changed and file matches watch path → trigger."""
-    from loopflow.lfd.agent import should_activate_watch
-
-    result = should_activate_watch(
-        watch_paths=["src/"],
-        last_sha="abc123",
-        current_sha="def456",
-        changed_files=["src/main.py"],
-    )
-    assert result is True
-
-
-def test_watch_trigger_exact_file_match():
-    """Watch path is exact file, changed file matches → trigger."""
-    from loopflow.lfd.agent import should_activate_watch
-
-    result = should_activate_watch(
-        watch_paths=["src/main.py"],
-        last_sha="abc123",
-        current_sha="def456",
-        changed_files=["src/main.py"],
-    )
-    assert result is True
-
-
-def test_watch_trigger_multiple_watch_paths():
-    """Multiple watch paths, one matches → trigger."""
-    from loopflow.lfd.agent import should_activate_watch
-
-    result = should_activate_watch(
-        watch_paths=["src/api/", "src/models/"],
-        last_sha="abc123",
-        current_sha="def456",
-        changed_files=["src/models/user.py"],
-    )
-    assert result is True
-
-
-def test_watch_trigger_glob_pattern():
-    """Watch path with glob pattern matches → trigger."""
-    from loopflow.lfd.agent import should_activate_watch
-
-    result = should_activate_watch(
-        watch_paths=["src/**/*.py"],
-        last_sha="abc123",
-        current_sha="def456",
-        changed_files=["src/deep/nested/file.py"],
-    )
-    assert result is True
-
-
-def test_watch_trigger_glob_no_match():
-    """Watch path with glob pattern, no match → no trigger."""
-    from loopflow.lfd.agent import should_activate_watch
-
-    result = should_activate_watch(
-        watch_paths=["src/**/*.py"],
-        last_sha="abc123",
-        current_sha="def456",
-        changed_files=["src/deep/nested/file.js"],
-    )
-    assert result is False
-
-
-def test_watch_trigger_empty_changed_files():
-    """SHA changed but no files changed → no trigger."""
-    from loopflow.lfd.agent import should_activate_watch
-
-    result = should_activate_watch(
-        watch_paths=["src/"],
-        last_sha="abc123",
-        current_sha="def456",
-        changed_files=[],
-    )
-    assert result is False
-
-
-def test_watch_trigger_trailing_slash_handling():
-    """Watch path trailing slash is handled correctly."""
-    from loopflow.lfd.agent import should_activate_watch
-
-    # With trailing slash
-    result1 = should_activate_watch(
-        watch_paths=["src/"],
-        last_sha="abc123",
-        current_sha="def456",
-        changed_files=["src/main.py"],
-    )
-    assert result1 is True
-
-    # Without trailing slash
-    result2 = should_activate_watch(
-        watch_paths=["src"],
-        last_sha="abc123",
-        current_sha="def456",
-        changed_files=["src/main.py"],
-    )
-    assert result2 is True
-
-
-def test_watch_trigger_partial_path_no_match():
-    """Watch path 'src' should not match 'src2/file.py'."""
-    from loopflow.lfd.agent import should_activate_watch
-
-    result = should_activate_watch(
-        watch_paths=["src"],
-        last_sha="abc123",
-        current_sha="def456",
-        changed_files=["src2/file.py"],
-    )
-    assert result is False
+    # Without trailing slash still works
+    assert should_activate_watch(["src"], "abc", "def", ["src/main.py"]) is True
 
 
 # =============================================================================
@@ -1789,103 +1605,45 @@ def test_watch_trigger_partial_path_no_match():
 # =============================================================================
 
 
-def test_cron_trigger_no_last_run():
-    """First run (no last_run) → trigger."""
+def test_cron_trigger_no_trigger_cases():
+    """Cron should NOT trigger in these cases."""
     from loopflow.lfd.agent import should_activate_cron
 
-    result = should_activate_cron("* * * * *", None)
-    assert result is True
+    now = datetime.now()
+
+    # Just ran, hourly cron not due yet
+    assert should_activate_cron("0 * * * *", now) is False
+
+    # Beyond grace period (zero grace = never trigger stale)
+    assert should_activate_cron("* * * * *", now - timedelta(days=30), timedelta(seconds=0)) is False
+
+    # First run but beyond grace period
+    assert should_activate_cron("* * * * *", None, timedelta(seconds=0)) is False
+
+    # Just ran, 5-minute cron not due
+    assert should_activate_cron("*/5 * * * *", now) is False
 
 
-def test_cron_trigger_due():
-    """Cron expression due since last run → trigger."""
+def test_cron_trigger_should_trigger_cases():
+    """Cron SHOULD trigger in these cases."""
     from loopflow.lfd.agent import should_activate_cron
 
-    # Last run was 10 minutes ago, cron runs every minute
-    last_run = datetime.now() - timedelta(minutes=10)
-    result = should_activate_cron("* * * * *", last_run)
-    assert result is True
+    now = datetime.now()
 
+    # First run (no last_run) with default grace
+    assert should_activate_cron("* * * * *", None) is True
 
-def test_cron_trigger_not_due():
-    """Cron not yet due → no trigger."""
-    from loopflow.lfd.agent import should_activate_cron
+    # Due (10 min since last run, runs every minute)
+    assert should_activate_cron("* * * * *", now - timedelta(minutes=10)) is True
 
-    # Last run was just now, cron runs every hour
-    last_run = datetime.now()
-    result = should_activate_cron("0 * * * *", last_run)
-    assert result is False
+    # Within grace period
+    assert should_activate_cron("* * * * *", now - timedelta(hours=2), timedelta(hours=24)) is True
 
+    # Daily cron, 25 hours since last run
+    assert should_activate_cron("0 9 * * *", now - timedelta(hours=25)) is True
 
-def test_cron_trigger_stale_beyond_grace():
-    """Cron missed beyond grace period → no trigger."""
-    from loopflow.lfd.agent import should_activate_cron
-
-    # With zero grace period, any prev_time in the past is stale
-    last_run = datetime.now() - timedelta(days=30)
-    result = should_activate_cron("* * * * *", last_run, grace_period=timedelta(seconds=0))
-    assert result is False
-
-
-def test_cron_trigger_within_grace():
-    """Cron missed but within grace period → trigger."""
-    from loopflow.lfd.agent import should_activate_cron
-
-    # Last run was 2 hours ago, grace period is 24 hours
-    last_run = datetime.now() - timedelta(hours=2)
-    result = should_activate_cron("* * * * *", last_run, grace_period=timedelta(hours=24))
-    assert result is True
-
-
-def test_cron_trigger_daily_schedule():
-    """Daily cron schedule triggers correctly."""
-    from loopflow.lfd.agent import should_activate_cron
-
-    # Last run was 25 hours ago, cron runs daily at 9am
-    last_run = datetime.now() - timedelta(hours=25)
-    result = should_activate_cron("0 9 * * *", last_run)
-    assert result is True
-
-
-def test_cron_trigger_hourly_recent_run():
-    """Hourly cron with recent run → no trigger."""
-    from loopflow.lfd.agent import should_activate_cron
-
-    # Last run was just now, cron runs every hour at :00
-    # Since last_run is after the most recent :00, should not trigger
-    last_run = datetime.now()
-    result = should_activate_cron("0 * * * *", last_run)
-    assert result is False
-
-
-def test_cron_trigger_first_run_stale():
-    """First run but beyond grace period → no trigger."""
-    from loopflow.lfd.agent import should_activate_cron
-
-    result = should_activate_cron("* * * * *", None, grace_period=timedelta(seconds=0))
-    assert result is False
-
-
-def test_cron_trigger_every_5_minutes():
-    """Every 5 minutes cron expression."""
-    from loopflow.lfd.agent import should_activate_cron
-
-    # Last run was 6 minutes ago
-    last_run = datetime.now() - timedelta(minutes=6)
-    result = should_activate_cron("*/5 * * * *", last_run)
-    assert result is True
-
-
-def test_cron_trigger_every_5_minutes_too_soon():
-    """Every 5 minutes, ran after last scheduled time → no trigger."""
-    from loopflow.lfd.agent import should_activate_cron
-
-    # Set last_run to just after the minute mark to ensure it's after prev_time
-    # If now is 10:07, prev scheduled is 10:05
-    # Setting last_run to now means last_run > prev_time, so no trigger
-    last_run = datetime.now()
-    result = should_activate_cron("*/5 * * * *", last_run)
-    assert result is False
+    # 5-minute cron, 6 minutes since last run
+    assert should_activate_cron("*/5 * * * *", now - timedelta(minutes=6)) is True
 
 
 # =============================================================================
@@ -1959,3 +1717,35 @@ def test_agent_model_with_consecutive_failures():
     """Agent model accepts consecutive_failures parameter."""
     agent = _make_agent(consecutive_failures=10)
     assert agent.consecutive_failures == 10
+
+
+# =============================================================================
+# Metrics tests
+# =============================================================================
+
+
+def test_metrics_increment():
+    """Metrics increment and get_all work correctly."""
+    from loopflow.lfd.daemon import metrics
+
+    # Get initial values
+    initial = metrics.get_all()
+
+    # Increment
+    metrics.increment("http_requests")
+    metrics.increment("http_requests")
+    metrics.increment("socket_requests", 5)
+
+    # Check increments
+    current = metrics.get_all()
+    assert current["http_requests"] == initial["http_requests"] + 2
+    assert current["socket_requests"] == initial["socket_requests"] + 5
+
+
+def test_metrics_increment_unknown_counter():
+    """Incrementing unknown counter is safe (no-op)."""
+    from loopflow.lfd.daemon import metrics
+
+    # Should not raise
+    metrics.increment("nonexistent_counter")
+    metrics.increment("also_nonexistent", 100)

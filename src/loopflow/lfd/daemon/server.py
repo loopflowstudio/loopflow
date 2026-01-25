@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 from loopflow.lfd.agent import run_cron_check, run_watch_check
+from loopflow.lfd.daemon import metrics
 from loopflow.lfd.daemon.manager import Manager, load_manager_config
 from loopflow.lfd.daemon.protocol import Event, Request, Response, error, success
 from loopflow.lfd.daemon.status import compute_status
@@ -98,6 +99,7 @@ class Server:
             writer.close()
 
     async def _dispatch(self, request: Request, writer: StreamWriter) -> Response:
+        metrics.increment("socket_requests")
         method = request.method
         params = request.params
 
@@ -353,6 +355,7 @@ class Server:
         return success({"branch": branch, "reason": reason})
 
     async def _broadcast(self, event: Event) -> None:
+        metrics.increment("events_broadcast")
         message = (event.serialize() + "\n").encode()
         for writer, patterns in list(self.subscriptions.items()):
             if any(fnmatch.fnmatch(event.event, p) for p in patterns):
@@ -493,11 +496,50 @@ class Server:
                 pass
 
 
+def _check_already_running(http_port: int = 8765) -> None:
+    """Check if another lfd instance is running. Raises SystemExit if so."""
+    import os
+    import urllib.request
+
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{http_port}/health", method="GET")
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            import json
+
+            data = json.loads(resp.read().decode())
+            if data.get("ok"):
+                result = data.get("result", {})
+                pid = result.get("pid", "?")
+                version = result.get("version", "?")
+                # Don't fail if it's us (same PID)
+                if pid != os.getpid():
+                    raise SystemExit(
+                        f"Another lfd instance is already running (pid {pid}, v{version}).\n"
+                        f"Stop it with: kill {pid}"
+                    )
+    except urllib.error.URLError:
+        # No server running, good
+        pass
+    except SystemExit:
+        raise
+    except Exception:
+        # Some other error, probably no server running
+        pass
+
+
 async def run_server(socket_path: Path, http_port: int = 8765) -> None:
     """Main daemon entry point. Runs until terminated."""
+    import logging
+    import sqlite3
+
     from loopflow.lfd.daemon.http_server import start_http_server
     from loopflow.lfd.daemon.launchd import remove_pid, write_pid
+    from loopflow.lfd.db import DB_PATH
 
+    # Enforce single instance
+    _check_already_running(http_port)
+
+    logger = logging.getLogger("lfd")
     server = Server(socket_path)
     http_server = None
 
@@ -505,10 +547,25 @@ async def run_server(socket_path: Path, http_port: int = 8765) -> None:
     write_pid()
 
     async def shutdown():
+        logger.info("Shutting down gracefully...")
+
+        # Stop accepting new connections
         await server.stop()
         if http_server:
             await http_server.stop()
+
+        # Checkpoint WAL to ensure all data is persisted
+        try:
+            if DB_PATH.exists():
+                conn = sqlite3.connect(DB_PATH)
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                conn.close()
+                logger.info("WAL checkpoint completed")
+        except Exception as e:
+            logger.warning(f"WAL checkpoint failed: {e}")
+
         remove_pid()
+        logger.info("Shutdown complete")
 
     loop = asyncio.get_event_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):

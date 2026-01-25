@@ -83,7 +83,8 @@ public actor LFDEventService {
         logger.debug("socket exists, creating connection")
         LoggingService.append("connecting to \(socketPath.path)", category: LoggingService.Category.lfd)
 
-        let params = NWParameters()
+        // Unix sockets need stream-based parameters (like TCP)
+        let params = NWParameters.tcp
         let endpoint = NWEndpoint.unix(path: socketPath.path)
         connection = NWConnection(to: endpoint, using: params)
 

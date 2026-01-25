@@ -235,6 +235,19 @@ def install_locally(repo_root: Path | None = None) -> tuple[bool, str]:
     return success, output
 
 
+def restart_daemon() -> tuple[bool, str]:
+    """Restart lfd daemon. Returns (success, message)."""
+    from loopflow.lfd.daemon.launchd import install, is_running
+
+    was_running = is_running()
+    if install():
+        if was_running:
+            return True, "Daemon restarted"
+        else:
+            return True, "Daemon started"
+    return False, "Failed to start daemon"
+
+
 # DMG publishing functions
 
 

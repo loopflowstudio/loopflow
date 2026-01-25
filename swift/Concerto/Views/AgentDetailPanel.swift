@@ -10,9 +10,7 @@ struct AgentDetailPanel: View {
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("changedFilesExpanded") private var changedFilesExpanded = true
 
-    @State private var commits: [CommitInfo] = []
     @State private var fileStats: [FileDiffStat] = []
-    @State private var isLoadingCommits = false
     @State private var isLoadingFiles = false
     @State private var actionError: String?
     @State private var showingActionError = false

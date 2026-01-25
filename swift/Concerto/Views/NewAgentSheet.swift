@@ -3,6 +3,127 @@
 import SwiftUI
 import LoopflowCore
 
+// MARK: - Typeahead Item
+
+struct TypeaheadItem: Identifiable, Equatable {
+    let id: String
+    let label: String
+    let icon: String
+    let section: String
+    var subtitle: String?
+}
+
+// MARK: - Typeahead Dropdown
+
+struct TypeaheadDropdown: View {
+    let items: [TypeaheadItem]
+    let selectedId: String?
+    let onSelect: (TypeaheadItem) -> Void
+
+    @State private var hoveredId: String?
+
+    private var groupedItems: [(section: String, items: [TypeaheadItem])] {
+        var sections: [String] = []
+        var groups: [String: [TypeaheadItem]] = [:]
+
+        for item in items {
+            if groups[item.section] == nil {
+                sections.append(item.section)
+                groups[item.section] = []
+            }
+            groups[item.section]?.append(item)
+        }
+
+        return sections.compactMap { section in
+            guard let items = groups[section] else { return nil }
+            return (section: section, items: items)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(groupedItems.enumerated()), id: \.element.section) { index, group in
+                if index > 0 {
+                    Divider()
+                        .padding(.vertical, 4)
+                }
+
+                // Section header
+                Text(group.section)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.top, index == 0 ? 8 : 4)
+                    .padding(.bottom, 4)
+
+                // Items
+                ForEach(group.items) { item in
+                    TypeaheadRow(
+                        item: item,
+                        isHovered: hoveredId == item.id,
+                        isSelected: selectedId == item.id
+                    )
+                    .onTapGesture {
+                        onSelect(item)
+                    }
+                    .onHover { hovering in
+                        hoveredId = hovering ? item.id : nil
+                    }
+                }
+            }
+        }
+        .padding(.bottom, 8)
+        .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.12), radius: 8, y: 4)
+    }
+}
+
+struct TypeaheadRow: View {
+    let item: TypeaheadItem
+    let isHovered: Bool
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: item.icon)
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+
+            Text(item.label)
+                .font(.body)
+
+            if let subtitle = item.subtitle {
+                Text("·")
+                    .foregroundStyle(.tertiary)
+                Text(subtitle)
+                    .font(.body)
+                    .foregroundStyle(.tertiary)
+            }
+
+            Spacer()
+
+            if isSelected {
+                Image(systemName: "checkmark")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(isHovered ? Color.primary.opacity(0.06) : Color.clear)
+        .contentShape(Rectangle())
+    }
+}
+
+// MARK: - New Agent Sheet
+
 struct NewAgentSheet: View {
     @Bindable var appState: AppState
     @Environment(\.dismiss) private var dismiss
@@ -26,7 +147,7 @@ struct NewAgentSheet: View {
             return ["."]
         }
 
-        var areas = ["."]
+        var areas: [String] = []
         let excludePatterns = appState.config?.exclude ?? []
 
         for item in contents {
@@ -51,13 +172,42 @@ struct NewAgentSheet: View {
         return areas.sorted()
     }
 
-    private var filteredAreas: [String] {
-        if areaSearchText.isEmpty || areaSearchText == "." {
-            return availableAreas
+    private var typeaheadItems: [TypeaheadItem] {
+        var items: [TypeaheadItem] = []
+
+        // Root is always first in its own section
+        let showRoot = areaSearchText.isEmpty ||
+                       areaSearchText == "." ||
+                       "root".contains(areaSearchText.lowercased())
+
+        if showRoot {
+            items.append(TypeaheadItem(
+                id: ".",
+                label: ".",
+                icon: "house",
+                section: "Root",
+                subtitle: "entire repository"
+            ))
         }
-        return availableAreas.filter {
-            $0.lowercased().contains(areaSearchText.lowercased())
+
+        // Filter folders
+        let folders = availableAreas.filter { area in
+            if areaSearchText.isEmpty || areaSearchText == "." {
+                return true
+            }
+            return area.lowercased().contains(areaSearchText.lowercased())
         }
+
+        for folder in folders.prefix(7) {
+            items.append(TypeaheadItem(
+                id: folder,
+                label: folder,
+                icon: "folder",
+                section: "Folders"
+            ))
+        }
+
+        return items
     }
 
     var body: some View {
@@ -98,24 +248,41 @@ struct NewAgentSheet: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    ZStack(alignment: .topLeading) {
-                        TextField(".", text: $areaSearchText)
-                            .textFieldStyle(.roundedBorder)
-                            .focused($isAreaFocused)
-                            .onChange(of: isAreaFocused) { _, focused in
+                    TextField(".", text: $areaSearchText)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($isAreaFocused)
+                        .onChange(of: isAreaFocused) { _, focused in
+                            withAnimation(.easeOut(duration: 0.15)) {
                                 isAreaDropdownVisible = focused
                             }
-                            .onSubmit {
-                                if let first = filteredAreas.first {
-                                    areaSearchText = first
-                                }
-                                isAreaDropdownVisible = false
-                            }
-
-                        if isAreaDropdownVisible && !filteredAreas.isEmpty {
-                            areaDropdown
                         }
-                    }
+                        .onChange(of: areaSearchText) { _, _ in
+                            if !isAreaDropdownVisible && isAreaFocused {
+                                isAreaDropdownVisible = true
+                            }
+                        }
+                        .onSubmit {
+                            if let first = typeaheadItems.first {
+                                areaSearchText = first.id
+                            }
+                            isAreaDropdownVisible = false
+                        }
+                        .overlay(alignment: .topLeading) {
+                            if isAreaDropdownVisible && !typeaheadItems.isEmpty {
+                                TypeaheadDropdown(
+                                    items: typeaheadItems,
+                                    selectedId: areaSearchText,
+                                    onSelect: { item in
+                                        areaSearchText = item.id
+                                        isAreaDropdownVisible = false
+                                        isAreaFocused = false
+                                    }
+                                )
+                                .frame(minWidth: 280)
+                                .offset(y: 36)
+                            }
+                        }
+                        .zIndex(100)
                 }
             }
 
@@ -146,41 +313,6 @@ struct NewAgentSheet: View {
         .onAppear {
             isDescriptionFocused = true
         }
-    }
-
-    private var areaDropdown: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(filteredAreas.prefix(8), id: \.self) { area in
-                Button {
-                    areaSearchText = area
-                    isAreaDropdownVisible = false
-                    isAreaFocused = false
-                } label: {
-                    HStack {
-                        if area == "." {
-                            Text(". (root)")
-                        } else {
-                            Text(area)
-                        }
-                        Spacer()
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
-        .frame(width: 200)
-        .offset(y: 34)
-        .zIndex(100)
     }
 
     private func createAgent() {

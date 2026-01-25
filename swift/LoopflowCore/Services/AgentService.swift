@@ -238,14 +238,16 @@ public struct AgentService: @unchecked Sendable {
         let (data, response) = try await URLSession.shared.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw AgentServiceError.commandFailed
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            throw AgentServiceError.commandFailed("HTTP \(statusCode)")
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let ok = json["ok"] as? Bool, ok,
               let result = json["result"] as? [String: Any],
               let agentData = result["agent"] as? [String: Any] else {
-            throw AgentServiceError.commandFailed
+            let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            throw AgentServiceError.commandFailed(errorMsg ?? "Invalid response")
         }
 
         return parseAgentFromJSON(agentData)
@@ -337,13 +339,21 @@ public struct AgentService: @unchecked Sendable {
             process.executableURL = URL(fileURLWithPath: "/bin/zsh")
             process.arguments = ["-l", "-c", args.joined(separator: " ")]
 
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = pipe
+
             do {
                 try process.run()
                 process.waitUntilExit()
+
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
                 if process.terminationStatus == 0 {
                     continuation.resume()
                 } else {
-                    continuation.resume(throwing: AgentServiceError.commandFailed)
+                    continuation.resume(throwing: AgentServiceError.commandFailed(output.isEmpty ? "Exit code \(process.terminationStatus)" : output))
                 }
             } catch {
                 continuation.resume(throwing: error)
@@ -353,12 +363,12 @@ public struct AgentService: @unchecked Sendable {
 }
 
 public enum AgentServiceError: LocalizedError {
-    case commandFailed
+    case commandFailed(String)
 
     public var errorDescription: String? {
         switch self {
-        case .commandFailed:
-            return "Command failed"
+        case .commandFailed(let message):
+            return message
         }
     }
 }

@@ -517,6 +517,35 @@ def _get_scheduler_status() -> dict | None:
         return None
 
 
+def _get_daemon_health() -> dict | None:
+    """Get daemon health from HTTP endpoint."""
+    try:
+        import urllib.request
+
+        req = urllib.request.Request("http://127.0.0.1:8765/health", method="GET")
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            import json
+
+            data = json.loads(resp.read().decode())
+            if data.get("ok"):
+                return data.get("result")
+        return None
+    except Exception:
+        return None
+
+
+def _format_uptime(seconds: int) -> str:
+    """Format uptime in human-readable form."""
+    if seconds < 60:
+        return f"{seconds}s"
+    elif seconds < 3600:
+        return f"{seconds // 60}m"
+    elif seconds < 86400:
+        return f"{seconds // 3600}h {(seconds % 3600) // 60}m"
+    else:
+        return f"{seconds // 86400}d {(seconds % 86400) // 3600}h"
+
+
 @app.command()
 def status(
     agent_id: str = typer.Argument(None, help="Agent ID (optional, shows all if omitted)"),
@@ -539,6 +568,19 @@ def status(
             raise typer.Exit(1)
         _print_agent_detail(agent, c)
     else:
+        # Show daemon health
+        health = _get_daemon_health()
+        if health:
+            uptime = _format_uptime(health.get("uptime_seconds", 0))
+            version = health.get("version", "?")
+            pid = health.get("pid", "?")
+            status_line = f"v{version}, pid {pid}, up {uptime}"
+            typer.echo(f"Daemon: {c['green']}healthy{c['reset']} ({status_line})")
+        else:
+            typer.echo(f"Daemon: {c['red']}not running{c['reset']}")
+            typer.echo(f"  {c['dim']}Start with: lfd install{c['reset']}")
+        typer.echo("")
+
         # Show scheduler status if daemon is running
         sched = _get_scheduler_status()
         if sched:

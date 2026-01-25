@@ -203,6 +203,14 @@ def run_tests(repo_root: Path | None = None) -> tuple[bool, str]:
 def build_package(repo_root: Path | None = None) -> tuple[bool, str]:
     """Build package with uv. Returns (success, output)."""
     cwd = repo_root or Path.cwd()
+    dist_dir = cwd / "dist"
+
+    # Clean old artifacts (keep .gitignore)
+    if dist_dir.exists():
+        for f in dist_dir.iterdir():
+            if f.name != ".gitignore":
+                f.unlink()
+
     result = _run(["uv", "build"], cwd)
     success = result.returncode == 0
     output = result.stdout + result.stderr

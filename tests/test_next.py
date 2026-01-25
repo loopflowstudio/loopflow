@@ -53,21 +53,28 @@ def test_get_pr_state_open():
 
 def test_enable_auto_merge_success():
     """Returns True on successful auto-merge enable."""
-    with patch("subprocess.run") as mock_run:
-        # First call gets PR info, second enables auto-merge
-        mock_run.side_effect = [
-            MagicMock(returncode=0, stdout='{"title": "My PR", "body": "Description"}'),
-            MagicMock(returncode=0),
-        ]
-        result = _enable_auto_merge(Path("/repo"), 42)
+    mock_message = MagicMock(title="My PR", body="Description")
+    with patch("loopflow.lfops.next.generate_pr_message", return_value=mock_message):
+        with patch("subprocess.run") as mock_run:
+            # First call edits PR, second enables auto-merge
+            mock_run.side_effect = [
+                MagicMock(returncode=0),  # gh pr edit
+                MagicMock(returncode=0),  # gh pr merge --auto
+            ]
+            result = _enable_auto_merge(Path("/repo"), 42)
     assert result is True
 
 
 def test_enable_auto_merge_failure():
     """Returns False when auto-merge fails."""
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=1)
-        result = _enable_auto_merge(Path("/repo"), 42)
+    mock_message = MagicMock(title="My PR", body="Description")
+    with patch("loopflow.lfops.next.generate_pr_message", return_value=mock_message):
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0),  # gh pr edit
+                MagicMock(returncode=1),  # gh pr merge --auto fails
+            ]
+            result = _enable_auto_merge(Path("/repo"), 42)
     assert result is False
 
 

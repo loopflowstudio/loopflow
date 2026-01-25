@@ -14,11 +14,7 @@ from loopflow.lf.context import (
     format_prompt,
     gather_prompt_components,
 )
-from loopflow.lf.output import (
-    copy_to_clipboard,
-    trim_components_if_needed,
-    warn_if_context_too_large,
-)
+from loopflow.lf.output import copy_to_clipboard, warn_if_context_too_large
 from loopflow.lf.tokens import analyze_components
 
 
@@ -91,8 +87,6 @@ def register_commands(app: typer.Typer) -> None:
         # Apply docs flag
         if not include_docs:
             components.docs = []
-
-        components = trim_components_if_needed(components)
 
         prompt = format_prompt(components)
         copy_to_clipboard(prompt)

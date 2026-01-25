@@ -48,6 +48,13 @@ struct ConcertoApp: App {
         .windowStyle(.automatic)
         .defaultSize(width: 900, height: 700)
 
+        // Terminal test window - for testing embedded Ghostty
+        Window("Terminal Test", id: "terminal-test") {
+            TerminalTestWindow()
+                .preferredColorScheme(preferredScheme)
+        }
+        .defaultSize(width: 800, height: 600)
+
         .commands {
             // Beta features menu
             CommandGroup(after: .appSettings) {
@@ -95,6 +102,13 @@ struct ConcertoApp: App {
                     NotificationCenter.default.post(name: .showNewWorktreeSheet, object: nil)
                 }
                 .keyboardShortcut("n", modifiers: .command)
+
+                Divider()
+
+                Button("Terminal Test") {
+                    openWindow(id: "terminal-test")
+                }
+                .keyboardShortcut("t", modifiers: [.command, .shift])
             }
         }
     }

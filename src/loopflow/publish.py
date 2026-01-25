@@ -352,6 +352,39 @@ def upload_dmg(dmg_path: Path, version: str) -> tuple[bool, str]:
         return False, f"Upload failed: {e}"
 
 
+def upload_file(
+    file_path: Path,
+    key: str,
+    content_type: str = "application/octet-stream",
+    bucket: str | None = None,
+) -> tuple[bool, str]:
+    """Upload file to R2 bucket. Returns (success, output)."""
+    bucket = bucket or os.environ.get("R2_BUCKET_NAME", "downloads")
+
+    if not file_path.exists():
+        return False, f"File not found: {file_path}"
+
+    try:
+        client = _get_r2_client()
+    except PublishError as e:
+        return False, str(e)
+
+    try:
+        client.upload_file(
+            str(file_path),
+            bucket,
+            key,
+            ExtraArgs={
+                "ContentType": content_type,
+                "CacheControl": "public, max-age=31536000, immutable",
+            },
+        )
+        url = f"https://bin.loopflow.studio/{key}" if bucket == "bin" else f"{R2_PUBLIC_URL}/{key}"
+        return True, f"Uploaded to {url}"
+    except Exception as e:
+        return False, f"Upload failed: {e}"
+
+
 def main() -> int:
     """CLI entrypoint: check publish readiness."""
     state = check_publish_ready()

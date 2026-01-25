@@ -15,7 +15,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from loopflow import __version__
-from loopflow.lfd.agent import create_agent, list_agents
+from loopflow.lfd.agent import (
+    create_agent,
+    delete_agent,
+    get_agent,
+    list_agents,
+    start_agent,
+    stop_agent,
+    update_agent,
+)
 from loopflow.lfd.daemon import metrics
 from loopflow.lfd.daemon.client import _notify_event
 from loopflow.lfd.daemon.status import compute_status
@@ -154,16 +162,40 @@ async def get_agents(repo: str = Query(..., description="Repository path")):
 
 class CreateAgentRequest(BaseModel):
     name: str | None = None
-    flow: str = "ship"
-    goal: list[str] = ["default"]
-    area: list[str] = ["."]
+    flow: str | None = None
+    goal: list[str] | None = None
+    area: list[str] | None = None
+
+
+def _agent_to_dict(agent) -> dict:
+    """Convert agent to API response dict."""
+    return {
+        "id": agent.id,
+        "name": agent.name,
+        "flow": agent.flow,
+        "goal": agent.goal,
+        "area": agent.area,
+        "repo": str(agent.repo),
+        "stimulus": {"kind": agent.stimulus.kind, "cron": agent.stimulus.cron},
+        "status": agent.status.value,
+        "iteration": agent.iteration,
+        "worktree": str(agent.worktree) if agent.worktree else None,
+        "branch": agent.branch,
+        "pr_limit": agent.pr_limit,
+        "merge_mode": agent.merge_mode.value,
+        "pid": agent.pid,
+        "created_at": agent.created_at.isoformat(),
+    }
 
 
 @app.post("/agents", response_model=LFDResponse)
 async def post_agent(
     repo: str = Query(..., description="Repository path"), request: CreateAgentRequest = None
 ):
-    """Create a new agent."""
+    """Create a new agent.
+
+    Accepts minimal body - even empty creates an agent with generated name.
+    """
     repo_path = Path(repo)
     if not repo_path.exists():
         raise HTTPException(status_code=404, detail=f"Repository not found: {repo}")
@@ -171,35 +203,156 @@ async def post_agent(
     try:
         agent = create_agent(
             repo=repo_path,
-            flow=request.flow if request else "ship",
-            goal=request.goal if request else ["default"],
-            area=request.area if request else ["."],
             name=request.name if request else None,
+            flow=request.flow if request and request.flow else "ship",
+            goal=request.goal if request else None,
+            area=request.area if request else None,
             stimulus=Stimulus(kind="once"),
         )
 
         # Notify subscribers of new agent
         await _notify_event("agent.created", {"agent_id": agent.id, "name": agent.name})
 
-        return LFDResponse(
-            ok=True,
-            result={
-                "agent": {
-                    "id": agent.id,
-                    "name": agent.name,
-                    "flow": agent.flow,
-                    "goal": agent.goal,
-                    "area": agent.area,
-                    "repo": str(agent.repo),
-                    "stimulus": {"kind": agent.stimulus.kind, "cron": agent.stimulus.cron},
-                    "status": agent.status.value,
-                    "iteration": agent.iteration,
-                    "worktree": str(agent.worktree) if agent.worktree else None,
-                    "branch": agent.branch,
-                    "created_at": agent.created_at.isoformat(),
-                }
-            },
+        return LFDResponse(ok=True, result={"agent": _agent_to_dict(agent)})
+    except Exception as e:
+        return LFDResponse(ok=False, error=str(e))
+
+
+class UpdateAgentRequest(BaseModel):
+    area: list[str] | None = None
+    goal: list[str] | None = None
+    flow: str | None = None
+
+
+@app.patch("/agents/{agent_id}", response_model=LFDResponse)
+async def patch_agent(agent_id: str, request: UpdateAgentRequest):
+    """Update an agent's configuration.
+
+    Accepts any subset of fields: area, goal, flow.
+    """
+    try:
+        agent = get_agent(agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
+
+        updated = update_agent(
+            agent_id,
+            area=request.area,
+            goal=request.goal,
+            flow=request.flow,
         )
+
+        if not updated:
+            return LFDResponse(ok=False, error="Failed to update agent")
+
+        # Notify subscribers of agent update
+        await _notify_event("agent.updated", {"agent_id": agent_id})
+
+        return LFDResponse(ok=True, result={"agent": _agent_to_dict(updated)})
+    except HTTPException:
+        raise
+    except Exception as e:
+        return LFDResponse(ok=False, error=str(e))
+
+
+@app.get("/agents/{agent_id}", response_model=LFDResponse)
+async def get_agent_by_id(agent_id: str):
+    """Get a single agent by ID."""
+    try:
+        agent = get_agent(agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
+
+        return LFDResponse(ok=True, result={"agent": _agent_to_dict(agent)})
+    except HTTPException:
+        raise
+    except Exception as e:
+        return LFDResponse(ok=False, error=str(e))
+
+
+@app.delete("/agents/{agent_id}", response_model=LFDResponse)
+async def delete_agent_by_id(agent_id: str):
+    """Delete an agent."""
+    try:
+        agent = get_agent(agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
+
+        deleted = delete_agent(agent_id)
+        if not deleted:
+            return LFDResponse(ok=False, error="Failed to delete agent")
+
+        # Notify subscribers
+        await _notify_event("agent.deleted", {"agent_id": agent_id})
+
+        return LFDResponse(ok=True, result={"deleted": True})
+    except HTTPException:
+        raise
+    except Exception as e:
+        return LFDResponse(ok=False, error=str(e))
+
+
+class RunAgentRequest(BaseModel):
+    stimulus: str = "once"  # once, loop, watch, cron
+    cron: str | None = None
+    path: str | None = None  # optional watch path override
+
+
+@app.post("/agents/{agent_id}/run", response_model=LFDResponse)
+async def run_agent(agent_id: str, request: RunAgentRequest = None):
+    """Run an agent.
+
+    Validates configuration before starting:
+    - area must be set (required)
+    - flow uses default if not set
+
+    Stimulus can be: once, loop, watch, cron.
+    """
+    try:
+        agent = get_agent(agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
+
+        # Validate: area must be set
+        if agent.area is None:
+            return LFDResponse(ok=False, error="Agent has no area configured. Set area first.")
+
+        # Update stimulus
+        stim_kind = request.stimulus if request else "once"
+        stim_cron = request.cron if request and stim_kind == "cron" else None
+        update_agent(agent_id, stimulus=Stimulus(kind=stim_kind, cron=stim_cron))
+
+        # Start the agent
+        result = start_agent(agent_id)
+
+        if result:
+            # Notify subscribers
+            await _notify_event("agent.started", {"agent_id": agent_id})
+            return LFDResponse(ok=True, result={"started": True, "agent_id": agent_id})
+        else:
+            return LFDResponse(ok=False, error=f"Failed to start: {result.reason}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        return LFDResponse(ok=False, error=str(e))
+
+
+@app.post("/agents/{agent_id}/stop", response_model=LFDResponse)
+async def stop_agent_by_id(agent_id: str):
+    """Stop a running agent."""
+    try:
+        agent = get_agent(agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
+
+        stopped = stop_agent(agent_id)
+        if stopped:
+            await _notify_event("agent.stopped", {"agent_id": agent_id})
+            return LFDResponse(ok=True, result={"stopped": True})
+        else:
+            return LFDResponse(ok=False, error="Failed to stop agent")
+    except HTTPException:
+        raise
     except Exception as e:
         return LFDResponse(ok=False, error=str(e))
 

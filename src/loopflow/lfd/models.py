@@ -73,14 +73,16 @@ class Agent(LfdModel):
     - loop: runs when started until stopped or PR limit
     - watch: runs when area changes on main
     - cron: runs on schedule
+
+    area and goal are optional at creation time and validated at run-time.
     """
 
     id: str
     name: str  # unique name, used for worktree/branch naming
     repo: Path
-    flow: str
-    goal: list[str] = Field(min_length=1)
-    area: list[str] = Field(min_length=1)  # context focus only
+    flow: str = "ship"  # default flow
+    goal: list[str] | None = None  # optional, validated at run-time
+    area: list[str] | None = None  # optional, validated at run-time
 
     stimulus: Stimulus = Field(default_factory=lambda: Stimulus("loop"))
     status: AgentStatus = AgentStatus.IDLE
@@ -112,6 +114,8 @@ class Agent(LfdModel):
     @field_validator("goal", mode="before")
     @classmethod
     def normalize_goal(cls, v):
+        if v is None:
+            return None
         if isinstance(v, str):
             return [v]
         return v
@@ -119,6 +123,8 @@ class Agent(LfdModel):
     @field_validator("area", mode="before")
     @classmethod
     def normalize_area(cls, v):
+        if v is None:
+            return None
         if isinstance(v, str):
             return [v]
         return v
@@ -144,20 +150,28 @@ class Agent(LfdModel):
 
     @property
     def goal_display(self) -> str:
+        if self.goal is None:
+            return ""
         return ", ".join(self.goal)
 
     @property
     def area_display(self) -> str:
+        if self.area is None:
+            return ""
         return ", ".join(self.area)
+
+    def is_configured(self) -> bool:
+        """Check if agent has required config for running."""
+        return self.area is not None
 
 
 def agent_from_row(row: dict) -> Agent:
     """Convert database row to Agent."""
     goal_str = row.get("goal")
-    goal = json.loads(goal_str) if goal_str else ["default"]
+    goal = json.loads(goal_str) if goal_str else None
 
     area_str = row.get("area")
-    area = json.loads(area_str) if area_str else ["."]
+    area = json.loads(area_str) if area_str else None
 
     merge_mode_str = row.get("merge_mode", "pr")
     if merge_mode_str == "auto":

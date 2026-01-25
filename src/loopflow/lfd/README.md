@@ -1,49 +1,65 @@
 # lfd — Loopflow Daemon
 
-Background service for session tracking and agent orchestration.
+Background service for agent orchestration.
 
 ## Usage
 
 ```bash
-lfd install
-lfd loop ship src/
-lfd subscribe ship src/ -p src/
-lfd schedule ship . "0 9 * * *"
-lfd status
+# One-shot: create + configure + run
+lfd loop swift-falcon --area src/
+
+# Incremental
+lfd create swift-falcon
+lfd area swift-falcon src/
+lfd goal swift-falcon "fix lint errors"
+lfd loop swift-falcon
+
+# Other stimuli
+lfd watch swift-falcon --area src/           # run on origin/main changes
+lfd cron swift-falcon "0 9 * * *" --area .   # run daily at 9am
 ```
 
 See `docs/lfd.md` for the full CLI reference.
 
-## Runs and Triggers
+## Agents
 
-Runs are execution instances of a flow. Triggers (loop, subscription, schedule) spawn
-runs and track their own status, iteration count, and PR limits.
+Agents are persistent configurations with:
+- **name**: User-visible identifier (e.g., "swift-falcon")
+- **area**: Working directories (required to run)
+- **goal**: What to accomplish (inline text or preset name)
+- **flow**: Which steps to execute (default: ship)
+- **stimulus**: When to run (run/loop/watch/cron)
 
-Parent encoding is stored on each run as `loop:<id>`, `subscription:<id>`, or
-`schedule:<id>` to keep the model portable.
+Create with minimal config, configure incrementally, run when ready.
+
+## Stimulus Modes
+
+| Mode | Trigger | Use Case |
+|------|---------|----------|
+| `run` | Manual, once | One-off task |
+| `loop` | After each iteration | Continuous improvement |
+| `watch` | origin/main changes | React to upstream |
+| `cron` | Schedule | Daily maintenance |
 
 ## Database
 
 SQLite at `~/.lf/lfd.db` (WAL mode).
 
-### runs, loops, subscriptions, schedules
+### agents table
 
-Runs record each execution. Triggers store configuration and status for background
-spawning.
-
-### sessions table
 | Column | Type | Description |
 |--------|------|-------------|
 | id | TEXT PK | UUID |
-| task | TEXT | Task name (design, implement, etc.) |
+| name | TEXT | User-visible name |
+| area | TEXT | JSON array of paths (nullable until configured) |
+| goal | TEXT | JSON array of goals (nullable) |
+| flow | TEXT | Flow name (default: ship) |
 | repo | TEXT | Repository path |
-| worktree | TEXT | Worktree path |
-| status | TEXT | running, waiting, completed, error |
-| started_at | TEXT | ISO8601 |
-| ended_at | TEXT | ISO8601 or NULL |
-| pid | INTEGER | Process ID |
-| model | TEXT | claude-code, codex, etc. |
-| run_mode | TEXT | auto or interactive |
+| stimulus_kind | TEXT | run, loop, watch, cron |
+| stimulus_cron | TEXT | Cron expression (for cron stimulus) |
+| status | TEXT | idle, running, waiting, error |
+| iteration | INTEGER | Iteration count |
+| ... | | |
 
 ## Protocol
 
@@ -51,87 +67,47 @@ JSON-over-newline on Unix socket at `~/.lf/lfd.sock`.
 
 See protocol.py for Request/Response/Event dataclasses.
 
-## Fire-and-Forget Pattern
+## HTTP API
 
-StepRun logging uses `_send_fire_and_forget()` — synchronous socket with
-0.5s timeout, fails silently. This prevents lfd availability from blocking
-task execution. If daemon is down, step runs aren't logged but tasks still run.
+```
+POST   /agents           {name?, area?, goal?, flow?}     → create
+PATCH  /agents/:id       {area?, goal?, flow?}            → update
+GET    /agents                                            → list
+GET    /agents/:id                                        → show
+DELETE /agents/:id                                        → delete
+POST   /agents/:id/run   {stimulus, cron?, path?}         → run
+POST   /agents/:id/stop                                   → stop
+```
 
-## Client Patterns
-
-- Async client: `DaemonClient` for CLI/tests (connect, call, subscribe)
-- Sync fire-and-forget: `log_step_run_start()`, `log_step_run_end()` for lf runner
+- Create accepts minimal body (even empty → generates name)
+- Update accepts any subset of fields
+- Validation happens on run, not create/update
+- CLI commands like `lfd area` map to `PATCH` with that field
 
 ## Debugging
 
 ### Logs
 
-All agent operations are logged to `~/.lf/logs/lfd.log`:
-
 ```bash
 tail -f ~/.lf/logs/lfd.log                    # watch live
-grep "agent-id" ~/.lf/logs/lfd.log            # filter by agent
+grep "swift-falcon" ~/.lf/logs/lfd.log        # filter by agent
 grep ERROR ~/.lf/logs/lfd.log                 # find errors
-grep TRIGGERED ~/.lf/logs/lfd.log             # see trigger events
 ```
-
-Log levels:
-- `DEBUG`: detailed trigger checks, attempt counts
-- `INFO`: agent start/stop, iteration success, trigger events
-- `WARNING`: retries, failed git operations
-- `ERROR`: exceptions, circuit breaker trips
 
 ### Database
 
-Inspect the SQLite database directly:
-
 ```bash
-sqlite3 ~/.lf/lfd.db ".schema"                # see tables
-sqlite3 ~/.lf/lfd.db "SELECT * FROM agents"   # list agents
-sqlite3 ~/.lf/lfd.db "SELECT id, status, consecutive_failures FROM agents"
-```
-
-Reset the database (use with caution):
-
-```bash
-LF_DB_RESET=1 lfd status                      # resets on schema mismatch
-rm ~/.lf/lfd.db                               # nuclear option
-```
-
-### Manual Testing
-
-Test trigger logic without starting agents:
-
-```bash
-# Check watch mode
-cd /path/to/repo
-git fetch origin main
-git diff --name-only <last-sha> origin/main -- src/
-
-# Check cron logic
-python -c "
-from loopflow.lfd.agent import should_trigger_cron
-from datetime import datetime, timedelta
-print(should_trigger_cron('*/5 * * * *', datetime.now() - timedelta(minutes=10)))
-"
+sqlite3 ~/.lf/lfd.db ".schema"
+sqlite3 ~/.lf/lfd.db "SELECT id, name, status, area FROM agents"
 ```
 
 ### Circuit Breaker
 
-When an agent fails repeatedly (>= 5 times), it trips the circuit breaker:
+When an agent fails >= 5 times consecutively:
 - Status becomes ERROR
-- `agent.circuit_breaker` event emitted
-- Won't restart until `consecutive_failures` is reset
+- Won't restart until reset
 
-Reset a tripped agent:
-
+Reset:
 ```bash
-sqlite3 ~/.lf/lfd.db "UPDATE agents SET consecutive_failures = 0, status = 'idle' WHERE id = '<agent-id>'"
+sqlite3 ~/.lf/lfd.db "UPDATE agents SET consecutive_failures = 0, status = 'idle' WHERE name = 'swift-falcon'"
 ```
-
-### Retry Behavior
-
-On iteration failure:
-1. Wait 30 seconds
-2. Retry up to 3 times
-3. If all retries fail: increment `consecutive_failures`, mark ERROR

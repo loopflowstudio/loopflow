@@ -48,8 +48,8 @@ public struct AgentService: @unchecked Sendable {
             }
 
             let name = columnText(stmt, 1) ?? ""
-            let goal = decodeStringArray(columnText(stmt, 3))
-            let area = decodeStringArray(columnText(stmt, 4))
+            let goal = decodeOptionalStringArray(columnText(stmt, 3))
+            let area = decodeOptionalStringArray(columnText(stmt, 4))
             let iteration = Int(sqlite3_column_int(stmt, 7))
             let worktreePath = columnText(stmt, 8)
             let branch = columnText(stmt, 9)
@@ -228,12 +228,12 @@ public struct AgentService: @unchecked Sendable {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        // Create with name only - area/goal/flow configured later
+        // Create with defaults - lfd requires non-empty goal/area
         let body: [String: Any] = [
             "name": name.isEmpty ? NSNull() : name,
             "flow": "ship",  // Default flow
-            "goal": [] as [String],
-            "area": [] as [String]  // Empty = not configured yet
+            "goal": ["default"],
+            "area": ["."]  // Root directory
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -276,8 +276,8 @@ public struct AgentService: @unchecked Sendable {
             id: json["id"] as? String ?? UUID().uuidString,
             name: json["name"] as? String ?? "",
             flow: json["flow"] as? String ?? "ship",
-            goal: json["goal"] as? [String] ?? [],
-            area: json["area"] as? [String] ?? ["."],
+            goal: json["goal"] as? [String],  // nullable
+            area: json["area"] as? [String],  // nullable
             repo: json["repo"] as? String ?? "",
             stimulus: stimulus,
             status: AgentStatus(rawValue: json["status"] as? String ?? "idle") ?? .idle,
@@ -320,6 +320,18 @@ public struct AgentService: @unchecked Sendable {
 
     private func decodeStringArray(_ str: String?) -> [String] {
         guard let str, !str.isEmpty else { return [] }
+        guard let data = str.data(using: .utf8) else { return [str] }
+        if let decoded = try? JSONDecoder().decode([String].self, from: data) {
+            return decoded
+        }
+        if let decoded = try? JSONDecoder().decode(String.self, from: data) {
+            return [decoded]
+        }
+        return [str]
+    }
+
+    private func decodeOptionalStringArray(_ str: String?) -> [String]? {
+        guard let str, !str.isEmpty else { return nil }
         guard let data = str.data(using: .utf8) else { return [str] }
         if let decoded = try? JSONDecoder().decode([String].self, from: data) {
             return decoded

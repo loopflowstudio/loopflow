@@ -50,8 +50,8 @@ def save_agent(agent: Agent, db_path: Path | None = None) -> None:
             agent.name,
             str(agent.repo),
             agent.flow,
-            json.dumps(agent.goal),
-            json.dumps(agent.area),
+            json.dumps(agent.goal) if agent.goal is not None else None,
+            json.dumps(agent.area) if agent.area is not None else None,
             agent.stimulus.kind,
             agent.stimulus.cron,
             agent.status.value,
@@ -97,6 +97,23 @@ def get_agent_by_area_repo(
         "SELECT * FROM agents WHERE area = ? AND repo = ?",
         (area_json, str(repo)),
     )
+    row = cursor.fetchone()
+    conn.close()
+    return agent_from_row(dict(row)) if row else None
+
+
+def get_agent_by_name(name: str, repo: Path | None = None, db_path: Path | None = None) -> Agent | None:
+    """Get an agent by name, optionally filtered by repo."""
+    conn = _get_db(db_path)
+
+    if repo:
+        cursor = conn.execute(
+            "SELECT * FROM agents WHERE name = ? AND repo = ?",
+            (name, str(repo)),
+        )
+    else:
+        cursor = conn.execute("SELECT * FROM agents WHERE name = ?", (name,))
+
     row = cursor.fetchone()
     conn.close()
     return agent_from_row(dict(row)) if row else None
@@ -269,39 +286,36 @@ def _generate_agent_name(repo: Path) -> str:
 
 def create_agent(
     repo: Path,
-    flow: str,
-    goal: list[str],
-    area: list[str],
     name: str | None = None,
+    flow: str = "ship",
+    goal: list[str] | None = None,
+    area: list[str] | None = None,
     pr_limit: int = 5,
     merge_mode: MergeMode = MergeMode.PR,
     stimulus: Stimulus | None = None,
 ) -> Agent:
-    """Create or update an agent."""
+    """Create a new agent or get existing by name.
+
+    If name is provided and an agent with that name exists in the repo,
+    returns the existing agent without modification (use update_agent for changes).
+
+    If area is provided and an agent with that area exists in the repo,
+    returns the existing agent without modification.
+    """
     if stimulus is None:
         stimulus = Stimulus("loop")
 
-    existing = get_agent_by_area_repo(area, repo)
-    if existing:
-        changed = False
-        if set(existing.goal) != set(goal):
-            existing.goal = goal
-            changed = True
-        if existing.flow != flow:
-            existing.flow = flow
-            changed = True
-        if existing.pr_limit != pr_limit:
-            existing.pr_limit = pr_limit
-            changed = True
-        if existing.merge_mode != merge_mode:
-            existing.merge_mode = merge_mode
-            changed = True
-        if existing.stimulus.kind != stimulus.kind or existing.stimulus.cron != stimulus.cron:
-            existing.stimulus = stimulus
-            changed = True
-        if changed:
-            save_agent(existing)
-        return existing
+    # Check for existing agent by name
+    if name:
+        existing = get_agent_by_name(name, repo)
+        if existing:
+            return existing
+
+    # Check for existing agent by area (backward compatibility)
+    if area:
+        existing = get_agent_by_area_repo(area, repo)
+        if existing:
+            return existing
 
     agent_name = name or _generate_agent_name(repo)
 
@@ -319,6 +333,38 @@ def create_agent(
     )
 
     save_agent(agent)
+    return agent
+
+
+def update_agent(
+    agent_id: str,
+    area: list[str] | None = None,
+    goal: list[str] | None = None,
+    flow: str | None = None,
+    stimulus: Stimulus | None = None,
+    pr_limit: int | None = None,
+    merge_mode: MergeMode | None = None,
+    db_path: Path | None = None,
+) -> Agent | None:
+    """Update an agent's configuration. Returns updated agent or None if not found."""
+    agent = get_agent(agent_id, db_path)
+    if not agent:
+        return None
+
+    if area is not None:
+        agent.area = area
+    if goal is not None:
+        agent.goal = goal
+    if flow is not None:
+        agent.flow = flow
+    if stimulus is not None:
+        agent.stimulus = stimulus
+    if pr_limit is not None:
+        agent.pr_limit = pr_limit
+    if merge_mode is not None:
+        agent.merge_mode = merge_mode
+
+    save_agent(agent, db_path)
     return agent
 
 

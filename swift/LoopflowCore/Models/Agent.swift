@@ -76,9 +76,9 @@ public enum MergeMode: String, Sendable, Codable {
 public struct Agent: Sendable, Identifiable, Hashable {
     public let id: String
     public var name: String  // User-visible name (e.g., "swift-falcon")
-    public let flow: String
-    public let goal: [String]
-    public let area: [String]
+    public var flow: String
+    public var goal: [String]?  // Optional, validated at run-time
+    public var area: [String]?  // Optional, validated at run-time
     public let repo: String
 
     public var stimulus: Stimulus
@@ -100,9 +100,9 @@ public struct Agent: Sendable, Identifiable, Hashable {
     public init(
         id: String,
         name: String = "",
-        flow: String,
-        goal: [String] = [],
-        area: [String] = ["."],
+        flow: String = "ship",
+        goal: [String]? = nil,
+        area: [String]? = nil,
         repo: String,
         stimulus: Stimulus = Stimulus(kind: .manual),
         status: AgentStatus = .idle,
@@ -133,6 +133,11 @@ public struct Agent: Sendable, Identifiable, Hashable {
         self.lastMainSha = lastMainSha
     }
 
+    /// Check if agent has required config for running.
+    public var isConfigured: Bool {
+        area != nil
+    }
+
 
     public var shortId: String { String(id.prefix(7)) }
 
@@ -144,16 +149,23 @@ public struct Agent: Sendable, Identifiable, Hashable {
 
     private func generateNameFromInput() -> String {
         // Generate a display name from the agent's configuration
-        let areaStr = area.first == "." ? "root" : (area.first ?? "root")
+        let areaStr: String
+        if let firstArea = area?.first {
+            areaStr = firstArea == "." ? "root" : firstArea
+        } else {
+            areaStr = "root"
+        }
         return "\(areaStr) · \(flow.isEmpty ? "default" : flow)"
     }
 
     public var areaDisplay: String {
-        area.first == "." ? "." : area.joined(separator: ", ")
+        guard let area = area else { return "" }
+        return area.first == "." ? "." : area.joined(separator: ", ")
     }
 
     public var goalDisplay: String {
-        goal.isEmpty ? "" : goal.joined(separator: ", ")
+        guard let goal = goal else { return "" }
+        return goal.isEmpty ? "" : goal.joined(separator: ", ")
     }
 
     public var flowDisplay: String {

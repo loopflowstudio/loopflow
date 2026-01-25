@@ -352,6 +352,45 @@ def list_flows(repo: Path | None) -> list[FlowDef]:
     return flows
 
 
+def list_steps(repo: Path | None) -> list[str]:
+    """List all step names (repo, global, builtins)."""
+    seen = set()
+    steps = []
+
+    # Repo steps
+    if repo:
+        for steps_dir in [repo / ".lf" / "steps", repo / ".claude" / "commands"]:
+            if steps_dir.exists():
+                for path in steps_dir.glob("*.md"):
+                    name = path.stem
+                    if name not in seen:
+                        steps.append(name)
+                        seen.add(name)
+
+    # Global steps
+    for global_dir in [
+        Path.home() / ".lf" / "steps",
+        Path.home() / ".claude" / "commands",
+    ]:
+        if global_dir.exists():
+            for path in global_dir.glob("*.md"):
+                name = path.stem
+                if name not in seen:
+                    steps.append(name)
+                    seen.add(name)
+
+    # Builtin steps
+    builtins_steps = Path(__file__).parent.parent / "templates" / "steps"
+    if builtins_steps.exists():
+        for path in builtins_steps.glob("*.md"):
+            name = path.stem
+            if name not in seen:
+                steps.append(name)
+                seen.add(name)
+
+    return sorted(steps)
+
+
 def save_flow(flow: FlowDef, repo: Path) -> Path:
     """Save flow to .lf/flows/{name}.py. Returns the path."""
     flows_dir = repo / ".lf" / "flows"

@@ -40,10 +40,10 @@ def save_agent(agent: Agent, db_path: Path | None = None) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO agents
-        (id, name, repo, flow, goal, area, stimulus_kind, stimulus_cron, status, iteration,
+        (id, name, repo, flow, goal, area, stimulus_kind, stimulus_cron, paused, status, iteration,
          worktree, branch, pr_limit, merge_mode, pid, created_at,
          last_main_sha, consecutive_failures, pending_activations)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             agent.id,
@@ -54,6 +54,7 @@ def save_agent(agent: Agent, db_path: Path | None = None) -> None:
             json.dumps(agent.area) if agent.area is not None else None,
             agent.stimulus.kind,
             agent.stimulus.cron,
+            1 if agent.paused else 0,
             agent.status.value,
             agent.iteration,
             str(agent.worktree) if agent.worktree else None,
@@ -336,6 +337,7 @@ def update_agent(
     goal: list[str] | None = None,
     flow: str | None = None,
     stimulus: Stimulus | None = None,
+    paused: bool | None = None,
     pr_limit: int | None = None,
     merge_mode: MergeMode | None = None,
     db_path: Path | None = None,
@@ -353,6 +355,8 @@ def update_agent(
         agent.flow = flow
     if stimulus is not None:
         agent.stimulus = stimulus
+    if paused is not None:
+        agent.paused = paused
     if pr_limit is not None:
         agent.pr_limit = pr_limit
     if merge_mode is not None:
@@ -360,6 +364,37 @@ def update_agent(
 
     save_agent(agent, db_path)
     return agent
+
+
+def clone_agent(
+    agent_id: str, name: str | None = None, db_path: Path | None = None
+) -> Agent | None:
+    """Clone an agent with a new ID and name. Returns new agent or None if source not found."""
+    from loopflow.lf.naming import generate_name
+
+    source = get_agent(agent_id, db_path)
+    if not source:
+        return None
+
+    new_agent = Agent(
+        id=str(uuid.uuid4()),
+        name=name or generate_name(),
+        repo=source.repo,
+        flow=source.flow,
+        goal=source.goal,
+        area=source.area,
+        stimulus=source.stimulus,
+        paused=True,  # Clones start paused
+        status=AgentStatus.IDLE,
+        iteration=0,
+        worktree=None,  # New agent gets fresh worktree
+        branch=None,
+        pr_limit=source.pr_limit,
+        merge_mode=source.merge_mode,
+    )
+
+    save_agent(new_agent, db_path)
+    return new_agent
 
 
 def count_outstanding(agent: Agent) -> int:
@@ -398,8 +433,20 @@ class StartResult:
         return self.ok
 
 
-def start_agent(agent_id: str, foreground: bool = False) -> StartResult:
-    """Start an agent running."""
+def start_agent(
+    agent_id: str,
+    foreground: bool = False,
+    *,
+    area: list[str] | None = None,
+    goal: list[str] | None = None,
+    flow: str | None = None,
+    stimulus: "Stimulus | None" = None,
+) -> StartResult:
+    """Start an agent running.
+
+    Optional kwargs are one-time overrides for this run only.
+    They don't modify the agent's persistent configuration.
+    """
     from loopflow.lfd.daemon.process import is_process_running
 
     agent = get_agent(agent_id)
@@ -414,14 +461,37 @@ def start_agent(agent_id: str, foreground: bool = False) -> StartResult:
         update_agent_status(agent_id, AgentStatus.WAITING)
         return StartResult(False, "waiting", outstanding=outstanding)
 
+    # Build CLI args for overrides
+    override_args = []
+    if area is not None:
+        override_args.extend(["--area", ",".join(area)])
+    if goal is not None:
+        override_args.extend(["--goal", ",".join(goal)])
+    if flow is not None:
+        override_args.extend(["--flow", flow])
+    if stimulus is not None:
+        override_args.extend(["--stimulus", stimulus.kind])
+        if stimulus.cron:
+            override_args.extend(["--cron", stimulus.cron])
+
     if foreground:
         update_agent_status(agent_id, AgentStatus.RUNNING)
         update_agent_pid(agent_id, os.getpid())
+        # Apply overrides to agent copy for foreground run
+        if area is not None:
+            agent.area = area
+        if goal is not None:
+            agent.goal = goal
+        if flow is not None:
+            agent.flow = flow
+        if stimulus is not None:
+            agent.stimulus = stimulus
         _run_agent(agent)
         return StartResult(True)
     else:
         proc = subprocess.Popen(
-            [sys.executable, "-m", "loopflow.lfd.execution.worker", "agent", agent_id],
+            [sys.executable, "-m", "loopflow.lfd.execution.worker", "agent", agent_id]
+            + override_args,
             cwd=agent.repo,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

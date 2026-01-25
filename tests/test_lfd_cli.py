@@ -26,8 +26,9 @@ def test_env(tmp_path, monkeypatch):
     # Patch DB_PATH at the module level
     monkeypatch.setattr(db_module, "DB_PATH", db_path)
 
-    # Patch get_wt_from_cwd to return our mock repo
+    # Patch repo resolution functions to return our mock repo
     monkeypatch.setattr("loopflow.lfd.cli.get_wt_from_cwd", lambda: repo_path)
+    monkeypatch.setattr("loopflow.lfd.cli.find_main_repo", lambda: repo_path)
 
     return {"repo": repo_path, "db": db_path}
 

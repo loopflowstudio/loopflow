@@ -13,6 +13,7 @@ from pathlib import Path
 import typer
 
 from loopflow.lf.flows import load_flow
+from loopflow.lf.git import find_main_repo
 from loopflow.lf.goals import list_goals
 from loopflow.lf.logging import get_log_dir
 from loopflow.lfd.agent import (
@@ -252,7 +253,8 @@ def create(
         lfd create swift-falcon       # create with specific name
     """
     c = _colors()
-    repo = get_wt_from_cwd()
+    # Use main repo (agents are shared across worktrees)
+    repo = find_main_repo() or get_wt_from_cwd()
     if not repo:
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
@@ -400,7 +402,8 @@ def list_cmd():
         lfd list
     """
     c = _colors()
-    repo = get_wt_from_cwd()
+    # Use main repo to find agents (worktrees share agents with their main repo)
+    repo = find_main_repo() or get_wt_from_cwd()
 
     agents = list_agents(repo=repo)
     if not agents:

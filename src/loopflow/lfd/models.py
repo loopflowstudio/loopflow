@@ -80,11 +80,12 @@ class Agent(LfdModel):
     id: str
     name: str  # unique name, used for worktree/branch naming
     repo: Path
-    flow: str = "ship"  # default flow
+    flow: str = "design"  # flow or step name
     goal: list[str] | None = None  # optional, validated at run-time
     area: list[str] | None = None  # optional, validated at run-time
 
-    stimulus: Stimulus = Field(default_factory=lambda: Stimulus("loop"))
+    stimulus: Stimulus = Field(default_factory=lambda: Stimulus("once"))
+    paused: bool = True  # when paused, stimulus doesn't fire (manual mode)
     status: AgentStatus = AgentStatus.IDLE
     iteration: int = 0
 
@@ -179,12 +180,19 @@ def agent_from_row(row: dict) -> Agent:
 
     # Build stimulus from DB columns
     stimulus = Stimulus(
-        kind=row.get("stimulus_kind", "loop"),
+        kind=row.get("stimulus_kind", "once"),
         cron=row.get("stimulus_cron"),
     )
 
     worktree_str = row.get("worktree")
     worktree = Path(worktree_str) if worktree_str else None
+
+    # Default paused=True for new agents (manual mode)
+    paused = row.get("paused")
+    if paused is None:
+        paused = True
+    else:
+        paused = bool(paused)
 
     return Agent(
         id=row["id"],
@@ -194,6 +202,7 @@ def agent_from_row(row: dict) -> Agent:
         goal=goal,
         area=area,
         stimulus=stimulus,
+        paused=paused,
         status=AgentStatus(row["status"]),
         iteration=row.get("iteration", 0),
         worktree=worktree,

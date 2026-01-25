@@ -4,9 +4,9 @@ import SwiftUI
 import LoopflowCore
 
 struct FlowEditor: View {
-    @Binding var flow: FlowDef
+    @Binding var flow: Flow
     let availablePrompts: [PromptCard]
-    let availableFlows: [FlowDef]
+    let availableFlows: [Flow]
     let onSave: () -> Void
     let onRun: () -> Void
     let onDelete: () -> Void
@@ -156,7 +156,7 @@ struct AddStepButton: View {
 struct StepEditorSheet: View {
     @Binding var step: Step
     let availablePrompts: [PromptCard]
-    let availableFlows: [FlowDef]
+    let availableFlows: [Flow]
     let onDelete: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -245,7 +245,7 @@ struct StepEditorSheet: View {
 // MARK: - Flow Row (for sidebar)
 
 struct FlowRow: View {
-    let flow: FlowDef
+    let flow: Flow
     let isSelected: Bool
     let onSelect: () -> Void
 
@@ -333,7 +333,7 @@ struct NewFlowSheet: View {
 }
 
 #Preview {
-    @Previewable @State var flow = FlowDef(
+    @Previewable @State var flow = Flow(
         name: "ship",
         steps: [
             Step(prompt: "design"),

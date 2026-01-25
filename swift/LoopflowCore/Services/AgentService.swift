@@ -10,7 +10,37 @@ public struct AgentService: @unchecked Sendable {
 
     // MARK: - Agents
 
+    /// List agents for a repository via HTTP API.
+    /// The API normalizes worktree paths to their main repo.
     public func listAgents(repo: URL) async throws -> [Agent] {
+        let baseURL = URL(string: "http://127.0.0.1:8765")!
+        var components = URLComponents(url: baseURL.appendingPathComponent("agents"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "repo", value: repo.path)]
+
+        guard let url = components.url else { return [] }
+
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                return []
+            }
+
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let ok = json["ok"] as? Bool, ok,
+                  let result = json["result"] as? [String: Any],
+                  let agentsData = result["agents"] as? [[String: Any]] else {
+                return []
+            }
+
+            return agentsData.map { parseAgentFromJSON($0) }
+        } catch {
+            return []
+        }
+    }
+
+    /// Fallback: list agents directly from SQLite (no repo path normalization).
+    public func listAgentsFromDB(repo: URL) async throws -> [Agent] {
         var agents: [Agent] = []
 
         var db: OpaquePointer?
@@ -76,11 +106,12 @@ public struct AgentService: @unchecked Sendable {
             let agent = Agent(
                 id: id,
                 name: name,
-                flow: flow,
-                goal: goal,
                 area: area,
+                goal: goal,
+                flow: flow,
                 repo: repoPath,
                 stimulus: stimulus,
+                paused: false,  // DB fallback doesn't have paused column yet
                 status: status,
                 iteration: iteration,
                 worktreePath: worktreePath,
@@ -231,7 +262,7 @@ public struct AgentService: @unchecked Sendable {
         // Create with defaults - lfd requires non-empty goal/area
         let body: [String: Any] = [
             "name": name.isEmpty ? NSNull() : name,
-            "flow": "ship",  // Default flow
+            "flow": "design",  // Default flow (single step)
             "goal": ["default"],
             "area": ["."]  // Root directory
         ]
@@ -275,11 +306,12 @@ public struct AgentService: @unchecked Sendable {
         return Agent(
             id: json["id"] as? String ?? UUID().uuidString,
             name: json["name"] as? String ?? "",
-            flow: json["flow"] as? String ?? "ship",
-            goal: json["goal"] as? [String],  // nullable
             area: json["area"] as? [String],  // nullable
+            goal: json["goal"] as? [String],  // nullable
+            flow: json["flow"] as? String ?? "design",
             repo: json["repo"] as? String ?? "",
             stimulus: stimulus,
+            paused: json["paused"] as? Bool ?? true,
             status: AgentStatus(rawValue: json["status"] as? String ?? "idle") ?? .idle,
             iteration: json["iteration"] as? Int ?? 0,
             worktreePath: json["worktree"] as? String,
@@ -291,29 +323,134 @@ public struct AgentService: @unchecked Sendable {
         )
     }
 
-    public func runFlow(agentId: String, flow: String, stimulus: Stimulus.Kind, args: String) async throws {
-        // Run flow for agent via lfd
-        var command = ["lfd"]
-        switch stimulus {
-        case .once:
-            command.append("run")
-        case .loop:
-            command.append("loop")
-        case .watch:
-            command.append("subscribe")
-        case .cron:
-            command.append("schedule")
-        case .manual:
-            command.append("run")
-        }
-        command.append(flow)
-        command.append(".")  // area - would come from agent
+    /// Update agent configuration (area, goal, flow, stimulus, paused).
+    public func updateAgent(
+        agentId: String,
+        area: [String]? = nil,
+        goal: [String]? = nil,
+        flow: String? = nil,
+        stimulus: Stimulus? = nil,
+        paused: Bool? = nil
+    ) async throws -> Agent {
+        let baseURL = URL(string: "http://127.0.0.1:8765")!
+        let url = baseURL.appendingPathComponent("agents/\(agentId)")
 
-        try await runShellCommand(command)
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        var body: [String: Any] = [:]
+        if let area = area { body["area"] = area }
+        if let goal = goal { body["goal"] = goal }
+        if let flow = flow { body["flow"] = flow }
+        if let stimulus = stimulus {
+            var stimDict: [String: Any] = ["kind": stimulus.kind.rawValue]
+            if let cron = stimulus.cron { stimDict["cron"] = cron }
+            body["stimulus"] = stimDict
+        }
+        if let paused = paused { body["paused"] = paused }
+
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            throw AgentServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let ok = json["ok"] as? Bool, ok,
+              let result = json["result"] as? [String: Any],
+              let agentData = result["agent"] as? [String: Any] else {
+            let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            throw AgentServiceError.commandFailed(errorMsg ?? "Invalid response")
+        }
+
+        return parseAgentFromJSON(agentData)
+    }
+
+    /// Run agent, optionally with one-time overrides.
+    public func run(
+        agentId: String,
+        area: [String]? = nil,
+        goal: [String]? = nil,
+        flow: String? = nil,
+        stimulus: Stimulus? = nil
+    ) async throws {
+        let baseURL = URL(string: "http://127.0.0.1:8765")!
+        let url = baseURL.appendingPathComponent("agents/\(agentId)/run")
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        // Build body with any overrides
+        var body: [String: Any] = [:]
+        if let area = area { body["area"] = area }
+        if let goal = goal { body["goal"] = goal }
+        if let flow = flow { body["flow"] = flow }
+        if let stimulus = stimulus {
+            var stimDict: [String: Any] = ["kind": stimulus.kind.rawValue]
+            if let cron = stimulus.cron { stimDict["cron"] = cron }
+            body["stimulus"] = stimDict
+        }
+
+        if !body.isEmpty {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        }
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            throw AgentServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let ok = json["ok"] as? Bool, ok else {
+            let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            throw AgentServiceError.commandFailed(errorMsg ?? "Invalid response")
+        }
     }
 
     public func stopAgent(agentId: String) async throws {
         try await runShellCommand(["lfd", "stop", agentId])
+    }
+
+    /// Clone an agent with a new name.
+    public func cloneAgent(agentId: String, name: String? = nil) async throws -> Agent {
+        let baseURL = URL(string: "http://127.0.0.1:8765")!
+        let url = baseURL.appendingPathComponent("agents/\(agentId)/clone")
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        if let name = name {
+            let body: [String: Any] = ["name": name]
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        }
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            throw AgentServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let ok = json["ok"] as? Bool, ok,
+              let result = json["result"] as? [String: Any],
+              let agentData = result["agent"] as? [String: Any] else {
+            let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            throw AgentServiceError.commandFailed(errorMsg ?? "Invalid response")
+        }
+
+        return parseAgentFromJSON(agentData)
     }
 
     // MARK: - Private helpers

@@ -1,5 +1,5 @@
-// Flow picker for running flows on idle agents.
-// Allows running once, or changing stimulus to loop/watch/cron.
+// Flow picker for experimenting with flows on idle agents.
+// Run different flows without changing the agent's default config.
 
 import SwiftUI
 import LoopflowCore
@@ -10,105 +10,104 @@ struct FlowPicker: View {
 
     @Environment(\.colorScheme) private var colorScheme
 
-    @State private var inputText: String = ""
     @State private var selectedFlowName: String = ""
     @State private var isRunning = false
+    @State private var isSaving = false
     @State private var errorMessage: String?
     @State private var showingError = false
-    @State private var showingScheduleSheet = false
 
     private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Run a flow")
-                .font(.headline)
-
-            // Optional description/goal input
-            VStack(alignment: .leading, spacing: 6) {
-                Text("What should it do?")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                TextField("Optional: describe the task...", text: $inputText)
-                    .textFieldStyle(.roundedBorder)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Try a different flow")
+                    .font(.headline)
+                Spacer()
             }
+
+            Text("Run a flow without changing the agent's default configuration.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             // Flow selector and run buttons
             HStack(spacing: 12) {
-                // Flow picker
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Flow")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    Picker("Flow", selection: $selectedFlowName) {
-                        ForEach(appState.flows) { flow in
-                            Text(flow.name).tag(flow.name)
+                // Flow picker (shows flows and steps with icons)
+                Picker("Flow", selection: $selectedFlowName) {
+                    // Flows section (multi-step pipelines)
+                    let flows = appState.flows.filter { $0.type == .flow }
+                    if !flows.isEmpty {
+                        Section("Flows") {
+                            ForEach(flows) { flow in
+                                Label(flow.name, systemImage: "arrow.triangle.branch")
+                                    .tag(flow.name)
+                            }
                         }
                     }
-                    .pickerStyle(.menu)
-                    .frame(minWidth: 100)
-                    .disabled(appState.flows.isEmpty)
+
+                    // Steps section (single-step actions)
+                    let steps = appState.flows.filter { $0.type == .step }
+                    if !steps.isEmpty {
+                        Section("Steps") {
+                            ForEach(steps) { step in
+                                Label(step.name, systemImage: "square")
+                                    .tag(step.name)
+                            }
+                        }
+                    }
                 }
+                .pickerStyle(.menu)
+                .frame(minWidth: 140)
+                .disabled(appState.flows.isEmpty)
 
                 Spacer()
 
-                // Run buttons
-                HStack(spacing: 8) {
+                // Run button
+                Button {
+                    runExperiment()
+                } label: {
+                    HStack(spacing: 4) {
+                        if isRunning {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                        } else {
+                            Image(systemName: "play.fill")
+                                .font(.caption)
+                        }
+                        Text("Run")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isRunning || selectedFlowName.isEmpty || !agent.isConfigured)
+
+                // Set as default button
+                if selectedFlowName != agent.flow && !selectedFlowName.isEmpty {
                     Button {
-                        runFlow(stimulus: .once)
+                        setAsDefault()
                     } label: {
                         HStack(spacing: 4) {
-                            if isRunning {
+                            if isSaving {
                                 ProgressView()
                                     .scaleEffect(0.7)
                             } else {
-                                Image(systemName: "play.fill")
+                                Image(systemName: "checkmark")
                                     .font(.caption)
                             }
-                            Text("Run Once")
+                            Text("Set Default")
                         }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(isRunning)
-
-                    Menu {
-                        Button {
-                            runFlow(stimulus: .loop)
-                        } label: {
-                            Label("Loop (continuous)", systemImage: "arrow.triangle.2.circlepath")
-                        }
-
-                        Button {
-                            runFlow(stimulus: .watch)
-                        } label: {
-                            Label("Watch \(agent.areaDisplay) (on change)", systemImage: "eye")
-                        }
-
-                        Button {
-                            showingScheduleSheet = true
-                        } label: {
-                            Label("Schedule...", systemImage: "clock")
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "ellipsis.circle")
-                                .font(.caption)
-                            Text("Keep Running")
-                        }
-                    }
-                    .menuStyle(.borderedButton)
-                    .disabled(isRunning || !agent.isConfigured)
+                    .buttonStyle(DarkButtonStyle())
+                    .disabled(isSaving)
+                    .help("Make '\(selectedFlowName)' the agent's default flow")
                 }
             }
 
-            // Stimulus help text
-            Text(stimulusHelpText)
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+            // Help text showing what the flow does
+            if !selectedFlowName.isEmpty {
+                flowDescription
+            }
         }
-        .padding(20)
+        .padding(16)
         .background(palette.surface)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .alert("Error", isPresented: $showingError) {
@@ -116,40 +115,55 @@ struct FlowPicker: View {
         } message: {
             Text(errorMessage ?? "Failed to run flow")
         }
-        .sheet(isPresented: $showingScheduleSheet) {
-            SchedulePickerSheet(
-                onSchedule: { cron in
-                    runFlowWithCron(cron)
-                }
-            )
-        }
         .onAppear {
-            if selectedFlowName.isEmpty, let first = appState.flows.first {
-                selectedFlowName = first.name
+            initializeSelection()
+        }
+        .onChange(of: appState.flows) {
+            if selectedFlowName.isEmpty {
+                initializeSelection()
             }
         }
     }
 
-    private var stimulusHelpText: String {
-        if appState.flows.isEmpty {
-            return "No flows defined. Add flows to .lf/flows/ in your repo."
+    private func initializeSelection() {
+        // Default to agent's configured flow, or first available
+        if !agent.flow.isEmpty && appState.flows.contains(where: { $0.name == agent.flow }) {
+            selectedFlowName = agent.flow
+        } else if let design = appState.flows.first(where: { $0.name == "design" }) {
+            selectedFlowName = design.name
+        } else if let first = appState.flows.first {
+            selectedFlowName = first.name
         }
-        guard let flow = appState.flows.first(where: { $0.name == selectedFlowName }) else {
-            return "Select a flow to run on this agent."
-        }
-        let stepNames = flow.steps.map(\.prompt).joined(separator: " → ")
-        return stepNames.isEmpty ? "Run the \(flow.name) flow." : stepNames
     }
 
-    private func runFlow(stimulus: Stimulus.Kind) {
+    @ViewBuilder
+    private var flowDescription: some View {
+        if let flow = appState.flows.first(where: { $0.name == selectedFlowName }) {
+            if flow.type == .step {
+                Text("Single step: \(flow.name)")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            } else if !flow.steps.isEmpty {
+                let stepNames = flow.steps.map(\.prompt).joined(separator: " \u{2192} ")
+                Text(stepNames)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    private func runExperiment() {
+        guard !selectedFlowName.isEmpty else { return }
+
         isRunning = true
         Task {
             do {
-                try await appState.runAgentFlow(
+                // Run with flow override - doesn't change agent's config
+                try await appState.runAgent(
                     agent: agent,
                     flow: selectedFlowName,
-                    stimulus: stimulus,
-                    args: inputText
+                    stimulus: Stimulus(kind: .once)  // Experiments run once
                 )
             } catch {
                 await MainActor.run {
@@ -163,18 +177,13 @@ struct FlowPicker: View {
         }
     }
 
-    private func runFlowWithCron(_ cron: String) {
-        isRunning = true
+    private func setAsDefault() {
+        guard !selectedFlowName.isEmpty else { return }
+
+        isSaving = true
         Task {
             do {
-                // For cron, we need to set the stimulus with the cron expression
-                // The runAgentFlow should handle this via the args or a separate parameter
-                try await appState.runAgentFlow(
-                    agent: agent,
-                    flow: selectedFlowName,
-                    stimulus: .cron,
-                    args: inputText.isEmpty ? cron : "\(inputText) --cron '\(cron)'"
-                )
+                try await appState.updateAgent(agent, flow: selectedFlowName)
             } catch {
                 await MainActor.run {
                     errorMessage = error.localizedDescription
@@ -182,91 +191,29 @@ struct FlowPicker: View {
                 }
             }
             await MainActor.run {
-                isRunning = false
+                isSaving = false
             }
         }
-    }
-}
-
-// MARK: - Schedule Picker Sheet
-
-struct SchedulePickerSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    let onSchedule: (String) -> Void
-
-    @State private var selectedPreset: CronPreset = .daily9am
-
-    enum CronPreset: String, CaseIterable {
-        case daily9am = "0 9 * * *"
-        case weekdays9am = "0 9 * * MON-FRI"
-        case hourly = "0 * * * *"
-        case every6hours = "0 */6 * * *"
-
-        var displayName: String {
-            switch self {
-            case .daily9am: return "Daily at 9am"
-            case .weekdays9am: return "Weekdays at 9am"
-            case .hourly: return "Every hour"
-            case .every6hours: return "Every 6 hours"
-            }
-        }
-    }
-
-    var body: some View {
-        VStack(spacing: 20) {
-            Text("Schedule Agent")
-                .font(.headline)
-
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Run this agent on a schedule:")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-
-                ForEach(CronPreset.allCases, id: \.self) { preset in
-                    Button {
-                        selectedPreset = preset
-                    } label: {
-                        HStack {
-                            Image(systemName: selectedPreset == preset ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(selectedPreset == preset ? .blue : .secondary)
-                            Text(preset.displayName)
-                            Spacer()
-                            Text(preset.rawValue)
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                        }
-                        .padding(.vertical, 4)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-
-            HStack {
-                Button("Cancel") {
-                    dismiss()
-                }
-                .keyboardShortcut(.escape)
-
-                Spacer()
-
-                Button("Schedule") {
-                    onSchedule(selectedPreset.rawValue)
-                    dismiss()
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(24)
-        .frame(width: 360)
     }
 }
 
 #Preview {
-    let state = AppState()
-    state.configureMockAgents()
+    @Previewable var state = AppState()
+
+    let _ = {
+        state.configureMockAgents()
+        state.flows = [
+            Flow(name: "design", steps: [Step(prompt: "design")], type: .step),
+            Flow(name: "ship", steps: [
+                Step(prompt: "design"),
+                Step(prompt: "code"),
+                Step(prompt: "test")
+            ], type: .flow)
+        ]
+    }()
+
     let agent = state.agents.first { $0.status == .idle } ?? state.agents.first!
-    return FlowPicker(agent: agent, appState: state)
+    FlowPicker(agent: agent, appState: state)
         .frame(width: 500)
         .padding()
 }

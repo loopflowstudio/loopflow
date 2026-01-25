@@ -1,4 +1,4 @@
-// Agent detail panel showing status, actions, and flow picker for idle agents.
+// Agent detail panel showing config, stimulus toggle, actions, and flow experimentation.
 
 import SwiftUI
 import LoopflowCore
@@ -15,6 +15,7 @@ struct AgentDetailPanel: View {
     @State private var actionError: String?
     @State private var showingActionError = false
     @State private var showingStopConfirmation = false
+    @State private var isCloning = false
 
     private let terminalLauncher = TerminalLauncher()
     private let worktreeService = WorktreeService()
@@ -34,25 +35,28 @@ struct AgentDetailPanel: View {
 
             Divider()
 
-            quickActionsBar
-
-            Divider()
-
             ScrollView {
-                VStack(spacing: 0) {
+                VStack(spacing: 16) {
+                    // Config section (always visible)
+                    configSection
+
                     if agent.status == .idle {
-                        // Show flow picker for idle agents
-                        FlowPicker(agent: agent, appState: appState)
-                            .padding(20)
+                        // Stimulus controls when idle
+                        stimulusSection
+
+                        // Try a different flow (experimentation)
+                        experimentSection
                     } else {
                         // Show run progress for active agents
                         runProgressSection
                     }
 
                     if agent.worktreePath != nil {
+                        quickActionsBar
                         changedFilesSection
                     }
                 }
+                .padding(20)
             }
         }
         .background(palette.background)
@@ -93,46 +97,61 @@ struct AgentDetailPanel: View {
                     Text(agent.displayName)
                         .font(.title2)
                         .fontWeight(.semibold)
-                }
-
-                HStack(spacing: 8) {
-                    Text(agent.areaDisplay)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    Text("•")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-
-                    Text(agent.flowDisplay)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    Text("•")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-
-                    Text(agent.stimulusText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
 
                     if agent.iteration > 0 {
-                        Text("•")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-
                         Text("iter \(agent.iteration)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(palette.surface)
+                            .clipShape(Capsule())
                     }
                 }
+
+                Text(agent.statusText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Spacer()
 
+            // Clone button (prominent)
+            Button {
+                cloneAgent()
+            } label: {
+                HStack(spacing: 4) {
+                    if isCloning {
+                        ProgressView()
+                            .scaleEffect(0.6)
+                    } else {
+                        Image(systemName: "doc.on.doc")
+                            .font(.caption)
+                    }
+                    Text("Clone")
+                }
+            }
+            .buttonStyle(DarkButtonStyle())
+            .disabled(isCloning)
+            .help("Create a copy of this agent")
+
             // PR badge if available
             if let wt = worktree, let prNumber = wt.prNumber, let prState = wt.prState {
                 prBadge(number: prNumber, state: prState, url: wt.prURL)
+            }
+
+            // Stop button when running
+            if agent.status == .running || agent.status == .waiting {
+                Button {
+                    showingStopConfirmation = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "stop.fill")
+                            .font(.caption)
+                        Text("Stop")
+                    }
+                }
+                .buttonStyle(DarkButtonStyle())
             }
         }
         .padding(.horizontal, 20)
@@ -169,6 +188,132 @@ struct AgentDetailPanel: View {
         .help("View PR on GitHub")
     }
 
+    // MARK: - Config Section
+
+    private var configSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Configuration")
+                    .font(.headline)
+                Spacer()
+            }
+
+            // Config display in a grid
+            LazyVGrid(columns: [
+                GridItem(.flexible(), alignment: .leading),
+                GridItem(.flexible(), alignment: .leading)
+            ], spacing: 8) {
+                configRow(label: "Area", value: agent.areaDisplay.isEmpty ? "Not set" : agent.areaDisplay)
+                configRow(label: "Goal", value: agent.goalDisplay.isEmpty ? "None" : agent.goalDisplay)
+                configRow(label: "Flow", value: agent.flowDisplay)
+                configRow(label: "Stimulus", value: agent.stimulusText)
+            }
+        }
+        .padding(16)
+        .background(palette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func configRow(label: String, value: String) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 50, alignment: .trailing)
+            Text(value)
+                .font(.subheadline)
+                .lineLimit(1)
+        }
+    }
+
+    // MARK: - Stimulus Section
+
+    private var stimulusSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Stimulus")
+                    .font(.headline)
+
+                Spacer()
+
+                // Paused toggle
+                Toggle(isOn: Binding(
+                    get: { !agent.paused },
+                    set: { newValue in
+                        togglePaused(!newValue)
+                    }
+                )) {
+                    Text(agent.paused ? "Paused" : "Active")
+                        .font(.caption)
+                        .foregroundColor(agent.paused ? .secondary : .green)
+                }
+                .toggleStyle(.switch)
+                .controlSize(.small)
+            }
+
+            // Explanation text
+            if agent.paused {
+                Text("Agent is paused. Stimulus won't fire automatically. Use Run to execute manually.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                HStack(spacing: 8) {
+                    Image(systemName: "bolt.fill")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                    Text("Stimulus active: \(stimulusDescription)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            // Run button
+            if agent.isConfigured {
+                Button {
+                    runWithCurrentConfig()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "play.fill")
+                            .font(.caption)
+                        Text("Run")
+                            .fontWeight(.medium)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+            } else {
+                Text("Configure area to enable running.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+        .padding(16)
+        .background(palette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var stimulusDescription: String {
+        switch agent.stimulus.kind {
+        case .once:
+            return "runs once when triggered"
+        case .loop:
+            return "runs continuously"
+        case .watch:
+            return "runs when \(agent.areaDisplay) changes"
+        case .cron:
+            return "runs on schedule (\(agent.stimulus.cron ?? ""))"
+        case .manual:
+            return "manual triggers only"
+        }
+    }
+
+    // MARK: - Experiment Section
+
+    private var experimentSection: some View {
+        FlowPicker(agent: agent, appState: appState)
+    }
+
     // MARK: - Quick Actions Bar
 
     private var quickActionsBar: some View {
@@ -177,13 +322,12 @@ struct AgentDetailPanel: View {
                 Button {
                     openInTerminal(path: path)
                 } label: {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         Image(systemName: "terminal")
-                            .font(.system(size: 14))
+                            .font(.system(size: 12))
                         Text(terminalApp.displayName)
-                            .fontWeight(.medium)
+                            .font(.caption)
                     }
-                    .frame(minWidth: 70)
                 }
                 .buttonStyle(DarkButtonStyle())
                 .help("Open in \(terminalApp.displayName)")
@@ -191,13 +335,12 @@ struct AgentDetailPanel: View {
                 Button {
                     openInIDE(path: path)
                 } label: {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         Image(systemName: "curlybraces")
-                            .font(.system(size: 14))
+                            .font(.system(size: 12))
                         Text(ideApp.displayName)
-                            .fontWeight(.medium)
+                            .font(.caption)
                     }
-                    .frame(minWidth: 70)
                 }
                 .buttonStyle(DarkButtonStyle())
                 .help("Open in \(ideApp.displayName)")
@@ -206,46 +349,32 @@ struct AgentDetailPanel: View {
                     Button {
                         landBranch()
                     } label: {
-                        HStack(spacing: 8) {
+                        HStack(spacing: 6) {
                             Image(systemName: "airplane.arrival")
-                                .font(.system(size: 14))
+                                .font(.system(size: 12))
                             Text("Land")
-                                .fontWeight(.medium)
+                                .font(.caption)
                         }
-                        .frame(minWidth: 70)
                     }
                     .buttonStyle(DarkButtonStyle())
                     .help("Land branch (creates PR if needed)")
                 }
-            }
 
-            Spacer()
-
-            if agent.status == .running || agent.status == .waiting {
-                Button {
-                    showingStopConfirmation = true
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "stop.fill")
-                            .font(.system(size: 14))
-                        Text("Stop")
-                            .fontWeight(.medium)
-                    }
-                    .frame(minWidth: 70)
-                }
-                .buttonStyle(DarkButtonStyle())
-                .help("Stop agent")
+                Spacer()
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
-        .background(palette.surface)
     }
 
     // MARK: - Run Progress Section
 
     private var runProgressSection: some View {
         VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Progress")
+                    .font(.headline)
+                Spacer()
+            }
+
             // Status description
             HStack(spacing: 8) {
                 switch agent.status {
@@ -283,13 +412,10 @@ struct AgentDetailPanel: View {
             if agent.status == .running {
                 liveOutputSection
             }
-
-            // Iteration history
-            if agent.iteration > 0 {
-                iterationHistory
-            }
         }
-        .padding(20)
+        .padding(16)
+        .background(palette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private var liveOutputSection: some View {
@@ -306,39 +432,12 @@ struct AgentDetailPanel: View {
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(12)
-                    .background(palette.surface)
+                    .background(palette.background)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
                 LoopLiveOutput(lines: output)
                     .frame(height: 120)
             }
-        }
-    }
-
-    private var iterationHistory: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("History")
-                .font(.caption)
-                .fontWeight(.medium)
-                .foregroundStyle(.secondary)
-
-            VStack(spacing: 4) {
-                ForEach(1...min(agent.iteration, 5), id: \.self) { i in
-                    let iter = agent.iteration - i + 1
-                    HStack {
-                        Image(systemName: "checkmark.circle")
-                            .font(.caption)
-                            .foregroundStyle(.green)
-                        Text("Iteration \(iter)")
-                            .font(.caption)
-                        Spacer()
-                    }
-                    .padding(.vertical, 4)
-                }
-            }
-            .padding(12)
-            .background(palette.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
         }
     }
 
@@ -370,7 +469,6 @@ struct AgentDetailPanel: View {
                         fileRow(file)
                     }
                 }
-                .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
         } label: {
@@ -389,8 +487,9 @@ struct AgentDetailPanel: View {
             }
             .foregroundStyle(.primary)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(16)
+        .background(palette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private var fileSummaryBar: some View {
@@ -422,7 +521,7 @@ struct AgentDetailPanel: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(palette.surface)
+                .fill(palette.background)
         )
     }
 
@@ -464,7 +563,7 @@ struct AgentDetailPanel: View {
         .padding(.horizontal, 10)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(palette.surface)
+                .fill(palette.background)
         )
     }
 
@@ -532,6 +631,49 @@ struct AgentDetailPanel: View {
         }
     }
 
+    private func togglePaused(_ paused: Bool) {
+        Task {
+            do {
+                try await appState.updateAgent(agent, paused: paused)
+            } catch {
+                await MainActor.run {
+                    actionError = "Failed to update agent: \(error.localizedDescription)"
+                    showingActionError = true
+                }
+            }
+        }
+    }
+
+    private func runWithCurrentConfig() {
+        Task {
+            do {
+                try await appState.runAgent(agent: agent)
+            } catch {
+                await MainActor.run {
+                    actionError = "Failed to run agent: \(error.localizedDescription)"
+                    showingActionError = true
+                }
+            }
+        }
+    }
+
+    private func cloneAgent() {
+        isCloning = true
+        Task {
+            do {
+                _ = try await appState.cloneAgent(agent)
+            } catch {
+                await MainActor.run {
+                    actionError = "Failed to clone agent: \(error.localizedDescription)"
+                    showingActionError = true
+                }
+            }
+            await MainActor.run {
+                isCloning = false
+            }
+        }
+    }
+
     private func openInTerminal(path: String) {
         do {
             try terminalLauncher.launchTerminal(terminalApp, at: URL(fileURLWithPath: path))
@@ -583,5 +725,5 @@ struct AgentDetailPanel: View {
     state.configureMockAgents()
     let agent = state.agents.first!
     return AgentDetailPanel(appState: state, agent: agent)
-        .frame(width: 600, height: 600)
+        .frame(width: 600, height: 700)
 }

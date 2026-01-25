@@ -76,12 +76,13 @@ public enum MergeMode: String, Sendable, Codable {
 public struct Agent: Sendable, Identifiable, Hashable {
     public let id: String
     public var name: String  // User-visible name (e.g., "swift-falcon")
-    public var flow: String
-    public var goal: [String]?  // Optional, validated at run-time
     public var area: [String]?  // Optional, validated at run-time
+    public var goal: [String]?  // Optional, validated at run-time
+    public var flow: String
     public let repo: String
 
     public var stimulus: Stimulus
+    public var paused: Bool  // When true, stimulus doesn't fire (manual mode)
     public var status: AgentStatus
     public var iteration: Int
 
@@ -100,11 +101,12 @@ public struct Agent: Sendable, Identifiable, Hashable {
     public init(
         id: String,
         name: String = "",
-        flow: String = "ship",
-        goal: [String]? = nil,
         area: [String]? = nil,
+        goal: [String]? = nil,
+        flow: String = "design",
         repo: String,
-        stimulus: Stimulus = Stimulus(kind: .manual),
+        stimulus: Stimulus = Stimulus(kind: .once),
+        paused: Bool = true,
         status: AgentStatus = .idle,
         iteration: Int = 0,
         worktreePath: String? = nil,
@@ -117,11 +119,12 @@ public struct Agent: Sendable, Identifiable, Hashable {
     ) {
         self.id = id
         self.name = name
-        self.flow = flow
-        self.goal = goal
         self.area = area
+        self.goal = goal
+        self.flow = flow
         self.repo = repo
         self.stimulus = stimulus
+        self.paused = paused
         self.status = status
         self.iteration = iteration
         self.worktreePath = worktreePath

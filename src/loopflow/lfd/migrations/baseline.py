@@ -20,7 +20,7 @@ def apply(conn: sqlite3.Connection) -> None:
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,   -- unique name, used for worktree/branch naming
             repo TEXT NOT NULL,
-            flow TEXT NOT NULL,
+            flow TEXT NOT NULL DEFAULT 'design',
             goal TEXT,            -- JSON array (optional, validated at run-time)
             area TEXT,            -- JSON array (optional, validated at run-time)
 

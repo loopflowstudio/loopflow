@@ -83,8 +83,8 @@ def get_repos_to_check() -> list[Path]:
 
     Returns repos that have worktrees (i.e., main repo roots).
     """
-    from loopflow.lfd.wave import list_waves
     from loopflow.lfd.step_run import load_step_runs
+    from loopflow.lfd.wave import list_waves
 
     repos = set()
 

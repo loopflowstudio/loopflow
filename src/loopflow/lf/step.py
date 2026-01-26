@@ -21,11 +21,11 @@ from loopflow.lf.context import (
     gather_prompt_components,
     gather_step,
 )
+from loopflow.lf.directions import parse_direction_arg, resolve_directions
 from loopflow.lf.flow import run_flow_def
 from loopflow.lf.flows import load_flow
 from loopflow.lf.frontmatter import StepConfig, resolve_step_config
 from loopflow.lf.git import find_main_repo
-from loopflow.lf.directions import parse_direction_arg, resolve_directions
 from loopflow.lf.launcher import (
     build_model_command,
     build_model_interactive_command,
@@ -349,7 +349,11 @@ def run(
     skip_permissions = config.yolo if config else False
 
     # Resolve direction to objects
-    resolved_direction = resolve_directions(repo_root, resolved.direction) if resolved.direction else None
+    resolved_direction = (
+        resolve_directions(repo_root, resolved.direction)
+        if resolved.direction
+        else None
+    )
 
     # Build exclude list: resolved.exclude + resolved.include adjustment
     exclude_patterns = list(resolved.exclude)
@@ -505,7 +509,11 @@ def inline(
     skip_permissions = config.yolo if config else False
 
     # Resolve direction to objects
-    resolved_direction = resolve_directions(repo_root, resolved.direction) if resolved.direction else None
+    resolved_direction = (
+        resolve_directions(repo_root, resolved.direction)
+        if resolved.direction
+        else None
+    )
 
     # Build exclude list from resolved config
     exclude_patterns = list(resolved.exclude)

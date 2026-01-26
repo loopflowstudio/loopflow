@@ -8,7 +8,6 @@ from asyncio import StreamReader, StreamWriter
 from datetime import datetime
 from pathlib import Path
 
-from loopflow.lfd.wave import run_cron_check, run_watch_check
 from loopflow.lfd.daemon import metrics
 from loopflow.lfd.daemon.manager import Manager, load_manager_config
 from loopflow.lfd.daemon.protocol import Event, Request, Response, error, success
@@ -25,6 +24,7 @@ from loopflow.lfd.step_run import (
     save_step_run,
     update_step_run_status,
 )
+from loopflow.lfd.wave import run_cron_check, run_watch_check
 from loopflow.lfd.worktree_state import get_worktree_state_service
 
 

@@ -2,9 +2,9 @@
 
 import os
 
-from loopflow.lfd.wave import list_waves
 from loopflow.lfd.models import WaveStatus
 from loopflow.lfd.step_run import load_step_runs
+from loopflow.lfd.wave import list_waves
 
 
 def compute_status() -> dict:

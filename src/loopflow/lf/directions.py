@@ -200,7 +200,10 @@ def format_direction_section(direction_names: list[str] | None, repo_root: Path)
     if not loaded:
         return None
 
-    parts = [f"<lf:direction:{direction.name}>\n{direction.content}\n</lf:direction:{direction.name}>" for direction in loaded]
+    parts = [
+        f"<lf:direction:{d.name}>\n{d.content}\n</lf:direction:{d.name}>"
+        for d in loaded
+    ]
 
     if len(parts) == 1:
         return parts[0]

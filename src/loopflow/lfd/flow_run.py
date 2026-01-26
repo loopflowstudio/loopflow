@@ -220,8 +220,8 @@ def cleanup_stale_runs(db_path: Path | None = None) -> int:
 
     Returns the number of runs cleaned up.
     """
-    from loopflow.lfd.wave import get_wave
     from loopflow.lfd.daemon.process import is_process_running
+    from loopflow.lfd.wave import get_wave
 
     conn = _get_db(db_path)
 

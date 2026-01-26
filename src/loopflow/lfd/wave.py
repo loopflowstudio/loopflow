@@ -17,10 +17,10 @@ from loopflow.lf.naming import branch_exists, generate_word_pair
 from loopflow.lfd.db import _get_db
 from loopflow.lfd.logging import stimulus_log
 from loopflow.lfd.models import (
-    Wave,
-    WaveStatus,
     MergeMode,
     Stimulus,
+    Wave,
+    WaveStatus,
     wave_from_row,
 )
 
@@ -40,9 +40,9 @@ def save_wave(wave: Wave, db_path: Path | None = None) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO waves
-        (id, name, repo, flow, direction, area, stimulus_kind, stimulus_cron, paused, status, iteration,
-         worktree, branch, pr_limit, merge_mode, pid, created_at,
-         last_main_sha, consecutive_failures, pending_activations)
+        (id, name, repo, flow, direction, area, stimulus_kind, stimulus_cron,
+         paused, status, iteration, worktree, branch, pr_limit, merge_mode,
+         pid, created_at, last_main_sha, consecutive_failures, pending_activations)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (

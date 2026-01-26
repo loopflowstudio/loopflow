@@ -15,6 +15,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from loopflow import __version__
+from loopflow.lfd.daemon import metrics
+from loopflow.lfd.daemon.client import _notify_event
+from loopflow.lfd.daemon.status import compute_status
+from loopflow.lfd.migrations.baseline import SCHEMA_VERSION
+from loopflow.lfd.models import Stimulus
 from loopflow.lfd.wave import (
     clone_wave,
     create_wave,
@@ -25,11 +30,6 @@ from loopflow.lfd.wave import (
     stop_wave,
     update_wave,
 )
-from loopflow.lfd.daemon import metrics
-from loopflow.lfd.daemon.client import _notify_event
-from loopflow.lfd.daemon.status import compute_status
-from loopflow.lfd.migrations.baseline import SCHEMA_VERSION
-from loopflow.lfd.models import Stimulus
 from loopflow.lfd.worktree_state import get_worktree_state_service
 
 # Default port - matches webapp's expected default

@@ -4,8 +4,13 @@ import pytest
 
 from loopflow.lf.config import Config
 from loopflow.lf.context import format_prompt, gather_prompt_components
+from loopflow.lf.directions import (
+    Direction,
+    load_direction,
+    parse_direction_arg,
+    resolve_directions,
+)
 from loopflow.lf.frontmatter import StepConfig, parse_step_file, resolve_step_config
-from loopflow.lf.directions import Direction, load_direction, parse_direction_arg, resolve_directions
 
 
 @pytest.fixture

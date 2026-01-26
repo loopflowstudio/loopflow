@@ -4,16 +4,6 @@ import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from loopflow.lfd.wave import (
-    delete_wave,
-    get_wave,
-    get_wave_by_area_repo,
-    list_waves,
-    save_wave,
-    update_wave_iteration,
-    update_wave_pid,
-    update_wave_status,
-)
 from loopflow.lfd.daemon.protocol import Event, Request, error, success
 from loopflow.lfd.db import _get_db
 from loopflow.lfd.flow_run import (
@@ -26,14 +16,14 @@ from loopflow.lfd.flow_run import (
 )
 from loopflow.lfd.migrations.registry import MIGRATIONS
 from loopflow.lfd.models import (
-    Wave,
-    WaveStatus,
     FlowRun,
     FlowRunStatus,
     MergeMode,
     StepRun,
     StepRunStatus,
     Stimulus,
+    Wave,
+    WaveStatus,
 )
 from loopflow.lfd.step_run import (
     load_step_runs,
@@ -41,6 +31,16 @@ from loopflow.lfd.step_run import (
     load_step_runs_for_worktree,
     save_step_run,
     update_step_run_status,
+)
+from loopflow.lfd.wave import (
+    delete_wave,
+    get_wave,
+    get_wave_by_area_repo,
+    list_waves,
+    save_wave,
+    update_wave_iteration,
+    update_wave_pid,
+    update_wave_status,
 )
 
 
@@ -178,10 +178,10 @@ def test_db_reset_function():
         # Create initial DB with some data
         conn = _get_db(db_path)
         conn.execute(
-            "INSERT INTO waves (id, name, repo, flow, direction, area, stimulus_kind, paused, status, iteration,"
-            "pr_limit, merge_mode, created_at) "
-            "VALUES ('test', 'test-wave', '/tmp', 'ship', '[]', '[]', 'loop', 0, 'idle', 0, 5, "
-            "'pr', '2024-01-01')"
+            "INSERT INTO waves (id, name, repo, flow, direction, area, "
+            "stimulus_kind, paused, status, iteration, pr_limit, merge_mode, "
+            "created_at) VALUES ('test', 'test-wave', '/tmp', 'ship', '[]', "
+            "'[]', 'loop', 0, 'idle', 0, 5, 'pr', '2024-01-01')"
         )
         conn.commit()
         conn.close()

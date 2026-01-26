@@ -13,9 +13,9 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from loopflow.lf.design import gather_area_docs, gather_design_docs, gather_internal_docs
+from loopflow.lf.directions import Direction
 from loopflow.lf.files import format_files, format_image_references, gather_docs, gather_files
 from loopflow.lf.frontmatter import StepFile, parse_step_file
-from loopflow.lf.directions import Direction, load_direction
 from loopflow.lf.skills import (
     discover_skill_sources,
     find_skill,
@@ -812,13 +812,17 @@ def format_prompt(components: PromptComponents) -> str:
         if components.direction:
             if len(components.direction) == 1:
                 d = components.direction[0]
-                direction_section = f"<lf:direction:{d.name}>\n{d.content}\n</lf:direction:{d.name}>"
+                direction_section = (
+                    f"<lf:direction:{d.name}>\n{d.content}\n</lf:direction:{d.name}>"
+                )
             else:
                 direction_parts = [
                     f"<lf:direction:{d.name}>\n{d.content}\n</lf:direction:{d.name}>"
                     for d in components.direction
                 ]
-                direction_section = f"<lf:directions>\n{chr(10).join(direction_parts)}\n</lf:directions>"
+                direction_section = (
+                    f"<lf:directions>\n{chr(10).join(direction_parts)}\n</lf:directions>"
+                )
             parts.append(f"The step.\n\n{direction_section}\n\n{step_tag}")
         else:
             parts.append(f"The step.\n\n{step_tag}")

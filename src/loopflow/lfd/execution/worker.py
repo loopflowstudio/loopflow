@@ -11,6 +11,10 @@ import time
 import uuid
 from pathlib import Path
 
+from loopflow.lfd.daemon.client import notify_event
+from loopflow.lfd.execution.runner import IterationResult, run_iteration
+from loopflow.lfd.logging import worker_log
+from loopflow.lfd.models import Wave, WaveStatus
 from loopflow.lfd.wave import (
     count_outstanding,
     get_wave,
@@ -20,10 +24,6 @@ from loopflow.lfd.wave import (
     update_wave_status,
     update_wave_worktree_branch,
 )
-from loopflow.lfd.daemon.client import notify_event
-from loopflow.lfd.execution.runner import IterationResult, run_iteration
-from loopflow.lfd.logging import worker_log
-from loopflow.lfd.models import Wave, WaveStatus
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 MANAGER_POLL_INTERVAL = 30  # seconds between slot checks

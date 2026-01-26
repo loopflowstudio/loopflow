@@ -13,10 +13,21 @@ from typing import Optional
 
 import typer
 
+from loopflow.lf.directions import list_directions, parse_list_arg
 from loopflow.lf.flows import load_flow
 from loopflow.lf.git import find_main_repo
-from loopflow.lf.directions import list_directions, parse_list_arg
 from loopflow.lf.logging import get_log_dir
+from loopflow.lfd.daemon.launchd import install as launchd_install
+from loopflow.lfd.daemon.launchd import is_running
+from loopflow.lfd.daemon.launchd import uninstall as launchd_uninstall
+from loopflow.lfd.daemon.server import run_server
+from loopflow.lfd.flow_run import list_runs_for_wave
+from loopflow.lfd.git_hooks import (
+    hooks_status,
+    install_hooks,
+    uninstall_hooks,
+)
+from loopflow.lfd.models import MergeMode, Stimulus, Wave, WaveStatus
 from loopflow.lfd.wave import (
     create_wave,
     delete_wave,
@@ -28,17 +39,6 @@ from loopflow.lfd.wave import (
     stop_wave,
     update_wave,
 )
-from loopflow.lfd.daemon.launchd import install as launchd_install
-from loopflow.lfd.daemon.launchd import is_running
-from loopflow.lfd.daemon.launchd import uninstall as launchd_uninstall
-from loopflow.lfd.daemon.server import run_server
-from loopflow.lfd.flow_run import list_runs_for_wave
-from loopflow.lfd.git_hooks import (
-    hooks_status,
-    install_hooks,
-    uninstall_hooks,
-)
-from loopflow.lfd.models import Wave, WaveStatus, MergeMode, Stimulus
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 
@@ -1154,8 +1154,13 @@ def list_directions_cmd():
 
     directions_dir = repo / ".lf" / "directions"
     if not directions_dir.exists():
-        typer.echo(f"{c['dim']}No directions directory found at {directions_dir}{c['reset']}")
-        typer.echo("Create one with: mkdir -p .lf/directions && echo '# My Direction' > .lf/directions/my-direction.md")
+        typer.echo(
+            f"{c['dim']}No directions directory found at {directions_dir}{c['reset']}"
+        )
+        typer.echo(
+            "Create one with: mkdir -p .lf/directions && "
+            "echo '# My Direction' > .lf/directions/my-direction.md"
+        )
         return
 
     all_directions = list_directions(repo)

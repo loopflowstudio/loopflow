@@ -14,6 +14,7 @@ from pathlib import Path
 
 from loopflow.lf.config import load_config, parse_model
 from loopflow.lf.context import ContextConfig, format_prompt, gather_prompt_components
+from loopflow.lf.directions import resolve_directions
 from loopflow.lf.flow import (
     ForkResult,
     build_synthesize_prompt,
@@ -30,7 +31,6 @@ from loopflow.lf.flows import (
     build_step_dag,
     load_flow,
 )
-from loopflow.lf.directions import resolve_directions
 from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lf.logging import write_prompt_file
 from loopflow.lf.messages import generate_pr_message
@@ -44,7 +44,7 @@ from loopflow.lfd.flow_run import (
     update_run_status,
     update_run_step,
 )
-from loopflow.lfd.models import Wave, FlowRun, FlowRunStatus
+from loopflow.lfd.models import FlowRun, FlowRunStatus, Wave
 
 
 @dataclass
@@ -87,7 +87,10 @@ def _build_loop_prompt(
         return None
 
     step_file, step_content = components.step
-    direction_parts = [f"<lf:direction:{d.name}>\n{d.content}\n</lf:direction:{d.name}>" for d in direction]
+    direction_parts = [
+        f"<lf:direction:{d.name}>\n{d.content}\n</lf:direction:{d.name}>"
+        for d in direction
+    ]
     direction_section = "\n\n".join(direction_parts)
 
     combined = f"{direction_section}\n\n---\n\n{step_content}"
@@ -292,7 +295,10 @@ def _build_loop_inline_prompt(
         return None
 
     step_file, step_content = components.step
-    direction_parts = [f"<lf:direction:{d.name}>\n{d.content}\n</lf:direction:{d.name}>" for d in direction]
+    direction_parts = [
+        f"<lf:direction:{d.name}>\n{d.content}\n</lf:direction:{d.name}>"
+        for d in direction
+    ]
     direction_section = "\n\n".join(direction_parts)
 
     combined = f"{direction_section}\n\n---\n\n{step_content}"

@@ -8,14 +8,19 @@ import os.log
 private let logger = Logger(subsystem: "com.loopflow.concerto", category: "screenshot")
 
 struct ScreenshotWindow: View {
-    let mode: AppState.ScreenshotMode
+    let mode: RepoState.ScreenshotMode
     let recentsService: RecentsService
-    @State private var appState = AppState()
+    @State private var repoState = RepoState()
+    @State private var sessionState = SessionState()
+    @State private var launcherState = LauncherState()
     @State private var hasLoaded = false
     @State private var hasCaptured = false
 
     var body: some View {
-        ContentView(appState: appState)
+        ContentView()
+            .environment(repoState)
+            .environment(sessionState)
+            .environment(launcherState)
             .background(WindowAccessor(onWindowReady: { window in
                 Task { @MainActor in
                     await setupAndCapture(window: window)
@@ -30,17 +35,17 @@ struct ScreenshotWindow: View {
         // Open the repo if specified
         if let repoPath = mode.repoPath {
             let repoURL = URL(fileURLWithPath: (repoPath as NSString).expandingTildeInPath)
-            await appState.openRepo(repoURL)
+            await repoState.openRepo(repoURL, launcherState: launcherState, sessionState: sessionState)
         }
 
-        // Configure mock agents if requested
+        // Configure mock waves if requested
         if mode.mockLoops {
-            appState.configureMockAgents()
+            repoState.configureMockWaves()
         }
 
         // Select a specific worktree if requested
         if let branch = mode.selectBranch {
-            appState.selectedWorktree = appState.worktrees.first { $0.branch == branch }
+            repoState.selectedWorktree = repoState.worktrees.first { $0.branch == branch }
         }
 
         // Resize window if specified

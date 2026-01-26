@@ -130,3 +130,23 @@ extension View {
         )
     }
 }
+
+// MARK: - Button Styles
+
+struct DarkButtonStyle: ButtonStyle {
+    @Environment(\.colorScheme) private var colorScheme
+
+    func makeBody(configuration: Configuration) -> some View {
+        let palette = LoopflowPalette.make(for: colorScheme)
+
+        configuration.label
+            .font(.subheadline)
+            .foregroundStyle(Color.loopflowCream)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(configuration.isPressed ? palette.accentHover : palette.accent)
+            )
+    }
+}

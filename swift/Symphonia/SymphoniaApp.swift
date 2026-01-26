@@ -1,5 +1,5 @@
 // Loopflow Symphonia - Teams product.
-// macOS 15+ native app for team coordination of LLM coding agents.
+// macOS 15+ native app for team coordination of LLM coding waves.
 
 import SwiftUI
 import LoopflowCore

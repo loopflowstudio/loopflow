@@ -1,20 +1,20 @@
-// Service for loading Agent and FlowRun data from lfd.db SQLite database.
+// Service for loading Wave and FlowRun data from lfd.db SQLite database.
 
 import Foundation
 import SQLite3
 
-public struct AgentService: @unchecked Sendable {
+public struct WaveService: @unchecked Sendable {
     public init() {}
     private let dbPath = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".lf/lfd.db").path
 
-    // MARK: - Agents
+    // MARK: - Waves
 
-    /// List agents for a repository via HTTP API.
+    /// List waves for a repository via HTTP API.
     /// The API normalizes worktree paths to their main repo.
-    public func listAgents(repo: URL) async throws -> [Agent] {
+    public func listWaves(repo: URL) async throws -> [Wave] {
         let baseURL = URL(string: "http://127.0.0.1:8765")!
-        var components = URLComponents(url: baseURL.appendingPathComponent("agents"), resolvingAgainstBaseURL: false)!
+        var components = URLComponents(url: baseURL.appendingPathComponent("waves"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "repo", value: repo.path)]
 
         guard let url = components.url else { return [] }
@@ -29,11 +29,11 @@ public struct AgentService: @unchecked Sendable {
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let ok = json["ok"] as? Bool, ok,
                   let result = json["result"] as? [String: Any],
-                  let agentsData = result["agents"] as? [[String: Any]] else {
+                  let wavesData = result["waves"] as? [[String: Any]] else {
                 return []
             }
 
-            return agentsData.map { parseAgentFromJSON($0) }
+            return wavesData.map { parseWaveFromJSON($0) }
         } catch {
             return []
         }
@@ -41,7 +41,7 @@ public struct AgentService: @unchecked Sendable {
 
     // MARK: - FlowRuns
 
-    public func listFlowRuns(agentId: String? = nil, repo: URL? = nil, limit: Int = 50) async throws -> [FlowRun] {
+    public func listFlowRuns(waveId: String? = nil, repo: URL? = nil, limit: Int = 50) async throws -> [FlowRun] {
         var flowRuns: [FlowRun] = []
 
         var db: OpaquePointer?
@@ -51,15 +51,15 @@ public struct AgentService: @unchecked Sendable {
         defer { sqlite3_close(db) }
 
         var query = """
-            SELECT id, agent_id, flow, area, repo, goal, status, iteration,
+            SELECT id, wave_id, flow, area, repo, direction, status, iteration,
                    worktree, branch, current_step, error, pr_url,
                    started_at, ended_at, created_at
             FROM runs
         """
 
         var conditions: [String] = []
-        if agentId != nil {
-            conditions.append("agent_id = ?")
+        if waveId != nil {
+            conditions.append("wave_id = ?")
         }
         if repo != nil {
             conditions.append("repo = ?")
@@ -77,8 +77,8 @@ public struct AgentService: @unchecked Sendable {
         defer { sqlite3_finalize(stmt) }
 
         var paramIndex: Int32 = 1
-        if let agentId {
-            sqlite3_bind_text(stmt, paramIndex, agentId, -1, nil)
+        if let waveId {
+            sqlite3_bind_text(stmt, paramIndex, waveId, -1, nil)
             paramIndex += 1
         }
         if let repo {
@@ -98,9 +98,9 @@ public struct AgentService: @unchecked Sendable {
                 continue
             }
 
-            let agentId = columnText(stmt, 1)
+            let waveId = columnText(stmt, 1)
             let area = columnText(stmt, 3) ?? "."
-            let goal = decodeStringArray(columnText(stmt, 5))
+            let direction = decodeStringArray(columnText(stmt, 5))
             let iteration = Int(sqlite3_column_int(stmt, 7))
             let worktree = columnText(stmt, 8)
             let branch = columnText(stmt, 9)
@@ -127,11 +127,11 @@ public struct AgentService: @unchecked Sendable {
 
             flowRuns.append(FlowRun(
                 id: id,
-                agentId: agentId,
+                waveId: waveId,
                 flow: flow,
                 area: area,
                 repo: repoPath,
-                goal: goal,
+                direction: direction,
                 status: status,
                 iteration: iteration,
                 worktree: worktree,
@@ -148,8 +148,8 @@ public struct AgentService: @unchecked Sendable {
         return flowRuns
     }
 
-    public func getFlowRuns(forAgent agentId: String, limit: Int = 10) async throws -> [FlowRun] {
-        return try await listFlowRuns(agentId: agentId, limit: limit)
+    public func getFlowRuns(forWave waveId: String, limit: Int = 10) async throws -> [FlowRun] {
+        return try await listFlowRuns(waveId: waveId, limit: limit)
     }
 
     // MARK: - Actions
@@ -158,22 +158,22 @@ public struct AgentService: @unchecked Sendable {
         try await runShellCommand(["lfd", "install"])
     }
 
-    public func createAgent(name: String, repo: URL) async throws -> Agent {
-        // Create agent via lfd HTTP API with minimal config
-        // User configures area, goal, flow in detail panel before running
+    public func createWave(name: String, repo: URL) async throws -> Wave {
+        // Create wave via lfd HTTP API with minimal config
+        // User configures area, direction, flow in detail panel before running
         let baseURL = URL(string: "http://127.0.0.1:8765")!
-        var components = URLComponents(url: baseURL.appendingPathComponent("agents"), resolvingAgainstBaseURL: false)!
+        var components = URLComponents(url: baseURL.appendingPathComponent("waves"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "repo", value: repo.path)]
 
         var request = URLRequest(url: components.url!)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        // Create with defaults - lfd requires non-empty goal/area
+        // Create with defaults - lfd requires non-empty direction/area
         let body: [String: Any] = [
             "name": name.isEmpty ? NSNull() : name,
             "flow": "design",  // Default flow (single step)
-            "goal": ["default"],
+            "direction": ["default"],
             "area": ["."]  // Root directory
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -182,21 +182,21 @@ public struct AgentService: @unchecked Sendable {
 
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-            throw AgentServiceError.commandFailed("HTTP \(statusCode)")
+            throw WaveServiceError.commandFailed("HTTP \(statusCode)")
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let ok = json["ok"] as? Bool, ok,
               let result = json["result"] as? [String: Any],
-              let agentData = result["agent"] as? [String: Any] else {
+              let waveData = result["wave"] as? [String: Any] else {
             let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
-            throw AgentServiceError.commandFailed(errorMsg ?? "Invalid response")
+            throw WaveServiceError.commandFailed(errorMsg ?? "Invalid response")
         }
 
-        return parseAgentFromJSON(agentData)
+        return parseWaveFromJSON(waveData)
     }
 
-    private func parseAgentFromJSON(_ json: [String: Any]) -> Agent {
+    private func parseWaveFromJSON(_ json: [String: Any]) -> Wave {
         let dateFormatter = ISO8601DateFormatter()
         dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
 
@@ -213,19 +213,77 @@ public struct AgentService: @unchecked Sendable {
             createdAt = dateFormatter.date(from: dateStr) ?? Date()
         }
 
-        return Agent(
+        // Parse PR URL
+        var prURL: URL?
+        if let urlStr = json["pr_url"] as? String {
+            prURL = URL(string: urlStr)
+        }
+
+        // Parse PR state
+        var prState: PRState?
+        if let stateStr = json["pr_state"] as? String {
+            prState = PRState(rawValue: stateStr.lowercased())
+        }
+
+        // Parse staleness
+        var staleness: Staleness = .active
+        if let stalenessStr = json["staleness"] as? String {
+            switch stalenessStr {
+            case "merged": staleness = .merged
+            case "remote_deleted": staleness = .remoteDeleted
+            default:
+                if let days = json["staleness_days"] as? Int {
+                    staleness = .inactive(days: days)
+                }
+            }
+        }
+
+        // Parse recent steps
+        var recentSteps: [StepRun] = []
+        if let stepsData = json["recent_steps"] as? [[String: Any]] {
+            recentSteps = stepsData.compactMap { stepJson -> StepRun? in
+                guard let id = stepJson["id"] as? String,
+                      let step = stepJson["step"] as? String,
+                      let status = stepJson["status"] as? String else {
+                    return nil
+                }
+                let stepRunJSON = StepRunJSON(
+                    id: id,
+                    step: step,
+                    status: status,
+                    startedAt: stepJson["started_at"] as? String,
+                    endedAt: stepJson["ended_at"] as? String
+                )
+                return StepRun(from: stepRunJSON)
+            }
+        }
+
+        return Wave(
             id: json["id"] as? String ?? UUID().uuidString,
             name: json["name"] as? String ?? "",
-            area: json["area"] as? [String],  // nullable
-            goal: json["goal"] as? [String],  // nullable
+            area: json["area"] as? [String],
+            direction: json["direction"] as? [String],
             flow: json["flow"] as? String ?? "design",
             repo: json["repo"] as? String ?? "",
             stimulus: stimulus,
             paused: json["paused"] as? Bool ?? true,
-            status: AgentStatus(rawValue: json["status"] as? String ?? "idle") ?? .idle,
+            status: WaveStatus(rawValue: json["status"] as? String ?? "idle") ?? .idle,
             iteration: json["iteration"] as? Int ?? 0,
             worktreePath: json["worktree"] as? String,
             branch: json["branch"] as? String,
+            isDirty: json["is_dirty"] as? Bool ?? false,
+            isRebasing: json["is_rebasing"] as? Bool ?? false,
+            isMerging: json["is_merging"] as? Bool ?? false,
+            hasDiff: json["has_diff"] as? Bool ?? false,
+            aheadMain: json["ahead_main"] as? Int ?? 0,
+            behindMain: json["behind_main"] as? Int ?? 0,
+            aheadRemote: json["ahead_remote"] as? Int ?? 0,
+            behindRemote: json["behind_remote"] as? Int ?? 0,
+            prURL: prURL,
+            prNumber: json["pr_number"] as? Int,
+            prState: prState,
+            staleness: staleness,
+            recentSteps: recentSteps,
             prLimit: json["pr_limit"] as? Int ?? 5,
             mergeMode: MergeMode(rawValue: json["merge_mode"] as? String ?? "pr") ?? .pr,
             pid: json["pid"] as? Int,
@@ -233,17 +291,17 @@ public struct AgentService: @unchecked Sendable {
         )
     }
 
-    /// Update agent configuration (area, goal, flow, stimulus, paused).
-    public func updateAgent(
-        agentId: String,
+    /// Update wave configuration (area, direction, flow, stimulus, paused).
+    public func updateWave(
+        waveId: String,
         area: [String]? = nil,
-        goal: [String]? = nil,
+        direction: [String]? = nil,
         flow: String? = nil,
         stimulus: Stimulus? = nil,
         paused: Bool? = nil
-    ) async throws -> Agent {
+    ) async throws -> Wave {
         let baseURL = URL(string: "http://127.0.0.1:8765")!
-        let url = baseURL.appendingPathComponent("agents/\(agentId)")
+        let url = baseURL.appendingPathComponent("waves/\(waveId)")
 
         var request = URLRequest(url: url)
         request.httpMethod = "PATCH"
@@ -251,7 +309,7 @@ public struct AgentService: @unchecked Sendable {
 
         var body: [String: Any] = [:]
         if let area = area { body["area"] = area }
-        if let goal = goal { body["goal"] = goal }
+        if let direction = direction { body["direction"] = direction }
         if let flow = flow { body["flow"] = flow }
         if let stimulus = stimulus {
             var stimDict: [String: Any] = ["kind": stimulus.kind.rawValue]
@@ -267,30 +325,30 @@ public struct AgentService: @unchecked Sendable {
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
             let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
-            throw AgentServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let ok = json["ok"] as? Bool, ok,
               let result = json["result"] as? [String: Any],
-              let agentData = result["agent"] as? [String: Any] else {
+              let waveData = result["wave"] as? [String: Any] else {
             let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
-            throw AgentServiceError.commandFailed(errorMsg ?? "Invalid response")
+            throw WaveServiceError.commandFailed(errorMsg ?? "Invalid response")
         }
 
-        return parseAgentFromJSON(agentData)
+        return parseWaveFromJSON(waveData)
     }
 
-    /// Run agent, optionally with one-time overrides.
+    /// Run wave, optionally with one-time overrides.
     public func run(
-        agentId: String,
+        waveId: String,
         area: [String]? = nil,
-        goal: [String]? = nil,
+        direction: [String]? = nil,
         flow: String? = nil,
         stimulus: Stimulus? = nil
     ) async throws {
         let baseURL = URL(string: "http://127.0.0.1:8765")!
-        let url = baseURL.appendingPathComponent("agents/\(agentId)/run")
+        let url = baseURL.appendingPathComponent("waves/\(waveId)/run")
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -299,7 +357,7 @@ public struct AgentService: @unchecked Sendable {
         // Build body with any overrides
         var body: [String: Any] = [:]
         if let area = area { body["area"] = area }
-        if let goal = goal { body["goal"] = goal }
+        if let direction = direction { body["direction"] = direction }
         if let flow = flow { body["flow"] = flow }
         if let stimulus = stimulus {
             var stimDict: [String: Any] = ["kind": stimulus.kind.rawValue]
@@ -316,24 +374,24 @@ public struct AgentService: @unchecked Sendable {
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
             let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
-            throw AgentServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let ok = json["ok"] as? Bool, ok else {
             let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
-            throw AgentServiceError.commandFailed(errorMsg ?? "Invalid response")
+            throw WaveServiceError.commandFailed(errorMsg ?? "Invalid response")
         }
     }
 
-    public func stopAgent(agentId: String) async throws {
-        try await runShellCommand(["lfd", "stop", agentId])
+    public func stopWave(waveId: String) async throws {
+        try await runShellCommand(["lfd", "stop", waveId])
     }
 
-    /// Clone an agent with a new name.
-    public func cloneAgent(agentId: String, name: String? = nil) async throws -> Agent {
+    /// Clone a wave with a new name.
+    public func cloneWave(waveId: String, name: String? = nil) async throws -> Wave {
         let baseURL = URL(string: "http://127.0.0.1:8765")!
-        let url = baseURL.appendingPathComponent("agents/\(agentId)/clone")
+        let url = baseURL.appendingPathComponent("waves/\(waveId)/clone")
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -349,18 +407,18 @@ public struct AgentService: @unchecked Sendable {
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
             let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
-            throw AgentServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let ok = json["ok"] as? Bool, ok,
               let result = json["result"] as? [String: Any],
-              let agentData = result["agent"] as? [String: Any] else {
+              let waveData = result["wave"] as? [String: Any] else {
             let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
-            throw AgentServiceError.commandFailed(errorMsg ?? "Invalid response")
+            throw WaveServiceError.commandFailed(errorMsg ?? "Invalid response")
         }
 
-        return parseAgentFromJSON(agentData)
+        return parseWaveFromJSON(waveData)
     }
 
     // MARK: - Private helpers
@@ -414,7 +472,7 @@ public struct AgentService: @unchecked Sendable {
                 if process.terminationStatus == 0 {
                     continuation.resume()
                 } else {
-                    continuation.resume(throwing: AgentServiceError.commandFailed(output.isEmpty ? "Exit code \(process.terminationStatus)" : output))
+                    continuation.resume(throwing: WaveServiceError.commandFailed(output.isEmpty ? "Exit code \(process.terminationStatus)" : output))
                 }
             } catch {
                 continuation.resume(throwing: error)
@@ -423,7 +481,7 @@ public struct AgentService: @unchecked Sendable {
     }
 }
 
-public enum AgentServiceError: LocalizedError {
+public enum WaveServiceError: LocalizedError {
     case commandFailed(String)
 
     public var errorDescription: String? {

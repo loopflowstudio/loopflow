@@ -240,8 +240,8 @@ public struct FlowService: @unchecked Sendable {
                     if key == "model" {
                         currentConfig?.model = value
                         inContext = false
-                    } else if key == "goal" {
-                        currentConfig?.goal = value
+                    } else if key == "direction" {
+                        currentConfig?.direction = value
                         inContext = false
                     } else if key == "context" {
                         inContext = true
@@ -283,8 +283,8 @@ public struct FlowService: @unchecked Sendable {
                 if let model = step.config?.model {
                     lines.append("      model: \(model)")
                 }
-                if let goal = step.config?.goal {
-                    lines.append("      goal: \(goal)")
+                if let direction = step.config?.direction {
+                    lines.append("      direction: \(direction)")
                 }
                 if let context = step.config?.context, !context.isEmpty {
                     lines.append("      context:")

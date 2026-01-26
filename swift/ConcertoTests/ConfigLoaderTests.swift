@@ -10,7 +10,7 @@ struct ConfigLoaderTests {
     func parseBasicConfig() {
         let loader = ConfigLoader()
         let yaml = """
-        agent_model: claude:opus
+        wave_model: claude:opus
         terminal: warp
         ide: cursor
         push: true
@@ -19,7 +19,7 @@ struct ConfigLoaderTests {
 
         let config = loader.parseYAML(yaml)
 
-        #expect(config?.agentModel == "claude:opus")
+        #expect(config?.waveModel == "claude:opus")
         #expect(config?.terminal == "warp")
         #expect(config?.ide == "cursor")
         #expect(config?.push == true)

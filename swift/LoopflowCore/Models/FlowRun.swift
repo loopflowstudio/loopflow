@@ -1,4 +1,4 @@
-// FlowRun - an execution instance of a Flow, spawned by an Agent.
+// FlowRun - an execution instance of a Flow, spawned by a Wave.
 
 import Foundation
 import SwiftUI
@@ -23,12 +23,12 @@ public enum FlowRunStatus: String, Sendable, Codable {
 
 public struct FlowRun: Sendable, Identifiable {
     public let id: String
-    public let agentId: String?
+    public let waveId: String?
 
     public let flow: String
     public let area: String
     public let repo: String
-    public let goal: [String]
+    public let direction: [String]
 
     public var status: FlowRunStatus
     public var iteration: Int
@@ -45,11 +45,11 @@ public struct FlowRun: Sendable, Identifiable {
 
     public init(
         id: String,
-        agentId: String?,
+        waveId: String?,
         flow: String,
         area: String,
         repo: String,
-        goal: [String] = [],
+        direction: [String] = [],
         status: FlowRunStatus = .pending,
         iteration: Int = 0,
         worktree: String? = nil,
@@ -62,11 +62,11 @@ public struct FlowRun: Sendable, Identifiable {
         createdAt: Date = Date()
     ) {
         self.id = id
-        self.agentId = agentId
+        self.waveId = waveId
         self.flow = flow
         self.area = area
         self.repo = repo
-        self.goal = goal
+        self.direction = direction
         self.status = status
         self.iteration = iteration
         self.worktree = worktree
@@ -85,8 +85,8 @@ public struct FlowRun: Sendable, Identifiable {
         area == "." ? "root" : area
     }
 
-    public var goalDisplay: String {
-        goal.isEmpty ? "default" : goal.joined(separator: ", ")
+    public var directionDisplay: String {
+        direction.isEmpty ? "default" : direction.joined(separator: ", ")
     }
 
     public var flowDisplay: String {

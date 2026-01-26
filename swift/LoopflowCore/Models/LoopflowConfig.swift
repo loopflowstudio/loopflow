@@ -2,8 +2,8 @@
 
 import Foundation
 
-/// Goal config that handles both single string and array formats in YAML.
-public enum GoalConfig: Sendable, Codable {
+/// Direction config that handles both single string and array formats in YAML.
+public enum DirectionConfig: Sendable, Codable {
     case single(String)
     case multiple([String])
 
@@ -22,7 +22,7 @@ public enum GoalConfig: Sendable, Codable {
             self = .multiple(multiple)
         } else {
             throw DecodingError.typeMismatch(
-                GoalConfig.self,
+                DirectionConfig.self,
                 DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Expected string or array of strings")
             )
         }
@@ -79,7 +79,7 @@ public struct SkillSourceConfig: Sendable, Codable {
 }
 
 public struct LoopflowConfig: Sendable, Codable {
-    public let agentModel: String?
+    public let waveModel: String?
     public let interactive: [String]?
     public let terminal: String?
     public let ide: String?
@@ -94,21 +94,21 @@ public struct LoopflowConfig: Sendable, Codable {
     public let diff: Bool?
     public let diffFiles: Bool?
     public let paste: Bool?
-    public let goal: GoalConfig?
+    public let direction: DirectionConfig?
     public let summaries: [SummaryConfig]?
     public let skillSources: [SkillSourceConfig]?
     public let work: WorkConfig?
 
     enum CodingKeys: String, CodingKey {
-        case agentModel = "agent_model"
+        case waveModel = "wave_model"
         case diffFiles = "diff_files"
         case skillSources = "skill_sources"
-        case interactive, terminal, ide, workspace, context, exclude, push, pr, yolo, chrome, docs, diff, paste, goal, summaries, work
+        case interactive, terminal, ide, workspace, context, exclude, push, pr, yolo, chrome, docs, diff, paste, direction, summaries, work
     }
 
-    /// Goal config can be a single string or array of strings in YAML.
-    public var goalNames: [String] {
-        goal?.names ?? []
+    /// Direction config can be a single string or array of strings in YAML.
+    public var directionNames: [String] {
+        direction?.names ?? []
     }
 
     public var terminalApp: TerminalApp {
@@ -168,7 +168,7 @@ public enum IDEApp: String, Sendable, CaseIterable {
 }
 
 /// Available models for the lf CLI.
-public struct AgentModel: Sendable, Identifiable, Hashable {
+public struct WaveModel: Sendable, Identifiable, Hashable {
     public let id: String  // e.g., "claude:opus", "codex:o3"
     public let backend: String
     public let variant: String?
@@ -189,16 +189,16 @@ public struct AgentModel: Sendable, Identifiable, Hashable {
         self.variant = parts.count > 1 ? String(parts[1]) : nil
     }
 
-    public static let claude = AgentModel("claude")
-    public static let claudeOpus = AgentModel("claude:opus")
-    public static let claudeSonnet = AgentModel("claude:sonnet")
-    public static let codex = AgentModel("codex")
-    public static let codexO3 = AgentModel("codex:o3")
-    public static let codexO4Mini = AgentModel("codex:o4-mini")
-    public static let gemini = AgentModel("gemini")
+    public static let claude = WaveModel("claude")
+    public static let claudeOpus = WaveModel("claude:opus")
+    public static let claudeSonnet = WaveModel("claude:sonnet")
+    public static let codex = WaveModel("codex")
+    public static let codexO3 = WaveModel("codex:o3")
+    public static let codexO4Mini = WaveModel("codex:o4-mini")
+    public static let gemini = WaveModel("gemini")
 
     /// Common models shown in the picker.
-    public static let commonModels: [AgentModel] = [
+    public static let commonModels: [WaveModel] = [
         .claude,
         .claudeOpus,
         .claudeSonnet,

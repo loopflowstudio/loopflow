@@ -1,11 +1,13 @@
-// Unified sidebar showing all agents. Replaces WorktreeSidebar.
+// Unified sidebar showing all waves.
 
 import SwiftUI
 import LoopflowCore
 
-struct AgentSidebar: View {
-    @Bindable var appState: AppState
-    @State private var showingNewAgentSheet = false
+struct WaveSidebar: View {
+    @Environment(RepoState.self) private var repoState
+    @Environment(SessionState.self) private var sessionState
+
+    @State private var showingNewWaveSheet = false
     @State private var showingDiagnostics = false
     @State private var actionError: String?
     @State private var showingActionError = false
@@ -14,50 +16,42 @@ struct AgentSidebar: View {
     @State private var keyboardFocusedId: String?
     @FocusState private var isSidebarFocused: Bool
 
-    // MARK: - Agent Sections
+    // MARK: - Wave Sections
 
-    /// Agents that need immediate attention (blocked, errors)
-    private var blockedAgents: [Agent] {
-        appState.agents.filter { $0.status == .error }
+    private var blockedWaves: [Wave] {
+        repoState.waves.filter { $0.status == .error }
     }
 
-    /// Agents with open PRs awaiting review
-    private var prAgents: [Agent] {
-        appState.agents.filter { agent in
-            agent.status != .error && pendingPR(for: agent) != nil
+    private var prWaves: [Wave] {
+        repoState.waves.filter { wave in
+            wave.status != .error && pendingPR(for: wave) != nil
         }
     }
 
-    /// Actively running agents (no PRs pending)
-    private var activeAgents: [Agent] {
-        appState.agents.filter { agent in
-            (agent.status == .running || agent.status == .waiting) &&
-            agent.status != .error &&
-            pendingPR(for: agent) == nil
+    private var activeWaves: [Wave] {
+        repoState.waves.filter { wave in
+            (wave.status == .running || wave.status == .waiting) &&
+            wave.status != .error &&
+            pendingPR(for: wave) == nil
         }
     }
 
-    /// Idle agents
-    private var idleAgents: [Agent] {
-        appState.agents.filter { agent in
-            agent.status == .idle && pendingPR(for: agent) == nil
+    private var idleWaves: [Wave] {
+        repoState.waves.filter { wave in
+            wave.status == .idle && pendingPR(for: wave) == nil
         }
     }
 
-    /// All agents in display order (for keyboard navigation)
-    private var allAgentsInOrder: [Agent] {
-        blockedAgents + prAgents + activeAgents + idleAgents
+    private var allWavesInOrder: [Wave] {
+        blockedWaves + prWaves + activeWaves + idleWaves
     }
 
-    /// Returns PR info if agent has an open PR awaiting review
-    private func pendingPR(for agent: Agent) -> (number: Int, url: URL?)? {
-        guard let path = agent.worktreePath,
-              let worktree = appState.worktrees.first(where: { $0.path == path }),
-              let prNumber = worktree.prNumber,
-              worktree.prState == .open else {
+    private func pendingPR(for wave: Wave) -> (number: Int, url: URL?)? {
+        guard let prNumber = wave.prNumber,
+              wave.prState == .open else {
             return nil
         }
-        return (number: prNumber, url: worktree.prURL)
+        return (number: prNumber, url: wave.prURL)
     }
 
     private func sectionHeader(_ title: String, icon: String, color: Color) -> some View {
@@ -75,37 +69,38 @@ struct AgentSidebar: View {
         .padding(.bottom, 4)
     }
 
-    private func agentRows(_ agents: [Agent]) -> some View {
-        ForEach(agents) { agent in
-            AgentRow(
-                agent: agent,
-                isSelected: appState.selectedAgent?.id == agent.id,
-                isKeyboardFocused: keyboardFocusedId == agent.id,
-                liveOutput: appState.liveOutput(for: agent),
-                pendingPR: pendingPR(for: agent),
+    private func waveRows(_ waves: [Wave]) -> some View {
+        ForEach(waves) { wave in
+            WaveRow(
+                wave: wave,
+                isSelected: repoState.selectedWave?.id == wave.id,
+                isKeyboardFocused: keyboardFocusedId == wave.id,
+                liveOutput: sessionState.output(for: wave.id),
+                pendingPR: pendingPR(for: wave),
                 onSelect: {
-                    appState.selectedAgent = agent
-                    keyboardFocusedId = agent.id
+                    repoState.selectedWave = wave
+                    keyboardFocusedId = wave.id
                 }
             )
         }
     }
 
     var body: some View {
+        @Bindable var repoState = repoState
         VStack(alignment: .leading, spacing: 0) {
             header
 
-            if appState.agents.isEmpty && !appState.lfdConnected {
+            if repoState.waves.isEmpty && !repoState.lfdConnected {
                 disconnectedState
-            } else if appState.agents.isEmpty {
+            } else if repoState.waves.isEmpty {
                 emptyState
             } else {
-                agentList
+                waveList
             }
         }
         .background(Color.loopflowBurgundy)
-        .sheet(isPresented: $showingNewAgentSheet) {
-            NewAgentSheet(appState: appState)
+        .sheet(isPresented: $showingNewWaveSheet) {
+            NewWaveSheet()
         }
         .sheet(isPresented: $showingDiagnostics) {
             DiagnosticsView()
@@ -115,37 +110,36 @@ struct AgentSidebar: View {
         } message: {
             Text(actionError ?? "An error occurred")
         }
-        .onReceive(NotificationCenter.default.publisher(for: .showNewAgentSheet)) { _ in
-            showingNewAgentSheet = true
+        .onReceive(NotificationCenter.default.publisher(for: .showNewWaveSheet)) { _ in
+            showingNewWaveSheet = true
         }
     }
 
     private var header: some View {
         HStack {
-            Text("Agents")
+            Text("Waves")
                 .font(.caption)
                 .fontWeight(.medium)
                 .foregroundStyle(.white.opacity(0.7))
-                .help("Agents are autonomous AI workers that run flows on your codebase")
+                .help("Waves are autonomous AI workers that run flows on your codebase")
 
             Spacer()
 
-            // lfd connection indicator
             Circle()
-                .fill(appState.lfdConnected ? Color.green : Color.white.opacity(0.3))
+                .fill(repoState.lfdConnected ? Color.green : Color.white.opacity(0.3))
                 .frame(width: 6, height: 6)
-                .help(appState.lfdConnected ? "Connected to lfd daemon" : "lfd daemon not connected")
+                .help(repoState.lfdConnected ? "Connected to lfd daemon" : "lfd daemon not connected")
 
             Button {
-                showingNewAgentSheet = true
+                showingNewWaveSheet = true
             } label: {
                 Image(systemName: "plus")
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.7))
             }
             .buttonStyle(.plain)
-            .help("Create a new agent")
-            .accessibleButton("Create new agent")
+            .help("Create a new wave")
+            .accessibleButton("Create new wave")
             .minHitTarget()
 
             Button {
@@ -178,7 +172,7 @@ struct AgentSidebar: View {
                     Text("Connect to lfd")
                         .fontWeight(.medium)
                         .foregroundStyle(.white.opacity(0.7))
-                    Text("Start the daemon to manage agents.")
+                    Text("Start the daemon to manage waves.")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.5))
                         .multilineTextAlignment(.center)
@@ -188,7 +182,7 @@ struct AgentSidebar: View {
                 Button {
                     Task {
                         do {
-                            try await appState.connectLfd()
+                            try await repoState.connectLfd()
                         } catch {
                             actionError = "Failed to connect: \(error.localizedDescription)"
                             showingActionError = true
@@ -222,27 +216,27 @@ struct AgentSidebar: View {
                     .foregroundStyle(.white.opacity(0.3))
 
                 VStack(spacing: 4) {
-                    Text("No agents yet")
+                    Text("No waves yet")
                         .fontWeight(.medium)
                         .foregroundStyle(.white.opacity(0.7))
-                        .accessibilityIdentifier("agent-empty-title")
-                    Text("Create an agent to start AI-powered work on your codebase.")
+                        .accessibilityIdentifier("wave-empty-title")
+                    Text("Create an wave to start AI-powered work on your codebase.")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.5))
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 16)
-                        .accessibilityIdentifier("agent-empty-description")
+                        .accessibilityIdentifier("wave-empty-description")
                 }
 
                 Button {
-                    showingNewAgentSheet = true
+                    showingNewWaveSheet = true
                 } label: {
-                    Label("Create Agent", systemImage: "plus")
+                    Label("Create Wave", systemImage: "plus")
                         .font(.caption)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-                .accessibilityIdentifier("agent-empty-create")
+                .accessibilityIdentifier("wave-empty-create")
             }
 
             Spacer()
@@ -254,31 +248,28 @@ struct AgentSidebar: View {
         .padding()
     }
 
-    private var agentList: some View {
-        ScrollView {
+    private var waveList: some View {
+        @Bindable var repoState = repoState
+        return ScrollView {
             LazyVStack(alignment: .leading, spacing: 4) {
-                // Blocked section
-                if !blockedAgents.isEmpty {
+                if !blockedWaves.isEmpty {
                     sectionHeader("Needs Attention", icon: "exclamationmark.triangle.fill", color: .orange)
-                    agentRows(blockedAgents)
+                    waveRows(blockedWaves)
                 }
 
-                // Open PRs section
-                if !prAgents.isEmpty {
+                if !prWaves.isEmpty {
                     sectionHeader("Open PRs", icon: "arrow.triangle.pull", color: .green)
-                    agentRows(prAgents)
+                    waveRows(prWaves)
                 }
 
-                // Active section
-                if !activeAgents.isEmpty {
+                if !activeWaves.isEmpty {
                     sectionHeader("Active", icon: "circle.fill", color: .blue)
-                    agentRows(activeAgents)
+                    waveRows(activeWaves)
                 }
 
-                // Idle section
-                if !idleAgents.isEmpty {
+                if !idleWaves.isEmpty {
                     sectionHeader("Idle", icon: "circle", color: .white.opacity(0.5))
-                    agentRows(idleAgents)
+                    waveRows(idleWaves)
                 }
             }
             .padding(.horizontal, 8)
@@ -296,23 +287,23 @@ struct AgentSidebar: View {
         }
         .onKeyPress(.return) {
             if let id = keyboardFocusedId,
-               let agent = appState.agents.first(where: { $0.id == id }) {
-                appState.selectedAgent = agent
+               let wave = repoState.waves.first(where: { $0.id == id }) {
+                repoState.selectedWave = wave
             }
             return .handled
         }
     }
 
     private func moveFocus(_ delta: Int) {
-        let agents = allAgentsInOrder
-        guard !agents.isEmpty else { return }
+        let waves = allWavesInOrder
+        guard !waves.isEmpty else { return }
 
         if let currentId = keyboardFocusedId,
-           let currentIndex = agents.firstIndex(where: { $0.id == currentId }) {
-            let newIndex = max(0, min(agents.count - 1, currentIndex + delta))
-            keyboardFocusedId = agents[newIndex].id
+           let currentIndex = waves.firstIndex(where: { $0.id == currentId }) {
+            let newIndex = max(0, min(waves.count - 1, currentIndex + delta))
+            keyboardFocusedId = waves[newIndex].id
         } else {
-            keyboardFocusedId = delta > 0 ? agents.first?.id : agents.last?.id
+            keyboardFocusedId = delta > 0 ? waves.first?.id : waves.last?.id
         }
     }
 }
@@ -320,12 +311,14 @@ struct AgentSidebar: View {
 // MARK: - Notification Names
 
 extension Notification.Name {
-    static let showNewAgentSheet = Notification.Name("showNewAgentSheet")
+    static let showNewWaveSheet = Notification.Name("showNewWaveSheet")
 }
 
 #Preview {
-    let state = AppState()
-    state.configureMockAgents()
-    return AgentSidebar(appState: state)
+    let state = RepoState()
+    state.configureMockWaves()
+    return WaveSidebar()
+        .environment(state)
+        .environment(SessionState())
         .frame(width: 280, height: 400)
 }

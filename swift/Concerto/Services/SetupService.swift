@@ -121,7 +121,7 @@ struct SetupService {
         log("ensureDaemonRunning: lfd found at \(lfdPath)")
 
         let plistPath = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/LaunchAgents/com.loopflow.lfd.plist")
+            .appendingPathComponent("Library/LaunchWaves/com.loopflow.lfd.plist")
 
         if !FileManager.default.fileExists(atPath: plistPath.path) {
             log("ensureDaemonRunning: plist not found, installing...")

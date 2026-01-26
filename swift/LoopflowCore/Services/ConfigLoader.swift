@@ -28,7 +28,7 @@ public struct ConfigLoader {
     }
 
     public func parseYAML(_ contents: String) -> LoopflowConfig? {
-        var agentModel: String?
+        var waveModel: String?
         var interactive: [String]?
         var terminal: String?
         var ide: String?
@@ -42,7 +42,7 @@ public struct ConfigLoader {
         var diff: Bool?
         var diffFiles: Bool?
         var paste: Bool?
-        var goal: GoalConfig?
+        var direction: DirectionConfig?
         let summaries: [SummaryConfig]? = nil
 
         let lines = contents.components(separatedBy: .newlines)
@@ -67,7 +67,7 @@ public struct ConfigLoader {
                     case "interactive": interactive = listItems
                     case "context": context = listItems
                     case "exclude": exclude = listItems
-                    case "goal": goal = .multiple(listItems)
+                    case "direction": direction = .multiple(listItems)
                     default: break
                     }
                 }
@@ -94,7 +94,7 @@ public struct ConfigLoader {
                 let value = valueRaw.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
 
                 switch key {
-                case "agent_model": agentModel = value
+                case "wave_model": waveModel = value
                 case "terminal": terminal = value
                 case "ide": ide = value
                 case "workspace": workspace = value
@@ -107,14 +107,14 @@ public struct ConfigLoader {
                 case "diff": diff = value == "true"
                 case "diff_files": diffFiles = value == "true"
                 case "paste": paste = value == "true"
-                case "goal": goal = .single(value)
+                case "direction": direction = .single(value)
                 default: break
                 }
             }
         }
 
         return LoopflowConfig(
-            agentModel: agentModel,
+            waveModel: waveModel,
             interactive: interactive,
             terminal: terminal,
             ide: ide,
@@ -129,7 +129,7 @@ public struct ConfigLoader {
             diff: diff,
             diffFiles: diffFiles,
             paste: paste,
-            goal: goal,
+            direction: direction,
             summaries: summaries,
             skillSources: nil,  // TODO: parse skill_sources from YAML
             work: nil

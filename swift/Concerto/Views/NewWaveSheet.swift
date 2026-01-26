@@ -1,10 +1,10 @@
-// Sheet for creating a new agent with optional name.
+// Sheet for creating a new wave with optional name.
 
 import SwiftUI
 import LoopflowCore
 
-struct NewAgentSheet: View {
-    @Bindable var appState: AppState
+struct NewWaveSheet: View {
+    @Environment(RepoState.self) private var repoState
     @Environment(\.dismiss) private var dismiss
 
     @State private var name = ""
@@ -14,7 +14,7 @@ struct NewAgentSheet: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            Text("New Agent")
+            Text("New Wave")
                 .font(.headline)
 
             VStack(alignment: .leading, spacing: 6) {
@@ -31,7 +31,7 @@ struct NewAgentSheet: View {
                     .textFieldStyle(.roundedBorder)
                     .focused($isNameFocused)
                     .onSubmit {
-                        createAgent()
+                        createWave()
                     }
             }
 
@@ -49,8 +49,8 @@ struct NewAgentSheet: View {
 
                 Spacer()
 
-                Button("Create Agent") {
-                    createAgent()
+                Button("Create Wave") {
+                    createWave()
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
@@ -64,13 +64,13 @@ struct NewAgentSheet: View {
         }
     }
 
-    private func createAgent() {
+    private func createWave() {
         isCreating = true
         errorMessage = nil
 
         Task {
             do {
-                try await appState.createAgent(name: name)
+                try await repoState.createWave(name: name)
                 dismiss()
             } catch {
                 errorMessage = error.localizedDescription
@@ -81,5 +81,6 @@ struct NewAgentSheet: View {
 }
 
 #Preview {
-    NewAgentSheet(appState: AppState())
+    NewWaveSheet()
+        .environment(RepoState())
 }

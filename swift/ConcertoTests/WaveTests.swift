@@ -1,29 +1,29 @@
-// Tests for Agent model and Stimulus struct.
+// Tests for Wave model and Stimulus struct.
 
 import Foundation
 import SwiftUI
 import Testing
 @testable import LoopflowCore
 
-@Suite("Agent Model")
-struct AgentModelTests {
+@Suite("Wave Model")
+struct WaveModelTests {
 
     // MARK: - Display Name
 
     @Test("displayName uses name when set")
     func displayNameUsesName() {
-        let agent = Agent(
+        let wave = Wave(
             id: "test-id",
             name: "swift-falcon",
             repo: "/tmp/repo"
         )
 
-        #expect(agent.displayName == "swift-falcon")
+        #expect(wave.displayName == "swift-falcon")
     }
 
     @Test("displayName generates from area and flow when name is empty")
     func displayNameGeneratesFromConfig() {
-        let agent = Agent(
+        let wave = Wave(
             id: "test-id",
             name: "",
             area: ["src/auth"],
@@ -31,12 +31,12 @@ struct AgentModelTests {
             repo: "/tmp/repo"
         )
 
-        #expect(agent.displayName == "src/auth · ship")
+        #expect(wave.displayName == "src/auth · ship")
     }
 
     @Test("displayName shows 'root' for dot area")
     func displayNameRootForDotArea() {
-        let agent = Agent(
+        let wave = Wave(
             id: "test-id",
             name: "",
             area: ["."],
@@ -44,12 +44,12 @@ struct AgentModelTests {
             repo: "/tmp/repo"
         )
 
-        #expect(agent.displayName == "root · debug")
+        #expect(wave.displayName == "root · debug")
     }
 
     @Test("displayName shows default flow when empty")
     func displayNameDefaultFlow() {
-        let agent = Agent(
+        let wave = Wave(
             id: "test-id",
             name: "",
             area: nil,
@@ -57,15 +57,15 @@ struct AgentModelTests {
             repo: "/tmp/repo"
         )
 
-        #expect(agent.displayName == "root · default")
+        #expect(wave.displayName == "root · default")
     }
 
     // MARK: - Status Indicator
 
     @Test("statusIndicator returns green circle for running")
     func statusIndicatorRunning() {
-        let agent = Agent(id: "test", repo: "/tmp", status: .running)
-        let indicator = agent.statusIndicator
+        let wave = Wave(id: "test", repo: "/tmp", status: .running)
+        let indicator = wave.statusIndicator
 
         #expect(indicator.icon == "circle.fill")
         #expect(indicator.color == .green)
@@ -73,8 +73,8 @@ struct AgentModelTests {
 
     @Test("statusIndicator returns yellow half-circle for waiting")
     func statusIndicatorWaiting() {
-        let agent = Agent(id: "test", repo: "/tmp", status: .waiting)
-        let indicator = agent.statusIndicator
+        let wave = Wave(id: "test", repo: "/tmp", status: .waiting)
+        let indicator = wave.statusIndicator
 
         #expect(indicator.icon == "circle.lefthalf.filled")
         #expect(indicator.color == .yellow)
@@ -82,22 +82,22 @@ struct AgentModelTests {
 
     @Test("statusIndicator returns gray circle for idle")
     func statusIndicatorIdle() {
-        let agent = Agent(id: "test", repo: "/tmp", status: .idle)
-        let indicator = agent.statusIndicator
+        let wave = Wave(id: "test", repo: "/tmp", status: .idle)
+        let indicator = wave.statusIndicator
 
         #expect(indicator.icon == "circle")
         #expect(indicator.color == .gray)
     }
 
-    @Test("statusIndicator returns clock for idle cron agent")
+    @Test("statusIndicator returns clock for idle cron wave")
     func statusIndicatorIdleCron() {
-        let agent = Agent(
+        let wave = Wave(
             id: "test",
             repo: "/tmp",
             stimulus: Stimulus(kind: .cron, cron: "0 9 * * *"),
             status: .idle
         )
-        let indicator = agent.statusIndicator
+        let indicator = wave.statusIndicator
 
         #expect(indicator.icon == "clock")
         #expect(indicator.color == .gray)
@@ -105,8 +105,8 @@ struct AgentModelTests {
 
     @Test("statusIndicator returns red X for error")
     func statusIndicatorError() {
-        let agent = Agent(id: "test", repo: "/tmp", status: .error)
-        let indicator = agent.statusIndicator
+        let wave = Wave(id: "test", repo: "/tmp", status: .error)
+        let indicator = wave.statusIndicator
 
         #expect(indicator.icon == "xmark.circle.fill")
         #expect(indicator.color == .red)
@@ -114,8 +114,8 @@ struct AgentModelTests {
 
     @Test("statusIndicator returns green checkmark for completed")
     func statusIndicatorCompleted() {
-        let agent = Agent(id: "test", repo: "/tmp", status: .completed)
-        let indicator = agent.statusIndicator
+        let wave = Wave(id: "test", repo: "/tmp", status: .completed)
+        let indicator = wave.statusIndicator
 
         #expect(indicator.icon == "checkmark.circle.fill")
         #expect(indicator.color == .green)
@@ -125,89 +125,89 @@ struct AgentModelTests {
 
     @Test("areaDisplay joins multiple areas")
     func areaDisplayJoins() {
-        let agent = Agent(
+        let wave = Wave(
             id: "test",
             area: ["src/", "lib/"],
             repo: "/tmp"
         )
 
-        #expect(agent.areaDisplay == "src/, lib/")
+        #expect(wave.areaDisplay == "src/, lib/")
     }
 
     @Test("areaDisplay returns dot for root area")
     func areaDisplayDot() {
-        let agent = Agent(id: "test", area: ["."], repo: "/tmp")
+        let wave = Wave(id: "test", area: ["."], repo: "/tmp")
 
-        #expect(agent.areaDisplay == ".")
+        #expect(wave.areaDisplay == ".")
     }
 
     @Test("areaDisplay returns empty for nil area")
     func areaDisplayNil() {
-        let agent = Agent(id: "test", area: nil, repo: "/tmp")
+        let wave = Wave(id: "test", area: nil, repo: "/tmp")
 
-        #expect(agent.areaDisplay == "")
+        #expect(wave.areaDisplay == "")
     }
 
-    @Test("goalDisplay joins multiple goals")
-    func goalDisplayJoins() {
-        let agent = Agent(
+    @Test("directionDisplay joins multiple goals")
+    func directionDisplayJoins() {
+        let wave = Wave(
             id: "test",
-            goal: ["product-engineer", "designer"],
+            direction: ["product-engineer", "designer"],
             repo: "/tmp"
         )
 
-        #expect(agent.goalDisplay == "product-engineer, designer")
+        #expect(wave.directionDisplay == "product-engineer, designer")
     }
 
-    @Test("goalDisplay returns empty for nil goal")
-    func goalDisplayNil() {
-        let agent = Agent(id: "test", goal: nil, repo: "/tmp")
+    @Test("directionDisplay returns empty for nil direction")
+    func directionDisplayNil() {
+        let wave = Wave(id: "test", direction: nil, repo: "/tmp")
 
-        #expect(agent.goalDisplay == "")
+        #expect(wave.directionDisplay == "")
     }
 
     @Test("flowDisplay returns flow name")
     func flowDisplayName() {
-        let agent = Agent(id: "test", flow: "polish", repo: "/tmp")
+        let wave = Wave(id: "test", flow: "polish", repo: "/tmp")
 
-        #expect(agent.flowDisplay == "polish")
+        #expect(wave.flowDisplay == "polish")
     }
 
     @Test("flowDisplay returns ship for empty flow")
     func flowDisplayDefault() {
-        let agent = Agent(id: "test", flow: "", repo: "/tmp")
+        let wave = Wave(id: "test", flow: "", repo: "/tmp")
 
-        #expect(agent.flowDisplay == "ship")
+        #expect(wave.flowDisplay == "ship")
     }
 
     @Test("shortId returns first 7 characters")
     func shortIdTruncates() {
-        let agent = Agent(id: "abcdefghijklmnop", repo: "/tmp")
+        let wave = Wave(id: "abcdefghijklmnop", repo: "/tmp")
 
-        #expect(agent.shortId == "abcdefg")
+        #expect(wave.shortId == "abcdefg")
     }
 
     // MARK: - isConfigured
 
     @Test("isConfigured returns true when area is set")
     func isConfiguredWithArea() {
-        let agent = Agent(id: "test", area: ["src/"], repo: "/tmp")
+        let wave = Wave(id: "test", area: ["src/"], repo: "/tmp")
 
-        #expect(agent.isConfigured == true)
+        #expect(wave.isConfigured == true)
     }
 
     @Test("isConfigured returns false when area is nil")
     func isConfiguredWithoutArea() {
-        let agent = Agent(id: "test", area: nil, repo: "/tmp")
+        let wave = Wave(id: "test", area: nil, repo: "/tmp")
 
-        #expect(agent.isConfigured == false)
+        #expect(wave.isConfigured == false)
     }
 
     // MARK: - Detail Text
 
     @Test("detailText combines area, flow, and stimulus")
     func detailTextCombines() {
-        let agent = Agent(
+        let wave = Wave(
             id: "test",
             area: ["src/"],
             flow: "ship",
@@ -215,12 +215,12 @@ struct AgentModelTests {
             stimulus: Stimulus(kind: .loop)
         )
 
-        #expect(agent.detailText == "src/ · ship · loop")
+        #expect(wave.detailText == "src/ · ship · loop")
     }
 
     @Test("detailText omits manual stimulus")
     func detailTextOmitsManual() {
-        let agent = Agent(
+        let wave = Wave(
             id: "test",
             area: ["."],
             flow: "debug",
@@ -228,23 +228,23 @@ struct AgentModelTests {
             stimulus: Stimulus(kind: .manual)
         )
 
-        #expect(agent.detailText == ". · debug")
+        #expect(wave.detailText == ". · debug")
     }
 
     // MARK: - Iteration Text
 
     @Test("iterationText shows iter count when positive")
     func iterationTextPositive() {
-        let agent = Agent(id: "test", repo: "/tmp", iteration: 5)
+        let wave = Wave(id: "test", repo: "/tmp", iteration: 5)
 
-        #expect(agent.iterationText == "iter 5")
+        #expect(wave.iterationText == "iter 5")
     }
 
     @Test("iterationText is empty when zero")
     func iterationTextZero() {
-        let agent = Agent(id: "test", repo: "/tmp", iteration: 0)
+        let wave = Wave(id: "test", repo: "/tmp", iteration: 0)
 
-        #expect(agent.iterationText == "")
+        #expect(wave.iterationText == "")
     }
 }
 
@@ -276,24 +276,24 @@ struct StimulusTests {
     }
 }
 
-@Suite("AgentStatus")
-struct AgentStatusTests {
+@Suite("WaveStatus")
+struct WaveStatusTests {
 
     @Test("color returns correct SwiftUI color")
     func colorForStatus() {
-        #expect(AgentStatus.running.color == .green)
-        #expect(AgentStatus.waiting.color == .yellow)
-        #expect(AgentStatus.idle.color == .gray)
-        #expect(AgentStatus.completed.color == .green)
-        #expect(AgentStatus.error.color == .red)
+        #expect(WaveStatus.running.color == .green)
+        #expect(WaveStatus.waiting.color == .yellow)
+        #expect(WaveStatus.idle.color == .gray)
+        #expect(WaveStatus.completed.color == .green)
+        #expect(WaveStatus.error.color == .red)
     }
 
     @Test("icon returns correct SF Symbol")
     func iconForStatus() {
-        #expect(AgentStatus.running.icon == "circle.fill")
-        #expect(AgentStatus.waiting.icon == "circle.lefthalf.filled")
-        #expect(AgentStatus.idle.icon == "circle")
-        #expect(AgentStatus.completed.icon == "checkmark.circle.fill")
-        #expect(AgentStatus.error.icon == "xmark.circle.fill")
+        #expect(WaveStatus.running.icon == "circle.fill")
+        #expect(WaveStatus.waiting.icon == "circle.lefthalf.filled")
+        #expect(WaveStatus.idle.icon == "circle")
+        #expect(WaveStatus.completed.icon == "checkmark.circle.fill")
+        #expect(WaveStatus.error.icon == "xmark.circle.fill")
     }
 }

@@ -283,8 +283,8 @@ public struct FlowService: @unchecked Sendable {
                 if let model = step.config?.model {
                     lines.append("      model: \(model)")
                 }
-                if let goal = step.config?.direction {
-                    lines.append("      direction: \(goal)")
+                if let direction = step.config?.direction {
+                    lines.append("      direction: \(direction)")
                 }
                 if let context = step.config?.context, !context.isEmpty {
                     lines.append("      context:")

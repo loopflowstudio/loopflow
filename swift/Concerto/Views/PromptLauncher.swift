@@ -488,7 +488,7 @@ struct PromptLauncher: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            // Selected goal chips
+            // Selected direction chips
             if launcherState.selectedDirections.isEmpty {
                 Button {
                     showingDirectionPicker = true
@@ -838,7 +838,7 @@ struct PromptLauncher: View {
                     .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .help("Model, goal, context toggles, and command preview")
+                .help("Model, direction, context toggles, and command preview")
                 .accessibleButton("Toggle advanced options", hint: showAdvancedOptions ? "Collapse" : "Expand")
             }
 

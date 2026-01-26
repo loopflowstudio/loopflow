@@ -159,7 +159,7 @@ struct WaveModelTests {
         #expect(wave.directionDisplay == "product-engineer, designer")
     }
 
-    @Test("directionDisplay returns empty for nil goal")
+    @Test("directionDisplay returns empty for nil direction")
     func directionDisplayNil() {
         let wave = Wave(id: "test", direction: nil, repo: "/tmp")
 

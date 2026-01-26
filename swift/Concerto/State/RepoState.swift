@@ -67,7 +67,7 @@ final class RepoState {
     var worktrees: [Worktree] = []
     var prompts: [PromptCard] = []
     var flows: [Flow] = []
-    var goals: [Goal] = []
+    var directions: [Direction] = []
     var waves: [Wave] = []
 
     // Selection
@@ -129,7 +129,7 @@ final class RepoState {
         config = nil
         prompts = []
         flows = []
-        goals = []
+        directions = []
         waves = []
         selectedWorktree = nil
         isLoading = false
@@ -252,18 +252,18 @@ final class RepoState {
             LoggingService.append("openRepo.config elapsed=\(Int((CFAbsoluteTimeGetCurrent() - t0) * 1000))ms")
 
             // Initialize launcher state from config
-            launcherState.initializeFromConfig(config, repoURL: url, goals: goals)
+            launcherState.initializeFromConfig(config, repoURL: url, directions: directions)
 
             // Load prompts and goals
             let t2 = CFAbsoluteTimeGetCurrent()
             prompts = try promptService.loadPrompts(from: url, config: config)
             flows = flowService.loadFlows(from: url)
-            refreshGoals()
+            refreshDirections()
             LoggingService.append("openRepo.prompts elapsed=\(Int((CFAbsoluteTimeGetCurrent() - t2) * 1000))ms")
 
             // Re-initialize launcher goals after goals are loaded
             if let directionNames = config?.directionNames, !directionNames.isEmpty {
-                launcherState.selectedDirections = goals.filter { directionNames.contains($0.name) }
+                launcherState.selectedDirections = directions.filter { directionNames.contains($0.name) }
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -563,9 +563,9 @@ final class RepoState {
 
     // MARK: - Goals & Flows
 
-    func refreshGoals() {
+    func refreshDirections() {
         guard let repo = currentRepo else { return }
-        goals = directionService.loadGoals(from: repo)
+        directions = directionService.loadDirections(from: repo)
     }
 
     func refreshFlows() {

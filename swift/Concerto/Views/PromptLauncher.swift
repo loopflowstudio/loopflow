@@ -477,14 +477,14 @@ struct PromptLauncher: View {
         .frame(minWidth: 220)
     }
 
-    // MARK: - Goal Selector
+    // MARK: - Direction Selector
 
     @State private var showingDirectionPicker = false
 
     private var goalSelector: some View {
         @Bindable var launcherState = launcherState
         return HStack(spacing: 8) {
-            Text("Goal")
+            Text("Direction")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -509,11 +509,11 @@ struct PromptLauncher: View {
                 }
             } else {
                 HStack(spacing: 6) {
-                    ForEach(launcherState.selectedDirections) { goal in
-                        goalChip(goal)
+                    ForEach(launcherState.selectedDirections) { direction in
+                        directionChip(direction)
                     }
 
-                    if repoState.goals.count > launcherState.selectedDirections.count {
+                    if repoState.directions.count > launcherState.selectedDirections.count {
                         Button {
                             showingDirectionPicker = true
                         } label: {
@@ -535,13 +535,13 @@ struct PromptLauncher: View {
         }
     }
 
-    private func goalChip(_ goal: Goal) -> some View {
+    private func directionChip(_ direction: Direction) -> some View {
         HStack(spacing: 4) {
-            Text(goal.displayName)
+            Text(direction.displayName)
                 .font(.caption)
                 .fontWeight(.medium)
             Button {
-                launcherState.selectedDirections.removeAll { $0.id == goal.id }
+                launcherState.selectedDirections.removeAll { $0.id == direction.id }
             } label: {
                 Image(systemName: "xmark")
                     .font(.caption2)
@@ -557,14 +557,14 @@ struct PromptLauncher: View {
     private func goalPickerPopover() -> some View {
         @Bindable var launcherState = launcherState
         return VStack(alignment: .leading, spacing: 0) {
-            Text("Available Goals")
+            Text("Available Directions")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 12)
                 .padding(.top, 12)
                 .padding(.bottom, 8)
 
-            if repoState.goals.isEmpty {
+            if repoState.directions.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("No goals configured")
                         .font(.caption)
@@ -578,19 +578,19 @@ struct PromptLauncher: View {
                 .padding(.bottom, 12)
                 .frame(maxWidth: 220)
             } else {
-                ForEach(repoState.goals) { goal in
-                    let isSelected = launcherState.selectedDirections.contains(goal)
+                ForEach(repoState.directions) { direction in
+                    let isSelected = launcherState.selectedDirections.contains(direction)
                     Button {
                         if isSelected {
-                            launcherState.selectedDirections.removeAll { $0.id == goal.id }
+                            launcherState.selectedDirections.removeAll { $0.id == direction.id }
                         } else {
-                            launcherState.selectedDirections.append(goal)
+                            launcherState.selectedDirections.append(direction)
                         }
                     } label: {
                         HStack {
                             Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                                 .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
-                            Text(goal.displayName)
+                            Text(direction.displayName)
                                 .fontWeight(.medium)
                             Spacer()
                         }

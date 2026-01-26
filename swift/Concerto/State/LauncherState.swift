@@ -7,7 +7,7 @@ import LoopflowCore
 @Observable
 final class LauncherState {
     var selectedPrompt: PromptCard?
-    var selectedDirections: [Goal] = []
+    var selectedDirections: [Direction] = []
     var selectedModel: WaveModel?
     var promptArgs: String = ""
 
@@ -31,7 +31,7 @@ final class LauncherState {
 
     // MARK: - Initialization from config
 
-    func initializeFromConfig(_ config: LoopflowConfig?, repoURL: URL, goals: [Goal]) {
+    func initializeFromConfig(_ config: LoopflowConfig?, repoURL: URL, directions: [Direction]) {
         includeDocs = config?.docs ?? true
         includeDiff = config?.diff ?? false
         includeDiffFiles = config?.diffFiles ?? true
@@ -50,7 +50,7 @@ final class LauncherState {
         }
 
         if let directionNames = config?.directionNames, !directionNames.isEmpty {
-            selectedDirections = goals.filter { directionNames.contains($0.name) }
+            selectedDirections = directions.filter { directionNames.contains($0.name) }
         }
     }
 

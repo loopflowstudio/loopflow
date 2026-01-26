@@ -435,18 +435,6 @@ public struct WaveService: @unchecked Sendable {
         return [str]
     }
 
-    private func decodeOptionalStringArray(_ str: String?) -> [String]? {
-        guard let str, !str.isEmpty else { return nil }
-        guard let data = str.data(using: .utf8) else { return [str] }
-        if let decoded = try? JSONDecoder().decode([String].self, from: data) {
-            return decoded
-        }
-        if let decoded = try? JSONDecoder().decode(String.self, from: data) {
-            return [decoded]
-        }
-        return [str]
-    }
-
     private func columnText(_ stmt: OpaquePointer?, _ index: Int32) -> String? {
         guard let ptr = sqlite3_column_text(stmt, index) else { return nil }
         return String(cString: ptr)

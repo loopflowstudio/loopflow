@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,8 +52,6 @@ class Worktree:
 
 def _find_wt_binary() -> str | None:
     """Find the wt binary, checking common locations."""
-    import shutil
-
     wt_path = shutil.which("wt")
     if wt_path:
         return wt_path
@@ -77,8 +76,6 @@ def ensure_wt_available() -> bool:
     """Ensure wt is available, installing via homebrew if needed."""
     if _find_wt_binary():
         return True
-
-    import shutil
 
     brew_path = shutil.which("brew")
     if not brew_path:

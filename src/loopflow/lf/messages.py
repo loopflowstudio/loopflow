@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -79,7 +80,6 @@ def _log_success(action: str) -> None:
 
 def _normalize_json_newlines(text: str) -> str:
     """Replace actual newlines inside JSON strings with escaped \\n."""
-    import re
 
     def escape_string_content(match: re.Match) -> str:
         content = match.group(1)

@@ -107,7 +107,7 @@ struct WaveSidebar: View {
         } message: {
             Text(actionError ?? "An error occurred")
         }
-        .onReceive(NotificationCenter.default.publisher(for: .showNewWaveSheet)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .newWaveRequested)) { _ in
             createWaveDirectly()
         }
     }
@@ -218,7 +218,7 @@ struct WaveSidebar: View {
                         .fontWeight(.medium)
                         .foregroundStyle(.white.opacity(0.7))
                         .accessibilityIdentifier("wave-empty-title")
-                    Text("Create an wave to start AI-powered work on your codebase.")
+                    Text("Create a wave to start AI-powered work on your codebase.")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.5))
                         .multilineTextAlignment(.center)
@@ -328,7 +328,7 @@ struct WaveSidebar: View {
 // MARK: - Notification Names
 
 extension Notification.Name {
-    static let showNewWaveSheet = Notification.Name("showNewWaveSheet")
+    static let newWaveRequested = Notification.Name("newWaveRequested")
     static let editWaveName = Notification.Name("editWaveName")
 }
 

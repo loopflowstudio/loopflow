@@ -2,235 +2,137 @@
 
 Reduce Concerto to its essential foundation before building embedded interactive sessions.
 
+## Status: Complete
+
+Both changes have been implemented:
+1. ✓ Merged Wave and Worktree into one model (`Wave` in Swift, with worktree state enriched from daemon)
+2. ✓ Split AppState into `RepoState`, `SessionState`, and `LauncherState`
+
 ## Context
 
-The embedded terminal work (jack-heart.ghost.20260125_1034) revealed structural complexity that will compound as we build. Pre-PMF, concepts change daily. Better to simplify now than carry cruft forward.
+The embedded terminal work (jack-heart.ghost.20260125_1034) revealed structural complexity that would compound as we build. Pre-PMF, concepts change daily. Better to simplify now than carry cruft forward.
 
-Two changes:
-1. Merge Agent and Worktree into one model
-2. Split AppState into focused state objects
+## Change 1: Wave absorbs Worktree
 
-## Change 1: Agent absorbs Worktree
+### Problem (was)
 
-### Problem
-
-Users see "agents" but the code maintains two parallel models:
+Users see "waves" but the code maintained two parallel models:
 
 ```swift
-// AppState has both
-var agents: [Agent]
+// AppState had both
+var waves: [Wave]
 var worktrees: [Worktree]
 
-// Every view does this dance
+// Every view did this dance
 private var worktree: Worktree? {
-    guard let path = agent.worktreePath else { return nil }
+    guard let path = wave.worktreePath else { return nil }
     return appState.worktrees.first { $0.path == path }
 }
 ```
 
-Agent has config (flow, goal, area, stimulus). Worktree has state (commits, PR, CI, dirty). But they're the same thing—an agent IS a worktree with config.
+### Solution (implemented)
 
-### Solution
-
-One model. Agent has everything:
+One model. `Wave` has everything:
 
 ```swift
-struct Agent: Codable, Identifiable, Hashable {
+public struct Wave: Sendable, Identifiable, Hashable {
     // Identity
-    let id: String
-    var name: String
-    let repo: String
+    public let id: String
+    public var name: String
+    public let repo: String
 
     // Configuration
-    var area: [String]?
-    var goal: [String]?
-    var flow: String
-    var stimulus: Stimulus
-    var paused: Bool
-    var prLimit: Int
-    var mergeMode: MergeMode
+    public var area: [String]?
+    public var direction: [String]?
+    public var flow: String
+    public var stimulus: Stimulus
+    public var paused: Bool
+    public var prLimit: Int
+    public var mergeMode: MergeMode
 
     // Status
-    var status: AgentStatus
-    var iteration: Int
-    var pid: Int?
-    var consecutiveFailures: Int
-    var pendingActivations: Int
+    public var status: WaveStatus
+    public var iteration: Int
+    public var pid: Int?
 
     // Worktree (was separate model)
-    let path: String                    // non-optional, agents always have worktrees
-    var branch: String
-    var baseBranch: String?
-    var isDirty: Bool
-    var isRebasing: Bool
-    var isMerging: Bool
-    var hasDiff: Bool
-    var aheadMain: Int
-    var behindMain: Int
-    var aheadRemote: Int
-    var behindRemote: Int
+    public var worktreePath: String?
+    public var branch: String?
+    public var isDirty: Bool
+    public var isRebasing: Bool
+    public var isMerging: Bool
+    public var hasDiff: Bool
+    public var aheadMain: Int
+    public var behindMain: Int
+    public var aheadRemote: Int
+    public var behindRemote: Int
 
     // PR
-    var prURL: URL?
-    var prNumber: Int?
-    var prState: PRState?
+    public var prURL: URL?
+    public var prNumber: Int?
+    public var prState: PRState?
 
     // Runtime
-    var ciStatus: CIStatus?
-    var staleness: Staleness
-    var recentSteps: [StepRun]
-
-    // Timestamps
-    let createdAt: Date
+    public var staleness: Staleness
+    public var recentSteps: [StepRun]
+    public let createdAt: Date
 }
 ```
 
-### Daemon API change
+### Deletions
 
-The daemon enriches `/agents` response with worktree state:
-
-```python
-# http_server.py: handle_agents_list
-def handle_agents_list(repo: Path) -> dict:
-    agents = list_agents(repo)
-    enriched = []
-    for agent in agents:
-        data = agent.model_dump()
-        if agent.worktree:
-            wt_state = get_worktree_state(agent.worktree)  # git status, PR info
-            data.update(wt_state)
-        enriched.append(data)
-    return {"agents": enriched}
-```
-
-Remove `/worktrees` endpoint. WorktreeService becomes internal implementation detail for git operations, not a data source.
-
-### Swift deletions
-
-| File | Action |
+| File | Status |
 |------|--------|
-| `Worktree.swift` | Delete |
-| `WorktreeSidebar.swift` | Delete (agents section moves to AgentSidebar) |
-| `WorktreeDetailPanel.swift` | Delete (merge into AgentDetailPanel) |
-| `AppState.worktrees` | Delete |
-| `AppState.selectedWorktree` | Delete (use selectedAgent) |
-| `WorktreeService` worktree-fetching methods | Delete |
-
-### What WorktreeService keeps
-
-WorktreeService still handles git operations:
-- `createWorktree()`, `removeWorktree()`
-- `createPR()`, `landPR()`, `markReady()`
-- `getDiff()`, `openInIDE()`, `openInTerminal()`
-
-It becomes a git operations helper, not a data service.
+| `WorktreeSidebar.swift` | ✓ Deleted |
+| `WorktreeDetailPanel.swift` | ✓ Deleted |
+| `AppState.swift` | ✓ Deleted |
+| `AgentSidebar.swift` | ✓ Renamed to `WaveSidebar.swift` |
+| `AgentDetailPanel.swift` | ✓ Renamed to `WaveDetailPanel.swift` |
+| `AgentRow.swift` | ✓ Renamed to `WaveRow.swift` |
+| `OutputPanel.swift` | ✓ Deleted |
+| `ResultsPanel.swift` | ✓ Deleted |
 
 ## Change 2: Split AppState
 
-### Problem
+### Problem (was)
 
-AppState is 1,100 lines with 30+ properties spanning unrelated concerns:
+AppState was 1,100 lines with 30+ properties spanning unrelated concerns.
 
-```swift
-// Data
-var agents: [Agent]
-var flows: [Flow]
-var goals: [Goal]
-var prompts: [PromptCard]
-
-// 8 session tracking dictionaries
-var liveOutputBySession: [String: [OutputLine]]
-var activeSessionIds: Set<String>
-var stepRunBaselines: [String: StepRunBaseline]
-var stepRunResults: [String: StepRunResult]
-private var stepRunWorktreeMap: [String: String]
-private var stepRunStepMap: [String: String]
-private var stepRunStartMap: [String: Date]
-var activeWorktreePaths: Set<String>
-
-// 15+ prompt launcher properties
-var selectedPrompt: PromptCard?
-var selectedGoals: [Goal]
-var promptArgs: String
-var includeDocs: Bool
-// ... etc
-
-// UI state
-var selectedAgent: Agent?
-var activeSession: InteractiveSession?
-var isLoading: Bool
-var errorMessage: String?
-```
-
-Session cleanup touches 7 maps. A change to any property triggers observation updates across the app.
-
-### Solution
+### Solution (implemented)
 
 Split into focused observable objects:
 
 ```swift
-// Primary data - agents, flows, goals, config
+// Primary data - waves, flows, directions, config
 @Observable final class RepoState {
     var currentRepo: URL?
     var config: LoopflowConfig?
-    var agents: [Agent]
+    var waves: [Wave]
     var flows: [Flow]
-    var goals: [Goal]
+    var directions: [Direction]
     var prompts: [PromptCard]
-
-    // Loading
-    var isLoading: Bool = false
-    var errorMessage: String?
-
-    // Selection
-    var selectedAgent: Agent?
+    var selectedWave: Wave?
+    // ...
 }
 
 // Session tracking - running steps and their output
 @Observable final class SessionState {
     var activeSessions: [String: ActiveSession] = [:]
-
-    struct ActiveSession {
-        let id: String
-        let agentId: String
-        let step: String
-        var baseline: StepRunBaseline?
-        var output: [OutputLine]
-        var result: StepRunResult?
-        let startedAt: Date
-    }
-
-    // Interactive session (one at a time for MVP)
     var interactiveSession: InteractiveSession?
+    // ...
 }
 
 // Context assembly for prompt launching
 @Observable final class LauncherState {
     var selectedPrompt: PromptCard?
-    var selectedGoals: [Goal] = []
+    var selectedDirections: [Direction] = []
     var selectedModel: AgentModel?
     var promptArgs: String = ""
-
-    // Context toggles
-    var includeDocs: Bool = true
-    var includeDiff: Bool = true
-    var includeDiffFiles: Bool = false
-    var includePaste: Bool = false
-    var includeSummaries: Bool = false
-    var includeChrome: Bool = false
-    var selectedContextFolders: Set<URL> = []
-    var attachedFiles: [URL] = []
-    var excludedFiles: Set<String> = []
-
-    var runMode: RunMode = .auto
-    var estimatedTokens: Int = 0
-    var contextPreview: ContextPreview = ContextPreview()
+    // Context toggles...
 }
 ```
 
-### Injection approach
-
-Use `@Environment` for app-wide state:
+### Injection
 
 ```swift
 @main
@@ -248,106 +150,29 @@ struct ConcertoApp: App {
         }
     }
 }
-
-// Views take only what they need
-struct AgentSidebar: View {
-    @Environment(RepoState.self) private var repoState
-
-    var body: some View {
-        List(repoState.agents) { agent in ... }
-    }
-}
-
-struct ResultsPanel: View {
-    @Environment(SessionState.self) private var sessionState
-
-    var body: some View {
-        ForEach(sessionState.activeSessions.values) { ... }
-    }
-}
 ```
 
-### Session lifecycle simplification
+## Terminology changes
 
-Before (7 operations):
-```swift
-activeSessionIds.remove(id)
-stepRunWorktreeMap.removeValue(forKey: id)
-stepRunStepMap.removeValue(forKey: id)
-stepRunStartMap.removeValue(forKey: id)
-liveOutputBySession.removeValue(forKey: id)
-// result computed separately
-stepRunResults[id] = computeResult(...)
-```
+During implementation, naming evolved:
 
-After (1 operation):
-```swift
-sessionState.activeSessions[id]?.result = computeResult(...)
-// or to end and archive:
-sessionState.activeSessions.removeValue(forKey: id)
-```
+| Design doc term | Implemented as |
+|-----------------|----------------|
+| Agent | Wave |
+| Goal | Direction |
+| AgentService | WaveService |
+| AgentSidebar | WaveSidebar |
+| AgentDetailPanel | WaveDetailPanel |
 
-### Services
+## What remains
 
-Services stay as they are—they're not state, they're operations. They can take state objects as parameters:
+WorktreeService still handles git operations:
+- `createWorktree()`, `removeWorktree()`
+- `createPR()`, `landPR()`, `markReady()`
+- `getDiff()`, `openInIDE()`, `openInTerminal()`
 
-```swift
-class AgentService {
-    func refresh(into state: RepoState) async throws { ... }
-    func run(agent: Agent, from state: RepoState) async throws { ... }
-}
-```
+It's a git operations helper, not a data service.
 
-Or access them via environment in views that coordinate.
-
-## Migration path
-
-### Phase 1: Merge Agent/Worktree (Python + Swift)
-
-1. Add worktree state fields to daemon Agent response
-2. Update Swift Agent model to include all fields
-3. Update AgentService to parse enriched response
-4. Remove worktrees array from AppState
-5. Delete Worktree.swift, WorktreeSidebar.swift, WorktreeDetailPanel.swift
-6. Update all views to use Agent directly
-7. Remove /worktrees endpoint from daemon
-
-### Phase 2: Split AppState (Swift only)
-
-1. Create RepoState, SessionState, LauncherState
-2. Move properties from AppState to appropriate new objects
-3. Update environment injection in app entry point
-4. Update views to take specific state objects
-5. Delete AppState.swift (or rename to legacy if gradual migration)
-
-### Phase 3: Resume embedded terminal work
+## Next: Embedded terminal work
 
 With simplified foundation, continue jack-heart.ghost.20260125_1034.
-
-## Verification
-
-After each phase, run existing tests. Some may break if they relied on the old structure—update or delete as appropriate.
-
-Manual test:
-- [ ] Agent list shows with correct status, commits, PR info
-- [ ] Agent detail shows worktree state (dirty, ahead/behind, CI)
-- [ ] Run agent → session appears in results
-- [ ] Session completes → result computed correctly
-- [ ] Prompt launcher still works
-
-## Deletions summary
-
-| Category | Files/Code |
-|----------|------------|
-| Models | Worktree.swift |
-| Views | WorktreeSidebar.swift, WorktreeDetailPanel.swift |
-| State | AppState.worktrees, 6 session dictionaries |
-| API | /worktrees endpoint |
-| Service methods | WorktreeService list/fetch methods |
-
-## Not in scope
-
-- Renaming Agent to something else
-- Changing the daemon's internal Agent model
-- Multi-session support (stays one-at-a-time)
-- Persisting session state across app restart

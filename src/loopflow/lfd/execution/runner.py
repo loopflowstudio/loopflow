@@ -88,8 +88,7 @@ def _build_loop_prompt(
 
     step_file, step_content = components.step
     direction_parts = [
-        f"<lf:direction:{d.name}>\n{d.content}\n</lf:direction:{d.name}>"
-        for d in direction
+        f"<lf:direction:{d.name}>\n{d.content}\n</lf:direction:{d.name}>" for d in direction
     ]
     direction_section = "\n\n".join(direction_parts)
 
@@ -296,8 +295,7 @@ def _build_loop_inline_prompt(
 
     step_file, step_content = components.step
     direction_parts = [
-        f"<lf:direction:{d.name}>\n{d.content}\n</lf:direction:{d.name}>"
-        for d in direction
+        f"<lf:direction:{d.name}>\n{d.content}\n</lf:direction:{d.name}>" for d in direction
     ]
     direction_section = "\n\n".join(direction_parts)
 

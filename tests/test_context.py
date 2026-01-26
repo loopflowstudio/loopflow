@@ -86,6 +86,7 @@ def test_build_prompt_handles_missing_task(temp_repo):
 def test_build_prompt_with_direction(temp_repo):
     """build_prompt passes direction through to formatting."""
     from loopflow.lf.directions import resolve_directions
+
     directions_dir = temp_repo / ".lf" / "directions"
     directions_dir.mkdir(parents=True, exist_ok=True)
     (directions_dir / "concise.md").write_text("Be concise.")

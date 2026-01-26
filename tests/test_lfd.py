@@ -110,9 +110,7 @@ def test_db_records_migrations():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         conn = _get_db(db_path)
-        rows = conn.execute(
-            "SELECT version, applied_at FROM schema_migrations"
-        ).fetchall()
+        rows = conn.execute("SELECT version, applied_at FROM schema_migrations").fetchall()
         conn.close()
 
         # Should have all migrations recorded

@@ -273,8 +273,7 @@ def run(
         None, "-m", "-M", "--model", help="Model to use (backend or backend:variant)"
     ),
     direction: Optional[list[str]] = typer.Option(
-        None, "-d", "-D", "--direction",
-        help="Direction to apply (repeatable, or comma-separated)"
+        None, "-d", "-D", "--direction", help="Direction to apply (repeatable, or comma-separated)"
     ),
     chrome: Optional[bool] = typer.Option(
         None, "--chrome/--no-chrome", help="Enable Chrome browser automation"
@@ -350,9 +349,7 @@ def run(
 
     # Resolve direction to objects
     resolved_direction = (
-        resolve_directions(repo_root, resolved.direction)
-        if resolved.direction
-        else None
+        resolve_directions(repo_root, resolved.direction) if resolved.direction else None
     )
 
     # Build exclude list: resolved.exclude + resolved.include adjustment
@@ -463,8 +460,7 @@ def inline(
         None, "-m", "-M", "--model", help="Model to use (backend or backend:variant)"
     ),
     direction: Optional[list[str]] = typer.Option(
-        None, "-d", "-D", "--direction",
-        help="Direction to apply (repeatable, or comma-separated)"
+        None, "-d", "-D", "--direction", help="Direction to apply (repeatable, or comma-separated)"
     ),
     chrome: Optional[bool] = typer.Option(
         None, "--chrome/--no-chrome", help="Enable Chrome browser automation"
@@ -510,9 +506,7 @@ def inline(
 
     # Resolve direction to objects
     resolved_direction = (
-        resolve_directions(repo_root, resolved.direction)
-        if resolved.direction
-        else None
+        resolve_directions(repo_root, resolved.direction) if resolved.direction else None
     )
 
     # Build exclude list from resolved config

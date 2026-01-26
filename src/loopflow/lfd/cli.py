@@ -437,8 +437,7 @@ def loop(
     name: str = typer.Argument(..., help="Wave name or ID"),
     area_opt: str = typer.Option(None, "--area", "-a", help="Set area (creates wave if needed)"),
     direction_opt: Optional[list[str]] = typer.Option(
-        None, "-d", "-D", "--direction",
-        help="Direction (repeatable, or comma-separated)"
+        None, "-d", "-D", "--direction", help="Direction (repeatable, or comma-separated)"
     ),
     flow_opt: str = typer.Option(None, "--flow", help="Set flow"),
     limit: int = typer.Option(None, "-l", "--limit", help="PR limit override"),
@@ -539,8 +538,7 @@ def run(
     name: str = typer.Argument(..., help="Wave name or ID"),
     area_opt: str = typer.Option(None, "--area", "-a", help="Set area (creates wave if needed)"),
     direction_opt: Optional[list[str]] = typer.Option(
-        None, "-d", "-D", "--direction",
-        help="Direction (repeatable, or comma-separated)"
+        None, "-d", "-D", "--direction", help="Direction (repeatable, or comma-separated)"
     ),
     flow_opt: str = typer.Option(None, "--flow", help="Set flow"),
 ):
@@ -611,8 +609,7 @@ def watch(
     area_opt: str = typer.Option(None, "--area", "-a", help="Set area (creates wave if needed)"),
     path_opt: str = typer.Option(None, "--path", "-p", help="Watch path (defaults to area)"),
     direction_opt: Optional[list[str]] = typer.Option(
-        None, "-d", "-D", "--direction",
-        help="Direction (repeatable, or comma-separated)"
+        None, "-d", "-D", "--direction", help="Direction (repeatable, or comma-separated)"
     ),
     flow_opt: str = typer.Option(None, "--flow", help="Set flow"),
 ):
@@ -682,8 +679,7 @@ def cron_cmd(
     cron_expr: str = typer.Argument(..., help="Cron expression (e.g., '0 9 * * *')"),
     area_opt: str = typer.Option(None, "--area", "-a", help="Set area (creates wave if needed)"),
     direction_opt: Optional[list[str]] = typer.Option(
-        None, "-d", "-D", "--direction",
-        help="Direction (repeatable, or comma-separated)"
+        None, "-d", "-D", "--direction", help="Direction (repeatable, or comma-separated)"
     ),
     flow_opt: str = typer.Option(None, "--flow", help="Set flow"),
 ):
@@ -1004,8 +1000,7 @@ def rm(
 
     if wave.status == WaveStatus.RUNNING:
         typer.echo(
-            f"{c['red']}Error:{c['reset']} Wave is running. Stop it first with: "
-            f"lfd stop {wave_id}",
+            f"{c['red']}Error:{c['reset']} Wave is running. Stop it first with: lfd stop {wave_id}",
             err=True,
         )
         raise typer.Exit(1)
@@ -1154,9 +1149,7 @@ def list_directions_cmd():
 
     directions_dir = repo / ".lf" / "directions"
     if not directions_dir.exists():
-        typer.echo(
-            f"{c['dim']}No directions directory found at {directions_dir}{c['reset']}"
-        )
+        typer.echo(f"{c['dim']}No directions directory found at {directions_dir}{c['reset']}")
         typer.echo(
             "Create one with: mkdir -p .lf/directions && "
             "echo '# My Direction' > .lf/directions/my-direction.md"

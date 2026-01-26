@@ -126,6 +126,7 @@ class TestWaveSchema:
         if not swift_path.exists():
             # Skip if Swift file not renamed yet (Agent.swift → Wave.swift)
             import pytest
+
             pytest.skip("Swift Wave.swift not yet created (pending Agent→Wave rename)")
 
         python_fields = extract_python_fields("Wave", REPO_ROOT / "src/loopflow/lfd/models.py")

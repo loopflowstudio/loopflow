@@ -87,9 +87,7 @@ def get_wave(wave_id: str, db_path: Path | None = None) -> Wave | None:
     return wave_from_row(dict(row)) if row else None
 
 
-def get_wave_by_area_repo(
-    area: list[str], repo: Path, db_path: Path | None = None
-) -> Wave | None:
+def get_wave_by_area_repo(area: list[str], repo: Path, db_path: Path | None = None) -> Wave | None:
     """Get a wave by area and repo."""
     conn = _get_db(db_path)
 
@@ -366,9 +364,7 @@ def update_wave(
     return wave
 
 
-def clone_wave(
-    wave_id: str, name: str | None = None, db_path: Path | None = None
-) -> Wave | None:
+def clone_wave(wave_id: str, name: str | None = None, db_path: Path | None = None) -> Wave | None:
     """Clone a wave with a new ID and name. Returns new wave or None if source not found."""
     from loopflow.lf.naming import generate_name
 
@@ -676,9 +672,7 @@ def check_cron_stimulus(wave: Wave) -> bool:
     activated = should_activate_cron(wave.stimulus.cron, last_time)
 
     if activated:
-        stimulus_log.info(
-            f"[{short_id}] ACTIVATED: cron={wave.stimulus.cron} last_run={last_time}"
-        )
+        stimulus_log.info(f"[{short_id}] ACTIVATED: cron={wave.stimulus.cron} last_run={last_time}")
     else:
         stimulus_log.debug(f"[{short_id}] not due: last_run={last_time}")
 
@@ -728,8 +722,7 @@ def run_watch_check() -> list[str]:
                         activated.append(wave.id)
                     else:
                         stimulus_log.warning(
-                            f"[{wave.short_id()}] watch activated but start failed: "
-                            f"{result.reason}"
+                            f"[{wave.short_id()}] watch activated but start failed: {result.reason}"
                         )
         except Exception as e:
             stimulus_log.error(f"[{wave.short_id()}] watch check error: {e}")

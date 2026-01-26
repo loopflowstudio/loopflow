@@ -162,7 +162,7 @@ struct StepEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var promptName: String = ""
     @State private var model: String = ""
-    @State private var goal: String = ""
+    @State private var direction: String = ""
     @State private var contextText: String = ""
 
     var body: some View {
@@ -192,7 +192,7 @@ struct StepEditorSheet: View {
 
                 Section("Config Overrides") {
                     TextField("Model (e.g., claude:opus)", text: $model)
-                    TextField("Goal", text: $goal)
+                    TextField("Direction", text: $direction)
                     TextField("Context paths (comma-separated)", text: $contextText)
                         .font(.system(size: 12, design: .monospaced))
                 }
@@ -215,7 +215,7 @@ struct StepEditorSheet: View {
         promptName = step.prompt
 
         model = step.config?.model ?? ""
-        goal = step.config?.goal ?? ""
+        direction = step.config?.direction ?? ""
         contextText = step.config?.context?.joined(separator: ", ") ?? ""
     }
 
@@ -228,12 +228,12 @@ struct StepEditorSheet: View {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
 
-        if model.isEmpty && goal.isEmpty && contextPaths.isEmpty {
+        if model.isEmpty && direction.isEmpty && contextPaths.isEmpty {
             step.config = nil
         } else {
             step.config = StepConfig(
                 model: model.isEmpty ? nil : model,
-                goal: goal.isEmpty ? nil : goal,
+                direction: direction.isEmpty ? nil : direction,
                 context: contextPaths.isEmpty ? nil : contextPaths
             )
         }
@@ -337,7 +337,7 @@ struct NewFlowSheet: View {
         name: "ship",
         steps: [
             Step(prompt: "design"),
-            Step(prompt: "implement", config: StepConfig(model: "claude:opus", goal: "architect")),
+            Step(prompt: "implement", config: StepConfig(model: "claude:opus", direction: "architect")),
             Step(prompt: "review"),
             Step(prompt: "polish"),
         ]

@@ -159,7 +159,7 @@ final class LauncherState {
 
         if !selectedDirections.isEmpty {
             let directionNames = selectedDirections.map { $0.name }.joined(separator: ",")
-            parts.append("--goal")
+            parts.append("--direction")
             parts.append(directionNames)
         }
 

@@ -6,17 +6,17 @@ import Foundation
 /// Per-step configuration overrides.
 public struct StepConfig: Sendable, Codable, Equatable {
     public var model: String?
-    public var goal: String?
+    public var direction: String?
     public var context: [String]?
 
-    public init(model: String? = nil, goal: String? = nil, context: [String]? = nil) {
+    public init(model: String? = nil, direction: String? = nil, context: [String]? = nil) {
         self.model = model
-        self.goal = goal
+        self.direction = direction
         self.context = context
     }
 
     public var isEmpty: Bool {
-        model == nil && goal == nil && (context == nil || context!.isEmpty)
+        model == nil && direction == nil && (context == nil || context!.isEmpty)
     }
 }
 

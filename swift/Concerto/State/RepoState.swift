@@ -561,7 +561,7 @@ final class RepoState {
         }
     }
 
-    // MARK: - Goals & Flows
+    // MARK: - Directions & Flows
 
     func refreshDirections() {
         guard let repo = currentRepo else { return }

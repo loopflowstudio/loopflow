@@ -479,7 +479,7 @@ struct PromptLauncher: View {
 
     // MARK: - Goal Selector
 
-    @State private var showingGoalPicker = false
+    @State private var showingDirectionPicker = false
 
     private var goalSelector: some View {
         @Bindable var launcherState = launcherState
@@ -489,9 +489,9 @@ struct PromptLauncher: View {
                 .foregroundStyle(.secondary)
 
             // Selected goal chips
-            if launcherState.selectedGoals.isEmpty {
+            if launcherState.selectedDirections.isEmpty {
                 Button {
-                    showingGoalPicker = true
+                    showingDirectionPicker = true
                 } label: {
                     Text("None")
                         .font(.system(size: 13))
@@ -504,18 +504,18 @@ struct PromptLauncher: View {
                         )
                 }
                 .buttonStyle(.plain)
-                .popover(isPresented: $showingGoalPicker) {
+                .popover(isPresented: $showingDirectionPicker) {
                     goalPickerPopover()
                 }
             } else {
                 HStack(spacing: 6) {
-                    ForEach(launcherState.selectedGoals) { goal in
+                    ForEach(launcherState.selectedDirections) { goal in
                         goalChip(goal)
                     }
 
-                    if repoState.goals.count > launcherState.selectedGoals.count {
+                    if repoState.goals.count > launcherState.selectedDirections.count {
                         Button {
-                            showingGoalPicker = true
+                            showingDirectionPicker = true
                         } label: {
                             Image(systemName: "plus")
                                 .font(.caption)
@@ -524,7 +524,7 @@ struct PromptLauncher: View {
                                 .background(Circle().fill(Color.primary.opacity(0.05)))
                         }
                         .buttonStyle(.plain)
-                        .popover(isPresented: $showingGoalPicker) {
+                        .popover(isPresented: $showingDirectionPicker) {
                             goalPickerPopover()
                         }
                     }
@@ -541,7 +541,7 @@ struct PromptLauncher: View {
                 .font(.caption)
                 .fontWeight(.medium)
             Button {
-                launcherState.selectedGoals.removeAll { $0.id == goal.id }
+                launcherState.selectedDirections.removeAll { $0.id == goal.id }
             } label: {
                 Image(systemName: "xmark")
                     .font(.caption2)
@@ -579,12 +579,12 @@ struct PromptLauncher: View {
                 .frame(maxWidth: 220)
             } else {
                 ForEach(repoState.goals) { goal in
-                    let isSelected = launcherState.selectedGoals.contains(goal)
+                    let isSelected = launcherState.selectedDirections.contains(goal)
                     Button {
                         if isSelected {
-                            launcherState.selectedGoals.removeAll { $0.id == goal.id }
+                            launcherState.selectedDirections.removeAll { $0.id == goal.id }
                         } else {
-                            launcherState.selectedGoals.append(goal)
+                            launcherState.selectedDirections.append(goal)
                         }
                     } label: {
                         HStack {

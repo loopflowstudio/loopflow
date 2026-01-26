@@ -102,7 +102,7 @@ final class RepoState {
     private let promptService = PromptService()
     private let flowService = FlowService()
     private let waveService = WaveService()
-    private let goalService = GoalService()
+    private let directionService = DirectionService()
     private var eventService: LFDEventService?
 
     // Background tasks
@@ -262,8 +262,8 @@ final class RepoState {
             LoggingService.append("openRepo.prompts elapsed=\(Int((CFAbsoluteTimeGetCurrent() - t2) * 1000))ms")
 
             // Re-initialize launcher goals after goals are loaded
-            if let goalNames = config?.goalNames, !goalNames.isEmpty {
-                launcherState.selectedGoals = goals.filter { goalNames.contains($0.name) }
+            if let directionNames = config?.directionNames, !directionNames.isEmpty {
+                launcherState.selectedDirections = goals.filter { directionNames.contains($0.name) }
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -565,7 +565,7 @@ final class RepoState {
 
     func refreshGoals() {
         guard let repo = currentRepo else { return }
-        goals = goalService.loadGoals(from: repo)
+        goals = directionService.loadGoals(from: repo)
     }
 
     func refreshFlows() {

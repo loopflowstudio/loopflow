@@ -7,7 +7,7 @@ import LoopflowCore
 @Observable
 final class LauncherState {
     var selectedPrompt: PromptCard?
-    var selectedGoals: [Goal] = []
+    var selectedDirections: [Goal] = []
     var selectedModel: WaveModel?
     var promptArgs: String = ""
 
@@ -49,8 +49,8 @@ final class LauncherState {
             selectedContextFolders = []
         }
 
-        if let goalNames = config?.goalNames, !goalNames.isEmpty {
-            selectedGoals = goals.filter { goalNames.contains($0.name) }
+        if let directionNames = config?.directionNames, !directionNames.isEmpty {
+            selectedDirections = goals.filter { directionNames.contains($0.name) }
         }
     }
 
@@ -157,10 +157,10 @@ final class LauncherState {
             }
         }
 
-        if !selectedGoals.isEmpty {
-            let goalNames = selectedGoals.map { $0.name }.joined(separator: ",")
+        if !selectedDirections.isEmpty {
+            let directionNames = selectedDirections.map { $0.name }.joined(separator: ",")
             parts.append("--goal")
-            parts.append(goalNames)
+            parts.append(directionNames)
         }
 
         if let model = selectedModel {

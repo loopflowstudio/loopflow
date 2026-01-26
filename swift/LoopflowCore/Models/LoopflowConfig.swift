@@ -107,7 +107,7 @@ public struct LoopflowConfig: Sendable, Codable {
     }
 
     /// Goal config can be a single string or array of strings in YAML.
-    public var goalNames: [String] {
+    public var directionNames: [String] {
         goal?.names ?? []
     }
 

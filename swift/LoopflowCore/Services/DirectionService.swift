@@ -2,7 +2,7 @@
 
 import Foundation
 
-public struct GoalService: @unchecked Sendable {
+public struct DirectionService: @unchecked Sendable {
     public init() {}
     public func loadGoals(from repoURL: URL) -> [Goal] {
         let goalsDir = repoURL.appendingPathComponent(".lf/goals")

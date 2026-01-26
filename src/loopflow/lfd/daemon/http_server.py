@@ -249,27 +249,29 @@ def _wave_to_dict(wave, worktree_state: dict | None = None) -> dict:
         ci = worktree_state.get("ci", {})
         diff = wt.get("diff_vs_main", {})
 
-        result.update({
-            # Git status
-            "is_dirty": wt.get("staged") or wt.get("modified") or wt.get("untracked") or False,
-            "is_rebasing": worktree_state.get("operation_state") == "rebase",
-            "is_merging": worktree_state.get("operation_state") == "merge",
-            "has_diff": (diff.get("added", 0) + diff.get("deleted", 0)) > 0,
-            # Ahead/behind
-            "ahead_main": main.get("ahead", 0),
-            "behind_main": main.get("behind", 0),
-            "ahead_remote": remote.get("ahead", 0),
-            "behind_remote": remote.get("behind", 0),
-            # PR
-            "pr_url": ci.get("url"),
-            "pr_number": _extract_pr_number(ci.get("url")),
-            "pr_state": ci.get("state"),
-            # Staleness
-            "staleness": worktree_state.get("staleness"),
-            "staleness_days": worktree_state.get("staleness_days"),
-            # Recent steps
-            "recent_steps": worktree_state.get("recent_steps", []),
-        })
+        result.update(
+            {
+                # Git status
+                "is_dirty": wt.get("staged") or wt.get("modified") or wt.get("untracked") or False,
+                "is_rebasing": worktree_state.get("operation_state") == "rebase",
+                "is_merging": worktree_state.get("operation_state") == "merge",
+                "has_diff": (diff.get("added", 0) + diff.get("deleted", 0)) > 0,
+                # Ahead/behind
+                "ahead_main": main.get("ahead", 0),
+                "behind_main": main.get("behind", 0),
+                "ahead_remote": remote.get("ahead", 0),
+                "behind_remote": remote.get("behind", 0),
+                # PR
+                "pr_url": ci.get("url"),
+                "pr_number": _extract_pr_number(ci.get("url")),
+                "pr_state": ci.get("state"),
+                # Staleness
+                "staleness": worktree_state.get("staleness"),
+                "staleness_days": worktree_state.get("staleness_days"),
+                # Recent steps
+                "recent_steps": worktree_state.get("recent_steps", []),
+            }
+        )
 
     return result
 
@@ -279,6 +281,7 @@ def _extract_pr_number(url: str | None) -> int | None:
     if not url:
         return None
     import re
+
     match = re.search(r"/pull/(\d+)", url)
     return int(match.group(1)) if match else None
 

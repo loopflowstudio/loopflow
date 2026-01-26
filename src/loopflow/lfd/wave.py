@@ -14,7 +14,8 @@ from croniter import croniter
 
 from loopflow.lf.context import find_worktree_root
 from loopflow.lf.naming import branch_exists, generate_word_pair
-from loopflow.lf.worktrees import create as create_worktree, WorktreeError
+from loopflow.lf.worktrees import WorktreeError
+from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lfd.db import _get_db
 from loopflow.lfd.logging import stimulus_log
 from loopflow.lfd.models import (

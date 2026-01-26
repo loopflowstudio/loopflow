@@ -6,15 +6,16 @@ import LoopflowCore
 
 struct InteractiveSessionView: View {
     let session: InteractiveSession
-    @Bindable var appState: AppState
 
+    @Environment(RepoState.self) private var repoState
+    @Environment(SessionState.self) private var sessionState
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var ghosttyManager = GhosttyManager.shared
 
     private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     private var agent: Agent? {
-        appState.agents.first { $0.id == session.agentId }
+        repoState.agents.first { $0.id == session.agentId }
     }
 
     var body: some View {
@@ -113,23 +114,26 @@ struct InteractiveSessionView: View {
     // MARK: - Actions
 
     private func endSession() {
-        appState.endInteractiveSession()
+        sessionState.endInteractiveSession()
     }
 }
 
 #Preview {
-    let state = AppState()
-    state.configureMockAgents()
+    let repoState = RepoState()
+    repoState.configureMockAgents()
 
     // Create a mock session
-    let agent = state.agents.first!
+    let agent = repoState.agents.first!
     let session = InteractiveSession(
         agentId: agent.id,
         step: "design",
         worktreePath: "/tmp/test-worktree"
     )
-    state.activeSession = session
+    let sessionState = SessionState()
+    sessionState.interactiveSession = session
 
-    return InteractiveSessionView(session: session, appState: state)
+    return InteractiveSessionView(session: session)
+        .environment(repoState)
+        .environment(sessionState)
         .frame(width: 600, height: 500)
 }

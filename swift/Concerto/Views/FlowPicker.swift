@@ -6,8 +6,9 @@ import LoopflowCore
 
 struct FlowPicker: View {
     let agent: Agent
-    @Bindable var appState: AppState
 
+    @Environment(RepoState.self) private var repoState
+    @Environment(SessionState.self) private var sessionState
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var selectedFlowName: String = ""
@@ -36,7 +37,7 @@ struct FlowPicker: View {
                 // Flow picker (shows flows and steps with icons)
                 Picker("Flow", selection: $selectedFlowName) {
                     // Flows section (multi-step pipelines)
-                    let flows = appState.flows.filter { $0.type == .flow }
+                    let flows = repoState.flows.filter { $0.type == .flow }
                     if !flows.isEmpty {
                         Section("Flows") {
                             ForEach(flows) { flow in
@@ -47,7 +48,7 @@ struct FlowPicker: View {
                     }
 
                     // Steps section (single-step actions)
-                    let steps = appState.flows.filter { $0.type == .step }
+                    let steps = repoState.flows.filter { $0.type == .step }
                     if !steps.isEmpty {
                         Section("Steps") {
                             ForEach(steps) { step in
@@ -59,7 +60,7 @@ struct FlowPicker: View {
                 }
                 .pickerStyle(.menu)
                 .frame(minWidth: 140)
-                .disabled(appState.flows.isEmpty)
+                .disabled(repoState.flows.isEmpty)
 
                 // Interactive toggle
                 Toggle(isOn: $isInteractive) {
@@ -131,7 +132,7 @@ struct FlowPicker: View {
         .onAppear {
             initializeSelection()
         }
-        .onChange(of: appState.flows) {
+        .onChange(of: repoState.flows) {
             if selectedFlowName.isEmpty {
                 initializeSelection()
             }
@@ -140,18 +141,18 @@ struct FlowPicker: View {
 
     private func initializeSelection() {
         // Default to agent's configured flow, or first available
-        if !agent.flow.isEmpty && appState.flows.contains(where: { $0.name == agent.flow }) {
+        if !agent.flow.isEmpty && repoState.flows.contains(where: { $0.name == agent.flow }) {
             selectedFlowName = agent.flow
-        } else if let design = appState.flows.first(where: { $0.name == "design" }) {
+        } else if let design = repoState.flows.first(where: { $0.name == "design" }) {
             selectedFlowName = design.name
-        } else if let first = appState.flows.first {
+        } else if let first = repoState.flows.first {
             selectedFlowName = first.name
         }
     }
 
     @ViewBuilder
     private var flowDescription: some View {
-        if let flow = appState.flows.first(where: { $0.name == selectedFlowName }) {
+        if let flow = repoState.flows.first(where: { $0.name == selectedFlowName }) {
             if flow.type == .step {
                 Text("Single step: \(flow.name)")
                     .font(.caption)
@@ -173,7 +174,7 @@ struct FlowPicker: View {
         Task {
             do {
                 // Run with flow override - doesn't change agent's config
-                try await appState.runAgent(
+                try await repoState.runAgent(
                     agent: agent,
                     flow: selectedFlowName,
                     stimulus: Stimulus(kind: .once)  // Experiments run once
@@ -191,8 +192,8 @@ struct FlowPicker: View {
     }
 
     private func launchInteractiveSession() {
-        guard !selectedFlowName.isEmpty, agent.worktreePath != nil else { return }
-        appState.launchInteractiveSession(agent: agent, step: selectedFlowName)
+        guard !selectedFlowName.isEmpty, let path = agent.worktreePath else { return }
+        sessionState.launchInteractiveSession(agentId: agent.id, step: selectedFlowName, worktreePath: path)
     }
 
     private func setAsDefault() {
@@ -201,7 +202,7 @@ struct FlowPicker: View {
         isSaving = true
         Task {
             do {
-                try await appState.updateAgent(agent, flow: selectedFlowName)
+                try await repoState.updateAgent(agent, flow: selectedFlowName)
             } catch {
                 await MainActor.run {
                     errorMessage = error.localizedDescription
@@ -216,22 +217,21 @@ struct FlowPicker: View {
 }
 
 #Preview {
-    @Previewable var state = AppState()
+    let repoState = RepoState()
+    repoState.configureMockAgents()
+    repoState.flows = [
+        Flow(name: "design", steps: [Step(prompt: "design")], type: .step),
+        Flow(name: "ship", steps: [
+            Step(prompt: "design"),
+            Step(prompt: "code"),
+            Step(prompt: "test")
+        ], type: .flow)
+    ]
 
-    let _ = {
-        state.configureMockAgents()
-        state.flows = [
-            Flow(name: "design", steps: [Step(prompt: "design")], type: .step),
-            Flow(name: "ship", steps: [
-                Step(prompt: "design"),
-                Step(prompt: "code"),
-                Step(prompt: "test")
-            ], type: .flow)
-        ]
-    }()
-
-    let agent = state.agents.first { $0.status == .idle } ?? state.agents.first!
-    FlowPicker(agent: agent, appState: state)
+    let agent = repoState.agents.first { $0.status == .idle } ?? repoState.agents.first!
+    return FlowPicker(agent: agent)
+        .environment(repoState)
+        .environment(SessionState())
         .frame(width: 500)
         .padding()
 }

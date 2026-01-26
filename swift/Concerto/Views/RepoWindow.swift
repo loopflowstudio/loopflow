@@ -1,5 +1,5 @@
 // Window wrapper for a single repository.
-// Each repo window has its own AppState instance.
+// Each repo window has its own state instances.
 
 import SwiftUI
 import LoopflowCore
@@ -7,7 +7,11 @@ import LoopflowCore
 struct RepoWindow: View {
     let repoURL: URL?
     let recentsService: RecentsService
-    @State private var appState = AppState()
+
+    @State private var repoState = RepoState()
+    @State private var sessionState = SessionState()
+    @State private var launcherState = LauncherState()
+
     @State private var setupComplete = false
     @State private var hasCheckedSetup = false
     @State private var hasOpenedRepo = false
@@ -21,17 +25,20 @@ struct RepoWindow: View {
             } else if !setupComplete {
                 SetupView(isComplete: $setupComplete)
             } else {
-                ContentView(appState: appState)
+                ContentView()
+                    .environment(repoState)
+                    .environment(sessionState)
+                    .environment(launcherState)
             }
         }
         .background(WindowAccessor(repoURL: repoURL))
         .task {
-            if let mode = AppState.uiTestMode() {
+            if let mode = RepoState.uiTestMode() {
                 setupComplete = true
                 hasCheckedSetup = true
                 hasOpenedRepo = true
                 let url = repoURL ?? URL(fileURLWithPath: "/tmp/loopflow-ui-tests")
-                appState.configureForUITest(mode, repoURL: url)
+                repoState.configureForUITest(mode, repoURL: url)
                 return
             }
 
@@ -43,16 +50,15 @@ struct RepoWindow: View {
             // Then open repo if setup is complete
             if setupComplete, let url = repoURL, !hasOpenedRepo {
                 hasOpenedRepo = true
-                await appState.openRepo(url)
+                await repoState.openRepo(url, launcherState: launcherState, sessionState: sessionState)
                 recentsService.addRecent(url)
             }
         }
         .onChange(of: setupComplete) { _, complete in
-            // Handle case where setup completes after initial check
             if complete, let url = repoURL, !hasOpenedRepo {
                 hasOpenedRepo = true
                 Task {
-                    await appState.openRepo(url)
+                    await repoState.openRepo(url, launcherState: launcherState, sessionState: sessionState)
                     recentsService.addRecent(url)
                 }
             }

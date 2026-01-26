@@ -14,7 +14,10 @@ extension Notification.Name {
 }
 
 struct ContentView: View {
-    @Bindable var appState: AppState
+    @Environment(RepoState.self) private var repoState
+    @Environment(SessionState.self) private var sessionState
+    @Environment(LauncherState.self) private var launcherState
+
     @State private var showingError = false
     @State private var showCommandPalette = false
     @Environment(\.colorScheme) private var colorScheme
@@ -24,62 +27,63 @@ struct ContentView: View {
     }
 
     private func flowEditorBinding(_ flow: Flow) -> some View {
-        FlowEditor(
+        @Bindable var repoState = repoState
+        return FlowEditor(
             flow: Binding(
-                get: { appState.selectedFlow ?? flow },
-                set: { appState.selectedFlow = $0 }
+                get: { repoState.selectedFlow ?? flow },
+                set: { repoState.selectedFlow = $0 }
             ),
-            availablePrompts: appState.prompts,
-            availableFlows: appState.flows.filter { $0.name != flow.name },
+            availablePrompts: repoState.prompts,
+            availableFlows: repoState.flows.filter { $0.name != flow.name },
             onSave: {
-                if let selected = appState.selectedFlow {
-                    appState.saveFlow(selected)
+                if let selected = repoState.selectedFlow {
+                    repoState.saveFlow(selected)
                 }
             },
             onRun: {
                 // TODO: Launch flow in terminal
             },
             onDelete: {
-                if let selected = appState.selectedFlow {
-                    appState.deleteFlow(selected)
+                if let selected = repoState.selectedFlow {
+                    repoState.deleteFlow(selected)
                 }
             }
         )
     }
 
     var body: some View {
+        @Bindable var repoState = repoState
         NavigationSplitView {
-            AgentSidebar(appState: appState)
+            AgentSidebar()
                 .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 360)
         } detail: {
-            if appState.isLoading {
+            if repoState.isLoading {
                 ProgressView("Loading...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if appState.currentRepo != nil {
+            } else if repoState.currentRepo != nil {
                 detailContent
             } else {
-                // No repo loaded yet - show loading placeholder
                 ProgressView("Opening repository...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .onChange(of: appState.errorMessage) { _, newValue in
+        .onChange(of: repoState.errorMessage) { _, newValue in
             showingError = newValue != nil
         }
         .alert("Error", isPresented: $showingError) {
             Button("OK") {
-                appState.errorMessage = nil
+                repoState.errorMessage = nil
             }
         } message: {
-            Text(appState.errorMessage ?? "An unknown error occurred")
+            Text(repoState.errorMessage ?? "An unknown error occurred")
         }
-        .navigationTitle(appState.currentRepo?.lastPathComponent ?? "Loopflow Concerto")
+        .navigationTitle(repoState.currentRepo?.lastPathComponent ?? "Loopflow Concerto")
         .toolbar {
             ToolbarItem(placement: .automatic) {
-                if appState.isRefreshingWorktrees {
+                if repoState.isRefreshingWorktrees {
                     ProgressView()
                         .controlSize(.small)
-                } else if let message = appState.refreshMessage {
+                } else if let message = repoState.refreshMessage {
                     Text(message)
                         .foregroundStyle(.secondary)
                         .font(.caption)
@@ -87,7 +91,7 @@ struct ContentView: View {
             }
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    Task { await appState.refreshWorktrees(showFeedback: true) }
+                    Task { await repoState.refreshWorktrees(showFeedback: true) }
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
@@ -124,9 +128,7 @@ struct ContentView: View {
     private func buildPaletteActions() -> [PaletteAction] {
         var actions: [PaletteAction] = []
 
-        // Global actions
         actions.append(PaletteAction("New Agent", icon: "plus.square", shortcut: "⌘N") {
-            // Post notification to trigger new agent sheet
             NotificationCenter.default.post(name: .showNewAgentSheet, object: nil)
         })
 
@@ -135,21 +137,20 @@ struct ContentView: View {
         })
 
         actions.append(PaletteAction("Refresh", icon: "arrow.clockwise") {
-            Task { await appState.refreshWorktrees(showFeedback: true) }
+            Task { await repoState.refreshWorktrees(showFeedback: true) }
         })
 
-        // Worktree-specific actions when a worktree is selected
-        if let worktree = appState.selectedWorktree {
+        if let worktree = repoState.selectedWorktree {
             let terminalLauncher = TerminalLauncher()
-            let terminal = appState.config?.terminalApp ?? .warp
-            let ide = appState.config?.ideApp ?? .cursor
+            let terminal = repoState.config?.terminalApp ?? .warp
+            let ide = repoState.config?.ideApp ?? .cursor
 
             actions.append(PaletteAction("Open Terminal", icon: "terminal", shortcut: "T") {
                 try? terminalLauncher.launchTerminal(terminal, at: URL(fileURLWithPath: worktree.path))
             })
 
             actions.append(PaletteAction("Open \(ide.displayName)", icon: "curlybraces", shortcut: "I") {
-                try? terminalLauncher.openInIDE(ide, at: URL(fileURLWithPath: worktree.path), workspace: appState.config?.workspace)
+                try? terminalLauncher.openInIDE(ide, at: URL(fileURLWithPath: worktree.path), workspace: repoState.config?.workspace)
             })
 
             actions.append(PaletteAction("View Diff", icon: "doc.text.magnifyingglass", shortcut: "D") {
@@ -166,14 +167,14 @@ struct ContentView: View {
                 if worktree.prState == .open {
                     actions.append(PaletteAction("Land PR", icon: "airplane.arrival", shortcut: "L") {
                         Task {
-                            try? await appState.landPR(for: worktree)
+                            try? await repoState.landPR(for: worktree)
                         }
                     })
                 }
             } else {
                 actions.append(PaletteAction("Create PR", icon: "arrow.triangle.pull", shortcut: "P") {
                     Task {
-                        try? await appState.createPR(for: worktree)
+                        try? await repoState.createPR(for: worktree)
                     }
                 })
             }
@@ -183,8 +184,7 @@ struct ContentView: View {
             })
         }
 
-        // Run step action
-        if !appState.prompts.isEmpty {
+        if !repoState.prompts.isEmpty {
             actions.append(PaletteAction("Run Step", icon: "play.fill", shortcut: "⌘↵") {
                 NotificationCenter.default.post(name: .runCurrentStep, object: nil)
             })
@@ -195,14 +195,11 @@ struct ContentView: View {
 
     @ViewBuilder
     private var detailContent: some View {
-        if Flags.beta, let flow = appState.selectedFlow {
+        if Flags.beta, let flow = repoState.selectedFlow {
             flowEditorBinding(flow)
-        } else if let agent = appState.selectedAgent {
-            // Show agent detail panel when an agent is selected
-            AgentDetailPanel(appState: appState, agent: agent)
+        } else if let agent = repoState.selectedAgent {
+            AgentDetailPanel(agent: agent)
         } else {
-            // No agent selected - show empty state
-            // Orphan worktrees (without agents) are intentionally hidden
             VStack(spacing: 16) {
                 Image(systemName: "cpu")
                     .font(.system(size: 48))
@@ -220,5 +217,8 @@ struct ContentView: View {
 }
 
 #Preview {
-    ContentView(appState: AppState())
+    ContentView()
+        .environment(RepoState())
+        .environment(SessionState())
+        .environment(LauncherState())
 }

@@ -4,7 +4,8 @@ import SwiftUI
 import LoopflowCore
 
 struct EmbeddedTerminalPanel: View {
-    @Bindable var appState: AppState
+    @Environment(RepoState.self) private var repoState
+    @Environment(SessionState.self) private var sessionState
     @State private var isExpanded = false
     @StateObject private var ghosttyManager = GhosttyManager.shared
     @State private var terminalHeight: CGFloat = 250
@@ -18,7 +19,7 @@ struct EmbeddedTerminalPanel: View {
     var body: some View {
         VStack(spacing: 0) {
             // Header bar
-            if !appState.activeSessionIds.isEmpty || hasActiveWorktree {
+            if !sessionState.activeSessionIds.isEmpty || hasActiveWorktree {
                 terminalHeader
             }
 
@@ -30,11 +31,11 @@ struct EmbeddedTerminalPanel: View {
     }
 
     private var hasActiveWorktree: Bool {
-        appState.selectedWorktree != nil || !appState.activeSessionIds.isEmpty
+        repoState.selectedWorktree != nil || !sessionState.activeSessionIds.isEmpty
     }
 
     private var effectiveWorktree: String? {
-        appState.selectedWorktree?.path ?? appState.currentRepo?.path()
+        repoState.selectedWorktree?.path ?? repoState.currentRepo?.path()
     }
 
     private var terminalHeader: some View {
@@ -43,12 +44,12 @@ struct EmbeddedTerminalPanel: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            if !appState.activeSessionIds.isEmpty {
+            if !sessionState.activeSessionIds.isEmpty {
                 Circle()
                     .fill(.green)
                     .frame(width: 8, height: 8)
 
-                Text("\(appState.activeSessionIds.count) running")
+                Text("\(sessionState.activeSessionIds.count) running")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -133,7 +134,8 @@ struct EmbeddedTerminalPanel: View {
 }
 
 #Preview {
-    let state = AppState()
-    return EmbeddedTerminalPanel(appState: state)
+    EmbeddedTerminalPanel()
+        .environment(RepoState())
+        .environment(SessionState())
         .frame(width: 600)
 }

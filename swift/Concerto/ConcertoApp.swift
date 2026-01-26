@@ -14,8 +14,8 @@ struct ConcertoApp: App {
 
     var body: some Scene {
         let preferredScheme = AppearanceMode(rawValue: appearanceMode)?.colorScheme
-        let uiTestMode = AppState.uiTestMode()
-        let screenshotMode = AppState.ScreenshotMode.fromArgs()
+        let uiTestMode = RepoState.uiTestMode()
+        let screenshotMode = RepoState.ScreenshotMode.fromArgs()
 
         // Welcome/main window - shown on launch
         WindowGroup {

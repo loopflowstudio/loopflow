@@ -1,12 +1,13 @@
-// Agent detail panel showing config, stimulus toggle, actions, and flow experimentation.
+// Agent detail panel. Idle agents show a start button; running agents show progress.
 
 import SwiftUI
 import LoopflowCore
 
 struct AgentDetailPanel: View {
-    @Bindable var appState: AppState
     let agent: Agent
 
+    @Environment(RepoState.self) private var repoState
+    @Environment(SessionState.self) private var sessionState
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("changedFilesExpanded") private var changedFilesExpanded = true
 
@@ -20,20 +21,20 @@ struct AgentDetailPanel: View {
     private let terminalLauncher = TerminalLauncher()
     private let worktreeService = WorktreeService()
 
-    private var ideApp: IDEApp { appState.config?.ideApp ?? .cursor }
-    private var terminalApp: TerminalApp { appState.config?.terminalApp ?? .warp }
+    private var ideApp: IDEApp { repoState.config?.ideApp ?? .cursor }
+    private var terminalApp: TerminalApp { repoState.config?.terminalApp ?? .warp }
     private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     private var worktree: Worktree? {
         guard let path = agent.worktreePath else { return nil }
-        return appState.worktrees.first { $0.path == path }
+        return repoState.worktrees.first { $0.path == path }
     }
 
     var body: some View {
         Group {
             // Show interactive session view when active, otherwise config view
-            if appState.hasActiveSession(for: agent), let session = appState.activeSession {
-                InteractiveSessionView(session: session, appState: appState)
+            if sessionState.hasActiveSession(for: agent.id), let session = sessionState.interactiveSession {
+                InteractiveSessionView(session: session)
             } else {
                 configView
             }
@@ -72,17 +73,11 @@ struct AgentDetailPanel: View {
 
             ScrollView {
                 VStack(spacing: 16) {
-                    // Config section (always visible)
-                    configSection
-
                     if agent.status == .idle {
-                        // Stimulus controls when idle
-                        stimulusSection
-
-                        // Try a different flow (experimentation)
-                        experimentSection
+                        // Fresh/idle agent: just show the start button
+                        idleAgentView
                     } else {
-                        // Show run progress for active agents
+                        // Running agent: show progress
                         runProgressSection
                     }
 
@@ -148,9 +143,9 @@ struct AgentDetailPanel: View {
             .disabled(isCloning)
             .help("Create a copy of this agent")
 
-            // PR badge if available
-            if let wt = worktree, let prNumber = wt.prNumber, let prState = wt.prState {
-                prBadge(number: prNumber, state: prState, url: wt.prURL)
+            // PR badge if available (from Agent fields)
+            if let prNumber = agent.prNumber, let prState = agent.prState {
+                prBadge(number: prNumber, state: prState, url: agent.prURL)
             }
 
             // Stop button when running
@@ -201,130 +196,50 @@ struct AgentDetailPanel: View {
         .help("View PR on GitHub")
     }
 
-    // MARK: - Config Section
+    // MARK: - Idle Agent View
 
-    private var configSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Configuration")
-                    .font(.headline)
-                Spacer()
-            }
-
-            // Config display in a grid
-            LazyVGrid(columns: [
-                GridItem(.flexible(), alignment: .leading),
-                GridItem(.flexible(), alignment: .leading)
-            ], spacing: 8) {
-                configRow(label: "Area", value: agent.areaDisplay.isEmpty ? "Not set" : agent.areaDisplay)
-                configRow(label: "Goal", value: agent.goalDisplay.isEmpty ? "None" : agent.goalDisplay)
-                configRow(label: "Flow", value: agent.flowDisplay)
-                configRow(label: "Stimulus", value: agent.stimulusText)
-            }
-        }
-        .padding(16)
-        .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-    }
-
-    private func configRow(label: String, value: String) -> some View {
-        HStack(spacing: 8) {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 50, alignment: .trailing)
-            Text(value)
-                .font(.subheadline)
-                .lineLimit(1)
-        }
-    }
-
-    // MARK: - Stimulus Section
-
-    private var stimulusSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Stimulus")
-                    .font(.headline)
-
-                Spacer()
-
-                // Paused toggle
-                Toggle(isOn: Binding(
-                    get: { !agent.paused },
-                    set: { newValue in
-                        togglePaused(!newValue)
-                    }
-                )) {
-                    Text(agent.paused ? "Paused" : "Active")
-                        .font(.caption)
-                        .foregroundColor(agent.paused ? .secondary : .green)
-                }
-                .toggleStyle(.switch)
-                .controlSize(.small)
-            }
-
-            // Explanation text
-            if agent.paused {
-                Text("Agent is paused. Stimulus won't fire automatically. Use Run to execute manually.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
+    private var idleAgentView: some View {
+        VStack(spacing: 16) {
+            // Big start button - prominent green
+            Button {
+                launchInteractive()
+            } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: "bolt.fill")
-                        .font(.caption)
-                        .foregroundStyle(.green)
-                    Text("Stimulus active: \(stimulusDescription)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Image(systemName: "play.fill")
+                        .font(.title3)
+                    Text("Start \(agent.flowDisplay)")
+                        .font(.title3)
+                        .fontWeight(.semibold)
                 }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(Color.green)
+                .foregroundStyle(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
             }
+            .buttonStyle(.plain)
+            .disabled(agent.worktreePath == nil)
+            .opacity(agent.worktreePath == nil ? 0.5 : 1)
 
-            // Run button
-            if agent.isConfigured {
-                Button {
-                    runWithCurrentConfig()
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "play.fill")
+            // Subtle config summary
+            if !agent.areaDisplay.isEmpty || !agent.goalDisplay.isEmpty {
+                HStack(spacing: 16) {
+                    if !agent.areaDisplay.isEmpty {
+                        Label(agent.areaDisplay, systemImage: "folder")
                             .font(.caption)
-                        Text("Run")
-                            .fontWeight(.medium)
+                            .foregroundStyle(.secondary)
                     }
-                    .frame(maxWidth: .infinity)
+                    if !agent.goalDisplay.isEmpty && agent.goalDisplay != "default" {
+                        Label(agent.goalDisplay, systemImage: "target")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-            } else {
-                Text("Configure area to enable running.")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
             }
         }
         .padding(16)
         .background(palette.surface)
         .clipShape(RoundedRectangle(cornerRadius: 12))
-    }
-
-    private var stimulusDescription: String {
-        switch agent.stimulus.kind {
-        case .once:
-            return "runs once when triggered"
-        case .loop:
-            return "runs continuously"
-        case .watch:
-            return "runs when \(agent.areaDisplay) changes"
-        case .cron:
-            return "runs on schedule (\(agent.stimulus.cron ?? ""))"
-        case .manual:
-            return "manual triggers only"
-        }
-    }
-
-    // MARK: - Experiment Section
-
-    private var experimentSection: some View {
-        FlowPicker(agent: agent, appState: appState)
     }
 
     // MARK: - Quick Actions Bar
@@ -358,7 +273,7 @@ struct AgentDetailPanel: View {
                 .buttonStyle(DarkButtonStyle())
                 .help("Open in \(ideApp.displayName)")
 
-                if let wt = worktree, wt.hasDiff {
+                if agent.hasDiff {
                     Button {
                         landBranch()
                     } label: {
@@ -443,7 +358,7 @@ struct AgentDetailPanel: View {
                     .frame(height: 200)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
-                let output = appState.liveOutput(for: agent)
+                let output = sessionState.output(for: agent.id)
                 if output.isEmpty {
                     Text("Waiting for output...")
                         .font(.caption)
@@ -641,8 +556,7 @@ struct AgentDetailPanel: View {
         Task {
             do {
                 let worktreeURL = URL(fileURLWithPath: worktreePath)
-                let base = worktree?.baseBranch ?? "main"
-                fileStats = try await worktreeService.getDiffStats("\(base)...HEAD", in: worktreeURL)
+                fileStats = try await worktreeService.getDiffStats("main...HEAD", in: worktreeURL)
             } catch {
                 fileStats = []
             }
@@ -650,37 +564,20 @@ struct AgentDetailPanel: View {
         }
     }
 
-    private func togglePaused(_ paused: Bool) {
-        Task {
-            do {
-                try await appState.updateAgent(agent, paused: paused)
-            } catch {
-                await MainActor.run {
-                    actionError = "Failed to update agent: \(error.localizedDescription)"
-                    showingActionError = true
-                }
-            }
-        }
-    }
-
-    private func runWithCurrentConfig() {
-        Task {
-            do {
-                try await appState.runAgent(agent: agent)
-            } catch {
-                await MainActor.run {
-                    actionError = "Failed to run agent: \(error.localizedDescription)"
-                    showingActionError = true
-                }
-            }
-        }
+    private func launchInteractive() {
+        guard let path = agent.worktreePath else { return }
+        sessionState.launchInteractiveSession(
+            agentId: agent.id,
+            step: agent.flow,
+            worktreePath: path
+        )
     }
 
     private func cloneAgent() {
         isCloning = true
         Task {
             do {
-                _ = try await appState.cloneAgent(agent)
+                _ = try await repoState.cloneAgent(agent)
             } catch {
                 await MainActor.run {
                     actionError = "Failed to clone agent: \(error.localizedDescription)"
@@ -715,7 +612,7 @@ struct AgentDetailPanel: View {
         guard let wt = worktree else { return }
         Task {
             do {
-                try await appState.landBranch(for: wt)
+                try await repoState.landBranch(for: wt)
             } catch {
                 await MainActor.run {
                     actionError = "Failed to land branch: \(error.localizedDescription)"
@@ -728,7 +625,7 @@ struct AgentDetailPanel: View {
     private func stopAgent() {
         Task {
             do {
-                try await appState.stopAgent(agent)
+                try await repoState.stopAgent(agent)
             } catch {
                 await MainActor.run {
                     actionError = "Failed to stop agent: \(error.localizedDescription)"
@@ -740,9 +637,11 @@ struct AgentDetailPanel: View {
 }
 
 #Preview {
-    let state = AppState()
-    state.configureMockAgents()
-    let agent = state.agents.first!
-    return AgentDetailPanel(appState: state, agent: agent)
+    let repoState = RepoState()
+    repoState.configureMockAgents()
+    let agent = repoState.agents.first!
+    return AgentDetailPanel(agent: agent)
+        .environment(repoState)
+        .environment(SessionState())
         .frame(width: 600, height: 700)
 }

@@ -213,11 +213,56 @@ public struct AgentService: @unchecked Sendable {
             createdAt = dateFormatter.date(from: dateStr) ?? Date()
         }
 
+        // Parse PR URL
+        var prURL: URL?
+        if let urlStr = json["pr_url"] as? String {
+            prURL = URL(string: urlStr)
+        }
+
+        // Parse PR state
+        var prState: PRState?
+        if let stateStr = json["pr_state"] as? String {
+            prState = PRState(rawValue: stateStr.lowercased())
+        }
+
+        // Parse staleness
+        var staleness: Staleness = .active
+        if let stalenessStr = json["staleness"] as? String {
+            switch stalenessStr {
+            case "merged": staleness = .merged
+            case "remote_deleted": staleness = .remoteDeleted
+            default:
+                if let days = json["staleness_days"] as? Int {
+                    staleness = .inactive(days: days)
+                }
+            }
+        }
+
+        // Parse recent steps
+        var recentSteps: [StepRun] = []
+        if let stepsData = json["recent_steps"] as? [[String: Any]] {
+            recentSteps = stepsData.compactMap { stepJson -> StepRun? in
+                guard let id = stepJson["id"] as? String,
+                      let step = stepJson["step"] as? String,
+                      let status = stepJson["status"] as? String else {
+                    return nil
+                }
+                let stepRunJSON = StepRunJSON(
+                    id: id,
+                    step: step,
+                    status: status,
+                    startedAt: stepJson["started_at"] as? String,
+                    endedAt: stepJson["ended_at"] as? String
+                )
+                return StepRun(from: stepRunJSON)
+            }
+        }
+
         return Agent(
             id: json["id"] as? String ?? UUID().uuidString,
             name: json["name"] as? String ?? "",
-            area: json["area"] as? [String],  // nullable
-            goal: json["goal"] as? [String],  // nullable
+            area: json["area"] as? [String],
+            goal: json["goal"] as? [String],
             flow: json["flow"] as? String ?? "design",
             repo: json["repo"] as? String ?? "",
             stimulus: stimulus,
@@ -226,6 +271,19 @@ public struct AgentService: @unchecked Sendable {
             iteration: json["iteration"] as? Int ?? 0,
             worktreePath: json["worktree"] as? String,
             branch: json["branch"] as? String,
+            isDirty: json["is_dirty"] as? Bool ?? false,
+            isRebasing: json["is_rebasing"] as? Bool ?? false,
+            isMerging: json["is_merging"] as? Bool ?? false,
+            hasDiff: json["has_diff"] as? Bool ?? false,
+            aheadMain: json["ahead_main"] as? Int ?? 0,
+            behindMain: json["behind_main"] as? Int ?? 0,
+            aheadRemote: json["ahead_remote"] as? Int ?? 0,
+            behindRemote: json["behind_remote"] as? Int ?? 0,
+            prURL: prURL,
+            prNumber: json["pr_number"] as? Int,
+            prState: prState,
+            staleness: staleness,
+            recentSteps: recentSteps,
             prLimit: json["pr_limit"] as? Int ?? 5,
             mergeMode: MergeMode(rawValue: json["merge_mode"] as? String ?? "pr") ?? .pr,
             pid: json["pid"] as? Int,

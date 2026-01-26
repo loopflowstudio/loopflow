@@ -5,8 +5,8 @@ import UniformTypeIdentifiers
 import LoopflowCore
 
 struct PromptLauncher: View {
-    @Bindable var appState: AppState
-
+    @Environment(RepoState.self) private var repoState
+    @Environment(LauncherState.self) private var launcherState
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var inputText: String = ""
@@ -35,7 +35,7 @@ struct PromptLauncher: View {
             return (promptPart.isEmpty ? nil : promptPart, argsPart)
         }
         // Check if the entire input matches a prompt name
-        if appState.prompts.contains(where: { $0.name.lowercased() == trimmed.lowercased() }) {
+        if repoState.prompts.contains(where: { $0.name.lowercased() == trimmed.lowercased() }) {
             return (trimmed, "")
         }
         return (nil, trimmed)
@@ -43,13 +43,13 @@ struct PromptLauncher: View {
 
     private var filteredPrompts: [PromptCard] {
         let query = parsedInput.prompt?.lowercased() ?? inputText.lowercased()
-        if query.isEmpty { return appState.prompts }
-        return appState.prompts.filter { $0.name.lowercased().contains(query) }
+        if query.isEmpty { return repoState.prompts }
+        return repoState.prompts.filter { $0.name.lowercased().contains(query) }
     }
 
     private var selectedPrompt: PromptCard? {
         guard let name = parsedInput.prompt else { return nil }
-        return appState.prompts.first { $0.name.lowercased() == name.lowercased() }
+        return repoState.prompts.first { $0.name.lowercased() == name.lowercased() }
     }
 
     var body: some View {
@@ -81,7 +81,7 @@ struct PromptLauncher: View {
         .onAppear {
             isInputFocused = true
         }
-        .onChange(of: appState.prompts) { _, prompts in
+        .onChange(of: repoState.prompts) { _, prompts in
             // Auto-select "implement" task on first load if available
             if !hasInitializedTask && !prompts.isEmpty {
                 hasInitializedTask = true
@@ -110,17 +110,17 @@ struct PromptLauncher: View {
 
     private var filteredTasks: [PromptCard] {
         if taskSearchText.isEmpty {
-            return appState.prompts
+            return repoState.prompts
         }
-        return appState.prompts.filter { $0.name.lowercased().contains(taskSearchText.lowercased()) }
+        return repoState.prompts.filter { $0.name.lowercased().contains(taskSearchText.lowercased()) }
     }
 
     private var filteredFlows: [Flow] {
         guard Flags.beta else { return [] }
         if taskSearchText.isEmpty {
-            return appState.flows
+            return repoState.flows
         }
-        return appState.flows.filter { $0.name.lowercased().contains(taskSearchText.lowercased()) }
+        return repoState.flows.filter { $0.name.lowercased().contains(taskSearchText.lowercased()) }
     }
 
     private var taskSelector: some View {
@@ -343,7 +343,7 @@ struct PromptLauncher: View {
         selectedFlow = flow
         // Clear task input when selecting a flow
         inputText = ""
-        appState.runMode = .auto  // Flows always run in auto mode
+        launcherState.runMode = .auto  // Flows always run in auto mode
     }
 
     private func clearTaskSelection() {
@@ -358,7 +358,7 @@ struct PromptLauncher: View {
         // Update input to have prompt prefix
         let currentArgs = parsedInput.args
         inputText = "\(prompt.name): \(currentArgs)"
-        appState.runMode = prompt.defaultMode
+        launcherState.runMode = prompt.defaultMode
     }
 
     private func clearPromptSelection() {
@@ -402,17 +402,18 @@ struct PromptLauncher: View {
     }
 
     private var modelDisplayText: String {
-        if let model = appState.selectedModel {
+        if let model = launcherState.selectedModel {
             return model.displayName
         }
-        if let configModel = appState.config?.agentModel {
+        if let configModel = repoState.config?.agentModel {
             return AgentModel(configModel).displayName + " (default)"
         }
         return "Default"
     }
 
     private func modelPickerPopover() -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        @Bindable var launcherState = launcherState
+        return VStack(alignment: .leading, spacing: 0) {
             Text("Select Model")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -422,16 +423,16 @@ struct PromptLauncher: View {
 
             // Default option (uses config)
             Button {
-                appState.selectedModel = nil
+                launcherState.selectedModel = nil
                 showingModelPicker = false
             } label: {
                 HStack {
-                    Image(systemName: appState.selectedModel == nil ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(appState.selectedModel == nil ? Color.accentColor : Color.secondary)
+                    Image(systemName: launcherState.selectedModel == nil ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(launcherState.selectedModel == nil ? Color.accentColor : Color.secondary)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Default")
                             .fontWeight(.medium)
-                        if let configModel = appState.config?.agentModel {
+                        if let configModel = repoState.config?.agentModel {
                             Text(AgentModel(configModel).displayName)
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
@@ -451,9 +452,9 @@ struct PromptLauncher: View {
 
             // Common models
             ForEach(AgentModel.commonModels) { model in
-                let isSelected = appState.selectedModel?.id == model.id
+                let isSelected = launcherState.selectedModel?.id == model.id
                 Button {
-                    appState.selectedModel = model
+                    launcherState.selectedModel = model
                     showingModelPicker = false
                 } label: {
                     HStack {
@@ -481,13 +482,14 @@ struct PromptLauncher: View {
     @State private var showingGoalPicker = false
 
     private var goalSelector: some View {
-        HStack(spacing: 8) {
+        @Bindable var launcherState = launcherState
+        return HStack(spacing: 8) {
             Text("Goal")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
             // Selected goal chips
-            if appState.selectedGoals.isEmpty {
+            if launcherState.selectedGoals.isEmpty {
                 Button {
                     showingGoalPicker = true
                 } label: {
@@ -507,11 +509,11 @@ struct PromptLauncher: View {
                 }
             } else {
                 HStack(spacing: 6) {
-                    ForEach(appState.selectedGoals) { goal in
+                    ForEach(launcherState.selectedGoals) { goal in
                         goalChip(goal)
                     }
 
-                    if appState.goals.count > appState.selectedGoals.count {
+                    if repoState.goals.count > launcherState.selectedGoals.count {
                         Button {
                             showingGoalPicker = true
                         } label: {
@@ -539,7 +541,7 @@ struct PromptLauncher: View {
                 .font(.caption)
                 .fontWeight(.medium)
             Button {
-                appState.selectedGoals.removeAll { $0.id == goal.id }
+                launcherState.selectedGoals.removeAll { $0.id == goal.id }
             } label: {
                 Image(systemName: "xmark")
                     .font(.caption2)
@@ -553,7 +555,8 @@ struct PromptLauncher: View {
     }
 
     private func goalPickerPopover() -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        @Bindable var launcherState = launcherState
+        return VStack(alignment: .leading, spacing: 0) {
             Text("Available Goals")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -561,7 +564,7 @@ struct PromptLauncher: View {
                 .padding(.top, 12)
                 .padding(.bottom, 8)
 
-            if appState.goals.isEmpty {
+            if repoState.goals.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("No goals configured")
                         .font(.caption)
@@ -575,13 +578,13 @@ struct PromptLauncher: View {
                 .padding(.bottom, 12)
                 .frame(maxWidth: 220)
             } else {
-                ForEach(appState.goals) { goal in
-                    let isSelected = appState.selectedGoals.contains(goal)
+                ForEach(repoState.goals) { goal in
+                    let isSelected = launcherState.selectedGoals.contains(goal)
                     Button {
                         if isSelected {
-                            appState.selectedGoals.removeAll { $0.id == goal.id }
+                            launcherState.selectedGoals.removeAll { $0.id == goal.id }
                         } else {
-                            appState.selectedGoals.append(goal)
+                            launcherState.selectedGoals.append(goal)
                         }
                     } label: {
                         HStack {
@@ -764,16 +767,17 @@ struct PromptLauncher: View {
     private func selectPrompt(_ prompt: PromptCard) {
         inputText = "\(prompt.name): "
         showingPromptPicker = false
-        appState.runMode = prompt.defaultMode
+        launcherState.runMode = prompt.defaultMode
     }
 
     // MARK: - Mode and Advanced Options Row
 
     private var modeAndAdvancedRow: some View {
-        VStack(spacing: 8) {
+        @Bindable var launcherState = launcherState
+        return VStack(spacing: 8) {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Picker("", selection: $appState.runMode) {
+                    Picker("", selection: $launcherState.runMode) {
                         Text("Auto").tag(RunMode.auto)
                         Text("Interactive").tag(RunMode.interactive)
                     }
@@ -781,13 +785,13 @@ struct PromptLauncher: View {
                     .frame(width: 160)
 
                     // Inline description of current mode
-                    Text(appState.runMode == .auto
+                    Text(launcherState.runMode == .auto
                         ? "Runs to completion"
                         : "Chat with the AI")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
-                .help(appState.runMode == .auto
+                .help(launcherState.runMode == .auto
                     ? "Auto: Runs to completion without interruption. Best for most tasks."
                     : "Interactive: Chat with the AI, can interrupt and redirect. Use for exploration.")
 
@@ -797,15 +801,15 @@ struct PromptLauncher: View {
                 Button {
                     withAnimation(DesignAnimation.standard(reduceMotion)) {
                         isPreviewExpanded.toggle()
-                        if isPreviewExpanded {
-                            Task { await appState.refreshContextPreview() }
+                        if isPreviewExpanded, let repoURL = repoState.currentRepo {
+                            Task { await launcherState.refreshContextPreview(repoURL: repoURL) }
                         }
                     }
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: isPreviewExpanded ? "chevron.down" : "chevron.right")
                             .font(.caption2)
-                        Text(formatTokenCount(appState.estimatedTokens))
+                        Text(formatTokenCount(launcherState.estimatedTokens))
                             .font(.system(size: 12, weight: .medium, design: .monospaced))
                     }
                     .foregroundStyle(.secondary)
@@ -860,8 +864,8 @@ struct PromptLauncher: View {
 
                 Button {
                     Task {
-                        if let _ = await appState.copyAssembledContext() {
-                            // Could show a confirmation toast
+                        if let repoURL = repoState.currentRepo {
+                            _ = await launcherState.copyAssembledContext(repoURL: repoURL)
                         }
                     }
                 } label: {
@@ -884,11 +888,11 @@ struct PromptLauncher: View {
             // Sections
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
-                    ForEach(appState.contextPreview.sections) { section in
+                    ForEach(launcherState.contextPreview.sections) { section in
                         contextSectionView(section)
                     }
 
-                    if appState.contextPreview.sections.isEmpty {
+                    if launcherState.contextPreview.sections.isEmpty {
                         HStack {
                             Spacer()
                             Text("Loading context...")
@@ -980,7 +984,7 @@ struct PromptLauncher: View {
             // Remove button for files and attached
             if section.kind == .files || section.kind == .attached {
                 Button {
-                    appState.removeContextItem(item, from: section)
+                    launcherState.removeContextItem(item, from: section)
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 9, weight: .medium))
@@ -1010,7 +1014,8 @@ struct PromptLauncher: View {
     @AppStorage("contextBarExpanded") private var contextBarExpanded = false
 
     private var contextBar: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        @Bindable var launcherState = launcherState
+        return VStack(alignment: .leading, spacing: 8) {
             // Collapsible header - always visible
             Button {
                 withAnimation(DesignAnimation.fast(reduceMotion)) {
@@ -1021,7 +1026,7 @@ struct PromptLauncher: View {
                     Text("Context")
                         .font(.caption)
                         .fontWeight(.medium)
-                    Text(formatTokenCount(appState.estimatedTokens))
+                    Text(formatTokenCount(launcherState.estimatedTokens))
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                     Spacer()
@@ -1037,30 +1042,30 @@ struct PromptLauncher: View {
             if contextBarExpanded {
                 HStack(spacing: 6) {
                     // Context chips
-                    ContextChip(label: "Docs", isOn: $appState.includeDocs, color: .blue)
+                    ContextChip(label: "Docs", isOn: $launcherState.includeDocs, color: .blue)
                         .help("AI sees: README, STYLE guide, and project docs. Helps it follow your conventions.")
-                    ContextChip(label: "Files", isOn: $appState.includeDiffFiles, color: .teal)
+                    ContextChip(label: "Files", isOn: $launcherState.includeDiffFiles, color: .teal)
                         .help("AI sees: Files you've changed on this branch. Helps it understand your work in progress.")
-                    ContextChip(label: "Diff", isOn: $appState.includeDiff, color: .green)
+                    ContextChip(label: "Diff", isOn: $launcherState.includeDiff, color: .green)
                         .help("AI sees: Exact line-by-line changes. Useful for reviews and understanding what changed.")
-                    ContextChip(label: "Clipboard", isOn: $appState.includePaste, color: .accentColor)
+                    ContextChip(label: "Clipboard", isOn: $launcherState.includePaste, color: .accentColor)
                         .help("AI sees: Whatever you copied. Paste code, errors, or docs for reference.")
-                    ContextChip(label: "Chrome", isOn: $appState.includeChrome, color: .indigo)
+                    ContextChip(label: "Chrome", isOn: $launcherState.includeChrome, color: .indigo)
                         .help("AI can control Chrome browser for web testing and automation.")
-                    if appState.config?.hasSummaries == true {
-                        ContextChip(label: "Summaries", isOn: $appState.includeSummaries, color: .orange)
+                    if repoState.config?.hasSummaries == true {
+                        ContextChip(label: "Summaries", isOn: $launcherState.includeSummaries, color: .orange)
                             .help("AI sees: Architecture overview of your codebase. Pre-generated for faster responses.")
                     }
                 }
 
                 // Attached files row
                 HStack(spacing: 6) {
-                    ForEach(appState.attachedFiles, id: \.self) { file in
+                    ForEach(launcherState.attachedFiles, id: \.self) { file in
                         FileChip(
                             name: file.lastPathComponent,
                             icon: iconForFile(file)
                         ) {
-                            appState.attachedFiles.removeAll { $0 == file }
+                            launcherState.attachedFiles.removeAll { $0 == file }
                         }
                     }
 
@@ -1075,8 +1080,8 @@ struct PromptLauncher: View {
                     ) { result in
                         if case .success(let urls) = result {
                             for url in urls {
-                                if !appState.attachedFiles.contains(url) {
-                                    appState.attachedFiles.append(url)
+                                if !launcherState.attachedFiles.contains(url) {
+                                    launcherState.attachedFiles.append(url)
                                 }
                             }
                         }
@@ -1097,40 +1102,52 @@ struct PromptLauncher: View {
             RoundedRectangle(cornerRadius: 10)
                 .stroke(isDraggingOver ? Color.accentColor : Color.clear, lineWidth: 2)
         )
-        .onChange(of: appState.includeDocs) {
+        .onChange(of: launcherState.includeDocs) {
             Task {
-                await appState.estimateTokens()
-                if isPreviewExpanded { await appState.refreshContextPreview() }
+                if let repoURL = repoState.currentRepo {
+                    await launcherState.estimateTokens(repoURL: repoURL)
+                    if isPreviewExpanded { await launcherState.refreshContextPreview(repoURL: repoURL) }
+                }
             }
         }
-        .onChange(of: appState.includeDiff) {
+        .onChange(of: launcherState.includeDiff) {
             Task {
-                await appState.estimateTokens()
-                if isPreviewExpanded { await appState.refreshContextPreview() }
+                if let repoURL = repoState.currentRepo {
+                    await launcherState.estimateTokens(repoURL: repoURL)
+                    if isPreviewExpanded { await launcherState.refreshContextPreview(repoURL: repoURL) }
+                }
             }
         }
-        .onChange(of: appState.includeDiffFiles) {
+        .onChange(of: launcherState.includeDiffFiles) {
             Task {
-                await appState.estimateTokens()
-                if isPreviewExpanded { await appState.refreshContextPreview() }
+                if let repoURL = repoState.currentRepo {
+                    await launcherState.estimateTokens(repoURL: repoURL)
+                    if isPreviewExpanded { await launcherState.refreshContextPreview(repoURL: repoURL) }
+                }
             }
         }
-        .onChange(of: appState.includePaste) {
+        .onChange(of: launcherState.includePaste) {
             Task {
-                await appState.estimateTokens()
-                if isPreviewExpanded { await appState.refreshContextPreview() }
+                if let repoURL = repoState.currentRepo {
+                    await launcherState.estimateTokens(repoURL: repoURL)
+                    if isPreviewExpanded { await launcherState.refreshContextPreview(repoURL: repoURL) }
+                }
             }
         }
-        .onChange(of: appState.attachedFiles) {
+        .onChange(of: launcherState.attachedFiles) {
             Task {
-                await appState.estimateTokens()
-                if isPreviewExpanded { await appState.refreshContextPreview() }
+                if let repoURL = repoState.currentRepo {
+                    await launcherState.estimateTokens(repoURL: repoURL)
+                    if isPreviewExpanded { await launcherState.refreshContextPreview(repoURL: repoURL) }
+                }
             }
         }
-        .onChange(of: appState.includeSummaries) {
+        .onChange(of: launcherState.includeSummaries) {
             Task {
-                await appState.estimateTokens()
-                if isPreviewExpanded { await appState.refreshContextPreview() }
+                if let repoURL = repoState.currentRepo {
+                    await launcherState.estimateTokens(repoURL: repoURL)
+                    if isPreviewExpanded { await launcherState.refreshContextPreview(repoURL: repoURL) }
+                }
             }
         }
     }
@@ -1189,9 +1206,9 @@ struct PromptLauncher: View {
 
     private var previewCommand: String {
         // Build command from current state
-        appState.selectedPrompt = selectedPrompt
-        appState.promptArgs = parsedInput.args
-        return appState.buildCommand(flow: selectedFlow)
+        launcherState.selectedPrompt = selectedPrompt
+        launcherState.promptArgs = parsedInput.args
+        return launcherState.buildCommand(flow: selectedFlow, config: repoState.config, repoURL: repoState.currentRepo)
     }
 
     private func formatTokenCount(_ count: Int) -> String {
@@ -1224,8 +1241,8 @@ struct PromptLauncher: View {
                 _ = provider.loadObject(ofClass: URL.self) { url, _ in
                     if let url = url {
                         DispatchQueue.main.async {
-                            if !appState.attachedFiles.contains(url) {
-                                appState.attachedFiles.append(url)
+                            if !self.launcherState.attachedFiles.contains(url) {
+                                self.launcherState.attachedFiles.append(url)
                             }
                         }
                     }
@@ -1238,15 +1255,15 @@ struct PromptLauncher: View {
     // MARK: - Actions
 
     private func launchInTerminal() {
-        guard let repo = appState.currentRepo else { return }
+        guard let repo = repoState.currentRepo else { return }
 
-        // Update appState from parsed input
-        appState.selectedPrompt = selectedPrompt
-        appState.promptArgs = parsedInput.args
+        // Update launcherState from parsed input
+        launcherState.selectedPrompt = selectedPrompt
+        launcherState.promptArgs = parsedInput.args
 
         // Check if on main branch - if so, create new worktree first
-        let isMain = appState.selectedWorktree?.branch == "main"
-                  || appState.selectedWorktree == nil
+        let isMain = repoState.selectedWorktree?.branch == "main"
+                  || repoState.selectedWorktree == nil
 
         if isMain {
             isCreatingWorktree = true
@@ -1255,7 +1272,7 @@ struct PromptLauncher: View {
                 isCreatingWorktree = false
             }
         } else {
-            launchCommand(repo: repo, workPath: URL(fileURLWithPath: appState.selectedWorktree!.path))
+            launchCommand(repo: repo, workPath: URL(fileURLWithPath: repoState.selectedWorktree!.path))
         }
     }
 
@@ -1263,11 +1280,11 @@ struct PromptLauncher: View {
         let name = NameGenerator.generate()
 
         do {
-            try await appState.createWorktree(name: name)
+            try await repoState.createWorktree(name: name)
 
             // Select the newly created worktree
-            if let newWorktree = appState.worktrees.first(where: { $0.branch == name }) {
-                appState.selectedWorktree = newWorktree
+            if let newWorktree = repoState.worktrees.first(where: { $0.branch == name }) {
+                repoState.selectedWorktree = newWorktree
                 let workPath = URL(fileURLWithPath: newWorktree.path)
                 launchCommand(repo: repo, workPath: workPath)
             } else {
@@ -1281,10 +1298,10 @@ struct PromptLauncher: View {
     }
 
     private func launchCommand(repo: URL, workPath: URL) {
-        let command = appState.buildCommand(flow: selectedFlow)
+        let command = launcherState.buildCommand(flow: selectedFlow, config: repoState.config, repoURL: repoState.currentRepo)
 
         // Launch in external terminal
-        let terminal = appState.config?.terminalApp ?? .warp
+        let terminal = repoState.config?.terminalApp ?? .warp
         do {
             try terminalLauncher.launchTerminal(terminal, at: workPath, command: command)
         } catch {
@@ -1442,7 +1459,8 @@ struct ContextItemView: View {
 }
 
 #Preview {
-    let state = AppState()
-    return PromptLauncher(appState: state)
+    PromptLauncher()
+        .environment(RepoState())
+        .environment(LauncherState())
         .frame(width: 600, height: 700)
 }

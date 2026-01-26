@@ -186,7 +186,7 @@ def _normalize_repo_path(repo: Path) -> Path:
 
 @app.get("/waves", response_model=LFDResponse)
 async def get_waves(repo: str = Query(..., description="Repository path")):
-    """List waves for a repository."""
+    """List waves for a repository, enriched with worktree state."""
     repo_path = Path(repo)
     if not repo_path.exists():
         raise HTTPException(status_code=404, detail=f"Repository not found: {repo}")
@@ -196,31 +196,19 @@ async def get_waves(repo: str = Query(..., description="Repository path")):
 
     try:
         waves = list_waves(repo=repo_path)
-        return LFDResponse(
-            ok=True,
-            result={
-                "waves": [
-                    {
-                        "id": w.id,
-                        "name": w.name,
-                        "flow": w.flow,
-                        "direction": w.direction,
-                        "area": w.area,
-                        "repo": str(w.repo),
-                        "stimulus": {"kind": w.stimulus.kind, "cron": w.stimulus.cron},
-                        "status": w.status.value,
-                        "iteration": w.iteration,
-                        "worktree": str(w.worktree) if w.worktree else None,
-                        "branch": w.branch,
-                        "pr_limit": w.pr_limit,
-                        "merge_mode": w.merge_mode.value,
-                        "pid": w.pid,
-                        "created_at": w.created_at.isoformat(),
-                    }
-                    for w in waves
-                ]
-            },
-        )
+
+        # Get worktree state service for enrichment
+        wt_service = get_worktree_state_service()
+
+        enriched = []
+        for wave in waves:
+            # Look up worktree state if wave has a branch
+            wt_state = None
+            if wave.branch:
+                wt_state = wt_service.get_one(repo_path, wave.branch)
+            enriched.append(_wave_to_dict(wave, wt_state))
+
+        return LFDResponse(ok=True, result={"waves": enriched})
     except Exception as e:
         return LFDResponse(ok=False, error=str(e))
 
@@ -232,9 +220,9 @@ class CreateWaveRequest(BaseModel):
     area: list[str] | None = None
 
 
-def _wave_to_dict(wave) -> dict:
-    """Convert wave to API response dict."""
-    return {
+def _wave_to_dict(wave, worktree_state: dict | None = None) -> dict:
+    """Convert wave to API response dict, enriched with worktree state."""
+    result = {
         "id": wave.id,
         "name": wave.name,
         "area": wave.area,
@@ -252,6 +240,47 @@ def _wave_to_dict(wave) -> dict:
         "pid": wave.pid,
         "created_at": wave.created_at.isoformat(),
     }
+
+    # Enrich with worktree state if available
+    if worktree_state:
+        wt = worktree_state.get("working_tree", {})
+        main = worktree_state.get("main", {})
+        remote = worktree_state.get("remote", {})
+        ci = worktree_state.get("ci", {})
+        diff = wt.get("diff_vs_main", {})
+
+        result.update({
+            # Git status
+            "is_dirty": wt.get("staged") or wt.get("modified") or wt.get("untracked") or False,
+            "is_rebasing": worktree_state.get("operation_state") == "rebase",
+            "is_merging": worktree_state.get("operation_state") == "merge",
+            "has_diff": (diff.get("added", 0) + diff.get("deleted", 0)) > 0,
+            # Ahead/behind
+            "ahead_main": main.get("ahead", 0),
+            "behind_main": main.get("behind", 0),
+            "ahead_remote": remote.get("ahead", 0),
+            "behind_remote": remote.get("behind", 0),
+            # PR
+            "pr_url": ci.get("url"),
+            "pr_number": _extract_pr_number(ci.get("url")),
+            "pr_state": ci.get("state"),
+            # Staleness
+            "staleness": worktree_state.get("staleness"),
+            "staleness_days": worktree_state.get("staleness_days"),
+            # Recent steps
+            "recent_steps": worktree_state.get("recent_steps", []),
+        })
+
+    return result
+
+
+def _extract_pr_number(url: str | None) -> int | None:
+    """Extract PR number from GitHub PR URL."""
+    if not url:
+        return None
+    import re
+    match = re.search(r"/pull/(\d+)", url)
+    return int(match.group(1)) if match else None
 
 
 @app.post("/waves", response_model=LFDResponse)

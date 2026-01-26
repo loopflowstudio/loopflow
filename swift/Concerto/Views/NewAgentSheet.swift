@@ -4,7 +4,7 @@ import SwiftUI
 import LoopflowCore
 
 struct NewAgentSheet: View {
-    @Bindable var appState: AppState
+    @Environment(RepoState.self) private var repoState
     @Environment(\.dismiss) private var dismiss
 
     @State private var name = ""
@@ -70,7 +70,7 @@ struct NewAgentSheet: View {
 
         Task {
             do {
-                try await appState.createAgent(name: name)
+                try await repoState.createAgent(name: name)
                 dismiss()
             } catch {
                 errorMessage = error.localizedDescription
@@ -81,5 +81,6 @@ struct NewAgentSheet: View {
 }
 
 #Preview {
-    NewAgentSheet(appState: AppState())
+    NewAgentSheet()
+        .environment(RepoState())
 }

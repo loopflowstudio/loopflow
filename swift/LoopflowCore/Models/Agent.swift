@@ -109,10 +109,30 @@ public struct Agent: Sendable, Identifiable, Hashable {
     public var status: AgentStatus
     public var iteration: Int
 
-    // Hidden implementation details
-    public var worktreePath: String?  // Path to the worktree (renamed from mainBranch)
+    // Worktree (agents always have worktrees)
+    public var worktreePath: String?  // Path to the worktree
     public var branch: String?  // Git branch (auto-generated)
 
+    // Git status (enriched from daemon)
+    public var isDirty: Bool
+    public var isRebasing: Bool
+    public var isMerging: Bool
+    public var hasDiff: Bool
+    public var aheadMain: Int
+    public var behindMain: Int
+    public var aheadRemote: Int
+    public var behindRemote: Int
+
+    // PR status
+    public var prURL: URL?
+    public var prNumber: Int?
+    public var prState: PRState?
+
+    // Staleness
+    public var staleness: Staleness
+    public var recentSteps: [StepRun]
+
+    // Config
     public var prLimit: Int
     public var mergeMode: MergeMode
     public var pid: Int?
@@ -134,6 +154,19 @@ public struct Agent: Sendable, Identifiable, Hashable {
         iteration: Int = 0,
         worktreePath: String? = nil,
         branch: String? = nil,
+        isDirty: Bool = false,
+        isRebasing: Bool = false,
+        isMerging: Bool = false,
+        hasDiff: Bool = false,
+        aheadMain: Int = 0,
+        behindMain: Int = 0,
+        aheadRemote: Int = 0,
+        behindRemote: Int = 0,
+        prURL: URL? = nil,
+        prNumber: Int? = nil,
+        prState: PRState? = nil,
+        staleness: Staleness = .active,
+        recentSteps: [StepRun] = [],
         prLimit: Int = 5,
         mergeMode: MergeMode = .pr,
         pid: Int? = nil,
@@ -152,6 +185,19 @@ public struct Agent: Sendable, Identifiable, Hashable {
         self.iteration = iteration
         self.worktreePath = worktreePath
         self.branch = branch
+        self.isDirty = isDirty
+        self.isRebasing = isRebasing
+        self.isMerging = isMerging
+        self.hasDiff = hasDiff
+        self.aheadMain = aheadMain
+        self.behindMain = behindMain
+        self.aheadRemote = aheadRemote
+        self.behindRemote = behindRemote
+        self.prURL = prURL
+        self.prNumber = prNumber
+        self.prState = prState
+        self.staleness = staleness
+        self.recentSteps = recentSteps
         self.prLimit = prLimit
         self.mergeMode = mergeMode
         self.pid = pid

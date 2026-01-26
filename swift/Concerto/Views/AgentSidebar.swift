@@ -1,10 +1,12 @@
-// Unified sidebar showing all agents. Replaces WorktreeSidebar.
+// Unified sidebar showing all agents.
 
 import SwiftUI
 import LoopflowCore
 
 struct AgentSidebar: View {
-    @Bindable var appState: AppState
+    @Environment(RepoState.self) private var repoState
+    @Environment(SessionState.self) private var sessionState
+
     @State private var showingNewAgentSheet = false
     @State private var showingDiagnostics = false
     @State private var actionError: String?
@@ -16,48 +18,40 @@ struct AgentSidebar: View {
 
     // MARK: - Agent Sections
 
-    /// Agents that need immediate attention (blocked, errors)
     private var blockedAgents: [Agent] {
-        appState.agents.filter { $0.status == .error }
+        repoState.agents.filter { $0.status == .error }
     }
 
-    /// Agents with open PRs awaiting review
     private var prAgents: [Agent] {
-        appState.agents.filter { agent in
+        repoState.agents.filter { agent in
             agent.status != .error && pendingPR(for: agent) != nil
         }
     }
 
-    /// Actively running agents (no PRs pending)
     private var activeAgents: [Agent] {
-        appState.agents.filter { agent in
+        repoState.agents.filter { agent in
             (agent.status == .running || agent.status == .waiting) &&
             agent.status != .error &&
             pendingPR(for: agent) == nil
         }
     }
 
-    /// Idle agents
     private var idleAgents: [Agent] {
-        appState.agents.filter { agent in
+        repoState.agents.filter { agent in
             agent.status == .idle && pendingPR(for: agent) == nil
         }
     }
 
-    /// All agents in display order (for keyboard navigation)
     private var allAgentsInOrder: [Agent] {
         blockedAgents + prAgents + activeAgents + idleAgents
     }
 
-    /// Returns PR info if agent has an open PR awaiting review
     private func pendingPR(for agent: Agent) -> (number: Int, url: URL?)? {
-        guard let path = agent.worktreePath,
-              let worktree = appState.worktrees.first(where: { $0.path == path }),
-              let prNumber = worktree.prNumber,
-              worktree.prState == .open else {
+        guard let prNumber = agent.prNumber,
+              agent.prState == .open else {
             return nil
         }
-        return (number: prNumber, url: worktree.prURL)
+        return (number: prNumber, url: agent.prURL)
     }
 
     private func sectionHeader(_ title: String, icon: String, color: Color) -> some View {
@@ -79,12 +73,12 @@ struct AgentSidebar: View {
         ForEach(agents) { agent in
             AgentRow(
                 agent: agent,
-                isSelected: appState.selectedAgent?.id == agent.id,
+                isSelected: repoState.selectedAgent?.id == agent.id,
                 isKeyboardFocused: keyboardFocusedId == agent.id,
-                liveOutput: appState.liveOutput(for: agent),
+                liveOutput: sessionState.output(for: agent.id),
                 pendingPR: pendingPR(for: agent),
                 onSelect: {
-                    appState.selectedAgent = agent
+                    repoState.selectedAgent = agent
                     keyboardFocusedId = agent.id
                 }
             )
@@ -92,12 +86,13 @@ struct AgentSidebar: View {
     }
 
     var body: some View {
+        @Bindable var repoState = repoState
         VStack(alignment: .leading, spacing: 0) {
             header
 
-            if appState.agents.isEmpty && !appState.lfdConnected {
+            if repoState.agents.isEmpty && !repoState.lfdConnected {
                 disconnectedState
-            } else if appState.agents.isEmpty {
+            } else if repoState.agents.isEmpty {
                 emptyState
             } else {
                 agentList
@@ -105,7 +100,7 @@ struct AgentSidebar: View {
         }
         .background(Color.loopflowBurgundy)
         .sheet(isPresented: $showingNewAgentSheet) {
-            NewAgentSheet(appState: appState)
+            NewAgentSheet()
         }
         .sheet(isPresented: $showingDiagnostics) {
             DiagnosticsView()
@@ -130,11 +125,10 @@ struct AgentSidebar: View {
 
             Spacer()
 
-            // lfd connection indicator
             Circle()
-                .fill(appState.lfdConnected ? Color.green : Color.white.opacity(0.3))
+                .fill(repoState.lfdConnected ? Color.green : Color.white.opacity(0.3))
                 .frame(width: 6, height: 6)
-                .help(appState.lfdConnected ? "Connected to lfd daemon" : "lfd daemon not connected")
+                .help(repoState.lfdConnected ? "Connected to lfd daemon" : "lfd daemon not connected")
 
             Button {
                 showingNewAgentSheet = true
@@ -188,7 +182,7 @@ struct AgentSidebar: View {
                 Button {
                     Task {
                         do {
-                            try await appState.connectLfd()
+                            try await repoState.connectLfd()
                         } catch {
                             actionError = "Failed to connect: \(error.localizedDescription)"
                             showingActionError = true
@@ -255,27 +249,24 @@ struct AgentSidebar: View {
     }
 
     private var agentList: some View {
-        ScrollView {
+        @Bindable var repoState = repoState
+        return ScrollView {
             LazyVStack(alignment: .leading, spacing: 4) {
-                // Blocked section
                 if !blockedAgents.isEmpty {
                     sectionHeader("Needs Attention", icon: "exclamationmark.triangle.fill", color: .orange)
                     agentRows(blockedAgents)
                 }
 
-                // Open PRs section
                 if !prAgents.isEmpty {
                     sectionHeader("Open PRs", icon: "arrow.triangle.pull", color: .green)
                     agentRows(prAgents)
                 }
 
-                // Active section
                 if !activeAgents.isEmpty {
                     sectionHeader("Active", icon: "circle.fill", color: .blue)
                     agentRows(activeAgents)
                 }
 
-                // Idle section
                 if !idleAgents.isEmpty {
                     sectionHeader("Idle", icon: "circle", color: .white.opacity(0.5))
                     agentRows(idleAgents)
@@ -296,8 +287,8 @@ struct AgentSidebar: View {
         }
         .onKeyPress(.return) {
             if let id = keyboardFocusedId,
-               let agent = appState.agents.first(where: { $0.id == id }) {
-                appState.selectedAgent = agent
+               let agent = repoState.agents.first(where: { $0.id == id }) {
+                repoState.selectedAgent = agent
             }
             return .handled
         }
@@ -324,8 +315,10 @@ extension Notification.Name {
 }
 
 #Preview {
-    let state = AppState()
+    let state = RepoState()
     state.configureMockAgents()
-    return AgentSidebar(appState: state)
+    return AgentSidebar()
+        .environment(state)
+        .environment(SessionState())
         .frame(width: 280, height: 400)
 }

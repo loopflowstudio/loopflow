@@ -83,15 +83,17 @@ def test_build_prompt_handles_missing_task(temp_repo):
     assert "No step file found" in result
 
 
-def test_build_prompt_with_goals(temp_repo):
-    """build_prompt passes goals through to formatting."""
-    goals_dir = temp_repo / ".lf" / "goals"
-    goals_dir.mkdir(parents=True, exist_ok=True)
-    (goals_dir / "concise.md").write_text("Be concise.")
+def test_build_prompt_with_direction(temp_repo):
+    """build_prompt passes direction through to formatting."""
+    from loopflow.lf.directions import resolve_directions
+    directions_dir = temp_repo / ".lf" / "directions"
+    directions_dir.mkdir(parents=True, exist_ok=True)
+    (directions_dir / "concise.md").write_text("Be concise.")
 
-    result = build_prompt(temp_repo, "implement", goals=["concise"])
+    direction = resolve_directions(temp_repo, ["concise"])
+    result = build_prompt(temp_repo, "implement", direction=direction)
 
-    assert "<lf:goal:concise>" in result
+    assert "<lf:direction:concise>" in result
     assert "Be concise." in result
 
 
@@ -698,7 +700,7 @@ def test_trim_prompt_components_drops_oversize_diff_files(tmp_path):
         repo_root=tmp_path,
         clipboard=None,
         loopflow_doc=None,
-        goals=None,
+        direction=None,
         image_files=None,
         summaries=None,
     )
@@ -734,7 +736,7 @@ def test_trim_prompt_components_keeps_small_diff_files(tmp_path):
         repo_root=tmp_path,
         clipboard=None,
         loopflow_doc=None,
-        goals=None,
+        direction=None,
         image_files=None,
         summaries=None,
     )

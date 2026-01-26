@@ -1,17 +1,17 @@
 ---
 layout: default
-title: Background Agents
+title: Waves
 ---
 
-# Background Agents
+# Waves
 
-An agent is **area × goal × flow × stimulus**.
+A wave is **area × direction × flow × stimulus**.
 
 ```bash
-lfd loop ship src/api/ --goal product-engineer
+lfd loop ship src/api/ --direction product-engineer
 ```
 
-This runs the `ship` flow on `src/api/` with the `product-engineer` goal—continuously, creating PRs until you stop it.
+This runs the `ship` flow on `src/api/` with the `product-engineer` direction—continuously, creating PRs until you stop it.
 
 ## Stimulus Types
 
@@ -28,7 +28,7 @@ Single execution. Run a flow once then stop.
 
 ```bash
 lfd run ship swift/                       # one-off iteration
-lfd run ship swift/ -g product-engineer   # with a goal
+lfd run ship swift/ -d product-engineer   # with a direction
 lfd run ship . -c                         # whole repo with clipboard
 ```
 
@@ -53,7 +53,7 @@ lfd subscribe ship src/api/               # watch src/api/ for changes
 lfd subscribe ship docs/                  # watch docs/ for changes
 ```
 
-The area serves as both the context for the agent and the paths to watch.
+The area serves as both the context for the wave and the paths to watch.
 
 ### Cron
 
@@ -83,17 +83,17 @@ Run exactly one iteration using the once stimulus:
 
 ```bash
 lfd run ship src/                       # single iteration
-lfd run ship src/ -g product-engineer   # with a goal
+lfd run ship src/ -d product-engineer   # with a direction
 lfd run ship src/ -c                    # with clipboard
 ```
 
-## Managing Agents
+## Managing Waves
 
 ```bash
-lfd status              # show all agents
-lfd prs <id>            # show PRs from an agent
-lfd stop <id>           # stop an agent
-lfd rm <id>             # remove agent and history
+lfd status              # show all waves
+lfd prs <id>            # show PRs from a wave
+lfd stop <id>           # stop a wave
+lfd rm <id>             # remove wave and history
 ```
 
 Status output:

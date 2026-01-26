@@ -1,6 +1,6 @@
 # lfd — Loopflow Daemon
 
-Background service for agent orchestration.
+Background service for wave orchestration.
 
 ## Usage
 
@@ -11,7 +11,7 @@ lfd loop swift-falcon --area src/
 # Incremental
 lfd create swift-falcon
 lfd area swift-falcon src/
-lfd goal swift-falcon "fix lint errors"
+lfd direction swift-falcon "fix lint errors"
 lfd loop swift-falcon
 
 # Other stimuli
@@ -21,12 +21,12 @@ lfd cron swift-falcon "0 9 * * *" --area .   # run daily at 9am
 
 See `docs/lfd.md` for the full CLI reference.
 
-## Agents
+## Waves
 
-Agents are persistent configurations with:
+Waves are persistent configurations with:
 - **name**: User-visible identifier (e.g., "swift-falcon")
 - **area**: Working directories (required to run)
-- **goal**: What to accomplish (inline text or preset name)
+- **direction**: What to accomplish (inline text or preset name)
 - **flow**: Which steps to execute (default: ship)
 - **stimulus**: When to run (run/loop/watch/cron)
 
@@ -45,14 +45,14 @@ Create with minimal config, configure incrementally, run when ready.
 
 SQLite at `~/.lf/lfd.db` (WAL mode).
 
-### agents table
+### waves table
 
 | Column | Type | Description |
 |--------|------|-------------|
 | id | TEXT PK | UUID |
 | name | TEXT | User-visible name |
 | area | TEXT | JSON array of paths (nullable until configured) |
-| goal | TEXT | JSON array of goals (nullable) |
+| direction | TEXT | JSON array of directions (nullable) |
 | flow | TEXT | Flow name (default: ship) |
 | repo | TEXT | Repository path |
 | stimulus_kind | TEXT | run, loop, watch, cron |
@@ -70,13 +70,13 @@ See protocol.py for Request/Response/Event dataclasses.
 ## HTTP API
 
 ```
-POST   /agents           {name?, area?, goal?, flow?}     → create
-PATCH  /agents/:id       {area?, goal?, flow?}            → update
-GET    /agents                                            → list
-GET    /agents/:id                                        → show
-DELETE /agents/:id                                        → delete
-POST   /agents/:id/run   {stimulus, cron?, path?}         → run
-POST   /agents/:id/stop                                   → stop
+POST   /waves           {name?, area?, direction?, flow?}     → create
+PATCH  /waves/:id       {area?, direction?, flow?}            → update
+GET    /waves                                                 → list
+GET    /waves/:id                                             → show
+DELETE /waves/:id                                             → delete
+POST   /waves/:id/run   {stimulus, cron?, path?}              → run
+POST   /waves/:id/stop                                        → stop
 ```
 
 - Create accepts minimal body (even empty → generates name)
@@ -90,7 +90,7 @@ POST   /agents/:id/stop                                   → stop
 
 ```bash
 tail -f ~/.lf/logs/lfd.log                    # watch live
-grep "swift-falcon" ~/.lf/logs/lfd.log        # filter by agent
+grep "swift-falcon" ~/.lf/logs/lfd.log        # filter by wave
 grep ERROR ~/.lf/logs/lfd.log                 # find errors
 ```
 
@@ -98,16 +98,16 @@ grep ERROR ~/.lf/logs/lfd.log                 # find errors
 
 ```bash
 sqlite3 ~/.lf/lfd.db ".schema"
-sqlite3 ~/.lf/lfd.db "SELECT id, name, status, area FROM agents"
+sqlite3 ~/.lf/lfd.db "SELECT id, name, status, area FROM waves"
 ```
 
 ### Circuit Breaker
 
-When an agent fails >= 5 times consecutively:
+When a wave fails >= 5 times consecutively:
 - Status becomes ERROR
 - Won't restart until reset
 
 Reset:
 ```bash
-sqlite3 ~/.lf/lfd.db "UPDATE agents SET consecutive_failures = 0, status = 'idle' WHERE name = 'swift-falcon'"
+sqlite3 ~/.lf/lfd.db "UPDATE waves SET consecutive_failures = 0, status = 'idle' WHERE name = 'swift-falcon'"
 ```

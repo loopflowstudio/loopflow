@@ -8,23 +8,25 @@ To add schema changes, create a new migration file in this directory.
 
 import sqlite3
 
-SCHEMA_VERSION = "2026-01-23T16:39:43Z_b159a91"
-DESCRIPTION = "baseline schema"
+SCHEMA_VERSION = "2026-01-25T16:15:00Z_wave"
+DESCRIPTION = "baseline schema with wave terminology"
 
 
 def apply(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
-        -- Agents: AI coding agents with loop/watch/cron modes
-        CREATE TABLE IF NOT EXISTS agents (
+        -- Waves: orchestrated work units with loop/watch/cron modes
+        CREATE TABLE IF NOT EXISTS waves (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,   -- unique name, used for worktree/branch naming
             repo TEXT NOT NULL,
             flow TEXT NOT NULL DEFAULT 'design',
-            goal TEXT,            -- JSON array (optional, validated at run-time)
+            direction TEXT,            -- JSON array (optional, validated at run-time)
             area TEXT,            -- JSON array (optional, validated at run-time)
 
-            mode TEXT NOT NULL DEFAULT 'loop',  -- loop, watch, cron
+            stimulus_kind TEXT NOT NULL DEFAULT 'loop',  -- loop, watch, cron
+            stimulus_cron TEXT,
+            paused INTEGER NOT NULL DEFAULT 0,
             status TEXT NOT NULL DEFAULT 'idle',
             iteration INTEGER NOT NULL DEFAULT 0,
 
@@ -36,9 +38,6 @@ def apply(conn: sqlite3.Connection) -> None:
             pid INTEGER,
             created_at TEXT NOT NULL,
 
-            -- Trigger config (watch/cron modes)
-            watch_paths TEXT,     -- comma-separated paths for watch mode
-            cron TEXT,            -- cron expression for cron mode
             last_main_sha TEXT,   -- last seen SHA on main (watch mode)
 
             -- Resilience
@@ -46,16 +45,16 @@ def apply(conn: sqlite3.Connection) -> None:
             pending_activations INTEGER NOT NULL DEFAULT 0
         );
 
-        CREATE INDEX IF NOT EXISTS idx_agents_repo ON agents(repo);
-        CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
+        CREATE INDEX IF NOT EXISTS idx_waves_repo ON waves(repo);
+        CREATE INDEX IF NOT EXISTS idx_waves_status ON waves(status);
 
         -- Runs: flow execution instances
         CREATE TABLE IF NOT EXISTS runs (
             id TEXT PRIMARY KEY,
-            agent TEXT,  -- agent ID (nullable for one-off runs)
+            wave TEXT,  -- wave ID (nullable for one-off runs)
 
             flow TEXT NOT NULL,
-            goal TEXT,            -- JSON array (nullable)
+            direction TEXT,            -- JSON array (nullable)
             area TEXT,            -- JSON array (nullable)
             repo TEXT NOT NULL,
 
@@ -73,7 +72,7 @@ def apply(conn: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL
         );
 
-        CREATE INDEX IF NOT EXISTS idx_runs_agent ON runs(agent);
+        CREATE INDEX IF NOT EXISTS idx_runs_wave ON runs(wave);
         CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
         CREATE INDEX IF NOT EXISTS idx_runs_repo ON runs(repo);
 
@@ -85,7 +84,7 @@ def apply(conn: sqlite3.Connection) -> None:
             worktree TEXT NOT NULL,
 
             flow_run_id TEXT,  -- parent run (nullable for standalone)
-            agent_id TEXT,     -- parent agent (nullable for standalone)
+            wave_id TEXT,     -- parent wave (nullable for standalone)
 
             status TEXT NOT NULL DEFAULT 'running',
             started_at TEXT NOT NULL,

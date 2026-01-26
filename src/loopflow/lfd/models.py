@@ -31,7 +31,7 @@ class LfdModel(BaseModel):
 
 @dataclass
 class Stimulus:
-    """Determines when an agent runs.
+    """Determines when a wave runs.
 
     Kinds:
     - once: single run (one-shot)
@@ -49,8 +49,8 @@ class Stimulus:
         return self.kind
 
 
-class AgentStatus(str, Enum):
-    """Runtime status of an agent."""
+class WaveStatus(str, Enum):
+    """Runtime status of a wave."""
 
     IDLE = "idle"
     RUNNING = "running"
@@ -65,8 +65,8 @@ class MergeMode(str, Enum):
     LAND = "land"
 
 
-class Agent(LfdModel):
-    """An AI coding agent.
+class Wave(LfdModel):
+    """An orchestrated unit of autonomous work.
 
     Stimulus types:
     - once: single run (one-shot)
@@ -74,19 +74,19 @@ class Agent(LfdModel):
     - watch: runs when area changes on main
     - cron: runs on schedule
 
-    area and goal are optional at creation time and validated at run-time.
+    area and direction are optional at creation time and validated at run-time.
     """
 
     id: str
     name: str  # unique name, used for worktree/branch naming
     repo: Path
     flow: str = "design"  # flow or step name
-    goal: list[str] | None = None  # optional, validated at run-time
+    direction: list[str] | None = None  # optional, validated at run-time
     area: list[str] | None = None  # optional, validated at run-time
 
     stimulus: Stimulus = Field(default_factory=lambda: Stimulus("once"))
     paused: bool = True  # when paused, stimulus doesn't fire (manual mode)
-    status: AgentStatus = AgentStatus.IDLE
+    status: WaveStatus = WaveStatus.IDLE
     iteration: int = 0
 
     worktree: Path | None = None  # persistent worktree location
@@ -112,9 +112,9 @@ class Agent(LfdModel):
         arbitrary_types_allowed=True,
     )
 
-    @field_validator("goal", mode="before")
+    @field_validator("direction", mode="before")
     @classmethod
-    def normalize_goal(cls, v):
+    def normalize_direction(cls, v):
         if v is None:
             return None
         if isinstance(v, str):
@@ -150,10 +150,10 @@ class Agent(LfdModel):
         return f"{self.name}.main"
 
     @property
-    def goal_display(self) -> str:
-        if self.goal is None:
+    def direction_display(self) -> str:
+        if self.direction is None:
             return ""
-        return ", ".join(self.goal)
+        return ", ".join(self.direction)
 
     @property
     def area_display(self) -> str:
@@ -162,14 +162,14 @@ class Agent(LfdModel):
         return ", ".join(self.area)
 
     def is_configured(self) -> bool:
-        """Check if agent has required config for running."""
+        """Check if wave has required config for running."""
         return self.area is not None
 
 
-def agent_from_row(row: dict) -> Agent:
-    """Convert database row to Agent."""
-    goal_str = row.get("goal")
-    goal = json.loads(goal_str) if goal_str else None
+def wave_from_row(row: dict) -> Wave:
+    """Convert database row to Wave."""
+    direction_str = row.get("direction")
+    direction = json.loads(direction_str) if direction_str else None
 
     area_str = row.get("area")
     area = json.loads(area_str) if area_str else None
@@ -187,23 +187,23 @@ def agent_from_row(row: dict) -> Agent:
     worktree_str = row.get("worktree")
     worktree = Path(worktree_str) if worktree_str else None
 
-    # Default paused=True for new agents (manual mode)
+    # Default paused=True for new waves (manual mode)
     paused = row.get("paused")
     if paused is None:
         paused = True
     else:
         paused = bool(paused)
 
-    return Agent(
+    return Wave(
         id=row["id"],
         name=row["name"],
         repo=Path(row["repo"]),
         flow=row["flow"],
-        goal=goal,
+        direction=direction,
         area=area,
         stimulus=stimulus,
         paused=paused,
-        status=AgentStatus(row["status"]),
+        status=WaveStatus(row["status"]),
         iteration=row.get("iteration", 0),
         worktree=worktree,
         branch=row.get("branch"),
@@ -231,13 +231,13 @@ class FlowRunStatus(str, Enum):
 
 
 class FlowRun(LfdModel):
-    """An execution instance of a Flow, spawned by an Agent."""
+    """An execution instance of a Flow, spawned by a Wave."""
 
     id: str
-    agent_id: str | None = None
+    wave_id: str | None = None
 
     flow: str
-    goal: list[str] = Field(min_length=1)
+    direction: list[str] = Field(min_length=1)
     area: list[str] = Field(min_length=1)
     repo: Path
 
@@ -270,7 +270,7 @@ class StepRunStatus(str, Enum):
 class StepRun(LfdModel):
     """An execution of a single step.
 
-    Can belong to a FlowRun (agent-spawned) or be standalone (interactive).
+    Can belong to a FlowRun (wave-spawned) or be standalone (interactive).
     """
 
     id: str
@@ -279,7 +279,7 @@ class StepRun(LfdModel):
     worktree: str
 
     flow_run_id: str | None = None
-    agent_id: str | None = None
+    wave_id: str | None = None
 
     status: StepRunStatus = StepRunStatus.RUNNING
     started_at: datetime = Field(default_factory=datetime.now)
@@ -296,7 +296,7 @@ class StepRun(LfdModel):
             "repo": self.repo,
             "worktree": self.worktree,
             "flow_run_id": self.flow_run_id,
-            "agent_id": self.agent_id,
+            "wave_id": self.wave_id,
             "status": self.status.value,
             "started_at": self.started_at.isoformat(),
             "ended_at": self.ended_at.isoformat() if self.ended_at else None,
@@ -313,7 +313,7 @@ class StepRun(LfdModel):
             repo=data["repo"],
             worktree=data["worktree"],
             flow_run_id=data.get("flow_run_id"),
-            agent_id=data.get("agent_id"),
+            wave_id=data.get("wave_id"),
             status=StepRunStatus(data["status"]),
             started_at=datetime.fromisoformat(data["started_at"]),
             ended_at=datetime.fromisoformat(data["ended_at"]) if data.get("ended_at") else None,

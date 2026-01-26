@@ -1,3 +1,0 @@
-#!/bin/bash
-# Stop all loopflow development agents
-uv run lfd stop --all

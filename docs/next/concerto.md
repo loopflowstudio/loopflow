@@ -7,9 +7,9 @@ title: Concerto
 
 *Coming soon.*
 
-The podium: visual control, real-time feedback. See your agents at work.
+The podium: visual control, real-time feedback. See your waves at work.
 
-Concerto is a native Mac app that wraps the CLI. Point-and-click prompt selection, live streaming output, worktree management in a sidebar. Start with the CLI to learn the system; add Concerto when you're managing multiple agents.
+Concerto is a native Mac app that wraps the CLI. Point-and-click prompt selection, live streaming output, worktree management in a sidebar. Start with the CLI to learn the system; add Concerto when you're managing multiple waves.
 
 ## Getting Started
 
@@ -60,7 +60,7 @@ Click **Context** to expand options:
 | Diff | Include raw `git diff` output |
 | Clipboard | Include clipboard contents |
 
-**Attached files**: Drag files onto the drop zone or paste with ⌘V. Attached files are passed to the agent as additional context.
+**Attached files**: Drag files onto the drop zone or paste with ⌘V. Attached files are passed to the coding agent as additional context.
 
 ### Token Estimation
 
@@ -105,24 +105,24 @@ Click **+** or use **⌘N** to create a new worktree. Enter a branch name or lea
 
 Right-click → **Delete** removes the worktree and its branch. You can also use `lfops wt prune` to clean up merged worktrees.
 
-## Agents Panel
+## Waves Panel
 
 ![Concerto with loops](../concerto-loops.png)
 
-View and manage background agents.
+View and manage waves.
 
-### Viewing Agents
+### Viewing Waves
 
-The agents panel shows all agents defined in `~/.lf/agents/`. Each entry displays:
+The waves panel shows all waves defined in `~/.lf/waves/`. Each entry displays:
 
-- Agent name and emoji
+- Wave name and emoji
 - Current status (idle, running, waiting, error)
 - Iteration count
 - Trigger type
 
 ### Starting/Stopping
 
-Click **Start** to begin an agent, **Stop** to halt it. Agents run in the background and appear in the session history.
+Click **Start** to begin a wave, **Stop** to halt it. Waves run in the background and appear in the session history.
 
 ## Session History
 

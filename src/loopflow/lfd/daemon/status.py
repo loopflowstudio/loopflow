@@ -2,20 +2,20 @@
 
 import os
 
-from loopflow.lfd.agent import list_agents
-from loopflow.lfd.models import AgentStatus
+from loopflow.lfd.wave import list_waves
+from loopflow.lfd.models import WaveStatus
 from loopflow.lfd.step_run import load_step_runs
 
 
 def compute_status() -> dict:
     """Return daemon status dict used by both socket and HTTP servers."""
-    agents = list_agents()
+    waves = list_waves()
     step_runs = load_step_runs(active_only=True)
-    running_agents = [a for a in agents if a.status == AgentStatus.RUNNING]
+    running_waves = [w for w in waves if w.status == WaveStatus.RUNNING]
 
     return {
         "pid": os.getpid(),
-        "agents_defined": len(agents),
-        "agents_running": len(running_agents),
+        "waves_defined": len(waves),
+        "waves_running": len(running_waves),
         "step_runs_active": len(step_runs),
     }

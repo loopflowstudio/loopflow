@@ -1,7 +1,7 @@
 """Manager for coordinating parallel worker execution.
 
 The manager controls how many workers can run simultaneously and
-tracks global PR limits across all agents.
+tracks global PR limits across all waves.
 """
 
 import threading
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import yaml
 
-from loopflow.lfd.agent import count_outstanding, list_agents
+from loopflow.lfd.wave import count_outstanding, list_waves
 
 
 @dataclass
@@ -18,7 +18,7 @@ class ManagerConfig:
     """Configuration for the worker manager."""
 
     concurrency: int = 3  # Max parallel workers
-    global_pr_limit: int = 15  # Total outstanding across all agents
+    global_pr_limit: int = 15  # Total outstanding across all waves
 
 
 def load_manager_config() -> ManagerConfig:
@@ -67,10 +67,10 @@ class Manager:
             return len(self._running)
 
     def total_outstanding(self) -> int:
-        """Total outstanding commits across all agents."""
+        """Total outstanding commits across all waves."""
         total = 0
-        for agent in list_agents():
-            total += count_outstanding(agent)
+        for wave in list_waves():
+            total += count_outstanding(wave)
         return total
 
     def can_start(self) -> tuple[bool, str | None]:

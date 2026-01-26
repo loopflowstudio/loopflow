@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from loopflow.lf.goals import _FRONTMATTER_PATTERN, _parse_frontmatter
+from loopflow.lf.directions import _FRONTMATTER_PATTERN, _parse_frontmatter
 
 
 @dataclass

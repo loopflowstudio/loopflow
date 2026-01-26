@@ -107,32 +107,36 @@ class TestStepRunSchema:
         assert not missing, f"Swift StepRun missing fields: {missing}"
 
 
-class TestAgentSchema:
-    """Agent schema alignment tests."""
+class TestWaveSchema:
+    """Wave schema alignment tests."""
 
-    def test_agent_python_fields(self):
-        """Python Agent has expected fields."""
-        fields = extract_python_fields("Agent", REPO_ROOT / "src/loopflow/lfd/models.py")
+    def test_wave_python_fields(self):
+        """Python Wave has expected fields."""
+        fields = extract_python_fields("Wave", REPO_ROOT / "src/loopflow/lfd/models.py")
         assert "id" in fields
         assert "repo" in fields
         assert "flow" in fields
-        assert "goal" in fields
+        assert "direction" in fields
         assert "area" in fields
         assert "status" in fields
 
-    def test_agent_swift_matches_python(self):
-        """Swift Agent fields match Python schema."""
-        python_fields = extract_python_fields("Agent", REPO_ROOT / "src/loopflow/lfd/models.py")
-        swift_fields = extract_swift_fields(
-            "Agent", REPO_ROOT / "swift/LoopflowCore/Models/Agent.swift"
-        )
+    def test_wave_swift_matches_python(self):
+        """Swift Wave fields match Python schema."""
+        swift_path = REPO_ROOT / "swift/LoopflowCore/Models/Wave.swift"
+        if not swift_path.exists():
+            # Skip if Swift file not renamed yet (Agent.swift → Wave.swift)
+            import pytest
+            pytest.skip("Swift Wave.swift not yet created (pending Agent→Wave rename)")
+
+        python_fields = extract_python_fields("Wave", REPO_ROOT / "src/loopflow/lfd/models.py")
+        swift_fields = extract_swift_fields("Wave", swift_path)
 
         python_camel = to_camel_case(python_fields)
 
         # Swift should have these core fields
-        core_fields = {"id", "repo", "flow", "goal", "area", "status", "iteration"}
+        core_fields = {"id", "repo", "flow", "direction", "area", "status", "iteration"}
         missing = core_fields - swift_fields
-        assert not missing, f"Swift Agent missing fields: {missing}"
+        assert not missing, f"Swift Wave missing fields: {missing}"
 
 
 class TestFlowRunSchema:

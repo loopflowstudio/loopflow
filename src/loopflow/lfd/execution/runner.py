@@ -1,6 +1,6 @@
 """Core iteration runner for lfd.
 
-Executes a single iteration of an Agent.
+Executes a single iteration of a Wave.
 """
 
 import concurrent.futures
@@ -30,7 +30,7 @@ from loopflow.lf.flows import (
     build_step_dag,
     load_flow,
 )
-from loopflow.lf.goals import resolve_goals
+from loopflow.lf.directions import resolve_directions
 from loopflow.lf.launcher import build_model_command, get_runner
 from loopflow.lf.logging import write_prompt_file
 from loopflow.lf.messages import generate_pr_message
@@ -44,12 +44,12 @@ from loopflow.lfd.flow_run import (
     update_run_status,
     update_run_step,
 )
-from loopflow.lfd.models import Agent, FlowRun, FlowRunStatus
+from loopflow.lfd.models import Wave, FlowRun, FlowRunStatus
 
 
 @dataclass
 class IterationResult:
-    """Result of running a single agent iteration."""
+    """Result of running a single wave iteration."""
 
     success: bool
     worktree: Path | None = None
@@ -64,13 +64,12 @@ def _iteration_branch_prefix(main_branch: str) -> str:
 
 
 def _build_loop_prompt(
-    agent: Agent,
-    effective_goals: list,
+    wave: Wave,
+    direction: list,
     worktree_path: Path,
     step_name: str,
     context_paths: list[str] | None,
     extra_context: list[str] | None = None,
-    goals: list[str] | None = None,
 ) -> tuple[str, str] | None:
     merged_context = list(context_paths) if context_paths else []
     if extra_context:
@@ -80,7 +79,7 @@ def _build_loop_prompt(
         worktree_path,
         step=step_name,
         run_mode="auto",
-        goals=goals,
+        direction=direction,
         context_config=ContextConfig(pathset=merged_context),
     )
 
@@ -88,10 +87,10 @@ def _build_loop_prompt(
         return None
 
     step_file, step_content = components.step
-    goal_parts = [f"<lf:goal:{g.name}>\n{g.content}\n</lf:goal:{g.name}>" for g in effective_goals]
-    goal_section = "\n\n".join(goal_parts)
+    direction_parts = [f"<lf:direction:{d.name}>\n{d.content}\n</lf:direction:{d.name}>" for d in direction]
+    direction_section = "\n\n".join(direction_parts)
 
-    combined = f"{goal_section}\n\n---\n\n{step_content}"
+    combined = f"{direction_section}\n\n---\n\n{step_content}"
     components = replace(components, step=(step_file, combined))
     prompt = format_prompt(components)
 
@@ -255,7 +254,7 @@ def _merge_branch(worktree: Path, branch: str) -> bool:
     )
     if result.returncode != 0:
         error = result.stderr.strip() or result.stdout.strip()
-        notify_event("agent.error", {"error": f"Merge failed for {branch}: {error}"})
+        notify_event("wave.error", {"error": f"Merge failed for {branch}: {error}"})
         return False
     return True
 
@@ -276,40 +275,39 @@ def _cleanup_fork_worktrees(repo_root: Path, results: list[ForkResult]) -> None:
 
 
 def _build_loop_inline_prompt(
-    agent: Agent,
-    effective_goals: list,
+    wave: Wave,
+    direction: list,
     worktree_path: Path,
     inline_text: str,
     context_paths: list[str] | None,
-    goals: list[str] | None = None,
 ) -> str | None:
     components = gather_prompt_components(
         worktree_path,
         inline=inline_text,
         run_mode="auto",
-        goals=goals,
+        direction=direction,
         context_config=ContextConfig(pathset=context_paths),
     )
     if not components.step:
         return None
 
     step_file, step_content = components.step
-    goal_parts = [f"<lf:goal:{g.name}>\n{g.content}\n</lf:goal:{g.name}>" for g in effective_goals]
-    goal_section = "\n\n".join(goal_parts)
+    direction_parts = [f"<lf:direction:{d.name}>\n{d.content}\n</lf:direction:{d.name}>" for d in direction]
+    direction_section = "\n\n".join(direction_parts)
 
-    combined = f"{goal_section}\n\n---\n\n{step_content}"
+    combined = f"{direction_section}\n\n---\n\n{step_content}"
     components = replace(components, step=(step_file, combined))
     return format_prompt(components)
 
 
 def _run_fork_synthesize(
-    agent: Agent,
+    wave: Wave,
     flow_name: str,
     worktree_path: Path,
     branch: str,
     fork: Fork,
     context_paths: list[str] | None,
-    effective_goals: list,
+    direction: list,
     skip_permissions: bool,
     backend: str,
     model_variant: str | None,
@@ -317,14 +315,14 @@ def _run_fork_synthesize(
     results: list[ForkResult] = []
     base_commit = _git_rev_parse(worktree_path, "HEAD")
 
-    def _run_agent(agent_config: ForkAgent, index: int) -> ForkResult:
+    def _run_fork_branch(fork_config: ForkAgent, index: int) -> ForkResult:
         wt_name = f"fork-{flow_name}-{index}"
         try:
-            wt_path = create_worktree(agent.repo, wt_name, base=branch)
+            wt_path = create_worktree(wave.repo, wt_name, base=branch)
         except Exception:
             return ForkResult(
                 worktree=worktree_path,
-                config=agent_config,
+                config=fork_config,
                 diff="",
                 status="failed",
                 scratch_notes="",
@@ -336,25 +334,25 @@ def _run_fork_synthesize(
         )
         subprocess.run(["git", "clean", "-fd"], cwd=wt_path, capture_output=True)
 
-        agent_backend = backend
-        agent_variant = model_variant
-        if agent_config.model:
-            agent_backend, agent_variant = parse_model(agent_config.model)
+        fork_backend = backend
+        fork_variant = model_variant
+        if fork_config.model:
+            fork_backend, fork_variant = parse_model(fork_config.model)
 
-        agent_context = list(context_paths) if context_paths else []
+        fork_context = list(context_paths) if context_paths else []
 
-        if agent_config.step:
+        if fork_config.step:
             prompt_result = _build_loop_prompt(
-                agent,
-                effective_goals,
+                wave,
+                direction,
                 wt_path,
-                agent_config.step,
-                agent_context or None,
+                fork_config.step,
+                fork_context or None,
             )
             if not prompt_result:
                 return ForkResult(
                     worktree=wt_path,
-                    config=agent_config,
+                    config=fork_config,
                     diff="",
                     status="failed",
                     scratch_notes="",
@@ -362,13 +360,13 @@ def _run_fork_synthesize(
 
             prompt, _step_file = prompt_result
             step_run_id = str(uuid.uuid4())
-            step_label = f"{agent.area_display}:{agent_config.step}:fork-{index}"
+            step_label = f"{wave.area_display}:{fork_config.step}:fork-{index}"
             try:
                 exit_code = _run_collector_step(
                     prompt,
                     wt_path,
-                    agent_backend,
-                    agent_variant,
+                    fork_backend,
+                    fork_variant,
                     skip_permissions,
                     step_run_id,
                     step_label,
@@ -378,7 +376,7 @@ def _run_fork_synthesize(
             except StepTimeoutError as exc:
                 return ForkResult(
                     worktree=wt_path,
-                    config=agent_config,
+                    config=fork_config,
                     diff="",
                     status=f"timeout: {exc}",
                     scratch_notes="",
@@ -387,18 +385,18 @@ def _run_fork_synthesize(
             diff = _run_git(wt_path, ["diff", f"{base_commit}..HEAD"])
             return ForkResult(
                 worktree=wt_path,
-                config=agent_config,
+                config=fork_config,
                 diff=diff,
                 status="completed" if exit_code == 0 else "failed",
                 scratch_notes=_read_scratch_notes(wt_path),
             )
 
-        if agent_config.flow:
-            flow_def = load_flow(agent_config.flow, agent.repo)
+        if fork_config.flow:
+            flow_def = load_flow(fork_config.flow, wave.repo)
             if not flow_def:
                 return ForkResult(
                     worktree=wt_path,
-                    config=agent_config,
+                    config=fork_config,
                     diff="",
                     status="failed",
                     scratch_notes="",
@@ -406,18 +404,18 @@ def _run_fork_synthesize(
             exit_code = run_flow_def(
                 flow_def,
                 wt_path,
-                context=agent_context or None,
+                context=fork_context or None,
                 exclude=None,
                 skip_permissions=skip_permissions,
                 push_enabled=False,
                 pr_enabled=False,
-                backend=agent_backend,
-                model_variant=agent_variant,
+                backend=fork_backend,
+                model_variant=fork_variant,
             )
             diff = _run_git(wt_path, ["diff", f"{base_commit}..HEAD"])
             return ForkResult(
                 worktree=wt_path,
-                config=agent_config,
+                config=fork_config,
                 diff=diff,
                 status="completed" if exit_code == 0 else "failed",
                 scratch_notes=_read_scratch_notes(wt_path),
@@ -425,7 +423,7 @@ def _run_fork_synthesize(
 
         return ForkResult(
             worktree=wt_path,
-            config=agent_config,
+            config=fork_config,
             diff="",
             status="failed",
             scratch_notes="",
@@ -433,28 +431,27 @@ def _run_fork_synthesize(
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(fork.agents)) as executor:
         futures = [
-            executor.submit(_run_agent, config, i + 1) for i, config in enumerate(fork.agents)
+            executor.submit(_run_fork_branch, config, i + 1) for i, config in enumerate(fork.agents)
         ]
         for future in futures:
             results.append(future.result())
 
     if not any(result.status == "completed" for result in results):
-        _cleanup_fork_worktrees(agent.repo, results)
+        _cleanup_fork_worktrees(wave.repo, results)
         return 1
 
     synth_prompt_override = fork.synthesize.prompt if fork.synthesize else None
-    instructions = load_synthesize_instructions(agent.repo, synth_prompt_override)
+    instructions = load_synthesize_instructions(wave.repo, synth_prompt_override)
     synth_prompt = build_synthesize_prompt(results, instructions, base_commit)
     synth_prompt = _build_loop_inline_prompt(
-        agent,
-        effective_goals,
+        wave,
+        direction,
         worktree_path,
         synth_prompt,
         context_paths,
-        goals=None,
     )
     if not synth_prompt:
-        _cleanup_fork_worktrees(agent.repo, results)
+        _cleanup_fork_worktrees(wave.repo, results)
         return 1
 
     try:
@@ -465,41 +462,41 @@ def _run_fork_synthesize(
             model_variant,
             skip_permissions,
             str(uuid.uuid4()),
-            f"{agent.area_display}:synthesize",
+            f"{wave.area_display}:synthesize",
             autocommit=True,
         )
     except StepTimeoutError:
-        _cleanup_fork_worktrees(agent.repo, results)
+        _cleanup_fork_worktrees(wave.repo, results)
         raise
 
-    _cleanup_fork_worktrees(agent.repo, results)
+    _cleanup_fork_worktrees(wave.repo, results)
     return exit_code
 
 
 def run_iteration(
-    agent: Agent,
+    wave: Wave,
     iteration: int,
     run_id: str | None = None,
 ) -> IterationResult:
-    """Run a single iteration of an agent."""
-    config = load_config(agent.repo)
+    """Run a single iteration of a wave."""
+    config = load_config(wave.repo)
 
-    prefix = _iteration_branch_prefix(agent.main_branch)
+    prefix = _iteration_branch_prefix(wave.main_branch)
     branch = f"{prefix}/{iteration:03d}"
     try:
-        worktree_path = create_worktree(agent.repo, branch, base=agent.main_branch)
+        worktree_path = create_worktree(wave.repo, branch, base=wave.main_branch)
     except WorktreeError as e:
         error_msg = f"Failed to create worktree: {e}"
-        notify_event("agent.error", {"agent_id": agent.id, "error": error_msg})
+        notify_event("wave.error", {"wave_id": wave.id, "error": error_msg})
         return IterationResult(success=False)
 
     run = FlowRun(
         id=run_id or str(uuid.uuid4()),
-        agent_id=agent.id,
-        flow=agent.flow,
-        goal=agent.goal,
-        area=agent.area,
-        repo=agent.repo,
+        wave_id=wave.id,
+        flow=wave.flow,
+        direction=wave.direction,
+        area=wave.area,
+        repo=wave.repo,
         status=FlowRunStatus.RUNNING,
         iteration=iteration,
         worktree=str(worktree_path),
@@ -509,41 +506,41 @@ def run_iteration(
     save_run(run)
 
     notify_event(
-        "agent.started",
+        "wave.started",
         {
-            "agent_id": agent.id,
-            "area": agent.area_display,
-            "goal": agent.goal_display,
-            "flow": agent.flow,
+            "wave_id": wave.id,
+            "area": wave.area_display,
+            "direction": wave.direction_display,
+            "flow": wave.flow,
             "iteration": iteration,
         },
     )
 
-    effective_goals = resolve_goals(agent.repo, agent.goal)
-    # Goals are optional - proceed even if none specified
+    direction = resolve_directions(wave.repo, wave.direction)
+    # Direction is optional - proceed even if none specified
 
-    flow = agent.flow
+    flow = wave.flow
     if not flow:
         update_run_status(run.id, FlowRunStatus.FAILED, error="Flow is required")
-        _cleanup_worktree(agent.repo, worktree_path, branch)
+        _cleanup_worktree(wave.repo, worktree_path, branch)
         return IterationResult(success=False)
 
     try:
-        flow_def = load_flow(flow, agent.repo)
+        flow_def = load_flow(flow, wave.repo)
     except ValueError as exc:
         update_run_status(run.id, FlowRunStatus.FAILED, error=str(exc))
-        _cleanup_worktree(agent.repo, worktree_path, branch)
+        _cleanup_worktree(wave.repo, worktree_path, branch)
         return IterationResult(success=False)
 
     if not flow_def:
         update_run_status(run.id, FlowRunStatus.FAILED, error=f"Unknown flow '{flow}'")
-        _cleanup_worktree(agent.repo, worktree_path, branch)
+        _cleanup_worktree(wave.repo, worktree_path, branch)
         return IterationResult(success=False)
 
     items: list[Step | Fork | Choose] = list(flow_def.steps)
     if not items:
         update_run_status(run.id, FlowRunStatus.FAILED, error=f"Empty flow '{flow}'")
-        _cleanup_worktree(agent.repo, worktree_path, branch)
+        _cleanup_worktree(wave.repo, worktree_path, branch)
         return IterationResult(success=False)
 
     agent_model = config.agent_model if config else "claude:opus"
@@ -556,8 +553,8 @@ def run_iteration(
 
     skip_permissions = config.yolo if config else False
 
-    # Use agent's area as context paths
-    context_paths = list(agent.area) if agent.area[0] != "." else None
+    # Use wave's area as context paths
+    context_paths = list(wave.area) if wave.area[0] != "." else None
 
     i = 0
     while i < len(items):
@@ -577,9 +574,9 @@ def run_iteration(
                     step_name = step_def.name
                     update_run_step(run.id, step_name)
                     notify_event(
-                        "agent.step.started",
+                        "wave.step.started",
                         {
-                            "agent_id": agent.id,
+                            "wave_id": wave.id,
                             "step": step_name,
                             "iteration": iteration,
                         },
@@ -591,8 +588,8 @@ def run_iteration(
                         step_backend, step_variant = parse_model(step_def.model)
 
                     prompt_result = _build_loop_prompt(
-                        agent,
-                        effective_goals,
+                        wave,
+                        direction,
                         worktree_path,
                         step_name,
                         context_paths,
@@ -601,7 +598,7 @@ def run_iteration(
                         update_run_status(
                             run.id, FlowRunStatus.FAILED, error=f"Step file not found: {step_name}"
                         )
-                        _cleanup_worktree(agent.repo, worktree_path, branch)
+                        _cleanup_worktree(wave.repo, worktree_path, branch)
                         return IterationResult(success=False)
 
                     prompt, _step_file = prompt_result
@@ -613,25 +610,25 @@ def run_iteration(
                             step_variant,
                             skip_permissions,
                             run.id,
-                            f"{agent.area_display}:{step_name}",
+                            f"{wave.area_display}:{step_name}",
                         )
                     except StepTimeoutError as e:
                         notify_event(
-                            "agent.step.completed",
+                            "wave.step.completed",
                             {
-                                "agent_id": agent.id,
+                                "wave_id": wave.id,
                                 "step": step_name,
                                 "status": "timeout",
                             },
                         )
                         update_run_status(run.id, FlowRunStatus.FAILED, error=str(e))
-                        _cleanup_worktree(agent.repo, worktree_path, branch)
+                        _cleanup_worktree(wave.repo, worktree_path, branch)
                         return IterationResult(success=False)
 
                     notify_event(
-                        "agent.step.completed",
+                        "wave.step.completed",
                         {
-                            "agent_id": agent.id,
+                            "wave_id": wave.id,
                             "step": step_name,
                             "status": "completed" if result_code == 0 else "error",
                         },
@@ -639,7 +636,7 @@ def run_iteration(
 
                     if result_code != 0:
                         update_run_status(run.id, FlowRunStatus.FAILED, error=f"{step_name} failed")
-                        _cleanup_worktree(agent.repo, worktree_path, branch)
+                        _cleanup_worktree(wave.repo, worktree_path, branch)
                         return IterationResult(success=False)
                     continue
 
@@ -649,7 +646,7 @@ def run_iteration(
 
                 def _run_parallel(step_def: Step, index: int) -> tuple[Step, Path, int]:
                     wt_name = f"parallel-{branch.replace('/', '-')}-{step_def.name}-{index}"
-                    wt_path = create_worktree(agent.repo, wt_name, base=base_branch)
+                    wt_path = create_worktree(wave.repo, wt_name, base=base_branch)
                     subprocess.run(
                         ["git", "reset", "--hard", base_branch],
                         cwd=wt_path,
@@ -663,8 +660,8 @@ def run_iteration(
                         step_backend, step_variant = parse_model(step_def.model)
 
                     prompt_result = _build_loop_prompt(
-                        agent,
-                        effective_goals,
+                        wave,
+                        direction,
                         wt_path,
                         step_def.name,
                         context_paths,
@@ -674,7 +671,7 @@ def run_iteration(
 
                     prompt, _step_file = prompt_result
                     step_run_id = str(uuid.uuid4())
-                    step_label = f"{agent.area_display}:{step_def.name}:parallel"
+                    step_label = f"{wave.area_display}:{step_def.name}:parallel"
                     try:
                         exit_code = _run_collector_step(
                             prompt,
@@ -699,46 +696,46 @@ def run_iteration(
 
                 if any(exit_code != 0 for _, _, exit_code in results):
                     for _, wt_path, _ in results:
-                        remove_worktree(agent.repo, wt_path.name.split(".")[-1])
+                        remove_worktree(wave.repo, wt_path.name.split(".")[-1])
                     update_run_status(run.id, FlowRunStatus.FAILED, error="Parallel step failed")
-                    _cleanup_worktree(agent.repo, worktree_path, branch)
+                    _cleanup_worktree(wave.repo, worktree_path, branch)
                     return IterationResult(success=False)
 
                 for _, wt_path, _ in results:
                     merge_branch = _current_branch(wt_path) or wt_path.name
                     if not _merge_branch(worktree_path, merge_branch):
                         for _, cleanup_path, _ in results:
-                            remove_worktree(agent.repo, cleanup_path.name.split(".")[-1])
+                            remove_worktree(wave.repo, cleanup_path.name.split(".")[-1])
                         update_run_status(run.id, FlowRunStatus.FAILED, error="Merge failed")
-                        _cleanup_worktree(agent.repo, worktree_path, branch)
+                        _cleanup_worktree(wave.repo, worktree_path, branch)
                         return IterationResult(success=False)
 
                 for _, wt_path, _ in results:
-                    remove_worktree(agent.repo, wt_path.name.split(".")[-1])
+                    remove_worktree(wave.repo, wt_path.name.split(".")[-1])
 
             continue
 
         if isinstance(item, Fork):
             try:
                 result_code = _run_fork_synthesize(
-                    agent,
+                    wave,
                     flow_def.name,
                     worktree_path,
                     branch,
                     item,
                     context_paths,
-                    effective_goals,
+                    direction,
                     skip_permissions,
                     backend,
                     model_variant,
                 )
             except StepTimeoutError as e:
                 update_run_status(run.id, FlowRunStatus.FAILED, error=str(e))
-                _cleanup_worktree(agent.repo, worktree_path, branch)
+                _cleanup_worktree(wave.repo, worktree_path, branch)
                 return IterationResult(success=False)
             if result_code != 0:
                 update_run_status(run.id, FlowRunStatus.FAILED, error="synthesize failed")
-                _cleanup_worktree(agent.repo, worktree_path, branch)
+                _cleanup_worktree(wave.repo, worktree_path, branch)
                 return IterationResult(success=False)
 
             i += 1
@@ -756,7 +753,7 @@ def run_iteration(
                 )
             except RuntimeError as exc:
                 update_run_status(run.id, FlowRunStatus.FAILED, error=str(exc))
-                _cleanup_worktree(agent.repo, worktree_path, branch)
+                _cleanup_worktree(wave.repo, worktree_path, branch)
                 return IterationResult(success=False)
 
             items = items[:i] + item.options[choice] + items[i + 1 :]
@@ -766,35 +763,35 @@ def run_iteration(
 
     update_run_step(run.id, None)
 
-    pr_url = _create_pr_to_main_branch(agent, worktree_path, branch, iteration)
+    pr_url = _create_pr_to_main_branch(wave, worktree_path, branch, iteration)
     if pr_url:
         update_run_pr(run.id, pr_url)
         _auto_merge_pr(worktree_path)
 
-        if agent.merge_mode.value == "land":
-            _land_to_main(agent)
+        if wave.merge_mode.value == "land":
+            _land_to_main(wave)
 
     update_run_status(run.id, FlowRunStatus.COMPLETED)
 
     notify_event(
-        "agent.iteration.done",
+        "wave.iteration.done",
         {
-            "agent_id": agent.id,
-            "area": agent.area_display,
-            "goal": agent.goal_display,
-            "flow": agent.flow,
+            "wave_id": wave.id,
+            "area": wave.area_display,
+            "direction": wave.direction_display,
+            "flow": wave.flow,
             "iteration": iteration,
             "pr_url": pr_url,
         },
     )
 
-    _cleanup_worktree(agent.repo, worktree_path, branch)
+    _cleanup_worktree(wave.repo, worktree_path, branch)
 
     return IterationResult(success=True, worktree=worktree_path, branch=branch)
 
 
 def _create_pr_to_main_branch(
-    agent: Agent, worktree_path: Path, branch: str, iteration: int
+    wave: Wave, worktree_path: Path, branch: str, iteration: int
 ) -> str | None:
     """Push branch and create PR targeting main_branch."""
     result = subprocess.run(
@@ -808,17 +805,17 @@ def _create_pr_to_main_branch(
 
     try:
         message = generate_pr_message(worktree_path)
-        title = f"[{agent.area_slug}] {message.title}"
+        title = f"[{wave.area_slug}] {message.title}"
         body = (
-            f"Agent: {agent.area_display} [{agent.goal_display}]\n"
-            f"Flow: {agent.flow}\n"
+            f"Wave: {wave.area_display} [{wave.direction_display}]\n"
+            f"Flow: {wave.flow}\n"
             f"Iteration: {iteration}\n\n{message.body}"
         )
     except Exception:
-        title = f"[{agent.area_slug}] Iteration {iteration}"
+        title = f"[{wave.area_slug}] Iteration {iteration}"
         body = (
-            f"Agent: {agent.area_display} [{agent.goal_display}]\n"
-            f"Flow: {agent.flow}\n"
+            f"Wave: {wave.area_display} [{wave.direction_display}]\n"
+            f"Flow: {wave.flow}\n"
             f"Iteration: {iteration}"
         )
 
@@ -831,7 +828,7 @@ def _create_pr_to_main_branch(
         "--body",
         body,
         "--base",
-        agent.main_branch,
+        wave.main_branch,
     ]
     result = subprocess.run(cmd, cwd=worktree_path, capture_output=True, text=True)
 
@@ -851,11 +848,11 @@ def _auto_merge_pr(worktree_path: Path) -> bool:
     return result.returncode == 0
 
 
-def _land_to_main(agent: Agent) -> str | None:
+def _land_to_main(wave: Wave) -> str | None:
     """Create or update PR from main_branch to main, enable auto-merge."""
-    repo = agent.repo
+    repo = wave.repo
 
-    subprocess.run(["git", "push", "origin", agent.main_branch], cwd=repo, capture_output=True)
+    subprocess.run(["git", "push", "origin", wave.main_branch], cwd=repo, capture_output=True)
 
     result = subprocess.run(
         [
@@ -863,7 +860,7 @@ def _land_to_main(agent: Agent) -> str | None:
             "pr",
             "list",
             "--head",
-            agent.main_branch,
+            wave.main_branch,
             "--base",
             "main",
             "--json",
@@ -894,12 +891,12 @@ def _land_to_main(agent: Agent) -> str | None:
             "--base",
             "main",
             "--head",
-            agent.main_branch,
+            wave.main_branch,
             "--title",
-            f"[{agent.area_slug}] Land accumulated work",
+            f"[{wave.area_slug}] Land accumulated work",
             "--body",
-            f"Auto-land from agent: {agent.area_display} [{agent.goal_display}] "
-            f"(flow: {agent.flow})",
+            f"Auto-land from wave: {wave.area_display} [{wave.direction_display}] "
+            f"(flow: {wave.flow})",
         ],
         cwd=repo,
         capture_output=True,

@@ -39,7 +39,7 @@ The task may be waiting for input. Use interactive mode:
 lf review -i    # interactive mode
 ```
 
-Check if the agent is stuck on a permission prompt or clarifying question.
+Check if the coding agent is stuck on a permission prompt or clarifying question.
 
 ## Rate limits
 
@@ -48,7 +48,7 @@ Check if the agent is stuck on a permission prompt or clarifying question.
 Claude, Codex, and Gemini have usage limits. Options:
 
 - Wait and retry
-- Reduce parallel agents
+- Reduce parallel waves
 - Switch to a different model: `lf review -m codex`
 
 ## Worktree issues
@@ -81,7 +81,7 @@ The loop hit its PR limit. Options:
 
 1. Review and merge outstanding PRs
 2. Increase the limit: `lfd loop <flow> <area> --limit 10`
-3. Land accumulated work: see [Background Agents](agents.md) for loop management
+3. Land accumulated work: see [Waves](waves.md) for loop management
 
 ## Context too large
 
@@ -121,4 +121,4 @@ lfops doctor
 
 ## See Also
 
-[Configuration](config.md) · [Background Agents](agents.md) · [`lfd` reference](lfd.md)
+[Configuration](config.md) · [Waves](waves.md) · [`lfd` reference](lfd.md)

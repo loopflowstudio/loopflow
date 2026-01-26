@@ -18,7 +18,7 @@ Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), or repo c
 | Include raw diff | `--diff` | `diff: true` |
 | Include clipboard | `-c, --clipboard` | — |
 | Add context files | `-p FILE` | `context: [FILE]` |
-| Goal (judgment/intent) | `--goal NAME` | `goal: NAME` |
+| Direction (judgment/intent) | `--direction NAME` | `direction: NAME` |
 | Chrome automation | `--chrome` | `chrome: true` |
 | Yolo mode (skip permissions) | — | `yolo: true` |
 
@@ -59,7 +59,7 @@ For most settings, repo overrides global. For additive settings (`context`, `exc
 ```yaml
 # ~/.lf/config.yaml (global)
 agent_model: claude:opus
-goal: product-engineer
+direction: product-engineer
 
 # .lf/config.yaml (repo)
 agent_model: codex        # overrides global
@@ -73,7 +73,7 @@ Example repo config:
 agent_model: claude:opus
 push: true
 
-goal: product-engineer
+direction: product-engineer
 
 context:
   - src/schema.py
@@ -122,7 +122,7 @@ Full content of files modified on the current branch.
 | **Config** | `diff_files: true` |
 | **Default** | `true` (included) |
 
-This is how agents see your changes. They get complete files, not just diffs.
+This is how the coding agent sees your changes. It gets complete files, not just diffs.
 
 ### Summaries
 
@@ -137,7 +137,7 @@ summaries:
     tokens: 5000
 ```
 
-Generate with `lfops summarize`. Summaries give agents codebase context without consuming the full token budget. Only summarize directories you're *not* including directly.
+Generate with `lfops summarize`. Summaries give the coding agent codebase context without consuming the full token budget. Only summarize directories you're *not* including directly.
 
 | | |
 |---|---|
@@ -220,16 +220,16 @@ interactive: true
 
 CLI flags override the frontmatter default.
 
-### Goal
+### Direction
 
-Goals shape judgment and intent—how the agent approaches work.
+Directions shape judgment and intent—how the coding agent approaches work.
 
 | | |
 |---|---|
-| **CLI** | `--goal designer` or `--goal product-engineer,designer` |
-| **Config** | `goal: product-engineer` or `goal: [product-engineer, designer]` |
+| **CLI** | `--direction designer` or `--direction product-engineer,designer` |
+| **Config** | `direction: product-engineer` or `direction: [product-engineer, designer]` |
 
-Goal files live in `.lf/goals/` as markdown. Built-in goals: `adapt`, `roadmap`, `ship`, `product-engineer`, `designer`, `infra-engineer`, `ceo`.
+Direction files live in `.lf/directions/` as markdown. Built-in directions: `adapt`, `roadmap`, `ship`, `product-engineer`, `designer`, `infra-engineer`, `ceo`.
 
 ### Chrome
 

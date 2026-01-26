@@ -25,7 +25,7 @@ from loopflow.lf.flow import run_flow_def
 from loopflow.lf.flows import load_flow
 from loopflow.lf.frontmatter import StepConfig, resolve_step_config
 from loopflow.lf.git import find_main_repo
-from loopflow.lf.goals import parse_goal_arg
+from loopflow.lf.directions import parse_direction_arg, resolve_directions
 from loopflow.lf.launcher import (
     build_model_command,
     build_model_interactive_command,
@@ -187,7 +187,7 @@ def _launch_interactive_default(
     config,
     context: list[str] | None = None,
     model: str | None = None,
-    goal: str | None = None,
+    direction: str | None = None,
     clipboard: bool | None = None,
     docs: bool | None = None,
 ) -> None:
@@ -206,7 +206,8 @@ def _launch_interactive_default(
         raise typer.Exit(1)
 
     skip_permissions = config.yolo if config else False
-    cli_goals = parse_goal_arg(goal)
+    direction_names = parse_direction_arg(direction) or (config.direction if config else None)
+    resolved_direction = resolve_directions(repo_root, direction_names) if direction_names else None
 
     # Resolve flags
     include_clipboard = clipboard if clipboard is not None else (config.paste if config else False)
@@ -217,7 +218,7 @@ def _launch_interactive_default(
         step=None,
         inline=None,
         run_mode="interactive",
-        goals=cli_goals or (config.goal if config else None),
+        direction=resolved_direction,
         context_config=ContextConfig.for_interactive(
             paths=list(context) if context else [],
             exclude=list(config.exclude) if config and config.exclude else [],
@@ -271,7 +272,10 @@ def run(
     model: ModelType = typer.Option(
         None, "-m", "-M", "--model", help="Model to use (backend or backend:variant)"
     ),
-    goal: str = typer.Option(None, "-g", "-G", "--goal", help="Goals to use (comma-separated)"),
+    direction: Optional[list[str]] = typer.Option(
+        None, "-d", "-D", "--direction",
+        help="Direction to apply (repeatable, or comma-separated)"
+    ),
     chrome: Optional[bool] = typer.Option(
         None, "--chrome/--no-chrome", help="Enable Chrome browser automation"
     ),
@@ -305,7 +309,7 @@ def run(
             config,
             context=list(path) if path else None,
             model=model,
-            goal=goal,
+            direction=direction,
             clipboard=clipboard,
             docs=docs,
         )
@@ -314,8 +318,8 @@ def run(
     step_file = gather_step(repo_root, step, config)
     frontmatter = step_file.config if step_file else StepConfig()
 
-    # Parse goal arg
-    cli_goals = parse_goal_arg(goal)
+    # Parse direction arg
+    cli_directions = parse_direction_arg(direction)
 
     # Resolve config: CLI > frontmatter > global > defaults
     resolved = resolve_step_config(
@@ -326,7 +330,7 @@ def run(
         cli_auto=True if auto else None,
         cli_model=model,
         cli_context=list(path) if path else None,
-        cli_goal=cli_goals or None,
+        cli_direction=cli_directions or None,
     )
 
     is_interactive = resolved.interactive
@@ -343,6 +347,9 @@ def run(
         raise typer.Exit(1)
 
     skip_permissions = config.yolo if config else False
+
+    # Resolve direction to objects
+    resolved_direction = resolve_directions(repo_root, resolved.direction) if resolved.direction else None
 
     # Build exclude list: resolved.exclude + resolved.include adjustment
     exclude_patterns = list(resolved.exclude)
@@ -372,7 +379,7 @@ def run(
         step,
         step_args=args,
         run_mode="interactive" if is_interactive else "auto",
-        goals=resolved.goal or None,
+        direction=resolved_direction,
         context_config=ContextConfig(
             diff_mode=resolved_diff_mode,
             files=FilesetConfig(
@@ -451,7 +458,10 @@ def inline(
     model: ModelType = typer.Option(
         None, "-m", "-M", "--model", help="Model to use (backend or backend:variant)"
     ),
-    goal: str = typer.Option(None, "-g", "-G", "--goal", help="Goals to use (comma-separated)"),
+    direction: Optional[list[str]] = typer.Option(
+        None, "-d", "-D", "--direction",
+        help="Direction to apply (repeatable, or comma-separated)"
+    ),
     chrome: Optional[bool] = typer.Option(
         None, "--chrome/--no-chrome", help="Enable Chrome browser automation"
     ),
@@ -464,8 +474,8 @@ def inline(
 
     config = load_config(repo_root) if (repo_root / ".lf" / "config.yaml").exists() else None
 
-    # Parse goal arg
-    cli_goals = parse_goal_arg(goal)
+    # Parse direction arg
+    cli_directions = parse_direction_arg(direction)
 
     # Resolve config for inline prompts (no frontmatter)
     resolved = resolve_step_config(
@@ -476,7 +486,7 @@ def inline(
         cli_auto=True if auto else None,
         cli_model=model,
         cli_context=list(path) if path else None,
-        cli_goal=cli_goals or None,
+        cli_direction=cli_directions or None,
     )
 
     is_interactive = resolved.interactive
@@ -493,6 +503,9 @@ def inline(
         raise typer.Exit(1)
 
     skip_permissions = config.yolo if config else False
+
+    # Resolve direction to objects
+    resolved_direction = resolve_directions(repo_root, resolved.direction) if resolved.direction else None
 
     # Build exclude list from resolved config
     exclude_patterns = list(resolved.exclude)
@@ -518,7 +531,7 @@ def inline(
         step=None,
         inline=prompt,
         run_mode="interactive" if is_interactive else "auto",
-        goals=resolved.goal or None,
+        direction=resolved_direction,
         context_config=ContextConfig(
             diff_mode=resolved_diff_mode,
             files=FilesetConfig(

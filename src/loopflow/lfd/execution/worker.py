@@ -1,6 +1,6 @@
 """Worker for continuous execution.
 
-Runs iterations of an agent until stopped or paused.
+Runs iterations of a wave until stopped or paused.
 Coordinates with the daemon manager for global concurrency limits.
 """
 
@@ -11,19 +11,19 @@ import time
 import uuid
 from pathlib import Path
 
-from loopflow.lfd.agent import (
+from loopflow.lfd.wave import (
     count_outstanding,
-    get_agent,
-    update_agent_consecutive_failures,
-    update_agent_iteration,
-    update_agent_pid,
-    update_agent_status,
-    update_agent_worktree_branch,
+    get_wave,
+    update_wave_consecutive_failures,
+    update_wave_iteration,
+    update_wave_pid,
+    update_wave_status,
+    update_wave_worktree_branch,
 )
 from loopflow.lfd.daemon.client import notify_event
 from loopflow.lfd.execution.runner import IterationResult, run_iteration
 from loopflow.lfd.logging import worker_log
-from loopflow.lfd.models import Agent, AgentStatus
+from loopflow.lfd.models import Wave, WaveStatus
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 MANAGER_POLL_INTERVAL = 30  # seconds between slot checks
@@ -34,14 +34,14 @@ RETRY_BACKOFF_SECONDS = 30
 CIRCUIT_BREAKER_THRESHOLD = 5
 
 
-def _emit_circuit_breaker(agent: Agent, failures: int) -> None:
+def _emit_circuit_breaker(wave: Wave, failures: int) -> None:
     """Emit circuit breaker event and log error."""
-    worker_log.error(f"[{agent.short_id()}] circuit breaker: {failures} consecutive failures")
+    worker_log.error(f"[{wave.short_id()}] circuit breaker: {failures} consecutive failures")
     notify_event(
-        "agent.circuit_breaker",
+        "wave.circuit_breaker",
         {
-            "agent_id": agent.id,
-            "area": agent.area_display,
+            "wave_id": wave.id,
+            "area": wave.area_display,
             "failures": failures,
             "threshold": CIRCUIT_BREAKER_THRESHOLD,
         },
@@ -102,40 +102,40 @@ def _manager_release(run_id: str) -> None:
     _manager_call("scheduler.release", {"run_id": run_id})
 
 
-def run_agent_iterations(agent: Agent) -> None:
-    """Run agent iterations until PR limit is reached or error occurs."""
-    short_id = agent.short_id()
-    consecutive_failures = agent.consecutive_failures
+def run_wave_iterations(wave: Wave) -> None:
+    """Run wave iterations until PR limit is reached or error occurs."""
+    short_id = wave.short_id()
+    consecutive_failures = wave.consecutive_failures
 
     worker_log.info(
-        f"[{short_id}] starting: stimulus={agent.stimulus} flow={agent.flow} "
-        f"area={agent.area_display} iteration={agent.iteration}"
+        f"[{short_id}] starting: stimulus={wave.stimulus} flow={wave.flow} "
+        f"area={wave.area_display} iteration={wave.iteration}"
     )
 
     # Check circuit breaker on startup
     if consecutive_failures >= CIRCUIT_BREAKER_THRESHOLD:
-        _emit_circuit_breaker(agent, consecutive_failures)
-        update_agent_status(agent.id, AgentStatus.ERROR)
-        update_agent_pid(agent.id, None)
+        _emit_circuit_breaker(wave, consecutive_failures)
+        update_wave_status(wave.id, WaveStatus.ERROR)
+        update_wave_pid(wave.id, None)
         return
 
     while True:
-        outstanding = count_outstanding(agent)
-        if outstanding >= agent.pr_limit:
-            worker_log.info(f"[{short_id}] waiting: {outstanding}/{agent.pr_limit} PRs outstanding")
-            update_agent_status(agent.id, AgentStatus.WAITING)
+        outstanding = count_outstanding(wave)
+        if outstanding >= wave.pr_limit:
+            worker_log.info(f"[{short_id}] waiting: {outstanding}/{wave.pr_limit} PRs outstanding")
+            update_wave_status(wave.id, WaveStatus.WAITING)
             notify_event(
-                "agent.waiting",
+                "wave.waiting",
                 {
-                    "agent_id": agent.id,
-                    "area": agent.area_display,
+                    "wave_id": wave.id,
+                    "area": wave.area_display,
                     "outstanding": outstanding,
-                    "limit": agent.pr_limit,
+                    "limit": wave.pr_limit,
                 },
             )
             break
 
-        iteration = agent.iteration + 1
+        iteration = wave.iteration + 1
         run_id = str(uuid.uuid4())
 
         worker_log.info(f"[{short_id}] starting iteration {iteration}")
@@ -149,31 +149,31 @@ def run_agent_iterations(agent: Agent) -> None:
             notify_event(
                 "scheduler.waiting",
                 {
-                    "agent_id": agent.id,
-                    "area": agent.area_display,
+                    "wave_id": wave.id,
+                    "area": wave.area_display,
                     "reason": reason or "concurrency",
                 },
             )
             time.sleep(MANAGER_POLL_INTERVAL)
 
         try:
-            result = _run_with_retry(agent, iteration, run_id)
+            result = _run_with_retry(wave, iteration, run_id)
             if result.success:
                 worker_log.info(f"[{short_id}] iteration {iteration} completed successfully")
                 # Reset failures on success
                 if consecutive_failures > 0:
                     worker_log.info(f"[{short_id}] resetting failures from {consecutive_failures}")
                     consecutive_failures = 0
-                    update_agent_consecutive_failures(agent.id, 0)
+                    update_wave_consecutive_failures(wave.id, 0)
 
-                update_agent_iteration(agent.id, iteration)
-                agent.iteration = iteration
+                update_wave_iteration(wave.id, iteration)
+                wave.iteration = iteration
 
-                # Update agent's worktree/branch for next iteration
+                # Update wave's worktree/branch for next iteration
                 if result.worktree and result.branch:
-                    update_agent_worktree_branch(agent.id, result.worktree, result.branch)
-                    agent.worktree = result.worktree
-                    agent.branch = result.branch
+                    update_wave_worktree_branch(wave.id, result.worktree, result.branch)
+                    wave.worktree = result.worktree
+                    wave.branch = result.branch
                     worker_log.info(f"[{short_id}] moved to branch {result.branch}")
             else:
                 # Increment failures
@@ -182,16 +182,16 @@ def run_agent_iterations(agent: Agent) -> None:
                     f"[{short_id}] iteration {iteration} failed "
                     f"(consecutive_failures={consecutive_failures})"
                 )
-                update_agent_consecutive_failures(agent.id, consecutive_failures)
+                update_wave_consecutive_failures(wave.id, consecutive_failures)
 
                 if consecutive_failures >= CIRCUIT_BREAKER_THRESHOLD:
-                    _emit_circuit_breaker(agent, consecutive_failures)
+                    _emit_circuit_breaker(wave, consecutive_failures)
 
-                update_agent_status(agent.id, AgentStatus.ERROR)
+                update_wave_status(wave.id, WaveStatus.ERROR)
                 break
         except Exception as e:
             consecutive_failures += 1
-            update_agent_consecutive_failures(agent.id, consecutive_failures)
+            update_wave_consecutive_failures(wave.id, consecutive_failures)
 
             worker_log.error(
                 f"[{short_id}] iteration {iteration} raised exception: {e}",
@@ -199,36 +199,36 @@ def run_agent_iterations(agent: Agent) -> None:
             )
 
             notify_event(
-                "agent.error",
+                "wave.error",
                 {
-                    "agent_id": agent.id,
-                    "area": agent.area_display,
+                    "wave_id": wave.id,
+                    "area": wave.area_display,
                     "error": str(e),
                     "consecutive_failures": consecutive_failures,
                 },
             )
 
             if consecutive_failures >= CIRCUIT_BREAKER_THRESHOLD:
-                _emit_circuit_breaker(agent, consecutive_failures)
+                _emit_circuit_breaker(wave, consecutive_failures)
 
-            update_agent_status(agent.id, AgentStatus.ERROR)
+            update_wave_status(wave.id, WaveStatus.ERROR)
             break
         finally:
             _manager_release(run_id)
 
-    worker_log.info(f"[{short_id}] stopped: status={agent.status.value}")
-    update_agent_pid(agent.id, None)
+    worker_log.info(f"[{short_id}] stopped: status={wave.status.value}")
+    update_wave_pid(wave.id, None)
 
 
-def _run_with_retry(agent: Agent, iteration: int, run_id: str) -> IterationResult:
+def _run_with_retry(wave: Wave, iteration: int, run_id: str) -> IterationResult:
     """Run iteration with retry and backoff."""
-    short_id = agent.short_id()
+    short_id = wave.short_id()
     last_error = None
 
     for attempt in range(MAX_RETRIES):
         try:
             worker_log.debug(f"[{short_id}] attempt {attempt + 1}/{MAX_RETRIES}")
-            result = run_iteration(agent, iteration, run_id)
+            result = run_iteration(wave, iteration, run_id)
             if result.success:
                 return result
 
@@ -239,10 +239,10 @@ def _run_with_retry(agent: Agent, iteration: int, run_id: str) -> IterationResul
                     f"retrying in {RETRY_BACKOFF_SECONDS}s"
                 )
                 notify_event(
-                    "agent.retry",
+                    "wave.retry",
                     {
-                        "agent_id": agent.id,
-                        "area": agent.area_display,
+                        "wave_id": wave.id,
+                        "area": wave.area_display,
                         "attempt": attempt + 1,
                         "max_retries": MAX_RETRIES,
                         "backoff": RETRY_BACKOFF_SECONDS,
@@ -261,10 +261,10 @@ def _run_with_retry(agent: Agent, iteration: int, run_id: str) -> IterationResul
                     f"retrying in {RETRY_BACKOFF_SECONDS}s"
                 )
                 notify_event(
-                    "agent.retry",
+                    "wave.retry",
                     {
-                        "agent_id": agent.id,
-                        "area": agent.area_display,
+                        "wave_id": wave.id,
+                        "area": wave.area_display,
                         "attempt": attempt + 1,
                         "max_retries": MAX_RETRIES,
                         "backoff": RETRY_BACKOFF_SECONDS,
@@ -286,31 +286,31 @@ def _run_with_retry(agent: Agent, iteration: int, run_id: str) -> IterationResul
 def main() -> None:
     """Entry point for background worker.
 
-    Usage: python -m loopflow.lfd.execution.worker agent <agent_id> [overrides]
+    Usage: python -m loopflow.lfd.execution.worker wave <wave_id> [overrides]
 
-    Optional overrides (one-time, don't modify agent config):
-      --area <areas>       comma-separated areas
-      --goal <goals>       comma-separated goals
-      --flow <flow>        flow or step name
-      --stimulus <kind>    once, loop, watch, cron
-      --cron <expr>        cron expression (when stimulus=cron)
+    Optional overrides (one-time, don't modify wave config):
+      --area <areas>           comma-separated areas
+      --direction <directions> comma-separated directions
+      --flow <flow>            flow or step name
+      --stimulus <kind>        once, loop, watch, cron
+      --cron <expr>            cron expression (when stimulus=cron)
     """
     from loopflow.lfd.models import Stimulus
 
     if len(sys.argv) < 3:
-        print("Usage: python -m loopflow.lfd.execution.worker agent <agent_id>", file=sys.stderr)
+        print("Usage: python -m loopflow.lfd.execution.worker wave <wave_id>", file=sys.stderr)
         sys.exit(1)
 
     cmd = sys.argv[1]
-    agent_id = sys.argv[2]
+    wave_id = sys.argv[2]
 
-    if cmd != "agent":
+    if cmd != "wave":
         print(f"Unknown command: {cmd}", file=sys.stderr)
         sys.exit(1)
 
-    agent = get_agent(agent_id)
-    if not agent:
-        print(f"Agent not found: {agent_id}", file=sys.stderr)
+    wave = get_wave(wave_id)
+    if not wave:
+        print(f"Wave not found: {wave_id}", file=sys.stderr)
         sys.exit(1)
 
     # Parse override args
@@ -321,13 +321,13 @@ def main() -> None:
 
     while i < len(args):
         if args[i] == "--area" and i + 1 < len(args):
-            agent.area = args[i + 1].split(",")
+            wave.area = args[i + 1].split(",")
             i += 2
-        elif args[i] == "--goal" and i + 1 < len(args):
-            agent.goal = args[i + 1].split(",")
+        elif args[i] == "--direction" and i + 1 < len(args):
+            wave.direction = args[i + 1].split(",")
             i += 2
         elif args[i] == "--flow" and i + 1 < len(args):
-            agent.flow = args[i + 1]
+            wave.flow = args[i + 1]
             i += 2
         elif args[i] == "--stimulus" and i + 1 < len(args):
             stimulus_kind = args[i + 1]
@@ -339,9 +339,9 @@ def main() -> None:
             i += 1
 
     if stimulus_kind:
-        agent.stimulus = Stimulus(kind=stimulus_kind, cron=cron_expr)
+        wave.stimulus = Stimulus(kind=stimulus_kind, cron=cron_expr)
 
-    run_agent_iterations(agent)
+    run_wave_iterations(wave)
 
 
 if __name__ == "__main__":

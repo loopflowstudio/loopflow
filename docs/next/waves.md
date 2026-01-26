@@ -1,13 +1,13 @@
 ---
 layout: default
-title: Background Agents
+title: Waves
 ---
 
-# Background Agents
+# Waves
 
 *Coming soon.*
 
-The `lfd` daemon tracks sessions and orchestrates background agents. Define agents as markdown files—what they do, when they trigger, how they merge. They run in the background, each in its own worktree. You review the PRs.
+The `lfd` daemon tracks sessions and orchestrates waves. Define waves as markdown files—what they do, when they trigger, how they merge. They run in the background, each in its own worktree. You review the PRs.
 
 ## Installation
 
@@ -48,17 +48,17 @@ Via socket (see [API Reference](api.md)):
 {"method": "sessions.history", "params": {"worktree": "/path/to/worktree"}}
 ```
 
-## Agents
+## Waves
 
-Agents are autonomous tasks that run on triggers. Define them as markdown files in `~/.lf/agents/`.
+Waves are autonomous tasks that run on triggers. Define them as markdown files in `~/.lf/waves/`.
 
-### Creating an Agent
+### Creating a Wave
 
 ```bash
-lfd new my-agent
+lfd new my-wave
 ```
 
-This creates `~/.lf/agents/my-agent.md`:
+This creates `~/.lf/waves/my-wave.md`:
 
 ```markdown
 ---
@@ -68,10 +68,10 @@ trigger:
   kind: manual
 ---
 
-Optional prompt or instructions for the agent.
+Optional prompt or instructions for the wave.
 ```
 
-### Agent Definition
+### Wave Definition
 
 | Field | Description |
 |-------|-------------|
@@ -84,7 +84,7 @@ Optional prompt or instructions for the agent.
 | `context` | Additional context files |
 | `emoji` | Display emoji for UI |
 | `merge_mode` | How to merge work: `auto`, `pr`, `silent` |
-| `personal_main` | Branch for agent's work (auto-allocated if not set) |
+| `personal_main` | Branch for wave's work (auto-allocated if not set) |
 
 ### Trigger Types
 
@@ -96,15 +96,15 @@ Optional prompt or instructions for the agent.
 | `loop` | Continuous: restarts immediately after completing |
 | `cron` | Runs on cron schedule |
 
-### Managing Agents
+### Managing Waves
 
 ```bash
-lfd list                  # List agents and status
-lfd start my-agent        # Start an agent
-lfd stop my-agent         # Stop a running agent
+lfd list                  # List waves and status
+lfd start my-wave         # Start a wave
+lfd stop my-wave          # Stop a running wave
 ```
 
-### Example: Continuous Review Agent
+### Example: Continuous Review Wave
 
 ```markdown
 ---
@@ -118,7 +118,7 @@ emoji: 🔍
 Continuously review incoming changes and fix issues.
 ```
 
-### Example: Daily Cleanup Agent
+### Example: Daily Cleanup Wave
 
 ```markdown
 ---
@@ -135,7 +135,7 @@ Run polish pipeline every morning at 9am.
 
 ### Personal Main Branches
 
-Each agent gets its own "personal main" branch to accumulate work without polluting the real main branch. This is auto-allocated when the agent first runs.
+Each wave gets its own "personal main" branch to accumulate work without polluting the real main branch. This is auto-allocated when the wave first runs.
 
 ```markdown
 ---
@@ -144,7 +144,7 @@ pipeline: ship
 trigger:
   kind: loop
 merge_mode: auto
-personal_main: review-agent-main
+personal_main: review-wave-main
 ---
 ```
 
@@ -153,7 +153,7 @@ Merge modes:
 - `pr` — Create PR, wait for human approval
 - `silent` — Direct merge to personal-main (no PR)
 
-To land agent work to real main:
+To land wave work to real main:
 
 ```bash
 lfops land --squash     # Squash personal-main to main
@@ -161,7 +161,7 @@ lfops land --squash     # Squash personal-main to main
 
 ## Database
 
-Session and agent state is stored in SQLite at `~/.lf/lfd.db` (WAL mode).
+Session and wave state is stored in SQLite at `~/.lf/lfd.db` (WAL mode).
 
 ### Sessions Table
 
@@ -178,12 +178,12 @@ Session and agent state is stored in SQLite at `~/.lf/lfd.db` (WAL mode).
 | model | TEXT | Model name |
 | run_mode | TEXT | auto or interactive |
 
-### Agent Runs Table
+### Wave Runs Table
 
 | Column | Type | Description |
 |--------|------|-------------|
 | id | TEXT | UUID |
-| agent_name | TEXT | Agent definition name |
+| wave_name | TEXT | Wave definition name |
 | status | TEXT | idle, running, waiting, error, stopped |
 | started_at | TEXT | ISO8601 timestamp |
 | ended_at | TEXT | ISO8601 or NULL |
@@ -199,7 +199,7 @@ The daemon listens on a Unix socket at `~/.lf/lfd.sock`. See [API Reference](api
 
 ## Logs
 
-Agent and daemon logs are written to `~/.lf/logs/`. Each agent run creates a timestamped log file.
+Wave and daemon logs are written to `~/.lf/logs/`. Each wave run creates a timestamped log file.
 
 ## Troubleshooting
 
@@ -219,10 +219,10 @@ rm ~/.lf/lfd.sock
 lfd install
 ```
 
-### Agent Stuck
+### Wave Stuck
 
-Agents that show "running" but their process is dead are automatically cleaned up by the daemon's periodic check. Force cleanup:
+Waves that show "running" but their process is dead are automatically cleaned up by the daemon's periodic check. Force cleanup:
 
 ```bash
-lfd stop my-agent
+lfd stop my-wave
 ```

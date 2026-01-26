@@ -15,16 +15,16 @@ def save_run(run: FlowRun, db_path: Path | None = None) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO runs
-        (id, agent, flow, goal, area, repo, status, iteration,
+        (id, wave, flow, direction, area, repo, status, iteration,
          worktree, branch, current_step, error, pr_url,
          started_at, ended_at, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             run.id,
-            run.agent_id,
+            run.wave_id,
             run.flow,
-            json.dumps(run.goal),
+            json.dumps(run.direction),
             json.dumps(run.area),
             str(run.repo),
             run.status.value,
@@ -60,7 +60,7 @@ def get_run(run_id: str, db_path: Path | None = None) -> FlowRun | None:
 
 def list_runs(
     repo: Path | None = None,
-    agent: str | None = None,
+    wave: str | None = None,
     status: FlowRunStatus | None = None,
     limit: int = 50,
     db_path: Path | None = None,
@@ -75,9 +75,9 @@ def list_runs(
         conditions.append("repo = ?")
         params.append(str(repo))
 
-    if agent:
-        conditions.append("agent = ?")
-        params.append(agent)
+    if wave:
+        conditions.append("wave = ?")
+        params.append(wave)
 
     if status:
         conditions.append("status = ?")
@@ -93,18 +93,18 @@ def list_runs(
     return runs
 
 
-def list_runs_for_agent(
-    agent_id: str,
+def list_runs_for_wave(
+    wave_id: str,
     limit: int = 10,
     db_path: Path | None = None,
 ) -> list[FlowRun]:
-    """List runs spawned by a specific agent."""
-    return list_runs(agent=agent_id, limit=limit, db_path=db_path)
+    """List runs spawned by a specific wave."""
+    return list_runs(wave=wave_id, limit=limit, db_path=db_path)
 
 
-def get_latest_run_for_agent(agent_id: str, db_path: Path | None = None) -> FlowRun | None:
-    """Get the most recent run for an agent."""
-    runs = list_runs_for_agent(agent_id, limit=1, db_path=db_path)
+def get_latest_run_for_wave(wave_id: str, db_path: Path | None = None) -> FlowRun | None:
+    """Get the most recent run for a wave."""
+    runs = list_runs_for_wave(wave_id, limit=1, db_path=db_path)
     return runs[0] if runs else None
 
 
@@ -181,17 +181,17 @@ def delete_run(run_id: str, db_path: Path | None = None) -> bool:
 
 def flow_run_from_row(row: dict) -> FlowRun:
     """Convert database row to FlowRun."""
-    goal_str = row.get("goal")
-    goal = json.loads(goal_str) if goal_str else ["default"]
+    direction_str = row.get("direction")
+    direction = json.loads(direction_str) if direction_str else ["default"]
 
     area_str = row.get("area")
     area = json.loads(area_str) if area_str else ["."]
 
     return FlowRun(
         id=row["id"],
-        agent_id=row.get("agent"),
+        wave_id=row.get("wave"),
         flow=row["flow"],
-        goal=goal,
+        direction=direction,
         area=area,
         repo=Path(row["repo"]),
         status=FlowRunStatus(row["status"]),
@@ -216,18 +216,18 @@ def mark_run_failed(run_id: str, error: str, db_path: Path | None = None) -> boo
 
 
 def cleanup_stale_runs(db_path: Path | None = None) -> int:
-    """Find RUNNING/PENDING runs with dead agent PIDs and mark as FAILED.
+    """Find RUNNING/PENDING runs with dead wave PIDs and mark as FAILED.
 
     Returns the number of runs cleaned up.
     """
-    from loopflow.lfd.agent import get_agent
+    from loopflow.lfd.wave import get_wave
     from loopflow.lfd.daemon.process import is_process_running
 
     conn = _get_db(db_path)
 
     # Find runs in active states
     cursor = conn.execute(
-        "SELECT id, agent FROM runs WHERE status IN (?, ?)",
+        "SELECT id, wave FROM runs WHERE status IN (?, ?)",
         (FlowRunStatus.RUNNING.value, FlowRunStatus.PENDING.value),
     )
     rows = cursor.fetchall()
@@ -236,27 +236,27 @@ def cleanup_stale_runs(db_path: Path | None = None) -> int:
     cleaned = 0
     for row in rows:
         run_id = row["id"]
-        agent_id = row["agent"]
+        wave_id = row["wave"]
 
-        # No agent = orphaned run, mark as failed
-        if not agent_id:
-            mark_run_failed(run_id, "Orphaned run (no agent)", db_path)
+        # No wave = orphaned run, mark as failed
+        if not wave_id:
+            mark_run_failed(run_id, "Orphaned run (no wave)", db_path)
             cleaned += 1
             continue
 
-        # Check if agent's process is alive
-        agent = get_agent(agent_id, db_path)
-        if not agent:
-            mark_run_failed(run_id, "Agent no longer exists", db_path)
+        # Check if wave's process is alive
+        wave = get_wave(wave_id, db_path)
+        if not wave:
+            mark_run_failed(run_id, "Wave no longer exists", db_path)
             cleaned += 1
             continue
 
-        if agent.pid and is_process_running(agent.pid):
+        if wave.pid and is_process_running(wave.pid):
             # Process is still running, leave it alone
             continue
 
-        # Agent has no PID or PID is dead
-        mark_run_failed(run_id, "Agent process died", db_path)
+        # Wave has no PID or PID is dead
+        mark_run_failed(run_id, "Wave process died", db_path)
         cleaned += 1
 
     return cleaned

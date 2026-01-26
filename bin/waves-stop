@@ -1,0 +1,3 @@
+#!/bin/bash
+# Stop all loopflow development waves
+uv run lfd stop --all

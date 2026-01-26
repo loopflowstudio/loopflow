@@ -19,7 +19,7 @@ class Step:
     name: str
     after: str | list[str] | None = None  # None = follows previous step
     model: str | None = None
-    goal: str | None = None
+    direction: str | None = None
 
 
 @dataclass
@@ -28,7 +28,7 @@ class ForkAgent:
 
     step: str | None = None  # single step
     flow: str | None = None  # or full flow
-    goal: str | None = None
+    direction: str | None = None
     model: str | None = None
     area: str | None = None  # defaults to parent's area
 
@@ -37,7 +37,7 @@ class ForkAgent:
 class SynthesizeConfig:
     """Config for synthesis after fork."""
 
-    goal: str | None = None
+    direction: str | None = None
     area: str | None = None
     prompt: str | None = None
 
@@ -155,7 +155,7 @@ def _parse_flow_item(item: Any) -> FlowItem:
                 name=name,
                 after=item.get("after"),
                 model=item.get("model"),
-                goal=item.get("goal"),
+                direction=item.get("direction"),
             )
     raise ValueError(f"Unsupported flow item: {item!r}")
 
@@ -170,15 +170,15 @@ def _parse_fork_agent(agent: Any) -> ForkAgent:
 
 def _step_to_data(step: FlowItem) -> dict | str:
     if isinstance(step, Step):
-        if not step.after and not step.model and not step.goal:
+        if not step.after and not step.model and not step.direction:
             return step.name
         data: dict[str, Any] = {"step": step.name}
         if step.after:
             data["after"] = step.after
         if step.model:
             data["model"] = step.model
-        if step.goal:
-            data["goal"] = step.goal
+        if step.direction:
+            data["direction"] = step.direction
         return data
     if isinstance(step, Fork):
         result: dict[str, Any] = {
@@ -186,7 +186,7 @@ def _step_to_data(step: FlowItem) -> dict | str:
                 {
                     "step": agent.step,
                     "flow": agent.flow,
-                    "goal": agent.goal,
+                    "direction": agent.direction,
                     "model": agent.model,
                     "area": agent.area,
                 }
@@ -199,7 +199,7 @@ def _step_to_data(step: FlowItem) -> dict | str:
             result["model"] = step.model
         if step.synthesize:
             result["synthesize"] = {
-                "goal": step.synthesize.goal,
+                "direction": step.synthesize.direction,
                 "area": step.synthesize.area,
                 "prompt": step.synthesize.prompt,
             }

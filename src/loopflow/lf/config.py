@@ -103,7 +103,7 @@ class Config(BaseModel):
     diff: bool = False  # Include raw branch diff against main
     diff_files: bool = True  # Include full content of files touched by branch
     paste: bool = False  # Include clipboard content by default
-    goal: Optional[list[str]] = None  # Default goals for all tasks
+    direction: Optional[list[str]] = None  # Default directions for all tasks
     area: Optional[str] = None  # Default area for parent doc inclusion (e.g., "lf/cli")
     summaries: list[SummaryConfig] = Field(default_factory=list)  # Summaries to include
     summary_tokens: int = 10000  # Default token budget for summaries
@@ -128,9 +128,9 @@ class Config(BaseModel):
             return v.split()
         return v
 
-    @field_validator("goal", mode="before")
+    @field_validator("direction", mode="before")
     @classmethod
-    def normalize_goal(cls, v):
+    def normalize_direction(cls, v):
         if v is None:
             return None
         if isinstance(v, str):

@@ -1,6 +1,6 @@
 # Loopflow Vision
 
-Arrange agents to code in harmony. Reusable prompts. Composable workflows.
+Orchestrate waves of autonomous work. Reusable prompts. Composable workflows.
 
 ---
 
@@ -45,7 +45,7 @@ Tasks are markdown files in `.claude/commands/` or `.lf/`. Prompts are artifacts
 
 **Pipelines** — declarative task chaining with auto-commit between steps
 
-**Background agents** — `lfd` daemon for autonomous work while you sleep
+**Waves** — `lfd` daemon for autonomous work while you sleep
 
 **Concerto** — the podium (see below)
 

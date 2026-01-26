@@ -114,17 +114,17 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
 
 
 def update_dead_processes(db_path: Path | None = None) -> int:
-    """Mark agents as idle if their process is no longer running."""
+    """Mark waves as idle if their process is no longer running."""
     from loopflow.lfd.daemon.process import is_process_running
 
     conn = _get_db(db_path)
     count = 0
 
-    cursor = conn.execute("SELECT id, pid FROM agents WHERE status = 'running' AND pid IS NOT NULL")
+    cursor = conn.execute("SELECT id, pid FROM waves WHERE status = 'running' AND pid IS NOT NULL")
     for row in cursor.fetchall():
         if not is_process_running(row["pid"]):
             conn.execute(
-                "UPDATE agents SET status = 'idle', pid = NULL WHERE id = ?",
+                "UPDATE waves SET status = 'idle', pid = NULL WHERE id = ?",
                 (row["id"],),
             )
             count += 1

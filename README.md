@@ -1,27 +1,25 @@
 # Loopflow
 
-Arrange and conduct an agent orchestra. 
+Loopflow helps you maintain flow and craft using coding agents (Claude Code, Codex, Gemini CLI) at high scale.
 
-Loopflow helps you maintain flow and craft using Claude Code or other coding agents at high scale.
+## Waves
 
-## Agents
+The core entities in loopflow are waves. Waves are a new way of configuring and using coding agents in composable and autonmous ways.
 
-The core entities in loopflow are agents. You work together with agents, which are configured and prompted coding agents, to produce software.
-
-Agents are made of 4 fields. The art of loopflow is remixing across these 4 dimensions in novel ways.
+Waves are made of 4 fields.
 
 | Field | Usage |
 |------|--------------|
 | **Area** | Scope and context |
 | **Flow** | Process followed / steps taken |
-| **Goal** | Defines success, quality, and aesthetics |
+| **Direction** | Defines success, quality, and aesthetics |
 | **Stimulus** | Watch, loop, or cron |
 
 ## Steps
 
-But before you make an agent, let's start at the beginning. All agents take their first steps.
+But before you create a wave, let's start at the beginning. 
 
-Steps are the building blocks of flows and can also be used for small, atomic changes.
+**Steps** are the the most basic of Loopflow building blocks. Steps are simply prompts for running coding agents to execute concrete, scoped, atomic tasks.
 
 There are many built-in steps that come bundled with loopflow, such as implement, polish, and rebase, but you can also write your own (put markdown in `.claude/commands` or `.lf/steps`) or import from your favorite library.
 
@@ -31,7 +29,7 @@ For example, try:
 lf debug -c
 ```
 
-This runs the `debug` prompt, loading the clipboard (`-c`) as context on what to debug. Steps are, by default, non-interactive. If you've copied a failing test to your clipboard, your coding agent will now go fix it for you.
+This runs the `debug` step, loading the clipboard (`-c`) as context on what to debug. Steps are non-interactive by default. If you've copied a failing test to your clipboard, the coding agent will fix it for you.
 
 To start building something new try:
 
@@ -39,7 +37,7 @@ To start building something new try:
 lf design
 ```
 
-This will trigger an interactive session with a coding agent primed to design something new in your codebase with you.
+This starts an interactive session with a coding agent, primed to design something new in your codebase with you.
 
 ## Flows
 
@@ -56,26 +54,26 @@ You can also pre-register flows. `ship` is a built-in flow that names the `imple
 lf flow ship
 ```
 
-## Running Agents
+## Playing in the Waves
 
-Once you have played with chaining steps into flows, you're ready to start playing with agents.
+Once you have played with chaining steps into flows, you're ready to start running waves.
 
 ```bash
-lfd create engbot --area src/ --goal product-engineer --flow ship
+lfd create engbot --area src/ --direction product-engineer --flow ship
 ```
 
-Runs the `ship` flow on `src/` continuously using the `product-engineer` prompt to guide direction, creating PRs until stopped.
+Runs the `ship` flow on `src/` continuously using the `product-engineer` direction, creating PRs until stopped.
 
 ```bash
 lfd loop engbot      # keep shipping continuously
-lfd subscribe ship designs/ -g designer   # or only ship when new designs arrive
+lfd subscribe ship designs/ -d designer   # or only ship when new designs arrive
 ```
 
-You can compose multiple goals to add additional nuance or perspectives.
+You can compose multiple directions to add additional nuance or perspectives.
 
 ```bash
-lf review -g designer,product-engineer
-lf review -g ceo    
+lf review -d designer,product-engineer
+lf review -d ceo
 ```
 
 ## Install
@@ -84,7 +82,7 @@ lf review -g ceo
 uv tool install loopflow
 ```
 
-Built-in steps and flows included. `lf init` sets up Claude Code and preferences.
+Built-in steps and flows included. `lf init` sets up your coding agent and preferences.
 
 [Documentation →](docs/index.md)
 

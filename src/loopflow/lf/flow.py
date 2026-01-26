@@ -56,7 +56,7 @@ class _StepParams:
     backend: str
     model_variant: str | None
     context: list[str] | None
-    goals: list[str] | None
+    direction: list[str] | None
 
 
 def _build_step_params(
@@ -69,7 +69,7 @@ def _build_step_params(
     step_backend = backend
     step_variant = model_variant
     step_context = list(context) if context else []
-    step_goals = [step.goal] if step.goal else None
+    step_direction = [step.direction] if step.direction else None
 
     if step.model:
         step_backend, step_variant = parse_model(step.model)
@@ -79,7 +79,7 @@ def _build_step_params(
         backend=step_backend,
         model_variant=step_variant,
         context=step_context or None,
-        goals=step_goals,
+        direction=step_direction,
     )
 
 
@@ -103,7 +103,7 @@ def _run_step(
         repo_root,
         params.step,
         run_mode="auto",
-        goals=params.goals,
+        direction=params.direction,
         context_config=ContextConfig(
             files=FilesetConfig(paths=params.context or [], exclude=exclude or [])
         ),
@@ -289,7 +289,7 @@ class _WorktreeTask:
     backend: str
     model_variant: str | None
     context: list[str] | None
-    goals: list[str] | None
+    direction: list[str] | None
 
 
 @dataclass
@@ -338,7 +338,7 @@ def _run_worktree_tasks(
             wt_path,
             wt_task.step,
             run_mode="auto",
-            goals=wt_task.goals,
+            direction=wt_task.direction,
             context_config=ContextConfig(
                 files=FilesetConfig(paths=wt_task.context or [], exclude=exclude or [])
             ),
@@ -480,7 +480,7 @@ def run_fork(
         subprocess.run(["git", "clean", "-fd"], cwd=wt_path, capture_output=True)
 
         if agent.step:
-            step = Step(name=agent.step, model=agent.model, goal=agent.goal)
+            step = Step(name=agent.step, model=agent.model, direction=agent.direction)
             params = _build_step_params(step, backend, model_variant, context)
             exit_code = _run_step(
                 params,
@@ -670,7 +670,7 @@ def build_synthesize_prompt(
         lines.append(f"### Fork {index}")
         lines.append(
             "Config: "
-            f"step={config.step}, flow={config.flow}, goal={config.goal}, "
+            f"step={config.step}, flow={config.flow}, direction={config.direction}, "
             f"model={config.model}, area={config.area}"
         )
         lines.append(f"Status: {result.status}")
@@ -906,7 +906,7 @@ def run_flow_def(
                             backend=params.backend,
                             model_variant=params.model_variant,
                             context=params.context,
-                            goals=params.goals,
+                            direction=params.direction,
                         )
                     )
 

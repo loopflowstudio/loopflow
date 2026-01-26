@@ -25,15 +25,15 @@ def test_extract_json_ignores_placeholders_before_fence():
     # Use raw string to preserve escaped newlines as Claude would output them
     text = r"""Looking at the diff:
 
-1. New function `load_goal()` that loads from `lf/goals/{name}.md`
+1. New function `load_direction()` that loads from `lf/directions/{name}.md`
 2. Updates to `design.md`
 
 ```json
-{"title": "folders: add goal loading", "body": "## Summary\n\nGoal loading works."}
+{"title": "folders: add direction loading", "body": "## Summary\n\nDirection loading works."}
 ```"""
     result = _extract_json_payload(text)
     assert result is not None
-    assert result["title"] == "folders: add goal loading"
+    assert result["title"] == "folders: add direction loading"
 
 
 def test_extract_json_without_fence_uses_first_brace():

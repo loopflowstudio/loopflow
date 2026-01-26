@@ -264,48 +264,48 @@ def test_parse_model_unknown_backend():
     assert parse_model("unknown") == ("unknown", None)
 
 
-def test_load_config_goal_as_string(temp_repo):
-    """goal as string is converted to single-item list."""
+def test_load_config_direction_as_string(temp_repo):
+    """direction as string is converted to single-item list."""
     config_yaml = temp_repo / ".lf" / "config.yaml"
-    config_yaml.write_text("goal: architect\n")
+    config_yaml.write_text("direction: architect\n")
 
     config = load_config(temp_repo)
 
     assert config is not None
-    assert config.goal == ["architect"]
+    assert config.direction == ["architect"]
 
 
-def test_load_config_goal_as_list(temp_repo):
-    """goal as YAML list works."""
+def test_load_config_direction_as_list(temp_repo):
+    """direction as YAML list works."""
     config_yaml = temp_repo / ".lf" / "config.yaml"
-    config_yaml.write_text("goal:\n  - architect\n  - concise\n")
+    config_yaml.write_text("direction:\n  - architect\n  - concise\n")
 
     config = load_config(temp_repo)
 
     assert config is not None
-    assert config.goal == ["architect", "concise"]
+    assert config.direction == ["architect", "concise"]
 
 
-def test_load_config_goal_defaults_none(temp_repo):
-    """goal defaults to None when not set."""
+def test_load_config_direction_defaults_none(temp_repo):
+    """direction defaults to None when not set."""
     config_yaml = temp_repo / ".lf" / "config.yaml"
     config_yaml.write_text("yolo: false\n")
 
     config = load_config(temp_repo)
 
     assert config is not None
-    assert config.goal is None
+    assert config.direction is None
 
 
-def test_load_config_goal_empty_string(temp_repo):
-    """goal as empty string is converted to None."""
+def test_load_config_direction_empty_string(temp_repo):
+    """direction as empty string is converted to None."""
     config_yaml = temp_repo / ".lf" / "config.yaml"
-    config_yaml.write_text("goal: ''\n")
+    config_yaml.write_text("direction: ''\n")
 
     config = load_config(temp_repo)
 
     assert config is not None
-    assert config.goal is None
+    assert config.direction is None
 
 
 # =============================================================================

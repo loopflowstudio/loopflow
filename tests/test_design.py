@@ -9,7 +9,7 @@ from loopflow.lf.design import (
     gather_design_docs,
     gather_internal_docs,
     has_design_artifacts,
-    load_goal,
+    load_direction,
 )
 
 
@@ -119,61 +119,61 @@ def test_gather_internal_docs_sorted(tmp_path):
 
 
 # =============================================================================
-# Goal loading tests
+# Direction loading tests
 # =============================================================================
 
 
-def test_load_goal_by_name(tmp_path):
-    """load_goal finds goal by name in lf/goals/."""
+def test_load_direction_by_name(tmp_path):
+    """load_direction finds direction by name in lf/directions/."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    goals_dir = repo_root / ".lf" / "goals"
-    goals_dir.mkdir(parents=True)
-    (goals_dir / "test-coverage.md").write_text("# Test Coverage\n\nImprove coverage.\n")
+    directions_dir = repo_root / ".lf" / "directions"
+    directions_dir.mkdir(parents=True)
+    (directions_dir / "test-coverage.md").write_text("# Test Coverage\n\nImprove coverage.\n")
 
-    content = load_goal("test-coverage", repo_root)
+    content = load_direction("test-coverage", repo_root)
 
     assert content is not None
     assert "# Test Coverage" in content
     assert "Improve coverage." in content
 
 
-def test_load_goal_by_path(tmp_path):
-    """load_goal finds goal by explicit path."""
+def test_load_direction_by_path(tmp_path):
+    """load_direction finds direction by explicit path."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    goals_dir = repo_root / ".lf" / "goals"
-    goals_dir.mkdir(parents=True)
-    (goals_dir / "security.md").write_text("# Security Goal\n")
+    directions_dir = repo_root / ".lf" / "directions"
+    directions_dir.mkdir(parents=True)
+    (directions_dir / "security.md").write_text("# Security Direction\n")
 
-    content = load_goal(".lf/goals/security.md", repo_root)
+    content = load_direction(".lf/directions/security.md", repo_root)
 
     assert content is not None
-    assert "# Security Goal" in content
+    assert "# Security Direction" in content
 
 
-def test_load_goal_returns_none_when_missing(tmp_path):
-    """load_goal returns None for non-existent goal."""
+def test_load_direction_returns_none_when_missing(tmp_path):
+    """load_direction returns None for non-existent direction."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
 
-    content = load_goal("nonexistent", repo_root)
+    content = load_direction("nonexistent", repo_root)
 
     assert content is None
 
 
-def test_load_goal_with_path_object(tmp_path):
-    """load_goal accepts Path objects."""
+def test_load_direction_with_path_object(tmp_path):
+    """load_direction accepts Path objects."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    goals_dir = repo_root / ".lf" / "goals"
-    goals_dir.mkdir(parents=True)
-    (goals_dir / "refactor.md").write_text("# Refactor Goal\n")
+    directions_dir = repo_root / ".lf" / "directions"
+    directions_dir.mkdir(parents=True)
+    (directions_dir / "refactor.md").write_text("# Refactor Direction\n")
 
-    content = load_goal(Path(".lf/goals/refactor.md"), repo_root)
+    content = load_direction(Path(".lf/directions/refactor.md"), repo_root)
 
     assert content is not None
-    assert "# Refactor Goal" in content
+    assert "# Refactor Direction" in content
 
 
 # =============================================================================

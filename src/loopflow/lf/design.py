@@ -3,7 +3,7 @@
 import shutil
 from pathlib import Path
 
-from loopflow.lf.goals import load_goal_content
+from loopflow.lf.directions import load_direction_content
 
 
 def gather_design_docs(repo_root: Path) -> list[tuple[Path, str]]:
@@ -81,18 +81,18 @@ def gather_area_docs(repo_root: Path, area: str) -> list[tuple[Path, str]]:
     return docs
 
 
-def load_goal(goal: str | Path, repo_root: Path) -> str | None:
-    """Load goal content from .lf/goals/{name}.md or a direct path."""
-    goal_str = str(goal)
+def load_direction(direction: str | Path, repo_root: Path) -> str | None:
+    """Load direction content from .lf/directions/{name}.md or a direct path."""
+    direction_str = str(direction)
 
-    # If it's just a name (no path separator), use goal loading
-    if "/" not in goal_str and "\\" not in goal_str:
-        return load_goal_content(repo_root, goal_str)
+    # If it's just a name (no path separator), use direction loading
+    if "/" not in direction_str and "\\" not in direction_str:
+        return load_direction_content(repo_root, direction_str)
 
     # It's a path, resolve relative to repo root
-    goal_path = repo_root / goal_str
-    if goal_path.exists() and goal_path.is_file():
-        return goal_path.read_text()
+    direction_path = repo_root / direction_str
+    if direction_path.exists() and direction_path.is_file():
+        return direction_path.read_text()
     return None
 
 

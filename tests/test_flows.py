@@ -18,7 +18,7 @@ def test_flow_from_dict_parses_steps():
     data = {
         "steps": [
             "design",
-            {"step": "implement", "model": "codex", "goal": "architect"},
+            {"step": "implement", "model": "codex", "direction": "architect"},
             {"step": "review", "after": "design"},
         ]
     }
@@ -27,7 +27,7 @@ def test_flow_from_dict_parses_steps():
     assert isinstance(flow.steps[0], Step)
     assert flow.steps[0].name == "design"
     assert flow.steps[1].model == "codex"
-    assert flow.steps[1].goal == "architect"
+    assert flow.steps[1].direction == "architect"
     assert flow.steps[2].after == "design"
 
 
@@ -95,10 +95,10 @@ def test_load_flow_with_fork():
 def flow():
     return Flow(
         Fork(
-            {"goal": "architect"},
-            {"goal": "pragmatist"},
+            {"direction": "architect"},
+            {"direction": "pragmatist"},
             step="implement",
-            synthesize={"goal": "reviewer"},
+            synthesize={"direction": "reviewer"},
         ),
     )
 """
@@ -108,7 +108,7 @@ def flow():
         assert flow is not None
         assert isinstance(flow.steps[0], Fork)
         assert flow.steps[0].step == "implement"
-        assert flow.steps[0].synthesize.goal == "reviewer"
+        assert flow.steps[0].synthesize.direction == "reviewer"
 
 
 def test_save_flow_roundtrip():
@@ -118,7 +118,7 @@ def test_save_flow_roundtrip():
             name="test",
             steps=[
                 Step("design"),
-                Step("implement", model="codex", goal="architect"),
+                Step("implement", model="codex", direction="architect"),
             ],
         )
 

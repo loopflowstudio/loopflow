@@ -15,21 +15,21 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from loopflow import __version__
-from loopflow.lfd.agent import (
-    clone_agent,
-    create_agent,
-    delete_agent,
-    get_agent,
-    list_agents,
-    start_agent,
-    stop_agent,
-    update_agent,
-)
 from loopflow.lfd.daemon import metrics
 from loopflow.lfd.daemon.client import _notify_event
 from loopflow.lfd.daemon.status import compute_status
 from loopflow.lfd.migrations.baseline import SCHEMA_VERSION
 from loopflow.lfd.models import Stimulus
+from loopflow.lfd.wave import (
+    clone_wave,
+    create_wave,
+    delete_wave,
+    get_wave,
+    list_waves,
+    start_wave,
+    stop_wave,
+    update_wave,
+)
 from loopflow.lfd.worktree_state import get_worktree_state_service
 
 # Default port - matches webapp's expected default
@@ -184,9 +184,9 @@ def _normalize_repo_path(repo: Path) -> Path:
     return git_dir.parent
 
 
-@app.get("/agents", response_model=LFDResponse)
-async def get_agents(repo: str = Query(..., description="Repository path")):
-    """List agents for a repository."""
+@app.get("/waves", response_model=LFDResponse)
+async def get_waves(repo: str = Query(..., description="Repository path")):
+    """List waves for a repository."""
     repo_path = Path(repo)
     if not repo_path.exists():
         raise HTTPException(status_code=404, detail=f"Repository not found: {repo}")
@@ -195,29 +195,29 @@ async def get_agents(repo: str = Query(..., description="Repository path")):
     repo_path = _normalize_repo_path(repo_path)
 
     try:
-        agents = list_agents(repo=repo_path)
+        waves = list_waves(repo=repo_path)
         return LFDResponse(
             ok=True,
             result={
-                "agents": [
+                "waves": [
                     {
-                        "id": a.id,
-                        "name": a.name,
-                        "flow": a.flow,
-                        "goal": a.goal,
-                        "area": a.area,
-                        "repo": str(a.repo),
-                        "stimulus": {"kind": a.stimulus.kind, "cron": a.stimulus.cron},
-                        "status": a.status.value,
-                        "iteration": a.iteration,
-                        "worktree": str(a.worktree) if a.worktree else None,
-                        "branch": a.branch,
-                        "pr_limit": a.pr_limit,
-                        "merge_mode": a.merge_mode.value,
-                        "pid": a.pid,
-                        "created_at": a.created_at.isoformat(),
+                        "id": w.id,
+                        "name": w.name,
+                        "flow": w.flow,
+                        "direction": w.direction,
+                        "area": w.area,
+                        "repo": str(w.repo),
+                        "stimulus": {"kind": w.stimulus.kind, "cron": w.stimulus.cron},
+                        "status": w.status.value,
+                        "iteration": w.iteration,
+                        "worktree": str(w.worktree) if w.worktree else None,
+                        "branch": w.branch,
+                        "pr_limit": w.pr_limit,
+                        "merge_mode": w.merge_mode.value,
+                        "pid": w.pid,
+                        "created_at": w.created_at.isoformat(),
                     }
-                    for a in agents
+                    for w in waves
                 ]
             },
         )
@@ -225,42 +225,42 @@ async def get_agents(repo: str = Query(..., description="Repository path")):
         return LFDResponse(ok=False, error=str(e))
 
 
-class CreateAgentRequest(BaseModel):
+class CreateWaveRequest(BaseModel):
     name: str | None = None
     flow: str | None = None
-    goal: list[str] | None = None
+    direction: list[str] | None = None
     area: list[str] | None = None
 
 
-def _agent_to_dict(agent) -> dict:
-    """Convert agent to API response dict."""
+def _wave_to_dict(wave) -> dict:
+    """Convert wave to API response dict."""
     return {
-        "id": agent.id,
-        "name": agent.name,
-        "area": agent.area,
-        "goal": agent.goal,
-        "flow": agent.flow,
-        "stimulus": {"kind": agent.stimulus.kind, "cron": agent.stimulus.cron},
-        "paused": agent.paused,
-        "repo": str(agent.repo),
-        "status": agent.status.value,
-        "iteration": agent.iteration,
-        "worktree": str(agent.worktree) if agent.worktree else None,
-        "branch": agent.branch,
-        "pr_limit": agent.pr_limit,
-        "merge_mode": agent.merge_mode.value,
-        "pid": agent.pid,
-        "created_at": agent.created_at.isoformat(),
+        "id": wave.id,
+        "name": wave.name,
+        "area": wave.area,
+        "direction": wave.direction,
+        "flow": wave.flow,
+        "stimulus": {"kind": wave.stimulus.kind, "cron": wave.stimulus.cron},
+        "paused": wave.paused,
+        "repo": str(wave.repo),
+        "status": wave.status.value,
+        "iteration": wave.iteration,
+        "worktree": str(wave.worktree) if wave.worktree else None,
+        "branch": wave.branch,
+        "pr_limit": wave.pr_limit,
+        "merge_mode": wave.merge_mode.value,
+        "pid": wave.pid,
+        "created_at": wave.created_at.isoformat(),
     }
 
 
-@app.post("/agents", response_model=LFDResponse)
-async def post_agent(
-    repo: str = Query(..., description="Repository path"), request: CreateAgentRequest = None
+@app.post("/waves", response_model=LFDResponse)
+async def post_wave(
+    repo: str = Query(..., description="Repository path"), request: CreateWaveRequest = None
 ):
-    """Create a new agent.
+    """Create a new wave.
 
-    Accepts minimal body - even empty creates an agent with generated name.
+    Accepts minimal body - even empty creates a wave with generated name.
     """
     repo_path = Path(repo)
     if not repo_path.exists():
@@ -270,19 +270,19 @@ async def post_agent(
     repo_path = _normalize_repo_path(repo_path)
 
     try:
-        agent = create_agent(
+        wave = create_wave(
             repo=repo_path,
             name=request.name if request else None,
             flow=request.flow if request and request.flow else "design",
-            goal=request.goal if request else None,
+            direction=request.direction if request else None,
             area=request.area if request else None,
             stimulus=Stimulus(kind="once"),
         )
 
-        # Notify subscribers of new agent
-        await _notify_event("agent.created", {"agent_id": agent.id, "name": agent.name})
+        # Notify subscribers of new wave
+        await _notify_event("wave.created", {"wave_id": wave.id, "name": wave.name})
 
-        return LFDResponse(ok=True, result={"agent": _agent_to_dict(agent)})
+        return LFDResponse(ok=True, result={"wave": _wave_to_dict(wave)})
     except Exception as e:
         return LFDResponse(ok=False, error=str(e))
 
@@ -292,82 +292,82 @@ class StimulusUpdate(BaseModel):
     cron: str | None = None
 
 
-class UpdateAgentRequest(BaseModel):
+class UpdateWaveRequest(BaseModel):
     area: list[str] | None = None
-    goal: list[str] | None = None
+    direction: list[str] | None = None
     flow: str | None = None
     stimulus: StimulusUpdate | None = None
     paused: bool | None = None
 
 
-@app.patch("/agents/{agent_id}", response_model=LFDResponse)
-async def patch_agent(agent_id: str, request: UpdateAgentRequest):
-    """Update an agent's configuration.
+@app.patch("/waves/{wave_id}", response_model=LFDResponse)
+async def patch_wave(wave_id: str, request: UpdateWaveRequest):
+    """Update a wave's configuration.
 
-    Accepts any subset of fields: area, goal, flow, stimulus, paused.
+    Accepts any subset of fields: area, direction, flow, stimulus, paused.
     Stimulus is an object: {kind: "once"|"loop"|"watch"|"cron", cron?: string}
     """
     try:
-        agent = get_agent(agent_id)
-        if not agent:
-            raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
+        wave = get_wave(wave_id)
+        if not wave:
+            raise HTTPException(status_code=404, detail=f"Wave not found: {wave_id}")
 
         # Build stimulus if provided
         stimulus = None
         if request.stimulus:
             stimulus = Stimulus(kind=request.stimulus.kind, cron=request.stimulus.cron)
 
-        updated = update_agent(
-            agent_id,
+        updated = update_wave(
+            wave_id,
             area=request.area,
-            goal=request.goal,
+            direction=request.direction,
             flow=request.flow,
             stimulus=stimulus,
             paused=request.paused,
         )
 
         if not updated:
-            return LFDResponse(ok=False, error="Failed to update agent")
+            return LFDResponse(ok=False, error="Failed to update wave")
 
-        # Notify subscribers of agent update
-        await _notify_event("agent.updated", {"agent_id": agent_id})
+        # Notify subscribers of wave update
+        await _notify_event("wave.updated", {"wave_id": wave_id})
 
-        return LFDResponse(ok=True, result={"agent": _agent_to_dict(updated)})
+        return LFDResponse(ok=True, result={"wave": _wave_to_dict(updated)})
     except HTTPException:
         raise
     except Exception as e:
         return LFDResponse(ok=False, error=str(e))
 
 
-@app.get("/agents/{agent_id}", response_model=LFDResponse)
-async def get_agent_by_id(agent_id: str):
-    """Get a single agent by ID."""
+@app.get("/waves/{wave_id}", response_model=LFDResponse)
+async def get_wave_by_id(wave_id: str):
+    """Get a single wave by ID."""
     try:
-        agent = get_agent(agent_id)
-        if not agent:
-            raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
+        wave = get_wave(wave_id)
+        if not wave:
+            raise HTTPException(status_code=404, detail=f"Wave not found: {wave_id}")
 
-        return LFDResponse(ok=True, result={"agent": _agent_to_dict(agent)})
+        return LFDResponse(ok=True, result={"wave": _wave_to_dict(wave)})
     except HTTPException:
         raise
     except Exception as e:
         return LFDResponse(ok=False, error=str(e))
 
 
-@app.delete("/agents/{agent_id}", response_model=LFDResponse)
-async def delete_agent_by_id(agent_id: str):
-    """Delete an agent."""
+@app.delete("/waves/{wave_id}", response_model=LFDResponse)
+async def delete_wave_by_id(wave_id: str):
+    """Delete a wave."""
     try:
-        agent = get_agent(agent_id)
-        if not agent:
-            raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
+        wave = get_wave(wave_id)
+        if not wave:
+            raise HTTPException(status_code=404, detail=f"Wave not found: {wave_id}")
 
-        deleted = delete_agent(agent_id)
+        deleted = delete_wave(wave_id)
         if not deleted:
-            return LFDResponse(ok=False, error="Failed to delete agent")
+            return LFDResponse(ok=False, error="Failed to delete wave")
 
         # Notify subscribers
-        await _notify_event("agent.deleted", {"agent_id": agent_id})
+        await _notify_event("wave.deleted", {"wave_id": wave_id})
 
         return LFDResponse(ok=True, result={"deleted": True})
     except HTTPException:
@@ -376,67 +376,67 @@ async def delete_agent_by_id(agent_id: str):
         return LFDResponse(ok=False, error=str(e))
 
 
-class CloneAgentRequest(BaseModel):
+class CloneWaveRequest(BaseModel):
     name: str | None = None  # optional name for clone
 
 
-@app.post("/agents/{agent_id}/clone", response_model=LFDResponse)
-async def clone_agent_endpoint(agent_id: str, request: CloneAgentRequest | None = None):
-    """Clone an agent with a new name.
+@app.post("/waves/{wave_id}/clone", response_model=LFDResponse)
+async def clone_wave_endpoint(wave_id: str, request: CloneWaveRequest | None = None):
+    """Clone a wave with a new name.
 
     Creates a copy with same config but fresh state (paused, no worktree).
     """
     try:
-        agent = get_agent(agent_id)
-        if not agent:
-            raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
+        wave = get_wave(wave_id)
+        if not wave:
+            raise HTTPException(status_code=404, detail=f"Wave not found: {wave_id}")
 
         name = request.name if request else None
-        cloned = clone_agent(agent_id, name=name)
+        cloned = clone_wave(wave_id, name=name)
 
         if not cloned:
-            return LFDResponse(ok=False, error="Failed to clone agent")
+            return LFDResponse(ok=False, error="Failed to clone wave")
 
         # Notify subscribers
-        await _notify_event("agent.created", {"agent_id": cloned.id, "name": cloned.name})
+        await _notify_event("wave.created", {"wave_id": cloned.id, "name": cloned.name})
 
-        return LFDResponse(ok=True, result={"agent": _agent_to_dict(cloned)})
+        return LFDResponse(ok=True, result={"wave": _wave_to_dict(cloned)})
     except HTTPException:
         raise
     except Exception as e:
         return LFDResponse(ok=False, error=str(e))
 
 
-class RunAgentRequest(BaseModel):
-    """Optional overrides for a single run (doesn't change agent config)."""
+class RunWaveRequest(BaseModel):
+    """Optional overrides for a single run (doesn't change wave config)."""
 
     area: list[str] | None = None
-    goal: list[str] | None = None
+    direction: list[str] | None = None
     flow: str | None = None
     stimulus: StimulusUpdate | None = None
 
 
-@app.post("/agents/{agent_id}/run", response_model=LFDResponse)
-async def run_agent(agent_id: str, request: RunAgentRequest | None = None):
-    """Run an agent.
+@app.post("/waves/{wave_id}/run", response_model=LFDResponse)
+async def run_wave(wave_id: str, request: RunWaveRequest | None = None):
+    """Run a wave.
 
     Optional body params are one-time overrides for this run only.
-    Order: area, goal, flow, stimulus - any can be overridden.
+    Order: area, direction, flow, stimulus - any can be overridden.
 
-    These overrides do NOT modify the agent's persistent configuration.
+    These overrides do NOT modify the wave's persistent configuration.
     """
     try:
-        agent = get_agent(agent_id)
-        if not agent:
-            raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
+        wave = get_wave(wave_id)
+        if not wave:
+            raise HTTPException(status_code=404, detail=f"Wave not found: {wave_id}")
 
         # Build overrides dict
         overrides = {}
         if request:
             if request.area is not None:
                 overrides["area"] = request.area
-            if request.goal is not None:
-                overrides["goal"] = request.goal
+            if request.direction is not None:
+                overrides["direction"] = request.direction
             if request.flow is not None:
                 overrides["flow"] = request.flow
             if request.stimulus is not None:
@@ -444,19 +444,19 @@ async def run_agent(agent_id: str, request: RunAgentRequest | None = None):
                     kind=request.stimulus.kind, cron=request.stimulus.cron
                 )
 
-        # Check area (from agent or override)
-        effective_area = overrides.get("area", agent.area)
+        # Check area (from wave or override)
+        effective_area = overrides.get("area", wave.area)
         if effective_area is None:
             return LFDResponse(
                 ok=False, error="No area configured. Set area first or pass as override."
             )
 
-        # Start the agent with optional overrides
-        result = start_agent(agent_id, **overrides)
+        # Start the wave with optional overrides
+        result = start_wave(wave_id, **overrides)
 
         if result:
-            await _notify_event("agent.started", {"agent_id": agent_id})
-            return LFDResponse(ok=True, result={"started": True, "agent_id": agent_id})
+            await _notify_event("wave.started", {"wave_id": wave_id})
+            return LFDResponse(ok=True, result={"started": True, "wave_id": wave_id})
         else:
             return LFDResponse(ok=False, error=f"Failed to start: {result.reason}")
     except HTTPException:
@@ -465,20 +465,20 @@ async def run_agent(agent_id: str, request: RunAgentRequest | None = None):
         return LFDResponse(ok=False, error=str(e))
 
 
-@app.post("/agents/{agent_id}/stop", response_model=LFDResponse)
-async def stop_agent_by_id(agent_id: str):
-    """Stop a running agent."""
+@app.post("/waves/{wave_id}/stop", response_model=LFDResponse)
+async def stop_wave_by_id(wave_id: str):
+    """Stop a running wave."""
     try:
-        agent = get_agent(agent_id)
-        if not agent:
-            raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
+        wave = get_wave(wave_id)
+        if not wave:
+            raise HTTPException(status_code=404, detail=f"Wave not found: {wave_id}")
 
-        stopped = stop_agent(agent_id)
+        stopped = stop_wave(wave_id)
         if stopped:
-            await _notify_event("agent.stopped", {"agent_id": agent_id})
+            await _notify_event("wave.stopped", {"wave_id": wave_id})
             return LFDResponse(ok=True, result={"stopped": True})
         else:
-            return LFDResponse(ok=False, error="Failed to stop agent")
+            return LFDResponse(ok=False, error="Failed to stop wave")
     except HTTPException:
         raise
     except Exception as e:

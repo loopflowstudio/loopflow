@@ -4,21 +4,11 @@ import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from loopflow.lfd.agent import (
-    delete_agent,
-    get_agent,
-    get_agent_by_area_repo,
-    list_agents,
-    save_agent,
-    update_agent_iteration,
-    update_agent_pid,
-    update_agent_status,
-)
 from loopflow.lfd.daemon.protocol import Event, Request, error, success
 from loopflow.lfd.db import _get_db
 from loopflow.lfd.flow_run import (
-    get_latest_run_for_agent,
-    list_runs_for_agent,
+    get_latest_run_for_wave,
+    list_runs_for_wave,
     save_run,
     update_run_pr,
     update_run_status,
@@ -26,14 +16,14 @@ from loopflow.lfd.flow_run import (
 )
 from loopflow.lfd.migrations.registry import MIGRATIONS
 from loopflow.lfd.models import (
-    Agent,
-    AgentStatus,
     FlowRun,
     FlowRunStatus,
     MergeMode,
     StepRun,
     StepRunStatus,
     Stimulus,
+    Wave,
+    WaveStatus,
 )
 from loopflow.lfd.step_run import (
     load_step_runs,
@@ -41,6 +31,16 @@ from loopflow.lfd.step_run import (
     load_step_runs_for_worktree,
     save_step_run,
     update_step_run_status,
+)
+from loopflow.lfd.wave import (
+    delete_wave,
+    get_wave,
+    get_wave_by_area_repo,
+    list_waves,
+    save_wave,
+    update_wave_iteration,
+    update_wave_pid,
+    update_wave_status,
 )
 
 
@@ -69,7 +69,7 @@ def test_protocol_request_parse():
 
 
 def test_protocol_response_serialize():
-    resp = success({"agents": 5}, id="req-1")
+    resp = success({"waves": 5}, id="req-1")
     serialized = resp.serialize()
     assert '"ok": true' in serialized
     assert '"result":' in serialized
@@ -83,9 +83,9 @@ def test_protocol_error_response():
 
 
 def test_protocol_event_serialize():
-    event = Event("agent.started", {"name": "test", "pid": 1234})
+    event = Event("wave.started", {"name": "test", "pid": 1234})
     serialized = event.serialize()
-    assert '"event": "agent.started"' in serialized
+    assert '"event": "wave.started"' in serialized
 
 
 def test_db_save_and_load_session():
@@ -110,15 +110,15 @@ def test_db_records_migrations():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         conn = _get_db(db_path)
-        rows = conn.execute(
-            "SELECT version, applied_at FROM schema_migrations ORDER BY version"
-        ).fetchall()
+        rows = conn.execute("SELECT version, applied_at FROM schema_migrations").fetchall()
         conn.close()
 
         # Should have all migrations recorded
         assert len(rows) == len(MIGRATIONS)
-        for i, row in enumerate(rows):
-            assert row[0] == MIGRATIONS[i].version
+        recorded_versions = {row[0] for row in rows}
+        expected_versions = {m.version for m in MIGRATIONS}
+        assert recorded_versions == expected_versions
+        for row in rows:
             assert row[1]  # applied_at timestamp exists
 
 
@@ -176,10 +176,10 @@ def test_db_reset_function():
         # Create initial DB with some data
         conn = _get_db(db_path)
         conn.execute(
-            "INSERT INTO agents (id, name, repo, flow, goal, area, status, iteration,"
-            "pr_limit, merge_mode, created_at) "
-            "VALUES ('test', 'test-agent', '/tmp', 'ship', '[]', '[]', 'idle', 0, 5, "
-            "'pr', '2024-01-01')"
+            "INSERT INTO waves (id, name, repo, flow, direction, area, "
+            "stimulus_kind, paused, status, iteration, pr_limit, merge_mode, "
+            "created_at) VALUES ('test', 'test-wave', '/tmp', 'ship', '[]', "
+            "'[]', 'loop', 0, 'idle', 0, 5, 'pr', '2024-01-01')"
         )
         conn.commit()
         conn.close()
@@ -193,7 +193,7 @@ def test_db_reset_function():
         assert version == SCHEMA_VERSION
 
         # Old data should be gone
-        cursor = conn.execute("SELECT COUNT(*) FROM agents")
+        cursor = conn.execute("SELECT COUNT(*) FROM waves")
         assert cursor.fetchone()[0] == 0
         conn.close()
 
@@ -207,19 +207,19 @@ def test_db_reset_function():
 # =============================================================================
 
 
-def test_migrations_cover_all_agent_fields():
-    """Migrations create columns for all Agent model fields."""
+def test_migrations_cover_all_wave_fields():
+    """Migrations create columns for all Wave model fields."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        agent = Agent(
+        wave = Wave(
             id="test-all-fields",
             name="aurora-melody",
             flow="ship",
             area=["src/test/"],
-            goal=["goal-a", "goal-b"],
+            direction=["direction-a", "direction-b"],
             repo=Path("/tmp/repo"),
-            status=AgentStatus.RUNNING,
+            status=WaveStatus.RUNNING,
             iteration=5,
             pr_limit=10,
             merge_mode=MergeMode.LAND,
@@ -228,24 +228,24 @@ def test_migrations_cover_all_agent_fields():
             last_main_sha="abc123",
         )
 
-        save_agent(agent, db_path)
-        loaded = get_agent("test-all-fields", db_path)
+        save_wave(wave, db_path)
+        loaded = get_wave("test-all-fields", db_path)
 
-        assert loaded.id == agent.id
-        assert loaded.name == agent.name
-        assert loaded.flow == agent.flow
-        assert loaded.area == agent.area
-        assert loaded.goal == agent.goal
-        assert loaded.repo == agent.repo
-        assert loaded.status == agent.status
-        assert loaded.iteration == agent.iteration
+        assert loaded.id == wave.id
+        assert loaded.name == wave.name
+        assert loaded.flow == wave.flow
+        assert loaded.area == wave.area
+        assert loaded.direction == wave.direction
+        assert loaded.repo == wave.repo
+        assert loaded.status == wave.status
+        assert loaded.iteration == wave.iteration
         assert loaded.main_branch == "aurora-melody.main"  # computed
-        assert loaded.pr_limit == agent.pr_limit
-        assert loaded.merge_mode == agent.merge_mode
-        assert loaded.pid == agent.pid
-        assert loaded.stimulus.kind == agent.stimulus.kind
-        assert loaded.stimulus.cron == agent.stimulus.cron
-        assert loaded.last_main_sha == agent.last_main_sha
+        assert loaded.pr_limit == wave.pr_limit
+        assert loaded.merge_mode == wave.merge_mode
+        assert loaded.pid == wave.pid
+        assert loaded.stimulus.kind == wave.stimulus.kind
+        assert loaded.stimulus.cron == wave.stimulus.cron
+        assert loaded.last_main_sha == wave.last_main_sha
 
 
 def test_migrations_cover_all_run_fields():
@@ -255,10 +255,10 @@ def test_migrations_cover_all_run_fields():
 
         run = FlowRun(
             id="test-run-all-fields",
-            agent_id="agent-id",
+            wave_id="wave-id",
             flow="ship",
             area=["src/test/"],
-            goal=["goal-a", "goal-b"],
+            direction=["direction-a", "direction-b"],
             repo=Path("/tmp/repo"),
             status=FlowRunStatus.RUNNING,
             iteration=3,
@@ -272,14 +272,14 @@ def test_migrations_cover_all_run_fields():
         )
 
         save_run(run, db_path)
-        runs = list_runs_for_agent("agent-id", db_path=db_path)
+        runs = list_runs_for_wave("wave-id", db_path=db_path)
         loaded = runs[0]
 
         assert loaded.id == run.id
-        assert loaded.agent_id == run.agent_id
+        assert loaded.wave_id == run.wave_id
         assert loaded.flow == run.flow
         assert loaded.area == run.area
-        assert loaded.goal == run.goal
+        assert loaded.direction == run.direction
         assert loaded.repo == run.repo
         assert loaded.status == run.status
         assert loaded.iteration == run.iteration
@@ -556,11 +556,11 @@ def test_server_handle_output_line_allows_empty_text():
     asyncio.run(run_test())
 
 
-# Agent model tests
+# Wave model tests
 
 
-def _make_agent(**kwargs) -> Agent:
-    """Helper to create an Agent with test defaults."""
+def _make_wave(**kwargs) -> Wave:
+    """Helper to create a Wave with test defaults."""
     # Determine stimulus from config if not explicitly set
     if "stimulus" not in kwargs:
         if kwargs.get("cron"):
@@ -569,62 +569,62 @@ def _make_agent(**kwargs) -> Agent:
             kwargs["stimulus"] = Stimulus("loop")
     defaults = {
         "id": "test-id",
-        "name": "test-agent",
+        "name": "test-wave",
         "flow": "ship",
         "area": ["src/test/"],
-        "goal": ["default"],
+        "direction": ["default"],
         "repo": Path("/tmp/repo"),
     }
     defaults.update(kwargs)
-    return Agent(**defaults)
+    return Wave(**defaults)
 
 
-def test_agent_model_defaults():
-    """Agent model has correct defaults."""
-    agent = Agent(
-        id="agent-1",
+def test_wave_model_defaults():
+    """Wave model has correct defaults."""
+    wave = Wave(
+        id="wave-1",
         name="test-coverage",
         flow="ship",
         area=["src/test-coverage/"],
-        goal=["default"],
+        direction=["default"],
         repo=Path("/tmp/repo"),
     )
-    assert agent.flow == "ship"
-    assert agent.status == AgentStatus.IDLE
-    assert agent.iteration == 0
-    assert agent.pr_limit == 5
-    assert agent.merge_mode == MergeMode.PR
-    assert agent.pid is None
-    assert agent.main_branch == "test-coverage.main"
+    assert wave.flow == "ship"
+    assert wave.status == WaveStatus.IDLE
+    assert wave.iteration == 0
+    assert wave.pr_limit == 5
+    assert wave.merge_mode == MergeMode.PR
+    assert wave.pid is None
+    assert wave.main_branch == "test-coverage.main"
 
 
-def test_agent_model_short_id():
-    """Agent.short_id() returns first 7 chars."""
-    agent = _make_agent(id="abcdef1234567890")
-    assert agent.short_id() == "abcdef1"
+def test_wave_model_short_id():
+    """Wave.short_id() returns first 7 chars."""
+    wave = _make_wave(id="abcdef1234567890")
+    assert wave.short_id() == "abcdef1"
 
 
-def test_agent_stimulus_property():
-    """Agent.stimulus returns correct stimulus."""
-    loop_agent = _make_agent()
-    assert loop_agent.stimulus.kind == "loop"
+def test_wave_stimulus_property():
+    """Wave.stimulus returns correct stimulus."""
+    loop_wave = _make_wave()
+    assert loop_wave.stimulus.kind == "loop"
 
-    watch_agent = _make_agent(stimulus=Stimulus("watch"))
-    assert watch_agent.stimulus.kind == "watch"
+    watch_wave = _make_wave(stimulus=Stimulus("watch"))
+    assert watch_wave.stimulus.kind == "watch"
 
-    cron_agent = _make_agent(stimulus=Stimulus("cron", cron="0 9 * * *"))
-    assert cron_agent.stimulus.kind == "cron"
-    assert cron_agent.stimulus.cron == "0 9 * * *"
+    cron_wave = _make_wave(stimulus=Stimulus("cron", cron="0 9 * * *"))
+    assert cron_wave.stimulus.kind == "cron"
+    assert cron_wave.stimulus.cron == "0 9 * * *"
 
 
 def test_run_model():
     """Run model stores execution data."""
     run = FlowRun(
         id="run-1",
-        agent_id="agent-1",
+        wave_id="wave-1",
         flow="ship",
         area=["src/test/"],
-        goal=["default"],
+        direction=["default"],
         repo=Path("/tmp/repo"),
         status=FlowRunStatus.RUNNING,
         iteration=3,
@@ -640,148 +640,148 @@ def test_run_model():
     assert run.pr_url is None
 
 
-# Agent database tests
+# Wave database tests
 
 
-def test_db_save_and_get_agent():
-    """Save and retrieve an agent."""
+def test_db_save_and_get_wave():
+    """Save and retrieve a wave."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
-        agent = _make_agent(
-            id="agent-123",
+        wave = _make_wave(
+            id="wave-123",
             name="test-coverage",
             area=["src/test-coverage/"],
-            status=AgentStatus.IDLE,
+            status=WaveStatus.IDLE,
             iteration=0,
             pr_limit=5,
         )
-        save_agent(agent, db_path)
+        save_wave(wave, db_path)
 
-        loaded = get_agent("agent-123", db_path)
+        loaded = get_wave("wave-123", db_path)
         assert loaded is not None
-        assert loaded.id == "agent-123"
+        assert loaded.id == "wave-123"
         assert loaded.area == ["src/test-coverage/"]
         assert loaded.name == "test-coverage"
         assert loaded.main_branch == "test-coverage.main"
         assert loaded.flow == "ship"
 
 
-def test_db_get_agent_short_id():
-    """Get agent by short ID prefix."""
+def test_db_get_wave_short_id():
+    """Get wave by short ID prefix."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
-        agent = _make_agent(id="abcdef1234567890")
-        save_agent(agent, db_path)
+        wave = _make_wave(id="abcdef1234567890")
+        save_wave(wave, db_path)
 
         # Should find by prefix
-        loaded = get_agent("abcdef1", db_path)
+        loaded = get_wave("abcdef1", db_path)
         assert loaded is not None
         assert loaded.id == "abcdef1234567890"
 
 
-def test_db_get_agent_by_area_repo():
-    """Get agent by area and repo."""
+def test_db_get_wave_by_area_repo():
+    """Get wave by area and repo."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
-        agent = _make_agent(
-            id="agent-1",
+        wave = _make_wave(
+            id="wave-1",
             name="api-aurora-melody",
             area=["src/api/"],
         )
-        save_agent(agent, db_path)
+        save_wave(wave, db_path)
 
-        loaded = get_agent_by_area_repo(["src/api/"], Path("/tmp/repo"), db_path=db_path)
+        loaded = get_wave_by_area_repo(["src/api/"], Path("/tmp/repo"), db_path=db_path)
         assert loaded is not None
-        assert loaded.id == "agent-1"
+        assert loaded.id == "wave-1"
 
         # Different area should not match
-        not_found = get_agent_by_area_repo(["src/other/"], Path("/tmp/repo"), db_path=db_path)
+        not_found = get_wave_by_area_repo(["src/other/"], Path("/tmp/repo"), db_path=db_path)
         assert not_found is None
 
 
-def test_db_list_agents():
-    """List all agents."""
+def test_db_list_waves():
+    """List all waves."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        agent1 = _make_agent(
-            id="agent-1",
-            name="goal-a",
-            area=["src/goal-a/"],
+        wave1 = _make_wave(
+            id="wave-1",
+            name="direction-a",
+            area=["src/direction-a/"],
             repo=Path("/tmp/repo-a"),
         )
-        agent2 = _make_agent(
-            id="agent-2",
-            name="goal-b",
-            area=["src/goal-b/"],
+        wave2 = _make_wave(
+            id="wave-2",
+            name="direction-b",
+            area=["src/direction-b/"],
             repo=Path("/tmp/repo-b"),
         )
-        save_agent(agent1, db_path)
-        save_agent(agent2, db_path)
+        save_wave(wave1, db_path)
+        save_wave(wave2, db_path)
 
-        agents = list_agents(db_path=db_path)
-        assert len(agents) == 2
+        waves = list_waves(db_path=db_path)
+        assert len(waves) == 2
 
         # Filter by repo
-        agents = list_agents(repo=Path("/tmp/repo-a"), db_path=db_path)
-        assert len(agents) == 1
-        assert agents[0].area == ["src/goal-a/"]
+        waves = list_waves(repo=Path("/tmp/repo-a"), db_path=db_path)
+        assert len(waves) == 1
+        assert waves[0].area == ["src/direction-a/"]
 
 
-def test_db_update_agent_status():
-    """Update agent status."""
+def test_db_update_wave_status():
+    """Update wave status."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
-        agent = _make_agent(
-            id="agent-1",
-            status=AgentStatus.IDLE,
+        wave = _make_wave(
+            id="wave-1",
+            status=WaveStatus.IDLE,
         )
-        save_agent(agent, db_path)
+        save_wave(wave, db_path)
 
-        updated = update_agent_status("agent-1", AgentStatus.RUNNING, db_path)
+        updated = update_wave_status("wave-1", WaveStatus.RUNNING, db_path)
         assert updated is True
 
-        loaded = get_agent("agent-1", db_path)
-        assert loaded.status == AgentStatus.RUNNING
+        loaded = get_wave("wave-1", db_path)
+        assert loaded.status == WaveStatus.RUNNING
 
 
-def test_db_update_agent_iteration():
-    """Update agent iteration count."""
+def test_db_update_wave_iteration():
+    """Update wave iteration count."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
-        agent = _make_agent(
-            id="agent-1",
+        wave = _make_wave(
+            id="wave-1",
             iteration=0,
         )
-        save_agent(agent, db_path)
+        save_wave(wave, db_path)
 
-        updated = update_agent_iteration("agent-1", 5, db_path)
+        updated = update_wave_iteration("wave-1", 5, db_path)
         assert updated is True
 
-        loaded = get_agent("agent-1", db_path)
+        loaded = get_wave("wave-1", db_path)
         assert loaded.iteration == 5
 
 
-def test_db_delete_agent():
-    """Delete agent and its runs."""
+def test_db_delete_wave():
+    """Delete wave and its runs."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
-        agent = _make_agent(
-            id="agent-1",
-            name="test-agent",
+        wave = _make_wave(
+            id="wave-1",
+            name="test-wave",
             flow="ship",
             area=["src/test/"],
             repo=Path("/tmp/repo"),
         )
-        save_agent(agent, db_path)
+        save_wave(wave, db_path)
 
         # Add a run
         run = FlowRun(
             id="run-1",
-            agent_id="agent-1",
+            wave_id="wave-1",
             flow="ship",
             area=["src/test/"],
-            goal=["default"],
+            direction=["default"],
             repo=Path("/tmp/repo"),
             iteration=1,
             status=FlowRunStatus.RUNNING,
@@ -789,12 +789,12 @@ def test_db_delete_agent():
         )
         save_run(run, db_path)
 
-        # Delete agent (should also delete runs)
-        deleted = delete_agent("agent-1", db_path)
+        # Delete wave (should also delete runs)
+        deleted = delete_wave("wave-1", db_path)
         assert deleted is True
 
-        assert get_agent("agent-1", db_path) is None
-        assert list_runs_for_agent("agent-1", db_path=db_path) == []
+        assert get_wave("wave-1", db_path) is None
+        assert list_runs_for_wave("wave-1", db_path=db_path) == []
 
 
 # Run database tests
@@ -805,16 +805,16 @@ def test_db_save_and_get_runs():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        # Create parent agent first
-        agent = _make_agent(id="agent-1")
-        save_agent(agent, db_path)
+        # Create parent wave first
+        wave = _make_wave(id="wave-1")
+        save_wave(wave, db_path)
 
         run1 = FlowRun(
             id="run-1",
-            agent_id="agent-1",
+            wave_id="wave-1",
             flow="ship",
             area=["src/test/"],
-            goal=["default"],
+            direction=["default"],
             repo=Path("/tmp/repo"),
             iteration=1,
             status=FlowRunStatus.COMPLETED,
@@ -823,10 +823,10 @@ def test_db_save_and_get_runs():
         )
         run2 = FlowRun(
             id="run-2",
-            agent_id="agent-1",
+            wave_id="wave-1",
             flow="ship",
             area=["src/test/"],
-            goal=["default"],
+            direction=["default"],
             repo=Path("/tmp/repo"),
             iteration=2,
             status=FlowRunStatus.RUNNING,
@@ -835,24 +835,24 @@ def test_db_save_and_get_runs():
         save_run(run1, db_path)
         save_run(run2, db_path)
 
-        runs = list_runs_for_agent("agent-1", db_path=db_path)
+        runs = list_runs_for_wave("wave-1", db_path=db_path)
         assert len(runs) == 2
 
 
-def test_db_get_latest_run_for_agent():
-    """Get most recent run for an agent."""
+def test_db_get_latest_run_for_wave():
+    """Get most recent run for a wave."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        agent = _make_agent(id="agent-1")
-        save_agent(agent, db_path)
+        wave = _make_wave(id="wave-1")
+        save_wave(wave, db_path)
 
         run1 = FlowRun(
             id="run-1",
-            agent_id="agent-1",
+            wave_id="wave-1",
             flow="ship",
             area=["src/test/"],
-            goal=["default"],
+            direction=["default"],
             repo=Path("/tmp/repo"),
             iteration=1,
             status=FlowRunStatus.COMPLETED,
@@ -860,10 +860,10 @@ def test_db_get_latest_run_for_agent():
         )
         run2 = FlowRun(
             id="run-2",
-            agent_id="agent-1",
+            wave_id="wave-1",
             flow="ship",
             area=["src/test/"],
-            goal=["default"],
+            direction=["default"],
             repo=Path("/tmp/repo"),
             iteration=2,
             status=FlowRunStatus.RUNNING,
@@ -872,7 +872,7 @@ def test_db_get_latest_run_for_agent():
         save_run(run1, db_path)
         save_run(run2, db_path)
 
-        latest = get_latest_run_for_agent("agent-1", db_path)
+        latest = get_latest_run_for_wave("wave-1", db_path)
         assert latest is not None
         assert latest.id == "run-2"
 
@@ -882,15 +882,15 @@ def test_db_update_run_status():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        agent = _make_agent(id="agent-1")
-        save_agent(agent, db_path)
+        wave = _make_wave(id="wave-1")
+        save_wave(wave, db_path)
 
         run = FlowRun(
             id="run-1",
-            agent_id="agent-1",
+            wave_id="wave-1",
             flow="ship",
             area=["src/test/"],
-            goal=["default"],
+            direction=["default"],
             repo=Path("/tmp/repo"),
             iteration=1,
             status=FlowRunStatus.RUNNING,
@@ -901,7 +901,7 @@ def test_db_update_run_status():
         updated = update_run_status("run-1", FlowRunStatus.COMPLETED, db_path=db_path)
         assert updated is True
 
-        runs = list_runs_for_agent("agent-1", db_path=db_path)
+        runs = list_runs_for_wave("wave-1", db_path=db_path)
         assert runs[0].status == FlowRunStatus.COMPLETED
         assert runs[0].ended_at is not None
 
@@ -911,15 +911,15 @@ def test_db_update_run_step():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        agent = _make_agent(id="agent-1")
-        save_agent(agent, db_path)
+        wave = _make_wave(id="wave-1")
+        save_wave(wave, db_path)
 
         run = FlowRun(
             id="run-1",
-            agent_id="agent-1",
+            wave_id="wave-1",
             flow="ship",
             area=["src/test/"],
-            goal=["default"],
+            direction=["default"],
             repo=Path("/tmp/repo"),
             iteration=1,
             status=FlowRunStatus.RUNNING,
@@ -930,7 +930,7 @@ def test_db_update_run_step():
         updated = update_run_step("run-1", "implement", db_path)
         assert updated is True
 
-        runs = list_runs_for_agent("agent-1", db_path=db_path)
+        runs = list_runs_for_wave("wave-1", db_path=db_path)
         assert runs[0].current_step == "implement"
 
 
@@ -939,15 +939,15 @@ def test_db_update_run_pr():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        agent = _make_agent(id="agent-1")
-        save_agent(agent, db_path)
+        wave = _make_wave(id="wave-1")
+        save_wave(wave, db_path)
 
         run = FlowRun(
             id="run-1",
-            agent_id="agent-1",
+            wave_id="wave-1",
             flow="ship",
             area=["src/test/"],
-            goal=["default"],
+            direction=["default"],
             repo=Path("/tmp/repo"),
             iteration=1,
             status=FlowRunStatus.RUNNING,
@@ -958,48 +958,48 @@ def test_db_update_run_pr():
         updated = update_run_pr("run-1", "https://github.com/user/repo/pull/42", db_path)
         assert updated is True
 
-        runs = list_runs_for_agent("agent-1", db_path=db_path)
+        runs = list_runs_for_wave("wave-1", db_path=db_path)
         assert runs[0].pr_url == "https://github.com/user/repo/pull/42"
 
 
-def test_db_update_agent_pid():
-    """Update agent's process ID."""
+def test_db_update_wave_pid():
+    """Update wave's process ID."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        agent = _make_agent(id="agent-1")
-        save_agent(agent, db_path)
+        wave = _make_wave(id="wave-1")
+        save_wave(wave, db_path)
 
         # Set pid
-        updated = update_agent_pid("agent-1", 12345, db_path)
+        updated = update_wave_pid("wave-1", 12345, db_path)
         assert updated is True
 
-        loaded = get_agent("agent-1", db_path)
+        loaded = get_wave("wave-1", db_path)
         assert loaded.pid == 12345
 
         # Clear pid
-        updated = update_agent_pid("agent-1", None, db_path)
+        updated = update_wave_pid("wave-1", None, db_path)
         assert updated is True
 
-        loaded = get_agent("agent-1", db_path)
+        loaded = get_wave("wave-1", db_path)
         assert loaded.pid is None
 
 
-def test_agent_model_with_pid():
-    """Agent model stores pid correctly."""
-    agent = _make_agent(id="agent-1", pid=12345)
-    assert agent.pid == 12345
+def test_wave_model_with_pid():
+    """Wave model stores pid correctly."""
+    wave = _make_wave(id="wave-1", pid=12345)
+    assert wave.pid == 12345
 
 
-def test_db_save_agent_with_pid():
-    """Save and load agent with pid."""
+def test_db_save_wave_with_pid():
+    """Save and load wave with pid."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        agent = _make_agent(id="agent-1", pid=54321)
-        save_agent(agent, db_path)
+        wave = _make_wave(id="wave-1", pid=54321)
+        save_wave(wave, db_path)
 
-        loaded = get_agent("agent-1", db_path)
+        loaded = get_wave("wave-1", db_path)
         assert loaded.pid == 54321
 
 
@@ -1008,7 +1008,7 @@ def test_db_save_agent_with_pid():
 
 def test_start_result_truthy_when_ok():
     """StartResult is truthy when ok=True."""
-    from loopflow.lfd.agent import StartResult
+    from loopflow.lfd.wave import StartResult
 
     result = StartResult(True)
     assert result.ok is True
@@ -1019,7 +1019,7 @@ def test_start_result_truthy_when_ok():
 
 def test_start_result_falsy_when_not_ok():
     """StartResult is falsy when ok=False."""
-    from loopflow.lfd.agent import StartResult
+    from loopflow.lfd.wave import StartResult
 
     result = StartResult(False, "already_running")
     assert result.ok is False
@@ -1029,7 +1029,7 @@ def test_start_result_falsy_when_not_ok():
 
 def test_start_result_with_outstanding():
     """StartResult includes outstanding count for waiting state."""
-    from loopflow.lfd.agent import StartResult
+    from loopflow.lfd.wave import StartResult
 
     result = StartResult(False, "waiting", outstanding=5)
     assert not result
@@ -1244,19 +1244,19 @@ def test_word_lists_have_sufficient_variety():
 
 
 def test_cleanup_stale_runs_marks_orphaned():
-    """cleanup_stale_runs marks runs without agents as FAILED."""
+    """cleanup_stale_runs marks runs without waves as FAILED."""
     from loopflow.lfd.flow_run import cleanup_stale_runs, get_run, save_run
 
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        # Create a run with no agent
+        # Create a run with no wave
         run = FlowRun(
             id="orphan-run",
-            agent_id=None,
+            wave_id=None,
             flow="ship",
             area=["src/"],
-            goal=["default"],
+            direction=["default"],
             repo=Path("/tmp/repo"),
             status=FlowRunStatus.RUNNING,
             started_at=datetime.now(),
@@ -1273,24 +1273,24 @@ def test_cleanup_stale_runs_marks_orphaned():
         assert "Orphaned" in updated.error
 
 
-def test_cleanup_stale_runs_marks_dead_agent():
-    """cleanup_stale_runs marks runs with dead agent PID as FAILED."""
+def test_cleanup_stale_runs_marks_dead_wave():
+    """cleanup_stale_runs marks runs with dead wave PID as FAILED."""
     from loopflow.lfd.flow_run import cleanup_stale_runs, get_run, save_run
 
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        # Create agent with non-existent PID
-        agent = _make_agent(id="agent-dead", pid=99999999)
-        save_agent(agent, db_path)
+        # Create wave with non-existent PID
+        wave = _make_wave(id="wave-dead", pid=99999999)
+        save_wave(wave, db_path)
 
-        # Create run for that agent
+        # Create run for that wave
         run = FlowRun(
-            id="run-dead-agent",
-            agent_id="agent-dead",
+            id="run-dead-wave",
+            wave_id="wave-dead",
             flow="ship",
             area=["src/"],
-            goal=["default"],
+            direction=["default"],
             repo=Path("/tmp/repo"),
             status=FlowRunStatus.RUNNING,
             started_at=datetime.now(),
@@ -1302,13 +1302,13 @@ def test_cleanup_stale_runs_marks_dead_agent():
         assert cleaned == 1
 
         # Verify run is now FAILED
-        updated = get_run("run-dead-agent", db_path)
+        updated = get_run("run-dead-wave", db_path)
         assert updated.status == FlowRunStatus.FAILED
         assert "died" in updated.error
 
 
 def test_cleanup_stale_runs_skips_active():
-    """cleanup_stale_runs does not touch runs with live agents."""
+    """cleanup_stale_runs does not touch runs with live waves."""
     import os
 
     from loopflow.lfd.flow_run import cleanup_stale_runs, get_run, save_run
@@ -1316,17 +1316,17 @@ def test_cleanup_stale_runs_skips_active():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        # Create agent with current process PID (guaranteed to be alive)
-        agent = _make_agent(id="agent-alive", pid=os.getpid())
-        save_agent(agent, db_path)
+        # Create wave with current process PID (guaranteed to be alive)
+        wave = _make_wave(id="wave-alive", pid=os.getpid())
+        save_wave(wave, db_path)
 
-        # Create run for that agent
+        # Create run for that wave
         run = FlowRun(
             id="run-active",
-            agent_id="agent-alive",
+            wave_id="wave-alive",
             flow="ship",
             area=["src/"],
-            goal=["default"],
+            direction=["default"],
             repo=Path("/tmp/repo"),
             status=FlowRunStatus.RUNNING,
             started_at=datetime.now(),
@@ -1342,20 +1342,20 @@ def test_cleanup_stale_runs_skips_active():
         assert updated.status == FlowRunStatus.RUNNING
 
 
-def test_cleanup_stale_runs_handles_deleted_agent():
-    """cleanup_stale_runs marks runs whose agent was deleted."""
+def test_cleanup_stale_runs_handles_deleted_wave():
+    """cleanup_stale_runs marks runs whose wave was deleted."""
     from loopflow.lfd.flow_run import cleanup_stale_runs, get_run, save_run
 
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        # Create run referencing non-existent agent
+        # Create run referencing non-existent wave
         run = FlowRun(
-            id="run-missing-agent",
-            agent_id="agent-that-was-deleted",
+            id="run-missing-wave",
+            wave_id="wave-that-was-deleted",
             flow="ship",
             area=["src/"],
-            goal=["default"],
+            direction=["default"],
             repo=Path("/tmp/repo"),
             status=FlowRunStatus.RUNNING,
             started_at=datetime.now(),
@@ -1367,7 +1367,7 @@ def test_cleanup_stale_runs_handles_deleted_agent():
         assert cleaned == 1
 
         # Verify run is now FAILED
-        updated = get_run("run-missing-agent", db_path)
+        updated = get_run("run-missing-wave", db_path)
         assert updated.status == FlowRunStatus.FAILED
         assert "no longer exists" in updated.error
 
@@ -1383,7 +1383,7 @@ def test_mark_run_failed():
             id="run-to-fail",
             flow="ship",
             area=["src/"],
-            goal=["default"],
+            direction=["default"],
             repo=Path("/tmp/repo"),
             status=FlowRunStatus.RUNNING,
             started_at=datetime.now(),
@@ -1559,7 +1559,7 @@ def test_summary_functions_work_after_schema_reset():
 
 def test_watch_trigger_no_trigger_cases():
     """Watch mode should NOT trigger in these cases."""
-    from loopflow.lfd.agent import should_activate_watch
+    from loopflow.lfd.wave import should_activate_watch
 
     # No previous SHA (first run records baseline)
     assert should_activate_watch(["src/"], None, "abc123", ["src/main.py"]) is False
@@ -1582,7 +1582,7 @@ def test_watch_trigger_no_trigger_cases():
 
 def test_watch_trigger_should_trigger_cases():
     """Watch mode SHOULD trigger in these cases."""
-    from loopflow.lfd.agent import should_activate_watch
+    from loopflow.lfd.wave import should_activate_watch
 
     # Basic match
     assert should_activate_watch(["src/"], "abc", "def", ["src/main.py"]) is True
@@ -1610,7 +1610,7 @@ def test_watch_trigger_should_trigger_cases():
 
 def test_cron_trigger_no_trigger_cases():
     """Cron should NOT trigger in these cases."""
-    from loopflow.lfd.agent import should_activate_cron
+    from loopflow.lfd.wave import should_activate_cron
 
     now = datetime.now()
 
@@ -1631,7 +1631,7 @@ def test_cron_trigger_no_trigger_cases():
 
 def test_cron_trigger_should_trigger_cases():
     """Cron SHOULD trigger in these cases."""
-    from loopflow.lfd.agent import should_activate_cron
+    from loopflow.lfd.wave import should_activate_cron
 
     now = datetime.now()
 
@@ -1656,38 +1656,38 @@ def test_cron_trigger_should_trigger_cases():
 # =============================================================================
 
 
-def test_agent_consecutive_failures_default():
-    """Agent consecutive_failures defaults to 0."""
-    agent = _make_agent()
-    assert agent.consecutive_failures == 0
+def test_wave_consecutive_failures_default():
+    """Wave consecutive_failures defaults to 0."""
+    wave = _make_wave()
+    assert wave.consecutive_failures == 0
 
 
-def test_agent_consecutive_failures_save_load():
+def test_wave_consecutive_failures_save_load():
     """consecutive_failures is persisted correctly."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        agent = _make_agent(id="agent-failures", consecutive_failures=3)
-        save_agent(agent, db_path)
+        wave = _make_wave(id="wave-failures", consecutive_failures=3)
+        save_wave(wave, db_path)
 
-        loaded = get_agent("agent-failures", db_path)
+        loaded = get_wave("wave-failures", db_path)
         assert loaded.consecutive_failures == 3
 
 
-def test_update_agent_consecutive_failures():
-    """update_agent_consecutive_failures updates the field."""
-    from loopflow.lfd.agent import update_agent_consecutive_failures
+def test_update_wave_consecutive_failures():
+    """update_wave_consecutive_failures updates the field."""
+    from loopflow.lfd.wave import update_wave_consecutive_failures
 
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        agent = _make_agent(id="agent-1", consecutive_failures=0)
-        save_agent(agent, db_path)
+        wave = _make_wave(id="wave-1", consecutive_failures=0)
+        save_wave(wave, db_path)
 
-        updated = update_agent_consecutive_failures("agent-1", 5, db_path)
+        updated = update_wave_consecutive_failures("wave-1", 5, db_path)
         assert updated is True
 
-        loaded = get_agent("agent-1", db_path)
+        loaded = get_wave("wave-1", db_path)
         assert loaded.consecutive_failures == 5
 
 
@@ -1696,12 +1696,12 @@ def test_migrations_cover_consecutive_failures():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        # Create agent with consecutive_failures
-        agent = _make_agent(id="agent-cf", consecutive_failures=7)
-        save_agent(agent, db_path)
+        # Create wave with consecutive_failures
+        wave = _make_wave(id="wave-cf", consecutive_failures=7)
+        save_wave(wave, db_path)
 
         # Verify it persists
-        loaded = get_agent("agent-cf", db_path)
+        loaded = get_wave("wave-cf", db_path)
         assert loaded.consecutive_failures == 7
 
 
@@ -1718,10 +1718,10 @@ def test_worker_retry_constants():
     assert CIRCUIT_BREAKER_THRESHOLD == 5
 
 
-def test_agent_model_with_consecutive_failures():
-    """Agent model accepts consecutive_failures parameter."""
-    agent = _make_agent(consecutive_failures=10)
-    assert agent.consecutive_failures == 10
+def test_wave_model_with_consecutive_failures():
+    """Wave model accepts consecutive_failures parameter."""
+    wave = _make_wave(consecutive_failures=10)
+    assert wave.consecutive_failures == 10
 
 
 # =============================================================================

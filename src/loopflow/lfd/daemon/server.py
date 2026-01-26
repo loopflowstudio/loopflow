@@ -8,7 +8,6 @@ from asyncio import StreamReader, StreamWriter
 from datetime import datetime
 from pathlib import Path
 
-from loopflow.lfd.agent import run_cron_check, run_watch_check
 from loopflow.lfd.daemon import metrics
 from loopflow.lfd.daemon.manager import Manager, load_manager_config
 from loopflow.lfd.daemon.protocol import Event, Request, Response, error, success
@@ -25,6 +24,7 @@ from loopflow.lfd.step_run import (
     save_step_run,
     update_step_run_status,
 )
+from loopflow.lfd.wave import run_cron_check, run_watch_check
 from loopflow.lfd.worktree_state import get_worktree_state_service
 
 
@@ -412,7 +412,7 @@ class Server:
             return None
 
     async def _periodic_check(self) -> None:
-        """Periodically update dead processes and check agent stimuli."""
+        """Periodically update dead processes and check wave stimuli."""
         from loopflow.lfd.autoprune import AutopruneManager, get_repos_to_check
         from loopflow.lfd.draft_prs import run_draft_pr_check
 
@@ -424,23 +424,23 @@ class Server:
                 update_dead_processes()
                 cleanup_stale_runs()
 
-                # Check watch stimulus agents (file changes on main)
+                # Check watch stimulus waves (file changes on main)
                 activated_watch = run_watch_check()
-                for agent_id in activated_watch:
+                for wave_id in activated_watch:
                     await self._broadcast(
                         Event(
-                            "agent.activated",
-                            {"agent_id": agent_id, "stimulus": "watch"},
+                            "wave.activated",
+                            {"wave_id": wave_id, "stimulus": "watch"},
                         )
                     )
 
-                # Check cron stimulus agents
+                # Check cron stimulus waves
                 activated_cron = run_cron_check()
-                for agent_id in activated_cron:
+                for wave_id in activated_cron:
                     await self._broadcast(
                         Event(
-                            "agent.activated",
-                            {"agent_id": agent_id, "stimulus": "cron"},
+                            "wave.activated",
+                            {"wave_id": wave_id, "stimulus": "cron"},
                         )
                     )
 

@@ -19,7 +19,6 @@ Commands:
 """
 
 import argparse
-import os
 import shutil
 import subprocess
 import sys
@@ -81,7 +80,7 @@ def cmd_run_debug() -> int:
         return result.returncode
 
     _install_dev_app()
-    print(f"Logs: ~/Library/Logs/Concerto/")
+    print("Logs: ~/Library/Logs/Concerto/")
     print("Press Ctrl+C to quit")
     print("---")
     return run([str(DEV_APP / "Contents" / "MacOS" / "Concerto")], check=False).returncode
@@ -207,7 +206,10 @@ def cmd_ghostty_build() -> int:
         print("Cloning Ghostty...")
         GHOSTTY_DIR.parent.mkdir(parents=True, exist_ok=True)
         result = run(
-            ["git", "clone", "--depth", "1", "https://github.com/ghostty-org/ghostty.git", str(GHOSTTY_DIR)],
+            [
+                "git", "clone", "--depth", "1",
+                "https://github.com/ghostty-org/ghostty.git", str(GHOSTTY_DIR)
+            ],
             check=False,
         )
         if result.returncode != 0:

@@ -5,7 +5,7 @@ title: lfd Command Reference
 
 # lfd Command Reference
 
-`lfd` is the loopflow daemon. It manages agents—persistent configurations that run flows on your codebase.
+`lfd` is the loopflow daemon. It manages waves—persistent configurations that run flows on your codebase.
 
 ## Quick Start
 
@@ -19,20 +19,20 @@ lfd area swift-falcon src/
 lfd loop swift-falcon
 ```
 
-## Creating Agents
+## Creating Waves
 
 ### lfd create
 
-Create a new agent.
+Create a new wave.
 
 ```bash
 lfd create swift-falcon      # create with name
 lfd create                   # create with generated name
 ```
 
-Creates an agent with no configuration. Use `area`, `goal`, `flow` to configure before running.
+Creates a wave with no configuration. Use `area`, `direction`, `flow` to configure before running.
 
-## Configuring Agents
+## Configuring Waves
 
 ### lfd area
 
@@ -43,13 +43,13 @@ lfd area swift-falcon src/
 lfd area swift-falcon src/api/ src/ui/    # multiple paths
 ```
 
-### lfd goal
+### lfd direction
 
-Set the goal (optional).
+Set the direction (optional).
 
 ```bash
-lfd goal swift-falcon "fix all lint errors"
-lfd goal swift-falcon product-engineer    # use preset from .lf/goals/
+lfd direction swift-falcon "fix all lint errors"
+lfd direction swift-falcon product-engineer    # use preset from .lf/directions/
 ```
 
 ### lfd flow
@@ -63,7 +63,7 @@ lfd flow swift-falcon ship
 
 Flows are defined in `.lf/flows/<name>.yaml`.
 
-## Running Agents
+## Running Waves
 
 All run commands validate configuration first. Area must be set.
 
@@ -78,8 +78,8 @@ lfd run swift-falcon --area src/    # one-shot: create + configure + run
 
 | Flag | Description |
 |------|-------------|
-| `--area` | Set area (creates agent if needed) |
-| `--goal` | Set goal |
+| `--area` | Set area (creates wave if needed) |
+| `--direction` | Set direction |
 | `--flow` | Set flow |
 
 ### lfd loop
@@ -88,15 +88,15 @@ Run continuously, iteration after iteration.
 
 ```bash
 lfd loop swift-falcon
-lfd loop swift-falcon --area src/ --goal "improve coverage"
+lfd loop swift-falcon --area src/ --direction "improve coverage"
 ```
 
 Runs until PR limit is reached, then waits. Each iteration runs the flow and creates a PR.
 
 | Flag | Description |
 |------|-------------|
-| `--area` | Set area (creates agent if needed) |
-| `--goal` | Set goal |
+| `--area` | Set area (creates wave if needed) |
+| `--direction` | Set direction |
 | `--flow` | Set flow |
 | `-l, --limit` | PR limit (default: 5) |
 | `--merge-mode` | `pr` (accumulate) or `land` (auto-merge) |
@@ -117,7 +117,7 @@ Polls origin/main for new commits. If files in the watched path changed since la
 |------|-------------|
 | `--area` | Set working area |
 | `--path` | Path to watch (default: area) |
-| `--goal` | Set goal |
+| `--direction` | Set direction |
 | `--flow` | Set flow |
 
 ### lfd cron
@@ -134,7 +134,7 @@ Has a 24-hour grace period—if your computer wakes after the scheduled time but
 | Flag | Description |
 |------|-------------|
 | `--area` | Set working area |
-| `--goal` | Set goal |
+| `--direction` | Set direction |
 | `--flow` | Set flow |
 
 ## Stimulus Modes
@@ -146,11 +146,11 @@ Has a 24-hour grace period—if your computer wakes after the scheduled time but
 | `watch` | origin/main changes | React to upstream |
 | `cron` | Schedule | Daily maintenance |
 
-## Managing Agents
+## Managing Waves
 
 ### lfd list
 
-List all agents.
+List all waves.
 
 ```bash
 lfd list
@@ -159,7 +159,7 @@ lfd list --all    # include completed/stopped
 
 ### lfd show
 
-Show agent details.
+Show wave details.
 
 ```bash
 lfd show swift-falcon
@@ -167,7 +167,7 @@ lfd show swift-falcon
 
 ### lfd stop
 
-Stop a running agent.
+Stop a running wave.
 
 ```bash
 lfd stop swift-falcon
@@ -176,7 +176,7 @@ lfd stop swift-falcon --force    # SIGKILL
 
 ### lfd rm
 
-Delete an agent.
+Delete a wave.
 
 ```bash
 lfd rm swift-falcon
@@ -187,7 +187,7 @@ lfd rm swift-falcon --force    # skip confirmation
 
 ### lfd logs
 
-Show logs for an agent.
+Show logs for a wave.
 
 ```bash
 lfd logs swift-falcon
@@ -197,7 +197,7 @@ lfd logs swift-falcon -n 100     # last 100 lines
 
 ### lfd prs
 
-Show PRs created by an agent.
+Show PRs created by a wave.
 
 ```bash
 lfd prs swift-falcon
@@ -232,4 +232,4 @@ lfd uninstall
 
 ## See Also
 
-[Background Agents](agents.md) · [Configuration](config.md)
+[Waves](waves.md) · [Configuration](config.md)

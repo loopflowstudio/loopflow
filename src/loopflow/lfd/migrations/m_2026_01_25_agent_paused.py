@@ -1,11 +1,17 @@
-"""Add paused column to agents table."""
+"""Add paused column to waves table."""
 
-VERSION = "2026_01_25_agent_paused"
-DESCRIPTION = "Add paused column to agents"
+VERSION = "2026_01_25_wave_paused"
+DESCRIPTION = "Add paused column to waves"
 
 
 def apply(conn) -> None:
-    """Add paused column (default 1 = True = manual mode)."""
+    """Add paused column (default 0 = False = automatic mode)."""
+    # Check if column already exists (baseline now includes it)
+    cursor = conn.execute("PRAGMA table_info(waves)")
+    columns = {row[1] for row in cursor.fetchall()}
+    if "paused" in columns:
+        return  # Already exists
+
     cursor = conn.cursor()
-    cursor.execute("ALTER TABLE agents ADD COLUMN paused INTEGER DEFAULT 1")
+    cursor.execute("ALTER TABLE waves ADD COLUMN paused INTEGER DEFAULT 0")
     conn.commit()

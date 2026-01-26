@@ -13,9 +13,9 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from loopflow.lf.design import gather_area_docs, gather_design_docs, gather_internal_docs
+from loopflow.lf.directions import Direction
 from loopflow.lf.files import format_files, format_image_references, gather_docs, gather_files
 from loopflow.lf.frontmatter import StepFile, parse_step_file
-from loopflow.lf.goals import Goal, load_goal
 from loopflow.lf.skills import (
     discover_skill_sources,
     find_skill,
@@ -55,7 +55,7 @@ class PromptComponents:
     repo_root: Path
     clipboard: ClipboardContent | None = None
     loopflow_doc: str | None = None  # Bundled system documentation
-    goals: list[Goal] | None = None
+    direction: list[Direction] | None = None
     image_files: list[Path] | None = None  # Images for visual context
     summaries: list[tuple[Path, str]] | None = None  # Pre-generated summaries
 
@@ -695,7 +695,7 @@ def gather_prompt_components(
     inline: Optional[str] = None,
     step_args: Optional[list[str]] = None,
     run_mode: Optional[str] = None,
-    goals: Optional[list[str]] = None,
+    direction: Optional[list[Direction]] = None,
     context_config: Optional[ContextConfig] = None,
     config=None,
 ) -> PromptComponents:
@@ -767,10 +767,7 @@ def gather_prompt_components(
 
     clipboard = _read_clipboard() if context_config.clipboard else None
 
-    # Load goals if specified
-    loaded_goals = None
-    if goals:
-        loaded_goals = [load_goal(repo_root, name) for name in goals if load_goal(repo_root, name)]
+    # Directions passed in directly (already loaded)
 
     # Load configured summaries (always include if config has them)
     summaries = gather_summaries(repo_root, config)
@@ -784,7 +781,7 @@ def gather_prompt_components(
         repo_root=repo_root,
         clipboard=clipboard,
         loopflow_doc=loopflow_doc,
-        goals=loaded_goals,
+        direction=direction,
         image_files=gather_result.image_files or None,
         summaries=summaries if summaries else None,
     )
@@ -811,18 +808,22 @@ def format_prompt(components: PromptComponents) -> str:
         else:
             step_tag = f"<lf:step:{name}>\n{content}\n</lf:step:{name}>"
 
-        # Goals go between "The step." header and the actual step content
-        if components.goals:
-            if len(components.goals) == 1:
-                goal = components.goals[0]
-                goal_section = f"<lf:goal:{goal.name}>\n{goal.content}\n</lf:goal:{goal.name}>"
+        # Directions go between "The step." header and the actual step content
+        if components.direction:
+            if len(components.direction) == 1:
+                d = components.direction[0]
+                direction_section = (
+                    f"<lf:direction:{d.name}>\n{d.content}\n</lf:direction:{d.name}>"
+                )
             else:
-                goal_parts = [
-                    f"<lf:goal:{goal.name}>\n{goal.content}\n</lf:goal:{goal.name}>"
-                    for goal in components.goals
+                direction_parts = [
+                    f"<lf:direction:{d.name}>\n{d.content}\n</lf:direction:{d.name}>"
+                    for d in components.direction
                 ]
-                goal_section = f"<lf:goals>\n{chr(10).join(goal_parts)}\n</lf:goals>"
-            parts.append(f"The step.\n\n{goal_section}\n\n{step_tag}")
+                direction_section = (
+                    f"<lf:directions>\n{chr(10).join(direction_parts)}\n</lf:directions>"
+                )
+            parts.append(f"The step.\n\n{direction_section}\n\n{step_tag}")
         else:
             parts.append(f"The step.\n\n{step_tag}")
 
@@ -881,7 +882,7 @@ def build_prompt(
     step: Optional[str] = None,
     inline: Optional[str] = None,
     run_mode: Optional[str] = None,
-    goals: Optional[list[str]] = None,
+    direction: Optional[list[Direction]] = None,
     context_config: Optional[ContextConfig] = None,
 ) -> str:
     """Build the full prompt for an LLM session."""
@@ -890,7 +891,7 @@ def build_prompt(
         step,
         inline,
         run_mode=run_mode,
-        goals=goals,
+        direction=direction,
         context_config=context_config,
     )
     return format_prompt(components)

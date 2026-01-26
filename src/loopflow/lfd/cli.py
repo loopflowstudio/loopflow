@@ -1,6 +1,6 @@
 """lfd: Loopflow daemon.
 
-Commands for managing AI coding agents.
+Commands for managing waves of autonomous work.
 """
 
 import asyncio
@@ -9,39 +9,40 @@ import socket
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 import typer
 
+from loopflow.lf.directions import list_directions, parse_list_arg
 from loopflow.lf.flows import load_flow
 from loopflow.lf.git import find_main_repo
-from loopflow.lf.goals import list_goals
 from loopflow.lf.logging import get_log_dir
-from loopflow.lfd.agent import (
-    create_agent,
-    delete_agent,
-    get_agent,
-    get_agent_by_name,
-    get_wt_from_cwd,
-    list_agents,
-    start_agent,
-    stop_agent,
-    update_agent,
-)
 from loopflow.lfd.daemon.launchd import install as launchd_install
 from loopflow.lfd.daemon.launchd import is_running
 from loopflow.lfd.daemon.launchd import uninstall as launchd_uninstall
 from loopflow.lfd.daemon.server import run_server
-from loopflow.lfd.flow_run import list_runs_for_agent
+from loopflow.lfd.flow_run import list_runs_for_wave
 from loopflow.lfd.git_hooks import (
     hooks_status,
     install_hooks,
     uninstall_hooks,
 )
-from loopflow.lfd.models import Agent, AgentStatus, MergeMode, Stimulus
+from loopflow.lfd.models import MergeMode, Stimulus, Wave, WaveStatus
+from loopflow.lfd.wave import (
+    create_wave,
+    delete_wave,
+    get_wave,
+    get_wave_by_name,
+    get_wt_from_cwd,
+    list_waves,
+    start_wave,
+    stop_wave,
+    update_wave,
+)
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 
-app = typer.Typer(help="Loopflow daemon - AI coding agents")
+app = typer.Typer(help="Loopflow daemon - waves of autonomous work")
 
 
 def _use_color() -> bool:
@@ -70,31 +71,31 @@ def _colors() -> dict[str, str]:
     }
 
 
-def _status_color(status: AgentStatus, c: dict[str, str]) -> str:
-    if status == AgentStatus.RUNNING:
+def _status_color(status: WaveStatus, c: dict[str, str]) -> str:
+    if status == WaveStatus.RUNNING:
         return c["green"]
-    elif status == AgentStatus.ERROR:
+    elif status == WaveStatus.ERROR:
         return c["red"]
-    elif status == AgentStatus.WAITING:
+    elif status == WaveStatus.WAITING:
         return c["yellow"]
     return c["dim"]
 
 
-def _agent_display(agent: Agent) -> str:
-    """Return area, flow, and goal for display."""
-    return f"{agent.area_display} [{agent.flow}] [{agent.goal_display}]"
+def _wave_display(wave: Wave) -> str:
+    """Return area, flow, and direction for display."""
+    return f"{wave.area_display} [{wave.flow}] [{wave.direction_display}]"
 
 
-def _parse_goals(goals: list[str] | None) -> list[str]:
-    """Parse goal list, handling comma-separated values.
+def _parse_directions(directions: list[str] | None) -> list[str]:
+    """Parse direction list, handling comma-separated values.
 
-    Accepts both: -g g1 -g g2 and -g g1,g2
+    Accepts both: -d d1 -d d2 and -d d1,d2
     """
-    if not goals:
+    if not directions:
         return ["default"]
     result = []
-    for g in goals:
-        result.extend(g.split(","))
+    for d in directions:
+        result.extend(d.split(","))
     return [x.strip() for x in result if x.strip()]
 
 
@@ -157,103 +158,103 @@ def uninstall():
 @app.command()
 def start(
     areas: list[str] = typer.Argument(None, help="Areas to start (all idle if omitted)"),
-    all_agents: bool = typer.Option(False, "--all", help="Include waiting agents"),
+    all_waves: bool = typer.Option(False, "--all", help="Include waiting waves"),
 ):
-    """Start multiple agents in parallel.
+    """Start multiple waves in parallel.
 
-    Without arguments, starts all idle agents. With --all, also starts waiting agents.
+    Without arguments, starts all idle waves. With --all, also starts waiting waves.
     """
     c = _colors()
     repo = get_wt_from_cwd()
 
-    # Get agents to start
+    # Get waves to start
     if areas:
         # Start specific areas
-        agents_to_start = []
+        waves_to_start = []
         for area in areas:
-            agent = None
-            for ag in list_agents(repo=repo):
-                if area in ag.area:
-                    agent = ag
+            wave = None
+            for w in list_waves(repo=repo):
+                if area in w.area:
+                    wave = w
                     break
-            if not agent:
+            if not wave:
                 typer.echo(
-                    f"{c['yellow']}Warning:{c['reset']} Agent for '{area}' not found, skipping",
+                    f"{c['yellow']}Warning:{c['reset']} Wave for '{area}' not found, skipping",
                     err=True,
                 )
             else:
-                agents_to_start.append(agent)
+                waves_to_start.append(wave)
     else:
-        # Start all eligible agents
-        agents_to_start = []
-        for agent in list_agents(repo=repo):
-            if agent.status == AgentStatus.IDLE:
-                agents_to_start.append(agent)
-            elif all_agents and agent.status == AgentStatus.WAITING:
-                agents_to_start.append(agent)
+        # Start all eligible waves
+        waves_to_start = []
+        for wave in list_waves(repo=repo):
+            if wave.status == WaveStatus.IDLE:
+                waves_to_start.append(wave)
+            elif all_waves and wave.status == WaveStatus.WAITING:
+                waves_to_start.append(wave)
 
-    if not agents_to_start:
-        typer.echo(f"{c['dim']}No agents to start{c['reset']}")
+    if not waves_to_start:
+        typer.echo(f"{c['dim']}No waves to start{c['reset']}")
         return
 
-    # Start each agent
+    # Start each wave
     started = 0
-    for agent in agents_to_start:
-        result = start_agent(agent.id)
+    for wave in waves_to_start:
+        result = start_wave(wave.id)
         if result:
-            msg = f"{c['green']}Started{c['reset']} {c['bold']}{agent.area_display}{c['reset']}"
-            typer.echo(f"{msg} ({agent.short_id()})")
+            msg = f"{c['green']}Started{c['reset']} {c['bold']}{wave.area_display}{c['reset']}"
+            typer.echo(f"{msg} ({wave.short_id()})")
             started += 1
         elif result.reason == "already_running":
-            typer.echo(f"{c['dim']}Already running:{c['reset']} {agent.area_display}")
+            typer.echo(f"{c['dim']}Already running:{c['reset']} {wave.area_display}")
         elif result.reason == "waiting":
-            msg = f"{c['yellow']}Waiting:{c['reset']} {agent.area_display}"
+            msg = f"{c['yellow']}Waiting:{c['reset']} {wave.area_display}"
             typer.echo(f"{msg} ({result.outstanding} outstanding)")
         else:
-            typer.echo(f"{c['red']}Failed:{c['reset']} {agent.area_display}")
+            typer.echo(f"{c['red']}Failed:{c['reset']} {wave.area_display}")
 
-    typer.echo(f"\nStarted {started}/{len(agents_to_start)} agents")
-
-
-# Agent commands
+    typer.echo(f"\nStarted {started}/{len(waves_to_start)} waves")
 
 
-def _resolve_agent(name_or_id: str, repo: Path, c: dict[str, str]) -> Agent | None:
-    """Resolve agent by name or ID. Returns None if not found."""
+# Wave commands
+
+
+def _resolve_wave(name_or_id: str, repo: Path, c: dict[str, str]) -> Wave | None:
+    """Resolve wave by name or ID. Returns None if not found."""
     # Try by name first
-    agent = get_agent_by_name(name_or_id, repo)
-    if agent:
-        return agent
+    wave = get_wave_by_name(name_or_id, repo)
+    if wave:
+        return wave
     # Then try by ID
-    return get_agent(name_or_id)
+    return get_wave(name_or_id)
 
 
-def _validate_agent_for_run(agent: Agent, c: dict[str, str]) -> None:
-    """Validate agent has required config for running. Exits on error."""
-    if agent.area is None:
+def _validate_wave_for_run(wave: Wave, c: dict[str, str]) -> None:
+    """Validate wave has required config for running. Exits on error."""
+    if wave.area is None:
         typer.echo(
-            f"{c['red']}Error:{c['reset']} Agent '{agent.name}' has no area configured",
+            f"{c['red']}Error:{c['reset']} Wave '{wave.name}' has no area configured",
             err=True,
         )
-        typer.echo(f"Set area with: lfd area {agent.name} <path>")
+        typer.echo(f"Set area with: lfd area {wave.name} <path>")
         raise typer.Exit(1)
 
 
 @app.command()
 def create(
-    name: str = typer.Argument(None, help="Agent name (generated if omitted)"),
+    name: str = typer.Argument(None, help="Wave name (generated if omitted)"),
 ):
-    """Create a new agent.
+    """Create a new wave.
 
-    Creates an agent with the given name (or generates one).
-    Configure with `lfd area`, `lfd goal`, `lfd flow` before running.
+    Creates a wave with the given name (or generates one).
+    Configure with `lfd area`, `lfd direction`, `lfd flow` before running.
 
     Examples:
         lfd create                    # create with generated name
         lfd create swift-falcon       # create with specific name
     """
     c = _colors()
-    # Use main repo (agents are shared across worktrees)
+    # Use main repo (waves are shared across worktrees)
     repo = find_main_repo() or get_wt_from_cwd()
     if not repo:
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
@@ -261,32 +262,32 @@ def create(
 
     # Check if name already exists
     if name:
-        existing = get_agent_by_name(name, repo)
+        existing = get_wave_by_name(name, repo)
         if existing:
-            typer.echo(f"Agent '{name}' already exists ({existing.short_id()})")
+            typer.echo(f"Wave '{name}' already exists ({existing.short_id()})")
             return
 
-    agent = create_agent(repo=repo, name=name)
+    wave = create_wave(repo=repo, name=name)
 
     typer.echo(
-        f"{c['green']}Created{c['reset']} {c['bold']}{agent.name}{c['reset']} ({agent.short_id()})"
+        f"{c['green']}Created{c['reset']} {c['bold']}{wave.name}{c['reset']} ({wave.short_id()})"
     )
     typer.echo(f"  Repo: {repo}")
     typer.echo("")
     typer.echo("Configure before running:")
-    typer.echo(f"  lfd area {agent.name} src/")
-    typer.echo(f'  lfd goal {agent.name} "fix lint errors"')
-    typer.echo(f"  lfd flow {agent.name} ship")
+    typer.echo(f"  lfd area {wave.name} src/")
+    typer.echo(f'  lfd direction {wave.name} "fix lint errors"')
+    typer.echo(f"  lfd flow {wave.name} ship")
     typer.echo("")
-    typer.echo(f"Then run: lfd loop {agent.name}")
+    typer.echo(f"Then run: lfd loop {wave.name}")
 
 
 @app.command()
 def area(
-    name: str = typer.Argument(..., help="Agent name or ID"),
+    name: str = typer.Argument(..., help="Wave name or ID"),
     paths: list[str] = typer.Argument(..., help="Area paths (e.g., src/, swift/)"),
 ):
-    """Set the working area for an agent.
+    """Set the working area for a wave.
 
     Examples:
         lfd area swift-falcon src/
@@ -298,29 +299,29 @@ def area(
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
 
-    agent = _resolve_agent(name, repo, c)
-    if not agent:
-        typer.echo(f"{c['red']}Error:{c['reset']} Agent '{name}' not found", err=True)
+    wave = _resolve_wave(name, repo, c)
+    if not wave:
+        typer.echo(f"{c['red']}Error:{c['reset']} Wave '{name}' not found", err=True)
         raise typer.Exit(1)
 
-    updated = update_agent(agent.id, area=paths)
+    updated = update_wave(wave.id, area=paths)
     if updated:
         typer.echo(f"Set area: {', '.join(paths)}")
     else:
-        typer.echo(f"{c['red']}Error:{c['reset']} Failed to update agent", err=True)
+        typer.echo(f"{c['red']}Error:{c['reset']} Failed to update wave", err=True)
         raise typer.Exit(1)
 
 
 @app.command()
-def goal(
-    name: str = typer.Argument(..., help="Agent name or ID"),
-    goal_text: str = typer.Argument(..., help="Goal (inline text or preset name)"),
+def direction(
+    name: str = typer.Argument(..., help="Wave name or ID"),
+    direction_text: str = typer.Argument(..., help="Direction (inline text or preset name)"),
 ):
-    """Set the goal for an agent.
+    """Set the direction for a wave.
 
     Examples:
-        lfd goal swift-falcon "fix lint errors"
-        lfd goal swift-falcon product-engineer
+        lfd direction swift-falcon "fix lint errors"
+        lfd direction swift-falcon product-engineer
     """
     c = _colors()
     repo = get_wt_from_cwd()
@@ -328,25 +329,25 @@ def goal(
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
 
-    agent = _resolve_agent(name, repo, c)
-    if not agent:
-        typer.echo(f"{c['red']}Error:{c['reset']} Agent '{name}' not found", err=True)
+    wave = _resolve_wave(name, repo, c)
+    if not wave:
+        typer.echo(f"{c['red']}Error:{c['reset']} Wave '{name}' not found", err=True)
         raise typer.Exit(1)
 
-    updated = update_agent(agent.id, goal=[goal_text])
+    updated = update_wave(wave.id, direction=[direction_text])
     if updated:
-        typer.echo(f"Set goal: {goal_text}")
+        typer.echo(f"Set direction: {direction_text}")
     else:
-        typer.echo(f"{c['red']}Error:{c['reset']} Failed to update agent", err=True)
+        typer.echo(f"{c['red']}Error:{c['reset']} Failed to update wave", err=True)
         raise typer.Exit(1)
 
 
 @app.command("flow")
 def set_flow(
-    name: str = typer.Argument(..., help="Agent name or ID"),
+    name: str = typer.Argument(..., help="Wave name or ID"),
     flow_name: str = typer.Argument(..., help="Flow name (from .lf/flows/)"),
 ):
-    """Set the flow for an agent.
+    """Set the flow for a wave.
 
     Examples:
         lfd flow swift-falcon ship
@@ -358,27 +359,27 @@ def set_flow(
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
 
-    agent = _resolve_agent(name, repo, c)
-    if not agent:
-        typer.echo(f"{c['red']}Error:{c['reset']} Agent '{name}' not found", err=True)
+    wave = _resolve_wave(name, repo, c)
+    if not wave:
+        typer.echo(f"{c['red']}Error:{c['reset']} Wave '{name}' not found", err=True)
         raise typer.Exit(1)
 
     # Validate flow exists
     flow_name = _validate_flow(repo, flow_name, c)
 
-    updated = update_agent(agent.id, flow=flow_name)
+    updated = update_wave(wave.id, flow=flow_name)
     if updated:
         typer.echo(f"Set flow: {flow_name}")
     else:
-        typer.echo(f"{c['red']}Error:{c['reset']} Failed to update agent", err=True)
+        typer.echo(f"{c['red']}Error:{c['reset']} Failed to update wave", err=True)
         raise typer.Exit(1)
 
 
 @app.command()
 def show(
-    name: str = typer.Argument(..., help="Agent name or ID"),
+    name: str = typer.Argument(..., help="Wave name or ID"),
 ):
-    """Show details for an agent.
+    """Show details for a wave.
 
     Examples:
         lfd show swift-falcon
@@ -386,70 +387,72 @@ def show(
     c = _colors()
     repo = get_wt_from_cwd()
 
-    agent = _resolve_agent(name, repo, c) if repo else get_agent(name)
-    if not agent:
-        typer.echo(f"{c['red']}Error:{c['reset']} Agent '{name}' not found", err=True)
+    wave = _resolve_wave(name, repo, c) if repo else get_wave(name)
+    if not wave:
+        typer.echo(f"{c['red']}Error:{c['reset']} Wave '{name}' not found", err=True)
         raise typer.Exit(1)
 
-    _print_agent_detail(agent, c)
+    _print_wave_detail(wave, c)
 
 
 @app.command("list")
 def list_cmd():
-    """List all agents.
+    """List all waves.
 
     Examples:
         lfd list
     """
     c = _colors()
-    # Use main repo to find agents (worktrees share agents with their main repo)
+    # Use main repo to find waves (worktrees share waves with their main repo)
     repo = find_main_repo() or get_wt_from_cwd()
 
-    agents = list_agents(repo=repo)
-    if not agents:
-        typer.echo(f"{c['dim']}No agents configured{c['reset']}")
-        typer.echo("Create an agent with: lfd create")
+    waves = list_waves(repo=repo)
+    if not waves:
+        typer.echo(f"{c['dim']}No waves configured{c['reset']}")
+        typer.echo("Create a wave with: lfd create")
         return
 
     typer.echo(f"{'NAME':<20} {'AREA':<20} {'STATUS':<10} {'STIMULUS':<12} ID")
     typer.echo("-" * 75)
 
-    for agent in agents:
-        status_c = _status_color(agent.status, c)
-        area_str = agent.area_display if agent.area else f"{c['dim']}(not set){c['reset']}"
+    for wave in waves:
+        status_c = _status_color(wave.status, c)
+        area_str = wave.area_display if wave.area else f"{c['dim']}(not set){c['reset']}"
         if len(area_str) > 20:
             area_str = area_str[:17] + "..."
 
-        name_str = agent.name
+        name_str = wave.name
         if len(name_str) > 20:
             name_str = name_str[:17] + "..."
 
         typer.echo(
             f"{name_str:<20} {area_str:<20} "
-            f"{status_c}{agent.status.value:<10}{c['reset']} "
-            f"{str(agent.stimulus):<12} {agent.short_id()}"
+            f"{status_c}{wave.status.value:<10}{c['reset']} "
+            f"{str(wave.stimulus):<12} {wave.short_id()}"
         )
 
 
 @app.command()
 def loop(
-    name: str = typer.Argument(..., help="Agent name or ID"),
-    area_opt: str = typer.Option(None, "--area", "-a", help="Set area (creates agent if needed)"),
-    goal_opt: str = typer.Option(None, "--goal", "-g", help="Set goal"),
+    name: str = typer.Argument(..., help="Wave name or ID"),
+    area_opt: str = typer.Option(None, "--area", "-a", help="Set area (creates wave if needed)"),
+    direction_opt: Optional[list[str]] = typer.Option(
+        None, "-d", "-D", "--direction", help="Direction (repeatable, or comma-separated)"
+    ),
     flow_opt: str = typer.Option(None, "--flow", help="Set flow"),
     limit: int = typer.Option(None, "-l", "--limit", help="PR limit override"),
     merge_mode: str = typer.Option(None, "--merge-mode", help="Merge mode: pr or land"),
     foreground: bool = typer.Option(False, "-f", "--foreground", help="Run in foreground"),
 ):
-    """Start a continuous agent loop (loop stimulus).
+    """Start a continuous wave loop (loop stimulus).
 
-    Agent name is required. Creates the agent if it doesn't exist and --area is provided.
+    Wave name is required. Creates the wave if it doesn't exist and --area is provided.
     Validates that area is configured before starting.
 
     Examples:
-        lfd loop swift-falcon                             # run existing agent
-        lfd loop swift-falcon --area src/                 # create + set area + run
-        lfd loop swift-falcon --area src/ --goal "fix lint"
+        lfd loop swift-falcon                                   # run existing wave
+        lfd loop swift-falcon --area src/                       # create + set area + run
+        lfd loop swift-falcon --area src/ -d concise -d fast
     """
     c = _colors()
     repo = get_wt_from_cwd()
@@ -457,28 +460,29 @@ def loop(
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
 
-    # Get or create agent
-    agent = _resolve_agent(name, repo, c)
-    if not agent:
+    # Get or create wave
+    wave = _resolve_wave(name, repo, c)
+    if not wave:
         if area_opt:
-            # Create new agent with options
-            agent = create_agent(repo=repo, name=name)
+            # Create new wave with options
+            wave = create_wave(repo=repo, name=name)
         else:
-            typer.echo(f"{c['red']}Error:{c['reset']} Agent '{name}' not found", err=True)
+            typer.echo(f"{c['red']}Error:{c['reset']} Wave '{name}' not found", err=True)
             typer.echo(f"Create with: lfd create {name}")
             raise typer.Exit(1)
 
     # Apply options if provided
     if area_opt:
-        update_agent(agent.id, area=[area_opt])
-        agent.area = [area_opt]
-    if goal_opt:
-        update_agent(agent.id, goal=[goal_opt])
-        agent.goal = [goal_opt]
+        update_wave(wave.id, area=[area_opt])
+        wave.area = [area_opt]
+    if direction_opt:
+        parsed_direction = parse_list_arg(direction_opt)
+        update_wave(wave.id, direction=parsed_direction)
+        wave.direction = parsed_direction
     if flow_opt:
         flow_opt = _validate_flow(repo, flow_opt, c)
-        update_agent(agent.id, flow=flow_opt)
-        agent.flow = flow_opt
+        update_wave(wave.id, flow=flow_opt)
+        wave.flow = flow_opt
 
     # Validate merge_mode if specified
     if merge_mode and merge_mode not in ("pr", "land"):
@@ -486,64 +490,66 @@ def loop(
         raise typer.Exit(1)
 
     if limit is not None:
-        update_agent(agent.id, pr_limit=limit)
+        update_wave(wave.id, pr_limit=limit)
     if merge_mode:
-        update_agent(agent.id, merge_mode=MergeMode(merge_mode))
+        update_wave(wave.id, merge_mode=MergeMode(merge_mode))
 
     # Update stimulus to loop
-    update_agent(agent.id, stimulus=Stimulus("loop"))
+    update_wave(wave.id, stimulus=Stimulus("loop"))
 
-    # Validate agent is configured
-    _validate_agent_for_run(agent, c)
+    # Validate wave is configured
+    _validate_wave_for_run(wave, c)
 
     # Validate flow exists
-    _validate_flow(repo, agent.flow, c)
+    _validate_flow(repo, wave.flow, c)
 
-    # Refresh agent after updates
-    agent = get_agent(agent.id)
+    # Refresh wave after updates
+    wave = get_wave(wave.id)
 
     # Start it
-    result = start_agent(agent.id, foreground=foreground)
+    result = start_wave(wave.id, foreground=foreground)
     if result:
         if foreground:
-            msg = f"{c['green']}Completed{c['reset']} loop {c['bold']}{agent.name}{c['reset']}"
-            typer.echo(f"{msg} ({agent.short_id()})")
+            msg = f"{c['green']}Completed{c['reset']} loop {c['bold']}{wave.name}{c['reset']}"
+            typer.echo(f"{msg} ({wave.short_id()})")
         else:
-            msg = f"{c['green']}Started{c['reset']} loop {c['bold']}{agent.name}{c['reset']}"
-            typer.echo(f"{msg} ({agent.short_id()})")
+            msg = f"{c['green']}Started{c['reset']} loop {c['bold']}{wave.name}{c['reset']}"
+            typer.echo(f"{msg} ({wave.short_id()})")
             typer.echo(f"  Repo: {repo}")
-            typer.echo(f"  Area: {agent.area_display}")
-            typer.echo(f"  Goals: {agent.goal_display}")
-            typer.echo(f"  Flow: {agent.flow}")
-            typer.echo(f"  PR limit: {agent.pr_limit}")
+            typer.echo(f"  Area: {wave.area_display}")
+            typer.echo(f"  Directions: {wave.direction_display}")
+            typer.echo(f"  Flow: {wave.flow}")
+            typer.echo(f"  PR limit: {wave.pr_limit}")
     elif result.reason == "already_running":
-        typer.echo(f"Agent already running (PID {agent.pid})")
+        typer.echo(f"Wave already running (PID {wave.pid})")
         raise typer.Exit(1)
     elif result.reason == "waiting":
         msg = f"{c['yellow']}Waiting:{c['reset']} {result.outstanding} outstanding PRs"
-        typer.echo(f"{msg} (limit {agent.pr_limit})")
+        typer.echo(f"{msg} (limit {wave.pr_limit})")
         typer.echo("Run 'lfops land --squash' to land work")
         raise typer.Exit(0)
     else:
-        typer.echo(f"{c['red']}Error:{c['reset']} Failed to start agent", err=True)
+        typer.echo(f"{c['red']}Error:{c['reset']} Failed to start wave", err=True)
         raise typer.Exit(1)
 
 
 @app.command()
 def run(
-    name: str = typer.Argument(..., help="Agent name or ID"),
-    area_opt: str = typer.Option(None, "--area", "-a", help="Set area (creates agent if needed)"),
-    goal_opt: str = typer.Option(None, "--goal", "-g", help="Set goal"),
+    name: str = typer.Argument(..., help="Wave name or ID"),
+    area_opt: str = typer.Option(None, "--area", "-a", help="Set area (creates wave if needed)"),
+    direction_opt: Optional[list[str]] = typer.Option(
+        None, "-d", "-D", "--direction", help="Direction (repeatable, or comma-separated)"
+    ),
     flow_opt: str = typer.Option(None, "--flow", help="Set flow"),
 ):
-    """Run an agent once (once stimulus - single run).
+    """Run a wave once (once stimulus - single run).
 
-    Agent name is required. Creates the agent if it doesn't exist and --area is provided.
+    Wave name is required. Creates the wave if it doesn't exist and --area is provided.
 
     Examples:
-        lfd run swift-falcon                             # run existing agent once
-        lfd run swift-falcon --area src/                 # create + set area + run once
-        lfd run swift-falcon --area src/ --goal "fix lint"
+        lfd run swift-falcon                                   # run existing wave once
+        lfd run swift-falcon --area src/                       # create + set area + run once
+        lfd run swift-falcon --area src/ -d concise
     """
     c = _colors()
     repo = get_wt_from_cwd()
@@ -551,45 +557,46 @@ def run(
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
 
-    # Get or create agent
-    agent = _resolve_agent(name, repo, c)
-    if not agent:
+    # Get or create wave
+    wave = _resolve_wave(name, repo, c)
+    if not wave:
         if area_opt:
-            agent = create_agent(repo=repo, name=name)
+            wave = create_wave(repo=repo, name=name)
         else:
-            typer.echo(f"{c['red']}Error:{c['reset']} Agent '{name}' not found", err=True)
+            typer.echo(f"{c['red']}Error:{c['reset']} Wave '{name}' not found", err=True)
             typer.echo(f"Create with: lfd create {name}")
             raise typer.Exit(1)
 
     # Apply options if provided
     if area_opt:
-        update_agent(agent.id, area=[area_opt])
-        agent.area = [area_opt]
-    if goal_opt:
-        update_agent(agent.id, goal=[goal_opt])
-        agent.goal = [goal_opt]
+        update_wave(wave.id, area=[area_opt])
+        wave.area = [area_opt]
+    if direction_opt:
+        parsed_direction = parse_list_arg(direction_opt)
+        update_wave(wave.id, direction=parsed_direction)
+        wave.direction = parsed_direction
     if flow_opt:
         flow_opt = _validate_flow(repo, flow_opt, c)
-        update_agent(agent.id, flow=flow_opt)
-        agent.flow = flow_opt
+        update_wave(wave.id, flow=flow_opt)
+        wave.flow = flow_opt
 
     # Update stimulus to once
-    update_agent(agent.id, stimulus=Stimulus("once"))
+    update_wave(wave.id, stimulus=Stimulus("once"))
 
-    # Validate agent is configured
-    _validate_agent_for_run(agent, c)
+    # Validate wave is configured
+    _validate_wave_for_run(wave, c)
 
     # Validate flow exists
-    _validate_flow(repo, agent.flow, c)
+    _validate_flow(repo, wave.flow, c)
 
-    # Refresh agent after updates
-    agent = get_agent(agent.id)
+    # Refresh wave after updates
+    wave = get_wave(wave.id)
 
     # Start it in foreground (runs once)
-    result = start_agent(agent.id, foreground=True)
+    result = start_wave(wave.id, foreground=True)
 
     if result:
-        msg = f"{c['green']}Completed{c['reset']} run {c['bold']}{agent.name}{c['reset']}"
+        msg = f"{c['green']}Completed{c['reset']} run {c['bold']}{wave.name}{c['reset']}"
         typer.echo(msg)
     else:
         typer.echo(f"{c['red']}Error:{c['reset']} Failed to run", err=True)
@@ -598,10 +605,12 @@ def run(
 
 @app.command()
 def watch(
-    name: str = typer.Argument(..., help="Agent name or ID"),
-    area_opt: str = typer.Option(None, "--area", "-a", help="Set area (creates agent if needed)"),
+    name: str = typer.Argument(..., help="Wave name or ID"),
+    area_opt: str = typer.Option(None, "--area", "-a", help="Set area (creates wave if needed)"),
     path_opt: str = typer.Option(None, "--path", "-p", help="Watch path (defaults to area)"),
-    goal_opt: str = typer.Option(None, "--goal", "-g", help="Set goal"),
+    direction_opt: Optional[list[str]] = typer.Option(
+        None, "-d", "-D", "--direction", help="Direction (repeatable, or comma-separated)"
+    ),
     flow_opt: str = typer.Option(None, "--flow", help="Set flow"),
 ):
     """Watch for changes on origin/main (watch stimulus).
@@ -610,7 +619,7 @@ def watch(
     Watch path defaults to area but can be overridden.
 
     Examples:
-        lfd watch swift-falcon                            # watch existing agent
+        lfd watch swift-falcon                            # watch existing wave
         lfd watch swift-falcon --area src/                # create + set area + watch
         lfd watch swift-falcon --area src/ --path tests/  # watch tests/, work on src/
     """
@@ -620,58 +629,61 @@ def watch(
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
 
-    # Get or create agent
-    agent = _resolve_agent(name, repo, c)
-    if not agent:
+    # Get or create wave
+    wave = _resolve_wave(name, repo, c)
+    if not wave:
         if area_opt:
-            agent = create_agent(repo=repo, name=name)
+            wave = create_wave(repo=repo, name=name)
         else:
-            typer.echo(f"{c['red']}Error:{c['reset']} Agent '{name}' not found", err=True)
+            typer.echo(f"{c['red']}Error:{c['reset']} Wave '{name}' not found", err=True)
             typer.echo(f"Create with: lfd create {name}")
             raise typer.Exit(1)
 
     # Apply options if provided
     if area_opt:
-        update_agent(agent.id, area=[area_opt])
-        agent.area = [area_opt]
-    if goal_opt:
-        update_agent(agent.id, goal=[goal_opt])
-        agent.goal = [goal_opt]
+        update_wave(wave.id, area=[area_opt])
+        wave.area = [area_opt]
+    if direction_opt:
+        parsed_direction = parse_list_arg(direction_opt)
+        update_wave(wave.id, direction=parsed_direction)
+        wave.direction = parsed_direction
     if flow_opt:
         flow_opt = _validate_flow(repo, flow_opt, c)
-        update_agent(agent.id, flow=flow_opt)
-        agent.flow = flow_opt
+        update_wave(wave.id, flow=flow_opt)
+        wave.flow = flow_opt
 
     # Update stimulus to watch
-    update_agent(agent.id, stimulus=Stimulus("watch"))
+    update_wave(wave.id, stimulus=Stimulus("watch"))
 
-    # Validate agent is configured
-    _validate_agent_for_run(agent, c)
+    # Validate wave is configured
+    _validate_wave_for_run(wave, c)
 
     # Validate flow exists
-    _validate_flow(repo, agent.flow, c)
+    _validate_flow(repo, wave.flow, c)
 
-    # Refresh agent after updates
-    agent = get_agent(agent.id)
+    # Refresh wave after updates
+    wave = get_wave(wave.id)
 
-    watch_path = path_opt or agent.area_display
-    msg = f"{c['green']}Watching{c['reset']} {c['bold']}{agent.name}{c['reset']}"
-    typer.echo(f"{msg} ({agent.short_id()})")
-    typer.echo(f"  Area: {agent.area_display}")
-    typer.echo(f"  Goals: {agent.goal_display}")
-    typer.echo(f"  Flow: {agent.flow}")
+    watch_path = path_opt or wave.area_display
+    msg = f"{c['green']}Watching{c['reset']} {c['bold']}{wave.name}{c['reset']}"
+    typer.echo(f"{msg} ({wave.short_id()})")
+    typer.echo(f"  Area: {wave.area_display}")
+    typer.echo(f"  Directions: {wave.direction_display}")
+    typer.echo(f"  Flow: {wave.flow}")
     typer.echo(f"  Activates when {watch_path} changes on main")
 
 
 @app.command("cron")
 def cron_cmd(
-    name: str = typer.Argument(..., help="Agent name or ID"),
+    name: str = typer.Argument(..., help="Wave name or ID"),
     cron_expr: str = typer.Argument(..., help="Cron expression (e.g., '0 9 * * *')"),
-    area_opt: str = typer.Option(None, "--area", "-a", help="Set area (creates agent if needed)"),
-    goal_opt: str = typer.Option(None, "--goal", "-g", help="Set goal"),
+    area_opt: str = typer.Option(None, "--area", "-a", help="Set area (creates wave if needed)"),
+    direction_opt: Optional[list[str]] = typer.Option(
+        None, "-d", "-D", "--direction", help="Direction (repeatable, or comma-separated)"
+    ),
     flow_opt: str = typer.Option(None, "--flow", help="Set flow"),
 ):
-    """Schedule an agent to run on cron (cron stimulus).
+    """Schedule a wave to run on cron (cron stimulus).
 
     Examples:
         lfd cron swift-falcon "0 9 * * *"                # run at 9am daily
@@ -684,45 +696,46 @@ def cron_cmd(
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
 
-    # Get or create agent
-    agent = _resolve_agent(name, repo, c)
-    if not agent:
+    # Get or create wave
+    wave = _resolve_wave(name, repo, c)
+    if not wave:
         if area_opt:
-            agent = create_agent(repo=repo, name=name)
+            wave = create_wave(repo=repo, name=name)
         else:
-            typer.echo(f"{c['red']}Error:{c['reset']} Agent '{name}' not found", err=True)
+            typer.echo(f"{c['red']}Error:{c['reset']} Wave '{name}' not found", err=True)
             typer.echo(f"Create with: lfd create {name}")
             raise typer.Exit(1)
 
     # Apply options if provided
     if area_opt:
-        update_agent(agent.id, area=[area_opt])
-        agent.area = [area_opt]
-    if goal_opt:
-        update_agent(agent.id, goal=[goal_opt])
-        agent.goal = [goal_opt]
+        update_wave(wave.id, area=[area_opt])
+        wave.area = [area_opt]
+    if direction_opt:
+        parsed_direction = parse_list_arg(direction_opt)
+        update_wave(wave.id, direction=parsed_direction)
+        wave.direction = parsed_direction
     if flow_opt:
         flow_opt = _validate_flow(repo, flow_opt, c)
-        update_agent(agent.id, flow=flow_opt)
-        agent.flow = flow_opt
+        update_wave(wave.id, flow=flow_opt)
+        wave.flow = flow_opt
 
     # Update stimulus to cron
-    update_agent(agent.id, stimulus=Stimulus("cron", cron=cron_expr))
+    update_wave(wave.id, stimulus=Stimulus("cron", cron=cron_expr))
 
-    # Validate agent is configured
-    _validate_agent_for_run(agent, c)
+    # Validate wave is configured
+    _validate_wave_for_run(wave, c)
 
     # Validate flow exists
-    _validate_flow(repo, agent.flow, c)
+    _validate_flow(repo, wave.flow, c)
 
-    # Refresh agent after updates
-    agent = get_agent(agent.id)
+    # Refresh wave after updates
+    wave = get_wave(wave.id)
 
-    msg = f"{c['green']}Scheduled{c['reset']} {c['bold']}{agent.name}{c['reset']}"
-    typer.echo(f"{msg} ({agent.short_id()})")
-    typer.echo(f"  Area: {agent.area_display}")
-    typer.echo(f"  Goals: {agent.goal_display}")
-    typer.echo(f"  Flow: {agent.flow}")
+    msg = f"{c['green']}Scheduled{c['reset']} {c['bold']}{wave.name}{c['reset']}"
+    typer.echo(f"{msg} ({wave.short_id()})")
+    typer.echo(f"  Area: {wave.area_display}")
+    typer.echo(f"  Directions: {wave.direction_display}")
+    typer.echo(f"  Flow: {wave.flow}")
     typer.echo(f"  Cron: {cron_expr}")
 
 
@@ -786,25 +799,25 @@ def _format_uptime(seconds: int) -> str:
 
 @app.command()
 def status(
-    agent_id: str = typer.Argument(None, help="Agent ID (optional, shows all if omitted)"),
-    ids_only: bool = typer.Option(False, "--ids", help="Print agent IDs only (for scripting)"),
+    wave_id: str = typer.Argument(None, help="Wave ID (optional, shows all if omitted)"),
+    ids_only: bool = typer.Option(False, "--ids", help="Print wave IDs only (for scripting)"),
 ):
-    """Show status of agents."""
+    """Show status of waves."""
     c = _colors()
 
     # Machine-readable output for scripting
     if ids_only:
-        for agent in list_agents():
-            typer.echo(agent.id)
+        for wave in list_waves():
+            typer.echo(wave.id)
         return
 
-    if agent_id:
-        # Try to find the agent
-        agent = get_agent(agent_id)
-        if not agent:
-            typer.echo(f"{c['red']}Error:{c['reset']} Agent '{agent_id}' not found", err=True)
+    if wave_id:
+        # Try to find the wave
+        wave = get_wave(wave_id)
+        if not wave:
+            typer.echo(f"{c['red']}Error:{c['reset']} Wave '{wave_id}' not found", err=True)
             raise typer.Exit(1)
-        _print_agent_detail(agent, c)
+        _print_wave_detail(wave, c)
     else:
         # Show daemon health
         health = _get_daemon_health()
@@ -836,47 +849,47 @@ def status(
             )
             typer.echo("")
 
-        agents = list_agents()
-        if not agents:
-            typer.echo(f"{c['dim']}No agents configured{c['reset']}")
-            typer.echo("Start an agent with: lfd loop <flow> <area>")
+        waves = list_waves()
+        if not waves:
+            typer.echo(f"{c['dim']}No waves configured{c['reset']}")
+            typer.echo("Start a wave with: lfd loop <flow> <area>")
             return
 
         typer.echo(f"{'ID':<9} {'STIMULUS':<12} {'AREA':<30} {'STATUS':<10} {'ITER':<6} REPO")
         typer.echo("-" * 95)
 
-        for agent in agents:
-            status_c = _status_color(agent.status, c)
-            display_str = _agent_display(agent)
+        for wave in waves:
+            status_c = _status_color(wave.status, c)
+            display_str = _wave_display(wave)
             if len(display_str) > 30:
                 display_str = display_str[:27] + "..."
 
-            repo_short = str(agent.repo).replace(str(Path.home()), "~")
+            repo_short = str(wave.repo).replace(str(Path.home()), "~")
             if len(repo_short) > 20:
                 repo_short = "..." + repo_short[-17:]
 
             typer.echo(
-                f"{agent.short_id():<9} {str(agent.stimulus):<12} {display_str:<30} "
-                f"{status_c}{agent.status.value:<10}{c['reset']} "
-                f"{agent.iteration:<6} {repo_short}"
+                f"{wave.short_id():<9} {str(wave.stimulus):<12} {display_str:<30} "
+                f"{status_c}{wave.status.value:<10}{c['reset']} "
+                f"{wave.iteration:<6} {repo_short}"
             )
 
 
-def _print_agent_detail(agent: Agent, c: dict[str, str]) -> None:
-    """Print detailed info for an agent."""
-    status_c = _status_color(agent.status, c)
+def _print_wave_detail(wave: Wave, c: dict[str, str]) -> None:
+    """Print detailed info for a wave."""
+    status_c = _status_color(wave.status, c)
 
-    typer.echo(f"{c['bold']}{agent.area_display}{c['reset']} ({agent.short_id()})")
-    typer.echo(f"  Stimulus: {agent.stimulus}")
-    typer.echo(f"  Status: {status_c}{agent.status.value}{c['reset']}")
-    typer.echo(f"  Repo: {agent.repo}")
-    typer.echo(f"  Main branch: {agent.main_branch}")
-    typer.echo(f"  Goals: {agent.goal_display}")
-    typer.echo(f"  Flow: {agent.flow}")
-    typer.echo(f"  Iteration: {agent.iteration}")
+    typer.echo(f"{c['bold']}{wave.area_display}{c['reset']} ({wave.short_id()})")
+    typer.echo(f"  Stimulus: {wave.stimulus}")
+    typer.echo(f"  Status: {status_c}{wave.status.value}{c['reset']}")
+    typer.echo(f"  Repo: {wave.repo}")
+    typer.echo(f"  Main branch: {wave.main_branch}")
+    typer.echo(f"  Directions: {wave.direction_display}")
+    typer.echo(f"  Flow: {wave.flow}")
+    typer.echo(f"  Iteration: {wave.iteration}")
 
     # Show recent runs
-    runs = list_runs_for_agent(agent.id, limit=5)
+    runs = list_runs_for_wave(wave.id, limit=5)
     if runs:
         typer.echo(f"\n  {c['dim']}Recent runs:{c['reset']}")
         for run in runs:
@@ -899,66 +912,66 @@ def _print_agent_detail(agent: Agent, c: dict[str, str]) -> None:
 
 @app.command()
 def stop(
-    agent_id: str = typer.Argument(None, help="Agent ID to stop (omit with --all)"),
-    all_agents: bool = typer.Option(False, "--all", help="Stop all running agents"),
+    wave_id: str = typer.Argument(None, help="Wave ID to stop (omit with --all)"),
+    all_waves: bool = typer.Option(False, "--all", help="Stop all running waves"),
     force: bool = typer.Option(False, "-f", "--force", help="Force kill (SIGKILL)"),
 ):
-    """Stop a running agent."""
+    """Stop a running wave."""
     c = _colors()
 
-    if all_agents:
-        # Stop all running agents
+    if all_waves:
+        # Stop all running waves
         stopped = 0
-        for agent in list_agents():
-            if agent.status == AgentStatus.RUNNING:
-                if stop_agent(agent.id, force=force):
-                    msg = f"{c['yellow']}Stopped{c['reset']} {_agent_display(agent)}"
-                    typer.echo(f"{msg} ({agent.short_id()})")
+        for wave in list_waves():
+            if wave.status == WaveStatus.RUNNING:
+                if stop_wave(wave.id, force=force):
+                    msg = f"{c['yellow']}Stopped{c['reset']} {_wave_display(wave)}"
+                    typer.echo(f"{msg} ({wave.short_id()})")
                     stopped += 1
         if stopped == 0:
-            typer.echo(f"{c['dim']}No running agents to stop{c['reset']}")
+            typer.echo(f"{c['dim']}No running waves to stop{c['reset']}")
         else:
-            typer.echo(f"\nStopped {stopped} agent{'s' if stopped != 1 else ''}")
+            typer.echo(f"\nStopped {stopped} wave{'s' if stopped != 1 else ''}")
         return
 
-    if not agent_id:
-        typer.echo(f"{c['red']}Error:{c['reset']} Provide an agent ID or use --all", err=True)
+    if not wave_id:
+        typer.echo(f"{c['red']}Error:{c['reset']} Provide a wave ID or use --all", err=True)
         raise typer.Exit(1)
 
-    agent = get_agent(agent_id)
-    if not agent:
-        typer.echo(f"{c['red']}Error:{c['reset']} Agent '{agent_id}' not found", err=True)
+    wave = get_wave(wave_id)
+    if not wave:
+        typer.echo(f"{c['red']}Error:{c['reset']} Wave '{wave_id}' not found", err=True)
         raise typer.Exit(1)
 
-    if stop_agent(agent.id, force=force):
-        msg = f"{c['yellow']}Stopped{c['reset']} {c['bold']}{_agent_display(agent)}{c['reset']}"
-        typer.echo(f"{msg} ({agent.short_id()})")
+    if stop_wave(wave.id, force=force):
+        msg = f"{c['yellow']}Stopped{c['reset']} {c['bold']}{_wave_display(wave)}{c['reset']}"
+        typer.echo(f"{msg} ({wave.short_id()})")
     else:
-        typer.echo(f"{c['red']}Error:{c['reset']} Failed to stop agent", err=True)
+        typer.echo(f"{c['red']}Error:{c['reset']} Failed to stop wave", err=True)
         raise typer.Exit(1)
 
 
 @app.command()
 def prs(
-    agent_id: str = typer.Argument(..., help="Agent ID"),
+    wave_id: str = typer.Argument(..., help="Wave ID"),
     limit: int = typer.Option(10, "-n", "--limit", help="Number of PRs to show"),
 ):
-    """Show PRs created by an agent."""
+    """Show PRs created by a wave."""
     c = _colors()
 
-    agent = get_agent(agent_id)
-    if not agent:
-        typer.echo(f"{c['red']}Error:{c['reset']} Agent '{agent_id}' not found", err=True)
+    wave = get_wave(wave_id)
+    if not wave:
+        typer.echo(f"{c['red']}Error:{c['reset']} Wave '{wave_id}' not found", err=True)
         raise typer.Exit(1)
 
-    runs = list_runs_for_agent(agent.id, limit=limit)
+    runs = list_runs_for_wave(wave.id, limit=limit)
     runs_with_prs = [r for r in runs if r.pr_url]
 
     if not runs_with_prs:
-        typer.echo(f"{c['dim']}No PRs found for '{agent.area_display}'{c['reset']}")
+        typer.echo(f"{c['dim']}No PRs found for '{wave.area_display}'{c['reset']}")
         return
 
-    typer.echo(f"{c['bold']}{agent.area_display}{c['reset']} PRs ({agent.short_id()})")
+    typer.echo(f"{c['bold']}{wave.area_display}{c['reset']} PRs ({wave.short_id()})")
     typer.echo("")
 
     from loopflow.lfd.models import FlowRunStatus
@@ -974,54 +987,53 @@ def prs(
 
 @app.command()
 def rm(
-    agent_id: str = typer.Argument(..., help="Agent ID to remove"),
+    wave_id: str = typer.Argument(..., help="Wave ID to remove"),
     force: bool = typer.Option(False, "-f", "--force", help="Skip confirmation"),
 ):
-    """Remove an agent and its history."""
+    """Remove a wave and its history."""
     c = _colors()
 
-    agent = get_agent(agent_id)
-    if not agent:
-        typer.echo(f"{c['red']}Error:{c['reset']} Agent '{agent_id}' not found", err=True)
+    wave = get_wave(wave_id)
+    if not wave:
+        typer.echo(f"{c['red']}Error:{c['reset']} Wave '{wave_id}' not found", err=True)
         raise typer.Exit(1)
 
-    if agent.status == AgentStatus.RUNNING:
+    if wave.status == WaveStatus.RUNNING:
         typer.echo(
-            f"{c['red']}Error:{c['reset']} Agent is running. Stop it first with: "
-            f"lfd stop {agent_id}",
+            f"{c['red']}Error:{c['reset']} Wave is running. Stop it first with: lfd stop {wave_id}",
             err=True,
         )
         raise typer.Exit(1)
 
     if not force:
-        confirm = typer.confirm(f"Delete agent '{agent.area_display}' ({agent.short_id()})?")
+        confirm = typer.confirm(f"Delete wave '{wave.area_display}' ({wave.short_id()})?")
         if not confirm:
             raise typer.Abort()
 
-    if delete_agent(agent.id):
-        typer.echo(f"Deleted: {agent.area_display} ({agent.short_id()})")
+    if delete_wave(wave.id):
+        typer.echo(f"Deleted: {wave.area_display} ({wave.short_id()})")
     else:
-        typer.echo(f"{c['red']}Error:{c['reset']} Failed to delete agent", err=True)
+        typer.echo(f"{c['red']}Error:{c['reset']} Failed to delete wave", err=True)
         raise typer.Exit(1)
 
 
 @app.command()
 def logs(
-    agent_id: str = typer.Argument(..., help="Agent ID"),
+    wave_id: str = typer.Argument(..., help="Wave ID"),
     follow: bool = typer.Option(False, "-f", "--follow", help="Follow output (like tail -f)"),
     lines: int = typer.Option(50, "-n", "--lines", help="Number of lines to show"),
 ):
-    """Show logs for an agent's current run."""
+    """Show logs for a wave's current run."""
     c = _colors()
-    agent = get_agent(agent_id)
-    if not agent:
-        typer.echo(f"{c['red']}Error:{c['reset']} Agent '{agent_id}' not found", err=True)
+    wave = get_wave(wave_id)
+    if not wave:
+        typer.echo(f"{c['red']}Error:{c['reset']} Wave '{wave_id}' not found", err=True)
         raise typer.Exit(1)
 
-    # Get latest run for this agent
-    runs = list_runs_for_agent(agent.id, limit=1)
+    # Get latest run for this wave
+    runs = list_runs_for_wave(wave.id, limit=1)
     if not runs:
-        typer.echo(f"{c['dim']}No runs found for '{agent.area_display}'{c['reset']}")
+        typer.echo(f"{c['dim']}No runs found for '{wave.area_display}'{c['reset']}")
         return
 
     run = runs[0]
@@ -1126,34 +1138,37 @@ def hooks_status_cmd(
         typer.echo(f"  {icon} {hook}")
 
 
-@app.command("list-goals")
-def list_goals_cmd():
-    """Show available goals in current repo."""
+@app.command("list-directions")
+def list_directions_cmd():
+    """Show available directions in current repo."""
     c = _colors()
     repo = get_wt_from_cwd()
     if not repo:
         typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
         raise typer.Exit(1)
 
-    goals_dir = repo / ".lf" / "goals"
-    if not goals_dir.exists():
-        typer.echo(f"{c['dim']}No goals directory found at {goals_dir}{c['reset']}")
-        typer.echo("Create one with: mkdir -p .lf/goals && echo '# My Goal' > .lf/goals/my-goal.md")
+    directions_dir = repo / ".lf" / "directions"
+    if not directions_dir.exists():
+        typer.echo(f"{c['dim']}No directions directory found at {directions_dir}{c['reset']}")
+        typer.echo(
+            "Create one with: mkdir -p .lf/directions && "
+            "echo '# My Direction' > .lf/directions/my-direction.md"
+        )
         return
 
-    all_goals = list_goals(repo)
-    if not all_goals:
-        typer.echo(f"{c['dim']}No goals found in {goals_dir}{c['reset']}")
+    all_directions = list_directions(repo)
+    if not all_directions:
+        typer.echo(f"{c['dim']}No directions found in {directions_dir}{c['reset']}")
         return
 
-    typer.echo(f"Goals in {c['dim']}{goals_dir}/{c['reset']}")
+    typer.echo(f"Directions in {c['dim']}{directions_dir}/{c['reset']}")
     typer.echo("")
 
-    for goal_name in all_goals:
-        typer.echo(f"  {c['bold']}{goal_name}{c['reset']}")
+    for direction_name in all_directions:
+        typer.echo(f"  {c['bold']}{direction_name}{c['reset']}")
 
     typer.echo("")
-    typer.echo(f"{len(all_goals)} goal{'s' if len(all_goals) != 1 else ''} found")
+    typer.echo(f"{len(all_directions)} direction{'s' if len(all_directions) != 1 else ''} found")
 
 
 def main() -> None:

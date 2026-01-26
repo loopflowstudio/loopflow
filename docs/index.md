@@ -5,7 +5,7 @@ title: Loopflow
 
 # Loopflow
 
-Arrange and conduct an agent orchestra.
+Orchestrate waves of autonomous work.
 
 ## Try it
 
@@ -52,13 +52,13 @@ The synthesizer doesn't just pick a winner—it documents why approaches differe
 |------|--------------|------|
 | **Step** | Runs a prompt with assembled context | `.lf/steps/*.md` |
 | **Flow** | Chains steps together | `.lf/flows/*.py` |
-| **Goal** | Shapes judgment and intent | `.lf/goals/*.md` |
+| **Direction** | Shapes judgment and intent | `.lf/directions/*.md` |
 | **Area** | Focuses on part of the codebase | path argument |
 | **Stimulus** | When to run: once, loop, watch, cron | command |
 
-An agent is **area × goal × flow × stimulus**.
+A wave is **area × direction × flow × stimulus**.
 
-Area is the path you pass—not a file. It scopes what the agent sees and changes.
+Area is the path you pass—not a file. It scopes what the wave sees and changes.
 
 | Stimulus | Runs when |
 |----------|-----------|
@@ -71,7 +71,7 @@ Area is the path you pass—not a file. It scopes what the agent sees and change
 
 ## Step
 
-A markdown file that tells the agent what to do.
+A markdown file that tells the coding agent what to do.
 
 ```markdown
 # .lf/steps/review.md
@@ -121,12 +121,12 @@ lf design: add auth && lf implement && lf polish
 
 ---
 
-## Goal
+## Direction
 
-Shapes how the agent judges and responds.
+Shapes how the coding agent judges and responds.
 
 ```markdown
-# .lf/goals/designer.md
+# .lf/directions/designer.md
 
 Create clear, actionable design documents that enable confident implementation.
 
@@ -136,27 +136,27 @@ A design doc in scratch/ that another engineer could implement from.
 ```
 
 ```bash
-lf review --goal designer
-lf review --goal product-engineer,designer    # stack multiple
+lf review --direction designer
+lf review --direction product-engineer,designer    # stack multiple
 ```
 
-Goals compose. A `product-engineer` goal sets intent. A `designer` goal adds design perspective. Stack them to get both.
+Directions compose. A `product-engineer` direction sets intent. A `designer` direction adds design perspective. Stack them to get both.
 
 ---
 
 ## Area
 
-The path you pass to `lfd`. Scopes what the agent works on.
+The path you pass to `lfd`. Scopes what the wave works on.
 
 ```bash
 lfd loop ship src/api/        # work on src/api/
 lfd loop ship .               # work on everything
 ```
 
-Combined with flow and goal, area defines the agent's mission:
+Combined with flow and direction, area defines the wave:
 
 ```bash
-lfd loop ship src/api/ --goal product-engineer
+lfd loop ship src/api/ --direction product-engineer
 ```
 
 ---
@@ -167,7 +167,7 @@ lfd loop ship src/api/ --goal product-engineer
 .lf/                      # Repo config and extensions
   config.yaml             # Model, context defaults
   steps/                  # Step prompts (preferred)
-  goals/                  # Judgment and intent
+  directions/             # Judgment and intent
   flows/                  # Flow definitions
 .claude/commands/         # Steps (Claude Code compatible)
 scratch/                  # PR scratchpad (cleared on merge)
@@ -197,7 +197,7 @@ Every step sees: `README.md`, `STYLE.md`, `CLAUDE.md`, `scratch/`, `roadmap/`, a
 
 ## Next
 
-[Background Agents →](agents.md)
+[Waves →](waves.md)
 
 ## Reference
 

@@ -36,7 +36,7 @@ diff_files     2,721 ██
 clipboard        634 ▏
 ```
 
-The `-c` flag pastes your clipboard. `lf` assembles context—repo docs, branch files, clipboard—and passes it to Claude Code.
+The `-c` flag pastes your clipboard. `lf` assembles context—repo docs, branch files, clipboard—and passes it to the coding agent.
 
 ### Inline prompts
 
@@ -96,15 +96,15 @@ lfops land    # submit to merge queue
 
 ---
 
-## Background Agents
+## Waves
 
-Run agents overnight, review PRs when you wake.
+Run waves overnight, review PRs when you wake.
 
 ```bash
 lfd loop ship src/
 ```
 
-An agent is **area × goal × flow × stimulus**. [Learn more →](agents.md)
+A wave is **area × direction × flow × stimulus**. [Learn more →](waves.md)
 
 ---
 

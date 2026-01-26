@@ -12,8 +12,8 @@ public actor LFDClient {
     public init(baseURL: URL = URL(string: "http://127.0.0.1:8765")!) {
         self.baseURL = baseURL
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 5
-        config.timeoutIntervalForResource = 10
+        config.timeoutIntervalForRequest = 2  // Fast fail if daemon not running
+        config.timeoutIntervalForResource = 5
         self.session = URLSession(configuration: config)
     }
 

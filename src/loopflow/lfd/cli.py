@@ -111,8 +111,8 @@ def _validate_flow(repo: Path, flow: str, c: dict[str, str]) -> str:
         typer.echo(f"{c['red']}Error:{c['reset']} Flow cannot be empty", err=True)
         raise typer.Exit(1)
 
-    flow_def = load_flow(normalized, repo)
-    if not flow_def:
+    loaded_flow = load_flow(normalized, repo)
+    if not loaded_flow:
         typer.echo(
             f"{c['red']}Error:{c['reset']} Flow '{normalized}' not found in .lf/flows/",
             err=True,

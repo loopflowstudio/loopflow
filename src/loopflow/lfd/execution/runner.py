@@ -20,7 +20,7 @@ from loopflow.lf.flow import (
     build_synthesize_prompt,
     choose_branch,
     load_synthesize_instructions,
-    run_flow_def,
+    run_flow,
     topological_batches,
 )
 from loopflow.lf.flows import (
@@ -396,8 +396,8 @@ def _run_fork_synthesize(
             )
 
         if fork_config.flow:
-            flow_def = load_flow(fork_config.flow, wave.repo)
-            if not flow_def:
+            loaded_flow = load_flow(fork_config.flow, wave.repo)
+            if not loaded_flow:
                 return ForkResult(
                     worktree=wt_path,
                     config=fork_config,
@@ -405,8 +405,8 @@ def _run_fork_synthesize(
                     status="failed",
                     scratch_notes="",
                 )
-            exit_code = run_flow_def(
-                flow_def,
+            exit_code = run_flow(
+                loaded_flow,
                 wt_path,
                 context=fork_context or None,
                 exclude=None,
@@ -447,9 +447,16 @@ def _run_fork_synthesize(
     synth_prompt_override = fork.synthesize.prompt if fork.synthesize else None
     instructions = load_synthesize_instructions(wave.repo, synth_prompt_override)
     synth_prompt = build_synthesize_prompt(results, instructions, base_commit)
+
+    # Add synthesize direction on top of wave direction
+    synth_direction = list(direction)
+    if fork.synthesize and fork.synthesize.direction:
+        extra = resolve_directions(fork.synthesize.direction, wave.repo)
+        synth_direction = synth_direction + extra
+
     synth_prompt = _build_loop_inline_prompt(
         wave,
-        direction,
+        synth_direction,
         worktree_path,
         synth_prompt,
         context_paths,
@@ -530,18 +537,18 @@ def run_iteration(
         return IterationResult(success=False)
 
     try:
-        flow_def = load_flow(flow, wave.repo)
+        loaded_flow = load_flow(flow, wave.repo)
     except ValueError as exc:
         update_run_status(run.id, FlowRunStatus.FAILED, error=str(exc))
         _cleanup_worktree(wave.repo, worktree_path, branch)
         return IterationResult(success=False)
 
-    if not flow_def:
+    if not loaded_flow:
         update_run_status(run.id, FlowRunStatus.FAILED, error=f"Unknown flow '{flow}'")
         _cleanup_worktree(wave.repo, worktree_path, branch)
         return IterationResult(success=False)
 
-    items: list[Step | Fork | Choose] = list(flow_def.steps)
+    items: list[Step | Fork | Choose] = list(loaded_flow.steps)
     if not items:
         update_run_status(run.id, FlowRunStatus.FAILED, error=f"Empty flow '{flow}'")
         _cleanup_worktree(wave.repo, worktree_path, branch)
@@ -723,7 +730,7 @@ def run_iteration(
             try:
                 result_code = _run_fork_synthesize(
                     wave,
-                    flow_def.name,
+                    loaded_flow.name,
                     worktree_path,
                     branch,
                     item,
@@ -749,7 +756,7 @@ def run_iteration(
             try:
                 choice = choose_branch(
                     item,
-                    flow_def.name,
+                    loaded_flow.name,
                     worktree_path,
                     backend,
                     model_variant,

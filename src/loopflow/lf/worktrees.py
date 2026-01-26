@@ -49,13 +49,56 @@ class Worktree:
     is_merging: bool
 
 
+def _find_wt_binary() -> str | None:
+    """Find the wt binary, checking common locations."""
+    import shutil
+
+    wt_path = shutil.which("wt")
+    if wt_path:
+        return wt_path
+
+    for path in [
+        "/opt/homebrew/bin/wt",
+        "/usr/local/bin/wt",
+        str(Path.home() / ".cargo" / "bin" / "wt"),
+    ]:
+        if Path(path).exists():
+            return path
+
+    return None
+
+
+def is_wt_available() -> bool:
+    """Check if wt (worktrunk) is available."""
+    return _find_wt_binary() is not None
+
+
+def ensure_wt_available() -> bool:
+    """Ensure wt is available, installing via homebrew if needed."""
+    if _find_wt_binary():
+        return True
+
+    import shutil
+
+    brew_path = shutil.which("brew")
+    if not brew_path:
+        return False
+
+    result = subprocess.run([brew_path, "install", "worktrunk"], capture_output=True)
+    if result.returncode != 0:
+        return False
+
+    return _find_wt_binary() is not None
+
+
 def _run_wt(args: list[str], repo_root: Path) -> str:
     """Run worktree CLI command."""
-    cmd = ["wt", "-C", str(repo_root), *args]
-    try:
-        result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)
-    except FileNotFoundError:
-        raise WorktreeError("Worktree CLI not found. Run: lf ops install")
+    wt_binary = _find_wt_binary()
+    if not wt_binary:
+        raise WorktreeError("Worktree CLI not found. Run: lfd install")
+
+    cmd = [wt_binary, "-C", str(repo_root), *args]
+    result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)
 
     if result.returncode != 0:
         error = result.stderr.strip() or result.stdout.strip() or "Worktree operation failed"

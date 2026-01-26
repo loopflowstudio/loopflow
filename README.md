@@ -2,57 +2,77 @@
 
 Loopflow helps you maintain flow and craft using coding agents (Claude Code, Codex, Gemini CLI) at high scale.
 
+Loopflow helps you create and run **Waves**. Waves are chains of coding agents working together in pre-defined ways.  
+
+Waves are first built manually through more interactive exploration. Eventually waves become autonomous through looping, scheduling, and watching for changes.
+
 ## Waves
 
-The core entities in loopflow are waves. Waves are a new way of configuring and using coding agents in composable and autonmous ways.
+Waves are objects with 4 primary fields.
 
-Waves are made of 4 fields.
-
-| Field | Usage |
-|------|--------------|
-| **Area** | Scope and context |
-| **Flow** | Process followed / steps taken |
-| **Direction** | Defines success, quality, and aesthetics |
-| **Stimulus** | Watch, loop, or cron |
+| Field | Usage | Form |
+|-------|------|------|
+| **Area** | Scope and context | pathset |
+| **Flow** | Process followed / steps taken | sequence of prompts |
+| **Direction** | Defines success, quality, and aesthetics | prompt |
+| **Stimulus** | Watch, loop, or cron | mode |
 
 ## Steps
 
-But before you create a wave, let's start at the beginning. 
-
-**Steps** are the the most basic of Loopflow building blocks. Steps are simply prompts for running coding agents to execute concrete, scoped, atomic tasks.
-
-There are many built-in steps that come bundled with loopflow, such as implement, polish, and rebase, but you can also write your own (put markdown in `.claude/commands` or `.lf/steps`) or import from your favorite library.
-
-For example, try:
-
 ```bash
-lf debug -c
+lf debug -c    # paste an error, watch it fix
+lf design      # interactive design session
 ```
 
-This runs the `debug` step, loading the clipboard (`-c`) as context on what to debug. Steps are non-interactive by default. If you've copied a failing test to your clipboard, the coding agent will fix it for you.
+Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 
-To start building something new try:
-
-```bash
-lf design
-```
-
-This starts an interactive session with a coding agent, primed to design something new in your codebase with you.
+| Built-in Step | What it does |
+|------|--------------|
+| `debug` | Fix an error |
+| `design` | Interactive design session |
+| `design-doc` | Pick roadmap item, write design |
+| `implement` | Build from a design doc |
+| `iterate` | Read review, write design to address it |
+| `reduce` | Simplify touched code |
+| `reduce-big` | Strategic simplification analysis |
+| `expand` | Identify what to add |
+| `expand-big` | Strategic expansion analysis |
+| `explore` | Investigate the codebase |
+| `review` | Review the diff |
+| `review-big` | Thorough area review |
+| `polish` | Run tests, fix issues |
+| `roadmap` | Reflect on learnings → forward direction |
+| `5whys` | Root cause analysis |
 
 ## Flows
 
-You chain steps together to make flows.  Start by trying it manually:
-
 ```bash
-lf design                 # create a design doc (interactive)
-lf implement && lf reduce && lf polish && lfops pr # turn it into shippable code!
+lf design && lf implement && lf polish    # chain steps manually
+lf flow ship                              # or use a named flow
 ```
 
-You can also pre-register flows. `ship` is a built-in flow that names the `implement -> reduce -> polish` flow.
+Steps chain into flows. Flows feed into waves.
+
+| Flow | Steps |
+|------|-------|
+| `ship` | implement → reduce → polish |
+| `pair` | design → ship |
+| `grind` | review-big → iterate → ship |
+| `research` | explore → design → roadmap |
+| `ship-roadmap` | design-doc → ship |
+| `plan-expand` | fork(expand-big×3) → roadmap |
+| `plan-reduce` | fork(reduce-big×3) → roadmap |
+| `debug-big` | debug → 5whys → ship |
+
+### Forks
+
+Forks run a step in parallel with different directions, then synthesize the results.
 
 ```bash
-lf flow ship
+lf flow plan-reduce    # runs reduce-big 3x with different perspectives
 ```
+
+`plan-reduce` forks `reduce-big` across infra-engineer, designer, and product-engineer directions, then feeds the combined analysis into `roadmap`.
 
 ## Playing in the Waves
 

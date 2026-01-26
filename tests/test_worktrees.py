@@ -106,8 +106,8 @@ def test_create_worktree_missing_wt_raises(tmp_path):
 
     with patch("loopflow.lf.worktrees.list_all") as mock_list:
         mock_list.return_value = []
-        with patch("subprocess.run", side_effect=FileNotFoundError()):
-            with pytest.raises(WorktreeError, match="lf ops install"):
+        with patch("loopflow.lf.worktrees._find_wt_binary", return_value=None):
+            with pytest.raises(WorktreeError, match="lfd install"):
                 create(repo_root, "feature")
 
 

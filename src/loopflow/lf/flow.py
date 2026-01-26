@@ -26,7 +26,7 @@ from loopflow.lf.context import (
 )
 from loopflow.lf.flows import (
     Choose,
-    FlowDef,
+    Flow,
     Fork,
     ForkAgent,
     Step,
@@ -496,12 +496,12 @@ def run_fork(
             return agent, wt_path, exit_code
 
         if agent.flow:
-            flow_def = load_flow(agent.flow, parent_worktree)
-            if not flow_def:
+            loaded_flow = load_flow(agent.flow, parent_worktree)
+            if not loaded_flow:
                 print(f"[{label}] Unknown flow: {agent.flow}")
                 return agent, wt_path, 1
-            exit_code = run_flow_def(
-                flow_def,
+            exit_code = run_flow(
+                loaded_flow,
                 wt_path,
                 context=context,
                 exclude=exclude,
@@ -835,8 +835,8 @@ def choose_branch(
     return choice
 
 
-def run_flow_def(
-    flow: FlowDef,
+def run_flow(
+    flow: Flow,
     repo_root: Path,
     context: Optional[list[str]] = None,
     exclude: Optional[list[str]] = None,
@@ -847,7 +847,7 @@ def run_flow_def(
     model_variant: str | None = "opus",
     chrome: bool = False,
 ) -> int:
-    """Run a FlowDef (from .lf/flows/). Returns first non-zero exit code, or 0."""
+    """Run a Flow (from .lf/flows/). Returns first non-zero exit code, or 0."""
     should_push = push_enabled
     should_pr = pr_enabled
     if should_pr:

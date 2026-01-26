@@ -78,7 +78,7 @@ struct SetupService {
         log("install: completed successfully")
     }
 
-    /// Install Claude Code and worktrunk dependencies
+    /// Install Claude Code dependencies
     private func installDependencies() async throws {
         // Install Node.js via Homebrew if needed
         if findExecutable("npm") == nil {
@@ -100,15 +100,8 @@ struct SetupService {
             }
         }
 
-        // Install worktrunk if needed
-        if findExecutable("wt") == nil {
-            if let brewPath = findExecutable("brew") {
-                log("install: installing worktrunk...")
-                try await runCommand(brewPath, args: ["install", "max-sixty/worktrunk/wt"])
-            } else {
-                log("install: WARNING - Homebrew not found, skipping worktrunk")
-            }
-        }
+        // Note: worktrunk (wt) is installed by lfd install, not here.
+        // Concerto talks to lfd, which uses wt as an implementation detail.
     }
 
     /// Ensure the loopflow daemon is running
@@ -121,7 +114,7 @@ struct SetupService {
         log("ensureDaemonRunning: lfd found at \(lfdPath)")
 
         let plistPath = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/LaunchWaves/com.loopflow.lfd.plist")
+            .appendingPathComponent("Library/LaunchAgents/com.loopflow.lfd.plist")
 
         if !FileManager.default.fileExists(atPath: plistPath.path) {
             log("ensureDaemonRunning: plist not found, installing...")

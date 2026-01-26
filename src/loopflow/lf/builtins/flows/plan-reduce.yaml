@@ -1,0 +1,9 @@
+- fork:
+    step: reduce-big
+    drafts:
+      - direction: infra-engineer
+      - direction: designer
+      - direction: product-engineer
+    synthesize:
+      direction: ceo
+- roadmap

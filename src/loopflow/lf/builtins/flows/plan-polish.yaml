@@ -1,0 +1,9 @@
+- fork:
+    step: polish-big
+    drafts:
+      - direction: infra-engineer
+      - direction: designer
+      - direction: product-engineer
+    synthesize:
+      direction: ceo
+- roadmap

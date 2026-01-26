@@ -1,4 +1,4 @@
-// Sheet for creating a new wave with optional name.
+// Sheet for creating a new wave with auto-generated name.
 
 import SwiftUI
 import LoopflowCore
@@ -7,7 +7,7 @@ struct NewWaveSheet: View {
     @Environment(RepoState.self) private var repoState
     @Environment(\.dismiss) private var dismiss
 
-    @State private var name = ""
+    @State private var name = NameGenerator.generate()
     @State private var isCreating = false
     @State private var errorMessage: String?
     @FocusState private var isNameFocused: Bool
@@ -18,16 +18,11 @@ struct NewWaveSheet: View {
                 .font(.headline)
 
             VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("Name")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("(optional)")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
+                Text("Name")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
-                TextField("Auto-generates if empty", text: $name)
+                TextField("wave-name", text: $name)
                     .textFieldStyle(.roundedBorder)
                     .focused($isNameFocused)
                     .onSubmit {
@@ -59,7 +54,9 @@ struct NewWaveSheet: View {
         }
         .padding(24)
         .frame(width: 320)
-        .onAppear {
+        .task {
+            // Small delay to ensure field is mounted before focusing
+            try? await Task.sleep(for: .milliseconds(100))
             isNameFocused = true
         }
     }

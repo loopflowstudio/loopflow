@@ -7,10 +7,10 @@ struct WaveSidebar: View {
     @Environment(RepoState.self) private var repoState
     @Environment(SessionState.self) private var sessionState
 
-    @State private var showingNewWaveSheet = false
     @State private var showingDiagnostics = false
     @State private var actionError: String?
     @State private var showingActionError = false
+    @State private var isCreatingWave = false
 
     // Keyboard navigation state
     @State private var keyboardFocusedId: String?
@@ -99,9 +99,6 @@ struct WaveSidebar: View {
             }
         }
         .background(Color.loopflowBurgundy)
-        .sheet(isPresented: $showingNewWaveSheet) {
-            NewWaveSheet()
-        }
         .sheet(isPresented: $showingDiagnostics) {
             DiagnosticsView()
         }
@@ -111,7 +108,7 @@ struct WaveSidebar: View {
             Text(actionError ?? "An error occurred")
         }
         .onReceive(NotificationCenter.default.publisher(for: .showNewWaveSheet)) { _ in
-            showingNewWaveSheet = true
+            createWaveDirectly()
         }
     }
 
@@ -131,13 +128,14 @@ struct WaveSidebar: View {
                 .help(repoState.lfdConnected ? "Connected to lfd daemon" : "lfd daemon not connected")
 
             Button {
-                showingNewWaveSheet = true
+                createWaveDirectly()
             } label: {
                 Image(systemName: "plus")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(.white.opacity(isCreatingWave ? 0.3 : 0.7))
             }
             .buttonStyle(.plain)
+            .disabled(isCreatingWave)
             .help("Create a new wave")
             .accessibleButton("Create new wave")
             .minHitTarget()
@@ -229,13 +227,14 @@ struct WaveSidebar: View {
                 }
 
                 Button {
-                    showingNewWaveSheet = true
+                    createWaveDirectly()
                 } label: {
                     Label("Create Wave", systemImage: "plus")
                         .font(.caption)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
+                .disabled(isCreatingWave)
                 .accessibilityIdentifier("wave-empty-create")
             }
 
@@ -306,12 +305,31 @@ struct WaveSidebar: View {
             keyboardFocusedId = delta > 0 ? waves.first?.id : waves.last?.id
         }
     }
+
+    private func createWaveDirectly() {
+        guard !isCreatingWave else { return }
+        isCreatingWave = true
+
+        Task {
+            do {
+                // Create with auto-generated name, then select it
+                try await repoState.createWave(name: "")
+                // The wave is selected in createWave, trigger name edit
+                NotificationCenter.default.post(name: .editWaveName, object: nil)
+            } catch {
+                actionError = error.localizedDescription
+                showingActionError = true
+            }
+            isCreatingWave = false
+        }
+    }
 }
 
 // MARK: - Notification Names
 
 extension Notification.Name {
     static let showNewWaveSheet = Notification.Name("showNewWaveSheet")
+    static let editWaveName = Notification.Name("editWaveName")
 }
 
 #Preview {

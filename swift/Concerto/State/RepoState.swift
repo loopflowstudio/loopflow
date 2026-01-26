@@ -671,6 +671,11 @@ final class RepoState {
         return cloned
     }
 
+    func renameWave(_ wave: Wave, to newName: String) async throws {
+        _ = try await waveService.updateWave(waveId: wave.id, name: newName)
+        await refreshWaves()
+    }
+
     func updateWave(
         _ wave: Wave,
         area: [String]? = nil,

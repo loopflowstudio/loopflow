@@ -22,7 +22,7 @@ from loopflow.lf.context import (
     gather_step,
 )
 from loopflow.lf.directions import parse_direction_arg, resolve_directions
-from loopflow.lf.flow import run_flow_def
+from loopflow.lf.flow import run_flow
 from loopflow.lf.flows import load_flow
 from loopflow.lf.frontmatter import StepConfig, resolve_step_config
 from loopflow.lf.git import find_main_repo
@@ -615,9 +615,9 @@ def flow(
 
     config = load_config(repo_root)
 
-    flow_def = load_flow(name, repo_root)
+    loaded_flow = load_flow(name, repo_root)
 
-    if not flow_def:
+    if not loaded_flow:
         typer.echo(f"Error: Flow '{name}' not found in .lf/flows/", err=True)
         raise typer.Exit(1)
 
@@ -650,7 +650,7 @@ def flow(
 
     if web:
         # Show tokens for first step in flow
-        first_step = flow_def.steps[0].step if flow_def.steps else None
+        first_step = loaded_flow.steps[0].step if loaded_flow.steps else None
 
         if not first_step:
             typer.echo("Error: Flow has no steps", err=True)
@@ -692,8 +692,8 @@ def flow(
     skip_permissions = config.yolo if config else False
     chrome_enabled = config.chrome if config else False
 
-    exit_code = run_flow_def(
-        flow_def,
+    exit_code = run_flow(
+        loaded_flow,
         repo_root,
         context=all_context or None,
         exclude=exclude,

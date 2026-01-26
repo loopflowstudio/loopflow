@@ -1,11 +1,11 @@
-// Flow picker for experimenting with flows on idle agents.
-// Run different flows without changing the agent's default config.
+// Flow picker for experimenting with flows on idle waves.
+// Run different flows without changing the wave's default config.
 
 import SwiftUI
 import LoopflowCore
 
 struct FlowPicker: View {
-    let agent: Agent
+    let wave: Wave
 
     @Environment(RepoState.self) private var repoState
     @Environment(SessionState.self) private var sessionState
@@ -28,7 +28,7 @@ struct FlowPicker: View {
                 Spacer()
             }
 
-            Text("Run a flow without changing the agent's default configuration.")
+            Text("Run a flow without changing the wave's default configuration.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -92,10 +92,10 @@ struct FlowPicker: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(isRunning || selectedFlowName.isEmpty || !agent.isConfigured || (isInteractive && agent.worktreePath == nil))
+                .disabled(isRunning || selectedFlowName.isEmpty || !wave.isConfigured || (isInteractive && wave.worktreePath == nil))
 
                 // Set as default button
-                if selectedFlowName != agent.flow && !selectedFlowName.isEmpty {
+                if selectedFlowName != wave.flow && !selectedFlowName.isEmpty {
                     Button {
                         setAsDefault()
                     } label: {
@@ -112,7 +112,7 @@ struct FlowPicker: View {
                     }
                     .buttonStyle(DarkButtonStyle())
                     .disabled(isSaving)
-                    .help("Make '\(selectedFlowName)' the agent's default flow")
+                    .help("Make '\(selectedFlowName)' the wave's default flow")
                 }
             }
 
@@ -140,9 +140,9 @@ struct FlowPicker: View {
     }
 
     private func initializeSelection() {
-        // Default to agent's configured flow, or first available
-        if !agent.flow.isEmpty && repoState.flows.contains(where: { $0.name == agent.flow }) {
-            selectedFlowName = agent.flow
+        // Default to wave's configured flow, or first available
+        if !wave.flow.isEmpty && repoState.flows.contains(where: { $0.name == wave.flow }) {
+            selectedFlowName = wave.flow
         } else if let design = repoState.flows.first(where: { $0.name == "design" }) {
             selectedFlowName = design.name
         } else if let first = repoState.flows.first {
@@ -173,9 +173,9 @@ struct FlowPicker: View {
         isRunning = true
         Task {
             do {
-                // Run with flow override - doesn't change agent's config
-                try await repoState.runAgent(
-                    agent: agent,
+                // Run with flow override - doesn't change wave's config
+                try await repoState.runWave(
+                    wave: wave,
                     flow: selectedFlowName,
                     stimulus: Stimulus(kind: .once)  // Experiments run once
                 )
@@ -192,8 +192,8 @@ struct FlowPicker: View {
     }
 
     private func launchInteractiveSession() {
-        guard !selectedFlowName.isEmpty, let path = agent.worktreePath else { return }
-        sessionState.launchInteractiveSession(agentId: agent.id, step: selectedFlowName, worktreePath: path)
+        guard !selectedFlowName.isEmpty, let path = wave.worktreePath else { return }
+        sessionState.launchInteractiveSession(waveId: wave.id, step: selectedFlowName, worktreePath: path)
     }
 
     private func setAsDefault() {
@@ -202,7 +202,7 @@ struct FlowPicker: View {
         isSaving = true
         Task {
             do {
-                try await repoState.updateAgent(agent, flow: selectedFlowName)
+                try await repoState.updateWave(wave, flow: selectedFlowName)
             } catch {
                 await MainActor.run {
                     errorMessage = error.localizedDescription
@@ -218,7 +218,7 @@ struct FlowPicker: View {
 
 #Preview {
     let repoState = RepoState()
-    repoState.configureMockAgents()
+    repoState.configureMockWaves()
     repoState.flows = [
         Flow(name: "design", steps: [Step(prompt: "design")], type: .step),
         Flow(name: "ship", steps: [
@@ -228,8 +228,8 @@ struct FlowPicker: View {
         ], type: .flow)
     ]
 
-    let agent = repoState.agents.first { $0.status == .idle } ?? repoState.agents.first!
-    return FlowPicker(agent: agent)
+    let wave = repoState.waves.first { $0.status == .idle } ?? repoState.waves.first!
+    return FlowPicker(wave: wave)
         .environment(repoState)
         .environment(SessionState())
         .frame(width: 500)

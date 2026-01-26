@@ -1,12 +1,12 @@
-// Row view for displaying an agent in the sidebar.
+// Row view for displaying an wave in the sidebar.
 // Uses status indicators from design: ● Running, ◐ Waiting, ○ Idle, ◷ Scheduled, ✓ Completed, ✗ Error
 
 import SwiftUI
 import AppKit
 import LoopflowCore
 
-struct AgentRow: View {
-    let agent: Agent
+struct WaveRow: View {
+    let wave: Wave
     let isSelected: Bool
     var isKeyboardFocused: Bool = false
     let liveOutput: [OutputLine]
@@ -19,18 +19,18 @@ struct AgentRow: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 // Status indicator using design system icons
-                Image(systemName: agent.statusIndicator.icon)
+                Image(systemName: wave.statusIndicator.icon)
                     .font(.system(size: 10))
-                    .foregroundStyle(agent.statusIndicator.color)
+                    .foregroundStyle(wave.statusIndicator.color)
                     .help(statusHelpText)
-                    .accessibilityIdentifier("agent-status")
+                    .accessibilityIdentifier("wave-status")
 
                 // Display name (user-visible name, not area)
-                Text(agent.displayName)
+                Text(wave.displayName)
                     .fontWeight(.medium)
                     .foregroundStyle(.white)
                     .lineLimit(1)
-                    .accessibilityIdentifier("agent-name")
+                    .accessibilityIdentifier("wave-name")
 
                 Spacer()
 
@@ -52,7 +52,7 @@ struct AgentRow: View {
                     }
                     .buttonStyle(.plain)
                 } else {
-                    Text(agent.flowDisplay)
+                    Text(wave.flowDisplay)
                         .font(.caption2)
                         .fontWeight(.medium)
                         .padding(.horizontal, 6)
@@ -60,50 +60,50 @@ struct AgentRow: View {
                         .background(Color.white.opacity(0.15))
                         .foregroundStyle(.white.opacity(0.7))
                         .clipShape(Capsule())
-                        .accessibilityIdentifier("agent-flow")
+                        .accessibilityIdentifier("wave-flow")
                 }
             }
 
             // Secondary info line
             HStack(spacing: 4) {
-                Text(agent.areaDisplay)
+                Text(wave.areaDisplay)
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.5))
-                    .accessibilityIdentifier("agent-area")
+                    .accessibilityIdentifier("wave-area")
 
-                if !agent.iterationText.isEmpty {
+                if !wave.iterationText.isEmpty {
                     Text("•")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.3))
-                    Text(agent.iterationText)
+                    Text(wave.iterationText)
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.5))
-                        .accessibilityIdentifier("agent-iteration")
+                        .accessibilityIdentifier("wave-iteration")
                 }
 
-                if agent.status == .waiting {
+                if wave.status == .waiting {
                     Text("•")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.3))
                     Text("PR limit")
                         .font(.caption)
                         .foregroundStyle(.yellow.opacity(0.7))
-                        .accessibilityIdentifier("agent-pr-limit")
+                        .accessibilityIdentifier("wave-pr-limit")
                 }
 
-                if agent.stimulus.kind == .cron, let cron = agent.stimulus.cron {
+                if wave.stimulus.kind == .cron, let cron = wave.stimulus.cron {
                     Text("•")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.3))
                     Text(formatCron(cron))
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.5))
-                        .accessibilityIdentifier("agent-cron")
+                        .accessibilityIdentifier("wave-cron")
                 }
             }
 
             // Live output when selected or running
-            if (isSelected || agent.status == .running) && !liveOutput.isEmpty {
+            if (isSelected || wave.status == .running) && !liveOutput.isEmpty {
                 LoopLiveOutput(lines: liveOutput)
                     .frame(height: 80)
             }
@@ -127,16 +127,16 @@ struct AgentRow: View {
             onSelect()
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Agent: \(agent.displayName)")
+        .accessibilityLabel("Wave: \(wave.displayName)")
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 
     private var statusHelpText: String {
-        switch agent.status {
+        switch wave.status {
         case .running: return "Running"
         case .waiting: return "Waiting (PR limit reached)"
         case .idle:
-            if agent.stimulus.kind == .cron {
+            if wave.stimulus.kind == .cron {
                 return "Scheduled"
             }
             return "Idle"

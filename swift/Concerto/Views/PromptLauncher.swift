@@ -405,8 +405,8 @@ struct PromptLauncher: View {
         if let model = launcherState.selectedModel {
             return model.displayName
         }
-        if let configModel = repoState.config?.agentModel {
-            return AgentModel(configModel).displayName + " (default)"
+        if let configModel = repoState.config?.waveModel {
+            return WaveModel(configModel).displayName + " (default)"
         }
         return "Default"
     }
@@ -432,8 +432,8 @@ struct PromptLauncher: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Default")
                             .fontWeight(.medium)
-                        if let configModel = repoState.config?.agentModel {
-                            Text(AgentModel(configModel).displayName)
+                        if let configModel = repoState.config?.waveModel {
+                            Text(WaveModel(configModel).displayName)
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
                         }
@@ -451,7 +451,7 @@ struct PromptLauncher: View {
                 .padding(.vertical, 4)
 
             // Common models
-            ForEach(AgentModel.commonModels) { model in
+            ForEach(WaveModel.commonModels) { model in
                 let isSelected = launcherState.selectedModel?.id == model.id
                 Button {
                     launcherState.selectedModel = model
@@ -569,7 +569,7 @@ struct PromptLauncher: View {
                     Text("No goals configured")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text("Add .md files to .lf/goals/ to shape agent judgment and intent.")
+                    Text("Add .md files to .lf/goals/ to shape wave judgment and intent.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)

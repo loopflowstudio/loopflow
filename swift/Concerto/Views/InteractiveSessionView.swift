@@ -1,5 +1,5 @@
 // Interactive session view wrapping GhosttyTerminalView with session controls.
-// Displays embedded terminal running `lf <step>` in the agent's worktree.
+// Displays embedded terminal running `lf <step>` in the wave's worktree.
 
 import SwiftUI
 import LoopflowCore
@@ -14,8 +14,8 @@ struct InteractiveSessionView: View {
 
     private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
-    private var agent: Agent? {
-        repoState.agents.first { $0.id == session.agentId }
+    private var wave: Wave? {
+        repoState.waves.first { $0.id == session.waveId }
     }
 
     var body: some View {
@@ -36,9 +36,9 @@ struct InteractiveSessionView: View {
                 .fill(.green)
                 .frame(width: 8, height: 8)
 
-            // Agent name
-            if let agent {
-                Text(agent.displayName)
+            // Wave name
+            if let wave {
+                Text(wave.displayName)
                     .font(.headline)
                     .fontWeight(.semibold)
             } else {
@@ -120,12 +120,12 @@ struct InteractiveSessionView: View {
 
 #Preview {
     let repoState = RepoState()
-    repoState.configureMockAgents()
+    repoState.configureMockWaves()
 
     // Create a mock session
-    let agent = repoState.agents.first!
+    let wave = repoState.waves.first!
     let session = InteractiveSession(
-        agentId: agent.id,
+        waveId: wave.id,
         step: "design",
         worktreePath: "/tmp/test-worktree"
     )

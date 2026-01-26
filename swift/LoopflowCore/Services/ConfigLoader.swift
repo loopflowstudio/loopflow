@@ -28,7 +28,7 @@ public struct ConfigLoader {
     }
 
     public func parseYAML(_ contents: String) -> LoopflowConfig? {
-        var agentModel: String?
+        var waveModel: String?
         var interactive: [String]?
         var terminal: String?
         var ide: String?
@@ -94,7 +94,7 @@ public struct ConfigLoader {
                 let value = valueRaw.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
 
                 switch key {
-                case "agent_model": agentModel = value
+                case "wave_model": waveModel = value
                 case "terminal": terminal = value
                 case "ide": ide = value
                 case "workspace": workspace = value
@@ -114,7 +114,7 @@ public struct ConfigLoader {
         }
 
         return LoopflowConfig(
-            agentModel: agentModel,
+            waveModel: waveModel,
             interactive: interactive,
             terminal: terminal,
             ide: ide,

@@ -1,10 +1,10 @@
-// Agent detail panel. Idle agents show a start button; running agents show progress.
+// Wave detail panel. Idle waves show a start button; running waves show progress.
 
 import SwiftUI
 import LoopflowCore
 
-struct AgentDetailPanel: View {
-    let agent: Agent
+struct WaveDetailPanel: View {
+    let wave: Wave
 
     @Environment(RepoState.self) private var repoState
     @Environment(SessionState.self) private var sessionState
@@ -26,14 +26,14 @@ struct AgentDetailPanel: View {
     private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     private var worktree: Worktree? {
-        guard let path = agent.worktreePath else { return nil }
+        guard let path = wave.worktreePath else { return nil }
         return repoState.worktrees.first { $0.path == path }
     }
 
     var body: some View {
         Group {
             // Show interactive session view when active, otherwise config view
-            if sessionState.hasActiveSession(for: agent.id), let session = sessionState.interactiveSession {
+            if sessionState.hasActiveSession(for: wave.id), let session = sessionState.interactiveSession {
                 InteractiveSessionView(session: session)
             } else {
                 configView
@@ -43,7 +43,7 @@ struct AgentDetailPanel: View {
         .onAppear {
             loadData()
         }
-        .onChange(of: agent.id) {
+        .onChange(of: wave.id) {
             loadData()
         }
         .alert("Error", isPresented: $showingActionError) {
@@ -52,14 +52,14 @@ struct AgentDetailPanel: View {
             Text(actionError ?? "An error occurred")
         }
         .confirmationDialog(
-            "Stop Agent",
+            "Stop Wave",
             isPresented: $showingStopConfirmation
         ) {
             Button("Stop", role: .destructive) {
-                stopAgent()
+                stopWave()
             }
         } message: {
-            Text("Stop '\(agent.displayName)'? It can be restarted later.")
+            Text("Stop '\(wave.displayName)'? It can be restarted later.")
         }
     }
 
@@ -73,15 +73,15 @@ struct AgentDetailPanel: View {
 
             ScrollView {
                 VStack(spacing: 16) {
-                    if agent.status == .idle {
-                        // Fresh/idle agent: just show the start button
-                        idleAgentView
+                    if wave.status == .idle {
+                        // Fresh/idle wave: just show the start button
+                        idleWaveView
                     } else {
-                        // Running agent: show progress
+                        // Running wave: show progress
                         runProgressSection
                     }
 
-                    if agent.worktreePath != nil {
+                    if wave.worktreePath != nil {
                         quickActionsBar
                         changedFilesSection
                     }
@@ -98,16 +98,16 @@ struct AgentDetailPanel: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
                     // Status indicator
-                    Image(systemName: agent.statusIndicator.icon)
+                    Image(systemName: wave.statusIndicator.icon)
                         .font(.system(size: 14))
-                        .foregroundStyle(agent.statusIndicator.color)
+                        .foregroundStyle(wave.statusIndicator.color)
 
-                    Text(agent.displayName)
+                    Text(wave.displayName)
                         .font(.title2)
                         .fontWeight(.semibold)
 
-                    if agent.iteration > 0 {
-                        Text("iter \(agent.iteration)")
+                    if wave.iteration > 0 {
+                        Text("iter \(wave.iteration)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 6)
@@ -117,7 +117,7 @@ struct AgentDetailPanel: View {
                     }
                 }
 
-                Text(agent.statusText)
+                Text(wave.statusText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -126,7 +126,7 @@ struct AgentDetailPanel: View {
 
             // Clone button (prominent)
             Button {
-                cloneAgent()
+                cloneWave()
             } label: {
                 HStack(spacing: 4) {
                     if isCloning {
@@ -141,15 +141,15 @@ struct AgentDetailPanel: View {
             }
             .buttonStyle(DarkButtonStyle())
             .disabled(isCloning)
-            .help("Create a copy of this agent")
+            .help("Create a copy of this wave")
 
-            // PR badge if available (from Agent fields)
-            if let prNumber = agent.prNumber, let prState = agent.prState {
-                prBadge(number: prNumber, state: prState, url: agent.prURL)
+            // PR badge if available (from Wave fields)
+            if let prNumber = wave.prNumber, let prState = wave.prState {
+                prBadge(number: prNumber, state: prState, url: wave.prURL)
             }
 
             // Stop button when running
-            if agent.status == .running || agent.status == .waiting {
+            if wave.status == .running || wave.status == .waiting {
                 Button {
                     showingStopConfirmation = true
                 } label: {
@@ -196,9 +196,9 @@ struct AgentDetailPanel: View {
         .help("View PR on GitHub")
     }
 
-    // MARK: - Idle Agent View
+    // MARK: - Idle Wave View
 
-    private var idleAgentView: some View {
+    private var idleWaveView: some View {
         VStack(spacing: 16) {
             // Big start button - prominent green
             Button {
@@ -207,7 +207,7 @@ struct AgentDetailPanel: View {
                 HStack(spacing: 8) {
                     Image(systemName: "play.fill")
                         .font(.title3)
-                    Text("Start \(agent.flowDisplay)")
+                    Text("Start \(wave.flowDisplay)")
                         .font(.title3)
                         .fontWeight(.semibold)
                 }
@@ -218,19 +218,19 @@ struct AgentDetailPanel: View {
                 .clipShape(RoundedRectangle(cornerRadius: 10))
             }
             .buttonStyle(.plain)
-            .disabled(agent.worktreePath == nil)
-            .opacity(agent.worktreePath == nil ? 0.5 : 1)
+            .disabled(wave.worktreePath == nil)
+            .opacity(wave.worktreePath == nil ? 0.5 : 1)
 
             // Subtle config summary
-            if !agent.areaDisplay.isEmpty || !agent.goalDisplay.isEmpty {
+            if !wave.areaDisplay.isEmpty || !wave.directionDisplay.isEmpty {
                 HStack(spacing: 16) {
-                    if !agent.areaDisplay.isEmpty {
-                        Label(agent.areaDisplay, systemImage: "folder")
+                    if !wave.areaDisplay.isEmpty {
+                        Label(wave.areaDisplay, systemImage: "folder")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    if !agent.goalDisplay.isEmpty && agent.goalDisplay != "default" {
-                        Label(agent.goalDisplay, systemImage: "target")
+                    if !wave.directionDisplay.isEmpty && wave.directionDisplay != "default" {
+                        Label(wave.directionDisplay, systemImage: "target")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -246,7 +246,7 @@ struct AgentDetailPanel: View {
 
     private var quickActionsBar: some View {
         HStack(spacing: 12) {
-            if let path = agent.worktreePath {
+            if let path = wave.worktreePath {
                 Button {
                     openInTerminal(path: path)
                 } label: {
@@ -273,7 +273,7 @@ struct AgentDetailPanel: View {
                 .buttonStyle(DarkButtonStyle())
                 .help("Open in \(ideApp.displayName)")
 
-                if agent.hasDiff {
+                if wave.hasDiff {
                     Button {
                         landBranch()
                     } label: {
@@ -305,11 +305,11 @@ struct AgentDetailPanel: View {
 
             // Status description
             HStack(spacing: 8) {
-                switch agent.status {
+                switch wave.status {
                 case .running:
                     ProgressView()
                         .scaleEffect(0.8)
-                    Text("Running \(agent.flowDisplay) flow...")
+                    Text("Running \(wave.flowDisplay) flow...")
                         .foregroundStyle(.secondary)
 
                 case .waiting:
@@ -337,7 +337,7 @@ struct AgentDetailPanel: View {
             .font(.subheadline)
 
             // Live output
-            if agent.status == .running {
+            if wave.status == .running {
                 liveOutputSection
             }
         }
@@ -353,12 +353,12 @@ struct AgentDetailPanel: View {
                 .fontWeight(.medium)
                 .foregroundStyle(.secondary)
 
-            if let path = agent.worktreePath {
+            if let path = wave.worktreePath {
                 GhosttyTerminalView(workingDirectory: path)
                     .frame(height: 200)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
-                let output = sessionState.output(for: agent.id)
+                let output = sessionState.output(for: wave.id)
                 if output.isEmpty {
                     Text("Waiting for output...")
                         .font(.caption)
@@ -547,7 +547,7 @@ struct AgentDetailPanel: View {
     // MARK: - Actions
 
     private func loadData() {
-        guard let path = agent.worktreePath else { return }
+        guard let path = wave.worktreePath else { return }
         loadFileStats(worktreePath: path)
     }
 
@@ -565,22 +565,22 @@ struct AgentDetailPanel: View {
     }
 
     private func launchInteractive() {
-        guard let path = agent.worktreePath else { return }
+        guard let path = wave.worktreePath else { return }
         sessionState.launchInteractiveSession(
-            agentId: agent.id,
-            step: agent.flow,
+            waveId: wave.id,
+            step: wave.flow,
             worktreePath: path
         )
     }
 
-    private func cloneAgent() {
+    private func cloneWave() {
         isCloning = true
         Task {
             do {
-                _ = try await repoState.cloneAgent(agent)
+                _ = try await repoState.cloneWave(wave)
             } catch {
                 await MainActor.run {
-                    actionError = "Failed to clone agent: \(error.localizedDescription)"
+                    actionError = "Failed to clone wave: \(error.localizedDescription)"
                     showingActionError = true
                 }
             }
@@ -622,13 +622,13 @@ struct AgentDetailPanel: View {
         }
     }
 
-    private func stopAgent() {
+    private func stopWave() {
         Task {
             do {
-                try await repoState.stopAgent(agent)
+                try await repoState.stopWave(wave)
             } catch {
                 await MainActor.run {
-                    actionError = "Failed to stop agent: \(error.localizedDescription)"
+                    actionError = "Failed to stop wave: \(error.localizedDescription)"
                     showingActionError = true
                 }
             }
@@ -638,9 +638,9 @@ struct AgentDetailPanel: View {
 
 #Preview {
     let repoState = RepoState()
-    repoState.configureMockAgents()
-    let agent = repoState.agents.first!
-    return AgentDetailPanel(agent: agent)
+    repoState.configureMockWaves()
+    let wave = repoState.waves.first!
+    return WaveDetailPanel(wave: wave)
         .environment(repoState)
         .environment(SessionState())
         .frame(width: 600, height: 700)

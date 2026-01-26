@@ -8,7 +8,7 @@ import LoopflowCore
 final class LauncherState {
     var selectedPrompt: PromptCard?
     var selectedGoals: [Goal] = []
-    var selectedModel: AgentModel?
+    var selectedModel: WaveModel?
     var promptArgs: String = ""
 
     // Context toggles
@@ -164,7 +164,7 @@ final class LauncherState {
         }
 
         if let model = selectedModel {
-            let configDefault = config?.agentModel
+            let configDefault = config?.waveModel
             if model.cliValue != configDefault {
                 parts.append("-m")
                 parts.append(model.cliValue)

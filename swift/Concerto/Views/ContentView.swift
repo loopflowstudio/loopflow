@@ -1,4 +1,4 @@
-// Main content view with agent sidebar and detail panel.
+// Main content view with wave sidebar and detail panel.
 
 import SwiftUI
 import LoopflowCore
@@ -54,7 +54,7 @@ struct ContentView: View {
     var body: some View {
         @Bindable var repoState = repoState
         NavigationSplitView {
-            AgentSidebar()
+            WaveSidebar()
                 .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 360)
         } detail: {
             if repoState.isLoading {
@@ -95,7 +95,7 @@ struct ContentView: View {
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
-                .help("Refresh agents and worktrees")
+                .help("Refresh waves and worktrees")
             }
         }
         .background(palette.background)
@@ -128,8 +128,8 @@ struct ContentView: View {
     private func buildPaletteActions() -> [PaletteAction] {
         var actions: [PaletteAction] = []
 
-        actions.append(PaletteAction("New Agent", icon: "plus.square", shortcut: "⌘N") {
-            NotificationCenter.default.post(name: .showNewAgentSheet, object: nil)
+        actions.append(PaletteAction("New Wave", icon: "plus.square", shortcut: "⌘N") {
+            NotificationCenter.default.post(name: .showNewWaveSheet, object: nil)
         })
 
         actions.append(PaletteAction("Focus Prompt", icon: "text.cursor", shortcut: "⌘L") {
@@ -197,14 +197,14 @@ struct ContentView: View {
     private var detailContent: some View {
         if Flags.beta, let flow = repoState.selectedFlow {
             flowEditorBinding(flow)
-        } else if let agent = repoState.selectedAgent {
-            AgentDetailPanel(agent: agent)
+        } else if let wave = repoState.selectedWave {
+            WaveDetailPanel(wave: wave)
         } else {
             VStack(spacing: 16) {
                 Image(systemName: "cpu")
                     .font(.system(size: 48))
                     .foregroundStyle(.tertiary)
-                Text("Select an agent")
+                Text("Select an wave")
                     .font(.headline)
                     .foregroundStyle(.secondary)
                 Text("Or create one to get started")

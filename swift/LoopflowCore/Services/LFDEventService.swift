@@ -30,9 +30,9 @@ public struct OutputEvent: Sendable {
     public let timestamp: Date
 }
 
-public struct AgentEvent: Sendable {
+public struct WaveEvent: Sendable {
     public let name: String
-    public let agentId: String?
+    public let waveId: String?
     public let stimulus: String?
 }
 
@@ -40,7 +40,7 @@ public enum LFDEvent: Sendable {
     case worktree(WorktreeEvent)
     case session(SessionEvent)
     case output(OutputEvent)
-    case agent(AgentEvent)
+    case wave(WaveEvent)
 }
 
 public actor LFDEventService {
@@ -216,10 +216,10 @@ public actor LFDEventService {
             ))
         }
 
-        if name.hasPrefix("agent.") {
-            return .agent(AgentEvent(
+        if name.hasPrefix("wave.") {
+            return .wave(WaveEvent(
                 name: name,
-                agentId: data["agent_id"] as? String ?? data["id"] as? String,
+                waveId: data["wave_id"] as? String ?? data["id"] as? String,
                 stimulus: data["stimulus"] as? String
             ))
         }

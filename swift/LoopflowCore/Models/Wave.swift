@@ -1,10 +1,10 @@
-// Agent - an autonomous AI coding agent.
+// Wave - an autonomous AI coding wave.
 // Stimulus types: manual (interactive), once (single run), loop (continuous), watch (on file change), cron (scheduled).
 
 import Foundation
 import SwiftUI
 
-/// Determines when an agent runs.
+/// Determines when a wave runs.
 public struct Stimulus: Sendable, Hashable, Codable {
     public enum Kind: String, Sendable, Codable {
         case manual  // User-triggered, interactive work
@@ -31,16 +31,16 @@ public struct Stimulus: Sendable, Hashable, Codable {
 
     public var icon: String {
         switch kind {
-        case .manual: return "circle"  // ○ Idle
+        case .manual: return "circle"  // Idle
         case .once: return "play.circle"
-        case .loop: return "circle.fill"  // ● Running
+        case .loop: return "circle.fill"  // Running
         case .watch: return "eye.circle"
-        case .cron: return "clock"  // ◷ Scheduled
+        case .cron: return "clock"  // Scheduled
         }
     }
 }
 
-public enum AgentStatus: String, Sendable, Codable {
+public enum WaveStatus: String, Sendable, Codable {
     case idle
     case running
     case waiting
@@ -59,11 +59,11 @@ public enum AgentStatus: String, Sendable, Codable {
 
     public var icon: String {
         switch self {
-        case .running: return "circle.fill"  // ●
-        case .waiting: return "circle.lefthalf.filled"  // ◐
-        case .idle: return "circle"  // ○
-        case .completed: return "checkmark.circle.fill"  // ✓
-        case .error: return "xmark.circle.fill"  // ✗
+        case .running: return "circle.fill"
+        case .waiting: return "circle.lefthalf.filled"
+        case .idle: return "circle"
+        case .completed: return "checkmark.circle.fill"
+        case .error: return "xmark.circle.fill"
         }
     }
 }
@@ -76,40 +76,40 @@ public enum MergeMode: String, Sendable, Codable {
 /// An interactive session running in the embedded terminal.
 public struct InteractiveSession: Sendable, Identifiable {
     public let id: String
-    public let agentId: String
+    public let waveId: String
     public let step: String
     public let worktreePath: String
     public let startedAt: Date
 
     public init(
         id: String = UUID().uuidString,
-        agentId: String,
+        waveId: String,
         step: String,
         worktreePath: String,
         startedAt: Date = Date()
     ) {
         self.id = id
-        self.agentId = agentId
+        self.waveId = waveId
         self.step = step
         self.worktreePath = worktreePath
         self.startedAt = startedAt
     }
 }
 
-public struct Agent: Sendable, Identifiable, Hashable {
+public struct Wave: Sendable, Identifiable, Hashable {
     public let id: String
     public var name: String  // User-visible name (e.g., "swift-falcon")
     public var area: [String]?  // Optional, validated at run-time
-    public var goal: [String]?  // Optional, validated at run-time
+    public var direction: [String]?  // Optional, validated at run-time
     public var flow: String
     public let repo: String
 
     public var stimulus: Stimulus
     public var paused: Bool  // When true, stimulus doesn't fire (manual mode)
-    public var status: AgentStatus
+    public var status: WaveStatus
     public var iteration: Int
 
-    // Worktree (agents always have worktrees)
+    // Worktree (waves always have worktrees)
     public var worktreePath: String?  // Path to the worktree
     public var branch: String?  // Git branch (auto-generated)
 
@@ -145,12 +145,12 @@ public struct Agent: Sendable, Identifiable, Hashable {
         id: String,
         name: String = "",
         area: [String]? = nil,
-        goal: [String]? = nil,
+        direction: [String]? = nil,
         flow: String = "design",
         repo: String,
         stimulus: Stimulus = Stimulus(kind: .once),
         paused: Bool = true,
-        status: AgentStatus = .idle,
+        status: WaveStatus = .idle,
         iteration: Int = 0,
         worktreePath: String? = nil,
         branch: String? = nil,
@@ -176,7 +176,7 @@ public struct Agent: Sendable, Identifiable, Hashable {
         self.id = id
         self.name = name
         self.area = area
-        self.goal = goal
+        self.direction = direction
         self.flow = flow
         self.repo = repo
         self.stimulus = stimulus
@@ -205,7 +205,7 @@ public struct Agent: Sendable, Identifiable, Hashable {
         self.lastMainSha = lastMainSha
     }
 
-    /// Check if agent has required config for running.
+    /// Check if wave has required config for running.
     public var isConfigured: Bool {
         area != nil
     }
@@ -220,7 +220,7 @@ public struct Agent: Sendable, Identifiable, Hashable {
     }
 
     private func generateNameFromInput() -> String {
-        // Generate a display name from the agent's configuration
+        // Generate a display name from the wave's configuration
         let areaStr: String
         if let firstArea = area?.first {
             areaStr = firstArea == "." ? "root" : firstArea
@@ -235,9 +235,9 @@ public struct Agent: Sendable, Identifiable, Hashable {
         return area.first == "." ? "." : area.joined(separator: ", ")
     }
 
-    public var goalDisplay: String {
-        guard let goal = goal else { return "" }
-        return goal.isEmpty ? "" : goal.joined(separator: ", ")
+    public var directionDisplay: String {
+        guard let direction = direction else { return "" }
+        return direction.isEmpty ? "" : direction.joined(separator: ", ")
     }
 
     public var flowDisplay: String {

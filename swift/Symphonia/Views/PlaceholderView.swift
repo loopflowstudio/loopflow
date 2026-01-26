@@ -13,7 +13,7 @@ struct PlaceholderView: View {
                 .font(.largeTitle)
                 .fontWeight(.bold)
 
-            Text("Teams coordination for LLM coding agents")
+            Text("Teams coordination for LLM coding waves")
                 .font(.title3)
                 .foregroundStyle(.secondary)
 

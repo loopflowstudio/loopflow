@@ -1,4 +1,4 @@
-// Primary data state - agents, flows, goals, config, worktrees.
+// Primary data state - waves, flows, directions, config, worktrees.
 
 import Foundation
 import SwiftUI
@@ -68,10 +68,10 @@ final class RepoState {
     var prompts: [PromptCard] = []
     var flows: [Flow] = []
     var goals: [Goal] = []
-    var agents: [Agent] = []
+    var waves: [Wave] = []
 
     // Selection
-    var selectedAgent: Agent?
+    var selectedWave: Wave?
     var selectedFlow: Flow?
 
     // Loading
@@ -83,11 +83,11 @@ final class RepoState {
     // Daemon connection
     var lfdConnected: Bool = false
 
-    // Computed: worktree for selected agent
+    // Computed: worktree for selected wave
     var selectedWorktree: Worktree? {
         get {
-            guard let agent = selectedAgent,
-                  let path = agent.worktreePath else { return _selectedWorktree }
+            guard let wave = selectedWave,
+                  let path = wave.worktreePath else { return _selectedWorktree }
             return worktrees.first { $0.path == path } ?? _selectedWorktree
         }
         set {
@@ -101,7 +101,7 @@ final class RepoState {
     private let configLoader = ConfigLoader()
     private let promptService = PromptService()
     private let flowService = FlowService()
-    private let agentService = AgentService()
+    private let waveService = WaveService()
     private let goalService = GoalService()
     private var eventService: LFDEventService?
 
@@ -130,7 +130,7 @@ final class RepoState {
         prompts = []
         flows = []
         goals = []
-        agents = []
+        waves = []
         selectedWorktree = nil
         isLoading = false
         errorMessage = nil
@@ -161,13 +161,13 @@ final class RepoState {
         }
     }
 
-    func configureMockAgents() {
-        agents = [
-            Agent(
-                id: "mock-agent-1",
+    func configureMockWaves() {
+        waves = [
+            Wave(
+                id: "mock-wave-1",
                 name: "swift-falcon",
                 area: ["src/auth"],
-                goal: [],
+                direction: [],
                 flow: "ship",
                 repo: currentRepo?.path ?? "/tmp/demo",
                 stimulus: Stimulus(kind: .loop),
@@ -175,17 +175,17 @@ final class RepoState {
                 status: .running,
                 iteration: 3,
                 worktreePath: nil,
-                branch: "agent-auth-feature",
+                branch: "wave-auth-feature",
                 prLimit: 5,
                 mergeMode: .pr,
                 pid: 12345,
                 createdAt: Date().addingTimeInterval(-3600)
             ),
-            Agent(
-                id: "mock-agent-2",
+            Wave(
+                id: "mock-wave-2",
                 name: "crystal-melody",
                 area: ["src/api"],
-                goal: ["product-engineer"],
+                direction: ["product-engineer"],
                 flow: "ship",
                 repo: currentRepo?.path ?? "/tmp/demo",
                 stimulus: Stimulus(kind: .loop),
@@ -193,17 +193,17 @@ final class RepoState {
                 status: .waiting,
                 iteration: 5,
                 worktreePath: nil,
-                branch: "agent-api-refactor",
+                branch: "wave-api-refactor",
                 prLimit: 3,
                 mergeMode: .pr,
                 pid: nil,
                 createdAt: Date().addingTimeInterval(-7200)
             ),
-            Agent(
-                id: "mock-agent-3",
+            Wave(
+                id: "mock-wave-3",
                 name: "Quick fix",
                 area: ["."],
-                goal: [],
+                direction: [],
                 flow: "debug",
                 repo: currentRepo?.path ?? "/tmp/demo",
                 stimulus: Stimulus(kind: .manual),
@@ -217,11 +217,11 @@ final class RepoState {
                 pid: nil,
                 createdAt: Date().addingTimeInterval(-86400)
             ),
-            Agent(
-                id: "mock-agent-4",
+            Wave(
+                id: "mock-wave-4",
                 name: "Nightly polish",
                 area: ["."],
-                goal: [],
+                direction: [],
                 flow: "polish",
                 repo: currentRepo?.path ?? "/tmp/demo",
                 stimulus: Stimulus(kind: .cron, cron: "0 9 * * *"),
@@ -278,7 +278,7 @@ final class RepoState {
             try? await setupService.ensureDaemonRunning()
             startEventSubscription(sessionState: sessionState)
 
-            await refreshAgents()
+            await refreshWaves()
             await refreshFlowsAsync()
             await launcherState.estimateTokens(repoURL: url)
         }
@@ -494,7 +494,7 @@ final class RepoState {
 
         Task {
             await eventService?.subscribe(
-                to: ["worktree.*", "session.*", "output.line", "agent.*"],
+                to: ["worktree.*", "session.*", "output.line", "wave.*"],
                 onEvent: { [weak self, weak sessionState] event in
                     Task { @MainActor in
                         guard let self, let sessionState else { return }
@@ -509,8 +509,8 @@ final class RepoState {
                                 text: outputEvent.text,
                                 timestamp: outputEvent.timestamp
                             )
-                        case .agent(_):
-                            await self.refreshAgents()
+                        case .wave(_):
+                            await self.refreshWaves()
                         }
                     }
                 },
@@ -552,7 +552,7 @@ final class RepoState {
             // session.started
             sessionState.startSession(
                 id: event.id,
-                agentId: nil,
+                waveId: nil,
                 step: event.step ?? "step",
                 worktree: event.worktree ?? ""
             )
@@ -616,82 +616,82 @@ final class RepoState {
         }
     }
 
-    // MARK: - Agents
+    // MARK: - Waves
 
-    func refreshAgents() async {
+    func refreshWaves() async {
         guard let repo = currentRepo else { return }
         do {
-            agents = try await agentService.listAgents(repo: repo)
-            if let selected = selectedAgent,
-               let updated = agents.first(where: { $0.id == selected.id }) {
-                selectedAgent = updated
+            waves = try await waveService.listWaves(repo: repo)
+            if let selected = selectedWave,
+               let updated = waves.first(where: { $0.id == selected.id }) {
+                selectedWave = updated
             }
         } catch {
-            agents = []
+            waves = []
         }
     }
 
-    func createAgent(name: String) async throws {
+    func createWave(name: String) async throws {
         guard let repo = currentRepo else { return }
 
-        let agentName = name.isEmpty ? NameGenerator.generate() : name
-        let agent = try await agentService.createAgent(name: agentName, repo: repo)
+        let waveName = name.isEmpty ? NameGenerator.generate() : name
+        let wave = try await waveService.createWave(name: waveName, repo: repo)
 
-        agents.insert(agent, at: 0)
-        selectedAgent = agent
+        waves.insert(wave, at: 0)
+        selectedWave = wave
     }
 
-    func runAgent(
-        agent: Agent,
+    func runWave(
+        wave: Wave,
         area: [String]? = nil,
-        goal: [String]? = nil,
+        direction: [String]? = nil,
         flow: String? = nil,
         stimulus: Stimulus? = nil
     ) async throws {
-        try await agentService.run(
-            agentId: agent.id,
+        try await waveService.run(
+            waveId: wave.id,
             area: area,
-            goal: goal,
+            direction: direction,
             flow: flow,
             stimulus: stimulus
         )
 
-        await refreshAgents()
+        await refreshWaves()
     }
 
-    func stopAgent(_ agent: Agent) async throws {
-        try await agentService.stopAgent(agentId: agent.id)
-        await refreshAgents()
+    func stopWave(_ wave: Wave) async throws {
+        try await waveService.stopWave(waveId: wave.id)
+        await refreshWaves()
     }
 
-    func cloneAgent(_ agent: Agent) async throws -> Agent {
-        let cloned = try await agentService.cloneAgent(agentId: agent.id)
-        agents.insert(cloned, at: 0)
-        selectedAgent = cloned
+    func cloneWave(_ wave: Wave) async throws -> Wave {
+        let cloned = try await waveService.cloneWave(waveId: wave.id)
+        waves.insert(cloned, at: 0)
+        selectedWave = cloned
         return cloned
     }
 
-    func updateAgent(
-        _ agent: Agent,
+    func updateWave(
+        _ wave: Wave,
         area: [String]? = nil,
-        goal: [String]? = nil,
+        direction: [String]? = nil,
         flow: String? = nil,
         stimulus: Stimulus? = nil,
         paused: Bool? = nil
     ) async throws {
-        _ = try await agentService.updateAgent(
-            agentId: agent.id,
+        _ = try await waveService.updateWave(
+            waveId: wave.id,
             area: area,
-            goal: goal,
+            direction: direction,
             flow: flow,
             stimulus: stimulus,
             paused: paused
         )
-        await refreshAgents()
+        await refreshWaves()
     }
 
     func connectLfd() async throws {
-        try? await agentService.connectLfd()
+        try? await waveService.connectLfd()
         if let sessionState = _sessionState {
             startEventSubscription(sessionState: sessionState)
         }

@@ -23,7 +23,7 @@ final class SessionState {
 
     struct ActiveSession {
         let id: String
-        let agentId: String?
+        let waveId: String?
         let step: String
         let worktree: String
         let startedAt: Date
@@ -41,10 +41,10 @@ final class SessionState {
 
     // MARK: - Session Lifecycle
 
-    func startSession(id: String, agentId: String?, step: String, worktree: String) {
+    func startSession(id: String, waveId: String?, step: String, worktree: String) {
         activeSessions[id] = ActiveSession(
             id: id,
-            agentId: agentId,
+            waveId: waveId,
             step: step,
             worktree: worktree,
             startedAt: Date()
@@ -116,8 +116,8 @@ final class SessionState {
         activeSessions.values.contains { $0.worktree == path && $0.isRunning }
     }
 
-    func output(for agentId: String) -> [OutputLine] {
-        activeSessions.values.first { $0.agentId == agentId }?.output ?? []
+    func output(for waveId: String) -> [OutputLine] {
+        activeSessions.values.first { $0.waveId == waveId }?.output ?? []
     }
 
     func currentResult(for worktreePath: String?) -> StepRunResult? {
@@ -135,9 +135,9 @@ final class SessionState {
 
     // MARK: - Interactive Sessions
 
-    func launchInteractiveSession(agentId: String, step: String, worktreePath: String) {
+    func launchInteractiveSession(waveId: String, step: String, worktreePath: String) {
         interactiveSession = InteractiveSession(
-            agentId: agentId,
+            waveId: waveId,
             step: step,
             worktreePath: worktreePath
         )
@@ -147,8 +147,8 @@ final class SessionState {
         interactiveSession = nil
     }
 
-    func hasActiveSession(for agentId: String) -> Bool {
-        interactiveSession?.agentId == agentId
+    func hasActiveSession(for waveId: String) -> Bool {
+        interactiveSession?.waveId == waveId
     }
 
     // MARK: - Diff Preview

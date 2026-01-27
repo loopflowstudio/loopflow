@@ -13,7 +13,12 @@ from datetime import datetime
 from pathlib import Path
 
 from loopflow.lf.config import load_config, parse_model
-from loopflow.lf.context import ContextConfig, format_prompt, gather_prompt_components
+from loopflow.lf.context import (
+    ContextConfig,
+    format_prompt,
+    gather_prompt_components,
+    gather_step,
+)
 from loopflow.lf.directions import resolve_directions
 from loopflow.lf.flow import (
     ForkResult,
@@ -38,7 +43,6 @@ from loopflow.lf.worktrees import WorktreeError
 from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
 from loopflow.lfd.daemon.client import notify_event
-from loopflow.lf.context import gather_step
 from loopflow.lfd.flow_run import (
     get_run,
     save_run,
@@ -138,18 +142,7 @@ def _run_collector_step(
     prefix: str | None = None,
     timeout: int | None = None,
 ) -> int:
-    """Run a step via collector subprocess.
-
-    Args:
-        timeout: Max seconds to wait. None uses DEFAULT_STEP_TIMEOUT.
-                 0 means no timeout.
-
-    Returns:
-        Exit code from the collector process.
-
-    Raises:
-        StepTimeoutError: If step exceeds timeout.
-    """
+    """Run a step via collector subprocess. Raises StepTimeoutError if step exceeds timeout."""
     if timeout is None:
         timeout = DEFAULT_STEP_TIMEOUT
 

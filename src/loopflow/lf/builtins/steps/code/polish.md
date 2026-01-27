@@ -1,49 +1,93 @@
 ---
 requires: code on branch
-produces: passing tests, scratch/ updated
+produces: polished code, scratch/<branch>-review.md
 ---
-Fix issues and run tests before landing.
+Make the branch as ready to ship as possible, and as easy for reviewers to evaluate as possible.
 
 ## Goal
 
-Get to green quickly. Fix real problems, not hypothetical ones. The bar is "ready to land," not "perfect." The human can do another polish pass or land directly—don't gold-plate.
+Polish isn't "tests pass." Tests passing is table stakes.
 
-The deliverable is working, clean code that passes tests.
+Polish means: the code is as good as it can be given the design intent, and a reviewer can understand the change in one read.
 
-## Workflow
+Ship-ready code. Reviewer-friendly docs. No excuses left.
 
-1. **Review and fix**
-   - Run `git diff main...HEAD` to see what changed
-   - Review against any style guides in the repo
-   - Fix bugs, style violations, and unnecessary complexity directly
-   - Don't just note issues—fix them
-   - Rewrite the primary design doc in `scratch/` to match the implementation
-   - Update README and docs if the branch changes user-facing behavior or APIs
+## Phase 1: Polish Code
 
-2. **Test**
-   - Run the project's test suite
-   - If tests fail, determine: broken test or broken code?
-   - Fix failures one by one
-   - Add missing tests for key behavior changes
+Make the implementation as clean as possible.
 
-## What to fix
+1. **Review the diff**
+   The diff against main is in your context. Check it against repo style guides (CLAUDE.md, STYLE.md).
 
-Focus only on code changed by this branch.
+2. **Fix developer experience**
+   - Intuitive APIs: sensible defaults, obvious signatures, no surprises
+   - Consistent naming: same concept, same word, everywhere
+   - Clean structure: code organization matches mental model
 
-**Test failures.** Get the suite green first.
+   Example: If three functions take `(path, config, options)` and one takes `(config, path, opts)`, fix it.
 
-**Bugs.** Logic errors, edge cases, off-by-ones in the new code.
+3. **Fix user experience**
+   - Fast paths stay fast. If a flow added latency, find it and fix it.
+   - Errors are clear. No silent failures, no cryptic messages.
+   - Interactions feel snappy. Slow is a bug.
 
-**Missing tests.** Add tests for user-visible behavior that isn't covered. Keep them short and focused.
+   Example: Run through the main user flows the branch touches. Click every button. Time the response. If something feels sluggish, profile it.
 
-## What to ignore
+4. **Tests**
+   Run the project's test suite. Fix failures—determine whether it's broken test or broken code. Add tests for key behavior changes. Keep them focused. Delete flaky tests rather than patching them.
 
-**Unrelated code.** Don't fix things outside this branch's scope. "While I'm here" improvements belong in a separate branch.
+5. **Cleanup**
+   - Remove dead code, debug prints, resolved TODOs
+   - Remove backwards-compatibility shims that aren't needed (old parameter names, deprecated re-exports, migration code for formats nothing uses)
+   - Consistent formatting in changed files
+   - No leftover comments like `// TODO: remove this`
 
-**Working code you'd write differently.** Only fix actual problems, not style preferences.
+## Phase 2: Polish Docs
 
-**Design doc deviations.** The implementation is the source of truth. Deviations are intentional.
+Make the change easy to review.
+
+1. **Write the design review doc** → `scratch/<branch>-review.md`
+
+   This document helps reviewers quickly grasp the diff:
+
+   | Section | Content |
+   |---------|---------|
+   | **What was implemented** | Concrete description. "Added X that does Y." |
+   | **Key choices** | Decisions made, why, alternatives rejected |
+   | **How it fits together** | Architecture in 2-3 sentences or a diagram |
+   | **Risks and bottlenecks** | What could break. What's slow. What's fragile. |
+   | **What's not included** | Intentional omissions. Scope boundaries. |
+
+   This isn't a changelog. It's a guide for someone reading the PR cold.
+
+2. **Update README and docs**
+   - If user-facing behavior changed, docs must reflect it
+   - Examples must work. Commands must be current.
+   - Check: `README.md`, module READMEs, docstrings on public APIs
+
+3. **Inline documentation**
+   - Add comments where the "why" isn't obvious
+   - Don't document the obvious. `# increment counter` above `counter += 1` is noise.
+
+## Scope
+
+**Polish this branch.** Only code changed by this branch.
+
+**Skip unrelated improvements.** "While I'm here" fixes belong in a separate branch.
+
+**Skip style preferences.** Working code you'd write differently isn't broken.
+
+**Don't gold-plate beyond design intent.** Polish to the design, not past it.
 
 ## Output
 
-Fix issues directly. Run tests until they pass. If nothing needs fixing and tests pass, say so.
+Phase 1 produces clean, tested code. Phase 2 produces `scratch/<branch>-review.md` and updated docs.
+
+If nothing needs fixing and tests pass, say so—but still write the design review doc.
+
+## Reference
+
+```bash
+git diff main...HEAD     # see what changed
+uv run pytest tests/     # run tests (or project's test command)
+```

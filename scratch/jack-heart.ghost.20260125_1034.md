@@ -2,192 +2,137 @@
 
 Launch `lf design` (and other interactive steps) directly in Concerto's embedded Ghostty terminal instead of requiring an external terminal.
 
-## What to build
+## Status: In Progress
 
-When a user creates an agent and clicks "Run Design", the session runs inside Concerto's embedded terminal—not in Warp or another external app. The user interacts with Claude Code directly in the Concerto window.
+Core implementation complete:
+- [x] Wave creation (worktree creation is future work, not MVP)
+- [x] InteractiveSession data structure in SessionState
+- [x] InteractiveSessionView wrapping GhosttyTerminalView
+- [x] FlowPicker with Interactive toggle
+- [x] WaveDetailPanel switches to session mode when interactive session active
+- [x] End button kills process and clears session state
+- [x] GhosttyManager callback when terminal closes
+
+Not yet implemented:
+- [ ] Wave creation creates worktree immediately (current: worktree created on first run)
+- [ ] Token summary bar in session view
+
+## What was built
+
+When a user selects a wave and clicks "Run" with Interactive toggle ON, the session runs inside Concerto's embedded terminal—not in Warp or another external app. The user interacts with Claude Code directly in the Concerto window.
 
 ## How it works
 
-1. Agent creation creates a worktree (new behavior)
-2. User clicks "Run" with Interactive toggle ON
-3. Concerto shows embedded terminal running `lf design` in the worktree
+1. User selects a wave in the sidebar
+2. User clicks "Run" with Interactive toggle ON in FlowPicker
+3. Concerto shows embedded terminal running `lf <step>` in the wave's worktree
+4. User interacts with Claude Code in the embedded terminal
+5. User clicks "End" or process exits naturally
 
-That's it. The `lf` CLI handles context assembly. No new daemon endpoints needed.
+## State management
 
-## Key change: Agent creation creates worktree
-
-Currently: Agent is created with no worktree. Worktree is created when the agent first runs.
-
-New: `POST /agents` creates the worktree immediately. The agent always has a `worktreePath`.
-
-```python
-# agent.py: create_agent()
-def create_agent(...) -> Agent:
-    # ... existing logic ...
-
-    # Create worktree for this agent
-    worktree_path = create_worktree(repo, agent.name)
-    agent.worktree = worktree_path
-
-    save_agent(agent)
-    return agent
-```
-
-## Swift: Launch in embedded terminal
+Implemented as three focused state objects (per concerto-simplification.md):
 
 ```swift
-// When user clicks Run with Interactive ON:
-func launchInteractiveSession(agent: Agent, step: String) {
-    guard let worktreePath = agent.worktreePath else { return }
-
-    appState.activeSession = InteractiveSession(
-        agentId: agent.id,
-        step: step,
-        worktreePath: worktreePath
-    )
+// RepoState: Primary data - waves, flows, directions, config
+@Observable final class RepoState {
+    var waves: [Wave]
+    var selectedWave: Wave?
+    // ...
 }
 
-// InteractiveSessionView shows:
-GhosttyTerminalView(
-    workingDirectory: session.worktreePath,
-    command: "lf \(session.step)"
-)
+// SessionState: Session tracking - running steps and their output
+@Observable final class SessionState {
+    var activeSessions: [String: ActiveSession] = [:]
+    var interactiveSession: InteractiveSession?
+    // ...
+}
+
+// LauncherState: Context assembly for prompt launching
+@Observable final class LauncherState {
+    var selectedPrompt: PromptCard?
+    var selectedDirections: [Direction] = []
+    // ...
+}
 ```
 
-## Data structures
+## InteractiveSession data structure
 
 ```swift
-// Swift side - minimal
-struct InteractiveSession {
-    let agentId: String
+// Swift - minimal
+struct InteractiveSession: Identifiable {
+    let id = UUID().uuidString
+    let waveId: String
     let step: String
     let worktreePath: String
-    let startedAt: Date
+    let startedAt = Date()
 }
 ```
 
-## UI changes
-
-### FlowPicker modifications
-
-Add "Interactive" toggle to existing FlowPicker:
-
-```
-┌─────────────────────────────────────────┐
-│ Try a different flow                    │
-│                                         │
-│ [design ▼]     [Interactive ✓]  [Run]   │
-│                                         │
-│ Single step: design                     │
-└─────────────────────────────────────────┘
-```
-
-When Interactive toggle is ON:
-- Run button calls `launchInteractiveSession()` (local, no API call)
-- Transitions AgentDetailPanel to "session mode"
-
-### AgentDetailPanel: Session Mode
-
-When an interactive session starts, the detail panel switches to session mode:
-
-```swift
-enum DetailPanelMode {
-    case config    // Current: shows config, stimulus, flow picker
-    case session   // New: shows embedded terminal
-}
-```
-
-Session mode layout:
-
-```
-┌─────────────────────────────────────────┐
-│ swift-falcon  design [interactive]      │
-│                              [End] [↗]  │
-├─────────────────────────────────────────┤
-│ Tokens: 12,847                          │
-│ files 6,892  diff_files 4,721           │
-├─────────────────────────────────────────┤
-│                                         │
-│  > lf design                            │
-│                                         │
-│  ━━━ design ━━━                         │
-│  Tokens: 12,847                         │
-│                                         │
-│  files          6,892 █████             │
-│    STYLE.md     2,854 ██                │
-│                                         │
-│  > What would you like to design?       │
-│  █                                      │
-│                                         │
-│                                         │
-└─────────────────────────────────────────┘
-```
-
-- Header: agent name, step name, mode badge
-- `[End]` button: stop session (kills process, returns to config mode)
-- `[↗]` button: detach to external terminal (future: not MVP)
-- Token summary bar: collapsed view of context breakdown
-- Terminal: full remaining height, GhosttyTerminalView
-
-### New View: InteractiveSessionView
+## InteractiveSessionView
 
 Wraps GhosttyTerminalView with session header:
 
 ```
 ┌─────────────────────────────────────────┐
-│ swift-falcon  design [interactive] [End]│
+│ ● swift-falcon  design [interactive]    │
+│                              [End]      │
 ├─────────────────────────────────────────┤
 │                                         │
 │  $ lf design                            │
-│  ━━━ design ━━━                         │
-│  Tokens: 12,847                         │
 │  ...                                    │
 │                                         │
 └─────────────────────────────────────────┘
 ```
 
-### State management
+- Green status indicator when running
+- Wave name and step name displayed
+- Interactive badge
+- End button kills process and clears session state
+
+## FlowPicker modifications
+
+Added "Interactive" toggle:
 
 ```swift
-// AppState
-@Published var activeSession: InteractiveSession?
+Toggle(isOn: $isInteractive) {
+    Text("Interactive")
+}
 ```
 
-AgentDetailPanel checks `appState.activeSession`:
-- If session exists for this agent → show InteractiveSessionView
+When Interactive toggle is ON:
+- Run button calls `launchInteractiveSession()` on SessionState
+- WaveDetailPanel detects active session and shows InteractiveSessionView
+
+## WaveDetailPanel: Session Mode
+
+WaveDetailPanel checks `sessionState.interactiveSession`:
+- If session exists for this wave → show InteractiveSessionView
 - Otherwise → show normal config view
+
+## Terminal ownership
+
+When terminal closes (process exits), GhosttyManager's `onSessionClosed` callback triggers:
+
+```swift
+GhosttyManager.shared.onSessionClosed = {
+    Task { @MainActor in
+        sessionState.endInteractiveSession()
+    }
+}
+```
+
+This clears the session state and returns to config mode.
 
 ## Constraints
 
-**Terminal ownership:** When terminal closes, need to detect session end and clear `activeSession`. GhosttyManager's `close_surface_cb` should notify Concerto.
+**One session at a time:** MVP supports one interactive session. `sessionState.interactiveSession` is singular.
 
-**One session at a time:** MVP supports one interactive session. `appState.activeSession` is singular.
-
-## Done when
-
-Manual test from Concerto:
-
-1. Open a repo in Concerto
-2. Create new agent → verify worktree is created immediately
-3. In FlowPicker, select "design" step, toggle "Interactive" ON
-4. Click "Run"
-5. Verify: panel switches to session mode with embedded terminal
-6. Verify: terminal runs `lf design`, shows token summary, Claude Code starts
-7. Type in terminal, verify Claude Code responds
-8. Click "End" button → verify returns to config mode
-
-Verification checklist:
-- [ ] Agent creation creates worktree
-- [ ] Terminal renders with Loopflow burgundy theme
-- [ ] Keyboard input works (typing, Ctrl+C, etc.)
-- [ ] End button kills process and clears session state
-
-## Open questions
-
-1. **Closing Concerto during session:** Kill the process? Current thinking: yes, interactive sessions need the terminal visible.
+**Closing Concerto during session:** Kills the process. Interactive sessions need the terminal visible.
 
 ## Not in scope (future)
 
 - Detach to external terminal
 - Multiple concurrent interactive sessions
 - Session resume after Concerto restart
+- Token summary bar showing context breakdown

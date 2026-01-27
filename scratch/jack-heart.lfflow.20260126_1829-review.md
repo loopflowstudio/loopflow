@@ -83,15 +83,43 @@ lf flow design-and-ship
 
 ## Files changed
 
+### Core implementation
+
 | File | Change |
 |------|--------|
-| `src/loopflow/lf/context.py` | Added budget limiting, restructured doc gathering |
-| `src/loopflow/lf/design.py` | Added `gather_area()`, `gather_ancestral_docs()` |
-| `src/loopflow/lf/flow.py` | Added `_is_step_interactive()`, `_run_interactive_step()` |
-| `src/loopflow/lf/flows.py` | Added `interactive` field to Step dataclass |
-| `src/loopflow/lf/step.py` | Renamed `-p/--path` to `--area` |
-| `src/loopflow/lf/config.py` | Added `BudgetConfig` |
-| `tests/test_design.py` | Updated tests for new function names |
-| `docs/*.md` | Updated CLI flag documentation |
-| `roadmap/` | Added roadmap items from research |
-| `scratch/` | Research notes, design doc |
+| `src/loopflow/lf/context.py` | Added budget limiting (`_limit_to_budget`), restructured doc gathering with area/docs/diff budgets |
+| `src/loopflow/lf/design.py` | Added `gather_area()` (all files in area), `gather_ancestral_docs()` (parent docs) |
+| `src/loopflow/lf/flow.py` | Added `_is_step_interactive()`, `_run_interactive_step()`, flow direction propagation |
+| `src/loopflow/lf/flows.py` | Added `interactive` field to Step dataclass, direction now supports list |
+| `src/loopflow/lf/step.py` | Renamed `-p/--path` to `--area`, added budget config wiring |
+| `src/loopflow/lf/config.py` | Added `BudgetConfig` dataclass |
+
+### Flows and steps
+
+| File | Change |
+|------|--------|
+| `src/loopflow/lf/builtins/flows/code/design-and-ship.yaml` | New flow: design → implement → reduce → polish |
+| `src/loopflow/lf/builtins/flows/code/ship.yaml` | Added consolidate as final step |
+| `src/loopflow/lf/builtins/steps/ops/consolidate.md` | Revised to focus on cleanup rather than roadmap prep |
+| `src/loopflow/lf/builtins/steps/ops/add-to-roadmap.md` | Updated to use `--area` for destination |
+
+### Documentation
+
+| File | Change |
+|------|--------|
+| `src/loopflow/LOOPFLOW.md` | Restructured for area-centric model |
+| `docs/*.md` | Updated CLI flags (`--area`), lfd command names (`watch`, `cron`) |
+| `README.md` | Updated flow tables, wave examples |
+
+### Tests
+
+| File | Change |
+|------|--------|
+| `tests/test_design.py` | Updated tests for `gather_area()` and `gather_ancestral_docs()` |
+
+## Test coverage
+
+All 594 tests pass. Key test files:
+- `test_design.py`: Tests for `gather_area()` and `gather_ancestral_docs()` functions
+- `test_context.py`: Context assembly tests (unchanged, existing coverage)
+- `test_flows.py`: Flow parsing including new `interactive` field

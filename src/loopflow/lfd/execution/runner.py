@@ -31,7 +31,7 @@ from loopflow.lf.flow import (
 from loopflow.lf.flows import (
     Choose,
     Fork,
-    ForkAgent,
+    ForkThread,
     Step,
     build_step_dag,
     load_flow,
@@ -325,7 +325,7 @@ def _run_fork_synthesize(
     results: list[ForkResult] = []
     base_commit = _git_rev_parse(worktree_path, "HEAD")
 
-    def _run_fork_branch(fork_config: ForkAgent, index: int) -> ForkResult:
+    def _run_fork_branch(fork_config: ForkThread, index: int) -> ForkResult:
         wt_name = f"fork-{flow_name}-{index}"
         try:
             wt_path = create_worktree(wave.repo, wt_name, base=branch)
@@ -439,9 +439,9 @@ def _run_fork_synthesize(
             scratch_notes="",
         )
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(fork.agents)) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(fork.threads)) as executor:
         futures = [
-            executor.submit(_run_fork_branch, config, i + 1) for i, config in enumerate(fork.agents)
+            executor.submit(_run_fork_branch, config, i + 1) for i, config in enumerate(fork.threads)
         ]
         for future in futures:
             results.append(future.result())

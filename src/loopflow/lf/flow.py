@@ -28,7 +28,7 @@ from loopflow.lf.flows import (
     Choose,
     Flow,
     Fork,
-    ForkAgent,
+    ForkThread,
     Step,
     StepDAG,
     SynthesizeConfig,
@@ -72,13 +72,7 @@ def _build_step_params(
     step_context = list(context) if context else []
 
     # Step direction overrides flow direction
-    if step.direction:
-        if isinstance(step.direction, list):
-            direction = step.direction
-        else:
-            direction = [step.direction]
-    else:
-        direction = flow_direction
+    direction = step.direction if step.direction else flow_direction
 
     if step.model:
         step_backend, step_variant = parse_model(step.model)
@@ -554,7 +548,7 @@ def _cleanup_worktrees(repo_root: Path, results: list[_WorktreeResult]) -> None:
 @dataclass
 class ForkResult:
     worktree: Path
-    config: ForkAgent
+    config: ForkThread
     diff: str
     status: str
     scratch_notes: str
@@ -573,17 +567,17 @@ def run_fork(
     context: list[str] | None,
     chrome: bool = False,
 ) -> list[ForkResult]:
-    """Create worktrees from base_commit, run each agent in parallel, return results."""
+    """Create worktrees from base_commit, run each thread in parallel, return results."""
     base_branch = _current_branch(parent_worktree) or "HEAD"
     results: list[ForkResult] = []
 
-    def _run_agent(agent: ForkAgent, index: int) -> tuple[ForkAgent, Path, int]:
+    def _run_thread(thread: ForkThread, index: int) -> tuple[ForkThread, Path, int]:
         label = f"fork-{flow_name}-{index}"
         try:
             wt_path = create_worktree(parent_worktree, label, base=base_branch)
         except Exception as exc:
             print(f"[{label}] Failed to create worktree: {exc}")
-            return agent, parent_worktree, 1
+            return thread, parent_worktree, 1
 
         subprocess.run(
             ["git", "reset", "--hard", base_branch],
@@ -592,9 +586,9 @@ def run_fork(
         )
         subprocess.run(["git", "clean", "-fd"], cwd=wt_path, capture_output=True)
 
-        if agent.step:
-            step = Step(name=agent.step, model=agent.model, direction=agent.direction)
-            params = _build_step_params(step, backend, model_variant, context)
+        if thread.step:
+            step = Step(name=thread.step, model=thread.model, direction=thread.direction)
+            params = _build_step_params(step, backend, model_variant, context, None)
             exit_code = _run_step(
                 params,
                 wt_path,
@@ -603,16 +597,16 @@ def run_fork(
                 skip_permissions,
                 False,
                 index,
-                len(fork.agents),
+                len(fork.threads),
                 chrome=chrome,
             )
-            return agent, wt_path, exit_code
+            return thread, wt_path, exit_code
 
-        if agent.flow:
-            loaded_flow = load_flow(agent.flow, parent_worktree)
+        if thread.flow:
+            loaded_flow = load_flow(thread.flow, parent_worktree)
             if not loaded_flow:
-                print(f"[{label}] Unknown flow: {agent.flow}")
-                return agent, wt_path, 1
+                print(f"[{label}] Unknown flow: {thread.flow}")
+                return thread, wt_path, 1
             exit_code = run_flow(
                 loaded_flow,
                 wt_path,
@@ -625,22 +619,22 @@ def run_fork(
                 model_variant=model_variant,
                 chrome=chrome,
             )
-            return agent, wt_path, exit_code
+            return thread, wt_path, exit_code
 
-        print(f"[{label}] Fork agent must set step or flow")
-        return agent, wt_path, 1
+        print(f"[{label}] Fork thread must set step or flow")
+        return thread, wt_path, 1
 
     futures = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(fork.agents)) as executor:
-        for index, agent in enumerate(fork.agents, 1):
-            futures.append(executor.submit(_run_agent, agent, index))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(fork.threads)) as executor:
+        for index, thread in enumerate(fork.threads, 1):
+            futures.append(executor.submit(_run_thread, thread, index))
         for future in futures:
-            agent, wt_path, exit_code = future.result()
+            thread, wt_path, exit_code = future.result()
             diff = _run_git(wt_path, ["diff", f"{base_commit}..HEAD"])
             results.append(
                 ForkResult(
                     worktree=wt_path,
-                    config=agent,
+                    config=thread,
                     diff=diff,
                     status="completed" if exit_code == 0 else "failed",
                     scratch_notes=_read_scratch_notes(wt_path),
@@ -993,7 +987,7 @@ def run_flow(
                 step_num += 1
                 if len(batch) == 1:
                     step = batch[0]
-                    params = _build_step_params(step, backend, model_variant, context)
+                    params = _build_step_params(step, backend, model_variant, context, None)
 
                     # Check if step should run interactively
                     if _is_step_interactive(step, repo_root, config):
@@ -1026,7 +1020,7 @@ def run_flow(
                 base_branch = _current_branch(repo_root) or "HEAD"
                 wt_tasks = []
                 for step in batch:
-                    params = _build_step_params(step, backend, model_variant, context)
+                    params = _build_step_params(step, backend, model_variant, context, None)
                     wt_tasks.append(
                         _WorktreeTask(
                             step=params.step,

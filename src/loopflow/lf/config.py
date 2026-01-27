@@ -71,8 +71,8 @@ class BranchNameConfig(BaseModel):
 class BudgetConfig(BaseModel):
     """Token budgets for prompt sections."""
 
-    area: int = 50000  # Area content (area/*.md, area/roadmap/)
-    docs: int = 30000  # Reference docs (root *.md, scratch/, roadmap/)
+    area: int = 50000  # Area content (area/*.md, area/reports/)
+    docs: int = 30000  # Reference docs (root *.md, scratch/, reports/)
     diff: int = 20000  # Branch changes
 
 
@@ -107,7 +107,7 @@ class Config(BaseModel):
     ide: IdeConfig = Field(default_factory=IdeConfig)
     interactive: list[str] = Field(default_factory=list)  # Tasks that default to interactive
     include_loopflow_doc: bool = True  # Include bundled LOOPFLOW.md in prompts
-    lfdocs: bool = True  # Include roadmap/, scratch/, and root .md files
+    lfdocs: bool = True  # Include reports/, roadmap/, scratch/, and root .md files
     diff: bool = False  # Include raw branch diff against main
     diff_files: bool = True  # Include full content of files touched by branch
     paste: bool = False  # Include clipboard content by default

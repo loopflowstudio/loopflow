@@ -112,15 +112,15 @@ def _parse_roadmap_item(path: Path, area: str) -> RoadmapItem | None:
 
 
 def list_areas(repo: Path) -> list[str]:
-    """List all areas in the roadmap."""
+    """List all waves in roadmap/."""
     roadmap_dir = repo / "roadmap"
     if not roadmap_dir.exists():
         return []
 
     areas = []
-    for area_dir in roadmap_dir.iterdir():
-        if area_dir.is_dir() and not area_dir.name.startswith("_"):
-            areas.append(area_dir.name)
+    for wave_dir in roadmap_dir.iterdir():
+        if wave_dir.is_dir() and not wave_dir.name.startswith("_"):
+            areas.append(wave_dir.name)
     return sorted(areas)
 
 
@@ -237,7 +237,7 @@ created_at: {now.isoformat()}
 def format_roadmap_list(roadmap: Roadmap) -> str:
     """Format roadmap for display."""
     if not roadmap.items:
-        return "No roadmap items found in roadmap/"
+        return "No items found in roadmap/"
 
     lines = []
 

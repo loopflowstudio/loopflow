@@ -143,13 +143,13 @@ class DiffMode(str, Enum):
 
 
 # Default paths always included unless explicitly excluded
-_DEFAULT_FILE_PATHS = ["scratch/", "roadmap/", "*.md"]
+_DEFAULT_FILE_PATHS = ["scratch/", "reports/", "roadmap/", "*.md"]
 
 
 class FilesetConfig(BaseModel):
     """Configuration for file context.
 
-    Default paths (scratch/, roadmap/, *.md) are always included unless excluded.
+    Default paths (scratch/, reports/, roadmap/, *.md) are always included unless excluded.
     The paths field is additive to defaults.
     """
 
@@ -165,12 +165,12 @@ class ContextConfig(BaseModel):
     # Branch work
     diff_mode: DiffMode = DiffMode.FILES
 
-    # User files (defaults: scratch/, roadmap/, *.md)
+    # User files (defaults: scratch/, reports/, roadmap/, *.md)
     files: FilesetConfig = Field(default_factory=FilesetConfig)
 
     # Area path (e.g., "lf/cli" or "concerto/ui")
     # When set with parent_docs=True, includes parent area docs:
-    # area="a/b/c" includes a/*.md, a/roadmap/, a/b/*.md, a/b/roadmap/, etc.
+    # area="a/b/c" includes a/*.md, a/reports/, a/b/*.md, a/b/reports/, etc.
     area: str | None = None
 
     # Bundled LOOPFLOW.md system documentation
@@ -189,7 +189,7 @@ class ContextConfig(BaseModel):
         """Minimal context for commit message generation."""
         return cls(
             diff_mode=DiffMode.DIFF,
-            files=FilesetConfig(exclude=["scratch/", "roadmap/", "*.md"]),
+            files=FilesetConfig(exclude=["scratch/", "reports/", "roadmap/", "*.md"]),
             lfdocs=False,
         )
 
@@ -821,7 +821,7 @@ def gather_prompt_components(
         # Area-scoped: ancestral docs from parent paths
         roadmap_docs = gather_ancestral_docs(repo_root, context_config.area)
     else:
-        # No area: include all of roadmap/ as reference
+        # No area: include all of reports/ as reference
         roadmap_docs = gather_internal_docs(repo_root)
     ref_docs = design_docs + roadmap_docs + docs
 
@@ -939,7 +939,7 @@ def format_prompt(components: PromptComponents) -> str:
         docs_body = "\n\n".join(doc_parts)
         parts.append(
             "Repository documentation. Follow STYLE carefully. "
-            "May include design artifacts (scratch/) and internal docs (roadmap/).\n\n"
+            "May include design artifacts (scratch/) and internal docs (reports/).\n\n"
             f"<lf:docs>\n{docs_body}\n</lf:docs>"
         )
 

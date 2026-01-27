@@ -10,6 +10,7 @@ from loopflow.lf.tokens import count_tokens
 
 # Patterns for lfdocs content (excluded from summaries when lfdocs is on)
 LFDOCS_EXCLUDE_PATTERNS = [
+    "reports/**",
     "roadmap/**",
     "scratch/**",
     "*.md",  # Root .md files

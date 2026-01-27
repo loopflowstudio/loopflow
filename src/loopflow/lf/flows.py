@@ -104,7 +104,16 @@ class Choose(BaseModel):
         return self
 
 
-FlowItem = Step | Fork | Choose
+@dataclass
+class LoopUntilEmpty:
+    """Repeat steps until wave backlog is empty."""
+
+    steps: list["FlowItem"] = dataclass_field(default_factory=list)
+    wave: str | None = None  # None = inherit from context
+    max_iterations: int = 100  # Safety limit
+
+
+FlowItem = Step | Fork | Choose | LoopUntilEmpty
 
 
 class Flow:
@@ -156,7 +165,7 @@ def _parse_flow_items(items: Iterable[Any]) -> list[FlowItem]:
 
 
 def _parse_flow_item(item: Any) -> FlowItem:
-    if isinstance(item, (Step, Fork, Choose)):
+    if isinstance(item, (Step, Fork, Choose, LoopUntilEmpty)):
         return item
     if isinstance(item, str):
         return Step(name=item)
@@ -187,6 +196,15 @@ def _parse_flow_item(item: Any) -> FlowItem:
                     model=item.get("model"),
                     synthesize=item.get("synthesize"),
                 )
+        if "loop_until_empty" in item:
+            loop_value = item["loop_until_empty"]
+            if isinstance(loop_value, dict):
+                return LoopUntilEmpty(
+                    steps=_parse_flow_items(loop_value.get("steps", [])),
+                    wave=loop_value.get("wave"),
+                    max_iterations=loop_value.get("max_iterations", 100),
+                )
+            raise ValueError("loop_until_empty must be a dict with 'steps' key")
         if "step" in item or "name" in item:
             name = item.get("name") or item.get("step")
             return Step(

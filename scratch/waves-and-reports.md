@@ -1,10 +1,10 @@
-# Waves and Reports: Work Item Management
+# Roadmap and Reports: Work Item Management
 
 Restructure how loopflow manages persistent work items and reference material.
 
 ## Problem
 
-`roadmap/` conflates two different things:
+The old `roadmap/` conflated two different things:
 - **Actionable work items** — things to build next
 - **Reference material** — context for understanding
 
@@ -16,15 +16,15 @@ Split into two directories with clear purposes:
 
 | Directory | Purpose | Keyed by | Example |
 |-----------|---------|----------|---------|
-| `waves/<wave>/` | Actionable work items | wave/worktree name | `waves/lfflow/dynamic-budgets.md` |
+| `roadmap/<wave>/` | Actionable work items | wave/worktree name | `roadmap/lfflow/dynamic-budgets.md` |
 | `reports/` | Reference material | topic | `reports/landscape.md` |
 
-### waves/
+### roadmap/
 
 Each wave has a backlog directory. Items are individual files:
 
 ```
-waves/
+roadmap/
   lfflow/
     dynamic-budgets.md
     summary-fallback.md
@@ -32,7 +32,7 @@ waves/
     keyboard-nav.md
 ```
 
-`ingest` pulls from `waves/<wave>/` and moves one item to `scratch/`. The wave name comes from the current worktree or wave configuration.
+`ingest` pulls from `roadmap/<wave>/` and moves one item to `scratch/`. The wave name comes from the current worktree or wave configuration.
 
 ### reports/
 
@@ -53,7 +53,7 @@ Keyed by topic, not wave. This is context, not work.
 
 Routes content based on type:
 
-- **Actionable follow-up** → `waves/<wave>/<item>.md`
+- **Actionable follow-up** → `roadmap/<wave>/<item>.md`
 - **Reference/context** → `reports/<topic>.md`
 
 The agent decides based on content. Work items go to the current wave's backlog. Research and analysis go to reports.
@@ -61,7 +61,7 @@ The agent decides based on content. Work items go to the current wave's backlog.
 **Destination logic:**
 ```
 Is this something to build/do next?
-  → waves/<current-wave>/<slug>.md
+  → roadmap/<current-wave>/<slug>.md
 
 Is this context/research for later reference?
   → reports/<topic>.md
@@ -69,9 +69,9 @@ Is this context/research for later reference?
 
 ### ingest
 
-Pulls from `waves/<wave>/`:
+Pulls from `roadmap/<wave>/`:
 
-1. Read items in `waves/<wave>/`
+1. Read items in `roadmap/<wave>/`
 2. Evaluate: urgency, importance, readiness
 3. Pick highest priority
 4. Move to `scratch/<slug>.md`
@@ -94,11 +94,11 @@ Repeat steps until a wave's backlog is empty:
 
 Flow:
 1. `review` analyzes the area
-2. `add-to-roadmap` populates `waves/lfflow/` with work items
+2. `add-to-roadmap` populates `roadmap/lfflow/` with work items
 3. Loop starts:
-   - `ingest` pulls one item from `waves/lfflow/`
+   - `ingest` pulls one item from `roadmap/lfflow/`
    - `ship` builds it
-   - Repeat until `waves/lfflow/` is empty
+   - Repeat until `roadmap/lfflow/` is empty
 
 Termination is implicit — when `ingest` finds no items, the loop completes.
 
@@ -111,10 +111,10 @@ If `wave:` is omitted, inherit from:
 
 ## Migration
 
-1. Rename `roadmap/` → `reports/`
-2. Move actionable items from `reports/` to `waves/<wave>/`
+1. Move reference material from `roadmap/` to `reports/`
+2. Keep actionable items in `roadmap/<wave>/`
 3. Update `add-to-roadmap` to route based on content type
-4. Update `ingest` to read from `waves/<wave>/`
+4. Update `ingest` to read from `roadmap/<wave>/`
 5. Add `loop_until_empty` primitive to flow execution
 
 ## What stays the same

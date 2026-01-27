@@ -606,17 +606,17 @@ def _setup_task_template(tmp_path):
 
 
 # =============================================================================
-# Internal docs (roadmap/) tests
+# Internal docs (reports/) tests
 # =============================================================================
 
 
 def test_internal_docs_auto_included(tmp_path):
-    """roadmap/ markdown files are auto-included in context."""
+    """reports/ markdown files are auto-included in context."""
     (tmp_path / ".git").mkdir()
     (tmp_path / "README.md").write_text("# Test\n")
 
-    # Create roadmap/ with some markdown files
-    internal_docs = tmp_path / "roadmap"
+    # Create reports/ with some markdown files
+    internal_docs = tmp_path / "reports"
     internal_docs.mkdir()
     (internal_docs / "architecture.md").write_text("# Architecture\n\nHow it works.\n")
     (internal_docs / "decisions").mkdir()
@@ -625,7 +625,7 @@ def test_internal_docs_auto_included(tmp_path):
     components = gather_prompt_components(tmp_path, "implement")
     prompt = format_prompt(components)
 
-    # roadmap/ files should be included
+    # reports/ files should be included
     assert "# Architecture" in prompt
     assert "How it works." in prompt
     assert "# ADR 001" in prompt
@@ -633,14 +633,14 @@ def test_internal_docs_auto_included(tmp_path):
 
 
 def test_internal_docs_empty_when_missing(tmp_path):
-    """roadmap/ missing doesn't cause errors."""
+    """reports/ missing doesn't cause errors."""
     (tmp_path / ".git").mkdir()
     (tmp_path / "README.md").write_text("# Test\n")
 
     components = gather_prompt_components(tmp_path, step=None, inline="test")
     prompt = format_prompt(components)
 
-    # Should still work, just no roadmap content
+    # Should still work, just no reports content
     assert "# Test" in prompt
 
 
@@ -665,7 +665,7 @@ def test_public_docs_not_auto_included(tmp_path):
 
 
 def test_internal_docs_before_root_docs(tmp_path):
-    """roadmap/ appears before repo root .md files in context."""
+    """reports/ appears before repo root .md files in context."""
     (tmp_path / ".git").mkdir()
     (tmp_path / "README.md").write_text("# Root README\n")
 
@@ -673,16 +673,16 @@ def test_internal_docs_before_root_docs(tmp_path):
     scratch_dir.mkdir()
     (scratch_dir / "plan.md").write_text("# Design Plan\n")
 
-    internal_docs = tmp_path / "roadmap"
+    internal_docs = tmp_path / "reports"
     internal_docs.mkdir()
     (internal_docs / "context.md").write_text("# Internal Context\n")
 
     components = gather_prompt_components(tmp_path, step=None, inline="test")
 
-    # Check order: scratch/, then roadmap/, then root docs
+    # Check order: scratch/, then reports/, then root docs
     doc_paths = [str(p) for p, _ in components.docs]
     scratch_idx = next(i for i, p in enumerate(doc_paths) if "scratch" in p)
-    internal_idx = next(i for i, p in enumerate(doc_paths) if "roadmap" in p)
+    internal_idx = next(i for i, p in enumerate(doc_paths) if "reports" in p)
     readme_idx = next(i for i, p in enumerate(doc_paths) if "README" in p)
 
     assert scratch_idx < internal_idx < readme_idx

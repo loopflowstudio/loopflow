@@ -20,13 +20,12 @@ def gather_design_docs(repo_root: Path) -> list[tuple[Path, str]]:
 
 
 def gather_internal_docs(repo_root: Path) -> list[tuple[Path, str]]:
-    """Gather internal docs from roadmap/ for prompt context.
+    """Gather internal docs from reports/ for prompt context.
 
-    roadmap/ contains forward-looking internal documentation:
-    architecture, decisions, context for agents. Unlike scratch/
-    (ephemeral per-PR), roadmap/ persists across merges.
+    reports/ contains reference material: research, analysis, decisions.
+    Unlike scratch/ (ephemeral per-PR), reports/ persists across merges.
     """
-    docs_dir = repo_root / "roadmap"
+    docs_dir = repo_root / "reports"
     if not docs_dir.is_dir():
         return []
 
@@ -54,7 +53,7 @@ def gather_area(repo_root: Path, area: str) -> list[tuple[Path, str]]:
 
     For area="src/api", includes:
     - All files in src/api/ (code, docs, everything)
-    - roadmap/src/api/* (roadmap items for this area)
+    - reports/src/api/* (reports for this area)
 
     This is what the agent is responsible for and needs to know.
     """
@@ -74,10 +73,10 @@ def gather_area(repo_root: Path, area: str) -> list[tuple[Path, str]]:
                 except (UnicodeDecodeError, PermissionError):
                     pass  # Skip binary or unreadable files
 
-    # Area-specific roadmap (roadmap/<area>/)
-    roadmap_dir = repo_root / "roadmap" / area
-    if roadmap_dir.is_dir():
-        for path in sorted(roadmap_dir.rglob("*")):
+    # Area-specific reports (reports/<area>/)
+    reports_dir = repo_root / "reports" / area
+    if reports_dir.is_dir():
+        for path in sorted(reports_dir.rglob("*")):
             if path.is_file() and path not in seen:
                 try:
                     content = path.read_text()
@@ -90,19 +89,19 @@ def gather_area(repo_root: Path, area: str) -> list[tuple[Path, str]]:
 
 
 def gather_ancestral_docs(repo_root: Path, area: str) -> list[tuple[Path, str]]:
-    """Gather docs and roadmap from parent paths of an area.
+    """Gather docs and reports from parent paths of an area.
 
     For area="a/b/c", includes:
     - a/*.md, a/b/*.md (parent docs)
-    - roadmap/a/*, roadmap/a/b/* (parent roadmap items)
-    - NOT a/b/c/* or roadmap/a/b/c/* (that's in the area itself)
+    - reports/a/*, reports/a/b/* (parent reports)
+    - NOT a/b/c/* or reports/a/b/c/* (that's in the area itself)
     """
     docs = []
     seen = set()
     parents = _area_parent_paths(area)[:-1]  # Exclude the area itself
 
     # Paths to exclude (the area itself and deeper)
-    area_roadmap = repo_root / "roadmap" / area.strip("/")
+    area_reports = repo_root / "reports" / area.strip("/")
 
     for parent in parents:
         # Parent directory docs
@@ -113,12 +112,12 @@ def gather_ancestral_docs(repo_root: Path, area: str) -> list[tuple[Path, str]]:
                     seen.add(path)
                     docs.append((path, path.read_text()))
 
-        # Parent roadmap items (all files, not just .md)
-        roadmap_dir = repo_root / "roadmap" / parent
-        if roadmap_dir.is_dir():
-            for path in sorted(roadmap_dir.rglob("*")):
-                # Skip files under the area's roadmap (handled by gather_area)
-                if _is_under(path, area_roadmap):
+        # Parent reports (all files, not just .md)
+        reports_dir = repo_root / "reports" / parent
+        if reports_dir.is_dir():
+            for path in sorted(reports_dir.rglob("*")):
+                # Skip files under the area's reports (handled by gather_area)
+                if _is_under(path, area_reports):
                     continue
                 if path.is_file() and path not in seen:
                     try:

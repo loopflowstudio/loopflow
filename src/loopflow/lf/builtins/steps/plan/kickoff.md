@@ -1,8 +1,8 @@
 ---
-requires: scratch/<slug>.md (ingested roadmap item)
+requires: scratch/<slug>.md (ingested wave item)
 produces: scratch/<slug>.md (elaborated design)
 ---
-Transform a roadmap item into a bold, well-considered design.
+Transform a wave item into a bold, well-considered design.
 
 ## Workflow
 

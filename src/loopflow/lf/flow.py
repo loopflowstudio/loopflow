@@ -29,6 +29,7 @@ from loopflow.lf.flows import (
     Flow,
     Fork,
     ForkThread,
+    LoopUntilEmpty,
     Step,
     StepDAG,
     SynthesizeConfig,
@@ -45,7 +46,7 @@ from loopflow.lf.worktrees import remove as remove_worktree
 from loopflow.lfd.models import StepRun, StepRunStatus
 from loopflow.lfd.step_run import log_step_run_end, log_step_run_start
 
-FlowItem = Step | Fork | Choose
+FlowItem = Step | Fork | Choose | LoopUntilEmpty
 
 
 @dataclass
@@ -723,6 +724,30 @@ def _current_branch(worktree: Path) -> str | None:
     return branch or None
 
 
+def _get_wave_name(repo_root: Path, explicit_wave: str | None) -> str:
+    """Get wave name from explicit value, or derive from worktree/branch."""
+    if explicit_wave:
+        return explicit_wave
+    # Derive from worktree directory name (e.g., loopflow.lfflow -> lfflow)
+    dir_name = repo_root.name
+    if "." in dir_name:
+        return dir_name.split(".")[-1]
+    # Fall back to branch name
+    branch = _current_branch(repo_root)
+    if branch:
+        return branch
+    return "default"
+
+
+def _is_wave_empty(repo_root: Path, wave: str) -> bool:
+    """Check if a wave's backlog is empty (no items in roadmap/<wave>/)."""
+    roadmap_dir = repo_root / "roadmap" / wave
+    if not roadmap_dir.exists():
+        return True
+    items = list(roadmap_dir.glob("*.md"))
+    return len(items) == 0
+
+
 def _run_git(worktree: Path, args: list[str]) -> str:
     result = subprocess.run(
         ["git", *args],
@@ -892,7 +917,7 @@ def _build_choose_prompt(
         [
             "",
             "Decide which option to run based on repository state.",
-            "Inspect roadmap/roadmap and .design as needed.",
+            "Inspect reports/ and scratch/ as needed.",
             "",
             f"Write your decision to {output_path} with this frontmatter:",
             "---",
@@ -1106,6 +1131,42 @@ def run_flow(
             branch_steps = item.options[choice]
             items = items[:i] + branch_steps + items[i + 1 :]
             total = _count_logical_steps(items)
+            continue
+
+        if isinstance(item, LoopUntilEmpty):
+            wave_name = _get_wave_name(repo_root, item.wave)
+            iteration = 0
+            print(f"\n{'=' * 60}")
+            print(f"[loop_until_empty] wave={wave_name}")
+            print(f"{'=' * 60}\n")
+
+            while not _is_wave_empty(repo_root, wave_name):
+                iteration += 1
+                if iteration > item.max_iterations:
+                    print(f"[loop_until_empty] max iterations ({item.max_iterations}) reached")
+                    return 1
+
+                print(f"\n--- Loop iteration {iteration} ---\n")
+
+                # Run the loop's steps as a sub-flow
+                loop_flow = Flow(name=f"{flow.name}-loop-{iteration}", steps=list(item.steps))
+                result_code = run_flow(
+                    loop_flow,
+                    repo_root,
+                    context=context,
+                    exclude=exclude,
+                    skip_permissions=skip_permissions,
+                    push_enabled=False,
+                    pr_enabled=False,
+                    backend=backend,
+                    model_variant=model_variant,
+                    chrome=chrome,
+                )
+                if result_code != 0:
+                    return result_code
+
+            print(f"\n[loop_until_empty] wave={wave_name} is empty, loop complete\n")
+            i += 1
             continue
 
         i += 1

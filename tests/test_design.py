@@ -51,15 +51,15 @@ def test_clear_design_artifacts_keeps_folder(tmp_path):
 
 
 # =============================================================================
-# Internal docs (roadmap/) tests
+# Internal docs (reports/) tests
 # =============================================================================
 
 
 def test_gather_internal_docs_reads_markdown(tmp_path):
-    """gather_internal_docs returns roadmap/ markdown files."""
+    """gather_internal_docs returns reports/ markdown files."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    docs_dir = repo_root / "roadmap"
+    docs_dir = repo_root / "reports"
     docs_dir.mkdir()
     (docs_dir / "architecture.md").write_text("# Architecture\n")
     (docs_dir / "notes.txt").write_text("ignore")
@@ -76,7 +76,7 @@ def test_gather_internal_docs_recursive(tmp_path):
     """gather_internal_docs finds nested markdown files."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    docs_dir = repo_root / "roadmap"
+    docs_dir = repo_root / "reports"
     docs_dir.mkdir()
     (docs_dir / "overview.md").write_text("# Overview\n")
     decisions = docs_dir / "decisions"
@@ -94,7 +94,7 @@ def test_gather_internal_docs_recursive(tmp_path):
 
 
 def test_gather_internal_docs_empty_when_missing(tmp_path):
-    """gather_internal_docs returns empty list when roadmap/ doesn't exist."""
+    """gather_internal_docs returns empty list when reports/ doesn't exist."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
 
@@ -107,7 +107,7 @@ def test_gather_internal_docs_sorted(tmp_path):
     """gather_internal_docs returns files in sorted order."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    docs_dir = repo_root / "roadmap"
+    docs_dir = repo_root / "reports"
     docs_dir.mkdir()
     (docs_dir / "zebra.md").write_text("Z")
     (docs_dir / "alpha.md").write_text("A")
@@ -220,17 +220,17 @@ def test_gather_area_includes_all_files(tmp_path):
     assert "GUIDE.md" in names  # nested files included
 
 
-def test_gather_area_includes_area_roadmap(tmp_path):
-    """gather_area includes roadmap/<area>/ items."""
+def test_gather_area_includes_area_reports(tmp_path):
+    """gather_area includes reports/<area>/ items."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     (repo_root / "lf").mkdir()
     (repo_root / "lf" / "cli").mkdir()
-    (repo_root / "roadmap").mkdir()
-    (repo_root / "roadmap" / "lf").mkdir()
-    (repo_root / "roadmap" / "lf" / "cli").mkdir()
-    (repo_root / "roadmap" / "lf" / "cli" / "refactor.md").write_text("# CLI refactor")
-    (repo_root / "roadmap" / "lf" / "cli" / "spec.txt").write_text("Spec content")
+    (repo_root / "reports").mkdir()
+    (repo_root / "reports" / "lf").mkdir()
+    (repo_root / "reports" / "lf" / "cli").mkdir()
+    (repo_root / "reports" / "lf" / "cli" / "refactor.md").write_text("# CLI refactor")
+    (repo_root / "reports" / "lf" / "cli" / "spec.txt").write_text("Spec content")
 
     docs = gather_area(repo_root, "lf/cli")
 
@@ -239,15 +239,15 @@ def test_gather_area_includes_area_roadmap(tmp_path):
     assert "spec.txt" in names  # non-.md file also included
 
 
-def test_gather_area_nested_roadmap(tmp_path):
-    """gather_area includes nested docs within roadmap/<area>/."""
+def test_gather_area_nested_reports(tmp_path):
+    """gather_area includes nested docs within reports/<area>/."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     (repo_root / "lf").mkdir()
-    (repo_root / "roadmap").mkdir()
-    (repo_root / "roadmap" / "lf").mkdir()
-    (repo_root / "roadmap" / "lf" / "decisions").mkdir()
-    (repo_root / "roadmap" / "lf" / "decisions" / "adr-001.md").write_text("# ADR")
+    (repo_root / "reports").mkdir()
+    (repo_root / "reports" / "lf").mkdir()
+    (repo_root / "reports" / "lf" / "decisions").mkdir()
+    (repo_root / "reports" / "lf" / "decisions" / "adr-001.md").write_text("# ADR")
 
     docs = gather_area(repo_root, "lf")
 
@@ -299,25 +299,25 @@ def test_gather_ancestral_docs_includes_parent_md(tmp_path):
     assert "GUIDE.md" not in names  # lf/cli/ is area itself, not ancestor
 
 
-def test_gather_ancestral_docs_includes_parent_roadmap(tmp_path):
-    """gather_ancestral_docs includes roadmap from parent paths."""
+def test_gather_ancestral_docs_includes_parent_reports(tmp_path):
+    """gather_ancestral_docs includes reports from parent paths."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     (repo_root / "lf").mkdir()
     (repo_root / "lf" / "cli").mkdir()
-    (repo_root / "roadmap").mkdir()
-    (repo_root / "roadmap" / "lf").mkdir()
-    (repo_root / "roadmap" / "lf" / "feature.md").write_text("# Feature plan")
-    (repo_root / "roadmap" / "lf" / "spec.txt").write_text("Spec content")
-    (repo_root / "roadmap" / "lf" / "cli").mkdir()
-    (repo_root / "roadmap" / "lf" / "cli" / "refactor.md").write_text("# CLI refactor")
+    (repo_root / "reports").mkdir()
+    (repo_root / "reports" / "lf").mkdir()
+    (repo_root / "reports" / "lf" / "feature.md").write_text("# Feature plan")
+    (repo_root / "reports" / "lf" / "spec.txt").write_text("Spec content")
+    (repo_root / "reports" / "lf" / "cli").mkdir()
+    (repo_root / "reports" / "lf" / "cli" / "refactor.md").write_text("# CLI refactor")
 
     docs = gather_ancestral_docs(repo_root, "lf/cli")
 
     names = [p.name for p, _ in docs]
-    assert "feature.md" in names  # from roadmap/lf/
-    assert "spec.txt" in names  # non-.md from roadmap/lf/
-    assert "refactor.md" not in names  # roadmap/lf/cli/ is area itself
+    assert "feature.md" in names  # from reports/lf/
+    assert "spec.txt" in names  # non-.md from reports/lf/
+    assert "refactor.md" not in names  # reports/lf/cli/ is area itself
 
 
 def test_gather_ancestral_docs_empty_for_root_area(tmp_path):

@@ -16,7 +16,7 @@ The design doc is scaffolding—a checkpoint for recovery, not documentation for
 ## Workflow
 
 1. Run `git branch --show-current` to confirm you're on a feature branch (not `main`)
-2. Check `roadmap/` for architecture notes, prior decisions, or context that informs this design
+2. Check `reports/` for architecture notes, prior decisions, or context that informs this design
 3. Create `scratch/<feature-name>.md` early—after the first exchange or two
 4. Write as you go, refining with each conversation turn
 5. Run `git add scratch/ && git commit -m "design: <branch>"` when done

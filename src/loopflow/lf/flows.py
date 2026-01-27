@@ -19,6 +19,7 @@ class Step:
     after: str | list[str] | None = None  # None = follows previous step
     model: str | None = None
     direction: str | None = None
+    interactive: bool | None = None  # Override frontmatter setting
 
 
 @dataclass
@@ -176,6 +177,7 @@ def _parse_flow_item(item: Any) -> FlowItem:
                 after=item.get("after"),
                 model=item.get("model"),
                 direction=item.get("direction"),
+                interactive=item.get("interactive"),
             )
     raise ValueError(f"Unsupported flow item: {item!r}")
 

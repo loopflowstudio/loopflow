@@ -14,7 +14,7 @@ from typing import Optional
 
 import yaml
 
-from loopflow.lf.config import parse_model
+from loopflow.lf.config import Config, load_config, parse_model
 from loopflow.lf.context import (
     ContextConfig,
     FilesetConfig,
@@ -36,7 +36,7 @@ from loopflow.lf.flows import (
     load_flow,
 )
 from loopflow.lf.git import GitError, find_main_repo, open_pr
-from loopflow.lf.launcher import build_model_command, get_runner
+from loopflow.lf.launcher import build_model_command, build_model_interactive_command, get_runner
 from loopflow.lf.logging import write_prompt_file
 from loopflow.lf.messages import generate_pr_message
 from loopflow.lf.tokens import MAX_SAFE_TOKENS, analyze_components
@@ -81,6 +81,110 @@ def _build_step_params(
         context=step_context or None,
         direction=step_direction,
     )
+
+
+def _is_step_interactive(step: Step, repo_root: Path, config: Config | None) -> bool:
+    """Check if step should run interactively.
+
+    Priority: flow step override > frontmatter > default (False)
+    """
+    if step.interactive is not None:
+        return step.interactive
+    step_file = gather_step(repo_root, step.name, config)
+    if step_file and step_file.config.interactive is not None:
+        return step_file.config.interactive
+    return False
+
+
+def _run_interactive_step(
+    params: _StepParams,
+    repo_root: Path,
+    main_repo: Path,
+    exclude: list[str] | None,
+    skip_permissions: bool,
+    step_num: int,
+    total_steps: int,
+    chrome: bool = False,
+) -> int:
+    """Run step interactively - direct coding agent, no collector.
+
+    Unlike standalone interactive runs (which use os.execvp), this uses
+    subprocess.run() so the flow can continue after the step completes.
+    """
+    print(f"\n{'=' * 60}")
+    print(f"[{step_num}/{total_steps}] {params.step} (interactive)")
+    print(f"{'=' * 60}\n")
+
+    components = gather_prompt_components(
+        repo_root,
+        params.step,
+        run_mode="interactive",
+        direction=params.direction,
+        context_config=ContextConfig(
+            files=FilesetConfig(paths=params.context or [], exclude=exclude or [])
+        ),
+    )
+    components, dropped = trim_prompt_components(components, MAX_SAFE_TOKENS)
+    if dropped:
+        dropped_summary = ", ".join(format_drop_label(item) for item in dropped)
+        print(
+            f"\033[33m⚠ Context trimmed to fit {MAX_SAFE_TOKENS:,} tokens. "
+            f"Dropped: {dropped_summary}\033[0m"
+        )
+    tree = analyze_components(components)
+    if tree.total() > MAX_SAFE_TOKENS:
+        print(f"\033[33m⚠ Prompt is {tree.total():,} tokens (limit ~{MAX_SAFE_TOKENS:,})\033[0m")
+
+    prompt = format_prompt(components)
+
+    # Show token summary
+    token_summary = tree.format()
+    print(f"\033[90m━━━ {params.step} ━━━\033[0m")
+    for line in token_summary.split("\n"):
+        print(f"\033[90m{line}\033[0m")
+    print()
+
+    step_run = StepRun(
+        id=str(uuid.uuid4()),
+        step=params.step,
+        repo=str(main_repo),
+        worktree=str(repo_root),
+        status=StepRunStatus.RUNNING,
+        started_at=datetime.now(),
+        pid=None,
+        model=params.backend,
+        run_mode="interactive",
+    )
+    log_step_run_start(step_run)
+
+    command = build_model_interactive_command(
+        params.backend,
+        skip_permissions=skip_permissions,
+        yolo=skip_permissions,
+        model_variant=params.model_variant,
+        sandbox_root=repo_root.parent,
+        workdir=repo_root,
+        chrome=chrome,
+    )
+
+    # Append prompt as argument
+    cmd_with_prompt = command + [prompt]
+
+    # Run interactively - subprocess.run preserves TTY
+    # Remove API keys so coding agents use subscriptions
+    env = os.environ.copy()
+    env.pop("ANTHROPIC_API_KEY", None)
+    env.pop("OPENAI_API_KEY", None)
+
+    result = subprocess.run(cmd_with_prompt, cwd=repo_root, env=env)
+
+    status = StepRunStatus.COMPLETED if result.returncode == 0 else StepRunStatus.FAILED
+    log_step_run_end(step_run.id, status)
+
+    if result.returncode != 0:
+        print(f"\n[{params.step}] failed with exit code {result.returncode}")
+
+    return result.returncode
 
 
 def _run_step(
@@ -855,9 +959,10 @@ def run_flow(
 
     runner = get_runner(backend)
     if not runner.is_available():
-        print(f"Error: '{backend}' CLI not found")
+        print(f"Error: '{backend}' coding agent not found")
         return 1
 
+    config = load_config(repo_root)
     main_repo = find_main_repo(repo_root) or repo_root
     items: list[FlowItem] = list(flow.steps)
     total = _count_logical_steps(items)
@@ -878,18 +983,33 @@ def run_flow(
             for batch in batches:
                 step_num += 1
                 if len(batch) == 1:
-                    params = _build_step_params(batch[0], backend, model_variant, context)
-                    result_code = _run_step(
-                        params,
-                        repo_root,
-                        main_repo,
-                        exclude,
-                        skip_permissions,
-                        should_push,
-                        step_num,
-                        total,
-                        chrome=chrome,
-                    )
+                    step = batch[0]
+                    params = _build_step_params(step, backend, model_variant, context)
+
+                    # Check if step should run interactively
+                    if _is_step_interactive(step, repo_root, config):
+                        result_code = _run_interactive_step(
+                            params,
+                            repo_root,
+                            main_repo,
+                            exclude,
+                            skip_permissions,
+                            step_num,
+                            total,
+                            chrome=chrome,
+                        )
+                    else:
+                        result_code = _run_step(
+                            params,
+                            repo_root,
+                            main_repo,
+                            exclude,
+                            skip_permissions,
+                            should_push,
+                            step_num,
+                            total,
+                            chrome=chrome,
+                        )
                     if result_code != 0:
                         return result_code
                     continue

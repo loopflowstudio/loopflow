@@ -45,9 +45,10 @@ def test_list_worktrees_maps_json_fields(tmp_path):
         },
     ]
 
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0, stdout=json_dump(payload), stderr="")
-        worktrees = list_all(repo_root)
+    with patch("loopflow.lf.worktrees._find_wt_binary", return_value="/usr/bin/wt"):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout=json_dump(payload), stderr="")
+            worktrees = list_all(repo_root)
 
     assert len(worktrees) == 1
     wt = worktrees[0]
@@ -77,9 +78,12 @@ def test_create_worktree_returns_existing_path(tmp_path):
 
     with patch("loopflow.lf.worktrees.list_all") as mock_list:
         mock_list.return_value = [MagicMock(branch="feature")]
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout=f"{existing_path}\n", stderr="")
-            result = create(repo_root, "feature")
+        with patch("loopflow.lf.worktrees._find_wt_binary", return_value="/usr/bin/wt"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=0, stdout=f"{existing_path}\n", stderr=""
+                )
+                result = create(repo_root, "feature")
 
     assert result == existing_path
 
@@ -92,9 +96,10 @@ def test_create_worktree_creates_new_path(tmp_path):
 
     with patch("loopflow.lf.worktrees.list_all") as mock_list:
         mock_list.return_value = []
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout=f"{new_path}\n", stderr="")
-            result = create(repo_root, "new")
+        with patch("loopflow.lf.worktrees._find_wt_binary", return_value="/usr/bin/wt"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=0, stdout=f"{new_path}\n", stderr="")
+                result = create(repo_root, "new")
 
     assert result == new_path
 

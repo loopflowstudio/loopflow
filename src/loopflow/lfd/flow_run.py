@@ -15,10 +15,10 @@ def save_run(run: FlowRun, db_path: Path | None = None) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO runs
-        (id, wave, flow, direction, area, repo, status, iteration,
+        (id, wave, flow, direction, area, repo, status, iteration, step_index,
          worktree, branch, current_step, error, pr_url,
          started_at, ended_at, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             run.id,
@@ -29,6 +29,7 @@ def save_run(run: FlowRun, db_path: Path | None = None) -> None:
             str(run.repo),
             run.status.value,
             run.iteration,
+            run.step_index,
             run.worktree,
             run.branch,
             run.current_step,
@@ -167,6 +168,20 @@ def update_run_pr(run_id: str, pr_url: str, db_path: Path | None = None) -> bool
     return updated
 
 
+def update_flow_run_index(run_id: str, step_index: int, db_path: Path | None = None) -> bool:
+    """Update the step_index for a flow run (tick-based execution)."""
+    conn = _get_db(db_path)
+
+    cursor = conn.execute(
+        "UPDATE runs SET step_index = ? WHERE id = ? OR id LIKE ?",
+        (step_index, run_id, f"{run_id}%"),
+    )
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    return updated
+
+
 def delete_run(run_id: str, db_path: Path | None = None) -> bool:
     """Delete a run."""
     conn = _get_db(db_path)
@@ -196,6 +211,7 @@ def flow_run_from_row(row: dict) -> FlowRun:
         repo=Path(row["repo"]),
         status=FlowRunStatus(row["status"]),
         iteration=row.get("iteration", 0),
+        step_index=row.get("step_index", 0),
         worktree=row.get("worktree"),
         branch=row.get("branch"),
         current_step=row.get("current_step"),

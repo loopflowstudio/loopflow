@@ -17,6 +17,9 @@ struct WaveDetailPanel: View {
     @State private var showingActionError = false
     @State private var showingStopConfirmation = false
     @State private var isCloning = false
+    @State private var editingName: String = ""
+    @State private var isEditingName = false
+    @FocusState private var isNameFocused: Bool
 
     private let terminalLauncher = TerminalLauncher()
     private let worktreeService = WorktreeService()
@@ -61,6 +64,12 @@ struct WaveDetailPanel: View {
         } message: {
             Text("Stop '\(wave.displayName)'? It can be restarted later.")
         }
+        .onReceive(NotificationCenter.default.publisher(for: .editWaveName)) { _ in
+            // Only respond if this wave is selected
+            if repoState.selectedWave?.id == wave.id {
+                startNameEdit()
+            }
+        }
     }
 
     // MARK: - Config View
@@ -102,9 +111,27 @@ struct WaveDetailPanel: View {
                         .font(.system(size: 14))
                         .foregroundStyle(wave.statusIndicator.color)
 
-                    Text(wave.displayName)
-                        .font(.title2)
-                        .fontWeight(.semibold)
+                    if isEditingName {
+                        TextField("Wave name", text: $editingName)
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                            .textFieldStyle(.plain)
+                            .focused($isNameFocused)
+                            .frame(minWidth: 150)
+                            .onSubmit {
+                                commitNameChange()
+                            }
+                            .onExitCommand {
+                                cancelNameEdit()
+                            }
+                    } else {
+                        Text(wave.displayName)
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                            .onTapGesture(count: 2) {
+                                startNameEdit()
+                            }
+                    }
 
                     if wave.iteration > 0 {
                         Text("iter \(wave.iteration)")
@@ -629,6 +656,42 @@ struct WaveDetailPanel: View {
             } catch {
                 await MainActor.run {
                     actionError = "Failed to stop wave: \(error.localizedDescription)"
+                    showingActionError = true
+                }
+            }
+        }
+    }
+
+    // MARK: - Name Editing
+
+    private func startNameEdit() {
+        editingName = wave.name
+        isEditingName = true
+        // Small delay to ensure TextField is mounted
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(50))
+            isNameFocused = true
+        }
+    }
+
+    private func cancelNameEdit() {
+        isEditingName = false
+        isNameFocused = false
+    }
+
+    private func commitNameChange() {
+        let newName = editingName.trimmingCharacters(in: .whitespacesAndNewlines)
+        isEditingName = false
+        isNameFocused = false
+
+        guard !newName.isEmpty, newName != wave.name else { return }
+
+        Task {
+            do {
+                try await repoState.renameWave(wave, to: newName)
+            } catch {
+                await MainActor.run {
+                    actionError = "Failed to rename: \(error.localizedDescription)"
                     showingActionError = true
                 }
             }

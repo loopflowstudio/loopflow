@@ -1,4 +1,5 @@
-// Service for interacting with `wt` CLI for worktree operations.
+// Service for worktree operations via lfd/lfops.
+// Concerto never calls wt (worktrunk) directly - that's an implementation detail of lfops.
 
 import Foundation
 
@@ -9,7 +10,7 @@ public struct WorktreeService: @unchecked Sendable {
         case commandFailed(String)
         case parseError(String)
         case notFound
-        case wtNotInstalled
+        case daemonNotRunning
 
         public var errorDescription: String? {
             switch self {
@@ -20,7 +21,7 @@ public struct WorktreeService: @unchecked Sendable {
                 return msg.trimmingCharacters(in: .whitespacesAndNewlines)
             case .parseError(let msg): return "Couldn't read worktree data: \(msg)"
             case .notFound: return "This worktree no longer exists. Try refreshing."
-            case .wtNotInstalled: return "Worktrunk not installed. Click retry to install it."
+            case .daemonNotRunning: return "Loopflow daemon not running. Run 'lfd install' to start it."
             }
         }
     }
@@ -50,7 +51,6 @@ public struct WorktreeService: @unchecked Sendable {
     }
 
     private let sessionService = SessionService()
-    @MainActor private static var lfopsCompatible: Bool?
 
     private func runProcessWithStatus(
         _ executable: URL,
@@ -125,57 +125,25 @@ public struct WorktreeService: @unchecked Sendable {
         var args = ["wt", "list", "--format", "json"]
         if full { args.append("--full") }
 
-        let lfopsCompatible = await getLfopsCompatible()
-        if lfopsCompatible != false, let lfopsURL = findCommand("lfops") {
-            do {
-                let t0 = CFAbsoluteTimeGetCurrent()
-                let (output, status) = try await runProcessWithStatus(lfopsURL, args, in: repoURL)
-                let cmdTime = Int((CFAbsoluteTimeGetCurrent() - t0) * 1000)
-                LoggingService.append("worktrees.list command=lfops full=\(full) status=\(status) bytes=\(output.utf8.count) cmd_ms=\(cmdTime)")
-                if status == 0 {
-                    let t1 = CFAbsoluteTimeGetCurrent()
-                    if let worktrees = try? await decodeWorktrees(from: output, source: "lfops", loadSessions: full) {
-                        let decodeTime = Int((CFAbsoluteTimeGetCurrent() - t1) * 1000)
-                        let totalTime = Int((CFAbsoluteTimeGetCurrent() - startTime) * 1000)
-                        LoggingService.append("worktrees.list decode_ms=\(decodeTime) total_ms=\(totalTime)")
-                        await setLfopsCompatible(true)
-                        return worktrees
-                    }
-                }
-                if output.contains("No such command 'wt'") {
-                    await setLfopsCompatible(false)
-                    LoggingService.append("worktrees.list command=lfops status=disabled reason=no-wt-command")
-                }
-            } catch {
-                LoggingService.append("worktrees.list command=lfops error=\(error.localizedDescription)")
-                if error.localizedDescription.contains("No such command 'wt'") {
-                    await setLfopsCompatible(false)
-                }
-            }
+        guard let lfopsURL = findCommand("lfops") else {
+            throw WorktreeError.commandFailed("lfops not found. Install loopflow.")
         }
 
-        // Fallback to wt directly
-        var wtArgs = ["list", "--format", "json"]
-        if full { wtArgs.append("--full") }
-
         let t0 = CFAbsoluteTimeGetCurrent()
-        let (output, status) = try await runProcessWithStatus(
-            URL(fileURLWithPath: "/opt/homebrew/bin/wt"),
-            wtArgs,
-            in: repoURL,
-            fallbackToWhich: true
-        )
+        let (output, status) = try await runProcessWithStatus(lfopsURL, args, in: repoURL)
         let cmdTime = Int((CFAbsoluteTimeGetCurrent() - t0) * 1000)
-        LoggingService.append("worktrees.list command=wt full=\(full) status=\(status) bytes=\(output.utf8.count) cmd_ms=\(cmdTime)")
+        LoggingService.append("worktrees.list command=lfops full=\(full) status=\(status) bytes=\(output.utf8.count) cmd_ms=\(cmdTime)")
+
         if status != 0 {
             throw WorktreeError.commandFailed(output)
         }
+
         let t1 = CFAbsoluteTimeGetCurrent()
-        let result = try await decodeWorktrees(from: output, source: "wt", loadSessions: full)
+        let worktrees = try await decodeWorktrees(from: output, source: "lfops", loadSessions: full)
         let decodeTime = Int((CFAbsoluteTimeGetCurrent() - t1) * 1000)
         let totalTime = Int((CFAbsoluteTimeGetCurrent() - startTime) * 1000)
         LoggingService.append("worktrees.list decode_ms=\(decodeTime) total_ms=\(totalTime)")
-        return result
+        return worktrees
     }
 
     private func decodeWorktrees(from output: String, source: String, loadSessions: Bool) async throws -> [Worktree] {
@@ -204,14 +172,6 @@ public struct WorktreeService: @unchecked Sendable {
         return worktrees
     }
 
-    private func getLfopsCompatible() async -> Bool? {
-        await MainActor.run { WorktreeService.lfopsCompatible }
-    }
-
-    private func setLfopsCompatible(_ value: Bool) async {
-        await MainActor.run { WorktreeService.lfopsCompatible = value }
-    }
-
     public func create(name: String, in repoURL: URL, baseBranch: String? = nil) async throws {
         // Use lfops wt create for schema-based branch naming
         var args = ["wt", "create", name]
@@ -223,7 +183,7 @@ public struct WorktreeService: @unchecked Sendable {
     }
 
     public func remove(name: String, in repoURL: URL) async throws {
-        _ = try await run(["-C", repoURL.path(), "remove", name], in: repoURL)
+        _ = try await runLfops(["wt", "-C", repoURL.path(), "remove", name], in: repoURL)
     }
 
     public func createPR(in worktreePath: URL) async throws {
@@ -525,13 +485,6 @@ public struct WorktreeService: @unchecked Sendable {
 
         guard let path = repoPath else { return nil }
         return URL(string: "https://github.com/\(path)/compare/\(base)...\(branch)")
-    }
-
-    private func run(_ args: [String], in directory: URL) async throws -> String {
-        guard let wtURL = findCommand("wt") else {
-            throw WorktreeError.wtNotInstalled
-        }
-        return try await runProcess(wtURL, args, in: directory)
     }
 
     private func runLfops(_ args: [String], in directory: URL) async throws -> String {

@@ -2,57 +2,109 @@
 
 Loopflow helps you maintain flow and craft using coding agents (Claude Code, Codex, Gemini CLI) at high scale.
 
+Loopflow helps you create and run **Waves**. Waves are chains of coding agents working together in pre-defined ways.  
+
+Waves are first built manually through more interactive exploration. Eventually waves become autonomous through looping, scheduling, and watching for changes.
+
 ## Waves
 
-The core entities in loopflow are waves. Waves are a new way of configuring and using coding agents in composable and autonmous ways.
+Waves are objects with 4 primary fields.
 
-Waves are made of 4 fields.
-
-| Field | Usage |
-|------|--------------|
-| **Area** | Scope and context |
-| **Flow** | Process followed / steps taken |
-| **Direction** | Defines success, quality, and aesthetics |
-| **Stimulus** | Watch, loop, or cron |
+| Field | Usage | Form |
+|-------|------|------|
+| **Area** | Scope and context | pathset |
+| **Flow** | Process followed / steps taken | sequence of prompts |
+| **Direction** | Defines success, quality, and aesthetics | prompt |
+| **Stimulus** | Watch, loop, or cron | mode |
 
 ## Steps
 
-But before you create a wave, let's start at the beginning. 
-
-**Steps** are the the most basic of Loopflow building blocks. Steps are simply prompts for running coding agents to execute concrete, scoped, atomic tasks.
-
-There are many built-in steps that come bundled with loopflow, such as implement, polish, and rebase, but you can also write your own (put markdown in `.claude/commands` or `.lf/steps`) or import from your favorite library.
-
-For example, try:
-
 ```bash
-lf debug -c
+lf debug -c    # paste an error, watch it fix
+lf design      # interactive design session
 ```
 
-This runs the `debug` step, loading the clipboard (`-c`) as context on what to debug. Steps are non-interactive by default. If you've copied a failing test to your clipboard, the coding agent will fix it for you.
+Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 
-To start building something new try:
+### Planning steps (`plan/`)
 
-```bash
-lf design
-```
+| Step | What it does |
+|------|--------------|
+| `review` | Research an area — architecture, complexity, quality, potential |
+| `reduce` | Find simplification opportunities |
+| `polish` | Find polish priorities |
+| `expand` | Find expansion opportunities |
+| `iterate` | Read review, write design to address it |
+| `ingest` | Pick roadmap item, move to scratch/ |
+| `kickoff` | Elaborate design — alternatives, research, imagine success/failure |
+| `roadmap` | Synthesize analysis into a roadmap proposal |
+| `5whys` | Root cause analysis on a bug fix |
 
-This starts an interactive session with a coding agent, primed to design something new in your codebase with you.
+### Code steps (`code/`)
+
+| Step | What it does |
+|------|--------------|
+| `debug` | Fix an error |
+| `implement` | Build from a design doc |
+| `compress` | Simplify touched code |
+| `gate` | Ship-ready code and reviewer-friendly docs |
+
+### Interactive steps (`interactive/`)
+
+| Step | What it does |
+|------|--------------|
+| `design` | Interactive design session |
+| `explore` | Investigate the codebase |
+| `refine` | Refine existing work |
+
+### Ops steps (`ops/`)
+
+| Step | What it does |
+|------|--------------|
+| `consolidate` | Reorganize scratch/ for roadmap |
+| `add-to-roadmap` | Promote from scratch/ to roadmap/ |
+| `synthesize` | Combine multiple perspectives into one |
+| `validate` | Validate flows, steps, and directions |
 
 ## Flows
 
-You chain steps together to make flows.  Start by trying it manually:
-
 ```bash
-lf design                 # create a design doc (interactive)
-lf implement && lf reduce && lf polish && lfops pr # turn it into shippable code!
+lf design && lf implement && lf gate    # chain steps manually
+lf flow ship                            # or use a named flow
 ```
 
-You can also pre-register flows. `ship` is a built-in flow that names the `implement -> reduce -> polish` flow.
+Steps chain into flows. Flows feed into waves.
+
+### Code flows (`code/`)
+
+| Flow | Steps |
+|------|-------|
+| `ship` | implement → compress → gate |
+| `pair` | design → ship |
+| `grind` | review → iterate → ship → gate |
+| `incident` | debug → 5whys → ship |
+| `start` | ingest → kickoff |
+| `ship-roadmap` | start → ship |
+
+### Plan flows (`plan/`)
+
+| Flow | Steps |
+|------|-------|
+| `roadmap-reduce` | review → fork(reduce×3) → publish |
+| `roadmap-polish` | review → fork(polish×3) → publish |
+| `roadmap-expand` | review → fork(expand×3) → publish |
+| `research` | explore → review → publish |
+| `publish` | consolidate → add-to-roadmap |
+
+### Forks
+
+Forks run a step in parallel with different directions, then synthesize the results.
 
 ```bash
-lf flow ship
+lf flow roadmap-reduce    # runs reduce 3x with different perspectives
 ```
+
+`roadmap-reduce` forks `reduce` across infra-engineer, designer, and product-engineer directions, then synthesizes and publishes to roadmap.
 
 ## Playing in the Waves
 

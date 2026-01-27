@@ -8,6 +8,13 @@ public struct WaveService: @unchecked Sendable {
     private let dbPath = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".lf/lfd.db").path
 
+    private var session: URLSession {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 3  // Fast fail if daemon not running
+        config.timeoutIntervalForResource = 10
+        return URLSession(configuration: config)
+    }
+
     // MARK: - Waves
 
     /// List waves for a repository via HTTP API.
@@ -20,7 +27,7 @@ public struct WaveService: @unchecked Sendable {
         guard let url = components.url else { return [] }
 
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
+            let (data, response) = try await session.data(from: url)
 
             guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
                 return []
@@ -178,7 +185,7 @@ public struct WaveService: @unchecked Sendable {
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -291,9 +298,10 @@ public struct WaveService: @unchecked Sendable {
         )
     }
 
-    /// Update wave configuration (area, direction, flow, stimulus, paused).
+    /// Update wave configuration (name, area, direction, flow, stimulus, paused).
     public func updateWave(
         waveId: String,
+        name: String? = nil,
         area: [String]? = nil,
         direction: [String]? = nil,
         flow: String? = nil,
@@ -308,6 +316,7 @@ public struct WaveService: @unchecked Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         var body: [String: Any] = [:]
+        if let name = name { body["name"] = name }
         if let area = area { body["area"] = area }
         if let direction = direction { body["direction"] = direction }
         if let flow = flow { body["flow"] = flow }
@@ -320,7 +329,7 @@ public struct WaveService: @unchecked Sendable {
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -369,7 +378,7 @@ public struct WaveService: @unchecked Sendable {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -402,7 +411,7 @@ public struct WaveService: @unchecked Sendable {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -425,18 +434,6 @@ public struct WaveService: @unchecked Sendable {
 
     private func decodeStringArray(_ str: String?) -> [String] {
         guard let str, !str.isEmpty else { return [] }
-        guard let data = str.data(using: .utf8) else { return [str] }
-        if let decoded = try? JSONDecoder().decode([String].self, from: data) {
-            return decoded
-        }
-        if let decoded = try? JSONDecoder().decode(String.self, from: data) {
-            return [decoded]
-        }
-        return [str]
-    }
-
-    private func decodeOptionalStringArray(_ str: String?) -> [String]? {
-        guard let str, !str.isEmpty else { return nil }
         guard let data = str.data(using: .utf8) else { return [str] }
         if let decoded = try? JSONDecoder().decode([String].self, from: data) {
             return decoded

@@ -2,11 +2,10 @@
 
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
-from importlib import util as importlib_util
 from pathlib import Path
-from types import ModuleType
 from typing import Any, Iterable
 
+import yaml
 from pydantic import BaseModel, ConfigDict, model_validator
 
 MAX_FORK_AGENTS = 5
@@ -69,16 +68,6 @@ class Fork:
         self.synthesize = SynthesizeConfig(**synthesize) if synthesize else None
 
 
-class Flow(list):
-    """Convenience wrapper for flow step lists with DAG support."""
-
-    def __init__(self, *steps):
-        parsed = []
-        for step in steps:
-            parsed.append(_parse_flow_item(step))
-        super().__init__(parsed)
-
-
 class Choose(BaseModel):
     """Prompt-driven choice between named subflows."""
 
@@ -100,10 +89,30 @@ class Choose(BaseModel):
 FlowItem = Step | Fork | Choose
 
 
-@dataclass
-class FlowDef:
-    name: str
-    steps: list[FlowItem]
+class Flow:
+    """A flow is a sequence of steps.
+
+    Can be constructed two ways:
+    - Flow("implement", "reduce", "polish")  # convenience
+    - Flow(name="ship", steps=[...])         # explicit
+
+    Parsing is deferred until steps are accessed.
+    """
+
+    def __init__(self, *args, name: str = "", steps: list | None = None):
+        self.name = name
+        if steps is not None:
+            self._steps = steps
+            self._raw = None
+        else:
+            self._steps = None
+            self._raw = args
+
+    @property
+    def steps(self) -> list[FlowItem]:
+        if self._steps is None:
+            self._steps = _parse_flow_items(self._raw)
+        return self._steps
 
     def to_dict(self) -> dict:
         return {
@@ -112,7 +121,7 @@ class FlowDef:
         }
 
     @classmethod
-    def from_dict(cls, name: str, data: dict) -> "FlowDef":
+    def from_dict(cls, name: str, data: dict) -> "Flow":
         steps = _parse_flow_items(data.get("steps", []))
         return cls(name=name, steps=steps)
 
@@ -140,15 +149,26 @@ def _parse_flow_item(item: Any) -> FlowItem:
                 return choose_value
             return Choose.model_validate(choose_value)
         if "fork" in item:
-            agents = item["fork"]
-            if not isinstance(agents, list):
-                raise ValueError("fork must be a list of agents")
-            return Fork(
-                *agents,
-                step=item.get("step"),
-                model=item.get("model"),
-                synthesize=item.get("synthesize"),
-            )
+            fork_value = item["fork"]
+            if isinstance(fork_value, dict):
+                # Nested structure: fork: { step, drafts, ... }
+                drafts = fork_value.get("drafts", [])
+                return Fork(
+                    *drafts,
+                    step=fork_value.get("step"),
+                    model=fork_value.get("model"),
+                    synthesize=fork_value.get("synthesize"),
+                )
+            else:
+                # Flat structure (legacy): fork: [...], step: ...
+                if not isinstance(fork_value, list):
+                    raise ValueError("fork must be a list or dict")
+                return Fork(
+                    *fork_value,
+                    step=item.get("step"),
+                    model=item.get("model"),
+                    synthesize=item.get("synthesize"),
+                )
         if "step" in item or "name" in item:
             name = item.get("name") or item.get("step")
             return Step(
@@ -244,86 +264,94 @@ def build_step_dag(steps: list[Step]) -> StepDAG:
     )
 
 
-def _load_flow_module(name: str, path: Path) -> ModuleType:
-    spec = importlib_util.spec_from_file_location(f"loopflow.flow.{name}", path)
-    if not spec or not spec.loader:
-        raise ValueError(f"Flow '{name}' failed to load")
-
-    module = importlib_util.module_from_spec(spec)
-    # Inject flow primitives for backwards compat (prefer explicit imports)
-    module.__dict__["Flow"] = Flow
-    module.__dict__["Step"] = Step
-    module.__dict__["Fork"] = Fork
-    module.__dict__["ForkAgent"] = ForkAgent
-    module.__dict__["Choose"] = Choose
-    spec.loader.exec_module(module)
-    return module
-
-
-def _coerce_flow(name: str, data: Any) -> FlowDef:
-    if isinstance(data, FlowDef):
-        return data
-    if isinstance(data, Flow):
-        return FlowDef(name=name, steps=list(data))
+def _load_flow_yaml(name: str, path: Path) -> Flow:
+    """Load a flow from a YAML file."""
+    data = yaml.safe_load(path.read_text())
     if isinstance(data, list):
-        steps = _parse_flow_items(data)
-        return FlowDef(name=name, steps=steps)
+        return Flow(*data, name=name)
     if isinstance(data, dict):
-        return FlowDef.from_dict(name, data)
-    raise ValueError(f"Flow '{name}' must return FlowDef, dict, or list")
+        return Flow.from_dict(name, data)
+    raise ValueError(f"Flow '{name}' must be a list or dict in YAML")
 
 
 def _get_builtins_dir() -> Path:
     return Path(__file__).parent / "builtins" / "flows"
 
 
-def load_flow(name: str, repo: Path | None) -> FlowDef | None:
-    """Load flow from flows/{name}.py (repo, global, then builtins)."""
+def _step_exists(name: str, repo: Path | None) -> bool:
+    """Check if a step exists (repo, global, or builtin)."""
+    from loopflow.lf.context import gather_step
+
+    return gather_step(repo, name) is not None
+
+
+def _find_flow_file(name: str, flows_dir: Path) -> Path | None:
+    """Find a flow file by name in a directory (including subdirectories)."""
+    # Check flat structure first
+    flat = flows_dir / f"{name}.yaml"
+    if flat.exists():
+        return flat
+
+    # Check subdirectories
+    for path in flows_dir.glob(f"**/{name}.yaml"):
+        return path
+
+    return None
+
+
+def flow_file_exists(name: str, repo: Path | None) -> bool:
+    """Check if an actual flow file exists (repo, global, or builtins).
+
+    Unlike load_flow, this does NOT consider autopromoted steps.
+    """
+    if repo:
+        if _find_flow_file(name, repo / ".lf" / "flows"):
+            return True
+
+    if _find_flow_file(name, Path.home() / ".lf" / "flows"):
+        return True
+
+    if _find_flow_file(name, _get_builtins_dir()):
+        return True
+
+    return False
+
+
+def load_flow(name: str, repo: Path | None) -> Flow | None:
+    """Load flow from flows/{name}.yaml (repo, global, then builtins).
+
+    Searches subdirectories. If no flow exists but a step with that name does,
+    autopromote to single-step flow.
+    """
     flow_path = None
 
     if repo:
-        repo_flow = repo / ".lf" / "flows" / f"{name}.py"
-        if repo_flow.exists():
-            flow_path = repo_flow
+        flow_path = _find_flow_file(name, repo / ".lf" / "flows")
 
     if not flow_path:
-        global_flow = Path.home() / ".lf" / "flows" / f"{name}.py"
-        if global_flow.exists():
-            flow_path = global_flow
+        flow_path = _find_flow_file(name, Path.home() / ".lf" / "flows")
 
     if not flow_path:
-        builtin_flow = _get_builtins_dir() / f"{name}.py"
-        if builtin_flow.exists():
-            flow_path = builtin_flow
+        flow_path = _find_flow_file(name, _get_builtins_dir())
 
+    # Autopromote: if no flow but step exists, create single-step flow
     if not flow_path:
+        if _step_exists(name, repo):
+            return Flow(name=name, steps=[Step(name=name)])
         return None
 
-    module = _load_flow_module(name, flow_path)
-    flow_func = getattr(module, "flow", None)
-    if callable(flow_func):
-        return _coerce_flow(name, flow_func())
-
-    flow_value = None
-    for attr in (name.upper(), "FLOW"):
-        flow_value = getattr(module, attr, None)
-        if flow_value is not None:
-            break
-    if flow_value is None:
-        raise ValueError(f"Flow '{name}' must define flow() or FLOW/{name.upper()}")
-
-    return _coerce_flow(name, flow_value)
+    return _load_flow_yaml(name, flow_path)
 
 
-def list_flows(repo: Path | None) -> list[FlowDef]:
-    """List all flows (repo, global, builtins)."""
+def list_flows(repo: Path | None) -> list[Flow]:
+    """List all flows (repo, global, builtins). Searches subdirectories."""
     seen = set()
     flows = []
 
     if repo:
         repo_flows_dir = repo / ".lf" / "flows"
         if repo_flows_dir.exists():
-            for path in repo_flows_dir.glob("*.py"):
+            for path in repo_flows_dir.glob("**/*.yaml"):
                 name = path.stem
                 flow = load_flow(name, repo)
                 if flow:
@@ -332,7 +360,7 @@ def list_flows(repo: Path | None) -> list[FlowDef]:
 
     global_flows_dir = Path.home() / ".lf" / "flows"
     if global_flows_dir.exists():
-        for path in global_flows_dir.glob("*.py"):
+        for path in global_flows_dir.glob("**/*.yaml"):
             name = path.stem
             if name not in seen:
                 flow = load_flow(name, repo)
@@ -342,7 +370,7 @@ def list_flows(repo: Path | None) -> list[FlowDef]:
 
     builtins_dir = _get_builtins_dir()
     if builtins_dir.exists():
-        for path in builtins_dir.glob("*.py"):
+        for path in builtins_dir.glob("**/*.yaml"):
             name = path.stem
             if name not in seen:
                 flow = load_flow(name, repo)
@@ -353,7 +381,7 @@ def list_flows(repo: Path | None) -> list[FlowDef]:
 
 
 def list_steps(repo: Path | None) -> list[str]:
-    """List all step names (repo, global, builtins)."""
+    """List all step names (repo, global, builtins). Searches subdirectories."""
     seen = set()
     steps = []
 
@@ -361,7 +389,7 @@ def list_steps(repo: Path | None) -> list[str]:
     if repo:
         for steps_dir in [repo / ".lf" / "steps", repo / ".claude" / "commands"]:
             if steps_dir.exists():
-                for path in steps_dir.glob("*.md"):
+                for path in steps_dir.glob("**/*.md"):
                     name = path.stem
                     if name not in seen:
                         steps.append(name)
@@ -373,16 +401,16 @@ def list_steps(repo: Path | None) -> list[str]:
         Path.home() / ".claude" / "commands",
     ]:
         if global_dir.exists():
-            for path in global_dir.glob("*.md"):
+            for path in global_dir.glob("**/*.md"):
                 name = path.stem
                 if name not in seen:
                     steps.append(name)
                     seen.add(name)
 
     # Builtin steps
-    builtins_steps = Path(__file__).parent.parent / "templates" / "steps"
+    builtins_steps = Path(__file__).parent / "builtins" / "steps"
     if builtins_steps.exists():
-        for path in builtins_steps.glob("*.md"):
+        for path in builtins_steps.glob("**/*.md"):
             name = path.stem
             if name not in seen:
                 steps.append(name)
@@ -391,18 +419,115 @@ def list_steps(repo: Path | None) -> list[str]:
     return sorted(steps)
 
 
-def save_flow(flow: FlowDef, repo: Path) -> Path:
-    """Save flow to .lf/flows/{name}.py. Returns the path."""
+def save_flow(flow: Flow, repo: Path) -> Path:
+    """Save flow to .lf/flows/{name}.yaml. Returns the path."""
     flows_dir = repo / ".lf" / "flows"
     flows_dir.mkdir(parents=True, exist_ok=True)
 
-    flow_path = flows_dir / f"{flow.name}.py"
-    data = {"steps": [_step_to_data(step) for step in flow.steps]}
-    contents = """# Generated by loopflow. Edit to customize.
-
-def flow():
-    return {data}
-""".format(data=repr(data))
-    flow_path.write_text(contents)
+    flow_path = flows_dir / f"{flow.name}.yaml"
+    data = [_step_to_data(step) for step in flow.steps]
+    flow_path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False))
 
     return flow_path
+
+
+def list_directions(repo: Path | None) -> list[str]:
+    """List all direction names (repo, global, builtins). Searches subdirectories."""
+    seen = set()
+    directions = []
+
+    if repo:
+        directions_dir = repo / ".lf" / "directions"
+        if directions_dir.exists():
+            for path in directions_dir.glob("**/*.md"):
+                name = path.stem
+                if name not in seen:
+                    directions.append(name)
+                    seen.add(name)
+
+    global_dir = Path.home() / ".lf" / "directions"
+    if global_dir.exists():
+        for path in global_dir.glob("**/*.md"):
+            name = path.stem
+            if name not in seen:
+                directions.append(name)
+                seen.add(name)
+
+    builtins_dir = Path(__file__).parent / "builtins" / "directions"
+    if builtins_dir.exists():
+        for path in builtins_dir.glob("**/*.md"):
+            name = path.stem
+            if name not in seen:
+                directions.append(name)
+                seen.add(name)
+
+    return sorted(directions)
+
+
+@dataclass
+class ValidationError:
+    flow_name: str
+    item: str
+    error: str
+
+
+def _extract_step_names(flow: Flow) -> list[str]:
+    """Extract all step names referenced in a flow."""
+    names = []
+    for item in flow.steps:
+        if isinstance(item, Step):
+            names.append(item.name)
+            if item.direction:
+                names.append(f"direction:{item.direction}")
+        elif isinstance(item, Fork):
+            if item.step:
+                names.append(item.step)
+            for agent in item.agents:
+                if agent.step:
+                    names.append(agent.step)
+                if agent.flow:
+                    names.append(f"flow:{agent.flow}")
+                if agent.direction:
+                    names.append(f"direction:{agent.direction}")
+            if item.synthesize and item.synthesize.direction:
+                names.append(f"direction:{item.synthesize.direction}")
+        elif isinstance(item, Choose):
+            for option_steps in item.options.values():
+                for step in option_steps:
+                    if isinstance(step, Step):
+                        names.append(step.name)
+    return names
+
+
+def validate_flows(repo: Path | None) -> list[ValidationError]:
+    """Validate all flows. Returns list of errors."""
+    errors = []
+    available_steps = set(list_steps(repo))
+    available_directions = set(list_directions(repo))
+    available_flows = {f.name for f in list_flows(repo)}
+
+    for flow in list_flows(repo):
+        refs = _extract_step_names(flow)
+        for ref in refs:
+            if ref.startswith("direction:"):
+                direction = ref[10:]
+                if direction not in available_directions:
+                    errors.append(
+                        ValidationError(
+                            flow_name=flow.name, item=direction, error="direction not found"
+                        )
+                    )
+            elif ref.startswith("flow:"):
+                flow_ref = ref[5:]
+                if flow_ref not in available_flows:
+                    errors.append(
+                        ValidationError(flow_name=flow.name, item=flow_ref, error="flow not found")
+                    )
+            else:
+                # Could be step or flow (autopromote)
+                if ref not in available_steps and ref not in available_flows:
+                    errors.append(
+                        ValidationError(flow_name=flow.name, item=ref, error="step/flow not found")
+                    )
+
+    return errors

@@ -9,6 +9,7 @@ from loopflow.lfd.migrations import m_2025_01_23_zz_stimulus as stimulus
 from loopflow.lfd.migrations import m_2026_01_24_agent_worktree as agent_worktree
 from loopflow.lfd.migrations import m_2026_01_24_nullable_goal_area as nullable_goal_area
 from loopflow.lfd.migrations import m_2026_01_25_agent_paused as agent_paused
+from loopflow.lfd.migrations import m_2026_01_26_step_index as step_index
 
 
 @dataclass
@@ -28,4 +29,5 @@ MIGRATIONS = [
         nullable_goal_area.apply,
     ),
     Migration(agent_paused.VERSION, agent_paused.DESCRIPTION, agent_paused.apply),
+    Migration(step_index.SCHEMA_VERSION, step_index.DESCRIPTION, step_index.apply),
 ]

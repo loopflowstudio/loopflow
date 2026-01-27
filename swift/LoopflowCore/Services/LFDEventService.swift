@@ -52,6 +52,7 @@ public actor LFDEventService {
     private var patterns: [String] = []
     private var reconnectTask: Task<Void, Never>?
     private var _isConnected = false
+    private var reconnectAttempts = 0
 
     public init() {}
 
@@ -108,6 +109,7 @@ public actor LFDEventService {
         logger.info("connected to lfd")
         LoggingService.append("connected", category: LoggingService.Category.lfd)
         updateConnectionState(true)
+        reconnectAttempts = 0  // Reset for next disconnect
 
         // Send subscribe request
         let patternsJson = patterns.map { "\"\($0)\"" }.joined(separator: ",")
@@ -135,12 +137,16 @@ public actor LFDEventService {
 
     private func startReconnectLoop() {
         reconnectTask?.cancel()
+        reconnectAttempts = 0
         reconnectTask = Task {
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(5))
+                // Fast reconnect at startup (0.5s for first 10 attempts), then slow down to 5s
+                let delay: Duration = reconnectAttempts < 10 ? .milliseconds(500) : .seconds(5)
+                try? await Task.sleep(for: delay)
                 guard !Task.isCancelled else { return }
 
                 if !_isConnected {
+                    reconnectAttempts += 1
                     await connect()
                 }
             }

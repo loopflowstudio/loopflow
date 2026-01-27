@@ -7,6 +7,63 @@ from typing import Optional
 
 import pathspec
 
+# =============================================================================
+# Markdown file lookup helpers (used by context.py and directions.py)
+# =============================================================================
+
+
+def find_md_in_dir(base_dir: Path, name: str) -> Path | None:
+    """Find a .md file by name in base_dir or its subdirectories.
+
+    Supports both 'name' and 'folder/name' formats.
+    If just 'name', searches subdirectories for unique match.
+    """
+    if not base_dir.exists():
+        return None
+
+    # Try exact path first (with or without folder prefix)
+    exact = base_dir / f"{name}.md"
+    if exact.exists():
+        return exact
+
+    # Search all .md files for matching stem
+    matches = []
+    for p in base_dir.rglob("*.md"):
+        if p.stem == name:
+            matches.append(p)
+
+    if len(matches) == 1:
+        return matches[0]
+    return None  # Ambiguous or not found
+
+
+def list_md_grouped(base_dir: Path) -> dict[str, list[str]]:
+    """List all .md files grouped by parent folder.
+
+    Returns dict mapping folder name (or '' for root) to list of stems.
+    """
+    if not base_dir.exists():
+        return {}
+
+    grouped: dict[str, list[str]] = {}
+    for p in base_dir.rglob("*.md"):
+        rel = p.relative_to(base_dir)
+        if len(rel.parts) == 1:
+            folder = ""
+        else:
+            folder = str(rel.parent)
+        grouped.setdefault(folder, []).append(p.stem)
+
+    # Sort within each group
+    for folder in grouped:
+        grouped[folder] = sorted(grouped[folder])
+    return grouped
+
+
+# =============================================================================
+# File gathering for LLM context
+# =============================================================================
+
 
 @dataclass
 class GatherResult:

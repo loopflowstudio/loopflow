@@ -9,12 +9,17 @@ import socket
 import sys
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 
+from loopflow.lf.context import gather_step
+from loopflow.lf.flows import Step, load_flow
+from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lfd.daemon.client import notify_event
-from loopflow.lfd.execution.runner import IterationResult, run_iteration
+from loopflow.lfd.execution.runner import IterationResult, run_iteration, tick_flow
+from loopflow.lfd.flow_run import save_run
 from loopflow.lfd.logging import worker_log
-from loopflow.lfd.models import Wave, WaveStatus
+from loopflow.lfd.models import FlowRun, FlowRunStatus, TickResult, Wave, WaveStatus
 from loopflow.lfd.wave import (
     count_outstanding,
     get_wave,
@@ -102,6 +107,99 @@ def _manager_release(run_id: str) -> None:
     _manager_call("scheduler.release", {"run_id": run_id})
 
 
+def _has_interactive_steps(wave: Wave) -> bool:
+    """Check if a flow has any interactive steps.
+
+    Returns True if any step in the flow has interactive: true in frontmatter.
+    """
+    flow = load_flow(wave.flow, wave.repo)
+    if not flow:
+        return False
+
+    for item in flow.steps:
+        if isinstance(item, Step):
+            step_file = gather_step(wave.repo, item.name)
+            if step_file and step_file.config.interactive:
+                return True
+
+    return False
+
+
+def _iteration_branch_prefix(main_branch: str) -> str:
+    """Derive iteration branch prefix from main branch."""
+    if main_branch.endswith("-main"):
+        return main_branch[:-5]
+    return main_branch
+
+
+def _run_tick_loop(wave: Wave, iteration: int, run_id: str) -> IterationResult:
+    """Run a flow using tick_flow() for interactive step support.
+
+    Creates a FlowRun, then ticks through steps until:
+    - WAITING_INTERACTIVE: pause for user connection
+    - FLOW_COMPLETE: all steps done
+    - STEP_FAILED: error occurred
+    """
+    from loopflow.lf.worktrees import WorktreeError
+
+    short_id = wave.short_id()
+    prefix = _iteration_branch_prefix(wave.main_branch)
+    branch = f"{prefix}/{iteration:03d}"
+
+    try:
+        worktree_path = create_worktree(wave.repo, branch, base=wave.main_branch)
+    except WorktreeError as e:
+        worker_log.error(f"[{short_id}] failed to create worktree: {e}")
+        return IterationResult(success=False)
+
+    # Create FlowRun record
+    flow_run = FlowRun(
+        id=run_id,
+        wave_id=wave.id,
+        flow=wave.flow,
+        direction=wave.direction,
+        area=wave.area,
+        repo=wave.repo,
+        status=FlowRunStatus.RUNNING,
+        iteration=iteration,
+        step_index=0,
+        worktree=str(worktree_path),
+        branch=branch,
+        started_at=datetime.now(),
+    )
+    save_run(flow_run)
+
+    notify_event(
+        "wave.started",
+        {
+            "wave_id": wave.id,
+            "flow_run_id": flow_run.id,
+            "iteration": iteration,
+            "mode": "tick",
+        },
+    )
+
+    # Tick loop
+    while True:
+        result = tick_flow(flow_run.id)
+
+        if result == TickResult.FLOW_COMPLETE:
+            worker_log.info(f"[{short_id}] flow complete via tick loop")
+            return IterationResult(success=True, worktree=worktree_path, branch=branch)
+
+        elif result == TickResult.WAITING_INTERACTIVE:
+            worker_log.info(f"[{short_id}] waiting for interactive step")
+            # Wave status already set to WAITING by tick_flow
+            # Return success=True but flow not complete - daemon will resume later
+            return IterationResult(success=True, worktree=worktree_path, branch=branch)
+
+        elif result == TickResult.STEP_FAILED:
+            worker_log.error(f"[{short_id}] step failed in tick loop")
+            return IterationResult(success=False)
+
+        # STEP_COMPLETE - continue looping
+
+
 def run_wave_iterations(wave: Wave) -> None:
     """Run wave iterations until PR limit is reached or error occurs."""
     short_id = wave.short_id()
@@ -157,7 +255,15 @@ def run_wave_iterations(wave: Wave) -> None:
             time.sleep(MANAGER_POLL_INTERVAL)
 
         try:
-            result = _run_with_retry(wave, iteration, run_id)
+            # Check if flow has interactive steps
+            use_tick_loop = _has_interactive_steps(wave)
+
+            if use_tick_loop:
+                worker_log.info(f"[{short_id}] using tick loop for interactive flow")
+                result = _run_tick_loop(wave, iteration, run_id)
+            else:
+                result = _run_with_retry(wave, iteration, run_id)
+
             if result.success:
                 worker_log.info(f"[{short_id}] iteration {iteration} completed successfully")
                 # Reset failures on success
@@ -175,6 +281,14 @@ def run_wave_iterations(wave: Wave) -> None:
                     wave.worktree = result.worktree
                     wave.branch = result.branch
                     worker_log.info(f"[{short_id}] moved to branch {result.branch}")
+
+                # If tick loop paused at interactive step, exit the worker loop
+                if use_tick_loop:
+                    # Refresh wave status from DB
+                    refreshed_wave = get_wave(wave.id)
+                    if refreshed_wave and refreshed_wave.status == WaveStatus.WAITING:
+                        worker_log.info(f"[{short_id}] paused at interactive step")
+                        break
             else:
                 # Increment failures
                 consecutive_failures += 1

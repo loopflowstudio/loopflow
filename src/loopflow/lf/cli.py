@@ -9,7 +9,7 @@ import yaml
 from loopflow.lf import step as step_module
 from loopflow.lf.config import ConfigError, load_config
 from loopflow.lf.context import find_worktree_root, gather_step, list_all_steps
-from loopflow.lf.flows import list_flows, load_flow
+from loopflow.lf.flows import flow_file_exists, list_flows
 
 # =============================================================================
 # Built-in step metadata for formatted listing
@@ -238,20 +238,20 @@ def main():
                 repo_root = find_worktree_root()
                 config = load_config(repo_root) if repo_root else None
 
-                # Check for flow in .lf/flows/
-                has_flow = repo_root and load_flow(name, repo_root) is not None
+                # Check for actual flow file (not auto-promoted steps)
+                has_flow_file = repo_root and flow_file_exists(name, repo_root)
 
                 # gather_step handles builtins and external skills even without repo_root
                 has_step = gather_step(repo_root, name, config) is not None
 
-                if has_flow and has_step:
+                if has_flow_file and has_step:
                     typer.echo(f"Error: '{name}' exists as both a flow and a step", err=True)
                     typer.echo("  Flow: defined in .lf/flows/", err=True)
                     typer.echo(f"  Step: .claude/commands/{name}.md or .lf/{name}.*", err=True)
                     typer.echo("Remove one to resolve the conflict.", err=True)
                     raise SystemExit(1)
 
-                if has_flow:
+                if has_flow_file:
                     sys.argv.insert(1, "flow")
                 elif has_step:
                     sys.argv.insert(1, "run")

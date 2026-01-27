@@ -5,7 +5,7 @@ from pathlib import Path
 
 from loopflow.lf.flow import topological_batches
 from loopflow.lf.flows import (
-    FlowDef,
+    Flow,
     Fork,
     Step,
     build_step_dag,
@@ -22,7 +22,7 @@ def test_flow_from_dict_parses_steps():
             {"step": "review", "after": "design"},
         ]
     }
-    flow = FlowDef.from_dict("ship", data)
+    flow = Flow.from_dict("ship", data)
     assert flow.name == "ship"
     assert isinstance(flow.steps[0], Step)
     assert flow.steps[0].name == "design"
@@ -63,18 +63,13 @@ def test_topological_batches_parallel():
     assert [step.name for step in batches[2]] == ["integrate"]
 
 
-def test_load_flow_with_flow_helper():
+def test_load_flow_yaml():
     with tempfile.TemporaryDirectory() as tmpdir:
         repo = Path(tmpdir)
         flows_dir = repo / ".lf" / "flows"
         flows_dir.mkdir(parents=True)
 
-        (flows_dir / "simple.py").write_text(
-            """
-def flow():
-    return Flow("implement", "review")
-"""
-        )
+        (flows_dir / "simple.yaml").write_text("- implement\n- review\n")
 
         flow = load_flow("simple", repo)
         assert flow is not None
@@ -90,17 +85,14 @@ def test_load_flow_with_fork():
         flows_dir = repo / ".lf" / "flows"
         flows_dir.mkdir(parents=True)
 
-        (flows_dir / "race.py").write_text(
-            """
-def flow():
-    return Flow(
-        Fork(
-            {"direction": "architect"},
-            {"direction": "pragmatist"},
-            step="implement",
-            synthesize={"direction": "reviewer"},
-        ),
-    )
+        (flows_dir / "race.yaml").write_text(
+            """- fork:
+    step: implement
+    drafts:
+      - direction: architect
+      - direction: pragmatist
+    synthesize:
+      direction: reviewer
 """
         )
 
@@ -114,7 +106,7 @@ def flow():
 def test_save_flow_roundtrip():
     with tempfile.TemporaryDirectory() as tmpdir:
         repo = Path(tmpdir)
-        flow = FlowDef(
+        flow = Flow(
             name="test",
             steps=[
                 Step("design"),

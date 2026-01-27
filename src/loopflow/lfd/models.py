@@ -161,6 +161,13 @@ class Wave(LfdModel):
             return ""
         return ", ".join(self.area)
 
+    @property
+    def area_slug(self) -> str:
+        """Short slug from area for PR titles: 'swift/' -> 'swift', '.' -> 'root'."""
+        if not self.area:
+            return "root"
+        return area_to_slug(self.area[0])
+
     def is_configured(self) -> bool:
         """Check if wave has required config for running."""
         return self.area is not None
@@ -230,6 +237,15 @@ class FlowRunStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+class TickResult(str, Enum):
+    """Result of a single tick_flow() call."""
+
+    STEP_COMPLETE = "step_complete"  # Continue ticking
+    FLOW_COMPLETE = "flow_complete"  # Flow finished successfully
+    WAITING_INTERACTIVE = "waiting_interactive"  # Paused at interactive step
+    STEP_FAILED = "step_failed"  # Step failed
+
+
 class FlowRun(LfdModel):
     """An execution instance of a Flow, spawned by a Wave."""
 
@@ -243,6 +259,7 @@ class FlowRun(LfdModel):
 
     status: FlowRunStatus = FlowRunStatus.PENDING
     iteration: int = 0
+    step_index: int = 0  # Position in flow.steps list for tick-based execution
 
     worktree: str | None = None
     branch: str | None = None

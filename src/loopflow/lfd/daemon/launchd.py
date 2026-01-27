@@ -178,7 +178,13 @@ def install() -> bool:
     Uses bootout/bootstrap for proper service lifecycle.
     If already installed, unloads first to pick up any plist changes.
     Kills any orphan processes on the HTTP port before starting.
+    Ensures wt (worktrunk) is available, installing via homebrew if needed.
     """
+    from loopflow.lf.worktrees import ensure_wt_available
+
+    # Ensure wt is available (install via homebrew if needed)
+    ensure_wt_available()
+
     PLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 

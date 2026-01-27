@@ -129,7 +129,7 @@ struct ContentView: View {
         var actions: [PaletteAction] = []
 
         actions.append(PaletteAction("New Wave", icon: "plus.square", shortcut: "⌘N") {
-            NotificationCenter.default.post(name: .showNewWaveSheet, object: nil)
+            NotificationCenter.default.post(name: .newWaveRequested, object: nil)
         })
 
         actions.append(PaletteAction("Focus Prompt", icon: "text.cursor", shortcut: "⌘L") {
@@ -204,7 +204,7 @@ struct ContentView: View {
                 Image(systemName: "cpu")
                     .font(.system(size: 48))
                     .foregroundStyle(.tertiary)
-                Text("Select an wave")
+                Text("Select a wave")
                     .font(.headline)
                     .foregroundStyle(.secondary)
                 Text("Or create one to get started")

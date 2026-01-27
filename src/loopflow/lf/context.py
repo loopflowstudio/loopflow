@@ -14,7 +14,14 @@ from pydantic import BaseModel, Field
 
 from loopflow.lf.design import gather_area_docs, gather_design_docs, gather_internal_docs
 from loopflow.lf.directions import Direction
-from loopflow.lf.files import format_files, format_image_references, gather_docs, gather_files
+from loopflow.lf.files import (
+    find_md_in_dir,
+    format_files,
+    format_image_references,
+    gather_docs,
+    gather_files,
+    list_md_grouped,
+)
 from loopflow.lf.frontmatter import StepFile, parse_step_file
 from loopflow.lf.skills import (
     discover_skill_sources,
@@ -25,8 +32,8 @@ from loopflow.lf.skills import (
 from loopflow.lf.tokens import count_tokens
 from loopflow.lfops.summarize import is_stale, load_summary
 
-# Path to bundled builtin templates
-_TEMPLATES_DIR = Path(__file__).parent.parent / "templates" / "steps"
+# Path to bundled builtin steps
+_BUILTINS_STEPS_DIR = Path(__file__).parent / "builtins" / "steps"
 
 # Global step locations to check (in order)
 _GLOBAL_STEP_PATHS = [
@@ -387,16 +394,19 @@ def _read_clipboard() -> ClipboardContent | None:
 
 
 def _get_builtin_step(name: str) -> Path | None:
-    """Return path to bundled template if it exists."""
-    builtin = _TEMPLATES_DIR / f"{name}.md"
-    return builtin if builtin.exists() else None
+    """Return path to bundled step if it exists."""
+    return find_md_in_dir(_BUILTINS_STEPS_DIR, name)
 
 
 def list_builtin_steps() -> list[str]:
     """Return names of all builtin steps."""
-    if not _TEMPLATES_DIR.exists():
-        return []
-    return sorted(p.stem for p in _TEMPLATES_DIR.glob("*.md"))
+    grouped = list_builtin_steps_grouped()
+    return sorted(name for names in grouped.values() for name in names)
+
+
+def list_builtin_steps_grouped() -> dict[str, list[str]]:
+    """Return builtin steps grouped by folder."""
+    return list_md_grouped(_BUILTINS_STEPS_DIR)
 
 
 # Files in .lf/ that aren't steps (prompts, docs, etc)
@@ -410,42 +420,57 @@ _LF_NON_STEP_FILES = {
 
 def list_user_steps(repo_root: Path) -> list[str]:
     """Return names of user-defined steps in the repo."""
-    steps = set()
+    grouped = list_user_steps_grouped(repo_root)
+    return sorted(name for names in grouped.values() for name in names)
 
-    # .lf/steps/*.md (preferred)
-    steps_dir = repo_root / ".lf" / "steps"
-    if steps_dir.exists():
-        for p in steps_dir.glob("*.md"):
-            steps.add(p.stem)
 
-    # .claude/commands/*.md (Claude Code compatible)
-    claude_dir = repo_root / ".claude" / "commands"
-    if claude_dir.exists():
-        for p in claude_dir.glob("*.md"):
-            steps.add(p.stem)
+def list_user_steps_grouped(repo_root: Path) -> dict[str, list[str]]:
+    """Return user-defined steps grouped by folder."""
+    grouped: dict[str, list[str]] = {}
 
-    # .lf/*.md (legacy)
+    def merge(source: dict[str, list[str]]) -> None:
+        for folder, names in source.items():
+            for name in names:
+                grouped.setdefault(folder, []).append(name)
+
+    # .lf/steps/ (preferred, including subdirs)
+    merge(list_md_grouped(repo_root / ".lf" / "steps"))
+
+    # .claude/commands/ (Claude Code compatible, including subdirs)
+    merge(list_md_grouped(repo_root / ".claude" / "commands"))
+
+    # .lf/*.md (legacy, flat only)
     lf_dir = repo_root / ".lf"
     if lf_dir.exists():
         for p in lf_dir.glob("*.md"):
             if p.name in _LF_NON_STEP_FILES:
                 continue
-            # Skip uppercase files (likely docs/prompts, not steps)
             if p.stem.isupper():
                 continue
-            steps.add(p.stem)
+            grouped.setdefault("", []).append(p.stem)
 
-    return sorted(steps)
+    # Sort and dedupe within each group
+    for folder in grouped:
+        grouped[folder] = sorted(set(grouped[folder]))
+    return grouped
 
 
 def list_global_steps() -> list[str]:
     """Return names of globally-installed steps (e.g., ~/.claude/commands/)."""
-    steps = set()
+    grouped = list_global_steps_grouped()
+    return sorted(name for names in grouped.values() for name in names)
+
+
+def list_global_steps_grouped() -> dict[str, list[str]]:
+    """Return globally-installed steps grouped by folder."""
+    grouped: dict[str, list[str]] = {}
     for global_dir in _GLOBAL_STEP_PATHS:
-        if global_dir.exists():
-            for p in global_dir.glob("*.md"):
-                steps.add(p.stem)
-    return sorted(steps)
+        for folder, names in list_md_grouped(global_dir).items():
+            for name in names:
+                grouped.setdefault(folder, []).append(name)
+    for folder in grouped:
+        grouped[folder] = sorted(set(grouped[folder]))
+    return grouped
 
 
 def list_all_steps(
@@ -493,7 +518,7 @@ def gather_step(repo_root: Path | None, name: str, config=None) -> StepFile | No
     3. .claude/commands/{name}.md (repo, Claude Code compatible)
     4. ~/.lf/steps/{name}.md (global)
     5. ~/.claude/commands/{name}.md (global, Claude Code compatible)
-    6. templates/steps/{name}.md (builtin)
+    6. builtins/steps/{name}.md (builtin)
 
     Returns StepFile with parsed config, or None if not found.
     """
@@ -513,29 +538,29 @@ def gather_step(repo_root: Path | None, name: str, config=None) -> StepFile | No
                 step_file.config.interactive = True
             return step_file
 
+    step_path = None
+
     if repo_root:
-        # Check .lf/steps/ first
-        lf_steps_dir = repo_root / ".lf" / "steps"
-        content = _read_file_if_named(lf_steps_dir, f"{name}.md")
-        if content:
-            return parse_step_file(name, content)
+        # Check .lf/steps/ first (including subdirs)
+        step_path = find_md_in_dir(repo_root / ".lf" / "steps", name)
 
         # Check .claude/commands (Claude Code compatible)
-        claude_dir = repo_root / ".claude" / "commands"
-        content = _read_file_if_named(claude_dir, f"{name}.md")
-        if content:
-            return parse_step_file(name, content)
+        if not step_path:
+            step_path = find_md_in_dir(repo_root / ".claude" / "commands", name)
 
     # Check global user steps
-    for global_dir in _GLOBAL_STEP_PATHS:
-        content = _read_file_if_named(global_dir, f"{name}.md")
-        if content:
-            return parse_step_file(name, content)
+    if not step_path:
+        for global_dir in _GLOBAL_STEP_PATHS:
+            step_path = find_md_in_dir(global_dir, name)
+            if step_path:
+                break
 
-    # Fall back to builtin templates
-    builtin_path = _get_builtin_step(name)
-    if builtin_path:
-        content = builtin_path.read_text()
+    # Fall back to builtins
+    if not step_path:
+        step_path = _get_builtin_step(name)
+
+    if step_path:
+        content = step_path.read_text()
         return parse_step_file(name, content)
 
     return None

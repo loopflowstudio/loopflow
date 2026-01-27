@@ -21,6 +21,15 @@ final class GhosttyManager: ObservableObject {
     private nonisolated(unsafe) var app: ghostty_app_t?
     private nonisolated(unsafe) var config: ghostty_config_t?
 
+    // Current active session ID (MVP: only one session at a time)
+    private var activeSessionId: String?
+
+    // Current active surface for termination
+    private nonisolated(unsafe) var activeSurface: ghostty_surface_t?
+
+    // Callback when the active session closes (process exits or user closes terminal)
+    var onSessionClosed: (() -> Void)?
+
     static let shared = GhosttyManager()
 
     // Loopflow color scheme
@@ -114,7 +123,13 @@ final class GhosttyManager: ObservableObject {
             pasteboard.clearContents()
             pasteboard.setString(String(cString: data), forType: .string)
         }
-        runtimeConfig.close_surface_cb = { _, _ in }
+        runtimeConfig.close_surface_cb = { (userdata: UnsafeMutableRawPointer?, _: Bool) in
+            guard let userdata else { return }
+            let manager = Unmanaged<GhosttyManager>.fromOpaque(userdata).takeUnretainedValue()
+            Task { @MainActor in
+                manager.handleSessionClosed()
+            }
+        }
 
         guard let ghosttyApp = ghostty_app_new(&runtimeConfig, cfg) else {
             state = .failed("Failed to create Ghostty app")
@@ -163,6 +178,27 @@ final class GhosttyManager: ObservableObject {
         ghostty_surface_free(surface)
     }
 
+    /// Register a surface as the active session.
+    func registerActiveSession(_ surface: ghostty_surface_t, sessionId: String) {
+        activeSessionId = sessionId
+        activeSurface = surface
+    }
+
+    /// Destroy the active session's surface, killing the child process.
+    func destroyActiveSession() {
+        guard let surface = activeSurface else { return }
+        activeSessionId = nil
+        activeSurface = nil
+        ghostty_surface_free(surface)
+    }
+
+    /// Called when Ghostty closes the active surface (process exits).
+    private func handleSessionClosed() {
+        activeSessionId = nil
+        activeSurface = nil
+        onSessionClosed?()
+    }
+
     deinit {
         if let app {
             ghostty_app_free(app)
@@ -187,6 +223,9 @@ final class GhosttyManager: ObservableObject {
 
     @Published private(set) var state: State = .failed("GhosttyKit not available")
 
+    // Callback when a session closes (stub - never called)
+    var onSessionClosed: (() -> Void)?
+
     static let shared = GhosttyManager()
 
     private init() {}
@@ -196,6 +235,10 @@ final class GhosttyManager: ObservableObject {
     }
 
     func tick() {}
+
+    func destroyActiveSession() {
+        // Stub - no-op
+    }
 }
 
 #endif

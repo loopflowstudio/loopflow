@@ -4,10 +4,12 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from loopflow.lf.files import find_md_in_dir, list_md_grouped
+
 _FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 
-# Path to bundled builtin direction templates
-_DIRECTIONS_TEMPLATES_DIR = Path(__file__).parent.parent / "templates" / "directions"
+# Path to bundled builtin directions
+_BUILTINS_DIRECTIONS_DIR = Path(__file__).parent / "builtins" / "directions"
 
 
 def _parse_frontmatter(text: str) -> tuple[dict, str]:
@@ -76,26 +78,30 @@ class Direction:
 
 
 def _get_builtin_direction(name: str) -> Path | None:
-    """Return path to bundled direction template if it exists."""
-    builtin = _DIRECTIONS_TEMPLATES_DIR / f"{name}.md"
-    return builtin if builtin.exists() else None
+    """Return path to bundled direction if it exists."""
+    return find_md_in_dir(_BUILTINS_DIRECTIONS_DIR, name)
 
 
 def list_builtin_directions() -> list[str]:
     """Return names of all builtin directions."""
-    if not _DIRECTIONS_TEMPLATES_DIR.exists():
-        return []
-    return sorted(p.stem for p in _DIRECTIONS_TEMPLATES_DIR.glob("*.md"))
+    grouped = list_md_grouped(_BUILTINS_DIRECTIONS_DIR)
+    return sorted(name for names in grouped.values() for name in names)
+
+
+def list_builtin_directions_grouped() -> dict[str, list[str]]:
+    """Return builtin directions grouped by folder."""
+    return list_md_grouped(_BUILTINS_DIRECTIONS_DIR)
 
 
 def load_direction(repo: Path | None, direction_name: str) -> Direction | None:
     """Load and parse a direction file.
 
     Checks in order:
-    1. .lf/directions/{name}.md (repo)
-    2. ~/.lf/directions/{name}.md (global)
-    3. templates/directions/{name}.md (builtin)
+    1. .lf/directions/{name}.md (repo, including subdirs)
+    2. ~/.lf/directions/{name}.md (global, including subdirs)
+    3. builtins/directions/{name}.md (builtin, including subdirs)
 
+    Supports both 'name' and 'folder/name' formats.
     Returns None if direction file doesn't exist.
     """
     if not direction_name:
@@ -104,23 +110,18 @@ def load_direction(repo: Path | None, direction_name: str) -> Direction | None:
     # Check repo direction first
     direction_path = None
     if repo:
-        repo_direction = repo / ".lf" / "directions" / f"{direction_name}.md"
-        if repo_direction.exists():
-            direction_path = repo_direction
+        direction_path = find_md_in_dir(repo / ".lf" / "directions", direction_name)
 
     # Check global direction
     if not direction_path:
-        global_direction = Path.home() / ".lf" / "directions" / f"{direction_name}.md"
-        if global_direction.exists():
-            direction_path = global_direction
+        direction_path = find_md_in_dir(Path.home() / ".lf" / "directions", direction_name)
 
-    # Fall back to builtin templates
+    # Fall back to builtins
     if not direction_path:
-        builtin_path = _get_builtin_direction(direction_name)
-        if builtin_path:
-            direction_path = builtin_path
-        else:
-            return None
+        direction_path = _get_builtin_direction(direction_name)
+
+    if not direction_path:
+        return None
 
     text = direction_path.read_text()
     _frontmatter, content = _parse_frontmatter(text)
@@ -136,23 +137,38 @@ def load_direction_content(repo: Path, direction_name: str) -> str | None:
 
 def list_directions(repo: Path | None) -> list[str]:
     """List available direction names (repo, global, and builtin)."""
-    directions = set()
+    grouped = list_directions_grouped(repo)
+    return sorted(name for names in grouped.values() for name in names)
 
-    # Repo directions
+
+def list_directions_grouped(repo: Path | None) -> dict[str, list[str]]:
+    """List available directions grouped by folder."""
+    grouped: dict[str, list[str]] = {}
+
+    def merge(source: dict[str, list[str]], seen: set[str]) -> None:
+        for folder, names in source.items():
+            for name in names:
+                if name not in seen:
+                    seen.add(name)
+                    grouped.setdefault(folder, []).append(name)
+
+    seen: set[str] = set()
+
+    # Repo directions (highest priority)
     if repo:
-        repo_directions_dir = repo / ".lf" / "directions"
-        if repo_directions_dir.exists():
-            directions.update(p.stem for p in repo_directions_dir.glob("*.md"))
+        merge(list_md_grouped(repo / ".lf" / "directions"), seen)
 
     # Global directions
-    global_directions_dir = Path.home() / ".lf" / "directions"
-    if global_directions_dir.exists():
-        directions.update(p.stem for p in global_directions_dir.glob("*.md"))
+    merge(list_md_grouped(Path.home() / ".lf" / "directions"), seen)
 
     # Builtin directions
-    directions.update(list_builtin_directions())
+    merge(list_builtin_directions_grouped(), seen)
 
-    return sorted(directions)
+    # Sort within each group
+    for folder in grouped:
+        grouped[folder] = sorted(grouped[folder])
+
+    return grouped
 
 
 def resolve_directions(repo: Path, direction_names: list[str]) -> list[Direction]:

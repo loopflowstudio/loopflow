@@ -13,14 +13,19 @@ from datetime import datetime
 from pathlib import Path
 
 from loopflow.lf.config import load_config, parse_model
-from loopflow.lf.context import ContextConfig, format_prompt, gather_prompt_components
+from loopflow.lf.context import (
+    ContextConfig,
+    format_prompt,
+    gather_prompt_components,
+    gather_step,
+)
 from loopflow.lf.directions import resolve_directions
 from loopflow.lf.flow import (
     ForkResult,
     build_synthesize_prompt,
     choose_branch,
     load_synthesize_instructions,
-    run_flow_def,
+    run_flow,
     topological_batches,
 )
 from loopflow.lf.flows import (
@@ -39,12 +44,24 @@ from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
 from loopflow.lfd.daemon.client import notify_event
 from loopflow.lfd.flow_run import (
+    get_run,
     save_run,
+    update_flow_run_index,
     update_run_pr,
     update_run_status,
     update_run_step,
 )
-from loopflow.lfd.models import FlowRun, FlowRunStatus, Wave
+from loopflow.lfd.models import (
+    FlowRun,
+    FlowRunStatus,
+    StepRun,
+    StepRunStatus,
+    TickResult,
+    Wave,
+    WaveStatus,
+)
+from loopflow.lfd.step_run import save_step_run
+from loopflow.lfd.wave import get_wave, update_wave_status
 
 
 @dataclass
@@ -125,18 +142,7 @@ def _run_collector_step(
     prefix: str | None = None,
     timeout: int | None = None,
 ) -> int:
-    """Run a step via collector subprocess.
-
-    Args:
-        timeout: Max seconds to wait. None uses DEFAULT_STEP_TIMEOUT.
-                 0 means no timeout.
-
-    Returns:
-        Exit code from the collector process.
-
-    Raises:
-        StepTimeoutError: If step exceeds timeout.
-    """
+    """Run a step via collector subprocess. Raises StepTimeoutError if step exceeds timeout."""
     if timeout is None:
         timeout = DEFAULT_STEP_TIMEOUT
 
@@ -396,8 +402,8 @@ def _run_fork_synthesize(
             )
 
         if fork_config.flow:
-            flow_def = load_flow(fork_config.flow, wave.repo)
-            if not flow_def:
+            loaded_flow = load_flow(fork_config.flow, wave.repo)
+            if not loaded_flow:
                 return ForkResult(
                     worktree=wt_path,
                     config=fork_config,
@@ -405,8 +411,8 @@ def _run_fork_synthesize(
                     status="failed",
                     scratch_notes="",
                 )
-            exit_code = run_flow_def(
-                flow_def,
+            exit_code = run_flow(
+                loaded_flow,
                 wt_path,
                 context=fork_context or None,
                 exclude=None,
@@ -447,9 +453,16 @@ def _run_fork_synthesize(
     synth_prompt_override = fork.synthesize.prompt if fork.synthesize else None
     instructions = load_synthesize_instructions(wave.repo, synth_prompt_override)
     synth_prompt = build_synthesize_prompt(results, instructions, base_commit)
+
+    # Add synthesize direction on top of wave direction
+    synth_direction = list(direction)
+    if fork.synthesize and fork.synthesize.direction:
+        extra = resolve_directions(fork.synthesize.direction, wave.repo)
+        synth_direction = synth_direction + extra
+
     synth_prompt = _build_loop_inline_prompt(
         wave,
-        direction,
+        synth_direction,
         worktree_path,
         synth_prompt,
         context_paths,
@@ -530,18 +543,18 @@ def run_iteration(
         return IterationResult(success=False)
 
     try:
-        flow_def = load_flow(flow, wave.repo)
+        loaded_flow = load_flow(flow, wave.repo)
     except ValueError as exc:
         update_run_status(run.id, FlowRunStatus.FAILED, error=str(exc))
         _cleanup_worktree(wave.repo, worktree_path, branch)
         return IterationResult(success=False)
 
-    if not flow_def:
+    if not loaded_flow:
         update_run_status(run.id, FlowRunStatus.FAILED, error=f"Unknown flow '{flow}'")
         _cleanup_worktree(wave.repo, worktree_path, branch)
         return IterationResult(success=False)
 
-    items: list[Step | Fork | Choose] = list(flow_def.steps)
+    items: list[Step | Fork | Choose] = list(loaded_flow.steps)
     if not items:
         update_run_status(run.id, FlowRunStatus.FAILED, error=f"Empty flow '{flow}'")
         _cleanup_worktree(wave.repo, worktree_path, branch)
@@ -723,7 +736,7 @@ def run_iteration(
             try:
                 result_code = _run_fork_synthesize(
                     wave,
-                    flow_def.name,
+                    loaded_flow.name,
                     worktree_path,
                     branch,
                     item,
@@ -749,7 +762,7 @@ def run_iteration(
             try:
                 choice = choose_branch(
                     item,
-                    flow_def.name,
+                    loaded_flow.name,
                     worktree_path,
                     backend,
                     model_variant,
@@ -792,6 +805,150 @@ def run_iteration(
     _cleanup_worktree(wave.repo, worktree_path, branch)
 
     return IterationResult(success=True, worktree=worktree_path, branch=branch)
+
+
+# Tick-based flow execution for interactive steps
+
+
+def tick_flow(flow_run_id: str) -> TickResult:
+    """Advance a FlowRun by one step. Returns when paused at interactive or complete.
+
+    This is the state machine executor for flows with interactive steps.
+    Each call:
+    1. Reads current position from DB (step_index)
+    2. Checks if next step is interactive
+    3. If interactive: creates WAITING StepRun, pauses
+    4. If auto: executes step, advances position
+    5. Returns result indicating next action
+    """
+    flow_run = get_run(flow_run_id)
+    if not flow_run:
+        return TickResult.STEP_FAILED
+
+    if not flow_run.wave_id:
+        return TickResult.STEP_FAILED
+
+    wave = get_wave(flow_run.wave_id)
+    if not wave:
+        return TickResult.STEP_FAILED
+
+    # Load flow definition
+    try:
+        loaded_flow = load_flow(flow_run.flow, wave.repo)
+    except ValueError:
+        update_run_status(flow_run.id, FlowRunStatus.FAILED, error="Flow not found")
+        return TickResult.STEP_FAILED
+
+    if not loaded_flow:
+        update_run_status(flow_run.id, FlowRunStatus.FAILED, error="Flow not found")
+        return TickResult.STEP_FAILED
+
+    # Flatten to list for indexing (only handles Step items for now)
+    items = [item for item in loaded_flow.steps if isinstance(item, Step)]
+
+    if flow_run.step_index >= len(items):
+        # All steps complete
+        update_run_status(flow_run.id, FlowRunStatus.COMPLETED)
+        return TickResult.FLOW_COMPLETE
+
+    step_def = items[flow_run.step_index]
+    step_name = step_def.name
+
+    # Check if step is interactive via frontmatter
+    worktree_path = Path(flow_run.worktree) if flow_run.worktree else None
+    step_file = gather_step(worktree_path, step_name)
+    is_interactive = step_file and step_file.config.interactive
+
+    if is_interactive:
+        # Create StepRun with WAITING status
+        step_run = StepRun(
+            id=str(uuid.uuid4()),
+            step=step_name,
+            repo=str(wave.repo),
+            worktree=flow_run.worktree or str(wave.repo),
+            flow_run_id=flow_run.id,
+            wave_id=wave.id,
+            status=StepRunStatus.WAITING,
+            run_mode="interactive",
+        )
+        save_step_run(step_run)
+
+        # Update wave status to WAITING
+        update_wave_status(wave.id, WaveStatus.WAITING)
+
+        # Update flow run current step
+        update_run_step(flow_run.id, step_name)
+
+        notify_event(
+            "wave.waiting",
+            {
+                "wave_id": wave.id,
+                "step": step_name,
+                "step_run_id": step_run.id,
+            },
+        )
+
+        return TickResult.WAITING_INTERACTIVE
+
+    # Auto step - run it
+    update_run_step(flow_run.id, step_name)
+
+    config = load_config(wave.repo)
+    agent_model = config.agent_model if config else "claude:opus"
+    backend, model_variant = parse_model(agent_model)
+
+    if step_def.model:
+        backend, model_variant = parse_model(step_def.model)
+
+    skip_permissions = config.yolo if config else False
+    context_paths = list(wave.area) if wave.area and wave.area[0] != "." else None
+    direction = resolve_directions(wave.repo, wave.direction)
+
+    prompt_result = _build_loop_prompt(
+        wave,
+        direction,
+        Path(flow_run.worktree),
+        step_name,
+        context_paths,
+    )
+
+    if not prompt_result:
+        update_run_status(flow_run.id, FlowRunStatus.FAILED, error=f"Step not found: {step_name}")
+        return TickResult.STEP_FAILED
+
+    prompt, _step_file = prompt_result
+
+    try:
+        result_code = _run_collector_step(
+            prompt,
+            Path(flow_run.worktree),
+            backend,
+            model_variant,
+            skip_permissions,
+            flow_run.id,
+            f"{wave.area_display}:{step_name}",
+        )
+    except StepTimeoutError as e:
+        update_run_status(flow_run.id, FlowRunStatus.FAILED, error=str(e))
+        return TickResult.STEP_FAILED
+
+    if result_code != 0:
+        update_run_status(flow_run.id, FlowRunStatus.FAILED, error=f"{step_name} failed")
+        return TickResult.STEP_FAILED
+
+    # Advance step index
+    update_flow_run_index(flow_run.id, flow_run.step_index + 1)
+
+    notify_event(
+        "wave.step.completed",
+        {
+            "wave_id": wave.id,
+            "step": step_name,
+            "status": "completed",
+        },
+    )
+
+    return TickResult.STEP_COMPLETE
 
 
 def _create_pr_to_main_branch(

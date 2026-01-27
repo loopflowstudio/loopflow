@@ -68,6 +68,15 @@ class BranchNameConfig(BaseModel):
     schema_: str = Field(default="{name}", alias="schema")
 
 
+class BudgetConfig(BaseModel):
+    """Token budgets for prompt sections."""
+
+    area: int = 50000  # Area content (area/*.md, area/roadmap/)
+    docs: int = 30000  # Reference docs (root *.md, scratch/, roadmap/)
+    diff: int = 20000  # Branch changes
+    clipboard: int = 10000  # User-provided content
+
+
 def parse_model(model: str) -> tuple[str, str | None]:
     """Parse model string like 'claude:opus' into (backend, variant).
 
@@ -113,6 +122,7 @@ class Config(BaseModel):
     branch_names: Optional[BranchNameConfig] = None  # Branch naming schema
     lint_check: Optional[str] = None  # Command to check if lint passes (exits 0 = pass)
     autoprune: AutopruneConfig = Field(default_factory=AutopruneConfig)
+    budgets: BudgetConfig = Field(default_factory=BudgetConfig)
 
     @field_validator("context", mode="before")
     @classmethod

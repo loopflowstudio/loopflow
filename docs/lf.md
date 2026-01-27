@@ -51,7 +51,7 @@ Inside step files, `{args}` is replaced with whatever comes after the colon.
 
 | Flag | Description |
 |------|-------------|
-| `-p, --path FILE` | Add a file or directory to context |
+| `--area PATH` | Area scope (paths to include in context) |
 | `-w, --worktree NAME` | Create worktree and run step there |
 | `--lfdocs / --no-lfdocs` | Include roadmap/, scratch/, and root .md files (default: on) |
 | `--diff-files / --no-diff-files` | Include files touched by branch (default: on) |
@@ -108,7 +108,7 @@ lf flow ship -w feature-branch
 
 | Flag | Description |
 |------|-------------|
-| `-p, --path FILE` | Additional files for all steps |
+| `--area PATH` | Area scope (paths to include in context) |
 | `-w, --worktree NAME` | Create worktree and run flow there |
 | `-m, --model MODEL` | Model to use |
 | `--pr` | Open PR when done |
@@ -133,7 +133,7 @@ These require explicit flags or config:
 |---------|---------------|
 | **Raw diff** (line-by-line changes) | `--diff` |
 | **Clipboard** | `-c` / `--clipboard` |
-| **Extra files** | `-p FILE` |
+| **Area scope** | `--area PATH` |
 | **Summaries** | Configure in `.lf/config.yaml` |
 | **Chrome automation** | `--chrome` |
 
@@ -148,10 +148,10 @@ See [Configuration](config.md) for setting defaults via config file.
 lf debug -c
 ```
 
-### Review with extra context
+### Review with area scope
 
 ```bash
-lf review -p docs/api.md -p tests/
+lf review --area src/api/
 ```
 
 ### Use a different model

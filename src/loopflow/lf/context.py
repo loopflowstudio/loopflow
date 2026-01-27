@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from loopflow.lf.design import gather_area_docs, gather_design_docs, gather_internal_docs
 from loopflow.lf.directions import Direction
 from loopflow.lf.files import (
+    GatherResult,
     find_md_in_dir,
     format_files,
     format_image_references,
@@ -40,6 +41,57 @@ _GLOBAL_STEP_PATHS = [
     Path.home() / ".lf" / "steps",  # Global loopflow steps
     Path.home() / ".claude" / "commands",  # Claude Code compatibility
 ]
+
+
+def _limit_to_budget(
+    docs: list[tuple[Path, str]], token_budget: int
+) -> tuple[list[tuple[Path, str]], bool]:
+    """Limit docs to fit within token budget.
+
+    Returns (limited_docs, was_truncated).
+    Keeps docs in order until budget is exceeded, then truncates.
+    """
+    if token_budget <= 0:
+        return docs, False
+
+    result = []
+    total_tokens = 0
+    truncated = False
+
+    for path, content in docs:
+        doc_tokens = count_tokens(content)
+        if total_tokens + doc_tokens <= token_budget:
+            result.append((path, content))
+            total_tokens += doc_tokens
+        else:
+            # Try to include a truncated version of this doc
+            remaining_budget = token_budget - total_tokens
+            if remaining_budget > 500:  # Only truncate if meaningful space left
+                # Rough char estimate: ~3.5 chars per token
+                char_limit = int(remaining_budget * 3.5)
+                truncated_content = content[:char_limit] + "\n\n[...truncated...]"
+                result.append((path, truncated_content))
+            truncated = True
+            break
+
+    return result, truncated
+
+
+def _limit_content_to_budget(content: str, token_budget: int) -> tuple[str, bool]:
+    """Limit string content to fit within token budget.
+
+    Returns (limited_content, was_truncated).
+    """
+    if token_budget <= 0:
+        return content, False
+
+    tokens = count_tokens(content)
+    if tokens <= token_budget:
+        return content, False
+
+    # Truncate to fit budget (~3.5 chars per token)
+    char_limit = int(token_budget * 3.5)
+    return content[:char_limit] + "\n\n[...truncated...]", True
 
 
 @dataclass
@@ -121,6 +173,12 @@ class ContextConfig(BaseModel):
 
     # Extras
     clipboard: bool = False
+
+    # Token budgets (0 = unlimited)
+    budget_area: int = 50000
+    budget_docs: int = 30000
+    budget_diff: int = 20000
+    budget_clipboard: int = 10000
 
     @classmethod
     def for_commit(cls) -> "ContextConfig":
@@ -734,24 +792,43 @@ def gather_prompt_components(
     # Load bundled LOOPFLOW.md (system documentation)
     loopflow_doc = _load_loopflow_doc() if context_config.lfdocs else None
 
-    # Insert design docs and internal docs before repo docs
-    # Order: scratch/ (ephemeral), roadmap/ (persistent internal), area docs, repo root .md files
-    design_docs = gather_design_docs(repo_root)
-    internal_docs = gather_internal_docs(repo_root)
-
     # Gather area-specific docs if area is set and parent_docs is enabled
     area_docs = []
+    area_summary_used = False
     if context_config.area and context_config.files.parent_docs:
-        area_docs = gather_area_docs(repo_root, context_config.area)
+        # Try to use summary for area if available and within budget
+        area_path = Path(context_config.area)
+        area_summary = load_summary(area_path, repo_root, context_config.budget_area)
+        if area_summary and not is_stale(area_summary, repo_root):
+            # Use the summary instead of full area docs
+            area_docs = [(area_path / "summary", area_summary.content)]
+            area_summary_used = True
+        else:
+            area_docs = gather_area_docs(repo_root, context_config.area)
 
-    prefix_docs = design_docs + internal_docs + area_docs
-    if prefix_docs:
-        docs[0:0] = prefix_docs
+    # Apply area budget (only if not using summary)
+    if not area_summary_used and context_config.budget_area > 0 and area_docs:
+        area_docs, _ = _limit_to_budget(area_docs, context_config.budget_area)
+
+    # Gather reference docs: scratch/ (ephemeral), roadmap/ (persistent internal), repo root .md
+    design_docs = gather_design_docs(repo_root)
+    internal_docs = gather_internal_docs(repo_root)
+    ref_docs = design_docs + internal_docs + docs
+
+    # Apply docs budget to reference docs
+    if context_config.budget_docs > 0 and ref_docs:
+        ref_docs, _ = _limit_to_budget(ref_docs, context_config.budget_docs)
+
+    # Combine: area docs first, then reference docs
+    docs = area_docs + ref_docs
 
     # Gather diff based on mode
     diff = None
     if context_config.diff_mode == DiffMode.DIFF:
         diff = gather_diff(repo_root, exclude)
+        # Apply diff budget
+        if diff and context_config.budget_diff > 0:
+            diff, _ = _limit_content_to_budget(diff, context_config.budget_diff)
 
     step_result = None
     if inline:
@@ -790,7 +867,19 @@ def gather_prompt_components(
     all_file_paths = diff_file_paths + [p for p in explicit_paths if p not in diff_set]
     gather_result = gather_files(all_file_paths, repo_root, context_exclude)
 
+    # Apply diff budget to diff files
+    if context_config.budget_diff > 0 and gather_result.text_files:
+        limited_files, _ = _limit_to_budget(gather_result.text_files, context_config.budget_diff)
+        gather_result = GatherResult(
+            text_files=limited_files, image_files=gather_result.image_files
+        )
+
     clipboard = _read_clipboard() if context_config.clipboard else None
+
+    # Apply clipboard budget
+    if clipboard and clipboard.text and context_config.budget_clipboard > 0:
+        limited_text, _ = _limit_content_to_budget(clipboard.text, context_config.budget_clipboard)
+        clipboard = ClipboardContent(text=limited_text, image_path=clipboard.image_path)
 
     # Directions passed in directly (already loaded)
 

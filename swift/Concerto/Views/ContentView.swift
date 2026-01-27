@@ -140,47 +140,47 @@ struct ContentView: View {
             Task { await repoState.refreshWorktrees(showFeedback: true) }
         })
 
-        if let worktree = repoState.selectedWorktree {
+        if let wave = repoState.selectedWave, let worktreePath = wave.worktreePath {
             let terminalLauncher = TerminalLauncher()
             let terminal = repoState.config?.terminalApp ?? .warp
             let ide = repoState.config?.ideApp ?? .cursor
 
             actions.append(PaletteAction("Open Terminal", icon: "terminal", shortcut: "T") {
-                try? terminalLauncher.launchTerminal(terminal, at: URL(fileURLWithPath: worktree.path))
+                try? terminalLauncher.launchTerminal(terminal, at: URL(fileURLWithPath: worktreePath))
             })
 
             actions.append(PaletteAction("Open \(ide.displayName)", icon: "curlybraces", shortcut: "I") {
-                try? terminalLauncher.openInIDE(ide, at: URL(fileURLWithPath: worktree.path), workspace: repoState.config?.workspace)
+                try? terminalLauncher.openInIDE(ide, at: URL(fileURLWithPath: worktreePath), workspace: repoState.config?.workspace)
             })
 
             actions.append(PaletteAction("View Diff", icon: "doc.text.magnifyingglass", shortcut: "D") {
-                NotificationCenter.default.post(name: .viewWorktreeDiff, object: worktree)
+                NotificationCenter.default.post(name: .viewWorktreeDiff, object: wave)
             })
 
-            if worktree.prURL != nil {
+            if wave.prURL != nil {
                 actions.append(PaletteAction("View PR", icon: "arrow.up.right.square", shortcut: "P") {
-                    if let url = worktree.prURL {
+                    if let url = wave.prURL {
                         terminalLauncher.openURL(url)
                     }
                 })
 
-                if worktree.prState == .open {
+                if wave.prState == .open {
                     actions.append(PaletteAction("Land PR", icon: "airplane.arrival", shortcut: "L") {
                         Task {
-                            try? await repoState.landPR(for: worktree)
+                            try? await repoState.landBranch(for: wave)
                         }
                     })
                 }
-            } else {
+            } else if wave.hasDiff {
                 actions.append(PaletteAction("Create PR", icon: "arrow.triangle.pull", shortcut: "P") {
                     Task {
-                        try? await repoState.createPR(for: worktree)
+                        try? await repoState.landBranch(for: wave)
                     }
                 })
             }
 
             actions.append(PaletteAction("Reveal in Finder", icon: "folder", shortcut: "⌘⇧F") {
-                terminalLauncher.openInFinder(at: URL(fileURLWithPath: worktree.path))
+                terminalLauncher.openInFinder(at: URL(fileURLWithPath: worktreePath))
             })
         }
 

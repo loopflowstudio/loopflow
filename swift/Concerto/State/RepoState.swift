@@ -83,19 +83,6 @@ final class RepoState {
     // Daemon connection
     var lfdConnected: Bool = false
 
-    // Computed: worktree for selected wave
-    var selectedWorktree: Worktree? {
-        get {
-            guard let wave = selectedWave,
-                  let path = wave.worktreePath else { return _selectedWorktree }
-            return worktrees.first { $0.path == path } ?? _selectedWorktree
-        }
-        set {
-            _selectedWorktree = newValue
-        }
-    }
-    private var _selectedWorktree: Worktree?
-
     // Services
     private let worktreeService = WorktreeService()
     private let configLoader = ConfigLoader()
@@ -131,7 +118,7 @@ final class RepoState {
         flows = []
         directions = []
         waves = []
-        selectedWorktree = nil
+        selectedWave = nil
         isLoading = false
         errorMessage = nil
 
@@ -301,9 +288,6 @@ final class RepoState {
         guard let repo = currentRepo else { return }
         do {
             worktrees = try await worktreeService.list(in: repo)
-            if let branch = selectedWorktree?.branch {
-                selectedWorktree = worktrees.first { $0.branch == branch }
-            }
         } catch {
             // Silent failure for background refresh
         }
@@ -319,10 +303,6 @@ final class RepoState {
             }
             let syncSucceeded = (try? await worktreeService.sync(in: repo)) != nil
             worktrees = try await worktreeService.list(in: repo)
-
-            if let branch = selectedWorktree?.branch {
-                selectedWorktree = worktrees.first { $0.branch == branch }
-            }
 
             if showFeedback {
                 refreshMessage = syncSucceeded ? "Refreshed" : "Refresh (sync failed)"
@@ -413,8 +393,9 @@ final class RepoState {
         let branchesToPrune = Set(candidates.map(\.branch))
 
         worktrees.removeAll { branchesToPrune.contains($0.branch) }
-        if let selected = selectedWorktree, branchesToPrune.contains(selected.branch) {
-            selectedWorktree = nil
+        // Clear selected wave if its branch is being pruned
+        if let selected = selectedWave, let branch = selected.branch, branchesToPrune.contains(branch) {
+            selectedWave = nil
         }
 
         Task.detached { [worktreeService] in
@@ -467,6 +448,15 @@ final class RepoState {
         let worktreeURL = URL(fileURLWithPath: worktree.path)
         try await worktreeService.landBranch(in: worktreeURL)
         listWorktrees()
+    }
+
+    func landBranch(for wave: Wave) async throws {
+        guard let path = wave.worktreePath else {
+            throw WorktreeService.WorktreeError.notFound
+        }
+        let worktreeURL = URL(fileURLWithPath: path)
+        try await worktreeService.landBranch(in: worktreeURL)
+        await refreshWaves()
     }
 
     func syncMain() async throws {
@@ -526,8 +516,9 @@ final class RepoState {
     private func handleWorktreeEvent(_ event: WorktreeEvent) {
         if event.name == "worktree.pruned", let branch = event.branch {
             worktrees.removeAll { $0.branch == branch }
-            if selectedWorktree?.branch == branch {
-                selectedWorktree = nil
+            // Clear selected wave if its branch was pruned
+            if selectedWave?.branch == branch {
+                selectedWave = nil
             }
             return
         }
@@ -535,12 +526,11 @@ final class RepoState {
         if let updatedWorktree = event.worktree, let branch = event.branch {
             if let index = worktrees.firstIndex(where: { $0.branch == branch }) {
                 worktrees[index] = updatedWorktree
-                if selectedWorktree?.branch == branch {
-                    selectedWorktree = updatedWorktree
-                }
             } else {
                 worktrees.append(updatedWorktree)
             }
+            // Refresh waves to get updated worktree state
+            Task { await refreshWaves() }
             return
         }
 

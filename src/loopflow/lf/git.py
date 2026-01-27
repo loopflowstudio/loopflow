@@ -134,10 +134,34 @@ def get_default_base_ref(repo_root: Path) -> str:
     return base_ref or "main"
 
 
+def get_pr_target(base_branch: str | None) -> str:
+    """Determine PR target based on base branch status.
+
+    If base_branch is set (stacked worktree), target it while its PR is open.
+    Once base branch PR merges, target main instead.
+    """
+    if not base_branch or base_branch == "main":
+        return "main"
+
+    # Check if base branch PR is merged
+    result = subprocess.run(
+        ["gh", "pr", "view", base_branch, "--json", "state", "-q", ".state"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        state = result.stdout.strip().upper()
+        if state == "MERGED":
+            return "main"
+
+    return base_branch
+
+
 def open_pr(
     repo_root: Path,
     title: Optional[str] = None,
     body: Optional[str] = None,
+    base: Optional[str] = None,
 ) -> str:
     """Open GitHub PR for current branch. Returns URL. Raises GitError on failure."""
     # Push to origin
@@ -151,6 +175,10 @@ def open_pr(
         cmd = ["gh", "pr", "create", "--title", title, "--body", body or ""]
     else:
         cmd = ["gh", "pr", "create", "--fill"]
+
+    # Add base branch if specified
+    if base and base != "main":
+        cmd.extend(["--base", base])
 
     result = subprocess.run(
         cmd,

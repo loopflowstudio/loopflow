@@ -1,0 +1,46 @@
+name: Clear Scratch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scratch/**'
+
+jobs:
+  clear-scratch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for scratch files
+        id: check
+        run: |
+          # Find files in scratch/ (excluding .gitkeep)
+          FILES=$(find scratch -type f ! -name '.gitkeep' 2>/dev/null || true)
+          if [ -n "$FILES" ]; then
+            echo "found=true" >> $GITHUB_OUTPUT
+            echo "Files to remove:"
+            echo "$FILES"
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Clear scratch directory
+        if: steps.check.outputs.found == 'true'
+        run: |
+          # Remove all files except .gitkeep
+          find scratch -type f ! -name '.gitkeep' -delete
+          # Remove empty directories
+          find scratch -type d -empty -delete 2>/dev/null || true
+          # Ensure scratch dir exists with .gitkeep
+          mkdir -p scratch
+          touch scratch/.gitkeep
+
+      - name: Commit changes
+        if: steps.check.outputs.found == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add scratch/
+          git commit -m "chore: clear scratch after merge"
+          git push

@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from loopflow.lf.git import GitError, autocommit, find_main_repo, open_pr
+from loopflow.lf.git import GitError, autocommit, find_main_repo, get_pr_target, open_pr
 
 
 @pytest.fixture
@@ -174,3 +174,78 @@ def test_get_current_branch_returns_none_when_detached(temp_repo):
 
         result = get_current_branch(temp_repo)
         assert result is None
+
+
+# PR targeting tests for stacked worktrees
+
+
+def test_get_pr_target_returns_main_when_no_base():
+    """get_pr_target returns 'main' when base_branch is None."""
+    assert get_pr_target(None) == "main"
+
+
+def test_get_pr_target_returns_main_when_base_is_main():
+    """get_pr_target returns 'main' when base_branch is 'main'."""
+    assert get_pr_target("main") == "main"
+
+
+def test_get_pr_target_returns_base_when_pr_open():
+    """get_pr_target returns base_branch when base PR is still open."""
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="OPEN\n")
+
+        result = get_pr_target("feature-A")
+        assert result == "feature-A"
+
+
+def test_get_pr_target_returns_main_when_base_pr_merged():
+    """get_pr_target returns 'main' when base PR has merged."""
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="MERGED\n")
+
+        result = get_pr_target("feature-A")
+        assert result == "main"
+
+
+def test_get_pr_target_returns_base_when_gh_fails():
+    """get_pr_target returns base_branch when gh pr view fails."""
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not found")
+
+        result = get_pr_target("feature-A")
+        assert result == "feature-A"
+
+
+def test_open_pr_includes_base_flag():
+    """open_pr includes --base flag when base is provided."""
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="https://github.com/org/repo/pull/1")
+
+        open_pr(MagicMock(), title="Test", body="Body", base="feature-A")
+
+        # Find the gh pr create call
+        create_calls = [
+            c for c in mock_run.call_args_list
+            if len(c[0]) > 0 and "gh" in c[0][0] and "create" in c[0][0]
+        ]
+        assert len(create_calls) == 1
+        args = create_calls[0][0][0]
+        assert "--base" in args
+        assert "feature-A" in args
+
+
+def test_open_pr_omits_base_flag_for_main():
+    """open_pr does not include --base flag when base is 'main'."""
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="https://github.com/org/repo/pull/1")
+
+        open_pr(MagicMock(), title="Test", body="Body", base="main")
+
+        # Find the gh pr create call
+        create_calls = [
+            c for c in mock_run.call_args_list
+            if len(c[0]) > 0 and "gh" in c[0][0] and "create" in c[0][0]
+        ]
+        assert len(create_calls) == 1
+        args = create_calls[0][0][0]
+        assert "--base" not in args

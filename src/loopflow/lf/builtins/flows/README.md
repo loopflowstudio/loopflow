@@ -12,6 +12,7 @@ Flows that produce code changes.
 | `pair` | design → ship | Interactive design then build |
 | `grind` | review → iterate → ship → gate | Review-driven iteration |
 | `incident` | debug → 5whys → ship | Fix bug, analyze root cause, ship fixes |
+| `start` | ingest → kickoff | Pick roadmap item, elaborate design |
 | `ship-roadmap` | start → ship | Pick roadmap item, elaborate, build |
 
 ## Plan flows (`plan/`)
@@ -20,7 +21,6 @@ Flows that produce roadmap items and analysis.
 
 | Flow | Steps | Use case |
 |------|-------|----------|
-| `start` | ingest → kickoff | Pick roadmap item, elaborate design |
 | `roadmap-reduce` | review → fork(reduce×3) → publish | Find simplification opportunities |
 | `roadmap-polish` | review → fork(polish×3) → publish | Find polish priorities |
 | `roadmap-expand` | review → fork(expand×3) → publish | Find expansion opportunities |

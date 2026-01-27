@@ -83,13 +83,13 @@ Steps chain into flows. Flows feed into waves.
 | `pair` | design → ship |
 | `grind` | review → iterate → ship → gate |
 | `incident` | debug → 5whys → ship |
+| `start` | ingest → kickoff |
 | `ship-roadmap` | start → ship |
 
 ### Plan flows (`plan/`)
 
 | Flow | Steps |
 |------|-------|
-| `start` | ingest → kickoff |
 | `roadmap-reduce` | review → fork(reduce×3) → publish |
 | `roadmap-polish` | review → fork(polish×3) → publish |
 | `roadmap-expand` | review → fork(expand×3) → publish |

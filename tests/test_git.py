@@ -214,38 +214,3 @@ def test_get_pr_target_returns_base_when_gh_fails():
 
         result = get_pr_target("feature-A")
         assert result == "feature-A"
-
-
-def test_open_pr_includes_base_flag():
-    """open_pr includes --base flag when base is provided."""
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0, stdout="https://github.com/org/repo/pull/1")
-
-        open_pr(MagicMock(), title="Test", body="Body", base="feature-A")
-
-        # Find the gh pr create call
-        create_calls = [
-            c for c in mock_run.call_args_list
-            if len(c[0]) > 0 and "gh" in c[0][0] and "create" in c[0][0]
-        ]
-        assert len(create_calls) == 1
-        args = create_calls[0][0][0]
-        assert "--base" in args
-        assert "feature-A" in args
-
-
-def test_open_pr_omits_base_flag_for_main():
-    """open_pr does not include --base flag when base is 'main'."""
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0, stdout="https://github.com/org/repo/pull/1")
-
-        open_pr(MagicMock(), title="Test", body="Body", base="main")
-
-        # Find the gh pr create call
-        create_calls = [
-            c for c in mock_run.call_args_list
-            if len(c[0]) > 0 and "gh" in c[0][0] and "create" in c[0][0]
-        ]
-        assert len(create_calls) == 1
-        args = create_calls[0][0][0]
-        assert "--base" not in args

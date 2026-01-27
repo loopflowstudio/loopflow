@@ -288,38 +288,3 @@ def ensure_ready_pr(repo_root: Path, pr_number: int | None = None) -> bool:
     return result.returncode == 0
 
 
-def update_pr(
-    repo_root: Path,
-    title: str,
-    body: str,
-) -> str:
-    """Update existing PR title and body. Returns URL. Raises GitError on failure."""
-    # Push any new commits
-    subprocess.run(
-        ["git", "push"],
-        cwd=repo_root,
-        capture_output=True,
-    )
-
-    # Update PR
-    result = subprocess.run(
-        ["gh", "pr", "edit", "--title", title, "--body", body],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-    )
-
-    if result.returncode != 0:
-        raise GitError(result.stderr.strip() or "Failed to update PR")
-
-    # Get PR URL
-    view_result = subprocess.run(
-        ["gh", "pr", "view", "--json", "url", "-q", ".url"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-    )
-    if view_result.returncode != 0:
-        raise GitError("PR updated but could not get URL")
-
-    return view_result.stdout.strip()

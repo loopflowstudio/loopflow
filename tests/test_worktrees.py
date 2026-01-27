@@ -301,8 +301,7 @@ def test_list_worktrees_includes_base_commit(tmp_path):
         },
     ]
 
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0, stdout=json_dump(payload), stderr="")
+    with patch("loopflow.lf.worktrees._run_wt", return_value=json_dump(payload)):
         worktrees = list_all(repo_root)
 
     assert len(worktrees) == 1

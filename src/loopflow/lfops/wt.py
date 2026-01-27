@@ -30,7 +30,9 @@ def register_commands(app: typer.Typer) -> None:
     def create_worktree(
         name: Annotated[str, typer.Argument(help="Short name for worktree")],
         base: Annotated[str | None, typer.Option("--base", "-b", help="Base branch")] = None,
-        stack: Annotated[bool, typer.Option("--stack", "-s", help="Stack on current branch")] = False,
+        stack: Annotated[
+            bool, typer.Option("--stack", "-s", help="Stack on current branch")
+        ] = False,
     ) -> None:
         """Create worktree with schema-based branch name.
 

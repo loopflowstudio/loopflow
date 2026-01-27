@@ -1,59 +1,42 @@
 ---
 requires: scratch/ with multiple files
-produces: scratch/ reorganized for roadmap
+produces: scratch/ cleaned up and reorganized
 ---
-Reorganize scratch/ content for clean transfer to roadmap/.
+Clean up scratch/—combine related content, remove stale material, make docs coherent.
 
 ## Context
 
-Analysis steps have written multiple files to scratch/—research, opportunities, priorities, synthesis. Before promoting to roadmap/, consolidate into a structure that will make sense as persistent documentation.
+Analysis steps accumulate files in scratch/—research, opportunities, priorities, synthesis. Over time this becomes cluttered with outdated content, redundant files, and fragmented ideas. Consolidate into a clean state.
 
 ## Workflow
 
 1. Read everything in scratch/
-2. Identify what should become roadmap items vs what was working notes
-3. Reorganize into files that stand alone
-4. Use path structure or frontmatter to declare destination
+2. Identify what's current vs outdated
+3. Combine related content into unified files
+4. Delete or archive superseded material
+5. Make remaining docs standalone and coherent
 
-## What to consolidate
+## What to do
 
-**Promote to roadmap:**
-- Proposals with clear scope and approach
-- Research that has lasting value
+**Combine:**
+- Multiple files covering the same topic → one file
+- Fragmented notes → coherent document
+- Related proposals → unified plan
+
+**Remove:**
+- Content superseded by later analysis
+- Working notes that informed decisions (the decision matters, not the notes)
+- Stale items that no longer apply
+
+**Keep:**
+- Active design docs for current work
+- Research with lasting value
 - Decisions that should be remembered
-
-**Leave behind:**
-- Working notes that informed decisions
-- Intermediate analysis superseded by synthesis
-- Context that's captured better elsewhere
-
-## Output structure
-
-Consolidate into files ready for `add-to-roadmap`:
-
-```
-scratch/
-  api/
-    auth-redesign.md      # → roadmap/api/auth-redesign.md
-    rate-limiting.md      # → roadmap/api/rate-limiting.md
-  research.md             # stays in scratch (working notes)
-  synthesis.md            # stays in scratch (intermediate)
-```
-
-Or use frontmatter:
-
-```markdown
----
-area: api
----
-# Auth Redesign
-...
-```
 
 ## Consolidation principles
 
-**Standalone files.** Each file should make sense without reading the others. Don't assume readers saw the research.
+**Standalone files.** Each file should make sense without reading the others. Don't assume readers saw earlier drafts.
 
-**Clear scope.** Each roadmap item should have obvious boundaries. Split large analyses into focused items.
+**Current state.** Files should reflect current understanding, not history. If something changed, update it—don't keep both versions.
 
-**Forward-looking.** Roadmap items describe what to build or what experiments to run, not what was analyzed. Transform observations into proposals.
+**Clear scope.** Each file should have obvious boundaries. Split sprawling docs into focused pieces, or combine fragments into one coherent doc.

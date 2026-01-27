@@ -17,7 +17,8 @@ Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), or repo c
 | Include branch files | `--diff-files` (default) | `diff_files: true` |
 | Include raw diff | `--diff` | `diff: true` |
 | Include clipboard | `-c, --clipboard` | — |
-| Add context files | `-p FILE` | `context: [FILE]` |
+| Area scope | `--area PATH` | `area: PATH` |
+| Context files | — | `context: [FILE]` |
 | Direction (judgment/intent) | `--direction NAME` | `direction: NAME` |
 | Chrome automation | `--chrome` | `chrome: true` |
 | Yolo mode (skip permissions) | — | `yolo: true` |

@@ -49,36 +49,95 @@ def _area_parent_paths(area: str) -> list[str]:
     return paths
 
 
-def gather_area_docs(repo_root: Path, area: str) -> list[tuple[Path, str]]:
-    """Gather docs from area and all parent areas.
+def gather_area(repo_root: Path, area: str) -> list[tuple[Path, str]]:
+    """Gather all content from an area (scope of responsibility).
+
+    For area="src/api", includes:
+    - All files in src/api/ (code, docs, everything)
+    - roadmap/src/api/* (roadmap items for this area)
+
+    This is what the agent is responsible for and needs to know.
+    """
+    files = []
+    seen = set()
+    area_dir = repo_root / area
+
+    # All files in the area directory
+    if area_dir.is_dir():
+        for path in sorted(area_dir.rglob("*")):
+            if path.is_file() and path not in seen:
+                # Skip binary files, only include text
+                try:
+                    content = path.read_text()
+                    seen.add(path)
+                    files.append((path, content))
+                except (UnicodeDecodeError, PermissionError):
+                    pass  # Skip binary or unreadable files
+
+    # Area-specific roadmap (roadmap/<area>/)
+    roadmap_dir = repo_root / "roadmap" / area
+    if roadmap_dir.is_dir():
+        for path in sorted(roadmap_dir.rglob("*")):
+            if path.is_file() and path not in seen:
+                try:
+                    content = path.read_text()
+                    seen.add(path)
+                    files.append((path, content))
+                except (UnicodeDecodeError, PermissionError):
+                    pass  # Skip binary or unreadable files
+
+    return files
+
+
+def gather_ancestral_docs(repo_root: Path, area: str) -> list[tuple[Path, str]]:
+    """Gather docs and roadmap from parent paths of an area.
 
     For area="a/b/c", includes:
-    - a/*.md and a/roadmap/**/*.md
-    - a/b/*.md and a/b/roadmap/**/*.md
-    - a/b/c/*.md and a/b/c/roadmap/**/*.md
+    - a/*.md, a/b/*.md (parent docs)
+    - roadmap/a/*, roadmap/a/b/* (parent roadmap items)
+    - NOT a/b/c/* or roadmap/a/b/c/* (that's in the area itself)
     """
     docs = []
     seen = set()
+    parents = _area_parent_paths(area)[:-1]  # Exclude the area itself
 
-    for parent in _area_parent_paths(area):
+    # Paths to exclude (the area itself and deeper)
+    area_roadmap = repo_root / "roadmap" / area.strip("/")
+
+    for parent in parents:
+        # Parent directory docs
         parent_dir = repo_root / parent
-
-        # Direct .md files in the area directory
         if parent_dir.is_dir():
             for path in sorted(parent_dir.glob("*.md")):
                 if path.is_file() and path not in seen:
                     seen.add(path)
                     docs.append((path, path.read_text()))
 
-        # Area-specific roadmap
-        roadmap_dir = parent_dir / "roadmap"
+        # Parent roadmap items (all files, not just .md)
+        roadmap_dir = repo_root / "roadmap" / parent
         if roadmap_dir.is_dir():
-            for path in sorted(roadmap_dir.rglob("*.md")):
+            for path in sorted(roadmap_dir.rglob("*")):
+                # Skip files under the area's roadmap (handled by gather_area)
+                if _is_under(path, area_roadmap):
+                    continue
                 if path.is_file() and path not in seen:
-                    seen.add(path)
-                    docs.append((path, path.read_text()))
+                    try:
+                        content = path.read_text()
+                        seen.add(path)
+                        docs.append((path, content))
+                    except (UnicodeDecodeError, PermissionError):
+                        pass  # Skip binary or unreadable files
 
     return docs
+
+
+def _is_under(path: Path, parent: Path) -> bool:
+    """Check if path is under parent directory."""
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
 
 
 def load_direction(direction: str | Path, repo_root: Path) -> str | None:

@@ -6,7 +6,7 @@ Synthesize analysis into a roadmap proposal.
 
 ## Scope
 
-The included context defines your area. Propose items that belong to this area. The area is recorded in frontmatter for later promotion to `roadmap/<area>/`.
+The included context defines your area. Propose items that belong to this area. When promoted via `add-to-roadmap`, the request's area determines the destination folder.
 
 ## Workflow
 
@@ -22,7 +22,6 @@ Write `scratch/roadmap-proposal.md`:
 ```markdown
 ---
 status: proposed
-area: <area>
 ---
 
 # Title

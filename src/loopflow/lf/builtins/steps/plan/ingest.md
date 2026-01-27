@@ -7,7 +7,7 @@ Pick the highest-priority roadmap item in this area and move it to scratch/.
 ## Workflow
 
 1. Identify the roadmap scope:
-   - If running with an area (e.g., `src/api/`), read from `roadmap/<area>/` (e.g., `src/api/roadmap/`)
+   - If running with an area (e.g., `src/api/`), read from `roadmap/<area>/` (e.g., `roadmap/src/api/`)
    - Otherwise, read from root `roadmap/`
 2. Evaluate each item: urgency, importance, dependencies, readiness
 3. Pick the one that should be built next

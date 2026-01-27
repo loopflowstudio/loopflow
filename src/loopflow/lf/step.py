@@ -393,7 +393,6 @@ def run(
             budget_area=config.budgets.area if config else 50000,
             budget_docs=config.budgets.docs if config else 30000,
             budget_diff=config.budgets.diff if config else 20000,
-            budget_clipboard=config.budgets.clipboard if config else 10000,
         ),
         config=config,
     )
@@ -550,7 +549,6 @@ def inline(
             budget_area=config.budgets.area if config else 50000,
             budget_docs=config.budgets.docs if config else 30000,
             budget_diff=config.budgets.diff if config else 20000,
-            budget_clipboard=config.budgets.clipboard if config else 10000,
         ),
         config=config,
     )

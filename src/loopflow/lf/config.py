@@ -74,7 +74,6 @@ class BudgetConfig(BaseModel):
     area: int = 50000  # Area content (area/*.md, area/roadmap/)
     docs: int = 30000  # Reference docs (root *.md, scratch/, roadmap/)
     diff: int = 20000  # Branch changes
-    clipboard: int = 10000  # User-provided content
 
 
 def parse_model(model: str) -> tuple[str, str | None]:

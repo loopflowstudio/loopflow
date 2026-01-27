@@ -1,104 +1,73 @@
 # Loopflow
 
-Loopflow runs prompts against LLM coding agents (Claude Code, Codex, Gemini CLI). Prompts are single-purpose and chain together—each one inherits state from the previous step and leaves state for the next.
+Run prompts, hand off cleanly. Each step does one thing and leaves state for the next.
 
-Principle: tight loops. Do one thing, hand off cleanly.
+---
+
+## Area
+
+Your working scope. Everything here is relevant.
+
+**Area docs**: Patterns and constraints for this part of the codebase.
+
+**Repo docs**: STYLE, CLAUDE.md, and other guidelines. Follow them.
+
+**Direction**: Your perspective. Follow its principles.
+
+**Step**: Your task. Do what it says.
+
+**Diff**: What's changed on this branch. Your primary working material.
+
+**Clipboard**: User-provided input. If present, it's why you're here.
 
 ---
 
 ## Run Modes
 
-**Auto mode** (default): Non-interactive. The prompt runs to completion without user input. Output streams to the terminal and logs to `~/.lf/logs/`.
+Check the run mode at the top of the prompt.
 
-**Interactive mode** (`-i` flag): Full chat interface. The session can be interrupted, redirected, or extended. Ctrl+C kills the session immediately with no cleanup.
+**If auto mode**: Run to completion. Don't pause for questions. Make best-effort assumptions. Write open questions to `scratch/questions.md` and keep moving.
+
+**If interactive mode**: Ask clarifying questions when needed. The user will guide you.
 
 ---
 
-## Context
+## Where to Write
 
-Prompts receive context assembled by loopflow. What's included is configurable via `.lf/config.yaml`. Typical context:
+**scratch/**: PR-scoped artifacts. Design docs, notes, questions. Cleared on merge.
+- `scratch/<branch>.md` — design doc for current work
+- `scratch/questions.md` — open questions, unknowns, blockers
 
-- Root-level `.md` files (README, STYLE, etc.)
-- Current diff against main
-- The step prompt from `.claude/commands/<step>.md` or `.lf/<step>.md`
-- Additional files via `-x` flag or `context:` in config
+**Code**: The actual work. Tests, implementation, fixes.
+
+Don't modify `roadmap/` unless the step explicitly says to. It persists across PRs.
 
 ---
 
 ## Commits
 
-In pipelines, loopflow commits between steps automatically.
+In auto mode, commit when a step completes. Small, atomic commits. Don't leave the branch broken.
 
-In interactive mode, commit at natural breakpoints. Don't leave the branch in a broken state.
-
----
-
-## File Structure
-
-```
-.lf/
-  config.yaml      # repo configuration
-  steps/           # step prompts
-  directions/      # judgment and intent
-  flows/           # flow definitions
-
-.claude/commands/  # step prompts (Claude Code compatible)
-
-scratch/           # PR scratchpad (root only, cleared on merge)
-  <branch>.md      # design doc for current branch
-  questions.md     # open questions captured during runs
-
-roadmap/           # internal docs (persists)
-  vision.md        # where we're going
-  <area>/          # area-specific plans
-```
-
-**scratch/** is for the current PR. Keep `scratch/<branch>.md` current as work progresses—what's done, what's left, what changed. Open questions go in `scratch/questions.md`. Don't block on unknowns; capture them and keep moving. Cleared automatically when the PR merges.
-
-**roadmap/** is for forward-looking plans that persist. Root `roadmap/` holds cross-cutting docs. Per-folder `roadmap/` (like `src/api/roadmap/`) holds area-specific plans. Including a path auto-includes its nested roadmap folders.
+In interactive mode, commit at natural breakpoints when the user signals readiness.
 
 ---
 
-## Worktrees
+## Chaining
 
-Loopflow works best with git worktrees. Each feature gets its own directory, isolated from other work.
+Steps produce artifacts that later steps consume:
 
-```bash
-lfops wt create <name>         # create worktree with schema-based branch
-lfops wt prune                 # remove merged worktrees
-```
-
-Most prompts expect to run on a feature branch, not main. If a branch doesn't exist yet, create a worktree.
-
----
-
-## Example: How Prompts Chain
-
-Prompts can require and produce specific artifacts. For example:
-
-| Prompt | Requires | Produces |
-|--------|----------|----------|
+| Step | Reads | Writes |
+|------|-------|--------|
 | design | — | scratch/<branch>.md |
 | implement | scratch/<branch>.md | code, tests |
-| polish | code on branch | passing tests |
 | review | code on branch | verdict in scratch/ |
 
-Common sequences:
-
-```
-design → implement → polish
-```
-Design writes a spec. Implement builds it. Polish verifies tests pass.
-
-```
-review → iterate → polish
-```
-Review finds issues. Iterate fixes them. Polish closes it out.
-
-These are examples. Check `.lf/flows/` for the actual pipelines configured in this repo.
+If a required artifact is missing, check scratch/ first. If still missing, note it in `scratch/questions.md` and proceed with what you have.
 
 ---
 
-## Auto Mode Behavior
+## Quality
 
-In headless execution, prompts run without interactive input. Make best-effort assumptions and keep moving. Questions get captured in `scratch/questions.md` for the next pass.
+Ship working code. Tests pass. No regressions.
+
+When unsure between two approaches, pick the simpler one. You can always iterate.

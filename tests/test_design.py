@@ -5,7 +5,8 @@ from pathlib import Path
 from loopflow.lf.design import (
     _area_parent_paths,
     clear_design_artifacts,
-    gather_area_docs,
+    gather_ancestral_docs,
+    gather_area,
     gather_design_docs,
     gather_internal_docs,
     has_design_artifacts,
@@ -177,7 +178,7 @@ def test_load_direction_with_path_object(tmp_path):
 
 
 # =============================================================================
-# Area docs tests
+# Area helper tests
 # =============================================================================
 
 
@@ -196,8 +197,94 @@ def test_area_parent_paths_handles_slashes():
     assert _area_parent_paths("/a/b/") == ["a", "a/b"]
 
 
-def test_gather_area_docs_includes_direct_md(tmp_path):
-    """gather_area_docs includes .md files directly in area folders."""
+# =============================================================================
+# gather_area tests
+# =============================================================================
+
+
+def test_gather_area_includes_all_files(tmp_path):
+    """gather_area includes all files in area directory."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "lf").mkdir()
+    (repo_root / "lf" / "README.md").write_text("# LF docs")
+    (repo_root / "lf" / "main.py").write_text("# Python code")
+    (repo_root / "lf" / "cli").mkdir()
+    (repo_root / "lf" / "cli" / "GUIDE.md").write_text("# CLI guide")
+
+    docs = gather_area(repo_root, "lf")
+
+    names = [p.name for p, _ in docs]
+    assert "README.md" in names
+    assert "main.py" in names
+    assert "GUIDE.md" in names  # nested files included
+
+
+def test_gather_area_includes_area_roadmap(tmp_path):
+    """gather_area includes roadmap/<area>/ items."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "lf").mkdir()
+    (repo_root / "lf" / "cli").mkdir()
+    (repo_root / "roadmap").mkdir()
+    (repo_root / "roadmap" / "lf").mkdir()
+    (repo_root / "roadmap" / "lf" / "cli").mkdir()
+    (repo_root / "roadmap" / "lf" / "cli" / "refactor.md").write_text("# CLI refactor")
+    (repo_root / "roadmap" / "lf" / "cli" / "spec.txt").write_text("Spec content")
+
+    docs = gather_area(repo_root, "lf/cli")
+
+    names = [p.name for p, _ in docs]
+    assert "refactor.md" in names  # .md file
+    assert "spec.txt" in names  # non-.md file also included
+
+
+def test_gather_area_nested_roadmap(tmp_path):
+    """gather_area includes nested docs within roadmap/<area>/."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "lf").mkdir()
+    (repo_root / "roadmap").mkdir()
+    (repo_root / "roadmap" / "lf").mkdir()
+    (repo_root / "roadmap" / "lf" / "decisions").mkdir()
+    (repo_root / "roadmap" / "lf" / "decisions" / "adr-001.md").write_text("# ADR")
+
+    docs = gather_area(repo_root, "lf")
+
+    names = [p.name for p, _ in docs]
+    assert "adr-001.md" in names
+
+
+def test_gather_area_empty_when_no_area_exists(tmp_path):
+    """gather_area returns empty list when area doesn't exist."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    docs = gather_area(repo_root, "nonexistent/area")
+
+    assert docs == []
+
+
+def test_gather_area_no_duplicates(tmp_path):
+    """gather_area doesn't include the same file twice."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "lf").mkdir()
+    (repo_root / "lf" / "README.md").write_text("# LF")
+
+    docs = gather_area(repo_root, "lf")
+
+    readme_count = sum(1 for p, _ in docs if p.name == "README.md")
+    assert readme_count == 1
+
+
+# =============================================================================
+# gather_ancestral_docs tests
+# =============================================================================
+
+
+def test_gather_ancestral_docs_includes_parent_md(tmp_path):
+    """gather_ancestral_docs includes .md files from parent directories."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     (repo_root / "lf").mkdir()
@@ -205,65 +292,41 @@ def test_gather_area_docs_includes_direct_md(tmp_path):
     (repo_root / "lf" / "cli").mkdir()
     (repo_root / "lf" / "cli" / "GUIDE.md").write_text("# CLI guide")
 
-    docs = gather_area_docs(repo_root, "lf/cli")
+    docs = gather_ancestral_docs(repo_root, "lf/cli")
 
     names = [p.name for p, _ in docs]
     assert "README.md" in names  # from lf/
-    assert "GUIDE.md" in names  # from lf/cli/
+    assert "GUIDE.md" not in names  # lf/cli/ is area itself, not ancestor
 
 
-def test_gather_area_docs_includes_roadmap(tmp_path):
-    """gather_area_docs includes roadmap/ under each area."""
+def test_gather_ancestral_docs_includes_parent_roadmap(tmp_path):
+    """gather_ancestral_docs includes roadmap from parent paths."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     (repo_root / "lf").mkdir()
-    (repo_root / "lf" / "roadmap").mkdir()
-    (repo_root / "lf" / "roadmap" / "feature.md").write_text("# Feature plan")
     (repo_root / "lf" / "cli").mkdir()
-    (repo_root / "lf" / "cli" / "roadmap").mkdir()
-    (repo_root / "lf" / "cli" / "roadmap" / "refactor.md").write_text("# CLI refactor")
+    (repo_root / "roadmap").mkdir()
+    (repo_root / "roadmap" / "lf").mkdir()
+    (repo_root / "roadmap" / "lf" / "feature.md").write_text("# Feature plan")
+    (repo_root / "roadmap" / "lf" / "spec.txt").write_text("Spec content")
+    (repo_root / "roadmap" / "lf" / "cli").mkdir()
+    (repo_root / "roadmap" / "lf" / "cli" / "refactor.md").write_text("# CLI refactor")
 
-    docs = gather_area_docs(repo_root, "lf/cli")
-
-    names = [p.name for p, _ in docs]
-    assert "feature.md" in names  # from lf/roadmap/
-    assert "refactor.md" in names  # from lf/cli/roadmap/
-
-
-def test_gather_area_docs_nested_roadmap(tmp_path):
-    """gather_area_docs includes nested docs within roadmap/."""
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    (repo_root / "lf").mkdir()
-    (repo_root / "lf" / "roadmap").mkdir()
-    (repo_root / "lf" / "roadmap" / "decisions").mkdir()
-    (repo_root / "lf" / "roadmap" / "decisions" / "adr-001.md").write_text("# ADR")
-
-    docs = gather_area_docs(repo_root, "lf")
+    docs = gather_ancestral_docs(repo_root, "lf/cli")
 
     names = [p.name for p, _ in docs]
-    assert "adr-001.md" in names
+    assert "feature.md" in names  # from roadmap/lf/
+    assert "spec.txt" in names  # non-.md from roadmap/lf/
+    assert "refactor.md" not in names  # roadmap/lf/cli/ is area itself
 
 
-def test_gather_area_docs_empty_when_no_area_exists(tmp_path):
-    """gather_area_docs returns empty list when area doesn't exist."""
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-
-    docs = gather_area_docs(repo_root, "nonexistent/area")
-
-    assert docs == []
-
-
-def test_gather_area_docs_no_duplicates(tmp_path):
-    """gather_area_docs doesn't include the same file twice."""
+def test_gather_ancestral_docs_empty_for_root_area(tmp_path):
+    """gather_ancestral_docs returns empty for single-level area."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     (repo_root / "lf").mkdir()
     (repo_root / "lf" / "README.md").write_text("# LF")
 
-    docs = gather_area_docs(repo_root, "lf")
+    docs = gather_ancestral_docs(repo_root, "lf")
 
-    # Should only appear once
-    readme_count = sum(1 for p, _ in docs if p.name == "README.md")
-    assert readme_count == 1
+    assert docs == []  # "lf" has no ancestors

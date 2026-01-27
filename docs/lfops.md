@@ -141,11 +141,15 @@ Create worktree with schema-based branch name.
 ```bash
 lfops wt create my-feature       # creates ../repo.my-feature
 lfops wt create my-feature -b develop   # from develop instead of main
+lfops wt create feature-B --stack       # stack on current branch
 ```
 
 | Flag | Description |
 |------|-------------|
 | `-b, --base` | Base branch (default: main) |
+| `-s, --stack` | Stack on current branch (branch from it, PR targets it) |
+
+When using `--stack`, the new worktree branches from the current branch instead of main. PRs from stacked branches target their base branch while it's open, then retarget to main after the base PR merges.
 
 ### lfops wt switch
 

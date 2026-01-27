@@ -6,9 +6,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from loopflow.lf.worktrees import (
+    CreateWorktreeResult,
     Worktree,
     WorktreeError,
     create,
+    create_with_schema,
     find_merged,
     is_merged,
     list_all,
@@ -137,13 +139,16 @@ def _make_worktree(
     is_dirty: bool = False,
     pr_state: str | None = None,
     ahead_main: int = 0,
+    base_branch: str | None = "main",
+    base_commit: str | None = None,
 ) -> Worktree:
     """Create a Worktree for testing."""
     return Worktree(
         name=branch,
         path=Path(f"/tmp/{branch}"),
         branch=branch,
-        base_branch="main",
+        base_branch=base_branch,
+        base_commit=base_commit,
         on_origin=True,
         is_dirty=is_dirty,
         main_state=None,
@@ -241,3 +246,105 @@ def test_find_merged_returns_only_merged_worktrees(tmp_path):
     # Only the merged worktree should be returned
     assert len(result) == 1
     assert result[0].branch == "merged-feature"
+
+
+# Stacking tests
+
+
+def test_stacked_worktree_not_pruned_when_base_lands(tmp_path):
+    """Stacked worktree B shouldn't be pruned when base A lands."""
+    # B is stacked on A, and has its own unmerged PR
+    stacked_wt = _make_worktree(
+        "feature-B",
+        pr_state="open",
+        ahead_main=5,
+        base_branch="feature-A",
+        base_commit="abc123",
+    )
+
+    with patch("loopflow.lf.worktrees.get_pr_state", return_value="open"):
+        # Should return False because B's PR is still open
+        result = is_merged(stacked_wt, tmp_path)
+
+    assert result is False
+
+
+def test_stacked_worktree_pruned_when_own_pr_merges(tmp_path):
+    """Stacked worktree B is pruned when its own PR merges."""
+    stacked_wt = _make_worktree(
+        "feature-B",
+        pr_state="merged",
+        ahead_main=5,
+        base_branch="feature-A",
+        base_commit="abc123",
+    )
+
+    result = is_merged(stacked_wt, tmp_path)
+    assert result is True
+
+
+def test_list_worktrees_includes_base_commit(tmp_path):
+    """list_all includes base_commit from JSON."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    payload = [
+        {
+            "branch": "stacked-feature",
+            "path": str(tmp_path / "repo.stacked-feature"),
+            "kind": "worktree",
+            "working_tree": {},
+            "main": {"ahead": 2, "behind": 0},
+            "remote": {},
+            "base_branch": "feature-A",
+            "base_commit": "abc123def456",
+        },
+    ]
+
+    with patch("loopflow.lf.worktrees._run_wt", return_value=json_dump(payload)):
+        worktrees = list_all(repo_root)
+
+    assert len(worktrees) == 1
+    wt = worktrees[0]
+    assert wt.base_branch == "feature-A"
+    assert wt.base_commit == "abc123def456"
+
+
+def test_create_with_schema_records_base_commit(tmp_path):
+    """create_with_schema records base_commit when stacking."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    with patch("loopflow.lf.worktrees.list_all", return_value=[]):
+        with patch("subprocess.run") as mock_run:
+            # Mock git rev-parse for base_commit
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout="abc123def456\n", stderr=""),  # rev-parse
+                MagicMock(returncode=0, stdout="", stderr=""),  # worktree add
+                MagicMock(returncode=0, stdout="", stderr=""),  # push
+            ]
+
+            result = create_with_schema(repo_root, "new-feature", base="feature-A")
+
+    assert isinstance(result, CreateWorktreeResult)
+    assert result.base_branch == "feature-A"
+    assert result.base_commit == "abc123def456"
+
+
+def test_create_with_schema_no_base_commit_for_main(tmp_path):
+    """create_with_schema doesn't record base_commit when branching from main."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    with patch("loopflow.lf.worktrees.list_all", return_value=[]):
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout="", stderr=""),  # worktree add
+                MagicMock(returncode=0, stdout="", stderr=""),  # push
+            ]
+
+            result = create_with_schema(repo_root, "new-feature", base=None)
+
+    assert isinstance(result, CreateWorktreeResult)
+    assert result.base_branch is None
+    assert result.base_commit is None

@@ -30,6 +30,7 @@ class Worktree:
     path: Path
     branch: str
     base_branch: str | None
+    base_commit: str | None  # SHA when branched - for squash merge recovery
     on_origin: bool
     is_dirty: bool
     main_state: str | None
@@ -231,6 +232,7 @@ def list_all(repo_root: Path) -> list[Worktree]:
                 path=path,
                 branch=branch,
                 base_branch=item.get("base_branch"),
+                base_commit=item.get("base_commit"),
                 on_origin=on_origin,
                 is_dirty=is_dirty,
                 main_state=main_state,
@@ -276,12 +278,22 @@ def create(repo_root: Path, name: str, base: str | None = None) -> Path:
     return Path(output.strip())
 
 
+@dataclass
+class CreateWorktreeResult:
+    """Result from create_with_schema."""
+
+    path: Path
+    branch: str
+    base_branch: str | None
+    base_commit: str | None
+
+
 def create_with_schema(
     repo_root: Path,
     short_name: str,
     base: str | None = None,
     branch_config: "BranchNameConfig | None" = None,
-) -> Path:
+) -> CreateWorktreeResult:
     """Create worktree with short name for path, schema-based branch name."""
     from loopflow.lf.branch_names import format_branch_name
 
@@ -297,9 +309,24 @@ def create_with_schema(
     if branch_name in existing_branches:
         raise WorktreeError(f"Branch already exists: {branch_name}")
 
+    # Resolve base ref and record base_commit for stacking
+    base_ref = base or "main"
+    base_branch = base if base and base != "main" else None
+    base_commit = None
+
+    if base_branch:
+        # Record the commit SHA we're branching from for squash merge recovery
+        result = subprocess.run(
+            ["git", "rev-parse", base_ref],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            base_commit = result.stdout.strip()
+
     # Create worktree with explicit branch name using git directly
     # (wt CLI doesn't support separate worktree name vs branch name)
-    base_ref = base or "main"
     result = subprocess.run(
         ["git", "worktree", "add", "-b", branch_name, str(worktree_path), base_ref],
         cwd=repo_root,
@@ -318,7 +345,12 @@ def create_with_schema(
         text=True,
     )
 
-    return worktree_path
+    return CreateWorktreeResult(
+        path=worktree_path,
+        branch=branch_name,
+        base_branch=base_branch,
+        base_commit=base_commit,
+    )
 
 
 def remove(repo_root: Path, name: str) -> bool:

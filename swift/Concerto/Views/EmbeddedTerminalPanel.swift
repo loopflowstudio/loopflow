@@ -31,11 +31,11 @@ struct EmbeddedTerminalPanel: View {
     }
 
     private var hasActiveWorktree: Bool {
-        repoState.selectedWorktree != nil || !sessionState.activeSessionIds.isEmpty
+        repoState.selectedWave?.worktreePath != nil || !sessionState.activeSessionIds.isEmpty
     }
 
     private var effectiveWorktree: String? {
-        repoState.selectedWorktree?.path ?? repoState.currentRepo?.path()
+        repoState.selectedWave?.worktreePath ?? repoState.currentRepo?.path()
     }
 
     private var terminalHeader: some View {

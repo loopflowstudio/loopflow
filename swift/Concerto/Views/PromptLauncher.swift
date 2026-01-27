@@ -1261,34 +1261,29 @@ struct PromptLauncher: View {
         launcherState.selectedPrompt = selectedPrompt
         launcherState.promptArgs = parsedInput.args
 
-        // Check if on main branch - if so, create new worktree first
-        let isMain = repoState.selectedWorktree?.branch == "main"
-                  || repoState.selectedWorktree == nil
-
-        if isMain {
+        // Check if we have a selected wave with a worktree
+        if let wave = repoState.selectedWave, let worktreePath = wave.worktreePath, wave.branch != "main" {
+            launchCommand(repo: repo, workPath: URL(fileURLWithPath: worktreePath))
+        } else {
+            // No wave selected or on main - create new wave first
             isCreatingWorktree = true
             Task {
-                await launchWithNewWorktree(repo: repo)
+                await launchWithNewWave(repo: repo)
                 isCreatingWorktree = false
             }
-        } else {
-            launchCommand(repo: repo, workPath: URL(fileURLWithPath: repoState.selectedWorktree!.path))
         }
     }
 
-    private func launchWithNewWorktree(repo: URL) async {
-        let name = NameGenerator.generate()
-
+    private func launchWithNewWave(repo: URL) async {
         do {
-            try await repoState.createWorktree(name: name)
+            // Create a new wave (which creates a worktree)
+            try await repoState.createWave(name: "")
 
-            // Select the newly created worktree
-            if let newWorktree = repoState.worktrees.first(where: { $0.branch == name }) {
-                repoState.selectedWorktree = newWorktree
-                let workPath = URL(fileURLWithPath: newWorktree.path)
-                launchCommand(repo: repo, workPath: workPath)
+            // The new wave should be selected and have a worktree
+            if let wave = repoState.selectedWave, let worktreePath = wave.worktreePath {
+                launchCommand(repo: repo, workPath: URL(fileURLWithPath: worktreePath))
             } else {
-                launchError = "Created the branch but couldn't find it. Try refreshing the sidebar."
+                launchError = "Created wave but worktree not ready. Try again."
                 showingLaunchError = true
             }
         } catch {

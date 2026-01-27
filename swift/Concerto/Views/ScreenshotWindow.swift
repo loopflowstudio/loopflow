@@ -43,9 +43,9 @@ struct ScreenshotWindow: View {
             repoState.configureMockWaves()
         }
 
-        // Select a specific worktree if requested
+        // Select a specific wave if requested
         if let branch = mode.selectBranch {
-            repoState.selectedWorktree = repoState.worktrees.first { $0.branch == branch }
+            repoState.selectedWave = repoState.waves.first { $0.branch == branch }
         }
 
         // Resize window if specified

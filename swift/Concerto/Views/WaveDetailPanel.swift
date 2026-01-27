@@ -28,10 +28,6 @@ struct WaveDetailPanel: View {
     private var terminalApp: TerminalApp { repoState.config?.terminalApp ?? .warp }
     private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
-    private var worktree: Worktree? {
-        guard let path = wave.worktreePath else { return nil }
-        return repoState.worktrees.first { $0.path == path }
-    }
 
     var body: some View {
         Group {
@@ -636,10 +632,9 @@ struct WaveDetailPanel: View {
     }
 
     private func landBranch() {
-        guard let wt = worktree else { return }
         Task {
             do {
-                try await repoState.landBranch(for: wt)
+                try await repoState.landBranch(for: wave)
             } catch {
                 await MainActor.run {
                     actionError = "Failed to land branch: \(error.localizedDescription)"

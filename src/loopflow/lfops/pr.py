@@ -10,10 +10,13 @@ from loopflow.lf.git import (
     GitError,
     ensure_ready_pr,
     find_main_repo,
+    get_current_branch,
+    get_pr_target,
     is_draft_pr,
     open_pr,
 )
 from loopflow.lf.messages import generate_pr_message, generate_pr_message_from_diff
+from loopflow.lf.worktrees import list_all
 from loopflow.lfops._helpers import (
     _push,
     add_commit_push,
@@ -96,6 +99,28 @@ def _sync_main_repo(repo_root) -> None:
         )
 
 
+def _get_worktree_base_branch(repo_root) -> str | None:
+    """Get base_branch for current worktree if it's stacked."""
+    main_repo = find_main_repo(repo_root)
+    if not main_repo:
+        return None
+
+    current_branch = get_current_branch(repo_root)
+    if not current_branch:
+        return None
+
+    # Find worktree with this branch and get its base_branch
+    try:
+        worktrees = list_all(main_repo)
+        for wt in worktrees:
+            if wt.branch == current_branch:
+                return wt.base_branch
+    except Exception:
+        pass
+
+    return None
+
+
 def register_commands(app: typer.Typer) -> None:
     """Register PR command on the app."""
 
@@ -165,8 +190,15 @@ def register_commands(app: typer.Typer) -> None:
             typer.echo(f"\n{message.title}\n")
             typer.echo(message.body)
             typer.echo("")
+
+            # Determine PR target for stacked branches
+            base_branch = _get_worktree_base_branch(repo_root)
+            pr_base = get_pr_target(base_branch)
+            if pr_base != "main":
+                typer.echo(f"Targeting base branch: {pr_base}")
+
             try:
-                pr_url = open_pr(repo_root, title=message.title, body=message.body)
+                pr_url = open_pr(repo_root, title=message.title, body=message.body, base=pr_base)
             except GitError as e:
                 typer.echo(f"Error: {e}", err=True)
                 raise typer.Exit(1)

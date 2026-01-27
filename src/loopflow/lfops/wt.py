@@ -30,11 +30,20 @@ def register_commands(app: typer.Typer) -> None:
     def create_worktree(
         name: Annotated[str, typer.Argument(help="Short name for worktree")],
         base: Annotated[str | None, typer.Option("--base", "-b", help="Base branch")] = None,
+        stack: Annotated[
+            bool, typer.Option("--stack", "-s", help="Stack on current branch")
+        ] = False,
     ) -> None:
         """Create worktree with schema-based branch name.
 
         The worktree directory uses the short NAME you provide.
         The git branch uses your configured schema (if any).
+
+        Use --stack to branch from the current branch (stacking):
+
+            lfops wt create feature-B --stack
+            # Creates worktree branched from current branch
+            # PR will target current branch until it merges
 
         Example:
             lfops wt create my-feature
@@ -48,32 +57,41 @@ def register_commands(app: typer.Typer) -> None:
             typer.echo("Error: Not in a git repository", err=True)
             raise typer.Exit(1)
 
+        # Handle --stack: use current branch as base
+        if stack:
+            result = subprocess.run(
+                ["git", "branch", "--show-current"],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0 or not result.stdout.strip():
+                typer.echo("Error: not on a branch (required for --stack)", err=True)
+                raise typer.Exit(1)
+            current_branch = result.stdout.strip()
+            if current_branch in ("main", "master"):
+                typer.echo("Error: cannot stack on main/master", err=True)
+                raise typer.Exit(1)
+            base = current_branch
+
         config = load_config(repo_root)
         branch_config = config.branch_names if config else None
 
         try:
-            path = create_with_schema(repo_root, name, base, branch_config)
+            wt_result = create_with_schema(repo_root, name, base, branch_config)
         except Exception as e:
             typer.echo(f"Error: {e}", err=True)
             raise typer.Exit(1)
 
-        # Get the branch name from the created worktree
-        result = subprocess.run(
-            ["git", "branch", "--show-current"],
-            cwd=path,
-            capture_output=True,
-            text=True,
-        )
-        branch = result.stdout.strip() if result.returncode == 0 else name
-
-        typer.echo(f"Created worktree: {path.name}")
-        if branch != name:
-            typer.echo(f"Branch: {branch}")
+        typer.echo(f"Created worktree: {wt_result.path.name}")
+        if wt_result.branch != name:
+            typer.echo(f"Branch: {wt_result.branch}")
+        if wt_result.base_branch:
+            typer.echo(f"Base: {wt_result.base_branch}")
 
         # Write cd directive for shell integration
-        if not write_directive(f"cd {path}"):
+        if not write_directive(f"cd {wt_result.path}"):
             # Shell integration not active - print manual cd command
-            typer.echo(f"\ncd {path}")
+            typer.echo(f"\ncd {wt_result.path}")
             typer.echo("\nTip: Run 'lfops shell install' for auto-cd after worktree creation")
 
     @wt_app.command("switch")

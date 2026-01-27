@@ -10,6 +10,7 @@ from loopflow.lf.git import (
     GitError,
     ensure_ready_pr,
     find_main_repo,
+    get_current_branch,
     get_pr_target,
     is_draft_pr,
     open_pr,
@@ -104,16 +105,9 @@ def _get_worktree_base_branch(repo_root) -> str | None:
     if not main_repo:
         return None
 
-    # Get current branch
-    result = subprocess.run(
-        ["git", "branch", "--show-current"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
+    current_branch = get_current_branch(repo_root)
+    if not current_branch:
         return None
-    current_branch = result.stdout.strip()
 
     # Find worktree with this branch and get its base_branch
     try:

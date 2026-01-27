@@ -286,5 +286,3 @@ def ensure_ready_pr(repo_root: Path, pr_number: int | None = None) -> bool:
         text=True,
     )
     return result.returncode == 0
-
-

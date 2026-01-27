@@ -26,53 +26,85 @@ lf design      # interactive design session
 
 Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 
-| Built-in Step | What it does |
+### Planning steps (`plan/`)
+
+| Step | What it does |
+|------|--------------|
+| `review` | Research an area — architecture, complexity, quality, potential |
+| `reduce` | Find simplification opportunities |
+| `polish` | Find polish priorities |
+| `expand` | Find expansion opportunities |
+| `iterate` | Read review, write design to address it |
+| `ingest` | Pick roadmap item, move to scratch/ |
+| `kickoff` | Elaborate design — alternatives, research, imagine success/failure |
+| `roadmap` | Synthesize analysis into a roadmap proposal |
+| `5whys` | Root cause analysis on a bug fix |
+
+### Code steps (`code/`)
+
+| Step | What it does |
 |------|--------------|
 | `debug` | Fix an error |
-| `design` | Interactive design session |
-| `design-doc` | Pick roadmap item, write design |
 | `implement` | Build from a design doc |
-| `iterate` | Read review, write design to address it |
-| `reduce` | Simplify touched code |
-| `reduce-big` | Strategic simplification analysis |
-| `expand` | Extend working code ambitiously |
+| `compress` | Simplify touched code |
+| `gate` | Ship-ready code and reviewer-friendly docs |
+
+### Interactive steps (`interactive/`)
+
+| Step | What it does |
+|------|--------------|
+| `design` | Interactive design session |
 | `explore` | Investigate the codebase |
-| `review` | Thorough area review |
-| `polish` | Ship-ready code and reviewer-friendly docs |
-| `polish-big` | Strategic polish analysis |
-| `roadmap` | Reflect on learnings → forward direction |
-| `5whys` | Root cause analysis |
+| `refine` | Refine existing work |
+
+### Ops steps (`ops/`)
+
+| Step | What it does |
+|------|--------------|
+| `consolidate` | Reorganize scratch/ for roadmap |
+| `add-to-roadmap` | Promote from scratch/ to roadmap/ |
+| `synthesize` | Combine multiple perspectives into one |
+| `validate` | Validate flows, steps, and directions |
 
 ## Flows
 
 ```bash
-lf design && lf implement && lf polish    # chain steps manually
-lf flow ship                              # or use a named flow
+lf design && lf implement && lf gate    # chain steps manually
+lf flow ship                            # or use a named flow
 ```
 
 Steps chain into flows. Flows feed into waves.
 
+### Code flows (`code/`)
+
 | Flow | Steps |
 |------|-------|
-| `ship` | implement → reduce → polish |
+| `ship` | implement → compress → gate |
 | `pair` | design → ship |
-| `grind` | review → iterate → ship → expand → polish |
-| `research` | explore → design → roadmap |
-| `ship-roadmap` | design-doc → ship |
-| `plan-reduce` | fork(reduce-big×3) → roadmap |
-| `plan-review` | fork(review×3) → roadmap |
-| `plan-polish` | fork(polish-big×3) → roadmap |
-| `debug-big` | debug → 5whys → ship |
+| `grind` | review → iterate → ship → gate |
+| `incident` | debug → 5whys → ship |
+| `ship-roadmap` | start → ship |
+
+### Plan flows (`plan/`)
+
+| Flow | Steps |
+|------|-------|
+| `start` | ingest → kickoff |
+| `roadmap-reduce` | review → fork(reduce×3) → publish |
+| `roadmap-polish` | review → fork(polish×3) → publish |
+| `roadmap-expand` | review → fork(expand×3) → publish |
+| `research` | explore → review → publish |
+| `publish` | consolidate → add-to-roadmap |
 
 ### Forks
 
 Forks run a step in parallel with different directions, then synthesize the results.
 
 ```bash
-lf flow plan-review    # runs review 3x with different perspectives
+lf flow roadmap-reduce    # runs reduce 3x with different perspectives
 ```
 
-`plan-review` forks `review` across infra-engineer, designer, and product-engineer directions, then feeds the combined analysis into `roadmap`.
+`roadmap-reduce` forks `reduce` across infra-engineer, designer, and product-engineer directions, then synthesizes and publishes to roadmap.
 
 ## Playing in the Waves
 

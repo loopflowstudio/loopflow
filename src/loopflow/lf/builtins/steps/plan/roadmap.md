@@ -1,24 +1,23 @@
 ---
-interactive: true
-requires: scratch/ analysis or user direction
-produces: <area>/roadmap/<item>.md
+requires: scratch/ analysis
+produces: scratch/roadmap-proposal.md
 ---
-Propose a new roadmap item.
+Synthesize analysis into a roadmap proposal.
 
-## Scope of responsibility
+## Scope
 
-The included context defines your area. Propose items that belong to this area. If working on `src/api/`, propose API improvements—not unrelated UI work. The area determines both what you should consider and where the roadmap item belongs.
+The included context defines your area. Propose items that belong to this area. The area is recorded in frontmatter for later promotion to `roadmap/<area>/`.
 
-## Process
+## Workflow
 
-1. Read `roadmap/` to understand the project's global direction and priorities
-2. Consider the user's request: {args}
-3. Evaluate honestly: where does this fit in the vision?
-4. Create a roadmap item at `<area>/roadmap/<slug>.md`
+1. Read analysis in `scratch/` (research, simplification opportunities, polish priorities, etc.)
+2. Read `roadmap/` to understand project direction and existing items
+3. Identify the highest-leverage proposal that emerges from the analysis
+4. Write `scratch/roadmap-proposal.md`
 
 ## Output format
 
-Write the roadmap item with this structure:
+Write `scratch/roadmap-proposal.md`:
 
 ```markdown
 ---
@@ -29,6 +28,10 @@ area: <area>
 # Title
 
 One paragraph describing what and why.
+
+## Context
+
+What analysis led to this proposal. Reference specific findings from scratch/.
 
 ## Scope
 
@@ -44,7 +47,5 @@ Technical direction. Not a full design doc—just enough to unblock building.
 
 - Focus on substantial work, not small fixes
 - Be honest about scope—what's in, what's out
-- Pick the right area based on what this primarily affects
 - The approach section should have enough detail that someone could start building
-
-If the request is too vague, ask clarifying questions before writing.
+- If the analysis doesn't clearly point to a proposal, write `scratch/roadmap-proposal.md` explaining why and what's missing

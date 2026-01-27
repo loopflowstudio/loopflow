@@ -1,9 +1,8 @@
 ---
-interactive: true
-requires: error context or incident to analyze
-produces: scratch/<branch>.md (root cause analysis with implementation plan)
+requires: diff from debug step
+produces: scratch/<branch>.md
 ---
-Perform root cause analysis on a bug, incident, or unexpected behavior using the 5 Whys technique. Produces a design doc that requires implementation.
+Perform root cause analysis on a bug fix. What systemic issues allowed this bug to exist?
 
 ## Philosophy
 
@@ -75,12 +74,4 @@ Problem → Cause 1 → Cause 2 → Cause 3 → Root Cause
 - [ ] <specific change 2>
 ```
 
-Run `lf implement` to execute the fixes.
-
-## Conversation guidance
-
-When the user says "I don't know why," investigate together. Read the file. Check git history. Run the test.
-
-If you hit a cause outside your control (external dependency, hardware), pivot: "Given we can't change X, why were we vulnerable to it?"
-
-At each level, explicitly ask: "What change to our prompts, processes, code, or tests would make this path impossible?"
+The `ship` flow following this step will implement the structural and systemic fixes.

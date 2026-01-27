@@ -1,55 +1,56 @@
 ---
-requires: fork outputs (multiple diffs from parallel agents)
-produces: unified code, scratch/synthesis.md
+requires: multiple drafts from forked agents
+produces: scratch/synthesis.md
 ---
-Combine multiple forked implementations into a single coherent result.
+Combine multiple perspectives into one coherent result.
 
 ## Context
 
-This step runs after a fork completes. Each forked agent worked on the same step with a different direction (e.g., infra-engineer, designer, product-engineer). Their outputs are available as diffs.
+Multiple agents worked on the same task with different directions. Their outputs are available as drafts. Your job is to synthesize them—find the signal, resolve conflicts, produce one unified output.
 
 ## Workflow
 
-1. Read each fork's diff and understand its approach
-2. Identify agreements (same solution across forks)
-3. Identify disagreements (different solutions, tradeoffs)
-4. Write analysis to `scratch/synthesis.md`
-5. Implement the unified solution in the current worktree
+1. Read each draft. Understand what each perspective emphasized.
+2. Find agreements—where drafts converge, the signal is strong.
+3. Find tensions—where drafts diverge, there's a real tradeoff.
+4. Synthesize into one coherent result in `scratch/synthesis.md`.
 
-## Analysis structure
+## What synthesis is
+
+**Synthesis is not averaging.** Don't water down strong positions into mush. If one draft has a sharp insight, preserve it.
+
+**Synthesis is not picking a winner.** The goal isn't to choose the best draft—it's to produce something better than any single draft by combining their strengths.
+
+**Synthesis is finding the throughline.** What would someone who held all these perspectives at once conclude?
+
+## Output
 
 Write `scratch/synthesis.md`:
 
 ```markdown
 # Synthesis
 
-## Fork approaches
-- **Fork 1 (direction)**: <approach summary>
-- **Fork 2 (direction)**: <approach summary>
-- **Fork 3 (direction)**: <approach summary>
+## Perspectives
+
+<What each draft emphasized. 1-2 sentences each.>
 
 ## Agreements
-<What all forks did the same way>
 
-## Disagreements
-| Issue | Fork 1 | Fork 2 | Fork 3 |
-|-------|--------|--------|--------|
-| <issue> | <choice> | <choice> | <choice> |
+<Where drafts converged. Strong signal.>
 
-## Resolution
-<Which approaches to take and why>
+## Tensions
+
+<Where drafts diverged. Real tradeoffs.>
+
+## Synthesis
+
+<The unified result. Incorporates agreements, resolves tensions.>
 ```
 
 ## Resolution principles
 
-**Unanimous = adopt.** If all forks made the same choice, use it.
+**Convergence = signal.** When multiple perspectives reach the same conclusion independently, weight it heavily.
 
-**Majority with clear rationale = adopt.** If 2/3 agree and the reasoning is sound, use it.
+**Divergence = tradeoff.** When perspectives conflict, name the tradeoff explicitly. Don't pretend there's no cost.
 
-**Split decisions = evaluate tradeoffs.** Consider the direction of the synthesize step (if specified) to break ties.
-
-**Conflicts = document and choose.** Note the tradeoff in scratch/, make a call, move on.
-
-## Output
-
-Working code that incorporates the best of each fork. The synthesis doc explains the reasoning for human review.
+**Your direction matters.** If you have a direction (e.g., ceo), use it to break ties. The synthesis should reflect that lens.

@@ -1,6 +1,6 @@
 ---
 requires: none
-produces: updated docs, scratch/polish-priorities.md
+produces: scratch/polish-priorities.md
 ---
 Survey your area's rough edges. What would make it feel more finished?
 
@@ -10,35 +10,22 @@ The included context defines your area of responsibility. Polish within that sco
 
 ## Goal
 
-Surface the polish work that matters most and make the case for it. Update documentation that's drifted. Identify friction points worth fixing. Produce evidence—specific examples, not vague concerns—that makes prioritization clear.
-
-The output is both immediate (updated docs) and strategic (a prioritized list of polish projects with compelling evidence).
-
-## Principle
-
-If something can be fixed directly, fix it. Don't suggest work that could just be done. The priority list is for projects that require more scope, coordination, or decisions—things worth advocating for but outside what a single session can complete.
+Surface the polish work that matters most and make the case for it. Identify friction points worth fixing. Produce evidence—specific examples, not vague concerns—that makes prioritization clear.
 
 ## Workflow
 
-1. Read README and user-facing docs. Update anything obviously stale.
+1. Read README and user-facing docs. Note what's stale or misleading.
 2. Run CLI commands. Note confusing help text, unhelpful errors.
 3. Scan for inconsistencies: naming, patterns, structure.
-4. Fix what can be fixed. Document what can't.
-5. For remaining friction points, gather specific evidence:
+4. For each friction point, gather specific evidence:
    - Where it occurs
    - What a user would experience
    - What the fix would involve
-6. Write `scratch/polish-priorities.md` with prioritized recommendations
+5. Write `scratch/polish-priorities.md` with prioritized recommendations
 
-## What to update immediately
+## What to document
 
-**Stale documentation.** If a README describes old behavior, fix it now. Don't just note it.
-
-**Obvious errors.** Typos, broken links, wrong examples in docs.
-
-**Misleading help text.** CLI `--help` that doesn't match current behavior.
-
-## What to document for future work
+**Stale documentation.** READMEs that describe old behavior.
 
 **Naming inconsistencies.** Same concept called different things in different places. Include specific examples.
 
@@ -50,16 +37,10 @@ If something can be fixed directly, fix it. Don't suggest work that could just b
 
 ## Output
 
-1. **Immediate updates**: Make doc fixes directly. Commit them.
-
-2. **Write `scratch/polish-priorities.md`**:
+Write `scratch/polish-priorities.md`:
 
 ```markdown
 # Polish Priorities
-
-## Docs updated
-- <file>: <what changed>
-- ...
 
 ## Priority 1: <name>
 **Evidence**:

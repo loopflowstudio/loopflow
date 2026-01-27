@@ -1,9 +1,8 @@
+- review
 - fork:
-    step: polish-big
+    step: expand
     drafts:
       - direction: infra-engineer
       - direction: designer
       - direction: product-engineer
-    synthesize:
-      direction: ceo
-- roadmap
+- publish

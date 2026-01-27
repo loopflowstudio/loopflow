@@ -1,16 +1,50 @@
 # Built-in Flows
 
-Flows shipped with loopflow. Available everywhere without user configuration.
+Flows shipped with loopflow. Organized by purpose.
 
-| Flow | Structure | Use case |
-|------|-----------|----------|
-| ship | implement → reduce → polish | Full feature workflow |
-| roadmap | Fork(roadmap×3, synthesize) | Strategic planning with multiple perspectives |
+## Code flows (`code/`)
 
-## Adding a Built-in Flow
+Flows that produce code changes.
 
-1. Create `{name}.py` with explicit import: `from loopflow.lf.flows import Flow, Fork`
-2. Return a `Flow` with steps
-3. Update this README
+| Flow | Steps | Use case |
+|------|-------|----------|
+| `ship` | implement → compress → gate | Build from design, ship clean |
+| `pair` | design → ship | Interactive design then build |
+| `grind` | review → iterate → ship → gate | Review-driven iteration |
+| `incident` | debug → 5whys → ship | Fix bug, analyze root cause, ship fixes |
+| `ship-roadmap` | start → ship | Pick roadmap item, elaborate, build |
 
-See `src/loopflow/lfd/execution/README.md` for Fork execution details.
+## Plan flows (`plan/`)
+
+Flows that produce roadmap items and analysis.
+
+| Flow | Steps | Use case |
+|------|-------|----------|
+| `start` | ingest → kickoff | Pick roadmap item, elaborate design |
+| `roadmap-reduce` | review → fork(reduce×3) → publish | Find simplification opportunities |
+| `roadmap-polish` | review → fork(polish×3) → publish | Find polish priorities |
+| `roadmap-expand` | review → fork(expand×3) → publish | Find expansion opportunities |
+| `research` | explore → review → publish | Investigate then propose |
+| `publish` | consolidate → add-to-roadmap | Promote scratch/ to roadmap/ |
+
+## Fork pattern
+
+Plan flows use forks to get multiple perspectives:
+
+```yaml
+- review
+- fork:
+    step: reduce
+    drafts:
+      - direction: infra-engineer
+      - direction: designer
+      - direction: product-engineer
+- publish
+```
+
+The fork runs `reduce` three times with different directions, synthesizes results using the wave's direction, then publishes to roadmap.
+
+## Adding a flow
+
+1. Create `{category}/{name}.yaml` with step list
+2. Update this README

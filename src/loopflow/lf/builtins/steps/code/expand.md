@@ -1,27 +1,45 @@
 ---
-requires: diff vs main
-produces: ambitious improvements
+requires: polished code on branch
+produces: extended functionality
 ---
-Explore ambitious changes that extend what this branch is already doing.
+Extend what this branch does. Push beyond "done" to "great."
 
 ## Goal
 
-Push beyond the immediate scope. If the branch adds feature X, what would make X great instead of just done? What adjacent features become easy now? What technical debt could be paid down while the context is fresh?
+The branch works and it's clean. Now: what would make it great instead of just done? What adjacent features become easy? What quality upgrades are now obvious?
 
 This is exploratory—propose ideas, implement the best one. The human can reject or redirect.
 
-## What to explore
+## Workflow
+
+1. **Review what's there**
+   The diff shows working, polished code. Understand what it does well.
+
+2. **Identify extensions**
+   Ask:
+   - What natural next step does this enable?
+   - What would users wish it also did?
+   - What quality upgrade is now obvious (speed, error messages, API clarity)?
+   - What nearby debt could be paid while context is fresh?
+
+3. **Pick one**
+   Highest impact. Don't scatter effort across multiple extensions.
+
+4. **Implement it**
+   Tests required. This isn't a prototype.
+
+## What to extend
 
 **Natural extensions.** The branch adds auth—what about password reset? The branch adds caching—what about cache invalidation UI?
 
-**Quality upgrades.** The branch works—could it be fast? Could errors be more helpful? Could the API be more intuitive?
+**Quality upgrades.** It works—could it be fast? Could errors be clearer? Could the API be more intuitive?
 
-**Debt paydown.** Code nearby that's been annoying. Patterns that should be updated to match the new code.
+**Debt paydown.** Code nearby that's been annoying. Patterns that should match the new code.
 
-## Constraints
+## Scope
 
-**One thing.** Pick the highest-impact extension and do it well. Don't scatter effort.
+**One thing.** Pick the highest-impact extension and do it well.
 
-**Stay coherent.** The expansion should feel like it belongs with the original branch work. If it's unrelated, it belongs in a different branch.
+**Stay coherent.** The expansion should feel like it belongs with the original branch. Unrelated improvements belong in a different branch.
 
-**Tests required.** New behavior needs tests. This isn't a prototype.
+**Tests required.** New behavior needs tests.

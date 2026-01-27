@@ -1,70 +1,39 @@
 ---
-requires: code on branch
-produces: scratch/<branch>.md with verdict
+requires: none
+produces: scratch/codebase-review.md
 ---
-Review the diff on this branch and produce a written assessment.
+Look at your area through a user's eyes—human or digital. Find the highest-leverage improvements.
 
-The goal is to put something in the human's hands quickly. A draft they can shape—add issues you missed, remove nitpicks they disagree with, adjust the verdict. You can always be re-invoked. Don't aim for comprehensive; aim for useful and fast.
+## Scope
 
-The deliverable is a consolidated design document under `scratch/`. Do not edit code files.
+The included context defines your area of responsibility. Review that area thoroughly—not the entire codebase. If given `src/auth/`, review auth deeply. Your job is clarity on where to focus within your scope, not a list of everything that could be better everywhere.
 
 ## Workflow
 
-1. Run `git diff main...HEAD` to see all committed changes
-2. Run `git diff` to see uncommitted changes
-3. Run `git log main..HEAD --oneline` to understand commit history
-4. Read any style guides in the repo
-5. Check `roadmap/` (root and area-specific) for architecture context and prior decisions
-6. Read existing `scratch/*.md` files
-7. Write a single consolidated document to `scratch/<branch-name>.md`
-8. Delete other `scratch/*.md` files after consolidating
+1. Start with README. Try to follow getting started instructions.
+2. Look at CLI help and error messages. Are they helpful to humans? Parseable by agents?
+3. Find the main entry points. Is the happy path obvious?
+4. Explore broadly: structure, core code, tests
+5. Ask: what single change would most improve the experience for users—whether they're people or programs?
 
-## What to look for
+## Output
 
-Focus only on code in the diff. Don't flag unrelated issues.
-
-**Bugs.** Logic errors, edge cases, off-by-ones, unhandled errors in the new code.
-
-**Unnecessary complexity.** Abstractions that don't earn their keep. Features beyond what was asked. Over-engineering.
-
-**Missing pieces.** Tests for new behavior. README updates for user-facing changes.
-
-When noting issues, be specific and actionable. "This is complex" is useless. "4 nested conditionals; early returns would simplify" is actionable—whether a human or iterate picks it up.
-
-## What to ignore
-
-**Design doc deviations.** The implementation is the source of truth. Design docs were scaffolding—deviations are refinements, not bugs.
-
-**Unrelated code.** Only review what's in the diff. This isn't a codebase audit.
-
-**Generic best practices.** Don't flag things that work fine just because a linter would complain. Focus on actual problems.
-
-## Consolidating design docs
-
-Merge anything worth keeping from existing `scratch/` docs. Be aggressive about culling:
-
-**Keep:** Decisions that explain non-obvious choices. User quotes that capture intent. "Not implemented" notes if still relevant.
-
-**Delete:** Old reviews. Details obvious from the code. Done checklists. Outdated plans.
-
-## Output format
-
-Write `scratch/<branch-name>.md`:
+Write `scratch/codebase-review.md`:
 
 ```markdown
-# <Branch Name>
+# Codebase Review
 
-<1-2 sentence summary>
+## First impressions
+<What a new user encounters. Be specific.>
 
-## Review
+## The one thing
+<Highest-leverage change. What and why.>
 
-**Verdict:** Ready to ship | Needs work
+## Friction points
+<2-3 other places users get stuck>
 
-<Specific issues if any. Skip section if none.>
-
-## Design notes
-
-<Consolidated notes worth preserving. Skip if nothing non-obvious.>
+## Quick wins
+<Small changes with outsized impact, if any>
 ```
 
-Delete other `scratch/*.md` files after writing.
+Focus on actionable. Skip theoretical concerns.

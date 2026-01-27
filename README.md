@@ -35,12 +35,11 @@ Steps are prompts that run coding agents. Add your own in `.lf/steps/`.
 | `iterate` | Read review, write design to address it |
 | `reduce` | Simplify touched code |
 | `reduce-big` | Strategic simplification analysis |
-| `expand` | Identify what to add |
-| `expand-big` | Strategic expansion analysis |
+| `expand` | Extend working code ambitiously |
 | `explore` | Investigate the codebase |
-| `review` | Review the diff |
-| `review-big` | Thorough area review |
-| `polish` | Run tests, fix issues |
+| `review` | Thorough area review |
+| `polish` | Ship-ready code and reviewer-friendly docs |
+| `polish-big` | Strategic polish analysis |
 | `roadmap` | Reflect on learnings → forward direction |
 | `5whys` | Root cause analysis |
 
@@ -57,11 +56,12 @@ Steps chain into flows. Flows feed into waves.
 |------|-------|
 | `ship` | implement → reduce → polish |
 | `pair` | design → ship |
-| `grind` | review-big → iterate → ship |
+| `grind` | review → iterate → ship → expand → polish |
 | `research` | explore → design → roadmap |
 | `ship-roadmap` | design-doc → ship |
-| `plan-expand` | fork(expand-big×3) → roadmap |
 | `plan-reduce` | fork(reduce-big×3) → roadmap |
+| `plan-review` | fork(review×3) → roadmap |
+| `plan-polish` | fork(polish-big×3) → roadmap |
 | `debug-big` | debug → 5whys → ship |
 
 ### Forks
@@ -69,10 +69,10 @@ Steps chain into flows. Flows feed into waves.
 Forks run a step in parallel with different directions, then synthesize the results.
 
 ```bash
-lf flow plan-reduce    # runs reduce-big 3x with different perspectives
+lf flow plan-review    # runs review 3x with different perspectives
 ```
 
-`plan-reduce` forks `reduce-big` across infra-engineer, designer, and product-engineer directions, then feeds the combined analysis into `roadmap`.
+`plan-review` forks `review` across infra-engineer, designer, and product-engineer directions, then feeds the combined analysis into `roadmap`.
 
 ## Playing in the Waves
 

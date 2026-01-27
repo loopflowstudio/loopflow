@@ -24,7 +24,8 @@ def save_step_run(step_run: StepRun, db_path: Path | None = None) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO step_runs
-        (id, step, repo, worktree, flow_run_id, wave_id, status, started_at, ended_at, pid, model, run_mode)
+        (id, step, repo, worktree, flow_run_id, wave_id, status,
+         started_at, ended_at, pid, model, run_mode)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (

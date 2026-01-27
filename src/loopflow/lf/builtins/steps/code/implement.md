@@ -6,33 +6,36 @@ Turn the design doc into working code.
 
 ## Goal
 
-Produce a working first draft quickly. The human will review it, polish will clean it up, and you can be re-invoked if needed. Don't block on ambiguity—make the simplest choice and keep moving. Working code with rough edges beats perfect code that took too long.
+Working code with rough edges beats perfect code that took too long.
 
-The design doc is under `scratch/` and auto-included. It contains data structures, function signatures, constraints, and a "done when" verification step.
+Produce a first draft quickly. Polish cleans it up. You can be re-invoked if needed. Don't block on ambiguity—make the simplest choice and keep moving.
 
 ## Workflow
 
-1. Read the design doc in `scratch/` to understand what to build
-2. Check `roadmap/` (root and any area-specific) for architecture guidance and prior decisions
-3. Read any style guides or conventions docs in the repo
-4. Implement data structures first—get the core types right
-5. Implement functions one at a time, following the signatures in the design
-6. Run tests to verify nothing broke
-7. Run the "done when" check from the design doc
-8. Do not commit—leave that to the caller or pipeline
+The design doc and style guides are in your context.
 
-## Implementation rules
+1. **Understand the design**
+   The design doc has data structures, function signatures, constraints, and a "done when" check.
 
-**Match existing patterns.** Before writing new code, find similar code nearby and match its style. If the codebase uses `@dataclass`, use `@dataclass`. If it uses type hints, use type hints.
+2. **Implement**
+   - Data structures first—get the core types right
+   - Functions one at a time, following the signatures
+   - Match existing patterns in the codebase
 
-**Stay in scope.** Implement exactly what the design doc describes. If something should be added, note it in `scratch/questions.md` but don't build it.
+3. **Verify**
+   - Run tests to confirm nothing broke
+   - Run the "done when" check from the design doc
 
-**Tests prove it works.** Add tests for user-visible behavior. Don't test implementation details. Don't write tests that just verify mock calls—assert on actual results.
+## Rules
 
-**Leave the design doc.** Don't delete `scratch/*.md`. The review step and landing process handle cleanup.
+**Match existing patterns.** Find similar code nearby and match its style. If the codebase uses `@dataclass`, use `@dataclass`. If it uses type hints, use type hints.
 
-## If something's wrong
+**Stay in scope.** Implement exactly what the design describes. Scope creep goes in `scratch/questions.md`, not the code.
 
-If the design doc is unclear, make the simplest choice and move on. Note your assumption in `scratch/questions.md`. The code can be rewritten if needed.
+**Tests prove it works.** Add tests for user-visible behavior. Don't test implementation details. Assert on results, not mock calls.
 
-If implementation reveals a design flaw, note it but keep going. The design was scaffolding—reality should diverge when it makes sense.
+## When the design is wrong
+
+If the design doc is unclear, make the simplest choice and move on. Note your assumption in `scratch/questions.md`.
+
+If implementation reveals a design flaw, note it but keep going. The design was scaffolding—diverge when reality demands it.

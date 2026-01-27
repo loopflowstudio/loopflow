@@ -1,5 +1,5 @@
 - fork:
-    step: review-big
+    step: review
     drafts:
       - direction: infra-engineer
       - direction: designer

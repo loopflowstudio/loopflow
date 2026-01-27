@@ -60,7 +60,7 @@ def apply(conn: sqlite3.Connection) -> None:
 
             status TEXT NOT NULL DEFAULT 'pending',
             iteration INTEGER NOT NULL DEFAULT 0,
-            step_index INTEGER NOT NULL DEFAULT 0,  -- position in flow.steps for tick-based execution
+            step_index INTEGER NOT NULL DEFAULT 0,  -- position in flow.steps
 
             worktree TEXT,
             branch TEXT,

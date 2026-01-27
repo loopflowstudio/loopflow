@@ -5,6 +5,7 @@ Commands for managing waves of autonomous work.
 
 import asyncio
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -13,8 +14,6 @@ from typing import Optional
 
 import typer
 
-import os
-
 from loopflow.lf.config import load_config, parse_model
 from loopflow.lf.context import ContextConfig, format_prompt, gather_prompt_components
 from loopflow.lf.directions import list_directions, parse_list_arg, resolve_directions
@@ -22,8 +21,6 @@ from loopflow.lf.flows import load_flow
 from loopflow.lf.git import autocommit, find_main_repo
 from loopflow.lf.launcher import build_model_interactive_command
 from loopflow.lf.logging import get_log_dir
-from loopflow.lfd.models import StepRunStatus
-from loopflow.lfd.step_run import get_waiting_step_run, update_step_run_status
 from loopflow.lfd.daemon.launchd import install as launchd_install
 from loopflow.lfd.daemon.launchd import is_running
 from loopflow.lfd.daemon.launchd import uninstall as launchd_uninstall
@@ -34,7 +31,8 @@ from loopflow.lfd.git_hooks import (
     install_hooks,
     uninstall_hooks,
 )
-from loopflow.lfd.models import MergeMode, Stimulus, Wave, WaveStatus
+from loopflow.lfd.models import MergeMode, StepRunStatus, Stimulus, Wave, WaveStatus
+from loopflow.lfd.step_run import get_waiting_step_run, update_step_run_status
 from loopflow.lfd.wave import (
     create_wave,
     delete_wave,
@@ -740,7 +738,8 @@ def connect(
         update_step_run_status(step_run.id, StepRunStatus.FAILED)
         update_wave_status(wave.id, WaveStatus.IDLE)
 
-        typer.echo(f"{c['dim']}Wave returned to idle. Run 'lfd connect {wave.name}' to retry.{c['reset']}")
+        msg = f"Wave returned to idle. Run 'lfd connect {wave.name}' to retry."
+        typer.echo(f"{c['dim']}{msg}{c['reset']}")
         raise typer.Exit(exit_code)
 
 

@@ -441,7 +441,8 @@ def _run_fork_synthesize(
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(fork.threads)) as executor:
         futures = [
-            executor.submit(_run_fork_branch, config, i + 1) for i, config in enumerate(fork.threads)
+            executor.submit(_run_fork_branch, config, i + 1)
+            for i, config in enumerate(fork.threads)
         ]
         for future in futures:
             results.append(future.result())

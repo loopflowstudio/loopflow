@@ -2,7 +2,7 @@
 
 ## System understanding
 
-Loopflow orchestrates waves of autonomous work using LLM coding agents (Claude Code, Codex, Gemini CLI). The architecture centers on **Waves**—persistent configurations that execute **Flows** (step sequences) in various stimulus modes.
+Loopflow orchestrates waves of autonomous work using LLM coding agents (Claude Code, Codex, Gemini CLI). The architecture centers on **steps** (atomic prompts) that chain into **flows** (DAGs) and scale into **waves** (persistent autonomous units).
 
 ### Architecture
 
@@ -15,26 +15,54 @@ Three CLIs with distinct responsibilities:
 | `lfops` | Git workflow helpers—worktrees, commits, PRs | `src/loopflow/lfops/commands.py` |
 
 ```
-lf/
-├── cli.py          # lf run, lf flow, lf inline
-├── step.py         # Step execution (interactive/auto)
-├── flow.py         # Flow orchestration, fork/synthesize
-├── flows.py        # Flow/Step/Fork parsing
-├── context.py      # Prompt assembly, token management
-├── launcher.py     # Runner selection (claude/codex/gemini)
-├── config.py       # Config loading & merging
-└── builtins/       # Steps, flows, directions
+lf/                     (~8000 LOC)
+├── cli.py              # Typer CLI entry point
+├── step.py             # Step execution (run, inline, flow)
+├── flow.py             # Flow DAG execution
+├── flows.py            # Flow/Step/Fork parsing
+├── context.py          # Prompt assembly, token management
+├── config.py           # Config loading & merging
+├── directions.py       # Direction file loading
+├── frontmatter.py      # YAML frontmatter parsing
+├── design.py           # Design artifact helpers
+├── files.py            # File library gathering
+├── launcher.py         # Runner selection (claude/codex/gemini)
+├── skills.py           # External skill discovery
+└── builtins/           # Steps, flows, directions
+    ├── steps/
+    │   ├── plan/       # review, reduce, expand, polish, etc.
+    │   ├── code/       # debug, implement, compress, gate
+    │   ├── ops/        # consolidate, add-to-roadmap, synthesize
+    │   └── interactive/
+    ├── flows/
+    │   ├── code/       # ship, grind, incident
+    │   └── plan/       # roadmap-reduce, roadmap-polish
+    └── directions/
+        ├── roles/      # designer, product-engineer, ceo
+        └── values/     # scale, craft, flow
 
-lfd/
-├── cli.py          # lfd create, loop, watch, cron
-├── models.py       # Wave, FlowRun, StepRun, Stimulus
-├── wave.py         # Wave persistence, stimulus checking
+lfd/                    (~4000 LOC)
+├── cli.py              # lfd create, loop, watch, cron
+├── models.py           # Wave, FlowRun, StepRun, Stimulus
+├── wave.py             # Wave persistence, stimulus checking
+├── db.py               # SQLite connection & migrations
+├── step_run.py         # Step execution logging
 ├── daemon/
-│   ├── server.py   # Asyncio socket server
-│   └── manager.py  # Concurrency control
+│   ├── server.py       # Asyncio socket server
+│   ├── protocol.py     # JSON-RPC format
+│   ├── manager.py      # Wave manager
+│   └── client.py       # Client for daemon communication
 └── execution/
-    ├── runner.py   # run_iteration() entry point
-    └── collector.py # Output capture, JSON streaming
+    ├── runner.py       # run_iteration() entry point
+    └── collector.py    # Output capture, JSON streaming
+
+lfops/
+├── commands.py         # Command registration
+├── commit.py           # Commit message generation
+├── pr.py               # PR creation/management
+├── rebase.py           # Rebase operations
+├── land.py             # Land-to-main workflow
+└── worktree/           # Worktree management
 ```
 
 ### Data flow
@@ -55,19 +83,22 @@ lfd loop <wave> → daemon scheduler (5s poll) → run_iteration() → run_flow(
 3. Load step file
 4. Resolve directions
 5. Add clipboard/summaries if requested
-6. Trim to token limits (~200k)
+6. Trim to token limits (~200k total, with per-section budgets)
 
 ### Key abstractions
 
-**Wave**: Persistent autonomous unit. `area × direction × flow × stimulus`.
+**Step**: Markdown file with YAML frontmatter that tells an agent what to do. Steps are atomic—each does one thing and produces artifacts for the next.
 
 ```python
-class Wave:
-    area: list[str]              # Paths to work on
-    direction: list[str]         # Judgment/intent (product-engineer, designer)
-    flow: str                    # Step sequence to run
-    stimulus: Stimulus           # once, loop, watch, cron
-    worktree: Path               # Persistent worktree
+@dataclass
+class StepConfig:
+    interactive: bool | None         # Run mode override
+    include: list[str]               # File patterns to include
+    exclude: list[str]               # File patterns to exclude
+    model: str | None                # Model override
+    direction: list[str] | None      # Direction files
+    area: str | None                 # Area scope
+    chrome: bool | None              # Browser automation
 ```
 
 **Flow**: Chains steps with commits between. Supports Fork (parallel) and Choose (conditional).
@@ -76,14 +107,35 @@ class Wave:
 class Flow:
     steps: list[Step | Fork | Choose]
 
+@dataclass
 class Step:
     name: str
     after: str | list[str]       # Dependencies (or None = sequential)
     direction: str | None        # Override
     interactive: bool | None     # Override
+    model: str | None            # Override
+
+@dataclass
+class Fork:
+    step: str                    # Step to run N times
+    directions: list[str]        # Different directions per branch
+    synthesize: bool             # Whether to synthesize results
 ```
 
-**Direction**: Shapes agent judgment. Markdown files in `.lf/directions/` or builtins.
+**Wave**: Persistent autonomous unit. `area × direction × flow × stimulus`.
+
+```python
+class Wave:
+    name: str
+    area: list[str]              # Paths to work on
+    direction: list[str]         # Judgment/intent
+    flow: str                    # Step sequence to run
+    stimulus: Stimulus           # once, loop, watch, cron
+    worktree: Path               # Persistent worktree
+    status: WaveStatus           # idle, running, stopped
+```
+
+**Direction**: Shapes agent judgment. Markdown files in `.lf/directions/` or builtins. Loaded and injected as XML sections in the prompt.
 
 **PromptComponents**: Everything that gets assembled into the prompt.
 ```python
@@ -94,109 +146,139 @@ class PromptComponents:
     step: tuple[str, str]            # (filename, content)
     direction: list[Direction]       # Judgment/style
     clipboard: ClipboardContent | None
+    images: list[Path]               # Visual context
+```
+
+**Config**: Layered configuration with global → repo → CLI precedence.
+
+```python
+@dataclass
+class Config:
+    agent_model: str = "claude:opus"
+    context: list[str] = []          # Default files to include
+    exclude: list[str] = []          # Patterns to skip
+    direction: list[str] | None = None
+    area: str | None = None
+    budgets: BudgetConfig            # Token limits per section
+    lfdocs: bool = True              # Include repo docs
+    diff_files: bool = True          # Include branch changes
+    yolo: bool = False               # Skip permissions
 ```
 
 ## Tensions
 
-- **Interactive vs auto modes**: `lf/step.py:191-240` handles both, but interactive uses `os.execvp()` (replaces process) while flow execution uses `subprocess.run()` (continues after). The flow path needed special handling for interactive steps within flows.
+**Interactive vs auto modes.** `lf/step.py` handles both, but interactive uses `os.execvp()` (replaces process) while flow execution uses `subprocess.run()` (continues after). The flow path at `flow.py` needed special handling for interactive steps within flows—they use subprocess so the flow can continue.
 
-- **Worktree lifecycle**: Waves use persistent worktrees (`wave.worktree`) but fork execution creates ephemeral worktrees. `lf/flow.py:265-340` manages cleanup, but the two models have different ownership semantics.
+**Worktree ownership.** Waves use persistent worktrees (`wave.worktree`) but fork execution creates ephemeral worktrees. The two models have different lifecycles—wave worktrees survive across iterations, fork worktrees are cleaned up after synthesis.
 
-- **Token trimming vs context completeness**: `lf/context.py` drops large components (diff_files first) to stay under 200k tokens, but this can remove the very files the agent needs to see.
+**Token trimming vs context completeness.** `lf/context.py` drops components greedily (largest first) to stay under budget, but this can remove the very files the agent needs. For a `debug` step, the diff is often most important but also largest.
 
-- **Daemon concurrency**: Manager limits concurrent steps (`max_concurrent_steps=2`) but doesn't have per-repo isolation. Two waves on the same repo could conflict.
+**Config layering complexity.** Some settings override (scalars), others combine (lists like `context`, `exclude`). The merging logic in `config.py` handles this, but it's not obvious from reading the config files which behavior applies.
 
 ## Observations
 
 ### Complexity
 
-**`lf/flow.py` (540 lines)**: Dense orchestration logic. `run_flow()` handles Steps, Forks, and Choose in a single loop. Fork parallelism (`run_fork()`, `run_synthesize()`) adds ~150 lines. The topological batch execution for parallel steps adds more complexity.
+**`lf/context.py` (718 lines)**: The densest file. `gather_prompt_components()` has ~15 parameters and orchestrates 8+ helper functions. Token budgeting logic is spread across multiple functions (`trim_prompt_components`, `analyze_components`, `_drop_candidates`). The XML formatting and component assembly are interleaved.
 
-**`lf/context.py` (718 lines)**: Context assembly with many code paths. `gather_prompt_components()` has 15+ parameters and calls 8 helper functions. Token trimming logic scattered across `trim_prompt_components()` and `analyze_components()`.
+**`lf/flow.py` (540 lines)**: Flow execution handles Steps, Forks, and Choose in a single loop. Fork parallelism (`run_fork()`, `run_synthesize()`) adds ~150 lines. The topological batch execution for parallel steps adds complexity but enables DAG execution.
 
-**`lfd/daemon/server.py`**: Asyncio server with method dispatch. Protocol is JSON-over-newline but not documented inline. Periodic checks (`_periodic_check()`) poll every 5s for wave triggers.
+**`lf/config.py` (300 lines)**: Config merging has special cases for additive keys. The `_merge_configs()` function handles scalars differently than lists, and there are comments explaining the edge cases.
+
+**`lfd/daemon/server.py` (400 lines)**: Asyncio server with method dispatch. Protocol is JSON-over-newline but this is only documented in `protocol.py`. Periodic checks (`_periodic_check()`) poll every 5s for wave triggers.
 
 ### Quality
 
-**Strong typing throughout**: Pydantic models for config, dataclasses for internal state. Type hints on all public functions.
+**Strong typing throughout.** Pydantic models for config, dataclasses for internal state. Type hints on all public functions. The codebase follows its own style guide.
 
-**Consistent patterns**: Verb-first functions (`find_prompt`, `load_config`), underscore prefix for private (`_run_step`), clean separation between parsing (`flows.py`) and execution (`flow.py`).
+**Consistent naming.** Verb-first functions (`find_prompt`, `load_config`, `gather_area`), underscore prefix for private (`_run_step`, `_execute_step`), clean separation between parsing and execution.
 
-**Error messages vary in quality**:
-- Good: `lf/config.py:89` - "Config file not found at {path}"
-- Sparse: `lf/launcher.py:42` - just raises without context
-- `lfd/daemon/server.py:156` logs errors but doesn't always surface them to users
+**Documentation quality varies:**
+- `CLAUDE.md`, `PROMPT_STYLE.md`: Excellent, comprehensive
+- Inline comments: Sparse but present where needed
+- Docstrings: Mostly one-line or skipped per style guide
+- Fork/synthesize algorithm: Not explained in code comments
+- Token trimming priority: Why largest first? Not documented
 
-**Documentation gaps**:
-- Fork/synthesize algorithm not explained in code comments
-- Tick-based execution (FlowRun.step_index) underdocumented
-- Token trimming priority not explained (why diff_files first?)
+**Error handling follows the guide.** Return `None` for "not found", raise exceptions for "shouldn't happen". Error messages include context (`f"Config file not found at {path}"`).
 
-**Test coverage**:
-- `tests/test_context.py` (24KB) - thorough context assembly tests
-- `tests/test_flows.py` - DAG building, parsing
-- `tests/test_lfd.py` - Wave DB, stimulus logic
+**Test coverage:**
+- `tests/test_context.py` (24KB): Thorough context assembly tests
+- `tests/test_flows.py`: DAG building, parsing
+- `tests/test_lfd.py`: Wave DB, stimulus logic
 - Gap: Fork/synthesize execution lightly tested
 - Gap: Interactive step handling within flows
 
 ### Potential
 
-**Choose step**: Defined in `flows.py:53-62` but `flow.py` Choose handling (`choose_branch()`) is isolated. Could enable conditional workflows (if tests pass → ship, else → debug).
+**Choose step exists but is underused.** Defined in `flows.py` and `flow.py` has `choose_branch()`, but no builtin flows use it. Could enable conditional workflows (if tests pass → ship, else → debug).
 
-**Tick-based resumption**: `FlowRun.step_index` exists but isn't used for resumption after failures. Could enable "resume from step 3" functionality.
+**Tick-based resumption.** `FlowRun.step_index` exists but isn't used for resumption after failures. Could enable "resume from step 3" functionality if a flow fails mid-way.
 
-**Event streaming**: `lfd/daemon/protocol.py` defines Event type and server has subscribe method stub. Could power real-time UI without polling.
+**Event streaming foundation.** `lfd/daemon/protocol.py` defines Event type and server has subscribe method. Could power real-time UI without polling if fully implemented.
 
-**Parallel step batches**: `topological_batches()` already groups independent steps. Currently runs in worktrees, but could run truly parallel with process isolation.
+**Parallel step batches.** `topological_batches()` already groups independent steps. Currently serializes within batches but could run truly parallel with process isolation.
+
+**Skills infrastructure is extensible.** `skills.py` already supports multiple sources (superpowers, local paths, SkillRegistry). Adding new skill providers would be straightforward.
 
 ## Open questions
 
-- Why does interactive mode in flows use `subprocess.run()` but standalone interactive uses `os.execvp()`? The comment at `flow.py:160` explains it, but is there a cleaner approach?
+- The `lfd/execution/worker.py` file exists but `runner.py` handles execution. Is worker.py unused or planned for future parallelism?
 
-- Token trimming drops diff_files first. Is this always right? For a `debug` step, the diff is often the most important context.
+- Token budgets are hard-coded (50k area, 30k docs, 20k diff). Should these be configurable per step or flow?
 
-- FlowRun.step_index tracks position but nothing uses it for resumption. Is this intended for future use or dead code?
+- `FlowRun.step_index` tracks position but nothing uses it for resumption. Dead code or planned feature?
 
-- `lfd/execution/worker.py` exists but appears unused. Legacy or planned?
+- Why does `context.py` drop diff_files first when trimming? For a debug step, the diff is crucial context.
 
 ## Recommendations
 
-### Clean up Choose handling
-
-**Observation**: `flow.py:420-450` has `choose_branch()` that calls the runner directly rather than going through the standard step execution path. It writes to a file (`scratch/choices/{flow}.md`) and parses frontmatter.
-
-**Cost**: Low—isolated change to one function.
-
-**Benefit**: More consistent flow execution; Choose would benefit from the same logging/error handling as Steps.
-
-**Verdict**: Worth doing. The special path is unnecessary complexity.
-
 ### Document token trimming strategy
 
-**Observation**: `context.py:450-490` trims components without explaining priority. `_drop_candidates()` returns components in arbitrary order, then sorts by size.
+**Observation**: `context.py` trims components without explaining the priority. The algorithm drops largest components first, but the rationale isn't documented.
 
-**Cost**: Low—just comments.
+**Cost**: Low—add a comment block explaining the priority and rationale.
 
-**Benefit**: Maintainers understand why diff_files drops before clipboard. Users can anticipate behavior.
+**Benefit**: Maintainers understand why components drop in a particular order. Users can predict behavior.
 
-**Verdict**: Worth doing. Add a comment block explaining the priority and rationale.
+**Verdict**: Worth doing. A 10-line comment would clarify the design decision.
 
 ### Remove or document worker.py
 
-**Observation**: `lfd/execution/worker.py` exists but `runner.py` handles execution. Either worker.py is unused or its purpose is unclear.
+**Observation**: `lfd/execution/worker.py` exists but `runner.py` handles execution. The file may be unused or planned for future parallelism.
 
-**Cost**: Low—either delete or add docstring.
+**Cost**: Low—either delete or add a docstring explaining its purpose.
 
 **Benefit**: Reduces confusion about execution architecture.
 
-**Verdict**: Worth investigating. If unused, delete; if planned, document.
+**Verdict**: Worth investigating. `grep` for imports/usages first. If unused, delete. If planned, document.
 
 ### Add fork/synthesize tests
 
-**Observation**: `tests/test_flows.py` tests Flow parsing but not fork execution. `flow.py:run_fork()` and `run_synthesize()` have no dedicated tests.
+**Observation**: `tests/test_flows.py` tests Flow parsing but fork execution is untested. `flow.py:run_fork()` and `run_synthesize()` have complex worktree logic.
 
 **Cost**: Medium—need to mock worktree creation and parallel execution.
 
 **Benefit**: Fork is a key feature (roadmap flows use it). Without tests, regressions go unnoticed.
 
 **Verdict**: Worth doing before adding more fork features.
+
+### Consolidate context.py complexity
+
+**Observation**: `gather_prompt_components()` has 15+ parameters and calls 8 helpers. Token trimming is spread across 3 functions. The file is the largest in `lf/` at 718 lines.
+
+**Cost**: Medium—requires careful refactoring to preserve behavior.
+
+**Benefit**: Easier to understand and maintain. Clearer separation between gathering, trimming, and formatting.
+
+**Verdict**: Worth considering but not urgent. The code works; complexity is a readability issue, not a correctness issue.
+
+### Make token budgets configurable
+
+**Observation**: Budgets (50k area, 30k docs, 20k diff) are hard-coded. Different workflows might need different balances—debug steps want more diff, design steps want more docs.
+
+**Cost**: Medium—add to Config, wire through gather/trim functions.
+
+**Benefit**: Users can tune context assembly for their workflows.
+
+**Verdict**: Nice to have. Current defaults work for most cases. Lower priority than documentation fixes.

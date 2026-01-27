@@ -103,10 +103,12 @@ ln -s ../.lf/steps .claude/commands
 
 Chains steps together with commits between them.
 
-```python
-# .lf/flows/ship.py
-def flow():
-    return Flow(["implement", "polish", "review"])
+```yaml
+# .lf/flows/ship.yaml
+- implement
+- compress
+- gate
+- consolidate
 ```
 
 ```bash
@@ -187,7 +189,7 @@ roadmap/                  # Internal docs (persists)
 `roadmap/` can exist at any level:
 - Root `roadmap/` is auto-included (part of lfdocs)
 - `src/api/roadmap/` holds API-specific plans
-- Including a path via `-p` auto-includes its nested `roadmap/` folders
+- Including an area via `--area` auto-includes its nested `roadmap/` folders
 
 ### What's Auto-Included
 

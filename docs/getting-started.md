@@ -50,7 +50,7 @@ lf : "add type hints to utils.py"
 | Flag | What it adds |
 |------|--------------|
 | `-c` | Clipboard content |
-| `-p FILE` | Specific file or directory |
+| `--area PATH` | Scope to specific area |
 | `--diff` | Raw `git diff` output |
 | `-a` | Auto mode (no interaction) |
 

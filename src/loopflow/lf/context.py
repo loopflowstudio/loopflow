@@ -987,9 +987,7 @@ def format_prompt(components: PromptComponents) -> str:
             diff_parts.append(f"<lf:diff>\n{components.diff}\n</lf:diff>")
         if components.diff_files:
             diff_parts.append(format_files(components.diff_files, components.repo_root))
-        parts.append(
-            "Changes on this branch (diff against main).\n\n" + "\n\n".join(diff_parts)
-        )
+        parts.append("Changes on this branch (diff against main).\n\n" + "\n\n".join(diff_parts))
 
     if components.clipboard and components.clipboard.text:
         parts.append(

@@ -79,7 +79,8 @@ Steps chain into flows. Flows feed into waves.
 
 | Flow | Steps |
 |------|-------|
-| `ship` | implement → compress → gate |
+| `ship` | implement → compress → gate → consolidate |
+| `design-and-ship` | design → implement → reduce → polish |
 | `pair` | design → ship |
 | `grind` | review → iterate → ship → gate |
 | `incident` | debug → 5whys → ship |

@@ -174,10 +174,9 @@ Additional files always included in every step.
 
 | | |
 |---|---|
-| **CLI** | `-p FILE` (repeatable) |
 | **Config** | `context: [src/schema.py, docs/api.md]` |
 
-CLI adds to config; config sets baseline for all steps.
+Config sets baseline files for all steps.
 
 ### Exclude Patterns
 

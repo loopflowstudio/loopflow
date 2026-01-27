@@ -64,12 +64,21 @@ def _build_step_params(
     backend: str,
     model_variant: str | None,
     context: list[str] | None,
+    flow_direction: list[str] | None,
 ) -> _StepParams:
     """Build step params by applying overrides to defaults."""
     step_backend = backend
     step_variant = model_variant
     step_context = list(context) if context else []
-    step_direction = [step.direction] if step.direction else None
+
+    # Step direction overrides flow direction
+    if step.direction:
+        if isinstance(step.direction, list):
+            direction = step.direction
+        else:
+            direction = [step.direction]
+    else:
+        direction = flow_direction
 
     if step.model:
         step_backend, step_variant = parse_model(step.model)
@@ -79,7 +88,7 @@ def _build_step_params(
         backend=step_backend,
         model_variant=step_variant,
         context=step_context or None,
-        direction=step_direction,
+        direction=direction,
     )
 
 

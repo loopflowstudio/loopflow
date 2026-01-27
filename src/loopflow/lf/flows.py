@@ -18,7 +18,7 @@ class Step:
     name: str
     after: str | list[str] | None = None  # None = follows previous step
     model: str | None = None
-    direction: str | None = None
+    direction: str | list[str] | None = None  # Overrides flow direction
     interactive: bool | None = None  # Override frontmatter setting
 
 

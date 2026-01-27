@@ -2,7 +2,7 @@
 
 Flows can contain interactive steps. When a flow reaches an interactive step, it pauses and waits for the user to connect.
 
-## Status: Partially Implemented
+## Status: Core Implemented
 
 Core tick-based execution implemented:
 - [x] `TickResult` enum (STEP_COMPLETE, FLOW_COMPLETE, WAITING_INTERACTIVE, STEP_FAILED)
@@ -10,10 +10,10 @@ Core tick-based execution implemented:
 - [x] `tick_flow()` function in runner.py
 - [x] StepRun with `status=WAITING` and `run_mode="interactive"`
 - [x] Step frontmatter check for `interactive: true`
+- [x] `lfd connect` CLI command
+- [x] Daemon integration (calling `tick_flow()` in tick loop via `_run_tick_loop`)
 
 Not yet implemented:
-- [ ] `lfd connect` CLI command
-- [ ] Daemon integration (calling `tick_flow()` in loop)
 - [ ] Concerto "Connect" button for WAITING waves
 
 ## The Model

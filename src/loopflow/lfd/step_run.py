@@ -24,14 +24,16 @@ def save_step_run(step_run: StepRun, db_path: Path | None = None) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO step_runs
-        (id, step, repo, worktree, status, started_at, ended_at, pid, model, run_mode)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, step, repo, worktree, flow_run_id, wave_id, status, started_at, ended_at, pid, model, run_mode)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             step_run.id,
             step_run.step,
             step_run.repo,
             step_run.worktree,
+            step_run.flow_run_id,
+            step_run.wave_id,
             step_run.status.value,
             step_run.started_at.isoformat(),
             step_run.ended_at.isoformat() if step_run.ended_at else None,
@@ -143,6 +145,8 @@ def _step_run_from_row(row: dict) -> StepRun:
         step=row["step"],
         repo=row["repo"],
         worktree=row["worktree"],
+        flow_run_id=row.get("flow_run_id"),
+        wave_id=row.get("wave_id"),
         status=StepRunStatus(row["status"]),
         started_at=datetime.fromisoformat(row["started_at"]),
         ended_at=datetime.fromisoformat(row["ended_at"]) if row.get("ended_at") else None,
@@ -150,6 +154,31 @@ def _step_run_from_row(row: dict) -> StepRun:
         model=row.get("model", "claude-code"),
         run_mode=row.get("run_mode", "auto"),
     )
+
+
+def get_waiting_step_run(wave_id: str, db_path: Path | None = None) -> StepRun | None:
+    """Find the WAITING StepRun for a wave."""
+    conn = _get_db(db_path)
+
+    cursor = conn.execute(
+        "SELECT * FROM step_runs WHERE wave_id = ? AND status = ? ORDER BY started_at DESC LIMIT 1",
+        (wave_id, StepRunStatus.WAITING.value),
+    )
+
+    row = cursor.fetchone()
+    conn.close()
+    return _step_run_from_row(dict(row)) if row else None
+
+
+def get_step_run(step_run_id: str, db_path: Path | None = None) -> StepRun | None:
+    """Get a step run by ID."""
+    conn = _get_db(db_path)
+
+    cursor = conn.execute("SELECT * FROM step_runs WHERE id = ?", (step_run_id,))
+
+    row = cursor.fetchone()
+    conn.close()
+    return _step_run_from_row(dict(row)) if row else None
 
 
 # Fire-and-forget logging to lfd daemon

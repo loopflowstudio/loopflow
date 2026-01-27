@@ -10,15 +10,18 @@ import GhosttyKit
 struct GhosttyTerminalView: View {
     let workingDirectory: String
     let command: String?
+    let sessionId: String?
     @ObservedObject var manager: GhosttyManager
 
     init(
         workingDirectory: String,
         command: String? = nil,
+        sessionId: String? = nil,
         manager: GhosttyManager = .shared
     ) {
         self.workingDirectory = workingDirectory
         self.command = command
+        self.sessionId = sessionId
         self.manager = manager
     }
 
@@ -27,6 +30,7 @@ struct GhosttyTerminalView: View {
             GhosttyTerminalRepresentable(
                 workingDirectory: workingDirectory,
                 command: command,
+                sessionId: sessionId,
                 size: geo.size,
                 manager: manager
             )
@@ -37,6 +41,7 @@ struct GhosttyTerminalView: View {
 struct GhosttyTerminalRepresentable: NSViewRepresentable {
     let workingDirectory: String
     let command: String?
+    let sessionId: String?
     let size: CGSize
     @ObservedObject var manager: GhosttyManager
 
@@ -44,6 +49,7 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
         let view = GhosttyMetalView()
         view.workingDirectory = workingDirectory
         view.command = command
+        view.sessionId = sessionId
 
         if case .uninitialized = manager.state {
             manager.initialize()
@@ -66,6 +72,7 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
 final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     var workingDirectory: String = ""
     var command: String?
+    var sessionId: String?
     nonisolated(unsafe) var surface: ghostty_surface_t?
 
     private nonisolated(unsafe) var displayLink: CADisplayLink?
@@ -100,7 +107,12 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             view: self
         )
 
-        if surface != nil {
+        if let surface {
+            // Register surface as active session for lifecycle callbacks
+            if let sessionId {
+                manager.registerActiveSession(surface, sessionId: sessionId)
+            }
+
             updateContentScale()
             updateSurfaceSize()
             setupDisplayLink()
@@ -558,15 +570,18 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 struct GhosttyTerminalView: View {
     let workingDirectory: String
     let command: String?
+    let sessionId: String?
     @ObservedObject var manager: GhosttyManager
 
     init(
         workingDirectory: String,
         command: String? = nil,
+        sessionId: String? = nil,
         manager: GhosttyManager = .shared
     ) {
         self.workingDirectory = workingDirectory
         self.command = command
+        self.sessionId = sessionId
         self.manager = manager
     }
 

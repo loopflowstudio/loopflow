@@ -13,10 +13,17 @@ from typing import Optional
 
 import typer
 
-from loopflow.lf.directions import list_directions, parse_list_arg
+import os
+
+from loopflow.lf.config import load_config, parse_model
+from loopflow.lf.context import ContextConfig, format_prompt, gather_prompt_components
+from loopflow.lf.directions import list_directions, parse_list_arg, resolve_directions
 from loopflow.lf.flows import load_flow
-from loopflow.lf.git import find_main_repo
+from loopflow.lf.git import autocommit, find_main_repo
+from loopflow.lf.launcher import build_model_interactive_command
 from loopflow.lf.logging import get_log_dir
+from loopflow.lfd.models import StepRunStatus
+from loopflow.lfd.step_run import get_waiting_step_run, update_step_run_status
 from loopflow.lfd.daemon.launchd import install as launchd_install
 from loopflow.lfd.daemon.launchd import is_running
 from loopflow.lfd.daemon.launchd import uninstall as launchd_uninstall
@@ -38,6 +45,7 @@ from loopflow.lfd.wave import (
     start_wave,
     stop_wave,
     update_wave,
+    update_wave_status,
 )
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
@@ -601,6 +609,139 @@ def run(
     else:
         typer.echo(f"{c['red']}Error:{c['reset']} Failed to run", err=True)
         raise typer.Exit(1)
+
+
+@app.command()
+def connect(
+    name: str = typer.Argument(..., help="Wave name or ID"),
+):
+    """Attach terminal to a wave's waiting interactive step.
+
+    When a flow reaches an interactive step, the wave pauses in WAITING status.
+    This command connects your terminal to that step, running an interactive
+    Claude Code session.
+
+    On successful exit (exit code 0):
+    - Changes are autocommitted
+    - Wave status returns to RUNNING
+    - Daemon continues with next steps
+
+    On abort (Ctrl+C, exit code != 0):
+    - No commit
+    - Wave returns to IDLE (can retry)
+
+    Examples:
+        lfd connect swift-falcon    # connect to waiting wave
+    """
+    c = _colors()
+    repo = get_wt_from_cwd()
+    if not repo:
+        typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    # Resolve wave
+    wave = _resolve_wave(name, repo, c)
+    if not wave:
+        typer.echo(f"{c['red']}Error:{c['reset']} Wave '{name}' not found", err=True)
+        raise typer.Exit(1)
+
+    # Check wave is waiting
+    if wave.status != WaveStatus.WAITING:
+        typer.echo(
+            f"{c['red']}Error:{c['reset']} Wave '{wave.name}' is not waiting "
+            f"(status: {wave.status.value})",
+            err=True,
+        )
+        typer.echo("Only waves paused at interactive steps can be connected to.")
+        raise typer.Exit(1)
+
+    # Find the waiting StepRun
+    step_run = get_waiting_step_run(wave.id)
+    if not step_run:
+        typer.echo(f"{c['red']}Error:{c['reset']} No waiting step found for wave", err=True)
+        raise typer.Exit(1)
+
+    step_name = step_run.step
+    worktree_path = Path(step_run.worktree)
+
+    # Update statuses to RUNNING
+    update_step_run_status(step_run.id, StepRunStatus.RUNNING)
+    update_wave_status(wave.id, WaveStatus.RUNNING)
+
+    # Load config and resolve directions
+    config = load_config(wave.repo)
+    agent_model = config.agent_model if config else "claude:opus"
+    backend, model_variant = parse_model(agent_model)
+    skip_permissions = config.yolo if config else False
+
+    direction = resolve_directions(wave.repo, wave.direction)
+    context_paths = list(wave.area) if wave.area and wave.area[0] != "." else None
+
+    # Assemble prompt
+    components = gather_prompt_components(
+        worktree_path,
+        step=step_name,
+        run_mode="interactive",
+        direction=direction,
+        context_config=ContextConfig(pathset=context_paths),
+    )
+
+    if not components.step:
+        typer.echo(f"{c['red']}Error:{c['reset']} Step '{step_name}' not found", err=True)
+        update_step_run_status(step_run.id, StepRunStatus.FAILED)
+        update_wave_status(wave.id, WaveStatus.IDLE)
+        raise typer.Exit(1)
+
+    prompt = format_prompt(components)
+
+    # Build interactive command
+    command = build_model_interactive_command(
+        backend,
+        skip_permissions=skip_permissions,
+        yolo=skip_permissions,
+        model_variant=model_variant,
+        sandbox_root=worktree_path.parent,
+        workdir=worktree_path,
+    )
+
+    # Display session header
+    typer.echo(f"\n{c['cyan']}━━━ {step_name} [interactive] ━━━{c['reset']}", err=True)
+    typer.echo(f"{c['dim']}Wave: {wave.name} | Worktree: {worktree_path}{c['reset']}", err=True)
+    typer.echo(err=True)
+
+    # Change to worktree and run
+    os.chdir(worktree_path)
+
+    # Remove API keys so CLIs use subscriptions
+    os.environ.pop("ANTHROPIC_API_KEY", None)
+    os.environ.pop("OPENAI_API_KEY", None)
+
+    # Run interactive session
+    cmd_with_prompt = command + [prompt]
+    result = subprocess.run(cmd_with_prompt, cwd=worktree_path)
+    exit_code = result.returncode
+
+    # Handle completion
+    if exit_code == 0:
+        typer.echo(f"\n{c['green']}Session completed successfully{c['reset']}")
+
+        # Autocommit changes
+        autocommit(worktree_path, step_name)
+
+        # Update statuses
+        update_step_run_status(step_run.id, StepRunStatus.COMPLETED)
+        update_wave_status(wave.id, WaveStatus.RUNNING)
+
+        typer.echo(f"{c['dim']}Changes committed. Daemon will continue flow.{c['reset']}")
+    else:
+        typer.echo(f"\n{c['yellow']}Session aborted (exit code {exit_code}){c['reset']}")
+
+        # Mark failed, return to idle
+        update_step_run_status(step_run.id, StepRunStatus.FAILED)
+        update_wave_status(wave.id, WaveStatus.IDLE)
+
+        typer.echo(f"{c['dim']}Wave returned to idle. Run 'lfd connect {wave.name}' to retry.{c['reset']}")
+        raise typer.Exit(exit_code)
 
 
 @app.command()

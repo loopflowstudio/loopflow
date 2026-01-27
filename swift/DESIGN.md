@@ -618,18 +618,7 @@ cat scratch/designprinciples.md | head -100
 ```
 
 ---
-
-## Open Questions
-
-Captured for future sessions:
-
-1. How does multiplayer/collaboration work in Concerto? (Multiple humans conducting?)
-2. Should there be a "rehearsal" vs "performance" mode distinction in UI?
-3. How do we visualize token budget without overwhelming?
-4. What's the right balance of streaming detail vs. summary?
-5. How do we handle the Notion research (rate-limited, incomplete)?
-
----
+=---
 
 ## Design System Implementation
 

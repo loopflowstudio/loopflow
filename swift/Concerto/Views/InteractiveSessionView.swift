@@ -25,6 +25,15 @@ struct InteractiveSessionView: View {
             terminalContent
         }
         .background(palette.background)
+        .task {
+            // Set up callback for when terminal process exits
+            let currentSessionState = sessionState
+            GhosttyManager.shared.onSessionClosed = {
+                Task { @MainActor in
+                    currentSessionState.endInteractiveSession()
+                }
+            }
+        }
     }
 
     // MARK: - Header
@@ -106,6 +115,7 @@ struct InteractiveSessionView: View {
         GhosttyTerminalView(
             workingDirectory: session.worktreePath,
             command: "lf \(session.step)",
+            sessionId: session.id,
             manager: ghosttyManager
         )
         .background(Color.black)
@@ -114,6 +124,9 @@ struct InteractiveSessionView: View {
     // MARK: - Actions
 
     private func endSession() {
+        // Destroy the terminal surface, killing the child process
+        GhosttyManager.shared.destroyActiveSession()
+        // Clear the session state
         sessionState.endInteractiveSession()
     }
 }

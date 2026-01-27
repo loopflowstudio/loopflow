@@ -8,8 +8,8 @@ To add schema changes, create a new migration file in this directory.
 
 import sqlite3
 
-SCHEMA_VERSION = "2026-01-25T16:15:00Z_wave"
-DESCRIPTION = "baseline schema with wave terminology"
+SCHEMA_VERSION = "2026-01-25T23:59:59Z_baseline"
+DESCRIPTION = "baseline schema with step_index for tick-based flow execution"
 
 
 def apply(conn: sqlite3.Connection) -> None:
@@ -60,6 +60,7 @@ def apply(conn: sqlite3.Connection) -> None:
 
             status TEXT NOT NULL DEFAULT 'pending',
             iteration INTEGER NOT NULL DEFAULT 0,
+            step_index INTEGER NOT NULL DEFAULT 0,  -- position in flow.steps for tick-based execution
 
             worktree TEXT,
             branch TEXT,

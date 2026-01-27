@@ -30,7 +30,7 @@ Lead with outcomes, not mechanisms.
 
 Good:
 - "Agents now persist their worktrees across iterations—no more lost context between runs"
-- "New `lfops cycle` command: land a PR and immediately continue in a fresh worktree"
+- "New `lfops next` command: land a PR and immediately continue in a fresh worktree"
 - "The daemon auto-recovers from database schema changes instead of failing silently"
 
 Bad:

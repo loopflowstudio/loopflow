@@ -2,14 +2,16 @@
 requires: roadmap/ items
 produces: scratch/<slug>.md
 ---
-Pick the highest-priority roadmap item and move it to scratch/.
+Pick the highest-priority roadmap item in this area and move it to scratch/.
 
 ## Workflow
 
-1. Read all roadmap items under `roadmap/**/*.md`
-2. Evaluate each: urgency, importance, dependencies, readiness
+1. Identify the roadmap scope:
+   - If running with an area (e.g., `src/api/`), read from `roadmap/<area>/` (e.g., `src/api/roadmap/`)
+   - Otherwise, read from root `roadmap/`
+2. Evaluate each item: urgency, importance, dependencies, readiness
 3. Pick the one that should be built next
-4. Move it from `roadmap/` to `scratch/`
+4. Move it to `scratch/<slug>.md`
 
 ## Selection criteria
 
@@ -25,6 +27,6 @@ If multiple items score similarly, prefer smaller scope—ship something.
 
 ## Output
 
-The selected roadmap item is moved to `scratch/<slug>.md`. The original is removed from `roadmap/`.
+The selected roadmap item is moved to `scratch/<slug>.md`. The original is removed from its roadmap location.
 
-If no roadmap items exist or none are ready, write `scratch/questions.md` explaining what's missing.
+If no roadmap items exist in the relevant scope or none are ready, write `scratch/questions.md` explaining what's missing.

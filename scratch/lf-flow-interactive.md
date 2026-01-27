@@ -7,7 +7,7 @@ Run flows seamlessly: interactive steps launch the coding agent, auto steps foll
 When `lf <flow>` runs a flow containing interactive steps, those steps launch directly (full coding agent session). When the user exits (Ctrl+D), execution continues with remaining steps in auto mode.
 
 ```bash
-lf fullship  # design (interactive) → implement → reduce → polish (auto)
+lf design-and-ship  # design (interactive) → implement → reduce → polish (auto)
 ```
 
 User experience:
@@ -64,13 +64,13 @@ Modified `run_flow()` (renamed from `run_flow_def`) to check each step for inter
 
 ### New builtin flow
 
-Added `fullship` flow: `design → implement → reduce → polish`
+Added `design-and-ship` flow: `design → implement → reduce → polish`
 
 ## Verification
 
 ```bash
-# Run the fullship flow
-lf fullship
+# Run the design-and-ship flow
+lf design-and-ship
 
 # Expected:
 # 1. Coding agent opens with design prompt
@@ -80,7 +80,7 @@ lf fullship
 ```
 
 Manual verification:
-- [ ] `lf fullship` opens coding agent for design
+- [ ] `lf design-and-ship` opens coding agent for design
 - [ ] After Ctrl+D, implement/reduce/polish run automatically
 - [ ] Exit code propagates (fail fast on any step failure)
 - [ ] `lf ship` still works (no interactive step, all auto)

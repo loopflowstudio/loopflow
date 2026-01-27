@@ -147,8 +147,8 @@ def flow():
 def flow():
     return Flow(
         Fork(
-            {"goal": "product-engineer"},
-            {"goal": "designer"},
+            {"direction": "product-engineer"},
+            {"direction": "designer"},
             step="implement",
             synthesize={},
         ),

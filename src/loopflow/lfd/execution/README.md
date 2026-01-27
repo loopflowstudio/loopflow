@@ -5,7 +5,7 @@ Runs flows as subprocesses. Manages worktrees for parallel execution.
 ## Flow Execution
 
 ```
-Agent (persistent worktree @ branch-1)
+Wave (persistent worktree @ branch-1)
 │
 ├── Sequential steps run in-place
 │
@@ -26,23 +26,23 @@ Fork runs multiple agents in parallel, each in its own temporary worktree. Synth
 Example flow (from `builtins/flows/roadmap.py`):
 ```python
 Fork(
-    {"goal": "infra-engineer"},
-    {"goal": "designer"},
-    {"goal": "product-engineer"},
+    {"direction": "infra-engineer"},
+    {"direction": "designer"},
+    {"direction": "product-engineer"},
     step="roadmap",
-    synthesize={"goal": "ceo"},
+    synthesize={"direction": "ceo"},
 )
 ```
 
 ### Process Diagram
 
 ```
-Agent (persistent worktree @ agent-main)
+Wave (persistent worktree @ wave-main)
 │
 ├─ Fork creates temp worktrees from HEAD
-│   ├─ fork-flow-1/ (goal: infra-engineer)  ─┐
-│   ├─ fork-flow-2/ (goal: designer)        ─┼─ concurrent.futures.ThreadPoolExecutor
-│   └─ fork-flow-3/ (goal: product-engineer)─┘
+│   ├─ fork-flow-1/ (direction: infra-engineer)  ─┐
+│   ├─ fork-flow-2/ (direction: designer)        ─┼─ concurrent.futures.ThreadPoolExecutor
+│   └─ fork-flow-3/ (direction: product-engineer)─┘
 │
 ├─ Each fork runs its step independently
 │   └─ Commits stay in fork worktree
@@ -69,8 +69,8 @@ Agent (persistent worktree @ agent-main)
 
 ### Worktree Types
 
-**Persistent (agent's worktree):**
-- Created once when agent starts
+**Persistent (wave's worktree):**
+- Created once when wave starts
 - Survives across iterations
 - Located at `../repo.branch-name`
 - After PR merges, `move_worktree()` switches to new branch
@@ -81,26 +81,26 @@ Agent (persistent worktree @ agent-main)
 - Located at `../repo.fork-{flow}-{n}`
 - Deleted after Synthesize completes
 
-### Agent Lifecycle
+### Wave Lifecycle
 
 ```
 lfd loop ship src/
 │
-├─ Agent created with persistent worktree
-│   └─ git worktree add -b <agent-main> <path> origin/main
+├─ Wave created with persistent worktree
+│   └─ git worktree add -b <wave-main> <path> origin/main
 │
 ├─ Iteration 1
 │   ├─ Create iteration worktree: <prefix>/001
 │   ├─ Run flow steps (may include Fork)
 │   ├─ Push: git push -u origin <branch>
-│   ├─ PR: gh pr create --base <agent-main>
+│   ├─ PR: gh pr create --base <wave-main>
 │   └─ Cleanup iteration worktree
 │
 ├─ Iteration 2...N (same pattern)
 │
 ├─ Land to main (if merge_mode=land)
-│   ├─ Push: git push origin <agent-main>
-│   ├─ PR: gh pr create --base main --head <agent-main>
+│   ├─ Push: git push origin <wave-main>
+│   ├─ PR: gh pr create --base main --head <wave-main>
 │   └─ Auto-merge: gh pr merge --squash --auto
 │
 └─ After merge, move_worktree() → fresh branch
@@ -137,5 +137,5 @@ Non-fork parallelism (from step dependencies) uses similar mechanics:
 - `_run_fork_synthesize()` — Spawns fork worktrees, runs agents in parallel, synthesizes
 - `_run_collector_step()` — Runs single step via collector subprocess
 - `_cleanup_fork_worktrees()` — Removes all fork worktrees after synthesis
-- `_create_pr_to_main_branch()` — Push and create PR targeting agent's main branch
-- `_land_to_main()` — Create/update PR from agent-main to main, enable auto-merge
+- `_create_pr_to_main_branch()` — Push and create PR targeting wave's main branch
+- `_land_to_main()` — Create/update PR from wave-main to main, enable auto-merge

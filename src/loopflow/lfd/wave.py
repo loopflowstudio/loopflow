@@ -122,6 +122,27 @@ def get_wave_by_name(
     return wave_from_row(dict(row)) if row else None
 
 
+def get_wave_by_worktree(
+    worktree: Path, repo: Path | None = None, db_path: Path | None = None
+) -> Wave | None:
+    """Get a wave by its worktree path, optionally filtered by repo."""
+    conn = _get_db(db_path)
+
+    if repo:
+        cursor = conn.execute(
+            "SELECT * FROM waves WHERE worktree = ? AND repo = ?",
+            (str(worktree), str(repo)),
+        )
+    else:
+        cursor = conn.execute(
+            "SELECT * FROM waves WHERE worktree = ?",
+            (str(worktree),),
+        )
+    row = cursor.fetchone()
+    conn.close()
+    return wave_from_row(dict(row)) if row else None
+
+
 def list_waves(repo: Path | None = None, db_path: Path | None = None) -> list[Wave]:
     """List all waves, optionally filtered by repo."""
     conn = _get_db(db_path)

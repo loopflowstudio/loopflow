@@ -6,7 +6,12 @@ Pick the highest-priority item from the wave's backlog and move it to scratch/.
 
 ## Wave context
 
-If `<lf:wave name="...">` is present in the prompt, that's your wave. The wave's roadmap (`roadmap/<wave>/`) is included in docs.
+**Finding the wave name:**
+1. Check for `<lf:wave name="...">` tag in the prompt — this is the authoritative source
+2. If no tag, look at the branch name pattern: `<wave>.main` indicates wave `<wave>`
+3. If still unclear, check `roadmap/` for subdirectories — each subdirectory is a wave
+
+The wave's roadmap (`roadmap/<wave>/`) should be included in docs. If you can't find the wave's roadmap, note this in `scratch/questions.md`.
 
 ## Staged roadmaps
 

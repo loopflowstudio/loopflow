@@ -9,7 +9,25 @@ class WaveContext:
     """Wave context for prompt assembly."""
 
     name: str  # e.g., "rust"
-    source: str  # "explicit" | "inferred"
+    source: str  # "explicit" | "inferred" | "worktree" | "lfd"
+
+
+def _lookup_wave_from_lfd(worktree: Path, repo: Path | None = None) -> str | None:
+    """Query lfd database for wave name by worktree path.
+
+    Returns wave name if found, None otherwise.
+    Fails silently if lfd database is not available.
+    """
+    try:
+        from loopflow.lf.git import find_main_repo
+        from loopflow.lfd.wave import get_wave_by_worktree
+
+        # Resolve main repo from worktree if not provided
+        main_repo = repo or find_main_repo(worktree)
+        wave = get_wave_by_worktree(worktree, repo=main_repo)
+        return wave.name if wave else None
+    except Exception:
+        return None
 
 
 def determine_wave(
@@ -20,16 +38,34 @@ def determine_wave(
 
     Priority:
     1. Explicit wave name (from lfd or --wave flag)
-    2. Infer from worktree directory name (only if roadmap/<candidate>/ exists)
+    2. Query lfd database for wave by worktree path
+    3. Wave worktree pattern (<repo>.<wave>.main indicates lfd-created wave)
+    4. Infer from worktree directory name (only if roadmap/<candidate>/ exists)
 
     An explicit wave is always honored, even without a roadmap folder.
-    Inference requires a matching roadmap folder to avoid false positives.
+    Wave worktrees (created by lfd) are recognized by the .main suffix.
+    Other inference requires a matching roadmap folder to avoid false positives.
     """
     if explicit_wave:
         return WaveContext(name=explicit_wave, source="explicit")
 
-    # Infer from worktree name — requires matching roadmap folder
+    # Query lfd database for wave by worktree path
+    lfd_wave = _lookup_wave_from_lfd(repo_root)
+    if lfd_wave:
+        return WaveContext(name=lfd_wave, source="lfd")
+
     worktree_name = repo_root.name
+    parts = worktree_name.split(".")
+
+    # Check for lfd wave worktree pattern: <repo>.<wave>.main
+    # Example: loopflow.rust.main → wave = "rust"
+    if len(parts) >= 3 and parts[-1] == "main":
+        wave_name = parts[-2]
+        # Skip if it looks like a date or common suffix
+        if wave_name and not wave_name.isdigit() and wave_name not in ("main", "master"):
+            return WaveContext(name=wave_name, source="worktree")
+
+    # Fall back to roadmap-based inference
     for candidate in _extract_wave_candidates(worktree_name):
         roadmap_path = repo_root / "roadmap" / candidate
         if roadmap_path.is_dir():

@@ -990,6 +990,10 @@ def run_flow(
         print(f"Error: '{backend}' coding agent not found")
         return 1
 
+    # Display engine header
+    engine_display = f"{backend}:{model_variant}" if model_variant else backend
+    print(f"\033[90mengine: {engine_display}\033[0m")
+
     config = load_config(repo_root)
     main_repo = find_main_repo(repo_root) or repo_root
     items: list[FlowItem] = list(flow.steps)

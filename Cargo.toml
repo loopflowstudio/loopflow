@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
   "rust/lf-core",
+  "rust/lfd",
 ]
 
 [workspace.package]

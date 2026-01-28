@@ -15,3 +15,7 @@ Open questions / assumptions
 - Event replay log: persistence location, rotation/expiry policy, and whether sequence_id resets per process or persists across restarts.
 - Minimal HTTP endpoints: exact endpoint list and response shapes for `/health`, `/status`, `/metrics`.
 - Metrics scope: which specific metrics are required for Stage 3 (tick latency, queue depth, run counts, etc.).
+- Rust lfd currently defaults new waves to flow "ship" and merge_mode MERGE_PR; confirm default flow/merge expectations.
+- UpdateWave treats empty direction/area arrays as "no change" (can't clear); if clearing should be supported, add explicit flags.
+- ConnectWave, ListFlows, ListWorktrees, and event streaming are stubbed (empty or unimplemented) until flow execution and session tracking are implemented.
+- HTTP endpoints return JSON ({status, uptime_seconds, counts}); confirm desired shapes for /health, /status, /metrics.

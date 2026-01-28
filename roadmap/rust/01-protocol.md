@@ -37,6 +37,16 @@ Create a versioned, transport-agnostic protocol that supports local and remote c
 - `ReportEvent(run_id, event)`
 - `WatchEvents(filters)` (stream)
 
+### Session connect (interactive steps)
+- `ConnectWave(wave_id)` → worktree, step, step_run_id, prompt_file
+- `StepRunStart(step_run_id, wave_id)` → ack (socket method)
+- `StepRunEnd(step_run_id, result)` → ack, triggers tick_flow (socket method)
+
+### Session events
+- `wave.waiting` — flow paused at interactive step, awaiting user connect
+- `session.started` — user connected, interactive step in progress
+- `session.ended` — interactive step completed, flow will continue
+
 ## Errors
 - Typed error codes with retry hints (retryable, terminal, auth, not found).
 - Include `trace_id` for observability.
@@ -288,4 +298,6 @@ message Event {
 
 ## Open questions
 - Do we want strict protobuf-only for v1 to avoid dual protocols?
-- Do we need bi-directional streaming for interactive steps?
+
+## Resolved questions
+- **Bi-directional streaming for interactive steps?** No. Session connect uses request/response: `ConnectWave` returns connection details, user runs step in their terminal, `StepRunEnd` signals completion. The daemon broadcasts `wave.waiting` events so clients know when to offer connect. This avoids WebSocket complexity while supporting Concerto and CLI.

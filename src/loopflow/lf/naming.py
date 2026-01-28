@@ -5,7 +5,9 @@ suffixes, used by both `lfops next` and agent creation.
 """
 
 import random
+import re
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 # Word lists for generating unique branch names
@@ -84,6 +86,11 @@ def generate_word_pair() -> str:
     return f"{magical}-{musical}"
 
 
+def generate_timestamp() -> str:
+    """Generate timestamp in YYYYMMDD_HHMM format."""
+    return datetime.now().strftime("%Y%m%d_%H%M")
+
+
 def branch_exists(repo: Path, branch: str) -> bool:
     """Check if a branch exists locally or on origin."""
     result = subprocess.run(
@@ -101,41 +108,63 @@ def branch_exists(repo: Path, branch: str) -> bool:
     return result.returncode == 0
 
 
-def parse_branch_base(branch: str) -> str:
-    """Extract base branch name (agent name) for next iteration.
+def _is_timestamp(s: str) -> bool:
+    """Check if string matches YYYYMMDD_HHMM format."""
+    return bool(re.match(r"^\d{8}_\d{4}$", s))
 
-    If branch ends with .word1-word2 pattern, strip it.
-    If branch ends with .main, strip it.
-    Otherwise use as-is.
+
+def _is_word_pair(s: str) -> bool:
+    """Check if string is a magical-musical word pair."""
+    if "-" not in s:
+        return False
+    word1, word2 = s.split("-", 1)
+    return word1 in MAGICAL and word2 in MUSICAL
+
+
+def parse_branch_base(branch: str) -> str:
+    """Extract base branch name (wave name) for next iteration.
+
+    Strips suffixes in order: .main, .timestamp.words, .words
 
     Examples:
-        'my-feature.main' → 'my-feature'
-        'my-feature.nova-waltz' → 'my-feature'
-        'my-feature' → 'my-feature'
+        'foo.main' → 'foo'
+        'foo.20260127_2204.wisp-forte' → 'foo'
+        'foo.wisp-forte' → 'foo'
+        'foo' → 'foo'
     """
     # Check if branch ends with .main
     if branch.endswith(".main"):
         return branch[:-5]
-    # Check if branch ends with .word1-word2 pattern
-    if "." in branch:
-        base, suffix = branch.rsplit(".", 1)
-        if "-" in suffix:
-            word1, word2 = suffix.split("-", 1)
-            if word1 in MAGICAL and word2 in MUSICAL:
-                return base
+
+    parts = branch.split(".")
+    if len(parts) < 2:
+        return branch
+
+    # Check for .timestamp.words pattern (new format)
+    if len(parts) >= 3:
+        maybe_words = parts[-1]
+        maybe_timestamp = parts[-2]
+        if _is_word_pair(maybe_words) and _is_timestamp(maybe_timestamp):
+            return ".".join(parts[:-2])
+
+    # Check for .words pattern (old format)
+    if _is_word_pair(parts[-1]):
+        return ".".join(parts[:-1])
+
     return branch
 
 
 def generate_next_branch(base: str, repo: Path) -> str:
     """Generate unique branch name for next iteration.
 
-    Appends .word1-word2 suffix, retries if exists.
+    Appends .timestamp.word1-word2 suffix, retries if exists.
 
     Examples:
-        'my-feature' → 'my-feature.nova-waltz'
+        'foo' → 'foo.20260127_2204.wisp-forte'
     """
+    timestamp = generate_timestamp()
     for _ in range(100):
-        candidate = f"{base}.{generate_word_pair()}"
+        candidate = f"{base}.{timestamp}.{generate_word_pair()}"
         if not branch_exists(repo, candidate):
             return candidate
 

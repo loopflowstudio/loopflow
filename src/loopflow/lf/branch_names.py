@@ -6,6 +6,8 @@ import subprocess
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from loopflow.lf.naming import generate_word_pair
+
 if TYPE_CHECKING:
     from loopflow.lf.config import BranchNameConfig
 
@@ -36,7 +38,15 @@ def _sanitize_for_branch(s: str) -> str:
 
 
 def format_branch_name(short_name: str, config: "BranchNameConfig | None") -> str:
-    """Transform short name into full branch name using schema."""
+    """Transform short name into full branch name using schema.
+
+    Available placeholders:
+        {name}  - the short name provided
+        {user}  - git username
+        {ts}    - timestamp (YYYYMMDD_HHMM)
+        {date}  - date (YYYYMMDD)
+        {words} - magical-musical word pair (e.g., wisp-forte)
+    """
     if config is None:
         return short_name
 
@@ -51,6 +61,7 @@ def format_branch_name(short_name: str, config: "BranchNameConfig | None") -> st
         "user": _get_git_username(),
         "ts": now.strftime("%Y%m%d_%H%M"),
         "date": now.strftime("%Y%m%d"),
+        "words": generate_word_pair(),
     }
 
     result = schema

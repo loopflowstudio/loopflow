@@ -1,4 +1,4 @@
-"""Next command: land current PR, create fresh worktree in same space."""
+"""Next command: land current PR, move worktree to new stacked branch."""
 
 import subprocess
 import time
@@ -10,8 +10,7 @@ from loopflow.lf.context import find_worktree_root
 from loopflow.lf.git import find_main_repo, get_current_branch
 from loopflow.lf.messages import generate_pr_message
 from loopflow.lf.naming import generate_next_branch, parse_branch_base
-from loopflow.lf.worktrees import get_path
-from loopflow.lfops._helpers import get_default_branch, remove_worktree
+from loopflow.lfops._helpers import get_default_branch
 from loopflow.lfops.shell import write_directive
 
 
@@ -105,29 +104,18 @@ def _open_terminal(path: Path) -> None:
 
 
 def move_worktree(
-    main_repo: Path,
     worktree_path: Path,
     new_branch: str,
-    base_branch: str,
 ) -> bool:
-    """Move a worktree to a new branch by removing and recreating at same path.
+    """Create new branch from current HEAD and switch to it (true stacking).
 
+    The new branch is based on the current branch's HEAD, not on main.
     Returns True if successful.
     """
-    # Remove current worktree
+    # Create new branch from current HEAD
     result = subprocess.run(
-        ["git", "worktree", "remove", "--force", str(worktree_path)],
-        cwd=main_repo,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        return False
-
-    # Create new worktree at the same path with new branch
-    result = subprocess.run(
-        ["git", "worktree", "add", "-b", new_branch, str(worktree_path), f"origin/{base_branch}"],
-        cwd=main_repo,
+        ["git", "checkout", "-b", new_branch],
+        cwd=worktree_path,
         capture_output=True,
         text=True,
     )
@@ -151,9 +139,10 @@ def next_worktree(
     open_terminal: bool = True,
     create_pr: bool = False,
 ) -> Path | None:
-    """Land current branch, create new worktree with magical-musical suffix.
+    """Land current branch, move worktree to new stacked branch.
 
-    Returns path to new worktree, or None if failed.
+    Reuses the same worktree directory, just switches to a new branch.
+    Returns path to worktree, or None if failed.
     """
     main_repo = find_main_repo(repo_root) or repo_root
     base_branch = get_default_branch(main_repo)
@@ -190,61 +179,28 @@ def next_worktree(
         typer.echo("Warning: Could not enable auto-merge", err=True)
 
     # Wait for merge if blocking
-    merged = False
     if block:
-        merged = _wait_for_merge(repo_root, pr_number)
+        _wait_for_merge(repo_root, pr_number)
 
     # Generate new branch name
     base_name = parse_branch_base(branch)
     new_branch = generate_next_branch(base_name, main_repo)
 
-    # Create new worktree
-    typer.echo(f"Creating worktree {new_branch}...")
-
-    # Use the short name (just the magical-musical suffix) for worktree directory
-    # Extract just the suffix part after the base name
-    suffix = new_branch[len(base_name) + 1 :]  # +1 for the hyphen
-    worktree_short_name = f"{base_name.split('.')[-1]}-{suffix}"
-
-    # Create worktree with git directly since we need specific branch name
-    worktree_path = get_path(main_repo, worktree_short_name)
-    result = subprocess.run(
-        ["git", "worktree", "add", "-b", new_branch, str(worktree_path), f"origin/{base_branch}"],
-        cwd=main_repo,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        typer.echo(f"Error creating worktree: {result.stderr}", err=True)
+    # Create new stacked branch from current HEAD
+    typer.echo(f"Creating stacked branch {new_branch}...")
+    if not move_worktree(repo_root, new_branch):
+        typer.echo("Error: Failed to create stacked branch", err=True)
         return None
 
-    # Push to create remote branch with tracking
-    subprocess.run(
-        ["git", "push", "-u", "origin", new_branch],
-        cwd=worktree_path,
-        capture_output=True,
-    )
-
-    # Remove old worktree if merge completed
-    if merged and repo_root != main_repo:
-        typer.echo(f"Removing worktree {branch}...")
-        try:
-            remove_worktree(main_repo, branch, repo_root, base_branch)
-        except Exception:
-            typer.echo(
-                "Warning: Could not remove old worktree. Run 'lfops wt prune' later.",
-                err=True,
-            )
-
-    # Open terminal in new worktree
+    # Open terminal in worktree (same path, new branch)
     if open_terminal:
         typer.echo("Opening terminal...")
-        _open_terminal(worktree_path)
+        _open_terminal(repo_root)
 
-    # Write shell directive to cd to new worktree
-    write_directive(f"cd {worktree_path}")
+    # Write shell directive to cd to worktree
+    write_directive(f"cd {repo_root}")
 
-    return worktree_path
+    return repo_root
 
 
 def register_commands(app: typer.Typer) -> None:
@@ -252,19 +208,19 @@ def register_commands(app: typer.Typer) -> None:
 
     @app.command("next")
     def next_cmd(
-        block: bool = typer.Option(False, "--block", help="Wait for merge before creating wt"),
+        block: bool = typer.Option(False, "--block", help="Wait for merge before moving"),
         no_open: bool = typer.Option(False, "--no-open", help="Don't open terminal"),
         create_pr: bool = typer.Option(False, "-c", "--create-pr", help="Create PR if none exists"),
     ) -> None:
-        """Land current PR, create fresh worktree in same space.
+        """Land current PR, move worktree to new stacked branch.
 
-        Enables auto-merge on the PR, creates a new worktree with a magical-musical
-        suffix (e.g., aurora-melody). Use --block to wait for merge and clean up
-        the old worktree.
+        Enables auto-merge on the PR, then moves the worktree to a new branch
+        with timestamp and magical-musical suffix (e.g., 20260127_2204.aurora-melody).
+        The worktree directory stays the same, only the branch changes.
 
         Example:
-            lfops next                 # land PR, create next worktree
-            lfops next --block         # wait for merge, then create worktree
+            lfops next                 # land PR, move to next branch
+            lfops next --block         # wait for merge, then move
             lfops next --create-pr     # create PR if none exists, then next
         """
         repo_root = find_worktree_root()

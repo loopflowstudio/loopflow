@@ -1,2 +1,1 @@
-- Protocol design doc calls for gRPC server + protobuf bindings; I only added JSON v1 compatibility endpoints and mapping helpers. Should I implement the gRPC server and codegen next?
-- Proto v1 endpoints for scheduler/event streaming are not implemented. Do you want those added to the HTTP server as well?
+No open questions.

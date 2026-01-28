@@ -261,6 +261,7 @@ def create(repo_root: Path, name: str, base: str | None = None) -> Path:
     """Create a worktree for a new branch. Returns path.
 
     If worktree already exists, switches to it and returns its path.
+    If branch exists without worktree (orphaned), deletes it first.
     Uses `name` for both worktree path and branch name (no schema).
     """
     existing = {wt.branch for wt in list_all(repo_root)}
@@ -268,6 +269,10 @@ def create(repo_root: Path, name: str, base: str | None = None) -> Path:
     if name in existing:
         output = _run_wt(["switch", name, "--execute", "pwd"], repo_root)
         return Path(output.strip())
+
+    # Delete orphaned branch (exists without worktree) before creating
+    if _local_branch_exists(repo_root, name):
+        _delete_local_branch(repo_root, name)
 
     args = ["switch", "--create", name]
     if base:
@@ -304,10 +309,15 @@ def create_with_schema(
     if worktree_path.exists():
         raise WorktreeError(f"Worktree path already exists: {worktree_path}")
 
-    # Check if branch already exists
+    # Check if branch already exists (in worktrees or as orphaned git branch)
     existing_branches = {wt.branch for wt in list_all(repo_root)}
     if branch_name in existing_branches:
         raise WorktreeError(f"Branch already exists: {branch_name}")
+    if _local_branch_exists(repo_root, branch_name):
+        raise WorktreeError(
+            f"Branch {branch_name} exists without a worktree. "
+            f"Delete with: git branch -D {branch_name}"
+        )
 
     # Resolve base ref and record base_commit for stacking
     base_ref = base or "main"
@@ -450,6 +460,25 @@ def _cherry_is_empty(repo_root: Path, branch: str, base_ref: str) -> bool:
     if result.returncode != 0:
         return False
     return result.stdout.strip() == ""
+
+
+def _local_branch_exists(repo_root: Path, branch: str) -> bool:
+    ref = f"refs/heads/{branch}"
+    result = subprocess.run(
+        ["git", "show-ref", "--verify", ref],
+        cwd=repo_root,
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def _delete_local_branch(repo_root: Path, branch: str) -> bool:
+    result = subprocess.run(
+        ["git", "branch", "-D", branch],
+        cwd=repo_root,
+        capture_output=True,
+    )
+    return result.returncode == 0
 
 
 def _remote_branch_exists(repo_root: Path, branch: str) -> bool:

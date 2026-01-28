@@ -1,3 +1,5 @@
 - Is `src/loopflow/lfd/execution/worker.py` still used, or can it be removed in favor of `runner.py`?
 - How intentionally different are `lf flow` execution semantics versus `lfd` iterations (collector/logging/step lifecycle)?
 - Are there explicit parity guarantees between socket, HTTP, and gRPC behaviors for the daemon?
+- Is there an explicit parity contract between socket events, HTTP v1, and gRPC responses (especially for StepRun/FlowRun lifecycles)?
+- Does the HTTP `/health` endpoint fully cover the planned daemon health checks, or is there still a socket-level health plan?

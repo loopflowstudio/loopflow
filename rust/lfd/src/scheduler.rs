@@ -33,13 +33,10 @@ impl Scheduler {
         if active.contains_key(run_id) {
             return (true, None);
         }
-        match self.semaphore.clone().try_acquire_owned() {
-            Ok(permit) => {
-                active.insert(run_id.to_string(), permit);
-                return (true, None);
-            }
-            Err(_) => {}
-        };
+        if let Ok(permit) = self.semaphore.clone().try_acquire_owned() {
+            active.insert(run_id.to_string(), permit);
+            return (true, None);
+        }
         (false, Some("no slots available".to_string()))
     }
 

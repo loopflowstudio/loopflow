@@ -22,7 +22,7 @@ use crate::proto::control::{
     StreamOutputResponse, UpdateWaveRequest, UpdateWaveResponse, Wave, WaveStatus,
 };
 use crate::scheduler::Scheduler;
-use crate::store::{SharedStore, StoreError};
+use crate::store::{SharedStore, StoreError, StoreResult};
 
 #[derive(Clone)]
 pub struct ControlServer {
@@ -48,6 +48,18 @@ impl ControlServer {
             scheduler,
             started_at: OffsetDateTime::now_utc(),
         }
+    }
+
+    async fn run_store<T, F>(&self, func: F) -> Result<T, Status>
+    where
+        T: Send + 'static,
+        F: FnOnce(SharedStore) -> StoreResult<T> + Send + 'static,
+    {
+        let store = self.store.clone();
+        tokio::task::spawn_blocking(move || func(store))
+            .await
+            .map_err(|err| Status::internal(format!("store task failed: {err}")))?
+            .map_err(Self::store_error)
     }
 
     fn status_counts(waves: &[Wave], step_runs: &[StepRun]) -> (u32, u32, u32) {
@@ -91,19 +103,12 @@ impl ControlServer {
     }
 
     async fn list_waves_inner(&self, repo: Option<String>) -> Result<Vec<Wave>, Status> {
-        let store = self.store.clone();
-        tokio::task::spawn_blocking(move || store.list_waves(repo.as_deref()))
+        self.run_store(move |store| store.list_waves(repo.as_deref()))
             .await
-            .map_err(|err| Status::internal(format!("store task failed: {err}")))?
-            .map_err(Self::store_error)
     }
 
     async fn list_step_runs_inner(&self) -> Result<Vec<StepRun>, Status> {
-        let store = self.store.clone();
-        tokio::task::spawn_blocking(move || store.list_step_runs())
-            .await
-            .map_err(|err| Status::internal(format!("store task failed: {err}")))?
-            .map_err(Self::store_error)
+        self.run_store(|store| store.list_step_runs()).await
     }
 }
 
@@ -130,18 +135,8 @@ impl ControlService for ControlServer {
         &self,
         _request: Request<GetHealthRequest>,
     ) -> Result<Response<GetHealthResponse>, Status> {
-        let store = self.store.clone();
-        let schema_version = tokio::task::spawn_blocking(move || store.schema_version())
-            .await
-            .map_err(|err| Status::internal(format!("store task failed: {err}")))?
-            .map_err(Self::store_error)?;
-
-        let store = self.store.clone();
-        let database_ok = tokio::task::spawn_blocking(move || store.health_check())
-            .await
-            .map_err(|err| Status::internal(format!("store task failed: {err}")))?
-            .map_err(Self::store_error)
-            .is_ok();
+        let schema_version = self.run_store(|store| store.schema_version()).await?;
+        let database_ok = self.run_store(|store| store.health_check()).await.is_ok();
 
         let waves = self.list_waves_inner(None).await?;
         let step_runs = self.list_step_runs_inner().await?;
@@ -190,11 +185,9 @@ impl ControlService for ControlServer {
         request: Request<crate::proto::control::GetWaveRequest>,
     ) -> Result<Response<crate::proto::control::GetWaveResponse>, Status> {
         let wave_id = request.into_inner().wave_id;
-        let store = self.store.clone();
-        let wave = tokio::task::spawn_blocking(move || store.get_wave(&wave_id))
-            .await
-            .map_err(|err| Status::internal(format!("store task failed: {err}")))?
-            .map_err(Self::store_error)?
+        let wave = self
+            .run_store(move |store| store.get_wave(&wave_id))
+            .await?
             .ok_or_else(|| Status::not_found("wave not found"))?;
         Ok(Response::new(crate::proto::control::GetWaveResponse {
             wave: Some(wave),
@@ -232,12 +225,9 @@ impl ControlService for ControlServer {
             pending_activations: 0,
         };
 
-        let store = self.store.clone();
         let wave_clone = wave.clone();
-        tokio::task::spawn_blocking(move || store.create_wave(&wave_clone))
-            .await
-            .map_err(|err| Status::internal(format!("store task failed: {err}")))?
-            .map_err(Self::store_error)?;
+        self.run_store(move |store| store.create_wave(&wave_clone))
+            .await?;
 
         Ok(Response::new(CreateWaveResponse { wave: Some(wave) }))
     }
@@ -248,11 +238,9 @@ impl ControlService for ControlServer {
     ) -> Result<Response<UpdateWaveResponse>, Status> {
         let req = request.into_inner();
         let wave_id = req.wave_id;
-        let store = self.store.clone();
-        let mut wave = tokio::task::spawn_blocking(move || store.get_wave(&wave_id))
-            .await
-            .map_err(|err| Status::internal(format!("store task failed: {err}")))?
-            .map_err(Self::store_error)?
+        let mut wave = self
+            .run_store(move |store| store.get_wave(&wave_id))
+            .await?
             .ok_or_else(|| Status::not_found("wave not found"))?;
 
         if let Some(flow) = req.flow {
@@ -271,12 +259,9 @@ impl ControlService for ControlServer {
             wave.paused = paused;
         }
 
-        let store = self.store.clone();
         let wave_clone = wave.clone();
-        tokio::task::spawn_blocking(move || store.update_wave(&wave_clone))
-            .await
-            .map_err(|err| Status::internal(format!("store task failed: {err}")))?
-            .map_err(Self::store_error)?;
+        self.run_store(move |store| store.update_wave(&wave_clone))
+            .await?;
 
         Ok(Response::new(UpdateWaveResponse { wave: Some(wave) }))
     }
@@ -286,11 +271,8 @@ impl ControlService for ControlServer {
         request: Request<DeleteWaveRequest>,
     ) -> Result<Response<DeleteWaveResponse>, Status> {
         let wave_id = request.into_inner().wave_id;
-        let store = self.store.clone();
-        tokio::task::spawn_blocking(move || store.delete_wave(&wave_id))
-            .await
-            .map_err(|err| Status::internal(format!("store task failed: {err}")))?
-            .map_err(Self::store_error)?;
+        self.run_store(move |store| store.delete_wave(&wave_id))
+            .await?;
         Ok(Response::new(DeleteWaveResponse {}))
     }
 
@@ -299,11 +281,10 @@ impl ControlService for ControlServer {
         request: Request<CloneWaveRequest>,
     ) -> Result<Response<CloneWaveResponse>, Status> {
         let req = request.into_inner();
-        let store = self.store.clone();
-        let mut wave = tokio::task::spawn_blocking(move || store.get_wave(&req.wave_id))
-            .await
-            .map_err(|err| Status::internal(format!("store task failed: {err}")))?
-            .map_err(Self::store_error)?
+        let wave_id = req.wave_id.clone();
+        let mut wave = self
+            .run_store(move |store| store.get_wave(&wave_id))
+            .await?
             .ok_or_else(|| Status::not_found("wave not found"))?;
 
         let new_id = Uuid::new_v4().to_string();
@@ -311,12 +292,9 @@ impl ControlService for ControlServer {
         wave.name = req.name.unwrap_or_else(|| format!("{}-copy", wave.name));
         wave.created_at = Some(Self::now_timestamp());
 
-        let store = self.store.clone();
         let wave_clone = wave.clone();
-        tokio::task::spawn_blocking(move || store.create_wave(&wave_clone))
-            .await
-            .map_err(|err| Status::internal(format!("store task failed: {err}")))?
-            .map_err(Self::store_error)?;
+        self.run_store(move |store| store.create_wave(&wave_clone))
+            .await?;
 
         Ok(Response::new(CloneWaveResponse { wave: Some(wave) }))
     }
@@ -327,11 +305,9 @@ impl ControlService for ControlServer {
     ) -> Result<Response<RunWaveResponse>, Status> {
         let req = request.into_inner();
         let wave_id = req.wave_id;
-        let store = self.store.clone();
-        let mut wave = tokio::task::spawn_blocking(move || store.get_wave(&wave_id))
-            .await
-            .map_err(|err| Status::internal(format!("store task failed: {err}")))?
-            .map_err(Self::store_error)?
+        let mut wave = self
+            .run_store(move |store| store.get_wave(&wave_id))
+            .await?
             .ok_or_else(|| Status::not_found("wave not found"))?;
 
         wave.status = WaveStatus::WaveRunning as i32;
@@ -349,12 +325,9 @@ impl ControlService for ControlServer {
             wave.stimulus = Some(stimulus);
         }
 
-        let store = self.store.clone();
         let wave_clone = wave.clone();
-        tokio::task::spawn_blocking(move || store.update_wave(&wave_clone))
-            .await
-            .map_err(|err| Status::internal(format!("store task failed: {err}")))?
-            .map_err(Self::store_error)?;
+        self.run_store(move |store| store.update_wave(&wave_clone))
+            .await?;
 
         Ok(Response::new(RunWaveResponse {
             started: true,
@@ -367,22 +340,17 @@ impl ControlService for ControlServer {
         request: Request<StopWaveRequest>,
     ) -> Result<Response<StopWaveResponse>, Status> {
         let wave_id = request.into_inner().wave_id;
-        let store = self.store.clone();
-        let mut wave = tokio::task::spawn_blocking(move || store.get_wave(&wave_id))
-            .await
-            .map_err(|err| Status::internal(format!("store task failed: {err}")))?
-            .map_err(Self::store_error)?
+        let mut wave = self
+            .run_store(move |store| store.get_wave(&wave_id))
+            .await?
             .ok_or_else(|| Status::not_found("wave not found"))?;
 
         wave.status = WaveStatus::WaveIdle as i32;
         wave.paused = true;
 
-        let store = self.store.clone();
         let wave_clone = wave.clone();
-        tokio::task::spawn_blocking(move || store.update_wave(&wave_clone))
-            .await
-            .map_err(|err| Status::internal(format!("store task failed: {err}")))?
-            .map_err(Self::store_error)?;
+        self.run_store(move |store| store.update_wave(&wave_clone))
+            .await?;
 
         Ok(Response::new(StopWaveResponse { stopped: true }))
     }
@@ -474,16 +442,14 @@ impl ControlService for ControlServer {
         request: Request<crate::proto::control::GetStepRunHistoryRequest>,
     ) -> Result<Response<crate::proto::control::GetStepRunHistoryResponse>, Status> {
         let req = request.into_inner();
-        let store = self.store.clone();
         let worktree = req.worktree.clone();
         let repo = req.repo.clone();
         let limit = req.limit;
-        let runs = tokio::task::spawn_blocking(move || {
-            store.list_step_run_history(worktree.as_deref(), repo.as_deref(), limit)
-        })
-        .await
-        .map_err(|err| Status::internal(format!("store task failed: {err}")))?
-        .map_err(Self::store_error)?;
+        let runs = self
+            .run_store(move |store| {
+                store.list_step_run_history(worktree.as_deref(), repo.as_deref(), limit)
+            })
+            .await?;
 
         Ok(Response::new(
             crate::proto::control::GetStepRunHistoryResponse { step_runs: runs },
@@ -510,12 +476,9 @@ impl ControlService for ControlServer {
             stored.started_at = Some(Self::now_timestamp());
         }
 
-        let store = self.store.clone();
         let stored_clone = stored.clone();
-        tokio::task::spawn_blocking(move || store.start_step_run(&stored_clone))
-            .await
-            .map_err(|err| Status::internal(format!("store task failed: {err}")))?
-            .map_err(Self::store_error)?;
+        self.run_store(move |store| store.start_step_run(&stored_clone))
+            .await?;
 
         Ok(Response::new(crate::proto::control::StartStepRunResponse {
             id,
@@ -529,11 +492,8 @@ impl ControlService for ControlServer {
         let req = request.into_inner();
         let step_run_id = req.step_run_id.clone();
         let ended_at = Self::now_timestamp().seconds;
-        let store = self.store.clone();
-        tokio::task::spawn_blocking(move || store.end_step_run(&step_run_id, req.status, ended_at))
-            .await
-            .map_err(|err| Status::internal(format!("store task failed: {err}")))?
-            .map_err(Self::store_error)?;
+        self.run_store(move |store| store.end_step_run(&step_run_id, req.status, ended_at))
+            .await?;
 
         Ok(Response::new(EndStepRunResponse {
             id: req.step_run_id,

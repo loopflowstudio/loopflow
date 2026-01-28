@@ -1,0 +1,540 @@
+// Loopflow Engine Contract v1
+//
+// This schema defines the execution engine interface between the daemon (lfd)
+// and the engine core (lf-core). It covers context assembly, prompt formatting,
+// step/flow execution, and artifact I/O.
+//
+// Protocol version: 1.0.0
+// Compatibility: Clients must refuse to connect if major version differs.
+
+syntax = "proto3";
+
+package loopflow.engine.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/loopflowstudio/loopflow/proto/engine/v1";
+
+// -----------------------------------------------------------------------------
+// Service Definitions
+// -----------------------------------------------------------------------------
+
+// EngineService handles execution of steps and flows.
+service EngineService {
+  // Context assembly
+  rpc GatherContext(GatherContextRequest) returns (GatherContextResponse);
+  rpc TrimContext(TrimContextRequest) returns (TrimContextResponse);
+  rpc AnalyzeTokens(AnalyzeTokensRequest) returns (AnalyzeTokensResponse);
+
+  // Prompt formatting
+  rpc FormatPrompt(FormatPromptRequest) returns (FormatPromptResponse);
+
+  // Step execution
+  rpc RunStep(RunStepRequest) returns (stream StepEvent);
+  rpc RunInteractiveStep(RunInteractiveStepRequest) returns (RunInteractiveStepResponse);
+
+  // Flow execution
+  rpc RunFlow(RunFlowRequest) returns (stream FlowEvent);
+  rpc RunFork(RunForkRequest) returns (stream ForkEvent);
+  rpc Synthesize(SynthesizeRequest) returns (stream SynthesizeEvent);
+
+  // Artifact resolution
+  rpc LoadStep(LoadStepRequest) returns (LoadStepResponse);
+  rpc LoadFlow(LoadFlowRequest) returns (LoadFlowResponse);
+  rpc LoadDirection(LoadDirectionRequest) returns (LoadDirectionResponse);
+
+  // Message generation
+  rpc GenerateCommitMessage(GenerateCommitMessageRequest) returns (GenerateCommitMessageResponse);
+  rpc GeneratePRMessage(GeneratePRMessageRequest) returns (GeneratePRMessageResponse);
+}
+
+// -----------------------------------------------------------------------------
+// Context Assembly
+// -----------------------------------------------------------------------------
+
+// How to gather branch diff information.
+enum DiffMode {
+  DIFF_MODE_UNSPECIFIED = 0;
+  DIFF_FILES = 1;  // Full content of changed files (default for steps)
+  DIFF_RAW = 2;    // Raw unified diff
+  DIFF_NONE = 3;   // Neither
+}
+
+// Clipboard content (text and/or image).
+message ClipboardContent {
+  optional string text = 1;
+  optional bytes image = 2;
+  optional string image_mime_type = 3;
+}
+
+// Configuration for file gathering.
+message FilesetConfig {
+  repeated string paths = 1;         // Additional paths to include
+  repeated string exclude = 2;       // Patterns to exclude
+  optional uint32 token_limit = 3;   // Summarize files exceeding this
+  bool parent_docs = 4;              // Include docs from parent area paths
+}
+
+// Token budget configuration.
+message BudgetConfig {
+  uint32 area = 1;     // Token limit for area content (default: 50000)
+  uint32 docs = 2;     // Token limit for reference docs (default: 30000)
+  uint32 diff = 3;     // Token limit for branch changes (default: 20000)
+  uint32 total = 4;    // Max total tokens (default: 120000)
+}
+
+// Full context configuration.
+message ContextConfig {
+  DiffMode diff_mode = 1;
+  FilesetConfig files = 2;
+  optional string area = 3;
+  bool lfdocs = 4;               // Include loopflow docs (default: true)
+  bool clipboard = 5;            // Include clipboard content
+  bool summaries = 6;            // Include pre-generated summaries
+  BudgetConfig budgets = 7;
+}
+
+// A document included in context.
+message Document {
+  string path = 1;       // Relative path from repo root
+  string content = 2;    // File content
+  string category = 3;   // "docs", "diff_files", "area", "summaries", etc.
+}
+
+// A direction (judgment/intent) document.
+message Direction {
+  string name = 1;
+  string content = 2;
+  string source = 3;     // "builtin", "repo", "global"
+}
+
+// Step file with frontmatter config.
+message StepFile {
+  string name = 1;
+  string content = 2;
+  StepConfig config = 3;
+  string source = 4;     // "builtin", "repo", "global", "skill:{prefix}"
+}
+
+// Step frontmatter configuration.
+message StepConfig {
+  optional bool interactive = 1;
+  repeated string include = 2;
+  repeated string exclude = 3;
+  optional string model = 4;
+  repeated string direction = 5;
+  optional bool chrome = 6;
+  optional bool diff_files = 7;
+  repeated string context = 8;
+  optional string area = 9;
+}
+
+// All components gathered for a prompt.
+message PromptComponents {
+  optional string run_mode = 1;              // "auto" or "interactive"
+  repeated Document docs = 2;                 // Reference documentation
+  optional string diff = 3;                   // Raw unified diff
+  repeated Document diff_files = 4;           // Full file contents for changed files
+  optional StepFile step = 5;                 // The step/prompt
+  string repo_root = 6;                       // Absolute path to repo
+  optional ClipboardContent clipboard = 7;    // Clipboard content
+  optional string loopflow_doc = 8;           // Bundled LOOPFLOW.md
+  repeated Direction directions = 9;          // Contextual directions
+  repeated string image_files = 10;           // Paths to image files
+  repeated Document summaries = 11;           // Pre-generated area summaries
+}
+
+// Information about a dropped component during trimming.
+message DroppedComponent {
+  string category = 1;
+  string name = 2;
+  uint32 tokens = 3;
+  string reason = 4;  // "budget_exceeded", "token_limit", etc.
+}
+
+message GatherContextRequest {
+  string repo_root = 1;
+  optional string step = 2;            // Step name to load
+  optional string inline = 3;          // Inline prompt (no step file)
+  repeated string step_args = 4;       // Arguments for step template
+  optional string run_mode = 5;        // "auto" or "interactive"
+  repeated string directions = 6;      // Direction names to load
+  ContextConfig config = 7;
+}
+
+message GatherContextResponse {
+  PromptComponents components = 1;
+  uint32 total_tokens = 2;
+}
+
+message TrimContextRequest {
+  PromptComponents components = 1;
+  uint32 max_tokens = 2;
+}
+
+message TrimContextResponse {
+  PromptComponents components = 1;
+  repeated DroppedComponent dropped = 2;
+  uint32 total_tokens = 3;
+}
+
+// Token tree node for hierarchical breakdown.
+message TokenNode {
+  string name = 1;
+  uint32 tokens = 2;
+  optional string path = 3;
+  repeated TokenNode children = 4;
+}
+
+message AnalyzeTokensRequest {
+  PromptComponents components = 1;
+}
+
+message AnalyzeTokensResponse {
+  TokenNode root = 1;
+  uint32 total_tokens = 2;
+  string formatted = 3;  // Human-readable breakdown
+}
+
+// -----------------------------------------------------------------------------
+// Prompt Formatting
+// -----------------------------------------------------------------------------
+
+message FormatPromptRequest {
+  PromptComponents components = 1;
+}
+
+message FormatPromptResponse {
+  string prompt = 1;
+  uint32 tokens = 2;
+}
+
+// -----------------------------------------------------------------------------
+// Step Execution
+// -----------------------------------------------------------------------------
+
+// Model backend specification.
+message ModelSpec {
+  string backend = 1;         // "claude", "codex", "gemini"
+  optional string variant = 2; // "opus", "sonnet", etc.
+}
+
+message RunStepRequest {
+  string repo_root = 1;
+  string step = 2;
+  repeated string step_args = 3;
+  ContextConfig context_config = 4;
+  repeated string directions = 5;
+  ModelSpec model = 6;
+  bool skip_permissions = 7;
+  bool push_enabled = 8;
+  bool chrome = 9;
+  string idempotency_key = 10;
+}
+
+// Step execution event types.
+enum StepEventType {
+  STEP_EVENT_TYPE_UNSPECIFIED = 0;
+  STEP_STARTED = 1;
+  STEP_OUTPUT = 2;
+  STEP_COMPLETED = 3;
+  STEP_FAILED = 4;
+  STEP_COMMITTED = 5;
+  STEP_PUSHED = 6;
+}
+
+message StepEvent {
+  StepEventType type = 1;
+  google.protobuf.Timestamp timestamp = 2;
+
+  // STEP_STARTED
+  optional string step_run_id = 10;
+  optional uint32 pid = 11;
+
+  // STEP_OUTPUT
+  optional string text = 20;
+
+  // STEP_COMPLETED / STEP_FAILED
+  optional int32 exit_code = 30;
+  optional string error = 31;
+
+  // STEP_COMMITTED
+  optional string commit_sha = 40;
+  optional string commit_message = 41;
+
+  // STEP_PUSHED
+  optional string remote_branch = 50;
+}
+
+message RunInteractiveStepRequest {
+  string repo_root = 1;
+  string step = 2;
+  repeated string step_args = 3;
+  ContextConfig context_config = 4;
+  repeated string directions = 5;
+  ModelSpec model = 6;
+  bool skip_permissions = 7;
+  bool chrome = 8;
+}
+
+message RunInteractiveStepResponse {
+  // Returns immediately; step runs in foreground terminal.
+  // Used to get command line to exec.
+  repeated string command = 1;
+  repeated string env = 2;  // KEY=VALUE format
+}
+
+// -----------------------------------------------------------------------------
+// Flow Execution
+// -----------------------------------------------------------------------------
+
+// Flow item types (union).
+message FlowItem {
+  oneof item {
+    FlowStep step = 1;
+    FlowFork fork = 2;
+    FlowChoose choose = 3;
+    FlowLoopUntilEmpty loop_until_empty = 4;
+  }
+}
+
+message FlowStep {
+  string name = 1;
+  repeated string after = 2;      // Dependencies
+  optional string model = 3;
+  repeated string direction = 4;
+  optional bool interactive = 5;
+}
+
+message ForkThread {
+  optional string step = 1;
+  optional string flow = 2;
+  repeated string direction = 3;
+  optional string model = 4;
+  repeated string area = 5;
+}
+
+message SynthesizeConfig {
+  repeated string direction = 1;
+  repeated string area = 2;
+  optional string prompt = 3;
+}
+
+message FlowFork {
+  repeated ForkThread threads = 1;
+  optional string step = 2;       // Apply to all threads
+  optional string model = 3;
+  optional SynthesizeConfig synthesize = 4;
+}
+
+message FlowChoose {
+  map<string, FlowItemList> options = 1;
+  optional string output = 2;
+  optional string prompt = 3;
+}
+
+message FlowItemList {
+  repeated FlowItem items = 1;
+}
+
+message FlowLoopUntilEmpty {
+  repeated FlowItem steps = 1;
+  optional string wave = 2;
+  uint32 max_iterations = 3;
+}
+
+message Flow {
+  string name = 1;
+  repeated FlowItem steps = 2;
+}
+
+message RunFlowRequest {
+  string repo_root = 1;
+  string flow = 2;
+  repeated string area = 3;
+  repeated string directions = 4;
+  ContextConfig context_config = 5;
+  ModelSpec model = 6;
+  bool skip_permissions = 7;
+  bool push_enabled = 8;
+  bool pr_enabled = 9;
+  bool chrome = 10;
+  string idempotency_key = 11;
+}
+
+enum FlowEventType {
+  FLOW_EVENT_TYPE_UNSPECIFIED = 0;
+  FLOW_STARTED = 1;
+  FLOW_STEP_STARTED = 2;
+  FLOW_STEP_COMPLETED = 3;
+  FLOW_STEP_FAILED = 4;
+  FLOW_FORK_STARTED = 5;
+  FLOW_FORK_THREAD_COMPLETED = 6;
+  FLOW_FORK_COMPLETED = 7;
+  FLOW_SYNTHESIZE_STARTED = 8;
+  FLOW_SYNTHESIZE_COMPLETED = 9;
+  FLOW_CHOOSE_STARTED = 10;
+  FLOW_CHOOSE_DECIDED = 11;
+  FLOW_COMPLETED = 12;
+  FLOW_FAILED = 13;
+  FLOW_COMMITTED = 14;
+  FLOW_PR_CREATED = 15;
+}
+
+message FlowEvent {
+  FlowEventType type = 1;
+  google.protobuf.Timestamp timestamp = 2;
+  optional string flow_run_id = 3;
+
+  // FLOW_STEP_* events
+  optional string step_name = 10;
+  optional int32 step_index = 11;
+  optional int32 exit_code = 12;
+  optional string error = 13;
+
+  // FLOW_FORK_* events
+  optional uint32 thread_index = 20;
+  optional string thread_direction = 21;
+  optional string thread_diff = 22;
+
+  // FLOW_CHOOSE_* events
+  optional string chosen_branch = 30;
+
+  // FLOW_COMMITTED
+  optional string commit_sha = 40;
+
+  // FLOW_PR_CREATED
+  optional string pr_url = 50;
+}
+
+// -----------------------------------------------------------------------------
+// Fork Execution
+// -----------------------------------------------------------------------------
+
+message RunForkRequest {
+  repeated ForkThread threads = 1;
+  string base_commit = 2;
+  string parent_worktree = 3;
+  string flow_name = 4;
+  string main_repo = 5;
+  repeated string exclude = 6;
+  bool skip_permissions = 7;
+  ModelSpec model = 8;
+  repeated string context = 9;
+  string idempotency_key = 10;
+}
+
+message ForkResult {
+  string worktree = 1;
+  ForkThread config = 2;
+  string diff = 3;            // Diff from base commit
+  string status = 4;          // "completed" or "failed"
+  string scratch_notes = 5;   // Contents of scratch/*.md
+}
+
+enum ForkEventType {
+  FORK_EVENT_TYPE_UNSPECIFIED = 0;
+  FORK_STARTED = 1;
+  FORK_THREAD_STARTED = 2;
+  FORK_THREAD_OUTPUT = 3;
+  FORK_THREAD_COMPLETED = 4;
+  FORK_THREAD_FAILED = 5;
+  FORK_COMPLETED = 6;
+}
+
+message ForkEvent {
+  ForkEventType type = 1;
+  google.protobuf.Timestamp timestamp = 2;
+
+  optional uint32 thread_index = 10;
+  optional string text = 20;
+  optional ForkResult result = 30;
+  repeated ForkResult all_results = 40;  // FORK_COMPLETED
+}
+
+// -----------------------------------------------------------------------------
+// Synthesis
+// -----------------------------------------------------------------------------
+
+message SynthesizeRequest {
+  repeated ForkResult fork_results = 1;
+  SynthesizeConfig config = 2;
+  string worktree = 3;
+  ModelSpec model = 4;
+  bool skip_permissions = 5;
+  string idempotency_key = 6;
+}
+
+enum SynthesizeEventType {
+  SYNTHESIZE_EVENT_TYPE_UNSPECIFIED = 0;
+  SYNTHESIZE_STARTED = 1;
+  SYNTHESIZE_OUTPUT = 2;
+  SYNTHESIZE_COMPLETED = 3;
+  SYNTHESIZE_FAILED = 4;
+}
+
+message SynthesizeEvent {
+  SynthesizeEventType type = 1;
+  google.protobuf.Timestamp timestamp = 2;
+
+  optional string text = 10;
+  optional int32 exit_code = 20;
+  optional string error = 21;
+}
+
+// -----------------------------------------------------------------------------
+// Artifact Resolution
+// -----------------------------------------------------------------------------
+
+message LoadStepRequest {
+  string name = 1;
+  string repo_root = 2;
+}
+
+message LoadStepResponse {
+  StepFile step = 1;
+}
+
+message LoadFlowRequest {
+  string name = 1;
+  string repo_root = 2;
+}
+
+message LoadFlowResponse {
+  Flow flow = 1;
+}
+
+message LoadDirectionRequest {
+  string name = 1;
+  string repo_root = 2;
+}
+
+message LoadDirectionResponse {
+  Direction direction = 1;
+}
+
+// -----------------------------------------------------------------------------
+// Message Generation
+// -----------------------------------------------------------------------------
+
+message GenerateCommitMessageRequest {
+  string repo_root = 1;
+  optional string diff = 2;  // If not provided, uses staged changes
+  ModelSpec model = 3;
+}
+
+message GenerateCommitMessageResponse {
+  string title = 1;
+  string body = 2;
+}
+
+message GeneratePRMessageRequest {
+  string repo_root = 1;
+  optional string base_branch = 2;  // Default: main
+  ModelSpec model = 3;
+}
+
+message GeneratePRMessageResponse {
+  string title = 1;
+  string body = 2;
+}

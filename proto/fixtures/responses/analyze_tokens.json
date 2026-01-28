@@ -1,0 +1,67 @@
+{
+  "root": {
+    "name": "total",
+    "tokens": 8500,
+    "children": [
+      {
+        "name": "loopflow",
+        "tokens": 1200,
+        "children": []
+      },
+      {
+        "name": "docs",
+        "tokens": 2400,
+        "children": [
+          {
+            "name": "STYLE.md",
+            "tokens": 1500,
+            "path": "STYLE.md"
+          },
+          {
+            "name": "README.md",
+            "tokens": 900,
+            "path": "README.md"
+          }
+        ]
+      },
+      {
+        "name": "diff_files",
+        "tokens": 3200,
+        "children": [
+          {
+            "name": "src/auth/oauth.py",
+            "tokens": 3200,
+            "path": "src/auth/oauth.py"
+          }
+        ]
+      },
+      {
+        "name": "summaries",
+        "tokens": 800,
+        "children": [
+          {
+            "name": "src/auth",
+            "tokens": 800,
+            "path": "src/auth"
+          }
+        ]
+      },
+      {
+        "name": "task",
+        "tokens": 900,
+        "children": [
+          {
+            "name": "direction:product-engineer",
+            "tokens": 400
+          },
+          {
+            "name": "step:implement",
+            "tokens": 500
+          }
+        ]
+      }
+    ]
+  },
+  "total_tokens": 8500,
+  "formatted": "Tokens: 8,500\n\ndocs           2,400 ████\n  STYLE.md     1,500 ██\n  README.md      900 █\ndiff_files     3,200 █████\n  oauth.py     3,200 █████\nloopflow       1,200 ██\nsummaries        800 █\ntask             900 █"
+}

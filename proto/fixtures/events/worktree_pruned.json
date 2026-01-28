@@ -1,0 +1,8 @@
+{
+  "event": "worktree.pruned",
+  "timestamp": "2026-01-27T14:00:00Z",
+  "worktree_pruned": {
+    "branch": "feature-auth",
+    "repo": "/Users/alice/repos/myproject"
+  }
+}

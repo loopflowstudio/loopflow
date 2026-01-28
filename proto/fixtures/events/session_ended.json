@@ -1,0 +1,8 @@
+{
+  "event": "session.ended",
+  "timestamp": "2026-01-27T12:05:30Z",
+  "session_ended": {
+    "id": "sr_abc123def456",
+    "status": "completed"
+  }
+}

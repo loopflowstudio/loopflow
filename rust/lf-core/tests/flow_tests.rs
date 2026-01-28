@@ -81,7 +81,10 @@ fn golden_flows() {
     let flow = load_flow("forked", repo).unwrap();
     assert_eq!(flow.items.len(), 3);
     match &flow.items[0] {
-        FlowItem::Fork { branches, synthesize } => {
+        FlowItem::Fork {
+            branches,
+            synthesize,
+        } => {
             assert_eq!(branches.len(), 2);
             assert_eq!(synthesize.as_deref(), Some("consolidate"));
         }
@@ -98,13 +101,16 @@ fn golden_flows() {
     match &flow.items[2] {
         FlowItem::LoopUntilEmpty { steps } => {
             assert_eq!(steps.len(), 1);
-            assert_eq!(steps[0], FlowItem::Step(Step {
-                name: "iterate".to_string(),
-                model: None,
-                directions: vec![],
-                interactive: None,
-                content: None,
-            }));
+            assert_eq!(
+                steps[0],
+                FlowItem::Step(Step {
+                    name: "iterate".to_string(),
+                    model: None,
+                    directions: vec![],
+                    interactive: None,
+                    content: None,
+                })
+            );
         }
         _ => panic!("expected loop"),
     }

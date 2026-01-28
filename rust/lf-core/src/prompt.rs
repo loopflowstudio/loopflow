@@ -56,9 +56,11 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
     })
 }
 
+/// Estimate token count from text length.
+/// Uses byte length / 3 as a rough approximation until tiktoken integration.
 pub fn count_tokens(text: &str) -> usize {
-    let bytes = text.as_bytes().len();
-    std::cmp::max(bytes / 3, 1)
+    // str::len() returns byte length, which is what we want for this estimate
+    std::cmp::max(text.len() / 3, 1)
 }
 
 pub fn format_prompt(_components: &PromptComponents) -> String {

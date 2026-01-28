@@ -16,7 +16,9 @@ pub fn create_worktree(repo: &Path, worktree: &Path, branch: &str) -> Result<(),
     if status.success() {
         Ok(())
     } else {
-        Err(CoreError::WorktreeError("git worktree add failed".to_string()))
+        Err(CoreError::WorktreeError(
+            "git worktree add failed".to_string(),
+        ))
     }
 }
 
@@ -43,9 +45,7 @@ pub fn find_worktree_root(path: &Path) -> Result<String, CoreError> {
         .arg("--show-toplevel")
         .output()?;
     if !output.status.success() {
-        return Err(CoreError::WorktreeError(
-            "git rev-parse failed".to_string(),
-        ));
+        return Err(CoreError::WorktreeError("git rev-parse failed".to_string()));
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }

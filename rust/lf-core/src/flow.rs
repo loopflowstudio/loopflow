@@ -54,8 +54,8 @@ pub struct Direction {
 pub fn load_flow(name: &str, repo: &Path) -> Result<Flow, LoadError> {
     let flow_path = find_flow_path(name, repo)?;
     let content = fs::read_to_string(&flow_path)?;
-    let value: Value = serde_yaml::from_str(&content)
-        .map_err(|err| LoadError::InvalidFlow(err.to_string()))?;
+    let value: Value =
+        serde_yaml::from_str(&content).map_err(|err| LoadError::InvalidFlow(err.to_string()))?;
     let items = parse_flow_items(&value)?;
     Ok(Flow {
         name: name.to_string(),
@@ -120,14 +120,24 @@ fn find_direction_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
     Err(LoadError::DirectionNotFound(name.to_string()))
 }
 
+// -----------------------------------------------------------------------------
+// YAML parsing helpers
+// -----------------------------------------------------------------------------
+
+fn key(s: &str) -> Value {
+    Value::String(s.to_string())
+}
+
 fn parse_flow_items(value: &Value) -> Result<Vec<FlowItem>, LoadError> {
     match value {
         Value::Sequence(seq) => seq.iter().map(parse_flow_item).collect(),
         Value::Mapping(map) => {
-            if let Some(steps) = map.get(&Value::String("steps".to_string())) {
+            if let Some(steps) = map.get(key("steps")) {
                 return parse_flow_items(steps);
             }
-            Err(LoadError::InvalidFlow("flow root must be a list".to_string()))
+            Err(LoadError::InvalidFlow(
+                "flow root must be a list".to_string(),
+            ))
         }
         _ => Err(LoadError::InvalidFlow(
             "flow root must be a list".to_string(),
@@ -152,16 +162,16 @@ fn parse_flow_item(value: &Value) -> Result<FlowItem, LoadError> {
 }
 
 fn parse_flow_mapping(map: &serde_yaml::Mapping) -> Result<FlowItem, LoadError> {
-    if let Some(step_value) = map.get(&Value::String("step".to_string())) {
+    if let Some(step_value) = map.get(key("step")) {
         return Ok(FlowItem::Step(parse_step_value(step_value)?));
     }
-    if let Some(fork_value) = map.get(&Value::String("fork".to_string())) {
+    if let Some(fork_value) = map.get(key("fork")) {
         return parse_fork_value(fork_value);
     }
-    if let Some(choose_value) = map.get(&Value::String("choose".to_string())) {
+    if let Some(choose_value) = map.get(key("choose")) {
         return parse_choose_value(choose_value);
     }
-    if let Some(loop_value) = map.get(&Value::String("loop_until_empty".to_string())) {
+    if let Some(loop_value) = map.get(key("loop_until_empty")) {
         return parse_loop_value(loop_value);
     }
     Err(LoadError::InvalidFlow(
@@ -179,7 +189,7 @@ fn parse_step_value(value: &Value) -> Result<Step, LoadError> {
             content: None,
         }),
         Value::Mapping(map) => {
-            let name = match map.get(&Value::String("name".to_string())) {
+            let name = match map.get(key("name")) {
                 Some(Value::String(name)) => name.to_string(),
                 _ => {
                     return Err(LoadError::InvalidFlow(
@@ -188,13 +198,11 @@ fn parse_step_value(value: &Value) -> Result<Step, LoadError> {
                 }
             };
             let model = map
-                .get(&Value::String("model".to_string()))
+                .get(key("model"))
                 .and_then(|val| val.as_str())
                 .map(|val| val.to_string());
-            let interactive = map
-                .get(&Value::String("interactive".to_string()))
-                .and_then(|val| val.as_bool());
-            let directions = parse_string_list(map.get(&Value::String("direction".to_string())));
+            let interactive = map.get(key("interactive")).and_then(|val| val.as_bool());
+            let directions = parse_string_list(map.get(key("direction")));
             Ok(Step {
                 name,
                 model,
@@ -214,7 +222,7 @@ fn parse_fork_value(value: &Value) -> Result<FlowItem, LoadError> {
         .as_mapping()
         .ok_or_else(|| LoadError::InvalidFlow("fork must be mapping".to_string()))?;
     let branches_value = map
-        .get(&Value::String("branches".to_string()))
+        .get(key("branches"))
         .ok_or_else(|| LoadError::InvalidFlow("fork missing branches".to_string()))?;
     let branches = match branches_value {
         Value::Sequence(seq) => seq.iter().map(parse_flow_item).collect::<Result<_, _>>()?,
@@ -225,10 +233,13 @@ fn parse_fork_value(value: &Value) -> Result<FlowItem, LoadError> {
         }
     };
     let synthesize = map
-        .get(&Value::String("synthesize".to_string()))
+        .get(key("synthesize"))
         .and_then(|val| val.as_str())
         .map(|val| val.to_string());
-    Ok(FlowItem::Fork { branches, synthesize })
+    Ok(FlowItem::Fork {
+        branches,
+        synthesize,
+    })
 }
 
 fn parse_choose_value(value: &Value) -> Result<FlowItem, LoadError> {
@@ -236,24 +247,24 @@ fn parse_choose_value(value: &Value) -> Result<FlowItem, LoadError> {
         .as_mapping()
         .ok_or_else(|| LoadError::InvalidFlow("choose must be mapping".to_string()))?;
     let prompt = map
-        .get(&Value::String("prompt".to_string()))
+        .get(key("prompt"))
         .and_then(|val| val.as_str())
         .ok_or_else(|| LoadError::InvalidFlow("choose missing prompt".to_string()))?
         .to_string();
     let options_value = map
-        .get(&Value::String("options".to_string()))
+        .get(key("options"))
         .ok_or_else(|| LoadError::InvalidFlow("choose missing options".to_string()))?;
-    let options_map = options_value.as_mapping().ok_or_else(|| {
-        LoadError::InvalidFlow("choose options must be mapping".to_string())
-    })?;
+    let options_map = options_value
+        .as_mapping()
+        .ok_or_else(|| LoadError::InvalidFlow("choose options must be mapping".to_string()))?;
     let mut options = HashMap::new();
-    for (key, value) in options_map {
-        let key = key
+    for (k, v) in options_map {
+        let k = k
             .as_str()
             .ok_or_else(|| LoadError::InvalidFlow("choose option key must be string".to_string()))?
             .to_string();
-        let items = parse_flow_items(value)?;
-        options.insert(key, items);
+        let items = parse_flow_items(v)?;
+        options.insert(k, items);
     }
     Ok(FlowItem::Choose { prompt, options })
 }
@@ -263,7 +274,7 @@ fn parse_loop_value(value: &Value) -> Result<FlowItem, LoadError> {
         .as_mapping()
         .ok_or_else(|| LoadError::InvalidFlow("loop_until_empty must be mapping".to_string()))?;
     let steps_value = map
-        .get(&Value::String("steps".to_string()))
+        .get(key("steps"))
         .ok_or_else(|| LoadError::InvalidFlow("loop_until_empty missing steps".to_string()))?;
     let steps = parse_flow_items(steps_value)?;
     Ok(FlowItem::LoopUntilEmpty { steps })

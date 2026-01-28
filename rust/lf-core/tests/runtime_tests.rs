@@ -5,11 +5,11 @@ use std::sync::Mutex;
 use lf_core::runtime::{
     tick_flow_with_runner, FlowRun, FlowRunStatus, StepResult, StepRun, StepRunStatus, TickResult,
 };
-use lf_core::{load_flow, RunStore, Step};
+use lf_core::{load_flow, RunId, RunStore, Step};
 use tempfile::TempDir;
 
 struct MemoryStore {
-    runs: Mutex<HashMap<String, FlowRun>>,
+    runs: Mutex<HashMap<RunId, FlowRun>>,
     step_runs: Mutex<Vec<StepRun>>,
 }
 
@@ -23,7 +23,7 @@ impl MemoryStore {
         }
     }
 
-    fn get_run_copy(&self, id: &str) -> FlowRun {
+    fn get_run_copy(&self, id: &RunId) -> FlowRun {
         self.runs.lock().unwrap().get(id).unwrap().clone()
     }
 
@@ -33,7 +33,7 @@ impl MemoryStore {
 }
 
 impl RunStore for MemoryStore {
-    fn get_run(&self, id: &str) -> Result<FlowRun, lf_core::StoreError> {
+    fn get_run(&self, id: &RunId) -> Result<FlowRun, lf_core::StoreError> {
         self.runs
             .lock()
             .unwrap()
@@ -88,8 +88,9 @@ fn tick_auto_flow_end_to_end() {
     let repo = temp.path();
     write_flow(repo, "auto", "- implement\n- polish\n");
 
+    let run_id = RunId::new("run-1");
     let run = FlowRun {
-        id: "run-1".to_string(),
+        id: run_id.clone(),
         flow: "auto".to_string(),
         direction: vec!["product-engineer".to_string()],
         area: vec![".".to_string()],
@@ -103,13 +104,13 @@ fn tick_auto_flow_end_to_end() {
     let store = MemoryStore::new(run);
     let runner = FakeRunner { exit_code: 0 };
 
-    let first = tick_flow_with_runner("run-1", &store, &runner).unwrap();
+    let first = tick_flow_with_runner(&run_id, &store, &runner).unwrap();
     assert_eq!(first, TickResult::StepComplete);
-    let second = tick_flow_with_runner("run-1", &store, &runner).unwrap();
+    let second = tick_flow_with_runner(&run_id, &store, &runner).unwrap();
     assert_eq!(second, TickResult::StepComplete);
-    let third = tick_flow_with_runner("run-1", &store, &runner).unwrap();
+    let third = tick_flow_with_runner(&run_id, &store, &runner).unwrap();
     assert_eq!(third, TickResult::FlowComplete);
-    let updated = store.get_run_copy("run-1");
+    let updated = store.get_run_copy(&run_id);
     assert_eq!(updated.status, FlowRunStatus::Completed);
 }
 
@@ -123,8 +124,9 @@ fn tick_interactive_pauses() {
         "- step:\n    name: design\n    interactive: true\n",
     );
 
+    let run_id = RunId::new("run-2");
     let run = FlowRun {
-        id: "run-2".to_string(),
+        id: run_id.clone(),
         flow: "interactive".to_string(),
         direction: vec!["designer".to_string()],
         area: vec![".".to_string()],
@@ -138,9 +140,9 @@ fn tick_interactive_pauses() {
     let store = MemoryStore::new(run);
     let runner = FakeRunner { exit_code: 0 };
 
-    let result = tick_flow_with_runner("run-2", &store, &runner).unwrap();
+    let result = tick_flow_with_runner(&run_id, &store, &runner).unwrap();
     assert_eq!(result, TickResult::WaitingInteractive);
-    let updated = store.get_run_copy("run-2");
+    let updated = store.get_run_copy(&run_id);
     assert_eq!(updated.status, FlowRunStatus::Waiting);
     assert_eq!(updated.step_index, 0);
 

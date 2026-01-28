@@ -7,25 +7,59 @@ use crate::error::CoreError;
 use crate::flow::{load_flow, FlowItem, Step};
 use crate::store::RunStore;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+// -----------------------------------------------------------------------------
+// Newtypes
+// -----------------------------------------------------------------------------
+
+/// Unique identifier for a flow run.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct RunId(pub String);
+
+impl RunId {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for RunId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Status enums
+// -----------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum FlowRunStatus {
+    #[default]
     Running,
     Waiting,
     Completed,
     Failed,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum StepRunStatus {
+    #[default]
     Running,
     Waiting,
     Completed,
     Failed,
 }
+
+// -----------------------------------------------------------------------------
+// Core structs
+// -----------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FlowRun {
-    pub id: String,
+    pub id: RunId,
     pub flow: String,
     pub direction: Vec<String>,
     pub area: Vec<String>,
@@ -43,11 +77,11 @@ pub struct StepRun {
     pub step: String,
     pub repo: String,
     pub worktree: String,
-    pub flow_run_id: Option<String>,
+    pub flow_run_id: Option<RunId>,
     pub status: StepRunStatus,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TickResult {
     StepComplete,
     FlowComplete,
@@ -55,21 +89,36 @@ pub enum TickResult {
     StepFailed,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct StepResult {
     pub exit_code: i32,
     pub stdout: String,
     pub stderr: String,
 }
 
+// -----------------------------------------------------------------------------
+// Step runner trait and implementation
+// -----------------------------------------------------------------------------
+
 pub trait StepRunner {
-    fn run(&self, step: &Step, worktree: &Path, directions: &[String]) -> Result<StepResult, CoreError>;
+    fn run(
+        &self,
+        step: &Step,
+        worktree: &Path,
+        directions: &[String],
+    ) -> Result<StepResult, CoreError>;
 }
 
+#[derive(Debug, Clone, Copy, Default)]
 pub struct CommandStepRunner;
 
 impl StepRunner for CommandStepRunner {
-    fn run(&self, step: &Step, worktree: &Path, directions: &[String]) -> Result<StepResult, CoreError> {
+    fn run(
+        &self,
+        step: &Step,
+        worktree: &Path,
+        directions: &[String],
+    ) -> Result<StepResult, CoreError> {
         let mut cmd = Command::new("lf");
         cmd.arg("--step").arg(&step.name);
         cmd.arg("--worktree").arg(worktree);
@@ -86,12 +135,12 @@ impl StepRunner for CommandStepRunner {
     }
 }
 
-pub fn tick_flow(run_id: &str, store: &dyn RunStore) -> Result<TickResult, CoreError> {
+pub fn tick_flow(run_id: &RunId, store: &dyn RunStore) -> Result<TickResult, CoreError> {
     tick_flow_with_runner(run_id, store, &CommandStepRunner)
 }
 
 pub fn tick_flow_with_runner(
-    run_id: &str,
+    run_id: &RunId,
     store: &dyn RunStore,
     runner: &dyn StepRunner,
 ) -> Result<TickResult, CoreError> {
@@ -131,7 +180,7 @@ pub fn tick_flow_with_runner(
 
     if step.interactive.unwrap_or(false) {
         let step_run = StepRun {
-            id: format!("{}:{}", run.id, run.step_index),
+            id: format!("{}:{}", run.id.as_str(), run.step_index),
             step: step.name.clone(),
             repo: run.repo.to_string_lossy().to_string(),
             worktree: worktree.to_string_lossy().to_string(),
@@ -146,7 +195,7 @@ pub fn tick_flow_with_runner(
     }
 
     let step_run = StepRun {
-        id: format!("{}:{}", run.id, run.step_index),
+        id: format!("{}:{}", run.id.as_str(), run.step_index),
         step: step.name.clone(),
         repo: run.repo.to_string_lossy().to_string(),
         worktree: worktree.to_string_lossy().to_string(),
@@ -170,6 +219,10 @@ pub fn tick_flow_with_runner(
     Ok(TickResult::StepFailed)
 }
 
-pub fn run_step(step: &Step, worktree: &Path, direction: &[String]) -> Result<StepResult, CoreError> {
+pub fn run_step(
+    step: &Step,
+    worktree: &Path,
+    direction: &[String],
+) -> Result<StepResult, CoreError> {
     CommandStepRunner.run(step, worktree, direction)
 }

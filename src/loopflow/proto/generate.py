@@ -50,7 +50,7 @@ def main():
         f"--pyi_out={output_dir}",
     ] + [str(proto_dir / f) for f in proto_files]
 
-    print(f"Generating Python bindings...")
+    print("Generating Python bindings...")
     print(f"  Proto dir: {proto_dir}")
     print(f"  Output dir: {output_dir}")
     print(f"  Command: {' '.join(cmd)}")
@@ -58,7 +58,7 @@ def main():
     result = subprocess.run(cmd, capture_output=True, text=True)
 
     if result.returncode != 0:
-        print(f"Error generating bindings:", file=sys.stderr)
+        print("Error generating bindings:", file=sys.stderr)
         print(result.stderr, file=sys.stderr)
         sys.exit(1)
 
@@ -77,9 +77,7 @@ def _fix_imports(output_dir: Path):
 
         # Fix imports like 'from loopflow.control.v1 import control_pb2'
         # to 'from loopflow.proto.loopflow.control.v1 import control_pb2'
-        fixed = content.replace(
-            "from loopflow.", "from loopflow.proto.loopflow."
-        )
+        fixed = content.replace("from loopflow.", "from loopflow.proto.loopflow.")
 
         if fixed != content:
             grpc_file.write_text(fixed)

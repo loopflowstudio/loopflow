@@ -527,9 +527,7 @@ def _check_already_running(http_port: int = 8765) -> None:
         pass
 
 
-async def run_server(
-    socket_path: Path, http_port: int = 8765, grpc_port: int = 50051
-) -> None:
+async def run_server(socket_path: Path, http_port: int = 8765, grpc_port: int = 50051) -> None:
     """Main daemon entry point. Runs until terminated."""
     import logging
     import sqlite3

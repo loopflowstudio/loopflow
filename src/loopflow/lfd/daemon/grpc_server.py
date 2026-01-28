@@ -28,7 +28,6 @@ from loopflow.lfd.step_run import (
 from loopflow.lfd.worktree_state import get_worktree_state_service
 from loopflow.proto.loopflow.control.v1 import control_pb2, control_pb2_grpc
 
-
 PROTOCOL_VERSION = control_pb2.ProtocolVersion(major=1, minor=0, patch=0)
 
 # Default gRPC port
@@ -71,6 +70,7 @@ class ControlServiceServicer(control_pb2_grpc.ControlServiceServicer):
         db_ok = True
         try:
             from loopflow.lfd.db import DB_PATH
+
             db_ok = DB_PATH.exists()
         except Exception:
             db_ok = False
@@ -341,11 +341,11 @@ class ControlServiceServicer(control_pb2_grpc.ControlServiceServicer):
     async def _broadcast_event(self, event_type: str, payload) -> None:
         """Broadcast an event through the socket server's mechanism."""
         if self._broadcast:
-            from loopflow.lfd.daemon.protocol import Event
-            import json
-
             # Convert protobuf message to dict
             from google.protobuf.json_format import MessageToDict
+
+            from loopflow.lfd.daemon.protocol import Event
+
             data = MessageToDict(payload, preserving_proto_field_name=True)
 
             await self._broadcast(Event(event_type, data))

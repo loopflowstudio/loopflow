@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from loopflow.lfd.models import MergeMode, StepRun, StepRunStatus, Stimulus, Wave, WaveStatus
@@ -72,7 +71,8 @@ def protocol_version() -> dict[str, int]:
 def stimulus_to_proto(stimulus: Stimulus | None) -> dict[str, Any]:
     if not stimulus:
         return {"kind": "STIMULUS_KIND_UNSPECIFIED"}
-    result: dict[str, Any] = {"kind": _STIMULUS_KIND.get(stimulus.kind, "STIMULUS_KIND_UNSPECIFIED")}
+    kind = _STIMULUS_KIND.get(stimulus.kind, "STIMULUS_KIND_UNSPECIFIED")
+    result: dict[str, Any] = {"kind": kind}
     if stimulus.kind == "cron" and stimulus.cron:
         result["cron"] = stimulus.cron
     return result
@@ -148,7 +148,9 @@ def worktree_to_proto(worktree_state: dict[str, Any]) -> dict[str, Any]:
         },
         "ci": {},
         "prunable": bool(worktree_state.get("prunable", False)),
-        "recent_steps": [_recent_step_to_proto(step) for step in worktree_state.get("recent_steps", [])],
+        "recent_steps": [
+            _recent_step_to_proto(step) for step in worktree_state.get("recent_steps", [])
+        ],
     }
 
     _maybe(data, "main_state", worktree_state.get("main_state"))

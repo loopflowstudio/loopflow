@@ -26,6 +26,14 @@ from loopflow.lfd.protocol_v1 import (
     wave_to_proto,
     worktree_to_proto,
 )
+from loopflow.lfd.step_run import (
+    get_waiting_step_run,
+    load_step_runs,
+    load_step_runs_for_repo,
+    load_step_runs_for_worktree,
+    save_step_run,
+    update_step_run_status,
+)
 from loopflow.lfd.wave import (
     clone_wave,
     create_wave,
@@ -34,17 +42,8 @@ from loopflow.lfd.wave import (
     list_waves,
     start_wave,
     stop_wave,
-    update_wave_status,
     update_wave,
-)
-from loopflow.lfd.flow_run import count_runs
-from loopflow.lfd.step_run import (
-    get_waiting_step_run,
-    load_step_runs,
-    load_step_runs_for_repo,
-    load_step_runs_for_worktree,
-    save_step_run,
-    update_step_run_status,
+    update_wave_status,
 )
 from loopflow.lfd.worktree_state import get_worktree_state_service
 
@@ -655,43 +654,6 @@ def _step_run_status_from_proto(status: str) -> StepRunStatus:
     return status_map.get(status, StepRunStatus(status))
 
 
-@app.get("/v1/status")
-async def get_status_v1():
-    return compute_status()
-
-
-@app.get("/v1/health")
-async def get_health_v1():
-    global _start_time
-    uptime = time.time() - _start_time if _start_time else 0
-
-    db_ok = True
-    try:
-        from loopflow.lfd.db import DB_PATH
-
-        db_ok = DB_PATH.exists()
-    except Exception:
-        db_ok = False
-
-    socket_path = Path.home() / ".lf" / "lfd.sock"
-    socket_ok = socket_path.exists()
-
-    status = compute_status()
-    return {
-        "version": __version__,
-        "schema_version": SCHEMA_VERSION,
-        "uptime_seconds": int(uptime),
-        "checks": {"database": db_ok, "socket": socket_ok},
-        "metrics": {
-            "waves_total": status["waves_defined"],
-            "waves_running": status["waves_running"],
-            "step_runs_active": status["step_runs_active"],
-            "flow_runs_total": count_runs(),
-        },
-        "protocol_version": protocol_version(),
-    }
-
-
 @app.get("/v1/flows")
 async def get_flows_v1(repo: str = Query(..., description="Repository path")):
     from loopflow.lf.flows import FlowItem, Fork, Step, list_flows, list_steps
@@ -835,9 +797,7 @@ async def run_wave_v1(wave_id: str, request: RunWaveRequestV1 | None = None):
         if request.flow is not None:
             overrides["flow"] = request.flow
         if request.stimulus is not None:
-            overrides["stimulus"] = Stimulus(
-                kind=request.stimulus.kind, cron=request.stimulus.cron
-            )
+            overrides["stimulus"] = Stimulus(kind=request.stimulus.kind, cron=request.stimulus.cron)
 
     effective_area = overrides.get("area", wave.area)
     if effective_area is None:

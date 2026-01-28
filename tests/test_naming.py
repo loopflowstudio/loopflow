@@ -31,21 +31,9 @@ def test_parse_branch_base_no_suffix():
     assert parse_branch_base("my-feature") == "my-feature"
 
 
-def test_parse_branch_base_with_suffix():
-    """Branch with .word1-word2 suffix strips it."""
-    result = parse_branch_base("my-feature.aurora-melody")
-    assert result == "my-feature"
-
-
 def test_parse_branch_base_with_timestamp_suffix():
     """Branch with .timestamp.word1-word2 suffix strips both."""
     result = parse_branch_base("my-feature.20260127_2204.aurora-melody")
-    assert result == "my-feature"
-
-
-def test_parse_branch_base_with_suffix_frost_cadence():
-    """Another valid suffix is stripped."""
-    result = parse_branch_base("my-feature.frost-cadence")
     assert result == "my-feature"
 
 
@@ -74,10 +62,10 @@ def test_parse_branch_base_simple_branch():
 def test_parse_branch_base_recursive():
     """Parsing a branch with suffix returns same base."""
     base = "my-feature"
-    with_suffix = f"{base}.aurora-melody"
+    with_suffix = f"{base}.20260127_2204.aurora-melody"
     assert parse_branch_base(with_suffix) == base
     # Different suffix still yields same base
-    with_suffix2 = f"{base}.frost-cadence"
+    with_suffix2 = f"{base}.20260127_2204.frost-cadence"
     assert parse_branch_base(with_suffix2) == base
 
 

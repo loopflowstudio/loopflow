@@ -37,6 +37,9 @@ service ControlService {
   rpc RunWave(RunWaveRequest) returns (RunWaveResponse);
   rpc StopWave(StopWaveRequest) returns (StopWaveResponse);
 
+  // Session connect (interactive steps)
+  rpc ConnectWave(ConnectWaveRequest) returns (ConnectWaveResponse);
+
   // Flow discovery
   rpc ListFlows(ListFlowsRequest) returns (ListFlowsResponse);
 
@@ -142,7 +145,7 @@ enum WaveStatus {
   WAVE_STATUS_UNSPECIFIED = 0;
   WAVE_IDLE = 1;
   WAVE_RUNNING = 2;
-  WAVE_WAITING = 3;  // Hit PR limit, waiting for merges
+  WAVE_WAITING = 3;  // Paused: interactive step awaiting connect, or PR limit reached
   WAVE_ERROR = 4;
 }
 
@@ -262,6 +265,19 @@ message StopWaveRequest {
 
 message StopWaveResponse {
   bool stopped = 1;
+}
+
+message ConnectWaveRequest {
+  string wave_id = 1;
+}
+
+message ConnectWaveResponse {
+  string worktree = 1;
+  string step = 2;
+  string step_run_id = 3;
+  string prompt_file = 4;          // Path to the step prompt file
+  optional string flow_run_id = 5; // Current flow run if in a flow
+  uint32 step_index = 6;           // Position in flow (0 if single step)
 }
 
 // -----------------------------------------------------------------------------
@@ -516,6 +532,7 @@ message Event {
     WaveStartedEvent wave_started = 18;
     WaveStoppedEvent wave_stopped = 19;
     WaveActivatedEvent wave_activated = 20;
+    WaveWaitingEvent wave_waiting = 23;
     SchedulerSlotAcquiredEvent scheduler_slot_acquired = 21;
     SchedulerSlotReleasedEvent scheduler_slot_released = 22;
   }
@@ -525,11 +542,19 @@ message SessionStartedEvent {
   string id = 1;
   string step = 2;
   string worktree = 3;
+  // Connection context (present when session is from ConnectWave)
+  optional string wave_id = 4;
+  optional string flow_run_id = 5;
+  optional uint32 step_index = 6;
 }
 
 message SessionEndedEvent {
   string id = 1;
-  string status = 2;
+  string status = 2;  // "completed" or "failed"
+  // Connection context (present when session was from ConnectWave)
+  optional string wave_id = 3;
+  optional string flow_run_id = 4;
+  optional bool flow_will_continue = 5;  // True if daemon will tick_flow after this
 }
 
 message OutputLineEvent {
@@ -591,6 +616,22 @@ message WaveStoppedEvent {
 message WaveActivatedEvent {
   string wave_id = 1;
   StimulusKind stimulus = 2;
+}
+
+// Emitted when a flow pauses at an interactive step, awaiting user connect.
+message WaveWaitingEvent {
+  string wave_id = 1;
+  string step = 2;                  // Interactive step name (e.g., "design")
+  string step_run_id = 3;
+  optional string flow_run_id = 4;  // Flow run if in a flow
+  uint32 step_index = 5;            // Position in flow
+  WaitingReason reason = 6;
+}
+
+enum WaitingReason {
+  WAITING_REASON_UNSPECIFIED = 0;
+  WAITING_INTERACTIVE_STEP = 1;  // Paused at interactive step
+  WAITING_PR_LIMIT = 2;          // Hit PR limit
 }
 
 message SchedulerSlotAcquiredEvent {

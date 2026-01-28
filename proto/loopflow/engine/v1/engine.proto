@@ -35,6 +35,7 @@ service EngineService {
 
   // Flow execution
   rpc RunFlow(RunFlowRequest) returns (stream FlowEvent);
+  rpc TickFlow(TickFlowRequest) returns (TickFlowResponse);
   rpc RunFork(RunForkRequest) returns (stream ForkEvent);
   rpc Synthesize(SynthesizeRequest) returns (stream SynthesizeEvent);
 
@@ -379,6 +380,7 @@ enum FlowEventType {
   FLOW_FAILED = 13;
   FLOW_COMMITTED = 14;
   FLOW_PR_CREATED = 15;
+  FLOW_WAITING = 16;  // Paused at interactive step, awaiting user connect
 }
 
 message FlowEvent {
@@ -405,6 +407,59 @@ message FlowEvent {
 
   // FLOW_PR_CREATED
   optional string pr_url = 50;
+
+  // FLOW_WAITING
+  optional string waiting_step = 60;
+  optional string waiting_step_run_id = 61;
+}
+
+// -----------------------------------------------------------------------------
+// Tick-Based Flow Execution
+// -----------------------------------------------------------------------------
+
+// FlowRun tracks the state of an executing flow.
+message FlowRun {
+  string id = 1;
+  string flow = 2;
+  string worktree = 3;
+  uint32 step_index = 4;           // Current position in flow
+  FlowRunStatus status = 5;
+  repeated string completed_steps = 6;  // Steps that have finished
+}
+
+enum FlowRunStatus {
+  FLOW_RUN_STATUS_UNSPECIFIED = 0;
+  FLOW_RUN_RUNNING = 1;
+  FLOW_RUN_WAITING = 2;   // Paused at interactive step
+  FLOW_RUN_COMPLETED = 3;
+  FLOW_RUN_FAILED = 4;
+}
+
+// Result of a single tick operation.
+enum TickResult {
+  TICK_RESULT_UNSPECIFIED = 0;
+  TICK_STEP_COMPLETE = 1;        // Auto step finished, continue ticking
+  TICK_FLOW_COMPLETE = 2;        // All steps done
+  TICK_WAITING_INTERACTIVE = 3;  // Paused at interactive step, awaiting user connect
+  TICK_STEP_FAILED = 4;          // Step errored, flow stops
+}
+
+message TickFlowRequest {
+  string flow_run_id = 1;
+  string repo_root = 2;
+  ContextConfig context_config = 3;
+  ModelSpec model = 4;
+  bool skip_permissions = 5;
+  string idempotency_key = 6;
+}
+
+message TickFlowResponse {
+  TickResult result = 1;
+  FlowRun flow_run = 2;
+  // When result is TICK_WAITING_INTERACTIVE:
+  optional string waiting_step = 10;
+  optional string waiting_step_run_id = 11;
+  optional string prompt_file = 12;
 }
 
 // -----------------------------------------------------------------------------

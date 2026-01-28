@@ -4,6 +4,9 @@
   "session_started": {
     "id": "sr_abc123def456",
     "step": "implement",
-    "worktree": "/Users/alice/repos/myproject.feature-auth"
+    "worktree": "/Users/alice/repos/myproject.feature-auth",
+    "wave_id": "wave_abc123",
+    "flow_run_id": "fr_def456",
+    "step_index": 1
   }
 }

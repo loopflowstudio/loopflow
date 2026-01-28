@@ -45,6 +45,7 @@ from loopflow.lfd.wave import (
     update_wave,
     update_wave_status,
 )
+from loopflow.lfops.shell import write_directive
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 
@@ -278,14 +279,17 @@ def create(
     typer.echo(
         f"{c['green']}Created{c['reset']} {c['bold']}{wave.name}{c['reset']} ({wave.short_id()})"
     )
-    typer.echo(f"  Repo: {repo}")
-    typer.echo("")
-    typer.echo("Configure before running:")
-    typer.echo(f"  lfd area {wave.name} src/")
-    typer.echo(f'  lfd direction {wave.name} "fix lint errors"')
-    typer.echo(f"  lfd flow {wave.name} ship")
-    typer.echo("")
-    typer.echo(f"Then run: lfd loop {wave.name}")
+
+    if wave.worktree:
+        typer.echo(f"  Worktree: {wave.worktree}")
+        typer.echo(f"  Branch: {wave.branch}")
+
+        # Switch to worktree via shell integration
+        if not write_directive(f"cd {wave.worktree}"):
+            typer.echo(f"\ncd {wave.worktree}")
+    else:
+        typer.echo(f"  Repo: {repo}")
+        typer.echo(f"  {c['yellow']}(worktree creation failed){c['reset']}")
 
 
 @app.command()

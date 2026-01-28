@@ -1,1 +1,3 @@
-No open questions.
+- Is `src/loopflow/lfd/execution/worker.py` still used, or can it be removed in favor of `runner.py`?
+- How intentionally different are `lf flow` execution semantics versus `lfd` iterations (collector/logging/step lifecycle)?
+- Are there explicit parity guarantees between socket, HTTP, and gRPC behaviors for the daemon?

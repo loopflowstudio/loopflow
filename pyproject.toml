@@ -34,6 +34,9 @@ dependencies = [
     "croniter>=2.0",
     "fastapi>=0.115.0",
     "uvicorn>=0.34.0",
+    "grpcio>=1.60.0",
+    "grpcio-tools>=1.60.0",
+    "protobuf>=4.25.0",
 ]
 
 [project.urls]

@@ -101,6 +101,14 @@ Subscribe with glob patterns: `wave.*`, `session.*`, `worktree.updated`
 
 ### Python (grpcio-tools)
 
+Use the built-in generation script:
+
+```bash
+uv run python -m loopflow.proto.generate
+```
+
+Or manually:
+
 ```bash
 python -m grpc_tools.protoc \
   -I proto \
@@ -108,6 +116,18 @@ python -m grpc_tools.protoc \
   --grpc_python_out=src/loopflow/proto \
   proto/loopflow/control/v1/control.proto \
   proto/loopflow/engine/v1/engine.proto
+```
+
+Generated files are in `src/loopflow/proto/loopflow/`.
+
+### Verifying
+
+```bash
+# Test proto imports
+uv run python -c "from loopflow.proto.loopflow.control.v1 import control_pb2; print('OK')"
+
+# Run fixture tests
+uv run pytest tests/test_proto_fixtures.py -v
 ```
 
 ### Rust (tonic-build)

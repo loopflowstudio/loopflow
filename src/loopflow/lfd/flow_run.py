@@ -94,6 +94,37 @@ def list_runs(
     return runs
 
 
+def count_runs(
+    repo: Path | None = None,
+    wave: str | None = None,
+    status: FlowRunStatus | None = None,
+    db_path: Path | None = None,
+) -> int:
+    """Count runs with optional filters."""
+    conn = _get_db(db_path)
+
+    conditions = []
+    params: list = []
+
+    if repo:
+        conditions.append("repo = ?")
+        params.append(str(repo))
+
+    if wave:
+        conditions.append("wave = ?")
+        params.append(wave)
+
+    if status:
+        conditions.append("status = ?")
+        params.append(status.value)
+
+    where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+    cursor = conn.execute(f"SELECT COUNT(*) as count FROM runs{where}", params)
+    row = cursor.fetchone()
+    conn.close()
+    return int(row["count"]) if row else 0
+
+
 def list_runs_for_wave(
     wave_id: str,
     limit: int = 10,

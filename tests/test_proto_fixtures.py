@@ -335,3 +335,93 @@ def test_readme_exists():
     """README.md must exist in proto directory."""
     readme_path = PROTO_ROOT / "README.md"
     assert readme_path.exists(), f"Missing: {readme_path}"
+
+
+# -----------------------------------------------------------------------------
+# Generated Code Tests
+# -----------------------------------------------------------------------------
+
+
+def test_python_bindings_importable():
+    """Python proto bindings must be importable."""
+    from loopflow.proto.loopflow.control.v1 import control_pb2, control_pb2_grpc
+    from loopflow.proto.loopflow.engine.v1 import engine_pb2, engine_pb2_grpc
+
+    # Control plane types
+    assert hasattr(control_pb2, "ProtocolVersion")
+    assert hasattr(control_pb2, "Wave")
+    assert hasattr(control_pb2, "GetHealthRequest")
+    assert hasattr(control_pb2, "GetHealthResponse")
+    assert hasattr(control_pb2_grpc, "ControlServiceServicer")
+
+    # Engine contract types
+    assert hasattr(engine_pb2, "PromptComponents")
+    assert hasattr(engine_pb2, "GatherContextRequest")
+    assert hasattr(engine_pb2_grpc, "EngineServiceServicer")
+
+
+def test_protocol_version_message_creation():
+    """ProtocolVersion message should be creatable."""
+    from loopflow.proto.loopflow.control.v1 import control_pb2
+
+    pv = control_pb2.ProtocolVersion(major=1, minor=0, patch=0)
+    assert pv.major == 1
+    assert pv.minor == 0
+    assert pv.patch == 0
+
+
+def test_health_response_includes_protocol_version():
+    """GetHealthResponse should include protocol_version field."""
+    from loopflow.proto.loopflow.control.v1 import control_pb2
+
+    pv = control_pb2.ProtocolVersion(major=1, minor=0, patch=0)
+    health = control_pb2.GetHealthResponse(
+        version="0.7.0",
+        schema_version=1,
+        uptime_seconds=100,
+        protocol_version=pv,
+    )
+
+    assert health.version == "0.7.0"
+    assert health.protocol_version.major == 1
+    assert health.protocol_version.minor == 0
+    assert health.protocol_version.patch == 0
+
+
+def test_grpc_servicer_exists():
+    """ControlServiceServicer should exist for gRPC server implementation."""
+    from loopflow.lfd.daemon.grpc_server import ControlServiceServicer
+
+    assert ControlServiceServicer is not None
+
+
+def test_wave_message_has_all_fields():
+    """Wave message should have all expected fields from proto schema."""
+    from loopflow.proto.loopflow.control.v1 import control_pb2
+
+    wave = control_pb2.Wave(
+        id="wave_123",
+        name="test-wave",
+        repo="/path/to/repo",
+        flow="ship",
+        direction=["product-engineer"],
+        area=["src/"],
+    )
+
+    assert wave.id == "wave_123"
+    assert wave.name == "test-wave"
+    assert wave.repo == "/path/to/repo"
+    assert wave.flow == "ship"
+    assert list(wave.direction) == ["product-engineer"]
+    assert list(wave.area) == ["src/"]
+
+
+def test_stimulus_enum_values():
+    """StimulusKind enum should have expected values."""
+    from loopflow.proto.loopflow.control.v1 import control_pb2
+
+    assert control_pb2.STIMULUS_KIND_UNSPECIFIED == 0
+    assert control_pb2.STIMULUS_ONCE == 1
+    assert control_pb2.STIMULUS_LOOP == 2
+    assert control_pb2.STIMULUS_WATCH == 3
+    assert control_pb2.STIMULUS_CRON == 4

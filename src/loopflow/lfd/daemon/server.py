@@ -527,11 +527,14 @@ def _check_already_running(http_port: int = 8765) -> None:
         pass
 
 
-async def run_server(socket_path: Path, http_port: int = 8765) -> None:
+async def run_server(
+    socket_path: Path, http_port: int = 8765, grpc_port: int = 50051
+) -> None:
     """Main daemon entry point. Runs until terminated."""
     import logging
     import sqlite3
 
+    from loopflow.lfd.daemon.grpc_server import start_grpc_server
     from loopflow.lfd.daemon.http_server import start_http_server
     from loopflow.lfd.daemon.launchd import remove_pid, write_pid
     from loopflow.lfd.db import DB_PATH
@@ -542,6 +545,7 @@ async def run_server(socket_path: Path, http_port: int = 8765) -> None:
     logger = logging.getLogger("lfd")
     server = Server(socket_path)
     http_server = None
+    grpc_server = None
 
     # Write PID file for process tracking
     write_pid()
@@ -553,6 +557,8 @@ async def run_server(socket_path: Path, http_port: int = 8765) -> None:
         await server.stop()
         if http_server:
             await http_server.stop()
+        if grpc_server:
+            await grpc_server.stop()
 
         # Checkpoint WAL to ensure all data is persisted
         try:
@@ -575,8 +581,18 @@ async def run_server(socket_path: Path, http_port: int = 8765) -> None:
         # Start HTTP server alongside socket server
         http_server = await start_http_server(http_port)
 
+        # Start gRPC server on separate port
+        grpc_server = await start_grpc_server(
+            port=grpc_port,
+            manager=server.manager,
+            broadcast_callback=server._broadcast,
+        )
+        logger.info(f"gRPC server started on port {grpc_port}")
+
         await server.start()
     finally:
         if http_server:
             await http_server.stop()
+        if grpc_server:
+            await grpc_server.stop()
         remove_pid()

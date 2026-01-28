@@ -72,6 +72,12 @@ WORKTREE_CHANGE_REASONS = {
     "WORKTREE_PR_STATE_CHANGED",
 }
 
+WAITING_REASONS = {
+    "WAITING_REASON_UNSPECIFIED",
+    "WAITING_INTERACTIVE_STEP",
+    "WAITING_PR_LIMIT",
+}
+
 # engine.proto enums
 DIFF_MODES = {
     "DIFF_MODE_UNSPECIFIED",
@@ -121,6 +127,7 @@ def test_event_fixture_has_payload(name: str, path: Path):
         "wave.started": "wave_started",
         "wave.stopped": "wave_stopped",
         "wave.activated": "wave_activated",
+        "wave.waiting": "wave_waiting",
         "scheduler.slot.acquired": "scheduler_slot_acquired",
         "scheduler.slot.released": "scheduler_slot_released",
     }
@@ -156,6 +163,17 @@ def test_wave_activated_event_fields():
     assert "wave_id" in payload
     assert "stimulus" in payload
     assert payload["stimulus"] in STIMULUS_KINDS
+
+
+def test_wave_waiting_event_fields():
+    """wave.waiting must have wave_id, step, step_run_id, and valid reason."""
+    data = _load_fixture(FIXTURES_ROOT / "events" / "wave_waiting.json")
+    payload = data["wave_waiting"]
+    assert "wave_id" in payload
+    assert "step" in payload
+    assert "step_run_id" in payload
+    assert "reason" in payload
+    assert payload["reason"] in WAITING_REASONS
 
 
 # -----------------------------------------------------------------------------

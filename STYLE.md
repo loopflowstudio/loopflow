@@ -63,6 +63,10 @@ When editing `*.rs` files:
 - Return `Option<T>` for "not found", `Result<T, E>` for "something went wrong"
 - Newtypes for domain concepts: `struct RunId(String)` not `type RunId = String`
 - Every `unsafe` block requires a `// SAFETY:` comment explaining invariants
+- When a name conflicts with a keyword: use `r#type` or `type_`, not `typ`
+- Use `#[non_exhaustive]` on public enums that may grow
+- Never use `()` as an error type
+- For public APIs, include `# Panics`/`# Errors`/`# Safety` doc sections where non-obvious
 
 When editing Rust tests:
 - `unwrap()` is fine in tests

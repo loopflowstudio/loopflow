@@ -18,7 +18,6 @@ from loopflow.lf.design import (
     gather_design_docs,
     gather_internal_docs,
 )
-from loopflow.lf.wave import WaveContext, determine_wave
 from loopflow.lf.directions import Direction
 from loopflow.lf.files import (
     GatherResult,
@@ -37,6 +36,7 @@ from loopflow.lf.skills import (
     load_skill_prompt,
 )
 from loopflow.lf.tokens import count_tokens
+from loopflow.lf.wave import WaveContext, determine_wave
 from loopflow.lfops.summarize import is_stale, load_summary
 
 # Path to bundled builtin steps

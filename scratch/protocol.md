@@ -1,303 +1,145 @@
-# Rust Roadmap: Protocol-First Engine (Stage 1)
+# Protocol-First Engine Design
 
-Define the stable API that all clients and services use to control Loopflow.
+## Problem
 
-## Goal
-Create a versioned, transport-agnostic protocol that supports local and remote control of Loopflow. This is the foundation for managed clusters, Concerto integration, and CLI clients.
+Loopflow needs a stable API for multiple clients (lf CLI, Concerto, web dashboards) to control the daemon and engine. The current JSON-over-socket protocol works but lacks versioning, typed errors, and streaming primitives. A Rust rewrite of `lfd` requires this boundary to be well-defined before implementation begins.
 
-## Scope
-- Request/response schema and event stream
-- Versioning and compatibility rules
-- Authn/z and multi-tenant routing hooks
-- Error model and retry semantics
+The protocol is the contract. Get it right, and clients and servers can evolve independently. Get it wrong, and every change requires coordinated releases across Python, Rust, and Swift.
 
-## Non-goals
-- Implementing the server runtime
-- Migrating existing Python internals
+## Approach
+
+Ship a two-tier protobuf schema with gRPC as primary transport and JSON-over-HTTP as fallback:
+
+1. **Control plane** (`control.proto`) — Client-facing wave management, observability, event streaming
+2. **Engine contract** (`engine.proto`) — Execution interface between daemon and core
+
+The proto files are the source of truth. Code is generated for Python (grpcio-tools), Rust (tonic-build), and Swift (swift-protobuf). JSON fixtures validate schema compatibility across releases.
+
+Start with the existing `proto/` directory structure and wire it into the Python daemon. Rust implementation comes later—the protocol ships first.
+
+## Alternatives considered
+
+| Approach | Tradeoff | Why not |
+|----------|----------|---------|
+| JSON Schema + OpenAPI | Maximum compatibility, easy curl debugging | Weaker typing, no native streaming, harder to evolve safely |
+| JSON-only with manual versioning | Simpler tooling, no protoc dependency | Schema drift is inevitable, no codegen across languages |
+| Cap'n Proto / FlatBuffers | Zero-copy performance | Limited ecosystem, poor Swift support, overkill for this workload |
+| Separate protocols per language | Each client gets native feel | Impossible to maintain, breaks when semantics diverge |
+
+gRPC + Protobuf is the right choice because:
+- Strong schema with cross-language codegen
+- Native streaming for events and step output
+- Versioning semantics baked into protobuf conventions
+- Connect compatibility layer available for browsers later
 
 ## Key decisions
-- **Transport:** gRPC over HTTP/2 for structured APIs; JSON over HTTP for simple tooling.
-- **Streaming:** server-side event stream for run progress.
-- **Versioning:** semantic protocol version with strict compatibility checks.
-- **Error model:** typed errors with retry hints and idempotency keys.
 
-## API surface (v1)
-### Runs
-- `CreateRun(flow_id, area, direction, params)`
-- `CancelRun(run_id)`
-- `GetRun(run_id)`
-- `ListRuns(filters)`
+**Two-tier surface, not one.** Control plane (lf/Concerto → lfd) and engine contract (lfd → lf-core) are separate services. Control plane is public API; engine contract is internal. Different stability guarantees.
 
-### Flows
-- `StartFlow(flow_id, area, direction, params)`
-- `GetFlow(flow_id)`
-- `ValidateFlow(flow_spec)`
+**Protobuf-first, JSON-compatible.** Primary transport is gRPC. Fallback is JSON-over-HTTP for debugging and simple tooling. Both use the same schema—proto3 field names are snake_case in JSON automatically.
 
-### Events
-- `ReportEvent(run_id, event)`
-- `WatchEvents(filters)` (stream)
+**No WebSocket streaming.** Interactive steps use request/response: `ConnectWave` returns connection details, user runs step in terminal, `StepRunEnd` signals completion. Server-side streaming via `Subscribe` RPC handles event delivery. This avoids WebSocket complexity.
 
-### Session connect (interactive steps)
-- `ConnectWave(wave_id)` → worktree, step, step_run_id, prompt_file
-- `StepRunStart(step_run_id, wave_id)` → ack (socket method)
-- `StepRunEnd(step_run_id, result)` → ack, triggers tick_flow (socket method)
+**Idempotency keys everywhere.** All mutating operations (`CreateWave`, `RunWave`, `StartStepRun`) accept idempotency keys. Clients can safely retry without duplicate effects.
 
-### Session events
-- `wave.waiting` — flow paused at interactive step, awaiting user connect
-- `session.started` — user connected, interactive step in progress
-- `session.ended` — interactive step completed, flow will continue
+**Typed errors with retry hints.** Every error includes machine-readable code, human message, retryability flag, and suggested retry delay. Observability via `trace_id`.
 
-## Errors
-- Typed error codes with retry hints (retryable, terminal, auth, not found).
-- Include `trace_id` for observability.
-- Idempotency keys for run creation and cancellation.
+**Protocol version handshake.** Clients check `GetHealth` response for `protocol_version`. Refuse connection if major version differs. Warn if server minor is older than client.
 
-## Authn/z
-- API keys for early phase.
-- JWT/OIDC for enterprise integration.
-- Tenant and project scoping in every request.
+## Scope
 
-## Compatibility
-- Protocol version in handshake and every response.
-- Client must refuse incompatible versions.
-- Server advertises supported version ranges.
+In scope:
+- Finalize `control.proto` and `engine.proto` schemas
+- Generate Python bindings and wire into existing daemon
+- Generate Swift bindings for Concerto
+- JSON compatibility layer for debugging
+- Golden fixtures for compatibility testing
+- Versioning documentation
 
-## Typed RPC options: gRPC vs other schema‑first protocols
-### gRPC + Protobuf (recommended default)
-- **Pros:** strong schema, excellent codegen for mobile/desktop, efficient streaming, ecosystem maturity.
-- **Cons:** requires HTTP/2, harder to debug with curl, protobuf schema language constraints.
+Out of scope:
+- Rust implementation of lfd (Stage 2)
+- Authentication beyond API keys (JWT/OIDC is Stage 3)
+- Multi-tenant routing (Stage 3)
+- WebSocket or long-polling alternatives
 
-### Connect (gRPC‑compatible over HTTP/1.1)
-- **Pros:** Protobuf‑based with better browser compatibility; can speak gRPC or JSON.
-- **Cons:** smaller ecosystem; still needs protobuf schemas and tooling.
+## Done when
 
-### Twirp (RPC over HTTP/1.1 + Protobuf)
-- **Pros:** simple deployment, protobuf schema, easy debugging.
-- **Cons:** no native streaming; less standard for multi‑language clients.
+```bash
+# Python daemon serves gRPC
+grpcurl -plaintext localhost:50051 loopflow.control.v1.ControlService/GetHealth
 
-### Thrift
-- **Pros:** mature IDL, multiple transports.
-- **Cons:** weaker modern tooling; less common on mobile; streaming story weaker.
+# JSON fallback works
+curl localhost:8080/v1/health
 
-### Cap’n Proto / FlatBuffers
-- **Pros:** very fast, zero‑copy; great for high‑throughput.
-- **Cons:** limited tooling and cross‑platform adoption; not ideal for public APIs.
+# Swift client compiles
+swift build --target LoopflowProto
 
-### JSON Schema + REST
-- **Pros:** maximum compatibility; easy tooling.
-- **Cons:** weaker typing guarantees; harder to evolve safely; streaming is ad‑hoc.
+# Fixtures pass
+pytest tests/test_proto_fixtures.py
 
-### Practical stance
-- **gRPC + Protobuf** for core control plane APIs and streaming events.
-- Optionally **Connect** as a compatibility layer for browser/mobile clients.
-- Avoid non‑protobuf IDLs unless a specific client forces it.
-
-## Internal protocol (lf/lfd ↔ lfd‑core)
-- Must be **well‑typed** and schema‑first.
-- Treat as the primary design artifact; public surfaces derive from it.
-
-## Remote lf behavior
-- Remote `lf` talks to **`lfd`** (control plane), never directly to `lfd‑core`.
-- Local `lf` must still work **without** a daemon running.
-- Local mode uses direct `lf` ↔ `lfd-core` calls.
-- `lfd` must expose the **subset of `lfd-core` APIs** that `lf` calls in local mode.
-- This subset is the **engine contract**; remote mode is an engine swap.
-
-### Engine contract (subset parity)
-The engine contract is the minimal API surface that `lf` depends on in local mode. `lfd` must expose an equivalent remote API so `lf` can switch engines without changing UX.
-
-**Core execution**
-- `ExecuteFlow(flow_id, area, direction, params)` → run result + events
-- `ExecuteStep(step_id, context, direction)` → step result + events
-- `CancelExecution(run_id)`
-
-**Context + prompt**
-- `GatherContext(area, rules, diff_mode)` → context bundle
-- `FormatPrompt(components)` → prompt text
-
-**Flows + steps**
-- `LoadFlow(flow_id)` → flow graph
-- `ValidateFlow(flow_spec)` → errors
-- `LoadStep(step_id)` → step definition
-
-**Tokens + limits**
-- `CountTokens(text, model)` → token count
-- `EnforceLimits(context)` → trimmed/validated bundle
-
-**Artifacts**
-- `WriteArtifact(path, contents)`
-- `ReadArtifact(path)` (if needed for resume)
-
-**Events**
-- `WatchEvents(filters)` (stream)
-
-### gRPC proto sketch (engine contract)
-```proto
-syntax = "proto3";
-
-package loopflow.engine.v1;
-
-service Engine {
-  // Core execution
-  rpc ExecuteFlow(ExecuteFlowRequest) returns (ExecuteFlowResponse);
-  rpc ExecuteStep(ExecuteStepRequest) returns (ExecuteStepResponse);
-  rpc CancelExecution(CancelExecutionRequest) returns (CancelExecutionResponse);
-
-  // Context + prompt
-  rpc GatherContext(GatherContextRequest) returns (GatherContextResponse);
-  rpc FormatPrompt(FormatPromptRequest) returns (FormatPromptResponse);
-
-  // Flows + steps
-  rpc LoadFlow(LoadFlowRequest) returns (LoadFlowResponse);
-  rpc ValidateFlow(ValidateFlowRequest) returns (ValidateFlowResponse);
-  rpc LoadStep(LoadStepRequest) returns (LoadStepResponse);
-
-  // Tokens + limits
-  rpc CountTokens(CountTokensRequest) returns (CountTokensResponse);
-  rpc EnforceLimits(EnforceLimitsRequest) returns (EnforceLimitsResponse);
-
-  // Artifacts
-  rpc WriteArtifact(WriteArtifactRequest) returns (WriteArtifactResponse);
-  rpc ReadArtifact(ReadArtifactRequest) returns (ReadArtifactResponse);
-
-  // Events
-  rpc WatchEvents(WatchEventsRequest) returns (stream Event);
-}
-
-message ExecuteFlowRequest {
-  string flow_id = 1;
-  string area = 2;
-  repeated string direction = 3;
-  map<string, string> params = 4;
-}
-
-message ExecuteFlowResponse {
-  string run_id = 1;
-  RunResult result = 2;
-}
-
-message ExecuteStepRequest {
-  string step_id = 1;
-  ContextBundle context = 2;
-  repeated string direction = 3;
-}
-
-message ExecuteStepResponse {
-  string run_id = 1;
-  RunResult result = 2;
-}
-
-message CancelExecutionRequest {
-  string run_id = 1;
-}
-
-message CancelExecutionResponse {
-  bool cancelled = 1;
-}
-
-message GatherContextRequest {
-  string area = 1;
-  repeated string rules = 2;
-  string diff_mode = 3;
-}
-
-message GatherContextResponse {
-  ContextBundle context = 1;
-}
-
-message FormatPromptRequest {
-  PromptComponents components = 1;
-}
-
-message FormatPromptResponse {
-  string prompt = 1;
-}
-
-message LoadFlowRequest {
-  string flow_id = 1;
-}
-
-message LoadFlowResponse {
-  Flow flow = 1;
-}
-
-message ValidateFlowRequest {
-  string flow_spec = 1;
-}
-
-message ValidateFlowResponse {
-  repeated ValidationError errors = 1;
-}
-
-message LoadStepRequest {
-  string step_id = 1;
-}
-
-message LoadStepResponse {
-  Step step = 1;
-}
-
-message CountTokensRequest {
-  string text = 1;
-  string model = 2;
-}
-
-message CountTokensResponse {
-  uint64 tokens = 1;
-}
-
-message EnforceLimitsRequest {
-  ContextBundle context = 1;
-}
-
-message EnforceLimitsResponse {
-  ContextBundle context = 1;
-  repeated ValidationError warnings = 2;
-}
-
-message WriteArtifactRequest {
-  string path = 1;
-  bytes contents = 2;
-}
-
-message WriteArtifactResponse {
-  bool ok = 1;
-}
-
-message ReadArtifactRequest {
-  string path = 1;
-}
-
-message ReadArtifactResponse {
-  bytes contents = 1;
-}
-
-message WatchEventsRequest {
-  string run_id = 1;
-}
-
-message Event {
-  string run_id = 1;
-  string kind = 2;
-  string message = 3;
-  map<string, string> data = 4;
-}
+# Version handshake enforced
+# (client with protocol_version 2.0.0 refuses server at 1.0.0)
 ```
 
-## UX compatibility requirements
-- **Must not change:** prompt/flow semantics, artifact paths, CLI affordances.
-- **Should not change:** direction composition, flow execution order, local defaults.
-- **Ambiguous:** token counting heuristics, scheduling jitter, minor error strings.
+## Implementation phases
 
-## Success criteria
-- `lf` can target local or remote `lfd` with no behavior differences.
-- Concerto can drive runs over the same API.
-- Backward-compatible changes are routine; breaking changes are rare and explicit.
-- Protocol supports remote clients beyond desktop (mobile app readiness).
-- Artifact and prompt paths remain unchanged.
+### Phase 1: Schema finalization
+- Review `control.proto` and `engine.proto` for gaps
+- Add missing fields identified in Python implementation audit
+- Write comprehensive golden fixtures
+
+### Phase 2: Python bindings
+- Generate stubs with grpcio-tools
+- Implement gRPC server alongside existing socket server
+- Migrate socket handlers to call gRPC handlers internally
+- JSON-over-HTTP adapter using grpc-gateway or custom middleware
+
+### Phase 3: Swift bindings
+- Generate Swift stubs with swift-protobuf
+- Update Concerto client to use gRPC
+- Fallback to JSON for development/debugging
+
+### Phase 4: Deprecate socket protocol
+- Mark socket protocol deprecated
+- Update lf CLI to use gRPC
+- Remove socket code after one release cycle
+
+## Protocol surface summary
+
+### Control plane (46 RPCs across 8 groups)
+
+**Health:** GetStatus, GetHealth
+**Waves:** ListWaves, GetWave, CreateWave, UpdateWave, DeleteWave, CloneWave, RunWave, StopWave, ConnectWave
+**Flows:** ListFlows
+**Worktrees:** ListWorktrees, NotifyWorktreeChanged
+**Scheduler:** GetSchedulerStatus, AcquireSlot, ReleaseSlot
+**StepRuns:** ListStepRuns, GetStepRunHistory, StartStepRun, EndStepRun
+**Events:** Subscribe (streaming)
+**Notifications:** Notify, StreamOutput
+
+### Engine contract (14 RPCs across 6 groups)
+
+**Context:** GatherContext, TrimContext, AnalyzeTokens
+**Prompt:** FormatPrompt
+**Steps:** RunStep (streaming), RunInteractiveStep
+**Flows:** RunFlow (streaming), TickFlow, RunFork (streaming), Synthesize (streaming)
+**Artifacts:** LoadStep, LoadFlow, LoadDirection
+**Messages:** GenerateCommitMessage, GeneratePRMessage
+
+### Events (14 types)
+
+session.started, session.ended, output.line, worktree.updated, worktree.pruned, wave.created, wave.updated, wave.deleted, wave.started, wave.stopped, wave.activated, wave.waiting, scheduler.slot.acquired, scheduler.slot.released
 
 ## Open questions
-- Do we want strict protobuf-only for v1 to avoid dual protocols?
 
-## Resolved questions
-- **Bi-directional streaming for interactive steps?** No. Session connect uses request/response: `ConnectWave` returns connection details, user runs step in their terminal, `StepRunEnd` signals completion. The daemon broadcasts `wave.waiting` events so clients know when to offer connect. This avoids WebSocket complexity while supporting Concerto and CLI.
+None remaining. Previous questions resolved:
+- Bi-directional streaming for interactive steps → No, use request/response with session events
+- Strict protobuf-only for v1 → Yes, JSON is compatibility layer only, schema comes from proto
+
+## Migration notes
+
+The existing `proto/` directory has most of this already. The work is:
+1. Audit Python implementation against proto schema for missing fields
+2. Wire up gRPC server in Python daemon
+3. Generate and test Swift bindings
+4. Migrate socket protocol callers to gRPC

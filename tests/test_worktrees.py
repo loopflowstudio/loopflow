@@ -317,8 +317,8 @@ def test_create_with_schema_records_base_commit(tmp_path):
 
     with patch("loopflow.lf.worktrees.list_all", return_value=[]):
         with patch("subprocess.run") as mock_run:
-            # Mock git rev-parse for base_commit
             mock_run.side_effect = [
+                MagicMock(returncode=1),  # show-ref (branch doesn't exist)
                 MagicMock(returncode=0, stdout="abc123def456\n", stderr=""),  # rev-parse
                 MagicMock(returncode=0, stdout="", stderr=""),  # worktree add
                 MagicMock(returncode=0, stdout="", stderr=""),  # push
@@ -339,6 +339,7 @@ def test_create_with_schema_no_base_commit_for_main(tmp_path):
     with patch("loopflow.lf.worktrees.list_all", return_value=[]):
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
+                MagicMock(returncode=1),  # show-ref (branch doesn't exist)
                 MagicMock(returncode=0, stdout="", stderr=""),  # worktree add
                 MagicMock(returncode=0, stdout="", stderr=""),  # push
             ]

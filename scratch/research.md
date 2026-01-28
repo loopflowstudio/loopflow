@@ -1,109 +1,127 @@
-# Research: loopflow.lfd-cli
+# Research: loopflow
 
 ## System understanding
 
-Loopflow is a multi-surface CLI suite for orchestrating coding-agent work. The Python package ships four entry points: `lf` (prompt launcher), `lfd` (daemon for waves), `lfops` (git workflow tooling), and `lfwork` (work queue integration). Prompts are files (steps) and are composed with context (docs, diffs, clipboard, summaries) before being passed to external agent CLIs (Claude Code, Codex, Gemini). The daemon persists wave configuration in SQLite and runs iterations via worktrees, streaming progress over a Unix socket, HTTP, and gRPC.
+Loopflow is a CLI-first orchestration layer for coding agents. Prompts are stored as versioned markdown steps; flows chain steps into DAGs; waves run flows continuously or on triggers. There are two main execution contexts: the interactive CLI (`lf`) and the daemon (`lfd`) that coordinates long-running waves with persistence, scheduling, and event streaming.
 
 ### Architecture
 
-- **Core CLI (`src/loopflow/lf/`)**
-  - `context.py` gathers docs, diffs, summaries, directions, and clipboard into `PromptComponents`, trims to token budget, and formats the final prompt.
-  - `step.py` implements `lf` commands, builds prompt/context, chooses model backend, and executes the agent CLI.
-  - `flow.py` executes multi-step flows (linear, fork, choose, loop) and logs step runs via the daemon’s step-run store.
-  - `launcher.py` translates model selection into concrete CLI commands and runner setup.
-  - `flows.py` defines flow item types (Step, Fork, Choose, LoopUntilEmpty) and DAG building.
-  - `directions.py`, `frontmatter.py`, `skills.py` load prompt directives and skill-based steps.
+**CLI entry points (Typer):**
 
-- **Daemon (`src/loopflow/lfd/`)**
-  - `daemon/server.py` is the async Unix socket server with event broadcast, scheduler slot management, and periodic checks.
-  - `daemon/http_server.py` exposes JSON-over-HTTP endpoints; `daemon/grpc_server.py` exposes gRPC.
-  - `models.py`, `wave.py`, `flow_run.py`, `step_run.py` define wave/iteration/step data and persistence.
-  - `execution/runner.py` runs a wave iteration, creating worktrees, executing steps through the collector, and updating DB state.
-  - `execution/collector.py` spawns agent CLI processes, captures output, and reports back via the socket.
-  - `worktree_state.py`, `pr_poller.py`, `autoprune.py`, `draft_prs.py` manage worktree metadata, PR state, and cleanup.
+| Entry point | Package | Responsibility |
+|-------------|---------|----------------|
+| `lf` | `loopflow.lf` | Prompt launcher—assemble context, run steps/flows |
+| `lfd` | `loopflow.lfd` | Daemon—manage waves, triggers, state, protocol |
+| `lfops` | `loopflow.lfops` | Git workflow automation (PR, land, rebase, worktrees) |
+| `lfwork` | `loopflow.lfwork` | Work queue integration (task sources) |
 
-- **Operations (`src/loopflow/lfops/`)**
-  - Git workflow commands: PR creation, land, next, worktrees, rebase, summarize, doctor, and commit helpers.
+**Prompt/flow surface (`loopflow.lf`):**
+- `cli.py` exposes `lf run`, `lf inline`, `lf flow` and step listing.
+- `context.py` constructs `PromptComponents` (docs/diff/context/clipboard/directions) and token-trims before formatting.
+- `flow.py` executes `Flow` DAGs (sequential, parallel, fork/synthesize, choose, loop-until-empty).
+- `flows.py` parses YAML flows into `Step`, `Fork`, `Choose`, `LoopUntilEmpty`.
+- `launcher.py` builds backend-specific commands (Claude/Codex/Gemini).
+- `step.py` is the single-step execution entry point.
 
-- **Work queue (`src/loopflow/lfwork.py`)**
-  - Integrates external work items (Asana) and provides CLI helpers for claim/release/approve.
+**Daemon surface (`loopflow.lfd`):**
+- `daemon/server.py` provides the Unix socket protocol and pub/sub event broadcast.
+- `daemon/http_server.py` exposes FastAPI REST endpoints plus JSON-compatible `/v1/*` for proto parity.
+- `daemon/grpc_server.py` serves the gRPC API (proto-first control plane).
+- `models.py` defines Wave/FlowRun/StepRun data models and status enums.
+- `wave.py`, `flow_run.py`, `step_run.py` handle persistence to SQLite and operational state.
+- `execution/runner.py` executes wave iterations (collector subprocess, timeouts, fork/synthesize, PR creation).
 
-- **Protocol & clients**
-  - `proto/` and `src/loopflow/proto/` define protobuf schemas and generated bindings.
-  - `swift/` contains Concerto UI code and shared models/tests.
+**Protocol layer:**
+- Proto files live in `proto/` and generated Python in `src/loopflow/proto/...`.
+- gRPC is the primary transport; JSON-over-HTTP v1 mirrors the proto structures for compatibility.
+- The Unix socket protocol is JSON-over-newline with request/response + event streams.
 
 ### Data flow
 
-1. **Prompt assembly (lf)**
-   - `lf` entrypoint → `step.py` parses flags → `gather_prompt_components()` collects:
-     - repo docs (`scratch/`, `roadmap/`, `*.md`), area-specific docs, directions
-     - diff files or raw diff (configurable)
-     - summaries (optional)
-     - clipboard text/images
-   - `trim_prompt_components()` drops components to meet token limit, then `format_prompt()` builds the final prompt.
-   - `launcher.py` builds the agent command and executes it (interactive or auto) in the worktree.
+**Single step (`lf <step>`):**
+1. `gather_prompt_components()` assembles docs, diffs, clipboard, directions, summaries.
+2. `trim_prompt_components()` enforces token budget and records dropped components.
+3. `format_prompt()` creates the tagged XML prompt.
+4. `build_model_command()` spawns the agent via `lfd.execution.collector` to capture output, autocommit, and step-run history.
 
-2. **Flow execution (lf)**
-   - `flow.py` loads `.lf/flows/*` definitions → builds DAG → executes steps in order/parallel.
-   - Steps log start/end via `lfd.step_run` utilities even when running outside the daemon.
+**Flow execution (`lf flow <name>`):**
+1. `load_flow()` parses YAML into `FlowItem`s.
+2. `build_step_dag()` and `topological_batches()` schedule steps for sequential or parallel execution.
+3. `run_flow()` handles Step/Fork/Choose/LoopUntilEmpty branching in one loop.
+4. Forks spawn worktrees, run steps in parallel, then synthesize results back into the main worktree.
 
-3. **Wave iteration (lfd)**
-   - `lfd` CLI updates wave config in SQLite.
-   - Daemon `server.py` runs periodic checks for watch/cron stimuli and auto-PR/autoprune.
-   - `execution/runner.py` creates worktree, builds prompts, runs steps via `collector.py`, updates flow/step/wave status.
-   - Collector streams output lines back to the daemon socket; server broadcasts to subscribers and UI clients.
+**Wave lifecycle (`lfd`):**
+1. `lfd create` stores a `Wave` (flow + direction + area + stimulus) in SQLite.
+2. `daemon/server.py` periodic checks evaluate watch/cron/loop triggers and manager slots.
+3. `execution/runner.py` runs an iteration in a persistent worktree branch (`{wave}.main`), logging `FlowRun` + `StepRun` records.
+4. Collector subprocess handles autocommit and optional PR creation; events are emitted to socket/HTTP clients.
 
 ### Key abstractions
 
-- **Step**: Markdown prompt file with frontmatter; executed by agent CLI.
-- **Flow**: Ordered or DAG-based chain of steps, can fork/choose/synthesize.
-- **Direction**: Perspective or intent applied to steps (markdown files under `.lf/directions/`).
-- **Wave**: Persistent configuration (area × direction × flow × stimulus) managed by `lfd`.
-- **PromptComponents**: Structured context chunks before formatting.
-- **StepRun / FlowRun**: Execution records stored in SQLite and streamed to clients.
+- **Wave** (`lfd.models.Wave`): long-lived orchestration unit with `area`, `direction`, `flow`, and `stimulus` (once/loop/watch/cron). Owns a persistent worktree and main branch.
+- **Flow** (`lf.flows.Flow`): DAG of `FlowItem`s; steps can specify `after`, `direction`, `model`, `interactive` overrides.
+- **Fork/Choose/LoopUntilEmpty**: flow constructs for parallel drafts, decision branches, and backpressure loops.
+- **PromptComponents** (`lf.context`): composable context parts; trimming logic enforces token budgets and tracks dropped elements.
+- **FlowRun/StepRun** (`lfd.models`): execution records for daemon runs; socket/HTTP APIs surface these for clients.
+- **Stimulus** (`lfd.models.Stimulus`): trigger configuration for waves (loop/watch/cron) with cron metadata.
 
 ## Tensions
 
-- **Dual execution paths**: `lf flow` and `lfd` iteration both execute steps, but share only some logging paths. Divergence risks inconsistent behavior between manual and daemon runs.
-- **Context trimming tradeoffs**: `trim_prompt_components()` drops content greedily after special-casing diff_files; ordering and rationale are implicit, which can surprise users when context is trimmed.
-- **Protocol surfaces**: socket, HTTP, and gRPC all exist; keeping parity and behavior consistent across them is a recurring risk.
+- **Dual execution paths**: `lf/flow.py` and `lfd/execution/runner.py` both implement flow orchestration, fork handling, and worktree management, but with different logging/timeout/collector paths.
+- **Transport parity**: socket, HTTP v1, and gRPC surfaces need to stay aligned; JSON compatibility endpoints mirror proto structs but the socket protocol has its own shape.
+- **Prompt assembly complexity**: `context.py` centralizes many concerns (diff modes, summaries, wave context, clipboard images), which makes it a hotspot for feature accretion.
+- **Wave branch naming**: daemon worktrees use `{wave}.main`, coupling naming to wave identity while `lfops wt` and `worktrunk` handle branching semantics differently.
 
 ## Observations
 
 ### Complexity
 
-- `src/loopflow/lf/context.py` handles gathering, budgets, and trimming logic in one module with multiple rules (diff vs files, area docs, summaries, clipboard).
-- `src/loopflow/lf/flow.py` interleaves DAG execution, worktree management, runner selection, and step-run logging.
-- `src/loopflow/lfd/daemon/server.py` mixes scheduling checks, PR polling, and event broadcast in one loop.
+- **Flow branching is dense**: `run_flow()` handles Step, Fork, Choose, LoopUntilEmpty, and interactive execution in one loop with multiple special cases.
+- **Runner orchestration is broad**: `execution/runner.py` combines prompt assembly, collector execution, timeouts, fork synthesis, PR creation, and daemon status updates.
+- **Daemon periodic checks**: `daemon/server.py:_periodic_check()` mixes process cleanup, watch/cron checks, PR polling, and autoprune in one timed loop.
+- **Worktree state tracking**: `lfd/worktree_state.py` and `lfops/worktrees.py` maintain multiple heuristics for merge and staleness detection.
 
 ### Quality
 
-- Test coverage is broad across CLI, flow logic, daemon protocol, and summarization (see `tests/test_*`).
-- Error handling is generally user-facing with Typer exit codes; some background paths swallow exceptions (daemon periodic loop) to keep service alive.
-- Documentation is thorough: CLI references, configuration, and daemon usage live under `docs/` and module READMEs.
+- **Tests exist but miss execution paths**: `tests/test_flows.py` focuses on parsing/topological batching but does not cover fork/synthesize execution or collector paths.
+- **Error handling is mixed**: some loaders return `None` for not-found (steps, flows), while others raise `ValueError` for invalid structure.
+- **Docs are strong at repo level**: `CLAUDE.md`, `STYLE.md`, `PROMPT_STYLE.md`, and `TESTING.md` give clear usage and style constraints.
 
 ### Potential
 
-- The gRPC server exists alongside HTTP and socket; it’s positioned for richer clients once parity is complete.
-- The flow DAG supports fork/synthesize patterns and parallelism, but tests focus more on parsing than execution.
-- Worktree state tracking, PR polling, and autoprune provide a foundation for a richer live UI (Concerto).
+- **Protocol-first design enables clients**: gRPC + JSON v1 endpoints make it feasible for Swift/Concerto to integrate without socket parsing.
+- **Flow DAGs allow real parallelism**: topological batching + forks are a strong foundation for multi-agent workflows.
+- **Persistent wave worktrees**: long-lived worktrees simplify iteration continuity and PR evolution if merge detection stays reliable.
 
 ## Open questions
 
-- Is `src/loopflow/lfd/execution/worker.py` still used in production paths, or is it legacy relative to `runner.py`?
-- How intentionally different are `lf flow` execution semantics versus `lfd` iterations (e.g., step logging, collector usage)?
-- Are there explicit guarantees about parity between socket, HTTP, and gRPC behaviors?
+- Is `lfd/execution/worker.py` still part of the runtime path, or legacy code that can be removed?
+- Is there an explicit parity contract between socket events, HTTP v1, and gRPC responses (especially for StepRun and FlowRun lifecycles)?
+- Does the new `/health` endpoint in `daemon/http_server.py` supersede the TODO noted in reliability docs, or is there a separate health path planned for the socket server?
+- Are `Choose` steps intended to bypass the collector (for speed), or should they follow the same step-run logging/timeout path as normal steps?
 
 ## Recommendations
 
-### Document context trimming strategy
-**Observation**: `trim_prompt_components()` uses special-case dropping for diff files plus greedy dropping for others; the rationale isn’t documented near the code.
-**Cost**: Low (comment block).
-**Benefit**: Maintainers can reason about trimming behavior and adjust priorities intentionally.
-**Verdict**: Worth it; behavior is user-visible when prompts get trimmed.
+### Document context trimming order
+**Observation**: `trim_prompt_components()` drops components with a defined priority but the rationale is undocumented.
+**Cost**: Low (comments only).
+**Benefit**: Easier to reason about missing context and user-visible prompt truncation.
+**Verdict**: Worth doing.
 
-### Add execution-path parity tests for fork/synthesize
-**Observation**: Flow parsing is tested, but fork/synthesize execution paths aren’t directly exercised in `tests/`.
-**Cost**: Medium (mock worktree/runner/collector).
-**Benefit**: Protects a key feature from regressions and clarifies expected behavior.
-**Verdict**: Worth it if fork/synthesize is a flagship workflow.
+### Clarify or remove legacy execution code
+**Observation**: `lfd/execution/worker.py` exists but `runner.py` appears to be the active entry point.
+**Cost**: Low (investigate + delete or document).
+**Benefit**: Reduces confusion over the true execution path.
+**Verdict**: Worth doing after confirming runtime usage.
+
+### Add fork/synthesize execution tests
+**Observation**: Tests validate flow parsing but not fork/synthesize execution behavior.
+**Cost**: Medium (mock worktrees/collector subprocesses).
+**Benefit**: Protects the most distinctive orchestration feature from regressions.
+**Verdict**: Worth doing when test harnesses can isolate side effects.
+
+### Consolidate flow execution paths (future)
+**Observation**: Flow orchestration exists in both `lf/flow.py` and `lfd/execution/runner.py`.
+**Cost**: High (refactor, parity, regression risk).
+**Benefit**: Single source of truth for flow semantics.
+**Verdict**: Defer unless execution semantics need major change.

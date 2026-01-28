@@ -12,7 +12,6 @@ syntax = "proto3";
 package loopflow.control.v1;
 
 import "google/protobuf/timestamp.proto";
-import "google/protobuf/empty.proto";
 
 option go_package = "github.com/loopflowstudio/loopflow/proto/control/v1";
 

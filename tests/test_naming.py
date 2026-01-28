@@ -31,15 +31,9 @@ def test_parse_branch_base_no_suffix():
     assert parse_branch_base("my-feature") == "my-feature"
 
 
-def test_parse_branch_base_with_suffix():
-    """Branch with .word1-word2 suffix strips it."""
-    result = parse_branch_base("my-feature.aurora-melody")
-    assert result == "my-feature"
-
-
-def test_parse_branch_base_with_suffix_frost_cadence():
-    """Another valid suffix is stripped."""
-    result = parse_branch_base("my-feature.frost-cadence")
+def test_parse_branch_base_with_timestamp_suffix():
+    """Branch with .timestamp.word1-word2 suffix strips both."""
+    result = parse_branch_base("my-feature.20260127_2204.aurora-melody")
     assert result == "my-feature"
 
 
@@ -68,24 +62,28 @@ def test_parse_branch_base_simple_branch():
 def test_parse_branch_base_recursive():
     """Parsing a branch with suffix returns same base."""
     base = "my-feature"
-    with_suffix = f"{base}.aurora-melody"
+    with_suffix = f"{base}.20260127_2204.aurora-melody"
     assert parse_branch_base(with_suffix) == base
     # Different suffix still yields same base
-    with_suffix2 = f"{base}.frost-cadence"
+    with_suffix2 = f"{base}.20260127_2204.frost-cadence"
     assert parse_branch_base(with_suffix2) == base
 
 
 def test_generate_next_branch_appends_suffix():
-    """Next branch gets .word1-word2 suffix."""
+    """Next branch gets .timestamp.word1-word2 suffix."""
     with patch("loopflow.lf.naming.branch_exists", return_value=False):
         result = generate_next_branch("my-feature", MagicMock())
     assert result.startswith("my-feature.")
-    # Should have magical-musical suffix after the dot
-    suffix = result.split(".", 1)[1]
-    parts = suffix.split("-")
-    assert len(parts) == 2
-    assert parts[0] in MAGICAL
-    assert parts[1] in MUSICAL
+    # Should have timestamp.word1-word2 suffix
+    parts = result.split(".")
+    assert len(parts) == 3  # base, timestamp, words
+    timestamp = parts[1]
+    assert len(timestamp) == 13  # YYYYMMDD_HHMM
+    assert "_" in timestamp
+    words = parts[2].split("-")
+    assert len(words) == 2
+    assert words[0] in MAGICAL
+    assert words[1] in MUSICAL
 
 
 def test_generate_next_branch_retries_on_collision():

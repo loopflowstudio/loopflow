@@ -227,9 +227,43 @@ def main():
             if first_arg == ":":
                 sys.argv.pop(1)
                 sys.argv.insert(1, "inline")
-            # Flags without step: lf -m codex → lf run -m codex
+            # Flags before step/flow: lf -m codex ship → lf flow ship -m codex
             elif first_arg.startswith("-") and first_arg not in known_commands:
-                sys.argv.insert(1, "run")
+                # Find the first non-flag arg that matches a step/flow name
+                repo_root = find_worktree_root()
+                config = load_config(repo_root) if repo_root else None
+
+                name_idx = None
+                name = None
+                is_flow = False
+                for idx, arg in enumerate(sys.argv[1:], start=1):
+                    if arg.startswith("-"):
+                        continue
+
+                    # Check if this arg is a valid step/flow (filters out flag values like "codex")
+                    candidate = arg.rstrip(":")
+                    has_flow_file = repo_root and flow_file_exists(candidate, repo_root)
+                    has_step = gather_step(repo_root, candidate, config) is not None
+
+                    if has_flow_file or has_step:
+                        if has_flow_file and has_step:
+                            typer.echo(
+                                f"Error: '{candidate}' exists as both a flow and a step", err=True
+                            )
+                            raise SystemExit(1)
+                        name_idx = idx
+                        name = candidate
+                        is_flow = has_flow_file
+                        break
+
+                if name:
+                    # Move name to position 2, insert command at position 1
+                    sys.argv.pop(name_idx)
+                    sys.argv.insert(1, "flow" if is_flow else "run")
+                    sys.argv.insert(2, name)
+                else:
+                    # No step/flow name found, just flags → lf -m codex → lf run -m codex
+                    sys.argv.insert(1, "run")
             elif first_arg not in known_commands:
                 # Handle colon suffix: "lf implement: add logout" -> "lf implement add logout"
                 if first_arg.endswith(":"):

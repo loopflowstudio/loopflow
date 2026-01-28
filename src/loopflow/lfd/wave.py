@@ -13,9 +13,8 @@ from pathlib import Path
 from croniter import croniter
 
 from loopflow.lf.context import find_worktree_root
-from loopflow.lf.naming import branch_exists, generate_word_pair
-from loopflow.lf.worktrees import WorktreeError
-from loopflow.lf.worktrees import create as create_worktree
+from loopflow.lf.naming import generate_next_branch, generate_word_pair
+from loopflow.lf.worktrees import WorktreeError, get_path
 from loopflow.lfd.db import _get_db
 from loopflow.lfd.logging import stimulus_log
 from loopflow.lfd.models import (
@@ -117,6 +116,27 @@ def get_wave_by_name(
     else:
         cursor = conn.execute("SELECT * FROM waves WHERE name = ?", (name,))
 
+    row = cursor.fetchone()
+    conn.close()
+    return wave_from_row(dict(row)) if row else None
+
+
+def get_wave_by_worktree(
+    worktree: Path, repo: Path | None = None, db_path: Path | None = None
+) -> Wave | None:
+    """Get a wave by its worktree path, optionally filtered by repo."""
+    conn = _get_db(db_path)
+
+    if repo:
+        cursor = conn.execute(
+            "SELECT * FROM waves WHERE worktree = ? AND repo = ?",
+            (str(worktree), str(repo)),
+        )
+    else:
+        cursor = conn.execute(
+            "SELECT * FROM waves WHERE worktree = ?",
+            (str(worktree),),
+        )
     row = cursor.fetchone()
     conn.close()
     return wave_from_row(dict(row)) if row else None
@@ -276,9 +296,8 @@ def _generate_wave_name(repo: Path) -> str:
     """Generate a unique wave name using word pairs."""
     for _ in range(100):
         words = generate_word_pair()
-        # Check that {name}.main branch doesn't exist
-        main_branch = f"{words}.main"
-        if not branch_exists(repo, main_branch):
+        # Check that no wave with this name exists
+        if not get_wave_by_name(words, repo):
             return words
 
     raise ValueError("Could not generate unique wave name")
@@ -316,11 +335,34 @@ def create_wave(
     wave_name = name or _generate_wave_name(repo)
 
     # Create worktree immediately so wave is ready for interactive sessions
-    main_branch = f"{wave_name}.main"
+    # Worktree path uses just the wave name (consistent across iterations)
+    # Branch name includes timestamp and words (evolves with each iteration)
+    branch = generate_next_branch(wave_name, repo)
+    worktree_path = get_path(repo, wave_name)
+
     try:
-        worktree_path = create_worktree(repo, main_branch)
-    except WorktreeError:
+        # Fetch to ensure we have latest origin/main
+        subprocess.run(["git", "fetch", "origin"], cwd=repo, capture_output=True)
+
+        # Create worktree with git directly (path != branch name)
+        result = subprocess.run(
+            ["git", "worktree", "add", "-b", branch, str(worktree_path), "origin/main"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise WorktreeError(result.stderr or "Failed to create worktree")
+
+        # Push to create remote branch with tracking
+        subprocess.run(
+            ["git", "push", "-u", "origin", branch],
+            cwd=worktree_path,
+            capture_output=True,
+        )
+    except (WorktreeError, subprocess.SubprocessError):
         worktree_path = None
+        branch = None
 
     wave = Wave(
         id=str(uuid.uuid4()),
@@ -334,7 +376,7 @@ def create_wave(
         pr_limit=pr_limit,
         merge_mode=merge_mode,
         worktree=worktree_path,
-        branch=main_branch if worktree_path else None,
+        branch=branch,
     )
 
     save_wave(wave)

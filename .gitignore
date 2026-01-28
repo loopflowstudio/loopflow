@@ -15,3 +15,5 @@ swift/dist/
 # Loopflow (generated cache)
 .lf/summaries/
 *.profraw
+.DS_Store
+target/

@@ -106,10 +106,26 @@ async def get_status():
 @app.get("/health", response_model=LFDResponse)
 async def get_health():
     """Detailed health check for diagnostics."""
-    global _start_time
-    uptime = time.time() - _start_time if _start_time else 0
+    uptime, db_ok, socket_ok, all_metrics, status = _health_snapshot()
+    return LFDResponse(
+        ok=True,
+        result={
+            **status,
+            "version": __version__,
+            "schema_version": SCHEMA_VERSION,
+            "uptime_seconds": uptime,
+            "checks": {
+                "database": "ok" if db_ok else "error",
+                "socket": "ok" if socket_ok else "error",
+            },
+            "metrics": all_metrics,
+        },
+    )
 
-    # Check database accessibility
+
+def _health_snapshot() -> tuple[int, bool, bool, dict[str, int], dict[str, Any]]:
+    uptime = int(time.time() - _start_time) if _start_time else 0
+
     db_ok = True
     try:
         from loopflow.lfd.db import DB_PATH
@@ -118,33 +134,16 @@ async def get_health():
     except Exception:
         db_ok = False
 
-    # Check socket exists
     socket_path = Path.home() / ".lf" / "lfd.sock"
     socket_ok = socket_path.exists()
 
-    status = compute_status()
-    return LFDResponse(
-        ok=True,
-        result={
-            **status,
-            "version": __version__,
-            "schema_version": SCHEMA_VERSION,
-            "uptime_seconds": int(uptime),
-            "checks": {
-                "database": "ok" if db_ok else "error",
-                "socket": "ok" if socket_ok else "error",
-            },
-            "metrics": metrics.get_all(),
-        },
-    )
+    return uptime, db_ok, socket_ok, metrics.get_all(), compute_status()
 
 
 # -----------------------------------------------------------------------------
 # JSON-over-HTTP Compatibility Layer (v1 API)
 # These endpoints mirror the gRPC API for clients that prefer JSON.
 # -----------------------------------------------------------------------------
-
-PROTOCOL_VERSION = {"major": 1, "minor": 0, "patch": 0}
 
 
 @app.get("/v1/health")
@@ -154,28 +153,12 @@ async def get_health_v1():
     This endpoint returns the exact structure defined in GetHealthResponse
     for clients that prefer JSON over gRPC.
     """
-    global _start_time
-    uptime = time.time() - _start_time if _start_time else 0
-
-    # Check database accessibility
-    db_ok = True
-    try:
-        from loopflow.lfd.db import DB_PATH
-
-        db_ok = DB_PATH.exists()
-    except Exception:
-        db_ok = False
-
-    # Check socket exists
-    socket_path = Path.home() / ".lf" / "lfd.sock"
-    socket_ok = socket_path.exists()
-
-    all_metrics = metrics.get_all()
+    uptime, db_ok, socket_ok, all_metrics, _ = _health_snapshot()
 
     return {
         "version": __version__,
         "schema_version": SCHEMA_VERSION,
-        "uptime_seconds": int(uptime),
+        "uptime_seconds": uptime,
         "checks": {
             "database": db_ok,
             "socket": socket_ok,
@@ -186,7 +169,7 @@ async def get_health_v1():
             "step_runs_active": all_metrics.get("step_runs_active", 0),
             "flow_runs_total": all_metrics.get("flow_runs_total", 0),
         },
-        "protocol_version": PROTOCOL_VERSION,
+        "protocol_version": protocol_version(),
     }
 
 

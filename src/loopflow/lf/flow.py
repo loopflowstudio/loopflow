@@ -555,6 +555,17 @@ class ForkResult:
     scratch_notes: str
 
 
+def _cleanup_stale_fork_branches(repo_root: Path, flow_name: str, count: int) -> None:
+    """Delete stale fork branches from a previous interrupted run."""
+    for i in range(1, count + 1):
+        branch = f"fork-{flow_name}-{i}"
+        subprocess.run(
+            ["git", "branch", "-D", branch],
+            cwd=repo_root,
+            capture_output=True,
+        )
+
+
 def run_fork(
     fork: Fork,
     base_commit: str,
@@ -571,6 +582,9 @@ def run_fork(
     """Create worktrees from base_commit, run each thread in parallel, return results."""
     base_branch = _current_branch(parent_worktree) or "HEAD"
     results: list[ForkResult] = []
+
+    # Clean up stale branches from previous interrupted runs
+    _cleanup_stale_fork_branches(parent_worktree, flow_name, len(fork.threads))
 
     def _run_thread(thread: ForkThread, index: int) -> tuple[ForkThread, Path, int]:
         label = f"fork-{flow_name}-{index}"

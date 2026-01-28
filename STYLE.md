@@ -4,10 +4,19 @@ This is the governing document of the loopflow codebase. Humans and LLMs alike a
 
 ## Quick Reference
 
+**Python:**
 - Use `uv run` or activate `.venv` before any Python command
 - Prefix private functions with `_`
 - Return `None` for "not found"; raise exceptions for "shouldn't happen"
 - No `Args:`/`Returns:` docstrings—if types are clear, skip the docstring
+
+**Rust:**
+- Run `cargo fmt` and `cargo clippy` before committing
+- Return `Option<T>` for "not found"; return `Result<T, E>` for failures
+- Use `expect("reason")` over `unwrap()` outside tests
+- Derive `Debug` on all public types
+
+**Both:**
 - Mock side effects, but don't test mock wiring
 - Design docs go under `scratch/`; `lf ops pr land` removes `scratch/*` contents
 - Auto runs are headless: make best-effort assumptions and append open questions to `scratch/questions.md`
@@ -43,6 +52,24 @@ When editing docs in `scratch/`:
 - `lf review` writes its assessment under `scratch/`
 - `lf ops pr land` removes `scratch/*` contents automatically
 
+When editing `*.rs` files:
+- Run `cargo fmt` before committing; CI enforces it
+- Run `cargo clippy -- -D warnings` locally; CI treats warnings as errors
+- Derive `Debug` on all public types; add `Clone`, `PartialEq`, `Default` where sensible
+- Use `thiserror` for library error types callers need to match on
+- Use `expect("why this is safe")` over `unwrap()` outside tests
+- Conversion methods: `as_` (cheap/borrowed), `to_` (allocates), `into_` (consumes self)
+- No `get_` prefix on getters: `fn name(&self)` not `fn get_name(&self)`
+- Return `Option<T>` for "not found", `Result<T, E>` for "something went wrong"
+- Newtypes for domain concepts: `struct RunId(String)` not `type RunId = String`
+- Every `unsafe` block requires a `// SAFETY:` comment explaining invariants
+
+When editing Rust tests:
+- `unwrap()` is fine in tests
+- Use `#[test]` for unit tests in the same file
+- Integration tests go in `tests/` directory
+- Mock via traits and dependency injection, not test doubles
+
 # Goals
 
 ## Clarity
@@ -63,9 +90,10 @@ Start with minimal data structures and APIs. If the core is right, trimming exce
 
 # Development Environment
 
-Use `uv` for all package management. Never use pip directly.
+Use `uv` for Python package management. Never use pip directly.
 
 ```bash
+# Python
 uv sync                       # Install dependencies
 uv run pytest tests/          # Run Python tests
 uv run lf agent --help        # Run commands
@@ -73,9 +101,15 @@ uv run lf agent --help        # Run commands
 # Or activate the venv
 source .venv/bin/activate
 pytest tests/
+
+# Rust
+cargo build                   # Build all crates
+cargo test                    # Run all Rust tests
+cargo fmt                     # Format code
+cargo clippy -- -D warnings   # Lint (warnings = errors)
 ```
 
-See TESTING.md for the full test suite (Python, Swift, Concerto UI). CI runs all three.
+See TESTING.md for the full test suite (Python, Swift, Rust, Concerto UI). CI runs all.
 
 # Code Organization
 
@@ -237,8 +271,18 @@ If a test requires elaborate mock setup, it's usually a sign that either:
 # Pre-Commit Checklist
 
 Before committing, verify:
+
+**Python:**
 - [ ] No new `Args:`/`Returns:` docstrings on functions with clear types
 - [ ] No inline imports; all imports at top of file
+
+**Rust:**
+- [ ] `cargo fmt` passes
+- [ ] `cargo clippy -- -D warnings` passes
+- [ ] Public types derive `Debug`
+- [ ] No `unwrap()` outside tests; use `expect("reason")`
+
+**Both:**
 - [ ] No `v2_`, `_old`, `_new`, `_backup` etc.; keep one implementation, use git for history
 - [ ] Mocks prevent side effects, not verify internal wiring
 - [ ] Tests assert on results, not mock calls

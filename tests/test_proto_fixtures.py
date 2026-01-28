@@ -61,34 +61,6 @@ WAVE_STATUSES = {
     "WAVE_ERROR",
 }
 
-MERGE_MODES = {
-    "MERGE_MODE_UNSPECIFIED",
-    "MERGE_PR",
-    "MERGE_LAND",
-}
-
-STEP_RUN_STATUSES = {
-    "STEP_RUN_STATUS_UNSPECIFIED",
-    "STEP_RUNNING",
-    "STEP_WAITING",
-    "STEP_COMPLETED",
-    "STEP_FAILED",
-}
-
-CI_STATES = {
-    "CI_STATE_UNSPECIFIED",
-    "CI_SUCCESS",
-    "CI_PENDING",
-    "CI_FAILURE",
-}
-
-PR_STATES = {
-    "PR_STATE_UNSPECIFIED",
-    "PR_OPEN",
-    "PR_MERGED",
-    "PR_CLOSED",
-}
-
 WORKTREE_CHANGE_REASONS = {
     "WORKTREE_CHANGE_REASON_UNSPECIFIED",
     "WORKTREE_COMMIT",
@@ -137,7 +109,8 @@ def test_event_fixture_has_payload(name: str, path: Path):
     data = _load_fixture(path)
     event_type = data["event"]
 
-    # Map event types to expected payload keys
+    # Map event types to expected payload keys.
+    # Only includes event types that have fixtures—add entries when adding fixtures.
     payload_map = {
         "session.started": "session_started",
         "session.ended": "session_ended",
@@ -145,8 +118,6 @@ def test_event_fixture_has_payload(name: str, path: Path):
         "worktree.updated": "worktree_updated",
         "worktree.pruned": "worktree_pruned",
         "wave.created": "wave_created",
-        "wave.updated": "wave_updated",
-        "wave.deleted": "wave_deleted",
         "wave.started": "wave_started",
         "wave.stopped": "wave_stopped",
         "wave.activated": "wave_activated",

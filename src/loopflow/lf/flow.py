@@ -14,7 +14,7 @@ from typing import Optional
 
 import yaml
 
-from loopflow.lf.config import parse_model
+from loopflow.lf.config import Config, load_config, parse_model
 from loopflow.lf.context import (
     ContextConfig,
     FilesetConfig,
@@ -28,7 +28,8 @@ from loopflow.lf.flows import (
     Choose,
     Flow,
     Fork,
-    ForkAgent,
+    ForkThread,
+    LoopUntilEmpty,
     Step,
     StepDAG,
     SynthesizeConfig,
@@ -36,7 +37,7 @@ from loopflow.lf.flows import (
     load_flow,
 )
 from loopflow.lf.git import GitError, find_main_repo, open_pr
-from loopflow.lf.launcher import build_model_command, get_runner
+from loopflow.lf.launcher import build_model_command, build_model_interactive_command, get_runner
 from loopflow.lf.logging import write_prompt_file
 from loopflow.lf.messages import generate_pr_message
 from loopflow.lf.tokens import MAX_SAFE_TOKENS, analyze_components
@@ -45,7 +46,7 @@ from loopflow.lf.worktrees import remove as remove_worktree
 from loopflow.lfd.models import StepRun, StepRunStatus
 from loopflow.lfd.step_run import log_step_run_end, log_step_run_start
 
-FlowItem = Step | Fork | Choose
+FlowItem = Step | Fork | Choose | LoopUntilEmpty
 
 
 @dataclass
@@ -64,12 +65,15 @@ def _build_step_params(
     backend: str,
     model_variant: str | None,
     context: list[str] | None,
+    flow_direction: list[str] | None,
 ) -> _StepParams:
     """Build step params by applying overrides to defaults."""
     step_backend = backend
     step_variant = model_variant
     step_context = list(context) if context else []
-    step_direction = [step.direction] if step.direction else None
+
+    # Step direction overrides flow direction
+    direction = step.direction if step.direction else flow_direction
 
     if step.model:
         step_backend, step_variant = parse_model(step.model)
@@ -79,8 +83,112 @@ def _build_step_params(
         backend=step_backend,
         model_variant=step_variant,
         context=step_context or None,
-        direction=step_direction,
+        direction=direction,
     )
+
+
+def _is_step_interactive(step: Step, repo_root: Path, config: Config | None) -> bool:
+    """Check if step should run interactively.
+
+    Priority: flow step override > frontmatter > default (False)
+    """
+    if step.interactive is not None:
+        return step.interactive
+    step_file = gather_step(repo_root, step.name, config)
+    if step_file and step_file.config.interactive is not None:
+        return step_file.config.interactive
+    return False
+
+
+def _run_interactive_step(
+    params: _StepParams,
+    repo_root: Path,
+    main_repo: Path,
+    exclude: list[str] | None,
+    skip_permissions: bool,
+    step_num: int,
+    total_steps: int,
+    chrome: bool = False,
+) -> int:
+    """Run step interactively - direct coding agent, no collector.
+
+    Unlike standalone interactive runs (which use os.execvp), this uses
+    subprocess.run() so the flow can continue after the step completes.
+    """
+    print(f"\n{'=' * 60}")
+    print(f"[{step_num}/{total_steps}] {params.step} (interactive)")
+    print(f"{'=' * 60}\n")
+
+    components = gather_prompt_components(
+        repo_root,
+        params.step,
+        run_mode="interactive",
+        direction=params.direction,
+        context_config=ContextConfig(
+            files=FilesetConfig(paths=params.context or [], exclude=exclude or [])
+        ),
+    )
+    components, dropped = trim_prompt_components(components, MAX_SAFE_TOKENS)
+    if dropped:
+        dropped_summary = ", ".join(format_drop_label(item) for item in dropped)
+        print(
+            f"\033[33m⚠ Context trimmed to fit {MAX_SAFE_TOKENS:,} tokens. "
+            f"Dropped: {dropped_summary}\033[0m"
+        )
+    tree = analyze_components(components)
+    if tree.total() > MAX_SAFE_TOKENS:
+        print(f"\033[33m⚠ Prompt is {tree.total():,} tokens (limit ~{MAX_SAFE_TOKENS:,})\033[0m")
+
+    prompt = format_prompt(components)
+
+    # Show token summary
+    token_summary = tree.format()
+    print(f"\033[90m━━━ {params.step} ━━━\033[0m")
+    for line in token_summary.split("\n"):
+        print(f"\033[90m{line}\033[0m")
+    print()
+
+    step_run = StepRun(
+        id=str(uuid.uuid4()),
+        step=params.step,
+        repo=str(main_repo),
+        worktree=str(repo_root),
+        status=StepRunStatus.RUNNING,
+        started_at=datetime.now(),
+        pid=None,
+        model=params.backend,
+        run_mode="interactive",
+    )
+    log_step_run_start(step_run)
+
+    command = build_model_interactive_command(
+        params.backend,
+        skip_permissions=skip_permissions,
+        yolo=skip_permissions,
+        model_variant=params.model_variant,
+        sandbox_root=repo_root.parent,
+        workdir=repo_root,
+        chrome=chrome,
+    )
+
+    # Append prompt as argument
+    cmd_with_prompt = command + [prompt]
+
+    # Run interactively - subprocess.run preserves TTY
+    # Remove API keys so coding agents use subscriptions
+    env = os.environ.copy()
+    env.pop("ANTHROPIC_API_KEY", None)
+    env.pop("OPENAI_API_KEY", None)
+
+    result = subprocess.run(cmd_with_prompt, cwd=repo_root, env=env)
+
+    status = StepRunStatus.COMPLETED if result.returncode == 0 else StepRunStatus.FAILED
+    log_step_run_end(step_run.id, status)
+
+    if result.returncode != 0:
+        print(f"\n[{params.step}] failed with exit code {result.returncode}")
+
+    return result.returncode
 
 
 def _run_step(
@@ -441,7 +549,7 @@ def _cleanup_worktrees(repo_root: Path, results: list[_WorktreeResult]) -> None:
 @dataclass
 class ForkResult:
     worktree: Path
-    config: ForkAgent
+    config: ForkThread
     diff: str
     status: str
     scratch_notes: str
@@ -460,17 +568,17 @@ def run_fork(
     context: list[str] | None,
     chrome: bool = False,
 ) -> list[ForkResult]:
-    """Create worktrees from base_commit, run each agent in parallel, return results."""
+    """Create worktrees from base_commit, run each thread in parallel, return results."""
     base_branch = _current_branch(parent_worktree) or "HEAD"
     results: list[ForkResult] = []
 
-    def _run_agent(agent: ForkAgent, index: int) -> tuple[ForkAgent, Path, int]:
+    def _run_thread(thread: ForkThread, index: int) -> tuple[ForkThread, Path, int]:
         label = f"fork-{flow_name}-{index}"
         try:
             wt_path = create_worktree(parent_worktree, label, base=base_branch)
         except Exception as exc:
             print(f"[{label}] Failed to create worktree: {exc}")
-            return agent, parent_worktree, 1
+            return thread, parent_worktree, 1
 
         subprocess.run(
             ["git", "reset", "--hard", base_branch],
@@ -479,9 +587,9 @@ def run_fork(
         )
         subprocess.run(["git", "clean", "-fd"], cwd=wt_path, capture_output=True)
 
-        if agent.step:
-            step = Step(name=agent.step, model=agent.model, direction=agent.direction)
-            params = _build_step_params(step, backend, model_variant, context)
+        if thread.step:
+            step = Step(name=thread.step, model=thread.model, direction=thread.direction)
+            params = _build_step_params(step, backend, model_variant, context, None)
             exit_code = _run_step(
                 params,
                 wt_path,
@@ -490,16 +598,16 @@ def run_fork(
                 skip_permissions,
                 False,
                 index,
-                len(fork.agents),
+                len(fork.threads),
                 chrome=chrome,
             )
-            return agent, wt_path, exit_code
+            return thread, wt_path, exit_code
 
-        if agent.flow:
-            loaded_flow = load_flow(agent.flow, parent_worktree)
+        if thread.flow:
+            loaded_flow = load_flow(thread.flow, parent_worktree)
             if not loaded_flow:
-                print(f"[{label}] Unknown flow: {agent.flow}")
-                return agent, wt_path, 1
+                print(f"[{label}] Unknown flow: {thread.flow}")
+                return thread, wt_path, 1
             exit_code = run_flow(
                 loaded_flow,
                 wt_path,
@@ -512,22 +620,22 @@ def run_fork(
                 model_variant=model_variant,
                 chrome=chrome,
             )
-            return agent, wt_path, exit_code
+            return thread, wt_path, exit_code
 
-        print(f"[{label}] Fork agent must set step or flow")
-        return agent, wt_path, 1
+        print(f"[{label}] Fork thread must set step or flow")
+        return thread, wt_path, 1
 
     futures = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(fork.agents)) as executor:
-        for index, agent in enumerate(fork.agents, 1):
-            futures.append(executor.submit(_run_agent, agent, index))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(fork.threads)) as executor:
+        for index, thread in enumerate(fork.threads, 1):
+            futures.append(executor.submit(_run_thread, thread, index))
         for future in futures:
-            agent, wt_path, exit_code = future.result()
+            thread, wt_path, exit_code = future.result()
             diff = _run_git(wt_path, ["diff", f"{base_commit}..HEAD"])
             results.append(
                 ForkResult(
                     worktree=wt_path,
-                    config=agent,
+                    config=thread,
                     diff=diff,
                     status="completed" if exit_code == 0 else "failed",
                     scratch_notes=_read_scratch_notes(wt_path),
@@ -614,6 +722,30 @@ def _current_branch(worktree: Path) -> str | None:
     )
     branch = result.stdout.strip()
     return branch or None
+
+
+def _get_wave_name(repo_root: Path, explicit_wave: str | None) -> str:
+    """Get wave name from explicit value, or derive from worktree/branch."""
+    if explicit_wave:
+        return explicit_wave
+    # Derive from worktree directory name (e.g., loopflow.lfflow -> lfflow)
+    dir_name = repo_root.name
+    if "." in dir_name:
+        return dir_name.split(".")[-1]
+    # Fall back to branch name
+    branch = _current_branch(repo_root)
+    if branch:
+        return branch
+    return "default"
+
+
+def _is_wave_empty(repo_root: Path, wave: str) -> bool:
+    """Check if a wave's backlog is empty (no items in roadmap/<wave>/)."""
+    roadmap_dir = repo_root / "roadmap" / wave
+    if not roadmap_dir.exists():
+        return True
+    items = list(roadmap_dir.glob("*.md"))
+    return len(items) == 0
 
 
 def _run_git(worktree: Path, args: list[str]) -> str:
@@ -785,7 +917,7 @@ def _build_choose_prompt(
         [
             "",
             "Decide which option to run based on repository state.",
-            "Inspect roadmap/roadmap and .design as needed.",
+            "Inspect reports/ and scratch/ as needed.",
             "",
             f"Write your decision to {output_path} with this frontmatter:",
             "---",
@@ -855,9 +987,10 @@ def run_flow(
 
     runner = get_runner(backend)
     if not runner.is_available():
-        print(f"Error: '{backend}' CLI not found")
+        print(f"Error: '{backend}' coding agent not found")
         return 1
 
+    config = load_config(repo_root)
     main_repo = find_main_repo(repo_root) or repo_root
     items: list[FlowItem] = list(flow.steps)
     total = _count_logical_steps(items)
@@ -878,18 +1011,33 @@ def run_flow(
             for batch in batches:
                 step_num += 1
                 if len(batch) == 1:
-                    params = _build_step_params(batch[0], backend, model_variant, context)
-                    result_code = _run_step(
-                        params,
-                        repo_root,
-                        main_repo,
-                        exclude,
-                        skip_permissions,
-                        should_push,
-                        step_num,
-                        total,
-                        chrome=chrome,
-                    )
+                    step = batch[0]
+                    params = _build_step_params(step, backend, model_variant, context, None)
+
+                    # Check if step should run interactively
+                    if _is_step_interactive(step, repo_root, config):
+                        result_code = _run_interactive_step(
+                            params,
+                            repo_root,
+                            main_repo,
+                            exclude,
+                            skip_permissions,
+                            step_num,
+                            total,
+                            chrome=chrome,
+                        )
+                    else:
+                        result_code = _run_step(
+                            params,
+                            repo_root,
+                            main_repo,
+                            exclude,
+                            skip_permissions,
+                            should_push,
+                            step_num,
+                            total,
+                            chrome=chrome,
+                        )
                     if result_code != 0:
                         return result_code
                     continue
@@ -897,7 +1045,7 @@ def run_flow(
                 base_branch = _current_branch(repo_root) or "HEAD"
                 wt_tasks = []
                 for step in batch:
-                    params = _build_step_params(step, backend, model_variant, context)
+                    params = _build_step_params(step, backend, model_variant, context, None)
                     wt_tasks.append(
                         _WorktreeTask(
                             step=params.step,
@@ -983,6 +1131,42 @@ def run_flow(
             branch_steps = item.options[choice]
             items = items[:i] + branch_steps + items[i + 1 :]
             total = _count_logical_steps(items)
+            continue
+
+        if isinstance(item, LoopUntilEmpty):
+            wave_name = _get_wave_name(repo_root, item.wave)
+            iteration = 0
+            print(f"\n{'=' * 60}")
+            print(f"[loop_until_empty] wave={wave_name}")
+            print(f"{'=' * 60}\n")
+
+            while not _is_wave_empty(repo_root, wave_name):
+                iteration += 1
+                if iteration > item.max_iterations:
+                    print(f"[loop_until_empty] max iterations ({item.max_iterations}) reached")
+                    return 1
+
+                print(f"\n--- Loop iteration {iteration} ---\n")
+
+                # Run the loop's steps as a sub-flow
+                loop_flow = Flow(name=f"{flow.name}-loop-{iteration}", steps=list(item.steps))
+                result_code = run_flow(
+                    loop_flow,
+                    repo_root,
+                    context=context,
+                    exclude=exclude,
+                    skip_permissions=skip_permissions,
+                    push_enabled=False,
+                    pr_enabled=False,
+                    backend=backend,
+                    model_variant=model_variant,
+                    chrome=chrome,
+                )
+                if result_code != 0:
+                    return result_code
+
+            print(f"\n[loop_until_empty] wave={wave_name} is empty, loop complete\n")
+            i += 1
             continue
 
         i += 1

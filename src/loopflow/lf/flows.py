@@ -8,7 +8,16 @@ from typing import Any, Iterable
 import yaml
 from pydantic import BaseModel, ConfigDict, model_validator
 
-MAX_FORK_AGENTS = 5
+MAX_FORK_THREADS = 5
+
+
+def _normalize(value: str | list[str] | None) -> list[str] | None:
+    """Normalize str | list[str] | None to list[str] | None."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return [value]
+    return value
 
 
 @dataclass
@@ -18,54 +27,63 @@ class Step:
     name: str
     after: str | list[str] | None = None  # None = follows previous step
     model: str | None = None
-    direction: str | None = None
+    direction: list[str] | None = None  # Overrides flow direction (normalized)
+    interactive: bool | None = None  # Override frontmatter setting
 
 
 @dataclass
-class ForkAgent:
-    """Configuration for one agent in a Fork."""
+class ForkThread:
+    """Configuration for one parallel thread in a Fork."""
 
     step: str | None = None  # single step
     flow: str | None = None  # or full flow
-    direction: str | None = None
+    direction: list[str] | None = None  # normalized
     model: str | None = None
-    area: str | None = None  # defaults to parent's area
+    area: list[str] | None = None  # normalized, defaults to parent's area
 
 
 @dataclass
 class SynthesizeConfig:
     """Config for synthesis after fork."""
 
-    direction: str | None = None
-    area: str | None = None
+    direction: list[str] | None = None  # normalized
+    area: list[str] | None = None  # normalized
     prompt: str | None = None
 
 
 @dataclass
 class Fork:
-    """Spawn parallel agents with synthesis."""
+    """Spawn parallel threads with synthesis."""
 
-    agents: list[ForkAgent] = dataclass_field(default_factory=list)
-    step: str | None = None  # apply to all agents
-    model: str | None = None  # apply to all agents
+    threads: list[ForkThread] = dataclass_field(default_factory=list)
+    step: str | None = None  # apply to all threads
+    model: str | None = None  # apply to all threads
     synthesize: SynthesizeConfig | None = None
 
     def __init__(
         self,
-        *agents,
+        *threads,
         step: str | None = None,
         model: str | None = None,
         synthesize: dict | None = None,
     ):
         parsed = []
-        for agent in agents:
-            parsed.append(_parse_fork_agent(agent))
-        if len(parsed) > MAX_FORK_AGENTS:
-            raise ValueError(f"Fork limited to {MAX_FORK_AGENTS} agents, got {len(parsed)}")
-        self.agents = parsed
+        for thread in threads:
+            parsed.append(_parse_fork_thread(thread))
+        if len(parsed) > MAX_FORK_THREADS:
+            raise ValueError(f"Fork limited to {MAX_FORK_THREADS} threads, got {len(parsed)}")
+        self.threads = parsed
         self.step = step
         self.model = model
-        self.synthesize = SynthesizeConfig(**synthesize) if synthesize else None
+        self.synthesize = (
+            SynthesizeConfig(
+                direction=_normalize(synthesize.get("direction")),
+                area=_normalize(synthesize.get("area")),
+                prompt=synthesize.get("prompt"),
+            )
+            if synthesize
+            else None
+        )
 
 
 class Choose(BaseModel):
@@ -86,7 +104,16 @@ class Choose(BaseModel):
         return self
 
 
-FlowItem = Step | Fork | Choose
+@dataclass
+class LoopUntilEmpty:
+    """Repeat steps until wave backlog is empty."""
+
+    steps: list["FlowItem"] = dataclass_field(default_factory=list)
+    wave: str | None = None  # None = inherit from context
+    max_iterations: int = 100  # Safety limit
+
+
+FlowItem = Step | Fork | Choose | LoopUntilEmpty
 
 
 class Flow:
@@ -138,7 +165,7 @@ def _parse_flow_items(items: Iterable[Any]) -> list[FlowItem]:
 
 
 def _parse_flow_item(item: Any) -> FlowItem:
-    if isinstance(item, (Step, Fork, Choose)):
+    if isinstance(item, (Step, Fork, Choose, LoopUntilEmpty)):
         return item
     if isinstance(item, str):
         return Step(name=item)
@@ -169,23 +196,39 @@ def _parse_flow_item(item: Any) -> FlowItem:
                     model=item.get("model"),
                     synthesize=item.get("synthesize"),
                 )
+        if "loop_until_empty" in item:
+            loop_value = item["loop_until_empty"]
+            if isinstance(loop_value, dict):
+                return LoopUntilEmpty(
+                    steps=_parse_flow_items(loop_value.get("steps", [])),
+                    wave=loop_value.get("wave"),
+                    max_iterations=loop_value.get("max_iterations", 100),
+                )
+            raise ValueError("loop_until_empty must be a dict with 'steps' key")
         if "step" in item or "name" in item:
             name = item.get("name") or item.get("step")
             return Step(
                 name=name,
                 after=item.get("after"),
                 model=item.get("model"),
-                direction=item.get("direction"),
+                direction=_normalize(item.get("direction")),
+                interactive=item.get("interactive"),
             )
     raise ValueError(f"Unsupported flow item: {item!r}")
 
 
-def _parse_fork_agent(agent: Any) -> ForkAgent:
-    if isinstance(agent, ForkAgent):
-        return agent
-    if isinstance(agent, dict):
-        return ForkAgent(**agent)
-    raise ValueError(f"Fork agent must be dict or ForkAgent, got {type(agent)}")
+def _parse_fork_thread(thread: Any) -> ForkThread:
+    if isinstance(thread, ForkThread):
+        return thread
+    if isinstance(thread, dict):
+        return ForkThread(
+            step=thread.get("step"),
+            flow=thread.get("flow"),
+            direction=_normalize(thread.get("direction")),
+            model=thread.get("model"),
+            area=_normalize(thread.get("area")),
+        )
+    raise ValueError(f"Fork thread must be dict or ForkThread, got {type(thread)}")
 
 
 def _step_to_data(step: FlowItem) -> dict | str:
@@ -204,13 +247,13 @@ def _step_to_data(step: FlowItem) -> dict | str:
         result: dict[str, Any] = {
             "fork": [
                 {
-                    "step": agent.step,
-                    "flow": agent.flow,
-                    "direction": agent.direction,
-                    "model": agent.model,
-                    "area": agent.area,
+                    "step": thread.step,
+                    "flow": thread.flow,
+                    "direction": thread.direction,
+                    "model": thread.model,
+                    "area": thread.area,
                 }
-                for agent in step.agents
+                for thread in step.threads
             ]
         }
         if step.step:
@@ -482,13 +525,13 @@ def _extract_step_names(flow: Flow) -> list[str]:
         elif isinstance(item, Fork):
             if item.step:
                 names.append(item.step)
-            for agent in item.agents:
-                if agent.step:
-                    names.append(agent.step)
-                if agent.flow:
-                    names.append(f"flow:{agent.flow}")
-                if agent.direction:
-                    names.append(f"direction:{agent.direction}")
+            for thread in item.threads:
+                if thread.step:
+                    names.append(thread.step)
+                if thread.flow:
+                    names.append(f"flow:{thread.flow}")
+                if thread.direction:
+                    names.append(f"direction:{thread.direction}")
             if item.synthesize and item.synthesize.direction:
                 names.append(f"direction:{item.synthesize.direction}")
         elif isinstance(item, Choose):

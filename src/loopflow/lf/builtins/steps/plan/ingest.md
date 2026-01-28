@@ -1,15 +1,19 @@
 ---
-requires: roadmap/ items
+requires: roadmap/<wave>/ items
 produces: scratch/<slug>.md
 ---
-Pick the highest-priority roadmap item and move it to scratch/.
+Pick the highest-priority item from the wave's backlog and move it to scratch/.
 
 ## Workflow
 
-1. Read all roadmap items under `roadmap/**/*.md`
-2. Evaluate each: urgency, importance, dependencies, readiness
-3. Pick the one that should be built next
-4. Move it from `roadmap/` to `scratch/`
+1. Identify the wave:
+   - Use explicit `--wave` flag if provided
+   - Use wave name from wave configuration (if running as a wave)
+   - Fall back to current worktree/branch name
+2. Read items from `roadmap/<wave>/`
+3. Evaluate each item: urgency, importance, dependencies, readiness
+4. Pick the one that should be built next
+5. Move it to `scratch/<slug>.md`
 
 ## Selection criteria
 
@@ -25,6 +29,8 @@ If multiple items score similarly, prefer smaller scope—ship something.
 
 ## Output
 
-The selected roadmap item is moved to `scratch/<slug>.md`. The original is removed from `roadmap/`.
+The selected item is moved to `scratch/<slug>.md`. The original is removed from `roadmap/<wave>/`.
 
-If no roadmap items exist or none are ready, write `scratch/questions.md` explaining what's missing.
+**If the wave backlog is empty:** Signal completion by writing nothing. This is not an error—it means the wave's work is done. When used in a `loop_until_empty` flow, this signals the loop should terminate.
+
+**If items exist but none are ready:** Write `scratch/questions.md` explaining what's blocking progress.

@@ -17,7 +17,8 @@ Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), or repo c
 | Include branch files | `--diff-files` (default) | `diff_files: true` |
 | Include raw diff | `--diff` | `diff: true` |
 | Include clipboard | `-c, --clipboard` | — |
-| Add context files | `-p FILE` | `context: [FILE]` |
+| Area scope | `--area PATH` | `area: PATH` |
+| Context files | — | `context: [FILE]` |
 | Direction (judgment/intent) | `--direction NAME` | `direction: NAME` |
 | Chrome automation | `--chrome` | `chrome: true` |
 | Yolo mode (skip permissions) | — | `yolo: true` |
@@ -173,10 +174,9 @@ Additional files always included in every step.
 
 | | |
 |---|---|
-| **CLI** | `-p FILE` (repeatable) |
 | **Config** | `context: [src/schema.py, docs/api.md]` |
 
-CLI adds to config; config sets baseline for all steps.
+Config sets baseline files for all steps.
 
 ### Exclude Patterns
 

@@ -92,7 +92,7 @@ Reduce context:
 ```bash
 lf review --no-lfdocs           # skip repo docs
 lf review --no-diff-files       # skip branch files
-lf review -p specific-file.py   # include only what you need
+lf review --area src/small/     # scope to specific area
 ```
 
 Use summaries for large codebases:

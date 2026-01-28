@@ -79,7 +79,8 @@ Steps chain into flows. Flows feed into waves.
 
 | Flow | Steps |
 |------|-------|
-| `ship` | implement → compress → gate |
+| `ship` | implement → compress → gate → consolidate |
+| `design-and-ship` | design → implement → reduce → polish |
 | `pair` | design → ship |
 | `grind` | review → iterate → ship → gate |
 | `incident` | debug → 5whys → ship |
@@ -111,14 +112,17 @@ lf flow roadmap-reduce    # runs reduce 3x with different perspectives
 Once you have played with chaining steps into flows, you're ready to start running waves.
 
 ```bash
-lfd create engbot --area src/ --direction product-engineer --flow ship
+lfd create engbot                         # create a wave
+lfd area engbot src/                      # set area
+lfd direction engbot product-engineer     # set direction
+lfd flow engbot ship                      # set flow
+lfd loop engbot                           # start looping
 ```
 
 Runs the `ship` flow on `src/` continuously using the `product-engineer` direction, creating PRs until stopped.
 
 ```bash
-lfd loop engbot      # keep shipping continuously
-lfd subscribe ship designs/ -d designer   # or only ship when new designs arrive
+lfd watch ship designs/ -d designer       # ship when designs/ changes on main
 ```
 
 You can compose multiple directions to add additional nuance or perspectives.

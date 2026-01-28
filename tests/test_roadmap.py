@@ -228,7 +228,7 @@ def test_format_roadmap_list_empty():
 
     output = format_roadmap_list(roadmap)
 
-    assert "No roadmap items found" in output
+    assert "No items found in roadmap/" in output
 
 
 def test_format_roadmap_list_groups_by_area(tmp_path):

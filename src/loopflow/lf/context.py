@@ -12,9 +12,15 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from loopflow.lf.design import gather_area_docs, gather_design_docs, gather_internal_docs
+from loopflow.lf.design import (
+    gather_ancestral_docs,
+    gather_area,
+    gather_design_docs,
+    gather_internal_docs,
+)
 from loopflow.lf.directions import Direction
 from loopflow.lf.files import (
+    GatherResult,
     find_md_in_dir,
     format_files,
     format_image_references,
@@ -40,6 +46,57 @@ _GLOBAL_STEP_PATHS = [
     Path.home() / ".lf" / "steps",  # Global loopflow steps
     Path.home() / ".claude" / "commands",  # Claude Code compatibility
 ]
+
+
+def _limit_to_budget(
+    docs: list[tuple[Path, str]], token_budget: int
+) -> tuple[list[tuple[Path, str]], bool]:
+    """Limit docs to fit within token budget.
+
+    Returns (limited_docs, was_truncated).
+    Keeps docs in order until budget is exceeded, then truncates.
+    """
+    if token_budget <= 0:
+        return docs, False
+
+    result = []
+    total_tokens = 0
+    truncated = False
+
+    for path, content in docs:
+        doc_tokens = count_tokens(content)
+        if total_tokens + doc_tokens <= token_budget:
+            result.append((path, content))
+            total_tokens += doc_tokens
+        else:
+            # Try to include a truncated version of this doc
+            remaining_budget = token_budget - total_tokens
+            if remaining_budget > 500:  # Only truncate if meaningful space left
+                # Rough char estimate: ~3.5 chars per token
+                char_limit = int(remaining_budget * 3.5)
+                truncated_content = content[:char_limit] + "\n\n[...truncated...]"
+                result.append((path, truncated_content))
+            truncated = True
+            break
+
+    return result, truncated
+
+
+def _limit_content_to_budget(content: str, token_budget: int) -> tuple[str, bool]:
+    """Limit string content to fit within token budget.
+
+    Returns (limited_content, was_truncated).
+    """
+    if token_budget <= 0:
+        return content, False
+
+    tokens = count_tokens(content)
+    if tokens <= token_budget:
+        return content, False
+
+    # Truncate to fit budget (~3.5 chars per token)
+    char_limit = int(token_budget * 3.5)
+    return content[:char_limit] + "\n\n[...truncated...]", True
 
 
 @dataclass
@@ -86,13 +143,13 @@ class DiffMode(str, Enum):
 
 
 # Default paths always included unless explicitly excluded
-_DEFAULT_FILE_PATHS = ["scratch/", "roadmap/", "*.md"]
+_DEFAULT_FILE_PATHS = ["scratch/", "reports/", "roadmap/", "*.md"]
 
 
 class FilesetConfig(BaseModel):
     """Configuration for file context.
 
-    Default paths (scratch/, roadmap/, *.md) are always included unless excluded.
+    Default paths (scratch/, reports/, roadmap/, *.md) are always included unless excluded.
     The paths field is additive to defaults.
     """
 
@@ -108,12 +165,12 @@ class ContextConfig(BaseModel):
     # Branch work
     diff_mode: DiffMode = DiffMode.FILES
 
-    # User files (defaults: scratch/, roadmap/, *.md)
+    # User files (defaults: scratch/, reports/, roadmap/, *.md)
     files: FilesetConfig = Field(default_factory=FilesetConfig)
 
     # Area path (e.g., "lf/cli" or "concerto/ui")
     # When set with parent_docs=True, includes parent area docs:
-    # area="a/b/c" includes a/*.md, a/roadmap/, a/b/*.md, a/b/roadmap/, etc.
+    # area="a/b/c" includes a/*.md, a/reports/, a/b/*.md, a/b/reports/, etc.
     area: str | None = None
 
     # Bundled LOOPFLOW.md system documentation
@@ -122,12 +179,17 @@ class ContextConfig(BaseModel):
     # Extras
     clipboard: bool = False
 
+    # Token budgets (0 = unlimited)
+    budget_area: int = 50000
+    budget_docs: int = 30000
+    budget_diff: int = 20000
+
     @classmethod
     def for_commit(cls) -> "ContextConfig":
         """Minimal context for commit message generation."""
         return cls(
             diff_mode=DiffMode.DIFF,
-            files=FilesetConfig(exclude=["scratch/", "roadmap/", "*.md"]),
+            files=FilesetConfig(exclude=["scratch/", "reports/", "roadmap/", "*.md"]),
             lfdocs=False,
         )
 
@@ -734,24 +796,49 @@ def gather_prompt_components(
     # Load bundled LOOPFLOW.md (system documentation)
     loopflow_doc = _load_loopflow_doc() if context_config.lfdocs else None
 
-    # Insert design docs and internal docs before repo docs
-    # Order: scratch/ (ephemeral), roadmap/ (persistent internal), area docs, repo root .md files
-    design_docs = gather_design_docs(repo_root)
-    internal_docs = gather_internal_docs(repo_root)
-
     # Gather area-specific docs if area is set and parent_docs is enabled
     area_docs = []
+    area_summary_used = False
     if context_config.area and context_config.files.parent_docs:
-        area_docs = gather_area_docs(repo_root, context_config.area)
+        # Try to use summary for area if available and within budget
+        area_path = Path(context_config.area)
+        area_summary = load_summary(area_path, repo_root, context_config.budget_area)
+        if area_summary and not is_stale(area_summary, repo_root):
+            # Use the summary instead of full area docs
+            area_docs = [(area_path / "summary", area_summary.content)]
+            area_summary_used = True
+        else:
+            area_docs = gather_area(repo_root, context_config.area)
 
-    prefix_docs = design_docs + internal_docs + area_docs
-    if prefix_docs:
-        docs[0:0] = prefix_docs
+    # Apply area budget (only if not using summary)
+    if not area_summary_used and context_config.budget_area > 0 and area_docs:
+        area_docs, _ = _limit_to_budget(area_docs, context_config.budget_area)
+
+    # Gather reference docs: scratch/ (ephemeral), roadmap context, and repo root .md
+    design_docs = gather_design_docs(repo_root)
+    roadmap_docs = []
+    if context_config.area:
+        # Area-scoped: ancestral docs from parent paths
+        roadmap_docs = gather_ancestral_docs(repo_root, context_config.area)
+    else:
+        # No area: include all of reports/ as reference
+        roadmap_docs = gather_internal_docs(repo_root)
+    ref_docs = design_docs + roadmap_docs + docs
+
+    # Apply docs budget to reference docs
+    if context_config.budget_docs > 0 and ref_docs:
+        ref_docs, _ = _limit_to_budget(ref_docs, context_config.budget_docs)
+
+    # Combine: area docs first, then reference docs
+    docs = area_docs + ref_docs
 
     # Gather diff based on mode
     diff = None
     if context_config.diff_mode == DiffMode.DIFF:
         diff = gather_diff(repo_root, exclude)
+        # Apply diff budget
+        if diff and context_config.budget_diff > 0:
+            diff, _ = _limit_content_to_budget(diff, context_config.budget_diff)
 
     step_result = None
     if inline:
@@ -790,6 +877,13 @@ def gather_prompt_components(
     all_file_paths = diff_file_paths + [p for p in explicit_paths if p not in diff_set]
     gather_result = gather_files(all_file_paths, repo_root, context_exclude)
 
+    # Apply diff budget to diff files
+    if context_config.budget_diff > 0 and gather_result.text_files:
+        limited_files, _ = _limit_to_budget(gather_result.text_files, context_config.budget_diff)
+        gather_result = GatherResult(
+            text_files=limited_files, image_files=gather_result.image_files
+        )
+
     clipboard = _read_clipboard() if context_config.clipboard else None
 
     # Directions passed in directly (already loaded)
@@ -813,9 +907,22 @@ def gather_prompt_components(
 
 
 def format_prompt(components: PromptComponents) -> str:
-    """Format prompt components into the final prompt string."""
+    """Format prompt components into the final prompt string.
+
+    Structure: system → reference → instructions → working context
+    1. System docs (loopflow)
+    2. Run mode
+    3. Reference material (docs, summaries)
+    4. Instructions (direction, step)
+    5. Working context (diff, clipboard, images)
+    """
     parts = []
 
+    # 1. System docs
+    if components.loopflow_doc:
+        parts.append(f"<lf:loopflow>\n{components.loopflow_doc}\n</lf:loopflow>")
+
+    # 2. Run mode
     if components.run_mode == "auto":
         parts.append(
             "Run mode is auto (headless). Proceed without pausing for questions. "
@@ -823,35 +930,7 @@ def format_prompt(components: PromptComponents) -> str:
             "any open questions to `scratch/questions.md`."
         )
 
-    if components.loopflow_doc:
-        parts.append(f"<lf:loopflow>\n{components.loopflow_doc}\n</lf:loopflow>")
-
-    if components.step:
-        name, content = components.step
-        if name == "inline":
-            step_tag = f"<lf:step>\n{content}\n</lf:step>"
-        else:
-            step_tag = f"<lf:step:{name}>\n{content}\n</lf:step:{name}>"
-
-        # Directions go between "The step." header and the actual step content
-        if components.direction:
-            if len(components.direction) == 1:
-                d = components.direction[0]
-                direction_section = (
-                    f"<lf:direction:{d.name}>\n{d.content}\n</lf:direction:{d.name}>"
-                )
-            else:
-                direction_parts = [
-                    f"<lf:direction:{d.name}>\n{d.content}\n</lf:direction:{d.name}>"
-                    for d in components.direction
-                ]
-                direction_section = (
-                    f"<lf:directions>\n{chr(10).join(direction_parts)}\n</lf:directions>"
-                )
-            parts.append(f"The step.\n\n{direction_section}\n\n{step_tag}")
-        else:
-            parts.append(f"The step.\n\n{step_tag}")
-
+    # 3. Reference material (docs, summaries)
     if components.docs:
         doc_parts = []
         for doc_path, content in components.docs:
@@ -860,7 +939,7 @@ def format_prompt(components: PromptComponents) -> str:
         docs_body = "\n\n".join(doc_parts)
         parts.append(
             "Repository documentation. Follow STYLE carefully. "
-            "May include design artifacts (scratch/) and internal docs (roadmap/).\n\n"
+            "May include design artifacts (scratch/) and internal docs (reports/).\n\n"
             f"<lf:docs>\n{docs_body}\n</lf:docs>"
         )
 
@@ -874,24 +953,48 @@ def format_prompt(components: PromptComponents) -> str:
             f"<lf:summaries>\n{summaries_body}\n</lf:summaries>"
         )
 
-    if components.diff:
-        parts.append(
-            f"Changes on this branch (diff against main).\n\n"
-            f"<lf:diff>\n{components.diff}\n</lf:diff>"
-        )
+    # 4. Instructions (direction, then step)
+    if components.direction:
+        if len(components.direction) == 1:
+            d = components.direction[0]
+            parts.append(
+                f"Direction for this work.\n\n"
+                f"<lf:direction:{d.name}>\n{d.content}\n</lf:direction:{d.name}>"
+            )
+        else:
+            direction_parts = [
+                f"<lf:direction:{d.name}>\n{d.content}\n</lf:direction:{d.name}>"
+                for d in components.direction
+            ]
+            parts.append(
+                f"Directions for this work.\n\n"
+                f"<lf:directions>\n{chr(10).join(direction_parts)}\n</lf:directions>"
+            )
 
-    # diff_files now contains merged diff + context files (deduplicated at load time)
-    if components.diff_files:
-        parts.append(format_files(components.diff_files, components.repo_root))
+    if components.step:
+        name, content = components.step
+        if name == "inline":
+            step_tag = f"<lf:step>\n{content}\n</lf:step>"
+        else:
+            step_tag = f"<lf:step:{name}>\n{content}\n</lf:step:{name}>"
+        parts.append(f"The step.\n\n{step_tag}")
 
-    # Handle clipboard content (text and/or image)
+    # 5. Working context (diff, clipboard, images)
+    # diff and diff_files are mutually exclusive (based on DiffMode)
+    if components.diff or components.diff_files:
+        diff_parts = []
+        if components.diff:
+            diff_parts.append(f"<lf:diff>\n{components.diff}\n</lf:diff>")
+        if components.diff_files:
+            diff_parts.append(format_files(components.diff_files, components.repo_root))
+        parts.append("Changes on this branch (diff against main).\n\n" + "\n\n".join(diff_parts))
+
     if components.clipboard and components.clipboard.text:
         parts.append(
             f"Content from clipboard.\n\n"
             f"<lf:clipboard>\n{components.clipboard.text}\n</lf:clipboard>"
         )
 
-    # Merge clipboard image with other image files
     all_images = list(components.image_files) if components.image_files else []
     if components.clipboard and components.clipboard.image_path:
         all_images.insert(0, components.clipboard.image_path)

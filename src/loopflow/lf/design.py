@@ -20,13 +20,12 @@ def gather_design_docs(repo_root: Path) -> list[tuple[Path, str]]:
 
 
 def gather_internal_docs(repo_root: Path) -> list[tuple[Path, str]]:
-    """Gather internal docs from roadmap/ for prompt context.
+    """Gather internal docs from reports/ for prompt context.
 
-    roadmap/ contains forward-looking internal documentation:
-    architecture, decisions, context for agents. Unlike scratch/
-    (ephemeral per-PR), roadmap/ persists across merges.
+    reports/ contains reference material: research, analysis, decisions.
+    Unlike scratch/ (ephemeral per-PR), reports/ persists across merges.
     """
-    docs_dir = repo_root / "roadmap"
+    docs_dir = repo_root / "reports"
     if not docs_dir.is_dir():
         return []
 
@@ -49,36 +48,95 @@ def _area_parent_paths(area: str) -> list[str]:
     return paths
 
 
-def gather_area_docs(repo_root: Path, area: str) -> list[tuple[Path, str]]:
-    """Gather docs from area and all parent areas.
+def gather_area(repo_root: Path, area: str) -> list[tuple[Path, str]]:
+    """Gather all content from an area (scope of responsibility).
+
+    For area="src/api", includes:
+    - All files in src/api/ (code, docs, everything)
+    - reports/src/api/* (reports for this area)
+
+    This is what the agent is responsible for and needs to know.
+    """
+    files = []
+    seen = set()
+    area_dir = repo_root / area
+
+    # All files in the area directory
+    if area_dir.is_dir():
+        for path in sorted(area_dir.rglob("*")):
+            if path.is_file() and path not in seen:
+                # Skip binary files, only include text
+                try:
+                    content = path.read_text()
+                    seen.add(path)
+                    files.append((path, content))
+                except (UnicodeDecodeError, PermissionError):
+                    pass  # Skip binary or unreadable files
+
+    # Area-specific reports (reports/<area>/)
+    reports_dir = repo_root / "reports" / area
+    if reports_dir.is_dir():
+        for path in sorted(reports_dir.rglob("*")):
+            if path.is_file() and path not in seen:
+                try:
+                    content = path.read_text()
+                    seen.add(path)
+                    files.append((path, content))
+                except (UnicodeDecodeError, PermissionError):
+                    pass  # Skip binary or unreadable files
+
+    return files
+
+
+def gather_ancestral_docs(repo_root: Path, area: str) -> list[tuple[Path, str]]:
+    """Gather docs and reports from parent paths of an area.
 
     For area="a/b/c", includes:
-    - a/*.md and a/roadmap/**/*.md
-    - a/b/*.md and a/b/roadmap/**/*.md
-    - a/b/c/*.md and a/b/c/roadmap/**/*.md
+    - a/*.md, a/b/*.md (parent docs)
+    - reports/a/*, reports/a/b/* (parent reports)
+    - NOT a/b/c/* or reports/a/b/c/* (that's in the area itself)
     """
     docs = []
     seen = set()
+    parents = _area_parent_paths(area)[:-1]  # Exclude the area itself
 
-    for parent in _area_parent_paths(area):
+    # Paths to exclude (the area itself and deeper)
+    area_reports = repo_root / "reports" / area.strip("/")
+
+    for parent in parents:
+        # Parent directory docs
         parent_dir = repo_root / parent
-
-        # Direct .md files in the area directory
         if parent_dir.is_dir():
             for path in sorted(parent_dir.glob("*.md")):
                 if path.is_file() and path not in seen:
                     seen.add(path)
                     docs.append((path, path.read_text()))
 
-        # Area-specific roadmap
-        roadmap_dir = parent_dir / "roadmap"
-        if roadmap_dir.is_dir():
-            for path in sorted(roadmap_dir.rglob("*.md")):
+        # Parent reports (all files, not just .md)
+        reports_dir = repo_root / "reports" / parent
+        if reports_dir.is_dir():
+            for path in sorted(reports_dir.rglob("*")):
+                # Skip files under the area's reports (handled by gather_area)
+                if _is_under(path, area_reports):
+                    continue
                 if path.is_file() and path not in seen:
-                    seen.add(path)
-                    docs.append((path, path.read_text()))
+                    try:
+                        content = path.read_text()
+                        seen.add(path)
+                        docs.append((path, content))
+                    except (UnicodeDecodeError, PermissionError):
+                        pass  # Skip binary or unreadable files
 
     return docs
+
+
+def _is_under(path: Path, parent: Path) -> bool:
+    """Check if path is under parent directory."""
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
 
 
 def load_direction(direction: str | Path, repo_root: Path) -> str | None:

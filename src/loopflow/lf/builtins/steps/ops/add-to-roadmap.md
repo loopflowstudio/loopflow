@@ -1,46 +1,84 @@
 ---
 requires: scratch/ files to promote
-produces: roadmap/ files
+produces: roadmap/ or reports/ files
 ---
-Promote files from scratch to the permanent roadmap.
+Route files from scratch/ to roadmap/ or reports/ based on content type.
 
-## Path rules
+## Two destinations
 
-Frontmatter overrides path. If no frontmatter, preserve existing path structure.
-
-**Frontmatter overrides:**
+**roadmap/<wave>/** — Actionable work items. Things to build next.
 ```
-scratch/api/auth.md with `area: cli` → roadmap/cli/auth.md
-scratch/proposal.md with `area: api` → roadmap/api/proposal.md
+roadmap/
+  lfflow/
+    dynamic-budgets.md
+    auth-redesign.md
 ```
 
-**Path preserved (no frontmatter):**
+**reports/** — Reference material. Context for understanding, not immediately actionable.
 ```
-scratch/api/auth.md → roadmap/api/auth.md
-scratch/proposal.md → roadmap/proposal.md
+reports/
+  landscape.md
+  target-customer.md
+```
+
+## Routing logic
+
+For each file in scratch/, decide:
+
+**Is this actionable follow-up work?**
+- Has clear scope and next steps
+- Someone should build this
+- → `roadmap/<wave>/<slug>.md`
+
+**Is this reference/context?**
+- Research with lasting value
+- Decisions that should be remembered
+- Context for future work
+- → `reports/<topic>.md`
+
+## Determining the wave name
+
+For actionable items going to `roadmap/`:
+
+1. Use explicit `--wave` flag if provided
+2. Use wave name from wave configuration (if running as a wave)
+3. Fall back to current worktree/branch name
+
+**Examples:**
+```
+--wave lfflow + actionable item → roadmap/lfflow/<slug>.md
+(no flag, worktree=loopflow.lfflow) + actionable item → roadmap/lfflow/<slug>.md
+reference material → reports/<topic>.md
 ```
 
 ## Workflow
 
-1. Find files in `scratch/` that should be promoted (skip temporary analysis files)
-2. For each file:
-   - If `area:` frontmatter exists, use it as the destination path
-   - Otherwise, preserve the relative path from scratch/
-3. Create corresponding file in `roadmap/`
-4. Remove promoted files from `scratch/`
+1. Read everything in scratch/
+2. For each file worth promoting:
+   - Decide: actionable (roadmap/) or reference (reports/)
+   - Determine destination path
+   - Move content (don't just copy—remove from scratch/)
+3. Skip temporary analysis files that shouldn't persist
 
 ## What to promote
 
-Promote files that represent decisions or plans:
-- `scratch/roadmap-proposal.md`
-- `scratch/<area>/item.md`
+**To roadmap/ (actionable):**
+- Proposals with clear scope
+- Follow-up work items from this diff
+- Bugs or issues discovered during work
 
-Skip analysis artifacts that informed the decision:
-- `scratch/research.md`
-- `scratch/simplification-opportunities.md`
-- `scratch/polish-priorities.md`
+**To reports/ (reference):**
+- Research with lasting value
+- Architectural decisions
+- Analysis that informs future work
+
+**Skip entirely:**
+- Working notes that informed decisions
+- Intermediate analysis superseded by synthesis
+- Branch-specific design docs (cleared on merge anyway)
 
 ## Validation
 
-- Destination must be determinable (path or frontmatter)
-- If destination already exists, fail with error
+- Every promoted file must have a clear destination
+- If destination already exists, merge or fail (don't silently overwrite)
+- Actionable items must have clear next steps

@@ -19,8 +19,8 @@ This runs the `ship` flow on `src/api/` with the `product-engineer` direction—
 |----------|-----------|---------|
 | **Once** | Single run | `lfd run` |
 | **Loop** | Continuously until stopped | `lfd loop` |
-| **Watch** | Area changes on main | `lfd subscribe` |
-| **Cron** | On schedule | `lfd schedule` |
+| **Watch** | Area changes on main | `lfd watch` |
+| **Cron** | On schedule | `lfd cron` |
 
 ### Once
 
@@ -49,8 +49,8 @@ When the PR limit is reached, the loop pauses until PRs are merged.
 React to changes. When files in the area change on main, activates one iteration.
 
 ```bash
-lfd subscribe ship src/api/               # watch src/api/ for changes
-lfd subscribe ship docs/                  # watch docs/ for changes
+lfd watch ship src/api/                   # watch src/api/ for changes
+lfd watch ship docs/                      # watch docs/ for changes
 ```
 
 The area serves as both the context for the wave and the paths to watch.
@@ -60,8 +60,8 @@ The area serves as both the context for the wave and the paths to watch.
 Run on schedule. 24-hour grace period for laptops.
 
 ```bash
-lfd schedule ship . "0 9 * * *"           # 9am daily
-lfd schedule ship . "0 9 * * MON-FRI"     # 9am weekdays
+lfd cron ship . "0 9 * * *"               # 9am daily
+lfd cron ship . "0 9 * * MON-FRI"         # 9am weekdays
 ```
 
 ---

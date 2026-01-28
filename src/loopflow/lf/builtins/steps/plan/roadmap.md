@@ -2,16 +2,16 @@
 requires: scratch/ analysis
 produces: scratch/roadmap-proposal.md
 ---
-Synthesize analysis into a roadmap proposal.
+Synthesize analysis into a proposal for work or reference.
 
 ## Scope
 
-The included context defines your area. Propose items that belong to this area. The area is recorded in frontmatter for later promotion to `roadmap/<area>/`.
+The included context defines your area. Propose items that belong to this area. When promoted via `add-to-roadmap`, actionable items go to `roadmap/<wave>/` and reference material goes to `reports/`.
 
 ## Workflow
 
 1. Read analysis in `scratch/` (research, simplification opportunities, polish priorities, etc.)
-2. Read `roadmap/` to understand project direction and existing items
+2. Read `reports/` to understand project direction and existing items
 3. Identify the highest-leverage proposal that emerges from the analysis
 4. Write `scratch/roadmap-proposal.md`
 
@@ -22,7 +22,6 @@ Write `scratch/roadmap-proposal.md`:
 ```markdown
 ---
 status: proposed
-area: <area>
 ---
 
 # Title

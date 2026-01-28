@@ -27,7 +27,7 @@ def test_flow_from_dict_parses_steps():
     assert isinstance(flow.steps[0], Step)
     assert flow.steps[0].name == "design"
     assert flow.steps[1].model == "codex"
-    assert flow.steps[1].direction == "architect"
+    assert flow.steps[1].direction == ["architect"]
     assert flow.steps[2].after == "design"
 
 
@@ -100,7 +100,7 @@ def test_load_flow_with_fork():
         assert flow is not None
         assert isinstance(flow.steps[0], Fork)
         assert flow.steps[0].step == "implement"
-        assert flow.steps[0].synthesize.direction == "reviewer"
+        assert flow.steps[0].synthesize.direction == ["reviewer"]
 
 
 def test_save_flow_roundtrip():
@@ -110,7 +110,7 @@ def test_save_flow_roundtrip():
             name="test",
             steps=[
                 Step("design"),
-                Step("implement", model="codex", direction="architect"),
+                Step("implement", model="codex", direction=["architect"]),
             ],
         )
 

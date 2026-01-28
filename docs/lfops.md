@@ -64,6 +64,16 @@ lfops land
 
 Enables auto-merge on your PR. GitHub merges when CI passes and the merge queue clears. Run `lfops wt prune` after merge completes to clean up.
 
+## lfops next
+
+Land current PR and continue work in a fresh worktree.
+
+```bash
+lfops next
+```
+
+Combines `lfops land` + `lfops wt create` in one command. After landing the current PR, creates a new worktree with the same naming scheme so you can continue working while the previous PR merges.
+
 ## lfops commit
 
 Generate commit message and commit.

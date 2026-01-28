@@ -68,6 +68,14 @@ class BranchNameConfig(BaseModel):
     schema_: str = Field(default="{name}", alias="schema")
 
 
+class BudgetConfig(BaseModel):
+    """Token budgets for prompt sections."""
+
+    area: int = 50000  # Area content (area/*.md, area/reports/)
+    docs: int = 30000  # Reference docs (root *.md, scratch/, reports/)
+    diff: int = 20000  # Branch changes
+
+
 def parse_model(model: str) -> tuple[str, str | None]:
     """Parse model string like 'claude:opus' into (backend, variant).
 
@@ -99,7 +107,7 @@ class Config(BaseModel):
     ide: IdeConfig = Field(default_factory=IdeConfig)
     interactive: list[str] = Field(default_factory=list)  # Tasks that default to interactive
     include_loopflow_doc: bool = True  # Include bundled LOOPFLOW.md in prompts
-    lfdocs: bool = True  # Include roadmap/, scratch/, and root .md files
+    lfdocs: bool = True  # Include reports/, roadmap/, scratch/, and root .md files
     diff: bool = False  # Include raw branch diff against main
     diff_files: bool = True  # Include full content of files touched by branch
     paste: bool = False  # Include clipboard content by default
@@ -113,6 +121,7 @@ class Config(BaseModel):
     branch_names: Optional[BranchNameConfig] = None  # Branch naming schema
     lint_check: Optional[str] = None  # Command to check if lint passes (exits 0 = pass)
     autoprune: AutopruneConfig = Field(default_factory=AutopruneConfig)
+    budgets: BudgetConfig = Field(default_factory=BudgetConfig)
 
     @field_validator("context", mode="before")
     @classmethod

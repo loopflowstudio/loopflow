@@ -33,7 +33,7 @@ def register_commands(app: typer.Typer) -> None:
             False, "-c", "-C", "--clipboard", help="Include clipboard content"
         ),
         docs: Optional[bool] = typer.Option(
-            None, "--lfdocs/--no-lfdocs", help="Include roadmap/, scratch/, and root .md files"
+            None, "--lfdocs/--no-lfdocs", help="Include reports/, roadmap/, scratch/, and .md files"
         ),
         diff_mode: Optional[str] = typer.Option(
             None, "--diff-mode", help="How to include branch changes: files, diff, or none"

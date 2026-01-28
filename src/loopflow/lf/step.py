@@ -253,7 +253,7 @@ def run(
     interactive: bool = typer.Option(
         False, "-i", "-I", "--interactive", help="Override to run in interactive mode"
     ),
-    path: list[str] = typer.Option(None, "-p", "-P", "--path", help="Additional files to include"),
+    area: list[str] = typer.Option(None, "--area", help="Area scope (paths to include in context)"),
     worktree: str = typer.Option(
         None, "-w", "-W", "--worktree", help="Create worktree and run step there"
     ),
@@ -264,7 +264,7 @@ def run(
         None, "-c", "-C", "--clipboard/--no-clipboard", help="Include clipboard content in prompt"
     ),
     docs: Optional[bool] = typer.Option(
-        None, "--lfdocs/--no-lfdocs", help="Include roadmap/, scratch/, and root .md files"
+        None, "--lfdocs/--no-lfdocs", help="Include reports/, roadmap/, scratch/, and .md files"
     ),
     diff_mode: Optional[str] = typer.Option(
         None, "--diff-mode", help="How to include branch changes: files, diff, or none"
@@ -306,7 +306,7 @@ def run(
         return _launch_interactive_default(
             repo_root,
             config,
-            context=list(path) if path else None,
+            context=list(area) if area else None,
             model=model,
             direction=direction,
             clipboard=clipboard,
@@ -328,7 +328,7 @@ def run(
         cli_interactive=True if interactive else None,
         cli_auto=True if auto else None,
         cli_model=model,
-        cli_context=list(path) if path else None,
+        cli_context=list(area) if area else None,
         cli_direction=cli_directions or None,
     )
 
@@ -390,6 +390,9 @@ def run(
             area=resolved.area,
             lfdocs=config.include_loopflow_doc if config else True,
             clipboard=include_clipboard,
+            budget_area=config.budgets.area if config else 50000,
+            budget_docs=config.budgets.docs if config else 30000,
+            budget_diff=config.budgets.diff if config else 20000,
         ),
         config=config,
     )
@@ -443,7 +446,7 @@ def inline(
     interactive: bool = typer.Option(
         False, "-i", "-I", "--interactive", help="Override to run in interactive mode"
     ),
-    path: list[str] = typer.Option(None, "-p", "-P", "--path", help="Additional files to include"),
+    area: list[str] = typer.Option(None, "--area", help="Area scope (paths to include in context)"),
     web: bool = typer.Option(
         False, "--web", help="Copy to clipboard and open web client (claude.ai, chatgpt.com, etc.)"
     ),
@@ -451,7 +454,7 @@ def inline(
         None, "-c", "-C", "--clipboard/--no-clipboard", help="Include clipboard content in prompt"
     ),
     docs: Optional[bool] = typer.Option(
-        None, "--lfdocs/--no-lfdocs", help="Include roadmap/, scratch/, and root .md files"
+        None, "--lfdocs/--no-lfdocs", help="Include reports/, roadmap/, scratch/, and .md files"
     ),
     diff_mode: Optional[str] = typer.Option(
         None, "--diff-mode", help="How to include branch changes: files, diff, or none"
@@ -485,7 +488,7 @@ def inline(
         cli_interactive=True if interactive else None,
         cli_auto=True if auto else None,
         cli_model=model,
-        cli_context=list(path) if path else None,
+        cli_context=list(area) if area else None,
         cli_direction=cli_directions or None,
     )
 
@@ -543,6 +546,9 @@ def inline(
             area=resolved.area,
             lfdocs=config.include_loopflow_doc if config else True,
             clipboard=include_clipboard,
+            budget_area=config.budgets.area if config else 50000,
+            budget_docs=config.budgets.docs if config else 30000,
+            budget_diff=config.budgets.diff if config else 20000,
         ),
         config=config,
     )
@@ -587,9 +593,7 @@ def inline(
 
 def flow(
     name: str = typer.Argument(help="Flow name from .lf/flows/"),
-    path: list[str] = typer.Option(
-        None, "-p", "-P", "--path", help="Additional files for all steps"
-    ),
+    area: list[str] = typer.Option(None, "--area", help="Area scope (paths to include in context)"),
     worktree: str = typer.Option(
         None, "-w", "-W", "--worktree", help="Create worktree and run flow there"
     ),
@@ -643,8 +647,8 @@ def flow(
         repo_root = worktree_path
 
     all_context = list(config.context) if config and config.context else []
-    if path:
-        all_context.extend(path)
+    if area:
+        all_context.extend(area)
 
     exclude = list(config.exclude) if config and config.exclude else None
 

@@ -10,6 +10,7 @@ Loopflow is evolving beyond single‑developer macOS use to managed, multi‑ten
 - Improve portability for managed clusters (Linux‑friendly, container‑ready, easy distribution).
 - Preserve Loopflow UX: prompts, flows, directions, and artifact paths remain unchanged.
 - Establish a protocol‑first architecture for remote clients (desktop + mobile).
+- Support session connect for interactive steps (tick‑based flow execution with pause/resume).
 
 ## Non‑goals
 - Full redesign of flows/steps/prompts.

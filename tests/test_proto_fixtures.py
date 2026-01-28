@@ -163,9 +163,7 @@ def test_wave_activated_event_fields():
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "name,path", REQUEST_FIXTURES, ids=[n for n, _ in REQUEST_FIXTURES]
-)
+@pytest.mark.parametrize("name,path", REQUEST_FIXTURES, ids=[n for n, _ in REQUEST_FIXTURES])
 def test_request_fixture_parses(name: str, path: Path):
     """All request fixtures must be valid JSON."""
     data = _load_fixture(path)
@@ -196,9 +194,7 @@ def test_gather_context_diff_mode_valid():
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "name,path", RESPONSE_FIXTURES, ids=[n for n, _ in RESPONSE_FIXTURES]
-)
+@pytest.mark.parametrize("name,path", RESPONSE_FIXTURES, ids=[n for n, _ in RESPONSE_FIXTURES])
 def test_response_fixture_parses(name: str, path: Path):
     """All response fixtures must be valid JSON."""
     data = _load_fixture(path)

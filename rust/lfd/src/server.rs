@@ -214,6 +214,7 @@ impl ControlService for ControlServer {
             paused: false,
             status: WaveStatus::WaveIdle as i32,
             iteration: 0,
+            step_index: 0,
             worktree: String::new(),
             branch: String::new(),
             pr_limit: 0,
@@ -311,6 +312,7 @@ impl ControlService for ControlServer {
             .ok_or_else(|| Status::not_found("wave not found"))?;
 
         wave.status = WaveStatus::WaveRunning as i32;
+        wave.step_index = 0;
         wave.paused = false;
         if let Some(flow) = req.flow {
             wave.flow = flow;

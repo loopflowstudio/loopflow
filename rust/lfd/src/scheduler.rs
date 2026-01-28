@@ -2,6 +2,11 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
+
+use crate::loops;
+use crate::store::SharedStore;
 
 #[derive(Debug)]
 pub struct Scheduler {
@@ -44,5 +49,18 @@ impl Scheduler {
         let mut active = self.active.lock().expect("scheduler mutex poisoned");
         active.remove(run_id);
         active.len() as u32
+    }
+
+    pub fn start_loops(
+        self: Arc<Self>,
+        store: SharedStore,
+        cancel: CancellationToken,
+    ) -> Vec<JoinHandle<()>> {
+        vec![
+            loops::spawn_loop_ticker(self.clone(), store.clone(), cancel.clone()),
+            loops::spawn_watch_poller(store.clone(), cancel.clone()),
+            loops::spawn_cron_poller(store.clone(), cancel.clone()),
+            loops::spawn_recovery_loop(store, cancel),
+        ]
     }
 }

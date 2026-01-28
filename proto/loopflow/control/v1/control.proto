@@ -182,6 +182,7 @@ message Wave {
   // Resilience
   uint32 consecutive_failures = 18;
   uint32 pending_activations = 19;
+  uint32 step_index = 20;
 }
 
 message ListWavesRequest {

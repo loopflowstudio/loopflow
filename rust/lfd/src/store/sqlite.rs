@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -64,7 +65,8 @@ impl SqliteStore {
                 created_at INTEGER NOT NULL,
                 last_main_sha TEXT,
                 consecutive_failures INTEGER NOT NULL,
-                pending_activations INTEGER NOT NULL
+                pending_activations INTEGER NOT NULL,
+                step_index INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS step_runs (
@@ -83,6 +85,7 @@ impl SqliteStore {
             );
             ",
         )?;
+        ensure_column(&conn, "waves", "step_index", "INTEGER NOT NULL DEFAULT 0")?;
         Ok(())
     }
 
@@ -93,7 +96,8 @@ impl SqliteStore {
                 "
                 SELECT id, name, repo, flow, direction, area, stimulus_kind, stimulus_cron,
                        paused, status, iteration, worktree, branch, pr_limit, merge_mode, pid,
-                       created_at, last_main_sha, consecutive_failures, pending_activations
+                       created_at, last_main_sha, consecutive_failures, pending_activations,
+                       step_index
                 FROM waves
                 WHERE repo = ?1
                 ORDER BY created_at DESC
@@ -104,7 +108,8 @@ impl SqliteStore {
                 "
                 SELECT id, name, repo, flow, direction, area, stimulus_kind, stimulus_cron,
                        paused, status, iteration, worktree, branch, pr_limit, merge_mode, pid,
-                       created_at, last_main_sha, consecutive_failures, pending_activations
+                       created_at, last_main_sha, consecutive_failures, pending_activations,
+                       step_index
                 FROM waves
                 ORDER BY created_at DESC
                 ",
@@ -141,8 +146,9 @@ impl SqliteStore {
             INSERT INTO waves (
                 id, name, repo, flow, direction, area, stimulus_kind, stimulus_cron,
                 paused, status, iteration, worktree, branch, pr_limit, merge_mode, pid,
-                created_at, last_main_sha, consecutive_failures, pending_activations
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
+                created_at, last_main_sha, consecutive_failures, pending_activations,
+                step_index
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 repo = excluded.repo,
@@ -162,7 +168,8 @@ impl SqliteStore {
                 created_at = excluded.created_at,
                 last_main_sha = excluded.last_main_sha,
                 consecutive_failures = excluded.consecutive_failures,
-                pending_activations = excluded.pending_activations
+                pending_activations = excluded.pending_activations,
+                step_index = excluded.step_index
             ",
             params![
                 wave.id,
@@ -185,6 +192,7 @@ impl SqliteStore {
                 wave.last_main_sha,
                 wave.consecutive_failures,
                 wave.pending_activations,
+                wave.step_index,
             ],
         )?;
         Ok(())
@@ -219,13 +227,36 @@ impl RunStore for SqliteStore {
         self.read_waves(repo)
     }
 
+    fn list_waves_by_stimulus(&self, kind: i32) -> StoreResult<Vec<Wave>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "
+            SELECT id, name, repo, flow, direction, area, stimulus_kind, stimulus_cron,
+                   paused, status, iteration, worktree, branch, pr_limit, merge_mode, pid,
+                   created_at, last_main_sha, consecutive_failures, pending_activations,
+                   step_index
+            FROM waves
+            WHERE stimulus_kind = ?1
+            ORDER BY created_at DESC
+            ",
+        )?;
+
+        let rows = stmt.query_map(params![kind], map_wave_row)?;
+        let mut waves = Vec::new();
+        for wave in rows {
+            waves.push(wave?);
+        }
+        Ok(waves)
+    }
+
     fn get_wave(&self, wave_id: &str) -> StoreResult<Option<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "
             SELECT id, name, repo, flow, direction, area, stimulus_kind, stimulus_cron,
                    paused, status, iteration, worktree, branch, pr_limit, merge_mode, pid,
-                   created_at, last_main_sha, consecutive_failures, pending_activations
+                   created_at, last_main_sha, consecutive_failures, pending_activations,
+                   step_index
             FROM waves
             WHERE id = ?1
             ",
@@ -250,6 +281,23 @@ impl RunStore for SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute("DELETE FROM waves WHERE id = ?1", params![wave_id])?;
         Ok(())
+    }
+
+    fn increment_pending_activations(&self, wave_id: &str) -> StoreResult<u32> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let updated = conn.execute(
+            "UPDATE waves SET pending_activations = pending_activations + 1 WHERE id = ?1",
+            params![wave_id],
+        )?;
+        if updated == 0 {
+            return Err(StoreError::NotFound);
+        }
+        let count: i64 = conn.query_row(
+            "SELECT pending_activations FROM waves WHERE id = ?1",
+            params![wave_id],
+            |row| row.get(0),
+        )?;
+        Ok(count as u32)
     }
 
     fn list_step_runs(&self) -> StoreResult<Vec<StepRun>> {
@@ -364,6 +412,47 @@ impl RunStore for SqliteStore {
         }
         Ok(())
     }
+
+    fn get_stuck_step_runs(&self, older_than_secs: u64) -> StoreResult<Vec<StepRun>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let cutoff = now_unix() - older_than_secs as i64;
+        let mut stmt = conn.prepare(
+            "
+            SELECT id, step, repo, worktree, flow_run_id, wave_id, status,
+                   started_at, ended_at, pid, model, run_mode
+            FROM step_runs
+            WHERE ended_at IS NULL AND started_at <= ?1
+            ORDER BY started_at ASC
+            ",
+        )?;
+
+        let rows = stmt.query_map(params![cutoff], |row| {
+            let started_at = unix_to_timestamp(row.get::<_, i64>(7)?);
+            let ended_at: Option<i64> = row.get(8)?;
+            let pid: Option<i64> = row.get(9)?;
+
+            Ok(StepRun {
+                id: row.get(0)?,
+                step: row.get(1)?,
+                repo: row.get(2)?,
+                worktree: row.get(3)?,
+                flow_run_id: row.get(4)?,
+                wave_id: row.get(5)?,
+                status: row.get::<_, i64>(6)? as i32,
+                started_at: Some(started_at),
+                ended_at: ended_at.map(unix_to_timestamp),
+                pid: pid.map(|value| value as u32),
+                model: row.get(10)?,
+                run_mode: row.get(11)?,
+            })
+        })?;
+
+        let mut runs = Vec::new();
+        for run in rows {
+            runs.push(run?);
+        }
+        Ok(runs)
+    }
 }
 
 fn unix_to_timestamp(seconds: i64) -> Timestamp {
@@ -419,10 +508,32 @@ fn map_wave_row(row: &Row<'_>) -> Result<Wave, rusqlite::Error> {
         last_main_sha: row.get(17)?,
         consecutive_failures: row.get::<_, i64>(18)? as u32,
         pending_activations: row.get::<_, i64>(19)? as u32,
+        step_index: row.get::<_, i64>(20)? as u32,
     })
 }
 
 fn parse_json_vec(value: &str) -> Result<Vec<String>, rusqlite::Error> {
     serde_json::from_str::<Vec<String>>(value)
         .map_err(|err| rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(err)))
+}
+
+fn ensure_column(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> StoreResult<()> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    let mut columns = HashSet::new();
+    for name in rows {
+        columns.insert(name?);
+    }
+    if !columns.contains(column) {
+        conn.execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+            [],
+        )?;
+    }
+    Ok(())
 }

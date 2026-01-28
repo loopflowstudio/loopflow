@@ -54,4 +54,3 @@ When a flow pauses at an interactive step, users can connect to complete it.
 ## Open questions
 - Do we keep SQLite for v1 or jump to Postgres now?
 - How do we handle per-tenant isolation in early phases?
-

@@ -21,6 +21,7 @@ from loopflow.lf.flows import load_flow
 from loopflow.lf.git import autocommit, find_main_repo
 from loopflow.lf.launcher import build_model_interactive_command
 from loopflow.lf.logging import get_log_dir
+from loopflow.lf.naming import generate_next_branch
 from loopflow.lfd.daemon.launchd import install as launchd_install
 from loopflow.lfd.daemon.launchd import is_running
 from loopflow.lfd.daemon.launchd import uninstall as launchd_uninstall
@@ -38,12 +39,15 @@ from loopflow.lfd.wave import (
     delete_wave,
     get_wave,
     get_wave_by_name,
+    get_wave_by_worktree,
     get_wt_from_cwd,
     list_waves,
     start_wave,
     stop_wave,
     update_wave,
+    update_wave_stacking,
     update_wave_status,
+    update_wave_worktree_branch,
 )
 from loopflow.lfops.shell import write_directive
 
@@ -1313,6 +1317,291 @@ def list_directions_cmd():
 
     typer.echo("")
     typer.echo(f"{len(all_directions)} direction{'s' if len(all_directions) != 1 else ''} found")
+
+
+# Stacking commands
+
+
+def _resolve_wave_from_worktree_or_name(
+    name: str | None, repo: Path, c: dict[str, str]
+) -> Wave | None:
+    """Resolve wave from name argument or current worktree."""
+    if name:
+        return _resolve_wave(name, repo, c)
+
+    # Try to find wave by current worktree
+    worktree = get_wt_from_cwd()
+    if worktree:
+        wave = get_wave_by_worktree(worktree, repo)
+        if wave:
+            return wave
+
+    return None
+
+
+def _get_pr_number(repo_root: Path) -> int | None:
+    """Get the PR number for the current branch."""
+    result = subprocess.run(
+        ["gh", "pr", "view", "--json", "number", "-q", ".number"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        return int(result.stdout.strip())
+    return None
+
+
+def _get_pr_state(repo_root: Path, branch: str) -> str | None:
+    """Get the state of a PR for a branch (OPEN, MERGED, CLOSED)."""
+    result = subprocess.run(
+        ["gh", "pr", "view", branch, "--json", "state", "-q", ".state"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout.strip().upper()
+    return None
+
+
+def _enable_auto_merge(repo_root: Path, pr_number: int) -> bool:
+    """Enable auto-merge on a PR. Returns True if successful."""
+    merge_cmd = ["gh", "pr", "merge", str(pr_number), "--squash", "--auto"]
+    result = subprocess.run(merge_cmd, cwd=repo_root, capture_output=True, text=True)
+    return result.returncode == 0
+
+
+@app.command("next")
+def next_cmd(
+    name: str = typer.Argument(None, help="Wave name (inferred from worktree if omitted)"),
+    create_pr: bool = typer.Option(False, "-c", "--create-pr", help="Create PR if none exists"),
+):
+    """Stack a new branch on top of current work.
+
+    Enables auto-merge on current PR, creates new branch from HEAD,
+    and records base tracking for rebase-on-land.
+
+    Examples:
+        lfd next                    # from within wave worktree
+        lfd next rust               # explicit wave name
+        lfd next --create-pr        # create PR first, then stack
+    """
+    c = _colors()
+    repo = get_wt_from_cwd()
+    if not repo:
+        typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    main_repo = find_main_repo(repo) or repo
+
+    # Resolve wave
+    wave = _resolve_wave_from_worktree_or_name(name, main_repo, c)
+    if not wave:
+        typer.echo(f"{c['red']}Error:{c['reset']} Wave not found", err=True)
+        if name:
+            typer.echo(f"Create with: lfd create {name}")
+        else:
+            typer.echo("Run from a wave worktree or specify wave name")
+        raise typer.Exit(1)
+
+    worktree = wave.worktree
+    if not worktree or not worktree.exists():
+        typer.echo(f"{c['red']}Error:{c['reset']} Wave has no worktree", err=True)
+        raise typer.Exit(1)
+
+    # Get current branch
+    result = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=worktree,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        typer.echo(f"{c['red']}Error:{c['reset']} Not on a branch", err=True)
+        raise typer.Exit(1)
+
+    old_branch = result.stdout.strip()
+
+    # Get current HEAD SHA for base_commit
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=worktree,
+        capture_output=True,
+        text=True,
+    )
+    old_head = result.stdout.strip() if result.returncode == 0 else None
+
+    # Get or create PR
+    pr_number = _get_pr_number(worktree)
+    if pr_number is None:
+        if create_pr:
+            typer.echo("Creating PR...")
+            result = subprocess.run(["lfops", "pr"], cwd=worktree)
+            if result.returncode != 0:
+                typer.echo(f"{c['red']}Error:{c['reset']} Failed to create PR", err=True)
+                raise typer.Exit(1)
+            pr_number = _get_pr_number(worktree)
+            if pr_number is None:
+                typer.echo(
+                    f"{c['red']}Error:{c['reset']} Could not find PR after creation", err=True
+                )
+                raise typer.Exit(1)
+        else:
+            msg = "No open PR found. Run 'lfops pr' first, or use --create-pr."
+            typer.echo(f"{c['red']}Error:{c['reset']} {msg}", err=True)
+            raise typer.Exit(1)
+
+    # Enable auto-merge
+    typer.echo(f"Enabling auto-merge for PR #{pr_number}...")
+    if not _enable_auto_merge(worktree, pr_number):
+        typer.echo(f"{c['yellow']}Warning:{c['reset']} Could not enable auto-merge", err=True)
+
+    # Generate new branch name
+    new_branch = generate_next_branch(wave.name, main_repo)
+
+    # Create new branch from current HEAD
+    typer.echo(f"Creating stacked branch {c['bold']}{new_branch}{c['reset']}...")
+    result = subprocess.run(
+        ["git", "checkout", "-b", new_branch],
+        cwd=worktree,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        typer.echo(f"{c['red']}Error:{c['reset']} Failed to create branch", err=True)
+        typer.echo(result.stderr)
+        raise typer.Exit(1)
+
+    # Push to origin with tracking
+    result = subprocess.run(
+        ["git", "push", "-u", "origin", new_branch],
+        cwd=worktree,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        typer.echo(f"{c['yellow']}Warning:{c['reset']} Failed to push to origin", err=True)
+
+    # Update wave: new branch, record base tracking
+    wave.branch = new_branch
+    wave.base_branch = old_branch
+    wave.base_commit = old_head
+    update_wave_worktree_branch(wave.id, worktree, new_branch)
+    update_wave_stacking(wave.id, old_branch, old_head)
+
+    typer.echo(f"{c['green']}Stacked{c['reset']} on {c['dim']}{old_branch}{c['reset']}")
+    typer.echo(f"New branch: {c['bold']}{new_branch}{c['reset']}")
+
+
+@app.command("rebase")
+def rebase_cmd(
+    name: str = typer.Argument(None, help="Wave name (inferred from worktree if omitted)"),
+):
+    """Rebase stacked branch after base PR lands.
+
+    Detects if base branch was squash-merged to main and rebases appropriately.
+
+    Examples:
+        lfd rebase                  # from within wave worktree
+        lfd rebase rust             # explicit wave name
+    """
+    c = _colors()
+    repo = get_wt_from_cwd()
+    if not repo:
+        typer.echo(f"{c['red']}Error:{c['reset']} Not in a git repository", err=True)
+        raise typer.Exit(1)
+
+    main_repo = find_main_repo(repo) or repo
+
+    # Resolve wave
+    wave = _resolve_wave_from_worktree_or_name(name, main_repo, c)
+    if not wave:
+        typer.echo(f"{c['red']}Error:{c['reset']} Wave not found", err=True)
+        raise typer.Exit(1)
+
+    worktree = wave.worktree
+    if not worktree or not worktree.exists():
+        typer.echo(f"{c['red']}Error:{c['reset']} Wave has no worktree", err=True)
+        raise typer.Exit(1)
+
+    # Fetch latest
+    typer.echo("Fetching origin...")
+    subprocess.run(["git", "fetch", "origin"], cwd=worktree, capture_output=True)
+
+    if not wave.base_branch:
+        # No stacking - just rebase onto origin/main
+        typer.echo("No base branch tracked, rebasing onto origin/main...")
+        result = subprocess.run(
+            ["git", "rebase", "origin/main"],
+            cwd=worktree,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            typer.echo(f"{c['red']}Error:{c['reset']} Rebase failed", err=True)
+            typer.echo(result.stderr)
+            typer.echo("Resolve conflicts and run: git rebase --continue")
+            raise typer.Exit(1)
+        typer.echo(f"{c['green']}Rebased{c['reset']} onto origin/main")
+        return
+
+    # Check if base PR is merged
+    pr_state = _get_pr_state(main_repo, wave.base_branch)
+    if pr_state == "OPEN":
+        typer.echo(f"{c['yellow']}Warning:{c['reset']} Base PR is still open")
+        typer.echo(
+            f"Wait for {c['dim']}{wave.base_branch}{c['reset']} to merge, then run lfd rebase again"
+        )
+        raise typer.Exit(1)
+
+    if pr_state != "MERGED":
+        typer.echo(f"Base PR state: {pr_state or 'unknown'}")
+
+    # Squash-aware rebase using base_commit
+    base_commit = wave.base_commit
+    if not base_commit:
+        typer.echo(
+            f"{c['yellow']}Warning:{c['reset']} No base_commit recorded, using normal rebase"
+        )
+        result = subprocess.run(
+            ["git", "rebase", "origin/main"],
+            cwd=worktree,
+            capture_output=True,
+            text=True,
+        )
+    else:
+        typer.echo(f"Rebasing onto origin/main from {c['dim']}{base_commit[:7]}{c['reset']}...")
+        result = subprocess.run(
+            ["git", "rebase", "--onto", "origin/main", base_commit],
+            cwd=worktree,
+            capture_output=True,
+            text=True,
+        )
+
+    if result.returncode != 0:
+        typer.echo(f"{c['red']}Error:{c['reset']} Rebase failed", err=True)
+        typer.echo(result.stderr)
+        typer.echo("Resolve conflicts and run: git rebase --continue")
+        raise typer.Exit(1)
+
+    # Push with force-with-lease
+    typer.echo("Pushing rebased branch...")
+    result = subprocess.run(
+        ["git", "push", "--force-with-lease"],
+        cwd=worktree,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        typer.echo(f"{c['yellow']}Warning:{c['reset']} Failed to push", err=True)
+        typer.echo(result.stderr)
+
+    # Clear stacking info
+    update_wave_stacking(wave.id, None, None)
+
+    typer.echo(f"{c['green']}Rebased{c['reset']} onto origin/main")
+    typer.echo(f"Cleared stacking from {c['dim']}{wave.base_branch}{c['reset']}")
 
 
 def main() -> None:

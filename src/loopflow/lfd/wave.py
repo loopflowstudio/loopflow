@@ -43,8 +43,9 @@ def save_wave(wave: Wave, db_path: Path | None = None) -> None:
         INSERT OR REPLACE INTO waves
         (id, name, repo, flow, direction, area, stimulus_kind, stimulus_cron,
          paused, status, iteration, worktree, branch, pr_limit, merge_mode,
-         pid, created_at, last_main_sha, consecutive_failures, pending_activations)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         pid, created_at, last_main_sha, consecutive_failures, pending_activations,
+         base_branch, base_commit)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             wave.id,
@@ -67,6 +68,8 @@ def save_wave(wave: Wave, db_path: Path | None = None) -> None:
             wave.last_main_sha,
             wave.consecutive_failures,
             wave.pending_activations,
+            wave.base_branch,
+            wave.base_commit,
         ),
     )
     conn.commit()
@@ -259,6 +262,25 @@ def update_wave_pending_activations(
     cursor = conn.execute(
         "UPDATE waves SET pending_activations = ? WHERE id = ? OR id LIKE ?",
         (pending, wave_id, f"{wave_id}%"),
+    )
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    return updated
+
+
+def update_wave_stacking(
+    wave_id: str,
+    base_branch: str | None,
+    base_commit: str | None,
+    db_path: Path | None = None,
+) -> bool:
+    """Update a wave's stacking information (base_branch and base_commit)."""
+    conn = _get_db(db_path)
+
+    cursor = conn.execute(
+        "UPDATE waves SET base_branch = ?, base_commit = ? WHERE id = ? OR id LIKE ?",
+        (base_branch, base_commit, wave_id, f"{wave_id}%"),
     )
     conn.commit()
     updated = cursor.rowcount > 0

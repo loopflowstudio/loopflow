@@ -34,6 +34,9 @@ dependencies = [
     "croniter>=2.0",
     "fastapi>=0.115.0",
     "uvicorn>=0.34.0",
+    "grpcio>=1.60.0",
+    "grpcio-tools>=1.60.0",
+    "protobuf>=4.25.0",
 ]
 
 [project.urls]
@@ -92,6 +95,7 @@ select = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["F841"]  # unused variables OK in test fixtures
+"src/loopflow/proto/**/*_pb2*" = ["E501", "F401", "F811", "I001", "E402"]  # generated protobuf code
 
 [dependency-groups]
 dev = [

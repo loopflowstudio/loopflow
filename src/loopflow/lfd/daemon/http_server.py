@@ -19,7 +19,21 @@ from loopflow.lfd.daemon import metrics
 from loopflow.lfd.daemon.client import _notify_event
 from loopflow.lfd.daemon.status import compute_status
 from loopflow.lfd.migrations.baseline import SCHEMA_VERSION
-from loopflow.lfd.models import Stimulus
+from loopflow.lfd.models import StepRun, StepRunStatus, Stimulus, WaveStatus
+from loopflow.lfd.protocol_v1 import (
+    protocol_version,
+    step_run_to_proto,
+    wave_to_proto,
+    worktree_to_proto,
+)
+from loopflow.lfd.step_run import (
+    get_waiting_step_run,
+    load_step_runs,
+    load_step_runs_for_repo,
+    load_step_runs_for_worktree,
+    save_step_run,
+    update_step_run_status,
+)
 from loopflow.lfd.wave import (
     clone_wave,
     create_wave,
@@ -29,6 +43,7 @@ from loopflow.lfd.wave import (
     start_wave,
     stop_wave,
     update_wave,
+    update_wave_status,
 )
 from loopflow.lfd.worktree_state import get_worktree_state_service
 
@@ -90,10 +105,26 @@ async def get_status():
 @app.get("/health", response_model=LFDResponse)
 async def get_health():
     """Detailed health check for diagnostics."""
-    global _start_time
-    uptime = time.time() - _start_time if _start_time else 0
+    uptime, db_ok, socket_ok, all_metrics, status = _health_snapshot()
+    return LFDResponse(
+        ok=True,
+        result={
+            **status,
+            "version": __version__,
+            "schema_version": SCHEMA_VERSION,
+            "uptime_seconds": uptime,
+            "checks": {
+                "database": "ok" if db_ok else "error",
+                "socket": "ok" if socket_ok else "error",
+            },
+            "metrics": all_metrics,
+        },
+    )
 
-    # Check database accessibility
+
+def _health_snapshot() -> tuple[int, bool, bool, dict[str, int], dict[str, Any]]:
+    uptime = int(time.time() - _start_time) if _start_time else 0
+
     db_ok = True
     try:
         from loopflow.lfd.db import DB_PATH
@@ -102,25 +133,55 @@ async def get_health():
     except Exception:
         db_ok = False
 
-    # Check socket exists
     socket_path = Path.home() / ".lf" / "lfd.sock"
     socket_ok = socket_path.exists()
 
-    status = compute_status()
-    return LFDResponse(
-        ok=True,
-        result={
-            **status,
-            "version": __version__,
-            "schema_version": SCHEMA_VERSION,
-            "uptime_seconds": int(uptime),
-            "checks": {
-                "database": "ok" if db_ok else "error",
-                "socket": "ok" if socket_ok else "error",
-            },
-            "metrics": metrics.get_all(),
+    return uptime, db_ok, socket_ok, metrics.get_all(), compute_status()
+
+
+# -----------------------------------------------------------------------------
+# JSON-over-HTTP Compatibility Layer (v1 API)
+# These endpoints mirror the gRPC API for clients that prefer JSON.
+# -----------------------------------------------------------------------------
+
+
+@app.get("/v1/health")
+async def get_health_v1():
+    """JSON-compatible health endpoint matching proto schema.
+
+    This endpoint returns the exact structure defined in GetHealthResponse
+    for clients that prefer JSON over gRPC.
+    """
+    uptime, db_ok, socket_ok, all_metrics, _ = _health_snapshot()
+
+    return {
+        "version": __version__,
+        "schema_version": SCHEMA_VERSION,
+        "uptime_seconds": uptime,
+        "checks": {
+            "database": db_ok,
+            "socket": socket_ok,
         },
-    )
+        "metrics": {
+            "waves_total": all_metrics.get("waves_total", 0),
+            "waves_running": all_metrics.get("waves_running", 0),
+            "step_runs_active": all_metrics.get("step_runs_active", 0),
+            "flow_runs_total": all_metrics.get("flow_runs_total", 0),
+        },
+        "protocol_version": protocol_version(),
+    }
+
+
+@app.get("/v1/status")
+async def get_status_v1():
+    """JSON-compatible status endpoint matching proto schema."""
+    status = compute_status()
+    return {
+        "pid": status.get("pid", 0),
+        "waves_defined": status.get("waves_defined", 0),
+        "waves_running": status.get("waves_running", 0),
+        "step_runs_active": status.get("step_runs_active", 0),
+    }
 
 
 @app.get("/flows", response_model=LFDResponse)
@@ -515,6 +576,352 @@ async def stop_wave_by_id(wave_id: str):
         raise
     except Exception as e:
         return LFDResponse(ok=False, error=str(e))
+
+
+# -----------------------------------------------------------------------------
+# Proto v1 JSON compatibility endpoints
+# -----------------------------------------------------------------------------
+
+
+class StimulusV1(BaseModel):
+    kind: str
+    cron: str | None = None
+
+
+class CreateWaveRequestV1(BaseModel):
+    repo: str
+    name: str | None = None
+    flow: str | None = None
+    direction: list[str] | None = None
+    area: list[str] | None = None
+    idempotency_key: str | None = None
+
+
+class UpdateWaveRequestV1(BaseModel):
+    flow: str | None = None
+    direction: list[str] | None = None
+    area: list[str] | None = None
+    stimulus: StimulusV1 | None = None
+    paused: bool | None = None
+    idempotency_key: str | None = None
+
+
+class RunWaveRequestV1(BaseModel):
+    area: list[str] | None = None
+    direction: list[str] | None = None
+    flow: str | None = None
+    stimulus: StimulusV1 | None = None
+    idempotency_key: str | None = None
+
+
+class StartStepRunRequestV1(BaseModel):
+    step_run: dict[str, Any]
+
+
+class EndStepRunRequestV1(BaseModel):
+    step_run_id: str
+    status: str
+
+
+def _load_repo_or_404(repo: str) -> Path:
+    repo_path = Path(repo)
+    if not repo_path.exists():
+        raise HTTPException(status_code=404, detail=f"Repository not found: {repo}")
+    return _normalize_repo_path(repo_path)
+
+
+def _step_run_from_proto(step_run_data: dict[str, Any]) -> StepRun:
+    status = step_run_data.get("status")
+    status_map = {
+        "STEP_RUNNING": "running",
+        "STEP_WAITING": "waiting",
+        "STEP_COMPLETED": "completed",
+        "STEP_FAILED": "failed",
+    }
+    normalized = dict(step_run_data)
+    if status in status_map:
+        normalized["status"] = status_map[status]
+    return StepRun.from_dict(normalized)
+
+
+def _step_run_status_from_proto(status: str) -> StepRunStatus:
+    status_map = {
+        "STEP_RUNNING": StepRunStatus.RUNNING,
+        "STEP_WAITING": StepRunStatus.WAITING,
+        "STEP_COMPLETED": StepRunStatus.COMPLETED,
+        "STEP_FAILED": StepRunStatus.FAILED,
+    }
+    return status_map.get(status, StepRunStatus(status))
+
+
+@app.get("/v1/flows")
+async def get_flows_v1(repo: str = Query(..., description="Repository path")):
+    from loopflow.lf.flows import FlowItem, Fork, Step, list_flows, list_steps
+
+    repo_path = _load_repo_or_404(repo)
+
+    def step_names(items: list[FlowItem]) -> list[str]:
+        names = []
+        for item in items:
+            if isinstance(item, Step):
+                names.append(item.name)
+            elif isinstance(item, Fork):
+                names.append("(fork)")
+            else:
+                names.append("(choose)")
+        return names
+
+    builtins_steps = Path(__file__).resolve().parents[2] / "lf" / "builtins" / "steps"
+
+    def is_builtin_step(name: str) -> bool:
+        return any(path.stem == name for path in builtins_steps.glob("**/*.md"))
+
+    flows = list_flows(repo_path)
+    steps = list_steps(repo_path)
+
+    return {
+        "flows": [
+            {
+                "name": flow.name,
+                "type": "FLOW_YAML",
+                "steps": step_names(flow.steps),
+            }
+            for flow in flows
+        ],
+        "steps": [
+            {"name": step, "type": "builtin" if is_builtin_step(step) else "custom"}
+            for step in steps
+        ],
+    }
+
+
+@app.get("/v1/worktrees")
+async def list_worktrees_v1(repo: str = Query(..., description="Repository path")):
+    repo_path = _load_repo_or_404(repo)
+    service = get_worktree_state_service()
+    worktrees = service.list_worktrees(repo_path)
+    return {"worktrees": [worktree_to_proto(wt) for wt in worktrees]}
+
+
+@app.get("/v1/waves")
+async def list_waves_v1(repo: str = Query(..., description="Repository path")):
+    repo_path = _load_repo_or_404(repo)
+    waves = list_waves(repo=repo_path)
+    return {"waves": [wave_to_proto(wave) for wave in waves]}
+
+
+@app.get("/v1/waves/{wave_id}")
+async def get_wave_v1(wave_id: str):
+    wave = get_wave(wave_id)
+    if not wave:
+        raise HTTPException(status_code=404, detail=f"Wave not found: {wave_id}")
+    return {"wave": wave_to_proto(wave)}
+
+
+@app.post("/v1/waves")
+async def create_wave_v1(request: CreateWaveRequestV1):
+    repo_path = _load_repo_or_404(request.repo)
+    wave = create_wave(
+        repo=repo_path,
+        name=request.name,
+        flow=request.flow or "design",
+        direction=request.direction,
+        area=request.area,
+        stimulus=Stimulus(kind="once"),
+    )
+    await _notify_event("wave.created", {"wave_id": wave.id, "name": wave.name})
+    return {"wave": wave_to_proto(wave)}
+
+
+@app.patch("/v1/waves/{wave_id}")
+async def update_wave_v1(wave_id: str, request: UpdateWaveRequestV1):
+    wave = get_wave(wave_id)
+    if not wave:
+        raise HTTPException(status_code=404, detail=f"Wave not found: {wave_id}")
+
+    stimulus = None
+    if request.stimulus:
+        stimulus = Stimulus(kind=request.stimulus.kind, cron=request.stimulus.cron)
+
+    updated = update_wave(
+        wave_id,
+        area=request.area,
+        direction=request.direction,
+        flow=request.flow,
+        stimulus=stimulus,
+        paused=request.paused,
+    )
+    if not updated:
+        raise HTTPException(status_code=500, detail="Failed to update wave")
+    await _notify_event("wave.updated", {"wave_id": wave_id})
+    return {"wave": wave_to_proto(updated)}
+
+
+@app.delete("/v1/waves/{wave_id}")
+async def delete_wave_v1(wave_id: str):
+    wave = get_wave(wave_id)
+    if not wave:
+        raise HTTPException(status_code=404, detail=f"Wave not found: {wave_id}")
+    deleted = delete_wave(wave_id)
+    if not deleted:
+        raise HTTPException(status_code=500, detail="Failed to delete wave")
+    await _notify_event("wave.deleted", {"wave_id": wave_id})
+    return {}
+
+
+@app.post("/v1/waves/{wave_id}/clone")
+async def clone_wave_v1(wave_id: str, request: CloneWaveRequest | None = None):
+    wave = get_wave(wave_id)
+    if not wave:
+        raise HTTPException(status_code=404, detail=f"Wave not found: {wave_id}")
+    name = request.name if request else None
+    cloned = clone_wave(wave_id, name=name)
+    if not cloned:
+        raise HTTPException(status_code=500, detail="Failed to clone wave")
+    await _notify_event("wave.created", {"wave_id": cloned.id, "name": cloned.name})
+    return {"wave": wave_to_proto(cloned)}
+
+
+@app.post("/v1/waves/{wave_id}/run")
+async def run_wave_v1(wave_id: str, request: RunWaveRequestV1 | None = None):
+    wave = get_wave(wave_id)
+    if not wave:
+        raise HTTPException(status_code=404, detail=f"Wave not found: {wave_id}")
+
+    overrides = {}
+    if request:
+        if request.area is not None:
+            overrides["area"] = request.area
+        if request.direction is not None:
+            overrides["direction"] = request.direction
+        if request.flow is not None:
+            overrides["flow"] = request.flow
+        if request.stimulus is not None:
+            overrides["stimulus"] = Stimulus(kind=request.stimulus.kind, cron=request.stimulus.cron)
+
+    effective_area = overrides.get("area", wave.area)
+    if effective_area is None:
+        raise HTTPException(
+            status_code=400,
+            detail="No area configured. Set area first or pass as override.",
+        )
+
+    result = start_wave(wave_id, **overrides)
+    if not result:
+        raise HTTPException(status_code=500, detail=f"Failed to start: {result.reason}")
+    await _notify_event("wave.started", {"wave_id": wave_id})
+    return {"started": True, "wave_id": wave_id}
+
+
+@app.post("/v1/waves/{wave_id}/stop")
+async def stop_wave_v1(wave_id: str):
+    wave = get_wave(wave_id)
+    if not wave:
+        raise HTTPException(status_code=404, detail=f"Wave not found: {wave_id}")
+    stopped = stop_wave(wave_id)
+    if not stopped:
+        raise HTTPException(status_code=500, detail="Failed to stop wave")
+    await _notify_event("wave.stopped", {"wave_id": wave_id})
+    return {"stopped": True}
+
+
+@app.post("/v1/waves/{wave_id}/connect")
+async def connect_wave_v1(wave_id: str):
+    from loopflow.lf.context import ContextConfig, format_prompt, gather_prompt_components
+    from loopflow.lf.directions import resolve_directions
+    from loopflow.lf.logging import write_prompt_file
+    from loopflow.lfd.flow_run import get_run
+
+    wave = get_wave(wave_id)
+    if not wave:
+        raise HTTPException(status_code=404, detail=f"Wave not found: {wave_id}")
+
+    step_run = get_waiting_step_run(wave.id)
+    if not step_run:
+        raise HTTPException(status_code=404, detail="No waiting step run")
+
+    update_step_run_status(step_run.id, StepRunStatus.RUNNING)
+    update_wave_status(wave.id, WaveStatus.RUNNING)
+
+    worktree_path = Path(step_run.worktree)
+    direction = resolve_directions(wave.repo, wave.direction)
+    context_paths = list(wave.area) if wave.area and wave.area[0] != "." else None
+
+    components = gather_prompt_components(
+        worktree_path,
+        step=step_run.step,
+        run_mode="interactive",
+        direction=direction,
+        context_config=ContextConfig(pathset=context_paths),
+    )
+    if not components.step:
+        raise HTTPException(status_code=404, detail=f"Step not found: {step_run.step}")
+
+    prompt = format_prompt(components)
+    prompt_file = write_prompt_file(prompt)
+
+    flow_run_id = step_run.flow_run_id
+    step_index = 0
+    if flow_run_id:
+        flow_run = get_run(flow_run_id)
+        if flow_run:
+            step_index = flow_run.step_index
+
+    return {
+        "worktree": step_run.worktree,
+        "step": step_run.step,
+        "step_run_id": step_run.id,
+        "prompt_file": prompt_file,
+        "flow_run_id": flow_run_id,
+        "step_index": step_index,
+    }
+
+
+@app.get("/v1/step_runs")
+async def list_step_runs_v1():
+    step_runs = load_step_runs()
+    return {"step_runs": [step_run_to_proto(sr) for sr in step_runs]}
+
+
+@app.get("/v1/step_runs/history")
+async def get_step_run_history_v1(
+    worktree: str | None = None,
+    repo: str | None = None,
+    limit: int | None = None,
+):
+    if worktree:
+        step_runs = load_step_runs_for_worktree(worktree, limit or 20)
+    elif repo:
+        step_runs = load_step_runs_for_repo(repo, limit or 20)
+    else:
+        step_runs = load_step_runs()[: (limit or 20)]
+    return {"step_runs": [step_run_to_proto(sr) for sr in step_runs]}
+
+
+@app.post("/v1/step_runs/start")
+async def start_step_run_v1(request: StartStepRunRequestV1):
+    step_run = _step_run_from_proto(request.step_run)
+    save_step_run(step_run)
+    await _notify_event(
+        "session.started",
+        {
+            "id": step_run.id,
+            "step": step_run.step,
+            "worktree": step_run.worktree,
+        },
+    )
+    return {"id": step_run.id}
+
+
+@app.post("/v1/step_runs/end")
+async def end_step_run_v1(request: EndStepRunRequestV1):
+    status = _step_run_status_from_proto(request.status)
+    update_step_run_status(request.step_run_id, status)
+    await _notify_event(
+        "session.ended",
+        {"id": request.step_run_id, "status": status.value},
+    )
+    return {"id": request.step_run_id}
 
 
 class UvicornServer:

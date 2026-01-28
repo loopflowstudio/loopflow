@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::proto::control::{StepRun, StepRunStatus, StimulusKind, Wave, WaveStatus};
 use crate::scheduler::Scheduler;
-use crate::store::SharedStore;
+use crate::store::{SharedStore, StoreError};
 
 pub fn spawn_loop_ticker(
     scheduler: Arc<Scheduler>,
@@ -73,6 +73,7 @@ fn handle_tick_result(
     result: Result<TickResult, lf_core::error::CoreError>,
     store: &SharedStore,
 ) {
+    let step_run_index = wave.step_index;
     let mut wave = match store.get_wave(&wave.id) {
         Ok(Some(wave)) => wave,
         Ok(None) => return,
@@ -84,6 +85,12 @@ fn handle_tick_result(
 
     match result {
         Ok(TickResult::StepComplete) => {
+            finish_step_run(
+                store,
+                &wave.id,
+                step_run_index,
+                StepRunStatus::StepCompleted,
+            );
             wave.consecutive_failures = 0;
             let _ = store.update_wave(&wave);
         }
@@ -105,6 +112,7 @@ fn handle_tick_result(
             tracing::info!(wave_id = %wave.id, "waiting for interactive step");
         }
         Ok(TickResult::StepFailed) | Err(_) => {
+            finish_step_run(store, &wave.id, step_run_index, StepRunStatus::StepFailed);
             wave.consecutive_failures += 1;
             if wave.consecutive_failures >= 3 {
                 wave.status = WaveStatus::WaveError as i32;
@@ -114,6 +122,20 @@ fn handle_tick_result(
             if let Err(err) = result {
                 tracing::warn!(wave_id = %wave.id, error = %err, "tick failed");
             }
+        }
+    }
+}
+
+fn finish_step_run(store: &SharedStore, wave_id: &str, step_index: u32, status: StepRunStatus) {
+    let step_run_id = format!("{wave_id}:{step_index}");
+    let ended_at = time::OffsetDateTime::now_utc().unix_timestamp();
+    match store.end_step_run(&step_run_id, status as i32, ended_at) {
+        Ok(()) => {}
+        Err(StoreError::NotFound) => {
+            tracing::debug!(step_run_id = %step_run_id, "step run not found when finishing");
+        }
+        Err(err) => {
+            tracing::warn!(step_run_id = %step_run_id, error = %err, "failed to finish step run");
         }
     }
 }
@@ -232,5 +254,165 @@ fn now_timestamp() -> prost_types::Timestamp {
     prost_types::Timestamp {
         seconds: now,
         nanos: 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use super::handle_tick_result;
+    use crate::proto::control::{StepRunStatus, Wave, WaveStatus};
+    use crate::store::{RunStore, SharedStore, StoreError, StoreResult};
+
+    #[derive(Debug, Default)]
+    struct TestStore {
+        wave: Mutex<Wave>,
+        ended: Mutex<Vec<(String, i32)>>,
+    }
+
+    impl TestStore {
+        fn new(wave: Wave) -> Self {
+            Self {
+                wave: Mutex::new(wave),
+                ended: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl RunStore for TestStore {
+        fn health_check(&self) -> StoreResult<()> {
+            Ok(())
+        }
+
+        fn schema_version(&self) -> StoreResult<u32> {
+            Ok(1)
+        }
+
+        fn list_waves(&self, _repo: Option<&str>) -> StoreResult<Vec<Wave>> {
+            Err(StoreError::InvalidData("unused".to_string()))
+        }
+
+        fn list_waves_by_stimulus(&self, _kind: i32) -> StoreResult<Vec<Wave>> {
+            Err(StoreError::InvalidData("unused".to_string()))
+        }
+
+        fn get_wave(&self, wave_id: &str) -> StoreResult<Option<Wave>> {
+            let wave = self.wave.lock().expect("wave mutex poisoned");
+            if wave.id == wave_id {
+                Ok(Some(wave.clone()))
+            } else {
+                Ok(None)
+            }
+        }
+
+        fn create_wave(&self, _wave: &Wave) -> StoreResult<()> {
+            Err(StoreError::InvalidData("unused".to_string()))
+        }
+
+        fn update_wave(&self, wave: &Wave) -> StoreResult<()> {
+            let mut stored = self.wave.lock().expect("wave mutex poisoned");
+            *stored = wave.clone();
+            Ok(())
+        }
+
+        fn delete_wave(&self, _wave_id: &str) -> StoreResult<()> {
+            Err(StoreError::InvalidData("unused".to_string()))
+        }
+
+        fn increment_pending_activations(&self, _wave_id: &str) -> StoreResult<u32> {
+            Err(StoreError::InvalidData("unused".to_string()))
+        }
+
+        fn list_step_runs(&self) -> StoreResult<Vec<crate::proto::control::StepRun>> {
+            Err(StoreError::InvalidData("unused".to_string()))
+        }
+
+        fn list_step_run_history(
+            &self,
+            _worktree: Option<&str>,
+            _repo: Option<&str>,
+            _limit: Option<u32>,
+        ) -> StoreResult<Vec<crate::proto::control::StepRun>> {
+            Err(StoreError::InvalidData("unused".to_string()))
+        }
+
+        fn start_step_run(&self, _step_run: &crate::proto::control::StepRun) -> StoreResult<()> {
+            Err(StoreError::InvalidData("unused".to_string()))
+        }
+
+        fn end_step_run(&self, step_run_id: &str, status: i32, _ended_at: i64) -> StoreResult<()> {
+            let mut ended = self.ended.lock().expect("ended mutex poisoned");
+            ended.push((step_run_id.to_string(), status));
+            Ok(())
+        }
+
+        fn get_stuck_step_runs(
+            &self,
+            _older_than_secs: u64,
+        ) -> StoreResult<Vec<crate::proto::control::StepRun>> {
+            Err(StoreError::InvalidData("unused".to_string()))
+        }
+    }
+
+    fn base_wave() -> Wave {
+        Wave {
+            id: "wave-1".to_string(),
+            name: "wave-1".to_string(),
+            repo: "/tmp".to_string(),
+            flow: "ship".to_string(),
+            direction: Vec::new(),
+            area: Vec::new(),
+            stimulus: None,
+            paused: false,
+            status: WaveStatus::WaveRunning as i32,
+            iteration: 0,
+            step_index: 3,
+            worktree: String::new(),
+            branch: String::new(),
+            pr_limit: 0,
+            merge_mode: 0,
+            pid: None,
+            created_at: None,
+            last_main_sha: None,
+            consecutive_failures: 0,
+            pending_activations: 0,
+        }
+    }
+
+    #[test]
+    fn handle_tick_result_ends_step_run_on_success() {
+        let wave = base_wave();
+        let store = std::sync::Arc::new(TestStore::new(wave.clone()));
+        let shared: SharedStore = store.clone();
+
+        handle_tick_result(
+            &wave,
+            Ok(lf_core::runtime::TickResult::StepComplete),
+            &shared,
+        );
+
+        let ended = store.ended.lock().expect("ended mutex poisoned").clone();
+
+        assert_eq!(
+            ended,
+            vec![("wave-1:3".to_string(), StepRunStatus::StepCompleted as i32)]
+        );
+    }
+
+    #[test]
+    fn handle_tick_result_ends_step_run_on_failure() {
+        let wave = base_wave();
+        let store = std::sync::Arc::new(TestStore::new(wave.clone()));
+        let shared: SharedStore = store.clone();
+
+        handle_tick_result(&wave, Ok(lf_core::runtime::TickResult::StepFailed), &shared);
+
+        let ended = store.ended.lock().expect("ended mutex poisoned").clone();
+
+        assert_eq!(
+            ended,
+            vec![("wave-1:3".to_string(), StepRunStatus::StepFailed as i32)]
+        );
     }
 }

@@ -247,13 +247,13 @@ def _step_to_data(step: FlowItem) -> dict | str:
         result: dict[str, Any] = {
             "fork": [
                 {
-                    "step": agent.step,
-                    "flow": agent.flow,
-                    "direction": agent.direction,
-                    "model": agent.model,
-                    "area": agent.area,
+                    "step": thread.step,
+                    "flow": thread.flow,
+                    "direction": thread.direction,
+                    "model": thread.model,
+                    "area": thread.area,
                 }
-                for agent in step.agents
+                for thread in step.threads
             ]
         }
         if step.step:
@@ -525,13 +525,13 @@ def _extract_step_names(flow: Flow) -> list[str]:
         elif isinstance(item, Fork):
             if item.step:
                 names.append(item.step)
-            for agent in item.agents:
-                if agent.step:
-                    names.append(agent.step)
-                if agent.flow:
-                    names.append(f"flow:{agent.flow}")
-                if agent.direction:
-                    names.append(f"direction:{agent.direction}")
+            for thread in item.threads:
+                if thread.step:
+                    names.append(thread.step)
+                if thread.flow:
+                    names.append(f"flow:{thread.flow}")
+                if thread.direction:
+                    names.append(f"direction:{thread.direction}")
             if item.synthesize and item.synthesize.direction:
                 names.append(f"direction:{item.synthesize.direction}")
         elif isinstance(item, Choose):

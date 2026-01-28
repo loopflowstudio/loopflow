@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::error::CoreError;
 use crate::flow::{load_direction, load_step, Direction, Step};
@@ -99,12 +99,4 @@ pub fn trim_context(mut components: PromptComponents, max_tokens: usize) -> Prom
         total = analyze_tokens(&components);
     }
     components
-}
-
-pub fn repo_root_from(path: &Path) -> Result<PathBuf, CoreError> {
-    if path.exists() {
-        Ok(path.to_path_buf())
-    } else {
-        Err(CoreError::ExecutionFailed("repo root not found".to_string()))
-    }
 }

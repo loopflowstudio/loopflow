@@ -3,7 +3,7 @@ use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{CoreError, LoadError};
+use crate::error::CoreError;
 use crate::flow::{load_flow, FlowItem, Step};
 use crate::store::RunStore;
 
@@ -172,12 +172,4 @@ pub fn tick_flow_with_runner(
 
 pub fn run_step(step: &Step, worktree: &Path, direction: &[String]) -> Result<StepResult, CoreError> {
     CommandStepRunner.run(step, worktree, direction)
-}
-
-pub fn validate_flow(flow: &str, repo: &Path) -> Result<(), LoadError> {
-    let flow = load_flow(flow, repo)?;
-    if flow.items.is_empty() {
-        return Err(LoadError::InvalidFlow("flow is empty".to_string()));
-    }
-    Ok(())
 }

@@ -34,6 +34,14 @@ The design doc and style guides are in your context.
 
 **Tests prove it works.** Add tests for user-visible behavior. Don't test implementation details. Assert on results, not mock calls.
 
+## Wave context
+
+If `<lf:wave>` is present, check `roadmap/<wave>/README.md` in docs:
+
+- Follow the wave's principles during implementation
+- Check against compatibility matrix if mentioned
+- Note drift from wave constraints in `scratch/questions.md`
+
 ## When the design is wrong
 
 If the design doc is unclear, make the simplest choice and move on. Note your assumption in `scratch/questions.md`.

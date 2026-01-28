@@ -18,6 +18,7 @@ from loopflow.lf.design import (
     gather_design_docs,
     gather_internal_docs,
 )
+from loopflow.lf.wave import WaveContext, determine_wave
 from loopflow.lf.directions import Direction
 from loopflow.lf.files import (
     GatherResult,
@@ -122,6 +123,7 @@ class PromptComponents:
     direction: list[Direction] | None = None
     image_files: list[Path] | None = None  # Images for visual context
     summaries: list[tuple[Path, str]] | None = None  # Pre-generated summaries
+    wave: WaveContext | None = None  # Wave context for roadmap scoping
 
 
 @dataclass(frozen=True)
@@ -172,6 +174,10 @@ class ContextConfig(BaseModel):
     # When set with parent_docs=True, includes parent area docs:
     # area="a/b/c" includes a/*.md, a/reports/, a/b/*.md, a/b/reports/, etc.
     area: str | None = None
+
+    # Wave name for roadmap scoping (e.g., "rust", "enterprise")
+    # When set, prioritizes roadmap/<wave>/ in docs gathering
+    wave: str | None = None
 
     # Bundled LOOPFLOW.md system documentation
     lfdocs: bool = True
@@ -714,6 +720,29 @@ def _load_loopflow_doc() -> str:
     return resources.files("loopflow").joinpath("LOOPFLOW.md").read_text()
 
 
+def _gather_wave_roadmap(wave_roadmap_path: Path) -> list[tuple[Path, str]]:
+    """Gather docs from a wave-specific roadmap directory.
+
+    Prioritizes README.md first, then numbered stages (01-*, 02-*), then rest.
+    """
+    if not wave_roadmap_path.is_dir():
+        return []
+
+    docs = []
+    readme = wave_roadmap_path / "README.md"
+    if readme.exists():
+        docs.append((readme, readme.read_text()))
+
+    # Gather remaining files, sorted (numbered stages first)
+    for path in sorted(wave_roadmap_path.glob("*.md")):
+        if path.name == "README.md":
+            continue
+        if path.is_file():
+            docs.append((path, path.read_text()))
+
+    return docs
+
+
 def _trigger_background_refresh(repo_root: Path) -> None:
     """Spawn background process to refresh stale summaries.
 
@@ -790,7 +819,19 @@ def gather_prompt_components(
     if context_config is None:
         context_config = ContextConfig()
 
-    exclude = context_config.files.exclude or []
+    # Determine wave context
+    wave_ctx = determine_wave(repo_root, context_config.wave)
+
+    exclude = list(context_config.files.exclude) if context_config.files.exclude else []
+
+    # When wave is set, exclude roadmap/ from default docs and gather wave-specific roadmap
+    wave_roadmap_docs = []
+    if wave_ctx:
+        exclude.append("roadmap/")  # Exclude all of roadmap/ from default gathering
+        wave_roadmap_path = repo_root / "roadmap" / wave_ctx.name
+        if wave_roadmap_path.is_dir():
+            wave_roadmap_docs = _gather_wave_roadmap(wave_roadmap_path)
+
     docs = gather_docs(repo_root, repo_root, exclude)
 
     # Load bundled LOOPFLOW.md (system documentation)
@@ -829,8 +870,8 @@ def gather_prompt_components(
     if context_config.budget_docs > 0 and ref_docs:
         ref_docs, _ = _limit_to_budget(ref_docs, context_config.budget_docs)
 
-    # Combine: area docs first, then reference docs
-    docs = area_docs + ref_docs
+    # Combine: wave roadmap first (if set), then area docs, then reference docs
+    docs = wave_roadmap_docs + area_docs + ref_docs
 
     # Gather diff based on mode
     diff = None
@@ -903,15 +944,17 @@ def gather_prompt_components(
         direction=direction,
         image_files=gather_result.image_files or None,
         summaries=summaries if summaries else None,
+        wave=wave_ctx,
     )
 
 
 def format_prompt(components: PromptComponents) -> str:
     """Format prompt components into the final prompt string.
 
-    Structure: system → reference → instructions → working context
+    Structure: system → wave → reference → instructions → working context
     1. System docs (loopflow)
     2. Run mode
+    2.5. Wave context (if set)
     3. Reference material (docs, summaries)
     4. Instructions (direction, step)
     5. Working context (diff, clipboard, images)
@@ -928,6 +971,15 @@ def format_prompt(components: PromptComponents) -> str:
             "Run mode is auto (headless). Proceed without pausing for questions. "
             "If you need clarification, make the best assumption you can and append "
             "any open questions to `scratch/questions.md`."
+        )
+
+    # 2.5. Wave context
+    if components.wave:
+        parts.append(
+            f'<lf:wave name="{components.wave.name}">\n'
+            f"You are building toward the {components.wave.name} program of work.\n"
+            f"Roadmap context is included in docs below.\n"
+            f"</lf:wave>"
         )
 
     # 3. Reference material (docs, summaries)

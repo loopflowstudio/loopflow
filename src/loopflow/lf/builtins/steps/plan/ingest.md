@@ -4,22 +4,38 @@ produces: scratch/<slug>.md
 ---
 Pick the highest-priority item from the wave's backlog and move it to scratch/.
 
-## Workflow
+## Wave context
 
-1. Identify the wave:
-   - Use explicit `--wave` flag if provided
-   - Use wave name from wave configuration (if running as a wave)
-   - Fall back to current worktree/branch name
-2. Read items from `roadmap/<wave>/`
-3. Evaluate each item: urgency, importance, dependencies, readiness
-4. Pick the one that should be built next
-5. Move it to `scratch/<slug>.md`
+If `<lf:wave name="...">` is present in the prompt, that's your wave. The wave's roadmap (`roadmap/<wave>/`) is included in docs.
+
+## Staged roadmaps
+
+Roadmaps may use numbered prefixes to indicate stages:
+
+```
+roadmap/rust/
+  README.md          # Strategic context (not a pickable item)
+  01-protocol.md     # Stage 1 items
+  02-core-engine.md  # Stage 2 items
+```
+
+**Stage ordering rules:**
+- Pick from the lowest-numbered stage first (01-* before 02-*)
+- Only move to the next stage when the current stage is complete
+- README.md provides principles and success criteria—use it to evaluate priority, but don't pick it
+
+**Using README.md:**
+- Follow the wave's principles when evaluating items
+- Check success criteria to understand what "done" means
+- Respect non-goals—don't pick items that conflict
 
 ## Selection criteria
 
+Within a stage, evaluate each item:
+
 **Urgency.** Is something blocked on this? Is there a deadline?
 
-**Importance.** How much does this move the product forward?
+**Importance.** How much does this move the wave's success criteria forward?
 
 **Readiness.** Are prerequisites met? Is scope clear enough to start?
 
@@ -27,9 +43,18 @@ Pick the highest-priority item from the wave's backlog and move it to scratch/.
 
 If multiple items score similarly, prefer smaller scope—ship something.
 
+## Workflow
+
+1. Get wave name from `<lf:wave>` in context
+2. Find `roadmap/<wave>/` in the docs
+3. Read README.md for strategic context (principles, success criteria)
+4. Identify the current stage (lowest numbered prefix with items)
+5. Pick the highest-priority item from that stage
+6. Move it to `scratch/<wave>-<slug>.md`
+
 ## Output
 
-The selected item is moved to `scratch/<slug>.md`. The original is removed from `roadmap/<wave>/`.
+The selected item is moved to `scratch/<wave>-<slug>.md`. The original is removed from `roadmap/<wave>/`.
 
 **If the wave backlog is empty:** Signal completion by writing nothing. This is not an error—it means the wave's work is done. When used in a `loop_until_empty` flow, this signals the loop should terminate.
 

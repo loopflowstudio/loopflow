@@ -88,6 +88,8 @@ def _build_loop_prompt(
     context_paths: list[str] | None,
     extra_context: list[str] | None = None,
 ) -> tuple[str, str] | None:
+    from loopflow.lf.context import FilesetConfig
+
     merged_context = list(context_paths) if context_paths else []
     if extra_context:
         merged_context.extend(extra_context)
@@ -97,7 +99,10 @@ def _build_loop_prompt(
         step=step_name,
         run_mode="auto",
         direction=direction,
-        context_config=ContextConfig(pathset=merged_context),
+        context_config=ContextConfig(
+            files=FilesetConfig(paths=merged_context),
+            wave=wave.name,
+        ),
     )
 
     if not components.step:
@@ -289,12 +294,17 @@ def _build_loop_inline_prompt(
     inline_text: str,
     context_paths: list[str] | None,
 ) -> str | None:
+    from loopflow.lf.context import FilesetConfig
+
     components = gather_prompt_components(
         worktree_path,
         inline=inline_text,
         run_mode="auto",
         direction=direction,
-        context_config=ContextConfig(pathset=context_paths),
+        context_config=ContextConfig(
+            files=FilesetConfig(paths=list(context_paths) if context_paths else []),
+            wave=wave.name,
+        ),
     )
     if not components.step:
         return None

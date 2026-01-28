@@ -115,9 +115,21 @@ def _run_interactive_step(
     Unlike standalone interactive runs (which use os.execvp), this uses
     subprocess.run() so the flow can continue after the step completes.
     """
-    print(f"\n{'=' * 60}")
-    print(f"[{step_num}/{total_steps}] {params.step} (interactive)")
-    print(f"{'=' * 60}\n")
+    # Step header
+    print(f"\n\033[1m{'─' * 60}\033[0m")
+    print(f"\033[1m[{step_num}/{total_steps}] {params.step} (interactive)\033[0m")
+    print(f"\033[1m{'─' * 60}\033[0m")
+
+    # Config summary
+    model_str = f"{params.backend}"
+    if params.model_variant:
+        model_str += f":{params.model_variant}"
+    config_parts = [f"model={model_str}"]
+    if params.direction:
+        config_parts.append(f"direction={','.join(params.direction)}")
+    if params.context:
+        config_parts.append(f"context={','.join(params.context)}")
+    print(f"\033[90m{' | '.join(config_parts)}\033[0m\n")
 
     components = gather_prompt_components(
         repo_root,
@@ -136,17 +148,17 @@ def _run_interactive_step(
             f"Dropped: {dropped_summary}\033[0m"
         )
     tree = analyze_components(components)
+
+    # Token profile
+    token_summary = tree.format()
+    for line in token_summary.split("\n"):
+        print(f"\033[90m{line}\033[0m")
+    print()
+
     if tree.total() > MAX_SAFE_TOKENS:
         print(f"\033[33m⚠ Prompt is {tree.total():,} tokens (limit ~{MAX_SAFE_TOKENS:,})\033[0m")
 
     prompt = format_prompt(components)
-
-    # Show token summary
-    token_summary = tree.format()
-    print(f"\033[90m━━━ {params.step} ━━━\033[0m")
-    for line in token_summary.split("\n"):
-        print(f"\033[90m{line}\033[0m")
-    print()
 
     step_run = StepRun(
         id=str(uuid.uuid4()),
@@ -203,9 +215,21 @@ def _run_step(
     chrome: bool = False,
 ) -> int:
     """Execute a single flow step. Returns exit code."""
-    print(f"\n{'=' * 60}")
-    print(f"[{step_num}/{total_steps}] {params.step}")
-    print(f"{'=' * 60}\n")
+    # Step header
+    print(f"\n\033[1m{'─' * 60}\033[0m")
+    print(f"\033[1m[{step_num}/{total_steps}] {params.step}\033[0m")
+    print(f"\033[1m{'─' * 60}\033[0m")
+
+    # Config summary
+    model_str = f"{params.backend}"
+    if params.model_variant:
+        model_str += f":{params.model_variant}"
+    config_parts = [f"model={model_str}"]
+    if params.direction:
+        config_parts.append(f"direction={','.join(params.direction)}")
+    if params.context:
+        config_parts.append(f"context={','.join(params.context)}")
+    print(f"\033[90m{' | '.join(config_parts)}\033[0m\n")
 
     components = gather_prompt_components(
         repo_root,
@@ -224,6 +248,13 @@ def _run_step(
             f"Dropped: {dropped_summary}\033[0m"
         )
     tree = analyze_components(components)
+
+    # Token profile
+    token_summary = tree.format()
+    for line in token_summary.split("\n"):
+        print(f"\033[90m{line}\033[0m")
+    print()
+
     if tree.total() > MAX_SAFE_TOKENS:
         print(f"\033[33m⚠ Prompt is {tree.total():,} tokens (limit ~{MAX_SAFE_TOKENS:,})\033[0m")
     prompt = format_prompt(components)
@@ -587,8 +618,14 @@ def run_fork(
         )
         subprocess.run(["git", "clean", "-fd"], cwd=wt_path, capture_output=True)
 
-        if thread.step:
-            step = Step(name=thread.step, model=thread.model, direction=thread.direction)
+        # Use thread's step, or fall back to fork-level step
+        step_name = thread.step or fork.step
+        if step_name:
+            step = Step(
+                name=step_name,
+                model=thread.model or fork.model,
+                direction=thread.direction,
+            )
             params = _build_step_params(step, backend, model_variant, context, None)
             exit_code = _run_step(
                 params,
@@ -879,6 +916,25 @@ def _count_logical_steps(items: list[FlowItem]) -> int:
     return count
 
 
+def _format_flow_outline(items: list[FlowItem]) -> str:
+    """Format a compact flow outline like: review → fork(reduce×3) → publish"""
+    parts = []
+    for item in items:
+        if isinstance(item, Step):
+            parts.append(item.name)
+        elif isinstance(item, Fork):
+            step_name = item.step or "?"
+            parts.append(f"fork({step_name}×{len(item.threads)})")
+        elif isinstance(item, Choose):
+            opts = list(item.options.keys())
+            parts.append(f"choose({'/'.join(opts[:3])})")
+        elif isinstance(item, LoopUntilEmpty):
+            parts.append(f"loop({item.source})")
+        else:
+            parts.append("?")
+    return " → ".join(parts)
+
+
 def _parse_choice(path: Path) -> tuple[str | None, str | None]:
     if not path.exists():
         return None, None
@@ -998,6 +1054,15 @@ def run_flow(
     main_repo = find_main_repo(repo_root) or repo_root
     items: list[FlowItem] = list(flow.steps)
     total = _count_logical_steps(items)
+
+    # Flow overview
+    model_str = f"{backend}:{model_variant}" if model_variant else backend
+    print(f"\n\033[1;34m{'═' * 60}\033[0m")
+    print(f"\033[1;34m  FLOW: {flow.name}\033[0m")
+    print(f"\033[1;34m{'═' * 60}\033[0m")
+    print(f"\033[90mmodel={model_str} | steps={total}\033[0m")
+    print(f"\033[90m{_format_flow_outline(items)}\033[0m")
+    print(f"\033[1;34m{'═' * 60}\033[0m")
 
     i = 0
     step_num = 0

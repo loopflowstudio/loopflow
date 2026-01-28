@@ -11,58 +11,76 @@ The system has three execution tiers:
 
 A fourth component, **Concerto**, provides a native macOS UI for conducting agents visually.
 
+A fifth component, **lf-core** (Rust), provides flow parsing and tick-based execution as a native library.
+
 ### Architecture
 
 ```
 loopflow/
 ├── lf/                     # Interactive prompt engine (CLI)
-│   ├── cli.py             # Entry point: `lf <step>` or `lf <flow>`
-│   ├── step.py            # Single step execution (719 lines)
-│   ├── flow.py            # Flow DAG execution (1,191 lines)
-│   ├── flows.py           # Flow data structures (576 lines)
-│   ├── context.py         # Context assembly (1,077 lines)
-│   ├── launcher.py        # Agent CLI builders (684 lines)
+│   ├── cli.py             # Entry point: `lf <step>` or `lf flow <name>`
+│   ├── step.py            # Single step execution
+│   ├── flow.py            # Flow DAG execution (~1,200 lines)
+│   ├── flows.py           # Flow data structures (~580 lines)
+│   ├── context.py         # Context assembly (~1,100 lines)
+│   ├── launcher.py        # Agent CLI builders (~700 lines)
 │   ├── config.py          # Configuration loading
 │   ├── directions.py      # Direction/perspective resolution
-│   ├── skills.py          # External skill discovery (398 lines)
-│   ├── worktrees.py       # Git worktree management (468 lines)
+│   ├── skills.py          # External skill discovery (~400 lines)
+│   ├── worktrees.py       # Git worktree management (~470 lines)
 │   └── builtins/          # Bundled steps, flows, directions
 │       ├── steps/         # 24 markdown step definitions
+│       │   ├── plan/      # review, reduce, polish, expand, iterate, ingest, kickoff, roadmap, 5whys
+│       │   ├── code/      # debug, implement, compress, gate
+│       │   ├── interactive/  # design, explore, refine
+│       │   └── ops/       # validate, synthesize, lint, init, consolidate, rebase, commit
 │       ├── flows/         # 12 YAML flow definitions
+│       │   ├── code/      # ship, design-and-ship, pair, grind, incident, start, ship-roadmap
+│       │   └── plan/      # roadmap-reduce, roadmap-polish, roadmap-expand, research, publish
 │       └── directions/    # Role and value perspectives
+│           ├── roles/     # designer, ceo, product-engineer, infra-engineer
+│           └── values/    # craft, flow, scale
 │
 ├── lfd/                    # Daemon for autonomous waves
-│   ├── cli.py             # Entry point: `lfd create|loop|watch|...` (1,326 lines)
-│   ├── models.py          # Wave, FlowRun, StepRun (347 lines)
-│   ├── wave.py            # Wave CRUD operations (771 lines)
-│   ├── db.py              # SQLite database management
+│   ├── cli.py             # Entry point: `lfd create|loop|watch|...` (~1,300 lines)
+│   ├── models.py          # Wave, FlowRun, StepRun (~340 lines)
+│   ├── wave.py            # Wave CRUD operations (~770 lines)
+│   ├── db.py              # SQLite database management (WAL mode, migrations)
 │   ├── daemon/
-│   │   ├── server.py      # Asyncio Unix socket server (582 lines)
-│   │   ├── http_server.py # HTTP API for Concerto (552 lines)
-│   │   ├── manager.py     # Concurrency slots, PR limits
+│   │   ├── server.py      # Asyncio Unix socket server (~580 lines)
+│   │   ├── http_server.py # HTTP API for Concerto (~550 lines)
+│   │   ├── manager.py     # Concurrency slots (3), PR limits (15 global)
 │   │   └── protocol.py    # JSON-over-newline protocol
 │   └── execution/
-│       ├── runner.py      # Wave iteration executor (1,098 lines)
-│       ├── collector.py   # Output capture, autocommit (387 lines)
-│       └── worker.py      # Process management (462 lines)
+│       ├── runner.py      # Wave iteration executor (~1,100 lines)
+│       ├── collector.py   # Output capture, autocommit (~390 lines)
+│       └── worker.py      # Process management, retries, circuit breaker (~460 lines)
 │
 ├── lfops/                  # Git workflow operations (13 commands)
-│   ├── land.py            # PR landing (749 lines)
-│   ├── summarize.py       # Commit summarization (648 lines)
-│   ├── wt.py              # Worktree operations (365 lines)
-│   ├── pr.py              # PR creation (139 lines)
-│   ├── commit.py          # Auto-commit (221 lines)
+│   ├── land.py            # PR landing (~750 lines)
+│   ├── summarize.py       # Commit summarization (~650 lines)
+│   ├── wt.py              # Worktree operations (~370 lines)
+│   ├── pr.py              # PR creation (~140 lines)
+│   ├── commit.py          # Auto-commit (~220 lines)
 │   └── [8 more commands]
 │
-└── swift/                  # Native macOS apps (~13,600 lines)
-    ├── Concerto/          # Main UI app (~7,500 lines)
-    │   ├── Views/         # SwiftUI components
-    │   ├── State/         # @EnvironmentObject state
-    │   └── Services/      # Business logic
-    ├── LoopflowCore/      # Shared framework
-    │   ├── Models/        # Wave, Worktree, etc.
-    │   └── Services/      # Daemon communication
-    └── Symphonia/         # Secondary app (placeholder)
+├── swift/                  # Native macOS apps (~13,600 lines Swift)
+│   ├── Concerto/          # Main UI app (~7,500 lines)
+│   │   ├── Views/         # SwiftUI components (WaveSidebar, WaveDetailPanel, PromptLauncher)
+│   │   ├── State/         # @Observable containers (RepoState, SessionState, LauncherState)
+│   │   └── Services/      # Local operations (Terminal, Capture, Recents)
+│   ├── LoopflowCore/      # Shared framework
+│   │   ├── Models/        # Wave, Worktree, StepRun, Direction, Flow
+│   │   └── Services/      # LFDClient (HTTP), LFDEventService (socket), WaveService, WorktreeService
+│   └── Symphonia/         # Secondary app (placeholder)
+│
+└── rust/lf-core/           # Native Rust engine (~600 lines)
+    ├── lib.rs             # Public API exports
+    ├── flow.rs            # YAML parsing for flows (~290 lines)
+    ├── runtime.rs         # Tick-based execution (~230 lines)
+    ├── store.rs           # RunStore trait for persistence
+    ├── prompt.rs          # Token budgeting and context assembly
+    └── error.rs           # CoreError, LoadError, StoreError
 ```
 
 **Key data flow:**
@@ -79,7 +97,7 @@ User → step/flow command → context.py (gather) → launcher.py (build CLI)
 
 ### Key abstractions
 
-**Wave (lfd/models.py):** The central orchestration unit for autonomous work.
+**Wave (lfd/models.py:68-175):** The central orchestration unit for autonomous work.
 
 ```python
 Wave:
@@ -87,9 +105,11 @@ Wave:
   flow, direction, area       # What to run and where
   stimulus: Stimulus          # When to run (once/loop/watch/cron)
   status: WaveStatus          # IDLE/RUNNING/WAITING/ERROR
+  paused: bool                # Manual mode (stimulus doesn't fire when true)
   worktree, branch            # Persistent worktree state
   pr_limit, merge_mode        # PR creation settings
-  consecutive_failures        # Circuit breaker counter
+  consecutive_failures        # Circuit breaker counter (threshold = 5)
+  pending_activations         # Queued activations when wave is busy
 ```
 
 **Stimulus (lfd/models.py):** Determines when a wave runs.
@@ -104,9 +124,9 @@ Wave:
 FlowItem = Step | Fork | Choose | LoopUntilEmpty
 
 Step:     name, after, model, direction, interactive
-Fork:     threads[], step, synthesize
-Choose:   options{}, prompt
-LoopUntilEmpty: steps[], wave, max_iterations
+Fork:     threads[], step, model, synthesize
+Choose:   options{}, output, prompt
+LoopUntilEmpty: steps[], wave, max_iterations (default 100)
 ```
 
 **PromptComponents (lf/context.py:112-127):** The assembled context before formatting.
@@ -178,11 +198,21 @@ ContextConfig:
 
 **Concerto UI data flow:**
 
-1. `LFDEventService` connects to daemon Unix socket
-2. Subscribes to event patterns (wave.*, session.*, worktree.*)
-3. `WaveService` / `WorktreeService` query HTTP API
-4. SwiftUI views observe `@Published` state changes
-5. Actions dispatch to daemon via socket protocol
+1. `LFDEventService` connects to daemon Unix socket at `~/.lf/lfd.sock`
+2. Subscribes to event patterns (wave.*, session.*, worktree.*, output.line)
+3. `WaveService` / `WorktreeService` query HTTP API at `127.0.0.1:8765`
+4. `SessionService` reads `~/.lf/lfd.db` directly for history (no daemon required)
+5. SwiftUI views observe `@Observable` state changes
+6. Actions dispatch to daemon via socket/HTTP protocol
+
+**Rust lf-core execution (runtime.rs):**
+
+1. `tick_flow()` loads flow via `load_flow()` from YAML
+2. Gets current FlowItem at `step_index`
+3. If Step: delegates to `StepRunner` trait (default: `CommandStepRunner`)
+4. `CommandStepRunner` shells out to `lf --step <name> --worktree <path> --auto`
+5. Returns `TickResult`: StepComplete, FlowComplete, WaitingInteractive, StepFailed
+6. **Limitation:** Only Step items execute; Fork/Choose/LoopUntilEmpty return StepFailed
 
 ### Dependencies between modules
 
@@ -202,6 +232,41 @@ ContextConfig:
 - `wt` (worktrunk) for worktree management
 - `gh` for PR operations
 - `claude`, `codex`, `gemini` CLIs for agent execution
+
+### Rust lf-core engine (rust/lf-core/)
+
+**FlowItem (flow.rs:23-39):** Rust mirrors the Python union type.
+
+```rust
+pub enum FlowItem {
+    Step(Step),
+    Fork { branches: Vec<FlowItem>, synthesize: Option<String> },
+    Choose { prompt: String, options: HashMap<String, Vec<FlowItem>> },
+    LoopUntilEmpty { steps: Vec<FlowItem> },
+}
+```
+
+**StepRunner trait (runtime.rs:103-110):** Dependency injection for step execution.
+
+```rust
+pub trait StepRunner {
+    fn run(&self, step: &Step, worktree: &Path, directions: &[String])
+        -> Result<StepResult, CoreError>;
+}
+```
+
+**TickResult (runtime.rs:85-90):** State machine outcomes.
+
+```rust
+pub enum TickResult {
+    StepComplete,        // Continue ticking
+    FlowComplete,        // Flow finished
+    WaitingInteractive,  // Paused at interactive step
+    StepFailed,          // Step failed (or non-Step item encountered)
+}
+```
+
+**Key limitation:** `tick_flow_with_runner()` (runtime.rs:142-220) only handles `FlowItem::Step`. Any Fork/Choose/LoopUntilEmpty item returns `StepFailed` with error "non-step flow item not supported in tick". The Rust engine is designed for simple linear flows; complex DAG execution remains in Python.
 
 ---
 
@@ -250,6 +315,13 @@ The ordering affects what context the agent sees, but there's no explanation of 
 
 The division isn't immediately clear from the code structure.
 
+**Rust/Python execution boundary:** `lf-core` (Rust) parses all FlowItem types but only executes Step. This creates a partial implementation:
+- Parsing: Rust handles all YAML → FlowItem conversion
+- Execution: Rust handles Step-only flows, Python handles Fork/Choose/LoopUntilEmpty
+- State: RunStore trait allows pluggable persistence, but daemon still uses SQLite directly
+
+The boundary is not documented—it's unclear whether the Rust engine is meant to eventually replace Python flow execution or remain limited to simple linear flows.
+
 ---
 
 ## Observations
@@ -293,12 +365,12 @@ The function `gather_prompt_components()` has complex conditional logic based on
 - VISUAL_DESIGN.md: Thorough design system documentation
 - Module-level docstrings: Inconsistent—some files have none
 
-**Test coverage (tests/):** 34 test files, 9,683 lines covering key areas:
+**Test coverage (tests/):** 35 test files covering key areas:
 - Flow parsing and DAG construction (test_flows.py) - 139 lines
-- Context gathering (test_context.py) - 750 lines
-- Worktree operations (test_worktrees.py) - 350 lines
-- Launcher backends (test_launcher.py) - 582 lines
-- lfd CLI and daemon (test_lfd.py) - 1,756 lines
+- Context gathering (test_context.py) - comprehensive
+- Worktree operations (test_worktrees.py)
+- Launcher backends (test_launcher.py)
+- lfd CLI and daemon (test_lfd.py, test_lfd_cli.py) - ~1,800 lines combined
 
 Missing dedicated tests for:
 - `run_fork()` and `run_synthesize()` execution paths
@@ -315,13 +387,21 @@ Missing dedicated tests for:
 
 **Token budgeting infrastructure:** Budget fields exist on ContextConfig with reasonable defaults. The trimming infrastructure is in place—just needs better documentation and potentially smarter strategies (e.g., prioritize recent changes over old docs).
 
-**Concerto UI architecture:** The Swift app follows solid design principles from DESIGN.md:
-- Immediate connection (streaming output)
+**Concerto UI architecture:** The Swift app follows solid design principles from VISUAL_DESIGN.md:
+- Immediate connection (streaming output via socket subscription)
 - Progressive disclosure (expandable details)
-- Keyboard-first (Cmd+K command palette)
-- Speed as feature (optimistic updates)
+- Keyboard-first (Cmd+K command palette, focus traps)
+- Speed as feature (optimistic updates, fast-fail timeouts)
 
-The separation between LoopflowCore services and Concerto views is clean.
+The separation between LoopflowCore services and Concerto views is clean. State management uses `@Observable` pattern (iOS 17+) with clear responsibility divisions:
+- `RepoState`: Repository data (config, worktrees, prompts, flows, directions, waves)
+- `SessionState`: Active sessions and streaming output (caps at 1000 lines/session)
+- `LauncherState`: Prompt launcher UI state (selection, context options, token estimation)
+
+Concerto communicates with the daemon via three patterns:
+1. **HTTP REST API** (`LFDClient`): Fast queries with 2-second timeout
+2. **Socket subscription** (`LFDEventService`): Real-time events with auto-reconnect
+3. **Direct SQLite** (`SessionService`): History queries, works without daemon
 
 **Protocol-first design:** Proto definitions exist in `proto/` for a potential Rust rewrite. The JSON-over-newline protocol is simple and debuggable. Event categories are well-structured (wave.*, session.*, worktree.*).
 
@@ -338,6 +418,8 @@ The separation between LoopflowCore services and Concerto views is clean.
 - **Fork thread step inheritance:** The logic at `step_name = thread.step or fork.step` (flow.py:591-592) is implicit. Should this be documented or made explicit in the ForkThread dataclass?
 
 - **Cron grace period:** `check_cron_stimulus()` has a 24-hour grace period for missed triggers. Is this configurable? What's the rationale for 24 hours specifically?
+
+- **Rust lf-core scope:** The Rust engine parses Fork/Choose/LoopUntilEmpty but `tick_flow()` only executes Step items. Is this intentional (stepping stone to full execution), or will complex items always stay in Python?
 
 ---
 
@@ -424,3 +506,19 @@ The separation between LoopflowCore services and Concerto views is clean.
 **Benefit:** Single source of truth for flow execution. Easier to add features to both paths simultaneously.
 
 **Verdict:** Worth exploring as a larger refactoring effort. Not urgent, but track as technical debt. A possible approach: extract a shared `FlowExecutor` class that both paths use, with hooks for daemon-specific behavior.
+
+---
+
+## Summary
+
+Loopflow is a well-architected system with clear separation between:
+- **lf**: Prompt assembly and single-step execution
+- **lf flow**: DAG-based multi-step execution with parallelism
+- **lfd**: Background daemon with scheduling and reliability
+- **Concerto**: Native macOS UI for visual orchestration
+
+The main technical debt lies in the duplication between flow.py and runner.py, and the implicit token trimming strategy. The codebase follows its own style guide consistently, has good documentation at the system level, and uses clean abstractions for agent backends.
+
+The Rust lf-core engine adds native flow parsing and tick-based execution, but currently only handles linear Step-only flows. The Fork/Choose/LoopUntilEmpty items are parsed but fail at runtime, keeping complex DAG execution in Python. The boundary between Rust and Python execution is an open design question.
+
+The test coverage is solid for parsing and configuration, but execution paths (especially fork/synthesize) lack dedicated tests. The four worktree naming conventions should be documented to make cleanup logic more maintainable.

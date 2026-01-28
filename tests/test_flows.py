@@ -121,3 +121,19 @@ def test_save_flow_roundtrip():
         assert loaded is not None
         assert isinstance(loaded.steps[0], Step)
         assert loaded.steps[1].model == "codex"
+
+
+def test_fork_threads_inherit_fork_step():
+    """Threads without explicit step should inherit fork.step."""
+    fork = Fork(
+        {"direction": ["architect"]},
+        {"direction": ["pragmatist"]},
+        step="implement",
+    )
+    assert fork.step == "implement"
+    # Threads have no step of their own
+    assert fork.threads[0].step is None
+    assert fork.threads[1].step is None
+    # But fork.step is available for run_fork to use
+    assert fork.threads[0].direction == ["architect"]
+    assert fork.threads[1].direction == ["pragmatist"]

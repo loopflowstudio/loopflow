@@ -587,8 +587,10 @@ def run_fork(
         )
         subprocess.run(["git", "clean", "-fd"], cwd=wt_path, capture_output=True)
 
-        if thread.step:
-            step = Step(name=thread.step, model=thread.model, direction=thread.direction)
+        # Thread step takes precedence, then fork-level step
+        step_name = thread.step or fork.step
+        if step_name:
+            step = Step(name=step_name, model=thread.model, direction=thread.direction)
             params = _build_step_params(step, backend, model_variant, context, None)
             exit_code = _run_step(
                 params,

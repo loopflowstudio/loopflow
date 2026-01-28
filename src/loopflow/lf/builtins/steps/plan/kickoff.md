@@ -55,6 +55,16 @@ Update `scratch/<slug>.md`:
 <Verification command or observable outcome>
 ```
 
+## Wave alignment
+
+If `<lf:wave>` is present, check `roadmap/<wave>/README.md` in docs:
+
+- Design must follow the wave's principles
+- Scope must exclude wave non-goals
+- "Done when" must contribute to wave success criteria
+
+Quote the specific principles you're following in "Key decisions".
+
 ## Principles
 
 **Bold over safe.** If you're not sure, pick the more ambitious option. Safe designs compound into mediocrity.

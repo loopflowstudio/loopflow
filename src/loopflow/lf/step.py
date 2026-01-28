@@ -254,6 +254,9 @@ def run(
         False, "-i", "-I", "--interactive", help="Override to run in interactive mode"
     ),
     area: list[str] = typer.Option(None, "--area", help="Area scope (paths to include in context)"),
+    wave: Optional[str] = typer.Option(
+        None, "--wave", help="Wave name for roadmap scoping (e.g., 'rust', 'enterprise')"
+    ),
     worktree: str = typer.Option(
         None, "-w", "-W", "--worktree", help="Create worktree and run step there"
     ),
@@ -388,6 +391,7 @@ def run(
                 exclude=list(exclude_patterns) if exclude_patterns else [],
             ),
             area=resolved.area,
+            wave=wave,
             lfdocs=config.include_loopflow_doc if config else True,
             clipboard=include_clipboard,
             budget_area=config.budgets.area if config else 50000,
@@ -447,6 +451,9 @@ def inline(
         False, "-i", "-I", "--interactive", help="Override to run in interactive mode"
     ),
     area: list[str] = typer.Option(None, "--area", help="Area scope (paths to include in context)"),
+    wave: Optional[str] = typer.Option(
+        None, "--wave", help="Wave name for roadmap scoping (e.g., 'rust', 'enterprise')"
+    ),
     web: bool = typer.Option(
         False, "--web", help="Copy to clipboard and open web client (claude.ai, chatgpt.com, etc.)"
     ),
@@ -544,6 +551,7 @@ def inline(
                 exclude=list(exclude_patterns) if exclude_patterns else [],
             ),
             area=resolved.area,
+            wave=wave,
             lfdocs=config.include_loopflow_doc if config else True,
             clipboard=include_clipboard,
             budget_area=config.budgets.area if config else 50000,

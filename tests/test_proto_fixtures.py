@@ -61,6 +61,34 @@ WAVE_STATUSES = {
     "WAVE_ERROR",
 }
 
+MERGE_MODES = {
+    "MERGE_MODE_UNSPECIFIED",
+    "MERGE_PR",
+    "MERGE_LAND",
+}
+
+STEP_RUN_STATUSES = {
+    "STEP_RUN_STATUS_UNSPECIFIED",
+    "STEP_RUNNING",
+    "STEP_WAITING",
+    "STEP_COMPLETED",
+    "STEP_FAILED",
+}
+
+CI_STATES = {
+    "CI_STATE_UNSPECIFIED",
+    "CI_SUCCESS",
+    "CI_PENDING",
+    "CI_FAILURE",
+}
+
+PR_STATES = {
+    "PR_STATE_UNSPECIFIED",
+    "PR_OPEN",
+    "PR_MERGED",
+    "PR_CLOSED",
+}
+
 WORKTREE_CHANGE_REASONS = {
     "WORKTREE_CHANGE_REASON_UNSPECIFIED",
     "WORKTREE_COMMIT",
@@ -70,12 +98,6 @@ WORKTREE_CHANGE_REASONS = {
     "WORKTREE_CI_UPDATED",
     "WORKTREE_MERGED",
     "WORKTREE_PR_STATE_CHANGED",
-}
-
-WAITING_REASONS = {
-    "WAITING_REASON_UNSPECIFIED",
-    "WAITING_INTERACTIVE_STEP",
-    "WAITING_PR_LIMIT",
 }
 
 # engine.proto enums
@@ -115,8 +137,7 @@ def test_event_fixture_has_payload(name: str, path: Path):
     data = _load_fixture(path)
     event_type = data["event"]
 
-    # Map event types to expected payload keys.
-    # Only includes event types that have fixtures—add entries when adding fixtures.
+    # Map event types to expected payload keys
     payload_map = {
         "session.started": "session_started",
         "session.ended": "session_ended",
@@ -124,10 +145,11 @@ def test_event_fixture_has_payload(name: str, path: Path):
         "worktree.updated": "worktree_updated",
         "worktree.pruned": "worktree_pruned",
         "wave.created": "wave_created",
+        "wave.updated": "wave_updated",
+        "wave.deleted": "wave_deleted",
         "wave.started": "wave_started",
         "wave.stopped": "wave_stopped",
         "wave.activated": "wave_activated",
-        "wave.waiting": "wave_waiting",
         "scheduler.slot.acquired": "scheduler_slot_acquired",
         "scheduler.slot.released": "scheduler_slot_released",
     }
@@ -165,23 +187,14 @@ def test_wave_activated_event_fields():
     assert payload["stimulus"] in STIMULUS_KINDS
 
 
-def test_wave_waiting_event_fields():
-    """wave.waiting must have wave_id, step, step_run_id, and valid reason."""
-    data = _load_fixture(FIXTURES_ROOT / "events" / "wave_waiting.json")
-    payload = data["wave_waiting"]
-    assert "wave_id" in payload
-    assert "step" in payload
-    assert "step_run_id" in payload
-    assert "reason" in payload
-    assert payload["reason"] in WAITING_REASONS
-
-
 # -----------------------------------------------------------------------------
 # Request Fixture Tests
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name,path", REQUEST_FIXTURES, ids=[n for n, _ in REQUEST_FIXTURES])
+@pytest.mark.parametrize(
+    "name,path", REQUEST_FIXTURES, ids=[n for n, _ in REQUEST_FIXTURES]
+)
 def test_request_fixture_parses(name: str, path: Path):
     """All request fixtures must be valid JSON."""
     data = _load_fixture(path)
@@ -212,7 +225,9 @@ def test_gather_context_diff_mode_valid():
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name,path", RESPONSE_FIXTURES, ids=[n for n, _ in RESPONSE_FIXTURES])
+@pytest.mark.parametrize(
+    "name,path", RESPONSE_FIXTURES, ids=[n for n, _ in RESPONSE_FIXTURES]
+)
 def test_response_fixture_parses(name: str, path: Path):
     """All response fixtures must be valid JSON."""
     data = _load_fixture(path)

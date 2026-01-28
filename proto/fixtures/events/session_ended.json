@@ -3,9 +3,6 @@
   "timestamp": "2026-01-27T12:05:30Z",
   "session_ended": {
     "id": "sr_abc123def456",
-    "status": "completed",
-    "wave_id": "wave_abc123",
-    "flow_run_id": "fr_def456",
-    "flow_will_continue": true
+    "status": "completed"
   }
 }

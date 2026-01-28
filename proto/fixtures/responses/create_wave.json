@@ -1,0 +1,21 @@
+{
+  "wave": {
+    "id": "wave_xyz789",
+    "name": "swift-falcon",
+    "repo": "/Users/alice/repos/myproject",
+    "flow": "ship",
+    "direction": ["product-engineer"],
+    "area": ["src/api"],
+    "stimulus": {
+      "kind": "STIMULUS_LOOP"
+    },
+    "paused": true,
+    "status": "WAVE_IDLE",
+    "iteration": 0,
+    "pr_limit": 5,
+    "merge_mode": "MERGE_PR",
+    "created_at": "2026-01-27T10:00:00Z",
+    "consecutive_failures": 0,
+    "pending_activations": 0
+  }
+}

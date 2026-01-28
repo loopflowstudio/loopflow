@@ -1,0 +1,8 @@
+{
+  "event": "scheduler.slot.released",
+  "timestamp": "2026-01-27T10:15:00Z",
+  "scheduler_slot_released": {
+    "run_id": "run_abc123",
+    "slots_used": 1
+  }
+}

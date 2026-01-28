@@ -1,0 +1,665 @@
+// Loopflow Control Plane API v1
+//
+// This schema defines the control plane interface between clients (lf CLI, Concerto)
+// and the loopflow daemon (lfd). It covers wave management, run lifecycle,
+// observability, and event streaming.
+//
+// Protocol version: 1.0.0
+// Compatibility: Clients must refuse to connect if major version differs.
+
+syntax = "proto3";
+
+package loopflow.control.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/loopflowstudio/loopflow/proto/control/v1";
+
+// -----------------------------------------------------------------------------
+// Service Definitions
+// -----------------------------------------------------------------------------
+
+// ControlService provides wave management and daemon control.
+service ControlService {
+  // Health and status
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+  rpc GetHealth(GetHealthRequest) returns (GetHealthResponse);
+
+  // Wave management
+  rpc ListWaves(ListWavesRequest) returns (ListWavesResponse);
+  rpc GetWave(GetWaveRequest) returns (GetWaveResponse);
+  rpc CreateWave(CreateWaveRequest) returns (CreateWaveResponse);
+  rpc UpdateWave(UpdateWaveRequest) returns (UpdateWaveResponse);
+  rpc DeleteWave(DeleteWaveRequest) returns (DeleteWaveResponse);
+  rpc CloneWave(CloneWaveRequest) returns (CloneWaveResponse);
+
+  // Wave control
+  rpc RunWave(RunWaveRequest) returns (RunWaveResponse);
+  rpc StopWave(StopWaveRequest) returns (StopWaveResponse);
+
+  // Session connect (interactive steps)
+  rpc ConnectWave(ConnectWaveRequest) returns (ConnectWaveResponse);
+
+  // Flow discovery
+  rpc ListFlows(ListFlowsRequest) returns (ListFlowsResponse);
+
+  // Worktree management
+  rpc ListWorktrees(ListWorktreesRequest) returns (ListWorktreesResponse);
+  rpc NotifyWorktreeChanged(NotifyWorktreeChangedRequest) returns (NotifyWorktreeChangedResponse);
+
+  // Scheduler
+  rpc GetSchedulerStatus(GetSchedulerStatusRequest) returns (GetSchedulerStatusResponse);
+  rpc AcquireSlot(AcquireSlotRequest) returns (AcquireSlotResponse);
+  rpc ReleaseSlot(ReleaseSlotRequest) returns (ReleaseSlotResponse);
+
+  // StepRun management
+  rpc ListStepRuns(ListStepRunsRequest) returns (ListStepRunsResponse);
+  rpc GetStepRunHistory(GetStepRunHistoryRequest) returns (GetStepRunHistoryResponse);
+  rpc StartStepRun(StartStepRunRequest) returns (StartStepRunResponse);
+  rpc EndStepRun(EndStepRunRequest) returns (EndStepRunResponse);
+
+  // Event streaming
+  rpc Subscribe(SubscribeRequest) returns (stream Event);
+
+  // Notifications (fire-and-forget from external systems)
+  rpc Notify(NotifyRequest) returns (NotifyResponse);
+  rpc StreamOutput(StreamOutputRequest) returns (StreamOutputResponse);
+}
+
+// -----------------------------------------------------------------------------
+// Common Types
+// -----------------------------------------------------------------------------
+
+// Protocol version for compatibility checking.
+message ProtocolVersion {
+  uint32 major = 1;  // Breaking changes
+  uint32 minor = 2;  // Additive changes
+  uint32 patch = 3;  // Bug fixes
+}
+
+// Error details with retry hints.
+message ErrorDetail {
+  string code = 1;              // Machine-readable error code (e.g., "WAVE_NOT_FOUND")
+  string message = 2;           // Human-readable message
+  bool retryable = 3;           // Whether client should retry
+  uint32 retry_after_seconds = 4;  // Suggested retry delay
+  string trace_id = 5;          // For correlating logs
+  string idempotency_key = 6;   // Echo back if provided in request
+}
+
+// -----------------------------------------------------------------------------
+// Status & Health
+// -----------------------------------------------------------------------------
+
+message GetStatusRequest {}
+
+message GetStatusResponse {
+  uint32 pid = 1;
+  uint32 waves_defined = 2;
+  uint32 waves_running = 3;
+  uint32 step_runs_active = 4;
+}
+
+message GetHealthRequest {}
+
+message GetHealthResponse {
+  string version = 1;
+  uint32 schema_version = 2;
+  uint64 uptime_seconds = 3;
+  HealthChecks checks = 4;
+  HealthMetrics metrics = 5;
+  ProtocolVersion protocol_version = 6;
+}
+
+message HealthChecks {
+  bool database = 1;
+  bool socket = 2;
+}
+
+message HealthMetrics {
+  uint32 waves_total = 1;
+  uint32 waves_running = 2;
+  uint32 step_runs_active = 3;
+  uint32 flow_runs_total = 4;
+}
+
+// -----------------------------------------------------------------------------
+// Wave Management
+// -----------------------------------------------------------------------------
+
+// Stimulus determines when a wave runs.
+message Stimulus {
+  StimulusKind kind = 1;
+  string cron = 2;  // Required when kind = STIMULUS_CRON
+}
+
+enum StimulusKind {
+  STIMULUS_KIND_UNSPECIFIED = 0;
+  STIMULUS_ONCE = 1;   // Single run
+  STIMULUS_LOOP = 2;   // Continuous iterations
+  STIMULUS_WATCH = 3;  // Triggered by file changes on main
+  STIMULUS_CRON = 4;   // Scheduled execution
+}
+
+enum WaveStatus {
+  WAVE_STATUS_UNSPECIFIED = 0;
+  WAVE_IDLE = 1;
+  WAVE_RUNNING = 2;
+  WAVE_WAITING = 3;  // Paused: interactive step awaiting connect, or PR limit reached
+  WAVE_ERROR = 4;
+}
+
+enum MergeMode {
+  MERGE_MODE_UNSPECIFIED = 0;
+  MERGE_PR = 1;    // Accumulate PRs for review
+  MERGE_LAND = 2;  // Auto-merge when CI passes
+}
+
+message Wave {
+  string id = 1;
+  string name = 2;
+  string repo = 3;
+  string flow = 4;
+  repeated string direction = 5;
+  repeated string area = 6;
+
+  Stimulus stimulus = 7;
+  bool paused = 8;
+  WaveStatus status = 9;
+  uint32 iteration = 10;
+
+  string worktree = 11;
+  string branch = 12;
+  uint32 pr_limit = 13;
+  MergeMode merge_mode = 14;
+
+  optional uint32 pid = 15;
+  google.protobuf.Timestamp created_at = 16;
+
+  // Watch state
+  optional string last_main_sha = 17;
+
+  // Resilience
+  uint32 consecutive_failures = 18;
+  uint32 pending_activations = 19;
+}
+
+message ListWavesRequest {
+  string repo = 1;
+}
+
+message ListWavesResponse {
+  repeated Wave waves = 1;
+}
+
+message GetWaveRequest {
+  string wave_id = 1;
+}
+
+message GetWaveResponse {
+  Wave wave = 1;
+}
+
+message CreateWaveRequest {
+  string repo = 1;
+  optional string name = 2;
+  optional string flow = 3;
+  repeated string direction = 4;
+  repeated string area = 5;
+  string idempotency_key = 6;
+}
+
+message CreateWaveResponse {
+  Wave wave = 1;
+}
+
+message UpdateWaveRequest {
+  string wave_id = 1;
+  optional string flow = 2;
+  repeated string direction = 3;
+  repeated string area = 4;
+  optional Stimulus stimulus = 5;
+  optional bool paused = 6;
+  string idempotency_key = 7;
+}
+
+message UpdateWaveResponse {
+  Wave wave = 1;
+}
+
+message DeleteWaveRequest {
+  string wave_id = 1;
+}
+
+message DeleteWaveResponse {}
+
+message CloneWaveRequest {
+  string wave_id = 1;
+  optional string name = 2;
+  string idempotency_key = 3;
+}
+
+message CloneWaveResponse {
+  Wave wave = 1;
+}
+
+message RunWaveRequest {
+  string wave_id = 1;
+  // Optional overrides (don't modify wave config)
+  repeated string area = 2;
+  repeated string direction = 3;
+  optional string flow = 4;
+  optional Stimulus stimulus = 5;
+  string idempotency_key = 6;
+}
+
+message RunWaveResponse {
+  bool started = 1;
+  string wave_id = 2;
+}
+
+message StopWaveRequest {
+  string wave_id = 1;
+  bool force = 2;  // SIGKILL vs SIGTERM
+}
+
+message StopWaveResponse {
+  bool stopped = 1;
+}
+
+message ConnectWaveRequest {
+  string wave_id = 1;
+}
+
+message ConnectWaveResponse {
+  string worktree = 1;
+  string step = 2;
+  string step_run_id = 3;
+  string prompt_file = 4;          // Path to the step prompt file
+  optional string flow_run_id = 5; // Current flow run if in a flow
+  uint32 step_index = 6;           // Position in flow (0 if single step)
+}
+
+// -----------------------------------------------------------------------------
+// Flow Discovery
+// -----------------------------------------------------------------------------
+
+enum FlowType {
+  FLOW_TYPE_UNSPECIFIED = 0;
+  FLOW_YAML = 1;
+  FLOW_PYTHON = 2;
+}
+
+message FlowInfo {
+  string name = 1;
+  FlowType type = 2;
+  repeated string steps = 3;
+}
+
+message StepInfo {
+  string name = 1;
+  string type = 2;  // "builtin" or "custom"
+}
+
+message ListFlowsRequest {
+  string repo = 1;
+}
+
+message ListFlowsResponse {
+  repeated FlowInfo flows = 1;
+  repeated StepInfo steps = 2;
+}
+
+// -----------------------------------------------------------------------------
+// Worktree Management
+// -----------------------------------------------------------------------------
+
+message WorkingTreeStatus {
+  bool staged = 1;
+  bool modified = 2;
+  bool untracked = 3;
+  int32 diff_added = 4;
+  int32 diff_deleted = 5;
+}
+
+message MainStatus {
+  int32 ahead = 1;
+  int32 behind = 2;
+}
+
+message RemoteStatus {
+  optional string name = 1;  // "origin" or null
+  int32 ahead = 2;
+  int32 behind = 3;
+}
+
+enum CIState {
+  CI_STATE_UNSPECIFIED = 0;
+  CI_SUCCESS = 1;
+  CI_PENDING = 2;
+  CI_FAILURE = 3;
+}
+
+enum PRState {
+  PR_STATE_UNSPECIFIED = 0;
+  PR_OPEN = 1;
+  PR_MERGED = 2;
+  PR_CLOSED = 3;
+}
+
+message CIStatus {
+  optional string source = 1;  // "pr" or null
+  optional string url = 2;     // GitHub PR URL
+  optional PRState state = 3;
+  optional CIState ci_state = 4;
+}
+
+enum OperationState {
+  OPERATION_STATE_UNSPECIFIED = 0;
+  OPERATION_REBASE = 1;
+  OPERATION_MERGE = 2;
+}
+
+enum Staleness {
+  STALENESS_UNSPECIFIED = 0;
+  STALENESS_MERGED = 1;
+  STALENESS_REMOTE_DELETED = 2;
+}
+
+message RecentStepRun {
+  string id = 1;
+  string step = 2;
+  StepRunStatus status = 3;
+  optional google.protobuf.Timestamp started_at = 4;
+  optional google.protobuf.Timestamp ended_at = 5;
+}
+
+message WorktreeState {
+  string branch = 1;
+  string path = 2;
+  string base_branch = 3;
+
+  WorkingTreeStatus working_tree = 4;
+  MainStatus main = 5;
+  optional string main_state = 6;
+  RemoteStatus remote = 7;
+  optional OperationState operation_state = 8;
+  CIStatus ci = 9;
+
+  // Extensions for UI
+  bool prunable = 10;
+  optional Staleness staleness = 11;
+  optional uint32 staleness_days = 12;
+  repeated RecentStepRun recent_steps = 13;
+}
+
+message ListWorktreesRequest {
+  string repo = 1;
+}
+
+message ListWorktreesResponse {
+  repeated WorktreeState worktrees = 1;
+}
+
+message NotifyWorktreeChangedRequest {
+  string repo = 1;
+  string branch = 2;
+  optional string reason = 3;
+}
+
+message NotifyWorktreeChangedResponse {
+  string branch = 1;
+  string reason = 2;
+}
+
+// -----------------------------------------------------------------------------
+// Scheduler
+// -----------------------------------------------------------------------------
+
+message GetSchedulerStatusRequest {}
+
+message GetSchedulerStatusResponse {
+  uint32 slots_used = 1;
+  uint32 slots_total = 2;
+  uint32 outstanding = 3;
+  uint32 outstanding_limit = 4;
+  repeated string running = 5;  // run_ids
+}
+
+message AcquireSlotRequest {
+  string run_id = 1;
+}
+
+message AcquireSlotResponse {
+  bool acquired = 1;
+  optional string reason = 2;
+  uint32 slots_used = 3;
+}
+
+message ReleaseSlotRequest {
+  string run_id = 1;
+}
+
+message ReleaseSlotResponse {
+  uint32 slots_used = 1;
+}
+
+// -----------------------------------------------------------------------------
+// StepRun Management
+// -----------------------------------------------------------------------------
+
+enum StepRunStatus {
+  STEP_RUN_STATUS_UNSPECIFIED = 0;
+  STEP_RUNNING = 1;
+  STEP_WAITING = 2;
+  STEP_COMPLETED = 3;
+  STEP_FAILED = 4;
+}
+
+message StepRun {
+  string id = 1;
+  string step = 2;
+  string repo = 3;
+  string worktree = 4;
+
+  optional string flow_run_id = 5;
+  optional string wave_id = 6;
+
+  StepRunStatus status = 7;
+  google.protobuf.Timestamp started_at = 8;
+  optional google.protobuf.Timestamp ended_at = 9;
+
+  optional uint32 pid = 10;
+  string model = 11;
+  string run_mode = 12;
+}
+
+message ListStepRunsRequest {}
+
+message ListStepRunsResponse {
+  repeated StepRun step_runs = 1;
+}
+
+message GetStepRunHistoryRequest {
+  optional string worktree = 1;
+  optional string repo = 2;
+  optional uint32 limit = 3;
+}
+
+message GetStepRunHistoryResponse {
+  repeated StepRun step_runs = 1;
+}
+
+message StartStepRunRequest {
+  StepRun step_run = 1;
+}
+
+message StartStepRunResponse {
+  string id = 1;
+}
+
+message EndStepRunRequest {
+  string step_run_id = 1;
+  StepRunStatus status = 2;
+}
+
+message EndStepRunResponse {
+  string id = 1;
+}
+
+// -----------------------------------------------------------------------------
+// Event Streaming
+// -----------------------------------------------------------------------------
+
+message SubscribeRequest {
+  repeated string patterns = 1;  // Glob patterns like "wave.*", "session.*"
+}
+
+// Event is a union type for all streamable events.
+message Event {
+  string event = 1;  // Event type (e.g., "wave.started", "session.ended")
+  google.protobuf.Timestamp timestamp = 2;
+
+  oneof payload {
+    SessionStartedEvent session_started = 10;
+    SessionEndedEvent session_ended = 11;
+    OutputLineEvent output_line = 12;
+    WorktreeUpdatedEvent worktree_updated = 13;
+    WorktreePrunedEvent worktree_pruned = 14;
+    WaveCreatedEvent wave_created = 15;
+    WaveUpdatedEvent wave_updated = 16;
+    WaveDeletedEvent wave_deleted = 17;
+    WaveStartedEvent wave_started = 18;
+    WaveStoppedEvent wave_stopped = 19;
+    WaveActivatedEvent wave_activated = 20;
+    WaveWaitingEvent wave_waiting = 23;
+    SchedulerSlotAcquiredEvent scheduler_slot_acquired = 21;
+    SchedulerSlotReleasedEvent scheduler_slot_released = 22;
+  }
+}
+
+message SessionStartedEvent {
+  string id = 1;
+  string step = 2;
+  string worktree = 3;
+  // Connection context (present when session is from ConnectWave)
+  optional string wave_id = 4;
+  optional string flow_run_id = 5;
+  optional uint32 step_index = 6;
+}
+
+message SessionEndedEvent {
+  string id = 1;
+  string status = 2;  // "completed" or "failed"
+  // Connection context (present when session was from ConnectWave)
+  optional string wave_id = 3;
+  optional string flow_run_id = 4;
+  optional bool flow_will_continue = 5;  // True if daemon will tick_flow after this
+}
+
+message OutputLineEvent {
+  string session_id = 1;
+  string text = 2;
+  // timestamp is in the parent Event message
+}
+
+enum WorktreeChangeReason {
+  WORKTREE_CHANGE_REASON_UNSPECIFIED = 0;
+  WORKTREE_COMMIT = 1;
+  WORKTREE_CHECKOUT = 2;
+  WORKTREE_CHANGED = 3;
+  WORKTREE_DRAFT_PR_CREATED = 4;
+  WORKTREE_CI_UPDATED = 5;
+  WORKTREE_MERGED = 6;
+  WORKTREE_PR_STATE_CHANGED = 7;
+}
+
+message WorktreeUpdatedEvent {
+  string branch = 1;
+  WorktreeChangeReason reason = 2;
+  string repo = 3;
+  optional WorktreeState worktree = 4;
+  optional WorktreeChanges changes = 5;
+}
+
+message WorktreeChanges {
+  optional CIState ci_state = 1;
+  optional PRState pr_state = 2;
+}
+
+message WorktreePrunedEvent {
+  string branch = 1;
+  string repo = 2;
+}
+
+message WaveCreatedEvent {
+  string wave_id = 1;
+  string name = 2;
+}
+
+message WaveUpdatedEvent {
+  string wave_id = 1;
+}
+
+message WaveDeletedEvent {
+  string wave_id = 1;
+}
+
+message WaveStartedEvent {
+  string wave_id = 1;
+}
+
+message WaveStoppedEvent {
+  string wave_id = 1;
+}
+
+message WaveActivatedEvent {
+  string wave_id = 1;
+  StimulusKind stimulus = 2;
+}
+
+// Emitted when a flow pauses at an interactive step, awaiting user connect.
+message WaveWaitingEvent {
+  string wave_id = 1;
+  string step = 2;                  // Interactive step name (e.g., "design")
+  string step_run_id = 3;
+  optional string flow_run_id = 4;  // Flow run if in a flow
+  uint32 step_index = 5;            // Position in flow
+  WaitingReason reason = 6;
+}
+
+enum WaitingReason {
+  WAITING_REASON_UNSPECIFIED = 0;
+  WAITING_INTERACTIVE_STEP = 1;  // Paused at interactive step
+  WAITING_PR_LIMIT = 2;          // Hit PR limit
+}
+
+message SchedulerSlotAcquiredEvent {
+  string run_id = 1;
+  uint32 slots_used = 2;
+}
+
+message SchedulerSlotReleasedEvent {
+  string run_id = 1;
+  uint32 slots_used = 2;
+}
+
+// -----------------------------------------------------------------------------
+// Notifications (fire-and-forget)
+// -----------------------------------------------------------------------------
+
+message NotifyRequest {
+  string event = 1;
+  bytes data = 2;  // JSON-encoded payload
+}
+
+message NotifyResponse {
+  string event = 1;
+}
+
+message StreamOutputRequest {
+  string step_run_id = 1;
+  string text = 2;
+}
+
+message StreamOutputResponse {}

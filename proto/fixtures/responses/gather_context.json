@@ -1,0 +1,50 @@
+{
+  "components": {
+    "run_mode": "auto",
+    "docs": [
+      {
+        "path": "STYLE.md",
+        "content": "# Style Guide\n\nFollow PEP8...",
+        "category": "docs"
+      },
+      {
+        "path": "README.md",
+        "content": "# MyProject\n\nA sample project...",
+        "category": "docs"
+      }
+    ],
+    "diff_files": [
+      {
+        "path": "src/auth/oauth.py",
+        "content": "from typing import Optional\n\nclass OAuthProvider:\n    ...",
+        "category": "diff_files"
+      }
+    ],
+    "step": {
+      "name": "implement",
+      "content": "Turn the design doc into working code.\n\n## Goal\n\nWorking code with rough edges beats perfect code...",
+      "config": {
+        "interactive": false,
+        "diff_files": true
+      },
+      "source": "builtin"
+    },
+    "repo_root": "/Users/alice/repos/myproject",
+    "loopflow_doc": "# Loopflow\n\nRun prompts, hand off cleanly...",
+    "directions": [
+      {
+        "name": "product-engineer",
+        "content": "Ship features users love...",
+        "source": "builtin"
+      }
+    ],
+    "summaries": [
+      {
+        "path": "src/auth",
+        "content": "## src/auth\n\nAuthentication module containing OAuth and JWT handlers...",
+        "category": "summaries"
+      }
+    ]
+  },
+  "total_tokens": 8500
+}

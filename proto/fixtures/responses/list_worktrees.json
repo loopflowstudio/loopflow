@@ -1,0 +1,65 @@
+{
+  "worktrees": [
+    {
+      "branch": "main",
+      "path": "/Users/alice/repos/myproject",
+      "base_branch": "main",
+      "working_tree": {
+        "staged": false,
+        "modified": false,
+        "untracked": false,
+        "diff_added": 0,
+        "diff_deleted": 0
+      },
+      "main": {
+        "ahead": 0,
+        "behind": 0
+      },
+      "remote": {
+        "name": "origin",
+        "ahead": 0,
+        "behind": 0
+      },
+      "ci": {},
+      "prunable": false,
+      "recent_steps": []
+    },
+    {
+      "branch": "feature-auth",
+      "path": "/Users/alice/repos/myproject.feature-auth",
+      "base_branch": "main",
+      "working_tree": {
+        "staged": false,
+        "modified": true,
+        "untracked": false,
+        "diff_added": 150,
+        "diff_deleted": 20
+      },
+      "main": {
+        "ahead": 5,
+        "behind": 2
+      },
+      "remote": {
+        "name": "origin",
+        "ahead": 1,
+        "behind": 0
+      },
+      "ci": {
+        "source": "pr",
+        "url": "https://github.com/alice/myproject/pull/123",
+        "state": "PR_OPEN",
+        "ci_state": "CI_SUCCESS"
+      },
+      "prunable": false,
+      "recent_steps": [
+        {
+          "id": "sr_abc123",
+          "step": "implement",
+          "status": "STEP_COMPLETED",
+          "started_at": "2026-01-27T11:00:00Z",
+          "ended_at": "2026-01-27T11:15:00Z"
+        }
+      ]
+    }
+  ]
+}

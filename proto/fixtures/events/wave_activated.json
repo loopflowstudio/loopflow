@@ -1,0 +1,8 @@
+{
+  "event": "wave.activated",
+  "timestamp": "2026-01-27T09:00:00Z",
+  "wave_activated": {
+    "wave_id": "wave_cron123",
+    "stimulus": "STIMULUS_CRON"
+  }
+}

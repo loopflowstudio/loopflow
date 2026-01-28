@@ -1,0 +1,49 @@
+{
+  "event": "worktree.updated",
+  "timestamp": "2026-01-27T12:03:00Z",
+  "worktree_updated": {
+    "branch": "feature-auth",
+    "reason": "WORKTREE_COMMIT",
+    "repo": "/Users/alice/repos/myproject",
+    "worktree": {
+      "branch": "feature-auth",
+      "path": "/Users/alice/repos/myproject.feature-auth",
+      "base_branch": "main",
+      "working_tree": {
+        "staged": false,
+        "modified": false,
+        "untracked": false,
+        "diff_added": 42,
+        "diff_deleted": 10
+      },
+      "main": {
+        "ahead": 3,
+        "behind": 0
+      },
+      "remote": {
+        "name": "origin",
+        "ahead": 0,
+        "behind": 0
+      },
+      "ci": {
+        "source": "pr",
+        "url": "https://github.com/alice/myproject/pull/123",
+        "state": "PR_OPEN",
+        "ci_state": "CI_PENDING"
+      },
+      "prunable": false,
+      "recent_steps": [
+        {
+          "id": "sr_abc123def456",
+          "step": "implement",
+          "status": "STEP_COMPLETED",
+          "started_at": "2026-01-27T12:00:00Z",
+          "ended_at": "2026-01-27T12:02:45Z"
+        }
+      ]
+    },
+    "changes": {
+      "ci_state": "CI_PENDING"
+    }
+  }
+}

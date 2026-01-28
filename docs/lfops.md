@@ -66,13 +66,13 @@ Enables auto-merge on your PR. GitHub merges when CI passes and the merge queue 
 
 ## lfops next
 
-Land current PR and continue work in a fresh worktree.
+Land current PR and continue work on a new stacked branch.
 
 ```bash
 lfops next
 ```
 
-Combines `lfops land` + `lfops wt create` in one command. After landing the current PR, creates a new worktree with the same naming scheme so you can continue working while the previous PR merges.
+Combines `lfops land` + a branch switch in one command. After landing the current PR, it creates a new stacked branch from the current HEAD and switches the worktree to it. The worktree directory stays the same so you can keep working while the previous PR merges.
 
 ## lfops commit
 

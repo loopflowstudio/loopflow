@@ -1,108 +1,92 @@
 # Wave Creation with Worktree
 
-Combine `lfd create` and `lfops wt create` so creating a wave also creates its worktree and switches you there.
+Make `lfd create` report the worktree it creates and switch the user there.
 
 ## What to build
 
-`lfd create <wave>` creates a wave record, creates a worktree for it, and switches to that worktree.
+`lfd create` already creates a worktree via `create_wave()`. The CLI just needs to:
+1. Report the worktree path to the user
+2. Switch to it via shell directive
 
 ## Current state
 
-```
-lfd create swift-falcon     # just creates database record
-lfops wt create swift-falcon  # separate: creates worktree, switches there
+`wave.py:create_wave()` already creates a worktree:
+```python
+main_branch = f"{wave_name}.main"
+worktree_path = create_worktree(repo, main_branch)
 ```
 
-User then needs to manually coordinate: create wave, create worktree, configure wave with area/direction/flow.
+But `lfd create` CLI output doesn't mention it:
+```
+Created swift-falcon (abc123)
+  Repo: /path/to/repo
+
+Configure before running:
+  lfd area swift-falcon src/
+  ...
+```
+
+The HTTP API (`POST /waves`) returns `worktree` in the response, so Concerto already gets this info.
 
 ## Proposed behavior
 
 ```bash
 lfd create swift-falcon
 # Output:
-# Created wave: swift-falcon (abc123)
-# Created worktree: ../loopflow.swift-falcon
-# cd ../loopflow.swift-falcon
+# Created swift-falcon (abc123)
+#   Worktree: ../loopflow.swift-falcon.main
+#   Branch: swift-falcon.main
+#
+# cd ../loopflow.swift-falcon.main
 ```
 
-Wave name = worktree name. The worktree uses the existing branch schema from config.
+Shell integration switches you there automatically.
 
-## Data structures
+## Key changes
 
-No new types. Uses existing:
-
-```python
-# From lfd/wave.py
-def create_wave(repo: Path, name: str | None = None) -> Wave: ...
-
-# From lf/worktrees.py
-@dataclass
-class WorktreeResult:
-    path: Path
-    branch: str
-    base_branch: str | None
-```
-
-## Key functions
+### 1. CLI output (lfd/cli.py:249-288)
 
 ```python
-# lfd/cli.py - modify existing create command
 @app.command()
 def create(
     name: str = typer.Argument(None, help="Wave name (generated if omitted)"),
-    no_worktree: bool = typer.Option(False, "--no-worktree", help="Skip worktree creation"),
 ):
-    """Create a new wave with its worktree."""
-    # 1. Create wave record
     wave = create_wave(repo=repo, name=name)
 
-    # 2. Create worktree (unless --no-worktree)
-    if not no_worktree:
-        wt_result = create_with_schema(repo, wave.name, base=None, branch_config=config)
-        # Write cd directive for shell integration
-        write_directive(f"cd {wt_result.path}")
+    typer.echo(f"{c['green']}Created{c['reset']} {c['bold']}{wave.name}{c['reset']} ({wave.short_id()})")
+
+    if wave.worktree:
+        typer.echo(f"  Worktree: {wave.worktree}")
+        typer.echo(f"  Branch: {wave.branch}")
+
+        # Switch to worktree via shell integration
+        from loopflow.lfops.shell import write_directive
+        if not write_directive(f"cd {wave.worktree}"):
+            typer.echo(f"\ncd {wave.worktree}")
+    else:
+        typer.echo(f"  Repo: {repo}")
+        typer.echo("  (worktree creation failed)")
 ```
 
-Import needed:
-```python
-from loopflow.lf.worktrees import create_with_schema
-from loopflow.lfops.shell import write_directive
-```
+### 2. Concerto (already works)
+
+`WaveService.createWave()` calls `POST /waves` which returns `worktree` field.
+Concerto can use `wave.worktreePath` to open Cursor/Warp there.
 
 ## Constraints
 
-- Wave name must work as worktree name (no special chars)
-- If wave exists, don't create duplicate worktree
-- If worktree creation fails, still keep the wave (user can retry worktree manually)
-- Shell integration (`write_directive`) only works if user ran `lfops shell install`
-
-## Edge cases
-
-1. **Wave exists**: Current behavior - prints "Wave already exists", returns. No worktree created.
-2. **Worktree exists**: Check before creating. If worktree exists for this name, skip creation but still print cd.
-3. **Auto-generated name**: `lfd create` with no name generates one. Worktree uses same generated name.
+- Shell directive only works if `lfops shell install` was run
+- If worktree creation failed, wave still exists (user sees warning)
+- Branch naming: `{wave_name}.main` (existing convention)
 
 ## Done when
 
 ```bash
-# Fresh start
-lfd rm swift-falcon --force 2>/dev/null
-rm -rf ../loopflow.swift-falcon 2>/dev/null
+# Create wave and verify it switches you there
+lfd create test-wave
+pwd  # should be ../loopflow.test-wave.main (if shell integration active)
 
-# Create wave
-lfd create swift-falcon
-
-# Verify wave exists
-lfd show swift-falcon  # should show wave details
-
-# Verify worktree exists
-ls ../loopflow.swift-falcon  # should exist
-
-# Verify shell got cd directive (if shell integration active)
-# Or: output shows "cd ../loopflow.swift-falcon"
+# Clean up
+lfd rm test-wave --force
+rm -rf ../loopflow.test-wave.main
 ```
-
-## Open questions
-
-1. Should there be a `--switch` flag that's default-on? Or always switch?
-2. Should `lfd loop/watch/cron` also create worktree if wave doesn't exist? (Currently they create wave if --area provided, but no worktree)

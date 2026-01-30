@@ -155,7 +155,10 @@ def test_next_starts_fresh_when_already_merged(tmp_path):
                                 "loopflow.lfops.next.parse_branch_base",
                                 return_value="wave",
                             ):
-                                with patch("loopflow.lfops.next.get_wave_by_worktree", return_value=None):
+                                with patch(
+                                    "loopflow.lfops.next.get_wave_by_worktree",
+                                    return_value=None,
+                                ):
                                     with patch("loopflow.lfops.next.write_directive"):
                                         result = next_worktree(
                                             repo,

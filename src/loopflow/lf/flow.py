@@ -5,8 +5,10 @@ import os
 import platform
 import re
 import subprocess
+import sys
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -17,6 +19,7 @@ from loopflow.lf.context import (
     ContextConfig,
     FilesetConfig,
     format_drop_label,
+    format_prompt,
     gather_prompt_components,
     gather_step,
     trim_prompt_components,
@@ -35,11 +38,14 @@ from loopflow.lf.flows import (
     load_flow,
 )
 from loopflow.lf.git import GitError, find_main_repo, open_pr
-from loopflow.lf.launcher import get_runner
+from loopflow.lf.launcher import build_model_command, get_runner
+from loopflow.lf.logging import write_prompt_file
 from loopflow.lf.messages import generate_pr_message
 from loopflow.lf.tokens import MAX_SAFE_TOKENS, analyze_components
 from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
+from loopflow.lfd.models import StepRun, StepRunStatus
+from loopflow.lfd.step_run import log_step_run_end, log_step_run_start
 
 FlowItem = Step | Fork | Choose | LoopUntilEmpty
 

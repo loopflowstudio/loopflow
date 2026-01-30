@@ -85,7 +85,10 @@ def execute_step(params: ExecutionParams) -> int:
     log_step_run_start(step_run)
 
     # Print header
-    step_display = f"{params.step_name} (interactive)" if params.is_interactive else params.step_name
+    if params.is_interactive:
+        step_display = f"{params.step_name} (interactive)"
+    else:
+        step_display = params.step_name
     print_step_header(
         step_display,
         params.backend,

@@ -1112,7 +1112,10 @@ def stop(
         return
 
     if not wave_id:
-        typer.echo(f"{c['red']}Error:{c['reset']} Provide a wave name or ID, or use --all", err=True)
+        typer.echo(
+            f"{c['red']}Error:{c['reset']} Provide a wave name or ID, or use --all",
+            err=True,
+        )
         raise typer.Exit(1)
 
     wave = _resolve_wave(wave_id, repo, c) if repo else get_wave(wave_id)

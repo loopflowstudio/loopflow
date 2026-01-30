@@ -273,14 +273,12 @@ StepRunner shows a grid of common steps (review, design, implement, debug) promi
 
 ## Implementation Status
 
-Core components implemented:
+All components implemented:
 - [x] AreaPicker with recent/browse/infer
 - [x] StepRunner with step grid, direction pills, prompt field
 - [x] TransitionBar with stimulus picker sheet
 - [x] DirectionPills with add/remove
 - [x] RecentAreasService with UserDefaults persistence
 - [x] WaveDetailPanel ViewMode state machine
-
-Refinements to add:
-- [ ] Step button tooltips (`.help()` modifiers)
-- [ ] Dynamic prompt placeholder based on selected step
+- [x] Step button tooltips (`.help()` modifiers)
+- [x] Dynamic prompt placeholder based on selected step

@@ -21,3 +21,6 @@ summaries:
 
 branch_names:
   schema: "{user}.{name}.{ts}"
+
+internal:
+  use_rust: true

@@ -1,55 +1,86 @@
 # Continue Button for Interactive Sessions
 
-Add "Continue" button to InteractiveSessionView that signals completion of the current step and advances the flow.
+Signal "I'm done reviewing" and advance the flow with a single tap.
 
-## Context
+## Problem
 
-From 03-conduct-ux.md:
+Interactive steps pause the flow until the user signals completion. Currently, you have to know to send Ctrl+D (EOF) to the terminal—an obscure Unix convention that's hostile to mobile users and anyone who hasn't memorized shell lore.
+
+The existing "End" button terminates the session abruptly (SIGTERM), which is cancel semantics, not continue semantics. Users need an obvious, affirmative way to say "I'm satisfied, proceed to the next step."
+
+## Approach
+
+Add a fixed footer bar below the terminal with two actions:
+
+1. **Continue** (primary) — Sends EOF to terminal, waits for graceful exit, triggers daemon to advance flow
+2. **Cancel** (secondary) — Same as current "End" button, aborts without advancing
+
+The footer lives outside the terminal scroll area so it's always visible and tappable—critical for mobile where you can't easily reach Ctrl+D.
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│ Terminal output here...                             │
+│ ● swift-falcon   design   [interactive]      [End] │
+├─────────────────────────────────────────────────────┤
 │                                                     │
-│ > claude: I've completed the design. Ready to       │
-│   proceed when you are.                             │
+│  Terminal content scrolls here...                   │
+│                                                     │
+│  > claude: I've completed the design. Ready to      │
+│    proceed when you are.                            │
 │                                                     │
 ├─────────────────────────────────────────────────────┤
 │                              [Cancel]  [✓ Continue] │
 └─────────────────────────────────────────────────────┘
 ```
 
-"Continue" = Ctrl+D equivalent. Tells the agent you're satisfied, flow proceeds to next step.
+## Alternatives considered
 
-This button lives outside the terminal view so it's always visible and tappable on mobile.
+| Approach | Tradeoff | Why not |
+|----------|----------|---------|
+| Keep Ctrl+D only | No UI changes | Hostile to mobile users, requires Unix knowledge |
+| Single "Done" button | Simpler UI | Conflates cancel and continue semantics |
+| Floating action button | More prominent | Obscures terminal content, feels out of place |
+| Move "End" to footer, rename to "Cancel" | Reuses existing control | Two places to look for session controls |
+| Add daemon polling for "agent done" state | Auto-enable Continue | Over-engineered; agent text parsing is fragile |
 
-## Current State
+## Key decisions
 
-InteractiveSessionView has:
-- Session header with wave name, step name, "interactive" badge
-- Ghostty terminal view running `lf <step>`
-- "End" button to terminate the session
+1. **Footer bar, not header.** The header already has session metadata and the End button. Adding Continue there crowds it. Footer is natural for action confirmation (iOS patterns, dialog buttons). Follows "Cancel/Continue" left-to-right convention.
 
-Missing:
-- "Continue" button to advance to next step
-- Footer bar with Cancel/Continue actions
+2. **EOF signal, not API call.** The daemon already handles process exit correctly—exit code 0 means success, advances flow. Sending EOF (ASCII 4) via `ghostty_surface_text()` is the same as user typing Ctrl+D. No new API needed.
 
-## Requirements
+3. **Remove "End" from header.** Move it to footer as "Cancel" for a single, consistent action area. Users won't have to choose between two exit mechanisms.
 
-1. **Continue button** - Prominent green button, visible below terminal
-2. **Cancel button** - Secondary action to abort without continuing
-3. **Footer bar** - Fixed at bottom, always visible (not scrolled with terminal)
-4. **Action handling** - Send Ctrl+D to terminal (or equivalent signal)
-5. **Flow awareness** - After Continue, either:
-   - Next step starts in same session
-   - Session ends and wave advances
+4. **No "agent is done" detection.** The original design doc asked about disabling Continue while agent works. Skip this. Polling terminal output for "ready to proceed" patterns is fragile. Users can see the terminal—they know when to click Continue.
+
+5. **Continue always visible, always enabled.** User owns the decision. If they click Continue mid-agent-work, the EOF interrupts the process (exit code 130), daemon treats it as incomplete, wave stays in WAITING state. That's recoverable—you can reconnect.
+
+**Wave principles applied:**
+- "Connect when needed, land when ready" (03-conduct-ux.md) — Continue is the "ready" signal
+- "Continue = Ctrl+D equivalent" (03-conduct-ux.md) — EOF semantics, not terminate
+- "Button lives outside terminal view so it's always visible" (03-conduct-ux.md) — Fixed footer
+
+## Scope
+
+**In scope:**
+- Footer bar component in `InteractiveSessionView`
+- Continue action: send EOF character to terminal via Ghostty API
+- Cancel action: existing `endSession()` logic moved from header
+- Remove "End" button from header
+- Keyboard shortcut: ⌘Return for Continue (macOS convention for "proceed")
+
+**Out of scope:**
+- Agent completion detection (polling, output parsing)
+- Visual indicator for "agent waiting vs. working"
+- Mobile-specific layout (iOS/iPad work comes in Phase 3)
+- New daemon APIs (existing EOF → exit → advance flow is sufficient)
 
 ## Implementation
 
-Add footer bar to InteractiveSessionView:
+### Footer Component
 
 ```swift
 private var sessionFooter: some View {
-    HStack(spacing: 16) {
+    HStack(spacing: Spacing.lg) {
         Spacer()
 
         Button {
@@ -58,30 +89,94 @@ private var sessionFooter: some View {
             Text("Cancel")
         }
         .buttonStyle(DarkButtonStyle())
+        .keyboardShortcut(.escape, modifiers: [])
 
         Button {
-            continueToNextStep()
+            continueSession()
         } label: {
-            HStack(spacing: 4) {
+            HStack(spacing: Spacing.xs) {
                 Image(systemName: "checkmark")
                 Text("Continue")
             }
         }
         .buttonStyle(.borderedProminent)
-        .tint(.green)
+        .tint(Color.statusSuccess)
+        .keyboardShortcut(.return, modifiers: .command)
     }
-    .padding(.horizontal, 20)
-    .padding(.vertical, 12)
+    .padding(.horizontal, Spacing.xl)
+    .padding(.vertical, Spacing.md)
     .background(palette.surface)
 }
 ```
 
-The Continue action should:
-1. Send Ctrl+D to the terminal (EOF signal)
-2. Wait for process to exit gracefully
-3. Update wave status / trigger next step
+### Continue Action
 
-## Open Questions
+```swift
+private func continueSession() {
+    // Send EOF (Ctrl+D = ASCII 4) to terminal
+    let eof = "\u{04}"
+    GhosttyManager.shared.sendText(eof)
 
-- How does the daemon know to advance to the next step? Need to check if lfd has a "continue" API or if Ctrl+D is sufficient.
-- Should Continue be disabled while the agent is actively working? Need UI indicator for "agent is done, waiting for you."
+    // Process will exit gracefully, triggering onSessionClosed callback
+    // which calls sessionState.endInteractiveSession()
+    // Daemon sees exit code 0, advances flow
+}
+```
+
+### GhosttyManager Extension
+
+Add `sendText(_:)` method to expose text input to the terminal:
+
+```swift
+// In GhosttyManager.swift
+func sendText(_ text: String) {
+    guard let surface = activeSurface else { return }
+    text.withCString { ptr in
+        ghostty_surface_text(surface, ptr, UInt(text.utf8.count))
+    }
+}
+```
+
+### View Structure Update
+
+```swift
+var body: some View {
+    VStack(spacing: 0) {
+        sessionHeader      // Remove "End" button
+        Divider()
+        terminalContent
+        Divider()
+        sessionFooter      // New: Cancel + Continue
+    }
+    .background(palette.background)
+    // ... existing .task modifier
+}
+```
+
+## Done when
+
+```bash
+# 1. Footer renders correctly
+# - Two buttons visible below terminal
+# - "Cancel" on left, "Continue" (green, checkmark) on right
+# - Footer doesn't scroll with terminal content
+
+# 2. Continue sends EOF and advances flow
+lf design: test flow  # Start interactive session
+# Click Continue
+# Terminal exits cleanly (exit code 0)
+# Daemon emits session.completed event
+# If flow has more steps, next step runs
+
+# 3. Cancel aborts without advancing
+# Click Cancel
+# Terminal killed (SIGTERM)
+# Wave stays in WAITING state, can reconnect
+
+# 4. Keyboard shortcuts work
+# ⌘Return triggers Continue
+# Escape triggers Cancel
+
+# 5. "End" button removed from header
+# Header only shows: status dot, wave name, step name, interactive badge
+```

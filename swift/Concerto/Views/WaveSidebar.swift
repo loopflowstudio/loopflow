@@ -110,6 +110,12 @@ struct WaveSidebar: View {
         .onReceive(NotificationCenter.default.publisher(for: .newWaveRequested)) { _ in
             createWaveDirectly()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .selectWave)) { notification in
+            if let waveId = notification.userInfo?["waveId"] as? String,
+               let wave = repoState.waves.first(where: { $0.id == waveId }) {
+                repoState.selectedWave = wave
+            }
+        }
     }
 
     private var header: some View {

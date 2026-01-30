@@ -97,6 +97,9 @@ final class RepoState {
     private var listDebounceTask: Task<Void, Never>?
     private var autoPruneInFlight: Bool = false
 
+    // Track previous wave statuses for notification transitions
+    private var previousWaveStatuses: [String: WaveStatus] = [:]
+
     // Keep reference to session state for event handling
     private weak var _sessionState: SessionState?
 
@@ -611,13 +614,65 @@ final class RepoState {
     func refreshWaves() async {
         guard let repo = currentRepo else { return }
         do {
-            waves = try await waveService.listWaves(repo: repo)
+            let newWaves = try await waveService.listWaves(repo: repo)
+
+            // Detect status transitions and notify
+            for wave in newWaves {
+                let oldStatus = previousWaveStatuses[wave.id]
+                let newStatus = wave.status
+
+                if oldStatus != newStatus {
+                    handleWaveStatusChange(wave: wave, from: oldStatus, to: newStatus)
+                }
+                previousWaveStatuses[wave.id] = newStatus
+            }
+
+            waves = newWaves
             if let selected = selectedWave,
                let updated = waves.first(where: { $0.id == selected.id }) {
                 selectedWave = updated
             }
         } catch {
             waves = []
+        }
+    }
+
+    private func handleWaveStatusChange(wave: Wave, from oldStatus: WaveStatus?, to newStatus: WaveStatus) {
+        switch newStatus {
+        case .waiting:
+            // Get current step from recentSteps if available
+            let step = wave.recentSteps.first?.step ?? "step"
+            NotificationService.shared.notifyNeedsInteractive(
+                waveId: wave.id,
+                waveName: wave.displayName,
+                step: step
+            )
+
+        case .error:
+            // Use step name for error message
+            let step = wave.recentSteps.first?.step ?? "unknown step"
+            let message = "Error in \(step)"
+            NotificationService.shared.notifyError(
+                waveId: wave.id,
+                waveName: wave.displayName,
+                message: message
+            )
+
+        case .idle:
+            // Check if PR was just created (prNumber set, wasn't before or status changed)
+            if let prNumber = wave.prNumber, wave.prState == .open {
+                // Only notify if this is a new PR (not just a refresh)
+                if oldStatus == .running {
+                    NotificationService.shared.notifyPRReady(
+                        waveId: wave.id,
+                        waveName: wave.displayName,
+                        prNumber: prNumber
+                    )
+                }
+            }
+
+        case .running, .completed:
+            break  // No notification needed
         }
     }
 

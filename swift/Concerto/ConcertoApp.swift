@@ -12,6 +12,12 @@ struct ConcertoApp: App {
     @State private var showCaptureError = false
     @AppStorage("appearanceMode") private var appearanceMode = AppearanceMode.system.rawValue
 
+    init() {
+        Task {
+            try? await NotificationService.shared.requestAuthorization()
+        }
+    }
+
     var body: some Scene {
         let preferredScheme = AppearanceMode(rawValue: appearanceMode)?.colorScheme
         let uiTestMode = RepoState.uiTestMode()

@@ -184,6 +184,34 @@ lfd status
 # Protocol unchanged—Concerto still works
 ```
 
+## Ops architecture decision
+
+**Decision:** `lf ops` and `lfd` are siblings, not layers. Both call `lf-core` for git operations.
+
+```
+lf-core (Rust)
+├── git::rebase(worktree, onto, base_commit)
+├── git::create_branch(worktree, name)
+├── git::push_force_with_lease(worktree)
+└── git::land(worktree, strategy)
+
+lf ops (Python CLI)              lfd (Rust daemon)
+├── rebase → lf-core(None)       ├── rebase → lf-core(wave.base_commit)
+├── next → lf-core               ├── next → lf-core + update wave state
+└── land → lf-core               └── land → lf-core + update wave state
+```
+
+| | `lf ops` | `lfd` |
+|---|----------|-------|
+| Daemon required | No | Yes |
+| State | None | Wave DB |
+| Scope | This worktree | Named wave |
+| Rebase | Simple onto main | Squash-aware via base_commit |
+
+The shared code lives in `lf-core`, not in `lf ops`. `lf ops` is the "no daemon, stateless" interface. `lfd` adds wave state for stacking workflows.
+
+See `roadmap/rust/04-lf-client.md` for full design.
+
 ## Open questions
 
 1. **Is there a real problem?** What's actually wrong with Python lfd that Rust would fix?

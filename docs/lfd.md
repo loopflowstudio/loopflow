@@ -204,6 +204,37 @@ lfd prs swift-falcon
 lfd prs swift-falcon -n 20
 ```
 
+## Branch Stacking
+
+Commands for managing dependent PRs (stacking).
+
+### lfd next
+
+Stack a new branch on top of current work.
+
+```bash
+lfd next                    # from within wave worktree
+lfd next swift-falcon       # explicit wave name
+lfd next --create-pr        # create PR first, then stack
+```
+
+Enables auto-merge on current PR, creates a new branch from HEAD, and records the base for squash-aware rebase later.
+
+| Flag | Description |
+|------|-------------|
+| `-c, --create-pr` | Create PR if none exists |
+
+### lfd rebase
+
+Rebase stacked branch after base PR lands.
+
+```bash
+lfd rebase                  # from within wave worktree
+lfd rebase swift-falcon     # explicit wave name
+```
+
+Detects if base branch was squash-merged and rebases appropriately. Uses recorded base commit to replay only stacked commits, avoiding conflicts from squash-merge.
+
 ## Daemon Management
 
 ### lfd serve

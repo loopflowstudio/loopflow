@@ -1382,6 +1382,7 @@ def next_cmd(
     Enables auto-merge on current PR, creates new branch from HEAD,
     and records base tracking for rebase-on-land.
 
+    \b
     Examples:
         lfd next                    # from within wave worktree
         lfd next rust               # explicit wave name
@@ -1502,6 +1503,7 @@ def rebase_cmd(
 
     Detects if base branch was squash-merged to main and rebases appropriately.
 
+    \b
     Examples:
         lfd rebase                  # from within wave worktree
         lfd rebase rust             # explicit wave name

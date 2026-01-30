@@ -50,7 +50,7 @@ Commit to **protocol‑first** Rust `lfd` with remote client support. The protoc
 - Stage 1: `roadmap/rust/01-protocol.md`
 - Stage 2: `roadmap/rust/02-core-engine.md`
 - Stage 3: `roadmap/rust/03-daemon-service.md`
-- Stage 4: `roadmap/rust/04-lf-client.md`
+- Stage 4: `roadmap/rust/04-lf-client.md` (includes lf ops refactor)
 - Stage 5: `roadmap/rust/05-data-backend.md`
 - Stage 6: `roadmap/rust/06-deployment.md`
 - Stage 7: `roadmap/rust/07-validation.md`

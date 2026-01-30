@@ -1,6 +1,6 @@
 # Rust Roadmap: lf Client Refactor (Stage 4)
 
-Make `lf` a protocol client that can target local or remote engines.
+Make `lf` and `lf ops` protocol clients that target lf-core.
 
 ## Goal
 Keep the CLI UX but move execution to the protocol-first engine, enabling remote control and managed clusters.
@@ -11,10 +11,61 @@ Keep the CLI UX but move execution to the protocol-first engine, enabling remote
 - Mapping existing commands to protocol calls
 - Event streaming to terminal
 - Local standalone mode without requiring `lfd`
-- Local mode uses direct `lf` ↔ `lfd-core` integration
-- Remote mode switches `lf` engine to `lfd` that exposes the same subset of `lfd-core` APIs used by `lf`
-- Move git operations from Python lfops to Rust lf-core
-- Expose operations via FFI or CLI for Python frontend
+- Local mode uses direct `lf` ↔ `lf-core` integration
+- Remote mode switches `lf` engine to `lfd` that exposes the same subset of `lf-core` APIs used by `lf`
+- `lf ops` commands (rebase, next, land) call lf-core git module
+
+## lfops → lf ops transition
+
+Consolidate `lfops` binary into `lf ops` subcommand. Orthogonal to Rust but natural to do at this stage.
+
+**Current state:**
+```bash
+lf debug           # prompt/agent commands
+lfops pr           # separate binary for git workflow
+lfops land
+lfops rebase
+```
+
+**Target state:**
+```bash
+lf debug           # prompt/agent commands
+lf ops pr          # subcommand, same binary
+lf ops land
+lf ops rebase
+```
+
+**Why now:**
+- One CLI to learn, one binary to install
+- Consistent `lf <domain> <command>` pattern
+- Natural breakpoint when moving to lf-core anyway
+- Aliases can preserve `lfops` for muscle memory
+
+**Migration:**
+1. Add `lf ops` subcommand that delegates to existing lfops code
+2. Deprecate `lfops` binary with warning pointing to `lf ops`
+3. Remove `lfops` binary after transition period
+
+## lf ops architecture
+
+When `lf` moves to lf-core, `lf ops` moves with it. Both become thin Python CLIs over Rust.
+
+```
+lf-core (Rust)
+├── git::rebase(worktree, onto, base_commit)
+├── git::create_branch(worktree, name)
+├── git::push_force_with_lease(worktree)
+└── git::land(worktree, strategy)
+
+lf (Python CLI)                  lf ops (Python CLI)
+├── run → lf-core                ├── rebase → lf-core
+├── flow → lf-core               ├── next → lf-core
+└── ...                          └── land → lf-core
+```
+
+`lf ops` is stateless - it calls lf-core with simple defaults (e.g., `rebase(worktree, "origin/main", None)`).
+
+`lfd` also calls lf-core but adds wave state (e.g., `rebase(worktree, "origin/main", wave.base_commit)`).
 
 ## Non-goals
 - Removing Python immediately

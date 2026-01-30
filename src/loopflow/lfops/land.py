@@ -21,6 +21,8 @@ from loopflow.lf.git import (
 from loopflow.lf.launcher import get_runner
 from loopflow.lf.messages import generate_commit_message_from_diff, generate_pr_message
 from loopflow.lf.worktrees import get_path
+from loopflow.lf.ops.git import push as git_push
+from loopflow.lf.ops.git import rebase as git_rebase
 from loopflow.lfops._helpers import (
     add_commit_push,
     get_default_branch,
@@ -132,6 +134,7 @@ def _rebase_onto_main(repo_root: Path, base_branch: str) -> bool:
     Handles force-push after rebase if the branch has an upstream.
     """
     from loopflow.lf.context import gather_step
+    from loopflow.lf.ops.git import GitError
 
     # Fetch latest main
     subprocess.run(["git", "fetch", "origin", base_branch], cwd=repo_root, check=False)
@@ -147,16 +150,15 @@ def _rebase_onto_main(repo_root: Path, base_branch: str) -> bool:
         return True
 
     typer.echo(f"Rebasing onto {base_branch}...")
-    result = subprocess.run(
-        ["git", "rebase", f"origin/{base_branch}"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        # Conflicts - abort and hand off to assistant
+    try:
+        rebase_result = git_rebase(repo_root, f"origin/{base_branch}")
+    except GitError as e:
+        typer.echo(f"Error: Rebase failed: {e}", err=True)
+        return False
+
+    if not rebase_result.success:
+        # Conflicts - hand off to assistant (git_rebase already aborted)
         typer.echo("Conflicts detected, launching rebase assistant...")
-        subprocess.run(["git", "rebase", "--abort"], cwd=repo_root, capture_output=True)
 
         # Get rebase prompt (custom or built-in)
         config = load_config(repo_root)
@@ -169,7 +171,7 @@ def _rebase_onto_main(repo_root: Path, base_branch: str) -> bool:
         agent_model = step.config.model or (config.agent_model if config else "claude:opus")
         backend, model_variant = parse_model(agent_model)
         runner = get_runner(backend)
-        rebase_result = runner.launch(
+        agent_result = runner.launch(
             step.content,
             auto=True,
             stream=True,
@@ -177,7 +179,7 @@ def _rebase_onto_main(repo_root: Path, base_branch: str) -> bool:
             model_variant=model_variant,
             cwd=repo_root,
         )
-        if rebase_result.exit_code != 0:
+        if agent_result.exit_code != 0:
             typer.echo("Rebase assistant failed", err=True)
             return False
 
@@ -201,14 +203,10 @@ def _rebase_onto_main(repo_root: Path, base_branch: str) -> bool:
     )
     if result.returncode == 0:
         typer.echo("Force-pushing rebased branch...")
-        result = subprocess.run(
-            ["git", "push", "--force-with-lease"],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            typer.echo("Error: Force-push failed after rebase.", err=True)
+        try:
+            git_push(repo_root, force_with_lease=True)
+        except GitError as e:
+            typer.echo(f"Error: Force-push failed after rebase: {e}", err=True)
             return False
 
     return True

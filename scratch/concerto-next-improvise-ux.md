@@ -76,6 +76,9 @@ WaveDetailPanel shows Conduct view (existing UI)
 | Wizard-style multi-step setup | Guided flow | Feels heavy for "just poke around" use case |
 | Keep AreaPicker in sidebar | Less intrusive | Buries the critical first step, confusing for new users |
 | Inline area editing (click to edit) | Compact | Doesn't teach users what areas are or why they matter |
+| Show StepRunner immediately with area field | Less friction | Hides the importance of area selection; users skip it |
+| Modal for area selection | Focused attention | Feels interruptive; panel flow is more natural |
+| Direction selection required before running | Ensures intent | Most users want defaults; friction kills exploration |
 
 ## Key decisions
 
@@ -93,6 +96,104 @@ WaveDetailPanel shows Conduct view (existing UI)
 
 **"Current branch" area inference.** If the worktree has uncommitted changes, offer to use the paths of changed files as the area. Common pattern: user makes manual edits, wants agent to continue.
 
+**ViewMode enum in WaveDetailPanel.** Four states: `interactive`, `areaPicker`, `stepRunner`, `conduct`. Priority order determines which view shows. Interactive sessions always win. This eliminates complex conditional logic.
+
+## Wild Success
+
+Six months out, Improvise is how everyone starts. The pattern:
+
+1. User has a vague idea: "auth feels janky"
+2. Creates wave, sees AreaPicker, picks `src/auth/`
+3. Runs `review` — agent produces a thorough analysis
+4. Reads it, thinks "actually, the token refresh is the issue"
+5. Runs `design` with prompt: "focus on token refresh edge cases"
+6. Agent produces a design they love
+7. Hits "Set Stimulus → Loop" — wave runs autonomously
+8. Next morning, PR is ready
+
+What made it great:
+- **Zero config** — creating a wave took one click
+- **Discoverable** — the step grid taught them what's possible
+- **Low commitment** — they could poke around before committing to autonomous work
+- **Smooth transition** — going from exploration to production felt like one continuous workflow
+
+Users say: "I used to overthink what flow to use. Now I just start with review and see where it goes."
+
+## Wild Failure
+
+Six months out, users avoid Improvise entirely. The pattern:
+
+1. User creates wave, sees AreaPicker, confused
+2. Picks "Entire repository" because they're not sure what to do
+3. Runs `review` — agent produces unfocused analysis (too broad)
+4. Tries `design` — agent asks clarifying questions, user doesn't know how to answer
+5. Abandons wave, goes back to CLI: `lf design -a src/auth/`
+
+What went wrong:
+- **Area selection felt like a gate** — users didn't understand why it mattered
+- **Steps grid didn't explain anything** — users clicked randomly, got random results
+- **Prompt field was ignored** — users didn't realize they could/should add context
+- **No feedback loop** — after running a step, users didn't know if it worked or what to do next
+- **TransitionBar was noise** — users didn't understand "stimulus" and ignored it
+
+The lesson: Improvise failed because it assumed users understood the loopflow mental model. It optimized for speed over understanding.
+
+## Refinements to Avoid Failure
+
+### 1. AreaPicker Needs Context
+
+Current: "Choose where to focus this wave."
+
+Better: Show a visual hint of what areas are available. If the repo has `src/`, `tests/`, `docs/`, show them as quick options with file counts. "src/ (847 files)" tells users this is a substantial directory.
+
+**Decision:** Add a "Common directories" section below Recent that shows top-level directories from the repo with file counts. Makes area selection feel informed, not arbitrary.
+
+### 2. Step Grid Needs Descriptions
+
+Current: Grid of buttons: `review`, `design`, `implement`, `debug`
+
+Better: On hover (or always visible on first use), show one-line descriptions:
+- **review** — analyze architecture, complexity, quality
+- **design** — interactive session to plan changes
+- **implement** — build from a design
+- **debug** — fix an error (paste it in the prompt)
+
+**Decision:** Add `.help()` tooltips to step buttons. First-time users see them; power users ignore them.
+
+### 3. Prompt Field Should Guide
+
+Current: "Additional context (optional)" with placeholder "e.g., focus on auth endpoints"
+
+Better: When specific steps are selected, the prompt guidance changes:
+- **debug** → "Paste the error message or describe the bug"
+- **review** → "What aspect to focus on? (e.g., security, performance)"
+- **design** → "What are you trying to build or change?"
+- **implement** → "Any specific requirements or constraints?"
+
+**Decision:** Dynamic prompt placeholder based on selected step. Teaches users what kind of input is useful.
+
+### 4. After Step Completion, Show Actionable Summary
+
+Current: TransitionBar shows "3 steps run" with generic buttons.
+
+Better: After a step completes, show a summary card:
+- For `review`: "Analysis complete. Key findings: X, Y, Z. → Run design to plan fixes"
+- For `design`: "Design written to scratch/. → Run implement to build it"
+- For `implement`: "Changes made. → Run review to verify, or set stimulus to loop"
+
+**Decision:** Add a `StepSummaryCard` below StepRunner that shows context-aware next steps. Bridges the gap between "step done" and "what now?"
+
+### 5. TransitionBar Should Explain
+
+Current: "Set Stimulus" button without explanation.
+
+Better: "Make this wave run automatically" with a brief explanation:
+- Loop: "Keep running until you stop it"
+- Watch: "Run when files change on main"
+- Schedule: "Run on a schedule (9am daily)"
+
+**Decision:** Move explanations into TransitionBar preview, not just the sheet. Users should understand the choice before clicking.
+
 ## Scope
 
 **In scope:**
@@ -102,6 +203,8 @@ WaveDetailPanel shows Conduct view (existing UI)
 - WaveDetailPanel state machine detecting unconfigured waves
 - RecentAreasService with UserDefaults persistence
 - Direction editing via inline pills
+- Step button tooltips with descriptions
+- Dynamic prompt placeholder based on selected step
 
 **Out of scope:**
 - Custom flow editor (use existing flows, custom via CLI)
@@ -109,6 +212,8 @@ WaveDetailPanel shows Conduct view (existing UI)
 - Prompt history (single field, no recall)
 - Step templates ("my review always uses these directions")
 - Remote execution (Phase 2)
+- StepSummaryCard (good idea, but adds complexity—revisit after basic flow works)
+- Common directories with file counts (nice-to-have, not essential)
 
 ## Done when
 
@@ -118,6 +223,12 @@ WaveDetailPanel shows Conduct view (existing UI)
 
 # Pick area from recent or browse
 # → StepRunner appears with step grid
+
+# Hover over step button
+# → Tooltip shows what the step does
+
+# Select "debug" step
+# → Prompt placeholder changes to "Paste the error message..."
 
 # Run "review" step
 # → Interactive session launches in terminal
@@ -140,8 +251,8 @@ WaveDetailPanel shows Conduct view (existing UI)
 - `swift/Concerto/Services/RecentAreasService.swift` — UserDefaults persistence
 
 **Modified files:**
-- `WaveDetailPanel.swift` — Add state machine for unconfigured/improvise/conduct views
-- `RepoState.swift` — Add `updateWaveDirection(_:, directions:)` method
+- `WaveDetailPanel.swift` — Add ViewMode enum and state machine for unconfigured/improvise/conduct views
+- `RepoState.swift` — Ensure `updateWave(_:, area:)` and `updateWave(_:, direction:)` methods work
 - `WaveService.swift` — Ensure area/direction update APIs work
 
 ## Wave alignment
@@ -159,3 +270,17 @@ The design uses a single WaveDetailPanel that adapts based on wave state. Users 
 > "Quick steps: common single steps"
 
 StepRunner shows a grid of common steps (review, design, implement, debug) prominently, with flows available but secondary.
+
+## Implementation Status
+
+Core components implemented:
+- [x] AreaPicker with recent/browse/infer
+- [x] StepRunner with step grid, direction pills, prompt field
+- [x] TransitionBar with stimulus picker sheet
+- [x] DirectionPills with add/remove
+- [x] RecentAreasService with UserDefaults persistence
+- [x] WaveDetailPanel ViewMode state machine
+
+Refinements to add:
+- [ ] Step button tooltips (`.help()` modifiers)
+- [ ] Dynamic prompt placeholder based on selected step

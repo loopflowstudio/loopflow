@@ -111,27 +111,58 @@ def test_next_creates_worktree_with_suffix(tmp_path):
     with patch("loopflow.lfops.next.find_main_repo", return_value=repo):
         with patch("loopflow.lfops.next.get_default_branch", return_value="main"):
             with patch("loopflow.lfops.next._get_pr_number", return_value=42):
-                with patch("loopflow.lfops.next._enable_auto_merge", return_value=True):
-                    with patch("loopflow.lfops.next._wait_for_merge", return_value=False):
+                with patch("loopflow.lfops.next._get_pr_state", return_value="OPEN"):
+                    with patch("loopflow.lfops.next._enable_auto_merge", return_value=True):
+                        with patch("loopflow.lfops.next._wait_for_merge", return_value=False):
+                            with patch(
+                                "loopflow.lfops.next.generate_next_branch",
+                                return_value="jack.auth.20260123_1112-aurora-melody",
+                            ):
+                                with patch(
+                                    "loopflow.lfops.next.parse_branch_base",
+                                    return_value="jack.auth.20260123_1112",
+                                ):
+                                    with patch("subprocess.run") as mock_run:
+                                        # git checkout -b succeeds
+                                        mock_run.return_value = MagicMock(returncode=0)
+                                        with patch("loopflow.lfops.next.write_directive"):
+                                            result = next_worktree(
+                                                repo,
+                                                "jack.auth.20260123_1112",
+                                                block=False,
+                                                open_terminal=False,
+                                            )
+
+    assert result is not None
+    assert result == repo
+
+
+def test_next_starts_fresh_when_already_merged(tmp_path):
+    """When branch is already merged, starts fresh from origin/main."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    with patch("loopflow.lfops.next.find_main_repo", return_value=repo):
+        with patch("loopflow.lfops.next.get_default_branch", return_value="main"):
+            with patch("loopflow.lfops.next._get_pr_number", return_value=42):
+                with patch("loopflow.lfops.next._get_pr_state", return_value="MERGED"):
+                    with patch("loopflow.lfops.next._fetch_main"):
                         with patch(
-                            "loopflow.lfops.next.generate_next_branch",
-                            return_value="jack.auth.20260123_1112-aurora-melody",
+                            "loopflow.lfops.next._fresh_start",
+                            return_value="wave.20260130_1200.aurora-melody",
                         ):
                             with patch(
                                 "loopflow.lfops.next.parse_branch_base",
-                                return_value="jack.auth.20260123_1112",
+                                return_value="wave",
                             ):
-                                with patch("subprocess.run") as mock_run:
-                                    # git worktree add succeeds
-                                    mock_run.return_value = MagicMock(returncode=0)
+                                with patch("loopflow.lfops.next.get_wave_by_worktree", return_value=None):
                                     with patch("loopflow.lfops.next.write_directive"):
                                         result = next_worktree(
                                             repo,
-                                            "jack.auth.20260123_1112",
+                                            "wave.20260129_1100.wisp-forte",
                                             block=False,
                                             open_terminal=False,
                                         )
 
     assert result is not None
-    # Worktree path should be sibling to repo
-    assert result.parent == repo.parent
+    assert result == repo

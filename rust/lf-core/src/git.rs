@@ -77,6 +77,62 @@ pub fn get_diff(repo: &Path) -> Result<String, CoreError> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+/// Fetch a remote ref (e.g., "origin/main").
+pub fn fetch(repo: &Path, remote: &str, refspec: &str) -> Result<(), GitError> {
+    let output = run_git(repo, &["fetch", remote, refspec])?;
+    if !output.status.success() {
+        return Err(GitError::CommandFailed {
+            command: format!("git fetch {} {}", remote, refspec),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Check if `commit` is an ancestor of `descendant`.
+/// Returns true if commit is fully merged into descendant.
+pub fn is_ancestor(repo: &Path, commit: &str, descendant: &str) -> Result<bool, GitError> {
+    let output = run_git(repo, &["merge-base", "--is-ancestor", commit, descendant])?;
+    Ok(output.status.success())
+}
+
+/// Checkout a ref (branch, tag, or commit).
+pub fn checkout(repo: &Path, ref_name: &str) -> Result<(), GitError> {
+    git_stdout(repo, &["checkout", ref_name])?;
+    Ok(())
+}
+
+/// Create and checkout a new branch from current HEAD.
+pub fn checkout_new_branch(repo: &Path, branch: &str) -> Result<(), GitError> {
+    git_stdout(repo, &["checkout", "-b", branch])?;
+    Ok(())
+}
+
+/// Push and set upstream tracking.
+pub fn push_with_upstream(repo: &Path, remote: &str, branch: &str) -> Result<(), GitError> {
+    let output = run_git(repo, &["push", "-u", remote, branch])?;
+    if !output.status.success() {
+        return Err(GitError::CommandFailed {
+            command: format!("git push -u {} {}", remote, branch),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Get current branch name. Returns None if in detached HEAD state.
+pub fn current_branch(repo: &Path) -> Result<Option<String>, GitError> {
+    let output = run_git(repo, &["symbolic-ref", "--short", "HEAD"])?;
+    if output.status.success() {
+        Ok(Some(
+            String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        ))
+    } else {
+        // Detached HEAD
+        Ok(None)
+    }
+}
+
 pub fn rebase(
     worktree: &Path,
     onto: &str,
@@ -251,5 +307,107 @@ mod tests {
         .expect("add remote");
 
         push(repo.path(), true).expect("push");
+    }
+
+    #[test]
+    fn git_is_ancestor_returns_true_when_merged() {
+        let repo = init_repo();
+        commit_file(repo.path(), "README.md", "hello");
+        let base_commit = git_stdout(repo.path(), &["rev-parse", "HEAD"])
+            .unwrap()
+            .trim()
+            .to_string();
+
+        create_branch(repo.path(), "feature").expect("create branch");
+        commit_file(repo.path(), "feature.txt", "feature");
+
+        // feature is ahead of base_commit, so base_commit is ancestor of feature
+        assert!(is_ancestor(repo.path(), &base_commit, "feature").unwrap());
+
+        // feature is not an ancestor of base_commit
+        assert!(!is_ancestor(repo.path(), "feature", &base_commit).unwrap());
+    }
+
+    #[test]
+    fn git_is_ancestor_after_merge() {
+        let repo = init_repo();
+        commit_file(repo.path(), "README.md", "hello");
+
+        create_branch(repo.path(), "feature").expect("create branch");
+        commit_file(repo.path(), "feature.txt", "feature");
+        let feature_head = git_stdout(repo.path(), &["rev-parse", "HEAD"])
+            .unwrap()
+            .trim()
+            .to_string();
+
+        // Merge feature into main
+        git_stdout(repo.path(), &["checkout", "main"]).expect("checkout main");
+        git_stdout(repo.path(), &["merge", "feature", "--no-ff", "-m", "merge"]).expect("merge");
+
+        // Now feature is an ancestor of main
+        assert!(is_ancestor(repo.path(), &feature_head, "main").unwrap());
+    }
+
+    #[test]
+    fn git_checkout_and_checkout_new_branch() {
+        let repo = init_repo();
+        commit_file(repo.path(), "README.md", "hello");
+
+        checkout_new_branch(repo.path(), "feature").expect("create feature");
+        assert_eq!(
+            current_branch(repo.path()).unwrap(),
+            Some("feature".to_string())
+        );
+
+        checkout(repo.path(), "main").expect("checkout main");
+        assert_eq!(
+            current_branch(repo.path()).unwrap(),
+            Some("main".to_string())
+        );
+    }
+
+    #[test]
+    fn git_current_branch_detached_head() {
+        let repo = init_repo();
+        commit_file(repo.path(), "README.md", "hello");
+        let commit = git_stdout(repo.path(), &["rev-parse", "HEAD"])
+            .unwrap()
+            .trim()
+            .to_string();
+
+        // Detach HEAD
+        git_stdout(repo.path(), &["checkout", &commit]).expect("detach");
+        assert_eq!(current_branch(repo.path()).unwrap(), None);
+    }
+
+    #[test]
+    fn git_push_with_upstream() {
+        let repo = init_repo();
+        commit_file(repo.path(), "README.md", "hello");
+
+        let remote_dir = tempfile::tempdir().expect("remote dir");
+        git_stdout(remote_dir.path(), &["init", "--bare"]).expect("init bare");
+        git_stdout(
+            repo.path(),
+            &[
+                "remote",
+                "add",
+                "origin",
+                remote_dir.path().to_str().expect("remote path"),
+            ],
+        )
+        .expect("add remote");
+
+        checkout_new_branch(repo.path(), "feature").expect("create feature");
+        commit_file(repo.path(), "feature.txt", "feature");
+        push_with_upstream(repo.path(), "origin", "feature").expect("push with upstream");
+
+        // Verify upstream is set
+        let tracking = git_stdout(
+            repo.path(),
+            &["rev-parse", "--abbrev-ref", "feature@{upstream}"],
+        )
+        .expect("get upstream");
+        assert_eq!(tracking.trim(), "origin/feature");
     }
 }

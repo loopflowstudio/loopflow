@@ -156,9 +156,9 @@ def next_worktree(
     pr_number = _get_pr_number(repo_root)
     if pr_number is None:
         if create_pr:
-            # Run lfops pr to create PR
+            # Run lf ops pr to create PR
             typer.echo("Creating PR...")
-            result = subprocess.run(["lfops", "pr"], cwd=repo_root)
+            result = subprocess.run(["lf", "ops", "pr"], cwd=repo_root)
             if result.returncode != 0:
                 typer.echo("Error: Failed to create PR", err=True)
                 return None
@@ -168,7 +168,7 @@ def next_worktree(
                 return None
         else:
             typer.echo(
-                "Error: No open PR found. Run 'lfops pr' first, or use --create-pr.",
+                "Error: No open PR found. Run 'lf ops pr' first, or use --create-pr.",
                 err=True,
             )
             return None
@@ -219,9 +219,9 @@ def register_commands(app: typer.Typer) -> None:
         The worktree directory stays the same, only the branch changes.
 
         Example:
-            lfops next                 # land PR, move to next branch
-            lfops next --block         # wait for merge, then move
-            lfops next --create-pr     # create PR if none exists, then next
+            lf ops next                 # land PR, move to next branch
+            lf ops next --block         # wait for merge, then move
+            lf ops next --create-pr     # create PR if none exists, then next
         """
         repo_root = find_worktree_root()
         if not repo_root:

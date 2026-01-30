@@ -1,4 +1,4 @@
-"""Worktree proxy commands for lfops."""
+"""Worktree proxy commands for lf ops."""
 
 import json
 import subprocess
@@ -41,12 +41,12 @@ def register_commands(app: typer.Typer) -> None:
 
         Use --stack to branch from the current branch (stacking):
 
-            lfops wt create feature-B --stack
+            lf ops wt create feature-B --stack
             # Creates worktree branched from current branch
             # PR will target current branch until it merges
 
         Example:
-            lfops wt create my-feature
+            lf ops wt create my-feature
             # Worktree: ../repo.my-feature
             # Branch: jack.my-feature.20260120_1234 (with schema)
         """
@@ -92,7 +92,7 @@ def register_commands(app: typer.Typer) -> None:
         if not write_directive(f"cd {wt_result.path}"):
             # Shell integration not active - print manual cd command
             typer.echo(f"\ncd {wt_result.path}")
-            typer.echo("\nTip: Run 'lfops shell install' for auto-cd after worktree creation")
+            typer.echo("\nTip: Run 'lf ops shell install' for auto-cd after worktree creation")
 
     @wt_app.command("switch")
     def switch_worktree(
@@ -104,7 +104,7 @@ def register_commands(app: typer.Typer) -> None:
         'concerto' matches '../loopflow.concerto'.
 
         Example:
-            lfops wt switch concerto
+            lf ops wt switch concerto
             # Switches to ../loopflow.concerto
         """
         repo_root = find_main_repo()

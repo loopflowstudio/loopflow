@@ -10,6 +10,19 @@ from loopflow.lf import step as step_module
 from loopflow.lf.config import ConfigError, load_config
 from loopflow.lf.context import find_worktree_root, gather_step, list_all_steps
 from loopflow.lf.flows import flow_file_exists, list_flows
+from loopflow.lfops import abandon as lfops_abandon
+from loopflow.lfops import add as lfops_add
+from loopflow.lfops import commit as lfops_commit
+from loopflow.lfops import cp as lfops_cp
+from loopflow.lfops import init as lfops_init
+from loopflow.lfops import land as lfops_land
+from loopflow.lfops import next as lfops_next
+from loopflow.lfops import pr as lfops_pr
+from loopflow.lfops import rebase as lfops_rebase
+from loopflow.lfops import shell as lfops_shell
+from loopflow.lfops import summarize as lfops_summarize
+from loopflow.lfops import sync as lfops_sync
+from loopflow.lfops import wt as lfops_wt
 
 # =============================================================================
 # Built-in step metadata for formatted listing
@@ -65,6 +78,23 @@ app = typer.Typer(
     help="Arrange LLMs to code in harmony.",
     no_args_is_help=False,
 )
+
+# Register ops subcommands
+ops_app = typer.Typer(help="Git workflow operations")
+lfops_abandon.register_commands(ops_app)
+lfops_add.register_commands(ops_app)
+lfops_cp.register_commands(ops_app)
+lfops_next.register_commands(ops_app)
+lfops_init.register_commands(ops_app)
+lfops_pr.register_commands(ops_app)
+lfops_land.register_commands(ops_app)
+lfops_commit.register_commands(ops_app)
+lfops_rebase.register_commands(ops_app)
+lfops_shell.register_commands(ops_app)
+lfops_summarize.register_commands(ops_app)
+lfops_sync.register_commands(ops_app)
+lfops_wt.register_commands(ops_app)
+app.add_typer(ops_app, name="ops")
 
 # Register top-level commands
 # lf is a prompt launcher - every command launches a prompt
@@ -206,6 +236,7 @@ def main():
         "run",
         "inline",
         "flow",
+        "ops",
         "--help",
         "-h",
     }

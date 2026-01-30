@@ -342,7 +342,7 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
             base_branch = get_default_branch(main_repo)
         else:
             typer.echo(
-                "Error: No open PR found. Run 'lfops pr' first, or use --local or --create-pr.",
+                "Error: No open PR found. Run 'lf ops pr' first, or use --local or --create-pr.",
                 err=True,
             )
             raise typer.Exit(1)
@@ -431,7 +431,7 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
         typer.echo(
             "Enable auto-merge in repo settings or run `gh pr merge --squash` after CI passes."
         )
-    typer.echo("Run 'lfops wt prune' after merge completes.")
+    typer.echo("Run 'lf ops wt prune' after merge completes.")
 
     if was_in_worktree:
         typer.echo(str(main_repo))
@@ -576,7 +576,7 @@ def _land_local(strict: bool, worktree: str | None) -> None:
             remove_worktree(main_repo, branch, repo_root, base_branch)
         except Exception:
             typer.echo("Warning: Could not remove worktree. Run manually:", err=True)
-            typer.echo("  lfops wt prune", err=True)
+            typer.echo("  lf ops wt prune", err=True)
     else:
         subprocess.run(["git", "branch", "-D", branch], cwd=main_repo, capture_output=True)
 
@@ -722,7 +722,7 @@ def register_commands(app: typer.Typer) -> None:
         By default, stages, commits, and pushes any pending changes before landing.
         Use --strict to require clean state (error if uncommitted/unpushed).
 
-        Default: uses gh pr merge (requires PR via lfops pr).
+        Default: uses gh pr merge (requires PR via lf ops pr).
         With --local: local merge + push (no PR needed).
         With --create-pr: create PR and immediately merge.
         With --squash: squash-merge entire loop-main branch to main (for agents).

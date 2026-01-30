@@ -1,4 +1,4 @@
-"""Tests for CLI structure after ops removal."""
+"""Tests for CLI structure after ops consolidation."""
 
 import re
 
@@ -45,15 +45,15 @@ def _get_command_names(output: str) -> list[str]:
     return commands
 
 
-def test_top_level_help_no_ops():
-    """Verify ops and loop subcommands were removed from lf."""
+def test_top_level_help_has_ops():
+    """Verify ops is present on lf and loop is still removed."""
     runner = CliRunner()
 
     result = runner.invoke(app, ["--help"])
 
     assert result.exit_code == 0
     commands = _get_command_names(result.output)
-    assert "ops" not in commands
+    assert "ops" in commands
     assert "loop" not in commands  # loop is now lfd command
     assert "run" in commands
 

@@ -208,7 +208,10 @@ def test_db_reset_function():
 
 
 def test_migrations_cover_all_wave_fields():
-    """Migrations create columns for all Wave model fields."""
+    """Migrations create columns for all Wave model fields.
+
+    Note: stimulus and last_main_sha are now in separate stimuli table.
+    """
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
@@ -224,8 +227,6 @@ def test_migrations_cover_all_wave_fields():
             pr_limit=10,
             merge_mode=MergeMode.LAND,
             pid=12345,
-            stimulus=Stimulus("cron", cron="0 9 * * *"),
-            last_main_sha="abc123",
         )
 
         save_wave(wave, db_path)
@@ -243,9 +244,6 @@ def test_migrations_cover_all_wave_fields():
         assert loaded.pr_limit == wave.pr_limit
         assert loaded.merge_mode == wave.merge_mode
         assert loaded.pid == wave.pid
-        assert loaded.stimulus.kind == wave.stimulus.kind
-        assert loaded.stimulus.cron == wave.stimulus.cron
-        assert loaded.last_main_sha == wave.last_main_sha
 
 
 def test_migrations_cover_all_run_fields():
@@ -560,13 +558,15 @@ def test_server_handle_output_line_allows_empty_text():
 
 
 def _make_wave(**kwargs) -> Wave:
-    """Helper to create a Wave with test defaults."""
-    # Determine stimulus from config if not explicitly set
-    if "stimulus" not in kwargs:
-        if kwargs.get("cron"):
-            kwargs["stimulus"] = Stimulus("cron", cron=kwargs.pop("cron"))
-        else:
-            kwargs["stimulus"] = Stimulus("loop")
+    """Helper to create a Wave with test defaults.
+
+    Note: Wave no longer has stimulus field - stimuli are separate entities.
+    """
+    # Remove any stimulus-related kwargs since Wave no longer has these
+    kwargs.pop("stimulus", None)
+    kwargs.pop("cron", None)
+    kwargs.pop("last_main_sha", None)
+
     defaults = {
         "id": "test-id",
         "name": "test-wave",
@@ -604,17 +604,25 @@ def test_wave_model_short_id():
     assert wave.short_id() == "abcdef1"
 
 
-def test_wave_stimulus_property():
-    """Wave.stimulus returns correct stimulus."""
-    loop_wave = _make_wave()
-    assert loop_wave.stimulus.kind == "loop"
+def test_stimulus_model():
+    """Stimulus model has correct structure.
 
-    watch_wave = _make_wave(stimulus=Stimulus("watch"))
-    assert watch_wave.stimulus.kind == "watch"
+    Note: Stimulus is now a separate entity with id, wave_id, etc.
+    """
+    stimulus = Stimulus(
+        id="stim-123",
+        wave_id="wave-456",
+        kind="cron",
+        cron="0 9 * * *",
+    )
+    assert stimulus.kind == "cron"
+    assert stimulus.cron == "0 9 * * *"
+    assert stimulus.wave_id == "wave-456"
+    assert stimulus.enabled is True  # default
+    assert str(stimulus) == "cron(0 9 * * *)"
 
-    cron_wave = _make_wave(stimulus=Stimulus("cron", cron="0 9 * * *"))
-    assert cron_wave.stimulus.kind == "cron"
-    assert cron_wave.stimulus.cron == "0 9 * * *"
+    loop_stimulus = Stimulus(id="stim-loop", wave_id="wave-1", kind="loop")
+    assert str(loop_stimulus) == "loop"
 
 
 def test_run_model():

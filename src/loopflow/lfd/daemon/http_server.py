@@ -19,7 +19,8 @@ from loopflow.lfd.daemon import metrics
 from loopflow.lfd.daemon.client import _notify_event
 from loopflow.lfd.daemon.status import compute_status
 from loopflow.lfd.migrations.baseline import SCHEMA_VERSION
-from loopflow.lfd.models import StepRun, StepRunStatus, Stimulus, WaveStatus
+from loopflow.lfd.models import StepRun, StepRunStatus, WaveStatus
+from loopflow.lfd.stimulus import create_stimulus
 from loopflow.lfd.protocol_v1 import (
     protocol_version,
     step_run_to_proto,
@@ -369,7 +370,7 @@ async def post_wave(
             flow=request.flow if request and request.flow else "design",
             direction=request.direction if request else None,
             area=request.area if request else None,
-            stimulus=Stimulus(kind="once"),
+            stimulus_kind="once",
         )
 
         # Notify subscribers of new wave
@@ -405,17 +406,15 @@ async def patch_wave(wave_id: str, request: UpdateWaveRequest):
         if not wave:
             raise HTTPException(status_code=404, detail=f"Wave not found: {wave_id}")
 
-        # Build stimulus if provided
-        stimulus = None
+        # Create stimulus if provided (separate entity now)
         if request.stimulus:
-            stimulus = Stimulus(kind=request.stimulus.kind, cron=request.stimulus.cron)
+            create_stimulus(wave_id, request.stimulus.kind, request.stimulus.cron)
 
         updated = update_wave(
             wave_id,
             area=request.area,
             direction=request.direction,
             flow=request.flow,
-            stimulus=stimulus,
             paused=request.paused,
         )
 
@@ -532,10 +531,9 @@ async def run_wave(wave_id: str, request: RunWaveRequest | None = None):
                 overrides["direction"] = request.direction
             if request.flow is not None:
                 overrides["flow"] = request.flow
+            # Create stimulus if provided (separate entity now)
             if request.stimulus is not None:
-                overrides["stimulus"] = Stimulus(
-                    kind=request.stimulus.kind, cron=request.stimulus.cron
-                )
+                create_stimulus(wave_id, request.stimulus.kind, request.stimulus.cron)
 
         # Check area (from wave or override)
         effective_area = overrides.get("area", wave.area)
@@ -727,7 +725,7 @@ async def create_wave_v1(request: CreateWaveRequestV1):
         flow=request.flow or "design",
         direction=request.direction,
         area=request.area,
-        stimulus=Stimulus(kind="once"),
+        stimulus_kind="once",
     )
     await _notify_event("wave.created", {"wave_id": wave.id, "name": wave.name})
     return {"wave": wave_to_proto(wave)}
@@ -739,16 +737,15 @@ async def update_wave_v1(wave_id: str, request: UpdateWaveRequestV1):
     if not wave:
         raise HTTPException(status_code=404, detail=f"Wave not found: {wave_id}")
 
-    stimulus = None
+    # Create stimulus if provided (separate entity now)
     if request.stimulus:
-        stimulus = Stimulus(kind=request.stimulus.kind, cron=request.stimulus.cron)
+        create_stimulus(wave_id, request.stimulus.kind, request.stimulus.cron)
 
     updated = update_wave(
         wave_id,
         area=request.area,
         direction=request.direction,
         flow=request.flow,
-        stimulus=stimulus,
         paused=request.paused,
     )
     if not updated:
@@ -796,8 +793,9 @@ async def run_wave_v1(wave_id: str, request: RunWaveRequestV1 | None = None):
             overrides["direction"] = request.direction
         if request.flow is not None:
             overrides["flow"] = request.flow
+        # Create stimulus if provided (separate entity now)
         if request.stimulus is not None:
-            overrides["stimulus"] = Stimulus(kind=request.stimulus.kind, cron=request.stimulus.cron)
+            create_stimulus(wave_id, request.stimulus.kind, request.stimulus.cron)
 
     effective_area = overrides.get("area", wave.area)
     if effective_area is None:

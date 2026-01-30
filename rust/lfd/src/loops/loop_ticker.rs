@@ -34,16 +34,39 @@ pub fn spawn_loop_ticker(
 }
 
 async fn tick_loop_waves(scheduler: &Scheduler, store: &SharedStore) {
-    let waves = match store.list_waves_by_stimulus(StimulusKind::StimulusLoop as i32) {
-        Ok(waves) => waves,
+    // Query stimuli with kind=LOOP
+    let stimuli = match store.list_stimuli_by_kind(StimulusKind::StimulusLoop as i32) {
+        Ok(stimuli) => stimuli,
         Err(err) => {
-            tracing::error!(error = %err, "failed to list loop waves");
+            tracing::error!(error = %err, "failed to list loop stimuli");
             return;
         }
     };
 
-    for wave in waves {
+    for stimulus in stimuli {
+        if !stimulus.enabled {
+            continue;
+        }
+
+        // Get the wave for this stimulus
+        let wave = match store.get_wave(&stimulus.wave_id) {
+            Ok(Some(wave)) => wave,
+            Ok(None) => {
+                tracing::warn!(stimulus_id = %stimulus.id, "stimulus references missing wave");
+                continue;
+            }
+            Err(err) => {
+                tracing::error!(stimulus_id = %stimulus.id, error = %err, "failed to get wave");
+                continue;
+            }
+        };
+
         if wave.paused || wave.status != WaveStatus::WaveRunning as i32 {
+            continue;
+        }
+
+        if scheduler.has_active_session(&wave.id) {
+            tracing::debug!(wave_id = %wave.id, "skipping tick while session active");
             continue;
         }
 
@@ -229,6 +252,58 @@ impl core_store::RunStore for LfCoreStoreAdapter {
             .map_err(|err| CoreStoreError::Other(err.to_string()))?;
         Ok(())
     }
+
+    fn list_fork_runs(
+        &self,
+        run_id: &RunId,
+        step_index: usize,
+    ) -> Result<Vec<lf_core::runtime::ForkRun>, CoreStoreError> {
+        let fork_runs = self
+            .store
+            .list_fork_runs(run_id.as_str(), step_index as u32)
+            .map_err(|err| CoreStoreError::Other(err.to_string()))?;
+        Ok(fork_runs
+            .into_iter()
+            .map(|fork_run| lf_core::runtime::ForkRun {
+                id: fork_run.id,
+                run_id: RunId::new(fork_run.wave_id),
+                step_index: fork_run.step_index as usize,
+                branch_index: fork_run.branch_index as usize,
+                status: map_fork_status(fork_run.status),
+                worktree: fork_run.worktree,
+            })
+            .collect())
+    }
+
+    fn upsert_fork_run(
+        &self,
+        fork_run: &lf_core::runtime::ForkRun,
+    ) -> Result<(), CoreStoreError> {
+        let status = map_fork_status_back(fork_run.status);
+        let record = crate::store::ForkRun {
+            id: fork_run.id.clone(),
+            wave_id: fork_run.run_id.as_str().to_string(),
+            step_index: fork_run.step_index as u32,
+            branch_index: fork_run.branch_index as u32,
+            status,
+            worktree: fork_run.worktree.clone(),
+        };
+        self.store
+            .upsert_fork_run(&record)
+            .map_err(|err| CoreStoreError::Other(err.to_string()))?;
+        Ok(())
+    }
+
+    fn delete_fork_runs(
+        &self,
+        run_id: &RunId,
+        step_index: usize,
+    ) -> Result<(), CoreStoreError> {
+        self.store
+            .delete_fork_runs(run_id.as_str(), step_index as u32)
+            .map_err(|err| CoreStoreError::Other(err.to_string()))?;
+        Ok(())
+    }
 }
 
 fn flow_status_from_wave(status: i32) -> FlowRunStatus {
@@ -249,6 +324,24 @@ fn wave_status_from_flow(status: FlowRunStatus) -> WaveStatus {
     }
 }
 
+fn map_fork_status(status: crate::store::ForkRunStatus) -> lf_core::runtime::ForkRunStatus {
+    match status {
+        crate::store::ForkRunStatus::Pending => lf_core::runtime::ForkRunStatus::Pending,
+        crate::store::ForkRunStatus::Running => lf_core::runtime::ForkRunStatus::Running,
+        crate::store::ForkRunStatus::Completed => lf_core::runtime::ForkRunStatus::Completed,
+        crate::store::ForkRunStatus::Failed => lf_core::runtime::ForkRunStatus::Failed,
+    }
+}
+
+fn map_fork_status_back(status: lf_core::runtime::ForkRunStatus) -> crate::store::ForkRunStatus {
+    match status {
+        lf_core::runtime::ForkRunStatus::Pending => crate::store::ForkRunStatus::Pending,
+        lf_core::runtime::ForkRunStatus::Running => crate::store::ForkRunStatus::Running,
+        lf_core::runtime::ForkRunStatus::Completed => crate::store::ForkRunStatus::Completed,
+        lf_core::runtime::ForkRunStatus::Failed => crate::store::ForkRunStatus::Failed,
+    }
+}
+
 fn now_timestamp() -> prost_types::Timestamp {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     prost_types::Timestamp {
@@ -263,7 +356,7 @@ mod tests {
 
     use super::handle_tick_result;
     use crate::proto::control::{StepRunStatus, Wave, WaveStatus};
-    use crate::store::{RunStore, SharedStore, StoreError, StoreResult};
+    use crate::store::{ForkRun, RunStore, SharedStore, StoreError, StoreResult};
 
     #[derive(Debug, Default)]
     struct TestStore {
@@ -293,10 +386,6 @@ mod tests {
             Err(StoreError::InvalidData("unused".to_string()))
         }
 
-        fn list_waves_by_stimulus(&self, _kind: i32) -> StoreResult<Vec<Wave>> {
-            Err(StoreError::InvalidData("unused".to_string()))
-        }
-
         fn get_wave(&self, wave_id: &str) -> StoreResult<Option<Wave>> {
             let wave = self.wave.lock().expect("wave mutex poisoned");
             if wave.id == wave_id {
@@ -320,10 +409,79 @@ mod tests {
             Err(StoreError::InvalidData("unused".to_string()))
         }
 
-        fn increment_pending_activations(&self, _wave_id: &str) -> StoreResult<u32> {
+        // Stimulus methods
+        fn list_stimuli(
+            &self,
+            _wave_id: Option<&str>,
+        ) -> StoreResult<Vec<crate::proto::control::Stimulus>> {
             Err(StoreError::InvalidData("unused".to_string()))
         }
 
+        fn list_stimuli_by_kind(
+            &self,
+            _kind: i32,
+        ) -> StoreResult<Vec<crate::proto::control::Stimulus>> {
+            Err(StoreError::InvalidData("unused".to_string()))
+        }
+
+        fn get_stimulus(
+            &self,
+            _stimulus_id: &str,
+        ) -> StoreResult<Option<crate::proto::control::Stimulus>> {
+            Err(StoreError::InvalidData("unused".to_string()))
+        }
+
+        fn create_stimulus(&self, _stimulus: &crate::proto::control::Stimulus) -> StoreResult<()> {
+            Err(StoreError::InvalidData("unused".to_string()))
+        }
+
+        fn update_stimulus(&self, _stimulus: &crate::proto::control::Stimulus) -> StoreResult<()> {
+            Err(StoreError::InvalidData("unused".to_string()))
+        }
+
+        fn delete_stimulus(&self, _stimulus_id: &str) -> StoreResult<()> {
+            Err(StoreError::InvalidData("unused".to_string()))
+        }
+
+        fn delete_stimuli_for_wave(&self, _wave_id: &str) -> StoreResult<u32> {
+            Err(StoreError::InvalidData("unused".to_string()))
+        }
+
+        // Pending activation methods
+        fn list_pending_activations(
+            &self,
+            _wave_id: &str,
+        ) -> StoreResult<Vec<crate::proto::control::PendingActivation>> {
+            Err(StoreError::InvalidData("unused".to_string()))
+        }
+
+        fn create_pending_activation(
+            &self,
+            _activation: &crate::proto::control::PendingActivation,
+        ) -> StoreResult<()> {
+            Err(StoreError::InvalidData("unused".to_string()))
+        }
+
+        fn update_pending_activation(
+            &self,
+            _activation: &crate::proto::control::PendingActivation,
+        ) -> StoreResult<()> {
+            Err(StoreError::InvalidData("unused".to_string()))
+        }
+
+        fn delete_pending_activations(&self, _wave_id: &str) -> StoreResult<u32> {
+            Err(StoreError::InvalidData("unused".to_string()))
+        }
+
+        fn get_pending_for_stimulus(
+            &self,
+            _wave_id: &str,
+            _stimulus_id: &str,
+        ) -> StoreResult<Option<crate::proto::control::PendingActivation>> {
+            Err(StoreError::InvalidData("unused".to_string()))
+        }
+
+        // Step run methods
         fn list_step_runs(&self) -> StoreResult<Vec<crate::proto::control::StepRun>> {
             Err(StoreError::InvalidData("unused".to_string()))
         }
@@ -337,7 +495,43 @@ mod tests {
             Err(StoreError::InvalidData("unused".to_string()))
         }
 
+        fn list_fork_runs(
+            &self,
+            _wave_id: &str,
+            _step_index: u32,
+        ) -> StoreResult<Vec<ForkRun>> {
+            Err(StoreError::InvalidData("unused".to_string()))
+        }
+
+        fn upsert_fork_run(&self, _fork_run: &ForkRun) -> StoreResult<()> {
+            Err(StoreError::InvalidData("unused".to_string()))
+        }
+
+        fn delete_fork_runs(&self, _wave_id: &str, _step_index: u32) -> StoreResult<u32> {
+            Err(StoreError::InvalidData("unused".to_string()))
+        }
+
+        fn get_step_run(&self, _step_run_id: &str) -> StoreResult<Option<crate::proto::control::StepRun>> {
+            Err(StoreError::InvalidData("unused".to_string()))
+        }
+
+        fn get_waiting_step_run(
+            &self,
+            _wave_id: &str,
+        ) -> StoreResult<Option<crate::proto::control::StepRun>> {
+            Err(StoreError::InvalidData("unused".to_string()))
+        }
+
         fn start_step_run(&self, _step_run: &crate::proto::control::StepRun) -> StoreResult<()> {
+            Err(StoreError::InvalidData("unused".to_string()))
+        }
+
+        fn update_step_run_status(
+            &self,
+            _step_run_id: &str,
+            _status: i32,
+            _pid: Option<u32>,
+        ) -> StoreResult<()> {
             Err(StoreError::InvalidData("unused".to_string()))
         }
 
@@ -363,7 +557,6 @@ mod tests {
             flow: "ship".to_string(),
             direction: Vec::new(),
             area: Vec::new(),
-            stimulus: None,
             paused: false,
             status: WaveStatus::WaveRunning as i32,
             iteration: 0,
@@ -374,7 +567,6 @@ mod tests {
             merge_mode: 0,
             pid: None,
             created_at: None,
-            last_main_sha: None,
             consecutive_failures: 0,
             pending_activations: 0,
         }

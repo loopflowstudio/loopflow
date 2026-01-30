@@ -78,7 +78,16 @@ def stimulus_to_proto(stimulus: Stimulus | None) -> dict[str, Any]:
     return result
 
 
-def wave_to_proto(wave: Wave) -> dict[str, Any]:
+def wave_to_proto(wave: Wave, stimuli: list[Stimulus] | None = None) -> dict[str, Any]:
+    """Convert Wave to proto-compatible dict.
+
+    Note: stimulus is now a separate entity. Pass stimuli list to include them.
+    The proto still expects a single stimulus field for backwards compat,
+    so we use the first stimulus if available.
+    """
+    # Get first stimulus if any provided (for backwards compat with proto)
+    first_stimulus = stimuli[0] if stimuli else None
+
     data: dict[str, Any] = {
         "id": wave.id,
         "name": wave.name,
@@ -86,7 +95,6 @@ def wave_to_proto(wave: Wave) -> dict[str, Any]:
         "flow": wave.flow,
         "direction": wave.direction or [],
         "area": wave.area or [],
-        "stimulus": stimulus_to_proto(wave.stimulus),
         "paused": wave.paused,
         "status": _WAVE_STATUS.get(wave.status, "WAVE_STATUS_UNSPECIFIED"),
         "iteration": wave.iteration,
@@ -95,12 +103,15 @@ def wave_to_proto(wave: Wave) -> dict[str, Any]:
         "created_at": _format_timestamp(wave.created_at),
         "consecutive_failures": wave.consecutive_failures,
         "pending_activations": wave.pending_activations,
+        "step_index": wave.step_index,
     }
+
+    # Note: Wave proto no longer has stimulus or last_main_sha fields
+    # These are now on the Stimulus message
 
     _maybe(data, "worktree", str(wave.worktree) if wave.worktree else None)
     _maybe(data, "branch", wave.branch)
     _maybe(data, "pid", wave.pid)
-    _maybe(data, "last_main_sha", wave.last_main_sha)
     return data
 
 

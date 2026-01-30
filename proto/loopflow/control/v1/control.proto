@@ -52,6 +52,13 @@ service ControlService {
   rpc AcquireSlot(AcquireSlotRequest) returns (AcquireSlotResponse);
   rpc ReleaseSlot(ReleaseSlotRequest) returns (ReleaseSlotResponse);
 
+  // Stimulus management (triggers for waves)
+  rpc ListStimuli(ListStimuliRequest) returns (ListStimuliResponse);
+  rpc GetStimulus(GetStimulusRequest) returns (GetStimulusResponse);
+  rpc CreateStimulus(CreateStimulusRequest) returns (CreateStimulusResponse);
+  rpc UpdateStimulus(UpdateStimulusRequest) returns (UpdateStimulusResponse);
+  rpc DeleteStimulus(DeleteStimulusRequest) returns (DeleteStimulusResponse);
+
   // StepRun management
   rpc ListStepRuns(ListStepRunsRequest) returns (ListStepRunsResponse);
   rpc GetStepRunHistory(GetStepRunHistoryRequest) returns (GetStepRunHistoryResponse);
@@ -127,18 +134,43 @@ message HealthMetrics {
 // Wave Management
 // -----------------------------------------------------------------------------
 
-// Stimulus determines when a wave runs.
-message Stimulus {
-  StimulusKind kind = 1;
-  string cron = 2;  // Required when kind = STIMULUS_CRON
-}
-
 enum StimulusKind {
   STIMULUS_KIND_UNSPECIFIED = 0;
   STIMULUS_ONCE = 1;   // Single run
   STIMULUS_LOOP = 2;   // Continuous iterations
   STIMULUS_WATCH = 3;  // Triggered by file changes on main
   STIMULUS_CRON = 4;   // Scheduled execution
+}
+
+// Stimulus is an independent trigger that can activate a wave.
+// Multiple stimuli can point to the same wave (many:1).
+message Stimulus {
+  string id = 1;
+  string wave_id = 2;
+  StimulusKind kind = 3;
+
+  // Configuration (kind-specific)
+  string cron = 10;              // Required when kind = STIMULUS_CRON
+
+  // State (kind-specific, tracked per-stimulus)
+  optional string last_main_sha = 20;    // For WATCH: last seen SHA on main
+  optional int64 last_triggered_at = 21; // For CRON: unix timestamp of last trigger
+
+  // Metadata
+  bool enabled = 30;
+  google.protobuf.Timestamp created_at = 31;
+}
+
+// PendingActivation tracks queued trigger events for coalescing.
+// When multiple triggers fire while a wave is running, they queue here
+// and coalesce into a single activation with combined context.
+message PendingActivation {
+  string id = 1;
+  string wave_id = 2;
+  string stimulus_id = 3;
+  string from_sha = 4;  // For watch: start of diff range
+  string to_sha = 5;    // For watch: end of diff range
+  int64 queued_at = 6;  // Unix timestamp
 }
 
 enum WaveStatus {
@@ -163,7 +195,10 @@ message Wave {
   repeated string direction = 5;
   repeated string area = 6;
 
-  Stimulus stimulus = 7;
+  // Note: stimulus field removed - now a separate entity (see Stimulus message)
+  // Multiple Stimulus objects can reference this wave via wave_id
+  reserved 7;  // was: Stimulus stimulus
+
   bool paused = 8;
   WaveStatus status = 9;
   uint32 iteration = 10;
@@ -176,8 +211,8 @@ message Wave {
   optional uint32 pid = 15;
   google.protobuf.Timestamp created_at = 16;
 
-  // Watch state
-  optional string last_main_sha = 17;
+  // Note: last_main_sha moved to Stimulus (per-stimulus state)
+  reserved 17;  // was: optional string last_main_sha
 
   // Resilience
   uint32 consecutive_failures = 18;
@@ -219,7 +254,7 @@ message UpdateWaveRequest {
   optional string flow = 2;
   repeated string direction = 3;
   repeated string area = 4;
-  optional Stimulus stimulus = 5;
+  reserved 5;  // was: optional Stimulus stimulus - now managed via Stimulus RPCs
   optional bool paused = 6;
   string idempotency_key = 7;
 }
@@ -250,7 +285,7 @@ message RunWaveRequest {
   repeated string area = 2;
   repeated string direction = 3;
   optional string flow = 4;
-  optional Stimulus stimulus = 5;
+  reserved 5;  // was: optional Stimulus stimulus - stimuli are separate entities
   string idempotency_key = 6;
 }
 
@@ -280,6 +315,55 @@ message ConnectWaveResponse {
   optional string flow_run_id = 5; // Current flow run if in a flow
   uint32 step_index = 6;           // Position in flow (0 if single step)
 }
+
+// -----------------------------------------------------------------------------
+// Stimulus Management
+// -----------------------------------------------------------------------------
+
+message ListStimuliRequest {
+  optional string wave_id = 1;  // Filter by wave
+  optional StimulusKind kind = 2;  // Filter by kind
+}
+
+message ListStimuliResponse {
+  repeated Stimulus stimuli = 1;
+}
+
+message GetStimulusRequest {
+  string stimulus_id = 1;
+}
+
+message GetStimulusResponse {
+  Stimulus stimulus = 1;
+}
+
+message CreateStimulusRequest {
+  string wave_id = 1;
+  StimulusKind kind = 2;
+  string cron = 3;             // Required when kind = STIMULUS_CRON
+  string idempotency_key = 4;
+}
+
+message CreateStimulusResponse {
+  Stimulus stimulus = 1;
+}
+
+message UpdateStimulusRequest {
+  string stimulus_id = 1;
+  optional string cron = 2;
+  optional bool enabled = 3;
+  string idempotency_key = 4;
+}
+
+message UpdateStimulusResponse {
+  Stimulus stimulus = 1;
+}
+
+message DeleteStimulusRequest {
+  string stimulus_id = 1;
+}
+
+message DeleteStimulusResponse {}
 
 // -----------------------------------------------------------------------------
 // Flow Discovery
@@ -616,7 +700,10 @@ message WaveStoppedEvent {
 
 message WaveActivatedEvent {
   string wave_id = 1;
-  StimulusKind stimulus = 2;
+  StimulusKind stimulus = 2;  // Deprecated: use triggering_stimuli
+  repeated string triggering_stimuli = 3;  // Stimulus IDs that triggered this activation
+  optional string from_sha = 4;  // For watch: combined diff range start
+  optional string to_sha = 5;    // For watch: combined diff range end
 }
 
 // Emitted when a flow pauses at an interactive step, awaiting user connect.

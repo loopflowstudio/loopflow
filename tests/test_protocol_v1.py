@@ -6,6 +6,10 @@ from loopflow.lfd.protocol_v1 import wave_to_proto, worktree_to_proto
 
 
 def test_wave_to_proto_maps_enums(tmp_path: Path) -> None:
+    """Wave to proto maps enum values correctly.
+
+    Note: stimulus is now a separate entity, not part of Wave.
+    """
     wave = Wave(
         id="wave_1",
         name="swift-falcon",
@@ -13,7 +17,6 @@ def test_wave_to_proto_maps_enums(tmp_path: Path) -> None:
         flow="ship",
         direction=["product-engineer"],
         area=["src/api"],
-        stimulus=Stimulus(kind="loop"),
         paused=False,
         status=WaveStatus.IDLE,
         iteration=2,
@@ -24,10 +27,10 @@ def test_wave_to_proto_maps_enums(tmp_path: Path) -> None:
 
     payload = wave_to_proto(wave)
 
-    assert payload["stimulus"]["kind"] == "STIMULUS_LOOP"
     assert payload["status"] == "WAVE_IDLE"
     assert payload["merge_mode"] == "MERGE_PR"
     assert payload["created_at"].endswith("Z")
+    # stimulus is no longer on Wave proto - it's a separate message
 
 
 def test_worktree_to_proto_maps_status() -> None:

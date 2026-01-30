@@ -27,3 +27,5 @@ Open questions / assumptions
 - PTY crate choice: `portable-pty` vs `pty-process` vs raw `nix::pty`. Need to evaluate cross-platform support (macOS primary, Linux for containers).
 - Session timeout: Should we kill long-idle interactive sessions? If so, what timeout? 4 hours like stuck runs?
 - Fork branch parallelism: All branches at once, or honor slot limits per branch? Current assumption: each branch acquires a slot.
+- ConnectWave currently launches `lf run --interactive` inside the daemon via PTY and returns an empty `prompt_file`. The control.proto RPC is unary (no output stream). Confirm whether ConnectWave should instead return a prompt file for clients to run locally, or whether we need to update the proto to support streaming output/input.
+- Rust fork flow format uses `fork.branches` while current built-in flows use `fork.step` + `drafts` in Python. Confirm which format the Rust engine should support.

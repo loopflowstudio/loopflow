@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -13,6 +13,7 @@ pub struct Scheduler {
     max_slots: usize,
     semaphore: Arc<Semaphore>,
     active: Mutex<HashMap<String, OwnedSemaphorePermit>>,
+    sessions: Mutex<HashSet<String>>,
 }
 
 impl Scheduler {
@@ -21,6 +22,7 @@ impl Scheduler {
             max_slots,
             semaphore: Arc::new(Semaphore::new(max_slots)),
             active: Mutex::new(HashMap::new()),
+            sessions: Mutex::new(HashSet::new()),
         }
     }
 
@@ -49,6 +51,25 @@ impl Scheduler {
         let mut active = self.active.lock().expect("scheduler mutex poisoned");
         active.remove(run_id);
         active.len() as u32
+    }
+
+    pub fn register_session(&self, wave_id: &str) -> bool {
+        let mut sessions = self.sessions.lock().expect("scheduler mutex poisoned");
+        if sessions.contains(wave_id) {
+            return false;
+        }
+        sessions.insert(wave_id.to_string());
+        true
+    }
+
+    pub fn unregister_session(&self, wave_id: &str) {
+        let mut sessions = self.sessions.lock().expect("scheduler mutex poisoned");
+        sessions.remove(wave_id);
+    }
+
+    pub fn has_active_session(&self, wave_id: &str) -> bool {
+        let sessions = self.sessions.lock().expect("scheduler mutex poisoned");
+        sessions.contains(wave_id)
     }
 
     pub fn start_loops(

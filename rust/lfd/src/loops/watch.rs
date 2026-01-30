@@ -1,11 +1,13 @@
 use std::path::Path;
 use std::time::Duration;
 
+use chrono::Utc;
 use git2::Repository;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
-use crate::proto::control::{StimulusKind, Wave, WaveStatus};
+use crate::proto::control::{PendingActivation, Stimulus, StimulusKind, Wave, WaveStatus};
 use crate::store::SharedStore;
 
 pub fn spawn_watch_poller(store: SharedStore, cancel: CancellationToken) -> JoinHandle<()> {
@@ -18,73 +20,100 @@ pub fn spawn_watch_poller(store: SharedStore, cancel: CancellationToken) -> Join
                     break;
                 }
                 _ = interval.tick() => {
-                    check_watch_waves(&store);
+                    check_watch_stimuli(&store);
                 }
             }
         }
     })
 }
 
-fn check_watch_waves(store: &SharedStore) {
-    let waves = match store.list_waves_by_stimulus(StimulusKind::StimulusWatch as i32) {
-        Ok(waves) => waves,
+fn check_watch_stimuli(store: &SharedStore) {
+    let stimuli = match store.list_stimuli_by_kind(StimulusKind::StimulusWatch as i32) {
+        Ok(stimuli) => stimuli,
         Err(err) => {
-            tracing::error!(error = %err, "failed to list watch waves");
+            tracing::error!(error = %err, "failed to list watch stimuli");
             return;
         }
     };
 
-    for wave in waves {
+    for stimulus in stimuli {
+        if !stimulus.enabled {
+            continue;
+        }
+
+        // Get the wave for this stimulus
+        let wave = match store.get_wave(&stimulus.wave_id) {
+            Ok(Some(wave)) => wave,
+            Ok(None) => {
+                tracing::warn!(stimulus_id = %stimulus.id, "stimulus references missing wave");
+                continue;
+            }
+            Err(err) => {
+                tracing::error!(stimulus_id = %stimulus.id, error = %err, "failed to get wave");
+                continue;
+            }
+        };
+
         if wave.paused {
             continue;
         }
 
-        match check_watch_stimulus(&wave) {
+        match check_watch_stimulus(&wave, &stimulus) {
             Ok(result) => {
                 if !result.update_sha && !result.trigger {
                     continue;
                 }
 
-                let mut wave = wave.clone();
+                // Update stimulus.last_main_sha
                 if result.update_sha {
-                    wave.last_main_sha = Some(result.current_sha);
+                    let mut stimulus = stimulus.clone();
+                    stimulus.last_main_sha = Some(result.current_sha.clone());
+                    if let Err(err) = store.update_stimulus(&stimulus) {
+                        tracing::error!(stimulus_id = %stimulus.id, error = %err, "failed to update stimulus");
+                        continue;
+                    }
                 }
 
                 if result.trigger {
                     if wave.status == WaveStatus::WaveRunning as i32
                         || wave.status == WaveStatus::WaveWaiting as i32
                     {
-                        if let Ok(count) = store.increment_pending_activations(&wave.id) {
-                            wave.pending_activations = count;
-                        }
-                        tracing::debug!(wave_id = %wave.id, "watch: queued activation");
+                        // Wave is busy - queue with SHA range for coalescing
+                        queue_or_coalesce_activation(
+                            store,
+                            &wave.id,
+                            &stimulus.id,
+                            &result.from_sha,
+                            &result.current_sha,
+                        );
+                        tracing::debug!(wave_id = %wave.id, stimulus_id = %stimulus.id, "watch: queued activation");
                     } else if wave.status == WaveStatus::WaveIdle as i32 {
+                        // Activate the wave
+                        let mut wave = wave.clone();
                         wave.status = WaveStatus::WaveRunning as i32;
-                        let _ = store.update_wave(&wave);
-                        tracing::info!(wave_id = %wave.id, "watch: activated");
-                        continue;
-                    } else {
-                        let _ = store.update_wave(&wave);
-                        continue;
+                        if let Err(err) = store.update_wave(&wave) {
+                            tracing::error!(wave_id = %wave.id, error = %err, "failed to activate wave");
+                            continue;
+                        }
+                        tracing::info!(wave_id = %wave.id, stimulus_id = %stimulus.id, "watch: activated");
                     }
                 }
-
-                let _ = store.update_wave(&wave);
             }
             Err(err) => {
-                tracing::warn!(wave_id = %wave.id, error = %err, "watch check failed");
+                tracing::warn!(wave_id = %wave.id, stimulus_id = %stimulus.id, error = %err, "watch check failed");
             }
         }
     }
 }
 
 struct WatchCheck {
+    from_sha: String,
     current_sha: String,
     trigger: bool,
     update_sha: bool,
 }
 
-fn check_watch_stimulus(wave: &Wave) -> Result<WatchCheck, git2::Error> {
+fn check_watch_stimulus(wave: &Wave, stimulus: &Stimulus) -> Result<WatchCheck, git2::Error> {
     let repo = Repository::open(&wave.repo)?;
 
     let mut remote = repo.find_remote("origin")?;
@@ -93,9 +122,11 @@ fn check_watch_stimulus(wave: &Wave) -> Result<WatchCheck, git2::Error> {
     let reference = repo.find_reference("refs/remotes/origin/main")?;
     let current_sha = reference.peel_to_commit()?.id().to_string();
 
-    let last_sha = wave.last_main_sha.as_deref();
+    // Use stimulus.last_main_sha for tracking
+    let last_sha = stimulus.last_main_sha.as_deref();
     if last_sha.is_none() {
         return Ok(WatchCheck {
+            from_sha: String::new(),
             current_sha,
             trigger: false,
             update_sha: true,
@@ -104,6 +135,7 @@ fn check_watch_stimulus(wave: &Wave) -> Result<WatchCheck, git2::Error> {
 
     if Some(current_sha.as_str()) == last_sha {
         return Ok(WatchCheck {
+            from_sha: String::new(),
             current_sha,
             trigger: false,
             update_sha: false,
@@ -114,6 +146,7 @@ fn check_watch_stimulus(wave: &Wave) -> Result<WatchCheck, git2::Error> {
         Some(value) => value,
         None => {
             return Ok(WatchCheck {
+                from_sha: String::new(),
                 current_sha,
                 trigger: false,
                 update_sha: true,
@@ -134,6 +167,7 @@ fn check_watch_stimulus(wave: &Wave) -> Result<WatchCheck, git2::Error> {
         Ok(diff) => diff,
         Err(_) => {
             return Ok(WatchCheck {
+                from_sha: prev.to_string(),
                 current_sha,
                 trigger: false,
                 update_sha: true,
@@ -141,6 +175,7 @@ fn check_watch_stimulus(wave: &Wave) -> Result<WatchCheck, git2::Error> {
         }
     };
 
+    // Check if diff touches wave.area
     let area_match = if wave.area.is_empty() {
         true
     } else {
@@ -151,8 +186,45 @@ fn check_watch_stimulus(wave: &Wave) -> Result<WatchCheck, git2::Error> {
     };
 
     Ok(WatchCheck {
+        from_sha: prev.to_string(),
         current_sha,
         trigger: area_match,
         update_sha: true,
     })
+}
+
+fn queue_or_coalesce_activation(
+    store: &SharedStore,
+    wave_id: &str,
+    stimulus_id: &str,
+    from_sha: &str,
+    to_sha: &str,
+) {
+    // Check if there's already a pending activation for this stimulus
+    match store.get_pending_for_stimulus(wave_id, stimulus_id) {
+        Ok(Some(mut existing)) => {
+            // Extend the SHA range (coalesce) - keep original from_sha, update to_sha
+            existing.to_sha = to_sha.to_string();
+            if let Err(err) = store.update_pending_activation(&existing) {
+                tracing::error!(wave_id = %wave_id, error = %err, "failed to update pending activation");
+            }
+        }
+        Ok(None) => {
+            // Create new pending activation
+            let activation = PendingActivation {
+                id: Uuid::new_v4().to_string(),
+                wave_id: wave_id.to_string(),
+                stimulus_id: stimulus_id.to_string(),
+                from_sha: from_sha.to_string(),
+                to_sha: to_sha.to_string(),
+                queued_at: Utc::now().timestamp(),
+            };
+            if let Err(err) = store.create_pending_activation(&activation) {
+                tracing::error!(wave_id = %wave_id, error = %err, "failed to queue activation");
+            }
+        }
+        Err(err) => {
+            tracing::error!(wave_id = %wave_id, error = %err, "failed to check pending activation");
+        }
+    }
 }

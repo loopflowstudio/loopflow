@@ -32,7 +32,8 @@ from loopflow.lfd.git_hooks import (
     install_hooks,
     uninstall_hooks,
 )
-from loopflow.lfd.models import MergeMode, StepRunStatus, Stimulus, Wave, WaveStatus
+from loopflow.lfd.models import MergeMode, StepRunStatus, Wave, WaveStatus
+from loopflow.lfd.stimulus import create_stimulus, list_stimuli
 from loopflow.lfd.step_run import get_waiting_step_run, update_step_run_status
 from loopflow.lfd.wave import (
     create_wave,
@@ -90,6 +91,15 @@ def _status_color(status: WaveStatus, c: dict[str, str]) -> str:
     elif status == WaveStatus.WAITING:
         return c["yellow"]
     return c["dim"]
+
+
+def _stimulus_display(wave_id: str) -> str:
+    """Get stimulus display string for a wave."""
+    stimuli = list_stimuli(wave_id=wave_id)
+    if not stimuli:
+        return "(none)"
+    kinds = sorted(set(s.kind for s in stimuli))
+    return ",".join(kinds)
 
 
 def _wave_display(wave: Wave) -> str:
@@ -442,7 +452,7 @@ def list_cmd():
         typer.echo(
             f"{name_str:<20} {area_str:<20} "
             f"{status_c}{wave.status.value:<10}{c['reset']} "
-            f"{str(wave.stimulus):<12} {wave.short_id()}"
+            f"{_stimulus_display(wave.id):<12} {wave.short_id()}"
         )
 
 
@@ -508,8 +518,8 @@ def loop(
     if merge_mode:
         update_wave(wave.id, merge_mode=MergeMode(merge_mode))
 
-    # Update stimulus to loop
-    update_wave(wave.id, stimulus=Stimulus("loop"))
+    # Create loop stimulus for the wave
+    create_stimulus(wave.id, "loop")
 
     # Validate wave is configured
     _validate_wave_for_run(wave, c)
@@ -594,8 +604,8 @@ def run(
         update_wave(wave.id, flow=flow_opt)
         wave.flow = flow_opt
 
-    # Update stimulus to once
-    update_wave(wave.id, stimulus=Stimulus("once"))
+    # Create once stimulus for the wave (single run)
+    create_stimulus(wave.id, "once")
 
     # Validate wave is configured
     _validate_wave_for_run(wave, c)
@@ -800,8 +810,8 @@ def watch(
         update_wave(wave.id, flow=flow_opt)
         wave.flow = flow_opt
 
-    # Update stimulus to watch
-    update_wave(wave.id, stimulus=Stimulus("watch"))
+    # Create watch stimulus for the wave
+    create_stimulus(wave.id, "watch")
 
     # Validate wave is configured
     _validate_wave_for_run(wave, c)
@@ -867,8 +877,8 @@ def cron_cmd(
         update_wave(wave.id, flow=flow_opt)
         wave.flow = flow_opt
 
-    # Update stimulus to cron
-    update_wave(wave.id, stimulus=Stimulus("cron", cron=cron_expr))
+    # Create cron stimulus for the wave
+    create_stimulus(wave.id, "cron", cron_expr)
 
     # Validate wave is configured
     _validate_wave_for_run(wave, c)
@@ -1017,7 +1027,7 @@ def status(
                 repo_short = "..." + repo_short[-17:]
 
             typer.echo(
-                f"{wave.short_id():<9} {str(wave.stimulus):<12} {display_str:<30} "
+                f"{wave.short_id():<9} {_stimulus_display(wave.id):<12} {display_str:<30} "
                 f"{status_c}{wave.status.value:<10}{c['reset']} "
                 f"{wave.iteration:<6} {repo_short}"
             )
@@ -1028,7 +1038,7 @@ def _print_wave_detail(wave: Wave, c: dict[str, str]) -> None:
     status_c = _status_color(wave.status, c)
 
     typer.echo(f"{c['bold']}{wave.area_display}{c['reset']} ({wave.short_id()})")
-    typer.echo(f"  Stimulus: {wave.stimulus}")
+    typer.echo(f"  Stimulus: {_stimulus_display(wave.id)}")
     typer.echo(f"  Status: {status_c}{wave.status.value}{c['reset']}")
     typer.echo(f"  Repo: {wave.repo}")
     typer.echo(f"  Main branch: {wave.main_branch}")

@@ -10,18 +10,22 @@ use uuid::Uuid;
 use crate::proto::control::control_service_server::ControlService;
 use crate::proto::control::{
     AcquireSlotRequest, AcquireSlotResponse, CloneWaveRequest, CloneWaveResponse,
-    ConnectWaveRequest, ConnectWaveResponse, CreateWaveRequest, CreateWaveResponse,
+    ConnectWaveRequest, ConnectWaveResponse, CreateStimulusRequest, CreateStimulusResponse,
+    CreateWaveRequest, CreateWaveResponse, DeleteStimulusRequest, DeleteStimulusResponse,
     DeleteWaveRequest, DeleteWaveResponse, EndStepRunRequest, EndStepRunResponse, Event,
     GetHealthRequest, GetHealthResponse, GetSchedulerStatusRequest, GetSchedulerStatusResponse,
-    GetStatusRequest, GetStatusResponse, HealthChecks, HealthMetrics, ListFlowsRequest,
-    ListFlowsResponse, ListStepRunsRequest, ListStepRunsResponse, ListWavesRequest,
-    ListWavesResponse, ListWorktreesRequest, ListWorktreesResponse, MergeMode, NotifyRequest,
-    NotifyResponse, NotifyWorktreeChangedRequest, NotifyWorktreeChangedResponse, ProtocolVersion,
+    GetStatusRequest, GetStatusResponse, GetStimulusRequest, GetStimulusResponse, HealthChecks,
+    HealthMetrics, ListFlowsRequest, ListFlowsResponse, ListStepRunsRequest, ListStepRunsResponse,
+    ListStimuliRequest, ListStimuliResponse, ListWavesRequest, ListWavesResponse,
+    ListWorktreesRequest, ListWorktreesResponse, MergeMode, NotifyRequest, NotifyResponse,
+    NotifyWorktreeChangedRequest, NotifyWorktreeChangedResponse, ProtocolVersion,
     ReleaseSlotRequest, ReleaseSlotResponse, RunWaveRequest, RunWaveResponse, StepRun,
-    StepRunStatus, Stimulus, StimulusKind, StopWaveRequest, StopWaveResponse, StreamOutputRequest,
-    StreamOutputResponse, UpdateWaveRequest, UpdateWaveResponse, Wave, WaveStatus,
+    StepRunStatus, Stimulus, StopWaveRequest, StopWaveResponse, StreamOutputRequest,
+    StreamOutputResponse, UpdateStimulusRequest, UpdateStimulusResponse, UpdateWaveRequest,
+    UpdateWaveResponse, Wave, WaveStatus,
 };
 use crate::scheduler::Scheduler;
+use crate::sessions::{run_pty_command, PtyCommand};
 use crate::store::{SharedStore, StoreError, StoreResult};
 
 #[derive(Clone)]
@@ -76,13 +80,6 @@ impl ControlServer {
             })
             .count() as u32;
         (waves_defined, waves_running, step_runs_active)
-    }
-
-    fn default_stimulus() -> Stimulus {
-        Stimulus {
-            kind: StimulusKind::StimulusOnce as i32,
-            cron: String::new(),
-        }
     }
 
     fn now_timestamp() -> Timestamp {
@@ -210,7 +207,6 @@ impl ControlService for ControlServer {
             flow,
             direction: req.direction,
             area: req.area,
-            stimulus: Some(Self::default_stimulus()),
             paused: false,
             status: WaveStatus::WaveIdle as i32,
             iteration: 0,
@@ -221,7 +217,6 @@ impl ControlService for ControlServer {
             merge_mode: MergeMode::MergePr as i32,
             pid: None,
             created_at: Some(Self::now_timestamp()),
-            last_main_sha: None,
             consecutive_failures: 0,
             pending_activations: 0,
         };
@@ -253,9 +248,7 @@ impl ControlService for ControlServer {
         if !req.area.is_empty() {
             wave.area = req.area;
         }
-        if let Some(stimulus) = req.stimulus {
-            wave.stimulus = Some(stimulus);
-        }
+        // Note: stimulus is now managed via separate Stimulus RPCs
         if let Some(paused) = req.paused {
             wave.paused = paused;
         }
@@ -323,9 +316,7 @@ impl ControlService for ControlServer {
         if !req.area.is_empty() {
             wave.area = req.area;
         }
-        if let Some(stimulus) = req.stimulus {
-            wave.stimulus = Some(stimulus);
-        }
+        // Note: stimulus is now managed via separate Stimulus RPCs
 
         let wave_clone = wave.clone();
         self.run_store(move |store| store.update_wave(&wave_clone))
@@ -357,13 +348,247 @@ impl ControlService for ControlServer {
         Ok(Response::new(StopWaveResponse { stopped: true }))
     }
 
+    // Stimulus management
+
+    async fn list_stimuli(
+        &self,
+        request: Request<ListStimuliRequest>,
+    ) -> Result<Response<ListStimuliResponse>, Status> {
+        let req = request.into_inner();
+        let wave_id = if req.wave_id.is_some() && !req.wave_id.as_ref().unwrap().is_empty() {
+            req.wave_id
+        } else {
+            None
+        };
+
+        let stimuli = if let Some(kind) = req.kind {
+            self.run_store(move |store| store.list_stimuli_by_kind(kind))
+                .await?
+        } else {
+            self.run_store(move |store| store.list_stimuli(wave_id.as_deref()))
+                .await?
+        };
+
+        Ok(Response::new(ListStimuliResponse { stimuli }))
+    }
+
+    async fn get_stimulus(
+        &self,
+        request: Request<GetStimulusRequest>,
+    ) -> Result<Response<GetStimulusResponse>, Status> {
+        let stimulus_id = request.into_inner().stimulus_id;
+        let stimulus = self
+            .run_store(move |store| store.get_stimulus(&stimulus_id))
+            .await?
+            .ok_or_else(|| Status::not_found("stimulus not found"))?;
+        Ok(Response::new(GetStimulusResponse {
+            stimulus: Some(stimulus),
+        }))
+    }
+
+    async fn create_stimulus(
+        &self,
+        request: Request<CreateStimulusRequest>,
+    ) -> Result<Response<CreateStimulusResponse>, Status> {
+        let req = request.into_inner();
+
+        // Verify wave exists
+        let wave_id = req.wave_id.clone();
+        self.run_store(move |store| store.get_wave(&wave_id))
+            .await?
+            .ok_or_else(|| Status::not_found("wave not found"))?;
+
+        let stimulus = Stimulus {
+            id: Uuid::new_v4().to_string(),
+            wave_id: req.wave_id,
+            kind: req.kind,
+            cron: req.cron,
+            last_main_sha: None,
+            last_triggered_at: None,
+            enabled: true,
+            created_at: Some(Self::now_timestamp()),
+        };
+
+        let stimulus_clone = stimulus.clone();
+        self.run_store(move |store| store.create_stimulus(&stimulus_clone))
+            .await?;
+
+        Ok(Response::new(CreateStimulusResponse {
+            stimulus: Some(stimulus),
+        }))
+    }
+
+    async fn update_stimulus(
+        &self,
+        request: Request<UpdateStimulusRequest>,
+    ) -> Result<Response<UpdateStimulusResponse>, Status> {
+        let req = request.into_inner();
+        let stimulus_id = req.stimulus_id;
+        let mut stimulus = self
+            .run_store(move |store| store.get_stimulus(&stimulus_id))
+            .await?
+            .ok_or_else(|| Status::not_found("stimulus not found"))?;
+
+        if let Some(cron) = req.cron {
+            stimulus.cron = cron;
+        }
+        if let Some(enabled) = req.enabled {
+            stimulus.enabled = enabled;
+        }
+
+        let stimulus_clone = stimulus.clone();
+        self.run_store(move |store| store.update_stimulus(&stimulus_clone))
+            .await?;
+
+        Ok(Response::new(UpdateStimulusResponse {
+            stimulus: Some(stimulus),
+        }))
+    }
+
+    async fn delete_stimulus(
+        &self,
+        request: Request<DeleteStimulusRequest>,
+    ) -> Result<Response<DeleteStimulusResponse>, Status> {
+        let stimulus_id = request.into_inner().stimulus_id;
+        self.run_store(move |store| store.delete_stimulus(&stimulus_id))
+            .await?;
+        Ok(Response::new(DeleteStimulusResponse {}))
+    }
+
     async fn connect_wave(
         &self,
-        _request: Request<ConnectWaveRequest>,
+        request: Request<ConnectWaveRequest>,
     ) -> Result<Response<ConnectWaveResponse>, Status> {
-        Err(Status::unimplemented(
-            "interactive session connect not implemented",
-        ))
+        let wave_id = request.into_inner().wave_id;
+        let mut wave = self
+            .run_store({
+                let wave_id = wave_id.clone();
+                move |store| store.get_wave(&wave_id)
+            })
+            .await?
+            .ok_or_else(|| Status::not_found("wave not found"))?;
+
+        if !self.scheduler.register_session(&wave_id) {
+            return Err(Status::failed_precondition("session already active"));
+        }
+
+        let step_run = match self
+            .run_store({
+                let wave_id = wave_id.clone();
+                move |store| store.get_waiting_step_run(&wave_id)
+            })
+            .await
+        {
+            Ok(Some(step_run)) => step_run,
+            Ok(None) => {
+                self.scheduler.unregister_session(&wave_id);
+                return Err(Status::not_found("no waiting step run"));
+            }
+            Err(err) => {
+                self.scheduler.unregister_session(&wave_id);
+                return Err(err);
+            }
+        };
+
+        let step_run_id = step_run.id.clone();
+        if let Err(err) = self
+            .run_store({
+                let step_run_id = step_run_id.clone();
+                move |store| {
+                    store.update_step_run_status(
+                        &step_run_id,
+                        StepRunStatus::StepRunning as i32,
+                        None,
+                    )
+                }
+            })
+            .await
+        {
+            self.scheduler.unregister_session(&wave_id);
+            return Err(err);
+        }
+
+        wave.status = WaveStatus::WaveRunning as i32;
+        let wave_clone = wave.clone();
+        if let Err(err) = self
+            .run_store(move |store| store.update_wave(&wave_clone))
+            .await
+        {
+            self.scheduler.unregister_session(&wave_id);
+            return Err(err);
+        }
+
+        let store = self.store.clone();
+        let scheduler = self.scheduler.clone();
+        let directions = wave.direction.clone();
+        let worktree = step_run.worktree.clone();
+        let step = step_run.step.clone();
+        let wave_id_task = wave.id.clone();
+
+        tokio::spawn(async move {
+            let mut command = PtyCommand::new("lf")
+                .arg("run")
+                .arg("--interactive")
+                .arg(step.clone())
+                .cwd(&worktree);
+            if !directions.is_empty() {
+                command = command.arg("--direction").arg(directions.join(","));
+            }
+
+            let exit_code = match tokio::task::spawn_blocking(move || run_pty_command(command))
+                .await
+            {
+                Ok(Ok(code)) => code,
+                Ok(Err(err)) => {
+                    tracing::error!(wave_id = %wave_id_task, error = %err, "session failed");
+                    1
+                }
+                Err(err) => {
+                    tracing::error!(wave_id = %wave_id_task, error = %err, "session join failed");
+                    1
+                }
+            };
+
+            let status = if exit_code == 0 {
+                StepRunStatus::StepCompleted
+            } else {
+                StepRunStatus::StepFailed
+            };
+
+            let ended_at = OffsetDateTime::now_utc().unix_timestamp();
+            if let Err(err) = store.end_step_run(&step_run_id, status as i32, ended_at) {
+                tracing::warn!(wave_id = %wave_id_task, error = %err, "failed to end step run");
+            }
+
+            if let Ok(Some(mut wave)) = store.get_wave(&wave_id_task) {
+                if status == StepRunStatus::StepCompleted {
+                    wave.step_index += 1;
+                    wave.consecutive_failures = 0;
+                    wave.status = WaveStatus::WaveRunning as i32;
+                } else {
+                    wave.consecutive_failures += 1;
+                    if wave.consecutive_failures >= 3 {
+                        wave.status = WaveStatus::WaveError as i32;
+                    } else {
+                        wave.status = WaveStatus::WaveRunning as i32;
+                    }
+                }
+                if let Err(err) = store.update_wave(&wave) {
+                    tracing::warn!(wave_id = %wave.id, error = %err, "failed to update wave");
+                }
+            }
+
+            scheduler.unregister_session(&wave_id_task);
+        });
+
+        Ok(Response::new(ConnectWaveResponse {
+            worktree: step_run.worktree,
+            step: step_run.step,
+            step_run_id: step_run.id,
+            prompt_file: String::new(),
+            flow_run_id: step_run.flow_run_id,
+            step_index: wave.step_index,
+        }))
     }
 
     async fn list_flows(
@@ -494,8 +719,43 @@ impl ControlService for ControlServer {
         let req = request.into_inner();
         let step_run_id = req.step_run_id.clone();
         let ended_at = Self::now_timestamp().seconds;
-        self.run_store(move |store| store.end_step_run(&step_run_id, req.status, ended_at))
+        let step_run_id_for_end = step_run_id.clone();
+        self.run_store(move |store| store.end_step_run(&step_run_id_for_end, req.status, ended_at))
             .await?;
+
+        if let Ok(Some(step_run)) = self
+            .run_store({
+                let step_run_id = step_run_id.clone();
+                move |store| store.get_step_run(&step_run_id)
+            })
+            .await
+        {
+            if let Some(wave_id) = step_run.wave_id {
+                let wave = self
+                    .run_store({
+                        let wave_id = wave_id.clone();
+                        move |store| store.get_wave(&wave_id)
+                    })
+                    .await?;
+
+                if let Some(mut wave) = wave {
+                    if req.status == StepRunStatus::StepCompleted as i32 {
+                        wave.step_index += 1;
+                        wave.consecutive_failures = 0;
+                        wave.status = WaveStatus::WaveRunning as i32;
+                    } else if req.status == StepRunStatus::StepFailed as i32 {
+                        wave.consecutive_failures += 1;
+                        if wave.consecutive_failures >= 3 {
+                            wave.status = WaveStatus::WaveError as i32;
+                        } else {
+                            wave.status = WaveStatus::WaveRunning as i32;
+                        }
+                    }
+                    let wave_clone = wave.clone();
+                    let _ = self.run_store(move |store| store.update_wave(&wave_clone)).await;
+                }
+            }
+        }
 
         Ok(Response::new(EndStepRunResponse {
             id: req.step_run_id,

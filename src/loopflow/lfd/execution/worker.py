@@ -206,7 +206,7 @@ def run_wave_iterations(wave: Wave) -> None:
     consecutive_failures = wave.consecutive_failures
 
     worker_log.info(
-        f"[{short_id}] starting: stimulus={wave.stimulus} flow={wave.flow} "
+        f"[{short_id}] starting: flow={wave.flow} "
         f"area={wave.area_display} iteration={wave.iteration}"
     )
 
@@ -406,11 +406,7 @@ def main() -> None:
       --area <areas>           comma-separated areas
       --direction <directions> comma-separated directions
       --flow <flow>            flow or step name
-      --stimulus <kind>        once, loop, watch, cron
-      --cron <expr>            cron expression (when stimulus=cron)
     """
-    from loopflow.lfd.models import Stimulus
-
     if len(sys.argv) < 3:
         print("Usage: python -m loopflow.lfd.execution.worker wave <wave_id>", file=sys.stderr)
         sys.exit(1)
@@ -430,8 +426,6 @@ def main() -> None:
     # Parse override args
     args = sys.argv[3:]
     i = 0
-    cron_expr = None
-    stimulus_kind = None
 
     while i < len(args):
         if args[i] == "--area" and i + 1 < len(args):
@@ -443,17 +437,8 @@ def main() -> None:
         elif args[i] == "--flow" and i + 1 < len(args):
             wave.flow = args[i + 1]
             i += 2
-        elif args[i] == "--stimulus" and i + 1 < len(args):
-            stimulus_kind = args[i + 1]
-            i += 2
-        elif args[i] == "--cron" and i + 1 < len(args):
-            cron_expr = args[i + 1]
-            i += 2
         else:
             i += 1
-
-    if stimulus_kind:
-        wave.stimulus = Stimulus(kind=stimulus_kind, cron=cron_expr)
 
     run_wave_iterations(wave)
 

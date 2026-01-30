@@ -1,2 +1,0 @@
-- Should lfd start calling lf-core git operations (rebase/next/land) in this phase, or defer until a dedicated lfd migration step?
-- Should lf ops shell integration emit wrappers for `lf ops` instead of `lfops`, now that `lfops` is deprecated?

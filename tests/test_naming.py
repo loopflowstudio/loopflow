@@ -110,3 +110,17 @@ def test_generate_next_branch_raises_on_exhaustion():
             assert False, "Should have raised ValueError"
         except ValueError as e:
             assert "Could not generate unique branch" in str(e)
+
+
+def test_parse_branch_base_strips_trailing_timestamp():
+    """Branch with trailing timestamp (from branch naming schema) strips it."""
+    # This handles branches created with schema like {user}.{name}.{date}_{ts}
+    result = parse_branch_base("jack-heart.concerto-next.20260129_2255")
+    assert result == "jack-heart.concerto-next"
+
+
+def test_parse_branch_base_nested_timestamps():
+    """Branch with double timestamps strips both correctly."""
+    # First strip the .timestamp.word-pair, then the remaining .timestamp
+    result = parse_branch_base("jack-heart.concerto-next.20260129_2255.20260129_2318.aurora-rondo")
+    assert result == "jack-heart.concerto-next"

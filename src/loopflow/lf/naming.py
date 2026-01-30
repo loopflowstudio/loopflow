@@ -124,11 +124,13 @@ def _is_word_pair(s: str) -> bool:
 def parse_branch_base(branch: str) -> str:
     """Extract base branch name (wave name) for next iteration.
 
-    Strips suffixes: .main or .timestamp.words
+    Strips suffixes: .main, .timestamp.words, or .timestamp (recursively)
 
     Examples:
         'foo.main' → 'foo'
         'foo.20260127_2204.wisp-forte' → 'foo'
+        'foo.20260127_2204' → 'foo'
+        'foo.20260127_2204.20260127_2205.wisp-forte' → 'foo'
         'foo' → 'foo'
     """
     if branch.endswith(".main"):
@@ -139,7 +141,12 @@ def parse_branch_base(branch: str) -> str:
         maybe_words = parts[-1]
         maybe_timestamp = parts[-2]
         if _is_word_pair(maybe_words) and _is_timestamp(maybe_timestamp):
-            return ".".join(parts[:-2])
+            # Recursively strip in case of nested timestamps
+            return parse_branch_base(".".join(parts[:-2]))
+
+    # Also strip trailing timestamp without word pair (from branch naming schema)
+    if len(parts) >= 2 and _is_timestamp(parts[-1]):
+        return ".".join(parts[:-1])
 
     return branch
 

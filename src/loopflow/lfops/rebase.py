@@ -5,7 +5,9 @@ import subprocess
 import typer
 
 from loopflow.lf.context import find_worktree_root, gather_step
-from loopflow.lf.ops.git import GitError, push, rebase
+from loopflow.lf.ops.git import GitError
+from loopflow.lf.ops.git import push as git_push
+from loopflow.lf.ops.git import rebase as git_rebase
 
 
 def register_commands(app: typer.Typer) -> None:
@@ -26,7 +28,7 @@ def register_commands(app: typer.Typer) -> None:
         # Attempt rebase via lf-core
         typer.echo("Rebasing onto origin/main...")
         try:
-            result = rebase(repo_root, "origin/main")
+            result = git_rebase(repo_root, "origin/main")
         except GitError as err:
             typer.echo(f"Rebase failed: {err}", err=True)
             raise typer.Exit(1)
@@ -34,7 +36,7 @@ def register_commands(app: typer.Typer) -> None:
         if result.success:
             typer.echo("Rebase succeeded, pushing...")
             try:
-                push(repo_root, force_with_lease=True)
+                git_push(repo_root, force_with_lease=True)
             except GitError as err:
                 typer.echo(f"Push failed: {err}", err=True)
                 raise typer.Exit(1)

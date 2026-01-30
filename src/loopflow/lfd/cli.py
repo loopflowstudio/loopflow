@@ -1623,6 +1623,147 @@ def rebase_cmd(
     typer.echo(f"Cleared stacking from {c['dim']}{wave.base_branch}{c['reset']}")
 
 
+# Stimuli sub-app
+stimuli_app = typer.Typer(help="Manage wave stimuli (triggers)")
+app.add_typer(stimuli_app, name="stimuli")
+
+
+@stimuli_app.command("list")
+def stimuli_list(
+    wave: str = typer.Argument(..., help="Wave name or ID"),
+):
+    """List stimuli for a wave.
+
+    Examples:
+        lfd stimuli list swift-falcon
+    """
+    c = _colors()
+    repo = get_wt_from_cwd()
+
+    wave_obj = _resolve_wave(wave, repo, c)
+    if not wave_obj:
+        typer.echo(f"{c['red']}Error:{c['reset']} Wave '{wave}' not found", err=True)
+        raise typer.Exit(1)
+
+    stimuli = list_stimuli(wave_id=wave_obj.id)
+    if not stimuli:
+        typer.echo(f"{c['dim']}No stimuli configured for {wave_obj.name}{c['reset']}")
+        return
+
+    typer.echo(f"Stimuli for {c['bold']}{wave_obj.name}{c['reset']} ({wave_obj.short_id()})")
+    typer.echo("")
+
+    for stim in stimuli:
+        enabled_str = "" if stim.enabled else f" {c['dim']}(disabled){c['reset']}"
+        cron_str = f" cron={stim.cron}" if stim.cron else ""
+        typer.echo(f"  {stim.short_id()}  {stim.kind:<8}{cron_str}{enabled_str}")
+
+    typer.echo("")
+    typer.echo(f"{len(stimuli)} stimulus{'es' if len(stimuli) != 1 else ''}")
+
+
+@stimuli_app.command("add")
+def stimuli_add(
+    wave: str = typer.Argument(..., help="Wave name or ID"),
+    kind: str = typer.Option(..., "--kind", "-k", help="Stimulus kind: loop, watch, cron"),
+    cron: str = typer.Option(None, "--cron", "-c", help="Cron expression (required for cron kind)"),
+):
+    """Add a stimulus to a wave.
+
+    Examples:
+        lfd stimuli add swift-falcon --kind watch
+        lfd stimuli add swift-falcon --kind cron --cron "0 9 * * *"
+    """
+    c = _colors()
+    repo = get_wt_from_cwd()
+
+    wave_obj = _resolve_wave(wave, repo, c)
+    if not wave_obj:
+        typer.echo(f"{c['red']}Error:{c['reset']} Wave '{wave}' not found", err=True)
+        raise typer.Exit(1)
+
+    if kind not in ("once", "loop", "watch", "cron"):
+        typer.echo(f"{c['red']}Error:{c['reset']} Invalid kind: {kind}", err=True)
+        typer.echo("Valid kinds: once, loop, watch, cron")
+        raise typer.Exit(1)
+
+    if kind == "cron" and not cron:
+        typer.echo(f"{c['red']}Error:{c['reset']} --cron is required for cron stimulus", err=True)
+        raise typer.Exit(1)
+
+    stimulus = create_stimulus(wave_obj.id, kind, cron)
+    typer.echo(
+        f"{c['green']}Created{c['reset']} {kind} stimulus for {wave_obj.name} ({stimulus.short_id()})"
+    )
+
+
+@stimuli_app.command("enable")
+def stimuli_enable(
+    stimulus_id: str = typer.Argument(..., help="Stimulus ID"),
+):
+    """Enable a stimulus.
+
+    Examples:
+        lfd stimuli enable abc1234
+    """
+    c = _colors()
+
+    if enable_stimulus(stimulus_id):
+        typer.echo(f"{c['green']}Enabled{c['reset']} stimulus {stimulus_id}")
+    else:
+        typer.echo(f"{c['red']}Error:{c['reset']} Stimulus '{stimulus_id}' not found", err=True)
+        raise typer.Exit(1)
+
+
+@stimuli_app.command("disable")
+def stimuli_disable(
+    stimulus_id: str = typer.Argument(..., help="Stimulus ID"),
+):
+    """Disable a stimulus.
+
+    Examples:
+        lfd stimuli disable abc1234
+    """
+    c = _colors()
+
+    if disable_stimulus(stimulus_id):
+        typer.echo(f"{c['yellow']}Disabled{c['reset']} stimulus {stimulus_id}")
+    else:
+        typer.echo(f"{c['red']}Error:{c['reset']} Stimulus '{stimulus_id}' not found", err=True)
+        raise typer.Exit(1)
+
+
+@stimuli_app.command("rm")
+def stimuli_rm(
+    stimulus_id: str = typer.Argument(..., help="Stimulus ID"),
+    force: bool = typer.Option(False, "-f", "--force", help="Skip confirmation"),
+):
+    """Remove a stimulus.
+
+    Examples:
+        lfd stimuli rm abc1234
+        lfd stimuli rm abc1234 -f
+    """
+    c = _colors()
+
+    stim = get_stimulus(stimulus_id)
+    if not stim:
+        typer.echo(f"{c['red']}Error:{c['reset']} Stimulus '{stimulus_id}' not found", err=True)
+        raise typer.Exit(1)
+
+    if not force:
+        confirm = typer.confirm(f"Delete {stim.kind} stimulus {stim.short_id()}?")
+        if not confirm:
+            typer.echo("Cancelled")
+            raise typer.Exit(0)
+
+    if delete_stimulus(stimulus_id):
+        typer.echo(f"{c['red']}Deleted{c['reset']} stimulus {stimulus_id}")
+    else:
+        typer.echo(f"{c['red']}Error:{c['reset']} Failed to delete stimulus", err=True)
+        raise typer.Exit(1)
+
+
 def main() -> None:
     """Entry point for lfd command."""
     if len(sys.argv) == 1:

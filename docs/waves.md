@@ -5,7 +5,7 @@ title: Waves
 
 # Waves
 
-A wave is **area × direction × flow × stimulus**.
+A wave is **area × direction × flow**. Stimuli (triggers) are separate entities that activate the wave.
 
 ```bash
 lfd loop ship src/api/ --direction product-engineer
@@ -53,7 +53,7 @@ lfd watch ship src/api/                   # watch src/api/ for changes
 lfd watch ship docs/                      # watch docs/ for changes
 ```
 
-The area serves as both the context for the wave and the paths to watch.
+The area serves as both the context for the wave and the paths to watch. When a watch triggers, the diff of changed files is included in context.
 
 ### Cron
 
@@ -63,6 +63,26 @@ Run on schedule. 24-hour grace period for laptops.
 lfd cron ship . "0 9 * * *"               # 9am daily
 lfd cron ship . "0 9 * * MON-FRI"         # 9am weekdays
 ```
+
+### Multiple Stimuli
+
+A wave can have multiple stimuli. Any stimulus firing activates the wave.
+
+```bash
+# Start with a watch stimulus
+lfd watch swift-falcon --area src/
+
+# Add a cron trigger too (9am daily)
+lfd stimuli add swift-falcon --kind cron --cron "0 9 * * *"
+
+# List all triggers
+lfd stimuli list swift-falcon
+
+# Disable one trigger
+lfd stimuli disable <stimulus-id>
+```
+
+When a wave is already running and another stimulus fires, the activation queues. Watch triggers coalesce—multiple commits combine into a single activation with a combined diff.
 
 ---
 

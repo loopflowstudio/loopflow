@@ -261,6 +261,57 @@ Remove launchd service.
 lfd uninstall
 ```
 
+## Managing Stimuli
+
+Waves can have multiple stimuli (triggers). Each stimulus is an independent entity that can activate the wave.
+
+### lfd stimuli list
+
+List stimuli for a wave.
+
+```bash
+lfd stimuli list swift-falcon
+```
+
+### lfd stimuli add
+
+Add a stimulus to an existing wave.
+
+```bash
+lfd stimuli add swift-falcon --kind watch
+lfd stimuli add swift-falcon --kind cron --cron "0 9 * * *"
+```
+
+| Flag | Description |
+|------|-------------|
+| `-k, --kind` | Stimulus kind: once, loop, watch, cron |
+| `-c, --cron` | Cron expression (required for cron kind) |
+
+### lfd stimuli enable
+
+Enable a disabled stimulus.
+
+```bash
+lfd stimuli enable abc1234
+```
+
+### lfd stimuli disable
+
+Disable a stimulus without removing it.
+
+```bash
+lfd stimuli disable abc1234
+```
+
+### lfd stimuli rm
+
+Remove a stimulus.
+
+```bash
+lfd stimuli rm abc1234
+lfd stimuli rm abc1234 -f    # skip confirmation
+```
+
 ## See Also
 
 [Waves](waves.md) · [Configuration](config.md)

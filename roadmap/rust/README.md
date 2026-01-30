@@ -73,8 +73,9 @@ Commit to **protocol‑first** Rust `lfd` with remote client support. The protoc
 
 ### Stage 4 — lf client
 - **Keep:** local `lf` uses in‑process `lfd‑core` by default.
-- **Parity focus:** local vs remote `lf` behavior is identical.
+- **Parity focus:** local vs remote `lf` behavior is identical; `lf ops` git operations match current Python behavior.
 - **Tests:** end‑to‑end CLI parity suite; remote integration tests.
+- **Also covers:** ops architecture (`lf ops` ↔ `lfd` relationship), git module in lf-core, stacking workflows.
 
 ### Stage 5 — Data backend
 - **Keep:** local stays on SQLite; managed mode uses Postgres.

@@ -422,8 +422,7 @@ fn fork_run_id(run: &FlowRun, branch_index: usize) -> String {
 fn fork_worktree_path(run: &FlowRun, branch_index: usize) -> String {
     let base = run
         .worktree
-        .as_ref()
-        .map(|path| path.clone())
+        .clone()
         .unwrap_or_else(|| run.repo.to_string_lossy().to_string());
     format!("{base}-fork-{branch_index}")
 }

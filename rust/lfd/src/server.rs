@@ -355,11 +355,11 @@ impl ControlService for ControlServer {
         request: Request<ListStimuliRequest>,
     ) -> Result<Response<ListStimuliResponse>, Status> {
         let req = request.into_inner();
-        let wave_id = if req.wave_id.is_some() && !req.wave_id.as_ref().unwrap().is_empty() {
-            req.wave_id
-        } else {
-            None
-        };
+        let wave_id = req
+            .wave_id
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
 
         let stimuli = if let Some(kind) = req.kind {
             self.run_store(move |store| store.list_stimuli_by_kind(kind))

@@ -30,15 +30,6 @@ impl PtyCommand {
         self
     }
 
-    pub fn args<I, S>(mut self, values: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        self.args.extend(values.into_iter().map(Into::into));
-        self
-    }
-
     pub fn cwd(mut self, cwd: impl Into<PathBuf>) -> Self {
         self.cwd = Some(cwd.into());
         self
@@ -99,7 +90,7 @@ mod tests {
 
     #[test]
     fn run_pty_command_returns_exit_code() {
-        let command = PtyCommand::new("sh").args(["-c", "exit 0"]);
+        let command = PtyCommand::new("sh").arg("-c").arg("exit 0");
         let exit_code = run_pty_command(command).unwrap();
         assert_eq!(exit_code, 0);
     }

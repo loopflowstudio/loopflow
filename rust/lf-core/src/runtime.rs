@@ -403,7 +403,8 @@ fn run_fork_item(
     for fork_run in store.list_fork_runs(&run.id, run.step_index)? {
         let worktree_path = Path::new(&fork_run.worktree);
         if worktree_path.join(".git").exists() {
-            let _ = remove_worktree(worktree_path);
+            // Force-delete branch since we created these fork worktrees
+            let _ = remove_worktree(worktree_path, true);
         }
     }
     store.delete_fork_runs(&run.id, run.step_index)?;

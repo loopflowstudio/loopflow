@@ -47,6 +47,8 @@ class LandResult:
 # Rust/Python routing
 # -----------------------------------------------------------------------------
 
+_backend_printed = False
+
 
 @lru_cache(maxsize=1)
 def _lf_core_available() -> bool:
@@ -56,6 +58,23 @@ def _lf_core_available() -> bool:
 def _use_rust() -> bool:
     """Use Rust if flag is set AND lf-core is available."""
     return get_internal_flag("use_rust") and _lf_core_available()
+
+
+def _print_backend_once() -> None:
+    """Print backend info once per session (grey text)."""
+    global _backend_printed
+    if _backend_printed:
+        return
+    _backend_printed = True
+
+    import sys
+
+    backend = "lf-core (rust)" if _use_rust() else "python"
+    # ANSI dim grey: \033[2m for dim, \033[0m to reset
+    if sys.stderr.isatty():
+        sys.stderr.write(f"\033[2m[git: {backend}]\033[0m\n")
+    else:
+        sys.stderr.write(f"[git: {backend}]\n")
 
 
 # -----------------------------------------------------------------------------
@@ -272,24 +291,28 @@ def _land_python(worktree: Path, strategy: str, main_branch: str = "main") -> La
 
 
 def rebase(worktree: Path, onto: str, base_commit: str | None = None) -> RebaseResult:
+    _print_backend_once()
     if _use_rust():
         return _rebase_rust(worktree, onto, base_commit)
     return _rebase_python(worktree, onto, base_commit)
 
 
 def push(worktree: Path, force_with_lease: bool = False) -> None:
+    _print_backend_once()
     if _use_rust():
         return _push_rust(worktree, force_with_lease)
     return _push_python(worktree, force_with_lease)
 
 
 def create_branch(worktree: Path, name: str) -> BranchInfo:
+    _print_backend_once()
     if _use_rust():
         return _create_branch_rust(worktree, name)
     return _create_branch_python(worktree, name)
 
 
 def land(worktree: Path, strategy: str, main_branch: str = "main") -> LandResult:
+    _print_backend_once()
     if _use_rust():
         return _land_rust(worktree, strategy, main_branch)
     return _land_python(worktree, strategy, main_branch)

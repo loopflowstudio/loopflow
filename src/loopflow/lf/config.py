@@ -76,6 +76,30 @@ class BudgetConfig(BaseModel):
     diff: int = 20000  # Branch changes
 
 
+class InternalConfig(BaseModel):
+    """Internal/experimental settings."""
+
+    use_rust: bool = False  # Use Rust lf-core for git operations
+
+
+def get_internal_flag(name: str, repo_root: Path | None = None) -> bool:
+    """Check internal flag: env var (LF_{NAME}) first, then config.
+
+    Returns False if neither is set.
+    """
+    import os
+
+    env_name = f"LF_{name.upper()}"
+    env = os.environ.get(env_name)
+    if env is not None:
+        return env == "1"
+
+    config = load_config(repo_root)
+    if config and config.internal:
+        return getattr(config.internal, name, False)
+    return False
+
+
 def parse_model(model: str) -> tuple[str, str | None]:
     """Parse model string like 'claude:opus' into (backend, variant).
 
@@ -122,6 +146,7 @@ class Config(BaseModel):
     lint_check: Optional[str] = None  # Command to check if lint passes (exits 0 = pass)
     autoprune: AutopruneConfig = Field(default_factory=AutopruneConfig)
     budgets: BudgetConfig = Field(default_factory=BudgetConfig)
+    internal: InternalConfig = Field(default_factory=InternalConfig)
 
     @field_validator("context", mode="before")
     @classmethod

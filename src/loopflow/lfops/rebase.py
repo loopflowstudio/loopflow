@@ -5,6 +5,9 @@ import subprocess
 import typer
 
 from loopflow.lf.context import find_worktree_root, gather_step
+from loopflow.lf.ops.git import GitError
+from loopflow.lf.ops.git import push as git_push
+from loopflow.lf.ops.git import rebase as git_rebase
 
 
 def register_commands(app: typer.Typer) -> None:
@@ -22,31 +25,29 @@ def register_commands(app: typer.Typer) -> None:
         typer.echo("Fetching origin/main...")
         subprocess.run(["git", "fetch", "origin", "main"], cwd=repo_root, check=False)
 
-        # Attempt rebase
+        # Attempt rebase via lf-core
         typer.echo("Rebasing onto origin/main...")
-        result = subprocess.run(
-            ["git", "rebase", "origin/main"],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-        )
-
-        if result.returncode == 0:
-            # Success - push
-            typer.echo("Rebase succeeded, pushing...")
-            push_result = subprocess.run(
-                ["git", "push", "--force-with-lease"],
-                cwd=repo_root,
-            )
-            if push_result.returncode == 0:
-                typer.echo("Done")
-                return
-            typer.echo("Push failed", err=True)
+        try:
+            result = git_rebase(repo_root, "origin/main")
+        except GitError as err:
+            typer.echo(f"Rebase failed: {err}", err=True)
             raise typer.Exit(1)
 
-        # Conflicts - abort and hand off to assistant
-        typer.echo("Conflicts detected, aborting rebase...")
-        subprocess.run(["git", "rebase", "--abort"], cwd=repo_root)
+        if result.success:
+            typer.echo("Rebase succeeded, pushing...")
+            try:
+                git_push(repo_root, force_with_lease=True)
+            except GitError as err:
+                typer.echo(f"Push failed: {err}", err=True)
+                raise typer.Exit(1)
+            typer.echo("Done")
+            return
+
+        # Conflicts - hand off to assistant
+        if result.conflicts:
+            typer.echo("Conflicts detected, aborting rebase...")
+            for path in result.conflicts:
+                typer.echo(f"  {path}")
 
         # Get rebase prompt (custom or built-in)
         step = gather_step(repo_root, "rebase")

@@ -539,7 +539,7 @@ def loop(
     elif result.reason == "waiting":
         msg = f"{c['yellow']}Waiting:{c['reset']} {result.outstanding} outstanding PRs"
         typer.echo(f"{msg} (limit {wave.pr_limit})")
-        typer.echo("Run 'lfops land --squash' to land work")
+        typer.echo("Run 'lf ops land --squash' to land work")
         raise typer.Exit(0)
     else:
         typer.echo(f"{c['red']}Error:{c['reset']} Failed to start wave", err=True)
@@ -1437,7 +1437,7 @@ def next_cmd(
     if pr_number is None:
         if create_pr:
             typer.echo("Creating PR...")
-            result = subprocess.run(["lfops", "pr"], cwd=worktree)
+            result = subprocess.run(["lf", "ops", "pr"], cwd=worktree)
             if result.returncode != 0:
                 typer.echo(f"{c['red']}Error:{c['reset']} Failed to create PR", err=True)
                 raise typer.Exit(1)
@@ -1448,7 +1448,7 @@ def next_cmd(
                 )
                 raise typer.Exit(1)
         else:
-            msg = "No open PR found. Run 'lfops pr' first, or use --create-pr."
+            msg = "No open PR found. Run 'lf ops pr' first, or use --create-pr."
             typer.echo(f"{c['red']}Error:{c['reset']} {msg}", err=True)
             raise typer.Exit(1)
 

@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use serde::Serialize;
+
 #[derive(Debug, Error)]
 pub enum StoreError {
     #[error("run not found: {0}")]
@@ -46,6 +48,15 @@ pub enum CoreError {
     IoError(String),
 }
 
+#[derive(Debug, Error, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum GitError {
+    #[error("git command failed: {command}")]
+    CommandFailed { command: String, stderr: String },
+    #[error("io error: {0}")]
+    Io(String),
+}
+
 impl From<StoreError> for CoreError {
     fn from(err: StoreError) -> Self {
         CoreError::StoreError(err.to_string())
@@ -66,6 +77,18 @@ impl From<LoadError> for CoreError {
 impl From<std::io::Error> for CoreError {
     fn from(err: std::io::Error) -> Self {
         CoreError::IoError(err.to_string())
+    }
+}
+
+impl From<GitError> for CoreError {
+    fn from(err: GitError) -> Self {
+        CoreError::ExecutionFailed(err.to_string())
+    }
+}
+
+impl From<std::io::Error> for GitError {
+    fn from(err: std::io::Error) -> Self {
+        GitError::Io(err.to_string())
     }
 }
 

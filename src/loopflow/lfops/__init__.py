@@ -3,6 +3,16 @@
 
 def main() -> None:
     """Entry point for lfops command."""
+    import sys
+
+    import typer
+
+    typer.echo(
+        "Warning: 'lfops' is deprecated. Use 'lf ops' instead.\n"
+        f"  Example: lf ops {' '.join(sys.argv[1:])}\n",
+        err=True,
+    )
+
     from loopflow.lfops.commands import main as _main
 
     _main()

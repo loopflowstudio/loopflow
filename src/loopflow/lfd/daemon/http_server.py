@@ -20,7 +20,6 @@ from loopflow.lfd.daemon.client import _notify_event
 from loopflow.lfd.daemon.status import compute_status
 from loopflow.lfd.migrations.baseline import SCHEMA_VERSION
 from loopflow.lfd.models import StepRun, StepRunStatus, WaveStatus
-from loopflow.lfd.stimulus import create_stimulus
 from loopflow.lfd.protocol_v1 import (
     protocol_version,
     step_run_to_proto,
@@ -35,6 +34,7 @@ from loopflow.lfd.step_run import (
     save_step_run,
     update_step_run_status,
 )
+from loopflow.lfd.stimulus import create_stimulus
 from loopflow.lfd.wave import (
     clone_wave,
     create_wave,

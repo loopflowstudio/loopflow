@@ -1,7 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 
-from loopflow.lfd.models import MergeMode, Stimulus, Wave, WaveStatus
+from loopflow.lfd.models import MergeMode, Wave, WaveStatus
 from loopflow.lfd.protocol_v1 import wave_to_proto, worktree_to_proto
 
 

@@ -33,6 +33,7 @@ from loopflow.lfd.git_hooks import (
     uninstall_hooks,
 )
 from loopflow.lfd.models import MergeMode, StepRunStatus, Wave, WaveStatus
+from loopflow.lfd.step_run import get_waiting_step_run, update_step_run_status
 from loopflow.lfd.stimulus import (
     create_stimulus,
     delete_stimulus,
@@ -41,7 +42,6 @@ from loopflow.lfd.stimulus import (
     get_stimulus,
     list_stimuli,
 )
-from loopflow.lfd.step_run import get_waiting_step_run, update_step_run_status
 from loopflow.lfd.wave import (
     create_wave,
     delete_wave,
@@ -1692,9 +1692,8 @@ def stimuli_add(
         raise typer.Exit(1)
 
     stimulus = create_stimulus(wave_obj.id, kind, cron)
-    typer.echo(
-        f"{c['green']}Created{c['reset']} {kind} stimulus for {wave_obj.name} ({stimulus.short_id()})"
-    )
+    msg = f"{c['green']}Created{c['reset']} {kind} stimulus for {wave_obj.name}"
+    typer.echo(f"{msg} ({stimulus.short_id()})")
 
 
 @stimuli_app.command("enable")

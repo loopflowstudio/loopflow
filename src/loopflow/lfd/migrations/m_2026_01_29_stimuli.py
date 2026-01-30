@@ -47,9 +47,7 @@ def apply(conn: sqlite3.Connection) -> None:
         )
         """
     )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_pending_wave_id ON pending_activations(wave_id)"
-    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_pending_wave_id ON pending_activations(wave_id)")
 
     # Migrate existing waves with stimulus_kind to stimuli table
     # Check if stimulus_kind column exists (may not if fresh install)

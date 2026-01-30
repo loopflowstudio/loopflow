@@ -85,9 +85,6 @@ def wave_to_proto(wave: Wave, stimuli: list[Stimulus] | None = None) -> dict[str
     The proto still expects a single stimulus field for backwards compat,
     so we use the first stimulus if available.
     """
-    # Get first stimulus if any provided (for backwards compat with proto)
-    first_stimulus = stimuli[0] if stimuli else None
-
     data: dict[str, Any] = {
         "id": wave.id,
         "name": wave.name,

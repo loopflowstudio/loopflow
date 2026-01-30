@@ -209,9 +209,7 @@ def update_wave_pid(wave_id: str, pid: int | None, db_path: Path | None = None) 
     return updated
 
 
-def update_wave_step_index(
-    wave_id: str, step_index: int, db_path: Path | None = None
-) -> bool:
+def update_wave_step_index(wave_id: str, step_index: int, db_path: Path | None = None) -> bool:
     """Update a wave's step_index."""
     conn = _get_db(db_path)
 
@@ -689,8 +687,7 @@ def check_watch_stimulus_for_wave(wave: Wave, stimulus: Stimulus) -> tuple[bool,
     current_sha = result.stdout.strip()
     last_sha = stimulus.last_main_sha
     stimulus_log.debug(
-        f"[{short_id}] SHA: last={last_sha[:7] if last_sha else 'None'} "
-        f"current={current_sha[:7]}"
+        f"[{short_id}] SHA: last={last_sha[:7] if last_sha else 'None'} current={current_sha[:7]}"
     )
 
     if current_sha == last_sha:
@@ -771,7 +768,7 @@ def check_cron_stimulus_for_wave(stimulus: Stimulus) -> bool:
     activated = should_activate_cron(stimulus.cron, last_time)
 
     if activated:
-        stimulus_log.info(f"[{short_id}] ACTIVATED: cron={stimulus.cron} last_triggered={last_time}")
+        stimulus_log.info(f"[{short_id}] ACTIVATED: cron={stimulus.cron} last={last_time}")
         update_stimulus_triggered_at(stimulus.id, datetime.now())
     else:
         stimulus_log.debug(f"[{short_id}] not due: last_triggered={last_time}")
@@ -807,9 +804,7 @@ def run_watch_check() -> list[str]:
             if is_activated:
                 if wave.status in (WaveStatus.RUNNING, WaveStatus.WAITING):
                     # Wave is busy, queue with SHA range for coalescing
-                    queue_or_coalesce_activation(
-                        wave.id, stimulus.id, from_sha, current_sha
-                    )
+                    queue_or_coalesce_activation(wave.id, stimulus.id, from_sha, current_sha)
                     stimulus_log.debug(f"[{wave.short_id()}] queued activation")
                 else:
                     # Wave is idle, start it

@@ -12,7 +12,6 @@ from loopflow.lfd.models import (
     stimulus_from_row,
 )
 
-
 # Stimulus persistence
 
 
@@ -54,9 +53,7 @@ def get_stimulus(stimulus_id: str, db_path: Path | None = None) -> Stimulus | No
     row = cursor.fetchone()
 
     if not row:
-        cursor = conn.execute(
-            "SELECT * FROM stimuli WHERE id LIKE ?", (f"{stimulus_id}%",)
-        )
+        cursor = conn.execute("SELECT * FROM stimuli WHERE id LIKE ?", (f"{stimulus_id}%",))
         row = cursor.fetchone()
 
     conn.close()
@@ -79,9 +76,7 @@ def list_stimuli(
             "SELECT * FROM stimuli WHERE wave_id = ? ORDER BY created_at", (wave_id,)
         )
     elif kind:
-        cursor = conn.execute(
-            "SELECT * FROM stimuli WHERE kind = ? ORDER BY created_at", (kind,)
-        )
+        cursor = conn.execute("SELECT * FROM stimuli WHERE kind = ? ORDER BY created_at", (kind,))
     else:
         cursor = conn.execute("SELECT * FROM stimuli ORDER BY created_at")
 
@@ -103,9 +98,7 @@ def list_stimuli_by_kind(kind: str, db_path: Path | None = None) -> list[Stimulu
     return stimuli
 
 
-def update_stimulus_sha(
-    stimulus_id: str, sha: str | None, db_path: Path | None = None
-) -> bool:
+def update_stimulus_sha(stimulus_id: str, sha: str | None, db_path: Path | None = None) -> bool:
     """Update a stimulus's last_main_sha (for watch mode)."""
     conn = _get_db(db_path)
 
@@ -211,9 +204,7 @@ def create_stimulus(
 # PendingActivation persistence
 
 
-def save_pending_activation(
-    activation: PendingActivation, db_path: Path | None = None
-) -> None:
+def save_pending_activation(activation: PendingActivation, db_path: Path | None = None) -> None:
     """Save a pending activation."""
     conn = _get_db(db_path)
 
@@ -250,9 +241,7 @@ def save_pending_activation(
     conn.close()
 
 
-def list_pending_activations(
-    wave_id: str, db_path: Path | None = None
-) -> list[PendingActivation]:
+def list_pending_activations(wave_id: str, db_path: Path | None = None) -> list[PendingActivation]:
     """List pending activations for a wave."""
     conn = _get_db(db_path)
 
@@ -284,16 +273,12 @@ def delete_pending_activations(wave_id: str, db_path: Path | None = None) -> int
     """Delete all pending activations for a wave. Returns count deleted."""
     conn = _get_db(db_path)
 
-    cursor = conn.execute(
-        "DELETE FROM pending_activations WHERE wave_id = ?", (wave_id,)
-    )
+    cursor = conn.execute("DELETE FROM pending_activations WHERE wave_id = ?", (wave_id,))
     conn.commit()
     count = cursor.rowcount
 
     # Update wave's pending_activations count to 0
-    conn.execute(
-        "UPDATE waves SET pending_activations = 0 WHERE id = ?", (wave_id,)
-    )
+    conn.execute("UPDATE waves SET pending_activations = 0 WHERE id = ?", (wave_id,))
     conn.commit()
     conn.close()
     return count

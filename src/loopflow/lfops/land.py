@@ -20,9 +20,9 @@ from loopflow.lf.git import (
 )
 from loopflow.lf.launcher import get_runner
 from loopflow.lf.messages import generate_commit_message_from_diff, generate_pr_message
-from loopflow.lf.worktrees import get_path
 from loopflow.lf.ops.git import push as git_push
 from loopflow.lf.ops.git import rebase as git_rebase
+from loopflow.lf.worktrees import get_path
 from loopflow.lfops._helpers import (
     add_commit_push,
     get_default_branch,

@@ -26,6 +26,7 @@ from loopflow.lfd.daemon.launchd import install as launchd_install
 from loopflow.lfd.daemon.launchd import is_running
 from loopflow.lfd.daemon.launchd import uninstall as launchd_uninstall
 from loopflow.lfd.daemon.server import run_server
+from loopflow.lfd.db import reset_db
 from loopflow.lfd.flow_run import list_runs_for_wave
 from loopflow.lfd.git_hooks import (
     hooks_status,
@@ -163,6 +164,33 @@ def uninstall():
     else:
         typer.echo("Failed to uninstall lfd")
         raise typer.Exit(1)
+
+
+@app.command()
+def reset(
+    force: bool = typer.Option(False, "-f", "--force", help="Skip confirmation"),
+):
+    """Stop all waves, delete database, reinitialize with latest schema."""
+    c = _colors()
+
+    if not force:
+        confirm = typer.confirm("This will stop all waves and delete all wave history. Continue?")
+        if not confirm:
+            raise typer.Abort()
+
+    # Stop all running waves
+    stopped = 0
+    for wave in list_waves():
+        if wave.status == WaveStatus.RUNNING:
+            if stop_wave(wave.id, force=True):
+                stopped += 1
+
+    if stopped > 0:
+        typer.echo(f"Stopped {stopped} running wave{'s' if stopped != 1 else ''}")
+
+    # Reset the database
+    reset_db()
+    typer.echo(f"{c['green']}Database reset.{c['reset']} All waves and history cleared.")
 
 
 @app.command()
@@ -946,7 +974,7 @@ def _format_uptime(seconds: int) -> str:
 
 @app.command()
 def status(
-    wave_id: str = typer.Argument(None, help="Wave ID (optional, shows all if omitted)"),
+    wave_id: str = typer.Argument(None, help="Wave name or ID (optional, shows all if omitted)"),
     ids_only: bool = typer.Option(False, "--ids", help="Print wave IDs only (for scripting)"),
 ):
     """Show status of waves."""
@@ -960,7 +988,8 @@ def status(
 
     if wave_id:
         # Try to find the wave
-        wave = get_wave(wave_id)
+        repo = find_main_repo() or get_wt_from_cwd()
+        wave = _resolve_wave(wave_id, repo, c) if repo else get_wave(wave_id)
         if not wave:
             typer.echo(f"{c['red']}Error:{c['reset']} Wave '{wave_id}' not found", err=True)
             raise typer.Exit(1)
@@ -1059,12 +1088,13 @@ def _print_wave_detail(wave: Wave, c: dict[str, str]) -> None:
 
 @app.command()
 def stop(
-    wave_id: str = typer.Argument(None, help="Wave ID to stop (omit with --all)"),
+    wave_id: str = typer.Argument(None, help="Wave name or ID to stop (omit with --all)"),
     all_waves: bool = typer.Option(False, "--all", help="Stop all running waves"),
     force: bool = typer.Option(False, "-f", "--force", help="Force kill (SIGKILL)"),
 ):
     """Stop a running wave."""
     c = _colors()
+    repo = find_main_repo() or get_wt_from_cwd()
 
     if all_waves:
         # Stop all running waves
@@ -1082,10 +1112,13 @@ def stop(
         return
 
     if not wave_id:
-        typer.echo(f"{c['red']}Error:{c['reset']} Provide a wave ID or use --all", err=True)
+        typer.echo(
+            f"{c['red']}Error:{c['reset']} Provide a wave name or ID, or use --all",
+            err=True,
+        )
         raise typer.Exit(1)
 
-    wave = get_wave(wave_id)
+    wave = _resolve_wave(wave_id, repo, c) if repo else get_wave(wave_id)
     if not wave:
         typer.echo(f"{c['red']}Error:{c['reset']} Wave '{wave_id}' not found", err=True)
         raise typer.Exit(1)
@@ -1100,13 +1133,14 @@ def stop(
 
 @app.command()
 def prs(
-    wave_id: str = typer.Argument(..., help="Wave ID"),
+    wave_id: str = typer.Argument(..., help="Wave name or ID"),
     limit: int = typer.Option(10, "-n", "--limit", help="Number of PRs to show"),
 ):
     """Show PRs created by a wave."""
     c = _colors()
+    repo = find_main_repo() or get_wt_from_cwd()
 
-    wave = get_wave(wave_id)
+    wave = _resolve_wave(wave_id, repo, c) if repo else get_wave(wave_id)
     if not wave:
         typer.echo(f"{c['red']}Error:{c['reset']} Wave '{wave_id}' not found", err=True)
         raise typer.Exit(1)
@@ -1134,13 +1168,14 @@ def prs(
 
 @app.command()
 def rm(
-    wave_id: str = typer.Argument(..., help="Wave ID to remove"),
+    wave_id: str = typer.Argument(..., help="Wave name or ID to remove"),
     force: bool = typer.Option(False, "-f", "--force", help="Skip confirmation"),
 ):
     """Remove a wave and its history."""
     c = _colors()
+    repo = find_main_repo() or get_wt_from_cwd()
 
-    wave = get_wave(wave_id)
+    wave = _resolve_wave(wave_id, repo, c) if repo else get_wave(wave_id)
     if not wave:
         typer.echo(f"{c['red']}Error:{c['reset']} Wave '{wave_id}' not found", err=True)
         raise typer.Exit(1)
@@ -1166,13 +1201,14 @@ def rm(
 
 @app.command()
 def logs(
-    wave_id: str = typer.Argument(..., help="Wave ID"),
+    wave_id: str = typer.Argument(..., help="Wave name or ID"),
     follow: bool = typer.Option(False, "-f", "--follow", help="Follow output (like tail -f)"),
     lines: int = typer.Option(50, "-n", "--lines", help="Number of lines to show"),
 ):
     """Show logs for a wave's current run."""
     c = _colors()
-    wave = get_wave(wave_id)
+    repo = find_main_repo() or get_wt_from_cwd()
+    wave = _resolve_wave(wave_id, repo, c) if repo else get_wave(wave_id)
     if not wave:
         typer.echo(f"{c['red']}Error:{c['reset']} Wave '{wave_id}' not found", err=True)
         raise typer.Exit(1)

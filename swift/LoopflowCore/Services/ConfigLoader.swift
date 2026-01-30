@@ -131,8 +131,7 @@ public struct ConfigLoader {
             paste: paste,
             direction: direction,
             summaries: summaries,
-            skillSources: nil,  // TODO: parse skill_sources from YAML
-            work: nil
+            skillSources: nil  // TODO: parse skill_sources from YAML
         )
     }
 }

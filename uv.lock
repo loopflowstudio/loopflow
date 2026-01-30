@@ -35,21 +35,6 @@ wheels = [
 ]
 
 [[package]]
-name = "asana"
-version = "5.2.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "certifi" },
-    { name = "python-dateutil" },
-    { name = "six" },
-    { name = "urllib3" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/db/59/af14efdd03d332c33d4a77aed8f1f7151e3de5c2441e4bea3b1c6dbcc9d7/asana-5.2.2.tar.gz", hash = "sha256:d280ce2e8edf0355ccf21e548d887617ca8c926e1cb41309b8a173ca3181632c", size = 126424, upload-time = "2025-09-24T21:31:04.055Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/26/5e/337125441af40aba86b087dee3dbe829413b6e42eac74defae2076926dbe/asana-5.2.2-py3-none-any.whl", hash = "sha256:1c8d15949a6cb9aa12363a5b7cfc6c0544cb3ae77290dd2e3255c0ec70668458", size = 203161, upload-time = "2025-09-24T21:31:02.401Z" },
-]
-
-[[package]]
 name = "boto3"
 version = "1.42.28"
 source = { registry = "https://pypi.org/simple" }
@@ -400,7 +385,6 @@ wheels = [
 name = "loopflow"
 source = { editable = "." }
 dependencies = [
-    { name = "asana" },
     { name = "croniter" },
     { name = "fastapi" },
     { name = "grpcio" },
@@ -428,7 +412,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "asana", specifier = ">=5.0.0" },
     { name = "croniter", specifier = ">=2.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "grpcio", specifier = ">=1.60.0" },

@@ -380,7 +380,9 @@ async def post_wave(
         return LFDResponse(ok=False, error=str(e))
 
 
-class StimulusUpdate(BaseModel):
+class StimulusRequest(BaseModel):
+    """Stimulus configuration for API requests."""
+
     kind: str  # once, loop, watch, cron
     cron: str | None = None
 
@@ -389,7 +391,7 @@ class UpdateWaveRequest(BaseModel):
     area: list[str] | None = None
     direction: list[str] | None = None
     flow: str | None = None
-    stimulus: StimulusUpdate | None = None
+    stimulus: StimulusRequest | None = None
     paused: bool | None = None
 
 
@@ -506,7 +508,7 @@ class RunWaveRequest(BaseModel):
     area: list[str] | None = None
     direction: list[str] | None = None
     flow: str | None = None
-    stimulus: StimulusUpdate | None = None
+    stimulus: StimulusRequest | None = None
 
 
 @app.post("/waves/{wave_id}/run", response_model=LFDResponse)
@@ -583,11 +585,6 @@ async def stop_wave_by_id(wave_id: str):
 # -----------------------------------------------------------------------------
 
 
-class StimulusV1(BaseModel):
-    kind: str
-    cron: str | None = None
-
-
 class CreateWaveRequestV1(BaseModel):
     repo: str
     name: str | None = None
@@ -601,7 +598,7 @@ class UpdateWaveRequestV1(BaseModel):
     flow: str | None = None
     direction: list[str] | None = None
     area: list[str] | None = None
-    stimulus: StimulusV1 | None = None
+    stimulus: StimulusRequest | None = None
     paused: bool | None = None
     idempotency_key: str | None = None
 
@@ -610,7 +607,7 @@ class RunWaveRequestV1(BaseModel):
     area: list[str] | None = None
     direction: list[str] | None = None
     flow: str | None = None
-    stimulus: StimulusV1 | None = None
+    stimulus: StimulusRequest | None = None
     idempotency_key: str | None = None
 
 

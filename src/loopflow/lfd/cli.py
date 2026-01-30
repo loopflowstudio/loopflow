@@ -93,24 +93,6 @@ def _wave_display(wave: Wave) -> str:
     return f"{wave.area_display} [{wave.flow}] [{wave.direction_display}]"
 
 
-def _parse_directions(directions: list[str] | None) -> list[str]:
-    """Parse direction list, handling comma-separated values.
-
-    Accepts both: -d d1 -d d2 and -d d1,d2
-    """
-    if not directions:
-        return ["default"]
-    result = []
-    for d in directions:
-        result.extend(d.split(","))
-    return [x.strip() for x in result if x.strip()]
-
-
-def _is_area(s: str) -> bool:
-    """Check if string looks like an area (contains / or is .)."""
-    return "/" in s or s == "."
-
-
 def _validate_flow(repo: Path, flow: str, c: dict[str, str]) -> str:
     """Validate and normalize flow name."""
     normalized = flow.strip()

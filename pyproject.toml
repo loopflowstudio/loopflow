@@ -30,7 +30,6 @@ dependencies = [
     "pyyaml>=6.0",
     "pydantic>=2.12.5",
     "tiktoken>=0.7.0",
-    "asana>=5.0.0",
     "croniter>=2.0",
     "fastapi>=0.115.0",
     "uvicorn>=0.34.0",
@@ -55,7 +54,6 @@ dev = [
 lf = "loopflow.lf.cli:main"
 lfd = "loopflow.lfd.cli:main"
 lfops = "loopflow.lfops:main"
-lfwork = "loopflow.lfwork:main"
 
 [build-system]
 requires = ["hatchling"]

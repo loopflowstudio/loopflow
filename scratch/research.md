@@ -13,7 +13,6 @@ Loopflow is a CLI-first orchestration layer for coding agents. Prompts are store
 | `lf` | `loopflow.lf` | Prompt launcher—assemble context, run steps/flows |
 | `lfd` | `loopflow.lfd` | Daemon—manage waves, triggers, state, protocol |
 | `lfops` | `loopflow.lfops` | Git workflow automation (PR, land, rebase, worktrees) |
-| `lfwork` | `loopflow.lfwork` | Work queue integration (task sources) |
 
 **Prompt/flow surface (`loopflow.lf`):**
 - `cli.py` exposes `lf run`, `lf inline`, `lf flow` and step listing.

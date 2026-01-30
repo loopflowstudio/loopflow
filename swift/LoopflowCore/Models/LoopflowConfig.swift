@@ -46,31 +46,6 @@ public struct SummaryConfig: Sendable, Codable {
     public let model: String?
 }
 
-public struct AsanaConfig: Sendable, Codable {
-    public let projectId: String
-
-    enum CodingKeys: String, CodingKey {
-        case projectId = "project_id"
-    }
-}
-
-public struct WorkConfig: Sendable, Codable {
-    public let backend: String?
-    public let asana: AsanaConfig?
-    public let autoRebase: Bool?
-    public let autoLand: Bool?
-
-    enum CodingKeys: String, CodingKey {
-        case backend, asana
-        case autoRebase = "auto_rebase"
-        case autoLand = "auto_land"
-    }
-
-    public var isAsana: Bool {
-        backend?.lowercased() == "asana"
-    }
-}
-
 /// External skill library configuration.
 public struct SkillSourceConfig: Sendable, Codable {
     public let name: String
@@ -97,13 +72,12 @@ public struct LoopflowConfig: Sendable, Codable {
     public let direction: DirectionConfig?
     public let summaries: [SummaryConfig]?
     public let skillSources: [SkillSourceConfig]?
-    public let work: WorkConfig?
 
     enum CodingKeys: String, CodingKey {
         case waveModel = "wave_model"
         case diffFiles = "diff_files"
         case skillSources = "skill_sources"
-        case interactive, terminal, ide, workspace, context, exclude, push, pr, yolo, chrome, docs, diff, paste, direction, summaries, work
+        case interactive, terminal, ide, workspace, context, exclude, push, pr, yolo, chrome, docs, diff, paste, direction, summaries
     }
 
     /// Direction config can be a single string or array of strings in YAML.

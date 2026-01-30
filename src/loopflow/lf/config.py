@@ -25,17 +25,6 @@ class IdeConfig(BaseModel):
     workspace: Optional[str] = None
 
 
-class AsanaConfig(BaseModel):
-    project_id: str
-
-
-class WorkConfig(BaseModel):
-    backend: str = "file"  # "file" or "asana"
-    asana: Optional[AsanaConfig] = None
-    auto_rebase: bool = True
-    auto_land: bool = False
-
-
 class SummaryConfig(BaseModel):
     """Per-path summary configuration."""
 
@@ -117,7 +106,6 @@ class Config(BaseModel):
     summary_tokens: int = 10000  # Default token budget for summaries
     skill_sources: list[SkillSourceConfig] = Field(default_factory=list)  # External skill libraries
     skill_registry: SkillRegistryConfig = Field(default_factory=SkillRegistryConfig)
-    work: Optional[WorkConfig] = None  # Work queue configuration
     branch_names: Optional[BranchNameConfig] = None  # Branch naming schema
     lint_check: Optional[str] = None  # Command to check if lint passes (exits 0 = pass)
     autoprune: AutopruneConfig = Field(default_factory=AutopruneConfig)

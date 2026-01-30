@@ -5,10 +5,8 @@ import os
 import platform
 import re
 import subprocess
-import sys
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -19,11 +17,11 @@ from loopflow.lf.context import (
     ContextConfig,
     FilesetConfig,
     format_drop_label,
-    format_prompt,
     gather_prompt_components,
     gather_step,
     trim_prompt_components,
 )
+from loopflow.lf.execution import ExecutionParams, execute_step
 from loopflow.lf.flows import (
     Choose,
     Flow,
@@ -37,14 +35,11 @@ from loopflow.lf.flows import (
     load_flow,
 )
 from loopflow.lf.git import GitError, find_main_repo, open_pr
-from loopflow.lf.launcher import build_model_command, build_model_interactive_command, get_runner
-from loopflow.lf.logging import write_prompt_file
+from loopflow.lf.launcher import get_runner
 from loopflow.lf.messages import generate_pr_message
 from loopflow.lf.tokens import MAX_SAFE_TOKENS, analyze_components
 from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
-from loopflow.lfd.models import StepRun, StepRunStatus
-from loopflow.lfd.step_run import log_step_run_end, log_step_run_start
 
 FlowItem = Step | Fork | Choose | LoopUntilEmpty
 
@@ -110,27 +105,7 @@ def _run_interactive_step(
     total_steps: int,
     chrome: bool = False,
 ) -> int:
-    """Run step interactively - direct coding agent, no collector.
-
-    Unlike standalone interactive runs (which use os.execvp), this uses
-    subprocess.run() so the flow can continue after the step completes.
-    """
-    # Step header
-    print(f"\n\033[1m{'─' * 60}\033[0m")
-    print(f"\033[1m[{step_num}/{total_steps}] {params.step} (interactive)\033[0m")
-    print(f"\033[1m{'─' * 60}\033[0m")
-
-    # Config summary
-    model_str = f"{params.backend}"
-    if params.model_variant:
-        model_str += f":{params.model_variant}"
-    config_parts = [f"model={model_str}"]
-    if params.direction:
-        config_parts.append(f"direction={','.join(params.direction)}")
-    if params.context:
-        config_parts.append(f"context={','.join(params.context)}")
-    print(f"\033[90m{' | '.join(config_parts)}\033[0m\n")
-
+    """Run step interactively using unified execution."""
     components = gather_prompt_components(
         repo_root,
         params.step,
@@ -147,60 +122,25 @@ def _run_interactive_step(
             f"\033[33m⚠ Context trimmed to fit {MAX_SAFE_TOKENS:,} tokens. "
             f"Dropped: {dropped_summary}\033[0m"
         )
-    tree = analyze_components(components)
 
-    # Token profile
-    token_summary = tree.format()
-    for line in token_summary.split("\n"):
-        print(f"\033[90m{line}\033[0m")
-    print()
-
-    if tree.total() > MAX_SAFE_TOKENS:
-        print(f"\033[33m⚠ Prompt is {tree.total():,} tokens (limit ~{MAX_SAFE_TOKENS:,})\033[0m")
-
-    prompt = format_prompt(components)
-
-    step_run = StepRun(
-        id=str(uuid.uuid4()),
-        step=params.step,
-        repo=str(main_repo),
-        worktree=str(repo_root),
-        status=StepRunStatus.RUNNING,
-        started_at=datetime.now(),
-        pid=None,
-        model=params.backend,
-        run_mode="interactive",
+    return execute_step(
+        ExecutionParams(
+            step_name=params.step,
+            repo_root=repo_root,
+            components=components,
+            backend=params.backend,
+            model_variant=params.model_variant,
+            skip_permissions=skip_permissions,
+            chrome=chrome,
+            is_interactive=True,
+            use_execvp=False,  # Flow needs subprocess.run to continue
+            step_num=step_num,
+            total_steps=total_steps,
+            direction=params.direction,
+            context=params.context,
+            autocommit=False,  # Flow handles autocommit
+        )
     )
-    log_step_run_start(step_run)
-
-    command = build_model_interactive_command(
-        params.backend,
-        skip_permissions=skip_permissions,
-        yolo=skip_permissions,
-        model_variant=params.model_variant,
-        sandbox_root=repo_root.parent,
-        workdir=repo_root,
-        chrome=chrome,
-    )
-
-    # Append prompt as argument
-    cmd_with_prompt = command + [prompt]
-
-    # Run interactively - subprocess.run preserves TTY
-    # Remove API keys so coding agents use subscriptions
-    env = os.environ.copy()
-    env.pop("ANTHROPIC_API_KEY", None)
-    env.pop("OPENAI_API_KEY", None)
-
-    result = subprocess.run(cmd_with_prompt, cwd=repo_root, env=env)
-
-    status = StepRunStatus.COMPLETED if result.returncode == 0 else StepRunStatus.FAILED
-    log_step_run_end(step_run.id, status)
-
-    if result.returncode != 0:
-        print(f"\n[{params.step}] failed with exit code {result.returncode}")
-
-    return result.returncode
 
 
 def _run_step(
@@ -214,23 +154,7 @@ def _run_step(
     total_steps: int,
     chrome: bool = False,
 ) -> int:
-    """Execute a single flow step. Returns exit code."""
-    # Step header
-    print(f"\n\033[1m{'─' * 60}\033[0m")
-    print(f"\033[1m[{step_num}/{total_steps}] {params.step}\033[0m")
-    print(f"\033[1m{'─' * 60}\033[0m")
-
-    # Config summary
-    model_str = f"{params.backend}"
-    if params.model_variant:
-        model_str += f":{params.model_variant}"
-    config_parts = [f"model={model_str}"]
-    if params.direction:
-        config_parts.append(f"direction={','.join(params.direction)}")
-    if params.context:
-        config_parts.append(f"context={','.join(params.context)}")
-    print(f"\033[90m{' | '.join(config_parts)}\033[0m\n")
-
+    """Execute a single flow step using unified execution."""
     components = gather_prompt_components(
         repo_root,
         params.step,
@@ -247,74 +171,25 @@ def _run_step(
             f"\033[33m⚠ Context trimmed to fit {MAX_SAFE_TOKENS:,} tokens. "
             f"Dropped: {dropped_summary}\033[0m"
         )
-    tree = analyze_components(components)
 
-    # Token profile
-    token_summary = tree.format()
-    for line in token_summary.split("\n"):
-        print(f"\033[90m{line}\033[0m")
-    print()
-
-    if tree.total() > MAX_SAFE_TOKENS:
-        print(f"\033[33m⚠ Prompt is {tree.total():,} tokens (limit ~{MAX_SAFE_TOKENS:,})\033[0m")
-    prompt = format_prompt(components)
-    prompt_file = write_prompt_file(prompt)
-
-    step_run = StepRun(
-        id=str(uuid.uuid4()),
-        step=params.step,
-        repo=str(main_repo),
-        worktree=str(repo_root),
-        status=StepRunStatus.RUNNING,
-        started_at=datetime.now(),
-        pid=None,
-        model=params.backend,
-        run_mode="auto",
+    return execute_step(
+        ExecutionParams(
+            step_name=params.step,
+            repo_root=repo_root,
+            components=components,
+            backend=params.backend,
+            model_variant=params.model_variant,
+            skip_permissions=skip_permissions,
+            chrome=chrome,
+            is_interactive=False,
+            step_num=step_num,
+            total_steps=total_steps,
+            direction=params.direction,
+            context=params.context,
+            autocommit=True,
+            push=should_push,
+        )
     )
-    log_step_run_start(step_run)
-
-    command = build_model_command(
-        params.backend,
-        auto=True,
-        stream=True,
-        skip_permissions=skip_permissions,
-        yolo=skip_permissions,
-        model_variant=params.model_variant,
-        sandbox_root=repo_root.parent,
-        workdir=repo_root,
-        chrome=chrome,
-    )
-    collector_cmd = [
-        sys.executable,
-        "-m",
-        "loopflow.lfd.execution.collector",
-        "--step-run-id",
-        step_run.id,
-        "--step",
-        params.step,
-        "--repo-root",
-        str(repo_root),
-        "--prompt-file",
-        prompt_file,
-        "--autocommit",
-        "--foreground",
-    ]
-    if should_push:
-        collector_cmd.append("--push")
-    collector_cmd.extend(["--", *command])
-
-    process = subprocess.Popen(collector_cmd, cwd=repo_root)
-    result_code = process.wait()
-
-    os.unlink(prompt_file)
-
-    status = StepRunStatus.COMPLETED if result_code == 0 else StepRunStatus.FAILED
-    log_step_run_end(step_run.id, status)
-
-    if result_code != 0:
-        print(f"\n[{params.step}] failed with exit code {result_code}")
-
-    return result_code
 
 
 def _run_inline_prompt(
@@ -327,63 +202,32 @@ def _run_inline_prompt(
     skip_permissions: bool,
     chrome: bool = False,
 ) -> int:
-    """Execute a prompt directly in the main worktree."""
-    prompt_file = write_prompt_file(prompt)
+    """Execute a prompt directly in the main worktree using unified execution."""
+    from loopflow.lf.context import PromptComponents
 
-    step_run = StepRun(
-        id=str(uuid.uuid4()),
-        step=step_label,
-        repo=str(main_repo),
-        worktree=str(repo_root),
-        status=StepRunStatus.RUNNING,
-        started_at=datetime.now(),
-        pid=None,
-        model=backend,
+    # Create minimal components for inline prompt
+    components = PromptComponents(
         run_mode="auto",
+        docs=[],
+        diff=None,
+        diff_files=[],
+        step=(step_label, prompt),
+        repo_root=repo_root,
     )
-    log_step_run_start(step_run)
 
-    command = build_model_command(
-        backend,
-        auto=True,
-        stream=True,
-        skip_permissions=skip_permissions,
-        yolo=skip_permissions,
-        model_variant=model_variant,
-        sandbox_root=repo_root.parent,
-        workdir=repo_root,
-        chrome=chrome,
+    return execute_step(
+        ExecutionParams(
+            step_name=step_label,
+            repo_root=repo_root,
+            components=components,
+            backend=backend,
+            model_variant=model_variant,
+            skip_permissions=skip_permissions,
+            chrome=chrome,
+            is_interactive=False,
+            autocommit=True,
+        )
     )
-    collector_cmd = [
-        sys.executable,
-        "-m",
-        "loopflow.lfd.execution.collector",
-        "--step-run-id",
-        step_run.id,
-        "--step",
-        step_label,
-        "--repo-root",
-        str(repo_root),
-        "--prompt-file",
-        prompt_file,
-        "--autocommit",
-        "--foreground",
-        "--",
-        *command,
-    ]
-
-    process = subprocess.Popen(collector_cmd, cwd=repo_root)
-    result_code = process.wait()
-
-    os.unlink(prompt_file)
-
-    status = StepRunStatus.COMPLETED if result_code == 0 else StepRunStatus.FAILED
-    log_step_run_end(step_run.id, status)
-
-    if result_code != 0:
-        print(f"\n[{step_label}] failed with exit code {result_code}")
-
-    return result_code
 
 
 def _finalize_flow(
@@ -604,7 +448,7 @@ def run_fork(
     results: list[ForkResult] = []
 
     def _run_thread(thread: ForkThread, index: int) -> tuple[ForkThread, Path, int]:
-        label = f"fork-{flow_name}-{index}"
+        label = f"fork-{flow_name}-{index}-{uuid.uuid4().hex[:8]}"
         try:
             wt_path = create_worktree(parent_worktree, label, base=base_branch)
         except Exception as exc:
@@ -1205,9 +1049,9 @@ def run_flow(
         if isinstance(item, LoopUntilEmpty):
             wave_name = _get_wave_name(repo_root, item.wave)
             iteration = 0
-            print(f"\n{'=' * 60}")
-            print(f"[loop_until_empty] wave={wave_name}")
-            print(f"{'=' * 60}\n")
+            print(f"\n\033[1m{'─' * 60}\033[0m")
+            print(f"\033[1m[loop_until_empty] wave={wave_name}\033[0m")
+            print(f"\033[1m{'─' * 60}\033[0m\n")
 
             while not _is_wave_empty(repo_root, wave_name):
                 iteration += 1
@@ -1215,7 +1059,7 @@ def run_flow(
                     print(f"[loop_until_empty] max iterations ({item.max_iterations}) reached")
                     return 1
 
-                print(f"\n--- Loop iteration {iteration} ---\n")
+                print(f"\n\033[90m─── Loop iteration {iteration} ───\033[0m\n")
 
                 # Run the loop's steps as a sub-flow
                 loop_flow = Flow(name=f"{flow.name}-loop-{iteration}", steps=list(item.steps))

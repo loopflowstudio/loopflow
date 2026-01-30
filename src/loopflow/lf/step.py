@@ -1,10 +1,6 @@
 """Step execution commands."""
 
-import os
 import subprocess
-import sys
-import uuid
-from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -22,16 +18,11 @@ from loopflow.lf.context import (
     gather_step,
 )
 from loopflow.lf.directions import parse_direction_arg, resolve_directions
+from loopflow.lf.execution import ExecutionParams, execute_step
 from loopflow.lf.flow import run_flow
 from loopflow.lf.flows import load_flow
 from loopflow.lf.frontmatter import StepConfig, resolve_step_config
-from loopflow.lf.git import find_main_repo
-from loopflow.lf.launcher import (
-    build_model_command,
-    build_model_interactive_command,
-    get_runner,
-)
-from loopflow.lf.logging import write_prompt_file
+from loopflow.lf.launcher import get_runner
 from loopflow.lf.output import (
     copy_to_clipboard,
     trim_components_if_needed,
@@ -39,8 +30,6 @@ from loopflow.lf.output import (
 )
 from loopflow.lf.tokens import analyze_components
 from loopflow.lf.worktrees import WorktreeError, create
-from loopflow.lfd.models import StepRun, StepRunStatus
-from loopflow.lfd.step_run import log_step_run_end, log_step_run_start
 
 ModelType = Optional[str]
 
@@ -58,7 +47,7 @@ def _open_web_client(backend: str) -> None:
     subprocess.run(["open", url], check=True)
 
 
-def _execute_step(
+def _run_step(
     step_name: str,
     repo_root: Path,
     components: PromptComponents,
@@ -68,118 +57,23 @@ def _execute_step(
     skip_permissions: bool,
     chrome: bool = False,
 ) -> int:
-    """Execute a step (run or inline) and return exit code.
+    """Execute a single step. Thin wrapper around execute_step."""
+    warn_if_context_too_large(analyze_components(components))
 
-    This shared helper handles session creation, command building, and execution
-    for both named steps and inline prompts.
-    """
-    prompt = format_prompt(components)
-    prompt_file = write_prompt_file(prompt)
-
-    tree = analyze_components(components)
-    token_summary = tree.format()
-
-    warn_if_context_too_large(tree)
-
-    main_repo = find_main_repo(repo_root) or repo_root
-    run_mode = "interactive" if is_interactive else "auto"
-    step_run = StepRun(
-        id=str(uuid.uuid4()),
-        step=step_name,
-        repo=str(main_repo),
-        worktree=str(repo_root),
-        status=StepRunStatus.RUNNING,
-        started_at=datetime.now(),
-        pid=os.getpid() if not is_interactive else None,
-        model=backend,
-        run_mode=run_mode,
+    return execute_step(
+        ExecutionParams(
+            step_name=step_name,
+            repo_root=repo_root,
+            components=components,
+            backend=backend,
+            model_variant=model_variant,
+            skip_permissions=skip_permissions,
+            chrome=chrome,
+            is_interactive=is_interactive,
+            use_execvp=is_interactive,  # Single-step interactive replaces process
+            autocommit=True,
+        )
     )
-    log_step_run_start(step_run)
-
-    if is_interactive:
-        command = build_model_interactive_command(
-            backend,
-            skip_permissions=skip_permissions,
-            yolo=skip_permissions,
-            model_variant=model_variant,
-            sandbox_root=repo_root.parent,
-            workdir=repo_root,
-            images=components.image_files,
-            chrome=chrome,
-        )
-    else:
-        command = build_model_command(
-            backend,
-            auto=True,
-            stream=True,
-            skip_permissions=skip_permissions,
-            yolo=skip_permissions,
-            model_variant=model_variant,
-            sandbox_root=repo_root.parent,
-            workdir=repo_root,
-            images=components.image_files,
-            chrome=chrome,
-        )
-
-    # For interactive mode, run CLI directly to preserve terminal
-    if is_interactive:
-        typer.echo(f"\033[90m━━━ {step_name} ━━━\033[0m", err=True)
-        for line in token_summary.split("\n"):
-            typer.echo(f"\033[90m{line}\033[0m", err=True)
-        typer.echo(err=True)
-
-        # Read prompt and clean up file before exec
-        prompt_content = Path(prompt_file).read_text()
-        try:
-            os.unlink(prompt_file)
-        except OSError:
-            pass  # Best effort cleanup
-
-        # Remove API keys so CLIs use subscriptions
-        os.environ.pop("ANTHROPIC_API_KEY", None)
-        os.environ.pop("OPENAI_API_KEY", None)
-
-        # Run CLI directly (replaces current process)
-        cmd_with_prompt = command + [prompt_content]
-        os.chdir(repo_root)
-        os.execvp(cmd_with_prompt[0], cmd_with_prompt)
-
-    # For auto mode, use collector for logging
-    collector_cmd = [
-        sys.executable,
-        "-m",
-        "loopflow.lfd.execution.collector",
-        "--step-run-id",
-        step_run.id,
-        "--step",
-        step_name,
-        "--repo-root",
-        str(repo_root),
-        "--prompt-file",
-        prompt_file,
-        "--token-summary",
-        token_summary,
-        "--autocommit",
-        "--foreground",
-        "--",
-        *command,
-    ]
-
-    # Don't strip API keys from collector env - it needs them for commit message generation.
-    # The collector strips keys when spawning the actual agent CLI.
-    process = subprocess.Popen(collector_cmd, cwd=repo_root)
-    result_code = process.wait()
-
-    # Clean up prompt file
-    try:
-        os.unlink(prompt_file)
-    except OSError:
-        pass  # Best effort cleanup
-
-    status = StepRunStatus.COMPLETED if result_code == 0 else StepRunStatus.FAILED
-    log_step_run_end(step_run.id, status)
-
-    return result_code
 
 
 def _launch_interactive_default(
@@ -234,7 +128,7 @@ def _launch_interactive_default(
 
     components = trim_components_if_needed(components)
 
-    result_code = _execute_step(
+    result_code = _run_step(
         "chat",  # Step name for session tracking
         repo_root,
         components,
@@ -427,7 +321,7 @@ def run(
     else:
         chrome_enabled = False
 
-    result_code = _execute_step(
+    result_code = _run_step(
         step,
         repo_root,
         components,
@@ -585,7 +479,7 @@ def inline(
     else:
         chrome_enabled = False
 
-    result_code = _execute_step(
+    result_code = _run_step(
         "inline",
         repo_root,
         components,

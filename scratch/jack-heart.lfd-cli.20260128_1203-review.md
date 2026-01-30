@@ -18,7 +18,7 @@
 
 **Orphan branch deletion in `create()`** — Auto-deletes orphaned branches silently. This matches the function's existing behavior of reusing worktrees when they exist. In contrast, `create_with_schema()` raises an explicit error, since schema-based creation is more deliberate.
 
-**Import ordering** — Fixed `reset_db` import to maintain alphabetical order within the `loopflow.lfd.*` block.
+**Fork step fallback** — When a fork thread doesn't specify a step, it now falls back to the fork-level step (e.g., `fork: {step: reduce, ...}`). This fixes a case where threads could run without a step name.
 
 ## How it fits together
 

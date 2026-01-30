@@ -43,7 +43,6 @@ impl PtyCommand {
         self.cwd = Some(cwd.into());
         self
     }
-
 }
 
 pub fn run_pty_command(command: PtyCommand) -> Result<i32, SessionError> {

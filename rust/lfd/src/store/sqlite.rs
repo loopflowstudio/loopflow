@@ -759,29 +759,26 @@ impl RunStore for SqliteStore {
         )?;
 
         let run = stmt
-            .query_row(
-                params![wave_id, StepRunStatus::StepWaiting as i32],
-                |row| {
-                    let started_at = unix_to_timestamp(row.get::<_, i64>(7)?);
-                    let ended_at: Option<i64> = row.get(8)?;
-                    let pid: Option<i64> = row.get(9)?;
+            .query_row(params![wave_id, StepRunStatus::StepWaiting as i32], |row| {
+                let started_at = unix_to_timestamp(row.get::<_, i64>(7)?);
+                let ended_at: Option<i64> = row.get(8)?;
+                let pid: Option<i64> = row.get(9)?;
 
-                    Ok(StepRun {
-                        id: row.get(0)?,
-                        step: row.get(1)?,
-                        repo: row.get(2)?,
-                        worktree: row.get(3)?,
-                        flow_run_id: row.get(4)?,
-                        wave_id: row.get(5)?,
-                        status: row.get::<_, i64>(6)? as i32,
-                        started_at: Some(started_at),
-                        ended_at: ended_at.map(unix_to_timestamp),
-                        pid: pid.map(|value| value as u32),
-                        model: row.get(10)?,
-                        run_mode: row.get(11)?,
-                    })
-                },
-            )
+                Ok(StepRun {
+                    id: row.get(0)?,
+                    step: row.get(1)?,
+                    repo: row.get(2)?,
+                    worktree: row.get(3)?,
+                    flow_run_id: row.get(4)?,
+                    wave_id: row.get(5)?,
+                    status: row.get::<_, i64>(6)? as i32,
+                    started_at: Some(started_at),
+                    ended_at: ended_at.map(unix_to_timestamp),
+                    pid: pid.map(|value| value as u32),
+                    model: row.get(10)?,
+                    run_mode: row.get(11)?,
+                })
+            })
             .optional()?;
 
         Ok(run)

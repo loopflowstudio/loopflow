@@ -752,7 +752,9 @@ impl ControlService for ControlServer {
                         }
                     }
                     let wave_clone = wave.clone();
-                    let _ = self.run_store(move |store| store.update_wave(&wave_clone)).await;
+                    let _ = self
+                        .run_store(move |store| store.update_wave(&wave_clone))
+                        .await;
                 }
             }
         }

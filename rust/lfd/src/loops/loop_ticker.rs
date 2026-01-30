@@ -275,10 +275,7 @@ impl core_store::RunStore for LfCoreStoreAdapter {
             .collect())
     }
 
-    fn upsert_fork_run(
-        &self,
-        fork_run: &lf_core::runtime::ForkRun,
-    ) -> Result<(), CoreStoreError> {
+    fn upsert_fork_run(&self, fork_run: &lf_core::runtime::ForkRun) -> Result<(), CoreStoreError> {
         let status = map_fork_status_back(fork_run.status);
         let record = crate::store::ForkRun {
             id: fork_run.id.clone(),
@@ -294,11 +291,7 @@ impl core_store::RunStore for LfCoreStoreAdapter {
         Ok(())
     }
 
-    fn delete_fork_runs(
-        &self,
-        run_id: &RunId,
-        step_index: usize,
-    ) -> Result<(), CoreStoreError> {
+    fn delete_fork_runs(&self, run_id: &RunId, step_index: usize) -> Result<(), CoreStoreError> {
         self.store
             .delete_fork_runs(run_id.as_str(), step_index as u32)
             .map_err(|err| CoreStoreError::Other(err.to_string()))?;
@@ -364,6 +357,10 @@ mod tests {
         ended: Mutex<Vec<(String, i32)>>,
     }
 
+    fn unused<T>() -> StoreResult<T> {
+        Err(StoreError::InvalidData("unused".to_string()))
+    }
+
     impl TestStore {
         fn new(wave: Wave) -> Self {
             Self {
@@ -383,7 +380,7 @@ mod tests {
         }
 
         fn list_waves(&self, _repo: Option<&str>) -> StoreResult<Vec<Wave>> {
-            Err(StoreError::InvalidData("unused".to_string()))
+            unused()
         }
 
         fn get_wave(&self, wave_id: &str) -> StoreResult<Option<Wave>> {
@@ -396,7 +393,7 @@ mod tests {
         }
 
         fn create_wave(&self, _wave: &Wave) -> StoreResult<()> {
-            Err(StoreError::InvalidData("unused".to_string()))
+            unused()
         }
 
         fn update_wave(&self, wave: &Wave) -> StoreResult<()> {
@@ -406,7 +403,7 @@ mod tests {
         }
 
         fn delete_wave(&self, _wave_id: &str) -> StoreResult<()> {
-            Err(StoreError::InvalidData("unused".to_string()))
+            unused()
         }
 
         // Stimulus methods
@@ -414,37 +411,37 @@ mod tests {
             &self,
             _wave_id: Option<&str>,
         ) -> StoreResult<Vec<crate::proto::control::Stimulus>> {
-            Err(StoreError::InvalidData("unused".to_string()))
+            unused()
         }
 
         fn list_stimuli_by_kind(
             &self,
             _kind: i32,
         ) -> StoreResult<Vec<crate::proto::control::Stimulus>> {
-            Err(StoreError::InvalidData("unused".to_string()))
+            unused()
         }
 
         fn get_stimulus(
             &self,
             _stimulus_id: &str,
         ) -> StoreResult<Option<crate::proto::control::Stimulus>> {
-            Err(StoreError::InvalidData("unused".to_string()))
+            unused()
         }
 
         fn create_stimulus(&self, _stimulus: &crate::proto::control::Stimulus) -> StoreResult<()> {
-            Err(StoreError::InvalidData("unused".to_string()))
+            unused()
         }
 
         fn update_stimulus(&self, _stimulus: &crate::proto::control::Stimulus) -> StoreResult<()> {
-            Err(StoreError::InvalidData("unused".to_string()))
+            unused()
         }
 
         fn delete_stimulus(&self, _stimulus_id: &str) -> StoreResult<()> {
-            Err(StoreError::InvalidData("unused".to_string()))
+            unused()
         }
 
         fn delete_stimuli_for_wave(&self, _wave_id: &str) -> StoreResult<u32> {
-            Err(StoreError::InvalidData("unused".to_string()))
+            unused()
         }
 
         // Pending activation methods
@@ -452,25 +449,25 @@ mod tests {
             &self,
             _wave_id: &str,
         ) -> StoreResult<Vec<crate::proto::control::PendingActivation>> {
-            Err(StoreError::InvalidData("unused".to_string()))
+            unused()
         }
 
         fn create_pending_activation(
             &self,
             _activation: &crate::proto::control::PendingActivation,
         ) -> StoreResult<()> {
-            Err(StoreError::InvalidData("unused".to_string()))
+            unused()
         }
 
         fn update_pending_activation(
             &self,
             _activation: &crate::proto::control::PendingActivation,
         ) -> StoreResult<()> {
-            Err(StoreError::InvalidData("unused".to_string()))
+            unused()
         }
 
         fn delete_pending_activations(&self, _wave_id: &str) -> StoreResult<u32> {
-            Err(StoreError::InvalidData("unused".to_string()))
+            unused()
         }
 
         fn get_pending_for_stimulus(
@@ -478,12 +475,12 @@ mod tests {
             _wave_id: &str,
             _stimulus_id: &str,
         ) -> StoreResult<Option<crate::proto::control::PendingActivation>> {
-            Err(StoreError::InvalidData("unused".to_string()))
+            unused()
         }
 
         // Step run methods
         fn list_step_runs(&self) -> StoreResult<Vec<crate::proto::control::StepRun>> {
-            Err(StoreError::InvalidData("unused".to_string()))
+            unused()
         }
 
         fn list_step_run_history(
@@ -492,38 +489,37 @@ mod tests {
             _repo: Option<&str>,
             _limit: Option<u32>,
         ) -> StoreResult<Vec<crate::proto::control::StepRun>> {
-            Err(StoreError::InvalidData("unused".to_string()))
+            unused()
         }
 
-        fn list_fork_runs(
-            &self,
-            _wave_id: &str,
-            _step_index: u32,
-        ) -> StoreResult<Vec<ForkRun>> {
-            Err(StoreError::InvalidData("unused".to_string()))
+        fn list_fork_runs(&self, _wave_id: &str, _step_index: u32) -> StoreResult<Vec<ForkRun>> {
+            unused()
         }
 
         fn upsert_fork_run(&self, _fork_run: &ForkRun) -> StoreResult<()> {
-            Err(StoreError::InvalidData("unused".to_string()))
+            unused()
         }
 
         fn delete_fork_runs(&self, _wave_id: &str, _step_index: u32) -> StoreResult<u32> {
-            Err(StoreError::InvalidData("unused".to_string()))
+            unused()
         }
 
-        fn get_step_run(&self, _step_run_id: &str) -> StoreResult<Option<crate::proto::control::StepRun>> {
-            Err(StoreError::InvalidData("unused".to_string()))
+        fn get_step_run(
+            &self,
+            _step_run_id: &str,
+        ) -> StoreResult<Option<crate::proto::control::StepRun>> {
+            unused()
         }
 
         fn get_waiting_step_run(
             &self,
             _wave_id: &str,
         ) -> StoreResult<Option<crate::proto::control::StepRun>> {
-            Err(StoreError::InvalidData("unused".to_string()))
+            unused()
         }
 
         fn start_step_run(&self, _step_run: &crate::proto::control::StepRun) -> StoreResult<()> {
-            Err(StoreError::InvalidData("unused".to_string()))
+            unused()
         }
 
         fn update_step_run_status(
@@ -532,7 +528,7 @@ mod tests {
             _status: i32,
             _pid: Option<u32>,
         ) -> StoreResult<()> {
-            Err(StoreError::InvalidData("unused".to_string()))
+            unused()
         }
 
         fn end_step_run(&self, step_run_id: &str, status: i32, _ended_at: i64) -> StoreResult<()> {
@@ -545,7 +541,7 @@ mod tests {
             &self,
             _older_than_secs: u64,
         ) -> StoreResult<Vec<crate::proto::control::StepRun>> {
-            Err(StoreError::InvalidData("unused".to_string()))
+            unused()
         }
     }
 

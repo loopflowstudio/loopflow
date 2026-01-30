@@ -16,7 +16,8 @@ pub trait RunStore {
     fn create_step_run(&self, step_run: &StepRun) -> Result<(), StoreError>;
 
     /// List fork runs for a flow run and step index.
-    fn list_fork_runs(&self, run_id: &RunId, step_index: usize) -> Result<Vec<ForkRun>, StoreError>;
+    fn list_fork_runs(&self, run_id: &RunId, step_index: usize)
+        -> Result<Vec<ForkRun>, StoreError>;
 
     /// Upsert a fork run record.
     fn upsert_fork_run(&self, fork_run: &ForkRun) -> Result<(), StoreError>;

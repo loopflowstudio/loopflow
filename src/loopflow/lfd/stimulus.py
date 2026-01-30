@@ -136,6 +136,34 @@ def update_stimulus_triggered_at(
     return updated
 
 
+def enable_stimulus(stimulus_id: str, db_path: Path | None = None) -> bool:
+    """Enable a stimulus."""
+    conn = _get_db(db_path)
+
+    cursor = conn.execute(
+        "UPDATE stimuli SET enabled = 1 WHERE id = ? OR id LIKE ?",
+        (stimulus_id, f"{stimulus_id}%"),
+    )
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    return updated
+
+
+def disable_stimulus(stimulus_id: str, db_path: Path | None = None) -> bool:
+    """Disable a stimulus."""
+    conn = _get_db(db_path)
+
+    cursor = conn.execute(
+        "UPDATE stimuli SET enabled = 0 WHERE id = ? OR id LIKE ?",
+        (stimulus_id, f"{stimulus_id}%"),
+    )
+    conn.commit()
+    updated = cursor.rowcount > 0
+    conn.close()
+    return updated
+
+
 def delete_stimulus(stimulus_id: str, db_path: Path | None = None) -> bool:
     """Delete a stimulus."""
     conn = _get_db(db_path)

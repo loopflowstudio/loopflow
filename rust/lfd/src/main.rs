@@ -11,8 +11,8 @@ mod loops;
 mod obs;
 mod proto;
 mod scheduler;
-mod sessions;
 mod server;
+mod sessions;
 mod store;
 
 use crate::http::HttpState;

@@ -33,7 +33,14 @@ from loopflow.lfd.git_hooks import (
     uninstall_hooks,
 )
 from loopflow.lfd.models import MergeMode, StepRunStatus, Wave, WaveStatus
-from loopflow.lfd.stimulus import create_stimulus, list_stimuli
+from loopflow.lfd.stimulus import (
+    create_stimulus,
+    delete_stimulus,
+    disable_stimulus,
+    enable_stimulus,
+    get_stimulus,
+    list_stimuli,
+)
 from loopflow.lfd.step_run import get_waiting_step_run, update_step_run_status
 from loopflow.lfd.wave import (
     create_wave,

@@ -288,7 +288,8 @@ fn run_fork_item(
             let fork_worktree = fork_worktree_path(run, index);
             let fork_branch = format!("{}-fork-{}", run.id.as_str(), index);
             if !Path::new(&fork_worktree).exists() {
-                if let Err(err) = create_worktree(&run.repo, Path::new(&fork_worktree), &fork_branch)
+                if let Err(err) =
+                    create_worktree(&run.repo, Path::new(&fork_worktree), &fork_branch)
                 {
                     run.status = FlowRunStatus::Failed;
                     run.error = Some(err.to_string());
@@ -332,10 +333,7 @@ fn run_fork_item(
             return Ok(TickResult::StepFailed);
         }
 
-        let mut fork_run = match fork_runs
-            .iter()
-            .find(|fork| fork.branch_index == index)
-        {
+        let mut fork_run = match fork_runs.iter().find(|fork| fork.branch_index == index) {
             Some(fork_run) => fork_run.clone(),
             None => {
                 run.status = FlowRunStatus::Failed;

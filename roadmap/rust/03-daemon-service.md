@@ -23,7 +23,17 @@ Deliver a production-grade service that runs 24/7, with stable scheduling, safe 
 - `queue`: concurrency and backpressure
 - `runs`: persistence and state transitions
 - `sessions`: interactive step connect lifecycle
+- `waves`: wave state (branch, base_branch, base_commit, worktree)
 - `obs`: logs + metrics + tracing
+
+## Stacking commands
+
+`lfd next` and `lfd rebase` call lf-core for git operations while managing wave state:
+
+- `lfd next` → lf-core::git::create_branch + update wave.base_branch/base_commit
+- `lfd rebase` → lf-core::git::rebase(wave.base_commit) + clear stacking info
+
+See `roadmap/rust/04-lf-client.md` and `roadmap/wave/ops-architecture.md` for full design.
 
 ## Session connect
 When a flow pauses at an interactive step, users can connect to complete it.
@@ -54,4 +64,3 @@ When a flow pauses at an interactive step, users can connect to complete it.
 ## Open questions
 - Do we keep SQLite for v1 or jump to Postgres now?
 - How do we handle per-tenant isolation in early phases?
-

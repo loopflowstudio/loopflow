@@ -10,6 +10,7 @@ from loopflow.lfd.migrations import m_2026_01_24_agent_worktree as agent_worktre
 from loopflow.lfd.migrations import m_2026_01_24_nullable_goal_area as nullable_goal_area
 from loopflow.lfd.migrations import m_2026_01_25_agent_paused as agent_paused
 from loopflow.lfd.migrations import m_2026_01_26_step_index as step_index
+from loopflow.lfd.migrations import m_2026_01_28_wave_stacking as wave_stacking
 
 
 @dataclass
@@ -30,4 +31,5 @@ MIGRATIONS = [
     ),
     Migration(agent_paused.VERSION, agent_paused.DESCRIPTION, agent_paused.apply),
     Migration(step_index.SCHEMA_VERSION, step_index.DESCRIPTION, step_index.apply),
+    Migration(wave_stacking.VERSION, wave_stacking.DESCRIPTION, wave_stacking.apply),
 ]

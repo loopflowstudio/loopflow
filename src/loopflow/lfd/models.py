@@ -106,6 +106,10 @@ class Wave(LfdModel):
     # Activation queue
     pending_activations: int = 0
 
+    # Stacking support
+    base_branch: str | None = None  # branch this wave is stacked on
+    base_commit: str | None = None  # SHA when branched (for squash merge recovery)
+
     model_config = ConfigDict(
         extra="forbid",
         validate_assignment=True,
@@ -221,6 +225,8 @@ def wave_from_row(row: dict) -> Wave:
         last_main_sha=row.get("last_main_sha"),
         consecutive_failures=row.get("consecutive_failures", 0),
         pending_activations=row.get("pending_activations", 0),
+        base_branch=row.get("base_branch"),
+        base_commit=row.get("base_commit"),
     )
 
 

@@ -10,6 +10,7 @@ struct AreaPicker: View {
     @Environment(RepoState.self) private var repoState
     @Environment(\.colorScheme) private var colorScheme
 
+    @State private var isLoadingInferred = false
     @State private var inferredPaths: [String] = []
 
     private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
@@ -197,6 +198,10 @@ struct AreaPicker: View {
     private func loadInferredPaths() async {
         guard wave.hasDiff, let worktreePath = wave.worktreePath else { return }
 
+        isLoadingInferred = true
+        defer { isLoadingInferred = false }
+
+        // Get changed directories from git
         let worktreeURL = URL(fileURLWithPath: worktreePath)
         let worktreeService = WorktreeService()
 

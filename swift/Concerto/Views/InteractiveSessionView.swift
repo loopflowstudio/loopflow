@@ -23,6 +23,8 @@ struct InteractiveSessionView: View {
             sessionHeader
             Divider()
             terminalContent
+            Divider()
+            sessionFooter
         }
         .background(palette.background)
         .task {
@@ -90,22 +92,42 @@ struct InteractiveSessionView: View {
                     .foregroundStyle(.red)
                     .help(error)
             }
+        }
+        .padding(.horizontal, Spacing.xl)
+        .padding(.vertical, Spacing.md)
+        .background(palette.surface)
+    }
 
-            // End session button
+    // MARK: - Footer
+
+    private var sessionFooter: some View {
+        HStack(spacing: Spacing.lg) {
+            Spacer()
+
             Button {
-                endSession()
+                cancelSession()
             } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "xmark")
-                        .font(.caption)
-                    Text("End")
-                }
+                Text("Cancel")
             }
             .buttonStyle(DarkButtonStyle())
-            .help("End this interactive session")
+            .keyboardShortcut(.escape, modifiers: [])
+            .help("Cancel this session without advancing the flow")
+
+            Button {
+                continueSession()
+            } label: {
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: "checkmark")
+                    Text("Continue")
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Color.statusSuccess)
+            .keyboardShortcut(.return, modifiers: .command)
+            .help("Signal completion and advance to the next step")
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
+        .padding(.horizontal, Spacing.xl)
+        .padding(.vertical, Spacing.md)
         .background(palette.surface)
     }
 
@@ -123,11 +145,20 @@ struct InteractiveSessionView: View {
 
     // MARK: - Actions
 
-    private func endSession() {
-        // Destroy the terminal surface, killing the child process
+    private func cancelSession() {
+        // Destroy the terminal surface, killing the child process (SIGTERM)
         GhosttyManager.shared.destroyActiveSession()
-        // Clear the session state
+        // Clear the session state - wave stays in WAITING, can reconnect
         sessionState.endInteractiveSession()
+    }
+
+    private func continueSession() {
+        // Send EOF (Ctrl+D = ASCII 4) to terminal
+        // Process will exit gracefully, triggering onSessionClosed callback
+        // which calls sessionState.endInteractiveSession()
+        // Daemon sees exit code 0, advances flow
+        let eof = "\u{04}"
+        GhosttyManager.shared.sendText(eof)
     }
 }
 

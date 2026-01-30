@@ -41,13 +41,13 @@ def _get_pr_state(repo_root: Path, pr_number: int) -> str | None:
     return None
 
 
+def _fetch_main(repo_root: Path) -> None:
+    """Fetch origin/main."""
+    subprocess.run(["git", "fetch", "origin", "main"], cwd=repo_root, capture_output=True)
+
+
 def _is_branch_merged(repo_root: Path, branch: str) -> bool:
-    """Check if branch is fully merged into origin/main."""
-    subprocess.run(
-        ["git", "fetch", "origin", "main"],
-        cwd=repo_root,
-        capture_output=True,
-    )
+    """Check if branch is fully merged into origin/main. Assumes origin/main is fetched."""
     result = subprocess.run(
         ["git", "merge-base", "--is-ancestor", branch, "origin/main"],
         cwd=repo_root,
@@ -58,11 +58,6 @@ def _is_branch_merged(repo_root: Path, branch: str) -> bool:
 
 def _fresh_start(repo_root: Path, wave_name: str) -> str | None:
     """Reset to origin/main and create fresh branch. Returns new branch name."""
-    subprocess.run(
-        ["git", "fetch", "origin", "main"],
-        cwd=repo_root,
-        capture_output=True,
-    )
     result = subprocess.run(
         ["git", "checkout", "origin/main"],
         cwd=repo_root,
@@ -216,6 +211,7 @@ def next_worktree(
         already_merged = True
     elif pr_number is None:
         # No PR - check if branch commits are merged into main
+        _fetch_main(repo_root)
         already_merged = _is_branch_merged(repo_root, branch)
         if not already_merged:
             if create_pr:
@@ -242,6 +238,7 @@ def next_worktree(
     if already_merged:
         # Fresh start from origin/main
         typer.echo("Branch already merged. Starting fresh from main...")
+        _fetch_main(repo_root)
         new_branch = _fresh_start(repo_root, wave_name)
         if not new_branch:
             typer.echo("Error: Failed to create fresh branch", err=True)

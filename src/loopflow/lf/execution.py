@@ -16,7 +16,7 @@ from loopflow.lf.context import PromptComponents, format_prompt
 from loopflow.lf.git import find_main_repo
 from loopflow.lf.launcher import build_model_command, build_model_interactive_command
 from loopflow.lf.logging import write_prompt_file
-from loopflow.lf.output import print_step_header
+from loopflow.lf.output import print_step_header, warn_if_context_too_large
 from loopflow.lf.tokens import analyze_components
 from loopflow.lfd.models import StepRun, StepRunStatus
 from loopflow.lfd.step_run import log_step_run_end, log_step_run_start
@@ -62,8 +62,10 @@ def execute_step(params: ExecutionParams) -> int:
 
     For auto mode, uses the collector subprocess for output capture and logging.
     """
-    prompt = format_prompt(params.components)
     tree = analyze_components(params.components)
+    warn_if_context_too_large(tree)
+
+    prompt = format_prompt(params.components)
     token_summary = tree.format()
 
     main_repo = find_main_repo(params.repo_root) or params.repo_root
@@ -96,16 +98,15 @@ def execute_step(params: ExecutionParams) -> int:
     )
 
     if params.is_interactive:
-        return _execute_interactive(params, step_run, prompt, main_repo)
+        return _execute_interactive(params, step_run, prompt)
     else:
-        return _execute_auto(params, step_run, prompt, main_repo)
+        return _execute_auto(params, step_run, prompt)
 
 
 def _execute_interactive(
     params: ExecutionParams,
     step_run: StepRun,
     prompt: str,
-    main_repo: Path,
 ) -> int:
     """Execute step in interactive mode."""
     command = build_model_interactive_command(
@@ -150,7 +151,6 @@ def _execute_auto(
     params: ExecutionParams,
     step_run: StepRun,
     prompt: str,
-    main_repo: Path,
 ) -> int:
     """Execute step in auto mode using collector."""
     prompt_file = write_prompt_file(prompt)

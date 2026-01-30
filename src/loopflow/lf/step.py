@@ -57,9 +57,7 @@ def _run_step(
     skip_permissions: bool,
     chrome: bool = False,
 ) -> int:
-    """Execute a single step. Thin wrapper around execute_step."""
-    warn_if_context_too_large(analyze_components(components))
-
+    """Execute a single step."""
     return execute_step(
         ExecutionParams(
             step_name=step_name,

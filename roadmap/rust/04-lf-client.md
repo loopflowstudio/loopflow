@@ -14,6 +14,25 @@ Keep the CLI UX but move execution to the protocol-first engine, enabling remote
 - Local mode uses direct `lf` ↔ `lf-core` integration
 - Remote mode switches `lf` engine to `lfd` that exposes the same subset of `lf-core` APIs used by `lf`
 - `lf ops` commands (rebase, next, land) call lf-core git module
+- Move git operations from Python lfops to Rust lf-core
+- Expose operations via FFI or CLI for Python frontend
+
+## lf ops vs lfd: siblings, not layers
+
+Both `lf ops` and `lfd` call lf-core for git operations. The difference is state:
+
+- `lf ops` — stateless, no daemon required
+- `lfd` — adds wave state (base_branch, base_commit) for stacking workflows
+
+| | `lf ops` | `lfd` |
+|---|----------|-------|
+| Daemon required | No | Yes |
+| State | None | Wave DB (SQLite/Postgres) |
+| Scope | This worktree | Named wave |
+| Rebase | Simple onto main | Squash-aware via base_commit |
+| Next | New branch, done | New branch + record stacking |
+
+Siblings, not layers. Shared engine, different state models.
 
 ## lfops → lf ops transition
 
@@ -53,78 +72,25 @@ When `lf` moves to lf-core, `lf ops` moves with it. Both become thin Python CLIs
 ```
 lf-core (Rust)
 ├── git::rebase(worktree, onto, base_commit)
-├── git::create_branch(worktree, name)
-├── git::push_force_with_lease(worktree)
-└── git::land(worktree, strategy)
-
-lf (Python CLI)                  lf ops (Python CLI)
-├── run → lf-core                ├── rebase → lf-core
-├── flow → lf-core               ├── next → lf-core
-└── ...                          └── land → lf-core
-```
-
-`lf ops` is stateless - it calls lf-core with simple defaults (e.g., `rebase(worktree, "origin/main", None)`).
-
-`lfd` also calls lf-core but adds wave state (e.g., `rebase(worktree, "origin/main", wave.base_commit)`).
-
-## Non-goals
-- Removing Python immediately
-- Rewriting all UX flows
-- Changing git workflow semantics
-- Wave state in lf-core (stays in lfd)
-
-## UX principles
-- `lf` behaves the same whether local or remote.
-- Clear, actionable errors on auth or protocol mismatch.
-- Local mode remains the default for dev.
-- Users can run `lf` without installing or running `lfd`.
-- Local mode should not require a daemon process.
-- Remote mode should be a pure engine switch, not a UX switch.
-
-## Success criteria
-- `lf run` works identically against local and remote.
-- Concerto and `lf` can connect to the same daemon.
-- Users can opt into remote with a single config change.
-- Hosted `lfd` can be targeted from a local `lf` without special flags.
-- Local `lf` works out of the box with no daemon running.
-- Remote `lf` uses the same engine API surface as local `lf` (subset parity).
-
----
-
-## Ops Architecture
-
-`lf ops` and `lfd` are siblings, not layers. Both call lf-core for git operations. The difference is state:
-
-- `lf ops` — stateless, no daemon required
-- `lfd` — adds wave state (base_branch, base_commit) for stacking workflows
-
-### Architecture
-
-```
-lf-core (Rust)
-├── git::rebase(worktree, onto, base_commit)
 ├── git::create_branch(worktree, name) → BranchInfo
 ├── git::push_force_with_lease(worktree)
 ├── git::land(worktree, strategy)
 └── git::pr_create(worktree, title, body)
 
-lf ops (Python CLI)              lfd (Rust daemon)
-├── rebase → lf-core(None)       ├── rebase → lf-core(wave.base_commit)
-├── next → lf-core               ├── next → lf-core + update wave state
-└── land → lf-core               └── land → lf-core + update wave state
+lf (Python CLI)                  lf ops (Python CLI)
+├── run → lf-core                ├── rebase → lf-core(None)
+├── flow → lf-core               ├── next → lf-core
+└── ...                          └── land → lf-core
+
+                                 lfd (Rust daemon)
+                                 ├── rebase → lf-core(wave.base_commit)
+                                 ├── next → lf-core + update wave state
+                                 └── land → lf-core + update wave state
 ```
 
-### Key distinction
+`lf ops` is stateless - it calls lf-core with simple defaults (e.g., `rebase(worktree, "origin/main", None)`).
 
-| | `lf ops` | `lfd` |
-|---|----------|-------|
-| Daemon required | No | Yes |
-| State | None | Wave DB (SQLite/Postgres) |
-| Scope | This worktree | Named wave |
-| Rebase | Simple onto main | Squash-aware via base_commit |
-| Next | New branch, done | New branch + record stacking |
-
-Siblings, not layers. Shared engine, different state models.
+`lfd` also calls lf-core but adds wave state (e.g., `rebase(worktree, "origin/main", wave.base_commit)`).
 
 ### lf-core git module
 
@@ -166,6 +132,28 @@ The `next`/`rebase` pair enables stacking:
 4. `lfd rebase` — uses base_commit for `git rebase --onto origin/main <base_commit>`
 
 Without daemon state, `lf ops rebase` does simple `git rebase origin/main`. The squash-aware logic requires the recorded base_commit.
+
+## Non-goals
+- Removing Python immediately
+- Rewriting all UX flows
+- Wave state management (stays in lfd)
+- Changing git workflow semantics
+
+## UX principles
+- `lf` behaves the same whether local or remote.
+- Clear, actionable errors on auth or protocol mismatch.
+- Local mode remains the default for dev.
+- Users can run `lf` without installing or running `lfd`.
+- Local mode should not require a daemon process.
+- Remote mode should be a pure engine switch, not a UX switch.
+
+## Success criteria
+- `lf run` works identically against local and remote.
+- Concerto and `lf` can connect to the same daemon.
+- Users can opt into remote with a single config change.
+- Hosted `lfd` can be targeted from a local `lf` without special flags.
+- Local `lf` works out of the box with no daemon running.
+- Remote `lf` uses the same engine API surface as local `lf` (subset parity).
 
 ---
 

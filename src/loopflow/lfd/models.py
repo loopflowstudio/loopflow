@@ -29,24 +29,62 @@ class LfdModel(BaseModel):
     )
 
 
+class StimulusKind(str, Enum):
+    """Type of stimulus trigger."""
+
+    ONCE = "once"  # Single run (one-shot)
+    LOOP = "loop"  # Continuously until stopped
+    WATCH = "watch"  # When files in area change on main
+    CRON = "cron"  # On schedule
+
+
 @dataclass
 class Stimulus:
-    """Determines when a wave runs.
+    """An independent trigger that can activate a wave.
 
-    Kinds:
-    - once: single run (one-shot)
-    - loop: continuously until stopped
-    - watch: when files in area change on main
-    - cron: on schedule
+    Multiple stimuli can point to the same wave (many:1).
+    Wave owns the "what" (area, direction, flow).
+    Stimulus owns the "when" (kind, trigger config, state).
     """
 
+    id: str
+    wave_id: str
     kind: Literal["once", "loop", "watch", "cron"]
-    cron: str | None = None
+
+    # Config (kind-specific)
+    cron: str | None = None  # Required when kind = cron
+
+    # State (kind-specific, tracked per-stimulus)
+    last_main_sha: str | None = None  # For watch: last seen SHA on main
+    last_triggered_at: datetime | None = None  # For cron: last trigger time
+
+    # Metadata
+    enabled: bool = True
+    created_at: datetime | None = None
 
     def __str__(self) -> str:
         if self.kind == "cron" and self.cron:
             return f"cron({self.cron})"
         return self.kind
+
+    def short_id(self) -> str:
+        return self.id[:7]
+
+
+@dataclass
+class PendingActivation:
+    """Tracks queued trigger events for coalescing.
+
+    When multiple triggers fire while a wave is running, they queue here
+    and coalesce into a single activation with combined context.
+    """
+
+    id: str
+    wave_id: str
+    stimulus_id: str
+    from_sha: str = ""  # For watch: start of diff range
+    to_sha: str = ""  # For watch: end of diff range
+    queued_at: datetime | None = None
 
 
 class WaveStatus(str, Enum):
@@ -68,11 +106,9 @@ class MergeMode(str, Enum):
 class Wave(LfdModel):
     """An orchestrated unit of autonomous work.
 
-    Stimulus types:
-    - once: single run (one-shot)
-    - loop: runs when started until stopped or PR limit
-    - watch: runs when area changes on main
-    - cron: runs on schedule
+    Wave owns the "what" (area, direction, flow).
+    Stimuli (separate entities) own the "when" (trigger config, state).
+    Multiple stimuli can point to the same wave (many:1).
 
     area and direction are optional at creation time and validated at run-time.
     """
@@ -84,8 +120,10 @@ class Wave(LfdModel):
     direction: list[str] | None = None  # optional, validated at run-time
     area: list[str] | None = None  # optional, validated at run-time
 
-    stimulus: Stimulus = Field(default_factory=lambda: Stimulus("once"))
-    paused: bool = True  # when paused, stimulus doesn't fire (manual mode)
+    # Note: stimulus field removed - now separate Stimulus entities
+    # Multiple Stimulus objects can reference this wave via wave_id
+
+    paused: bool = True  # when paused, stimuli don't fire (manual mode)
     status: WaveStatus = WaveStatus.IDLE
     iteration: int = 0
 
@@ -97,18 +135,20 @@ class Wave(LfdModel):
     pid: int | None = None
     created_at: datetime = Field(default_factory=datetime.now)
 
-    # Watch state
-    last_main_sha: str | None = None
+    # Note: last_main_sha moved to Stimulus (per-stimulus state)
 
     # Circuit breaker
     consecutive_failures: int = 0
 
-    # Activation queue
+    # Activation queue (count of pending_activations table entries)
     pending_activations: int = 0
 
     # Stacking support
     base_branch: str | None = None  # branch this wave is stacked on
     base_commit: str | None = None  # SHA when branched (for squash merge recovery)
+
+    # Step execution state
+    step_index: int = 0
 
     model_config = ConfigDict(
         extra="forbid",
@@ -132,17 +172,6 @@ class Wave(LfdModel):
             return None
         if isinstance(v, str):
             return [v]
-        return v
-
-    @field_validator("stimulus", mode="before")
-    @classmethod
-    def normalize_stimulus(cls, v):
-        if isinstance(v, Stimulus):
-            return v
-        if isinstance(v, dict):
-            return Stimulus(kind=v.get("kind", "loop"), cron=v.get("cron"))
-        if isinstance(v, str):
-            return Stimulus(kind=v)
         return v
 
     def short_id(self) -> str:
@@ -189,11 +218,7 @@ def wave_from_row(row: dict) -> Wave:
     if merge_mode_str == "auto":
         merge_mode_str = "pr"
 
-    # Build stimulus from DB columns
-    stimulus = Stimulus(
-        kind=row.get("stimulus_kind", "once"),
-        cron=row.get("stimulus_cron"),
-    )
+    # Note: stimulus and last_main_sha now in separate stimuli table
 
     worktree_str = row.get("worktree")
     worktree = Path(worktree_str) if worktree_str else None
@@ -212,7 +237,6 @@ def wave_from_row(row: dict) -> Wave:
         flow=row["flow"],
         direction=direction,
         area=area,
-        stimulus=stimulus,
         paused=paused,
         status=WaveStatus(row["status"]),
         iteration=row.get("iteration", 0),
@@ -222,11 +246,49 @@ def wave_from_row(row: dict) -> Wave:
         merge_mode=MergeMode(merge_mode_str),
         pid=row.get("pid"),
         created_at=datetime.fromisoformat(row["created_at"]),
-        last_main_sha=row.get("last_main_sha"),
         consecutive_failures=row.get("consecutive_failures", 0),
         pending_activations=row.get("pending_activations", 0),
         base_branch=row.get("base_branch"),
         base_commit=row.get("base_commit"),
+        step_index=row.get("step_index", 0),
+    )
+
+
+def stimulus_from_row(row: dict) -> Stimulus:
+    """Convert database row to Stimulus."""
+    last_triggered_at = row.get("last_triggered_at")
+    if last_triggered_at is not None:
+        last_triggered_at = datetime.fromtimestamp(last_triggered_at)
+
+    created_at = row.get("created_at")
+    if created_at is not None:
+        created_at = datetime.fromisoformat(created_at)
+
+    return Stimulus(
+        id=row["id"],
+        wave_id=row["wave_id"],
+        kind=row["kind"],
+        cron=row.get("cron") or None,
+        last_main_sha=row.get("last_main_sha"),
+        last_triggered_at=last_triggered_at,
+        enabled=bool(row.get("enabled", 1)),
+        created_at=created_at,
+    )
+
+
+def pending_activation_from_row(row: dict) -> PendingActivation:
+    """Convert database row to PendingActivation."""
+    queued_at = row.get("queued_at")
+    if queued_at is not None:
+        queued_at = datetime.fromtimestamp(queued_at)
+
+    return PendingActivation(
+        id=row["id"],
+        wave_id=row["wave_id"],
+        stimulus_id=row["stimulus_id"],
+        from_sha=row.get("from_sha") or "",
+        to_sha=row.get("to_sha") or "",
+        queued_at=queued_at,
     )
 
 

@@ -9,6 +9,7 @@ import sys
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Literal
 
 from croniter import croniter
 
@@ -35,17 +36,23 @@ def get_wt_from_cwd() -> Path | None:
 
 
 def save_wave(wave: Wave, db_path: Path | None = None) -> None:
-    """Save or update a wave."""
+    """Save or update a wave.
+
+    Note: stimulus and last_main_sha are now in separate stimuli table.
+    Use stimulus.py functions to manage stimuli.
+    """
     conn = _get_db(db_path)
 
+    # Note: stimulus_kind, stimulus_cron, last_main_sha columns kept for backwards compat
+    # but set to defaults - actual stimulus data is in stimuli table
     conn.execute(
         """
         INSERT OR REPLACE INTO waves
         (id, name, repo, flow, direction, area, stimulus_kind, stimulus_cron,
          paused, status, iteration, worktree, branch, pr_limit, merge_mode,
          pid, created_at, last_main_sha, consecutive_failures, pending_activations,
-         base_branch, base_commit)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         base_branch, base_commit, step_index)
+        VALUES (?, ?, ?, ?, ?, ?, 'once', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)
         """,
         (
             wave.id,
@@ -54,8 +61,6 @@ def save_wave(wave: Wave, db_path: Path | None = None) -> None:
             wave.flow,
             json.dumps(wave.direction) if wave.direction is not None else None,
             json.dumps(wave.area) if wave.area is not None else None,
-            wave.stimulus.kind,
-            wave.stimulus.cron,
             1 if wave.paused else 0,
             wave.status.value,
             wave.iteration,
@@ -65,11 +70,11 @@ def save_wave(wave: Wave, db_path: Path | None = None) -> None:
             wave.merge_mode.value,
             wave.pid,
             wave.created_at.isoformat(),
-            wave.last_main_sha,
             wave.consecutive_failures,
             wave.pending_activations,
             wave.base_branch,
             wave.base_commit,
+            wave.step_index,
         ),
     )
     conn.commit()
@@ -204,13 +209,13 @@ def update_wave_pid(wave_id: str, pid: int | None, db_path: Path | None = None) 
     return updated
 
 
-def update_wave_sha(wave_id: str, sha: str | None, db_path: Path | None = None) -> bool:
-    """Update a wave's last_main_sha (for watch mode)."""
+def update_wave_step_index(wave_id: str, step_index: int, db_path: Path | None = None) -> bool:
+    """Update a wave's step_index."""
     conn = _get_db(db_path)
 
     cursor = conn.execute(
-        "UPDATE waves SET last_main_sha = ? WHERE id = ? OR id LIKE ?",
-        (sha, wave_id, f"{wave_id}%"),
+        "UPDATE waves SET step_index = ? WHERE id = ? OR id LIKE ?",
+        (step_index, wave_id, f"{wave_id}%"),
     )
     conn.commit()
     updated = cursor.rowcount > 0
@@ -336,7 +341,8 @@ def create_wave(
     area: list[str] | None = None,
     pr_limit: int = 5,
     merge_mode: MergeMode = MergeMode.PR,
-    stimulus: Stimulus | None = None,
+    stimulus_kind: Literal["once", "loop", "watch", "cron"] | None = None,
+    stimulus_cron: str | None = None,
 ) -> Wave:
     """Create a new wave or get existing by name.
 
@@ -344,9 +350,11 @@ def create_wave(
     returns the existing wave without modification (use update_wave for changes).
 
     Creates a worktree immediately so the wave is ready for interactive sessions.
+
+    If stimulus_kind is provided, also creates a stimulus for the wave.
+    Use stimulus.create_stimulus() to add additional stimuli to existing waves.
     """
-    if stimulus is None:
-        stimulus = Stimulus("loop")
+    from loopflow.lfd.stimulus import create_stimulus
 
     # Check for existing wave by name
     if name:
@@ -393,7 +401,6 @@ def create_wave(
         flow=flow,
         direction=direction,
         area=area,
-        stimulus=stimulus,
         status=WaveStatus.IDLE,
         pr_limit=pr_limit,
         merge_mode=merge_mode,
@@ -402,6 +409,11 @@ def create_wave(
     )
 
     save_wave(wave)
+
+    # Create initial stimulus if kind specified
+    if stimulus_kind:
+        create_stimulus(wave.id, stimulus_kind, stimulus_cron)
+
     return wave
 
 
@@ -410,13 +422,15 @@ def update_wave(
     area: list[str] | None = None,
     direction: list[str] | None = None,
     flow: str | None = None,
-    stimulus: Stimulus | None = None,
     paused: bool | None = None,
     pr_limit: int | None = None,
     merge_mode: MergeMode | None = None,
     db_path: Path | None = None,
 ) -> Wave | None:
-    """Update a wave's configuration. Returns updated wave or None if not found."""
+    """Update a wave's configuration. Returns updated wave or None if not found.
+
+    Note: stimuli are now managed via stimulus.py functions.
+    """
     wave = get_wave(wave_id, db_path)
     if not wave:
         return None
@@ -427,8 +441,6 @@ def update_wave(
         wave.direction = direction
     if flow is not None:
         wave.flow = flow
-    if stimulus is not None:
-        wave.stimulus = stimulus
     if paused is not None:
         wave.paused = paused
     if pr_limit is not None:
@@ -441,8 +453,12 @@ def update_wave(
 
 
 def clone_wave(wave_id: str, name: str | None = None, db_path: Path | None = None) -> Wave | None:
-    """Clone a wave with a new ID and name. Returns new wave or None if source not found."""
+    """Clone a wave with a new ID and name. Returns new wave or None if source not found.
+
+    Note: Does not clone stimuli. Use stimulus.create_stimulus() to add stimuli to the clone.
+    """
     from loopflow.lf.naming import generate_name
+    from loopflow.lfd.stimulus import create_stimulus, list_stimuli
 
     source = get_wave(wave_id, db_path)
     if not source:
@@ -455,7 +471,6 @@ def clone_wave(wave_id: str, name: str | None = None, db_path: Path | None = Non
         flow=source.flow,
         direction=source.direction,
         area=source.area,
-        stimulus=source.stimulus,
         paused=True,  # Clones start paused
         status=WaveStatus.IDLE,
         iteration=0,
@@ -466,6 +481,12 @@ def clone_wave(wave_id: str, name: str | None = None, db_path: Path | None = Non
     )
 
     save_wave(new_wave, db_path)
+
+    # Clone stimuli from source wave
+    source_stimuli = list_stimuli(wave_id=source.id, db_path=db_path)
+    for stim in source_stimuli:
+        create_stimulus(new_wave.id, stim.kind, stim.cron, db_path)
+
     return new_wave
 
 
@@ -512,12 +533,14 @@ def start_wave(
     area: list[str] | None = None,
     direction: list[str] | None = None,
     flow: str | None = None,
-    stimulus: "Stimulus | None" = None,
 ) -> StartResult:
     """Start a wave running.
 
     Optional kwargs are one-time overrides for this run only.
     They don't modify the wave's persistent configuration.
+
+    Note: Stimuli are now managed separately. This starts the wave regardless
+    of stimulus type - the daemon handles stimulus-based triggering.
     """
     from loopflow.lfd.daemon.process import is_process_running
 
@@ -541,10 +564,6 @@ def start_wave(
         override_args.extend(["--direction", ",".join(direction)])
     if flow is not None:
         override_args.extend(["--flow", flow])
-    if stimulus is not None:
-        override_args.extend(["--stimulus", stimulus.kind])
-        if stimulus.cron:
-            override_args.extend(["--cron", stimulus.cron])
 
     if foreground:
         update_wave_status(wave_id, WaveStatus.RUNNING)
@@ -556,8 +575,6 @@ def start_wave(
             wave.direction = direction
         if flow is not None:
             wave.flow = flow
-        if stimulus is not None:
-            wave.stimulus = stimulus
         _run_wave(wave)
         return StartResult(True)
     else:
@@ -637,22 +654,25 @@ def should_activate_watch(
     return False
 
 
-def check_watch_stimulus(wave: Wave) -> bool:
-    """Check if watch-stimulus wave should run. Returns True if activated."""
-    if wave.stimulus.kind != "watch":
-        return False
+def check_watch_stimulus_for_wave(wave: Wave, stimulus: Stimulus) -> tuple[bool, str, str]:
+    """Check if watch stimulus should activate.
+
+    Returns (activated, from_sha, current_sha) tuple.
+    from_sha is the SHA to start the diff range from (for context).
+    """
+    from loopflow.lfd.stimulus import update_stimulus_sha
 
     repo = wave.repo
-    short_id = wave.short_id()
-    # Use area as watch paths
-    watch_paths = wave.area
+    short_id = stimulus.short_id()
+    # Use wave.area as watch paths
+    watch_paths = wave.area or []
 
     stimulus_log.debug(f"[{short_id}] watch check: area={wave.area_display}")
 
     result = subprocess.run(["git", "fetch", "origin", "main"], cwd=repo, capture_output=True)
     if result.returncode != 0:
         stimulus_log.warning(f"[{short_id}] git fetch failed: {result.stderr.decode()[:200]}")
-        return False
+        return False, "", ""
 
     result = subprocess.run(
         ["git", "rev-parse", "origin/main"],
@@ -662,36 +682,36 @@ def check_watch_stimulus(wave: Wave) -> bool:
     )
     if result.returncode != 0:
         stimulus_log.warning(f"[{short_id}] git rev-parse failed")
-        return False
+        return False, "", ""
 
     current_sha = result.stdout.strip()
+    last_sha = stimulus.last_main_sha
     stimulus_log.debug(
-        f"[{short_id}] SHA: last={wave.last_main_sha[:7] if wave.last_main_sha else 'None'} "
-        f"current={current_sha[:7]}"
+        f"[{short_id}] SHA: last={last_sha[:7] if last_sha else 'None'} current={current_sha[:7]}"
     )
 
-    if current_sha == wave.last_main_sha:
-        return False
+    if current_sha == last_sha:
+        return False, "", current_sha
 
-    if wave.last_main_sha is None:
+    if last_sha is None:
         stimulus_log.info(f"[{short_id}] first check, recording baseline SHA {current_sha[:7]}")
-        update_wave_sha(wave.id, current_sha)
-        return False
+        update_stimulus_sha(stimulus.id, current_sha)
+        return False, "", current_sha
 
     result = subprocess.run(
-        ["git", "diff", "--name-only", wave.last_main_sha, current_sha, "--"] + watch_paths,
+        ["git", "diff", "--name-only", last_sha, current_sha, "--"] + watch_paths,
         cwd=repo,
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
         stimulus_log.warning(f"[{short_id}] git diff failed")
-        update_wave_sha(wave.id, current_sha)
-        return False
+        update_stimulus_sha(stimulus.id, current_sha)
+        return False, last_sha, current_sha
 
     changed_files = [f for f in result.stdout.strip().split("\n") if f]
 
-    activated = should_activate_watch(watch_paths, wave.last_main_sha, current_sha, changed_files)
+    activated = should_activate_watch(watch_paths, last_sha, current_sha, changed_files)
 
     if activated:
         stimulus_log.info(f"[{short_id}] ACTIVATED: {len(changed_files)} files changed in area")
@@ -702,8 +722,8 @@ def check_watch_stimulus(wave: Wave) -> bool:
     else:
         stimulus_log.debug(f"[{short_id}] no matching changes")
 
-    update_wave_sha(wave.id, current_sha)
-    return activated
+    update_stimulus_sha(stimulus.id, current_sha)
+    return activated, last_sha, current_sha
 
 
 # Cron stimulus checking
@@ -732,25 +752,26 @@ def should_activate_cron(
     return prev_time > last_run
 
 
-def check_cron_stimulus(wave: Wave) -> bool:
-    """Check if cron-stimulus wave should run. Returns True if activated."""
-    if wave.stimulus.kind != "cron" or not wave.stimulus.cron:
+def check_cron_stimulus_for_wave(stimulus: Stimulus) -> bool:
+    """Check if cron stimulus should activate. Returns True if activated."""
+    from loopflow.lfd.stimulus import update_stimulus_triggered_at
+
+    if stimulus.kind != "cron" or not stimulus.cron:
         return False
 
-    from loopflow.lfd.flow_run import get_latest_run_for_wave
+    short_id = stimulus.short_id()
+    stimulus_log.debug(f"[{short_id}] cron check: expr={stimulus.cron}")
 
-    short_id = wave.short_id()
-    stimulus_log.debug(f"[{short_id}] cron check: expr={wave.stimulus.cron}")
+    # Use stimulus.last_triggered_at for cron scheduling
+    last_time = stimulus.last_triggered_at
 
-    last_run = get_latest_run_for_wave(wave.id)
-    last_time = last_run.ended_at if last_run else None
-
-    activated = should_activate_cron(wave.stimulus.cron, last_time)
+    activated = should_activate_cron(stimulus.cron, last_time)
 
     if activated:
-        stimulus_log.info(f"[{short_id}] ACTIVATED: cron={wave.stimulus.cron} last_run={last_time}")
+        stimulus_log.info(f"[{short_id}] ACTIVATED: cron={stimulus.cron} last={last_time}")
+        update_stimulus_triggered_at(stimulus.id, datetime.now())
     else:
-        stimulus_log.debug(f"[{short_id}] not due: last_run={last_time}")
+        stimulus_log.debug(f"[{short_id}] not due: last_triggered={last_time}")
 
     return activated
 
@@ -758,38 +779,33 @@ def check_cron_stimulus(wave: Wave) -> bool:
 # Daemon stimulus check functions
 
 
-def _queue_activation(wave: Wave) -> bool:
-    """Queue an activation for a busy wave. Returns True if queued.
-
-    Uses combine semantics: only one pending activation at a time (idempotent).
-    """
-    if wave.pending_activations >= MAX_PENDING_ACTIVATIONS:
-        stimulus_log.warning(
-            f"[{wave.short_id()}] pending activations at max ({MAX_PENDING_ACTIVATIONS}), dropping"
-        )
-        return False
-
-    if wave.pending_activations == 0:
-        update_wave_pending_activations(wave.id, 1)
-        stimulus_log.info(f"[{wave.short_id()}] queued activation")
-        return True
-    stimulus_log.debug(f"[{wave.short_id()}] already has pending activation")
-    return False
-
-
 def run_watch_check() -> list[str]:
-    """Check all watch-stimulus waves and activate or queue as needed."""
-    waves = list_waves()
-    watch_waves = [w for w in waves if w.stimulus.kind == "watch"]
-    stimulus_log.debug(f"watch check: {len(watch_waves)} waves to check")
+    """Check all watch stimuli and activate or queue as needed."""
+    from loopflow.lfd.stimulus import list_stimuli_by_kind, queue_or_coalesce_activation
+
+    stimuli = list_stimuli_by_kind("watch")
+    stimulus_log.debug(f"watch check: {len(stimuli)} stimuli to check")
 
     activated = []
-    for wave in watch_waves:
+    for stimulus in stimuli:
+        if not stimulus.enabled:
+            continue
+
         try:
-            if check_watch_stimulus(wave):
+            wave = get_wave(stimulus.wave_id)
+            if not wave:
+                stimulus_log.warning(f"[{stimulus.short_id()}] stimulus references missing wave")
+                continue
+
+            if wave.paused:
+                continue
+
+            is_activated, from_sha, current_sha = check_watch_stimulus_for_wave(wave, stimulus)
+            if is_activated:
                 if wave.status in (WaveStatus.RUNNING, WaveStatus.WAITING):
-                    # Wave is busy, queue the activation
-                    _queue_activation(wave)
+                    # Wave is busy, queue with SHA range for coalescing
+                    queue_or_coalesce_activation(wave.id, stimulus.id, from_sha, current_sha)
+                    stimulus_log.debug(f"[{wave.short_id()}] queued activation")
                 else:
                     # Wave is idle, start it
                     result = start_wave(wave.id)
@@ -801,24 +817,37 @@ def run_watch_check() -> list[str]:
                             f"[{wave.short_id()}] watch activated but start failed: {result.reason}"
                         )
         except Exception as e:
-            stimulus_log.error(f"[{wave.short_id()}] watch check error: {e}")
+            stimulus_log.error(f"[{stimulus.short_id()}] watch check error: {e}")
 
     return activated
 
 
 def run_cron_check() -> list[str]:
-    """Check all cron-stimulus waves and activate or queue as needed."""
-    waves = list_waves()
-    cron_waves = [w for w in waves if w.stimulus.kind == "cron"]
-    stimulus_log.debug(f"cron check: {len(cron_waves)} waves to check")
+    """Check all cron stimuli and activate or queue as needed."""
+    from loopflow.lfd.stimulus import list_stimuli_by_kind, queue_or_coalesce_activation
+
+    stimuli = list_stimuli_by_kind("cron")
+    stimulus_log.debug(f"cron check: {len(stimuli)} stimuli to check")
 
     activated = []
-    for wave in cron_waves:
+    for stimulus in stimuli:
+        if not stimulus.enabled:
+            continue
+
         try:
-            if check_cron_stimulus(wave):
+            wave = get_wave(stimulus.wave_id)
+            if not wave:
+                stimulus_log.warning(f"[{stimulus.short_id()}] stimulus references missing wave")
+                continue
+
+            if wave.paused:
+                continue
+
+            if check_cron_stimulus_for_wave(stimulus):
                 if wave.status in (WaveStatus.RUNNING, WaveStatus.WAITING):
-                    # Wave is busy, queue the activation
-                    _queue_activation(wave)
+                    # Wave is busy, queue (no SHA range for cron)
+                    queue_or_coalesce_activation(wave.id, stimulus.id)
+                    stimulus_log.debug(f"[{wave.short_id()}] queued activation")
                 else:
                     # Wave is idle, start it
                     result = start_wave(wave.id)
@@ -830,6 +859,6 @@ def run_cron_check() -> list[str]:
                             f"[{wave.short_id()}] cron activated but start failed: {result.reason}"
                         )
         except Exception as e:
-            stimulus_log.error(f"[{wave.short_id()}] cron check error: {e}")
+            stimulus_log.error(f"[{stimulus.short_id()}] cron check error: {e}")
 
     return activated

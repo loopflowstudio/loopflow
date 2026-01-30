@@ -14,7 +14,7 @@ pub use prompt::{
     GatherContextOpts, PromptComponents,
 };
 pub use runtime::{
-    run_step, tick_flow, tick_flow_with_runner, FlowRun, FlowRunStatus, RunId, StepResult, StepRun,
-    StepRunStatus, TickResult,
+    run_step, tick_flow, tick_flow_with_runner, FlowRun, FlowRunStatus, ForkRun, ForkRunStatus,
+    RunId, StepResult, StepRun, StepRunStatus, TickResult,
 };
 pub use store::RunStore;

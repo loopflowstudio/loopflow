@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::CoreError;
 use crate::flow::{load_flow, FlowItem, Step};
 use crate::store::RunStore;
+use crate::worktree::{create_worktree, remove_worktree};
 
 // -----------------------------------------------------------------------------
 // Newtypes
@@ -79,6 +80,24 @@ pub struct StepRun {
     pub worktree: String,
     pub flow_run_id: Option<RunId>,
     pub status: StepRunStatus,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ForkRunStatus {
+    Pending,
+    Running,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ForkRun {
+    pub id: String,
+    pub run_id: RunId,
+    pub step_index: usize,
+    pub branch_index: usize,
+    pub status: ForkRunStatus,
+    pub worktree: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -164,6 +183,12 @@ pub fn tick_flow_with_runner(
 
     let step = match next_item {
         FlowItem::Step(step) => step,
+        FlowItem::Fork {
+            branches,
+            synthesize,
+        } => {
+            return run_fork_item(&mut run, branches, synthesize.as_deref(), store, runner);
+        }
         _ => {
             run.status = FlowRunStatus::Failed;
             run.error = Some("non-step flow item not supported in tick".to_string());
@@ -225,4 +250,192 @@ pub fn run_step(
     direction: &[String],
 ) -> Result<StepResult, CoreError> {
     CommandStepRunner.run(step, worktree, direction)
+}
+
+fn run_fork_item(
+    run: &mut FlowRun,
+    branches: Vec<FlowItem>,
+    synthesize: Option<&str>,
+    store: &dyn RunStore,
+    runner: &dyn StepRunner,
+) -> Result<TickResult, CoreError> {
+    let mut fork_runs = store.list_fork_runs(&run.id, run.step_index)?;
+    if fork_runs.is_empty() {
+        let step_run = StepRun {
+            id: format!("{}:{}", run.id.as_str(), run.step_index),
+            step: "fork".to_string(),
+            repo: run.repo.to_string_lossy().to_string(),
+            worktree: run
+                .worktree
+                .clone()
+                .unwrap_or_else(|| run.repo.to_string_lossy().to_string()),
+            flow_run_id: Some(run.id.clone()),
+            status: StepRunStatus::Running,
+        };
+        store.create_step_run(&step_run)?;
+
+        for (index, branch) in branches.iter().enumerate() {
+            let step = match branch {
+                FlowItem::Step(step) => step,
+                _ => {
+                    run.status = FlowRunStatus::Failed;
+                    run.error = Some("non-step fork branches are not supported".to_string());
+                    store.update_run(run)?;
+                    return Ok(TickResult::StepFailed);
+                }
+            };
+
+            let fork_worktree = fork_worktree_path(run, index);
+            let fork_branch = format!("{}-fork-{}", run.id.as_str(), index);
+            if !Path::new(&fork_worktree).exists() {
+                if let Err(err) =
+                    create_worktree(&run.repo, Path::new(&fork_worktree), &fork_branch)
+                {
+                    run.status = FlowRunStatus::Failed;
+                    run.error = Some(err.to_string());
+                    store.update_run(run)?;
+                    return Ok(TickResult::StepFailed);
+                }
+            }
+
+            let fork_run = ForkRun {
+                id: fork_run_id(run, index),
+                run_id: run.id.clone(),
+                step_index: run.step_index,
+                branch_index: index,
+                status: if step.interactive.unwrap_or(false) {
+                    ForkRunStatus::Failed
+                } else {
+                    ForkRunStatus::Pending
+                },
+                worktree: fork_worktree,
+            };
+            store.upsert_fork_run(&fork_run)?;
+        }
+        fork_runs = store.list_fork_runs(&run.id, run.step_index)?;
+    }
+
+    for (index, branch) in branches.iter().enumerate() {
+        let step = match branch {
+            FlowItem::Step(step) => step,
+            _ => {
+                run.status = FlowRunStatus::Failed;
+                run.error = Some("non-step fork branches are not supported".to_string());
+                store.update_run(run)?;
+                return Ok(TickResult::StepFailed);
+            }
+        };
+
+        if step.interactive.unwrap_or(false) {
+            run.status = FlowRunStatus::Failed;
+            run.error = Some("interactive fork branches are not supported".to_string());
+            store.update_run(run)?;
+            return Ok(TickResult::StepFailed);
+        }
+
+        let mut fork_run = match fork_runs.iter().find(|fork| fork.branch_index == index) {
+            Some(fork_run) => fork_run.clone(),
+            None => {
+                run.status = FlowRunStatus::Failed;
+                run.error = Some("fork run missing branch metadata".to_string());
+                store.update_run(run)?;
+                return Ok(TickResult::StepFailed);
+            }
+        };
+
+        if matches!(fork_run.status, ForkRunStatus::Completed) {
+            continue;
+        }
+
+        fork_run.status = ForkRunStatus::Running;
+        store.upsert_fork_run(&fork_run)?;
+
+        let branch_directions = merge_directions(&run.direction, &step.directions);
+        let result = runner.run(step, Path::new(&fork_run.worktree), &branch_directions)?;
+        if result.exit_code == 0 {
+            fork_run.status = ForkRunStatus::Completed;
+            store.upsert_fork_run(&fork_run)?;
+            continue;
+        }
+
+        fork_run.status = ForkRunStatus::Failed;
+        store.upsert_fork_run(&fork_run)?;
+        run.status = FlowRunStatus::Failed;
+        run.error = Some(result.stderr);
+        store.update_run(run)?;
+        return Ok(TickResult::StepFailed);
+    }
+
+    let all_done = store
+        .list_fork_runs(&run.id, run.step_index)?
+        .iter()
+        .all(|fork| matches!(fork.status, ForkRunStatus::Completed));
+    if !all_done {
+        run.status = FlowRunStatus::Failed;
+        run.error = Some("fork branches did not complete".to_string());
+        store.update_run(run)?;
+        return Ok(TickResult::StepFailed);
+    }
+
+    if let Some(step_name) = synthesize {
+        let synth_step = Step {
+            name: step_name.to_string(),
+            model: None,
+            directions: Vec::new(),
+            interactive: None,
+            content: None,
+        };
+        let base_worktree = run
+            .worktree
+            .as_ref()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| run.repo.clone());
+
+        let result = runner.run(&synth_step, &base_worktree, &run.direction)?;
+        if result.exit_code != 0 {
+            run.status = FlowRunStatus::Failed;
+            run.error = Some(result.stderr);
+            store.update_run(run)?;
+            return Ok(TickResult::StepFailed);
+        }
+    }
+
+    for fork_run in store.list_fork_runs(&run.id, run.step_index)? {
+        let worktree_path = Path::new(&fork_run.worktree);
+        if worktree_path.join(".git").exists() {
+            let _ = remove_worktree(worktree_path);
+        }
+    }
+    store.delete_fork_runs(&run.id, run.step_index)?;
+
+    run.step_index += 1;
+    run.status = FlowRunStatus::Running;
+    run.current_step = None;
+    store.update_run(run)?;
+    Ok(TickResult::StepComplete)
+}
+
+fn fork_run_id(run: &FlowRun, branch_index: usize) -> String {
+    format!("{}:{}:{}", run.id.as_str(), run.step_index, branch_index)
+}
+
+fn fork_worktree_path(run: &FlowRun, branch_index: usize) -> String {
+    let base = run
+        .worktree
+        .clone()
+        .unwrap_or_else(|| run.repo.to_string_lossy().to_string());
+    format!("{base}-fork-{branch_index}")
+}
+
+fn merge_directions(base: &[String], extra: &[String]) -> Vec<String> {
+    if extra.is_empty() {
+        return base.to_vec();
+    }
+    let mut combined = base.to_vec();
+    for item in extra {
+        if !combined.contains(item) {
+            combined.push(item.clone());
+        }
+    }
+    combined
 }

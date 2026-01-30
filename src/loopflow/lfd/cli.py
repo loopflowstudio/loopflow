@@ -32,8 +32,16 @@ from loopflow.lfd.git_hooks import (
     install_hooks,
     uninstall_hooks,
 )
-from loopflow.lfd.models import MergeMode, StepRunStatus, Stimulus, Wave, WaveStatus
+from loopflow.lfd.models import MergeMode, StepRunStatus, Wave, WaveStatus
 from loopflow.lfd.step_run import get_waiting_step_run, update_step_run_status
+from loopflow.lfd.stimulus import (
+    create_stimulus,
+    delete_stimulus,
+    disable_stimulus,
+    enable_stimulus,
+    get_stimulus,
+    list_stimuli,
+)
 from loopflow.lfd.wave import (
     create_wave,
     delete_wave,
@@ -90,6 +98,15 @@ def _status_color(status: WaveStatus, c: dict[str, str]) -> str:
     elif status == WaveStatus.WAITING:
         return c["yellow"]
     return c["dim"]
+
+
+def _stimulus_display(wave_id: str) -> str:
+    """Get stimulus display string for a wave."""
+    stimuli = list_stimuli(wave_id=wave_id)
+    if not stimuli:
+        return "(none)"
+    kinds = sorted(set(s.kind for s in stimuli))
+    return ",".join(kinds)
 
 
 def _wave_display(wave: Wave) -> str:
@@ -442,7 +459,7 @@ def list_cmd():
         typer.echo(
             f"{name_str:<20} {area_str:<20} "
             f"{status_c}{wave.status.value:<10}{c['reset']} "
-            f"{str(wave.stimulus):<12} {wave.short_id()}"
+            f"{_stimulus_display(wave.id):<12} {wave.short_id()}"
         )
 
 
@@ -508,8 +525,8 @@ def loop(
     if merge_mode:
         update_wave(wave.id, merge_mode=MergeMode(merge_mode))
 
-    # Update stimulus to loop
-    update_wave(wave.id, stimulus=Stimulus("loop"))
+    # Create loop stimulus for the wave
+    create_stimulus(wave.id, "loop")
 
     # Validate wave is configured
     _validate_wave_for_run(wave, c)
@@ -594,8 +611,8 @@ def run(
         update_wave(wave.id, flow=flow_opt)
         wave.flow = flow_opt
 
-    # Update stimulus to once
-    update_wave(wave.id, stimulus=Stimulus("once"))
+    # Create once stimulus for the wave (single run)
+    create_stimulus(wave.id, "once")
 
     # Validate wave is configured
     _validate_wave_for_run(wave, c)
@@ -800,8 +817,8 @@ def watch(
         update_wave(wave.id, flow=flow_opt)
         wave.flow = flow_opt
 
-    # Update stimulus to watch
-    update_wave(wave.id, stimulus=Stimulus("watch"))
+    # Create watch stimulus for the wave
+    create_stimulus(wave.id, "watch")
 
     # Validate wave is configured
     _validate_wave_for_run(wave, c)
@@ -867,8 +884,8 @@ def cron_cmd(
         update_wave(wave.id, flow=flow_opt)
         wave.flow = flow_opt
 
-    # Update stimulus to cron
-    update_wave(wave.id, stimulus=Stimulus("cron", cron=cron_expr))
+    # Create cron stimulus for the wave
+    create_stimulus(wave.id, "cron", cron_expr)
 
     # Validate wave is configured
     _validate_wave_for_run(wave, c)
@@ -1017,7 +1034,7 @@ def status(
                 repo_short = "..." + repo_short[-17:]
 
             typer.echo(
-                f"{wave.short_id():<9} {str(wave.stimulus):<12} {display_str:<30} "
+                f"{wave.short_id():<9} {_stimulus_display(wave.id):<12} {display_str:<30} "
                 f"{status_c}{wave.status.value:<10}{c['reset']} "
                 f"{wave.iteration:<6} {repo_short}"
             )
@@ -1028,7 +1045,7 @@ def _print_wave_detail(wave: Wave, c: dict[str, str]) -> None:
     status_c = _status_color(wave.status, c)
 
     typer.echo(f"{c['bold']}{wave.area_display}{c['reset']} ({wave.short_id()})")
-    typer.echo(f"  Stimulus: {wave.stimulus}")
+    typer.echo(f"  Stimulus: {_stimulus_display(wave.id)}")
     typer.echo(f"  Status: {status_c}{wave.status.value}{c['reset']}")
     typer.echo(f"  Repo: {wave.repo}")
     typer.echo(f"  Main branch: {wave.main_branch}")
@@ -1604,6 +1621,146 @@ def rebase_cmd(
 
     typer.echo(f"{c['green']}Rebased{c['reset']} onto origin/main")
     typer.echo(f"Cleared stacking from {c['dim']}{wave.base_branch}{c['reset']}")
+
+
+# Stimuli sub-app
+stimuli_app = typer.Typer(help="Manage wave stimuli (triggers)")
+app.add_typer(stimuli_app, name="stimuli")
+
+
+@stimuli_app.command("list")
+def stimuli_list(
+    wave: str = typer.Argument(..., help="Wave name or ID"),
+):
+    """List stimuli for a wave.
+
+    Examples:
+        lfd stimuli list swift-falcon
+    """
+    c = _colors()
+    repo = get_wt_from_cwd()
+
+    wave_obj = _resolve_wave(wave, repo, c)
+    if not wave_obj:
+        typer.echo(f"{c['red']}Error:{c['reset']} Wave '{wave}' not found", err=True)
+        raise typer.Exit(1)
+
+    stimuli = list_stimuli(wave_id=wave_obj.id)
+    if not stimuli:
+        typer.echo(f"{c['dim']}No stimuli configured for {wave_obj.name}{c['reset']}")
+        return
+
+    typer.echo(f"Stimuli for {c['bold']}{wave_obj.name}{c['reset']} ({wave_obj.short_id()})")
+    typer.echo("")
+
+    for stim in stimuli:
+        enabled_str = "" if stim.enabled else f" {c['dim']}(disabled){c['reset']}"
+        cron_str = f" cron={stim.cron}" if stim.cron else ""
+        typer.echo(f"  {stim.short_id()}  {stim.kind:<8}{cron_str}{enabled_str}")
+
+    typer.echo("")
+    typer.echo(f"{len(stimuli)} stimulus{'es' if len(stimuli) != 1 else ''}")
+
+
+@stimuli_app.command("add")
+def stimuli_add(
+    wave: str = typer.Argument(..., help="Wave name or ID"),
+    kind: str = typer.Option(..., "--kind", "-k", help="Stimulus kind: loop, watch, cron"),
+    cron: str = typer.Option(None, "--cron", "-c", help="Cron expression (required for cron kind)"),
+):
+    """Add a stimulus to a wave.
+
+    Examples:
+        lfd stimuli add swift-falcon --kind watch
+        lfd stimuli add swift-falcon --kind cron --cron "0 9 * * *"
+    """
+    c = _colors()
+    repo = get_wt_from_cwd()
+
+    wave_obj = _resolve_wave(wave, repo, c)
+    if not wave_obj:
+        typer.echo(f"{c['red']}Error:{c['reset']} Wave '{wave}' not found", err=True)
+        raise typer.Exit(1)
+
+    if kind not in ("once", "loop", "watch", "cron"):
+        typer.echo(f"{c['red']}Error:{c['reset']} Invalid kind: {kind}", err=True)
+        typer.echo("Valid kinds: once, loop, watch, cron")
+        raise typer.Exit(1)
+
+    if kind == "cron" and not cron:
+        typer.echo(f"{c['red']}Error:{c['reset']} --cron is required for cron stimulus", err=True)
+        raise typer.Exit(1)
+
+    stimulus = create_stimulus(wave_obj.id, kind, cron)
+    msg = f"{c['green']}Created{c['reset']} {kind} stimulus for {wave_obj.name}"
+    typer.echo(f"{msg} ({stimulus.short_id()})")
+
+
+@stimuli_app.command("enable")
+def stimuli_enable(
+    stimulus_id: str = typer.Argument(..., help="Stimulus ID"),
+):
+    """Enable a stimulus.
+
+    Examples:
+        lfd stimuli enable abc1234
+    """
+    c = _colors()
+
+    if enable_stimulus(stimulus_id):
+        typer.echo(f"{c['green']}Enabled{c['reset']} stimulus {stimulus_id}")
+    else:
+        typer.echo(f"{c['red']}Error:{c['reset']} Stimulus '{stimulus_id}' not found", err=True)
+        raise typer.Exit(1)
+
+
+@stimuli_app.command("disable")
+def stimuli_disable(
+    stimulus_id: str = typer.Argument(..., help="Stimulus ID"),
+):
+    """Disable a stimulus.
+
+    Examples:
+        lfd stimuli disable abc1234
+    """
+    c = _colors()
+
+    if disable_stimulus(stimulus_id):
+        typer.echo(f"{c['yellow']}Disabled{c['reset']} stimulus {stimulus_id}")
+    else:
+        typer.echo(f"{c['red']}Error:{c['reset']} Stimulus '{stimulus_id}' not found", err=True)
+        raise typer.Exit(1)
+
+
+@stimuli_app.command("rm")
+def stimuli_rm(
+    stimulus_id: str = typer.Argument(..., help="Stimulus ID"),
+    force: bool = typer.Option(False, "-f", "--force", help="Skip confirmation"),
+):
+    """Remove a stimulus.
+
+    Examples:
+        lfd stimuli rm abc1234
+        lfd stimuli rm abc1234 -f
+    """
+    c = _colors()
+
+    stim = get_stimulus(stimulus_id)
+    if not stim:
+        typer.echo(f"{c['red']}Error:{c['reset']} Stimulus '{stimulus_id}' not found", err=True)
+        raise typer.Exit(1)
+
+    if not force:
+        confirm = typer.confirm(f"Delete {stim.kind} stimulus {stim.short_id()}?")
+        if not confirm:
+            typer.echo("Cancelled")
+            raise typer.Exit(0)
+
+    if delete_stimulus(stimulus_id):
+        typer.echo(f"{c['red']}Deleted{c['reset']} stimulus {stimulus_id}")
+    else:
+        typer.echo(f"{c['red']}Error:{c['reset']} Failed to delete stimulus", err=True)
+        raise typer.Exit(1)
 
 
 def main() -> None:

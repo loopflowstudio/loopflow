@@ -3,7 +3,8 @@ use std::fs;
 use std::sync::Mutex;
 
 use lf_core::runtime::{
-    tick_flow_with_runner, FlowRun, FlowRunStatus, StepResult, StepRun, StepRunStatus, TickResult,
+    tick_flow_with_runner, FlowRun, FlowRunStatus, ForkRun, ForkRunStatus, StepResult, StepRun,
+    StepRunStatus, TickResult,
 };
 use lf_core::{load_flow, RunId, RunStore, Step};
 use tempfile::TempDir;
@@ -11,6 +12,7 @@ use tempfile::TempDir;
 struct MemoryStore {
     runs: Mutex<HashMap<RunId, FlowRun>>,
     step_runs: Mutex<Vec<StepRun>>,
+    fork_runs: Mutex<HashMap<(RunId, usize, usize), ForkRun>>,
 }
 
 impl MemoryStore {
@@ -20,6 +22,7 @@ impl MemoryStore {
         Self {
             runs: Mutex::new(map),
             step_runs: Mutex::new(Vec::new()),
+            fork_runs: Mutex::new(HashMap::new()),
         }
     }
 
@@ -52,6 +55,44 @@ impl RunStore for MemoryStore {
 
     fn create_step_run(&self, step_run: &StepRun) -> Result<(), lf_core::StoreError> {
         self.step_runs.lock().unwrap().push(step_run.clone());
+        Ok(())
+    }
+
+    fn list_fork_runs(
+        &self,
+        run_id: &RunId,
+        step_index: usize,
+    ) -> Result<Vec<ForkRun>, lf_core::StoreError> {
+        let runs = self
+            .fork_runs
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|fork| fork.run_id == *run_id && fork.step_index == step_index)
+            .cloned()
+            .collect();
+        Ok(runs)
+    }
+
+    fn upsert_fork_run(&self, fork_run: &ForkRun) -> Result<(), lf_core::StoreError> {
+        self.fork_runs.lock().unwrap().insert(
+            (
+                fork_run.run_id.clone(),
+                fork_run.step_index,
+                fork_run.branch_index,
+            ),
+            fork_run.clone(),
+        );
+        Ok(())
+    }
+
+    fn delete_fork_runs(
+        &self,
+        run_id: &RunId,
+        step_index: usize,
+    ) -> Result<(), lf_core::StoreError> {
+        let mut fork_runs = self.fork_runs.lock().unwrap();
+        fork_runs.retain(|(id, step, _), _| id != run_id || *step != step_index);
         Ok(())
     }
 }
@@ -149,4 +190,58 @@ fn tick_interactive_pauses() {
     let step_runs = store.step_runs();
     assert_eq!(step_runs.len(), 1);
     assert_eq!(step_runs[0].status, StepRunStatus::Waiting);
+}
+
+#[test]
+fn tick_fork_advances_after_branches() {
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path();
+    write_flow(
+        repo,
+        "forked",
+        r#"
+- fork:
+    branches:
+      - step: { name: implement }
+      - step: { name: polish }
+    synthesize: consolidate
+"#,
+    );
+
+    let run_id = RunId::new("run-fork");
+    let run = FlowRun {
+        id: run_id.clone(),
+        flow: "forked".to_string(),
+        direction: vec!["product-engineer".to_string()],
+        area: vec![".".to_string()],
+        repo: repo.to_path_buf(),
+        status: FlowRunStatus::Running,
+        step_index: 0,
+        worktree: None,
+        current_step: None,
+        error: None,
+    };
+
+    let fork0 = std::path::PathBuf::from(format!("{}-fork-0", repo.display()));
+    let fork1 = std::path::PathBuf::from(format!("{}-fork-1", repo.display()));
+    std::fs::create_dir_all(&fork0).unwrap();
+    std::fs::create_dir_all(&fork1).unwrap();
+
+    let store = MemoryStore::new(run);
+    let runner = FakeRunner { exit_code: 0 };
+
+    let result = tick_flow_with_runner(&run_id, &store, &runner).unwrap();
+    assert_eq!(result, TickResult::StepComplete);
+    let updated = store.get_run_copy(&run_id);
+    assert_eq!(updated.step_index, 1);
+    assert_eq!(updated.status, FlowRunStatus::Running);
+
+    let fork_runs = store
+        .fork_runs
+        .lock()
+        .unwrap()
+        .values()
+        .filter(|fork| fork.status != ForkRunStatus::Completed)
+        .count();
+    assert_eq!(fork_runs, 0);
 }

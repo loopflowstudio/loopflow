@@ -3,13 +3,16 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::signal;
+use tokio_util::sync::CancellationToken;
 use tonic::transport::Server;
 
 mod http;
+mod loops;
 mod obs;
 mod proto;
 mod scheduler;
 mod server;
+mod sessions;
 mod store;
 
 use crate::http::HttpState;
@@ -40,6 +43,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let store = Arc::new(SqliteStore::new(&db_path)?) as SharedStore;
     let scheduler = Arc::new(Scheduler::new(max_slots));
+    let cancel = CancellationToken::new();
+    let loop_handles = scheduler.clone().start_loops(store.clone(), cancel.clone());
 
     let grpc_server = ControlServer::new(store.clone(), scheduler.clone());
 
@@ -72,6 +77,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ = signal::ctrl_c() => {
             tracing::info!("shutdown signal received");
         }
+    }
+
+    cancel.cancel();
+    for handle in loop_handles {
+        let _ = handle.await;
     }
 
     Ok(())

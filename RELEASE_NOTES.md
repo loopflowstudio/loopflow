@@ -1,13 +1,11 @@
-# v0.7.0
+# v0.7.1
 
-This release introduces DAG-based flow execution with fork/synthesize patterns, a redesigned Concerto UI centered on agents with sidebar navigation and detail panels, and persistent agent worktrees that survive across iterations. The daemon now automatically resets on schema mismatch and consolidates migrations into a baseline schema.
+A polish release for the Rust engine and Concerto app. The daemon gains Rust-powered git operations for more reliable rebases and pushes, while Concerto now sends local notifications when waves need attention, fail, or have PRs ready for review.
 
 ## Changes
 
-- Add DAG-based flow execution with `fork` and `synthesize` steps for parallel agent workflows
-- Redesign Concerto UI with agent-centric sidebar, detail panel, and flow picker
-- Persist agent worktrees across iterations and move branch on completion
-- Add `lfops next` command to land PR and continue work on a stacked branch
-- Consolidate database migrations into baseline schema with auto-reset on mismatch
-- Rename `voice` to `goal` and `trigger/mode` to `stimulus` throughout codebase
-- Remove website deploy from publish workflow; add `--version` flag using PyPI API
+- Concerto notifies you when a wave needs input, fails, or opens a PR—no more polling the sidebar
+- Cancel and continue buttons for interactive sessions let you bail out or resume mid-flow
+- The `lf ops land` command now uses Rust git operations for rebasing and pushing, making merges more reliable
+- Unified step execution removes the internal work queue—waves run more predictably
+- Git ops consolidated under `lf ops` namespace with new Rust-backed rebase/push primitives

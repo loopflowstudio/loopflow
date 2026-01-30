@@ -1,122 +1,161 @@
 # Improvise UX
 
-Build the Improvise mode UI for Concerto: area picker, step runner, and transition to Conduct.
+Manual wave exploration through area selection, step execution, and guided transition to autonomous mode.
 
-## Context
+## Problem
 
-Concerto has two modes:
-- **Conduct**: Dashboard-first, connect when needed, land PRs (mostly built)
-- **Improvise**: Create wave, run steps manually, discover (not built)
+Conduct mode assumes you know what you want: waves exist, flows are chosen, you're landing PRs. Improvise is the opposite: you're discovering what to build.
 
-Phase 1 requires both modes. Conduct is functional. Improvise is missing.
+Today, creating a new wave in Concerto dumps you at an idle screen with a disabled "Start" button. No guidance on picking an area. No way to run individual steps. No path from exploration to autonomous work.
 
-## What to Build
+Improvise needs to answer: "I want to poke around src/api/ and see what this agent can do."
 
-### 1. Area Picker
+## Approach
 
-When a wave is selected and idle, show area selection options:
+**One unified detail panel that adapts to wave state.** No separate "Improvise mode"—the WaveDetailPanel detects an unconfigured wave and shows the setup flow. Configured waves show the existing Conduct UI.
 
-```
-┌─────────────────────────────────────────────────────┐
-│ Explore                                             │
-├─────────────────────────────────────────────────────┤
-│ Recent areas:                                       │
-│   src/api/          last: 2h ago                    │
-│   swift/Concerto/   last: yesterday                 │
-│                                                     │
-│ [Browse...]  [From clipboard]  [Current branch]     │
-└─────────────────────────────────────────────────────┘
-```
+The progression:
+1. **No area** → Show AreaPicker (prominent, full-panel)
+2. **Has area, no steps run** → Show StepRunner (configure + run)
+3. **Has steps, still exploring** → Show StepRunner + history
+4. **Add stimulus** → Transition complete, shows Conduct view
 
-- Track recent areas per repo
-- Browse opens file picker
-- From clipboard uses clipboard as area hint
-- Current branch infers area from diff
+### Three New Components
 
-### 2. Step Runner
+**AreaPicker** — Shown when `wave.area == nil`. Dominant UI. Three options:
+- Recent areas (per-repo, persisted)
+- Browse (NSOpenPanel folder picker)
+- Infer from branch diff (if worktree has changes)
 
-Once area is set:
+**StepRunner** — Shown after area is set. The improvisation cockpit:
+- Current area display with "Change" button
+- Direction pills (editable inline)
+- Step/flow grid (most common: review, design, implement, debug)
+- Prompt text field for ad-hoc instructions
+- Big "Run ▶" button
 
-```
-┌─────────────────────────────────────────────────────┐
-│ src/api/auth/                          [Change Area]│
-├─────────────────────────────────────────────────────┤
-│ Direction: product-engineer, security    [Edit]     │
-├─────────────────────────────────────────────────────┤
-│ Quick steps:                                        │
-│   [review]  [design]  [implement]  [debug]          │
-├─────────────────────────────────────────────────────┤
-│ Or run flow:                                        │
-│   [ship]  [grind]  [research]  [custom...]          │
-├─────────────────────────────────────────────────────┤
-│ Prompt:                                             │
-│ ┌─────────────────────────────────────────────────┐ │
-│ │ add rate limiting to the auth endpoints        │ │
-│ └─────────────────────────────────────────────────┘ │
-│                                        [Run ▶]      │
-└─────────────────────────────────────────────────────┘
-```
+**TransitionBar** — Shown after any steps run successfully. Sticky footer:
+- "Set Stimulus" → Opens stimulus picker sheet
+- "Create PR" → Runs `lf ops pr`
+- "Archive" → Moves to archive/hidden
 
-- Quick steps: common single steps
-- Flows: multi-step workflows
-- Prompt: optional stimulus text
-- Run: launches the selected step/flow
-
-### 3. Transition to Conduct
-
-After running steps, wave has history. Show transition options:
+### Key Data Flow
 
 ```
-┌─────────────────────────────────────────────────────┐
-│ auth-feature (4 steps run)                          │
-│                                                     │
-│ [Add Stimulus]  [Create PR]  [Archive]              │
-└─────────────────────────────────────────────────────┘
+User creates wave (sidebar +)
+    ↓
+WaveDetailPanel sees wave.area == nil
+    ↓
+Shows AreaPicker (full panel)
+    ↓
+User picks area → repoState.updateWave(wave, area: [...])
+    ↓
+WaveDetailPanel sees wave.area != nil && wave.recentSteps.isEmpty
+    ↓
+Shows StepRunner (ready to improvise)
+    ↓
+User picks step, enters optional prompt, hits Run
+    ↓
+sessionState.launchInteractiveSession(...) for interactive steps
+    OR repoState.runWave(...) for auto steps
+    ↓
+Step completes → recentSteps populated
+    ↓
+TransitionBar appears: "3 steps run — Set Stimulus to run autonomously"
+    ↓
+User sets stimulus → wave.stimulus.kind != .manual
+    ↓
+WaveDetailPanel shows Conduct view (existing UI)
 ```
 
-- Add Stimulus: set loop/watch/cron for autonomous execution
-- Create PR: opens PR for manual review
-- Archive: removes wave from active list
+## Alternatives considered
 
-## Implementation Approach
+| Approach | Tradeoff | Why not |
+|----------|----------|---------|
+| Separate Improvise tab/mode | Clear separation | Doubles UI surface, forces mode declaration before starting |
+| Wizard-style multi-step setup | Guided flow | Feels heavy for "just poke around" use case |
+| Keep AreaPicker in sidebar | Less intrusive | Buries the critical first step, confusing for new users |
+| Inline area editing (click to edit) | Compact | Doesn't teach users what areas are or why they matter |
 
-### File Changes
+## Key decisions
+
+**Full-panel AreaPicker, not a dialog.** When you create a wave, the first thing you see is area selection taking over the detail panel. This makes the requirement obvious and the action prominent. A sheet/dialog feels like an interruption; a full panel feels like "this is what you do next."
+
+**Steps as grid, not dropdown.** The FlowPicker uses a dropdown—fine for power users, invisible for discovery. A grid of buttons (review, design, implement, debug) teaches what's available. Common steps first, "More..." expands to full list.
+
+**Direction as pills, not a text field.** Directions are composable ("product-engineer, security"). Pills make this visual. Click pill to remove, click "+" to add from preset list.
+
+**Prompt field always visible.** Even if running a named step like "review", users can add context: "focus on auth endpoints". This makes every step invocation customizable.
+
+**TransitionBar sticky at bottom.** Not inline with content. The question "should this run autonomously?" persists until answered. User can keep improvising, but the option to graduate is always visible.
+
+**Recent areas stored per-repo in UserDefaults.** Key: `recentAreas.<repo-hash>`. Max 5 entries. Sorted by recency.
+
+**"Current branch" area inference.** If the worktree has uncommitted changes, offer to use the paths of changed files as the area. Common pattern: user makes manual edits, wants agent to continue.
+
+## Scope
+
+**In scope:**
+- AreaPicker component with recent/browse/infer
+- StepRunner component with step grid + direction pills + prompt
+- TransitionBar with stimulus/PR/archive actions
+- WaveDetailPanel state machine detecting unconfigured waves
+- RecentAreasService with UserDefaults persistence
+- Direction editing via inline pills
+
+**Out of scope:**
+- Custom flow editor (use existing flows, custom via CLI)
+- Fine-grained area selection (whole directories only)
+- Prompt history (single field, no recall)
+- Step templates ("my review always uses these directions")
+- Remote execution (Phase 2)
+
+## Done when
+
+```bash
+# Create new wave
+# → AreaPicker shows, not disabled Start button
+
+# Pick area from recent or browse
+# → StepRunner appears with step grid
+
+# Run "review" step
+# → Interactive session launches in terminal
+# → After completion, TransitionBar appears
+
+# Set stimulus to "loop"
+# → Detail panel switches to Conduct view
+# → Wave sidebar shows running indicator
+
+# Time from creating wave to running first step: < 15 seconds
+```
+
+## File changes
 
 **New files:**
-- `swift/Concerto/Views/ImprovisePanel.swift` — Main Improvise view
-- `swift/Concerto/Views/AreaPicker.swift` — Area selection component
-- `swift/Concerto/Views/StepRunner.swift` — Step/flow selection + prompt
-- `swift/Concerto/Services/RecentAreasService.swift` — Track recent areas
+- `swift/Concerto/Views/Improvise/AreaPicker.swift` — Area selection component
+- `swift/Concerto/Views/Improvise/StepRunner.swift` — Step/flow execution UI
+- `swift/Concerto/Views/Improvise/TransitionBar.swift` — Stimulus/PR/archive actions
+- `swift/Concerto/Views/Improvise/DirectionPills.swift` — Inline direction editing
+- `swift/Concerto/Services/RecentAreasService.swift` — UserDefaults persistence
 
 **Modified files:**
-- `WaveDetailPanel.swift` — Show ImprovisePanel for idle waves without area
-- `RepoState.swift` — Add area tracking, step execution
-- `LoopflowCore/Models/Wave.swift` — Ensure area field is exposed
+- `WaveDetailPanel.swift` — Add state machine for unconfigured/improvise/conduct views
+- `RepoState.swift` — Add `updateWaveDirection(_:, directions:)` method
+- `WaveService.swift` — Ensure area/direction update APIs work
 
-### Data Flow
+## Wave alignment
 
-1. User creates wave → idle, no area
-2. User picks area → wave.area updated via lfd
-3. User picks step + enters prompt → lfd runs step
-4. Step completes → wave shows results
-5. User can run more steps or transition to Conduct
+Following concerto-next principles from `roadmap/concerto-next/`:
 
-### lfd Integration
+> "Improvise: Create wave, run steps manually, discover"
 
-Uses existing lfd commands:
-- `lfd area <wave> <paths>` — Set wave area
-- `lfd direction <wave> <directions>` — Set wave directions
-- `lfd run <wave> <step>` — Run step on wave (may need to add prompt parameter)
+This design makes Improvise the default experience for new waves. No configuration required upfront—just create and start exploring.
 
-## Success Criteria
+> "Same UI, Different Workflows. Conduct and Improvise aren't tabs or modes in the UI."
 
-- Can create wave and pick area
-- Can run individual steps with optional prompt
-- Can transition to Conduct mode (add stimulus)
-- Recent areas persist across app launches
+The design uses a single WaveDetailPanel that adapts based on wave state. Users don't declare "I want Improvise mode"—they just create a wave and the UI guides them.
 
-## Out of Scope
+> "Quick steps: common single steps"
 
-- Custom flow editor (use existing FlowPicker)
-- Remote execution (Phase 2)
-- Fine-grained area selection (just paths for now)
+StepRunner shows a grid of common steps (review, design, implement, debug) prominently, with flows available but secondary.

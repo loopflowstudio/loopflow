@@ -87,17 +87,19 @@ def test_next_fails_on_main_branch():
 
 
 def test_next_fails_without_pr():
-    """Fails when no PR exists and create_pr not set."""
+    """Fails when no PR exists, branch not merged, and create_pr not set."""
     with patch("loopflow.lfops.next.find_main_repo", return_value=Path("/repo")):
         with patch("loopflow.lfops.next.get_default_branch", return_value="main"):
             with patch("loopflow.lfops.next._get_pr_number", return_value=None):
-                result = next_worktree(
-                    Path("/repo"),
-                    "feature-branch",
-                    block=False,
-                    open_terminal=False,
-                    create_pr=False,
-                )
+                with patch("loopflow.lfops.next._fetch_main"):
+                    with patch("loopflow.lfops.next._is_branch_merged", return_value=False):
+                        result = next_worktree(
+                            Path("/repo"),
+                            "feature-branch",
+                            block=False,
+                            open_terminal=False,
+                            create_pr=False,
+                        )
     assert result is None
 
 

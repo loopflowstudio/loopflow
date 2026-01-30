@@ -22,6 +22,9 @@ struct StepRunner: View {
     // Common steps shown prominently
     private let commonSteps = ["review", "design", "implement", "debug"]
 
+    // 4-column grid for step buttons
+    private let gridColumns = Array(repeating: GridItem(.flexible()), count: 4)
+
     // All available steps from repo
     private var allSteps: [Flow] {
         repoState.flows.filter { $0.type == .step }
@@ -104,12 +107,7 @@ struct StepRunner: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            LazyVGrid(columns: [
-                GridItem(.flexible()),
-                GridItem(.flexible()),
-                GridItem(.flexible()),
-                GridItem(.flexible())
-            ], spacing: Spacing.sm) {
+            LazyVGrid(columns: gridColumns, spacing: Spacing.sm) {
                 ForEach(commonSteps, id: \.self) { step in
                     stepButton(step)
                 }
@@ -134,12 +132,7 @@ struct StepRunner: View {
             if showingAllSteps {
                 let additionalSteps = allSteps.filter { !commonSteps.contains($0.name) }
                 if !additionalSteps.isEmpty {
-                    LazyVGrid(columns: [
-                        GridItem(.flexible()),
-                        GridItem(.flexible()),
-                        GridItem(.flexible()),
-                        GridItem(.flexible())
-                    ], spacing: Spacing.sm) {
+                    LazyVGrid(columns: gridColumns, spacing: Spacing.sm) {
                         ForEach(additionalSteps) { step in
                             stepButton(step.name)
                         }

@@ -25,8 +25,8 @@ from loopflow.lf.naming import generate_next_branch
 from loopflow.lfd.daemon.launchd import install as launchd_install
 from loopflow.lfd.daemon.launchd import is_running
 from loopflow.lfd.daemon.launchd import uninstall as launchd_uninstall
-from loopflow.lfd.db import reset_db
 from loopflow.lfd.daemon.server import run_server
+from loopflow.lfd.db import reset_db
 from loopflow.lfd.flow_run import list_runs_for_wave
 from loopflow.lfd.git_hooks import (
     hooks_status,

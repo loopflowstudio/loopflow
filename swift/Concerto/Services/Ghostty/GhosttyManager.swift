@@ -192,6 +192,14 @@ final class GhosttyManager: ObservableObject {
         ghostty_surface_free(surface)
     }
 
+    /// Send text to the active terminal session.
+    func sendText(_ text: String) {
+        guard let surface = activeSurface else { return }
+        text.withCString { ptr in
+            ghostty_surface_text(surface, ptr, UInt(text.utf8.count))
+        }
+    }
+
     /// Called when Ghostty closes the active surface (process exits).
     private func handleSessionClosed() {
         activeSessionId = nil
@@ -237,6 +245,10 @@ final class GhosttyManager: ObservableObject {
     func tick() {}
 
     func destroyActiveSession() {
+        // Stub - no-op
+    }
+
+    func sendText(_ text: String) {
         // Stub - no-op
     }
 }

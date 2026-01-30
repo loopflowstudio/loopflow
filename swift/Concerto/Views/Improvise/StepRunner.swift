@@ -19,15 +19,41 @@ struct StepRunner: View {
 
     private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
-    // Common steps shown prominently
-    private let commonSteps = ["review", "design", "implement", "debug"]
+    // Common steps shown prominently with descriptions for tooltips
+    private let commonSteps: [(name: String, description: String)] = [
+        ("review", "Analyze architecture, complexity, quality"),
+        ("design", "Interactive session to plan changes"),
+        ("implement", "Build from a design doc"),
+        ("debug", "Fix an error (paste it in the prompt)")
+    ]
 
     // 4-column grid for step buttons
     private let gridColumns = Array(repeating: GridItem(.flexible()), count: 4)
 
+    // Step names for comparisons
+    private var commonStepNames: [String] {
+        commonSteps.map(\.name)
+    }
+
     // All available steps from repo
     private var allSteps: [Flow] {
         repoState.flows.filter { $0.type == .step }
+    }
+
+    // Dynamic prompt placeholder based on selected step
+    private var promptPlaceholder: String {
+        switch selectedStep {
+        case "debug":
+            return "Paste the error message or describe the bug"
+        case "review":
+            return "What aspect to focus on? (e.g., security, performance)"
+        case "design":
+            return "What are you trying to build or change?"
+        case "implement":
+            return "Any specific requirements or constraints?"
+        default:
+            return "e.g., focus on auth endpoints"
+        }
     }
 
     // All available flows from repo
@@ -108,11 +134,11 @@ struct StepRunner: View {
                 .foregroundStyle(.secondary)
 
             LazyVGrid(columns: gridColumns, spacing: Spacing.sm) {
-                ForEach(commonSteps, id: \.self) { step in
-                    stepButton(step)
+                ForEach(commonSteps, id: \.name) { step in
+                    stepButton(step.name, description: step.description)
                 }
 
-                if !showingAllSteps && allSteps.count > commonSteps.count {
+                if !showingAllSteps && allSteps.count > commonStepNames.count {
                     Button {
                         showingAllSteps = true
                     } label: {
@@ -130,11 +156,11 @@ struct StepRunner: View {
 
             // Show additional steps when expanded
             if showingAllSteps {
-                let additionalSteps = allSteps.filter { !commonSteps.contains($0.name) }
+                let additionalSteps = allSteps.filter { !commonStepNames.contains($0.name) }
                 if !additionalSteps.isEmpty {
                     LazyVGrid(columns: gridColumns, spacing: Spacing.sm) {
                         ForEach(additionalSteps) { step in
-                            stepButton(step.name)
+                            stepButton(step.name, description: nil)
                         }
                     }
                     .padding(.top, Spacing.xs)
@@ -143,7 +169,7 @@ struct StepRunner: View {
         }
     }
 
-    private func stepButton(_ step: String) -> some View {
+    private func stepButton(_ step: String, description: String?) -> some View {
         let isSelected = selectedStep == step
 
         return Button {
@@ -159,6 +185,7 @@ struct StepRunner: View {
                 .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
         }
         .buttonStyle(.plain)
+        .help(description ?? step)
     }
 
     // MARK: - Flow Selector
@@ -198,7 +225,7 @@ struct StepRunner: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            TextField("e.g., focus on auth endpoints", text: $prompt, axis: .vertical)
+            TextField(promptPlaceholder, text: $prompt, axis: .vertical)
                 .textFieldStyle(.plain)
                 .padding(Spacing.md)
                 .background(palette.surface)

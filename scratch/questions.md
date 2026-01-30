@@ -22,3 +22,8 @@ Open questions / assumptions
 - Assumed wave `step_index` resets to 0 on `RunWave` and after a flow completes; if runs should resume from the prior index, we should skip these resets.
 - Cron scheduling uses the latest ended step run for the wave (derived from `StepRun.wave_id`); if we need a different source of truth (e.g., wave iteration timestamps), add a dedicated field on Wave.
 - Watch polling only checks `origin/main`; if repos use a different default branch, we may need to store the target ref per wave.
+
+## Session connect + fork execution (2026-01-29)
+- PTY crate choice: `portable-pty` vs `pty-process` vs raw `nix::pty`. Need to evaluate cross-platform support (macOS primary, Linux for containers).
+- Session timeout: Should we kill long-idle interactive sessions? If so, what timeout? 4 hours like stuck runs?
+- Fork branch parallelism: All branches at once, or honor slot limits per branch? Current assumption: each branch acquires a slot.

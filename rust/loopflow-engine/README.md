@@ -1,6 +1,6 @@
-# lf-core
+# loopflow-engine
 
-Rust engine for loopflow. Owns flow execution, prompt assembly, and run state transitions.
+Rust engine for loopflow. Owns flow execution, context assembly, and agent invocation.
 
 ## Quick Start
 
@@ -14,12 +14,15 @@ cargo fmt                     # Format
 ## Architecture
 
 ```
-lf-core/
+loopflow-engine/
+├── agent.rs     # Agent invocation (Claude, Codex, Gemini)
+├── config.rs    # Config loading (~/.lf/, .lf/)
 ├── flow.rs      # Flow/step/direction parsing from YAML
+├── prompt.rs    # Context gathering and prompt formatting
 ├── runtime.rs   # Tick-based execution engine
-├── prompt.rs    # Context gathering and token counting
+├── python.rs    # PyO3 bindings for Python integration
 ├── store.rs     # RunStore trait for persistence
-├── git.rs       # Git status/diff helpers
+├── git.rs       # Git operations (rebase, push, branch)
 ├── worktree.rs  # Worktree creation/removal
 ├── error.rs     # Typed errors with thiserror
 └── event.rs     # Lifecycle events for runs
@@ -163,21 +166,29 @@ Mock via traits: implement `RunStore` and `StepRunner` with test doubles.
 
 ## Token Counting
 
-Currently uses byte length / 3 as a heuristic. Future: tiktoken-rs for accurate counts.
+Uses tiktoken-rs with cl100k_base encoding for accurate token counts:
 
 ```rust
-let tokens = count_tokens("hello world");  // ~4 tokens
+let tokens = count_tokens("hello world");  // ~3 tokens
 ```
+
+Falls back to bytes/3 heuristic if tiktoken fails to load.
 
 ## Status
 
 Working:
 - Flow parsing (step/fork/choose/loop)
-- Tick-based execution for linear steps
-- Token counting heuristic
-- Git/worktree helpers
+- Tick-based execution for all flow items
+- Fork execution with parallel worktrees
+- Choose execution (deterministic selection)
+- LoopUntilEmpty execution with wave termination
+- Agent invocation (Claude, Codex, Gemini)
+- Context assembly with docs, diff, clipboard
+- tiktoken-rs token counting
+- Config loading with global/repo merging
+- PyO3 bindings for Python integration
 
 Not yet implemented:
-- Fork/choose/loop execution (parsed but not run)
-- Tiktoken integration
-- Full prompt rendering
+- Summary loading
+- Bundled LOOPFLOW.md embedding
+- LLM-based choose prompt evaluation

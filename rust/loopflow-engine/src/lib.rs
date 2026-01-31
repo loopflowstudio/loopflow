@@ -1,3 +1,5 @@
+pub mod agent;
+pub mod config;
 pub mod error;
 pub mod event;
 pub mod flow;
@@ -7,6 +9,14 @@ pub mod runtime;
 pub mod store;
 pub mod worktree;
 
+#[cfg(feature = "python")]
+mod python;
+
+pub use agent::{
+    build_claude_command, build_codex_command, build_gemini_command, build_model_command,
+    check_cli_available, launch_agent, AgentRunner, DefaultAgentRunner, LaunchConfig, LaunchResult,
+};
+pub use config::{load_config, load_config_or_default, parse_model, Config};
 pub use error::{CoreError, GitError, LoadError, StoreError};
 pub use flow::{load_direction, load_flow, load_step, Direction, Flow, FlowItem, Step};
 pub use prompt::{

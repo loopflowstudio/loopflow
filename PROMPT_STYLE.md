@@ -86,6 +86,57 @@ Action goals can include light process for system navigation. Perspective goals 
 
 The goal should work for any codebase using loopflow, not just the one where it was written.
 
+### Orthogonality
+
+Directions are orthogonal to steps and areas. A direction applies to any task in any scope.
+
+```
+Step = what you're doing (implement, review, design)
+Area = where you're working (src/api/, swift/Concerto/)
+Direction = which users you're trying to serve
+```
+
+**Don't couple to steps.** "When reviewing code, ask..." ties the direction to `review`. The same concerns apply whether you're reviewing, implementing, or designing.
+
+**Don't couple to areas.** "When working on Concerto..." ties the direction to a specific codebase. User patterns like conductor/improviser/returner exist in any product with parallel work.
+
+### How directions apply
+
+Directions are not roleplay. A direction is intent—what you're optimizing for while doing your work.
+
+Directions can be:
+- **User patterns**: conductor, improviser, returner—make this kind of user thrive
+- **Perspectives**: product-engineer, designer, infra-engineer—think with these concerns
+- **Metrics**: performance, security, accessibility—optimize for this quality
+- **Values**: simplicity, craft—hold this standard
+
+The questions in a direction help you check if your work serves the intent.
+
+```bash
+lf implement --direction conductor --area src/api/
+```
+
+You're implementing in src/api/. The conductor direction means you're building with the intent that conductors thrive. The questions ("can I see what needs attention without drilling in?") verify your implementation serves that intent.
+
+```bash
+lf review --direction security --area src/auth/
+```
+
+You're reviewing src/auth/. The security direction means you're optimizing for security. The questions surface vulnerabilities you might otherwise miss.
+
+```markdown
+# Bad: coupled to step and area
+When reviewing Concerto code, ask:
+- Can I tell what needs attention?
+
+# Good: intent + questions
+Managing multiple parallel workstreams. Checking in, not diving deep.
+
+- Can I see what needs attention without drilling in?
+- Is urgency visually obvious?
+- How many clicks from "I see a problem" to "I'm acting on it"?
+```
+
 ### Voice
 
 Goals should feel opinionated. "Slow is fake." "Errors of omission kill." "Sunk cost is sunk."

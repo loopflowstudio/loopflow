@@ -3,6 +3,10 @@
 
 Supports both Swift (Concerto) and web client captures.
 
+IMPORTANT: Swift screenshots require Screen Recording permission.
+If screenshots fail silently, grant permission in:
+  System Settings → Privacy & Security → Screen Recording → Concerto
+
 Usage:
     python scripts/generate_screenshots.py
     python scripts/generate_screenshots.py --output docs/
@@ -107,7 +111,7 @@ def _list_worktrees(repo_path: Path) -> list[str]:
 
 
 def _create_demo_worktrees(repo_path: Path) -> None:
-    branches = ["add-auth", "fix-cache"]
+    branches = ["wave-auth-feature", "wave-api-refactor"]
     for branch in branches:
         worktree_path = repo_path.parent / f"{repo_path.name}.{branch}"
         if worktree_path.exists():
@@ -128,14 +132,19 @@ def _create_demo_worktrees(repo_path: Path) -> None:
 
 
 def find_concerto_executable() -> Path:
-    """Find the Concerto executable."""
+    """Find the Concerto executable.
+
+    Prefers app bundle executable for proper code signing (required for screen capture).
+    """
     derived_data = Path.home() / "Library/Developer/Xcode/DerivedData"
 
-    # Check for Concerto or swift- (package name) builds
-    for pattern in ["Concerto-", "swift-"]:
+    # Prefer app bundle (has proper code signing for screen recording permission)
+    # Check LoopflowSwift builds first, then Concerto and swift builds
+    for pattern in ["LoopflowSwift-", "Concerto-", "swift-"]:
         for d in derived_data.iterdir():
             if d.name.startswith(pattern):
-                for app_name in ["Concerto", "Concerto.app/Contents/MacOS/Concerto"]:
+                # Prefer app bundle executable over bare binary
+                for app_name in ["Concerto.app/Contents/MacOS/Concerto", "Concerto"]:
                     release = d / "Build/Products/Release" / app_name
                     debug = d / "Build/Products/Debug" / app_name
                     if release.exists():
@@ -163,12 +172,13 @@ def find_concerto_executable() -> Path:
             check=True,
             capture_output=True,
         )
-        # Check again
-        for d in derived_data.iterdir():
-            if d.name.startswith("swift-"):
-                release = d / "Build/Products/Release/Concerto"
-                if release.exists():
-                    return release
+        # Check again - look for app bundle first
+        for pattern in ["LoopflowSwift-", "swift-"]:
+            for d in derived_data.iterdir():
+                if d.name.startswith(pattern):
+                    release = d / "Build/Products/Release/Concerto.app/Contents/MacOS/Concerto"
+                    if release.exists():
+                        return release
 
     raise FileNotFoundError(
         "Could not find Concerto. Build it first with: "
@@ -262,7 +272,7 @@ def main() -> None:
         "--output",
         "-o",
         type=Path,
-        default=Path("docs"),
+        default=Path("docs/screenshots"),
         help="Output directory for screenshots",
     )
     parser.add_argument(

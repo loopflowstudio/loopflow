@@ -1,15 +1,43 @@
-# Screenshot manifest for Loopflow documentation
+# Screenshot manifest for Loopflow documentation and UX review
 # Run: python scripts/generate_screenshots.py
+# Output: docs/screenshots/
 
 repo: https://github.com/loopflowstudio/loopflow-demos
 local: ~/src/loopflow-demos
 
 screenshots:
-  # Main Concerto window - shows sidebar with loops
+  # Main dashboard - shows sidebar with grouped waves
+  # Conductor: Can I see what needs attention without drilling in?
   - name: concerto-main
     type: swift
     window_size: [1200, 800]
     mock_loops: true
+
+  # Running wave selected - detail view
+  # Conductor: How many clicks from "I see a problem" to "I'm acting on it"?
+  - name: concerto-wave-running
+    type: swift
+    window_size: [1200, 800]
+    mock_loops: true
+    select_branch: wave-auth-feature
+
+  # Waiting wave selected - needs interaction
+  # Conductor: Is urgency visually obvious?
+  # Returner: Is "needs me" vs "fine" instant to distinguish?
+  - name: concerto-wave-waiting
+    type: swift
+    window_size: [1200, 800]
+    mock_loops: true
+    select_branch: wave-api-refactor
+
+  # Improvise mode - launcher expanded (requires beta flag)
+  # Improviser: How fast from intent to action?
+  # Improviser: Am I configuring things I don't care about yet?
+  # - name: concerto-improvise
+  #   type: swift
+  #   window_size: [1200, 800]
+  #   mock_loops: true
+  #   show_launcher: true  # TODO: add flag support
 
   # Web client (future)
   # - name: loopflow-web

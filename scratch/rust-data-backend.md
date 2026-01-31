@@ -31,4 +31,3 @@ Support multi-tenant managed clusters with durable state, concurrency safety, an
 ## Open questions
 - Do we keep SQLite for local dev long-term?
 - Should we adopt an event-sourcing model?
-

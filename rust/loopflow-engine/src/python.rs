@@ -8,6 +8,14 @@ use std::path::PathBuf;
 
 use crate::agent::{launch_agent, LaunchConfig, LaunchResult as RustLaunchResult};
 use crate::config::{load_config_or_default, parse_model};
+use crate::git::{
+    commit as git_commit, create_branch as git_create_branch, delete_local_branch,
+    delete_remote_branch, get_default_branch, is_clean as git_is_clean, land as git_land,
+    pr_create_draft, pr_exists, pr_merge_squash_auto, push as git_push,
+    push_with_upstream as git_push_with_upstream, rebase as git_rebase, stage_all, sync_main,
+    worktree_remove, BranchInfo as RustBranchInfo, LandResult as RustLandResult,
+    LandStrategy as RustLandStrategy, RebaseResult as RustRebaseResult,
+};
 use crate::prompt::{
     count_tokens, format_prompt, gather_context, GatherContextOpts,
     PromptComponents as RustPromptComponents,
@@ -40,6 +48,69 @@ impl From<RustLaunchResult> for PyLaunchResult {
 #[derive(Debug, Clone)]
 pub struct PyPromptComponents {
     inner: RustPromptComponents,
+}
+
+/// Python-exposed git rebase result.
+#[pyclass]
+#[derive(Debug, Clone)]
+pub struct PyRebaseResult {
+    #[pyo3(get)]
+    pub success: bool,
+    #[pyo3(get)]
+    pub conflicts: Option<Vec<PathBuf>>,
+    #[pyo3(get)]
+    pub new_head: Option<String>,
+}
+
+impl From<RustRebaseResult> for PyRebaseResult {
+    fn from(result: RustRebaseResult) -> Self {
+        Self {
+            success: result.success,
+            conflicts: result.conflicts,
+            new_head: result.new_head,
+        }
+    }
+}
+
+/// Python-exposed branch info.
+#[pyclass]
+#[derive(Debug, Clone)]
+pub struct PyBranchInfo {
+    #[pyo3(get)]
+    pub old_branch: String,
+    #[pyo3(get)]
+    pub old_head: String,
+    #[pyo3(get)]
+    pub new_branch: String,
+}
+
+impl From<RustBranchInfo> for PyBranchInfo {
+    fn from(info: RustBranchInfo) -> Self {
+        Self {
+            old_branch: info.old_branch,
+            old_head: info.old_head,
+            new_branch: info.new_branch,
+        }
+    }
+}
+
+/// Python-exposed land result.
+#[pyclass]
+#[derive(Debug, Clone)]
+pub struct PyLandResult {
+    #[pyo3(get)]
+    pub merged_commit: String,
+    #[pyo3(get)]
+    pub branch_deleted: bool,
+}
+
+impl From<RustLandResult> for PyLandResult {
+    fn from(result: RustLandResult) -> Self {
+        Self {
+            merged_commit: result.merged_commit,
+            branch_deleted: result.branch_deleted,
+        }
+    }
 }
 
 #[pymethods]
@@ -151,6 +222,167 @@ fn py_launch_agent(
     }
 }
 
+/// Git: rebase worktree.
+#[pyfunction]
+#[pyo3(signature = (worktree, onto, base_commit=None))]
+fn py_git_rebase(
+    worktree: &str,
+    onto: &str,
+    base_commit: Option<&str>,
+) -> PyResult<PyRebaseResult> {
+    match git_rebase(PathBuf::from(worktree).as_path(), onto, base_commit) {
+        Ok(result) => Ok(result.into()),
+        Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+    }
+}
+
+/// Git: push worktree.
+#[pyfunction]
+#[pyo3(signature = (worktree, force_with_lease=false))]
+fn py_git_push(worktree: &str, force_with_lease: bool) -> PyResult<()> {
+    match git_push(PathBuf::from(worktree).as_path(), force_with_lease) {
+        Ok(()) => Ok(()),
+        Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+    }
+}
+
+/// Git: push and set upstream.
+#[pyfunction]
+fn py_git_push_with_upstream(worktree: &str, remote: &str, branch: &str) -> PyResult<()> {
+    match git_push_with_upstream(PathBuf::from(worktree).as_path(), remote, branch) {
+        Ok(()) => Ok(()),
+        Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+    }
+}
+
+/// Git: create branch.
+#[pyfunction]
+fn py_git_create_branch(worktree: &str, name: &str) -> PyResult<PyBranchInfo> {
+    match git_create_branch(PathBuf::from(worktree).as_path(), name) {
+        Ok(info) => Ok(info.into()),
+        Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+    }
+}
+
+/// Git: land branch.
+#[pyfunction]
+#[pyo3(signature = (worktree, strategy, main_branch="main"))]
+fn py_git_land(worktree: &str, strategy: &str, main_branch: &str) -> PyResult<PyLandResult> {
+    let parsed = match strategy {
+        "squash" | "squash_merge" => RustLandStrategy::SquashMerge,
+        "local" | "local_merge" => RustLandStrategy::LocalMerge,
+        _ => {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "Invalid land strategy",
+            ))
+        }
+    };
+    match git_land(PathBuf::from(worktree).as_path(), parsed, main_branch) {
+        Ok(result) => Ok(result.into()),
+        Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+    }
+}
+
+/// Git: get default branch.
+#[pyfunction]
+fn py_git_get_default_branch(repo: &str) -> PyResult<String> {
+    match get_default_branch(PathBuf::from(repo).as_path()) {
+        Ok(branch) => Ok(branch),
+        Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+    }
+}
+
+/// Git: check if repo is clean.
+#[pyfunction]
+fn py_git_is_clean(repo: &str) -> PyResult<bool> {
+    match git_is_clean(PathBuf::from(repo).as_path()) {
+        Ok(clean) => Ok(clean),
+        Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+    }
+}
+
+/// Git: stage all.
+#[pyfunction]
+fn py_git_stage_all(repo: &str) -> PyResult<()> {
+    match stage_all(PathBuf::from(repo).as_path()) {
+        Ok(()) => Ok(()),
+        Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+    }
+}
+
+/// Git: commit.
+#[pyfunction]
+fn py_git_commit(repo: &str, message: &str) -> PyResult<()> {
+    match git_commit(PathBuf::from(repo).as_path(), message) {
+        Ok(()) => Ok(()),
+        Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+    }
+}
+
+/// Git: delete remote branch.
+#[pyfunction]
+fn py_git_delete_remote_branch(repo: &str, remote: &str, branch: &str) -> PyResult<()> {
+    match delete_remote_branch(PathBuf::from(repo).as_path(), remote, branch) {
+        Ok(()) => Ok(()),
+        Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+    }
+}
+
+/// Git: delete local branch.
+#[pyfunction]
+fn py_git_delete_local_branch(repo: &str, branch: &str) -> PyResult<()> {
+    match delete_local_branch(PathBuf::from(repo).as_path(), branch) {
+        Ok(()) => Ok(()),
+        Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+    }
+}
+
+/// Git: check if PR exists.
+#[pyfunction]
+fn py_git_pr_exists(repo: &str) -> PyResult<bool> {
+    match pr_exists(PathBuf::from(repo).as_path()) {
+        Ok(exists) => Ok(exists),
+        Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+    }
+}
+
+/// Git: create draft PR.
+#[pyfunction]
+fn py_git_pr_create_draft(repo: &str) -> PyResult<String> {
+    match pr_create_draft(PathBuf::from(repo).as_path()) {
+        Ok(url) => Ok(url),
+        Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+    }
+}
+
+/// Git: enable squash auto-merge.
+#[pyfunction]
+fn py_git_pr_merge_squash_auto(repo: &str) -> PyResult<()> {
+    match pr_merge_squash_auto(PathBuf::from(repo).as_path()) {
+        Ok(()) => Ok(()),
+        Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+    }
+}
+
+/// Git: sync main branch.
+#[pyfunction]
+#[pyo3(signature = (repo, main_branch="main"))]
+fn py_git_sync_main(repo: &str, main_branch: &str) -> PyResult<bool> {
+    match sync_main(PathBuf::from(repo).as_path(), main_branch) {
+        Ok(result) => Ok(result),
+        Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+    }
+}
+
+/// Git: remove worktree.
+#[pyfunction]
+fn py_git_worktree_remove(repo: &str, path: &str) -> PyResult<()> {
+    match worktree_remove(PathBuf::from(repo).as_path(), PathBuf::from(path).as_path()) {
+        Ok(()) => Ok(()),
+        Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+    }
+}
+
 /// Run a step with assembled context.
 ///
 /// This is the main entry point for Python lf to execute steps via Rust.
@@ -214,10 +446,31 @@ fn run_step(
 fn loopflow_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyLaunchResult>()?;
     m.add_class::<PyPromptComponents>()?;
+    m.add_class::<PyRebaseResult>()?;
+    m.add_class::<PyBranchInfo>()?;
+    m.add_class::<PyLandResult>()?;
     m.add_function(wrap_pyfunction!(py_count_tokens, m)?)?;
     m.add_function(wrap_pyfunction!(py_parse_model, m)?)?;
     m.add_function(wrap_pyfunction!(py_gather_context, m)?)?;
     m.add_function(wrap_pyfunction!(py_launch_agent, m)?)?;
     m.add_function(wrap_pyfunction!(run_step, m)?)?;
+    let git_mod = PyModule::new_bound(m.py(), "git")?;
+    git_mod.add_function(wrap_pyfunction!(py_git_rebase, &git_mod)?)?;
+    git_mod.add_function(wrap_pyfunction!(py_git_push, &git_mod)?)?;
+    git_mod.add_function(wrap_pyfunction!(py_git_push_with_upstream, &git_mod)?)?;
+    git_mod.add_function(wrap_pyfunction!(py_git_create_branch, &git_mod)?)?;
+    git_mod.add_function(wrap_pyfunction!(py_git_land, &git_mod)?)?;
+    git_mod.add_function(wrap_pyfunction!(py_git_get_default_branch, &git_mod)?)?;
+    git_mod.add_function(wrap_pyfunction!(py_git_is_clean, &git_mod)?)?;
+    git_mod.add_function(wrap_pyfunction!(py_git_stage_all, &git_mod)?)?;
+    git_mod.add_function(wrap_pyfunction!(py_git_commit, &git_mod)?)?;
+    git_mod.add_function(wrap_pyfunction!(py_git_delete_remote_branch, &git_mod)?)?;
+    git_mod.add_function(wrap_pyfunction!(py_git_delete_local_branch, &git_mod)?)?;
+    git_mod.add_function(wrap_pyfunction!(py_git_pr_exists, &git_mod)?)?;
+    git_mod.add_function(wrap_pyfunction!(py_git_pr_create_draft, &git_mod)?)?;
+    git_mod.add_function(wrap_pyfunction!(py_git_pr_merge_squash_auto, &git_mod)?)?;
+    git_mod.add_function(wrap_pyfunction!(py_git_sync_main, &git_mod)?)?;
+    git_mod.add_function(wrap_pyfunction!(py_git_worktree_remove, &git_mod)?)?;
+    m.add_submodule(&git_mod)?;
     Ok(())
 }

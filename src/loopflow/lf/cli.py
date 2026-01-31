@@ -1,13 +1,17 @@
 """Loopflow CLI: Arrange LLMs to code in harmony."""
 
+import json
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
 import typer
 import yaml
 
+from loopflow import __version__
 from loopflow.lf import step as step_module
-from loopflow.lf.config import ConfigError, load_config
+from loopflow.lf.config import ConfigError, get_internal_flag, load_config
 from loopflow.lf.context import find_worktree_root, gather_step, list_all_steps
 from loopflow.lf.flows import flow_file_exists, list_flows
 from loopflow.lfops import abandon as lfops_abandon
@@ -242,6 +246,23 @@ def main():
     }
 
     try:
+        # Handle --version flag
+        if "--version" in sys.argv:
+            if get_internal_flag("use_rust") and shutil.which("lf-engine"):
+                result = subprocess.run(
+                    ["lf-engine", "version"], capture_output=True, text=True
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    try:
+                        version = json.loads(result.stdout.strip())
+                    except json.JSONDecodeError:
+                        version = result.stdout.strip()
+                    typer.echo(f"loopflow {version}")
+                    raise SystemExit(0)
+
+            typer.echo(f"loopflow {__version__}")
+            raise SystemExit(0)
+
         # Handle --list / -l flag: show formatted step list
         if "--list" in sys.argv or "-l" in sys.argv:
             _list_steps()

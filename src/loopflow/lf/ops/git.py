@@ -120,6 +120,20 @@ def _push_rust(worktree: Path, force_with_lease: bool = False) -> None:
         args.append("--force-with-lease")
     _run_loopflow_engine(args)
 
+def _push_with_upstream_rust(worktree: Path, remote: str, branch: str) -> None:
+    _run_loopflow_engine(
+        [
+            "lf-engine",
+            "push-with-upstream",
+            "--worktree",
+            str(worktree),
+            "--remote",
+            remote,
+            "--branch",
+            branch,
+        ]
+    )
+
 
 def _create_branch_rust(worktree: Path, name: str) -> BranchInfo:
     data = _run_loopflow_engine(["lf-engine", "branch", "--worktree", str(worktree), "--name", name])
@@ -139,6 +153,71 @@ def _land_rust(worktree: Path, strategy: str, main_branch: str = "main") -> Land
     ]
     data = _run_loopflow_engine(args)
     return LandResult(**data)
+
+def _get_default_branch_rust(repo: Path) -> str:
+    data = _run_loopflow_engine(["lf-engine", "default-branch", "--repo", str(repo)])
+    return str(data)
+
+
+def _is_clean_rust(repo: Path) -> bool:
+    data = _run_loopflow_engine(["lf-engine", "is-clean", "--repo", str(repo)])
+    return bool(data)
+
+
+def _stage_all_rust(repo: Path) -> None:
+    _run_loopflow_engine(["lf-engine", "stage-all", "--repo", str(repo)])
+
+
+def _commit_rust(repo: Path, message: str) -> None:
+    _run_loopflow_engine(["lf-engine", "commit", "--repo", str(repo), "--message", message])
+
+
+def _delete_remote_branch_rust(repo: Path, remote: str, branch: str) -> None:
+    _run_loopflow_engine(
+        [
+            "lf-engine",
+            "delete-remote-branch",
+            "--repo",
+            str(repo),
+            "--remote",
+            remote,
+            "--branch",
+            branch,
+        ]
+    )
+
+
+def _delete_local_branch_rust(repo: Path, branch: str) -> None:
+    _run_loopflow_engine(
+        ["lf-engine", "delete-local-branch", "--repo", str(repo), "--branch", branch]
+    )
+
+
+def _pr_exists_rust(repo: Path) -> bool:
+    data = _run_loopflow_engine(["lf-engine", "pr-exists", "--repo", str(repo)])
+    return bool(data)
+
+
+def _pr_create_draft_rust(repo: Path) -> str:
+    data = _run_loopflow_engine(["lf-engine", "pr-create-draft", "--repo", str(repo)])
+    return str(data)
+
+
+def _pr_merge_squash_auto_rust(repo: Path) -> None:
+    _run_loopflow_engine(["lf-engine", "pr-merge-squash-auto", "--repo", str(repo)])
+
+
+def _sync_main_rust(repo: Path, main_branch: str) -> bool:
+    data = _run_loopflow_engine(
+        ["lf-engine", "sync-main", "--repo", str(repo), "--main-branch", main_branch]
+    )
+    return bool(data)
+
+
+def _worktree_remove_rust(repo: Path, path: Path) -> None:
+    _run_loopflow_engine(
+        ["lf-engine", "worktree-remove", "--repo", str(repo), "--path", str(path)]
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -284,6 +363,139 @@ def _land_python(worktree: Path, strategy: str, main_branch: str = "main") -> La
 
     return LandResult(merged_commit=merged_commit, branch_deleted=branch_deleted)
 
+def _get_default_branch_python(repo_root: Path) -> str:
+    result = subprocess.run(
+        ["git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout.strip().split("/", 1)[-1]
+    return "main"
+
+
+def _is_clean_python(repo_root: Path) -> bool:
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0 and not result.stdout.strip()
+
+
+def _stage_all_python(repo_root: Path) -> None:
+    result = subprocess.run(["git", "add", "-A"], cwd=repo_root, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise GitError(result.stderr.strip() or "git add failed")
+
+
+def _commit_python(repo_root: Path, message: str) -> None:
+    result = subprocess.run(
+        ["git", "commit", "-m", message],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise GitError(result.stderr.strip() or "git commit failed")
+
+
+def _delete_remote_branch_python(repo_root: Path, remote: str, branch: str) -> None:
+    result = subprocess.run(
+        ["git", "push", remote, "--delete", branch],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise GitError(result.stderr.strip() or "delete remote branch failed")
+
+
+def _delete_local_branch_python(repo_root: Path, branch: str) -> None:
+    result = subprocess.run(
+        ["git", "branch", "-D", branch],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise GitError(result.stderr.strip() or "delete local branch failed")
+
+
+def _pr_exists_python(repo_root: Path) -> bool:
+    result = subprocess.run(
+        ["gh", "pr", "view", "--json", "state", "-q", ".state"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0 and bool(result.stdout.strip())
+
+
+def _pr_create_draft_python(repo_root: Path) -> str:
+    result = subprocess.run(
+        ["gh", "pr", "create", "--draft", "--fill"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise GitError(result.stderr.strip() or "create draft PR failed")
+    return result.stdout.strip()
+
+
+def _pr_merge_squash_auto_python(repo_root: Path) -> None:
+    result = subprocess.run(
+        ["gh", "pr", "merge", "--squash", "--auto"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise GitError(result.stderr.strip() or "enable auto-merge failed")
+
+
+def _sync_main_python(repo_root: Path, main_branch: str) -> bool:
+    fetch_result = subprocess.run(
+        ["git", "fetch", "origin", main_branch],
+        cwd=repo_root,
+        capture_output=True,
+    )
+    if fetch_result.returncode != 0:
+        return False
+
+    current_branch = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    if current_branch != main_branch:
+        return True
+
+    if not _is_clean_python(repo_root):
+        return False
+
+    result = subprocess.run(
+        ["git", "reset", "--hard", f"origin/{main_branch}"],
+        cwd=repo_root,
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def _worktree_remove_python(repo_root: Path, path: Path) -> None:
+    result = subprocess.run(
+        ["git", "worktree", "remove", "--force", str(path)],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise GitError(result.stderr.strip() or "worktree remove failed")
+
 
 # -----------------------------------------------------------------------------
 # Public API
@@ -303,6 +515,19 @@ def push(worktree: Path, force_with_lease: bool = False) -> None:
         return _push_rust(worktree, force_with_lease)
     return _push_python(worktree, force_with_lease)
 
+def push_with_upstream(worktree: Path, remote: str, branch: str) -> None:
+    _print_backend_once()
+    if _use_rust():
+        return _push_with_upstream_rust(worktree, remote, branch)
+    result = subprocess.run(
+        ["git", "push", "-u", remote, branch],
+        cwd=worktree,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise GitError(result.stderr.strip() or "Push with upstream failed")
+
 
 def create_branch(worktree: Path, name: str) -> BranchInfo:
     _print_backend_once()
@@ -316,3 +541,80 @@ def land(worktree: Path, strategy: str, main_branch: str = "main") -> LandResult
     if _use_rust():
         return _land_rust(worktree, strategy, main_branch)
     return _land_python(worktree, strategy, main_branch)
+
+
+def get_default_branch(repo_root: Path) -> str:
+    _print_backend_once()
+    if _use_rust():
+        return _get_default_branch_rust(repo_root)
+    return _get_default_branch_python(repo_root)
+
+
+def is_clean(repo_root: Path) -> bool:
+    _print_backend_once()
+    if _use_rust():
+        return _is_clean_rust(repo_root)
+    return _is_clean_python(repo_root)
+
+
+def stage_all(repo_root: Path) -> None:
+    _print_backend_once()
+    if _use_rust():
+        return _stage_all_rust(repo_root)
+    return _stage_all_python(repo_root)
+
+
+def commit(repo_root: Path, message: str) -> None:
+    _print_backend_once()
+    if _use_rust():
+        return _commit_rust(repo_root, message)
+    return _commit_python(repo_root, message)
+
+
+def delete_remote_branch(repo_root: Path, remote: str, branch: str) -> None:
+    _print_backend_once()
+    if _use_rust():
+        return _delete_remote_branch_rust(repo_root, remote, branch)
+    return _delete_remote_branch_python(repo_root, remote, branch)
+
+
+def delete_local_branch(repo_root: Path, branch: str) -> None:
+    _print_backend_once()
+    if _use_rust():
+        return _delete_local_branch_rust(repo_root, branch)
+    return _delete_local_branch_python(repo_root, branch)
+
+
+def pr_exists(repo_root: Path) -> bool:
+    _print_backend_once()
+    if _use_rust():
+        return _pr_exists_rust(repo_root)
+    return _pr_exists_python(repo_root)
+
+
+def pr_create_draft(repo_root: Path) -> str:
+    _print_backend_once()
+    if _use_rust():
+        return _pr_create_draft_rust(repo_root)
+    return _pr_create_draft_python(repo_root)
+
+
+def pr_merge_squash_auto(repo_root: Path) -> None:
+    _print_backend_once()
+    if _use_rust():
+        return _pr_merge_squash_auto_rust(repo_root)
+    return _pr_merge_squash_auto_python(repo_root)
+
+
+def sync_main(repo_root: Path, main_branch: str) -> bool:
+    _print_backend_once()
+    if _use_rust():
+        return _sync_main_rust(repo_root, main_branch)
+    return _sync_main_python(repo_root, main_branch)
+
+
+def worktree_remove(repo_root: Path, path: Path) -> None:
+    _print_backend_once()
+    if _use_rust():
+        return _worktree_remove_rust(repo_root, path)
+    return _worktree_remove_python(repo_root, path)

@@ -265,15 +265,8 @@ pub fn sync_main(repo: &Path, main_branch: &str) -> Result<bool, GitError> {
 }
 
 pub fn worktree_remove(repo: &Path, path: &Path) -> Result<(), GitError> {
-    let output = run_git(
-        repo,
-        &[
-            "worktree",
-            "remove",
-            "--force",
-            path.to_str().unwrap_or_default(),
-        ],
-    )?;
+    let path_str = path.to_string_lossy();
+    let output = run_git(repo, &["worktree", "remove", "--force", path_str.as_ref()])?;
     if !output.status.success() {
         return Err(GitError::CommandFailed {
             command: format!("git worktree remove --force {}", path.to_string_lossy()),

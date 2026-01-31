@@ -88,17 +88,35 @@ Swift tests: 70 tests pass, including 6 new tests for shell escaping and Interac
 
 Python tests: 669 tests pass. Wave creation logic tested through existing wave/stimulus tests.
 
+## Additional improvements
+
+**Wave deletion.** Added `deleteWave()` to WaveService and RepoState, with context menu in WaveRow for right-click delete.
+
+**Better lfd connection handling.** The create wave button now waits for lfd connection before attempting to create, with clearer error message if daemon isn't running.
+
+**Improved logging.** Added `ui`, `model`, and `lfd` logging categories with timestamps and console output for debugging wave creation flow.
+
+**Step button tooltips.** Common steps (review, design, implement, debug) now show descriptions on hover.
+
+**Dev tooling.** Added `./scripts/dev.py lfd` command to stop installed lfd and run from the current branch for development.
+
 ## Files changed
 
 | File | Purpose |
 |------|---------|
 | `src/loopflow/lfd/wave.py` | Split create_wave and setup_wave_worktree |
 | `src/loopflow/lfd/daemon/http_server.py` | Background worktree setup, asyncio.to_thread for git ops |
-| `src/loopflow/lfd/daemon/server.py` | Better connection error handling |
+| `src/loopflow/lfd/daemon/server.py` | Better connection error handling, startup logging |
+| `src/loopflow/lfd/cli.py` | Suppress gRPC fork handler spam |
 | `swift/LoopflowCore/Models/Wave.swift` | Add prompt to InteractiveSession, shellEscape() |
 | `swift/Concerto/State/SessionState.swift` | Pass prompt to launchInteractiveSession |
+| `swift/Concerto/State/RepoState.swift` | Logging, deleteWave() |
 | `swift/Concerto/Views/Improvise/AreaTypeahead.swift` | New fish-style area input |
-| `swift/Concerto/Views/Improvise/StepRunner.swift` | Use AreaTypeahead, pass prompt |
+| `swift/Concerto/Views/Improvise/StepRunner.swift` | Use AreaTypeahead, pass prompt, step tooltips |
 | `swift/Concerto/Views/InteractiveSessionView.swift` | Use session.command |
-| `swift/LoopflowCore/Services/WaveService.swift` | longSession for git operations |
+| `swift/Concerto/Views/WaveRow.swift` | Context menu for delete |
+| `swift/Concerto/Views/WaveSidebar.swift` | Improved create flow with lfd connection check |
+| `swift/LoopflowCore/Services/WaveService.swift` | longSession, deleteWave, logging |
+| `swift/LoopflowCore/Services/LoggingService.swift` | ui/model/lfd categories, timestamps |
 | `swift/ConcertoTests/WaveTests.swift` | Shell escape and command tests |
+| `swift/scripts/dev.py` | `lfd` command for dev workflow |

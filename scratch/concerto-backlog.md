@@ -1,35 +1,65 @@
 # Concerto Backlog Restructure
 
-Transform `roadmap/concerto-next/` into a pure backlog. Move design docs to `reports/`, personas to `.lf/directions/`, and UX test scripts to `swift/`.
+Transform `roadmap/concerto-next/` into a pure backlog. Move design docs to `reports/`, personas to `.lf/directions/`.
 
 ## What to build
 
 - `roadmap/concerto/` — pure backlog of pickable work items
 - `reports/concerto/` — design reference (current 00-09 docs)
 - `.lf/directions/` — personas as directions
-- `swift/ConcertoTests/UXExperiments/` — executable test scripts
+- `.lf/steps/ux-review.md` — screenshot-driven persona review step
 
-## Current state → New locations
+## Current state
 
-| Current | New | Why |
-|---------|-----|-----|
-| `roadmap/concerto-next/00-09*.md` | `reports/concerto/` | Reference docs, not backlog |
-| `roadmap/concerto-next/07-ux-experiments.md` | Split: personas → `.lf/`, scripts → `swift/` | |
-| (new) | `roadmap/concerto/` | Pickable work items |
+Phase 1 is largely implemented:
+- Status dashboard with grouped sections (Needs Attention, Open PRs, Active, Idle)
+- Connect flow with Continue button (InteractiveSessionView)
+- Area picker, step runner, direction pills
+- Land flow, local notifications
+
+The backlog focuses on:
+- **Phase 1 polish** — friction discovered through persona+screenshot review
+- **Phase 2** — remote access foundation
+- **Phase 3** — mobile
+
+## Backlog generation: screenshot + persona
+
+The core loop:
+
+```bash
+# Take screenshot of current state
+# Run persona review against it
+lf ux-review --direction conductor --screenshot docs/concerto-main.png
+```
+
+The step:
+1. Reads screenshot
+2. Applies persona questions as lens
+3. Identifies friction, missing affordances
+4. Outputs backlog items in correct format
 
 ## Backlog structure
 
 ```
 roadmap/concerto/
 ├── README.md
-├── status-dashboard.md
-├── connect-flow.md
-├── continue-button.md
-├── land-flow.md
-├── area-picker.md
-├── step-runner.md
-├── wave-creation.md
-└── local-notifications.md
+│
+├── # Phase 1: Polish (discovered via persona review)
+├── dashboard-grouping-clarity.md
+├── connect-click-count.md
+├── ...
+│
+├── # Phase 2: Remote access foundation
+├── waveservice-protocol.md
+├── grpc-terminal-streaming.md
+├── loopflow-auth.md
+├── lfd-registration.md
+│
+├── # Phase 3: Mobile
+├── ios-conduct-ui.md
+├── ios-improvise-ui.md
+├── remote-terminal-view.md
+├── push-notifications.md
 ```
 
 Each item:
@@ -37,26 +67,33 @@ Each item:
 ```yaml
 ---
 status: todo | in-progress | done
-phase: 1
-verifies: [E2, E5]  # which UX experiments test this
+phase: 1 | 2 | 3
+persona: conductor | improviser | returner  # who this serves (optional)
+screenshot: docs/concerto-main.png  # evidence (optional)
 ---
 ```
 
 ```markdown
-# Status Dashboard
+# Dashboard Grouping Clarity
 
-Wave list grouped by NEEDS YOU / RUNNING / READY TO LAND.
+Conductor can't tell "needs me" from "running" at a glance.
 
 ## Current
-WaveSidebar.swift shows flat list with status badges.
+WaveSidebar groups: "Needs Attention", "Open PRs", "Active", "Idle"
+
+## Problem
+"Needs Attention" only shows errors. Interactive-waiting waves are in "Active".
+Conductor has to scan Active to find what needs them.
 
 ## Build
-- Group waves by status category
-- Section headers with counts
-- Priority ordering within groups
+- Add "Waiting for You" section for interactive-waiting waves
+- Or: visual distinction within Active for waiting vs running
+
+## Evidence
+[screenshot showing the issue]
 
 ## Done when
-E2 passes: "Status clear in < 5 seconds"
+Conductor question passes: "Can I tell what needs attention without clicking anything?"
 ```
 
 ## Personas as directions
@@ -116,123 +153,103 @@ Red flags:
 - Context lost between sessions
 ```
 
-## UX experiments as Swift tests
+## UX review step
 
-Experiments become executable tests in `swift/ConcertoTests/UXExperiments/`. They drive the app through scenarios and can capture screenshots, measure timing, log friction.
+Screenshot-driven persona review that generates backlog items.
 
-```swift
-// swift/ConcertoTests/UXExperiments/E2_MorningCheckin.swift
+```markdown
+# .lf/steps/ux-review.md
+---
+requires: screenshot
+produces: backlog items
+interactive: true
+---
 
-import XCTest
-@testable import Concerto
+Review the screenshot through the lens of the given direction (persona).
 
-/// Persona: Returner
-/// Target: Status clear in < 5 seconds, each wave handled in < 2 min
-final class E2_MorningCheckin: XCTestCase {
+Apply each question from the direction. For each question:
+1. Can the current UI answer it positively?
+2. If not, what's the friction?
+3. What would fix it?
 
-    /// Setup: 5 waves in various states
-    func setupScenario() async throws -> RepoState {
-        // Create test waves:
-        // - 2 in "needs you" (waiting for interactive)
-        // - 2 running
-        // - 1 ready to land
-    }
+Output backlog items in this format:
 
-    func test_statusVisibleQuickly() async throws {
-        let state = try await setupScenario()
-        let start = Date()
+    ---
+    status: todo
+    phase: 1
+    persona: <direction>
+    screenshot: <screenshot-path>
+    ---
 
-        // Simulate: open app, look at dashboard
-        let dashboard = DashboardView(state: state)
+    # <Title>
 
-        // Can I tell what needs attention?
-        let needsYou = dashboard.wavesNeedingAttention
-        XCTAssertEqual(needsYou.count, 2)
+    <One-line problem statement>
 
-        let elapsed = Date().timeIntervalSince(start)
-        XCTAssertLessThan(elapsed, 5.0, "Status should be clear in < 5 seconds")
-    }
+    ## Current
+    <What exists now>
 
-    func test_canHandleWaveQuickly() async throws {
-        // Measure: connect → review → continue for one wave
-    }
+    ## Problem
+    <Why it fails the persona question>
 
-    func test_canLandReadyPR() async throws {
-        // Measure: find ready wave → land
-    }
-}
+    ## Build
+    <What to change>
+
+    ## Done when
+    <Persona question that should pass>
 ```
 
-For more visual testing (screenshots, simulated user flow):
+Usage:
 
-```swift
-// swift/ConcertoTests/UXExperiments/E2_MorningCheckin_Visual.swift
-
-final class E2_MorningCheckin_Visual: XCTestCase {
-
-    func test_captureUserFlow() async throws {
-        let state = try await setupScenario()
-
-        // Capture screenshots at each step
-        let screenshots = CaptureService()
-
-        screenshots.capture("01-open-app", view: RepoWindow(state: state))
-
-        // Simulate: user scans for "needs you"
-        screenshots.capture("02-see-needs-you", view: ...)
-
-        // Simulate: user clicks connect
-        screenshots.capture("03-connect", view: ...)
-
-        // Export to scratch/ for review
-        try screenshots.exportAll(to: "scratch/E2-captures/")
-    }
-}
+```bash
+lf ux-review --direction conductor --screenshot docs/concerto-main.png
+lf ux-review --direction improviser --screenshot docs/concerto-improvise.png
+lf ux-review --direction returner --screenshot docs/concerto-main.png
 ```
 
-## Key functions
+## Phase 2 items (remote access foundation)
 
-```python
-# Backlog item loading
-@dataclass
-class BacklogItem:
-    name: str
-    status: str  # todo, in-progress, done
-    phase: int
-    verifies: list[str]  # experiment IDs
-    content: str
+From `reports/concerto/01-platform.md` and `02-auth.md`:
 
-def load_backlog(path: Path) -> list[BacklogItem]:
-    """Load all items from roadmap/concerto/."""
-    ...
+| Item | Description |
+|------|-------------|
+| `waveservice-protocol.md` | Abstract transport so same UI works against Python lfd and future Rust lfd |
+| `grpc-terminal-streaming.md` | Bidirectional stream for remote terminal I/O |
+| `loopflow-auth.md` | GitHub OAuth for remote access |
+| `lfd-registration.md` | lfd registers with Loopflow, receives tokens |
 
-def pick_next_item(backlog: list[BacklogItem]) -> BacklogItem:
-    """Pick highest priority todo item."""
-    ...
-```
+## Phase 3 items (mobile)
+
+From `reports/concerto/09-phasing.md`:
+
+| Item | Description |
+|------|-------------|
+| `ios-conduct-ui.md` | Same Conduct dashboard on iOS/iPad |
+| `ios-improvise-ui.md` | Same Improvise flow on iOS/iPad |
+| `remote-terminal-view.md` | Terminal view streaming from lfd |
+| `push-notifications.md` | APNS integration via Loopflow |
 
 ## Constraints
 
-- Backlog items must reference at least one experiment
-- Experiments are executable (Swift tests), not just documentation
-- Personas are directions that can be passed to `lf` commands
-- Design docs in `reports/` are reference, not source of truth for work
+- Phase 1 items come from persona+screenshot review
+- Phase 2/3 items come from design docs in `reports/concerto/`
+- Each item has a phase, optional persona
+- Personas are directions in `.lf/directions/`
 
 ## Done when
 
 ```bash
 # Structure
-ls roadmap/concerto/*.md           # backlog items
+ls roadmap/concerto/*.md           # backlog items (phases 1-3)
 ls reports/concerto/*.md           # design reference
 ls .lf/directions/conductor.md     # persona directions
-ls swift/ConcertoTests/UXExperiments/  # test scripts
+ls .lf/steps/ux-review.md          # screenshot review step
 
-# Backlog works with ingest
+# Can generate Phase 1 items
+lf ux-review --direction conductor --screenshot docs/concerto-main.png
+
+# Can ingest from backlog
 lf ingest  # picks from roadmap/concerto/
 
-# Personas work with lf
-lf review --direction conductor    # shapes review through persona lens
-
-# Tests run
-swift test --filter UXExperiments  # experiments execute
+# Personas work
+lf review --direction conductor
 ```

@@ -61,45 +61,59 @@ E2 passes: "Status clear in < 5 seconds"
 
 ## Personas as directions
 
-Personas become `.lf/directions/` files—questions to ask while working. They shift perspective, not specify requirements.
+Personas become `.lf/directions/` files—a lens that applies to any step and any area. See PROMPT_STYLE.md § Orthogonality.
 
 ```markdown
 # .lf/directions/conductor.md
 
-When reviewing Concerto code, ask:
+Managing multiple parallel workstreams. Checking in, not diving deep.
 
-- Can I tell what needs attention without clicking anything?
-- If 3 waves need me, is that obvious at a glance?
-- How many clicks from "I see a problem" to "I'm fixing it"?
-- Would I trust this to show me the right thing while I'm away?
-- Does landing a PR feel like a single action or a workflow?
-- Am I being asked to confirm things I already decided?
+- Can I see what needs attention without drilling in?
+- Is urgency visually obvious?
+- How many clicks from "I see a problem" to "I'm acting on it"?
+- Would I trust this to surface the right thing while I'm away?
+- Do routine actions feel like single actions or workflows?
+- Am I confirming things I already decided?
+
+Red flags:
+- Flat lists with no hierarchy
+- Status requires interaction to reveal
+- Confirmation dialogs for routine operations
 ```
 
 ```markdown
 # .lf/directions/improviser.md
 
-When reviewing Concerto code, ask:
+Exploring unfamiliar territory. Doesn't know the right approach yet.
 
-- How fast from "I have an idea" to "a step is running"?
-- Am I being asked to configure things I don't care about yet?
-- Can I run one step without committing to a flow?
-- Does the UI feel like a workshop or a form?
-- If I change my mind, is that easy or expensive?
+- How fast from intent to action?
+- Am I configuring things I don't care about yet?
+- Can I do one thing without committing to a sequence?
+- Does this feel like a workshop or a form?
+- If I change my mind, is that cheap?
 - Am I exploring or filling out paperwork?
+
+Red flags:
+- Setup wizards before first action
+- Required fields for optional concepts
+- Changing course requires starting over
 ```
 
 ```markdown
 # .lf/directions/returner.md
 
-When reviewing Concerto code, ask:
+Was away. Needs to catch up and triage.
 
-- Can I tell what happened while I was away?
-- Which waves need me vs which are fine—is that instant?
-- Do I have to click into each wave to understand its state?
-- Is there a summary or do I have to reconstruct context?
-- Are notifications helping me catch up or adding noise?
-- Can I triage 5 waves in 2 minutes?
+- Can I tell what happened while I was gone?
+- Is "needs me" vs "fine" instant to distinguish?
+- Do I have to click into each item to understand state?
+- Is there a summary or must I reconstruct context?
+- Can I triage N items in a few minutes?
+
+Red flags:
+- No history/timeline visible
+- State only visible after navigation
+- Context lost between sessions
 ```
 
 ## UX experiments as Swift tests

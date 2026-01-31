@@ -86,6 +86,29 @@ Action goals can include light process for system navigation. Perspective goals 
 
 The goal should work for any codebase using loopflow, not just the one where it was written.
 
+### Orthogonality
+
+Directions are orthogonal to steps and areas. A direction is a lens that applies to any task in any scope.
+
+**Don't couple to steps.** "When reviewing code, ask..." ties the direction to the `review` step. Just ask the questions—they apply whether you're reviewing, implementing, or designing.
+
+**Don't couple to areas.** "When working on Concerto..." ties the direction to a specific codebase. The same user patterns (conductor, improviser, returner) exist in any product with parallel work.
+
+```markdown
+# Bad: coupled to step and area
+When reviewing Concerto code, ask:
+- Can I tell what needs attention?
+
+# Good: pure lens
+Managing multiple parallel workstreams. Checking in, not diving deep.
+
+- Can I see what needs attention without drilling in?
+- Is urgency visually obvious?
+- How many clicks from "I see a problem" to "I'm acting on it"?
+```
+
+The direction shapes judgment. The step defines the task. The area defines scope. Keep them independent.
+
 ### Voice
 
 Goals should feel opinionated. "Slow is fake." "Errors of omission kill." "Sunk cost is sunk."

@@ -214,9 +214,9 @@ When ready to optimize Postgres storage:
 
 ## Done when
 
-- [ ] `LfdId::new()` generates valid UUIDs
-- [ ] `LfdId::parse()` validates UUID format
-- [ ] SQLite store compiles and tests pass
-- [ ] Postgres store compiles and tests pass
-- [ ] No raw `&str` IDs in store trait methods
-- [ ] `cargo clippy` clean
+- [x] `LfdId::new()` generates valid UUIDs
+- [x] `LfdId::parse()` validates UUID format
+- [x] SQLite store compiles and tests pass
+- [x] Postgres store compiles and tests pass
+- [x] No raw `&str` IDs in store trait methods
+- [x] `cargo clippy` clean

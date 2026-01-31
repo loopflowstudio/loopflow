@@ -615,6 +615,7 @@ mod tests {
     #[test]
     fn handle_tick_result_ends_step_run_on_success() {
         let wave = base_wave();
+        let expected_step_run_id = format!("{}:{}", wave.id, wave.step_index);
         let store = std::sync::Arc::new(TestStore::new(wave.clone()));
         let shared: SharedStore = store.clone();
 
@@ -628,13 +629,14 @@ mod tests {
 
         assert_eq!(
             ended,
-            vec![("wave-1:3".to_string(), StepRunStatus::StepCompleted as i32)]
+            vec![(expected_step_run_id, StepRunStatus::StepCompleted as i32)]
         );
     }
 
     #[test]
     fn handle_tick_result_ends_step_run_on_failure() {
         let wave = base_wave();
+        let expected_step_run_id = format!("{}:{}", wave.id, wave.step_index);
         let store = std::sync::Arc::new(TestStore::new(wave.clone()));
         let shared: SharedStore = store.clone();
 
@@ -648,7 +650,7 @@ mod tests {
 
         assert_eq!(
             ended,
-            vec![("wave-1:3".to_string(), StepRunStatus::StepFailed as i32)]
+            vec![(expected_step_run_id, StepRunStatus::StepFailed as i32)]
         );
     }
 }

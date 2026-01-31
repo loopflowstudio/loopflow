@@ -1,6 +1,14 @@
-# Design Review: Postgres Storage Backend + UI Polish
+# Design Review: Postgres Storage Backend + LfdId + UI Polish
 
 ## What was implemented
+
+**LfdId unified ID type:**
+- `LfdId` newtype in `rust/lfd/src/id.rs` with UUID generation and validation
+- Serialization traits: `Display`, `FromStr`, `Serialize`, `Deserialize`
+- SQLite support via `rusqlite::ToSql` / `FromSql`
+- Postgres support via `tokio_postgres::ToSql` / `FromSql`
+- Store trait methods updated to use `&LfdId` instead of `&str`
+- Proto boundary converts `String` <-> `LfdId` at service layer
 
 **Rust Postgres backend:**
 - `PostgresStore` implementing the full `RunStore` trait (42 methods)
@@ -15,6 +23,8 @@
 - New DesignSystem.swift additions for button styles
 
 ## Key choices
+
+**LfdId with `from_raw` escape hatch:** `LfdId::parse()` validates UUIDs, but step-run and fork-run IDs use composite strings (e.g., `"{wave_id}:{step_index}"`). The `LfdId::from_raw()` method bypasses validation for these internal IDs. This keeps type safety at the API boundary while accommodating existing ID formats. See `scratch/questions.md` for discussion of migrating these to UUIDs.
 
 **Sync trait over async trait:** The `RunStore` trait uses synchronous methods. `PostgresStore` creates its own tokio runtime and uses `block_on` to bridge async postgres calls. This preserves trait compatibility with the existing `SqliteStore` implementation and avoids forcing async across the entire codebase.
 
@@ -62,32 +72,31 @@ docker-compose.yml
 - Retention policies and cleanup jobs
 - SQLite-to-Postgres data migration tooling
 - TLS/SSL support for Postgres connections
+- Per-entity ID types (`WaveId`, `StepRunId`, etc.)
 
 ## Testing
 
 - SQLite test suite: passes
 - Postgres test suite: passes (via testcontainers or external Postgres)
 - `LFD_SKIP_POSTGRES_TESTS=1` skips Postgres tests when Docker unavailable
-- Python tests: 673 passed
-- Swift tests: 70 passed
 - Rust format/clippy: clean
 
 ## Files changed
 
 | File | Change |
 |------|--------|
-| `rust/lfd/src/store/postgres.rs` | New: 969 lines implementing PostgresStore |
-| `rust/lfd/src/store/mod.rs` | Added ForkRun, ForkRunStatus, StoreError variants, test suite |
+| `rust/lfd/src/id.rs` | New: LfdId newtype with UUID generation, validation, serialization |
+| `rust/lfd/src/store/postgres.rs` | New: 979 lines implementing PostgresStore |
+| `rust/lfd/src/store/mod.rs` | Added ForkRun, ForkRunStatus, StoreError variants, LfdId in trait methods, test suite |
+| `rust/lfd/src/store/sqlite.rs` | Updated to use LfdId in queries |
 | `rust/lfd/src/store/migrations/postgres/001_initial.sql` | New: initial schema |
 | `rust/lfd/Cargo.toml` | Added tokio-postgres, deadpool-postgres, testcontainers deps |
 | `rust/lfd/src/main.rs` | Backend selection logic, `migrate` subcommand |
-| `rust/lfd/src/server.rs` | StoreError::Postgres handling |
+| `rust/lfd/src/server.rs` | StoreError::Postgres handling, LfdId::parse at proto boundary |
+| `rust/lfd/src/loops/*.rs` | Updated to use LfdId |
 | `rust/lfd/Dockerfile` | New: multi-stage build for lfd binary |
 | `rust/lfd/docker-compose.yml` | New: local dev with Postgres |
 | `rust/lfd/README.md` | New: docker usage docs |
-| `swift/Concerto/Views/WaveDetailPanel.swift` | Refactored: action bar, abandon confirmation |
-| `swift/Concerto/Views/WaveSidebar.swift` | Renamed to Agents, added sections |
-| `swift/Concerto/DesignSystem.swift` | Added DarkButtonStyle, OutlineButtonStyle |
-| `scratch/rust-data-backend.md` | Design doc for Postgres backend |
-| `scratch/questions.md` | Updated with resolved questions |
+| `scratch/lfd-id.md` | Design doc for LfdId |
+| `scratch/questions.md` | Open question about composite IDs |
 | `roadmap/rust/05-data-backend.md` | Deleted: replaced by scratch/ design |

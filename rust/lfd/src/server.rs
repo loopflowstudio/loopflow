@@ -53,6 +53,7 @@ impl ControlServer {
         }
     }
 
+    #[allow(clippy::result_large_err)]
     fn parse_id(value: &str, name: &str) -> Result<LfdId, Status> {
         LfdId::parse(value)
             .map_err(|err| Status::invalid_argument(format!("invalid {name}: {err}")))
@@ -751,7 +752,7 @@ impl ControlService for ControlServer {
             if let Some(wave_id) = step_run.wave_id {
                 let wave_id = Self::parse_id(&wave_id, "wave_id")?;
                 let wave = self
-                    .run_store({ move |store| store.get_wave(&wave_id) })
+                    .run_store(move |store| store.get_wave(&wave_id))
                     .await?;
 
                 if let Some(mut wave) = wave {

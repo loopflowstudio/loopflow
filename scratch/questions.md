@@ -17,3 +17,4 @@
 - Agent-assisted conflict resolution: should this live in `lf ops rebase` only, or also in daemon's rebase for waves?
 - Should we add worktree operations to Rust? `wt` CLI handles them now, but daemon may want direct control.
 - gh CLI wrappers: keep in Python forever, or eventually move to Rust for daemon integration?
+- With the `lfops` console script removed, should Concerto/Swift WorktreeService switch to `lf ops` (or is a shim expected)?

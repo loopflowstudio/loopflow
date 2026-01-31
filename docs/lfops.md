@@ -1,21 +1,21 @@
 ---
 layout: default
-title: lfops Commands
+title: lf ops Commands
 ---
 
-# lfops Commands
+# lf ops Commands
 
-Operations and utilities. `lfops` handles everything that's not launching a prompt.
+Operations and utilities. `lf ops` handles everything that's not launching a prompt.
 
-## lfops cp
+## lf ops cp
 
 Copy context to clipboard for use with web clients.
 
 ```bash
-lfops cp                     # copy repo docs
-lfops cp src tests           # copy specific paths
-lfops cp -e "*.pyc"          # exclude patterns
-lfops cp --no-lfdocs         # skip repo docs
+lf ops cp                     # copy repo docs
+lf ops cp src tests           # copy specific paths
+lf ops cp -e "*.pyc"          # exclude patterns
+lf ops cp --no-lfdocs         # skip repo docs
 ```
 
 Options:
@@ -29,57 +29,57 @@ Options:
 | `--diff-files / --no-diff-files` | Include files touched by branch |
 | `--summaries / --no-summaries` | Include pre-generated codebase summaries |
 
-## lfops add
+## lf ops add
 
 Create a new prompt file.
 
 ```bash
-lfops add my-task            # creates .claude/commands/my-task.md
-lfops add my-task -f         # overwrite if exists
+lf ops add my-task            # creates .claude/commands/my-task.md
+lf ops add my-task -f         # overwrite if exists
 ```
 
 ---
 
 ## Git Workflow
 
-## lfops pr
+## lf ops pr
 
 Create or update a PR, open in browser.
 
 ```bash
-lfops pr
+lf ops pr
 ```
 
 Generates a PR description based on the branch diff, creates the PR (or updates if one exists), and opens it in your browser.
 
 Idempotent: run it to create, or again to update after more commits.
 
-## lfops land
+## lf ops land
 
 Submit PR to merge queue.
 
 ```bash
-lfops land
+lf ops land
 ```
 
-Enables auto-merge on your PR. GitHub merges when CI passes and the merge queue clears. Run `lfops wt prune` after merge completes to clean up.
+Enables auto-merge on your PR. GitHub merges when CI passes and the merge queue clears. Run `lf ops wt prune` after merge completes to clean up.
 
-## lfops next
+## lf ops next
 
 Land current PR and continue work on a new stacked branch.
 
 ```bash
-lfops next
+lf ops next
 ```
 
-Combines `lfops land` + a branch switch in one command. After landing the current PR, it creates a new stacked branch from the current HEAD and switches the worktree to it. The worktree directory stays the same so you can keep working while the previous PR merges.
+Combines `lf ops land` + a branch switch in one command. After landing the current PR, it creates a new stacked branch from the current HEAD and switches the worktree to it. The worktree directory stays the same so you can keep working while the previous PR merges.
 
-## lfops commit
+## lf ops commit
 
 Generate commit message and commit.
 
 ```bash
-lfops commit
+lf ops commit
 ```
 
 Stages changes, generates a commit message based on the diff, and commits.
@@ -90,68 +90,68 @@ Options:
 |------|-------------|
 | `-p, --push` | Push after committing |
 
-## lfops doctor
+## lf ops doctor
 
 Check dependencies.
 
 ```bash
-lfops doctor
+lf ops doctor
 ```
 
 Verifies that required tools are installed and working.
 
-## lfops version
+## lf ops version
 
 Show loopflow version.
 
 ```bash
-lfops version
+lf ops version
 ```
 
-## lfops summarize
+## lf ops summarize
 
 Generate codebase summaries.
 
 ```bash
-lfops summarize src/           # Generate summary for src/
-lfops summarize -t 20000 src   # With specific token budget
-lfops summarize -a             # Regenerate all configured summaries
+lf ops summarize src/           # Generate summary for src/
+lf ops summarize -t 20000 src   # With specific token budget
+lf ops summarize -a             # Regenerate all configured summaries
 ```
 
 Creates pre-generated LLM summaries for large codebases. Summaries are cached and included in context when configured.
 
-## lfops rebase
+## lf ops rebase
 
 Rebase current branch onto main.
 
 ```bash
-lfops rebase
+lf ops rebase
 ```
 
 Fetches main and rebases. If conflicts occur, launches an assistant to help resolve them.
 
-## lfops sync
+## lf ops sync
 
 Update local main to match origin.
 
 ```bash
-lfops sync
+lf ops sync
 ```
 
 Fetches `origin/main` and updates your local main branch. Safe to run from any worktree.
 
-## lfops wt
+## lf ops wt
 
 Worktree helper commands.
 
-### lfops wt create
+### lf ops wt create
 
 Create worktree with schema-based branch name.
 
 ```bash
-lfops wt create my-feature       # creates ../repo.my-feature
-lfops wt create my-feature -b develop   # from develop instead of main
-lfops wt create feature-B --stack       # stack on current branch
+lf ops wt create my-feature       # creates ../repo.my-feature
+lf ops wt create my-feature -b develop   # from develop instead of main
+lf ops wt create feature-B --stack       # stack on current branch
 ```
 
 | Flag | Description |
@@ -161,38 +161,38 @@ lfops wt create feature-B --stack       # stack on current branch
 
 When using `--stack`, the new worktree branches from the current branch instead of main. PRs from stacked branches target their base branch while it's open, then retarget to main after the base PR merges.
 
-### lfops wt switch
+### lf ops wt switch
 
 Switch to a worktree by its short directory name.
 
 ```bash
-lfops wt switch my-feature       # switches to ../repo.my-feature
+lf ops wt switch my-feature       # switches to ../repo.my-feature
 ```
 
-### lfops wt list
+### lf ops wt list
 
 List worktrees with prunable metadata.
 
 ```bash
-lfops wt list
+lf ops wt list
 ```
 
-### lfops wt ci
+### lf ops wt ci
 
 Show CI status for the current branch.
 
 ```bash
-lfops wt ci
+lf ops wt ci
 ```
 
-### lfops wt prune
+### lf ops wt prune
 
 Remove worktrees whose branches have been merged.
 
 ```bash
-lfops wt prune           # interactive confirmation
-lfops wt prune --dry-run # show what would be pruned
-lfops wt prune --force   # skip confirmation
+lf ops wt prune           # interactive confirmation
+lf ops wt prune --dry-run # show what would be pruned
+lf ops wt prune --force   # skip confirmation
 ```
 
 Finds worktrees where the PR was merged or the branch is an ancestor of `origin/main` (handles squash merges). Never prunes main/master or dirty worktrees.
@@ -202,26 +202,26 @@ Finds worktrees where the PR was merged or the branch is an ancestor of `origin/
 | `-n, --dry-run` | Show what would be pruned without removing |
 | `-f, --force` | Skip confirmation prompt |
 
-## lfops abandon
+## lf ops abandon
 
 Abandon a branch: close PR, remove worktree, delete branch.
 
 ```bash
-lfops abandon feature-branch
-lfops abandon feature-branch --force   # skip confirmation
+lf ops abandon feature-branch
+lf ops abandon feature-branch --force   # skip confirmation
 ```
 
 | Flag | Description |
 |------|-------------|
 | `-f, --force` | Skip confirmation and force abandon with uncommitted changes |
 
-## lfops shell
+## lf ops shell
 
 Shell integration setup.
 
 ```bash
-lfops shell init       # print shell integration code
-lfops shell install    # install to shell config file
+lf ops shell init       # print shell integration code
+lf ops shell install    # install to shell config file
 ```
 
 Adds the `wt` function for quick worktree switching: `wt my-feature` switches to `../repo.my-feature`.
@@ -229,17 +229,17 @@ Adds the `wt` function for quick worktree switching: `wt my-feature` switches to
 ## Typical Workflow
 
 ```bash
-lfops wt create my-feature       # create worktree (../repo.my-feature)
-lfops wt switch my-feature       # switch to worktree from another
+lf ops wt create my-feature       # create worktree (../repo.my-feature)
+lf ops wt switch my-feature       # switch to worktree from another
 # ... work on feature ...
-lfops commit                     # commit with generated message
-lfops pr                         # open PR (CI runs automatically)
+lf ops commit                     # commit with generated message
+lf ops pr                         # open PR (CI runs automatically)
 # ... address review feedback ...
-lfops commit -p                  # commit and push
-lfops wt ci                      # check CI status
-lfops land                       # submit to merge queue
+lf ops commit -p                  # commit and push
+lf ops wt ci                      # check CI status
+lf ops land                       # submit to merge queue
 # ... wait for CI to pass and merge ...
-lfops wt prune                   # cleanup merged worktrees
+lf ops wt prune                   # cleanup merged worktrees
 ```
 
 ## See Also

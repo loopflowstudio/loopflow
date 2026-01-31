@@ -248,7 +248,12 @@ def main():
     try:
         # Handle --version flag
         if "--version" in sys.argv:
-            if get_internal_flag("use_rust") and shutil.which("lf-engine"):
+            try:
+                use_rust = get_internal_flag("use_rust")
+            except ConfigError:
+                use_rust = False
+
+            if use_rust and shutil.which("lf-engine"):
                 result = subprocess.run(
                     ["lf-engine", "version"], capture_output=True, text=True
                 )

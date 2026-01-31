@@ -120,6 +120,7 @@ def _push_rust(worktree: Path, force_with_lease: bool = False) -> None:
         args.append("--force-with-lease")
     _run_loopflow_engine(args)
 
+
 def _push_with_upstream_rust(worktree: Path, remote: str, branch: str) -> None:
     _run_loopflow_engine(
         [
@@ -136,7 +137,9 @@ def _push_with_upstream_rust(worktree: Path, remote: str, branch: str) -> None:
 
 
 def _create_branch_rust(worktree: Path, name: str) -> BranchInfo:
-    data = _run_loopflow_engine(["lf-engine", "branch", "--worktree", str(worktree), "--name", name])
+    data = _run_loopflow_engine(
+        ["lf-engine", "branch", "--worktree", str(worktree), "--name", name]
+    )
     return BranchInfo(**data)
 
 
@@ -153,6 +156,7 @@ def _land_rust(worktree: Path, strategy: str, main_branch: str = "main") -> Land
     ]
     data = _run_loopflow_engine(args)
     return LandResult(**data)
+
 
 def _get_default_branch_rust(repo: Path) -> str:
     data = _run_loopflow_engine(["lf-engine", "default-branch", "--repo", str(repo)])

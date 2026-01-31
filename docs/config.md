@@ -138,7 +138,7 @@ summaries:
     tokens: 5000
 ```
 
-Generate with `lfops summarize`. Summaries give the coding agent codebase context without consuming the full token budget. Only summarize directories you're *not* including directly.
+Generate with `lf ops summarize`. Summaries give the coding agent codebase context without consuming the full token budget. Only summarize directories you're *not* including directly.
 
 | | |
 |---|---|
@@ -293,7 +293,7 @@ ide:
 
 ### Branch Names
 
-Customize branch naming for `lfops wt create`.
+Customize branch naming for `lf ops wt create`.
 
 ```yaml
 branch_names:
@@ -301,7 +301,7 @@ branch_names:
 ```
 
 Available placeholders:
-- `{name}` — short name passed to `lfops wt create`
+- `{name}` — short name passed to `lf ops wt create`
 - `{user}` — git `user.name` (sanitized)
 - `{date}` — `YYYYMMDD`
 - `{ts}` — `YYYYMMDD_HHMM`
@@ -319,7 +319,7 @@ summaries:
     tokens: 5000
 ```
 
-Generate with `lfops summarize`.
+Generate with `lf ops summarize`.
 
 ### SkillRegistry
 

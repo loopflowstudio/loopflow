@@ -1,67 +1,44 @@
 # Concerto Backlog Restructure
 
-Transform `roadmap/concerto-next/` from narrative design docs into a pickable backlog with simulated UX testing workflow.
+Transform `roadmap/concerto-next/` into a pure backlog. Move design docs to `reports/`, personas to `.lf/directions/`, and UX test scripts to `swift/`.
 
 ## What to build
 
-A backlog structure where each item is a discrete piece of work that can be ingested, implemented, and verified via persona-based UX simulation.
+- `roadmap/concerto/` — pure backlog of pickable work items
+- `reports/concerto/` — design reference (current 00-09 docs)
+- `.lf/directions/` — personas as directions
+- `swift/ConcertoTests/UXExperiments/` — executable test scripts
 
-## Current state
+## Current state → New locations
 
-```
-roadmap/concerto-next/
-├── 00-overview.md      # narrative
-├── 01-platform.md      # narrative
-├── ...
-├── 07-ux-experiments.md  # personas + test scripts (useful!)
-├── 09-phasing.md       # done criteria
-└── README.md
-```
+| Current | New | Why |
+|---------|-----|-----|
+| `roadmap/concerto-next/00-09*.md` | `reports/concerto/` | Reference docs, not backlog |
+| `roadmap/concerto-next/07-ux-experiments.md` | Split: personas → `.lf/`, scripts → `swift/` | |
+| (new) | `roadmap/concerto/` | Pickable work items |
 
-The design docs are valuable reference but not pickable work items. The UX experiments file has personas and test scripts—these become the verification mechanism.
-
-## New structure
+## Backlog structure
 
 ```
 roadmap/concerto/
-├── README.md           # overview, points to docs/ and backlog/
-├── docs/               # design reference (current 00-09 files)
-│   ├── overview.md
-│   ├── conduct-ux.md
-│   ├── improvise-ux.md
-│   └── ...
-├── personas/           # who we're building for
-│   ├── conductor.md
-│   ├── improviser.md
-│   └── returner.md
-├── experiments/        # UX test scripts
-│   ├── E1-quick-debug.md
-│   ├── E2-morning-checkin.md
-│   ├── E3-ship-feature.md
-│   ├── E4-start-project.md
-│   └── E5-multi-wave.md
-└── backlog/            # pickable work items
-    ├── status-dashboard.md
-    ├── connect-flow.md
-    ├── continue-button.md
-    ├── land-flow.md
-    ├── area-picker.md
-    ├── step-runner.md
-    ├── wave-creation.md
-    ├── local-notifications.md
-    └── ...
+├── README.md
+├── status-dashboard.md
+├── connect-flow.md
+├── continue-button.md
+├── land-flow.md
+├── area-picker.md
+├── step-runner.md
+├── wave-creation.md
+└── local-notifications.md
 ```
 
-## Backlog item format
-
-Each item in `backlog/` follows this structure:
+Each item:
 
 ```yaml
 ---
 status: todo | in-progress | done
-phase: 1 | 2 | 3 | 4
-tests: [E1, E3]  # which experiments verify this
-personas: [conductor, returner]  # who benefits
+phase: 1
+verifies: [E2, E5]  # which UX experiments test this
 ---
 ```
 
@@ -70,146 +47,202 @@ personas: [conductor, returner]  # who benefits
 
 Wave list grouped by NEEDS YOU / RUNNING / READY TO LAND.
 
-## What exists
-- WaveSidebar.swift shows flat list
-- WaveRow.swift displays individual waves
+## Current
+WaveSidebar.swift shows flat list with status badges.
 
-## What to build
+## Build
 - Group waves by status category
-- Section headers: "NEEDS YOU", "RUNNING", "READY TO LAND"
+- Section headers with counts
 - Priority ordering within groups
 
 ## Done when
-Experiment E2 (morning check-in): "Status clear in < 5 seconds"
+E2 passes: "Status clear in < 5 seconds"
 ```
 
-## Simulated UX testing flow
+## Personas as directions
 
-The experiments become a verification mechanism. After implementing a feature:
-
-```bash
-lf ux-test E2  # runs persona simulation against the app
-```
-
-The step:
-1. Reads the experiment script (E2-morning-checkin.md)
-2. Reads relevant persona (returner.md)
-3. Uses Claude to simulate the persona walking through the experiment
-4. Reports friction points, missing affordances, timing estimates
-
-This creates a feedback loop: implement → simulate → identify gaps → implement.
-
-## Persona files
-
-Extract from 07-ux-experiments.md into standalone files:
+Personas become `.lf/directions/` files. They shape how an agent approaches Concerto work—same as product-engineer or designer.
 
 ```markdown
-# roadmap/concerto/personas/conductor.md
+# .lf/directions/conductor.md
 
-**The Conductor**
+Build for users who have multiple waves running and check in periodically.
 
-Has multiple waves running. Checks in periodically. Connects for interactive steps, reviews output, lands PRs.
-
-## Wants
+## What they want
 - Glanceable status
-- Quick connect
+- Quick connect to interactive steps
 - Minimal friction to land
 
-## Typical session
-- Open app, scan wave list
-- Handle anything in "NEEDS YOU"
-- Land anything in "READY TO LAND"
-- Check "RUNNING" waves are healthy
+## Quality signals
+- Can I tell what needs attention in < 5 seconds?
+- How many clicks to connect?
+- Is wave state obvious?
 
-## Pain points
-- Slow to see what needs attention
-- Too many clicks to connect
-- Unclear wave state
+## Anti-patterns
+- Burying "needs attention" in a flat list
+- Requiring navigation to see status
+- Modal confirmations for routine actions
 ```
-
-## Experiment files
 
 ```markdown
-# roadmap/concerto/experiments/E2-morning-checkin.md
----
-persona: returner
-features: [status-dashboard, connect-flow, land-flow]
-target: "Status clear in < 5 seconds, each wave handled in < 2 min"
----
+# .lf/directions/improviser.md
 
-# E2: Morning check-in
+Build for users starting fresh on a problem, exploring before committing to a flow.
 
-## Script
-1. Open Concerto
-2. See which waves need attention
-3. For each waiting wave: connect, review, continue or fix
-4. Land any ready PRs
-5. Check running waves are healthy
+## What they want
+- Quick wave creation
+- Easy step running
+- Low commitment
 
-## Success criteria
-- Status clear in < 5 seconds
-- Each wave handled in < 2 min
+## Quality signals
+- How fast from "I have an idea" to "step is running"?
+- Can I iterate without ceremony?
+- Does the UI get out of my way?
 
-## Friction signals
-- User hesitates (where?)
-- User clicks wrong thing
-- User asks "how do I..."
-- User can't find information
+## Anti-patterns
+- Wizards and setup flows
+- Requiring full wave config before running a step
+- Making exploration feel like commitment
 ```
 
-## Backlog items (Phase 1)
+```markdown
+# .lf/directions/returner.md
 
-From 09-phasing.md, Phase 1 deliverables become these items:
+Build for users who were away and need to catch up on wave status.
 
-| Item | Experiments | Personas |
-|------|-------------|----------|
-| status-dashboard | E2, E5 | conductor, returner |
-| connect-flow | E2, E3 | conductor, returner |
-| continue-button | E3 | conductor |
-| land-flow | E2, E3 | conductor, returner |
-| area-picker | E1, E4 | improviser |
-| step-runner | E1, E4 | improviser |
-| wave-creation | E4 | improviser |
-| local-notifications | E3 | conductor |
+## What they want
+- See what happened while away
+- Quick triage: what needs me vs what's fine
+- Decide next actions fast
+
+## Quality signals
+- Can I catch up on 5 waves in 2 minutes?
+- Is history/progress visible?
+- Are notifications useful, not noisy?
+
+## Anti-patterns
+- Requiring click-through to see status
+- Losing context when away
+- Notification spam
+```
+
+## UX experiments as Swift tests
+
+Experiments become executable tests in `swift/ConcertoTests/UXExperiments/`. They drive the app through scenarios and can capture screenshots, measure timing, log friction.
+
+```swift
+// swift/ConcertoTests/UXExperiments/E2_MorningCheckin.swift
+
+import XCTest
+@testable import Concerto
+
+/// Persona: Returner
+/// Target: Status clear in < 5 seconds, each wave handled in < 2 min
+final class E2_MorningCheckin: XCTestCase {
+
+    /// Setup: 5 waves in various states
+    func setupScenario() async throws -> RepoState {
+        // Create test waves:
+        // - 2 in "needs you" (waiting for interactive)
+        // - 2 running
+        // - 1 ready to land
+    }
+
+    func test_statusVisibleQuickly() async throws {
+        let state = try await setupScenario()
+        let start = Date()
+
+        // Simulate: open app, look at dashboard
+        let dashboard = DashboardView(state: state)
+
+        // Can I tell what needs attention?
+        let needsYou = dashboard.wavesNeedingAttention
+        XCTAssertEqual(needsYou.count, 2)
+
+        let elapsed = Date().timeIntervalSince(start)
+        XCTAssertLessThan(elapsed, 5.0, "Status should be clear in < 5 seconds")
+    }
+
+    func test_canHandleWaveQuickly() async throws {
+        // Measure: connect → review → continue for one wave
+    }
+
+    func test_canLandReadyPR() async throws {
+        // Measure: find ready wave → land
+    }
+}
+```
+
+For more visual testing (screenshots, simulated user flow):
+
+```swift
+// swift/ConcertoTests/UXExperiments/E2_MorningCheckin_Visual.swift
+
+final class E2_MorningCheckin_Visual: XCTestCase {
+
+    func test_captureUserFlow() async throws {
+        let state = try await setupScenario()
+
+        // Capture screenshots at each step
+        let screenshots = CaptureService()
+
+        screenshots.capture("01-open-app", view: RepoWindow(state: state))
+
+        // Simulate: user scans for "needs you"
+        screenshots.capture("02-see-needs-you", view: ...)
+
+        // Simulate: user clicks connect
+        screenshots.capture("03-connect", view: ...)
+
+        // Export to scratch/ for review
+        try screenshots.exportAll(to: "scratch/E2-captures/")
+    }
+}
+```
 
 ## Key functions
 
 ```python
-# New step: ux-test
-# .lf/steps/ux-test.md
-def run_ux_test(experiment: str) -> UXTestResult:
-    """Simulate persona walking through experiment."""
+# Backlog item loading
+@dataclass
+class BacklogItem:
+    name: str
+    status: str  # todo, in-progress, done
+    phase: int
+    verifies: list[str]  # experiment IDs
+    content: str
+
+def load_backlog(path: Path) -> list[BacklogItem]:
+    """Load all items from roadmap/concerto/."""
     ...
 
-@dataclass
-class UXTestResult:
-    experiment: str
-    persona: str
-    friction_points: list[str]
-    missing_affordances: list[str]
-    estimated_time: str
-    verdict: str  # "PASS" | "FRICTION" | "BLOCKED"
+def pick_next_item(backlog: list[BacklogItem]) -> BacklogItem:
+    """Pick highest priority todo item."""
+    ...
 ```
 
 ## Constraints
 
-- Keep design docs as reference—don't delete them
-- Each backlog item must link to at least one experiment
-- Experiments are the acceptance criteria
-- Persona simulations use the actual app state (screenshot or DOM inspection where possible)
+- Backlog items must reference at least one experiment
+- Experiments are executable (Swift tests), not just documentation
+- Personas are directions that can be passed to `lf` commands
+- Design docs in `reports/` are reference, not source of truth for work
 
 ## Done when
 
 ```bash
-# Rename works
-ls roadmap/concerto/  # exists
-ls roadmap/concerto-next/  # gone
+# Structure
+ls roadmap/concerto/*.md           # backlog items
+ls reports/concerto/*.md           # design reference
+ls .lf/directions/conductor.md     # persona directions
+ls swift/ConcertoTests/UXExperiments/  # test scripts
 
-# Structure correct
-ls roadmap/concerto/backlog/  # has items
-ls roadmap/concerto/experiments/  # has E1-E5
-ls roadmap/concerto/personas/  # has 3 personas
+# Backlog works with ingest
+lf ingest  # picks from roadmap/concerto/
 
-# Can ingest
-lf ingest  # picks an item from backlog/
+# Personas work with lf
+lf review --direction conductor    # shapes review through persona lens
+
+# Tests run
+swift test --filter UXExperiments  # experiments execute
 ```

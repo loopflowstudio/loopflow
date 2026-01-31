@@ -15,9 +15,9 @@ Pickable work items for Concerto, the loopflow macOS app.
 Phase 1 items come from persona+screenshot review:
 
 ```bash
-lf ux-review --direction conductor --screenshot docs/concerto-main.png
-lf ux-review --direction improviser --screenshot docs/concerto-improvise.png
-lf ux-review --direction returner --screenshot docs/concerto-main.png
+lf ux-review --direction conductor --area docs/concerto-main.png
+lf ux-review --direction improviser --area docs/concerto-main.png
+lf ux-review --direction returner --area docs/concerto-main.png
 ```
 
 ## Item format

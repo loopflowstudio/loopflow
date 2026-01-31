@@ -29,7 +29,7 @@ The core loop:
 ```bash
 # Take screenshot of current state
 # Run persona review against it
-lf ux-review --direction conductor --screenshot docs/concerto-main.png
+lf ux-review --direction conductor --area docs/concerto-main.png
 ```
 
 The step:
@@ -201,9 +201,9 @@ Output backlog items in this format:
 Usage:
 
 ```bash
-lf ux-review --direction conductor --screenshot docs/concerto-main.png
-lf ux-review --direction improviser --screenshot docs/concerto-improvise.png
-lf ux-review --direction returner --screenshot docs/concerto-main.png
+lf ux-review --direction conductor --area docs/concerto-main.png
+lf ux-review --direction improviser --area docs/concerto-main.png
+lf ux-review --direction returner --area docs/concerto-main.png
 ```
 
 ## Phase 2 items (remote access foundation)
@@ -245,7 +245,7 @@ ls .lf/directions/conductor.md     # persona directions
 ls .lf/steps/ux-review.md          # screenshot review step
 
 # Can generate Phase 1 items
-lf ux-review --direction conductor --screenshot docs/concerto-main.png
+lf ux-review --direction conductor --area docs/concerto-main.png
 
 # Can ingest from backlog
 lf ingest  # picks from roadmap/concerto/

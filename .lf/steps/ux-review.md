@@ -1,10 +1,10 @@
 ---
-requires: screenshot
+requires: screenshot in area
 produces: backlog items
 interactive: true
 ---
 
-Review the screenshot through the lens of the given direction (persona).
+Review the screenshot (included via --area) through the lens of the given direction (persona).
 
 Apply each question from the direction. For each question:
 1. Can the current UI answer it positively?

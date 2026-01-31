@@ -116,6 +116,33 @@ impl lf_core::runtime::StepRunner for FakeRunner {
     }
 }
 
+struct LoopRunner {
+    repo: std::path::PathBuf,
+    runs: Mutex<usize>,
+}
+
+impl lf_core::runtime::StepRunner for LoopRunner {
+    fn run(
+        &self,
+        _step: &Step,
+        _worktree: &std::path::Path,
+        _directions: &[String],
+    ) -> Result<StepResult, lf_core::CoreError> {
+        let mut runs = self.runs.lock().unwrap();
+        *runs += 1;
+        if *runs == 1 {
+            let wave_dir = self.repo.join("roadmap").join("testwave");
+            let item = wave_dir.join("item.md");
+            let _ = std::fs::remove_file(item);
+        }
+        Ok(StepResult {
+            exit_code: 0,
+            stdout: String::new(),
+            stderr: String::new(),
+        })
+    }
+}
+
 fn write_flow(repo: &std::path::Path, name: &str, content: &str) {
     let flows_dir = repo.join(".lf/flows");
     fs::create_dir_all(&flows_dir).unwrap();
@@ -244,4 +271,98 @@ fn tick_fork_advances_after_branches() {
         .filter(|fork| fork.status != ForkRunStatus::Completed)
         .count();
     assert_eq!(fork_runs, 0);
+}
+
+#[test]
+fn tick_choose_selects_branch() {
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path();
+    write_flow(
+        repo,
+        "choose-flow",
+        r#"
+- choose:
+    prompt: pick
+    options:
+      alpha:
+        - step: { name: implement }
+      beta:
+        - step: { name: polish }
+"#,
+    );
+
+    let run_id = RunId::new("run-choose");
+    let run = FlowRun {
+        id: run_id.clone(),
+        flow: "choose-flow".to_string(),
+        direction: vec!["product-engineer".to_string()],
+        area: vec![".".to_string()],
+        repo: repo.to_path_buf(),
+        status: FlowRunStatus::Running,
+        step_index: 0,
+        worktree: None,
+        current_step: None,
+        error: None,
+    };
+
+    let store = MemoryStore::new(run);
+    let runner = FakeRunner { exit_code: 0 };
+
+    let first = tick_flow_with_runner(&run_id, &store, &runner).unwrap();
+    assert_eq!(first, TickResult::StepComplete);
+    let updated = store.get_run_copy(&run_id);
+    assert_eq!(updated.step_index, 1);
+
+    let steps = store.step_runs();
+    assert_eq!(steps.len(), 1);
+    assert_eq!(steps[0].step, "implement");
+
+    let done = tick_flow_with_runner(&run_id, &store, &runner).unwrap();
+    assert_eq!(done, TickResult::FlowComplete);
+}
+
+#[test]
+fn tick_loop_until_empty_terminates() {
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path();
+    write_flow(
+        repo,
+        "looped",
+        r#"
+- loop_until_empty:
+    wave: testwave
+    max_iterations: 3
+    steps:
+      - step: { name: implement }
+"#,
+    );
+
+    let wave_dir = repo.join("roadmap").join("testwave");
+    fs::create_dir_all(&wave_dir).unwrap();
+    fs::write(wave_dir.join("item.md"), "todo").unwrap();
+
+    let run_id = RunId::new("run-loop");
+    let run = FlowRun {
+        id: run_id.clone(),
+        flow: "looped".to_string(),
+        direction: vec!["product-engineer".to_string()],
+        area: vec![".".to_string()],
+        repo: repo.to_path_buf(),
+        status: FlowRunStatus::Running,
+        step_index: 0,
+        worktree: None,
+        current_step: None,
+        error: None,
+    };
+
+    let store = MemoryStore::new(run);
+    let runner = LoopRunner {
+        repo: repo.to_path_buf(),
+        runs: Mutex::new(0),
+    };
+
+    let result = tick_flow_with_runner(&run_id, &store, &runner).unwrap();
+    assert_eq!(result, TickResult::StepComplete);
+    let updated = store.get_run_copy(&run_id);
+    assert_eq!(updated.step_index, 1);
 }

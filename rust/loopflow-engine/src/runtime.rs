@@ -1,10 +1,14 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
+use crate::agent::{launch_agent, LaunchConfig};
+use crate::config::load_config_or_default;
 use crate::error::CoreError;
 use crate::flow::{load_flow, FlowItem, Step};
+use crate::prompt::{format_prompt, gather_context, GatherContextOpts};
 use crate::store::RunStore;
 use crate::worktree::{create_worktree, remove_worktree};
 
@@ -154,8 +158,60 @@ impl StepRunner for CommandStepRunner {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AgentStepRunner;
+
+impl StepRunner for AgentStepRunner {
+    fn run(
+        &self,
+        step: &Step,
+        worktree: &Path,
+        directions: &[String],
+    ) -> Result<StepResult, CoreError> {
+        let config = load_config_or_default(Some(worktree));
+        let model = step
+            .model
+            .clone()
+            .unwrap_or_else(|| config.agent_model.clone());
+
+        let opts = GatherContextOpts {
+            repo_root: worktree.to_path_buf(),
+            step: Some(step.name.clone()),
+            inline: None,
+            step_args: Vec::new(),
+            run_mode: Some("auto".to_string()),
+            directions: directions.to_vec(),
+            lfdocs: config.lfdocs,
+            diff_files: config.diff_files,
+            diff: config.diff,
+            clipboard: config.paste,
+            area: config.area.clone(),
+            wave: None,
+        };
+
+        let components = gather_context(&opts)?;
+        let prompt = format_prompt(&components);
+
+        let launch = LaunchConfig {
+            auto: true,
+            stream: false,
+            skip_permissions: config.yolo,
+            model_variant: None,
+            chrome: config.chrome,
+            cwd: Some(worktree.to_path_buf()),
+        };
+
+        let result = launch_agent(&model, &prompt, &launch)?;
+        Ok(StepResult {
+            exit_code: result.exit_code,
+            stdout: result.stdout,
+            stderr: result.stderr,
+        })
+    }
+}
+
 pub fn tick_flow(run_id: &RunId, store: &dyn RunStore) -> Result<TickResult, CoreError> {
-    tick_flow_with_runner(run_id, store, &CommandStepRunner)
+    tick_flow_with_runner(run_id, store, &AgentStepRunner)
 }
 
 pub fn tick_flow_with_runner(
@@ -189,11 +245,22 @@ pub fn tick_flow_with_runner(
         } => {
             return run_fork_item(&mut run, branches, synthesize.as_deref(), store, runner);
         }
-        _ => {
-            run.status = FlowRunStatus::Failed;
-            run.error = Some("non-step flow item not supported in tick".to_string());
-            store.update_run(&run)?;
-            return Ok(TickResult::StepFailed);
+        FlowItem::Choose { prompt, options } => {
+            return run_choose_item(&mut run, &prompt, options, store, runner);
+        }
+        FlowItem::LoopUntilEmpty {
+            steps,
+            wave,
+            max_iterations,
+        } => {
+            return run_loop_until_empty(
+                &mut run,
+                &steps,
+                wave.as_deref(),
+                max_iterations,
+                store,
+                runner,
+            );
         }
     };
 
@@ -229,7 +296,8 @@ pub fn tick_flow_with_runner(
     };
     store.create_step_run(&step_run)?;
 
-    let result = runner.run(&step, &worktree, &run.direction)?;
+    let step_directions = merge_directions(&run.direction, &step.directions);
+    let result = runner.run(&step, &worktree, &step_directions)?;
     if result.exit_code == 0 {
         run.step_index += 1;
         run.status = FlowRunStatus::Running;
@@ -249,7 +317,7 @@ pub fn run_step(
     worktree: &Path,
     direction: &[String],
 ) -> Result<StepResult, CoreError> {
-    CommandStepRunner.run(step, worktree, direction)
+    AgentStepRunner.run(step, worktree, direction)
 }
 
 fn run_fork_item(
@@ -439,4 +507,251 @@ fn merge_directions(base: &[String], extra: &[String]) -> Vec<String> {
         }
     }
     combined
+}
+
+// -----------------------------------------------------------------------------
+// Choose execution
+// -----------------------------------------------------------------------------
+
+/// Execute a choose flow item.
+///
+/// The choose construct requires selecting a branch based on the prompt.
+/// For now, we select the first option (deterministic for testing).
+/// In production, this would invoke an LLM to evaluate the prompt.
+fn run_choose_item(
+    run: &mut FlowRun,
+    _prompt: &str,
+    options: HashMap<String, Vec<FlowItem>>,
+    store: &dyn RunStore,
+    runner: &dyn StepRunner,
+) -> Result<TickResult, CoreError> {
+    // For now, select the first option alphabetically (deterministic)
+    // In production, would invoke LLM with the prompt to select
+    let mut option_keys: Vec<&String> = options.keys().collect();
+    option_keys.sort();
+
+    let selected_key = match option_keys.first() {
+        Some(key) => (*key).clone(),
+        None => {
+            run.status = FlowRunStatus::Failed;
+            run.error = Some("choose has no options".to_string());
+            store.update_run(run)?;
+            return Ok(TickResult::StepFailed);
+        }
+    };
+
+    let selected_items = match options.get(&selected_key) {
+        Some(items) => items.clone(),
+        None => {
+            run.status = FlowRunStatus::Failed;
+            run.error = Some(format!("choose option '{}' not found", selected_key));
+            store.update_run(run)?;
+            return Ok(TickResult::StepFailed);
+        }
+    };
+
+    // Execute each item in the selected branch
+    let worktree = run
+        .worktree
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| run.repo.clone());
+
+    for item in selected_items {
+        match item {
+            FlowItem::Step(step) => {
+                if step.interactive.unwrap_or(false) {
+                    run.status = FlowRunStatus::Failed;
+                    run.error =
+                        Some("interactive steps in choose branches not supported".to_string());
+                    store.update_run(run)?;
+                    return Ok(TickResult::StepFailed);
+                }
+
+                let step_run = StepRun {
+                    id: format!(
+                        "{}:{}:choose:{}",
+                        run.id.as_str(),
+                        run.step_index,
+                        step.name
+                    ),
+                    step: step.name.clone(),
+                    repo: run.repo.to_string_lossy().to_string(),
+                    worktree: worktree.to_string_lossy().to_string(),
+                    flow_run_id: Some(run.id.clone()),
+                    status: StepRunStatus::Running,
+                };
+                store.create_step_run(&step_run)?;
+
+                let directions = merge_directions(&run.direction, &step.directions);
+                let result = runner.run(&step, &worktree, &directions)?;
+                if result.exit_code != 0 {
+                    run.status = FlowRunStatus::Failed;
+                    run.error = Some(result.stderr);
+                    store.update_run(run)?;
+                    return Ok(TickResult::StepFailed);
+                }
+            }
+            _ => {
+                // Nested choose/fork/loop not supported yet
+                run.status = FlowRunStatus::Failed;
+                run.error = Some("nested flow items in choose not supported".to_string());
+                store.update_run(run)?;
+                return Ok(TickResult::StepFailed);
+            }
+        }
+    }
+
+    run.step_index += 1;
+    run.status = FlowRunStatus::Running;
+    run.current_step = None;
+    store.update_run(run)?;
+    Ok(TickResult::StepComplete)
+}
+
+// -----------------------------------------------------------------------------
+// LoopUntilEmpty execution
+// -----------------------------------------------------------------------------
+
+/// Execute a loop_until_empty flow item.
+///
+/// The loop runs until a termination condition is met. For now, we run
+/// each step once (single iteration). In production, the loop would
+/// continue until the steps indicate completion (e.g., no more items to process).
+fn run_loop_until_empty(
+    run: &mut FlowRun,
+    steps: &[FlowItem],
+    wave: Option<&str>,
+    max_iterations: usize,
+    store: &dyn RunStore,
+    runner: &dyn StepRunner,
+) -> Result<TickResult, CoreError> {
+    let worktree = run
+        .worktree
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| run.repo.clone());
+
+    let wave_name = resolve_wave_name(&run.repo, wave);
+    if steps.is_empty() && !is_wave_empty(&run.repo, &wave_name) {
+        run.status = FlowRunStatus::Failed;
+        run.error = Some("loop_until_empty has no steps".to_string());
+        store.update_run(run)?;
+        return Ok(TickResult::StepFailed);
+    }
+
+    let mut iteration = 0usize;
+    while !is_wave_empty(&run.repo, &wave_name) {
+        iteration += 1;
+        if iteration > max_iterations {
+            run.status = FlowRunStatus::Failed;
+            run.error = Some(format!(
+                "loop_until_empty max iterations ({}) reached",
+                max_iterations
+            ));
+            store.update_run(run)?;
+            return Ok(TickResult::StepFailed);
+        }
+
+        for item in steps {
+            match item {
+                FlowItem::Step(step) => {
+                    if step.interactive.unwrap_or(false) {
+                        run.status = FlowRunStatus::Failed;
+                        run.error = Some("interactive steps in loop not supported".to_string());
+                        store.update_run(run)?;
+                        return Ok(TickResult::StepFailed);
+                    }
+
+                    let step_run = StepRun {
+                        id: format!(
+                            "{}:{}:loop:{}:{}",
+                            run.id.as_str(),
+                            run.step_index,
+                            iteration,
+                            step.name
+                        ),
+                        step: step.name.clone(),
+                        repo: run.repo.to_string_lossy().to_string(),
+                        worktree: worktree.to_string_lossy().to_string(),
+                        flow_run_id: Some(run.id.clone()),
+                        status: StepRunStatus::Running,
+                    };
+                    store.create_step_run(&step_run)?;
+
+                    let directions = merge_directions(&run.direction, &step.directions);
+                    let result = runner.run(&step, &worktree, &directions)?;
+                    if result.exit_code != 0 {
+                        run.status = FlowRunStatus::Failed;
+                        run.error = Some(result.stderr);
+                        store.update_run(run)?;
+                        return Ok(TickResult::StepFailed);
+                    }
+                }
+                _ => {
+                    run.status = FlowRunStatus::Failed;
+                    run.error = Some("nested flow items in loop not supported".to_string());
+                    store.update_run(run)?;
+                    return Ok(TickResult::StepFailed);
+                }
+            }
+        }
+    }
+
+    run.step_index += 1;
+    run.status = FlowRunStatus::Running;
+    run.current_step = None;
+    store.update_run(run)?;
+    Ok(TickResult::StepComplete)
+}
+
+fn resolve_wave_name(repo_root: &Path, explicit: Option<&str>) -> String {
+    if let Some(name) = explicit {
+        return name.to_string();
+    }
+    if let Some(dir_name) = repo_root.file_name().and_then(|n| n.to_str()) {
+        if let Some((_prefix, wave)) = dir_name.rsplit_once('.') {
+            return wave.to_string();
+        }
+    }
+    if let Some(branch) = current_branch(repo_root) {
+        return branch;
+    }
+    "default".to_string()
+}
+
+fn current_branch(repo_root: &Path) -> Option<String> {
+    let output = Command::new("git")
+        .args(["branch", "--show-current"])
+        .current_dir(repo_root)
+        .output()
+        .ok()?;
+    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if branch.is_empty() {
+        None
+    } else {
+        Some(branch)
+    }
+}
+
+fn is_wave_empty(repo_root: &Path, wave: &str) -> bool {
+    let roadmap_dir = repo_root.join("roadmap").join(wave);
+    if !roadmap_dir.exists() {
+        return true;
+    }
+    let entries = match roadmap_dir.read_dir() {
+        Ok(entries) => entries,
+        Err(_) => return true,
+    };
+    for entry in entries.flatten() {
+        if entry
+            .path()
+            .extension()
+            .map(|ext| ext == "md")
+            .unwrap_or(false)
+        {
+            return false;
+        }
+    }
+    true
 }

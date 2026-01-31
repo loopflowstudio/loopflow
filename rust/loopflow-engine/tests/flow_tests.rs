@@ -99,8 +99,14 @@ fn golden_flows() {
         _ => panic!("expected choose"),
     }
     match &flow.items[2] {
-        FlowItem::LoopUntilEmpty { steps } => {
+        FlowItem::LoopUntilEmpty {
+            steps,
+            wave,
+            max_iterations,
+        } => {
             assert_eq!(steps.len(), 1);
+            assert!(wave.is_none());
+            assert_eq!(*max_iterations, 100);
             assert_eq!(
                 steps[0],
                 FlowItem::Step(Step {

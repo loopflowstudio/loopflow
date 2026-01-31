@@ -35,6 +35,10 @@ pub enum FlowItem {
     },
     LoopUntilEmpty {
         steps: Vec<FlowItem>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        wave: Option<String>,
+        #[serde(default = "default_loop_max_iterations")]
+        max_iterations: usize,
     },
 }
 
@@ -277,7 +281,20 @@ fn parse_loop_value(value: &Value) -> Result<FlowItem, LoadError> {
         .get(key("steps"))
         .ok_or_else(|| LoadError::InvalidFlow("loop_until_empty missing steps".to_string()))?;
     let steps = parse_flow_items(steps_value)?;
-    Ok(FlowItem::LoopUntilEmpty { steps })
+    let wave = map
+        .get(key("wave"))
+        .and_then(|val| val.as_str())
+        .map(|val| val.to_string());
+    let max_iterations = map
+        .get(key("max_iterations"))
+        .and_then(|val| val.as_i64())
+        .map(|val| val.max(1) as usize)
+        .unwrap_or_else(default_loop_max_iterations);
+    Ok(FlowItem::LoopUntilEmpty {
+        steps,
+        wave,
+        max_iterations,
+    })
 }
 
 fn parse_string_list(value: Option<&Value>) -> Vec<String> {
@@ -289,4 +306,8 @@ fn parse_string_list(value: Option<&Value>) -> Vec<String> {
             .collect(),
         _ => Vec::new(),
     }
+}
+
+fn default_loop_max_iterations() -> usize {
+    100
 }

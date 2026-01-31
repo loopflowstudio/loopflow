@@ -1,133 +1,121 @@
 # Rust Core Engine (Stage 2)
 
-## Goal
-Build the Rust engine that owns flow execution, prompt assembly, and run state transitions. The Python daemon shells out to this engine for execution, but the engine is the single source of truth for how flows work.
+## Problem
 
-## Scope
-- Flow parsing and validation
-- Run state machine (steps, retries, failures)
-- Tick-based execution for interactive steps
-- Prompt assembly pipeline and token counting policy
-- Worktree and git operations
-- Event model and internal logging
+The Python `lfd` daemon shells out to `lf` for every step execution, coupling daemon reliability to Python runtime quirks. Context assembly, flow parsing, and token counting happen in Python—logic that needs to be predictable, fast, and portable for 24/7 managed clusters.
 
-## Non-goals
-- Full daemon scheduling and triggers
-- Cluster deployment
-- Full prompt rendering/model invocation in Rust (Stage 4)
-- Engine contract gRPC implementation (Stage 3)
+Stage 2 builds `lf-core`: the Rust engine that owns the execution semantics. Python `lfd` calls into this engine. Later stages replace the Python daemon entirely.
+
+Who benefits: Wave operators running `lfd loop` overnight. Enterprise deployments needing deterministic behavior. Anyone hitting Python's memory or GC issues during long-running flows.
+
+Why now: The Python implementation works but accumulates state between runs. Fork execution is brittle. Token counting is a guess. The Rust workspace already exists with working flow parsing—this stage completes the execution story.
 
 ## Approach
-Build `lf-core`, a Rust crate called by the daemon via in-process FFI (initially) and later via gRPC. Expose a small API:
 
-```rust
-// Core execution
-fn tick_flow(run_id: &str, db: &Database) -> TickResult;
-fn gather_context(opts: &GatherContextOpts) -> PromptComponents;
-fn run_step(step: &Step, worktree: &Path, direction: &[String]) -> StepResult;
+Complete `lf-core` to execute flows end-to-end by shelling to `lf --step` for actual agent invocation. The engine owns:
 
-// Artifact loading
-fn load_flow(name: &str, repo: &Path) -> Result<Flow, LoadError>;
-fn load_step(name: &str, repo: &Path) -> Result<Step, LoadError>;
-fn load_direction(name: &str, repo: &Path) -> Result<Direction, LoadError>;
-```
+1. **Flow parsing** — already works for step/fork/choose/loop structures
+2. **Tick-based runtime** — already handles linear steps and pauses at interactive steps
+3. **Fork execution** — already creates parallel worktrees and runs branches
+4. **Context assembly** — skeleton exists, needs full parity with Python `gather_prompt_components`
+5. **Token counting** — fallback exists, needs tiktoken-rs for accuracy
 
-The daemon remains responsible for scheduling, concurrency limits, stimulus evaluation, persistence, and broadcasting. The engine owns flow parsing, step execution, prompt assembly, and run state transitions.
+The engine does NOT invoke models directly. It shells to `lf --step <name> --worktree <path> --direction <d1>,<d2>` for actual execution. This keeps the boundary clean: lf-core owns the flow graph, `lf` owns the agent invocation.
 
-## Core modules
-- `flow`: parse/load steps and DAGs
-- `runtime`: run state machine, tick-based executor
-- `prompt`: context gathering, token counting, trimming
-- `worktree`: create/find/remove worktrees
-- `git`: status/diff utilities (Stage 2), rebase/next/land ops (Stage 4+)
-- `event`: structured events for runs and steps
+**Key insight:** The existing implementation is ~80% complete. The gaps are:
+- Choose/LoopUntilEmpty execution (parsed but not executed)
+- Full context assembly (docs, diff_files, clipboard, summaries, wave)
+- tiktoken-rs integration
+- Python integration via FFI or subprocess
 
-**Note:** Git workflow operations (rebase, next, land) are part of Stage 4. See `roadmap/rust/04-lf-client.md` for the full design.
+## Alternatives considered
 
-## Tick-based execution
-Interactive steps require tick-based execution. The engine advances step-by-step, pausing when it hits an interactive step and resuming when the user connects.
-
-**FlowRun state:**
-- `step_index`: current position in flow (persisted)
-- `status`: running | waiting | completed | failed
-
-**TickResult enum:**
-- `StepComplete` — auto step finished, continue ticking
-- `FlowComplete` — all steps done
-- `WaitingInteractive` — paused at interactive step, awaiting user connect
-- `StepFailed` — step errored, flow stops
-
-**tick_flow() behavior:**
-1. Load FlowRun from DB
-2. Get next step at `step_index`
-3. If interactive: create WAITING StepRun, emit `wave.waiting`, return `WaitingInteractive`
-4. If auto: shell to `lf --step <step> --worktree <path>`, advance `step_index`
-5. Return `StepComplete` or `StepFailed`
-
-The daemon calls `tick_flow` initially and again when `StepRunEnd` signals interactive step completion.
-
-## Protocol alignment
-Loopflow standardizes daemon/client integration on a two-tier protobuf schema with gRPC as the primary transport and JSON-over-HTTP as a compatibility layer.
-
-**Decisions:**
-- Control plane (lf/Concerto → lfd) is public; engine contract (lfd → lf-core) is internal.
-- Protobuf-first: gRPC is primary; JSON is derived from proto.
-- No WebSocket streaming; use server-side streaming via `Subscribe`.
-- Idempotency keys on mutations for safe retries.
-- Typed errors include machine code, human message, retryability, and delay.
-
-**Remaining gaps:**
-- Engine contract gRPC implementation (streaming execution not wired)
-- Some control-plane RPCs still partial across gRPC/HTTP parity
-- Swift client integration still pending
+| Approach | Tradeoff | Why not |
+|----------|----------|---------|
+| Full Rust daemon (Stage 2+3 combined) | Ship faster, but bigger blast radius | Risk is too high. Staged rollout lets us validate engine correctness before replacing the daemon. |
+| Shell to `lf flow` instead of `lf --step` | Simpler invocation, but no tick control | Daemon loses step-by-step visibility. Can't pause at interactive steps. |
+| gRPC between daemon and engine | Clean boundary, but adds latency | Overkill for in-process calls. Save for Stage 3 when daemon moves to Rust. |
+| Skip tiktoken, keep byte heuristic | Ship faster | Token counting accuracy matters for context trimming. Wrong counts = dropped content or context overflow. |
 
 ## Key decisions
-1. **Crate boundary:** single crate `lf-core` containing all engine logic.
-2. **Database via trait:** RunStore trait keeps persistence out of core.
-3. **Step execution:** shell to `lf --step <name> --worktree <path> --direction <d1>,<d2>` initially.
-4. **Token counting:** tiktoken-rs for cl100k_base if accurate; fallback to byte-based estimates.
-5. **Flow parsing:** exact parity with Python structure (Fork/Choose/LoopUntilEmpty).
-6. **Events:** engine emits proto-aligned lifecycle events.
-7. **Typed errors:** structured error surface for callers.
 
-## Current implementation status
-- Rust workspace with `lf-core` crate and public API.
-- Flow parsing (step/fork/choose/loop) and loaders for flows/steps/directions.
-- Tick-based runtime execution for linear steps; shells to `lf` for execution.
-- Prompt context structs, token-counting fallback, and trimming behavior.
-- Git/worktree helpers, core error types, and unit tests.
+1. **Shell to `lf --step`, not `lf flow`.** The daemon controls tick-by-tick execution. Flows are data structures, not black-box commands.
 
-## Risks and bottlenecks
-- Tick execution fails on non-step flow items (fork/choose/loop not executed yet).
-- Shelling to `lf --step` depends on CLI flag compatibility.
-- Token counting is a heuristic until tiktoken integration is added.
-- Worktree edge cases on macOS vs Linux.
+2. **Complete Choose/Loop execution this stage.** The parsing exists. Execution is the gap. Without it, flows like `roadmap-reduce` (which uses forks) work but `grind` (which uses choose) doesn't.
+
+3. **tiktoken-rs for cl100k_base.** The `tiktoken-rs` crate wraps OpenAI's tokenizer. It's accurate for Claude (close enough) and well-maintained. Fallback to bytes/3 only if the crate fails to load.
+
+4. **Context assembly: diff_files before docs.** When trimming, drop docs first (they're reference material). Keep diff_files (the actual work). This matches Python's priority order.
+
+5. **Python integration via `lf-core` CLI.** Add `cargo build --bin lf-core` that exposes `lf-core tick <run-id> --db <path>` and `lf-core context <opts>`. Python daemon calls the binary. FFI can come later if subprocess overhead matters.
+
+## Scope
+
+**In scope:**
+- Choose and LoopUntilEmpty execution in tick_flow
+- Full context assembly matching Python parity
+- tiktoken-rs integration with fallback
+- `lf-core` binary for Python integration
+- Golden flow tests: ship, grind, roadmap-reduce, roadmap-polish
+- Event emission for step/flow lifecycle
+
+**Out of scope:**
+- Replacing Python daemon (Stage 3)
+- gRPC engine contract (Stage 3)
+- Git workflow operations (Stage 4)
+- Postgres backend (Stage 5)
 
 ## Done when
+
 ```bash
-# Parse a flow, verify structure matches Python
+# Flow parsing matches Python structure
 cargo test --package lf-core flow_parsing_parity
 
-# Tick through a simple auto flow
+# Tick through auto flow end-to-end
 cargo test --package lf-core tick_auto_flow_end_to_end
 
 # Tick to interactive step, verify WAITING state
 cargo test --package lf-core tick_interactive_pauses
 
+# Fork branches execute and synthesize
+cargo test --package lf-core tick_fork_advances_after_branches
+
+# Choose branches work
+cargo test --package lf-core tick_choose_selects_branch
+
+# LoopUntilEmpty terminates correctly
+cargo test --package lf-core tick_loop_until_empty
+
+# Token counting with tiktoken-rs
+cargo test --package lf-core token_counting_tiktoken
+
+# Context assembly matches Python output
+cargo test --package lf-core context_assembly_parity
+
+# CLI integration works
+lf-core context --repo . --step implement --direction product-engineer
+lf-core tick run-123 --db ~/.lf/lfd.db
+
 # Python daemon calls Rust engine
 pytest tests/test_lfd.py -k rust_engine
-
-# Count tokens with tiktoken-rs
-cargo test --package lf-core token_counting
-
-# Golden flow set (10 representative flows)
-cargo test --package lf-core golden_flows
 ```
 
-The engine can execute the `ship` flow (implement → compress → gate → consolidate) end-to-end with the same observable behavior as Python.
+Observable outcome: `lfd loop ship src/` executes with Rust lf-core handling tick_flow. Same behavior as Python, but deterministic state transitions.
 
-## Open questions
-- Which Python behaviors should be left behind vs matched exactly?
-- How much of prompt rendering should be configurable vs hard-coded?
-- Which tokenizer is acceptable, and when do we fall back to byte limits?
-- Does the `lf` CLI require different flags than `--step/--worktree/--direction`?
+## Implementation sequence
+
+1. **Choose execution** — Add branch selection to tick_flow based on prompt evaluation
+2. **LoopUntilEmpty execution** — Add iteration with termination condition
+3. **Context assembly** — Port Python's gather_prompt_components to Rust
+4. **tiktoken-rs** — Add dependency, wire up count_tokens
+5. **lf-core CLI** — Binary with tick and context subcommands
+6. **Python integration** — Daemon shells to lf-core instead of inline code
+7. **Golden flow tests** — ship, grind, roadmap-reduce with fixture comparison
+
+## Risks
+
+**Choose prompt evaluation:** The choose construct requires evaluating a prompt to select a branch. Currently this means shelling to an LLM. For testing, we'll use a mock that returns deterministic choices. For production, the daemon may need to invoke the model directly—but that's Stage 3 territory. For now: Choose branches are selected by the first matching option, or error if ambiguous.
+
+**tiktoken-rs version drift:** The crate may lag behind OpenAI's tokenizer updates. Acceptable: token counts within 5% of Python's tiktoken are fine for context budgeting.
+
+**Worktree cleanup on fork failure:** If a fork branch fails mid-execution, worktrees may be left behind. Current code attempts cleanup but doesn't guarantee it. Acceptable: stale worktrees are annoying but not data loss. The daemon's autoprune handles cleanup.

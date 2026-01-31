@@ -11,7 +11,7 @@ chrono = { version = "0.4", features = ["serde"] }
 cron = "0.12"
 dirs = "5"
 git2 = "0.18"
-lf-core = { path = "../lf-core" }
+loopflow-engine = { path = "../loopflow-engine" }
 prost = "0.12"
 prost-types = "0.12"
 portable-pty = "0.8"

@@ -971,20 +971,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
-name = "lf-core"
-version = "0.1.0"
-dependencies = [
- "clap",
- "serde",
- "serde_json",
- "serde_yaml",
- "tempfile",
- "thiserror",
-]
-
-[[package]]
 name = "lfd"
-version = "0.1.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
@@ -992,7 +980,7 @@ dependencies = [
  "cron",
  "dirs",
  "git2",
- "lf-core",
+ "loopflow-engine",
  "portable-pty",
  "prost",
  "prost-types",
@@ -1097,6 +1085,18 @@ name = "log"
 version = "0.4.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
+
+[[package]]
+name = "loopflow-engine"
+version = "0.7.1"
+dependencies = [
+ "clap",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror",
+]
 
 [[package]]
 name = "matchers"

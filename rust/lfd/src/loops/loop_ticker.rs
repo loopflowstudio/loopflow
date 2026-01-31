@@ -2,9 +2,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use lf_core::error::StoreError as CoreStoreError;
-use lf_core::runtime::{FlowRun, FlowRunStatus, RunId, TickResult};
-use lf_core::store as core_store;
+use loopflow_engine::error::StoreError as CoreStoreError;
+use loopflow_engine::runtime::{FlowRun, FlowRunStatus, RunId, TickResult};
+use loopflow_engine::store as core_store;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -85,15 +85,15 @@ async fn tick_loop_waves(scheduler: &Scheduler, store: &SharedStore) {
 async fn tick_wave(
     wave: &Wave,
     store: &SharedStore,
-) -> Result<TickResult, lf_core::error::CoreError> {
+) -> Result<TickResult, loopflow_engine::error::CoreError> {
     let adapter = LfCoreStoreAdapter::new(store.clone());
     let run_id = RunId::new(wave.id.clone());
-    lf_core::runtime::tick_flow(&run_id, &adapter)
+    loopflow_engine::runtime::tick_flow(&run_id, &adapter)
 }
 
 fn handle_tick_result(
     wave: &Wave,
-    result: Result<TickResult, lf_core::error::CoreError>,
+    result: Result<TickResult, loopflow_engine::error::CoreError>,
     store: &SharedStore,
 ) {
     let step_run_index = wave.step_index;
@@ -218,12 +218,17 @@ impl core_store::RunStore for LfCoreStoreAdapter {
         Ok(())
     }
 
-    fn create_step_run(&self, step_run: &lf_core::runtime::StepRun) -> Result<(), CoreStoreError> {
+    fn create_step_run(
+        &self,
+        step_run: &loopflow_engine::runtime::StepRun,
+    ) -> Result<(), CoreStoreError> {
         let status = match step_run.status {
-            lf_core::runtime::StepRunStatus::Running => StepRunStatus::StepRunning as i32,
-            lf_core::runtime::StepRunStatus::Waiting => StepRunStatus::StepWaiting as i32,
-            lf_core::runtime::StepRunStatus::Completed => StepRunStatus::StepCompleted as i32,
-            lf_core::runtime::StepRunStatus::Failed => StepRunStatus::StepFailed as i32,
+            loopflow_engine::runtime::StepRunStatus::Running => StepRunStatus::StepRunning as i32,
+            loopflow_engine::runtime::StepRunStatus::Waiting => StepRunStatus::StepWaiting as i32,
+            loopflow_engine::runtime::StepRunStatus::Completed => {
+                StepRunStatus::StepCompleted as i32
+            }
+            loopflow_engine::runtime::StepRunStatus::Failed => StepRunStatus::StepFailed as i32,
         };
 
         let step_run = StepRun {
@@ -257,14 +262,14 @@ impl core_store::RunStore for LfCoreStoreAdapter {
         &self,
         run_id: &RunId,
         step_index: usize,
-    ) -> Result<Vec<lf_core::runtime::ForkRun>, CoreStoreError> {
+    ) -> Result<Vec<loopflow_engine::runtime::ForkRun>, CoreStoreError> {
         let fork_runs = self
             .store
             .list_fork_runs(run_id.as_str(), step_index as u32)
             .map_err(|err| CoreStoreError::Other(err.to_string()))?;
         Ok(fork_runs
             .into_iter()
-            .map(|fork_run| lf_core::runtime::ForkRun {
+            .map(|fork_run| loopflow_engine::runtime::ForkRun {
                 id: fork_run.id,
                 run_id: RunId::new(fork_run.wave_id),
                 step_index: fork_run.step_index as usize,
@@ -275,7 +280,10 @@ impl core_store::RunStore for LfCoreStoreAdapter {
             .collect())
     }
 
-    fn upsert_fork_run(&self, fork_run: &lf_core::runtime::ForkRun) -> Result<(), CoreStoreError> {
+    fn upsert_fork_run(
+        &self,
+        fork_run: &loopflow_engine::runtime::ForkRun,
+    ) -> Result<(), CoreStoreError> {
         let status = map_fork_status_back(fork_run.status);
         let record = crate::store::ForkRun {
             id: fork_run.id.clone(),
@@ -317,21 +325,27 @@ fn wave_status_from_flow(status: FlowRunStatus) -> WaveStatus {
     }
 }
 
-fn map_fork_status(status: crate::store::ForkRunStatus) -> lf_core::runtime::ForkRunStatus {
+fn map_fork_status(status: crate::store::ForkRunStatus) -> loopflow_engine::runtime::ForkRunStatus {
     match status {
-        crate::store::ForkRunStatus::Pending => lf_core::runtime::ForkRunStatus::Pending,
-        crate::store::ForkRunStatus::Running => lf_core::runtime::ForkRunStatus::Running,
-        crate::store::ForkRunStatus::Completed => lf_core::runtime::ForkRunStatus::Completed,
-        crate::store::ForkRunStatus::Failed => lf_core::runtime::ForkRunStatus::Failed,
+        crate::store::ForkRunStatus::Pending => loopflow_engine::runtime::ForkRunStatus::Pending,
+        crate::store::ForkRunStatus::Running => loopflow_engine::runtime::ForkRunStatus::Running,
+        crate::store::ForkRunStatus::Completed => {
+            loopflow_engine::runtime::ForkRunStatus::Completed
+        }
+        crate::store::ForkRunStatus::Failed => loopflow_engine::runtime::ForkRunStatus::Failed,
     }
 }
 
-fn map_fork_status_back(status: lf_core::runtime::ForkRunStatus) -> crate::store::ForkRunStatus {
+fn map_fork_status_back(
+    status: loopflow_engine::runtime::ForkRunStatus,
+) -> crate::store::ForkRunStatus {
     match status {
-        lf_core::runtime::ForkRunStatus::Pending => crate::store::ForkRunStatus::Pending,
-        lf_core::runtime::ForkRunStatus::Running => crate::store::ForkRunStatus::Running,
-        lf_core::runtime::ForkRunStatus::Completed => crate::store::ForkRunStatus::Completed,
-        lf_core::runtime::ForkRunStatus::Failed => crate::store::ForkRunStatus::Failed,
+        loopflow_engine::runtime::ForkRunStatus::Pending => crate::store::ForkRunStatus::Pending,
+        loopflow_engine::runtime::ForkRunStatus::Running => crate::store::ForkRunStatus::Running,
+        loopflow_engine::runtime::ForkRunStatus::Completed => {
+            crate::store::ForkRunStatus::Completed
+        }
+        loopflow_engine::runtime::ForkRunStatus::Failed => crate::store::ForkRunStatus::Failed,
     }
 }
 
@@ -576,7 +590,7 @@ mod tests {
 
         handle_tick_result(
             &wave,
-            Ok(lf_core::runtime::TickResult::StepComplete),
+            Ok(loopflow_engine::runtime::TickResult::StepComplete),
             &shared,
         );
 
@@ -594,7 +608,11 @@ mod tests {
         let store = std::sync::Arc::new(TestStore::new(wave.clone()));
         let shared: SharedStore = store.clone();
 
-        handle_tick_result(&wave, Ok(lf_core::runtime::TickResult::StepFailed), &shared);
+        handle_tick_result(
+            &wave,
+            Ok(loopflow_engine::runtime::TickResult::StepFailed),
+            &shared,
+        );
 
         let ended = store.ended.lock().expect("ended mutex poisoned").clone();
 

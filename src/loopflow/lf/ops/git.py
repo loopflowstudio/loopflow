@@ -1,4 +1,4 @@
-"""Git operations with Rust (lf-core) or Python fallback."""
+"""Git operations with Rust (lf-engine) or Python fallback."""
 
 import json
 import shutil
@@ -52,11 +52,11 @@ _backend_printed = False
 
 @lru_cache(maxsize=1)
 def _lf_core_available() -> bool:
-    return shutil.which("lf-core") is not None
+    return shutil.which("lf-engine") is not None
 
 
 def _use_rust() -> bool:
-    """Use Rust if flag is set AND lf-core is available."""
+    """Use Rust if flag is set AND lf-engine is available."""
     return get_internal_flag("use_rust") and _lf_core_available()
 
 
@@ -69,7 +69,7 @@ def _print_backend_once() -> None:
 
     import sys
 
-    backend = "lf-core (rust)" if _use_rust() else "python"
+    backend = "lf-engine (rust)" if _use_rust() else "python"
     # ANSI dim grey: \033[2m for dim, \033[0m to reset
     if sys.stderr.isatty():
         sys.stderr.write(f"\033[2m[git: {backend}]\033[0m\n")
@@ -78,7 +78,7 @@ def _print_backend_once() -> None:
 
 
 # -----------------------------------------------------------------------------
-# Rust implementations (via lf-core subprocess)
+# Rust implementations (via lf-engine subprocess)
 # -----------------------------------------------------------------------------
 
 
@@ -86,7 +86,7 @@ def _run_lf_core(args: list[str]) -> Any:
     try:
         result = subprocess.run(args, capture_output=True, text=True)
     except FileNotFoundError as err:
-        raise GitError(f"lf-core not found: {err}") from None
+        raise GitError(f"lf-engine not found: {err}") from None
     if result.returncode != 0:
         payload = result.stderr.strip()
         try:
@@ -100,7 +100,7 @@ def _run_lf_core(args: list[str]) -> Any:
 
 
 def _rebase_rust(worktree: Path, onto: str, base_commit: str | None = None) -> RebaseResult:
-    args = ["lf-core", "rebase", "--worktree", str(worktree), "--onto", onto]
+    args = ["lf-engine", "rebase", "--worktree", str(worktree), "--onto", onto]
     if base_commit:
         args.extend(["--base-commit", base_commit])
     data = _run_lf_core(args)
@@ -115,20 +115,20 @@ def _rebase_rust(worktree: Path, onto: str, base_commit: str | None = None) -> R
 
 
 def _push_rust(worktree: Path, force_with_lease: bool = False) -> None:
-    args = ["lf-core", "push", "--worktree", str(worktree)]
+    args = ["lf-engine", "push", "--worktree", str(worktree)]
     if force_with_lease:
         args.append("--force-with-lease")
     _run_lf_core(args)
 
 
 def _create_branch_rust(worktree: Path, name: str) -> BranchInfo:
-    data = _run_lf_core(["lf-core", "branch", "--worktree", str(worktree), "--name", name])
+    data = _run_lf_core(["lf-engine", "branch", "--worktree", str(worktree), "--name", name])
     return BranchInfo(**data)
 
 
 def _land_rust(worktree: Path, strategy: str, main_branch: str = "main") -> LandResult:
     args = [
-        "lf-core",
+        "lf-engine",
         "land",
         "--worktree",
         str(worktree),

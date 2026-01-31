@@ -102,17 +102,27 @@ Direction = which users you're trying to serve
 
 ### How directions apply
 
-Directions are not roleplay. You don't simulate being the user.
+Directions are not roleplay. A direction is intent—what you're optimizing for while doing your work.
 
-A direction is intent—you're doing your work with the goal of making this kind of user thrive. The questions help you check if your work serves them.
+Directions can be:
+- **User patterns**: conductor, improviser, returner—make this kind of user thrive
+- **Perspectives**: product-engineer, designer, infra-engineer—think with these concerns
+- **Metrics**: performance, security, accessibility—optimize for this quality
+- **Values**: simplicity, craft—hold this standard
+
+The questions in a direction help you check if your work serves the intent.
 
 ```bash
 lf implement --direction conductor --area src/api/
 ```
 
-You're implementing in src/api/. The conductor direction means you're building with the intent that conductors thrive—people managing parallel workstreams who check in periodically. The questions ("can I see what needs attention without drilling in?") help you verify your implementation serves that intent.
+You're implementing in src/api/. The conductor direction means you're building with the intent that conductors thrive. The questions ("can I see what needs attention without drilling in?") verify your implementation serves that intent.
 
-Think of it as: who are you building for? The direction names them. The questions operationalize their needs.
+```bash
+lf review --direction security --area src/auth/
+```
+
+You're reviewing src/auth/. The security direction means you're optimizing for security. The questions surface vulnerabilities you might otherwise miss.
 
 ```markdown
 # Bad: coupled to step and area

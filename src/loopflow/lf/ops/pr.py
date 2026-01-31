@@ -16,9 +16,6 @@ from loopflow.lf.git import (
     open_pr,
 )
 from loopflow.lf.messages import generate_pr_message, generate_pr_message_from_diff
-from loopflow.lf.ops.git import push as git_push
-from loopflow.lf.ops.git import rebase as git_rebase
-from loopflow.lf.worktrees import list_all
 from loopflow.lf.ops._helpers import (
     _push,
     add_commit_push,
@@ -26,6 +23,9 @@ from loopflow.lf.ops._helpers import (
     run_lint,
     sync_main_repo,
 )
+from loopflow.lf.ops.git import push as git_push
+from loopflow.lf.ops.git import rebase as git_rebase
+from loopflow.lf.worktrees import list_all
 
 
 def _get_existing_pr_url(repo_root) -> str | None:

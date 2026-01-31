@@ -214,10 +214,14 @@ def _finalize_release(version: str, skip_dmg: bool) -> int:
         print("Publishing to PyPI...")
         success, output = publish_package(ROOT)
         if not success:
-            print("Publish failed:", file=sys.stderr)
-            print(output, file=sys.stderr)
-            return 1
-        print("Published to PyPI.")
+            if "File already exists" in output:
+                print(f"v{version} already on PyPI (file exists)")
+            else:
+                print("Publish failed:", file=sys.stderr)
+                print(output, file=sys.stderr)
+                return 1
+        else:
+            print("Published to PyPI.")
 
     # Build and upload DMG
     if not skip_dmg:

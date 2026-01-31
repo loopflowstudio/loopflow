@@ -150,21 +150,3 @@ struct DarkButtonStyle: ButtonStyle {
             )
     }
 }
-
-struct OutlineButtonStyle: ButtonStyle {
-    @Environment(\.colorScheme) private var colorScheme
-
-    func makeBody(configuration: Configuration) -> some View {
-        let palette = LoopflowPalette.make(for: colorScheme)
-
-        configuration.label
-            .font(.subheadline)
-            .foregroundStyle(palette.accent)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(palette.accent.opacity(configuration.isPressed ? 0.9 : 0.6), lineWidth: 1)
-            )
-    }
-}

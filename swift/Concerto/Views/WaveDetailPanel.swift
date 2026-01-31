@@ -12,17 +12,14 @@ struct WaveDetailPanel: View {
     @Environment(RepoState.self) private var repoState
     @Environment(SessionState.self) private var sessionState
     @Environment(\.colorScheme) private var colorScheme
-    @AppStorage("commitsExpanded") private var commitsExpanded = true
     @AppStorage("changedFilesExpanded") private var changedFilesExpanded = true
 
     @State private var fileStats: [FileDiffStat] = []
     @State private var isLoadingFiles = false
-    @State private var commits: [CommitInfo] = []
-    @State private var isLoadingCommits = false
     @State private var actionError: String?
     @State private var showingActionError = false
     @State private var showingStopConfirmation = false
-    @State private var showingAbandonConfirmation = false
+    @State private var isCloning = false
     @State private var editingName: String = ""
     @State private var isEditingName = false
     @FocusState private var isNameFocused: Bool
@@ -65,16 +62,6 @@ struct WaveDetailPanel: View {
         } message: {
             Text("Stop '\(wave.displayName)'? It can be restarted later.")
         }
-        .confirmationDialog(
-            "Abandon Wave",
-            isPresented: $showingAbandonConfirmation
-        ) {
-            Button("Abandon", role: .destructive) {
-                abandonWave()
-            }
-        } message: {
-            Text("Delete '\(wave.displayName)'? This removes the wave from the daemon.")
-        }
         .onReceive(NotificationCenter.default.publisher(for: .editWaveName)) { _ in
             // Only respond if this wave is selected
             if repoState.selectedWave?.id == wave.id {
@@ -88,10 +75,6 @@ struct WaveDetailPanel: View {
     private var blendedView: some View {
         VStack(spacing: 0) {
             header
-
-            Divider()
-
-            actionBar
 
             Divider()
 
@@ -110,7 +93,7 @@ struct WaveDetailPanel: View {
                     }
 
                     if wave.worktreePath != nil {
-                        commitsSection
+                        quickActionsBar
                         changedFilesSection
                     }
                 }
@@ -169,9 +152,77 @@ struct WaveDetailPanel: View {
             }
 
             Spacer()
+
+            // Clone button (prominent)
+            Button {
+                cloneWave()
+            } label: {
+                HStack(spacing: 4) {
+                    if isCloning {
+                        ProgressView()
+                            .scaleEffect(0.6)
+                    } else {
+                        Image(systemName: "doc.on.doc")
+                            .font(.caption)
+                    }
+                    Text("Clone")
+                }
+            }
+            .buttonStyle(DarkButtonStyle())
+            .disabled(isCloning)
+            .help("Create a copy of this wave")
+
+            // PR badge if available (from Wave fields)
+            if let prNumber = wave.prNumber, let prState = wave.prState {
+                prBadge(number: prNumber, state: prState, url: wave.prURL)
+            }
+
+            // Stop button when running
+            if wave.status == .running || wave.status == .waiting {
+                Button {
+                    showingStopConfirmation = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "stop.fill")
+                            .font(.caption)
+                        Text("Stop")
+                    }
+                }
+                .buttonStyle(DarkButtonStyle())
+            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
+    }
+
+    private func prBadge(number: Int, state: PRState, url: URL?) -> some View {
+        let color: Color = switch state {
+        case .open: .green
+        case .merged: .purple
+        case .closed: .red
+        case .draft: .orange
+        }
+
+        return Button {
+            if let url {
+                terminalLauncher.openURL(url)
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.up.right.square")
+                    .font(.caption2)
+                Text("PR #\(number)")
+                    .font(.caption)
+                    .fontWeight(.medium)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.15))
+            .foregroundStyle(color)
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help("View PR on GitHub")
     }
 
     // MARK: - Idle Wave View
@@ -220,91 +271,55 @@ struct WaveDetailPanel: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
-    // MARK: - Action Bar
+    // MARK: - Quick Actions Bar
 
-    private var actionBar: some View {
-        let hasWorktree = wave.worktreePath != nil
-
-        return HStack(spacing: 12) {
-            Button {
-                landBranch()
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "airplane.arrival")
-                        .font(.system(size: 12))
-                    Text("Land")
-                        .font(.caption)
-                }
-            }
-            .buttonStyle(DarkButtonStyle())
-            .disabled(!hasWorktree || !wave.hasDiff)
-            .help("Land branch (creates PR if needed)")
-
-            Button {
-                if let path = wave.worktreePath {
-                    openInIDE(path: path)
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "curlybraces")
-                        .font(.system(size: 12))
-                    Text(ideApp.displayName)
-                        .font(.caption)
-                }
-            }
-            .buttonStyle(DarkButtonStyle())
-            .disabled(!hasWorktree)
-            .help("Open in \(ideApp.displayName)")
-
-            Button {
-                if let path = wave.worktreePath {
-                    openInTerminal(path: path)
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "terminal")
-                        .font(.system(size: 12))
-                    Text(terminalApp.displayName)
-                        .font(.caption)
-                }
-            }
-            .buttonStyle(DarkButtonStyle())
-            .disabled(!hasWorktree)
-            .help("Open in \(terminalApp.displayName)")
-
-            Spacer()
-
-            if wave.status == .running || wave.status == .waiting {
+    private var quickActionsBar: some View {
+        HStack(spacing: 12) {
+            if let path = wave.worktreePath {
                 Button {
-                    showingStopConfirmation = true
+                    openInTerminal(path: path)
                 } label: {
                     HStack(spacing: 6) {
-                        Image(systemName: "stop.fill")
+                        Image(systemName: "terminal")
                             .font(.system(size: 12))
-                        Text("Stop")
+                        Text(terminalApp.displayName)
                             .font(.caption)
                     }
                 }
-                .buttonStyle(OutlineButtonStyle())
-                .help("Stop wave")
-            }
+                .buttonStyle(DarkButtonStyle())
+                .help("Open in \(terminalApp.displayName)")
 
-            Button {
-                showingAbandonConfirmation = true
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 12))
-                    Text("Abandon")
-                        .font(.caption)
+                Button {
+                    openInIDE(path: path)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "curlybraces")
+                            .font(.system(size: 12))
+                        Text(ideApp.displayName)
+                            .font(.caption)
+                    }
                 }
+                .buttonStyle(DarkButtonStyle())
+                .help("Open in \(ideApp.displayName)")
+
+                if wave.hasDiff {
+                    Button {
+                        landBranch()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "airplane.arrival")
+                                .font(.system(size: 12))
+                            Text("Land")
+                                .font(.caption)
+                        }
+                    }
+                    .buttonStyle(DarkButtonStyle())
+                    .help("Land branch (creates PR if needed)")
+                }
+
+                Spacer()
             }
-            .buttonStyle(OutlineButtonStyle())
-            .help("Delete this wave")
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-        .background(palette.surface)
     }
 
     // MARK: - Run Progress Section
@@ -387,83 +402,6 @@ struct WaveDetailPanel: View {
                 }
             }
         }
-    }
-
-    // MARK: - Commits Section
-
-    private var commitsSection: some View {
-        DisclosureGroup(isExpanded: $commitsExpanded) {
-            if isLoadingCommits {
-                ProgressView()
-                    .scaleEffect(0.8)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
-            } else if commits.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "point.topleft.down.curvedto.point.bottomright.up")
-                        .font(.title2)
-                        .foregroundStyle(.tertiary)
-                    Text("No commits yet")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 24)
-            } else {
-                VStack(spacing: 8) {
-                    ForEach(commits) { commit in
-                        commitRow(commit)
-                    }
-                }
-                .padding(.vertical, 12)
-            }
-        } label: {
-            HStack {
-                Image(systemName: "checkmark.circle")
-                    .font(.subheadline)
-                Text("Commits")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                if !commits.isEmpty {
-                    Text("(\(commits.count))")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-                Spacer()
-            }
-            .foregroundStyle(.primary)
-        }
-        .padding(16)
-        .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-    }
-
-    private func commitRow(_ commit: CommitInfo) -> some View {
-        HStack(spacing: 10) {
-            Text(commit.shortSHA)
-                .font(.system(.caption2, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .frame(width: 52, alignment: .leading)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(commit.message)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .lineLimit(1)
-
-                Text("\(commit.author) · \(commit.relativeTime)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(palette.background)
-        )
     }
 
     // MARK: - Changed Files Section
@@ -638,15 +576,8 @@ struct WaveDetailPanel: View {
     // MARK: - Actions
 
     private func loadData() {
-        guard let path = wave.worktreePath else {
-            fileStats = []
-            commits = []
-            isLoadingFiles = false
-            isLoadingCommits = false
-            return
-        }
+        guard let path = wave.worktreePath else { return }
         loadFileStats(worktreePath: path)
-        loadCommits(worktreePath: path)
     }
 
     private func loadFileStats(worktreePath: String) {
@@ -654,39 +585,11 @@ struct WaveDetailPanel: View {
         Task {
             do {
                 let worktreeURL = URL(fileURLWithPath: worktreePath)
-                let stats = try await worktreeService.getDiffStats("main...HEAD", in: worktreeURL)
-                await MainActor.run {
-                    fileStats = stats
-                }
+                fileStats = try await worktreeService.getDiffStats("main...HEAD", in: worktreeURL)
             } catch {
-                await MainActor.run {
-                    fileStats = []
-                }
+                fileStats = []
             }
-            await MainActor.run {
-                isLoadingFiles = false
-            }
-        }
-    }
-
-    private func loadCommits(worktreePath: String) {
-        isLoadingCommits = true
-        Task {
-            do {
-                let branchName = wave.branch ?? URL(fileURLWithPath: worktreePath).lastPathComponent
-                let worktree = Worktree(path: worktreePath, branch: branchName, baseBranch: "main")
-                let items = try await worktreeService.getCommits(for: worktree)
-                await MainActor.run {
-                    commits = items
-                }
-            } catch {
-                await MainActor.run {
-                    commits = []
-                }
-            }
-            await MainActor.run {
-                isLoadingCommits = false
-            }
+            isLoadingFiles = false
         }
     }
 
@@ -697,6 +600,23 @@ struct WaveDetailPanel: View {
             step: wave.flow,
             worktreePath: path
         )
+    }
+
+    private func cloneWave() {
+        isCloning = true
+        Task {
+            do {
+                _ = try await repoState.cloneWave(wave)
+            } catch {
+                await MainActor.run {
+                    actionError = "Failed to clone wave: \(error.localizedDescription)"
+                    showingActionError = true
+                }
+            }
+            await MainActor.run {
+                isCloning = false
+            }
+        }
     }
 
     private func openInTerminal(path: String) {
@@ -737,19 +657,6 @@ struct WaveDetailPanel: View {
             } catch {
                 await MainActor.run {
                     actionError = "Failed to stop wave: \(error.localizedDescription)"
-                    showingActionError = true
-                }
-            }
-        }
-    }
-
-    private func abandonWave() {
-        Task {
-            do {
-                try await repoState.deleteWave(wave)
-            } catch {
-                await MainActor.run {
-                    actionError = "Failed to abandon wave: \(error.localizedDescription)"
                     showingActionError = true
                 }
             }

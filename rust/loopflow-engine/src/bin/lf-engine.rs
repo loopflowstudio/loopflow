@@ -1,11 +1,11 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-use lf_core::git::{create_branch, push, rebase, LandStrategy};
-use lf_core::GitError;
+use loopflow_engine::git::{create_branch, push, rebase, LandStrategy};
+use loopflow_engine::GitError;
 
 #[derive(Parser)]
-#[command(name = "lf-core", about = "Loopflow core CLI")]
+#[command(name = "lf-engine", about = "Loopflow engine CLI")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -80,7 +80,7 @@ fn main() {
             worktree,
             strategy,
             main_branch,
-        } => match lf_core::git::land(&worktree, strategy, &main_branch) {
+        } => match loopflow_engine::git::land(&worktree, strategy, &main_branch) {
             Ok(result) => print_json(&result),
             Err(err) => print_error(&err),
         },

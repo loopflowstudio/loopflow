@@ -25,7 +25,7 @@ def register_commands(app: typer.Typer) -> None:
         typer.echo("Fetching origin/main...")
         subprocess.run(["git", "fetch", "origin", "main"], cwd=repo_root, check=False)
 
-        # Attempt rebase via lf-core
+        # Attempt rebase via lf-engine
         typer.echo("Rebasing onto origin/main...")
         try:
             result = git_rebase(repo_root, "origin/main")

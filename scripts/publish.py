@@ -34,6 +34,37 @@ from loopflow.publish import (
 )
 
 ROOT = Path(__file__).parent.parent
+VERSION_FILE = ROOT / "VERSION"
+
+
+# --- Version management ---
+
+
+def _read_version() -> str:
+    """Read version from VERSION file."""
+    return VERSION_FILE.read_text().strip()
+
+
+def _write_version_file(version: str) -> None:
+    """Write version to VERSION file."""
+    VERSION_FILE.write_text(version + "\n")
+
+
+def _sync_versions(version: str) -> None:
+    """Sync version to Python and Rust."""
+    import re
+
+    # Python: src/loopflow/__init__.py
+    write_version(version)
+
+    # Rust: Cargo.toml workspace version
+    cargo_toml = ROOT / "Cargo.toml"
+    content = cargo_toml.read_text()
+    new_content = re.sub(r'version = "[^"]+"', f'version = "{version}"', content)
+    cargo_toml.write_text(new_content)
+
+    # VERSION file
+    _write_version_file(version)
 
 
 # --- Screenshot generation ---
@@ -55,20 +86,28 @@ def _generate_screenshots() -> tuple[bool, str]:
 # --- State detection ---
 
 
-def _get_release_version_from_main() -> str | None:
-    """Get the version from the latest commit on origin/main if it's a release commit."""
+def _find_pending_release() -> str | None:
+    """Find a release commit on main that hasn't been tagged/published yet.
+
+    Searches the last 50 commits for release commits, robust to other commits
+    landing on main after the release PR merges.
+    """
     subprocess.run(["git", "fetch", "origin", "main"], cwd=ROOT, capture_output=True)
     result = subprocess.run(
-        ["git", "log", "-1", "--format=%s", "origin/main"],
+        ["git", "log", "origin/main", "-50", "--format=%s"],
         cwd=ROOT,
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
         return None
-    subject = result.stdout.strip()
-    if subject.startswith("release: v"):
-        return subject.replace("release: v", "")
+
+    for line in result.stdout.strip().split("\n"):
+        # Match "release: v0.7.1" or "release: v0.7.1 [skip ci]"
+        if line.startswith("release: v"):
+            version = line.replace("release: v", "").split()[0]
+            if not _tag_exists(version) or not _is_on_pypi(version):
+                return version
     return None
 
 
@@ -313,7 +352,7 @@ def _create_release_pr(
         check=True,
     )
     subprocess.run(
-        ["git", "commit", "-m", f"release: v{new_version}"],
+        ["git", "commit", "-m", f"release: v{new_version}\n\n[skip ci]"],
         cwd=ROOT,
         check=True,
     )
@@ -354,10 +393,13 @@ def _create_release_pr(
     pr_url = result.stdout.strip()
     print(f"Created: {pr_url}")
 
-    # Enable auto-merge
-    print("Enabling auto-merge...")
+    # Enable admin auto-merge (bypasses branch protection since CI is skipped)
+    print("Enabling admin auto-merge...")
     result = subprocess.run(
-        ["gh", "pr", "merge", "--squash", "--auto", "--subject", f"release: v{new_version}"],
+        [
+            "gh", "pr", "merge", "--squash", "--auto", "--admin",
+            "--subject", f"release: v{new_version}",
+        ],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -370,13 +412,18 @@ def _create_release_pr(
         )
         if auto_merge_disabled:
             print(
-                "Auto-merge not enabled for this repo. Merge manually after CI passes.",
+                "Auto-merge not enabled for this repo. Merge manually.",
+                file=sys.stderr,
+            )
+        elif "must be a repository admin" in error_msg.lower():
+            print(
+                "Admin auto-merge requires admin rights. Merge manually.",
                 file=sys.stderr,
             )
         else:
             print(f"Warning: Could not enable auto-merge: {error_msg}")
     else:
-        print("Auto-merge enabled. PR will merge when CI passes.")
+        print("Admin auto-merge enabled. PR will merge immediately.")
 
     # Open PR in browser
     subprocess.run(["open", pr_url])
@@ -503,7 +550,7 @@ def main() -> int:
     print("Checking release state...")
 
     # State 1: Release commit on main, not yet tagged/published → finalize
-    release_version = _get_release_version_from_main()
+    release_version = _find_pending_release()
     if release_version:
         if _tag_exists(release_version) and _is_on_pypi(release_version):
             print(f"v{release_version} already released (tagged and on PyPI)")

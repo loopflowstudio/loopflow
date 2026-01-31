@@ -68,7 +68,7 @@ class BudgetConfig(BaseModel):
 class InternalConfig(BaseModel):
     """Internal/experimental settings."""
 
-    use_rust: bool = False  # Use Rust lf-core for git operations
+    use_rust: bool = False  # Use Rust lf-engine for git operations
 
 
 def get_internal_flag(name: str, repo_root: Path | None = None) -> bool:

@@ -9,7 +9,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::id::LfdId;
-use crate::proto::control::{StepRun, StepRunStatus, StimulusKind, Wave, WaveStatus};
+use crate::proto::control::{Agent, AgentStatus, StimulusKind, Wave, WaveStatus};
 use crate::scheduler::Scheduler;
 use crate::store::{SharedStore, StoreError};
 
@@ -104,7 +104,6 @@ fn handle_tick_result(
     result: Result<TickResult, loopflow_engine::error::CoreError>,
     store: &SharedStore,
 ) {
-    let step_run_index = wave.step_index;
     let wave_id = match LfdId::parse(&wave.id) {
         Ok(id) => id,
         Err(err) => {
@@ -123,12 +122,7 @@ fn handle_tick_result(
 
     match result {
         Ok(TickResult::StepComplete) => {
-            finish_step_run(
-                store,
-                &wave.id,
-                step_run_index,
-                StepRunStatus::StepCompleted,
-            );
+            finish_agent(store, &wave.id, AgentStatus::AgentCompleted);
             wave.consecutive_failures = 0;
             let _ = store.update_wave(&wave);
         }
@@ -150,7 +144,7 @@ fn handle_tick_result(
             tracing::info!(wave_id = %wave.id, "waiting for interactive step");
         }
         Ok(TickResult::StepFailed) | Err(_) => {
-            finish_step_run(store, &wave.id, step_run_index, StepRunStatus::StepFailed);
+            finish_agent(store, &wave.id, AgentStatus::AgentFailed);
             wave.consecutive_failures += 1;
             if wave.consecutive_failures >= 3 {
                 wave.status = WaveStatus::WaveError as i32;
@@ -164,16 +158,22 @@ fn handle_tick_result(
     }
 }
 
-fn finish_step_run(store: &SharedStore, wave_id: &str, step_index: u32, status: StepRunStatus) {
-    let step_run_id = LfdId::from_raw(format!("{wave_id}:{step_index}"));
+fn finish_agent(store: &SharedStore, wave_id: &str, status: AgentStatus) {
+    let wave_id = match LfdId::parse(wave_id) {
+        Ok(id) => id,
+        Err(_) => {
+            tracing::warn!(wave_id = %wave_id, "invalid wave_id when finishing step run");
+            return;
+        }
+    };
     let ended_at = time::OffsetDateTime::now_utc().unix_timestamp();
-    match store.end_step_run(&step_run_id, status as i32, ended_at) {
+    match store.end_active_agent_for_wave(&wave_id, status as i32, ended_at) {
         Ok(()) => {}
         Err(StoreError::NotFound) => {
-            tracing::debug!(step_run_id = %step_run_id, "step run not found when finishing");
+            tracing::debug!(wave_id = %wave_id, "no active step run found when finishing");
         }
         Err(err) => {
-            tracing::warn!(step_run_id = %step_run_id, error = %err, "failed to finish step run");
+            tracing::warn!(wave_id = %wave_id, error = %err, "failed to finish step run");
         }
     }
 }
@@ -237,29 +237,29 @@ impl core_store::RunStore for LfCoreStoreAdapter {
         Ok(())
     }
 
-    fn create_step_run(
+    fn create_agent(
         &self,
-        step_run: &loopflow_engine::runtime::StepRun,
+        agent: &loopflow_engine::runtime::Agent,
     ) -> Result<(), CoreStoreError> {
-        let status = match step_run.status {
-            loopflow_engine::runtime::StepRunStatus::Running => StepRunStatus::StepRunning as i32,
-            loopflow_engine::runtime::StepRunStatus::Waiting => StepRunStatus::StepWaiting as i32,
-            loopflow_engine::runtime::StepRunStatus::Completed => {
-                StepRunStatus::StepCompleted as i32
+        let status = match agent.status {
+            loopflow_engine::runtime::AgentStatus::Running => AgentStatus::AgentRunning as i32,
+            loopflow_engine::runtime::AgentStatus::Waiting => AgentStatus::AgentWaiting as i32,
+            loopflow_engine::runtime::AgentStatus::Completed => {
+                AgentStatus::AgentCompleted as i32
             }
-            loopflow_engine::runtime::StepRunStatus::Failed => StepRunStatus::StepFailed as i32,
+            loopflow_engine::runtime::AgentStatus::Failed => AgentStatus::AgentFailed as i32,
         };
 
-        let step_run = StepRun {
-            id: step_run.id.clone(),
-            step: step_run.step.clone(),
-            repo: step_run.repo.clone(),
-            worktree: step_run.worktree.clone(),
-            flow_run_id: step_run
+        let agent = Agent {
+            id: agent.id.clone(),
+            step: agent.step.clone(),
+            repo: agent.repo.clone(),
+            worktree: agent.worktree.clone(),
+            flow_run_id: agent
                 .flow_run_id
                 .as_ref()
                 .map(|run_id| run_id.as_str().to_string()),
-            wave_id: step_run
+            wave_id: agent
                 .flow_run_id
                 .as_ref()
                 .map(|run_id| run_id.as_str().to_string()),
@@ -272,7 +272,7 @@ impl core_store::RunStore for LfCoreStoreAdapter {
         };
 
         self.store
-            .start_step_run(&step_run)
+            .start_agent(&agent)
             .map_err(|err| CoreStoreError::Other(err.to_string()))?;
         Ok(())
     }
@@ -307,8 +307,8 @@ impl core_store::RunStore for LfCoreStoreAdapter {
     ) -> Result<(), CoreStoreError> {
         let status = map_fork_status_back(fork_run.status);
         let record = crate::store::ForkRun {
-            id: LfdId::from_raw(fork_run.id.clone()),
-            wave_id: LfdId::from_raw(fork_run.run_id.as_str().to_string()),
+            id: LfdId::parse(&fork_run.id).expect("fork_run.id should be valid UUID"),
+            wave_id: LfdId::parse(fork_run.run_id.as_str()).expect("run_id should be valid UUID"),
             step_index: fork_run.step_index as u32,
             branch_index: fork_run.branch_index as u32,
             status,
@@ -386,7 +386,7 @@ mod tests {
 
     use super::handle_tick_result;
     use crate::id::LfdId;
-    use crate::proto::control::{StepRunStatus, Wave, WaveStatus};
+    use crate::proto::control::{AgentStatus, Wave, WaveStatus};
     use crate::store::{ForkRun, RunStore, SharedStore, StoreError, StoreResult};
 
     #[derive(Debug, Default)]
@@ -517,16 +517,16 @@ mod tests {
         }
 
         // Step run methods
-        fn list_step_runs(&self) -> StoreResult<Vec<crate::proto::control::StepRun>> {
+        fn list_agents(&self) -> StoreResult<Vec<crate::proto::control::Agent>> {
             unused()
         }
 
-        fn list_step_run_history(
+        fn list_agent_history(
             &self,
             _worktree: Option<&str>,
             _repo: Option<&str>,
             _limit: Option<u32>,
-        ) -> StoreResult<Vec<crate::proto::control::StepRun>> {
+        ) -> StoreResult<Vec<crate::proto::control::Agent>> {
             unused()
         }
 
@@ -542,48 +542,59 @@ mod tests {
             unused()
         }
 
-        fn get_step_run(
+        fn get_agent(
             &self,
-            _step_run_id: &LfdId,
-        ) -> StoreResult<Option<crate::proto::control::StepRun>> {
+            _agent_id: &LfdId,
+        ) -> StoreResult<Option<crate::proto::control::Agent>> {
             unused()
         }
 
-        fn get_waiting_step_run(
+        fn get_waiting_agent(
             &self,
             _wave_id: &LfdId,
-        ) -> StoreResult<Option<crate::proto::control::StepRun>> {
+        ) -> StoreResult<Option<crate::proto::control::Agent>> {
             unused()
         }
 
-        fn start_step_run(&self, _step_run: &crate::proto::control::StepRun) -> StoreResult<()> {
+        fn start_agent(&self, _agent: &crate::proto::control::Agent) -> StoreResult<()> {
             unused()
         }
 
-        fn update_step_run_status(
+        fn update_agent_status(
             &self,
-            _step_run_id: &LfdId,
+            _agent_id: &LfdId,
             _status: i32,
             _pid: Option<u32>,
         ) -> StoreResult<()> {
             unused()
         }
 
-        fn end_step_run(
+        fn end_agent(
             &self,
-            step_run_id: &LfdId,
+            agent_id: &LfdId,
             status: i32,
             _ended_at: i64,
         ) -> StoreResult<()> {
             let mut ended = self.ended.lock().expect("ended mutex poisoned");
-            ended.push((step_run_id.to_string(), status));
+            ended.push((agent_id.to_string(), status));
             Ok(())
         }
 
-        fn get_stuck_step_runs(
+        fn end_active_agent_for_wave(
+            &self,
+            wave_id: &LfdId,
+            status: i32,
+            _ended_at: i64,
+        ) -> StoreResult<()> {
+            let mut ended = self.ended.lock().expect("ended mutex poisoned");
+            ended.push((wave_id.to_string(), status));
+            Ok(())
+        }
+
+        fn get_stuck_agents(
             &self,
             _older_than_secs: u64,
-        ) -> StoreResult<Vec<crate::proto::control::StepRun>> {
+        ) -> StoreResult<Vec<crate::proto::control::Agent>> {
             unused()
         }
     }
@@ -613,9 +624,8 @@ mod tests {
     }
 
     #[test]
-    fn handle_tick_result_ends_step_run_on_success() {
+    fn handle_tick_result_ends_agent_on_success() {
         let wave = base_wave();
-        let expected_step_run_id = format!("{}:{}", wave.id, wave.step_index);
         let store = std::sync::Arc::new(TestStore::new(wave.clone()));
         let shared: SharedStore = store.clone();
 
@@ -629,14 +639,13 @@ mod tests {
 
         assert_eq!(
             ended,
-            vec![(expected_step_run_id, StepRunStatus::StepCompleted as i32)]
+            vec![(wave.id, AgentStatus::AgentCompleted as i32)]
         );
     }
 
     #[test]
-    fn handle_tick_result_ends_step_run_on_failure() {
+    fn handle_tick_result_ends_agent_on_failure() {
         let wave = base_wave();
-        let expected_step_run_id = format!("{}:{}", wave.id, wave.step_index);
         let store = std::sync::Arc::new(TestStore::new(wave.clone()));
         let shared: SharedStore = store.clone();
 
@@ -650,7 +659,7 @@ mod tests {
 
         assert_eq!(
             ended,
-            vec![(expected_step_run_id, StepRunStatus::StepFailed as i32)]
+            vec![(wave.id, AgentStatus::AgentFailed as i32)]
         );
     }
 }

@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::agent::{launch_agent, LaunchConfig};
 use crate::config::load_config_or_default;
@@ -50,7 +51,7 @@ pub enum FlowRunStatus {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub enum StepRunStatus {
+pub enum AgentStatus {
     #[default]
     Running,
     Waiting,
@@ -77,13 +78,13 @@ pub struct FlowRun {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct StepRun {
+pub struct Agent {
     pub id: String,
     pub step: String,
     pub repo: String,
     pub worktree: String,
     pub flow_run_id: Option<RunId>,
-    pub status: StepRunStatus,
+    pub status: AgentStatus,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -271,30 +272,30 @@ pub fn tick_flow_with_runner(
         .unwrap_or_else(|| run.repo.clone());
 
     if step.interactive.unwrap_or(false) {
-        let step_run = StepRun {
-            id: format!("{}:{}", run.id.as_str(), run.step_index),
+        let step_run = Agent {
+            id: Uuid::new_v4().to_string(),
             step: step.name.clone(),
             repo: run.repo.to_string_lossy().to_string(),
             worktree: worktree.to_string_lossy().to_string(),
             flow_run_id: Some(run.id.clone()),
-            status: StepRunStatus::Waiting,
+            status: AgentStatus::Waiting,
         };
-        store.create_step_run(&step_run)?;
+        store.create_agent(&step_run)?;
         run.status = FlowRunStatus::Waiting;
         run.current_step = Some(step.name);
         store.update_run(&run)?;
         return Ok(TickResult::WaitingInteractive);
     }
 
-    let step_run = StepRun {
-        id: format!("{}:{}", run.id.as_str(), run.step_index),
+    let step_run = Agent {
+        id: Uuid::new_v4().to_string(),
         step: step.name.clone(),
         repo: run.repo.to_string_lossy().to_string(),
         worktree: worktree.to_string_lossy().to_string(),
         flow_run_id: Some(run.id.clone()),
-        status: StepRunStatus::Running,
+        status: AgentStatus::Running,
     };
-    store.create_step_run(&step_run)?;
+    store.create_agent(&step_run)?;
 
     let step_directions = merge_directions(&run.direction, &step.directions);
     let result = runner.run(&step, &worktree, &step_directions)?;
@@ -329,8 +330,8 @@ fn run_fork_item(
 ) -> Result<TickResult, CoreError> {
     let mut fork_runs = store.list_fork_runs(&run.id, run.step_index)?;
     if fork_runs.is_empty() {
-        let step_run = StepRun {
-            id: format!("{}:{}", run.id.as_str(), run.step_index),
+        let step_run = Agent {
+            id: Uuid::new_v4().to_string(),
             step: "fork".to_string(),
             repo: run.repo.to_string_lossy().to_string(),
             worktree: run
@@ -338,9 +339,9 @@ fn run_fork_item(
                 .clone()
                 .unwrap_or_else(|| run.repo.to_string_lossy().to_string()),
             flow_run_id: Some(run.id.clone()),
-            status: StepRunStatus::Running,
+            status: AgentStatus::Running,
         };
-        store.create_step_run(&step_run)?;
+        store.create_agent(&step_run)?;
 
         for (index, branch) in branches.iter().enumerate() {
             let step = match branch {
@@ -484,8 +485,8 @@ fn run_fork_item(
     Ok(TickResult::StepComplete)
 }
 
-fn fork_run_id(run: &FlowRun, branch_index: usize) -> String {
-    format!("{}:{}:{}", run.id.as_str(), run.step_index, branch_index)
+fn fork_run_id(_run: &FlowRun, _branch_index: usize) -> String {
+    Uuid::new_v4().to_string()
 }
 
 fn fork_worktree_path(run: &FlowRun, branch_index: usize) -> String {
@@ -568,7 +569,7 @@ fn run_choose_item(
                     return Ok(TickResult::StepFailed);
                 }
 
-                let step_run = StepRun {
+                let step_run = Agent {
                     id: format!(
                         "{}:{}:choose:{}",
                         run.id.as_str(),
@@ -579,9 +580,9 @@ fn run_choose_item(
                     repo: run.repo.to_string_lossy().to_string(),
                     worktree: worktree.to_string_lossy().to_string(),
                     flow_run_id: Some(run.id.clone()),
-                    status: StepRunStatus::Running,
+                    status: AgentStatus::Running,
                 };
-                store.create_step_run(&step_run)?;
+                store.create_agent(&step_run)?;
 
                 let directions = merge_directions(&run.direction, &step.directions);
                 let result = runner.run(&step, &worktree, &directions)?;
@@ -663,7 +664,7 @@ fn run_loop_until_empty(
                         return Ok(TickResult::StepFailed);
                     }
 
-                    let step_run = StepRun {
+                    let step_run = Agent {
                         id: format!(
                             "{}:{}:loop:{}:{}",
                             run.id.as_str(),
@@ -675,9 +676,9 @@ fn run_loop_until_empty(
                         repo: run.repo.to_string_lossy().to_string(),
                         worktree: worktree.to_string_lossy().to_string(),
                         flow_run_id: Some(run.id.clone()),
-                        status: StepRunStatus::Running,
+                        status: AgentStatus::Running,
                     };
-                    store.create_step_run(&step_run)?;
+                    store.create_agent(&step_run)?;
 
                     let directions = merge_directions(&run.direction, &step.directions);
                     let result = runner.run(step, &worktree, &directions)?;

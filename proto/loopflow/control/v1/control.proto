@@ -59,11 +59,11 @@ service ControlService {
   rpc UpdateStimulus(UpdateStimulusRequest) returns (UpdateStimulusResponse);
   rpc DeleteStimulus(DeleteStimulusRequest) returns (DeleteStimulusResponse);
 
-  // StepRun management
-  rpc ListStepRuns(ListStepRunsRequest) returns (ListStepRunsResponse);
-  rpc GetStepRunHistory(GetStepRunHistoryRequest) returns (GetStepRunHistoryResponse);
-  rpc StartStepRun(StartStepRunRequest) returns (StartStepRunResponse);
-  rpc EndStepRun(EndStepRunRequest) returns (EndStepRunResponse);
+  // Agent management
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
+  rpc GetAgentHistory(GetAgentHistoryRequest) returns (GetAgentHistoryResponse);
+  rpc StartAgent(StartAgentRequest) returns (StartAgentResponse);
+  rpc EndAgent(EndAgentRequest) returns (EndAgentResponse);
 
   // Event streaming
   rpc Subscribe(SubscribeRequest) returns (stream Event);
@@ -104,7 +104,7 @@ message GetStatusResponse {
   uint32 pid = 1;
   uint32 waves_defined = 2;
   uint32 waves_running = 3;
-  uint32 step_runs_active = 4;
+  uint32 agents_active = 4;
 }
 
 message GetHealthRequest {}
@@ -126,7 +126,7 @@ message HealthChecks {
 message HealthMetrics {
   uint32 waves_total = 1;
   uint32 waves_running = 2;
-  uint32 step_runs_active = 3;
+  uint32 agents_active = 3;
   uint32 flow_runs_total = 4;
 }
 
@@ -310,7 +310,7 @@ message ConnectWaveRequest {
 message ConnectWaveResponse {
   string worktree = 1;
   string step = 2;
-  string step_run_id = 3;
+  string agent_id = 3;
   string prompt_file = 4;          // Path to the step prompt file
   optional string flow_run_id = 5; // Current flow run if in a flow
   uint32 step_index = 6;           // Position in flow (0 if single step)
@@ -451,10 +451,10 @@ enum Staleness {
   STALENESS_REMOTE_DELETED = 2;
 }
 
-message RecentStepRun {
+message RecentAgent {
   string id = 1;
   string step = 2;
-  StepRunStatus status = 3;
+  AgentStatus status = 3;
   optional google.protobuf.Timestamp started_at = 4;
   optional google.protobuf.Timestamp ended_at = 5;
 }
@@ -475,7 +475,7 @@ message WorktreeState {
   bool prunable = 10;
   optional Staleness staleness = 11;
   optional uint32 staleness_days = 12;
-  repeated RecentStepRun recent_steps = 13;
+  repeated RecentAgent recent_steps = 13;
 }
 
 message ListWorktreesRequest {
@@ -530,18 +530,18 @@ message ReleaseSlotResponse {
 }
 
 // -----------------------------------------------------------------------------
-// StepRun Management
+// Agent Management
 // -----------------------------------------------------------------------------
 
-enum StepRunStatus {
-  STEP_RUN_STATUS_UNSPECIFIED = 0;
-  STEP_RUNNING = 1;
-  STEP_WAITING = 2;
-  STEP_COMPLETED = 3;
-  STEP_FAILED = 4;
+enum AgentStatus {
+  AGENT_STATUS_UNSPECIFIED = 0;
+  AGENT_RUNNING = 1;
+  AGENT_WAITING = 2;
+  AGENT_COMPLETED = 3;
+  AGENT_FAILED = 4;
 }
 
-message StepRun {
+message Agent {
   string id = 1;
   string step = 2;
   string repo = 3;
@@ -550,7 +550,7 @@ message StepRun {
   optional string flow_run_id = 5;
   optional string wave_id = 6;
 
-  StepRunStatus status = 7;
+  AgentStatus status = 7;
   google.protobuf.Timestamp started_at = 8;
   optional google.protobuf.Timestamp ended_at = 9;
 
@@ -559,36 +559,36 @@ message StepRun {
   string run_mode = 12;
 }
 
-message ListStepRunsRequest {}
+message ListAgentsRequest {}
 
-message ListStepRunsResponse {
-  repeated StepRun step_runs = 1;
+message ListAgentsResponse {
+  repeated Agent agents = 1;
 }
 
-message GetStepRunHistoryRequest {
+message GetAgentHistoryRequest {
   optional string worktree = 1;
   optional string repo = 2;
   optional uint32 limit = 3;
 }
 
-message GetStepRunHistoryResponse {
-  repeated StepRun step_runs = 1;
+message GetAgentHistoryResponse {
+  repeated Agent agents = 1;
 }
 
-message StartStepRunRequest {
-  StepRun step_run = 1;
+message StartAgentRequest {
+  Agent agent = 1;
 }
 
-message StartStepRunResponse {
+message StartAgentResponse {
   string id = 1;
 }
 
-message EndStepRunRequest {
-  string step_run_id = 1;
-  StepRunStatus status = 2;
+message EndAgentRequest {
+  string agent_id = 1;
+  AgentStatus status = 2;
 }
 
-message EndStepRunResponse {
+message EndAgentResponse {
   string id = 1;
 }
 
@@ -710,7 +710,7 @@ message WaveActivatedEvent {
 message WaveWaitingEvent {
   string wave_id = 1;
   string step = 2;                  // Interactive step name (e.g., "design")
-  string step_run_id = 3;
+  string agent_id = 3;
   optional string flow_run_id = 4;  // Flow run if in a flow
   uint32 step_index = 5;            // Position in flow
   WaitingReason reason = 6;
@@ -746,7 +746,7 @@ message NotifyResponse {
 }
 
 message StreamOutputRequest {
-  string step_run_id = 1;
+  string agent_id = 1;
   string text = 2;
 }
 

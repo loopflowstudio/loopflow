@@ -3,15 +3,15 @@ use std::fs;
 use std::sync::Mutex;
 
 use loopflow_engine::runtime::{
-    tick_flow_with_runner, FlowRun, FlowRunStatus, ForkRun, ForkRunStatus, StepResult, StepRun,
-    StepRunStatus, TickResult,
+    tick_flow_with_runner, FlowRun, FlowRunStatus, ForkRun, ForkRunStatus, StepResult, Agent,
+    AgentStatus, TickResult,
 };
 use loopflow_engine::{load_flow, RunId, RunStore, Step};
 use tempfile::TempDir;
 
 struct MemoryStore {
     runs: Mutex<HashMap<RunId, FlowRun>>,
-    step_runs: Mutex<Vec<StepRun>>,
+    agents: Mutex<Vec<Agent>>,
     fork_runs: Mutex<HashMap<(RunId, usize, usize), ForkRun>>,
 }
 
@@ -21,7 +21,7 @@ impl MemoryStore {
         map.insert(run.id.clone(), run);
         Self {
             runs: Mutex::new(map),
-            step_runs: Mutex::new(Vec::new()),
+            agents: Mutex::new(Vec::new()),
             fork_runs: Mutex::new(HashMap::new()),
         }
     }
@@ -30,8 +30,8 @@ impl MemoryStore {
         self.runs.lock().unwrap().get(id).unwrap().clone()
     }
 
-    fn step_runs(&self) -> Vec<StepRun> {
-        self.step_runs.lock().unwrap().clone()
+    fn agents(&self) -> Vec<Agent> {
+        self.agents.lock().unwrap().clone()
     }
 }
 
@@ -53,8 +53,8 @@ impl RunStore for MemoryStore {
         Ok(())
     }
 
-    fn create_step_run(&self, step_run: &StepRun) -> Result<(), loopflow_engine::StoreError> {
-        self.step_runs.lock().unwrap().push(step_run.clone());
+    fn create_agent(&self, agent: &Agent) -> Result<(), loopflow_engine::StoreError> {
+        self.agents.lock().unwrap().push(agent.clone());
         Ok(())
     }
 
@@ -214,9 +214,9 @@ fn tick_interactive_pauses() {
     assert_eq!(updated.status, FlowRunStatus::Waiting);
     assert_eq!(updated.step_index, 0);
 
-    let step_runs = store.step_runs();
-    assert_eq!(step_runs.len(), 1);
-    assert_eq!(step_runs[0].status, StepRunStatus::Waiting);
+    let agents = store.agents();
+    assert_eq!(agents.len(), 1);
+    assert_eq!(agents[0].status, AgentStatus::Waiting);
 }
 
 #[test]
@@ -313,7 +313,7 @@ fn tick_choose_selects_branch() {
     let updated = store.get_run_copy(&run_id);
     assert_eq!(updated.step_index, 1);
 
-    let steps = store.step_runs();
+    let steps = store.agents();
     assert_eq!(steps.len(), 1);
     assert_eq!(steps[0].step, "implement");
 

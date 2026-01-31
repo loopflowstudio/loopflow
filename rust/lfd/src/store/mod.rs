@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::id::LfdId;
 use crate::proto::control::PendingActivation;
-use crate::proto::control::StepRun;
+use crate::proto::control::Agent;
 use crate::proto::control::Stimulus;
 use crate::proto::control::Wave;
 
@@ -95,24 +95,30 @@ pub trait RunStore: Send + Sync {
     fn delete_fork_runs(&self, wave_id: &LfdId, step_index: u32) -> StoreResult<u32>;
 
     // Step runs
-    fn list_step_runs(&self) -> StoreResult<Vec<StepRun>>;
-    fn list_step_run_history(
+    fn list_agents(&self) -> StoreResult<Vec<Agent>>;
+    fn list_agent_history(
         &self,
         worktree: Option<&str>,
         repo: Option<&str>,
         limit: Option<u32>,
-    ) -> StoreResult<Vec<StepRun>>;
-    fn get_step_run(&self, step_run_id: &LfdId) -> StoreResult<Option<StepRun>>;
-    fn get_waiting_step_run(&self, wave_id: &LfdId) -> StoreResult<Option<StepRun>>;
-    fn start_step_run(&self, step_run: &StepRun) -> StoreResult<()>;
-    fn update_step_run_status(
+    ) -> StoreResult<Vec<Agent>>;
+    fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<Agent>>;
+    fn get_waiting_agent(&self, wave_id: &LfdId) -> StoreResult<Option<Agent>>;
+    fn start_agent(&self, agent: &Agent) -> StoreResult<()>;
+    fn update_agent_status(
         &self,
-        step_run_id: &LfdId,
+        agent_id: &LfdId,
         status: i32,
         pid: Option<u32>,
     ) -> StoreResult<()>;
-    fn end_step_run(&self, step_run_id: &LfdId, status: i32, ended_at: i64) -> StoreResult<()>;
-    fn get_stuck_step_runs(&self, older_than_secs: u64) -> StoreResult<Vec<StepRun>>;
+    fn end_agent(&self, agent_id: &LfdId, status: i32, ended_at: i64) -> StoreResult<()>;
+    fn end_active_agent_for_wave(
+        &self,
+        wave_id: &LfdId,
+        status: i32,
+        ended_at: i64,
+    ) -> StoreResult<()>;
+    fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<Agent>>;
 }
 
 pub type SharedStore = Arc<dyn RunStore>;
@@ -122,7 +128,7 @@ mod tests {
     use super::*;
     use crate::id::LfdId;
     use crate::proto::control::{
-        MergeMode, PendingActivation, StepRun, StepRunStatus, Stimulus, StimulusKind, Wave,
+        MergeMode, PendingActivation, Agent, AgentStatus, Stimulus, StimulusKind, Wave,
         WaveStatus,
     };
     use prost_types::Timestamp;
@@ -188,8 +194,8 @@ mod tests {
         }
     }
 
-    fn make_step_run(wave_id: Option<&str>, status: StepRunStatus, started_at: i64) -> StepRun {
-        StepRun {
+    fn make_agent(wave_id: Option<&str>, status: AgentStatus, started_at: i64) -> Agent {
+        Agent {
             id: LfdId::new().to_string(),
             step: "plan".to_string(),
             repo: "/repo".to_string(),
@@ -307,31 +313,31 @@ mod tests {
         assert_eq!(deleted_forks, 1);
 
         let now = OffsetDateTime::now_utc().unix_timestamp();
-        let step_run = make_step_run(Some(&wave.id), StepRunStatus::StepWaiting, now);
-        store.start_step_run(&step_run).unwrap();
+        let agent = make_agent(Some(&wave.id), AgentStatus::AgentWaiting, now);
+        store.start_agent(&agent).unwrap();
         let waiting = store
-            .get_waiting_step_run(&LfdId::parse(&wave.id).unwrap())
+            .get_waiting_agent(&LfdId::parse(&wave.id).unwrap())
             .unwrap()
             .unwrap();
-        assert_eq!(waiting.id, step_run.id);
+        assert_eq!(waiting.id, agent.id);
         store
-            .update_step_run_status(
-                &LfdId::parse(&step_run.id).unwrap(),
-                StepRunStatus::StepRunning as i32,
+            .update_agent_status(
+                &LfdId::parse(&agent.id).unwrap(),
+                AgentStatus::AgentRunning as i32,
                 Some(123),
             )
             .unwrap();
         store
-            .end_step_run(
-                &LfdId::parse(&step_run.id).unwrap(),
-                StepRunStatus::StepCompleted as i32,
+            .end_agent(
+                &LfdId::parse(&agent.id).unwrap(),
+                AgentStatus::AgentCompleted as i32,
                 now + 10,
             )
             .unwrap();
 
-        let old_run = make_step_run(Some(&wave.id), StepRunStatus::StepRunning, now - 3600);
-        store.start_step_run(&old_run).unwrap();
-        let stuck = store.get_stuck_step_runs(60).unwrap();
+        let old_run = make_agent(Some(&wave.id), AgentStatus::AgentRunning, now - 3600);
+        store.start_agent(&old_run).unwrap();
+        let stuck = store.get_stuck_agents(60).unwrap();
         assert!(stuck.iter().any(|run| run.id == old_run.id));
 
         store.delete_wave(&LfdId::parse(&wave.id).unwrap()).unwrap();
@@ -352,7 +358,7 @@ mod tests {
             });
             client
                 .batch_execute(
-                    "TRUNCATE pending_activations, stimuli, fork_runs, step_runs, waves CASCADE",
+                    "TRUNCATE pending_activations, stimuli, fork_runs, agents, waves CASCADE",
                 )
                 .await
                 .unwrap();

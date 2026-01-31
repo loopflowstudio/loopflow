@@ -5,7 +5,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::id::LfdId;
-use crate::proto::control::{StepRunStatus, WaveStatus};
+use crate::proto::control::{AgentStatus, WaveStatus};
 use crate::store::SharedStore;
 
 pub fn spawn_recovery_loop(store: SharedStore, cancel: CancellationToken) -> JoinHandle<()> {
@@ -27,7 +27,7 @@ pub fn spawn_recovery_loop(store: SharedStore, cancel: CancellationToken) -> Joi
 
 fn recover_stuck_runs(store: &SharedStore) {
     let stuck_threshold = 4 * 60 * 60;
-    let stuck_runs = match store.get_stuck_step_runs(stuck_threshold) {
+    let stuck_runs = match store.get_stuck_agents(stuck_threshold) {
         Ok(runs) => runs,
         Err(err) => {
             tracing::error!(error = %err, "failed to query stuck runs");
@@ -36,7 +36,7 @@ fn recover_stuck_runs(store: &SharedStore) {
     };
 
     for run in stuck_runs {
-        tracing::warn!(step_run_id = %run.id, pid = ?run.pid, "step run stuck >4h, terminating");
+        tracing::warn!(agent_id = %run.id, pid = ?run.pid, "step run stuck >4h, terminating");
 
         if let Some(pid) = run.pid {
             let _ = kill_process(pid);
@@ -46,8 +46,8 @@ fn recover_stuck_runs(store: &SharedStore) {
             .duration_since(UNIX_EPOCH)
             .expect("system time before unix epoch")
             .as_secs() as i64;
-        let step_run_id = LfdId::from_raw(run.id.clone());
-        let _ = store.end_step_run(&step_run_id, StepRunStatus::StepFailed as i32, now);
+        let agent_id = LfdId::from_raw(run.id.clone());
+        let _ = store.end_agent(&agent_id, AgentStatus::AgentFailed as i32, now);
 
         if let Some(wave_id) = run.wave_id.as_deref() {
             let wave_id = match LfdId::parse(wave_id) {

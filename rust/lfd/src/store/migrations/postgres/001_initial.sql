@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS waves (
 CREATE INDEX IF NOT EXISTS idx_waves_repo ON waves(repo);
 CREATE INDEX IF NOT EXISTS idx_waves_status ON waves(status);
 
-CREATE TABLE IF NOT EXISTS step_runs (
+CREATE TABLE IF NOT EXISTS agents (
     id TEXT PRIMARY KEY,
     step TEXT NOT NULL,
     repo TEXT NOT NULL,
@@ -85,5 +85,5 @@ CREATE TABLE IF NOT EXISTS fork_runs (
 
 CREATE INDEX IF NOT EXISTS idx_fork_runs_wave_id ON fork_runs(wave_id, step_index);
 
-CREATE INDEX IF NOT EXISTS idx_step_runs_status ON step_runs(status);
-CREATE INDEX IF NOT EXISTS idx_step_runs_wave ON step_runs(wave_id);
+CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
+CREATE INDEX IF NOT EXISTS idx_agents_wave ON agents(wave_id);

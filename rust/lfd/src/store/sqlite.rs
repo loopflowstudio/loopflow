@@ -8,7 +8,7 @@ use rusqlite::{params, Connection, OptionalExtension, Row, ToSql};
 use time::OffsetDateTime;
 
 use crate::id::LfdId;
-use crate::proto::control::{PendingActivation, StepRun, StepRunStatus, Stimulus, Wave};
+use crate::proto::control::{PendingActivation, Agent, AgentStatus, Stimulus, Wave};
 use crate::store::{ForkRun, ForkRunStatus, RunStore, StoreError, StoreResult};
 
 const SCHEMA_VERSION: u32 = 1;
@@ -70,7 +70,7 @@ impl SqliteStore {
                 step_index INTEGER NOT NULL DEFAULT 0
             );
 
-            CREATE TABLE IF NOT EXISTS step_runs (
+            CREATE TABLE IF NOT EXISTS agents (
                 id TEXT PRIMARY KEY,
                 step TEXT NOT NULL,
                 repo TEXT NOT NULL,
@@ -568,22 +568,22 @@ impl RunStore for SqliteStore {
         Ok(activation)
     }
 
-    fn list_step_runs(&self) -> StoreResult<Vec<StepRun>> {
-        self.list_step_run_history(None, None, None)
+    fn list_agents(&self) -> StoreResult<Vec<Agent>> {
+        self.list_agent_history(None, None, None)
     }
 
-    fn list_step_run_history(
+    fn list_agent_history(
         &self,
         worktree: Option<&str>,
         repo: Option<&str>,
         limit: Option<u32>,
-    ) -> StoreResult<Vec<StepRun>> {
+    ) -> StoreResult<Vec<Agent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = String::from(
             "
             SELECT id, step, repo, worktree, flow_run_id, wave_id, status,
                    started_at, ended_at, pid, model, run_mode
-            FROM step_runs
+            FROM agents
             ",
         );
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -614,7 +614,7 @@ impl RunStore for SqliteStore {
             let ended_at: Option<i64> = row.get(8)?;
             let pid: Option<i64> = row.get(9)?;
 
-            Ok(StepRun {
+            Ok(Agent {
                 id: row.get(0)?,
                 step: row.get(1)?,
                 repo: row.get(2)?,
@@ -709,24 +709,24 @@ impl RunStore for SqliteStore {
         Ok(deleted as u32)
     }
 
-    fn get_step_run(&self, step_run_id: &LfdId) -> StoreResult<Option<StepRun>> {
+    fn get_agent(&self, agent_id: &LfdId) -> StoreResult<Option<Agent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "
             SELECT id, step, repo, worktree, flow_run_id, wave_id, status,
                    started_at, ended_at, pid, model, run_mode
-            FROM step_runs
+            FROM agents
             WHERE id = ?1
             ",
         )?;
 
         let run = stmt
-            .query_row(params![step_run_id], |row| {
+            .query_row(params![agent_id], |row| {
                 let started_at = unix_to_timestamp(row.get::<_, i64>(7)?);
                 let ended_at: Option<i64> = row.get(8)?;
                 let pid: Option<i64> = row.get(9)?;
 
-                Ok(StepRun {
+                Ok(Agent {
                     id: row.get(0)?,
                     step: row.get(1)?,
                     repo: row.get(2)?,
@@ -746,13 +746,13 @@ impl RunStore for SqliteStore {
         Ok(run)
     }
 
-    fn get_waiting_step_run(&self, wave_id: &LfdId) -> StoreResult<Option<StepRun>> {
+    fn get_waiting_agent(&self, wave_id: &LfdId) -> StoreResult<Option<Agent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "
             SELECT id, step, repo, worktree, flow_run_id, wave_id, status,
                    started_at, ended_at, pid, model, run_mode
-            FROM step_runs
+            FROM agents
             WHERE wave_id = ?1 AND status = ?2
             ORDER BY started_at DESC
             LIMIT 1
@@ -760,12 +760,12 @@ impl RunStore for SqliteStore {
         )?;
 
         let run = stmt
-            .query_row(params![wave_id, StepRunStatus::StepWaiting as i32], |row| {
+            .query_row(params![wave_id, AgentStatus::AgentWaiting as i32], |row| {
                 let started_at = unix_to_timestamp(row.get::<_, i64>(7)?);
                 let ended_at: Option<i64> = row.get(8)?;
                 let pid: Option<i64> = row.get(9)?;
 
-                Ok(StepRun {
+                Ok(Agent {
                     id: row.get(0)?,
                     step: row.get(1)?,
                     repo: row.get(2)?,
@@ -785,48 +785,48 @@ impl RunStore for SqliteStore {
         Ok(run)
     }
 
-    fn start_step_run(&self, step_run: &StepRun) -> StoreResult<()> {
+    fn start_agent(&self, agent: &Agent) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let started_at = step_run
+        let started_at = agent
             .started_at
             .as_ref()
             .map(timestamp_to_unix)
             .unwrap_or_else(now_unix);
         conn.execute(
             "
-            INSERT INTO step_runs (
+            INSERT INTO agents (
                 id, step, repo, worktree, flow_run_id, wave_id, status, started_at,
                 ended_at, pid, model, run_mode
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
             ",
             params![
-                step_run.id,
-                step_run.step,
-                step_run.repo,
-                step_run.worktree,
-                step_run.flow_run_id,
-                step_run.wave_id,
-                step_run.status,
+                agent.id,
+                agent.step,
+                agent.repo,
+                agent.worktree,
+                agent.flow_run_id,
+                agent.wave_id,
+                agent.status,
                 started_at,
-                step_run.ended_at.as_ref().map(timestamp_to_unix),
-                step_run.pid.map(|value| value as i64),
-                step_run.model,
-                step_run.run_mode,
+                agent.ended_at.as_ref().map(timestamp_to_unix),
+                agent.pid.map(|value| value as i64),
+                agent.model,
+                agent.run_mode,
             ],
         )?;
         Ok(())
     }
 
-    fn update_step_run_status(
+    fn update_agent_status(
         &self,
-        step_run_id: &LfdId,
+        agent_id: &LfdId,
         status: i32,
         pid: Option<u32>,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let updated = conn.execute(
-            "UPDATE step_runs SET status = ?1, pid = COALESCE(?2, pid) WHERE id = ?3",
-            params![status, pid.map(|value| value as i64), step_run_id],
+            "UPDATE agents SET status = ?1, pid = COALESCE(?2, pid) WHERE id = ?3",
+            params![status, pid.map(|value| value as i64), agent_id],
         )?;
         if updated == 0 {
             return Err(StoreError::NotFound);
@@ -834,11 +834,11 @@ impl RunStore for SqliteStore {
         Ok(())
     }
 
-    fn end_step_run(&self, step_run_id: &LfdId, status: i32, ended_at: i64) -> StoreResult<()> {
+    fn end_agent(&self, agent_id: &LfdId, status: i32, ended_at: i64) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let updated = conn.execute(
-            "UPDATE step_runs SET status = ?1, ended_at = ?2 WHERE id = ?3",
-            params![status, ended_at, step_run_id],
+            "UPDATE agents SET status = ?1, ended_at = ?2 WHERE id = ?3",
+            params![status, ended_at, agent_id],
         )?;
         if updated == 0 {
             return Err(StoreError::NotFound);
@@ -846,14 +846,32 @@ impl RunStore for SqliteStore {
         Ok(())
     }
 
-    fn get_stuck_step_runs(&self, older_than_secs: u64) -> StoreResult<Vec<StepRun>> {
+    fn end_active_agent_for_wave(
+        &self,
+        wave_id: &LfdId,
+        status: i32,
+        ended_at: i64,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let updated = conn.execute(
+            "UPDATE agents SET status = ?1, ended_at = ?2
+             WHERE wave_id = ?3 AND ended_at IS NULL",
+            params![status, ended_at, wave_id.as_str()],
+        )?;
+        if updated == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
+    fn get_stuck_agents(&self, older_than_secs: u64) -> StoreResult<Vec<Agent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let cutoff = now_unix() - older_than_secs as i64;
         let mut stmt = conn.prepare(
             "
             SELECT id, step, repo, worktree, flow_run_id, wave_id, status,
                    started_at, ended_at, pid, model, run_mode
-            FROM step_runs
+            FROM agents
             WHERE ended_at IS NULL AND started_at <= ?1
             ORDER BY started_at ASC
             ",
@@ -864,7 +882,7 @@ impl RunStore for SqliteStore {
             let ended_at: Option<i64> = row.get(8)?;
             let pid: Option<i64> = row.get(9)?;
 
-            Ok(StepRun {
+            Ok(Agent {
                 id: row.get(0)?,
                 step: row.get(1)?,
                 repo: row.get(2)?,

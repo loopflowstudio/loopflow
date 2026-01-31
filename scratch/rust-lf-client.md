@@ -1,165 +1,163 @@
-# Rust Roadmap: lf Client Refactor (Stage 4)
+# lf Client Refactor (Stage 4)
 
-Make `lf` and `lf ops` protocol clients that target lf-core.
+Move git operations from Python lfops to Rust lf-core. Python CLI becomes a thin wrapper over Rust.
 
-## Goal
-Keep the CLI UX but move execution to the protocol-first engine, enabling remote control and managed clusters.
+## Problem
 
-## Scope
-- Client config for target engine (local/remote)
-- Authn for API keys and tokens
-- Mapping existing commands to protocol calls
-- Event streaming to terminal
-- Local standalone mode without requiring `lfd`
-- Local mode uses direct `lf` ↔ `lf-core` integration
-- Remote mode switches `lf` engine to `lfd` that exposes the same subset of `lf-core` APIs used by `lf`
-- `lf ops` commands (rebase, next, land) call lf-core git module
-- Move git operations from Python lfops to Rust lf-core
-- Expose operations via FFI or CLI for Python frontend
+The Python lfops code duplicates logic that will exist in the Rust daemon. Both need rebasing, branch creation, and landing. Today:
 
-## lf ops vs lfd: siblings, not layers
+- `lfops` is a separate binary from `lf`
+- Git operations are scattered across `_helpers.py`, `land.py`, `next.py`, `rebase.py`
+- No shared code with the Rust daemon
 
-Both `lf ops` and `lfd` call lf-core for git operations. The difference is state:
+This creates maintenance burden and blocks the Rust daemon from using the same git logic for stacking workflows.
 
-- `lf ops` — stateless, no daemon required
-- `lfd` — adds wave state (base_branch, base_commit) for stacking workflows
+## Approach
 
-| | `lf ops` | `lfd` |
-|---|----------|-------|
-| Daemon required | No | Yes |
-| State | None | Wave DB (SQLite/Postgres) |
-| Scope | This worktree | Named wave |
-| Rebase | Simple onto main | Squash-aware via base_commit |
-| Next | New branch, done | New branch + record stacking |
+Extend `rust/loopflow-engine/src/git.rs` with the operations needed by `lf ops`. Expose via PyO3 bindings. Python commands become thin wrappers that call Rust.
 
-Siblings, not layers. Shared engine, different state models.
+### Git module expansion
 
-## lfops → lf ops transition
+The current `git.rs` has:
+- `rebase(worktree, onto, base_commit)` — already squash-aware
+- `create_branch(worktree, name)` — records old state
+- `push(worktree, force_with_lease)` — basic push
+- `land(worktree, strategy, main_branch)` — local merge only
 
-Consolidate `lfops` binary into `lf ops` subcommand. Orthogonal to Rust but natural to do at this stage.
+Add:
+- `get_default_branch(repo)` — detect main/master via origin/HEAD
+- `is_clean(repo)` — check git status --porcelain
+- `stage_all(repo)` — git add -A
+- `commit(repo, message)` — git commit -m
+- `push_with_upstream(repo, remote, branch)` — push -u (already exists)
+- `delete_remote_branch(repo, remote, branch)` — push origin --delete
+- `delete_local_branch(repo, branch)` — branch -D
+- `pr_exists(repo)` — check if PR exists for current branch (shell to gh)
+- `pr_create_draft(repo)` — create draft PR (shell to gh)
+- `pr_merge_squash_auto(repo)` — enable auto-merge (shell to gh)
+- `sync_main(repo, main_branch)` — fetch + reset if checked out
+- `worktree_remove(repo, path)` — git worktree remove --force
 
-**Current state:**
-```bash
-lf debug           # prompt/agent commands
-lfops pr           # separate binary for git workflow
-lfops land
-lfops rebase
+### PyO3 bindings
+
+Expose new functions in `python.rs`:
+
+```python
+from loopflow_engine import git
+
+# Current
+git.rebase("/path/to/worktree", "origin/main", None)
+git.create_branch("/path/to/worktree", "feature")
+git.push("/path/to/worktree", force_with_lease=True)
+git.land("/path/to/worktree", "squash_merge", "main")
+
+# New
+git.get_default_branch("/path/to/repo")  # -> "main"
+git.is_clean("/path/to/repo")            # -> bool
+git.stage_all("/path/to/repo")
+git.commit("/path/to/repo", "message")
+git.delete_remote_branch("/path/to/repo", "origin", "feature")
+git.sync_main("/path/to/repo", "main")   # fetch + maybe reset
 ```
 
-**Target state:**
+### Python migration path
+
+Each lfops command calls Rust for git operations:
+
+| Command | Python keeps | Rust handles |
+|---------|-------------|--------------|
+| `pr` | CLI output, gh calls | stage, commit, push, is_clean |
+| `land` | strategy selection, scratch/ cleanup | rebase, push, land, delete branch |
+| `next` | branch naming, wave metadata | is_ancestor, checkout, create_branch, push |
+| `rebase` | conflict UX, agent fallback | rebase, push |
+| `commit` | message generation (via agent) | stage, commit, push |
+
+The Python layer handles:
+- User-facing output (typer.echo)
+- Agent invocation for message generation
+- GitHub CLI calls (gh) — these stay in Python for now
+- Wave metadata updates (daemon integration)
+
+### lfops → lf ops consolidation
+
+Merge into single binary:
+
 ```bash
-lf debug           # prompt/agent commands
-lf ops pr          # subcommand, same binary
+# Before
+lfops pr
+lfops land
+lfops rebase
+
+# After
+lf ops pr
 lf ops land
 lf ops rebase
 ```
 
-**Why now:**
-- One CLI to learn, one binary to install
-- Consistent `lf <domain> <command>` pattern
-- Natural breakpoint when moving to lf-core anyway
-- Aliases can preserve `lfops` for muscle memory
+Migration:
+1. Add `lf ops` subcommand that delegates to lfops code
+2. Keep `lfops` binary with deprecation warning for 2 releases
+3. Remove `lfops` binary
 
-**Migration:**
-1. Add `lf ops` subcommand that delegates to existing lfops code
-2. Deprecate `lfops` binary with warning pointing to `lf ops`
-3. Remove `lfops` binary after transition period
+### gh CLI integration
 
-## lf ops architecture
+GitHub operations stay as subprocess calls to `gh`:
+- `gh pr view` — check PR status
+- `gh pr create` — create PR
+- `gh pr merge --squash --auto` — enable auto-merge
 
-When `lf` moves to lf-core, `lf ops` moves with it. Both become thin Python CLIs over Rust.
+Wrapping `gh` in Rust adds complexity without benefit. The `gh` CLI handles auth, caching, and rate limiting. Keep it.
 
-```
-lf-core (Rust)
-├── git::rebase(worktree, onto, base_commit)
-├── git::create_branch(worktree, name) → BranchInfo
-├── git::push_force_with_lease(worktree)
-├── git::land(worktree, strategy)
-└── git::pr_create(worktree, title, body)
+## Alternatives considered
 
-lf (Python CLI)                  lf ops (Python CLI)
-├── run → lf-core                ├── rebase → lf-core(None)
-├── flow → lf-core               ├── next → lf-core
-└── ...                          └── land → lf-core
+| Approach | Tradeoff | Why not |
+|----------|----------|---------|
+| Rewrite lfops in pure Rust | Single language, no FFI | Python still needed for agent invocation; not worth the migration cost |
+| Keep Python git operations | No Rust dependency | Daemon needs same operations in Rust anyway; blocks stacking workflow |
+| Use git2-rs instead of shelling out | No subprocess overhead | Adds 500KB to binary; git CLI is fast enough; git2 API is complex |
+| Wrap gh in Rust too | Single implementation | gh handles auth well; no benefit to reimplementing |
 
-                                 lfd (Rust daemon)
-                                 ├── rebase → lf-core(wave.base_commit)
-                                 ├── next → lf-core + update wave state
-                                 └── land → lf-core + update wave state
-```
+## Key decisions
 
-`lf ops` is stateless - it calls lf-core with simple defaults (e.g., `rebase(worktree, "origin/main", None)`).
+**Shell to git, not git2-rs.** The git CLI is stable, fast, and handles edge cases we'd have to reimplement. git2-rs adds binary size and complexity for no user benefit. Per the roadmap principle: "Shell to lf" for execution, we extend this to "shell to git" for git operations.
 
-`lfd` also calls lf-core but adds wave state (e.g., `rebase(worktree, "origin/main", wave.base_commit)`).
+**gh stays in Python.** The GitHub CLI handles OAuth, token refresh, and API rate limiting. Wrapping it in Rust adds layers without value. Python subprocess calls to gh are fine.
 
-### lf-core git module
+**Stateless ops, stateful daemon.** `lf ops` commands are stateless—they work on the current worktree with no daemon. The daemon adds wave state (base_commit for squash-aware rebase). Same Rust functions, different callers.
 
-```rust
-// rust/lf-core/src/git.rs
+**Thin Python wrapper.** Python lfops becomes a 50-line wrapper per command. All git logic lives in Rust. This makes the Python code obvious and the Rust code testable.
 
-pub struct BranchInfo {
-    pub old_branch: String,
-    pub old_head: String,
-    pub new_branch: String,
-}
+## Scope
 
-pub fn rebase(
-    worktree: &Path,
-    onto: &str,
-    base_commit: Option<&str>,
-) -> Result<(), GitError>;
+- In scope: Git operations in Rust, PyO3 bindings, lfops migration, lf ops consolidation
+- Out of scope: gh wrapper in Rust, agent message generation in Rust, daemon integration
 
-pub fn create_stacked_branch(
-    worktree: &Path,
-    new_branch: &str,
-) -> Result<BranchInfo, GitError>;
+## Done when
 
-pub fn push_force_with_lease(worktree: &Path) -> Result<(), GitError>;
+```bash
+# All tests pass
+cargo test -p loopflow-engine
 
-pub fn land(
-    worktree: &Path,
-    strategy: LandStrategy,
-) -> Result<LandResult, GitError>;
+# Python tests pass
+uv run pytest tests/test_git.py
+
+# Commands work
+lf ops pr       # stages, commits, pushes, creates PR
+lf ops land     # rebases, lands via PR or local merge
+lf ops next     # lands current, creates stacked branch
+lf ops rebase   # rebases with squash-aware logic
+
+# Deprecation works
+lfops pr        # shows warning, delegates to lf ops pr
 ```
 
-### Stacking workflow
+## Implementation order
 
-The `next`/`rebase` pair enables stacking:
-
-1. `lfd next` — create branch from HEAD, record base_branch + base_commit
-2. Work on stacked branch, create PR
-3. Base PR lands (squash-merged to main)
-4. `lfd rebase` — uses base_commit for `git rebase --onto origin/main <base_commit>`
-
-Without daemon state, `lf ops rebase` does simple `git rebase origin/main`. The squash-aware logic requires the recorded base_commit.
-
-## Non-goals
-- Removing Python immediately
-- Rewriting all UX flows
-- Wave state management (stays in lfd)
-- Changing git workflow semantics
-
-## UX principles
-- `lf` behaves the same whether local or remote.
-- Clear, actionable errors on auth or protocol mismatch.
-- Local mode remains the default for dev.
-- Users can run `lf` without installing or running `lfd`.
-- Local mode should not require a daemon process.
-- Remote mode should be a pure engine switch, not a UX switch.
-
-## Success criteria
-- `lf run` works identically against local and remote.
-- Concerto and `lf` can connect to the same daemon.
-- Users can opt into remote with a single config change.
-- Hosted `lfd` can be targeted from a local `lf` without special flags.
-- Local `lf` works out of the box with no daemon running.
-- Remote `lf` uses the same engine API surface as local `lf` (subset parity).
-
----
-
-## Open questions
-- How should credentials be stored (keychain vs file)?
-- Do we need offline mode with cached flows?
-- FFI vs CLI for Python → Rust calls?
-- Should `lf ops` become `lf git` or stay as `lf ops`?
-- Agent-assisted conflict resolution: lf ops only, or lfd too?
+1. Extend `git.rs` with missing functions (is_clean, stage_all, commit, delete branches, sync_main)
+2. Add PyO3 bindings in `python.rs`
+3. Migrate `_helpers.py` to use Rust functions
+4. Migrate `rebase.py` (simplest command)
+5. Migrate `land.py` (most complex)
+6. Migrate `next.py` and `commit.py`
+7. Add `lf ops` subcommand
+8. Deprecate `lfops` binary

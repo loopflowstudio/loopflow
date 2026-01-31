@@ -86,17 +86,31 @@ class Server:
                     writer.write((response.serialize() + "\n").encode())
                     await writer.drain()
                 except json.JSONDecodeError:
-                    resp = error("Invalid JSON")
-                    writer.write((resp.serialize() + "\n").encode())
-                    await writer.drain()
+                    try:
+                        resp = error("Invalid JSON")
+                        writer.write((resp.serialize() + "\n").encode())
+                        await writer.drain()
+                    except (ConnectionResetError, BrokenPipeError, OSError):
+                        break
+                except (ConnectionResetError, BrokenPipeError, OSError):
+                    break  # Client disconnected, exit cleanly
                 except Exception as e:
-                    resp = error(str(e))
-                    writer.write((resp.serialize() + "\n").encode())
-                    await writer.drain()
+                    try:
+                        resp = error(str(e))
+                        writer.write((resp.serialize() + "\n").encode())
+                        await writer.drain()
+                    except (ConnectionResetError, BrokenPipeError, OSError):
+                        break
+        except (ConnectionResetError, BrokenPipeError, OSError):
+            pass  # Client disconnected, ignore
         finally:
             self.clients.discard(writer)
             self.subscriptions.pop(writer, None)
-            writer.close()
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                pass  # Ignore any close errors
 
     async def _dispatch(self, request: Request, writer: StreamWriter) -> Response:
         metrics.increment("socket_requests")
@@ -540,7 +554,9 @@ async def run_server(socket_path: Path, http_port: int = 8765, grpc_port: int = 
     # Enforce single instance
     _check_already_running(http_port)
 
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     logger = logging.getLogger("lfd")
+    logger.info(f"lfd starting (socket={socket_path}, http={http_port}, grpc={grpc_port})")
     server = Server(socket_path)
     http_server = None
     grpc_server = None
@@ -585,7 +601,7 @@ async def run_server(socket_path: Path, http_port: int = 8765, grpc_port: int = 
             manager=server.manager,
             broadcast_callback=server._broadcast,
         )
-        logger.info(f"gRPC server started on port {grpc_port}")
+        logger.info(f"lfd ready (http={http_port}, grpc={grpc_port})")
 
         await server.start()
     finally:

@@ -136,7 +136,7 @@ struct InteractiveSessionView: View {
     private var terminalContent: some View {
         GhosttyTerminalView(
             workingDirectory: session.worktreePath,
-            command: "lf \(session.step)",
+            command: session.command,
             sessionId: session.id,
             manager: ghosttyManager
         )

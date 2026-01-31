@@ -10,8 +10,12 @@ from loopflow.lf.context import find_worktree_root
 from loopflow.lf.git import find_main_repo, get_current_branch
 from loopflow.lf.messages import generate_pr_message
 from loopflow.lf.naming import extract_iteration_suffix, generate_next_branch, parse_branch_base
+from loopflow.lf.ops.git import GitError
+from loopflow.lf.ops.git import create_branch as git_create_branch
+from loopflow.lf.ops.git import push as git_push
+from loopflow.lf.ops.git import rebase as git_rebase
 from loopflow.lfd.wave import get_wave_by_worktree, update_wave_worktree_branch
-from loopflow.lfops._helpers import get_default_branch
+from loopflow.lfops._helpers import add_commit_push, get_default_branch
 from loopflow.lfops.shell import write_directive
 
 
@@ -70,13 +74,9 @@ def _fresh_start(repo_root: Path, wave_name: str) -> str | None:
     main_repo = find_main_repo(repo_root) or repo_root
     new_branch = generate_next_branch(wave_name, main_repo)
 
-    result = subprocess.run(
-        ["git", "checkout", "-b", new_branch],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
+    try:
+        git_create_branch(repo_root, new_branch)
+    except GitError:
         return None
 
     subprocess.run(
@@ -207,31 +207,38 @@ def _create_fresh_worktree(
     return worktree_path
 
 
-def move_worktree(
-    worktree_path: Path,
-    new_branch: str,
-) -> bool:
-    """Create new branch from current HEAD and switch to it (true stacking).
+def _rebase_onto_main(repo_root: Path, base_branch: str) -> bool:
+    """Rebase current branch onto base_branch. Returns True if successful."""
+    # Fetch latest
+    subprocess.run(["git", "fetch", "origin", base_branch], cwd=repo_root, capture_output=True)
 
-    The new branch is based on the current branch's HEAD, not on main.
-    Returns True if successful.
-    """
-    # Create new branch from current HEAD
+    # Check if rebase is needed
     result = subprocess.run(
-        ["git", "checkout", "-b", new_branch],
-        cwd=worktree_path,
+        ["git", "merge-base", "--is-ancestor", f"origin/{base_branch}", "HEAD"],
+        cwd=repo_root,
         capture_output=True,
-        text=True,
     )
-    if result.returncode != 0:
+    if result.returncode == 0:
+        return True  # Already up-to-date
+
+    typer.echo(f"Rebasing onto {base_branch}...")
+    try:
+        rebase_result = git_rebase(repo_root, f"origin/{base_branch}")
+    except GitError as e:
+        typer.echo(f"Error: Rebase failed: {e}", err=True)
         return False
 
-    # Push to create remote branch with tracking
-    subprocess.run(
-        ["git", "push", "-u", "origin", new_branch],
-        cwd=worktree_path,
-        capture_output=True,
-    )
+    if not rebase_result.success:
+        typer.echo("Rebase had conflicts. Resolve manually or run 'lf ops rebase'.", err=True)
+        return False
+
+    # Force-push rebased branch
+    typer.echo("Pushing rebased branch...")
+    try:
+        git_push(repo_root, force_with_lease=True)
+    except GitError as e:
+        typer.echo(f"Error: Push failed after rebase: {e}", err=True)
+        return False
 
     return True
 
@@ -242,6 +249,7 @@ def next_worktree(
     block: bool = False,
     open_terminal: bool = True,
     create_pr: bool = False,
+    rebase: bool = True,
 ) -> Path | None:
     """Move to next branch iteration, handling both open PRs and merged branches.
 
@@ -259,6 +267,11 @@ def next_worktree(
     if branch in (base_branch, "main", "master"):
         typer.echo(f"Error: Cannot run next from {branch}", err=True)
         return None
+
+    # Rebase onto main to ensure we're working with latest code
+    if rebase:
+        if not _rebase_onto_main(repo_root, base_branch):
+            return None
 
     # Check PR state to determine if already merged
     pr_number = _get_pr_number(repo_root)
@@ -364,8 +377,11 @@ def register_commands(app: typer.Typer) -> None:
         block: bool = typer.Option(False, "--block", help="Wait for merge before moving"),
         no_open: bool = typer.Option(False, "--no-open", help="Don't open terminal"),
         create_pr: bool = typer.Option(False, "-c", "--create-pr", help="Create PR if none exists"),
+        rebase: bool = typer.Option(True, "--rebase/--no-rebase", help="Rebase onto main first"),
     ) -> None:
         """Move to next branch iteration, preserving the old worktree.
+
+        Auto-commits any uncommitted changes, then rebases onto main (unless --no-rebase).
 
         If current branch has an open PR: enables auto-merge, then creates a
         stacked branch from current HEAD.
@@ -381,6 +397,7 @@ def register_commands(app: typer.Typer) -> None:
             lf ops next                 # land PR or start fresh if merged
             lf ops next --block         # wait for merge, then move
             lf ops next --create-pr     # create PR if none exists, then next
+            lf ops next --no-rebase     # skip rebasing onto main
         """
         repo_root = find_worktree_root()
         if not repo_root:
@@ -392,12 +409,16 @@ def register_commands(app: typer.Typer) -> None:
             typer.echo("Error: Not on a branch (detached HEAD)", err=True)
             raise typer.Exit(1)
 
+        # Handle uncommitted changes
+        add_commit_push(repo_root, push=True)
+
         result = next_worktree(
             repo_root,
             branch,
             block=block,
             open_terminal=not no_open,
             create_pr=create_pr,
+            rebase=rebase,
         )
 
         if result is None:

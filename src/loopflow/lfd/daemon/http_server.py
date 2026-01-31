@@ -34,13 +34,14 @@ from loopflow.lfd.step_run import (
     save_step_run,
     update_step_run_status,
 )
-from loopflow.lfd.stimulus import create_stimulus
+from loopflow.lfd.stimulus import create_stimulus, list_stimuli
 from loopflow.lfd.wave import (
     clone_wave,
     create_wave,
     delete_wave,
     get_wave,
     list_waves,
+    setup_wave_worktree,
     start_wave,
     stop_wave,
     update_wave,
@@ -82,6 +83,12 @@ class LFDResponse(BaseModel):
     version: str = __version__
 
 
+def _list_worktrees_sync(repo_path: Path) -> list[dict]:
+    """List worktrees with staleness. Blocking - call from thread."""
+    service = get_worktree_state_service()
+    return service.list_worktrees(repo_path)
+
+
 @app.get("/worktrees", response_model=LFDResponse)
 async def list_worktrees(repo: str = Query(..., description="Repository path")):
     """List worktrees with staleness and recent steps."""
@@ -90,8 +97,7 @@ async def list_worktrees(repo: str = Query(..., description="Repository path")):
         raise HTTPException(status_code=404, detail=f"Repository not found: {repo}")
 
     try:
-        service = get_worktree_state_service()
-        worktrees = service.list_worktrees(repo_path)
+        worktrees = await asyncio.to_thread(_list_worktrees_sync, repo_path)
         return LFDResponse(ok=True, result={"worktrees": worktrees})
     except Exception as e:
         return LFDResponse(ok=False, error=str(e))
@@ -246,6 +252,29 @@ def _normalize_repo_path(repo: Path) -> Path:
     return git_dir.parent
 
 
+def _list_waves_with_enrichment(repo: str) -> list[dict]:
+    """List waves with worktree state enrichment. Blocking - call from thread."""
+    repo_path = Path(repo)
+
+    # Normalize to main repo (worktrees resolve to their main repo)
+    repo_path = _normalize_repo_path(repo_path)
+
+    waves = list_waves(repo=repo_path)
+
+    # Get worktree state service for enrichment
+    wt_service = get_worktree_state_service()
+
+    enriched = []
+    for wave in waves:
+        # Look up worktree state if wave has a branch
+        wt_state = None
+        if wave.branch:
+            wt_state = wt_service.get_one(repo_path, wave.branch)
+        enriched.append(_wave_to_dict(wave, wt_state))
+
+    return enriched
+
+
 @app.get("/waves", response_model=LFDResponse)
 async def get_waves(repo: str = Query(..., description="Repository path")):
     """List waves for a repository, enriched with worktree state."""
@@ -253,23 +282,9 @@ async def get_waves(repo: str = Query(..., description="Repository path")):
     if not repo_path.exists():
         raise HTTPException(status_code=404, detail=f"Repository not found: {repo}")
 
-    # Normalize to main repo (worktrees resolve to their main repo)
-    repo_path = _normalize_repo_path(repo_path)
-
     try:
-        waves = list_waves(repo=repo_path)
-
-        # Get worktree state service for enrichment
-        wt_service = get_worktree_state_service()
-
-        enriched = []
-        for wave in waves:
-            # Look up worktree state if wave has a branch
-            wt_state = None
-            if wave.branch:
-                wt_state = wt_service.get_one(repo_path, wave.branch)
-            enriched.append(_wave_to_dict(wave, wt_state))
-
+        # Run in thread - includes git operations for normalization and worktree state
+        enriched = await asyncio.to_thread(_list_waves_with_enrichment, repo)
         return LFDResponse(ok=True, result={"waves": enriched})
     except Exception as e:
         return LFDResponse(ok=False, error=str(e))
@@ -284,13 +299,20 @@ class CreateWaveRequest(BaseModel):
 
 def _wave_to_dict(wave, worktree_state: dict | None = None) -> dict:
     """Convert wave to API response dict, enriched with worktree state."""
+    # Get primary stimulus (first one) for backwards compat
+    stimuli = list_stimuli(wave_id=wave.id)
+    primary_stimulus = stimuli[0] if stimuli else None
+
     result = {
         "id": wave.id,
         "name": wave.name,
         "area": wave.area,
         "direction": wave.direction,
         "flow": wave.flow,
-        "stimulus": {"kind": wave.stimulus.kind, "cron": wave.stimulus.cron},
+        "stimulus": {
+            "kind": primary_stimulus.kind if primary_stimulus else "once",
+            "cron": primary_stimulus.cron if primary_stimulus else None,
+        },
         "paused": wave.paused,
         "repo": str(wave.repo),
         "status": wave.status.value,
@@ -355,6 +377,7 @@ async def post_wave(
     """Create a new wave.
 
     Accepts minimal body - even empty creates a wave with generated name.
+    Returns immediately; worktree setup happens in background.
     """
     repo_path = Path(repo)
     if not repo_path.exists():
@@ -364,6 +387,7 @@ async def post_wave(
     repo_path = _normalize_repo_path(repo_path)
 
     try:
+        # Create wave record immediately (no git ops)
         wave = create_wave(
             repo=repo_path,
             name=request.name if request else None,
@@ -373,7 +397,14 @@ async def post_wave(
             stimulus_kind="once",
         )
 
-        # Notify subscribers of new wave
+        # Background the git operations (fetch, worktree add, push)
+        async def setup_worktree_background():
+            await asyncio.to_thread(setup_wave_worktree, wave.id)
+            await _notify_event("wave.ready", {"wave_id": wave.id, "name": wave.name})
+
+        asyncio.create_task(setup_worktree_background())
+
+        # Notify subscribers of new wave (before worktree is ready)
         await _notify_event("wave.created", {"wave_id": wave.id, "name": wave.name})
 
         return LFDResponse(ok=True, result={"wave": _wave_to_dict(wave)})
@@ -690,19 +721,31 @@ async def get_flows_v1(repo: str = Query(..., description="Repository path")):
     }
 
 
-@app.get("/v1/worktrees")
-async def list_worktrees_v1(repo: str = Query(..., description="Repository path")):
+def _list_worktrees_v1_sync(repo: str) -> list[dict]:
+    """List worktrees. Blocking - call from thread."""
     repo_path = _load_repo_or_404(repo)
     service = get_worktree_state_service()
     worktrees = service.list_worktrees(repo_path)
-    return {"worktrees": [worktree_to_proto(wt) for wt in worktrees]}
+    return [worktree_to_proto(wt) for wt in worktrees]
+
+
+@app.get("/v1/worktrees")
+async def list_worktrees_v1(repo: str = Query(..., description="Repository path")):
+    worktrees = await asyncio.to_thread(_list_worktrees_v1_sync, repo)
+    return {"worktrees": worktrees}
+
+
+def _list_waves_v1_sync(repo: str) -> list[dict]:
+    """List waves. Blocking - call from thread."""
+    repo_path = _load_repo_or_404(repo)
+    waves = list_waves(repo=repo_path)
+    return [wave_to_proto(wave) for wave in waves]
 
 
 @app.get("/v1/waves")
 async def list_waves_v1(repo: str = Query(..., description="Repository path")):
-    repo_path = _load_repo_or_404(repo)
-    waves = list_waves(repo=repo_path)
-    return {"waves": [wave_to_proto(wave) for wave in waves]}
+    waves = await asyncio.to_thread(_list_waves_v1_sync, repo)
+    return {"waves": waves}
 
 
 @app.get("/v1/waves/{wave_id}")
@@ -716,6 +759,8 @@ async def get_wave_v1(wave_id: str):
 @app.post("/v1/waves")
 async def create_wave_v1(request: CreateWaveRequestV1):
     repo_path = _load_repo_or_404(request.repo)
+
+    # Create wave record immediately (no git ops)
     wave = create_wave(
         repo=repo_path,
         name=request.name,
@@ -724,6 +769,14 @@ async def create_wave_v1(request: CreateWaveRequestV1):
         area=request.area,
         stimulus_kind="once",
     )
+
+    # Background the git operations
+    async def setup_worktree_background():
+        await asyncio.to_thread(setup_wave_worktree, wave.id)
+        await _notify_event("wave.ready", {"wave_id": wave.id, "name": wave.name})
+
+    asyncio.create_task(setup_worktree_background())
+
     await _notify_event("wave.created", {"wave_id": wave.id, "name": wave.name})
     return {"wave": wave_to_proto(wave)}
 

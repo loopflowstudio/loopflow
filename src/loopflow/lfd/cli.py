@@ -3,9 +3,13 @@
 Commands for managing waves of autonomous work.
 """
 
+import os
+
+# Suppress gRPC fork handler spam when running subprocesses
+os.environ.setdefault("GRPC_ENABLE_FORK_SUPPORT", "0")
+
 import asyncio
 import json
-import os
 import socket
 import subprocess
 import sys

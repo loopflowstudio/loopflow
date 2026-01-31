@@ -57,6 +57,20 @@ func listWavesNeedingAttention() -> [Wave]
 func subscribeToNotifications() -> AsyncStream<WaveNotification>
 ```
 
+## Prompt Delivery
+
+**Current:** Prompts are passed as CLI positional args (`lf design 'add rate limiting'`). The `lf` CLI appends them to step content via the existing `step_args` machinery.
+
+**Future:** For very long prompts, deliver via file to keep terminal commands clean:
+
+```
+.lf/history/
+  2025-01-30T17:30:00-design.md
+  2025-01-30T17:45:12-implement.md
+```
+
+The file approach creates traceable history and keeps giant prompts out of Claude's conversation context. The `.lf/history/` directory is gitignored.
+
 ## Constraints
 
 1. **Must work with both Python and Rust lfd** — abstract the transport

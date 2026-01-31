@@ -9,6 +9,8 @@ import typer
 from loopflow.lf.config import Config, load_config
 from loopflow.lf.git import ensure_draft_pr, get_current_branch
 from loopflow.lf.messages import generate_commit_message
+from loopflow.lf.ops.git import GitError
+from loopflow.lf.ops.git import push as git_push
 
 
 def _check_lint(repo_root: Path, config: Config | None) -> bool | None:
@@ -99,10 +101,15 @@ def add_commit_push(repo_root: Path, push: bool = True) -> bool:
 def _push(repo_root: Path) -> None:
     """Push current branch, using --force-with-lease if needed (e.g., after rebase)."""
     typer.echo("Pushing...")
-    result = subprocess.run(["git", "push"], cwd=repo_root, capture_output=True)
-    if result.returncode != 0:
+    try:
+        git_push(repo_root)
+    except GitError:
         # Non-fast-forward - use force-with-lease (safe for feature branches after rebase)
-        subprocess.run(["git", "push", "--force-with-lease"], cwd=repo_root, check=True)
+        try:
+            git_push(repo_root, force_with_lease=True)
+        except GitError as e:
+            typer.echo(f"Push failed: {e}", err=True)
+            raise
 
 
 def _maybe_create_draft_pr(repo_root: Path) -> None:

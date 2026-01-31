@@ -5,14 +5,26 @@ public enum LoggingService {
         case worktrees
         case lfd
         case general
+        case ui       // User interactions: button clicks, selections
+        case model    // Data model changes: waves, state updates
     }
 
+    nonisolated(unsafe) private static let dateFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
     public static func append(_ message: String, category: Category = .worktrees) {
+        let timestamp = dateFormatter.string(from: Date())
+        let line = "\(timestamp) [\(category.rawValue.uppercased())] \(message.trimmingCharacters(in: .whitespacesAndNewlines))\n"
+
+        // Also print to console for immediate feedback during development
+        print(line, terminator: "")
+
         do {
             let url = logURL(for: category)
             try ensureLogDirectory(for: url)
-            let timestamp = ISO8601DateFormatter().string(from: Date())
-            let line = "\(timestamp) \(message.trimmingCharacters(in: .whitespacesAndNewlines))\n"
             let data = line.data(using: .utf8) ?? Data()
             if FileManager.default.fileExists(atPath: url.path()) {
                 let handle = try FileHandle(forWritingTo: url)
@@ -25,6 +37,19 @@ public enum LoggingService {
         } catch {
             // Avoid throwing from logging.
         }
+    }
+
+    // Convenience methods for common logging patterns
+    public static func ui(_ message: String) {
+        append(message, category: .ui)
+    }
+
+    public static func model(_ message: String) {
+        append(message, category: .model)
+    }
+
+    public static func lfd(_ message: String) {
+        append(message, category: .lfd)
     }
 
     public static func read(category: Category = .worktrees) -> String {

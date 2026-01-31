@@ -67,7 +67,7 @@ public actor LFDEventService {
         self.onEvent = onEvent
         self.onConnectionChange = onConnectionChange
 
-        logger.debug("subscribe() called with patterns: \(patterns)")
+        LoggingService.lfd("EventService.subscribe: patterns=\(patterns)")
         await connect()
         startReconnectLoop()
     }

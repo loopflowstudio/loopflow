@@ -12,6 +12,7 @@ struct WaveRow: View {
     let liveOutput: [OutputLine]
     var pendingPR: (number: Int, url: URL?)? = nil  // PR awaiting review
     let onSelect: () -> Void
+    var onDelete: (() -> Void)? = nil
 
     @State private var isHovering = false
 
@@ -125,6 +126,15 @@ struct WaveRow: View {
         }
         .onTapGesture {
             onSelect()
+        }
+        .contextMenu {
+            if let onDelete {
+                Button(role: .destructive) {
+                    onDelete()
+                } label: {
+                    Label("Delete Wave", systemImage: "trash")
+                }
+            }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Wave: \(wave.displayName)")

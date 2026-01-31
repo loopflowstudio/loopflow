@@ -349,7 +349,7 @@ def create_wave(
     If name is provided and a wave with that name exists in the repo,
     returns the existing wave without modification (use update_wave for changes).
 
-    Creates a worktree immediately so the wave is ready for interactive sessions.
+    Returns immediately. Worktree setup happens via setup_wave_worktree().
 
     If stimulus_kind is provided, also creates a stimulus for the wave.
     Use stimulus.create_stimulus() to add additional stimuli to existing waves.
@@ -364,8 +364,46 @@ def create_wave(
 
     wave_name = name or _generate_wave_name(repo)
 
-    # Create worktree immediately so wave is ready for interactive sessions
-    # Worktree path uses just the wave name (consistent across iterations)
+    wave = Wave(
+        id=str(uuid.uuid4()),
+        name=wave_name,
+        repo=repo,
+        flow=flow,
+        direction=direction,
+        area=area,
+        status=WaveStatus.IDLE,
+        pr_limit=pr_limit,
+        merge_mode=merge_mode,
+        worktree=None,  # Set by setup_wave_worktree
+        branch=None,  # Set by setup_wave_worktree
+    )
+
+    save_wave(wave)
+
+    # Create initial stimulus if kind specified
+    if stimulus_kind:
+        create_stimulus(wave.id, stimulus_kind, stimulus_cron)
+
+    return wave
+
+
+def setup_wave_worktree(wave_id: str) -> bool:
+    """Create worktree and branch for a wave. Returns True on success.
+
+    This does blocking git operations (fetch, worktree add, push).
+    Call from a background thread/task to avoid blocking the event loop.
+    """
+    wave = get_wave(wave_id)
+    if not wave:
+        return False
+
+    # Already set up
+    if wave.worktree and wave.branch:
+        return True
+
+    repo = wave.repo
+    wave_name = wave.name
+
     # Branch name includes timestamp and words (evolves with each iteration)
     branch = generate_next_branch(wave_name, repo)
     worktree_path = get_path(repo, wave_name)
@@ -390,31 +428,13 @@ def create_wave(
             cwd=worktree_path,
             capture_output=True,
         )
+
+        # Update wave with worktree info
+        update_wave_worktree_branch(wave_id, worktree_path, branch)
+        return True
+
     except (WorktreeError, subprocess.SubprocessError):
-        worktree_path = None
-        branch = None
-
-    wave = Wave(
-        id=str(uuid.uuid4()),
-        name=wave_name,
-        repo=repo,
-        flow=flow,
-        direction=direction,
-        area=area,
-        status=WaveStatus.IDLE,
-        pr_limit=pr_limit,
-        merge_mode=merge_mode,
-        worktree=worktree_path,
-        branch=branch,
-    )
-
-    save_wave(wave)
-
-    # Create initial stimulus if kind specified
-    if stimulus_kind:
-        create_stimulus(wave.id, stimulus_kind, stimulus_cron)
-
-    return wave
+        return False
 
 
 def update_wave(

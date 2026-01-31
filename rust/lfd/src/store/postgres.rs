@@ -12,6 +12,15 @@ use crate::store::{ForkRun, ForkRunStatus, RunStore, StoreError, StoreResult};
 const SCHEMA_VERSION: u32 = 1;
 const MIGRATION_001: &str = include_str!("migrations/postgres/001_initial.sql");
 
+// NOTE: Sync trait with block_on bridging
+//
+// This design prioritizes trait compatibility with SqliteStore over async efficiency.
+// Fine for: tens of waves, low-latency Postgres, moderate traffic.
+// Revisit when: 100s+ concurrent waves, high-latency Postgres, or pool exhaustion.
+//
+// Upgrade path: Make RunStore an async trait. PostgresStore uses native async,
+// SqliteStore uses spawn_blocking. No thread blocking, scales to thousands of ops.
+
 #[derive(Debug)]
 pub struct PostgresStore {
     pool: Pool,

@@ -1,5 +1,5 @@
-// Window for screenshot capture mode.
-// Loads a repo, waits for UI to stabilize, captures, and exits.
+// Window for screenshot snapshot mode.
+// Loads a repo, waits for UI to stabilize, snapshots, and exits.
 
 import SwiftUI
 import LoopflowCore
@@ -63,20 +63,20 @@ struct ScreenshotWindow: View {
         try? await Task.sleep(for: .seconds(1))
 
         // Capture and exit
-        await captureAndExit(window: window)
+        await snapshotAndExit(window: window)
     }
 
     @MainActor
-    private func captureAndExit(window: NSWindow) async {
+    private func snapshotAndExit(window: NSWindow) async {
         guard !hasCaptured else { return }
         hasCaptured = true
 
-        let captureService = CaptureService()
+        let snapshotService = SnapshotService()
         do {
-            _ = try captureService.captureWindow(window, to: mode.outputPath)
-            logger.info("screenshot saved to: \(mode.outputPath)")
+            _ = try snapshotService.snapshotWindow(window, to: mode.outputPath)
+            logger.info("snapshot saved to: \(mode.outputPath)")
         } catch {
-            logger.error("capture failed: \(error.localizedDescription)")
+            logger.error("snapshot failed: \(error.localizedDescription)")
         }
 
         // Exit the app

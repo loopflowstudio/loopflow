@@ -280,7 +280,7 @@ def build_codex_command(
         cmd.append("--json")
 
     if yolo:
-        cmd.append("--dangerously-bypass-approvals-and-sandbox")
+        cmd.extend(["--sandbox", "danger-full-access"])
     else:
         cmd.extend(["--sandbox", "workspace-write"])
         if sandbox_root:
@@ -291,15 +291,14 @@ def build_codex_command(
         for img in images:
             cmd.extend(["-i", str(img)])
 
-    if not yolo:
-        if skip_permissions:
-            # Keep sandboxing but avoid approval prompts in exec mode.
-            cmd.extend(["-c", 'approval_policy="never"'])
-        elif auto:
-            if _codex_exec_supports_full_auto():
-                cmd.append("--full-auto")
-            else:
-                cmd.extend(["-c", 'approval_policy="on-request"'])
+    if skip_permissions:
+        # Keep sandboxing but avoid approval prompts in exec mode.
+        cmd.extend(["-c", 'approval_policy="never"'])
+    elif auto:
+        if _codex_exec_supports_full_auto():
+            cmd.append("--full-auto")
+        else:
+            cmd.extend(["-c", 'approval_policy="on-request"'])
 
     return cmd
 
@@ -337,11 +336,11 @@ def build_codex_interactive_command(
         cmd.extend(["-c", f'model="{model_variant}"'])
     if workdir:
         cmd.extend(["-C", str(workdir)])
+    if skip_permissions:
+        cmd.extend(["-a", "never"])
     if yolo:
-        cmd.append("--dangerously-bypass-approvals-and-sandbox")
+        cmd.extend(["--sandbox", "danger-full-access"])
     else:
-        if skip_permissions:
-            cmd.extend(["-a", "never"])
         cmd.extend(["--sandbox", "workspace-write"])
         if sandbox_root:
             cmd.extend(["--add-dir", str(sandbox_root)])

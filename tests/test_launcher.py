@@ -175,7 +175,7 @@ def test_build_codex_command_skip_permissions():
 
 
 def test_build_codex_command_yolo():
-    """build_codex_command with yolo bypasses sandbox and approvals."""
+    """build_codex_command with yolo uses danger-full-access sandbox."""
     cmd = build_codex_command(
         auto=False,
         stream=False,
@@ -185,13 +185,13 @@ def test_build_codex_command_yolo():
         workdir=Path("/repo/worktree"),
     )
 
-    assert "--dangerously-bypass-approvals-and-sandbox" in cmd
-    assert "--sandbox" not in cmd
+    assert "--sandbox" in cmd
+    assert "danger-full-access" in cmd
     assert "--add-dir" not in cmd
 
 
-def test_build_codex_command_yolo_ignores_skip_permissions():
-    """build_codex_command yolo mode ignores skip_permissions."""
+def test_build_codex_command_yolo_with_skip_permissions():
+    """build_codex_command yolo mode with skip_permissions adds approval policy."""
     cmd = build_codex_command(
         auto=True,
         stream=False,
@@ -201,9 +201,12 @@ def test_build_codex_command_yolo_ignores_skip_permissions():
         workdir=Path("/repo/worktree"),
     )
 
-    assert "--dangerously-bypass-approvals-and-sandbox" in cmd
-    assert 'approval_policy="never"' not in " ".join(cmd)
-    assert "--sandbox" not in cmd
+    assert "--sandbox" in cmd
+    assert "danger-full-access" in cmd
+    assert "--add-dir" not in cmd
+    # skip_permissions adds approval_policy even in yolo mode
+    assert "-c" in cmd
+    assert 'approval_policy="never"' in cmd
 
 
 def test_build_codex_command_with_model_variant():
@@ -275,7 +278,7 @@ def test_build_codex_interactive_command_with_model():
 
 
 def test_build_codex_interactive_command_yolo():
-    """build_codex_interactive_command with yolo bypasses sandbox."""
+    """build_codex_interactive_command with yolo uses danger-full-access sandbox."""
     cmd = build_codex_interactive_command(
         skip_permissions=False,
         yolo=True,
@@ -283,8 +286,8 @@ def test_build_codex_interactive_command_yolo():
         workdir=Path("/repo/worktree"),
     )
 
-    assert "--dangerously-bypass-approvals-and-sandbox" in cmd
-    assert "--sandbox" not in cmd
+    assert "--sandbox" in cmd
+    assert "danger-full-access" in cmd
     assert "--add-dir" not in cmd
 
 

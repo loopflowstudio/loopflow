@@ -98,14 +98,14 @@ Direction = which users you're trying to serve
 
 **Don't couple to steps.** "When reviewing code, ask..." ties the direction to `review`. The same concerns apply whether you're reviewing, implementing, or designing.
 
-**Don't couple to areas.** "When working on Concerto..." ties the direction to a specific codebase. User patterns like conductor/improviser/returner exist in any product with parallel work.
+**Don't couple to areas.** "When working on Concerto..." ties the direction to a specific codebase. User patterns like conductor/improviser/listener exist in any product with parallel work.
 
 ### How directions apply
 
 Directions are not roleplay. A direction is intent—what you're optimizing for while doing your work.
 
 Directions can be:
-- **User patterns**: conductor, improviser, returner—make this kind of user thrive
+- **User patterns**: conductor, improviser, listener—make this kind of user thrive
 - **Perspectives**: product-engineer, designer, infra-engineer—think with these concerns
 - **Metrics**: performance, security, accessibility—optimize for this quality
 - **Values**: simplicity, craft—hold this standard

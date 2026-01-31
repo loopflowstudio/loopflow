@@ -7,7 +7,7 @@ Transform Phase 1 from empty to populated through systematic persona review.
 Phase 1 (Polish - macOS local) is marked "In progress" but has no backlog items. All existing items in `roadmap/concerto/` are Phase 2 or Phase 3. The Concerto app exists and is functional, but there's no structured way to discover polish work.
 
 The infrastructure for discovery exists:
-- Persona directions in `.lf/directions/` (conductor, improviser, returner)
+- Persona directions in `.lf/directions/` (conductor, improviser, listener)
 - UX review step in `.lf/steps/ux-review.md`
 - Screenshot generation script with manifest
 
@@ -26,7 +26,7 @@ python scripts/generate_screenshots.py
 # Review each screenshot with each persona
 lf ux-review --direction conductor --area docs/screenshots/
 lf ux-review --direction improviser --area docs/screenshots/
-lf ux-review --direction returner --area docs/screenshots/
+lf ux-review --direction listener --area docs/screenshots/
 ```
 
 Output: Phase 1 backlog items in `roadmap/concerto/` with frontmatter:
@@ -48,7 +48,7 @@ screenshot: docs/screenshots/concerto-main.png
 | Approach | Tradeoff | Why not |
 |----------|----------|---------|
 | Live app testing | Captures interaction flow, timing | Not repeatable by LLM agents—needs human |
-| User interviews | Real user problems | Don't have conductor/improviser/returner users yet |
+| User interviews | Real user problems | Don't have conductor/improviser/listener users yet |
 | Heuristic audit | Deterministic | Loses creative insight from applying persona lens |
 | Skip Phase 1 | Ship faster | Phase 1 is the polish phase—skipping defeats the purpose |
 

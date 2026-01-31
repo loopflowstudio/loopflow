@@ -16,7 +16,7 @@ Repeatable workflows to test every iteration. Run these manually, note friction,
 - Runs steps manually, iterates on direction
 - Wants: quick wave creation, easy step running, low commitment
 
-**The Returner**
+**The Listener**
 - Was away (hours/days)
 - Waves ran while gone, some need attention
 - Wants: catch up quickly, see what happened, decide what to do
@@ -38,7 +38,7 @@ Run these against the app. Time each. Note friction points.
 Target: < 30 seconds to running step
 ```
 
-### E2: Morning check-in (Returner)
+### E2: Morning check-in (Listener)
 
 ```
 1. Open Concerto

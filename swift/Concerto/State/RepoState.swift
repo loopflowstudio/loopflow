@@ -10,6 +10,7 @@ final class RepoState {
     enum UITestMode: String {
         case emptyWorkspaces = "empty-workspaces"
         case sampleWorkspaces = "sample-workspaces"
+        case mockWaves = "mock-waves"
     }
 
     struct ScreenshotMode {
@@ -21,12 +22,12 @@ final class RepoState {
 
         static func fromArgs() -> ScreenshotMode? {
             let args = ProcessInfo.processInfo.arguments
-            guard let captureIndex = args.firstIndex(of: "--capture"),
-                  args.count > captureIndex + 1 else {
+            guard let snapshotIndex = args.firstIndex(of: "--snapshot"),
+                  args.count > snapshotIndex + 1 else {
                 return nil
             }
 
-            let outputPath = args[captureIndex + 1]
+            let outputPath = args[snapshotIndex + 1]
             var repoPath: String?
             var windowSize: (Int, Int)?
             var selectBranch: String?
@@ -124,6 +125,7 @@ final class RepoState {
         selectedWave = nil
         isLoading = false
         errorMessage = nil
+        let selectBranch = ProcessInfo.processInfo.environment["CONCERTO_UI_TEST_SELECT_BRANCH"]
 
         switch mode {
         case .emptyWorkspaces:
@@ -148,6 +150,12 @@ final class RepoState {
                     hasDiff: true
                 )
             ]
+        case .mockWaves:
+            worktrees = []
+            configureMockWaves()
+            if let selectBranch {
+                selectedWave = waves.first { $0.branch == selectBranch }
+            }
         }
     }
 

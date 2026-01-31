@@ -1,7 +1,7 @@
 // Wave detail panel. Adapts to wave state:
-// - No area → AreaPicker (Improvise: pick where to work)
-// - Has area, idle → StepRunner (Improvise: run individual steps)
-// - Running/waiting/etc → Conduct view (monitor progress, land PRs)
+// - No area → AreaPicker (pick where to work)
+// - Has area, idle → StepRunner (run individual steps)
+// - Running/waiting/etc → Progress + actions
 
 import SwiftUI
 import LoopflowCore
@@ -31,50 +31,13 @@ struct WaveDetailPanel: View {
     private var terminalApp: TerminalApp { repoState.config?.terminalApp ?? .warp }
     private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
-    /// Determines which view to show based on wave state.
-    private enum ViewMode {
-        case interactive    // Active interactive session
-        case areaPicker     // No area set - need to pick one (Improvise start)
-        case stepRunner     // Has area, idle - run individual steps (Improvise)
-        case conduct        // Running/waiting/completed/error - monitor progress (Conduct)
-    }
-
-    private var viewMode: ViewMode {
-        // Priority 1: Active interactive session takes over
-        if sessionState.hasActiveSession(for: wave.id) {
-            return .interactive
-        }
-
-        // Priority 2: No area → must pick one first
-        if wave.area == nil {
-            return .areaPicker
-        }
-
-        // Priority 3: Idle → Improvise mode (StepRunner)
-        if wave.status == .idle {
-            return .stepRunner
-        }
-
-        // Priority 4: Everything else → Conduct mode
-        return .conduct
-    }
-
     var body: some View {
         Group {
-            switch viewMode {
-            case .interactive:
-                if let session = sessionState.interactiveSession {
-                    InteractiveSessionView(session: session)
-                }
-
-            case .areaPicker:
-                AreaPicker(wave: wave)
-
-            case .stepRunner:
-                improviseView
-
-            case .conduct:
-                conductView
+            if sessionState.hasActiveSession(for: wave.id),
+               let session = sessionState.interactiveSession {
+                InteractiveSessionView(session: session)
+            } else {
+                blendedView
             }
         }
         .background(palette.background)
@@ -107,25 +70,9 @@ struct WaveDetailPanel: View {
         }
     }
 
-    // MARK: - Improvise View (StepRunner + optional TransitionBar)
+    // MARK: - Blended View (header + context + actions)
 
-    private var improviseView: some View {
-        VStack(spacing: 0) {
-            ScrollView {
-                StepRunner(wave: wave)
-            }
-
-            // Show TransitionBar if steps have been run
-            if !wave.recentSteps.isEmpty {
-                Divider()
-                TransitionBar(wave: wave)
-            }
-        }
-    }
-
-    // MARK: - Conduct View (header + progress/actions)
-
-    private var conductView: some View {
+    private var blendedView: some View {
         VStack(spacing: 0) {
             header
 
@@ -133,11 +80,15 @@ struct WaveDetailPanel: View {
 
             ScrollView {
                 VStack(spacing: 16) {
-                    if wave.status == .idle {
-                        // Fresh/idle wave: just show the start button
-                        idleWaveView
+                    if wave.area == nil {
+                        AreaPicker(wave: wave)
+                    } else if wave.status == .idle {
+                        StepRunner(wave: wave)
+                        if !wave.recentSteps.isEmpty {
+                            Divider()
+                            NextActionsBar(wave: wave)
+                        }
                     } else {
-                        // Running wave: show progress
                         runProgressSection
                     }
 

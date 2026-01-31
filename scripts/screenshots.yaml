@@ -9,23 +9,23 @@ screenshots:
   # Main dashboard - shows sidebar with grouped waves
   # Conductor: Can I see what needs attention without drilling in?
   - name: concerto-main
-    type: swift
+    type: snapshot
     window_size: [1200, 800]
     mock_loops: true
 
   # Running wave selected - detail view
   # Conductor: How many clicks from "I see a problem" to "I'm acting on it"?
   - name: concerto-wave-running
-    type: swift
+    type: snapshot
     window_size: [1200, 800]
     mock_loops: true
     select_branch: wave-auth-feature
 
   # Waiting wave selected - needs interaction
   # Conductor: Is urgency visually obvious?
-  # Returner: Is "needs me" vs "fine" instant to distinguish?
+  # Listener: Is "needs me" vs "fine" instant to distinguish?
   - name: concerto-wave-waiting
-    type: swift
+    type: snapshot
     window_size: [1200, 800]
     mock_loops: true
     select_branch: wave-api-refactor
@@ -34,13 +34,25 @@ screenshots:
   # Improviser: How fast from intent to action?
   # Improviser: Am I configuring things I don't care about yet?
   # - name: concerto-improvise
-  #   type: swift
+  #   type: snapshot
   #   window_size: [1200, 800]
   #   mock_loops: true
   #   show_launcher: true  # TODO: add flag support
 
-  # Web client (future)
-  # - name: loopflow-web
-  #   type: web
-  #   url: http://localhost:3000
-  #   viewport: [1200, 800]
+  # UI test captures (flow-focused, slower)
+  - name: concerto-main-uitest
+    type: uitest
+    ui_test_mode: mock-waves
+    ui_test_delay: 2
+
+  - name: concerto-wave-running-uitest
+    type: uitest
+    ui_test_mode: mock-waves
+    ui_test_select_branch: wave-auth-feature
+    ui_test_delay: 2
+
+  - name: concerto-wave-waiting-uitest
+    type: uitest
+    ui_test_mode: mock-waves
+    ui_test_select_branch: wave-api-refactor
+    ui_test_delay: 2

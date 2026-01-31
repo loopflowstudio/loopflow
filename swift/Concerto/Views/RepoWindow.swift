@@ -66,7 +66,7 @@ struct RepoWindow: View {
     }
 }
 
-/// Helper to set representedURL on the hosting window for capture service.
+/// Helper to set representedURL on the hosting window for snapshot service.
 private struct WindowAccessor: NSViewRepresentable {
     let repoURL: URL?
 

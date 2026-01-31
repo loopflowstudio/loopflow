@@ -1,0 +1,9 @@
+time: 2026-01-31T14:45:53.153449
+args: xcodegen generate
+returncode: 0
+stdout:
+⚙️  Generating plists...
+⚙️  Generating project...
+⚙️  Writing project...
+Created project at /Users/jack/src/loopflow.concerto-next/swift/LoopflowSwift.xcodeproj
+

@@ -1,7 +1,7 @@
-//! PyO3 bindings for lf-core.
+//! PyO3 bindings for loopflow-engine.
 //!
 //! Exposes the Rust engine to Python via PyO3. This allows Python `lf` to
-//! import lf-core directly without subprocess overhead.
+//! import loopflow_engine directly without subprocess overhead.
 
 use pyo3::prelude::*;
 use std::path::PathBuf;
@@ -209,9 +209,9 @@ fn run_step(
     }
 }
 
-/// The lf_core Python module.
+/// The loopflow_engine Python module.
 #[pymodule]
-fn lf_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn loopflow_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyLaunchResult>()?;
     m.add_class::<PyPromptComponents>()?;
     m.add_function(wrap_pyfunction!(py_count_tokens, m)?)?;

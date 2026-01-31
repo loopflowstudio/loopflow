@@ -1,10 +1,10 @@
 # lf Client Refactor (Stage 4)
 
-Move git operations from Python lfops to Rust lf-core. Python CLI becomes a thin wrapper over Rust.
+Move git operations from Python lf ops to Rust lf-core. Python CLI becomes a thin wrapper over Rust.
 
 ## Problem
 
-The Python lfops code duplicates logic that will exist in the Rust daemon. Both need rebasing, branch creation, and landing. Today:
+The Python lf ops code duplicates logic that will exist in the Rust daemon. Both need rebasing, branch creation, and landing. Today:
 
 - `lfops` is a separate binary from `lf`
 - Git operations are scattered across `_helpers.py`, `land.py`, `next.py`, `rebase.py`
@@ -62,7 +62,7 @@ git.sync_main("/path/to/repo", "main")   # fetch + maybe reset
 
 ### Python migration path
 
-Each lfops command calls Rust for git operations:
+Each lf ops command calls Rust for git operations:
 
 | Command | Python keeps | Rust handles |
 |---------|-------------|--------------|
@@ -78,26 +78,19 @@ The Python layer handles:
 - GitHub CLI calls (gh) — these stay in Python for now
 - Wave metadata updates (daemon integration)
 
-### lfops → lf ops consolidation
+### lfops removal
 
-Merge into single binary:
+Use `lf ops` only:
 
 ```bash
-# Before
-lfops pr
-lfops land
-lfops rebase
-
-# After
 lf ops pr
 lf ops land
 lf ops rebase
 ```
 
 Migration:
-1. Add `lf ops` subcommand that delegates to lfops code
-2. Keep `lfops` binary with deprecation warning for 2 releases
-3. Remove `lfops` binary
+1. Add `lf ops` subcommand
+2. Remove `lfops` binary (no backwards compatibility)
 
 ### gh CLI integration
 
@@ -121,15 +114,19 @@ Wrapping `gh` in Rust adds complexity without benefit. The `gh` CLI handles auth
 
 **Shell to git, not git2-rs.** The git CLI is stable, fast, and handles edge cases we'd have to reimplement. git2-rs adds binary size and complexity for no user benefit. Per the roadmap principle: "Shell to lf" for execution, we extend this to "shell to git" for git operations.
 
-**gh stays in Python.** The GitHub CLI handles OAuth, token refresh, and API rate limiting. Wrapping it in Rust adds layers without value. Python subprocess calls to gh are fine.
+**Coherent Rust lf ops API.** The Rust layer defines the lf ops surface. It may shell out to `gh` directly as needed to keep the API cohesive. Shelling out to Python is a fallback, not the default.
 
-**Stateless ops, stateful daemon.** `lf ops` commands are stateless—they work on the current worktree with no daemon. The daemon adds wave state (base_commit for squash-aware rebase). Same Rust functions, different callers.
+**Stateless engine, stateful daemon.** `loopflow-engine` stays stateless; `lfd` supplies wave state (e.g., base_commit for squash-aware rebase). Both `lf ops` and `lfd` call the same Rust functions with explicit inputs.
 
-**Thin Python wrapper.** Python lfops becomes a 50-line wrapper per command. All git logic lives in Rust. This makes the Python code obvious and the Rust code testable.
+**Rust lf ops first.** After this change, `lf ops` should default to the Rust implementation (gated by `internal.rust` config). Rust `lfd` is not required yet, but the API should be shaped for eventual daemon reuse.
+
+**Thin Python wrapper.** Python lf ops becomes a 50-line wrapper per command. All git logic lives in Rust. This makes the Python code obvious and the Rust code testable.
 
 ## Scope
 
-- In scope: Git operations in Rust, PyO3 bindings, lfops migration, lf ops consolidation
+- In scope: Git operations in Rust, PyO3 bindings, lf ops wiring, lfops removal
+- Directional: move the entire `lf` CLI toward Rust over time; this change should keep that path open (ops first, other commands later).
+- Non-zero in this diff: add a Rust entrypoint used by `lf` for at least one non-ops surface (e.g., `lf --version`/`lf info`), gated by `internal.rust`. This establishes a concrete end-to-end path beyond ops without pulling full CLI behavior into Rust yet.
 - Out of scope: gh wrapper in Rust, agent message generation in Rust, daemon integration
 
 ## Done when
@@ -147,8 +144,11 @@ lf ops land     # rebases, lands via PR or local merge
 lf ops next     # lands current, creates stacked branch
 lf ops rebase   # rebases with squash-aware logic
 
+# Rust CLI path beyond ops
+lf --version    # served by Rust when internal.rust is enabled
+
 # Deprecation works
-lfops pr        # shows warning, delegates to lf ops pr
+# No lfops binary
 ```
 
 ## Implementation order
@@ -160,4 +160,4 @@ lfops pr        # shows warning, delegates to lf ops pr
 5. Migrate `land.py` (most complex)
 6. Migrate `next.py` and `commit.py`
 7. Add `lf ops` subcommand
-8. Deprecate `lfops` binary
+8. Remove `lfops` binary

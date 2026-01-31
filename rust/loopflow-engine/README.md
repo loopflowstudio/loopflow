@@ -31,7 +31,7 @@ loopflow-engine/
 ## Core API
 
 ```rust
-use lf_core::{load_flow, tick_flow, RunId, RunStore};
+use loopflow_engine::{load_flow, tick_flow, RunId, RunStore};
 
 // Load a flow from .lf/flows/
 let flow = load_flow("ship", &repo_path)?;

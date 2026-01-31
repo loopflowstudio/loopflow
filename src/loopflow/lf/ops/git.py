@@ -51,13 +51,13 @@ _backend_printed = False
 
 
 @lru_cache(maxsize=1)
-def _lf_core_available() -> bool:
+def _loopflow_engine_available() -> bool:
     return shutil.which("lf-engine") is not None
 
 
 def _use_rust() -> bool:
     """Use Rust if flag is set AND lf-engine is available."""
-    return get_internal_flag("use_rust") and _lf_core_available()
+    return get_internal_flag("use_rust") and _loopflow_engine_available()
 
 
 def _print_backend_once() -> None:
@@ -82,7 +82,7 @@ def _print_backend_once() -> None:
 # -----------------------------------------------------------------------------
 
 
-def _run_lf_core(args: list[str]) -> Any:
+def _run_loopflow_engine(args: list[str]) -> Any:
     try:
         result = subprocess.run(args, capture_output=True, text=True)
     except FileNotFoundError as err:
@@ -103,7 +103,7 @@ def _rebase_rust(worktree: Path, onto: str, base_commit: str | None = None) -> R
     args = ["lf-engine", "rebase", "--worktree", str(worktree), "--onto", onto]
     if base_commit:
         args.extend(["--base-commit", base_commit])
-    data = _run_lf_core(args)
+    data = _run_loopflow_engine(args)
     conflicts = None
     if data.get("conflicts"):
         conflicts = [Path(path) for path in data["conflicts"]]
@@ -118,11 +118,11 @@ def _push_rust(worktree: Path, force_with_lease: bool = False) -> None:
     args = ["lf-engine", "push", "--worktree", str(worktree)]
     if force_with_lease:
         args.append("--force-with-lease")
-    _run_lf_core(args)
+    _run_loopflow_engine(args)
 
 
 def _create_branch_rust(worktree: Path, name: str) -> BranchInfo:
-    data = _run_lf_core(["lf-engine", "branch", "--worktree", str(worktree), "--name", name])
+    data = _run_loopflow_engine(["lf-engine", "branch", "--worktree", str(worktree), "--name", name])
     return BranchInfo(**data)
 
 
@@ -137,7 +137,7 @@ def _land_rust(worktree: Path, strategy: str, main_branch: str = "main") -> Land
         "--main-branch",
         main_branch,
     ]
-    data = _run_lf_core(args)
+    data = _run_loopflow_engine(args)
     return LandResult(**data)
 
 

@@ -7,7 +7,12 @@
 
 ## Stage 4: lf Client Refactor
 
-- Should `lf ops` become `lf git` for clarity? "ops" is vague; "git" is precise.
+- Decision: keep `lf ops` as the name; no rename to `lf git`.
+- Decision: remove `lfops` binary with no backwards compatibility.
+- Decision: Rust `lf ops` API is primary; shell out to `gh` from Rust as needed. Python proxy is fallback only.
+- Decision: `lf ops` should default to Rust when `internal.rust` is enabled; Rust `lfd` can come later.
+- Direction: move the entire `lf` CLI toward Rust over time; decide which non-ops commands are next.
+- Decision: include at least one non-ops Rust-backed `lf` surface in this diff (e.g., `lf --version`/`lf info`) gated by `internal.rust`.
 - Agent-assisted conflict resolution: should this live in `lf ops rebase` only, or also in daemon's rebase for waves?
 - Should we add worktree operations to Rust? `wt` CLI handles them now, but daemon may want direct control.
 - gh CLI wrappers: keep in Python forever, or eventually move to Rust for daemon integration?

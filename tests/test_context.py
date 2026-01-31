@@ -610,8 +610,8 @@ def _setup_task_template(tmp_path):
 # =============================================================================
 
 
-def test_internal_docs_auto_included(tmp_path):
-    """reports/ markdown files are auto-included in context."""
+def test_internal_docs_not_auto_included(tmp_path):
+    """reports/ is NOT auto-included by default - use area to include relevant reports."""
     (tmp_path / ".git").mkdir()
     (tmp_path / "README.md").write_text("# Test\n")
 
@@ -625,11 +625,11 @@ def test_internal_docs_auto_included(tmp_path):
     components = gather_prompt_components(tmp_path, "implement")
     prompt = format_prompt(components)
 
-    # reports/ files should be included
-    assert "# Architecture" in prompt
-    assert "How it works." in prompt
-    assert "# ADR 001" in prompt
-    assert "We chose X." in prompt
+    # reports/ files should NOT be included by default
+    assert "# Architecture" not in prompt
+    assert "How it works." not in prompt
+    assert "# ADR 001" not in prompt
+    assert "We chose X." not in prompt
 
 
 def test_internal_docs_empty_when_missing(tmp_path):
@@ -664,8 +664,8 @@ def test_public_docs_not_auto_included(tmp_path):
     assert "# API Reference" not in prompt
 
 
-def test_internal_docs_before_root_docs(tmp_path):
-    """reports/ appears before repo root .md files in context."""
+def test_scratch_before_root_docs(tmp_path):
+    """scratch/ appears before repo root .md files in context."""
     (tmp_path / ".git").mkdir()
     (tmp_path / "README.md").write_text("# Root README\n")
 
@@ -673,19 +673,14 @@ def test_internal_docs_before_root_docs(tmp_path):
     scratch_dir.mkdir()
     (scratch_dir / "plan.md").write_text("# Design Plan\n")
 
-    internal_docs = tmp_path / "reports"
-    internal_docs.mkdir()
-    (internal_docs / "context.md").write_text("# Internal Context\n")
-
     components = gather_prompt_components(tmp_path, step=None, inline="test")
 
-    # Check order: scratch/, then reports/, then root docs
+    # Check order: scratch/ before root docs
     doc_paths = [str(p) for p, _ in components.docs]
     scratch_idx = next(i for i, p in enumerate(doc_paths) if "scratch" in p)
-    internal_idx = next(i for i, p in enumerate(doc_paths) if "reports" in p)
     readme_idx = next(i for i, p in enumerate(doc_paths) if "README" in p)
 
-    assert scratch_idx < internal_idx < readme_idx
+    assert scratch_idx < readme_idx
 
 
 def test_trim_prompt_components_drops_oversize_diff_files(tmp_path):

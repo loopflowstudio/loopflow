@@ -9,13 +9,13 @@ import pytest
 
 from loopflow.lf.config import Config, SummaryConfig
 from loopflow.lf.context import _trigger_background_refresh, gather_summaries
-from loopflow.lfd.db import _get_db, save_summary_db
 from loopflow.lf.ops.summarize import (
     Summary,
     compute_source_hash,
     pathset_hash,
     pathset_key,
 )
+from loopflow.lfd.db import _get_db, save_summary_db
 
 
 @pytest.fixture

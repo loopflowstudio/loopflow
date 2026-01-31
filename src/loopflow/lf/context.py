@@ -29,6 +29,7 @@ from loopflow.lf.files import (
     list_md_grouped,
 )
 from loopflow.lf.frontmatter import StepFile, parse_step_file
+from loopflow.lf.ops.summarize import is_stale, load_summary
 from loopflow.lf.skills import (
     discover_skill_sources,
     find_skill,
@@ -37,7 +38,6 @@ from loopflow.lf.skills import (
 )
 from loopflow.lf.tokens import count_tokens
 from loopflow.lf.wave import WaveContext, determine_wave
-from loopflow.lf.ops.summarize import is_stale, load_summary
 
 # Path to bundled builtin steps
 _BUILTINS_STEPS_DIR = Path(__file__).parent / "builtins" / "steps"

@@ -11,6 +11,8 @@ from loopflow.lf.config import load_config
 from loopflow.lf.context import find_worktree_root
 from loopflow.lf.deps import require_wt
 from loopflow.lf.git import find_main_repo
+from loopflow.lf.ops._helpers import get_default_branch, sync_main_repo
+from loopflow.lf.ops.shell import write_directive
 from loopflow.lf.worktrees import (
     create_with_schema,
     find_merged,
@@ -19,8 +21,6 @@ from loopflow.lf.worktrees import (
     merge_diagnostics,
     remove,
 )
-from loopflow.lf.ops._helpers import get_default_branch, sync_main_repo
-from loopflow.lf.ops.shell import write_directive
 
 
 def register_commands(app: typer.Typer) -> None:

@@ -135,11 +135,12 @@ final class SessionState {
 
     // MARK: - Interactive Sessions
 
-    func launchInteractiveSession(waveId: String, step: String, worktreePath: String) {
+    func launchInteractiveSession(waveId: String, step: String, worktreePath: String, prompt: String? = nil) {
         interactiveSession = InteractiveSession(
             waveId: waveId,
             step: step,
-            worktreePath: worktreePath
+            worktreePath: worktreePath,
+            prompt: prompt
         )
     }
 

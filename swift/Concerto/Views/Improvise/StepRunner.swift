@@ -263,11 +263,13 @@ struct StepRunner: View {
         let isInteractive = allSteps.first(where: { $0.name == selectedStep }) != nil
 
         if isInteractive {
-            // Launch interactive session
+            // Launch interactive session with prompt if provided
+            let promptArg = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
             sessionState.launchInteractiveSession(
                 waveId: wave.id,
                 step: selectedStep,
-                worktreePath: path
+                worktreePath: path,
+                prompt: promptArg.isEmpty ? nil : promptArg
             )
         } else {
             // Run as auto step via daemon

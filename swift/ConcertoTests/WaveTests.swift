@@ -297,3 +297,83 @@ struct WaveStatusTests {
         #expect(WaveStatus.error.icon == "xmark.circle.fill")
     }
 }
+
+@Suite("InteractiveSession")
+struct InteractiveSessionTests {
+
+    @Test("command returns step without prompt")
+    func commandWithoutPrompt() {
+        let session = InteractiveSession(
+            waveId: "wave-1",
+            step: "design",
+            worktreePath: "/tmp/wt"
+        )
+        #expect(session.command == "lf design")
+    }
+
+    @Test("command includes shell-escaped prompt")
+    func commandWithPrompt() {
+        let session = InteractiveSession(
+            waveId: "wave-1",
+            step: "design",
+            worktreePath: "/tmp/wt",
+            prompt: "add rate limiting"
+        )
+        #expect(session.command == "lf design 'add rate limiting'")
+    }
+
+    @Test("command escapes single quotes in prompt")
+    func commandEscapesSingleQuotes() {
+        let session = InteractiveSession(
+            waveId: "wave-1",
+            step: "debug",
+            worktreePath: "/tmp/wt",
+            prompt: "fix the user's auth flow"
+        )
+        #expect(session.command == "lf debug 'fix the user'\\''s auth flow'")
+    }
+
+    @Test("command handles special shell characters")
+    func commandHandlesSpecialChars() {
+        let session = InteractiveSession(
+            waveId: "wave-1",
+            step: "implement",
+            worktreePath: "/tmp/wt",
+            prompt: "add $HOME expansion & pipes | redirects > /dev/null"
+        )
+        // Single quotes protect all special characters except single quotes themselves
+        #expect(session.command == "lf implement 'add $HOME expansion & pipes | redirects > /dev/null'")
+    }
+}
+
+@Suite("Shell Escape")
+struct ShellEscapeTests {
+
+    @Test("shellEscape wraps in single quotes")
+    func wrapsInSingleQuotes() {
+        #expect(shellEscape("hello") == "'hello'")
+    }
+
+    @Test("shellEscape escapes internal single quotes")
+    func escapesInternalQuotes() {
+        #expect(shellEscape("it's") == "'it'\\''s'")
+    }
+
+    @Test("shellEscape handles multiple single quotes")
+    func handlesMultipleSingleQuotes() {
+        // Input: 'a' and 'b'
+        // Expected: ''\'a'\'' and '\''b'\''
+        // Each ' becomes '\'' (end quote, escaped quote, start quote)
+        #expect(shellEscape("'a' and 'b'") == "''\\''a'\\'' and '\\''b'\\'''")
+    }
+
+    @Test("shellEscape preserves special characters")
+    func preservesSpecialChars() {
+        #expect(shellEscape("$HOME & | > < ; `") == "'$HOME & | > < ; `'")
+    }
+
+    @Test("shellEscape handles empty string")
+    func handlesEmptyString() {
+        #expect(shellEscape("") == "''")
+    }
+}

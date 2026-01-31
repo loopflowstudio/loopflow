@@ -96,6 +96,8 @@ impl ControlServer {
             StoreError::InvalidData(message) => Status::invalid_argument(message),
             StoreError::Serde(err) => Status::internal(format!("serialization error: {err}")),
             StoreError::Sqlite(err) => Status::internal(format!("database error: {err}")),
+            StoreError::Postgres(err) => Status::internal(format!("database error: {err}")),
+            StoreError::PostgresPool(err) => Status::internal(format!("database error: {err}")),
         }
     }
 

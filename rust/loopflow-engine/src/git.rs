@@ -3,7 +3,7 @@ use std::process::{Command, Output};
 
 use serde::Serialize;
 
-use crate::error::{CoreError, GitError};
+use crate::error::GitError;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RebaseResult {
@@ -74,22 +74,6 @@ fn list_conflicts(repo: &Path) -> Result<Vec<PathBuf>, GitError> {
         .map(PathBuf::from)
         .collect::<Vec<_>>();
     Ok(conflicts)
-}
-
-pub fn get_status(repo: &Path) -> Result<String, CoreError> {
-    let output = run_git(repo, &["status", "--porcelain"])?;
-    if !output.status.success() {
-        return Err(CoreError::ExecutionFailed("git status failed".to_string()));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
-}
-
-pub fn get_diff(repo: &Path) -> Result<String, CoreError> {
-    let output = run_git(repo, &["diff"])?;
-    if !output.status.success() {
-        return Err(CoreError::ExecutionFailed("git diff failed".to_string()));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 /// Fetch a remote ref (e.g., "origin/main").

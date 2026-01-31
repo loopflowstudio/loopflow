@@ -7,7 +7,7 @@ use tokio_postgres::types::ToSql;
 use tokio_postgres::{NoTls, Row};
 
 use crate::id::LfdId;
-use crate::proto::control::{PendingActivation, Agent, AgentStatus, Stimulus, Wave};
+use crate::proto::control::{Agent, AgentStatus, PendingActivation, Stimulus, Wave};
 use crate::store::{ForkRun, ForkRunStatus, RunStore, StoreError, StoreResult};
 
 const SCHEMA_VERSION: u32 = 1;

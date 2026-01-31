@@ -237,16 +237,11 @@ impl core_store::RunStore for LfCoreStoreAdapter {
         Ok(())
     }
 
-    fn create_agent(
-        &self,
-        agent: &loopflow_engine::runtime::Agent,
-    ) -> Result<(), CoreStoreError> {
+    fn create_agent(&self, agent: &loopflow_engine::runtime::Agent) -> Result<(), CoreStoreError> {
         let status = match agent.status {
             loopflow_engine::runtime::AgentStatus::Running => AgentStatus::AgentRunning as i32,
             loopflow_engine::runtime::AgentStatus::Waiting => AgentStatus::AgentWaiting as i32,
-            loopflow_engine::runtime::AgentStatus::Completed => {
-                AgentStatus::AgentCompleted as i32
-            }
+            loopflow_engine::runtime::AgentStatus::Completed => AgentStatus::AgentCompleted as i32,
             loopflow_engine::runtime::AgentStatus::Failed => AgentStatus::AgentFailed as i32,
         };
 
@@ -569,12 +564,7 @@ mod tests {
             unused()
         }
 
-        fn end_agent(
-            &self,
-            agent_id: &LfdId,
-            status: i32,
-            _ended_at: i64,
-        ) -> StoreResult<()> {
+        fn end_agent(&self, agent_id: &LfdId, status: i32, _ended_at: i64) -> StoreResult<()> {
             let mut ended = self.ended.lock().expect("ended mutex poisoned");
             ended.push((agent_id.to_string(), status));
             Ok(())
@@ -637,10 +627,7 @@ mod tests {
 
         let ended = store.ended.lock().expect("ended mutex poisoned").clone();
 
-        assert_eq!(
-            ended,
-            vec![(wave.id, AgentStatus::AgentCompleted as i32)]
-        );
+        assert_eq!(ended, vec![(wave.id, AgentStatus::AgentCompleted as i32)]);
     }
 
     #[test]
@@ -657,9 +644,6 @@ mod tests {
 
         let ended = store.ended.lock().expect("ended mutex poisoned").clone();
 
-        assert_eq!(
-            ended,
-            vec![(wave.id, AgentStatus::AgentFailed as i32)]
-        );
+        assert_eq!(ended, vec![(wave.id, AgentStatus::AgentFailed as i32)]);
     }
 }

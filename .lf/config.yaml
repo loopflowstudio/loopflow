@@ -6,9 +6,6 @@ skill_sources:
   - name: superpowers
     prefix: sp
     path: ~/.superpowers
-context:
-  - docs
-  - scratch
 exclude:
   - uv.lock
 push: true

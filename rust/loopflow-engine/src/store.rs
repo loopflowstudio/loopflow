@@ -1,5 +1,5 @@
 use crate::error::StoreError;
-use crate::runtime::{FlowRun, ForkRun, RunId, Agent};
+use crate::runtime::{Agent, FlowRun, ForkRun, RunId};
 
 /// Persistence layer for flow and step runs.
 ///

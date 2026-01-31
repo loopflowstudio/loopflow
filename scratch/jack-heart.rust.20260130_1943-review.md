@@ -1,4 +1,4 @@
-# Design Review: Postgres Storage Backend + LfdId + UI Polish
+# Design Review: Postgres Storage Backend + LfdId
 
 ## What was implemented
 
@@ -16,11 +16,6 @@
 - Docker Compose setup for local development with Postgres
 - Config-driven backend selection via `LFD_STORAGE` environment variable
 - Dual-backend test suite (SQLite + Postgres with testcontainers)
-
-**Concerto UI updates:**
-- Wave detail panel redesigned with action bar (Land, IDE, Terminal, Stop, Abandon)
-- WaveSidebar renamed "Agents" with categorized sections (Blocked, Open PRs, Active, Idle)
-- New DesignSystem.swift additions for button styles
 
 ## Key choices
 
@@ -86,7 +81,7 @@ docker-compose.yml
 | File | Change |
 |------|--------|
 | `rust/lfd/src/id.rs` | New: LfdId newtype with UUID generation, validation, serialization |
-| `rust/lfd/src/store/postgres.rs` | New: 979 lines implementing PostgresStore |
+| `rust/lfd/src/store/postgres.rs` | New: ~1000 lines implementing PostgresStore |
 | `rust/lfd/src/store/mod.rs` | Added ForkRun, ForkRunStatus, StoreError variants, LfdId in trait methods, test suite |
 | `rust/lfd/src/store/sqlite.rs` | Updated to use LfdId in queries |
 | `rust/lfd/src/store/migrations/postgres/001_initial.sql` | New: initial schema |

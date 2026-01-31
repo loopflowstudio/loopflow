@@ -3,8 +3,8 @@ use std::fs;
 use std::sync::Mutex;
 
 use loopflow_engine::runtime::{
-    tick_flow_with_runner, FlowRun, FlowRunStatus, ForkRun, ForkRunStatus, StepResult, Agent,
-    AgentStatus, TickResult,
+    tick_flow_with_runner, Agent, AgentStatus, FlowRun, FlowRunStatus, ForkRun, ForkRunStatus,
+    StepResult, TickResult,
 };
 use loopflow_engine::{load_flow, RunId, RunStore, Step};
 use tempfile::TempDir;

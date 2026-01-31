@@ -4,20 +4,20 @@ use std::sync::Arc;
 use crate::id::LfdId;
 use crate::proto::control::control_service_server::ControlService;
 use crate::proto::control::{
-    AcquireSlotRequest, AcquireSlotResponse, CloneWaveRequest, CloneWaveResponse,
-    ConnectWaveRequest, ConnectWaveResponse, CreateStimulusRequest, CreateStimulusResponse,
-    CreateWaveRequest, CreateWaveResponse, DeleteStimulusRequest, DeleteStimulusResponse,
-    DeleteWaveRequest, DeleteWaveResponse, EndAgentRequest, EndAgentResponse, Event,
-    GetHealthRequest, GetHealthResponse, GetSchedulerStatusRequest, GetSchedulerStatusResponse,
-    GetStatusRequest, GetStatusResponse, GetStimulusRequest, GetStimulusResponse, HealthChecks,
-    HealthMetrics, ListFlowsRequest, ListFlowsResponse, ListAgentsRequest, ListAgentsResponse,
-    ListStimuliRequest, ListStimuliResponse, ListWavesRequest, ListWavesResponse,
-    ListWorktreesRequest, ListWorktreesResponse, MergeMode, NotifyRequest, NotifyResponse,
-    NotifyWorktreeChangedRequest, NotifyWorktreeChangedResponse, ProtocolVersion,
-    ReleaseSlotRequest, ReleaseSlotResponse, RunWaveRequest, RunWaveResponse, Agent,
-    AgentStatus, Stimulus, StopWaveRequest, StopWaveResponse, StreamOutputRequest,
-    StreamOutputResponse, UpdateStimulusRequest, UpdateStimulusResponse, UpdateWaveRequest,
-    UpdateWaveResponse, Wave, WaveStatus,
+    AcquireSlotRequest, AcquireSlotResponse, Agent, AgentStatus, CloneWaveRequest,
+    CloneWaveResponse, ConnectWaveRequest, ConnectWaveResponse, CreateStimulusRequest,
+    CreateStimulusResponse, CreateWaveRequest, CreateWaveResponse, DeleteStimulusRequest,
+    DeleteStimulusResponse, DeleteWaveRequest, DeleteWaveResponse, EndAgentRequest,
+    EndAgentResponse, Event, GetHealthRequest, GetHealthResponse, GetSchedulerStatusRequest,
+    GetSchedulerStatusResponse, GetStatusRequest, GetStatusResponse, GetStimulusRequest,
+    GetStimulusResponse, HealthChecks, HealthMetrics, ListAgentsRequest, ListAgentsResponse,
+    ListFlowsRequest, ListFlowsResponse, ListStimuliRequest, ListStimuliResponse, ListWavesRequest,
+    ListWavesResponse, ListWorktreesRequest, ListWorktreesResponse, MergeMode, NotifyRequest,
+    NotifyResponse, NotifyWorktreeChangedRequest, NotifyWorktreeChangedResponse, ProtocolVersion,
+    ReleaseSlotRequest, ReleaseSlotResponse, RunWaveRequest, RunWaveResponse, Stimulus,
+    StopWaveRequest, StopWaveResponse, StreamOutputRequest, StreamOutputResponse,
+    UpdateStimulusRequest, UpdateStimulusResponse, UpdateWaveRequest, UpdateWaveResponse, Wave,
+    WaveStatus,
 };
 use crate::scheduler::Scheduler;
 use crate::sessions::{run_pty_command, PtyCommand};
@@ -124,8 +124,7 @@ impl ControlService for ControlServer {
     ) -> Result<Response<GetStatusResponse>, Status> {
         let waves = self.list_waves_inner(None).await?;
         let agents = self.list_agents_inner().await?;
-        let (waves_defined, waves_running, agents_active) =
-            Self::status_counts(&waves, &agents);
+        let (waves_defined, waves_running, agents_active) = Self::status_counts(&waves, &agents);
 
         Ok(Response::new(GetStatusResponse {
             pid: std::process::id(),
@@ -144,8 +143,7 @@ impl ControlService for ControlServer {
 
         let waves = self.list_waves_inner(None).await?;
         let agents = self.list_agents_inner().await?;
-        let (waves_defined, waves_running, agents_active) =
-            Self::status_counts(&waves, &agents);
+        let (waves_defined, waves_running, agents_active) = Self::status_counts(&waves, &agents);
 
         let uptime = OffsetDateTime::now_utc() - self.started_at;
 
@@ -776,9 +774,7 @@ impl ControlService for ControlServer {
             }
         }
 
-        Ok(Response::new(EndAgentResponse {
-            id: req.agent_id,
-        }))
+        Ok(Response::new(EndAgentResponse { id: req.agent_id }))
     }
 
     type SubscribeStream = Pin<Box<dyn Stream<Item = Result<Event, Status>> + Send>>;

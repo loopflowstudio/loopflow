@@ -14,7 +14,7 @@ mod python;
 
 pub use agent::{
     build_claude_command, build_codex_command, build_gemini_command, build_model_command,
-    check_cli_available, launch_agent, Runner, DefaultRunner, LaunchConfig, LaunchResult,
+    check_cli_available, launch_agent, DefaultRunner, LaunchConfig, LaunchResult, Runner,
 };
 pub use config::{load_config, load_config_or_default, parse_model, Config};
 pub use error::{CoreError, GitError, LoadError, StoreError};

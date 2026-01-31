@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::id::LfdId;
-use crate::proto::control::PendingActivation;
 use crate::proto::control::Agent;
+use crate::proto::control::PendingActivation;
 use crate::proto::control::Stimulus;
 use crate::proto::control::Wave;
 
@@ -128,8 +128,7 @@ mod tests {
     use super::*;
     use crate::id::LfdId;
     use crate::proto::control::{
-        MergeMode, PendingActivation, Agent, AgentStatus, Stimulus, StimulusKind, Wave,
-        WaveStatus,
+        Agent, AgentStatus, MergeMode, PendingActivation, Stimulus, StimulusKind, Wave, WaveStatus,
     };
     use prost_types::Timestamp;
     use std::env;

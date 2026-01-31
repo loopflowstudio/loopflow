@@ -201,10 +201,7 @@ fn main() {
             Ok(()) => print_json(&serde_json::Value::Null),
             Err(err) => print_error(&err),
         },
-        Commands::SyncMain {
-            repo,
-            main_branch,
-        } => match sync_main(&repo, &main_branch) {
+        Commands::SyncMain { repo, main_branch } => match sync_main(&repo, &main_branch) {
             Ok(result) => print_json(&result),
             Err(err) => print_error(&err),
         },

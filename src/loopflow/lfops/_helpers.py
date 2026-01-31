@@ -8,6 +8,7 @@ import typer
 
 from loopflow.lf.config import Config, load_config
 from loopflow.lf.git import ensure_draft_pr
+from loopflow.lf.messages import generate_commit_message
 from loopflow.lf.ops.git import GitError
 from loopflow.lf.ops.git import commit as git_commit
 from loopflow.lf.ops.git import delete_local_branch as git_delete_local_branch
@@ -17,9 +18,6 @@ from loopflow.lf.ops.git import push as git_push
 from loopflow.lf.ops.git import stage_all as git_stage_all
 from loopflow.lf.ops.git import sync_main as git_sync_main
 from loopflow.lf.ops.git import worktree_remove as git_worktree_remove
-from loopflow.lf.messages import generate_commit_message
-from loopflow.lf.ops.git import GitError
-from loopflow.lf.ops.git import push as git_push
 
 
 def _check_lint(repo_root: Path, config: Config | None) -> bool | None:

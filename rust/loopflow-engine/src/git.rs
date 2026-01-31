@@ -260,6 +260,62 @@ pub fn worktree_remove(repo: &Path, path: &Path) -> Result<(), GitError> {
     Ok(())
 }
 
+/// Move a worktree to a new path.
+pub fn worktree_move(repo: &Path, old_path: &Path, new_path: &Path) -> Result<(), GitError> {
+    let old_str = old_path.to_string_lossy();
+    let new_str = new_path.to_string_lossy();
+    let output = run_git(
+        repo,
+        &["worktree", "move", old_str.as_ref(), new_str.as_ref()],
+    )?;
+    if !output.status.success() {
+        return Err(GitError::CommandFailed {
+            command: format!("git worktree move {} {}", old_str, new_str),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Create a new worktree with a new branch.
+pub fn worktree_add(
+    repo: &Path,
+    path: &Path,
+    branch: &str,
+    start_point: &str,
+) -> Result<(), GitError> {
+    let path_str = path.to_string_lossy();
+    let output = run_git(
+        repo,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            branch,
+            path_str.as_ref(),
+            start_point,
+        ],
+    )?;
+    if !output.status.success() {
+        return Err(GitError::CommandFailed {
+            command: format!(
+                "git worktree add -b {} {} {}",
+                branch, path_str, start_point
+            ),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Get the SHA for a ref (branch, tag, HEAD, etc.).
+pub fn rev_parse(repo: &Path, refspec: &str) -> Result<String, GitError> {
+    let sha = git_stdout(repo, &["rev-parse", refspec])?
+        .trim()
+        .to_string();
+    Ok(sha)
+}
+
 pub fn rebase(
     worktree: &Path,
     onto: &str,
@@ -576,5 +632,62 @@ mod tests {
         checkout(repo.path(), "main").expect("checkout main");
 
         delete_local_branch(repo.path(), "feature").expect("delete branch");
+    }
+
+    #[test]
+    fn git_rev_parse_returns_sha() {
+        let repo = init_repo();
+        commit_file(repo.path(), "README.md", "hello");
+
+        let sha = rev_parse(repo.path(), "HEAD").expect("rev-parse HEAD");
+        assert!(!sha.is_empty());
+        assert!(sha.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn git_worktree_move_and_add() {
+        let repo = init_repo();
+        commit_file(repo.path(), "README.md", "hello");
+
+        // Create a worktree
+        let wt_path = repo.path().parent().unwrap().join("test-worktree");
+        checkout_new_branch(repo.path(), "feature").expect("create feature");
+        checkout(repo.path(), "main").expect("back to main");
+
+        git_stdout(
+            repo.path(),
+            &["worktree", "add", wt_path.to_str().unwrap(), "feature"],
+        )
+        .expect("create worktree");
+
+        // Move the worktree
+        let new_path = repo.path().parent().unwrap().join("moved-worktree");
+        worktree_move(repo.path(), &wt_path, &new_path).expect("move worktree");
+
+        // Verify old path doesn't exist, new path does
+        assert!(!wt_path.exists());
+        assert!(new_path.exists());
+
+        // Clean up
+        worktree_remove(repo.path(), &new_path).expect("remove worktree");
+    }
+
+    #[test]
+    fn git_worktree_add_creates_branch() {
+        let repo = init_repo();
+        commit_file(repo.path(), "README.md", "hello");
+
+        let wt_path = repo.path().parent().unwrap().join("new-worktree");
+        worktree_add(repo.path(), &wt_path, "new-feature", "HEAD").expect("worktree add");
+
+        // Verify worktree exists
+        assert!(wt_path.exists());
+
+        // Verify branch was created
+        let branch = current_branch(&wt_path).expect("get branch");
+        assert_eq!(branch, Some("new-feature".to_string()));
+
+        // Clean up
+        worktree_remove(repo.path(), &wt_path).expect("remove worktree");
     }
 }

@@ -12,9 +12,10 @@ use crate::git::{
     commit as git_commit, create_branch as git_create_branch, delete_local_branch,
     delete_remote_branch, get_default_branch, is_clean as git_is_clean, land as git_land,
     pr_create_draft, pr_exists, pr_merge_squash_auto, push as git_push,
-    push_with_upstream as git_push_with_upstream, rebase as git_rebase, stage_all, sync_main,
-    worktree_remove, BranchInfo as RustBranchInfo, LandResult as RustLandResult,
-    LandStrategy as RustLandStrategy, RebaseResult as RustRebaseResult,
+    push_with_upstream as git_push_with_upstream, rebase as git_rebase, rev_parse, stage_all,
+    sync_main, worktree_add, worktree_move, worktree_remove, BranchInfo as RustBranchInfo,
+    LandResult as RustLandResult, LandStrategy as RustLandStrategy,
+    RebaseResult as RustRebaseResult,
 };
 use crate::prompt::{
     count_tokens, format_prompt, gather_context, GatherContextOpts,
@@ -383,6 +384,42 @@ fn py_git_worktree_remove(repo: &str, path: &str) -> PyResult<()> {
     }
 }
 
+/// Git: move worktree.
+#[pyfunction]
+fn py_git_worktree_move(repo: &str, old_path: &str, new_path: &str) -> PyResult<()> {
+    match worktree_move(
+        PathBuf::from(repo).as_path(),
+        PathBuf::from(old_path).as_path(),
+        PathBuf::from(new_path).as_path(),
+    ) {
+        Ok(()) => Ok(()),
+        Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+    }
+}
+
+/// Git: create worktree with new branch.
+#[pyfunction]
+fn py_git_worktree_add(repo: &str, path: &str, branch: &str, start_point: &str) -> PyResult<()> {
+    match worktree_add(
+        PathBuf::from(repo).as_path(),
+        PathBuf::from(path).as_path(),
+        branch,
+        start_point,
+    ) {
+        Ok(()) => Ok(()),
+        Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+    }
+}
+
+/// Git: get SHA for ref.
+#[pyfunction]
+fn py_git_rev_parse(repo: &str, refspec: &str) -> PyResult<String> {
+    match rev_parse(PathBuf::from(repo).as_path(), refspec) {
+        Ok(sha) => Ok(sha),
+        Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e.to_string())),
+    }
+}
+
 /// Run a step with assembled context.
 ///
 /// This is the main entry point for Python lf to execute steps via Rust.
@@ -471,6 +508,9 @@ fn loopflow_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     git_mod.add_function(wrap_pyfunction!(py_git_pr_merge_squash_auto, &git_mod)?)?;
     git_mod.add_function(wrap_pyfunction!(py_git_sync_main, &git_mod)?)?;
     git_mod.add_function(wrap_pyfunction!(py_git_worktree_remove, &git_mod)?)?;
+    git_mod.add_function(wrap_pyfunction!(py_git_worktree_move, &git_mod)?)?;
+    git_mod.add_function(wrap_pyfunction!(py_git_worktree_add, &git_mod)?)?;
+    git_mod.add_function(wrap_pyfunction!(py_git_rev_parse, &git_mod)?)?;
     m.add_submodule(&git_mod)?;
     Ok(())
 }

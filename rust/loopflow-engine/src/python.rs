@@ -4,7 +4,6 @@
 //! import lf-core directly without subprocess overhead.
 
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
 use std::path::PathBuf;
 
 use crate::agent::{launch_agent, LaunchConfig, LaunchResult as RustLaunchResult};

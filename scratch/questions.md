@@ -11,10 +11,10 @@
 - Decision: remove `lfops` binary with no backwards compatibility.
 - Decision: Rust `lf ops` API is primary; shell out to `gh` from Rust as needed. Python proxy is fallback only.
 - Decision: `lf ops` should default to Rust when `internal.rust` is enabled; Rust `lfd` can come later.
-- Direction: move the entire `lf` CLI toward Rust over time; decide which non-ops commands are next.
 - Decision: include at least one non-ops Rust-backed `lf` surface in this diff (e.g., `lf --version`/`lf info`) gated by `internal.rust`.
+- Decision: Rust CLI (`lf`, `lfd`) is the long-term primary interface. Python `loopflow` becomes a library for scripting/integration. The current hybrid is transitional.
 - For `lf --version` (Rust-backed), should `lf-engine version` mirror `loopflow.__version__`? Workspace/Cargo version and `VERSION` file are `0.7.1` while Python `__version__` is `0.7.2`.
 - Agent-assisted conflict resolution: should this live in `lf ops rebase` only, or also in daemon's rebase for waves?
 - Should we add worktree operations to Rust? `wt` CLI handles them now, but daemon may want direct control.
-- gh CLI wrappers: keep in Python forever, or eventually move to Rust for daemon integration?
+- gh CLI wrappers: eventually move to Rust for daemon integration (follows from Rust CLI decision).
 - With the `lfops` console script removed, should Concerto/Swift WorktreeService switch to `lf ops` (or is a shim expected)?

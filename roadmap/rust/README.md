@@ -40,6 +40,26 @@ Commit to **protocol‑first** Rust `lfd` with remote client support. The protoc
 - Per‑run sandboxing with strict resource limits
 - Remote clients (desktop + mobile) as first‑class
 
+## Artifact split
+
+Two distinct artifacts, each in its natural language:
+
+| Artifact | Language | Distribution | Purpose |
+|----------|----------|--------------|---------|
+| `lf` CLI | Rust | brew, cargo, binary | Primary user interface |
+| `loopflow` library | Python | PyPI | Scripting, integration, contributor‑friendly |
+
+The Rust CLI (`lf`, `lfd`) is the primary interface—fast startup, single binary, reliable. The Python package becomes a library for programmatic access: notebooks, scripts, extending loopflow. Contributors can work in Python without touching Rust.
+
+The current hybrid (Python CLI calling Rust engine) is transitional. The path:
+1. Expand `lf-engine` to cover full `lf` surface
+2. Rename/alias to `lf`
+3. Python `loopflow` provides library APIs and bundles the Rust binary
+
+`uv tool install loopflow` remains the primary install method. The Python package bundles platform‑specific Rust binaries (like `ruff`, `uv` do), so users get the native CLI automatically.
+
+This requires CI to build wheels for each platform (macOS arm64/x86, Linux x86_64/aarch64). The `loopflow-engine` maturin build already does this for the library; extending to include the CLI binary is the same process.
+
 ## Decision criteria
 - Idle overhead reduced by >50% vs Python daemon.
 - Scheduling jitter reduced by >30% under synthetic load.

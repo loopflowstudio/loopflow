@@ -27,7 +27,6 @@ Screenshots in `docs/screenshots/`:
 - `concerto-wave-running.png` — running wave detail
 - `concerto-wave-waiting.png` — waiting wave detail
 
-
 ## Item format
 
 ```yaml

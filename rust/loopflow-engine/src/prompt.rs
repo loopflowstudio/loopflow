@@ -7,7 +7,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::config::{load_config_or_default, Config};
 use crate::error::CoreError;
 use crate::flow::{load_direction, load_step, Direction, Step};
 

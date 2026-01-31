@@ -680,7 +680,7 @@ fn run_loop_until_empty(
                     store.create_step_run(&step_run)?;
 
                     let directions = merge_directions(&run.direction, &step.directions);
-                    let result = runner.run(&step, &worktree, &directions)?;
+                    let result = runner.run(step, &worktree, &directions)?;
                     if result.exit_code != 0 {
                         run.status = FlowRunStatus::Failed;
                         run.error = Some(result.stderr);

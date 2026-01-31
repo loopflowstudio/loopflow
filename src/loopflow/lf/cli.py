@@ -254,9 +254,7 @@ def main():
                 use_rust = False
 
             if use_rust and shutil.which("lf-engine"):
-                result = subprocess.run(
-                    ["lf-engine", "version"], capture_output=True, text=True
-                )
+                result = subprocess.run(["lf-engine", "version"], capture_output=True, text=True)
                 if result.returncode == 0 and result.stdout.strip():
                     try:
                         version = json.loads(result.stdout.strip())

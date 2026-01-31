@@ -219,9 +219,7 @@ def _sync_main_rust(repo: Path, main_branch: str) -> bool:
 
 
 def _worktree_remove_rust(repo: Path, path: Path) -> None:
-    _run_loopflow_engine(
-        ["lf-engine", "worktree-remove", "--repo", str(repo), "--path", str(path)]
-    )
+    _run_loopflow_engine(["lf-engine", "worktree-remove", "--repo", str(repo), "--path", str(path)])
 
 
 # -----------------------------------------------------------------------------
@@ -366,6 +364,7 @@ def _land_python(worktree: Path, strategy: str, main_branch: str = "main") -> La
     branch_deleted = delete_result.returncode == 0
 
     return LandResult(merged_commit=merged_commit, branch_deleted=branch_deleted)
+
 
 def _get_default_branch_python(repo_root: Path) -> str:
     result = subprocess.run(
@@ -518,6 +517,7 @@ def push(worktree: Path, force_with_lease: bool = False) -> None:
     if _use_rust():
         return _push_rust(worktree, force_with_lease)
     return _push_python(worktree, force_with_lease)
+
 
 def push_with_upstream(worktree: Path, remote: str, branch: str) -> None:
     _print_backend_once()

@@ -1,12 +1,7 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
-use prost_types::Timestamp;
-use time::OffsetDateTime;
-use tokio_stream::Stream;
-use tonic::{Request, Response, Status};
-use uuid::Uuid;
-
+use crate::id::LfdId;
 use crate::proto::control::control_service_server::ControlService;
 use crate::proto::control::{
     AcquireSlotRequest, AcquireSlotResponse, CloneWaveRequest, CloneWaveResponse,
@@ -27,6 +22,10 @@ use crate::proto::control::{
 use crate::scheduler::Scheduler;
 use crate::sessions::{run_pty_command, PtyCommand};
 use crate::store::{SharedStore, StoreError, StoreResult};
+use prost_types::Timestamp;
+use time::OffsetDateTime;
+use tokio_stream::Stream;
+use tonic::{Request, Response, Status};
 
 #[derive(Clone)]
 pub struct ControlServer {
@@ -52,6 +51,11 @@ impl ControlServer {
             scheduler,
             started_at: OffsetDateTime::now_utc(),
         }
+    }
+
+    fn parse_id(value: &str, name: &str) -> Result<LfdId, Status> {
+        LfdId::parse(value)
+            .map_err(|err| Status::invalid_argument(format!("invalid {name}: {err}")))
     }
 
     async fn run_store<T, F>(&self, func: F) -> Result<T, Status>
@@ -184,6 +188,7 @@ impl ControlService for ControlServer {
         request: Request<crate::proto::control::GetWaveRequest>,
     ) -> Result<Response<crate::proto::control::GetWaveResponse>, Status> {
         let wave_id = request.into_inner().wave_id;
+        let wave_id = Self::parse_id(&wave_id, "wave_id")?;
         let wave = self
             .run_store(move |store| store.get_wave(&wave_id))
             .await?
@@ -198,7 +203,7 @@ impl ControlService for ControlServer {
         request: Request<CreateWaveRequest>,
     ) -> Result<Response<CreateWaveResponse>, Status> {
         let req = request.into_inner();
-        let id = Uuid::new_v4().to_string();
+        let id = LfdId::new().to_string();
         let name = req.name.unwrap_or_else(|| format!("wave-{id}"));
         let flow = req.flow.unwrap_or_else(|| "ship".to_string());
 
@@ -236,6 +241,7 @@ impl ControlService for ControlServer {
     ) -> Result<Response<UpdateWaveResponse>, Status> {
         let req = request.into_inner();
         let wave_id = req.wave_id;
+        let wave_id = Self::parse_id(&wave_id, "wave_id")?;
         let mut wave = self
             .run_store(move |store| store.get_wave(&wave_id))
             .await?
@@ -267,6 +273,7 @@ impl ControlService for ControlServer {
         request: Request<DeleteWaveRequest>,
     ) -> Result<Response<DeleteWaveResponse>, Status> {
         let wave_id = request.into_inner().wave_id;
+        let wave_id = Self::parse_id(&wave_id, "wave_id")?;
         self.run_store(move |store| store.delete_wave(&wave_id))
             .await?;
         Ok(Response::new(DeleteWaveResponse {}))
@@ -277,13 +284,13 @@ impl ControlService for ControlServer {
         request: Request<CloneWaveRequest>,
     ) -> Result<Response<CloneWaveResponse>, Status> {
         let req = request.into_inner();
-        let wave_id = req.wave_id.clone();
+        let wave_id = Self::parse_id(&req.wave_id, "wave_id")?;
         let mut wave = self
             .run_store(move |store| store.get_wave(&wave_id))
             .await?
             .ok_or_else(|| Status::not_found("wave not found"))?;
 
-        let new_id = Uuid::new_v4().to_string();
+        let new_id = LfdId::new().to_string();
         wave.id = new_id;
         wave.name = req.name.unwrap_or_else(|| format!("{}-copy", wave.name));
         wave.created_at = Some(Self::now_timestamp());
@@ -301,6 +308,7 @@ impl ControlService for ControlServer {
     ) -> Result<Response<RunWaveResponse>, Status> {
         let req = request.into_inner();
         let wave_id = req.wave_id;
+        let wave_id = Self::parse_id(&wave_id, "wave_id")?;
         let mut wave = self
             .run_store(move |store| store.get_wave(&wave_id))
             .await?
@@ -335,6 +343,7 @@ impl ControlService for ControlServer {
         request: Request<StopWaveRequest>,
     ) -> Result<Response<StopWaveResponse>, Status> {
         let wave_id = request.into_inner().wave_id;
+        let wave_id = Self::parse_id(&wave_id, "wave_id")?;
         let mut wave = self
             .run_store(move |store| store.get_wave(&wave_id))
             .await?
@@ -357,17 +366,17 @@ impl ControlService for ControlServer {
         request: Request<ListStimuliRequest>,
     ) -> Result<Response<ListStimuliResponse>, Status> {
         let req = request.into_inner();
-        let wave_id = req
-            .wave_id
-            .as_deref()
-            .filter(|value| !value.is_empty())
-            .map(str::to_string);
+        let wave_id = req.wave_id.as_deref().filter(|value| !value.is_empty());
+        let wave_id = match wave_id {
+            Some(value) => Some(Self::parse_id(value, "wave_id")?),
+            None => None,
+        };
 
         let stimuli = if let Some(kind) = req.kind {
             self.run_store(move |store| store.list_stimuli_by_kind(kind))
                 .await?
         } else {
-            self.run_store(move |store| store.list_stimuli(wave_id.as_deref()))
+            self.run_store(move |store| store.list_stimuli(wave_id.as_ref()))
                 .await?
         };
 
@@ -379,6 +388,7 @@ impl ControlService for ControlServer {
         request: Request<GetStimulusRequest>,
     ) -> Result<Response<GetStimulusResponse>, Status> {
         let stimulus_id = request.into_inner().stimulus_id;
+        let stimulus_id = Self::parse_id(&stimulus_id, "stimulus_id")?;
         let stimulus = self
             .run_store(move |store| store.get_stimulus(&stimulus_id))
             .await?
@@ -395,13 +405,13 @@ impl ControlService for ControlServer {
         let req = request.into_inner();
 
         // Verify wave exists
-        let wave_id = req.wave_id.clone();
+        let wave_id = Self::parse_id(&req.wave_id, "wave_id")?;
         self.run_store(move |store| store.get_wave(&wave_id))
             .await?
             .ok_or_else(|| Status::not_found("wave not found"))?;
 
         let stimulus = Stimulus {
-            id: Uuid::new_v4().to_string(),
+            id: LfdId::new().to_string(),
             wave_id: req.wave_id,
             kind: req.kind,
             cron: req.cron,
@@ -426,6 +436,7 @@ impl ControlService for ControlServer {
     ) -> Result<Response<UpdateStimulusResponse>, Status> {
         let req = request.into_inner();
         let stimulus_id = req.stimulus_id;
+        let stimulus_id = Self::parse_id(&stimulus_id, "stimulus_id")?;
         let mut stimulus = self
             .run_store(move |store| store.get_stimulus(&stimulus_id))
             .await?
@@ -452,6 +463,7 @@ impl ControlService for ControlServer {
         request: Request<DeleteStimulusRequest>,
     ) -> Result<Response<DeleteStimulusResponse>, Status> {
         let stimulus_id = request.into_inner().stimulus_id;
+        let stimulus_id = Self::parse_id(&stimulus_id, "stimulus_id")?;
         self.run_store(move |store| store.delete_stimulus(&stimulus_id))
             .await?;
         Ok(Response::new(DeleteStimulusResponse {}))
@@ -462,6 +474,7 @@ impl ControlService for ControlServer {
         request: Request<ConnectWaveRequest>,
     ) -> Result<Response<ConnectWaveResponse>, Status> {
         let wave_id = request.into_inner().wave_id;
+        let wave_id = Self::parse_id(&wave_id, "wave_id")?;
         let mut wave = self
             .run_store({
                 let wave_id = wave_id.clone();
@@ -470,7 +483,7 @@ impl ControlService for ControlServer {
             .await?
             .ok_or_else(|| Status::not_found("wave not found"))?;
 
-        if !self.scheduler.register_session(&wave_id) {
+        if !self.scheduler.register_session(wave_id.as_str()) {
             return Err(Status::failed_precondition("session already active"));
         }
 
@@ -483,11 +496,11 @@ impl ControlService for ControlServer {
         {
             Ok(Some(step_run)) => step_run,
             Ok(None) => {
-                self.scheduler.unregister_session(&wave_id);
+                self.scheduler.unregister_session(wave_id.as_str());
                 return Err(Status::not_found("no waiting step run"));
             }
             Err(err) => {
-                self.scheduler.unregister_session(&wave_id);
+                self.scheduler.unregister_session(wave_id.as_str());
                 return Err(err);
             }
         };
@@ -498,7 +511,7 @@ impl ControlService for ControlServer {
                 let step_run_id = step_run_id.clone();
                 move |store| {
                     store.update_step_run_status(
-                        &step_run_id,
+                        &LfdId::from_raw(step_run_id),
                         StepRunStatus::StepRunning as i32,
                         None,
                     )
@@ -506,7 +519,7 @@ impl ControlService for ControlServer {
             })
             .await
         {
-            self.scheduler.unregister_session(&wave_id);
+            self.scheduler.unregister_session(wave_id.as_str());
             return Err(err);
         }
 
@@ -516,7 +529,7 @@ impl ControlService for ControlServer {
             .run_store(move |store| store.update_wave(&wave_clone))
             .await
         {
-            self.scheduler.unregister_session(&wave_id);
+            self.scheduler.unregister_session(wave_id.as_str());
             return Err(err);
         }
 
@@ -526,6 +539,8 @@ impl ControlService for ControlServer {
         let worktree = step_run.worktree.clone();
         let step = step_run.step.clone();
         let wave_id_task = wave.id.clone();
+        let wave_id_task_id =
+            LfdId::parse(&wave.id).unwrap_or_else(|_| LfdId::from_raw(wave.id.clone()));
 
         tokio::spawn(async move {
             let mut command = PtyCommand::new("lf")
@@ -558,11 +573,12 @@ impl ControlService for ControlServer {
             };
 
             let ended_at = OffsetDateTime::now_utc().unix_timestamp();
+            let step_run_id = LfdId::from_raw(step_run_id);
             if let Err(err) = store.end_step_run(&step_run_id, status as i32, ended_at) {
                 tracing::warn!(wave_id = %wave_id_task, error = %err, "failed to end step run");
             }
 
-            if let Ok(Some(mut wave)) = store.get_wave(&wave_id_task) {
+            if let Ok(Some(mut wave)) = store.get_wave(&wave_id_task_id) {
                 if status == StepRunStatus::StepCompleted {
                     wave.step_index += 1;
                     wave.consecutive_failures = 0;
@@ -694,7 +710,7 @@ impl ControlService for ControlServer {
             .step_run
             .ok_or_else(|| Status::invalid_argument("missing step_run"))?;
         let id = if step_run.id.is_empty() {
-            Uuid::new_v4().to_string()
+            LfdId::new().to_string()
         } else {
             step_run.id.clone()
         };
@@ -720,24 +736,22 @@ impl ControlService for ControlServer {
     ) -> Result<Response<EndStepRunResponse>, Status> {
         let req = request.into_inner();
         let step_run_id = req.step_run_id.clone();
+        let step_run_id_for_end = LfdId::from_raw(step_run_id.clone());
         let ended_at = Self::now_timestamp().seconds;
-        let step_run_id_for_end = step_run_id.clone();
         self.run_store(move |store| store.end_step_run(&step_run_id_for_end, req.status, ended_at))
             .await?;
 
         if let Ok(Some(step_run)) = self
             .run_store({
-                let step_run_id = step_run_id.clone();
+                let step_run_id = LfdId::from_raw(step_run_id.clone());
                 move |store| store.get_step_run(&step_run_id)
             })
             .await
         {
             if let Some(wave_id) = step_run.wave_id {
+                let wave_id = Self::parse_id(&wave_id, "wave_id")?;
                 let wave = self
-                    .run_store({
-                        let wave_id = wave_id.clone();
-                        move |store| store.get_wave(&wave_id)
-                    })
+                    .run_store({ move |store| store.get_wave(&wave_id) })
                     .await?;
 
                 if let Some(mut wave) = wave {

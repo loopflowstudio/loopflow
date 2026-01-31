@@ -4,6 +4,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use crate::id::LfdId;
 use crate::proto::control::{StepRunStatus, WaveStatus};
 use crate::store::SharedStore;
 
@@ -45,10 +46,18 @@ fn recover_stuck_runs(store: &SharedStore) {
             .duration_since(UNIX_EPOCH)
             .expect("system time before unix epoch")
             .as_secs() as i64;
-        let _ = store.end_step_run(&run.id, StepRunStatus::StepFailed as i32, now);
+        let step_run_id = LfdId::from_raw(run.id.clone());
+        let _ = store.end_step_run(&step_run_id, StepRunStatus::StepFailed as i32, now);
 
         if let Some(wave_id) = run.wave_id.as_deref() {
-            if let Ok(Some(mut wave)) = store.get_wave(wave_id) {
+            let wave_id = match LfdId::parse(wave_id) {
+                Ok(id) => id,
+                Err(err) => {
+                    tracing::warn!(wave_id = %wave_id, error = %err, "invalid wave id");
+                    continue;
+                }
+            };
+            if let Ok(Some(mut wave)) = store.get_wave(&wave_id) {
                 wave.consecutive_failures += 1;
                 if wave.consecutive_failures >= 3 {
                     wave.status = WaveStatus::WaveError as i32;

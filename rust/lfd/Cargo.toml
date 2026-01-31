@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 anyhow = "1"
 axum = "0.7"
+bytes = "1"
 chrono = { version = "0.4", features = ["serde"] }
 cron = "0.12"
 deadpool-postgres = "0.12"

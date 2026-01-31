@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::id::LfdId;
 use crate::proto::control::PendingActivation;
 use crate::proto::control::StepRun;
 use crate::proto::control::Stimulus;
@@ -30,8 +31,8 @@ impl ForkRunStatus {
 
 #[derive(Debug, Clone)]
 pub struct ForkRun {
-    pub id: String,
-    pub wave_id: String,
+    pub id: LfdId,
+    pub wave_id: LfdId,
     pub step_index: u32,
     pub branch_index: u32,
     pub status: ForkRunStatus,
@@ -63,35 +64,35 @@ pub trait RunStore: Send + Sync {
 
     // Wave management
     fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>>;
-    fn get_wave(&self, wave_id: &str) -> StoreResult<Option<Wave>>;
+    fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>>;
     fn create_wave(&self, wave: &Wave) -> StoreResult<()>;
     fn update_wave(&self, wave: &Wave) -> StoreResult<()>;
-    fn delete_wave(&self, wave_id: &str) -> StoreResult<()>;
+    fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()>;
 
     // Stimulus management (many:1 with waves)
-    fn list_stimuli(&self, wave_id: Option<&str>) -> StoreResult<Vec<Stimulus>>;
+    fn list_stimuli(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Stimulus>>;
     fn list_stimuli_by_kind(&self, kind: i32) -> StoreResult<Vec<Stimulus>>;
-    fn get_stimulus(&self, stimulus_id: &str) -> StoreResult<Option<Stimulus>>;
+    fn get_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<Option<Stimulus>>;
     fn create_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()>;
     fn update_stimulus(&self, stimulus: &Stimulus) -> StoreResult<()>;
-    fn delete_stimulus(&self, stimulus_id: &str) -> StoreResult<()>;
-    fn delete_stimuli_for_wave(&self, wave_id: &str) -> StoreResult<u32>;
+    fn delete_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<()>;
+    fn delete_stimuli_for_wave(&self, wave_id: &LfdId) -> StoreResult<u32>;
 
     // Pending activations (for coalescing triggers)
-    fn list_pending_activations(&self, wave_id: &str) -> StoreResult<Vec<PendingActivation>>;
+    fn list_pending_activations(&self, wave_id: &LfdId) -> StoreResult<Vec<PendingActivation>>;
     fn create_pending_activation(&self, activation: &PendingActivation) -> StoreResult<()>;
     fn update_pending_activation(&self, activation: &PendingActivation) -> StoreResult<()>;
-    fn delete_pending_activations(&self, wave_id: &str) -> StoreResult<u32>;
+    fn delete_pending_activations(&self, wave_id: &LfdId) -> StoreResult<u32>;
     fn get_pending_for_stimulus(
         &self,
-        wave_id: &str,
-        stimulus_id: &str,
+        wave_id: &LfdId,
+        stimulus_id: &LfdId,
     ) -> StoreResult<Option<PendingActivation>>;
 
     // Fork runs
-    fn list_fork_runs(&self, wave_id: &str, step_index: u32) -> StoreResult<Vec<ForkRun>>;
+    fn list_fork_runs(&self, wave_id: &LfdId, step_index: u32) -> StoreResult<Vec<ForkRun>>;
     fn upsert_fork_run(&self, fork_run: &ForkRun) -> StoreResult<()>;
-    fn delete_fork_runs(&self, wave_id: &str, step_index: u32) -> StoreResult<u32>;
+    fn delete_fork_runs(&self, wave_id: &LfdId, step_index: u32) -> StoreResult<u32>;
 
     // Step runs
     fn list_step_runs(&self) -> StoreResult<Vec<StepRun>>;
@@ -101,16 +102,16 @@ pub trait RunStore: Send + Sync {
         repo: Option<&str>,
         limit: Option<u32>,
     ) -> StoreResult<Vec<StepRun>>;
-    fn get_step_run(&self, step_run_id: &str) -> StoreResult<Option<StepRun>>;
-    fn get_waiting_step_run(&self, wave_id: &str) -> StoreResult<Option<StepRun>>;
+    fn get_step_run(&self, step_run_id: &LfdId) -> StoreResult<Option<StepRun>>;
+    fn get_waiting_step_run(&self, wave_id: &LfdId) -> StoreResult<Option<StepRun>>;
     fn start_step_run(&self, step_run: &StepRun) -> StoreResult<()>;
     fn update_step_run_status(
         &self,
-        step_run_id: &str,
+        step_run_id: &LfdId,
         status: i32,
         pid: Option<u32>,
     ) -> StoreResult<()>;
-    fn end_step_run(&self, step_run_id: &str, status: i32, ended_at: i64) -> StoreResult<()>;
+    fn end_step_run(&self, step_run_id: &LfdId, status: i32, ended_at: i64) -> StoreResult<()>;
     fn get_stuck_step_runs(&self, older_than_secs: u64) -> StoreResult<Vec<StepRun>>;
 }
 
@@ -119,6 +120,7 @@ pub type SharedStore = Arc<dyn RunStore>;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::id::LfdId;
     use crate::proto::control::{
         MergeMode, PendingActivation, StepRun, StepRunStatus, Stimulus, StimulusKind, Wave,
         WaveStatus,
@@ -139,9 +141,10 @@ mod tests {
     }
 
     fn make_wave(repo: &str) -> Wave {
+        let id = LfdId::new().to_string();
         Wave {
-            id: Uuid::new_v4().to_string(),
-            name: format!("wave-{}", Uuid::new_v4()),
+            id: id.clone(),
+            name: format!("wave-{id}"),
             repo: repo.to_string(),
             flow: "default".to_string(),
             direction: vec!["focus".to_string()],
@@ -163,7 +166,7 @@ mod tests {
 
     fn make_stimulus(wave_id: &str) -> Stimulus {
         Stimulus {
-            id: Uuid::new_v4().to_string(),
+            id: LfdId::new().to_string(),
             wave_id: wave_id.to_string(),
             kind: StimulusKind::StimulusWatch as i32,
             cron: "".to_string(),
@@ -176,7 +179,7 @@ mod tests {
 
     fn make_pending_activation(wave_id: &str, stimulus_id: &str) -> PendingActivation {
         PendingActivation {
-            id: Uuid::new_v4().to_string(),
+            id: LfdId::new().to_string(),
             wave_id: wave_id.to_string(),
             stimulus_id: stimulus_id.to_string(),
             from_sha: "aaa".to_string(),
@@ -187,7 +190,7 @@ mod tests {
 
     fn make_step_run(wave_id: Option<&str>, status: StepRunStatus, started_at: i64) -> StepRun {
         StepRun {
-            id: format!("step-{}", Uuid::new_v4()),
+            id: LfdId::new().to_string(),
             step: "plan".to_string(),
             repo: "/repo".to_string(),
             worktree: "/repo".to_string(),
@@ -209,13 +212,19 @@ mod tests {
         let mut wave = make_wave("/repo");
         store.create_wave(&wave).unwrap();
 
-        let loaded = store.get_wave(&wave.id).unwrap().unwrap();
+        let loaded = store
+            .get_wave(&LfdId::parse(&wave.id).unwrap())
+            .unwrap()
+            .unwrap();
         assert_eq!(loaded.name, wave.name);
 
         wave.paused = true;
         wave.status = WaveStatus::WaveRunning as i32;
         store.update_wave(&wave).unwrap();
-        let updated = store.get_wave(&wave.id).unwrap().unwrap();
+        let updated = store
+            .get_wave(&LfdId::parse(&wave.id).unwrap())
+            .unwrap()
+            .unwrap();
         assert!(updated.paused);
         assert_eq!(updated.status, WaveStatus::WaveRunning as i32);
 
@@ -224,7 +233,9 @@ mod tests {
 
         let stimulus = make_stimulus(&wave.id);
         store.create_stimulus(&stimulus).unwrap();
-        let listed = store.list_stimuli(Some(&wave.id)).unwrap();
+        let listed = store
+            .list_stimuli(Some(&LfdId::parse(&wave.id).unwrap()))
+            .unwrap();
         assert_eq!(listed.len(), 1);
         let by_kind = store
             .list_stimuli_by_kind(StimulusKind::StimulusWatch as i32)
@@ -234,20 +245,31 @@ mod tests {
         let mut stimulus_updated = stimulus.clone();
         stimulus_updated.enabled = false;
         store.update_stimulus(&stimulus_updated).unwrap();
-        let loaded_stimulus = store.get_stimulus(&stimulus.id).unwrap().unwrap();
+        let loaded_stimulus = store
+            .get_stimulus(&LfdId::parse(&stimulus.id).unwrap())
+            .unwrap()
+            .unwrap();
         assert!(!loaded_stimulus.enabled);
 
         let activation = make_pending_activation(&wave.id, &stimulus.id);
         store.create_pending_activation(&activation).unwrap();
-        let activations = store.list_pending_activations(&wave.id).unwrap();
+        let activations = store
+            .list_pending_activations(&LfdId::parse(&wave.id).unwrap())
+            .unwrap();
         assert_eq!(activations.len(), 1);
         let pending = store
-            .get_pending_for_stimulus(&wave.id, &stimulus.id)
+            .get_pending_for_stimulus(
+                &LfdId::parse(&wave.id).unwrap(),
+                &LfdId::parse(&stimulus.id).unwrap(),
+            )
             .unwrap()
             .unwrap();
         assert_eq!(pending.id, activation.id);
 
-        let wave_after_pending = store.get_wave(&wave.id).unwrap().unwrap();
+        let wave_after_pending = store
+            .get_wave(&LfdId::parse(&wave.id).unwrap())
+            .unwrap()
+            .unwrap();
         assert_eq!(wave_after_pending.pending_activations, 1);
 
         let mut activation_updated = activation.clone();
@@ -256,35 +278,55 @@ mod tests {
             .update_pending_activation(&activation_updated)
             .unwrap();
 
-        let deleted = store.delete_pending_activations(&wave.id).unwrap();
+        let deleted = store
+            .delete_pending_activations(&LfdId::parse(&wave.id).unwrap())
+            .unwrap();
         assert_eq!(deleted, 1);
-        let wave_after_delete = store.get_wave(&wave.id).unwrap().unwrap();
+        let wave_after_delete = store
+            .get_wave(&LfdId::parse(&wave.id).unwrap())
+            .unwrap()
+            .unwrap();
         assert_eq!(wave_after_delete.pending_activations, 0);
 
         let fork_run = ForkRun {
-            id: Uuid::new_v4().to_string(),
-            wave_id: wave.id.clone(),
+            id: LfdId::new(),
+            wave_id: LfdId::parse(&wave.id).unwrap(),
             step_index: 0,
             branch_index: 0,
             status: ForkRunStatus::Pending,
             worktree: "/tmp/branch".to_string(),
         };
         store.upsert_fork_run(&fork_run).unwrap();
-        let forks = store.list_fork_runs(&wave.id, 0).unwrap();
+        let forks = store
+            .list_fork_runs(&LfdId::parse(&wave.id).unwrap(), 0)
+            .unwrap();
         assert_eq!(forks.len(), 1);
-        let deleted_forks = store.delete_fork_runs(&wave.id, 0).unwrap();
+        let deleted_forks = store
+            .delete_fork_runs(&LfdId::parse(&wave.id).unwrap(), 0)
+            .unwrap();
         assert_eq!(deleted_forks, 1);
 
         let now = OffsetDateTime::now_utc().unix_timestamp();
         let step_run = make_step_run(Some(&wave.id), StepRunStatus::StepWaiting, now);
         store.start_step_run(&step_run).unwrap();
-        let waiting = store.get_waiting_step_run(&wave.id).unwrap().unwrap();
+        let waiting = store
+            .get_waiting_step_run(&LfdId::parse(&wave.id).unwrap())
+            .unwrap()
+            .unwrap();
         assert_eq!(waiting.id, step_run.id);
         store
-            .update_step_run_status(&step_run.id, StepRunStatus::StepRunning as i32, Some(123))
+            .update_step_run_status(
+                &LfdId::parse(&step_run.id).unwrap(),
+                StepRunStatus::StepRunning as i32,
+                Some(123),
+            )
             .unwrap();
         store
-            .end_step_run(&step_run.id, StepRunStatus::StepCompleted as i32, now + 10)
+            .end_step_run(
+                &LfdId::parse(&step_run.id).unwrap(),
+                StepRunStatus::StepCompleted as i32,
+                now + 10,
+            )
             .unwrap();
 
         let old_run = make_step_run(Some(&wave.id), StepRunStatus::StepRunning, now - 3600);
@@ -292,8 +334,11 @@ mod tests {
         let stuck = store.get_stuck_step_runs(60).unwrap();
         assert!(stuck.iter().any(|run| run.id == old_run.id));
 
-        store.delete_wave(&wave.id).unwrap();
-        assert!(store.get_wave(&wave.id).unwrap().is_none());
+        store.delete_wave(&LfdId::parse(&wave.id).unwrap()).unwrap();
+        assert!(store
+            .get_wave(&LfdId::parse(&wave.id).unwrap())
+            .unwrap()
+            .is_none());
     }
 
     fn reset_postgres(url: &str) {

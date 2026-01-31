@@ -6,6 +6,7 @@ use tokio_postgres::error::SqlState;
 use tokio_postgres::types::ToSql;
 use tokio_postgres::{NoTls, Row};
 
+use crate::id::LfdId;
 use crate::proto::control::{PendingActivation, StepRun, StepRunStatus, Stimulus, Wave};
 use crate::store::{ForkRun, ForkRunStatus, RunStore, StoreError, StoreResult};
 
@@ -240,7 +241,7 @@ impl RunStore for PostgresStore {
         self.read_waves(repo)
     }
 
-    fn get_wave(&self, wave_id: &str) -> StoreResult<Option<Wave>> {
+    fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
         self.with_client(|client| async move {
             let row = client
                 .query_opt(
@@ -267,7 +268,7 @@ impl RunStore for PostgresStore {
         self.upsert_wave(wave)
     }
 
-    fn delete_wave(&self, wave_id: &str) -> StoreResult<()> {
+    fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
         self.with_client(|client| async move {
             client
                 .execute("DELETE FROM waves WHERE id = $1", &[&wave_id])
@@ -276,7 +277,7 @@ impl RunStore for PostgresStore {
         })
     }
 
-    fn list_stimuli(&self, wave_id: Option<&str>) -> StoreResult<Vec<Stimulus>> {
+    fn list_stimuli(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Stimulus>> {
         self.with_client(|client| async move {
             let rows = if let Some(wave_id) = wave_id {
                 client
@@ -321,7 +322,7 @@ impl RunStore for PostgresStore {
         })
     }
 
-    fn get_stimulus(&self, stimulus_id: &str) -> StoreResult<Option<Stimulus>> {
+    fn get_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<Option<Stimulus>> {
         self.with_client(|client| async move {
             let row = client
                 .query_opt(
@@ -387,7 +388,7 @@ impl RunStore for PostgresStore {
         })
     }
 
-    fn delete_stimulus(&self, stimulus_id: &str) -> StoreResult<()> {
+    fn delete_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<()> {
         self.with_client(|client| async move {
             client
                 .execute("DELETE FROM stimuli WHERE id = $1", &[&stimulus_id])
@@ -396,7 +397,7 @@ impl RunStore for PostgresStore {
         })
     }
 
-    fn delete_stimuli_for_wave(&self, wave_id: &str) -> StoreResult<u32> {
+    fn delete_stimuli_for_wave(&self, wave_id: &LfdId) -> StoreResult<u32> {
         self.with_client(|client| async move {
             let deleted = client
                 .execute("DELETE FROM stimuli WHERE wave_id = $1", &[&wave_id])
@@ -405,7 +406,7 @@ impl RunStore for PostgresStore {
         })
     }
 
-    fn list_pending_activations(&self, wave_id: &str) -> StoreResult<Vec<PendingActivation>> {
+    fn list_pending_activations(&self, wave_id: &LfdId) -> StoreResult<Vec<PendingActivation>> {
         self.with_client(|client| async move {
             let rows = client
                 .query(
@@ -469,7 +470,7 @@ impl RunStore for PostgresStore {
         })
     }
 
-    fn delete_pending_activations(&self, wave_id: &str) -> StoreResult<u32> {
+    fn delete_pending_activations(&self, wave_id: &LfdId) -> StoreResult<u32> {
         self.with_client(|client| async move {
             let mut client = client;
             let transaction = client.transaction().await?;
@@ -492,8 +493,8 @@ impl RunStore for PostgresStore {
 
     fn get_pending_for_stimulus(
         &self,
-        wave_id: &str,
-        stimulus_id: &str,
+        wave_id: &LfdId,
+        stimulus_id: &LfdId,
     ) -> StoreResult<Option<PendingActivation>> {
         self.with_client(|client| async move {
             let row = client
@@ -507,7 +508,7 @@ impl RunStore for PostgresStore {
         })
     }
 
-    fn list_fork_runs(&self, wave_id: &str, step_index: u32) -> StoreResult<Vec<ForkRun>> {
+    fn list_fork_runs(&self, wave_id: &LfdId, step_index: u32) -> StoreResult<Vec<ForkRun>> {
         self.with_client(|client| async move {
             let rows = client
                 .query(
@@ -553,7 +554,7 @@ impl RunStore for PostgresStore {
         })
     }
 
-    fn delete_fork_runs(&self, wave_id: &str, step_index: u32) -> StoreResult<u32> {
+    fn delete_fork_runs(&self, wave_id: &LfdId, step_index: u32) -> StoreResult<u32> {
         self.with_client(|client| async move {
             let deleted = client
                 .execute(
@@ -615,7 +616,7 @@ impl RunStore for PostgresStore {
         })
     }
 
-    fn get_step_run(&self, step_run_id: &str) -> StoreResult<Option<StepRun>> {
+    fn get_step_run(&self, step_run_id: &LfdId) -> StoreResult<Option<StepRun>> {
         self.with_client(|client| async move {
             let row = client
                 .query_opt(
@@ -632,7 +633,7 @@ impl RunStore for PostgresStore {
         })
     }
 
-    fn get_waiting_step_run(&self, wave_id: &str) -> StoreResult<Option<StepRun>> {
+    fn get_waiting_step_run(&self, wave_id: &LfdId) -> StoreResult<Option<StepRun>> {
         self.with_client(|client| async move {
             let row = client
                 .query_opt(
@@ -690,7 +691,7 @@ impl RunStore for PostgresStore {
 
     fn update_step_run_status(
         &self,
-        step_run_id: &str,
+        step_run_id: &LfdId,
         status: i32,
         pid: Option<u32>,
     ) -> StoreResult<()> {
@@ -709,7 +710,7 @@ impl RunStore for PostgresStore {
         })
     }
 
-    fn end_step_run(&self, step_run_id: &str, status: i32, ended_at: i64) -> StoreResult<()> {
+    fn end_step_run(&self, step_run_id: &LfdId, status: i32, ended_at: i64) -> StoreResult<()> {
         self.with_client(|client| async move {
             let updated = client
                 .execute(
@@ -885,8 +886,8 @@ fn map_fork_run_row(row: &Row) -> StoreResult<ForkRun> {
         .ok_or_else(|| StoreError::InvalidData("invalid fork run status".to_string()))?;
 
     Ok(ForkRun {
-        id: row.get(0),
-        wave_id: row.get(1),
+        id: LfdId::from_raw(row.get::<_, String>(0)),
+        wave_id: LfdId::from_raw(row.get::<_, String>(1)),
         step_index: row.get::<_, i32>(2) as u32,
         branch_index: row.get::<_, i32>(3) as u32,
         status,

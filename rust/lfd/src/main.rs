@@ -7,6 +7,7 @@ use tokio_util::sync::CancellationToken;
 use tonic::transport::Server;
 
 mod http;
+mod id;
 mod loops;
 mod obs;
 mod proto;

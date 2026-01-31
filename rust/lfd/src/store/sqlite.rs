@@ -7,6 +7,7 @@ use rusqlite::types::Type;
 use rusqlite::{params, Connection, OptionalExtension, Row, ToSql};
 use time::OffsetDateTime;
 
+use crate::id::LfdId;
 use crate::proto::control::{PendingActivation, StepRun, StepRunStatus, Stimulus, Wave};
 use crate::store::{ForkRun, ForkRunStatus, RunStore, StoreError, StoreResult};
 
@@ -308,7 +309,7 @@ impl RunStore for SqliteStore {
         self.read_waves(repo)
     }
 
-    fn get_wave(&self, wave_id: &str) -> StoreResult<Option<Wave>> {
+    fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "
@@ -334,7 +335,7 @@ impl RunStore for SqliteStore {
         self.upsert_wave(wave)
     }
 
-    fn delete_wave(&self, wave_id: &str) -> StoreResult<()> {
+    fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         // Stimuli and pending_activations cascade delete via foreign key
         conn.execute("DELETE FROM waves WHERE id = ?1", params![wave_id])?;
@@ -343,13 +344,13 @@ impl RunStore for SqliteStore {
 
     // Stimulus methods
 
-    fn list_stimuli(&self, wave_id: Option<&str>) -> StoreResult<Vec<Stimulus>> {
+    fn list_stimuli(&self, wave_id: Option<&LfdId>) -> StoreResult<Vec<Stimulus>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let (query, params): (&str, Vec<Box<dyn ToSql>>) = if let Some(wave_id) = wave_id {
             (
                 "SELECT id, wave_id, kind, cron, last_main_sha, last_triggered_at, enabled, created_at
                  FROM stimuli WHERE wave_id = ?1 ORDER BY created_at",
-                vec![Box::new(wave_id.to_string())],
+                vec![Box::new(wave_id.clone())],
             )
         } else {
             (
@@ -385,7 +386,7 @@ impl RunStore for SqliteStore {
         Ok(stimuli)
     }
 
-    fn get_stimulus(&self, stimulus_id: &str) -> StoreResult<Option<Stimulus>> {
+    fn get_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<Option<Stimulus>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, wave_id, kind, cron, last_main_sha, last_triggered_at, enabled, created_at
@@ -447,13 +448,13 @@ impl RunStore for SqliteStore {
         Ok(())
     }
 
-    fn delete_stimulus(&self, stimulus_id: &str) -> StoreResult<()> {
+    fn delete_stimulus(&self, stimulus_id: &LfdId) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute("DELETE FROM stimuli WHERE id = ?1", params![stimulus_id])?;
         Ok(())
     }
 
-    fn delete_stimuli_for_wave(&self, wave_id: &str) -> StoreResult<u32> {
+    fn delete_stimuli_for_wave(&self, wave_id: &LfdId) -> StoreResult<u32> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let deleted = conn.execute("DELETE FROM stimuli WHERE wave_id = ?1", params![wave_id])?;
         Ok(deleted as u32)
@@ -461,7 +462,7 @@ impl RunStore for SqliteStore {
 
     // Pending activation methods
 
-    fn list_pending_activations(&self, wave_id: &str) -> StoreResult<Vec<PendingActivation>> {
+    fn list_pending_activations(&self, wave_id: &LfdId) -> StoreResult<Vec<PendingActivation>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, wave_id, stimulus_id, from_sha, to_sha, queued_at
@@ -524,7 +525,7 @@ impl RunStore for SqliteStore {
         Ok(())
     }
 
-    fn delete_pending_activations(&self, wave_id: &str) -> StoreResult<u32> {
+    fn delete_pending_activations(&self, wave_id: &LfdId) -> StoreResult<u32> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let deleted = conn.execute(
             "DELETE FROM pending_activations WHERE wave_id = ?1",
@@ -542,8 +543,8 @@ impl RunStore for SqliteStore {
 
     fn get_pending_for_stimulus(
         &self,
-        wave_id: &str,
-        stimulus_id: &str,
+        wave_id: &LfdId,
+        stimulus_id: &LfdId,
     ) -> StoreResult<Option<PendingActivation>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
@@ -636,7 +637,7 @@ impl RunStore for SqliteStore {
         Ok(runs)
     }
 
-    fn list_fork_runs(&self, wave_id: &str, step_index: u32) -> StoreResult<Vec<ForkRun>> {
+    fn list_fork_runs(&self, wave_id: &LfdId, step_index: u32) -> StoreResult<Vec<ForkRun>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, wave_id, step_index, branch_index, status, worktree
@@ -658,8 +659,8 @@ impl RunStore for SqliteStore {
             })?;
 
             Ok(ForkRun {
-                id: row.get(0)?,
-                wave_id: row.get(1)?,
+                id: LfdId::from_raw(row.get::<_, String>(0)?),
+                wave_id: LfdId::from_raw(row.get::<_, String>(1)?),
                 step_index: row.get::<_, i64>(2)? as u32,
                 branch_index: row.get::<_, i64>(3)? as u32,
                 status,
@@ -699,7 +700,7 @@ impl RunStore for SqliteStore {
         Ok(())
     }
 
-    fn delete_fork_runs(&self, wave_id: &str, step_index: u32) -> StoreResult<u32> {
+    fn delete_fork_runs(&self, wave_id: &LfdId, step_index: u32) -> StoreResult<u32> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let deleted = conn.execute(
             "DELETE FROM fork_runs WHERE wave_id = ?1 AND step_index = ?2",
@@ -708,7 +709,7 @@ impl RunStore for SqliteStore {
         Ok(deleted as u32)
     }
 
-    fn get_step_run(&self, step_run_id: &str) -> StoreResult<Option<StepRun>> {
+    fn get_step_run(&self, step_run_id: &LfdId) -> StoreResult<Option<StepRun>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "
@@ -745,7 +746,7 @@ impl RunStore for SqliteStore {
         Ok(run)
     }
 
-    fn get_waiting_step_run(&self, wave_id: &str) -> StoreResult<Option<StepRun>> {
+    fn get_waiting_step_run(&self, wave_id: &LfdId) -> StoreResult<Option<StepRun>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "
@@ -818,7 +819,7 @@ impl RunStore for SqliteStore {
 
     fn update_step_run_status(
         &self,
-        step_run_id: &str,
+        step_run_id: &LfdId,
         status: i32,
         pid: Option<u32>,
     ) -> StoreResult<()> {
@@ -833,7 +834,7 @@ impl RunStore for SqliteStore {
         Ok(())
     }
 
-    fn end_step_run(&self, step_run_id: &str, status: i32, ended_at: i64) -> StoreResult<()> {
+    fn end_step_run(&self, step_run_id: &LfdId, status: i32, ended_at: i64) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let updated = conn.execute(
             "UPDATE step_runs SET status = ?1, ended_at = ?2 WHERE id = ?3",

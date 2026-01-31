@@ -1,14 +1,13 @@
 use std::path::Path;
 use std::time::Duration;
 
+use crate::id::LfdId;
+use crate::proto::control::{PendingActivation, Stimulus, StimulusKind, Wave, WaveStatus};
+use crate::store::SharedStore;
 use chrono::Utc;
 use git2::Repository;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use uuid::Uuid;
-
-use crate::proto::control::{PendingActivation, Stimulus, StimulusKind, Wave, WaveStatus};
-use crate::store::SharedStore;
 
 pub fn spawn_watch_poller(store: SharedStore, cancel: CancellationToken) -> JoinHandle<()> {
     tokio::spawn(async move {
@@ -42,7 +41,14 @@ fn check_watch_stimuli(store: &SharedStore) {
         }
 
         // Get the wave for this stimulus
-        let wave = match store.get_wave(&stimulus.wave_id) {
+        let wave_id = match LfdId::parse(&stimulus.wave_id) {
+            Ok(id) => id,
+            Err(err) => {
+                tracing::warn!(stimulus_id = %stimulus.id, error = %err, "invalid wave id");
+                continue;
+            }
+        };
+        let wave = match store.get_wave(&wave_id) {
             Ok(Some(wave)) => wave,
             Ok(None) => {
                 tracing::warn!(stimulus_id = %stimulus.id, "stimulus references missing wave");
@@ -79,10 +85,12 @@ fn check_watch_stimuli(store: &SharedStore) {
                         || wave.status == WaveStatus::WaveWaiting as i32
                     {
                         // Wave is busy - queue with SHA range for coalescing
+                        let stimulus_id = LfdId::parse(&stimulus.id)
+                            .unwrap_or_else(|_| LfdId::from_raw(stimulus.id.clone()));
                         queue_or_coalesce_activation(
                             store,
-                            &wave.id,
-                            &stimulus.id,
+                            &wave_id,
+                            &stimulus_id,
                             &result.from_sha,
                             &result.current_sha,
                         );
@@ -195,8 +203,8 @@ fn check_watch_stimulus(wave: &Wave, stimulus: &Stimulus) -> Result<WatchCheck, 
 
 fn queue_or_coalesce_activation(
     store: &SharedStore,
-    wave_id: &str,
-    stimulus_id: &str,
+    wave_id: &LfdId,
+    stimulus_id: &LfdId,
     from_sha: &str,
     to_sha: &str,
 ) {
@@ -212,7 +220,7 @@ fn queue_or_coalesce_activation(
         Ok(None) => {
             // Create new pending activation
             let activation = PendingActivation {
-                id: Uuid::new_v4().to_string(),
+                id: LfdId::new().to_string(),
                 wave_id: wave_id.to_string(),
                 stimulus_id: stimulus_id.to_string(),
                 from_sha: from_sha.to_string(),

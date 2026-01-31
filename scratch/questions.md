@@ -1,10 +1,3 @@
 # Open Questions
 
-*Questions resolved in `scratch/rust-data-backend.md`:*
-- ~~Tenancy model~~ → `tenant_id` + `project_id` (flat hierarchy)
-- ~~Event retention defaults~~ → Operator-defined via `LFD_EVENT_RETENTION_DAYS`
-- ~~Migration tooling location~~ → `lfd migrate` subcommand in Rust daemon
-
-*Open questions from UI pass (2026-01-31):*
-- Should the new "Abandon" action also remove the worktree on disk, or only delete the wave record?
-- Should commit history be shown relative to `main` or the wave's base branch when available?
+- LfdId validates UUIDs, but step-run and fork-run IDs are currently composite strings (e.g., "{wave_id}:{step_index}"). I used `LfdId::from_raw(...)` for those internal IDs to avoid validation failures. Should we migrate step/fork IDs to UUIDs instead (and update engine + protocol), or relax validation for those types?

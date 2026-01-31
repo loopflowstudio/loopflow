@@ -509,6 +509,7 @@ final class RepoState {
                 },
                 onConnectionChange: { [weak self] connected in
                     Task { @MainActor in
+                        LoggingService.lfd("onConnectionChange: connected=\(connected)")
                         self?.lfdConnected = connected
                     }
                 }
@@ -612,9 +613,14 @@ final class RepoState {
     // MARK: - Waves
 
     func refreshWaves() async {
-        guard let repo = currentRepo else { return }
+        guard let repo = currentRepo else {
+            LoggingService.model("refreshWaves: no currentRepo")
+            return
+        }
+        LoggingService.model("refreshWaves: starting for repo=\(repo.path)")
         do {
             let newWaves = try await waveService.listWaves(repo: repo)
+            LoggingService.model("refreshWaves: got \(newWaves.count) waves")
 
             // Detect status transitions and notify
             for wave in newWaves {
@@ -622,6 +628,7 @@ final class RepoState {
                 let newStatus = wave.status
 
                 if oldStatus != newStatus {
+                    LoggingService.model("refreshWaves: wave \(wave.id) status changed \(String(describing: oldStatus)) -> \(newStatus)")
                     handleWaveStatusChange(wave: wave, from: oldStatus, to: newStatus)
                 }
                 previousWaveStatuses[wave.id] = newStatus
@@ -633,6 +640,7 @@ final class RepoState {
                 selectedWave = updated
             }
         } catch {
+            LoggingService.model("refreshWaves: error=\(error.localizedDescription)")
             waves = []
         }
     }
@@ -677,13 +685,20 @@ final class RepoState {
     }
 
     func createWave(name: String) async throws {
-        guard let repo = currentRepo else { return }
+        guard let repo = currentRepo else {
+            LoggingService.model("createWave: no currentRepo")
+            return
+        }
 
         let waveName = name.isEmpty ? NameGenerator.generate() : name
+        LoggingService.model("createWave: name=\(waveName) repo=\(repo.path)")
+
         let wave = try await waveService.createWave(name: waveName, repo: repo)
 
+        LoggingService.model("createWave: success, inserting wave id=\(wave.id)")
         waves.insert(wave, at: 0)
         selectedWave = wave
+        LoggingService.model("createWave: selectedWave=\(wave.id)")
     }
 
     func runWave(
@@ -716,6 +731,14 @@ final class RepoState {
         return cloned
     }
 
+    func deleteWave(_ wave: Wave) async throws {
+        try await waveService.deleteWave(waveId: wave.id)
+        waves.removeAll { $0.id == wave.id }
+        if selectedWave?.id == wave.id {
+            selectedWave = nil
+        }
+    }
+
     func renameWave(_ wave: Wave, to newName: String) async throws {
         _ = try await waveService.updateWave(waveId: wave.id, name: newName)
         await refreshWaves()
@@ -741,9 +764,12 @@ final class RepoState {
     }
 
     func connectLfd() async throws {
+        LoggingService.lfd("connectLfd: starting")
         try? await waveService.connectLfd()
+        LoggingService.lfd("connectLfd: waveService.connectLfd completed")
         if let sessionState = _sessionState {
             startEventSubscription(sessionState: sessionState)
+            LoggingService.lfd("connectLfd: event subscription started")
         }
     }
 }

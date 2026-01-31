@@ -15,6 +15,14 @@ public struct WaveService: @unchecked Sendable {
         return URLSession(configuration: config)
     }
 
+    /// Session with longer timeouts for operations that involve git (fetch, push, worktree).
+    private var longSession: URLSession {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 30  // Git operations can be slow
+        config.timeoutIntervalForResource = 60
+        return URLSession(configuration: config)
+    }
+
     // MARK: - Waves
 
     /// List waves for a repository via HTTP API.
@@ -24,12 +32,26 @@ public struct WaveService: @unchecked Sendable {
         var components = URLComponents(url: baseURL.appendingPathComponent("waves"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "repo", value: repo.path)]
 
-        guard let url = components.url else { return [] }
+        guard let url = components.url else {
+            LoggingService.lfd("listWaves: invalid URL for repo=\(repo.path)")
+            return []
+        }
+
+        LoggingService.lfd("listWaves: GET \(url)")
 
         do {
-            let (data, response) = try await session.data(from: url)
+            // Use longSession - list may include worktree state enrichment which runs git
+            let (data, response) = try await longSession.data(from: url)
 
-            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            guard let httpResponse = response as? HTTPURLResponse else {
+                LoggingService.lfd("listWaves: no HTTP response")
+                return []
+            }
+
+            LoggingService.lfd("listWaves: status=\(httpResponse.statusCode)")
+
+            guard httpResponse.statusCode == 200 else {
+                LoggingService.lfd("listWaves: non-200 status")
                 return []
             }
 
@@ -37,11 +59,15 @@ public struct WaveService: @unchecked Sendable {
                   let ok = json["ok"] as? Bool, ok,
                   let result = json["result"] as? [String: Any],
                   let wavesData = result["waves"] as? [[String: Any]] else {
+                LoggingService.lfd("listWaves: invalid JSON response")
                 return []
             }
 
-            return wavesData.map { parseWaveFromJSON($0) }
+            let waves = wavesData.map { parseWaveFromJSON($0) }
+            LoggingService.lfd("listWaves: found \(waves.count) waves")
+            return waves
         } catch {
+            LoggingService.lfd("listWaves: error=\(error.localizedDescription)")
             return []
         }
     }
@@ -162,10 +188,14 @@ public struct WaveService: @unchecked Sendable {
     // MARK: - Actions
 
     public func connectLfd() async throws {
+        LoggingService.lfd("connectLfd: running 'lfd install'")
         try await runShellCommand(["lfd", "install"])
+        LoggingService.lfd("connectLfd: 'lfd install' completed")
     }
 
     public func createWave(name: String, repo: URL) async throws -> Wave {
+        LoggingService.lfd("createWave: name=\(name.isEmpty ? "(auto)" : name) repo=\(repo.path)")
+
         // Create wave via lfd HTTP API with minimal config
         // User configures area, direction, flow in detail panel before running
         let baseURL = URL(string: "http://127.0.0.1:8765")!
@@ -185,22 +215,43 @@ public struct WaveService: @unchecked Sendable {
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await session.data(for: request)
+        LoggingService.lfd("createWave: POST \(components.url!) body=\(body)")
 
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-            throw WaveServiceError.commandFailed("HTTP \(statusCode)")
+        do {
+            // Use longSession - createWave does git fetch + worktree add + push
+            let (data, response) = try await longSession.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                LoggingService.lfd("createWave: no HTTP response")
+                throw WaveServiceError.commandFailed("No response from lfd")
+            }
+
+            LoggingService.lfd("createWave: status=\(httpResponse.statusCode)")
+
+            guard httpResponse.statusCode == 200 else {
+                let errorBody = String(data: data, encoding: .utf8) ?? ""
+                LoggingService.lfd("createWave: error response=\(errorBody)")
+                throw WaveServiceError.commandFailed("HTTP \(httpResponse.statusCode)")
+            }
+
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let ok = json["ok"] as? Bool, ok,
+                  let result = json["result"] as? [String: Any],
+                  let waveData = result["wave"] as? [String: Any] else {
+                let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+                LoggingService.lfd("createWave: invalid response error=\(errorMsg ?? "unknown")")
+                throw WaveServiceError.commandFailed(errorMsg ?? "Invalid response")
+            }
+
+            let wave = parseWaveFromJSON(waveData)
+            LoggingService.lfd("createWave: success id=\(wave.id) name=\(wave.name)")
+            return wave
+        } catch let error as WaveServiceError {
+            throw error
+        } catch {
+            LoggingService.lfd("createWave: exception=\(error.localizedDescription)")
+            throw WaveServiceError.commandFailed(error.localizedDescription)
         }
-
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let ok = json["ok"] as? Bool, ok,
-              let result = json["result"] as? [String: Any],
-              let waveData = result["wave"] as? [String: Any] else {
-            let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
-            throw WaveServiceError.commandFailed(errorMsg ?? "Invalid response")
-        }
-
-        return parseWaveFromJSON(waveData)
     }
 
     private func parseWaveFromJSON(_ json: [String: Any]) -> Wave {
@@ -430,6 +481,29 @@ public struct WaveService: @unchecked Sendable {
         return parseWaveFromJSON(waveData)
     }
 
+    /// Delete a wave.
+    public func deleteWave(waveId: String) async throws {
+        let baseURL = URL(string: "http://127.0.0.1:8765")!
+        let url = baseURL.appendingPathComponent("waves/\(waveId)")
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+
+        let (data, response) = try await session.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let ok = json["ok"] as? Bool, ok else {
+            let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            throw WaveServiceError.commandFailed(errorMsg ?? "Invalid response")
+        }
+    }
+
     // MARK: - Private helpers
 
     private func decodeStringArray(_ str: String?) -> [String] {
@@ -450,10 +524,13 @@ public struct WaveService: @unchecked Sendable {
     }
 
     private func runShellCommand(_ args: [String]) async throws {
+        let cmd = args.joined(separator: " ")
+        LoggingService.lfd("runShellCommand: \(cmd)")
+
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            process.arguments = ["-l", "-c", args.joined(separator: " ")]
+            process.arguments = ["-l", "-c", cmd]
 
             let pipe = Pipe()
             process.standardOutput = pipe
@@ -466,12 +543,15 @@ public struct WaveService: @unchecked Sendable {
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()
                 let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
+                LoggingService.lfd("runShellCommand: exit=\(process.terminationStatus) output=\(output.prefix(200))")
+
                 if process.terminationStatus == 0 {
                     continuation.resume()
                 } else {
                     continuation.resume(throwing: WaveServiceError.commandFailed(output.isEmpty ? "Exit code \(process.terminationStatus)" : output))
                 }
             } catch {
+                LoggingService.lfd("runShellCommand: exception=\(error.localizedDescription)")
                 continuation.resume(throwing: error)
             }
         }

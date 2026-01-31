@@ -18,7 +18,8 @@ let package = Package(
     targets: [
         .target(
             name: "LoopflowCore",
-            path: "LoopflowCore"
+            path: "LoopflowCore",
+            exclude: ["Info.plist"]
         ),
         .binaryTarget(
             name: "GhosttyKit",
@@ -32,7 +33,7 @@ let package = Package(
                 "GhosttyKit"
             ],
             path: "Concerto",
-            exclude: ["Info.plist", "Concerto.sdef"],
+            exclude: ["Info.plist", "Concerto.sdef", "UX_DESIGN.md", "AppIcon.icns", "Services/Ghostty/README.md"],
             swiftSettings: [
                 .define("GHOSTTY_ENABLED")
             ],

@@ -98,31 +98,11 @@ struct StepRunner: View {
     // MARK: - Area Header
 
     private var areaHeader: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text("Working in")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                HStack(spacing: Spacing.sm) {
-                    Image(systemName: "folder.fill")
-                        .foregroundStyle(palette.accent)
-
-                    Text(wave.areaDisplay.isEmpty ? "." : wave.areaDisplay)
-                        .font(.headline)
-                }
+        AreaTypeahead(wave: wave) { areas in
+            Task {
+                try? await repoState.updateWave(wave, area: areas.isEmpty ? nil : areas)
             }
-
-            Spacer()
-
-            Button("Change") {
-                clearArea()
-            }
-            .buttonStyle(DarkButtonStyle())
         }
-        .padding(Spacing.md)
-        .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
     }
 
     // MARK: - Step Grid
@@ -312,11 +292,6 @@ struct StepRunner: View {
         }
     }
 
-    private func clearArea() {
-        Task {
-            try? await repoState.updateWave(wave, area: nil)
-        }
-    }
 }
 
 #Preview {

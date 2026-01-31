@@ -80,6 +80,11 @@ struct WaveSidebar: View {
                 onSelect: {
                     repoState.selectedWave = wave
                     keyboardFocusedId = wave.id
+                },
+                onDelete: {
+                    Task {
+                        try? await repoState.deleteWave(wave)
+                    }
                 }
             )
         }
@@ -138,11 +143,11 @@ struct WaveSidebar: View {
             } label: {
                 Image(systemName: "plus")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(isCreatingWave ? 0.3 : 0.7))
+                    .foregroundStyle(.white.opacity(isCreatingWave || !repoState.lfdConnected ? 0.3 : 0.7))
             }
             .buttonStyle(.plain)
-            .disabled(isCreatingWave)
-            .help("Create a new wave")
+            .disabled(isCreatingWave || !repoState.lfdConnected)
+            .help(repoState.lfdConnected ? "Create a new wave" : "Connect to lfd first")
             .accessibleButton("Create new wave")
             .minHitTarget()
 
@@ -313,17 +318,38 @@ struct WaveSidebar: View {
     }
 
     private func createWaveDirectly() {
-        guard !isCreatingWave else { return }
+        LoggingService.ui("createWave: button clicked, lfdConnected=\(repoState.lfdConnected)")
+        guard !isCreatingWave else {
+            LoggingService.ui("createWave: already in progress, ignoring")
+            return
+        }
         isCreatingWave = true
 
         Task {
             do {
+                // Ensure lfd is connected before creating wave
+                if !repoState.lfdConnected {
+                    LoggingService.ui("createWave: lfd not connected, attempting connect")
+                    try await repoState.connectLfd()
+                    // Brief delay to let the daemon start
+                    try await Task.sleep(for: .milliseconds(500))
+                    LoggingService.ui("createWave: connect completed, lfdConnected=\(repoState.lfdConnected)")
+                }
+
                 // Create with auto-generated name, then select it
+                LoggingService.ui("createWave: calling repoState.createWave")
                 try await repoState.createWave(name: "")
+                LoggingService.ui("createWave: success, triggering name edit")
                 // The wave is selected in createWave, trigger name edit
                 NotificationCenter.default.post(name: .editWaveName, object: nil)
             } catch {
-                actionError = error.localizedDescription
+                LoggingService.ui("createWave: error=\(error.localizedDescription)")
+                // Provide clearer error message for daemon issues
+                if !repoState.lfdConnected {
+                    actionError = "lfd daemon not running. Run 'lfd install' in terminal."
+                } else {
+                    actionError = error.localizedDescription
+                }
                 showingActionError = true
             }
             isCreatingWave = false

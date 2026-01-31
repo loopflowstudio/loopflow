@@ -13,16 +13,20 @@ Commands:
     clean           Remove dev app and reset permissions
     xcode           Open in Xcode
     logs            Tail the app logs
+    lfd             Stop installed lfd and run from this branch
 
     ghostty-build   Build GhosttyKit xcframework locally
     ghostty-update  Build, upload to R2, and update Package.swift
 """
 
 import argparse
+import os
+import signal
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 SWIFT_DIR = Path(__file__).parent.parent
@@ -83,7 +87,10 @@ def cmd_run_debug() -> int:
     print("Logs: ~/Library/Logs/Concerto/")
     print("Press Ctrl+C to quit")
     print("---")
-    return run([str(DEV_APP / "Contents" / "MacOS" / "Concerto")], check=False).returncode
+    # Use exec so Ctrl+C goes directly to Concerto
+    import os
+    executable = str(DEV_APP / "Contents" / "MacOS" / "Concerto")
+    os.execv(executable, [executable])
 
 
 def cmd_release() -> int:
@@ -165,6 +172,37 @@ def cmd_logs() -> int:
             return run(["tail", "-f"] + [str(log) for log in logs], check=False).returncode
     print("No logs yet. Run the app first.")
     return 1
+
+
+def cmd_lfd() -> int:
+    """Stop installed lfd and run from this branch."""
+    plist = Path.home() / "Library" / "LaunchAgents" / "com.loopflow.lfd.plist"
+
+    # Unload launchd service
+    if plist.exists():
+        print("Unloading lfd launchd service...")
+        run(["launchctl", "unload", str(plist)], check=False)
+
+    # Stop lfd using PID file (avoids killing claude processes that have "lfd" in prompts)
+    pid_file = Path.home() / ".lf" / "lfd.pid"
+    if pid_file.exists():
+        try:
+            pid = int(pid_file.read_text().strip())
+            print(f"Stopping lfd (pid {pid})...")
+            os.kill(pid, signal.SIGTERM)
+            time.sleep(1.0)
+        except (ValueError, ProcessLookupError):
+            pass
+        pid_file.unlink(missing_ok=True)
+
+    # Suppress gRPC fork handler spam
+    os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "0"
+    os.environ["GRPC_VERBOSITY"] = "ERROR"
+
+    # Run from this branch - use exec so Ctrl+C works
+    print("Starting lfd from this branch...")
+    os.chdir(REPO_ROOT)
+    os.execvp("uv", ["uv", "run", "lfd", "serve"])
 
 
 def _install_dev_app() -> None:
@@ -318,6 +356,7 @@ COMMANDS = {
     "clean": (cmd_clean, "Remove dev app and reset permissions"),
     "xcode": (cmd_xcode, "Open in Xcode"),
     "logs": (cmd_logs, "Tail the app logs"),
+    "lfd": (cmd_lfd, "Stop installed lfd and run from this branch"),
     "ghostty-build": (cmd_ghostty_build, "Build GhosttyKit xcframework locally"),
     "ghostty-update": (cmd_ghostty_update, "Build, upload to R2, update Package.swift"),
 }

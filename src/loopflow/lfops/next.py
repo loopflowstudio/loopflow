@@ -9,7 +9,7 @@ import typer
 from loopflow.lf.context import find_worktree_root
 from loopflow.lf.git import find_main_repo, get_current_branch
 from loopflow.lf.messages import generate_pr_message
-from loopflow.lf.naming import generate_next_branch, parse_branch_base
+from loopflow.lf.naming import extract_iteration_suffix, generate_next_branch, parse_branch_base
 from loopflow.lfd.wave import get_wave_by_worktree, update_wave_worktree_branch
 from loopflow.lfops._helpers import get_default_branch
 from loopflow.lfops.shell import write_directive
@@ -150,6 +150,63 @@ def _open_terminal(path: Path) -> None:
     subprocess.run(["open", f"warp://action/new_window?path={path}"])
 
 
+def _preserve_worktree(repo_root: Path, branch: str, wave_name: str) -> Path | None:
+    """Move current worktree to preserve it. Returns new path or None if failed."""
+    suffix = extract_iteration_suffix(branch)
+    if not suffix:
+        # No iteration suffix - use branch name directly
+        suffix = branch
+
+    main_repo = find_main_repo(repo_root) or repo_root
+    new_path = main_repo.parent / f"{main_repo.name}.{wave_name}.{suffix}"
+
+    if new_path.exists():
+        typer.echo(f"Error: Cannot preserve worktree, path exists: {new_path}", err=True)
+        return None
+
+    # git worktree move <worktree> <new-path>
+    result = subprocess.run(
+        ["git", "worktree", "move", str(repo_root), str(new_path)],
+        cwd=main_repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        typer.echo(f"Error: Failed to move worktree: {result.stderr}", err=True)
+        return None
+
+    return new_path
+
+
+def _create_fresh_worktree(
+    main_repo: Path,
+    wave_name: str,
+    new_branch: str,
+    base_ref: str = "origin/main",
+) -> Path | None:
+    """Create new worktree at wave_name path with new branch."""
+    worktree_path = main_repo.parent / f"{main_repo.name}.{wave_name}"
+
+    result = subprocess.run(
+        ["git", "worktree", "add", "-b", new_branch, str(worktree_path), base_ref],
+        cwd=main_repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        typer.echo(f"Error: Failed to create worktree: {result.stderr}", err=True)
+        return None
+
+    # Push to create remote branch
+    subprocess.run(
+        ["git", "push", "-u", "origin", new_branch],
+        cwd=worktree_path,
+        capture_output=True,
+    )
+
+    return worktree_path
+
+
 def move_worktree(
     worktree_path: Path,
     new_branch: str,
@@ -191,8 +248,9 @@ def next_worktree(
     If branch has an open PR: enables auto-merge, creates stacked branch from HEAD.
     If branch is already merged: creates fresh branch from origin/main.
 
-    Reuses the same worktree directory, just switches to a new branch.
-    Returns path to worktree, or None if failed.
+    Preserves the old worktree at a new path (e.g., repo.wave.timestamp.words)
+    and creates a new worktree at the original path.
+    Returns path to new worktree, or None if failed.
     """
     main_repo = find_main_repo(repo_root) or repo_root
     base_branch = get_default_branch(main_repo)
@@ -235,49 +293,67 @@ def next_worktree(
     # Parse wave name from branch for new branch generation
     wave_name = parse_branch_base(branch)
 
+    # Preserve current worktree before making changes
+    typer.echo("Preserving current worktree...")
+    preserved = _preserve_worktree(repo_root, branch, wave_name)
+    if not preserved:
+        return None
+    typer.echo(f"Old worktree preserved at {preserved}")
+
+    # Look up wave before creating new worktree (it tracks the old path)
+    wave = get_wave_by_worktree(preserved)
+
     if already_merged:
         # Fresh start from origin/main
-        typer.echo("Branch already merged. Starting fresh from main...")
-        _fetch_main(repo_root)
-        new_branch = _fresh_start(repo_root, wave_name)
-        if not new_branch:
-            typer.echo("Error: Failed to create fresh branch", err=True)
+        typer.echo("Creating fresh branch from main...")
+        _fetch_main(main_repo)
+        new_branch = generate_next_branch(wave_name, main_repo)
+        new_worktree = _create_fresh_worktree(main_repo, wave_name, new_branch)
+        if not new_worktree:
+            typer.echo("Error: Failed to create fresh worktree", err=True)
             return None
-
-        # Update wave if it exists
-        wave = get_wave_by_worktree(repo_root)
-        if wave:
-            update_wave_worktree_branch(wave.id, repo_root, new_branch)
-            typer.echo(f"Updated wave '{wave.name}' to branch {new_branch}")
     else:
         # Land PR then create stacked branch
-        # Enable auto-merge
+        # Enable auto-merge on the old PR (now at preserved path)
         typer.echo(f"Enabling auto-merge for PR #{pr_number}...")
-        if not _enable_auto_merge(repo_root, pr_number):
+        if not _enable_auto_merge(preserved, pr_number):
             typer.echo("Warning: Could not enable auto-merge", err=True)
 
         # Wait for merge if blocking
         if block:
-            _wait_for_merge(repo_root, pr_number)
+            _wait_for_merge(preserved, pr_number)
 
-        # Generate new branch name
+        # Get current HEAD from preserved worktree for stacking
+        head_result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=preserved,
+            capture_output=True,
+            text=True,
+        )
+        head_sha = head_result.stdout.strip()
+
+        # Generate new branch and create stacked worktree
         new_branch = generate_next_branch(wave_name, main_repo)
-
-        # Create new stacked branch from current HEAD
         typer.echo(f"Creating stacked branch {new_branch}...")
-        if not move_worktree(repo_root, new_branch):
-            typer.echo("Error: Failed to create stacked branch", err=True)
+        new_worktree = _create_fresh_worktree(main_repo, wave_name, new_branch, head_sha)
+        if not new_worktree:
+            typer.echo("Error: Failed to create stacked worktree", err=True)
             return None
 
-    # Open terminal in worktree (same path, new branch)
+    # Update wave if it exists
+    if wave:
+        update_wave_worktree_branch(wave.id, new_worktree, new_branch)
+        typer.echo(f"Updated wave '{wave.name}' to branch {new_branch}")
+
+    # Open terminal in new worktree
     if open_terminal:
         typer.echo("Opening terminal...")
-        _open_terminal(repo_root)
+        _open_terminal(new_worktree)
 
-    # Write shell directive to cd to worktree
-    write_directive(f"cd {repo_root}")
+    # Write shell directive to cd to new worktree
+    write_directive(f"cd {new_worktree}")
 
-    return repo_root
+    return new_worktree
 
 
 def register_commands(app: typer.Typer) -> None:
@@ -289,7 +365,7 @@ def register_commands(app: typer.Typer) -> None:
         no_open: bool = typer.Option(False, "--no-open", help="Don't open terminal"),
         create_pr: bool = typer.Option(False, "-c", "--create-pr", help="Create PR if none exists"),
     ) -> None:
-        """Move to next branch iteration.
+        """Move to next branch iteration, preserving the old worktree.
 
         If current branch has an open PR: enables auto-merge, then creates a
         stacked branch from current HEAD.
@@ -297,7 +373,9 @@ def register_commands(app: typer.Typer) -> None:
         If current branch is already merged (PR merged or no PR but commits
         in main): creates a fresh branch from origin/main.
 
-        The worktree directory stays the same, only the branch changes.
+        The old worktree is preserved at a new path (e.g., repo.wave.timestamp.words)
+        so you can still access it for rebasing or other work. It will be cleaned
+        up by `lf ops wt prune` when its PR merges.
 
         Example:
             lf ops next                 # land PR or start fresh if merged

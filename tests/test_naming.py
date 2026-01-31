@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 from loopflow.lf.naming import (
     MAGICAL,
     MUSICAL,
+    extract_iteration_suffix,
     generate_next_branch,
     generate_word_pair,
     parse_branch_base,
@@ -124,3 +125,26 @@ def test_parse_branch_base_nested_timestamps():
     # First strip the .timestamp.word-pair, then the remaining .timestamp
     result = parse_branch_base("jack-heart.concerto-next.20260129_2255.20260129_2318.aurora-rondo")
     assert result == "jack-heart.concerto-next"
+
+
+def test_extract_iteration_suffix_with_suffix():
+    """Extract timestamp.words suffix from branch."""
+    result = extract_iteration_suffix("rust.20260127_1234.wisp-forte")
+    assert result == "20260127_1234.wisp-forte"
+
+
+def test_extract_iteration_suffix_with_username():
+    """Extract suffix from branch with username prefix."""
+    result = extract_iteration_suffix("jack.rust.20260127_1234.wisp-forte")
+    assert result == "20260127_1234.wisp-forte"
+
+
+def test_extract_iteration_suffix_no_suffix():
+    """Return None for branch without iteration suffix."""
+    assert extract_iteration_suffix("rust") is None
+    assert extract_iteration_suffix("my-feature") is None
+
+
+def test_extract_iteration_suffix_invalid_words():
+    """Return None if words aren't magical-musical."""
+    assert extract_iteration_suffix("rust.20260127_1234.foo-bar") is None

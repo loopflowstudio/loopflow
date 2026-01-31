@@ -151,6 +151,23 @@ def parse_branch_base(branch: str) -> str:
     return branch
 
 
+def extract_iteration_suffix(branch: str) -> str | None:
+    """Extract iteration suffix (timestamp.words) from branch name.
+
+    Examples:
+        'rust.20260127_1234.wisp-forte' → '20260127_1234.wisp-forte'
+        'jack.rust.20260127_1234.wisp-forte' → '20260127_1234.wisp-forte'
+        'rust' → None
+    """
+    parts = branch.split(".")
+    if len(parts) >= 3:
+        maybe_words = parts[-1]
+        maybe_timestamp = parts[-2]
+        if _is_word_pair(maybe_words) and _is_timestamp(maybe_timestamp):
+            return f"{maybe_timestamp}.{maybe_words}"
+    return None
+
+
 def generate_next_branch(base: str, repo: Path) -> str:
     """Generate unique branch name for next iteration.
 

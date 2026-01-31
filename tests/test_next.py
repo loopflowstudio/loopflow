@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from loopflow.lfops.next import (
+from loopflow.lf.ops.next import (
     _enable_auto_merge,
     _get_pr_number,
     _get_pr_state,
@@ -54,7 +54,7 @@ def test_get_pr_state_open():
 def test_enable_auto_merge_success():
     """Returns True on successful auto-merge enable."""
     mock_message = MagicMock(title="My PR", body="Description")
-    with patch("loopflow.lfops.next.generate_pr_message", return_value=mock_message):
+    with patch("loopflow.lf.ops.next.generate_pr_message", return_value=mock_message):
         with patch("subprocess.run") as mock_run:
             # First call edits PR, second enables auto-merge
             mock_run.side_effect = [
@@ -68,7 +68,7 @@ def test_enable_auto_merge_success():
 def test_enable_auto_merge_failure():
     """Returns False when auto-merge fails."""
     mock_message = MagicMock(title="My PR", body="Description")
-    with patch("loopflow.lfops.next.generate_pr_message", return_value=mock_message):
+    with patch("loopflow.lf.ops.next.generate_pr_message", return_value=mock_message):
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
                 MagicMock(returncode=0),  # gh pr edit
@@ -80,20 +80,20 @@ def test_enable_auto_merge_failure():
 
 def test_next_fails_on_main_branch():
     """Cannot run next from main branch."""
-    with patch("loopflow.lfops.next.find_main_repo", return_value=Path("/repo")):
-        with patch("loopflow.lfops.next.get_default_branch", return_value="main"):
+    with patch("loopflow.lf.ops.next.find_main_repo", return_value=Path("/repo")):
+        with patch("loopflow.lf.ops.next.get_default_branch", return_value="main"):
             result = next_worktree(Path("/repo"), "main", block=False, open_terminal=False)
     assert result is None
 
 
 def test_next_fails_without_pr():
     """Fails when no PR exists, branch not merged, and create_pr not set."""
-    with patch("loopflow.lfops.next.find_main_repo", return_value=Path("/repo")):
-        with patch("loopflow.lfops.next.get_default_branch", return_value="main"):
-            with patch("loopflow.lfops.next._rebase_onto_main", return_value=True):
-                with patch("loopflow.lfops.next._get_pr_number", return_value=None):
-                    with patch("loopflow.lfops.next._fetch_main"):
-                        with patch("loopflow.lfops.next._is_branch_merged", return_value=False):
+    with patch("loopflow.lf.ops.next.find_main_repo", return_value=Path("/repo")):
+        with patch("loopflow.lf.ops.next.get_default_branch", return_value="main"):
+            with patch("loopflow.lf.ops.next._rebase_onto_main", return_value=True):
+                with patch("loopflow.lf.ops.next._get_pr_number", return_value=None):
+                    with patch("loopflow.lf.ops.next._fetch_main"):
+                        with patch("loopflow.lf.ops.next._is_branch_merged", return_value=False):
                             result = next_worktree(
                                 Path("/repo"),
                                 "feature-branch",
@@ -111,23 +111,23 @@ def test_next_creates_worktree_with_suffix(tmp_path):
     preserved_path = tmp_path / "repo.jack.auth.20260123_1112.suffix"
     new_worktree = tmp_path / "repo.jack.auth.20260123_1112"
 
-    with patch("loopflow.lfops.next.find_main_repo", return_value=repo):
-        with patch("loopflow.lfops.next.get_default_branch", return_value="main"):
-            with patch("loopflow.lfops.next._rebase_onto_main", return_value=True):
-                with patch("loopflow.lfops.next._get_pr_number", return_value=42):
-                    with patch("loopflow.lfops.next._get_pr_state", return_value="OPEN"):
-                        with patch("loopflow.lfops.next._enable_auto_merge", return_value=True):
-                            with patch("loopflow.lfops.next._wait_for_merge", return_value=False):
+    with patch("loopflow.lf.ops.next.find_main_repo", return_value=repo):
+        with patch("loopflow.lf.ops.next.get_default_branch", return_value="main"):
+            with patch("loopflow.lf.ops.next._rebase_onto_main", return_value=True):
+                with patch("loopflow.lf.ops.next._get_pr_number", return_value=42):
+                    with patch("loopflow.lf.ops.next._get_pr_state", return_value="OPEN"):
+                        with patch("loopflow.lf.ops.next._enable_auto_merge", return_value=True):
+                            with patch("loopflow.lf.ops.next._wait_for_merge", return_value=False):
                                 with patch(
-                                    "loopflow.lfops.next.generate_next_branch",
+                                    "loopflow.lf.ops.next.generate_next_branch",
                                     return_value="jack.auth.20260123_1112-aurora-melody",
                                 ):
                                     with patch(
-                                        "loopflow.lfops.next._preserve_worktree",
+                                        "loopflow.lf.ops.next._preserve_worktree",
                                         return_value=preserved_path,
                                     ):
                                         with patch(
-                                            "loopflow.lfops.next._create_fresh_worktree",
+                                            "loopflow.lf.ops.next._create_fresh_worktree",
                                             return_value=new_worktree,
                                         ):
                                             with patch("subprocess.run") as mock_run:
@@ -136,11 +136,11 @@ def test_next_creates_worktree_with_suffix(tmp_path):
                                                     returncode=0, stdout="abc123\n"
                                                 )
                                                 with patch(
-                                                    "loopflow.lfops.next.get_wave_by_worktree",
+                                                    "loopflow.lf.ops.next.get_wave_by_worktree",
                                                     return_value=None,
                                                 ):
                                                     with patch(
-                                                        "loopflow.lfops.next.write_directive"
+                                                        "loopflow.lf.ops.next.write_directive"
                                                     ):
                                                         result = next_worktree(
                                                             repo,
@@ -160,33 +160,33 @@ def test_next_starts_fresh_when_already_merged(tmp_path):
     preserved_path = tmp_path / "repo.wave.wisp-forte"
     new_worktree = tmp_path / "repo.wave"
 
-    with patch("loopflow.lfops.next.find_main_repo", return_value=repo):
-        with patch("loopflow.lfops.next.get_default_branch", return_value="main"):
-            with patch("loopflow.lfops.next._rebase_onto_main", return_value=True):
-                with patch("loopflow.lfops.next._get_pr_number", return_value=42):
-                    with patch("loopflow.lfops.next._get_pr_state", return_value="MERGED"):
-                        with patch("loopflow.lfops.next._fetch_main"):
+    with patch("loopflow.lf.ops.next.find_main_repo", return_value=repo):
+        with patch("loopflow.lf.ops.next.get_default_branch", return_value="main"):
+            with patch("loopflow.lf.ops.next._rebase_onto_main", return_value=True):
+                with patch("loopflow.lf.ops.next._get_pr_number", return_value=42):
+                    with patch("loopflow.lf.ops.next._get_pr_state", return_value="MERGED"):
+                        with patch("loopflow.lf.ops.next._fetch_main"):
                             with patch(
-                                "loopflow.lfops.next.parse_branch_base",
+                                "loopflow.lf.ops.next.parse_branch_base",
                                 return_value="wave",
                             ):
                                 with patch(
-                                    "loopflow.lfops.next._preserve_worktree",
+                                    "loopflow.lf.ops.next._preserve_worktree",
                                     return_value=preserved_path,
                                 ):
                                     with patch(
-                                        "loopflow.lfops.next.generate_next_branch",
+                                        "loopflow.lf.ops.next.generate_next_branch",
                                         return_value="wave.20260130_1200-aurora-melody",
                                     ):
                                         with patch(
-                                            "loopflow.lfops.next._create_fresh_worktree",
+                                            "loopflow.lf.ops.next._create_fresh_worktree",
                                             return_value=new_worktree,
                                         ):
                                             with patch(
-                                                "loopflow.lfops.next.get_wave_by_worktree",
+                                                "loopflow.lf.ops.next.get_wave_by_worktree",
                                                 return_value=None,
                                             ):
-                                                with patch("loopflow.lfops.next.write_directive"):
+                                                with patch("loopflow.lf.ops.next.write_directive"):
                                                     result = next_worktree(
                                                         repo,
                                                         "wave.20260129_1100.wisp-forte",

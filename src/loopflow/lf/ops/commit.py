@@ -14,7 +14,7 @@ from loopflow.lf.context import (
 )
 from loopflow.lf.git import ensure_draft_pr, has_upstream
 from loopflow.lf.launcher import get_runner
-from loopflow.lfops._helpers import run_lint
+from loopflow.lf.ops._helpers import run_lint
 
 
 def register_commands(app: typer.Typer) -> None:

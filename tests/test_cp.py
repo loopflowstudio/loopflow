@@ -1,11 +1,11 @@
-"""Tests for lfops cp command."""
+"""Tests for lf ops cp command."""
 
 from unittest.mock import patch
 
 import pytest
 from typer.testing import CliRunner
 
-from loopflow.lfops.commands import app
+from loopflow.lf.cli import app
 
 
 @pytest.fixture
@@ -22,8 +22,8 @@ def test_cp_copies_docs_by_default(temp_repo, monkeypatch):
     monkeypatch.chdir(temp_repo)
     runner = CliRunner()
 
-    with patch("loopflow.lfops.cp.copy_to_clipboard") as mock_copy:
-        result = runner.invoke(app, ["cp"])
+    with patch("loopflow.lf.ops.cp.copy_to_clipboard") as mock_copy:
+        result = runner.invoke(app, ["ops", "cp"])
 
     assert result.exit_code == 0
     assert "Copied to clipboard" in result.output
@@ -37,8 +37,8 @@ def test_cp_includes_context_files(temp_repo, monkeypatch):
     monkeypatch.chdir(temp_repo)
     runner = CliRunner()
 
-    with patch("loopflow.lfops.cp.copy_to_clipboard") as mock_copy:
-        result = runner.invoke(app, ["cp", "main.py"])
+    with patch("loopflow.lf.ops.cp.copy_to_clipboard") as mock_copy:
+        result = runner.invoke(app, ["ops", "cp", "main.py"])
 
     assert result.exit_code == 0
     copied_text = mock_copy.call_args[0][0]
@@ -50,8 +50,8 @@ def test_cp_no_lfdocs_excludes_documentation(temp_repo, monkeypatch):
     monkeypatch.chdir(temp_repo)
     runner = CliRunner()
 
-    with patch("loopflow.lfops.cp.copy_to_clipboard") as mock_copy:
-        result = runner.invoke(app, ["cp", "--no-lfdocs"])
+    with patch("loopflow.lf.ops.cp.copy_to_clipboard") as mock_copy:
+        result = runner.invoke(app, ["ops", "cp", "--no-lfdocs"])
 
     assert result.exit_code == 0
     copied_text = mock_copy.call_args[0][0]
@@ -65,8 +65,8 @@ def test_cp_exclude_patterns(temp_repo, monkeypatch):
     monkeypatch.chdir(temp_repo)
     runner = CliRunner()
 
-    with patch("loopflow.lfops.cp.copy_to_clipboard") as mock_copy:
-        result = runner.invoke(app, ["cp", "*.py", "-e", "test.py"])
+    with patch("loopflow.lf.ops.cp.copy_to_clipboard") as mock_copy:
+        result = runner.invoke(app, ["ops", "cp", "*.py", "-e", "test.py"])
 
     assert result.exit_code == 0
     copied_text = mock_copy.call_args[0][0]
@@ -80,8 +80,8 @@ def test_cp_works_outside_git_repo(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
 
-    with patch("loopflow.lfops.cp.copy_to_clipboard") as mock_copy:
-        result = runner.invoke(app, ["cp"])
+    with patch("loopflow.lf.ops.cp.copy_to_clipboard") as mock_copy:
+        result = runner.invoke(app, ["ops", "cp"])
 
     assert result.exit_code == 0
     assert "Copied to clipboard" in result.output
@@ -98,8 +98,8 @@ def test_cp_positional_args_as_context(temp_repo, monkeypatch):
     monkeypatch.chdir(temp_repo)
     runner = CliRunner()
 
-    with patch("loopflow.lfops.cp.copy_to_clipboard") as mock_copy:
-        result = runner.invoke(app, ["cp", "src", "tests"])
+    with patch("loopflow.lf.ops.cp.copy_to_clipboard") as mock_copy:
+        result = runner.invoke(app, ["ops", "cp", "src", "tests"])
 
     assert result.exit_code == 0
     copied_text = mock_copy.call_args[0][0]

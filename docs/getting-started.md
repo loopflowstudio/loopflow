@@ -61,11 +61,11 @@ lf : "add type hints to utils.py"
 Design, implement, polish, ship.
 
 ```bash
-lfops wt create auth-feature       # create worktree
+lf ops wt create auth-feature       # create worktree
 lf design: add OAuth login         # discuss approach
 lf implement                       # build it
 lf polish                          # run tests, fix issues
-lfops pr                           # open PR
+lf ops pr                           # open PR
 ```
 
 ### Built-in steps
@@ -90,8 +90,8 @@ lfops pr                           # open PR
 ### Shipping
 
 ```bash
-lfops pr      # create or update PR
-lfops land    # submit to merge queue
+lf ops pr      # create or update PR
+lf ops land    # submit to merge queue
 ```
 
 ---
@@ -122,4 +122,4 @@ lf debug -c                       # fix it
 
 ## Reference
 
-[`lf` commands](lf.md) · [`lfops` commands](lfops.md) · [`lfd` commands](lfd.md) · [Configuration](config.md)
+[`lf` commands](lf.md) · [`lf ops` commands](lfops.md) · [`lfd` commands](lfd.md) · [Configuration](config.md)

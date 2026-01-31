@@ -7,10 +7,17 @@ from pathlib import Path
 import typer
 
 from loopflow.lf.config import Config, load_config
-from loopflow.lf.git import ensure_draft_pr, get_current_branch
+from loopflow.lf.git import ensure_draft_pr
 from loopflow.lf.messages import generate_commit_message
 from loopflow.lf.ops.git import GitError
+from loopflow.lf.ops.git import commit as git_commit
+from loopflow.lf.ops.git import delete_local_branch as git_delete_local_branch
+from loopflow.lf.ops.git import get_default_branch as git_get_default_branch
+from loopflow.lf.ops.git import is_clean as git_is_clean
 from loopflow.lf.ops.git import push as git_push
+from loopflow.lf.ops.git import stage_all as git_stage_all
+from loopflow.lf.ops.git import sync_main as git_sync_main
+from loopflow.lf.ops.git import worktree_remove as git_worktree_remove
 
 
 def _check_lint(repo_root: Path, config: Config | None) -> bool | None:
@@ -67,20 +74,14 @@ def run_lint(repo_root: Path) -> bool:
 
 def add_commit_push(repo_root: Path, push: bool = True) -> bool:
     """Add, commit (with generated message), and optionally push. Returns True if committed."""
-    result = subprocess.run(
-        ["git", "status", "--porcelain"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-    )
-    if not result.stdout.strip():
+    if git_is_clean(repo_root):
         if push:
             _push(repo_root)
             _maybe_create_draft_pr(repo_root)
         return False
 
     typer.echo("Staging changes...")
-    subprocess.run(["git", "add", "-A"], cwd=repo_root, check=True)
+    git_stage_all(repo_root)
 
     typer.echo("Generating commit message...")
     message = generate_commit_message(repo_root)
@@ -89,7 +90,7 @@ def add_commit_push(repo_root: Path, push: bool = True) -> bool:
         commit_msg += f"\n\n{message.body}"
 
     typer.echo(f"Committing: {message.title}")
-    subprocess.run(["git", "commit", "-m", commit_msg], cwd=repo_root, check=True)
+    git_commit(repo_root, commit_msg)
 
     if push:
         _push(repo_root)
@@ -120,25 +121,17 @@ def _maybe_create_draft_pr(repo_root: Path) -> None:
 
 
 def get_default_branch(repo_root: Path) -> str:
-    result = subprocess.run(
-        ["git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode == 0 and result.stdout.strip():
-        return result.stdout.strip().split("/", 1)[-1]
-    return "main"
+    try:
+        return git_get_default_branch(repo_root)
+    except GitError:
+        return "main"
 
 
 def is_repo_clean(repo_root: Path) -> bool:
-    result = subprocess.run(
-        ["git", "status", "--porcelain"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-    )
-    return result.returncode == 0 and not result.stdout.strip()
+    try:
+        return git_is_clean(repo_root)
+    except GitError:
+        return False
 
 
 def resolve_base_ref(repo_root: Path, base_branch: str) -> str:
@@ -166,29 +159,11 @@ def get_diff(repo_root: Path, base_ref: str) -> str:
 
 def sync_main_repo(main_repo: Path, base_branch: str) -> bool:
     """Fetch origin/base_branch. Updates local ref if base_branch is checked out here."""
-    fetch_result = subprocess.run(
-        ["git", "fetch", "origin", base_branch],
-        cwd=main_repo,
-        capture_output=True,
-    )
-    if fetch_result.returncode != 0:
+    try:
+        synced = git_sync_main(main_repo, base_branch)
+    except GitError:
         return False
-
-    # If base_branch is checked out here, update it to match origin
-    current_branch = get_current_branch(main_repo)
-    if current_branch == base_branch:
-        if not is_repo_clean(main_repo):
-            return False
-        result = subprocess.run(
-            ["git", "reset", "--hard", f"origin/{base_branch}"],
-            cwd=main_repo,
-            capture_output=True,
-        )
-        if result.returncode != 0:
-            return False
-
-    # origin/base_branch is now up-to-date, which is sufficient for merge-base checks
-    return True
+    return synced
 
 
 def remove_worktree(
@@ -209,13 +184,12 @@ def remove_worktree(
         return
 
     # wt failed - fall back to git directly (handles "main already used" errors)
-    subprocess.run(
-        ["git", "worktree", "remove", "--force", str(worktree_path)],
-        cwd=main_repo,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "branch", "-D", branch],
-        cwd=main_repo,
-        capture_output=True,
-    )
+    try:
+        git_worktree_remove(main_repo, worktree_path)
+    except GitError:
+        pass
+
+    try:
+        git_delete_local_branch(main_repo, branch)
+    except GitError:
+        pass

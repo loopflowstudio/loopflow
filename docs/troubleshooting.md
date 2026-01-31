@@ -70,7 +70,7 @@ git worktree prune
 Remove merged worktrees:
 
 ```bash
-lfops wt prune
+lf ops wt prune
 ```
 
 ## Loop stuck in WAITING
@@ -98,7 +98,7 @@ lf review --area src/small/     # scope to specific area
 Use summaries for large codebases:
 
 ```bash
-lfops summarize src/
+lf ops summarize src/
 ```
 
 See [Configuration](config.md) for context options.
@@ -116,7 +116,7 @@ lf init
 Check installation:
 
 ```bash
-lfops doctor
+lf ops doctor
 ```
 
 ## See Also

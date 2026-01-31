@@ -203,4 +203,4 @@ Every step sees: `README.md`, `STYLE.md`, `CLAUDE.md`, `scratch/`, `roadmap/`, a
 
 ## Reference
 
-[`lf` commands](lf.md) · [`lfops` commands](lfops.md) · [`lfd` commands](lfd.md) · [Configuration](config.md)
+[`lf` commands](lf.md) · [`lf ops` commands](lfops.md) · [`lfd` commands](lfd.md) · [Configuration](config.md)

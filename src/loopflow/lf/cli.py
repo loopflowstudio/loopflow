@@ -1,28 +1,32 @@
 """Loopflow CLI: Arrange LLMs to code in harmony."""
 
+import json
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
 import typer
 import yaml
 
+from loopflow import __version__
 from loopflow.lf import step as step_module
-from loopflow.lf.config import ConfigError, load_config
+from loopflow.lf.config import ConfigError, get_internal_flag, load_config
 from loopflow.lf.context import find_worktree_root, gather_step, list_all_steps
 from loopflow.lf.flows import flow_file_exists, list_flows
-from loopflow.lfops import abandon as lfops_abandon
-from loopflow.lfops import add as lfops_add
-from loopflow.lfops import commit as lfops_commit
-from loopflow.lfops import cp as lfops_cp
-from loopflow.lfops import init as lfops_init
-from loopflow.lfops import land as lfops_land
-from loopflow.lfops import next as lfops_next
-from loopflow.lfops import pr as lfops_pr
-from loopflow.lfops import rebase as lfops_rebase
-from loopflow.lfops import shell as lfops_shell
-from loopflow.lfops import summarize as lfops_summarize
-from loopflow.lfops import sync as lfops_sync
-from loopflow.lfops import wt as lfops_wt
+from loopflow.lf.ops import abandon as ops_abandon
+from loopflow.lf.ops import add as ops_add
+from loopflow.lf.ops import commit as ops_commit
+from loopflow.lf.ops import cp as ops_cp
+from loopflow.lf.ops import init as ops_init
+from loopflow.lf.ops import land as ops_land
+from loopflow.lf.ops import next as ops_next
+from loopflow.lf.ops import pr as ops_pr
+from loopflow.lf.ops import rebase as ops_rebase
+from loopflow.lf.ops import shell as ops_shell
+from loopflow.lf.ops import summarize as ops_summarize
+from loopflow.lf.ops import sync as ops_sync
+from loopflow.lf.ops import wt as ops_wt
 
 # =============================================================================
 # Built-in step metadata for formatted listing
@@ -81,19 +85,19 @@ app = typer.Typer(
 
 # Register ops subcommands
 ops_app = typer.Typer(help="Git workflow operations")
-lfops_abandon.register_commands(ops_app)
-lfops_add.register_commands(ops_app)
-lfops_cp.register_commands(ops_app)
-lfops_next.register_commands(ops_app)
-lfops_init.register_commands(ops_app)
-lfops_pr.register_commands(ops_app)
-lfops_land.register_commands(ops_app)
-lfops_commit.register_commands(ops_app)
-lfops_rebase.register_commands(ops_app)
-lfops_shell.register_commands(ops_app)
-lfops_summarize.register_commands(ops_app)
-lfops_sync.register_commands(ops_app)
-lfops_wt.register_commands(ops_app)
+ops_abandon.register_commands(ops_app)
+ops_add.register_commands(ops_app)
+ops_cp.register_commands(ops_app)
+ops_next.register_commands(ops_app)
+ops_init.register_commands(ops_app)
+ops_pr.register_commands(ops_app)
+ops_land.register_commands(ops_app)
+ops_commit.register_commands(ops_app)
+ops_rebase.register_commands(ops_app)
+ops_shell.register_commands(ops_app)
+ops_summarize.register_commands(ops_app)
+ops_sync.register_commands(ops_app)
+ops_wt.register_commands(ops_app)
 app.add_typer(ops_app, name="ops")
 
 # Register top-level commands
@@ -242,6 +246,26 @@ def main():
     }
 
     try:
+        # Handle --version flag
+        if "--version" in sys.argv:
+            try:
+                use_rust = get_internal_flag("use_rust")
+            except ConfigError:
+                use_rust = False
+
+            if use_rust and shutil.which("lf-engine"):
+                result = subprocess.run(["lf-engine", "version"], capture_output=True, text=True)
+                if result.returncode == 0 and result.stdout.strip():
+                    try:
+                        version = json.loads(result.stdout.strip())
+                    except json.JSONDecodeError:
+                        version = result.stdout.strip()
+                    typer.echo(f"loopflow {version}")
+                    raise SystemExit(0)
+
+            typer.echo(f"loopflow {__version__}")
+            raise SystemExit(0)
+
         # Handle --list / -l flag: show formatted step list
         if "--list" in sys.argv or "-l" in sys.argv:
             _list_steps()

@@ -6,7 +6,7 @@ from pathlib import Path
 import typer
 
 from loopflow.lf.git import find_main_repo
-from loopflow.lfops._helpers import get_default_branch, remove_worktree
+from loopflow.lf.ops._helpers import get_default_branch, remove_worktree
 
 
 def _find_worktree_by_branch(main_repo: Path, branch: str) -> Path | None:

@@ -10,7 +10,7 @@ import pytest
 from loopflow.lf.config import Config, SummaryConfig
 from loopflow.lf.context import _trigger_background_refresh, gather_summaries
 from loopflow.lfd.db import _get_db, save_summary_db
-from loopflow.lfops.summarize import (
+from loopflow.lf.ops.summarize import (
     Summary,
     compute_source_hash,
     pathset_hash,
@@ -263,7 +263,7 @@ def test_pathset_caching_saves_under_pathset_key(temp_repo, temp_db):
 def test_pathset_cache_hit_with_matching_hash(temp_repo, temp_db):
     """Cache hit when pathset hash matches."""
 
-    from loopflow.lfops.summarize import load_summary
+    from loopflow.lf.ops.summarize import load_summary
 
     pathset = "docs,swift"
     combined_hash = pathset_hash(["aaa", "bbb"])
@@ -290,7 +290,7 @@ def test_pathset_cache_hit_with_matching_hash(temp_repo, temp_db):
 
 def test_pathset_cache_miss_with_different_hash(temp_repo, temp_db):
     """Cache miss when pathset hash doesn't match (stale)."""
-    from loopflow.lfops.summarize import load_summary
+    from loopflow.lf.ops.summarize import load_summary
 
     pathset = "docs,swift"
     old_hash = pathset_hash(["old1", "old2"])
@@ -354,7 +354,7 @@ def test_hash_uses_merge_base_not_head(git_repo):
     """Hash is computed at merge-base with main, not at HEAD."""
     import subprocess
 
-    from loopflow.lfops.summarize import compute_source_hash
+    from loopflow.lf.ops.summarize import compute_source_hash
 
     # Get hash on main
     hash_on_main = compute_source_hash(Path("src"), git_repo)
@@ -376,7 +376,7 @@ def test_hash_changes_when_main_advances(git_repo):
     """Hash changes when main branch advances."""
     import subprocess
 
-    from loopflow.lfops.summarize import compute_source_hash
+    from loopflow.lf.ops.summarize import compute_source_hash
 
     # Create feature branch from main
     subprocess.run(["git", "checkout", "-b", "feature"], cwd=git_repo, capture_output=True)
@@ -403,7 +403,7 @@ def test_hash_unchanged_by_untracked_files(git_repo):
     """Untracked files don't affect the hash."""
     import subprocess
 
-    from loopflow.lfops.summarize import compute_source_hash
+    from loopflow.lf.ops.summarize import compute_source_hash
 
     # Create feature branch
     subprocess.run(["git", "checkout", "-b", "feature"], cwd=git_repo, capture_output=True)
@@ -421,7 +421,7 @@ def test_hash_unchanged_by_staged_changes(git_repo):
     """Staged but uncommitted changes don't affect the hash."""
     import subprocess
 
-    from loopflow.lfops.summarize import compute_source_hash
+    from loopflow.lf.ops.summarize import compute_source_hash
 
     subprocess.run(["git", "checkout", "-b", "feature"], cwd=git_repo, capture_output=True)
 
@@ -439,7 +439,7 @@ def test_subdir_hashes_independent(git_repo):
     """Each subdir has independent hash based on its merge-base content."""
     import subprocess
 
-    from loopflow.lfops.summarize import compute_subdir_hashes
+    from loopflow.lf.ops.summarize import compute_subdir_hashes
 
     subprocess.run(["git", "checkout", "-b", "feature"], cwd=git_repo, capture_output=True)
 
@@ -454,7 +454,7 @@ def test_subdir_hashes_independent(git_repo):
 
 def test_on_main_branch_hash_still_works(git_repo):
     """Hash computation works when already on main (merge-base is HEAD)."""
-    from loopflow.lfops.summarize import compute_source_hash
+    from loopflow.lf.ops.summarize import compute_source_hash
 
     # Stay on main
     hash_on_main = compute_source_hash(Path("src"), git_repo)

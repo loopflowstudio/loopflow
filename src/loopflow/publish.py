@@ -200,6 +200,32 @@ def run_tests(repo_root: Path | None = None) -> tuple[bool, str]:
     return success, output
 
 
+def build_rust_extension(repo_root: Path | None = None) -> tuple[bool, str]:
+    """Build loopflow-engine Python extension with maturin. Returns (success, output)."""
+    cwd = repo_root or Path.cwd()
+    manifest_path = cwd / "rust" / "loopflow-engine" / "Cargo.toml"
+
+    if not manifest_path.exists():
+        return False, f"Cargo.toml not found: {manifest_path}"
+
+    result = _run(
+        [
+            "uv",
+            "run",
+            "maturin",
+            "develop",
+            "--manifest-path",
+            str(manifest_path),
+            "--features",
+            "python",
+        ],
+        cwd,
+    )
+    success = result.returncode == 0
+    output = result.stdout + result.stderr
+    return success, output
+
+
 def build_package(repo_root: Path | None = None) -> tuple[bool, str]:
     """Build package with uv. Returns (success, output)."""
     cwd = repo_root or Path.cwd()

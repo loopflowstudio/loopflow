@@ -5,7 +5,6 @@ import re
 from typer.testing import CliRunner
 
 from loopflow.lf.cli import app
-from loopflow.lfops import get_app
 
 
 def _strip_ansi(text: str) -> str:
@@ -58,12 +57,11 @@ def test_top_level_help_has_ops():
     assert "run" in commands
 
 
-def test_lfops_help_lists_management_commands():
-    """Verify lfops has the expected commands."""
+def test_ops_help_lists_management_commands():
+    """Verify lf ops has the expected commands."""
     runner = CliRunner()
-    lfops_app = get_app()
 
-    result = runner.invoke(lfops_app, ["--help"])
+    result = runner.invoke(app, ["ops", "--help"])
 
     assert result.exit_code == 0
     commands = _get_command_names(result.output)

@@ -86,7 +86,7 @@ Run Step (with prompt)
 
 Swift tests: 70 tests pass, including 6 new tests for shell escaping and InteractiveSession.command behavior.
 
-Python tests: 669 tests pass. Wave creation logic tested through existing wave/stimulus tests.
+Python tests: 673 tests pass. Wave creation logic tested through existing wave/stimulus tests. `lf ops next` tests updated to mock the new rebase step.
 
 ## Additional improvements
 
@@ -99,6 +99,8 @@ Python tests: 669 tests pass. Wave creation logic tested through existing wave/s
 **Step button tooltips.** Common steps (review, design, implement, debug) now show descriptions on hover.
 
 **Dev tooling.** Added `./scripts/dev.py lfd` command to stop installed lfd and run from the current branch for development.
+
+**`lf ops next` improvements.** Refactored to use `ops/git` helpers (`git_push`, `git_rebase`, `git_create_branch`) for consistent error handling. Added rebase-onto-main step before creating new iteration.
 
 ## Files changed
 
@@ -120,3 +122,6 @@ Python tests: 669 tests pass. Wave creation logic tested through existing wave/s
 | `swift/LoopflowCore/Services/LoggingService.swift` | ui/model/lfd categories, timestamps |
 | `swift/ConcertoTests/WaveTests.swift` | Shell escape and command tests |
 | `swift/scripts/dev.py` | `lfd` command for dev workflow |
+| `src/loopflow/lfops/next.py` | Use ops/git helpers, add rebase-onto-main step |
+| `src/loopflow/lfops/_helpers.py` | Use ops/git push helper |
+| `tests/test_next.py` | Mock new rebase step |

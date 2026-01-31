@@ -641,6 +641,8 @@ struct WaveDetailPanel: View {
         guard let path = wave.worktreePath else {
             fileStats = []
             commits = []
+            isLoadingFiles = false
+            isLoadingCommits = false
             return
         }
         loadFileStats(worktreePath: path)

@@ -16,7 +16,6 @@ from loopflow.lf.design import (
     gather_ancestral_docs,
     gather_area,
     gather_design_docs,
-    gather_internal_docs,
 )
 from loopflow.lf.directions import Direction
 from loopflow.lf.files import (
@@ -145,14 +144,16 @@ class DiffMode(str, Enum):
 
 
 # Default paths always included unless explicitly excluded
-_DEFAULT_FILE_PATHS = ["scratch/", "reports/", "roadmap/", "*.md"]
+# Note: reports/ is NOT included by default - use area to scope to relevant reports
+_DEFAULT_FILE_PATHS = ["scratch/", "*.md"]
 
 
 class FilesetConfig(BaseModel):
     """Configuration for file context.
 
-    Default paths (scratch/, reports/, roadmap/, *.md) are always included unless excluded.
-    The paths field is additive to defaults.
+    Default paths: scratch/ (design docs) and root *.md files.
+    reports/ is NOT included by default - use area to include relevant reports.
+    roadmap/ is included only for the active wave (inferred from branch/worktree name).
     """
 
     paths: list[str] = Field(default_factory=list)  # Additive to defaults
@@ -167,7 +168,7 @@ class ContextConfig(BaseModel):
     # Branch work
     diff_mode: DiffMode = DiffMode.FILES
 
-    # User files (defaults: scratch/, reports/, roadmap/, *.md)
+    # User files (defaults: scratch/, *.md; wave-specific roadmap/)
     files: FilesetConfig = Field(default_factory=FilesetConfig)
 
     # Area path (e.g., "lf/cli" or "concerto/ui")
@@ -855,16 +856,14 @@ def gather_prompt_components(
     if not area_summary_used and context_config.budget_area > 0 and area_docs:
         area_docs, _ = _limit_to_budget(area_docs, context_config.budget_area)
 
-    # Gather reference docs: scratch/ (ephemeral), roadmap context, and repo root .md
+    # Gather reference docs: scratch/ (ephemeral) and repo root .md
+    # reports/ is NOT included by default - use area to scope to relevant reports
     design_docs = gather_design_docs(repo_root)
-    roadmap_docs = []
+    ancestral_docs = []
     if context_config.area:
-        # Area-scoped: ancestral docs from parent paths
-        roadmap_docs = gather_ancestral_docs(repo_root, context_config.area)
-    else:
-        # No area: include all of reports/ as reference
-        roadmap_docs = gather_internal_docs(repo_root)
-    ref_docs = design_docs + roadmap_docs + docs
+        # Area-scoped: ancestral docs (parent READMEs + reports/<area>/)
+        ancestral_docs = gather_ancestral_docs(repo_root, context_config.area)
+    ref_docs = design_docs + ancestral_docs + docs
 
     # Apply docs budget to reference docs
     if context_config.budget_docs > 0 and ref_docs:

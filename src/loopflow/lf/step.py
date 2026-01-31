@@ -29,7 +29,6 @@ from loopflow.lf.output import (
     warn_if_context_too_large,
 )
 from loopflow.lf.tokens import analyze_components
-from loopflow.lf.worktrees import WorktreeError, create
 
 ModelType = Optional[str]
 
@@ -141,25 +140,22 @@ def _launch_interactive_default(
 def run(
     ctx: typer.Context,
     step: Optional[str] = typer.Argument(None, help="Step name (e.g., 'review', 'implement')"),
-    auto: bool = typer.Option(False, "-a", "-A", "--auto", help="Override to run in auto mode"),
+    batch: bool = typer.Option(False, "-b", "-B", "--batch", help="Run in batch/headless mode"),
     interactive: bool = typer.Option(
         False, "-i", "-I", "--interactive", help="Override to run in interactive mode"
     ),
-    area: list[str] = typer.Option(None, "--area", help="Area scope (paths to include in context)"),
+    area: list[str] = typer.Option(
+        None, "-a", "-A", "--area", help="Area scope (paths to include in context)"
+    ),
     wave: Optional[str] = typer.Option(
-        None, "--wave", help="Wave name for roadmap scoping (e.g., 'rust', 'enterprise')"
+        None, "-w", "-W", "--wave", help="Wave name for roadmap scoping"
     ),
-    worktree: str = typer.Option(
-        None, "-w", "-W", "--worktree", help="Create worktree and run step there"
-    ),
-    web: bool = typer.Option(
-        False, "--web", help="Copy to clipboard and open web client (claude.ai, chatgpt.com, etc.)"
-    ),
+    web: bool = typer.Option(False, "--web", help="Copy to clipboard and open web client"),
     clipboard: Optional[bool] = typer.Option(
-        None, "-c", "-C", "--clipboard/--no-clipboard", help="Include clipboard content in prompt"
+        None, "-c", "-C", "--clipboard/--no-clipboard", help="Include clipboard content"
     ),
     docs: Optional[bool] = typer.Option(
-        None, "--lfdocs/--no-lfdocs", help="Include reports/, roadmap/, scratch/, and .md files"
+        None, "--lfdocs/--no-lfdocs", help="Include scratch/, root .md, and loopflow docs"
     ),
     diff_mode: Optional[str] = typer.Option(
         None, "--diff-mode", help="How to include branch changes: files, diff, or none"
@@ -168,7 +164,7 @@ def run(
         None, "-m", "-M", "--model", help="Model to use (backend or backend:variant)"
     ),
     direction: Optional[list[str]] = typer.Option(
-        None, "-d", "-D", "--direction", help="Direction to apply (repeatable, or comma-separated)"
+        None, "-d", "-D", "--direction", help="Direction to apply (repeatable)"
     ),
     chrome: Optional[bool] = typer.Option(
         None, "--chrome/--no-chrome", help="Enable Chrome browser automation"
@@ -177,24 +173,11 @@ def run(
     """Run a step with an LLM model."""
     repo_root = find_worktree_root()
 
-    # Some features require a git repo
+    # Use cwd as fallback for non-git usage
     if not repo_root:
-        if worktree:
-            typer.echo("Error: --worktree requires a git repository", err=True)
-            raise typer.Exit(1)
-        # Use cwd as fallback for non-git usage
         repo_root = Path.cwd()
 
     config = load_config(repo_root)
-
-    if worktree:
-        try:
-            worktree_path = create(repo_root, worktree)
-        except WorktreeError as e:
-            typer.echo(f"Error: {e}", err=True)
-            raise typer.Exit(1)
-        repo_root = worktree_path
-        config = load_config(repo_root)
 
     # Handle no step: launch interactive claude with docs context
     if step is None:
@@ -221,7 +204,7 @@ def run(
         global_config=config,
         frontmatter=frontmatter,
         cli_interactive=True if interactive else None,
-        cli_auto=True if auto else None,
+        cli_auto=True if batch else None,
         cli_model=model,
         cli_context=list(area) if area else None,
         cli_direction=cli_directions or None,
@@ -330,30 +313,27 @@ def run(
         chrome=chrome_enabled,
     )
 
-    if worktree:
-        typer.echo(f"\nWorktree: {repo_root}")
-
     raise typer.Exit(result_code)
 
 
 def inline(
     prompt: str = typer.Argument(help="Inline prompt to run"),
-    auto: bool = typer.Option(False, "-a", "-A", "--auto", help="Override to run in auto mode"),
+    batch: bool = typer.Option(False, "-b", "-B", "--batch", help="Run in batch/headless mode"),
     interactive: bool = typer.Option(
         False, "-i", "-I", "--interactive", help="Override to run in interactive mode"
     ),
-    area: list[str] = typer.Option(None, "--area", help="Area scope (paths to include in context)"),
+    area: list[str] = typer.Option(
+        None, "-a", "-A", "--area", help="Area scope (paths to include in context)"
+    ),
     wave: Optional[str] = typer.Option(
-        None, "--wave", help="Wave name for roadmap scoping (e.g., 'rust', 'enterprise')"
+        None, "-w", "-W", "--wave", help="Wave name for roadmap scoping"
     ),
-    web: bool = typer.Option(
-        False, "--web", help="Copy to clipboard and open web client (claude.ai, chatgpt.com, etc.)"
-    ),
+    web: bool = typer.Option(False, "--web", help="Copy to clipboard and open web client"),
     clipboard: Optional[bool] = typer.Option(
         None, "-c", "-C", "--clipboard/--no-clipboard", help="Include clipboard content in prompt"
     ),
     docs: Optional[bool] = typer.Option(
-        None, "--lfdocs/--no-lfdocs", help="Include reports/, roadmap/, scratch/, and .md files"
+        None, "--lfdocs/--no-lfdocs", help="Include scratch/, root .md, and loopflow docs"
     ),
     diff_mode: Optional[str] = typer.Option(
         None, "--diff-mode", help="How to include branch changes: files, diff, or none"
@@ -385,7 +365,7 @@ def inline(
         global_config=config,
         frontmatter=StepConfig(),
         cli_interactive=True if interactive else None,
-        cli_auto=True if auto else None,
+        cli_auto=True if batch else None,
         cli_model=model,
         cli_context=list(area) if area else None,
         cli_direction=cli_directions or None,
@@ -493,25 +473,17 @@ def inline(
 
 def flow(
     name: str = typer.Argument(help="Flow name from .lf/flows/"),
-    area: list[str] = typer.Option(None, "--area", help="Area scope (paths to include in context)"),
-    worktree: str = typer.Option(
-        None, "-w", "-W", "--worktree", help="Create worktree and run flow there"
+    area: list[str] = typer.Option(
+        None, "-a", "-A", "--area", help="Area scope (paths to include in context)"
     ),
     pr: bool = typer.Option(None, "--pr", help="Open PR when done"),
-    web: bool = typer.Option(
-        False, "--web", help="Copy to clipboard and open web client (claude.ai, chatgpt.com, etc.)"
-    ),
+    web: bool = typer.Option(False, "--web", help="Copy to clipboard and open web client"),
     model: ModelType = typer.Option(
         None, "-m", "-M", "--model", help="Model to use (backend or backend:variant)"
     ),
 ):
     """Run a named flow."""
     repo_root = find_worktree_root()
-
-    # Worktree creation still requires git
-    if not repo_root and worktree:
-        typer.echo("Error: --worktree requires a git repository", err=True)
-        raise typer.Exit(1)
 
     # Use cwd as fallback for non-git usage
     if not repo_root:
@@ -537,14 +509,6 @@ def flow(
     if not web and not runner.is_available():
         typer.echo(f"Error: '{backend}' CLI not found", err=True)
         raise typer.Exit(1)
-
-    if worktree:
-        try:
-            worktree_path = create(repo_root, worktree)
-        except WorktreeError as e:
-            typer.echo(f"Error: {e}", err=True)
-            raise typer.Exit(1)
-        repo_root = worktree_path
 
     all_context = list(config.context) if config and config.context else []
     if area:

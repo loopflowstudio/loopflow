@@ -65,12 +65,38 @@ def determine_wave(
         if wave_name and not wave_name.isdigit() and wave_name not in ("main", "master"):
             return WaveContext(name=wave_name, source="worktree")
 
-    # Fall back to roadmap-based inference
+    # Fall back to roadmap-based inference from worktree name
     for candidate in _extract_wave_candidates(worktree_name):
         roadmap_path = repo_root / "roadmap" / candidate
         if roadmap_path.is_dir():
             return WaveContext(name=candidate, source="inferred")
 
+    # Try branch name as additional source
+    branch_name = _get_current_branch(repo_root)
+    if branch_name and branch_name != worktree_name:
+        for candidate in _extract_wave_candidates(branch_name):
+            roadmap_path = repo_root / "roadmap" / candidate
+            if roadmap_path.is_dir():
+                return WaveContext(name=candidate, source="branch")
+
+    return None
+
+
+def _get_current_branch(repo_root: Path) -> str | None:
+    """Get current git branch name."""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
     return None
 
 

@@ -19,8 +19,8 @@ from loopflow.lf.worktrees import (
     merge_diagnostics,
     remove,
 )
-from loopflow.lfops._helpers import get_default_branch, sync_main_repo
-from loopflow.lfops.shell import write_directive
+from loopflow.lf.ops._helpers import get_default_branch, sync_main_repo
+from loopflow.lf.ops.shell import write_directive
 
 
 def register_commands(app: typer.Typer) -> None:

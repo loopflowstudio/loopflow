@@ -37,7 +37,7 @@ from loopflow.lf.skills import (
 )
 from loopflow.lf.tokens import count_tokens
 from loopflow.lf.wave import WaveContext, determine_wave
-from loopflow.lfops.summarize import is_stale, load_summary
+from loopflow.lf.ops.summarize import is_stale, load_summary
 
 # Path to bundled builtin steps
 _BUILTINS_STEPS_DIR = Path(__file__).parent / "builtins" / "steps"
@@ -768,7 +768,7 @@ def _trigger_background_refresh(repo_root: Path) -> None:
     # Fork and write lock, logging output for debugging
     with open(log_file, "w") as log:
         process = subprocess.Popen(
-            [sys.executable, "-m", "loopflow.lfops", "summarize", "--all"],
+            [sys.executable, "-m", "loopflow.lf.ops", "summarize", "--all"],
             cwd=repo_root,
             stdout=log,
             stderr=subprocess.STDOUT,

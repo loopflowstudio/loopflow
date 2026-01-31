@@ -3,7 +3,7 @@
 import typer
 
 from loopflow.lf.git import find_main_repo, get_current_branch
-from loopflow.lfops._helpers import get_default_branch, is_repo_clean, sync_main_repo
+from loopflow.lf.ops._helpers import get_default_branch, is_repo_clean, sync_main_repo
 
 
 def register_commands(app: typer.Typer) -> None:

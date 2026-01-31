@@ -12,7 +12,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
+      - uses: dtolnay/rust-toolchain@stable
       - run: uv sync
+      - name: Build loopflow-engine Python extension
+        run: uv run maturin develop --manifest-path rust/loopflow-engine/Cargo.toml --features python
       - run: uv run pytest tests/
 
   swift-test:

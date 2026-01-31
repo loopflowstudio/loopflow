@@ -1,11 +1,11 @@
-"""Tests for loopflow.lfops.summarize module."""
+"""Tests for loopflow.lf.ops.summarize module."""
 
 from datetime import datetime
 from pathlib import Path
 
 import pytest
 
-from loopflow.lfops.summarize import (
+from loopflow.lf.ops.summarize import (
     Summary,
     _gather_source_content_working_dir,
     compute_source_hash,

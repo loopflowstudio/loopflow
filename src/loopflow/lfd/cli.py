@@ -62,7 +62,7 @@ from loopflow.lfd.wave import (
     update_wave_status,
     update_wave_worktree_branch,
 )
-from loopflow.lfops.shell import write_directive
+from loopflow.lf.ops.shell import write_directive
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 

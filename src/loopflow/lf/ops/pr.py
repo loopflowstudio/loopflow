@@ -19,7 +19,7 @@ from loopflow.lf.messages import generate_pr_message, generate_pr_message_from_d
 from loopflow.lf.ops.git import push as git_push
 from loopflow.lf.ops.git import rebase as git_rebase
 from loopflow.lf.worktrees import list_all
-from loopflow.lfops._helpers import (
+from loopflow.lf.ops._helpers import (
     _push,
     add_commit_push,
     get_default_branch,

@@ -20,6 +20,7 @@ from loopflow.publish import (
     R2_PUBLIC_URL,
     build_dmg,
     build_package,
+    build_rust_extension,
     bump_version,
     check_ci_passed,
     check_publish_ready,
@@ -503,8 +504,16 @@ def main() -> int:
     # Handle --local mode: build, install, and restart daemon
     if args.local:
         if args.dry_run:
-            print("Would build package, install locally, and restart daemon")
+            print("Would build Rust extension, Python package, install locally, and restart daemon")
             return 0
+
+        print("Building Rust extension...")
+        success, output = build_rust_extension(ROOT)
+        if not success:
+            print("Rust extension build failed:", file=sys.stderr)
+            print(output, file=sys.stderr)
+            return 1
+        print("Rust extension built.")
 
         print("Building package...")
         success, output = build_package(ROOT)

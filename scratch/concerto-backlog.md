@@ -61,69 +61,45 @@ E2 passes: "Status clear in < 5 seconds"
 
 ## Personas as directions
 
-Personas become `.lf/directions/` files. They shape how an agent approaches Concerto work—same as product-engineer or designer.
+Personas become `.lf/directions/` files—questions to ask while working. They shift perspective, not specify requirements.
 
 ```markdown
 # .lf/directions/conductor.md
 
-Build for users who have multiple waves running and check in periodically.
+When reviewing Concerto code, ask:
 
-## What they want
-- Glanceable status
-- Quick connect to interactive steps
-- Minimal friction to land
-
-## Quality signals
-- Can I tell what needs attention in < 5 seconds?
-- How many clicks to connect?
-- Is wave state obvious?
-
-## Anti-patterns
-- Burying "needs attention" in a flat list
-- Requiring navigation to see status
-- Modal confirmations for routine actions
+- Can I tell what needs attention without clicking anything?
+- If 3 waves need me, is that obvious at a glance?
+- How many clicks from "I see a problem" to "I'm fixing it"?
+- Would I trust this to show me the right thing while I'm away?
+- Does landing a PR feel like a single action or a workflow?
+- Am I being asked to confirm things I already decided?
 ```
 
 ```markdown
 # .lf/directions/improviser.md
 
-Build for users starting fresh on a problem, exploring before committing to a flow.
+When reviewing Concerto code, ask:
 
-## What they want
-- Quick wave creation
-- Easy step running
-- Low commitment
-
-## Quality signals
-- How fast from "I have an idea" to "step is running"?
-- Can I iterate without ceremony?
-- Does the UI get out of my way?
-
-## Anti-patterns
-- Wizards and setup flows
-- Requiring full wave config before running a step
-- Making exploration feel like commitment
+- How fast from "I have an idea" to "a step is running"?
+- Am I being asked to configure things I don't care about yet?
+- Can I run one step without committing to a flow?
+- Does the UI feel like a workshop or a form?
+- If I change my mind, is that easy or expensive?
+- Am I exploring or filling out paperwork?
 ```
 
 ```markdown
 # .lf/directions/returner.md
 
-Build for users who were away and need to catch up on wave status.
+When reviewing Concerto code, ask:
 
-## What they want
-- See what happened while away
-- Quick triage: what needs me vs what's fine
-- Decide next actions fast
-
-## Quality signals
-- Can I catch up on 5 waves in 2 minutes?
-- Is history/progress visible?
-- Are notifications useful, not noisy?
-
-## Anti-patterns
-- Requiring click-through to see status
-- Losing context when away
-- Notification spam
+- Can I tell what happened while I was away?
+- Which waves need me vs which are fine—is that instant?
+- Do I have to click into each wave to understand its state?
+- Is there a summary or do I have to reconstruct context?
+- Are notifications helping me catch up or adding noise?
+- Can I triage 5 waves in 2 minutes?
 ```
 
 ## UX experiments as Swift tests

@@ -107,6 +107,8 @@ def test_next_creates_worktree_with_suffix(tmp_path):
     """Creates new worktree with magical-musical suffix."""
     repo = tmp_path / "repo"
     repo.mkdir()
+    preserved_path = tmp_path / "repo.jack.auth.20260123_1112.suffix"
+    new_worktree = tmp_path / "repo.jack.auth.20260123_1112"
 
     with patch("loopflow.lfops.next.find_main_repo", return_value=repo):
         with patch("loopflow.lfops.next.get_default_branch", return_value="main"):
@@ -122,25 +124,43 @@ def test_next_creates_worktree_with_suffix(tmp_path):
                                     "loopflow.lfops.next.parse_branch_base",
                                     return_value="jack.auth.20260123_1112",
                                 ):
-                                    with patch("subprocess.run") as mock_run:
-                                        # git checkout -b succeeds
-                                        mock_run.return_value = MagicMock(returncode=0)
-                                        with patch("loopflow.lfops.next.write_directive"):
-                                            result = next_worktree(
-                                                repo,
-                                                "jack.auth.20260123_1112",
-                                                block=False,
-                                                open_terminal=False,
-                                            )
+                                    with patch(
+                                        "loopflow.lfops.next._preserve_worktree",
+                                        return_value=preserved_path,
+                                    ):
+                                        with patch(
+                                            "loopflow.lfops.next._create_fresh_worktree",
+                                            return_value=new_worktree,
+                                        ):
+                                            with patch("subprocess.run") as mock_run:
+                                                # git rev-parse HEAD for stacking
+                                                mock_run.return_value = MagicMock(
+                                                    returncode=0, stdout="abc123\n"
+                                                )
+                                                with patch(
+                                                    "loopflow.lfops.next.get_wave_by_worktree",
+                                                    return_value=None,
+                                                ):
+                                                    with patch(
+                                                        "loopflow.lfops.next.write_directive"
+                                                    ):
+                                                        result = next_worktree(
+                                                            repo,
+                                                            "jack.auth.20260123_1112",
+                                                            block=False,
+                                                            open_terminal=False,
+                                                        )
 
     assert result is not None
-    assert result == repo
+    assert result == new_worktree
 
 
 def test_next_starts_fresh_when_already_merged(tmp_path):
     """When branch is already merged, starts fresh from origin/main."""
     repo = tmp_path / "repo"
     repo.mkdir()
+    preserved_path = tmp_path / "repo.wave.wisp-forte"
+    new_worktree = tmp_path / "repo.wave"
 
     with patch("loopflow.lfops.next.find_main_repo", return_value=repo):
         with patch("loopflow.lfops.next.get_default_branch", return_value="main"):
@@ -148,24 +168,32 @@ def test_next_starts_fresh_when_already_merged(tmp_path):
                 with patch("loopflow.lfops.next._get_pr_state", return_value="MERGED"):
                     with patch("loopflow.lfops.next._fetch_main"):
                         with patch(
-                            "loopflow.lfops.next._fresh_start",
-                            return_value="wave.20260130_1200.aurora-melody",
+                            "loopflow.lfops.next.parse_branch_base",
+                            return_value="wave",
                         ):
                             with patch(
-                                "loopflow.lfops.next.parse_branch_base",
-                                return_value="wave",
+                                "loopflow.lfops.next._preserve_worktree",
+                                return_value=preserved_path,
                             ):
                                 with patch(
-                                    "loopflow.lfops.next.get_wave_by_worktree",
-                                    return_value=None,
+                                    "loopflow.lfops.next.generate_next_branch",
+                                    return_value="wave.20260130_1200-aurora-melody",
                                 ):
-                                    with patch("loopflow.lfops.next.write_directive"):
-                                        result = next_worktree(
-                                            repo,
-                                            "wave.20260129_1100.wisp-forte",
-                                            block=False,
-                                            open_terminal=False,
-                                        )
+                                    with patch(
+                                        "loopflow.lfops.next._create_fresh_worktree",
+                                        return_value=new_worktree,
+                                    ):
+                                        with patch(
+                                            "loopflow.lfops.next.get_wave_by_worktree",
+                                            return_value=None,
+                                        ):
+                                            with patch("loopflow.lfops.next.write_directive"):
+                                                result = next_worktree(
+                                                    repo,
+                                                    "wave.20260129_1100.wisp-forte",
+                                                    block=False,
+                                                    open_terminal=False,
+                                                )
 
     assert result is not None
-    assert result == repo
+    assert result == new_worktree

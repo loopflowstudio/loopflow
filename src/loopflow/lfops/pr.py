@@ -16,6 +16,8 @@ from loopflow.lf.git import (
     open_pr,
 )
 from loopflow.lf.messages import generate_pr_message, generate_pr_message_from_diff
+from loopflow.lf.ops.git import push as git_push
+from loopflow.lf.ops.git import rebase as git_rebase
 from loopflow.lf.worktrees import list_all
 from loopflow.lfops._helpers import (
     _push,
@@ -121,6 +123,41 @@ def _get_worktree_base_branch(repo_root) -> str | None:
     return None
 
 
+def _is_behind_main(repo_root) -> int:
+    """Check how many commits branch is behind origin/main. Returns count."""
+    result = subprocess.run(
+        ["git", "rev-list", "--count", "HEAD..origin/main"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return 0
+    return int(result.stdout.strip()) if result.stdout.strip() else 0
+
+
+def _auto_rebase(repo_root) -> bool:
+    """Rebase onto origin/main. Returns True if successful."""
+    typer.echo("Rebasing onto origin/main...")
+    result = git_rebase(repo_root, "origin/main")
+    if not result.success:
+        if result.conflicts:
+            typer.echo("Rebase conflicts detected:", err=True)
+            for path in result.conflicts:
+                typer.echo(f"  {path}", err=True)
+            typer.echo("Resolve conflicts and run 'lf ops pr' again.", err=True)
+        return False
+
+    # Force push after rebase
+    try:
+        git_push(repo_root, force_with_lease=True)
+    except Exception as e:
+        typer.echo(f"Push failed after rebase: {e}", err=True)
+        return False
+
+    return True
+
+
 def register_commands(app: typer.Typer) -> None:
     """Register PR command on the app."""
 
@@ -152,6 +189,13 @@ def register_commands(app: typer.Typer) -> None:
 
         # Always auto-commit and push any pending changes
         add_commit_push(repo_root)
+
+        # Auto-rebase if behind main
+        behind_count = _is_behind_main(repo_root)
+        if behind_count > 0:
+            typer.echo(f"Branch is {behind_count} commits behind main. Rebasing...")
+            if not _auto_rebase(repo_root):
+                raise typer.Exit(1)
 
         # Check if PR already exists
         existing_url = _get_existing_pr_url(repo_root)

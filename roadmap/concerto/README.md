@@ -14,12 +14,12 @@ Pickable work items for Concerto, the loopflow macOS app.
 
 ```bash
 # Generate all screenshots
-python scripts/generate_screenshots.py
+uv run python scripts/generate_screenshots.py
 
 # Review with each persona
-lf ux-review --direction conductor --area docs/screenshots/
-lf ux-review --direction improviser --area docs/screenshots/
-lf ux-review --direction returner --area docs/screenshots/
+uv run lf ux-review --direction conductor --area docs/screenshots/
+uv run lf ux-review --direction improviser --area docs/screenshots/
+uv run lf ux-review --direction returner --area docs/screenshots/
 ```
 
 Screenshots in `docs/screenshots/`:
@@ -37,6 +37,17 @@ persona: conductor | improviser | returner  # optional
 screenshot: path/to/evidence.png  # optional
 ---
 ```
+
+## Phase 1 items
+
+```bash
+uv run python scripts/generate_screenshots.py
+uv run lf ux-review --direction conductor --area docs/screenshots/
+uv run lf ux-review --direction improviser --area docs/screenshots/
+uv run lf ux-review --direction returner --area docs/screenshots/
+```
+
+Run the pipeline and review the output in `roadmap/concerto/` before promoting items.
 
 ## Reference
 

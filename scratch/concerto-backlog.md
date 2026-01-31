@@ -2,41 +2,33 @@
 
 Transform `roadmap/concerto-next/` into a pure backlog. Move design docs to `reports/`, personas to `.lf/directions/`.
 
-## What to build
+## Status: Complete
 
-- `roadmap/concerto/` — pure backlog of pickable work items
-- `reports/concerto/` — design reference (current 00-09 docs)
-- `.lf/directions/` — personas as directions
-- `.lf/steps/ux-review.md` — screenshot-driven persona review step
+The restructure is done:
+- `roadmap/concerto/` — pure backlog with Phase 2/3 items
+- `reports/concerto/` — design docs (00-09)
+- `.lf/directions/` — conductor, improviser, returner personas
+- `.lf/steps/ux-review.md` — screenshot-driven review step
+- `scripts/screenshots.yaml` — screenshot manifest
 
-## Current state
-
-Phase 1 is largely implemented:
-- Status dashboard with grouped sections (Needs Attention, Open PRs, Active, Idle)
-- Connect flow with Continue button (InteractiveSessionView)
-- Area picker, step runner, direction pills
-- Land flow, local notifications
-
-The backlog focuses on:
-- **Phase 1 polish** — friction discovered through persona+screenshot review
-- **Phase 2** — remote access foundation
-- **Phase 3** — mobile
-
-## Backlog generation: screenshot + persona
-
-The core loop:
+## Screenshot pipeline
 
 ```bash
-# Take screenshot of current state
-# Run persona review against it
-lf ux-review --direction conductor --area docs/concerto-main.png
+# Generate screenshots
+python scripts/generate_screenshots.py
+
+# Review all with each persona
+lf ux-review --direction conductor --area docs/screenshots/
+lf ux-review --direction improviser --area docs/screenshots/
+lf ux-review --direction returner --area docs/screenshots/
 ```
 
-The step:
-1. Reads screenshot
-2. Applies persona questions as lens
-3. Identifies friction, missing affordances
-4. Outputs backlog items in correct format
+Screenshots in `docs/screenshots/`:
+- `concerto-main.png` — sidebar with grouped waves
+- `concerto-wave-running.png` — running wave detail
+- `concerto-wave-waiting.png` — waiting wave detail
+
+The step reads all images in the area, applies persona questions, outputs backlog items.
 
 ## Backlog structure
 

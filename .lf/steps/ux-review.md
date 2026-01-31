@@ -1,15 +1,27 @@
 ---
-requires: screenshot in area
+requires: screenshot(s) in area
 produces: backlog items
 interactive: true
 ---
 
-Review the screenshot (included via --area) through the lens of the given direction (persona).
+Review screenshot(s) through the lens of the given direction (persona).
 
-Apply each question from the direction. For each question:
-1. Can the current UI answer it positively?
-2. If not, what's the friction?
-3. What would fix it?
+## Usage
+
+```bash
+# Review all screenshots with a persona
+lf ux-review --direction conductor --area docs/screenshots/
+
+# Review specific screenshot
+lf ux-review --direction conductor --area docs/screenshots/concerto-main.png
+```
+
+## Process
+
+For each screenshot in the area:
+1. Read the screenshot
+2. Apply each question from the direction
+3. For each question that the UI fails to answer well, output a backlog item
 
 ## Output format
 

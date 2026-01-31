@@ -293,7 +293,7 @@ def build_dmg(repo_root: Path | None = None) -> tuple[bool, str]:
     if not swift_dir.exists():
         return False, f"swift directory not found: {swift_dir}"
 
-    result = _run(["./dev", "release"], cwd=swift_dir)
+    result = _run([sys.executable, "scripts/dev.py", "release"], cwd=swift_dir)
     success = result.returncode == 0
     output = result.stdout + result.stderr
     return success, output

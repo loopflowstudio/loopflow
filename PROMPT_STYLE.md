@@ -88,26 +88,44 @@ The goal should work for any codebase using loopflow, not just the one where it 
 
 ### Orthogonality
 
-Directions are orthogonal to steps and areas. A direction is a lens that applies to any task in any scope.
+Directions are orthogonal to steps and areas. A direction applies to any task in any scope.
 
-**Don't couple to steps.** "When reviewing code, ask..." ties the direction to the `review` step. Just ask the questions—they apply whether you're reviewing, implementing, or designing.
+```
+Step = what you're doing (implement, review, design)
+Area = where you're working (src/api/, swift/Concerto/)
+Direction = which users you're trying to serve
+```
 
-**Don't couple to areas.** "When working on Concerto..." ties the direction to a specific codebase. The same user patterns (conductor, improviser, returner) exist in any product with parallel work.
+**Don't couple to steps.** "When reviewing code, ask..." ties the direction to `review`. The same concerns apply whether you're reviewing, implementing, or designing.
+
+**Don't couple to areas.** "When working on Concerto..." ties the direction to a specific codebase. User patterns like conductor/improviser/returner exist in any product with parallel work.
+
+### How directions apply
+
+Directions are not roleplay. You don't simulate being the user.
+
+A direction is intent—you're doing your work with the goal of making this kind of user thrive. The questions help you check if your work serves them.
+
+```bash
+lf implement --direction conductor --area src/api/
+```
+
+You're implementing in src/api/. The conductor direction means you're building with the intent that conductors thrive—people managing parallel workstreams who check in periodically. The questions ("can I see what needs attention without drilling in?") help you verify your implementation serves that intent.
+
+Think of it as: who are you building for? The direction names them. The questions operationalize their needs.
 
 ```markdown
 # Bad: coupled to step and area
 When reviewing Concerto code, ask:
 - Can I tell what needs attention?
 
-# Good: pure lens
+# Good: intent + questions
 Managing multiple parallel workstreams. Checking in, not diving deep.
 
 - Can I see what needs attention without drilling in?
 - Is urgency visually obvious?
 - How many clicks from "I see a problem" to "I'm acting on it"?
 ```
-
-The direction shapes judgment. The step defines the task. The area defines scope. Keep them independent.
 
 ### Voice
 

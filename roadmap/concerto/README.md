@@ -10,6 +10,7 @@ Pickable work items for Concerto, the loopflow macOS app.
 | 2 | Remote access foundation | Planning |
 | 3 | Mobile (iOS/iPad) | Future |
 
+<<<<<<< HEAD
 ## Screenshot pipeline
 
 ```bash
@@ -27,6 +28,18 @@ Screenshots in `docs/screenshots/`:
 - `concerto-wave-running.png` — running wave detail
 - `concerto-wave-waiting.png` — waiting wave detail
 
+=======
+## Generating Phase 1 items
+
+Phase 1 items come from persona+screenshot review:
+
+```bash
+lf ux-review --direction conductor --screenshot docs/concerto-main.png
+lf ux-review --direction improviser --screenshot docs/concerto-improvise.png
+lf ux-review --direction returner --screenshot docs/concerto-main.png
+```
+
+>>>>>>> c75991bee (concerto: restructure roadmap with persona directions and phases 1-3)
 ## Item format
 
 ```yaml
@@ -40,5 +53,13 @@ screenshot: path/to/evidence.png  # optional
 
 ## Reference
 
+<<<<<<< HEAD
 Design docs: `reports/concerto/`
 Personas: `.lf/directions/{conductor,improviser,returner}.md`
+=======
+Design docs in `reports/concerto/`:
+- `00-overview.md` — Conduct & Improvise modes
+- `03-conduct-ux.md` — Dashboard, connect, land
+- `04-improvise-ux.md` — Area picker, step runner
+- `09-phasing.md` — Phase definitions
+>>>>>>> c75991bee (concerto: restructure roadmap with persona directions and phases 1-3)

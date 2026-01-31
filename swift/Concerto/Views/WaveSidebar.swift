@@ -133,11 +133,11 @@ struct WaveSidebar: View {
 
     private var header: some View {
         HStack {
-            Text("Waves")
+            Text("Agents")
                 .font(.caption)
                 .fontWeight(.medium)
                 .foregroundStyle(.white.opacity(0.7))
-                .help("Waves are autonomous AI workers that run flows on your codebase")
+                .help("Agents are autonomous AI workers that run flows on your codebase")
 
             if attentionCount > 0 {
                 HStack(spacing: 4) {
@@ -246,11 +246,11 @@ struct WaveSidebar: View {
                     .foregroundStyle(.white.opacity(0.3))
 
                 VStack(spacing: 4) {
-                    Text("No waves yet")
+                    Text("No agents yet")
                         .fontWeight(.medium)
                         .foregroundStyle(.white.opacity(0.7))
                         .accessibilityIdentifier("wave-empty-title")
-                    Text("Create a wave to start AI-powered work on your codebase.")
+                    Text("Create an agent to start AI-powered work on your codebase.")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.5))
                         .multilineTextAlignment(.center)
@@ -261,7 +261,7 @@ struct WaveSidebar: View {
                 Button {
                     createWaveDirectly()
                 } label: {
-                    Label("Create Wave", systemImage: "plus")
+                    Label("Create Agent", systemImage: "plus")
                         .font(.caption)
                 }
                 .buttonStyle(.borderedProminent)

@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::fs;
 use std::sync::Mutex;
 
-use lf_core::runtime::{
+use loopflow_engine::runtime::{
     tick_flow_with_runner, FlowRun, FlowRunStatus, ForkRun, ForkRunStatus, StepResult, StepRun,
     StepRunStatus, TickResult,
 };
-use lf_core::{load_flow, RunId, RunStore, Step};
+use loopflow_engine::{load_flow, RunId, RunStore, Step};
 use tempfile::TempDir;
 
 struct MemoryStore {
@@ -36,16 +36,16 @@ impl MemoryStore {
 }
 
 impl RunStore for MemoryStore {
-    fn get_run(&self, id: &RunId) -> Result<FlowRun, lf_core::StoreError> {
+    fn get_run(&self, id: &RunId) -> Result<FlowRun, loopflow_engine::StoreError> {
         self.runs
             .lock()
             .unwrap()
             .get(id)
             .cloned()
-            .ok_or_else(|| lf_core::StoreError::RunNotFound(id.to_string()))
+            .ok_or_else(|| loopflow_engine::StoreError::RunNotFound(id.to_string()))
     }
 
-    fn update_run(&self, run: &FlowRun) -> Result<(), lf_core::StoreError> {
+    fn update_run(&self, run: &FlowRun) -> Result<(), loopflow_engine::StoreError> {
         self.runs
             .lock()
             .unwrap()
@@ -53,7 +53,7 @@ impl RunStore for MemoryStore {
         Ok(())
     }
 
-    fn create_step_run(&self, step_run: &StepRun) -> Result<(), lf_core::StoreError> {
+    fn create_step_run(&self, step_run: &StepRun) -> Result<(), loopflow_engine::StoreError> {
         self.step_runs.lock().unwrap().push(step_run.clone());
         Ok(())
     }
@@ -62,7 +62,7 @@ impl RunStore for MemoryStore {
         &self,
         run_id: &RunId,
         step_index: usize,
-    ) -> Result<Vec<ForkRun>, lf_core::StoreError> {
+    ) -> Result<Vec<ForkRun>, loopflow_engine::StoreError> {
         let runs = self
             .fork_runs
             .lock()
@@ -74,7 +74,7 @@ impl RunStore for MemoryStore {
         Ok(runs)
     }
 
-    fn upsert_fork_run(&self, fork_run: &ForkRun) -> Result<(), lf_core::StoreError> {
+    fn upsert_fork_run(&self, fork_run: &ForkRun) -> Result<(), loopflow_engine::StoreError> {
         self.fork_runs.lock().unwrap().insert(
             (
                 fork_run.run_id.clone(),
@@ -90,7 +90,7 @@ impl RunStore for MemoryStore {
         &self,
         run_id: &RunId,
         step_index: usize,
-    ) -> Result<(), lf_core::StoreError> {
+    ) -> Result<(), loopflow_engine::StoreError> {
         let mut fork_runs = self.fork_runs.lock().unwrap();
         fork_runs.retain(|(id, step, _), _| id != run_id || *step != step_index);
         Ok(())
@@ -101,13 +101,13 @@ struct FakeRunner {
     exit_code: i32,
 }
 
-impl lf_core::runtime::StepRunner for FakeRunner {
+impl loopflow_engine::runtime::StepRunner for FakeRunner {
     fn run(
         &self,
         _step: &Step,
         _worktree: &std::path::Path,
         _directions: &[String],
-    ) -> Result<StepResult, lf_core::CoreError> {
+    ) -> Result<StepResult, loopflow_engine::CoreError> {
         Ok(StepResult {
             exit_code: self.exit_code,
             stdout: String::new(),
@@ -121,13 +121,13 @@ struct LoopRunner {
     runs: Mutex<usize>,
 }
 
-impl lf_core::runtime::StepRunner for LoopRunner {
+impl loopflow_engine::runtime::StepRunner for LoopRunner {
     fn run(
         &self,
         _step: &Step,
         _worktree: &std::path::Path,
         _directions: &[String],
-    ) -> Result<StepResult, lf_core::CoreError> {
+    ) -> Result<StepResult, loopflow_engine::CoreError> {
         let mut runs = self.runs.lock().unwrap();
         *runs += 1;
         if *runs == 1 {

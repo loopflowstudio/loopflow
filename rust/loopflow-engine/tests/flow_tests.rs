@@ -1,8 +1,8 @@
 use std::fs;
 use std::path::Path;
 
-use lf_core::flow::{FlowItem, Step};
-use lf_core::load_flow;
+use loopflow_engine::flow::{FlowItem, Step};
+use loopflow_engine::load_flow;
 use tempfile::TempDir;
 
 fn write_flow(repo: &Path, name: &str, content: &str) {

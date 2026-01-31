@@ -7,7 +7,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::config::{load_config_or_default, Config};
 use crate::error::CoreError;
 use crate::flow::{load_direction, load_step, Direction, Step};
 
@@ -148,7 +147,6 @@ pub fn trim_context(mut components: PromptComponents, max_tokens: usize) -> Prom
 /// Gather all prompt components.
 pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, CoreError> {
     let repo_root = &opts.repo_root;
-    let config = load_config_or_default(Some(repo_root));
 
     // Load step
     let step = match &opts.step {
@@ -164,7 +162,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
 
     // Gather docs
     let docs = if opts.lfdocs {
-        gather_docs(repo_root, &config)?
+        gather_docs(repo_root)?
     } else {
         Vec::new()
     };
@@ -209,7 +207,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
 }
 
 /// Gather docs from repo (roadmap/, scratch/, root .md files).
-fn gather_docs(repo_root: &Path, _config: &Config) -> Result<Vec<Document>, CoreError> {
+fn gather_docs(repo_root: &Path) -> Result<Vec<Document>, CoreError> {
     let mut docs = Vec::new();
 
     // Root .md files

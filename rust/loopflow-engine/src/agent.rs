@@ -201,13 +201,9 @@ fn launch_streaming(cmd: &mut Command) -> Result<LaunchResult, CoreError> {
 
     if let Some(stdout) = child.stdout.take() {
         let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            if let Ok(line) = line {
-                // In streaming mode, we could emit events here
-                // For now, just collect the output
-                stdout_content.push_str(&line);
-                stdout_content.push('\n');
-            }
+        for line in reader.lines().map_while(Result::ok) {
+            stdout_content.push_str(&line);
+            stdout_content.push('\n');
         }
     }
 

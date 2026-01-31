@@ -1,4 +1,4 @@
-use lf_core::count_tokens;
+use loopflow_engine::count_tokens;
 
 #[test]
 fn token_counting() {

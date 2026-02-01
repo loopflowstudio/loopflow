@@ -60,14 +60,13 @@ Run the pipeline and review the output in `roadmap/concerto/` before promoting i
 
 Use the ordered backlog below as the canonical Phase 1 list:
 
-1. `20260131-01-attention-summary-and-grouping.md`
-2. `20260131-02-history-and-recency.md`
-3. `20260131-03-waiting-state-actionable.md`
-4. `20260131-04-running-state-progress-and-connect.md`
-5. `20260131-05-empty-state-creates-and-teaches.md`
-6. `20260131-06-quick-experiment-path.md`
+1. `20260131-02-history-and-recency.md`
+2. `20260131-03-waiting-state-actionable.md`
+3. `20260131-04-running-state-progress-and-connect.md`
+4. `20260131-05-empty-state-creates-and-teaches.md`
+5. `20260131-06-quick-experiment-path.md`
 
-Older Phase 1 fragments should be merged into this ordered set or removed.
+Attention summary and grouping (formerly item 01) is complete—shipped in the current branch.
 
 ## If screenshots are blocked
 

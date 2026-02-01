@@ -31,7 +31,6 @@ struct WaveSidebar: View {
     private var activeWaves: [Wave] {
         repoState.waves.filter { wave in
             (wave.status == .running || wave.status == .waiting) &&
-            wave.status != .error &&
             pendingPR(for: wave) == nil
         }
     }
@@ -40,6 +39,10 @@ struct WaveSidebar: View {
         repoState.waves.filter { wave in
             wave.status == .idle && pendingPR(for: wave) == nil
         }
+    }
+
+    private var attentionCount: Int {
+        blockedWaves.count + prWaves.count
     }
 
     private var allWavesInOrder: [Wave] {
@@ -54,7 +57,7 @@ struct WaveSidebar: View {
         return (number: prNumber, url: wave.prURL)
     }
 
-    private func sectionHeader(_ title: String, icon: String, color: Color) -> some View {
+    private func sectionHeader(_ title: String, icon: String, color: Color, count: Int) -> some View {
         HStack(spacing: 6) {
             Image(systemName: icon)
                 .font(.system(size: 9))
@@ -63,6 +66,11 @@ struct WaveSidebar: View {
                 .font(.caption2)
                 .fontWeight(.medium)
                 .foregroundStyle(.white.opacity(0.6))
+            if count > 0 {
+                Text("(\(count))")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.4))
+            }
         }
         .padding(.leading, 8)
         .padding(.top, 12)
@@ -130,6 +138,19 @@ struct WaveSidebar: View {
                 .fontWeight(.medium)
                 .foregroundStyle(.white.opacity(0.7))
                 .help("Waves are autonomous AI workers that run flows on your codebase")
+
+            if attentionCount > 0 {
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(Color.statusWarning)
+                        .frame(width: 6, height: 6)
+                    Text("\(attentionCount)")
+                        .font(.caption2)
+                        .fontWeight(.medium)
+                        .foregroundStyle(Color.statusWarning)
+                }
+                .help("\(attentionCount) wave\(attentionCount == 1 ? "" : "s") need\(attentionCount == 1 ? "s" : "") attention")
+            }
 
             Spacer()
 
@@ -263,22 +284,22 @@ struct WaveSidebar: View {
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 4) {
                 if !blockedWaves.isEmpty {
-                    sectionHeader("Needs Attention", icon: "exclamationmark.triangle.fill", color: .orange)
+                    sectionHeader("Needs Attention", icon: "exclamationmark.triangle.fill", color: .orange, count: blockedWaves.count)
                     waveRows(blockedWaves)
                 }
 
                 if !prWaves.isEmpty {
-                    sectionHeader("Open PRs", icon: "arrow.triangle.pull", color: .green)
+                    sectionHeader("Open PRs", icon: "arrow.triangle.pull", color: .green, count: prWaves.count)
                     waveRows(prWaves)
                 }
 
                 if !activeWaves.isEmpty {
-                    sectionHeader("Active", icon: "circle.fill", color: .blue)
+                    sectionHeader("Active", icon: "circle.fill", color: .blue, count: activeWaves.count)
                     waveRows(activeWaves)
                 }
 
                 if !idleWaves.isEmpty {
-                    sectionHeader("Idle", icon: "circle", color: .white.opacity(0.5))
+                    sectionHeader("Idle", icon: "circle", color: .white.opacity(0.5), count: idleWaves.count)
                     waveRows(idleWaves)
                 }
             }

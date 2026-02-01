@@ -1,9 +1,0 @@
-time: 2026-01-31T16:00:42.190057
-args: /Applications/Concerto.app/Contents/MacOS/Concerto --snapshot /Users/jack/src/loopflow.concerto-next/docs/screenshots/concerto-wave-waiting.png --repo /Users/jack/src/loopflow-demos --size 1200x800 --select wave-api-refactor --mock-loops
-returncode: 0
-duration_seconds: 2.30
-stdout:
-2026-02-01T00:00:40.057Z [WORKTREES] openRepo.config elapsed=0ms
-2026-02-01T00:00:40.058Z [WORKTREES] openRepo.prompts elapsed=0ms
-2026-02-01T00:00:40.059Z [WORKTREES] openRepo.total elapsed=1ms
-

@@ -31,7 +31,6 @@ struct WaveSidebar: View {
     private var activeWaves: [Wave] {
         repoState.waves.filter { wave in
             (wave.status == .running || wave.status == .waiting) &&
-            wave.status != .error &&
             pendingPR(for: wave) == nil
         }
     }

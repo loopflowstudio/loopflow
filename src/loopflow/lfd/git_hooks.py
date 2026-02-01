@@ -21,7 +21,7 @@ _lfd_notify() {{
     [ -S "$socket" ] || return
     local msg='{{"method":"notify","params":{{"event":"git.'
     msg+="$event"'","data":{{"repo":"'"$repo"'","branch":"'"$branch"'"}}}}}}'
-    printf '%s\\n' "$msg" | nc -U "$socket" 2>/dev/null &
+    printf '%s\\n' "$msg" | timeout 1 nc -U "$socket" 2>/dev/null &
 }}
 _lfd_notify "{event}"
 {end_marker}

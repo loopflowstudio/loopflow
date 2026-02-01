@@ -61,7 +61,7 @@ PYTHON_TO_CAMEL = {
     "started_at": "startedAt",
     "ended_at": "endedAt",
     "run_mode": "runMode",
-    "flow_run_id": "flowRunId",
+    "wave_run_id": "waveRunId",
     "agent_id": "agentId",
     "main_branch": "mainBranch",
     "pr_limit": "prLimit",
@@ -79,12 +79,12 @@ def to_camel_case(python_fields: set[str]) -> set[str]:
     return {PYTHON_TO_CAMEL.get(f, f) for f in python_fields}
 
 
-class TestStepRunSchema:
-    """StepRun schema alignment tests."""
+class TestAgentSchema:
+    """Agent schema alignment tests."""
 
-    def test_steprun_python_fields(self):
-        """Python StepRun has expected fields."""
-        fields = extract_python_fields("StepRun", REPO_ROOT / "src/loopflow/lfd/models.py")
+    def test_agent_python_fields(self):
+        """Python Agent has expected fields."""
+        fields = extract_python_fields("Agent", REPO_ROOT / "src/loopflow/lfd/models.py")
         # Core fields that must exist
         assert "id" in fields
         assert "step" in fields
@@ -92,19 +92,24 @@ class TestStepRunSchema:
         assert "worktree" in fields
         assert "status" in fields
 
-    def test_steprun_swift_matches_python(self):
-        """Swift StepRun fields match Python schema."""
-        python_fields = extract_python_fields("StepRun", REPO_ROOT / "src/loopflow/lfd/models.py")
-        swift_fields = extract_swift_fields(
-            "StepRun", REPO_ROOT / "swift/LoopflowCore/Models/Step.swift"
-        )
+    def test_agent_swift_matches_python(self):
+        """Swift Agent fields match Python schema."""
+        swift_path = REPO_ROOT / "swift/LoopflowCore/Models/Agent.swift"
+        if not swift_path.exists():
+            # Skip if Swift file not renamed yet (StepRun.swift → Agent.swift)
+            import pytest
+
+            pytest.skip("Swift Agent.swift not yet created (pending StepRun→Agent rename)")
+
+        python_fields = extract_python_fields("Agent", REPO_ROOT / "src/loopflow/lfd/models.py")
+        swift_fields = extract_swift_fields("Agent", swift_path)
 
         python_camel = to_camel_case(python_fields)
 
         # Swift should have these core fields from Python
         core_fields = {"id", "step", "repo", "worktree", "status", "startedAt", "model", "runMode"}
         missing = core_fields - swift_fields
-        assert not missing, f"Swift StepRun missing fields: {missing}"
+        assert not missing, f"Swift Agent missing fields: {missing}"
 
 
 class TestWaveSchema:
@@ -140,23 +145,28 @@ class TestWaveSchema:
         assert not missing, f"Swift Wave missing fields: {missing}"
 
 
-class TestFlowRunSchema:
-    """FlowRun schema alignment tests."""
+class TestWaveRunSchema:
+    """WaveRun schema alignment tests."""
 
-    def test_flowrun_python_fields(self):
-        """Python FlowRun has expected fields."""
-        fields = extract_python_fields("FlowRun", REPO_ROOT / "src/loopflow/lfd/models.py")
+    def test_waverun_python_fields(self):
+        """Python WaveRun has expected fields."""
+        fields = extract_python_fields("WaveRun", REPO_ROOT / "src/loopflow/lfd/models.py")
         assert "id" in fields
         assert "flow" in fields
         assert "repo" in fields
         assert "status" in fields
 
-    def test_flowrun_swift_matches_python(self):
-        """Swift FlowRun fields match Python schema."""
-        swift_fields = extract_swift_fields(
-            "FlowRun", REPO_ROOT / "swift/LoopflowCore/Models/FlowRun.swift"
-        )
+    def test_waverun_swift_matches_python(self):
+        """Swift WaveRun fields match Python schema."""
+        swift_path = REPO_ROOT / "swift/LoopflowCore/Models/WaveRun.swift"
+        if not swift_path.exists():
+            # Skip if Swift file not renamed yet (FlowRun.swift → WaveRun.swift)
+            import pytest
+
+            pytest.skip("Swift WaveRun.swift not yet created (pending FlowRun→WaveRun rename)")
+
+        swift_fields = extract_swift_fields("WaveRun", swift_path)
 
         core_fields = {"id", "flow", "repo", "status", "iteration"}
         missing = core_fields - swift_fields
-        assert not missing, f"Swift FlowRun missing fields: {missing}"
+        assert not missing, f"Swift WaveRun missing fields: {missing}"

@@ -1,4 +1,4 @@
-# Design Review: Postgres Storage Backend + LfdId
+# Design Review: Postgres Storage Backend + LfdId + Model Renaming
 
 ## What was implemented
 
@@ -16,6 +16,15 @@
 - Docker Compose setup for local development with Postgres
 - Config-driven backend selection via `LFD_STORAGE` environment variable
 - Dual-backend test suite (SQLite + Postgres with testcontainers)
+
+**Model renaming (Python + Proto):**
+- `StepRun` → `Agent` throughout Python codebase
+- `FlowRun` → `WaveRun` throughout Python codebase
+- Proto messages renamed: `StepRun` → `Agent`, `flow_run_id` → `wave_run_id`
+- Database column renamed: `flow_run_id` → `wave_run_id` in agents table
+- Proto enums renamed: `STEP_COMPLETED` → `AGENT_COMPLETED`, etc.
+- Python file deleted: `step_run.py`, replaced by `agent.py`
+- Python file deleted: `flow_run.py`, replaced by `wave_run.py`
 
 ## Key choices
 
@@ -67,31 +76,63 @@ docker-compose.yml
 - Retention policies and cleanup jobs
 - SQLite-to-Postgres data migration tooling
 - TLS/SSL support for Postgres connections
-- Per-entity ID types (`WaveId`, `StepRunId`, etc.)
+- Per-entity ID types (`WaveId`, `AgentId`, etc.)
+- Swift code renaming (still uses `StepRun` in `Step.swift`)
+- Python migration scripts for existing databases (manual SQL needed)
 
 ## Testing
 
-- SQLite test suite: passes
+- Rust tests: all pass (5 lfd tests, 37 loopflow-engine tests)
+- Python tests: 671 passed, 2 skipped (Swift alignment tests pending Swift rename)
 - Postgres test suite: passes (via testcontainers or external Postgres)
 - `LFD_SKIP_POSTGRES_TESTS=1` skips Postgres tests when Docker unavailable
 - Rust format/clippy: clean
 
 ## Files changed
 
+**Rust (LfdId + Postgres):**
+
 | File | Change |
 |------|--------|
 | `rust/lfd/src/id.rs` | New: LfdId newtype with UUID generation, validation, serialization |
 | `rust/lfd/src/store/postgres.rs` | New: ~1000 lines implementing PostgresStore |
 | `rust/lfd/src/store/mod.rs` | Added ForkRun, ForkRunStatus, StoreError variants, LfdId in trait methods, test suite |
-| `rust/lfd/src/store/sqlite.rs` | Updated to use LfdId in queries |
-| `rust/lfd/src/store/migrations/postgres/001_initial.sql` | New: initial schema |
+| `rust/lfd/src/store/sqlite.rs` | Updated to use LfdId in queries, `wave_run_id` column |
+| `rust/lfd/src/store/migrations/postgres/001_initial.sql` | New: initial schema with `wave_run_id` |
 | `rust/lfd/Cargo.toml` | Added tokio-postgres, deadpool-postgres, testcontainers deps |
 | `rust/lfd/src/main.rs` | Backend selection logic, `migrate` subcommand |
-| `rust/lfd/src/server.rs` | StoreError::Postgres handling, LfdId::parse at proto boundary |
+| `rust/lfd/src/server.rs` | StoreError::Postgres handling, LfdId::parse at proto boundary, `wave_run_id` |
 | `rust/lfd/src/loops/*.rs` | Updated to use LfdId |
 | `rust/lfd/Dockerfile` | New: multi-stage build for lfd binary |
 | `rust/lfd/docker-compose.yml` | New: local dev with Postgres |
 | `rust/lfd/README.md` | New: docker usage docs |
+
+**Proto:**
+
+| File | Change |
+|------|--------|
+| `proto/loopflow/control/v1/control.proto` | `StepRun` → `Agent`, `flow_run_id` → `wave_run_id`, enum renames |
+| `src/loopflow/proto/loopflow/control/v1/control_pb2.py` | Regenerated |
+
+**Python (Model Renaming):**
+
+| File | Change |
+|------|--------|
+| `src/loopflow/lfd/agent.py` | New: replaces `step_run.py` |
+| `src/loopflow/lfd/wave_run.py` | New: replaces `flow_run.py` |
+| `src/loopflow/lfd/step_run.py` | Deleted |
+| `src/loopflow/lfd/flow_run.py` | Deleted |
+| `src/loopflow/lfd/models.py` | `StepRun` → `Agent`, `FlowRun` → `WaveRun` |
+| `src/loopflow/lfd/protocol_v1.py` | Updated to match proto renames |
+| `src/loopflow/lfd/daemon/*.py` | Updated imports and references |
+| `src/loopflow/lfd/execution/*.py` | Updated imports and references |
+| `tests/test_lfd.py` | Updated test fixtures and assertions |
+| `tests/test_schema_alignment.py` | Updated test classes for new model names |
+
+**Design docs:**
+
+| File | Change |
+|------|--------|
 | `scratch/lfd-id.md` | Design doc for LfdId |
 | `scratch/questions.md` | Open question about composite IDs |
 | `roadmap/rust/05-data-backend.md` | Deleted: replaced by scratch/ design |

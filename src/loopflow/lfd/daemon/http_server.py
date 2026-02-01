@@ -19,20 +19,20 @@ from loopflow.lfd.daemon import metrics
 from loopflow.lfd.daemon.client import _notify_event
 from loopflow.lfd.daemon.status import compute_status
 from loopflow.lfd.migrations.baseline import SCHEMA_VERSION
-from loopflow.lfd.models import StepRun, StepRunStatus, WaveStatus
+from loopflow.lfd.models import Agent, AgentStatus, WaveStatus
 from loopflow.lfd.protocol_v1 import (
+    agent_to_proto,
     protocol_version,
-    step_run_to_proto,
     wave_to_proto,
     worktree_to_proto,
 )
-from loopflow.lfd.step_run import (
-    get_waiting_step_run,
-    load_step_runs,
-    load_step_runs_for_repo,
-    load_step_runs_for_worktree,
-    save_step_run,
-    update_step_run_status,
+from loopflow.lfd.agent import (
+    get_waiting_agent,
+    load_agents,
+    load_agents_for_repo,
+    load_agents_for_worktree,
+    save_agent,
+    update_agent_status,
 )
 from loopflow.lfd.stimulus import create_stimulus, list_stimuli
 from loopflow.lfd.wave import (
@@ -172,8 +172,8 @@ async def get_health_v1():
         "metrics": {
             "waves_total": all_metrics.get("waves_total", 0),
             "waves_running": all_metrics.get("waves_running", 0),
-            "step_runs_active": all_metrics.get("step_runs_active", 0),
-            "flow_runs_total": all_metrics.get("flow_runs_total", 0),
+            "agents_active": all_metrics.get("agents_active", 0),
+            "wave_runs_total": all_metrics.get("wave_runs_total", 0),
         },
         "protocol_version": protocol_version(),
     }
@@ -187,7 +187,7 @@ async def get_status_v1():
         "pid": status.get("pid", 0),
         "waves_defined": status.get("waves_defined", 0),
         "waves_running": status.get("waves_running", 0),
-        "step_runs_active": status.get("step_runs_active", 0),
+        "agents_active": status.get("agents_active", 0),
     }
 
 
@@ -640,12 +640,12 @@ class RunWaveRequestV1(BaseModel):
     idempotency_key: str | None = None
 
 
-class StartStepRunRequestV1(BaseModel):
-    step_run: dict[str, Any]
+class StartAgentRequestV1(BaseModel):
+    agent: dict[str, Any]
 
 
-class EndStepRunRequestV1(BaseModel):
-    step_run_id: str
+class EndAgentRequestV1(BaseModel):
+    agent_id: str
     status: str
 
 
@@ -656,28 +656,28 @@ def _load_repo_or_404(repo: str) -> Path:
     return _normalize_repo_path(repo_path)
 
 
-def _step_run_from_proto(step_run_data: dict[str, Any]) -> StepRun:
-    status = step_run_data.get("status")
+def _agent_from_proto(agent_data: dict[str, Any]) -> Agent:
+    status = agent_data.get("status")
     status_map = {
-        "STEP_RUNNING": "running",
-        "STEP_WAITING": "waiting",
-        "STEP_COMPLETED": "completed",
-        "STEP_FAILED": "failed",
+        "AGENT_RUNNING": "running",
+        "AGENT_WAITING": "waiting",
+        "AGENT_COMPLETED": "completed",
+        "AGENT_FAILED": "failed",
     }
-    normalized = dict(step_run_data)
+    normalized = dict(agent_data)
     if status in status_map:
         normalized["status"] = status_map[status]
-    return StepRun.from_dict(normalized)
+    return Agent.from_dict(normalized)
 
 
-def _step_run_status_from_proto(status: str) -> StepRunStatus:
+def _agent_status_from_proto(status: str) -> AgentStatus:
     status_map = {
-        "STEP_RUNNING": StepRunStatus.RUNNING,
-        "STEP_WAITING": StepRunStatus.WAITING,
-        "STEP_COMPLETED": StepRunStatus.COMPLETED,
-        "STEP_FAILED": StepRunStatus.FAILED,
+        "AGENT_RUNNING": AgentStatus.RUNNING,
+        "AGENT_WAITING": AgentStatus.WAITING,
+        "AGENT_COMPLETED": AgentStatus.COMPLETED,
+        "AGENT_FAILED": AgentStatus.FAILED,
     }
-    return status_map.get(status, StepRunStatus(status))
+    return status_map.get(status, AgentStatus(status))
 
 
 @app.get("/v1/flows")
@@ -878,98 +878,98 @@ async def connect_wave_v1(wave_id: str):
     from loopflow.lf.context import ContextConfig, format_prompt, gather_prompt_components
     from loopflow.lf.directions import resolve_directions
     from loopflow.lf.logging import write_prompt_file
-    from loopflow.lfd.flow_run import get_run
+    from loopflow.lfd.wave_run import get_wave_run
 
     wave = get_wave(wave_id)
     if not wave:
         raise HTTPException(status_code=404, detail=f"Wave not found: {wave_id}")
 
-    step_run = get_waiting_step_run(wave.id)
-    if not step_run:
-        raise HTTPException(status_code=404, detail="No waiting step run")
+    agent = get_waiting_agent(wave.id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="No waiting agent")
 
-    update_step_run_status(step_run.id, StepRunStatus.RUNNING)
+    update_agent_status(agent.id, AgentStatus.RUNNING)
     update_wave_status(wave.id, WaveStatus.RUNNING)
 
-    worktree_path = Path(step_run.worktree)
+    worktree_path = Path(agent.worktree)
     direction = resolve_directions(wave.repo, wave.direction)
     context_paths = list(wave.area) if wave.area and wave.area[0] != "." else None
 
     components = gather_prompt_components(
         worktree_path,
-        step=step_run.step,
+        step=agent.step,
         run_mode="interactive",
         direction=direction,
         context_config=ContextConfig(pathset=context_paths),
     )
     if not components.step:
-        raise HTTPException(status_code=404, detail=f"Step not found: {step_run.step}")
+        raise HTTPException(status_code=404, detail=f"Step not found: {agent.step}")
 
     prompt = format_prompt(components)
     prompt_file = write_prompt_file(prompt)
 
-    flow_run_id = step_run.flow_run_id
+    wave_run_id = agent.wave_run_id
     step_index = 0
-    if flow_run_id:
-        flow_run = get_run(flow_run_id)
-        if flow_run:
-            step_index = flow_run.step_index
+    if wave_run_id:
+        wave_run = get_wave_run(wave_run_id)
+        if wave_run:
+            step_index = wave_run.step_index
 
     return {
-        "worktree": step_run.worktree,
-        "step": step_run.step,
-        "step_run_id": step_run.id,
+        "worktree": agent.worktree,
+        "step": agent.step,
+        "agent_id": agent.id,
         "prompt_file": prompt_file,
-        "flow_run_id": flow_run_id,
+        "wave_run_id": wave_run_id,
         "step_index": step_index,
     }
 
 
-@app.get("/v1/step_runs")
-async def list_step_runs_v1():
-    step_runs = load_step_runs()
-    return {"step_runs": [step_run_to_proto(sr) for sr in step_runs]}
+@app.get("/v1/agents")
+async def list_agents_v1():
+    agents = load_agents()
+    return {"agents": [agent_to_proto(a) for a in agents]}
 
 
-@app.get("/v1/step_runs/history")
-async def get_step_run_history_v1(
+@app.get("/v1/agents/history")
+async def get_agent_history_v1(
     worktree: str | None = None,
     repo: str | None = None,
     limit: int | None = None,
 ):
     if worktree:
-        step_runs = load_step_runs_for_worktree(worktree, limit or 20)
+        agents = load_agents_for_worktree(worktree, limit or 20)
     elif repo:
-        step_runs = load_step_runs_for_repo(repo, limit or 20)
+        agents = load_agents_for_repo(repo, limit or 20)
     else:
-        step_runs = load_step_runs()[: (limit or 20)]
-    return {"step_runs": [step_run_to_proto(sr) for sr in step_runs]}
+        agents = load_agents()[: (limit or 20)]
+    return {"agents": [agent_to_proto(a) for a in agents]}
 
 
-@app.post("/v1/step_runs/start")
-async def start_step_run_v1(request: StartStepRunRequestV1):
-    step_run = _step_run_from_proto(request.step_run)
-    save_step_run(step_run)
+@app.post("/v1/agents/start")
+async def start_agent_v1(request: StartAgentRequestV1):
+    agent = _agent_from_proto(request.agent)
+    save_agent(agent)
     await _notify_event(
-        "session.started",
+        "agent.started",
         {
-            "id": step_run.id,
-            "step": step_run.step,
-            "worktree": step_run.worktree,
+            "id": agent.id,
+            "step": agent.step,
+            "worktree": agent.worktree,
         },
     )
-    return {"id": step_run.id}
+    return {"id": agent.id}
 
 
-@app.post("/v1/step_runs/end")
-async def end_step_run_v1(request: EndStepRunRequestV1):
-    status = _step_run_status_from_proto(request.status)
-    update_step_run_status(request.step_run_id, status)
+@app.post("/v1/agents/end")
+async def end_agent_v1(request: EndAgentRequestV1):
+    status = _agent_status_from_proto(request.status)
+    update_agent_status(request.agent_id, status)
     await _notify_event(
-        "session.ended",
-        {"id": request.step_run_id, "status": status.value},
+        "agent.ended",
+        {"id": request.agent_id, "status": status.value},
     )
-    return {"id": request.step_run_id}
+    return {"id": request.agent_id}
 
 
 class UvicornServer:

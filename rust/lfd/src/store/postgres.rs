@@ -579,7 +579,7 @@ impl RunStore for PostgresStore {
         self.with_client(|client| async move {
             let mut query = String::from(
                 "
-                SELECT id, step, repo, worktree, flow_run_id, wave_id, status,
+                SELECT id, step, repo, worktree, wave_run_id, wave_id, status,
                        started_at, ended_at, pid, model, run_mode
                 FROM agents
                 ",
@@ -621,7 +621,7 @@ impl RunStore for PostgresStore {
             let row = client
                 .query_opt(
                     "
-                    SELECT id, step, repo, worktree, flow_run_id, wave_id, status,
+                    SELECT id, step, repo, worktree, wave_run_id, wave_id, status,
                            started_at, ended_at, pid, model, run_mode
                     FROM agents
                     WHERE id = $1
@@ -638,7 +638,7 @@ impl RunStore for PostgresStore {
             let row = client
                 .query_opt(
                     "
-                    SELECT id, step, repo, worktree, flow_run_id, wave_id, status,
+                    SELECT id, step, repo, worktree, wave_run_id, wave_id, status,
                            started_at, ended_at, pid, model, run_mode
                     FROM agents
                     WHERE wave_id = $1 AND status = $2
@@ -665,7 +665,7 @@ impl RunStore for PostgresStore {
                 .execute(
                     "
                     INSERT INTO agents (
-                        id, step, repo, worktree, flow_run_id, wave_id, status, started_at,
+                        id, step, repo, worktree, wave_run_id, wave_id, status, started_at,
                         ended_at, pid, model, run_mode
                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                     ",
@@ -674,7 +674,7 @@ impl RunStore for PostgresStore {
                         &agent.step,
                         &agent.repo,
                         &agent.worktree,
-                        &agent.flow_run_id,
+                        &agent.wave_run_id,
                         &agent.wave_id,
                         &agent.status,
                         &started_at,
@@ -752,7 +752,7 @@ impl RunStore for PostgresStore {
             let rows = client
                 .query(
                     "
-                    SELECT id, step, repo, worktree, flow_run_id, wave_id, status,
+                    SELECT id, step, repo, worktree, wave_run_id, wave_id, status,
                            started_at, ended_at, pid, model, run_mode
                     FROM agents
                     WHERE ended_at IS NULL AND started_at <= $1
@@ -926,7 +926,7 @@ fn map_agent_row(row: &Row) -> StoreResult<Agent> {
         step: row.get(1),
         repo: row.get(2),
         worktree: row.get(3),
-        flow_run_id: row.get(4),
+        wave_run_id: row.get(4),
         wave_id: row.get(5),
         status: row.get::<_, i32>(6),
         started_at: Some(started_at),

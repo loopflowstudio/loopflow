@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use loopflow_engine::error::StoreError as CoreStoreError;
-use loopflow_engine::runtime::{FlowRun, FlowRunStatus, RunId, TickResult};
+use loopflow_engine::runtime::{RunId, TickResult, WaveRun, WaveRunStatus};
 use loopflow_engine::store as core_store;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -190,7 +190,7 @@ impl LfCoreStoreAdapter {
 }
 
 impl core_store::RunStore for LfCoreStoreAdapter {
-    fn get_run(&self, id: &RunId) -> Result<FlowRun, CoreStoreError> {
+    fn get_run(&self, id: &RunId) -> Result<WaveRun, CoreStoreError> {
         let wave_id =
             LfdId::parse(id.as_str()).map_err(|err| CoreStoreError::Other(err.to_string()))?;
         let wave = self
@@ -199,7 +199,7 @@ impl core_store::RunStore for LfCoreStoreAdapter {
             .map_err(|err| CoreStoreError::Other(err.to_string()))?
             .ok_or_else(|| CoreStoreError::RunNotFound(id.as_str().to_string()))?;
 
-        Ok(FlowRun {
+        Ok(WaveRun {
             id: RunId::new(wave.id.clone()),
             flow: wave.flow,
             direction: wave.direction,
@@ -217,7 +217,7 @@ impl core_store::RunStore for LfCoreStoreAdapter {
         })
     }
 
-    fn update_run(&self, run: &FlowRun) -> Result<(), CoreStoreError> {
+    fn update_run(&self, run: &WaveRun) -> Result<(), CoreStoreError> {
         let wave_id =
             LfdId::parse(run.id.as_str()).map_err(|err| CoreStoreError::Other(err.to_string()))?;
         let mut wave = self
@@ -250,12 +250,12 @@ impl core_store::RunStore for LfCoreStoreAdapter {
             step: agent.step.clone(),
             repo: agent.repo.clone(),
             worktree: agent.worktree.clone(),
-            flow_run_id: agent
-                .flow_run_id
+            wave_run_id: agent
+                .wave_run_id
                 .as_ref()
                 .map(|run_id| run_id.as_str().to_string()),
             wave_id: agent
-                .flow_run_id
+                .wave_run_id
                 .as_ref()
                 .map(|run_id| run_id.as_str().to_string()),
             status,
@@ -325,21 +325,21 @@ impl core_store::RunStore for LfCoreStoreAdapter {
     }
 }
 
-fn flow_status_from_wave(status: i32) -> FlowRunStatus {
+fn flow_status_from_wave(status: i32) -> WaveRunStatus {
     match WaveStatus::try_from(status) {
-        Ok(WaveStatus::WaveWaiting) => FlowRunStatus::Waiting,
-        Ok(WaveStatus::WaveError) => FlowRunStatus::Failed,
-        Ok(WaveStatus::WaveIdle) => FlowRunStatus::Completed,
-        _ => FlowRunStatus::Running,
+        Ok(WaveStatus::WaveWaiting) => WaveRunStatus::Waiting,
+        Ok(WaveStatus::WaveError) => WaveRunStatus::Failed,
+        Ok(WaveStatus::WaveIdle) => WaveRunStatus::Completed,
+        _ => WaveRunStatus::Running,
     }
 }
 
-fn wave_status_from_flow(status: FlowRunStatus) -> WaveStatus {
+fn wave_status_from_flow(status: WaveRunStatus) -> WaveStatus {
     match status {
-        FlowRunStatus::Running => WaveStatus::WaveRunning,
-        FlowRunStatus::Waiting => WaveStatus::WaveWaiting,
-        FlowRunStatus::Completed => WaveStatus::WaveIdle,
-        FlowRunStatus::Failed => WaveStatus::WaveError,
+        WaveRunStatus::Running => WaveStatus::WaveRunning,
+        WaveRunStatus::Waiting => WaveStatus::WaveWaiting,
+        WaveRunStatus::Completed => WaveStatus::WaveIdle,
+        WaveRunStatus::Failed => WaveStatus::WaveError,
     }
 }
 

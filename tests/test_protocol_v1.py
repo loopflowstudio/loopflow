@@ -67,4 +67,4 @@ def test_worktree_to_proto_maps_status() -> None:
     assert payload["working_tree"]["diff_deleted"] == 3
     assert payload["operation_state"] == "OPERATION_REBASE"
     assert payload["staleness"] == "STALENESS_MERGED"
-    assert payload["recent_steps"][0]["status"] == "STEP_COMPLETED"
+    assert payload["recent_steps"][0]["status"] == "AGENT_COMPLETED"

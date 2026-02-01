@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 from loopflow.lf.worktrees import is_merged, list_all
-from loopflow.lfd.step_run import load_step_runs_for_worktree
+from loopflow.lfd.agent import load_agents_for_worktree
 
 
 class WorktreeStateService:
@@ -75,22 +75,22 @@ class WorktreeStateService:
                 staleness = "remote_deleted"
             # Note: inactive detection would need timestamp tracking
 
-            # Get recent steps
-            recent_steps = []
+            # Get recent agents
+            recent_agents = []
             try:
-                step_runs = load_step_runs_for_worktree(str(wt.path), limit=5)
-                recent_steps = [
+                agents = load_agents_for_worktree(str(wt.path), limit=5)
+                recent_agents = [
                     {
-                        "id": sr.id,
-                        "step": sr.step,
-                        "status": sr.status.value,
-                        "startedAt": sr.started_at.isoformat() if sr.started_at else None,
-                        "endedAt": sr.ended_at.isoformat() if sr.ended_at else None,
+                        "id": a.id,
+                        "step": a.step,
+                        "status": a.status.value,
+                        "startedAt": a.started_at.isoformat() if a.started_at else None,
+                        "endedAt": a.ended_at.isoformat() if a.ended_at else None,
                     }
-                    for sr in step_runs
+                    for a in agents
                 ]
             except Exception:
-                pass  # Step run lookup can fail for various reasons
+                pass  # Agent lookup can fail for various reasons
 
             # Build response matching Swift's WorktreeJSON + extensions
             wt_dict = {
@@ -128,7 +128,7 @@ class WorktreeStateService:
                 "prunable": staleness == "merged",
                 "staleness": staleness,
                 "staleness_days": staleness_days,
-                "recent_steps": recent_steps,
+                "recent_agents": recent_agents,
             }
             result.append(wt_dict)
 

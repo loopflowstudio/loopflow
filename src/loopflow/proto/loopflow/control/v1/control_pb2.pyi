@@ -64,13 +64,13 @@ class Staleness(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     STALENESS_MERGED: _ClassVar[Staleness]
     STALENESS_REMOTE_DELETED: _ClassVar[Staleness]
 
-class StepRunStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+class AgentStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
-    STEP_RUN_STATUS_UNSPECIFIED: _ClassVar[StepRunStatus]
-    STEP_RUNNING: _ClassVar[StepRunStatus]
-    STEP_WAITING: _ClassVar[StepRunStatus]
-    STEP_COMPLETED: _ClassVar[StepRunStatus]
-    STEP_FAILED: _ClassVar[StepRunStatus]
+    AGENT_STATUS_UNSPECIFIED: _ClassVar[AgentStatus]
+    AGENT_RUNNING: _ClassVar[AgentStatus]
+    AGENT_WAITING: _ClassVar[AgentStatus]
+    AGENT_COMPLETED: _ClassVar[AgentStatus]
+    AGENT_FAILED: _ClassVar[AgentStatus]
 
 class WorktreeChangeReason(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -88,7 +88,6 @@ class WaitingReason(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     WAITING_REASON_UNSPECIFIED: _ClassVar[WaitingReason]
     WAITING_INTERACTIVE_STEP: _ClassVar[WaitingReason]
     WAITING_PR_LIMIT: _ClassVar[WaitingReason]
-
 STIMULUS_KIND_UNSPECIFIED: StimulusKind
 STIMULUS_ONCE: StimulusKind
 STIMULUS_LOOP: StimulusKind
@@ -119,11 +118,11 @@ OPERATION_MERGE: OperationState
 STALENESS_UNSPECIFIED: Staleness
 STALENESS_MERGED: Staleness
 STALENESS_REMOTE_DELETED: Staleness
-STEP_RUN_STATUS_UNSPECIFIED: StepRunStatus
-STEP_RUNNING: StepRunStatus
-STEP_WAITING: StepRunStatus
-STEP_COMPLETED: StepRunStatus
-STEP_FAILED: StepRunStatus
+AGENT_STATUS_UNSPECIFIED: AgentStatus
+AGENT_RUNNING: AgentStatus
+AGENT_WAITING: AgentStatus
+AGENT_COMPLETED: AgentStatus
+AGENT_FAILED: AgentStatus
 WORKTREE_CHANGE_REASON_UNSPECIFIED: WorktreeChangeReason
 WORKTREE_COMMIT: WorktreeChangeReason
 WORKTREE_CHECKOUT: WorktreeChangeReason
@@ -144,19 +143,10 @@ class ProtocolVersion(_message.Message):
     major: int
     minor: int
     patch: int
-    def __init__(
-        self, major: _Optional[int] = ..., minor: _Optional[int] = ..., patch: _Optional[int] = ...
-    ) -> None: ...
+    def __init__(self, major: _Optional[int] = ..., minor: _Optional[int] = ..., patch: _Optional[int] = ...) -> None: ...
 
 class ErrorDetail(_message.Message):
-    __slots__ = (
-        "code",
-        "message",
-        "retryable",
-        "retry_after_seconds",
-        "trace_id",
-        "idempotency_key",
-    )
+    __slots__ = ("code", "message", "retryable", "retry_after_seconds", "trace_id", "idempotency_key")
     CODE_FIELD_NUMBER: _ClassVar[int]
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
     RETRYABLE_FIELD_NUMBER: _ClassVar[int]
@@ -169,51 +159,30 @@ class ErrorDetail(_message.Message):
     retry_after_seconds: int
     trace_id: str
     idempotency_key: str
-    def __init__(
-        self,
-        code: _Optional[str] = ...,
-        message: _Optional[str] = ...,
-        retryable: bool = ...,
-        retry_after_seconds: _Optional[int] = ...,
-        trace_id: _Optional[str] = ...,
-        idempotency_key: _Optional[str] = ...,
-    ) -> None: ...
+    def __init__(self, code: _Optional[str] = ..., message: _Optional[str] = ..., retryable: bool = ..., retry_after_seconds: _Optional[int] = ..., trace_id: _Optional[str] = ..., idempotency_key: _Optional[str] = ...) -> None: ...
 
 class GetStatusRequest(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
 
 class GetStatusResponse(_message.Message):
-    __slots__ = ("pid", "waves_defined", "waves_running", "step_runs_active")
+    __slots__ = ("pid", "waves_defined", "waves_running", "agents_active")
     PID_FIELD_NUMBER: _ClassVar[int]
     WAVES_DEFINED_FIELD_NUMBER: _ClassVar[int]
     WAVES_RUNNING_FIELD_NUMBER: _ClassVar[int]
-    STEP_RUNS_ACTIVE_FIELD_NUMBER: _ClassVar[int]
+    AGENTS_ACTIVE_FIELD_NUMBER: _ClassVar[int]
     pid: int
     waves_defined: int
     waves_running: int
-    step_runs_active: int
-    def __init__(
-        self,
-        pid: _Optional[int] = ...,
-        waves_defined: _Optional[int] = ...,
-        waves_running: _Optional[int] = ...,
-        step_runs_active: _Optional[int] = ...,
-    ) -> None: ...
+    agents_active: int
+    def __init__(self, pid: _Optional[int] = ..., waves_defined: _Optional[int] = ..., waves_running: _Optional[int] = ..., agents_active: _Optional[int] = ...) -> None: ...
 
 class GetHealthRequest(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
 
 class GetHealthResponse(_message.Message):
-    __slots__ = (
-        "version",
-        "schema_version",
-        "uptime_seconds",
-        "checks",
-        "metrics",
-        "protocol_version",
-    )
+    __slots__ = ("version", "schema_version", "uptime_seconds", "checks", "metrics", "protocol_version")
     VERSION_FIELD_NUMBER: _ClassVar[int]
     SCHEMA_VERSION_FIELD_NUMBER: _ClassVar[int]
     UPTIME_SECONDS_FIELD_NUMBER: _ClassVar[int]
@@ -226,15 +195,7 @@ class GetHealthResponse(_message.Message):
     checks: HealthChecks
     metrics: HealthMetrics
     protocol_version: ProtocolVersion
-    def __init__(
-        self,
-        version: _Optional[str] = ...,
-        schema_version: _Optional[int] = ...,
-        uptime_seconds: _Optional[int] = ...,
-        checks: _Optional[_Union[HealthChecks, _Mapping]] = ...,
-        metrics: _Optional[_Union[HealthMetrics, _Mapping]] = ...,
-        protocol_version: _Optional[_Union[ProtocolVersion, _Mapping]] = ...,
-    ) -> None: ...
+    def __init__(self, version: _Optional[str] = ..., schema_version: _Optional[int] = ..., uptime_seconds: _Optional[int] = ..., checks: _Optional[_Union[HealthChecks, _Mapping]] = ..., metrics: _Optional[_Union[HealthMetrics, _Mapping]] = ..., protocol_version: _Optional[_Union[ProtocolVersion, _Mapping]] = ...) -> None: ...
 
 class HealthChecks(_message.Message):
     __slots__ = ("database", "socket")
@@ -245,62 +206,61 @@ class HealthChecks(_message.Message):
     def __init__(self, database: bool = ..., socket: bool = ...) -> None: ...
 
 class HealthMetrics(_message.Message):
-    __slots__ = ("waves_total", "waves_running", "step_runs_active", "flow_runs_total")
+    __slots__ = ("waves_total", "waves_running", "agents_active", "wave_runs_total")
     WAVES_TOTAL_FIELD_NUMBER: _ClassVar[int]
     WAVES_RUNNING_FIELD_NUMBER: _ClassVar[int]
-    STEP_RUNS_ACTIVE_FIELD_NUMBER: _ClassVar[int]
-    FLOW_RUNS_TOTAL_FIELD_NUMBER: _ClassVar[int]
+    AGENTS_ACTIVE_FIELD_NUMBER: _ClassVar[int]
+    WAVE_RUNS_TOTAL_FIELD_NUMBER: _ClassVar[int]
     waves_total: int
     waves_running: int
-    step_runs_active: int
-    flow_runs_total: int
-    def __init__(
-        self,
-        waves_total: _Optional[int] = ...,
-        waves_running: _Optional[int] = ...,
-        step_runs_active: _Optional[int] = ...,
-        flow_runs_total: _Optional[int] = ...,
-    ) -> None: ...
+    agents_active: int
+    wave_runs_total: int
+    def __init__(self, waves_total: _Optional[int] = ..., waves_running: _Optional[int] = ..., agents_active: _Optional[int] = ..., wave_runs_total: _Optional[int] = ...) -> None: ...
 
 class Stimulus(_message.Message):
-    __slots__ = ("kind", "cron")
+    __slots__ = ("id", "wave_id", "kind", "cron", "last_main_sha", "last_triggered_at", "enabled", "created_at")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    WAVE_ID_FIELD_NUMBER: _ClassVar[int]
     KIND_FIELD_NUMBER: _ClassVar[int]
     CRON_FIELD_NUMBER: _ClassVar[int]
+    LAST_MAIN_SHA_FIELD_NUMBER: _ClassVar[int]
+    LAST_TRIGGERED_AT_FIELD_NUMBER: _ClassVar[int]
+    ENABLED_FIELD_NUMBER: _ClassVar[int]
+    CREATED_AT_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    wave_id: str
     kind: StimulusKind
     cron: str
-    def __init__(
-        self, kind: _Optional[_Union[StimulusKind, str]] = ..., cron: _Optional[str] = ...
-    ) -> None: ...
+    last_main_sha: str
+    last_triggered_at: int
+    enabled: bool
+    created_at: _timestamp_pb2.Timestamp
+    def __init__(self, id: _Optional[str] = ..., wave_id: _Optional[str] = ..., kind: _Optional[_Union[StimulusKind, str]] = ..., cron: _Optional[str] = ..., last_main_sha: _Optional[str] = ..., last_triggered_at: _Optional[int] = ..., enabled: bool = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class PendingActivation(_message.Message):
+    __slots__ = ("id", "wave_id", "stimulus_id", "from_sha", "to_sha", "queued_at")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    WAVE_ID_FIELD_NUMBER: _ClassVar[int]
+    STIMULUS_ID_FIELD_NUMBER: _ClassVar[int]
+    FROM_SHA_FIELD_NUMBER: _ClassVar[int]
+    TO_SHA_FIELD_NUMBER: _ClassVar[int]
+    QUEUED_AT_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    wave_id: str
+    stimulus_id: str
+    from_sha: str
+    to_sha: str
+    queued_at: int
+    def __init__(self, id: _Optional[str] = ..., wave_id: _Optional[str] = ..., stimulus_id: _Optional[str] = ..., from_sha: _Optional[str] = ..., to_sha: _Optional[str] = ..., queued_at: _Optional[int] = ...) -> None: ...
 
 class Wave(_message.Message):
-    __slots__ = (
-        "id",
-        "name",
-        "repo",
-        "flow",
-        "direction",
-        "area",
-        "stimulus",
-        "paused",
-        "status",
-        "iteration",
-        "worktree",
-        "branch",
-        "pr_limit",
-        "merge_mode",
-        "pid",
-        "created_at",
-        "last_main_sha",
-        "consecutive_failures",
-        "pending_activations",
-    )
+    __slots__ = ("id", "name", "repo", "flow", "direction", "area", "paused", "status", "iteration", "worktree", "branch", "pr_limit", "merge_mode", "pid", "created_at", "consecutive_failures", "pending_activations", "step_index")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     REPO_FIELD_NUMBER: _ClassVar[int]
     FLOW_FIELD_NUMBER: _ClassVar[int]
     DIRECTION_FIELD_NUMBER: _ClassVar[int]
     AREA_FIELD_NUMBER: _ClassVar[int]
-    STIMULUS_FIELD_NUMBER: _ClassVar[int]
     PAUSED_FIELD_NUMBER: _ClassVar[int]
     STATUS_FIELD_NUMBER: _ClassVar[int]
     ITERATION_FIELD_NUMBER: _ClassVar[int]
@@ -310,16 +270,15 @@ class Wave(_message.Message):
     MERGE_MODE_FIELD_NUMBER: _ClassVar[int]
     PID_FIELD_NUMBER: _ClassVar[int]
     CREATED_AT_FIELD_NUMBER: _ClassVar[int]
-    LAST_MAIN_SHA_FIELD_NUMBER: _ClassVar[int]
     CONSECUTIVE_FAILURES_FIELD_NUMBER: _ClassVar[int]
     PENDING_ACTIVATIONS_FIELD_NUMBER: _ClassVar[int]
+    STEP_INDEX_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     repo: str
     flow: str
     direction: _containers.RepeatedScalarFieldContainer[str]
     area: _containers.RepeatedScalarFieldContainer[str]
-    stimulus: Stimulus
     paused: bool
     status: WaveStatus
     iteration: int
@@ -329,31 +288,10 @@ class Wave(_message.Message):
     merge_mode: MergeMode
     pid: int
     created_at: _timestamp_pb2.Timestamp
-    last_main_sha: str
     consecutive_failures: int
     pending_activations: int
-    def __init__(
-        self,
-        id: _Optional[str] = ...,
-        name: _Optional[str] = ...,
-        repo: _Optional[str] = ...,
-        flow: _Optional[str] = ...,
-        direction: _Optional[_Iterable[str]] = ...,
-        area: _Optional[_Iterable[str]] = ...,
-        stimulus: _Optional[_Union[Stimulus, _Mapping]] = ...,
-        paused: bool = ...,
-        status: _Optional[_Union[WaveStatus, str]] = ...,
-        iteration: _Optional[int] = ...,
-        worktree: _Optional[str] = ...,
-        branch: _Optional[str] = ...,
-        pr_limit: _Optional[int] = ...,
-        merge_mode: _Optional[_Union[MergeMode, str]] = ...,
-        pid: _Optional[int] = ...,
-        created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...,
-        last_main_sha: _Optional[str] = ...,
-        consecutive_failures: _Optional[int] = ...,
-        pending_activations: _Optional[int] = ...,
-    ) -> None: ...
+    step_index: int
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., repo: _Optional[str] = ..., flow: _Optional[str] = ..., direction: _Optional[_Iterable[str]] = ..., area: _Optional[_Iterable[str]] = ..., paused: bool = ..., status: _Optional[_Union[WaveStatus, str]] = ..., iteration: _Optional[int] = ..., worktree: _Optional[str] = ..., branch: _Optional[str] = ..., pr_limit: _Optional[int] = ..., merge_mode: _Optional[_Union[MergeMode, str]] = ..., pid: _Optional[int] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., consecutive_failures: _Optional[int] = ..., pending_activations: _Optional[int] = ..., step_index: _Optional[int] = ...) -> None: ...
 
 class ListWavesRequest(_message.Message):
     __slots__ = ("repo",)
@@ -393,15 +331,7 @@ class CreateWaveRequest(_message.Message):
     direction: _containers.RepeatedScalarFieldContainer[str]
     area: _containers.RepeatedScalarFieldContainer[str]
     idempotency_key: str
-    def __init__(
-        self,
-        repo: _Optional[str] = ...,
-        name: _Optional[str] = ...,
-        flow: _Optional[str] = ...,
-        direction: _Optional[_Iterable[str]] = ...,
-        area: _Optional[_Iterable[str]] = ...,
-        idempotency_key: _Optional[str] = ...,
-    ) -> None: ...
+    def __init__(self, repo: _Optional[str] = ..., name: _Optional[str] = ..., flow: _Optional[str] = ..., direction: _Optional[_Iterable[str]] = ..., area: _Optional[_Iterable[str]] = ..., idempotency_key: _Optional[str] = ...) -> None: ...
 
 class CreateWaveResponse(_message.Message):
     __slots__ = ("wave",)
@@ -410,31 +340,20 @@ class CreateWaveResponse(_message.Message):
     def __init__(self, wave: _Optional[_Union[Wave, _Mapping]] = ...) -> None: ...
 
 class UpdateWaveRequest(_message.Message):
-    __slots__ = ("wave_id", "flow", "direction", "area", "stimulus", "paused", "idempotency_key")
+    __slots__ = ("wave_id", "flow", "direction", "area", "paused", "idempotency_key")
     WAVE_ID_FIELD_NUMBER: _ClassVar[int]
     FLOW_FIELD_NUMBER: _ClassVar[int]
     DIRECTION_FIELD_NUMBER: _ClassVar[int]
     AREA_FIELD_NUMBER: _ClassVar[int]
-    STIMULUS_FIELD_NUMBER: _ClassVar[int]
     PAUSED_FIELD_NUMBER: _ClassVar[int]
     IDEMPOTENCY_KEY_FIELD_NUMBER: _ClassVar[int]
     wave_id: str
     flow: str
     direction: _containers.RepeatedScalarFieldContainer[str]
     area: _containers.RepeatedScalarFieldContainer[str]
-    stimulus: Stimulus
     paused: bool
     idempotency_key: str
-    def __init__(
-        self,
-        wave_id: _Optional[str] = ...,
-        flow: _Optional[str] = ...,
-        direction: _Optional[_Iterable[str]] = ...,
-        area: _Optional[_Iterable[str]] = ...,
-        stimulus: _Optional[_Union[Stimulus, _Mapping]] = ...,
-        paused: bool = ...,
-        idempotency_key: _Optional[str] = ...,
-    ) -> None: ...
+    def __init__(self, wave_id: _Optional[str] = ..., flow: _Optional[str] = ..., direction: _Optional[_Iterable[str]] = ..., area: _Optional[_Iterable[str]] = ..., paused: bool = ..., idempotency_key: _Optional[str] = ...) -> None: ...
 
 class UpdateWaveResponse(_message.Message):
     __slots__ = ("wave",)
@@ -460,12 +379,7 @@ class CloneWaveRequest(_message.Message):
     wave_id: str
     name: str
     idempotency_key: str
-    def __init__(
-        self,
-        wave_id: _Optional[str] = ...,
-        name: _Optional[str] = ...,
-        idempotency_key: _Optional[str] = ...,
-    ) -> None: ...
+    def __init__(self, wave_id: _Optional[str] = ..., name: _Optional[str] = ..., idempotency_key: _Optional[str] = ...) -> None: ...
 
 class CloneWaveResponse(_message.Message):
     __slots__ = ("wave",)
@@ -474,28 +388,18 @@ class CloneWaveResponse(_message.Message):
     def __init__(self, wave: _Optional[_Union[Wave, _Mapping]] = ...) -> None: ...
 
 class RunWaveRequest(_message.Message):
-    __slots__ = ("wave_id", "area", "direction", "flow", "stimulus", "idempotency_key")
+    __slots__ = ("wave_id", "area", "direction", "flow", "idempotency_key")
     WAVE_ID_FIELD_NUMBER: _ClassVar[int]
     AREA_FIELD_NUMBER: _ClassVar[int]
     DIRECTION_FIELD_NUMBER: _ClassVar[int]
     FLOW_FIELD_NUMBER: _ClassVar[int]
-    STIMULUS_FIELD_NUMBER: _ClassVar[int]
     IDEMPOTENCY_KEY_FIELD_NUMBER: _ClassVar[int]
     wave_id: str
     area: _containers.RepeatedScalarFieldContainer[str]
     direction: _containers.RepeatedScalarFieldContainer[str]
     flow: str
-    stimulus: Stimulus
     idempotency_key: str
-    def __init__(
-        self,
-        wave_id: _Optional[str] = ...,
-        area: _Optional[_Iterable[str]] = ...,
-        direction: _Optional[_Iterable[str]] = ...,
-        flow: _Optional[str] = ...,
-        stimulus: _Optional[_Union[Stimulus, _Mapping]] = ...,
-        idempotency_key: _Optional[str] = ...,
-    ) -> None: ...
+    def __init__(self, wave_id: _Optional[str] = ..., area: _Optional[_Iterable[str]] = ..., direction: _Optional[_Iterable[str]] = ..., flow: _Optional[str] = ..., idempotency_key: _Optional[str] = ...) -> None: ...
 
 class RunWaveResponse(_message.Message):
     __slots__ = ("started", "wave_id")
@@ -526,28 +430,92 @@ class ConnectWaveRequest(_message.Message):
     def __init__(self, wave_id: _Optional[str] = ...) -> None: ...
 
 class ConnectWaveResponse(_message.Message):
-    __slots__ = ("worktree", "step", "step_run_id", "prompt_file", "flow_run_id", "step_index")
+    __slots__ = ("worktree", "step", "agent_id", "prompt_file", "wave_run_id", "step_index")
     WORKTREE_FIELD_NUMBER: _ClassVar[int]
     STEP_FIELD_NUMBER: _ClassVar[int]
-    STEP_RUN_ID_FIELD_NUMBER: _ClassVar[int]
+    AGENT_ID_FIELD_NUMBER: _ClassVar[int]
     PROMPT_FILE_FIELD_NUMBER: _ClassVar[int]
-    FLOW_RUN_ID_FIELD_NUMBER: _ClassVar[int]
+    WAVE_RUN_ID_FIELD_NUMBER: _ClassVar[int]
     STEP_INDEX_FIELD_NUMBER: _ClassVar[int]
     worktree: str
     step: str
-    step_run_id: str
+    agent_id: str
     prompt_file: str
-    flow_run_id: str
+    wave_run_id: str
     step_index: int
-    def __init__(
-        self,
-        worktree: _Optional[str] = ...,
-        step: _Optional[str] = ...,
-        step_run_id: _Optional[str] = ...,
-        prompt_file: _Optional[str] = ...,
-        flow_run_id: _Optional[str] = ...,
-        step_index: _Optional[int] = ...,
-    ) -> None: ...
+    def __init__(self, worktree: _Optional[str] = ..., step: _Optional[str] = ..., agent_id: _Optional[str] = ..., prompt_file: _Optional[str] = ..., wave_run_id: _Optional[str] = ..., step_index: _Optional[int] = ...) -> None: ...
+
+class ListStimuliRequest(_message.Message):
+    __slots__ = ("wave_id", "kind")
+    WAVE_ID_FIELD_NUMBER: _ClassVar[int]
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    wave_id: str
+    kind: StimulusKind
+    def __init__(self, wave_id: _Optional[str] = ..., kind: _Optional[_Union[StimulusKind, str]] = ...) -> None: ...
+
+class ListStimuliResponse(_message.Message):
+    __slots__ = ("stimuli",)
+    STIMULI_FIELD_NUMBER: _ClassVar[int]
+    stimuli: _containers.RepeatedCompositeFieldContainer[Stimulus]
+    def __init__(self, stimuli: _Optional[_Iterable[_Union[Stimulus, _Mapping]]] = ...) -> None: ...
+
+class GetStimulusRequest(_message.Message):
+    __slots__ = ("stimulus_id",)
+    STIMULUS_ID_FIELD_NUMBER: _ClassVar[int]
+    stimulus_id: str
+    def __init__(self, stimulus_id: _Optional[str] = ...) -> None: ...
+
+class GetStimulusResponse(_message.Message):
+    __slots__ = ("stimulus",)
+    STIMULUS_FIELD_NUMBER: _ClassVar[int]
+    stimulus: Stimulus
+    def __init__(self, stimulus: _Optional[_Union[Stimulus, _Mapping]] = ...) -> None: ...
+
+class CreateStimulusRequest(_message.Message):
+    __slots__ = ("wave_id", "kind", "cron", "idempotency_key")
+    WAVE_ID_FIELD_NUMBER: _ClassVar[int]
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    CRON_FIELD_NUMBER: _ClassVar[int]
+    IDEMPOTENCY_KEY_FIELD_NUMBER: _ClassVar[int]
+    wave_id: str
+    kind: StimulusKind
+    cron: str
+    idempotency_key: str
+    def __init__(self, wave_id: _Optional[str] = ..., kind: _Optional[_Union[StimulusKind, str]] = ..., cron: _Optional[str] = ..., idempotency_key: _Optional[str] = ...) -> None: ...
+
+class CreateStimulusResponse(_message.Message):
+    __slots__ = ("stimulus",)
+    STIMULUS_FIELD_NUMBER: _ClassVar[int]
+    stimulus: Stimulus
+    def __init__(self, stimulus: _Optional[_Union[Stimulus, _Mapping]] = ...) -> None: ...
+
+class UpdateStimulusRequest(_message.Message):
+    __slots__ = ("stimulus_id", "cron", "enabled", "idempotency_key")
+    STIMULUS_ID_FIELD_NUMBER: _ClassVar[int]
+    CRON_FIELD_NUMBER: _ClassVar[int]
+    ENABLED_FIELD_NUMBER: _ClassVar[int]
+    IDEMPOTENCY_KEY_FIELD_NUMBER: _ClassVar[int]
+    stimulus_id: str
+    cron: str
+    enabled: bool
+    idempotency_key: str
+    def __init__(self, stimulus_id: _Optional[str] = ..., cron: _Optional[str] = ..., enabled: bool = ..., idempotency_key: _Optional[str] = ...) -> None: ...
+
+class UpdateStimulusResponse(_message.Message):
+    __slots__ = ("stimulus",)
+    STIMULUS_FIELD_NUMBER: _ClassVar[int]
+    stimulus: Stimulus
+    def __init__(self, stimulus: _Optional[_Union[Stimulus, _Mapping]] = ...) -> None: ...
+
+class DeleteStimulusRequest(_message.Message):
+    __slots__ = ("stimulus_id",)
+    STIMULUS_ID_FIELD_NUMBER: _ClassVar[int]
+    stimulus_id: str
+    def __init__(self, stimulus_id: _Optional[str] = ...) -> None: ...
+
+class DeleteStimulusResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
 
 class FlowInfo(_message.Message):
     __slots__ = ("name", "type", "steps")
@@ -557,12 +525,7 @@ class FlowInfo(_message.Message):
     name: str
     type: FlowType
     steps: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(
-        self,
-        name: _Optional[str] = ...,
-        type: _Optional[_Union[FlowType, str]] = ...,
-        steps: _Optional[_Iterable[str]] = ...,
-    ) -> None: ...
+    def __init__(self, name: _Optional[str] = ..., type: _Optional[_Union[FlowType, str]] = ..., steps: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class StepInfo(_message.Message):
     __slots__ = ("name", "type")
@@ -584,11 +547,7 @@ class ListFlowsResponse(_message.Message):
     STEPS_FIELD_NUMBER: _ClassVar[int]
     flows: _containers.RepeatedCompositeFieldContainer[FlowInfo]
     steps: _containers.RepeatedCompositeFieldContainer[StepInfo]
-    def __init__(
-        self,
-        flows: _Optional[_Iterable[_Union[FlowInfo, _Mapping]]] = ...,
-        steps: _Optional[_Iterable[_Union[StepInfo, _Mapping]]] = ...,
-    ) -> None: ...
+    def __init__(self, flows: _Optional[_Iterable[_Union[FlowInfo, _Mapping]]] = ..., steps: _Optional[_Iterable[_Union[StepInfo, _Mapping]]] = ...) -> None: ...
 
 class WorkingTreeStatus(_message.Message):
     __slots__ = ("staged", "modified", "untracked", "diff_added", "diff_deleted")
@@ -602,14 +561,7 @@ class WorkingTreeStatus(_message.Message):
     untracked: bool
     diff_added: int
     diff_deleted: int
-    def __init__(
-        self,
-        staged: bool = ...,
-        modified: bool = ...,
-        untracked: bool = ...,
-        diff_added: _Optional[int] = ...,
-        diff_deleted: _Optional[int] = ...,
-    ) -> None: ...
+    def __init__(self, staged: bool = ..., modified: bool = ..., untracked: bool = ..., diff_added: _Optional[int] = ..., diff_deleted: _Optional[int] = ...) -> None: ...
 
 class MainStatus(_message.Message):
     __slots__ = ("ahead", "behind")
@@ -627,9 +579,7 @@ class RemoteStatus(_message.Message):
     name: str
     ahead: int
     behind: int
-    def __init__(
-        self, name: _Optional[str] = ..., ahead: _Optional[int] = ..., behind: _Optional[int] = ...
-    ) -> None: ...
+    def __init__(self, name: _Optional[str] = ..., ahead: _Optional[int] = ..., behind: _Optional[int] = ...) -> None: ...
 
 class CIStatus(_message.Message):
     __slots__ = ("source", "url", "state", "ci_state")
@@ -641,15 +591,9 @@ class CIStatus(_message.Message):
     url: str
     state: PRState
     ci_state: CIState
-    def __init__(
-        self,
-        source: _Optional[str] = ...,
-        url: _Optional[str] = ...,
-        state: _Optional[_Union[PRState, str]] = ...,
-        ci_state: _Optional[_Union[CIState, str]] = ...,
-    ) -> None: ...
+    def __init__(self, source: _Optional[str] = ..., url: _Optional[str] = ..., state: _Optional[_Union[PRState, str]] = ..., ci_state: _Optional[_Union[CIState, str]] = ...) -> None: ...
 
-class RecentStepRun(_message.Message):
+class RecentAgent(_message.Message):
     __slots__ = ("id", "step", "status", "started_at", "ended_at")
     ID_FIELD_NUMBER: _ClassVar[int]
     STEP_FIELD_NUMBER: _ClassVar[int]
@@ -658,34 +602,13 @@ class RecentStepRun(_message.Message):
     ENDED_AT_FIELD_NUMBER: _ClassVar[int]
     id: str
     step: str
-    status: StepRunStatus
+    status: AgentStatus
     started_at: _timestamp_pb2.Timestamp
     ended_at: _timestamp_pb2.Timestamp
-    def __init__(
-        self,
-        id: _Optional[str] = ...,
-        step: _Optional[str] = ...,
-        status: _Optional[_Union[StepRunStatus, str]] = ...,
-        started_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...,
-        ended_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...,
-    ) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., step: _Optional[str] = ..., status: _Optional[_Union[AgentStatus, str]] = ..., started_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., ended_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class WorktreeState(_message.Message):
-    __slots__ = (
-        "branch",
-        "path",
-        "base_branch",
-        "working_tree",
-        "main",
-        "main_state",
-        "remote",
-        "operation_state",
-        "ci",
-        "prunable",
-        "staleness",
-        "staleness_days",
-        "recent_steps",
-    )
+    __slots__ = ("branch", "path", "base_branch", "working_tree", "main", "main_state", "remote", "operation_state", "ci", "prunable", "staleness", "staleness_days", "recent_steps")
     BRANCH_FIELD_NUMBER: _ClassVar[int]
     PATH_FIELD_NUMBER: _ClassVar[int]
     BASE_BRANCH_FIELD_NUMBER: _ClassVar[int]
@@ -711,23 +634,8 @@ class WorktreeState(_message.Message):
     prunable: bool
     staleness: Staleness
     staleness_days: int
-    recent_steps: _containers.RepeatedCompositeFieldContainer[RecentStepRun]
-    def __init__(
-        self,
-        branch: _Optional[str] = ...,
-        path: _Optional[str] = ...,
-        base_branch: _Optional[str] = ...,
-        working_tree: _Optional[_Union[WorkingTreeStatus, _Mapping]] = ...,
-        main: _Optional[_Union[MainStatus, _Mapping]] = ...,
-        main_state: _Optional[str] = ...,
-        remote: _Optional[_Union[RemoteStatus, _Mapping]] = ...,
-        operation_state: _Optional[_Union[OperationState, str]] = ...,
-        ci: _Optional[_Union[CIStatus, _Mapping]] = ...,
-        prunable: bool = ...,
-        staleness: _Optional[_Union[Staleness, str]] = ...,
-        staleness_days: _Optional[int] = ...,
-        recent_steps: _Optional[_Iterable[_Union[RecentStepRun, _Mapping]]] = ...,
-    ) -> None: ...
+    recent_steps: _containers.RepeatedCompositeFieldContainer[RecentAgent]
+    def __init__(self, branch: _Optional[str] = ..., path: _Optional[str] = ..., base_branch: _Optional[str] = ..., working_tree: _Optional[_Union[WorkingTreeStatus, _Mapping]] = ..., main: _Optional[_Union[MainStatus, _Mapping]] = ..., main_state: _Optional[str] = ..., remote: _Optional[_Union[RemoteStatus, _Mapping]] = ..., operation_state: _Optional[_Union[OperationState, str]] = ..., ci: _Optional[_Union[CIStatus, _Mapping]] = ..., prunable: bool = ..., staleness: _Optional[_Union[Staleness, str]] = ..., staleness_days: _Optional[int] = ..., recent_steps: _Optional[_Iterable[_Union[RecentAgent, _Mapping]]] = ...) -> None: ...
 
 class ListWorktreesRequest(_message.Message):
     __slots__ = ("repo",)
@@ -739,9 +647,7 @@ class ListWorktreesResponse(_message.Message):
     __slots__ = ("worktrees",)
     WORKTREES_FIELD_NUMBER: _ClassVar[int]
     worktrees: _containers.RepeatedCompositeFieldContainer[WorktreeState]
-    def __init__(
-        self, worktrees: _Optional[_Iterable[_Union[WorktreeState, _Mapping]]] = ...
-    ) -> None: ...
+    def __init__(self, worktrees: _Optional[_Iterable[_Union[WorktreeState, _Mapping]]] = ...) -> None: ...
 
 class NotifyWorktreeChangedRequest(_message.Message):
     __slots__ = ("repo", "branch", "reason")
@@ -751,9 +657,7 @@ class NotifyWorktreeChangedRequest(_message.Message):
     repo: str
     branch: str
     reason: str
-    def __init__(
-        self, repo: _Optional[str] = ..., branch: _Optional[str] = ..., reason: _Optional[str] = ...
-    ) -> None: ...
+    def __init__(self, repo: _Optional[str] = ..., branch: _Optional[str] = ..., reason: _Optional[str] = ...) -> None: ...
 
 class NotifyWorktreeChangedResponse(_message.Message):
     __slots__ = ("branch", "reason")
@@ -779,14 +683,7 @@ class GetSchedulerStatusResponse(_message.Message):
     outstanding: int
     outstanding_limit: int
     running: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(
-        self,
-        slots_used: _Optional[int] = ...,
-        slots_total: _Optional[int] = ...,
-        outstanding: _Optional[int] = ...,
-        outstanding_limit: _Optional[int] = ...,
-        running: _Optional[_Iterable[str]] = ...,
-    ) -> None: ...
+    def __init__(self, slots_used: _Optional[int] = ..., slots_total: _Optional[int] = ..., outstanding: _Optional[int] = ..., outstanding_limit: _Optional[int] = ..., running: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class AcquireSlotRequest(_message.Message):
     __slots__ = ("run_id",)
@@ -802,9 +699,7 @@ class AcquireSlotResponse(_message.Message):
     acquired: bool
     reason: str
     slots_used: int
-    def __init__(
-        self, acquired: bool = ..., reason: _Optional[str] = ..., slots_used: _Optional[int] = ...
-    ) -> None: ...
+    def __init__(self, acquired: bool = ..., reason: _Optional[str] = ..., slots_used: _Optional[int] = ...) -> None: ...
 
 class ReleaseSlotRequest(_message.Message):
     __slots__ = ("run_id",)
@@ -818,26 +713,13 @@ class ReleaseSlotResponse(_message.Message):
     slots_used: int
     def __init__(self, slots_used: _Optional[int] = ...) -> None: ...
 
-class StepRun(_message.Message):
-    __slots__ = (
-        "id",
-        "step",
-        "repo",
-        "worktree",
-        "flow_run_id",
-        "wave_id",
-        "status",
-        "started_at",
-        "ended_at",
-        "pid",
-        "model",
-        "run_mode",
-    )
+class Agent(_message.Message):
+    __slots__ = ("id", "step", "repo", "worktree", "wave_run_id", "wave_id", "status", "started_at", "ended_at", "pid", "model", "run_mode")
     ID_FIELD_NUMBER: _ClassVar[int]
     STEP_FIELD_NUMBER: _ClassVar[int]
     REPO_FIELD_NUMBER: _ClassVar[int]
     WORKTREE_FIELD_NUMBER: _ClassVar[int]
-    FLOW_RUN_ID_FIELD_NUMBER: _ClassVar[int]
+    WAVE_RUN_ID_FIELD_NUMBER: _ClassVar[int]
     WAVE_ID_FIELD_NUMBER: _ClassVar[int]
     STATUS_FIELD_NUMBER: _ClassVar[int]
     STARTED_AT_FIELD_NUMBER: _ClassVar[int]
@@ -849,43 +731,27 @@ class StepRun(_message.Message):
     step: str
     repo: str
     worktree: str
-    flow_run_id: str
+    wave_run_id: str
     wave_id: str
-    status: StepRunStatus
+    status: AgentStatus
     started_at: _timestamp_pb2.Timestamp
     ended_at: _timestamp_pb2.Timestamp
     pid: int
     model: str
     run_mode: str
-    def __init__(
-        self,
-        id: _Optional[str] = ...,
-        step: _Optional[str] = ...,
-        repo: _Optional[str] = ...,
-        worktree: _Optional[str] = ...,
-        flow_run_id: _Optional[str] = ...,
-        wave_id: _Optional[str] = ...,
-        status: _Optional[_Union[StepRunStatus, str]] = ...,
-        started_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...,
-        ended_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...,
-        pid: _Optional[int] = ...,
-        model: _Optional[str] = ...,
-        run_mode: _Optional[str] = ...,
-    ) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., step: _Optional[str] = ..., repo: _Optional[str] = ..., worktree: _Optional[str] = ..., wave_run_id: _Optional[str] = ..., wave_id: _Optional[str] = ..., status: _Optional[_Union[AgentStatus, str]] = ..., started_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., ended_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., pid: _Optional[int] = ..., model: _Optional[str] = ..., run_mode: _Optional[str] = ...) -> None: ...
 
-class ListStepRunsRequest(_message.Message):
+class ListAgentsRequest(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
 
-class ListStepRunsResponse(_message.Message):
-    __slots__ = ("step_runs",)
-    STEP_RUNS_FIELD_NUMBER: _ClassVar[int]
-    step_runs: _containers.RepeatedCompositeFieldContainer[StepRun]
-    def __init__(
-        self, step_runs: _Optional[_Iterable[_Union[StepRun, _Mapping]]] = ...
-    ) -> None: ...
+class ListAgentsResponse(_message.Message):
+    __slots__ = ("agents",)
+    AGENTS_FIELD_NUMBER: _ClassVar[int]
+    agents: _containers.RepeatedCompositeFieldContainer[Agent]
+    def __init__(self, agents: _Optional[_Iterable[_Union[Agent, _Mapping]]] = ...) -> None: ...
 
-class GetStepRunHistoryRequest(_message.Message):
+class GetAgentHistoryRequest(_message.Message):
     __slots__ = ("worktree", "repo", "limit")
     WORKTREE_FIELD_NUMBER: _ClassVar[int]
     REPO_FIELD_NUMBER: _ClassVar[int]
@@ -893,44 +759,35 @@ class GetStepRunHistoryRequest(_message.Message):
     worktree: str
     repo: str
     limit: int
-    def __init__(
-        self,
-        worktree: _Optional[str] = ...,
-        repo: _Optional[str] = ...,
-        limit: _Optional[int] = ...,
-    ) -> None: ...
+    def __init__(self, worktree: _Optional[str] = ..., repo: _Optional[str] = ..., limit: _Optional[int] = ...) -> None: ...
 
-class GetStepRunHistoryResponse(_message.Message):
-    __slots__ = ("step_runs",)
-    STEP_RUNS_FIELD_NUMBER: _ClassVar[int]
-    step_runs: _containers.RepeatedCompositeFieldContainer[StepRun]
-    def __init__(
-        self, step_runs: _Optional[_Iterable[_Union[StepRun, _Mapping]]] = ...
-    ) -> None: ...
+class GetAgentHistoryResponse(_message.Message):
+    __slots__ = ("agents",)
+    AGENTS_FIELD_NUMBER: _ClassVar[int]
+    agents: _containers.RepeatedCompositeFieldContainer[Agent]
+    def __init__(self, agents: _Optional[_Iterable[_Union[Agent, _Mapping]]] = ...) -> None: ...
 
-class StartStepRunRequest(_message.Message):
-    __slots__ = ("step_run",)
-    STEP_RUN_FIELD_NUMBER: _ClassVar[int]
-    step_run: StepRun
-    def __init__(self, step_run: _Optional[_Union[StepRun, _Mapping]] = ...) -> None: ...
+class StartAgentRequest(_message.Message):
+    __slots__ = ("agent",)
+    AGENT_FIELD_NUMBER: _ClassVar[int]
+    agent: Agent
+    def __init__(self, agent: _Optional[_Union[Agent, _Mapping]] = ...) -> None: ...
 
-class StartStepRunResponse(_message.Message):
+class StartAgentResponse(_message.Message):
     __slots__ = ("id",)
     ID_FIELD_NUMBER: _ClassVar[int]
     id: str
     def __init__(self, id: _Optional[str] = ...) -> None: ...
 
-class EndStepRunRequest(_message.Message):
-    __slots__ = ("step_run_id", "status")
-    STEP_RUN_ID_FIELD_NUMBER: _ClassVar[int]
+class EndAgentRequest(_message.Message):
+    __slots__ = ("agent_id", "status")
+    AGENT_ID_FIELD_NUMBER: _ClassVar[int]
     STATUS_FIELD_NUMBER: _ClassVar[int]
-    step_run_id: str
-    status: StepRunStatus
-    def __init__(
-        self, step_run_id: _Optional[str] = ..., status: _Optional[_Union[StepRunStatus, str]] = ...
-    ) -> None: ...
+    agent_id: str
+    status: AgentStatus
+    def __init__(self, agent_id: _Optional[str] = ..., status: _Optional[_Union[AgentStatus, str]] = ...) -> None: ...
 
-class EndStepRunResponse(_message.Message):
+class EndAgentResponse(_message.Message):
     __slots__ = ("id",)
     ID_FIELD_NUMBER: _ClassVar[int]
     id: str
@@ -943,28 +800,11 @@ class SubscribeRequest(_message.Message):
     def __init__(self, patterns: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class Event(_message.Message):
-    __slots__ = (
-        "event",
-        "timestamp",
-        "session_started",
-        "session_ended",
-        "output_line",
-        "worktree_updated",
-        "worktree_pruned",
-        "wave_created",
-        "wave_updated",
-        "wave_deleted",
-        "wave_started",
-        "wave_stopped",
-        "wave_activated",
-        "wave_waiting",
-        "scheduler_slot_acquired",
-        "scheduler_slot_released",
-    )
+    __slots__ = ("event", "timestamp", "agent_started", "agent_ended", "output_line", "worktree_updated", "worktree_pruned", "wave_created", "wave_updated", "wave_deleted", "wave_started", "wave_stopped", "wave_activated", "wave_waiting", "scheduler_slot_acquired", "scheduler_slot_released")
     EVENT_FIELD_NUMBER: _ClassVar[int]
     TIMESTAMP_FIELD_NUMBER: _ClassVar[int]
-    SESSION_STARTED_FIELD_NUMBER: _ClassVar[int]
-    SESSION_ENDED_FIELD_NUMBER: _ClassVar[int]
+    AGENT_STARTED_FIELD_NUMBER: _ClassVar[int]
+    AGENT_ENDED_FIELD_NUMBER: _ClassVar[int]
     OUTPUT_LINE_FIELD_NUMBER: _ClassVar[int]
     WORKTREE_UPDATED_FIELD_NUMBER: _ClassVar[int]
     WORKTREE_PRUNED_FIELD_NUMBER: _ClassVar[int]
@@ -979,8 +819,8 @@ class Event(_message.Message):
     SCHEDULER_SLOT_RELEASED_FIELD_NUMBER: _ClassVar[int]
     event: str
     timestamp: _timestamp_pb2.Timestamp
-    session_started: SessionStartedEvent
-    session_ended: SessionEndedEvent
+    agent_started: AgentStartedEvent
+    agent_ended: AgentEndedEvent
     output_line: OutputLineEvent
     worktree_updated: WorktreeUpdatedEvent
     worktree_pruned: WorktreePrunedEvent
@@ -993,78 +833,45 @@ class Event(_message.Message):
     wave_waiting: WaveWaitingEvent
     scheduler_slot_acquired: SchedulerSlotAcquiredEvent
     scheduler_slot_released: SchedulerSlotReleasedEvent
-    def __init__(
-        self,
-        event: _Optional[str] = ...,
-        timestamp: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...,
-        session_started: _Optional[_Union[SessionStartedEvent, _Mapping]] = ...,
-        session_ended: _Optional[_Union[SessionEndedEvent, _Mapping]] = ...,
-        output_line: _Optional[_Union[OutputLineEvent, _Mapping]] = ...,
-        worktree_updated: _Optional[_Union[WorktreeUpdatedEvent, _Mapping]] = ...,
-        worktree_pruned: _Optional[_Union[WorktreePrunedEvent, _Mapping]] = ...,
-        wave_created: _Optional[_Union[WaveCreatedEvent, _Mapping]] = ...,
-        wave_updated: _Optional[_Union[WaveUpdatedEvent, _Mapping]] = ...,
-        wave_deleted: _Optional[_Union[WaveDeletedEvent, _Mapping]] = ...,
-        wave_started: _Optional[_Union[WaveStartedEvent, _Mapping]] = ...,
-        wave_stopped: _Optional[_Union[WaveStoppedEvent, _Mapping]] = ...,
-        wave_activated: _Optional[_Union[WaveActivatedEvent, _Mapping]] = ...,
-        wave_waiting: _Optional[_Union[WaveWaitingEvent, _Mapping]] = ...,
-        scheduler_slot_acquired: _Optional[_Union[SchedulerSlotAcquiredEvent, _Mapping]] = ...,
-        scheduler_slot_released: _Optional[_Union[SchedulerSlotReleasedEvent, _Mapping]] = ...,
-    ) -> None: ...
+    def __init__(self, event: _Optional[str] = ..., timestamp: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., agent_started: _Optional[_Union[AgentStartedEvent, _Mapping]] = ..., agent_ended: _Optional[_Union[AgentEndedEvent, _Mapping]] = ..., output_line: _Optional[_Union[OutputLineEvent, _Mapping]] = ..., worktree_updated: _Optional[_Union[WorktreeUpdatedEvent, _Mapping]] = ..., worktree_pruned: _Optional[_Union[WorktreePrunedEvent, _Mapping]] = ..., wave_created: _Optional[_Union[WaveCreatedEvent, _Mapping]] = ..., wave_updated: _Optional[_Union[WaveUpdatedEvent, _Mapping]] = ..., wave_deleted: _Optional[_Union[WaveDeletedEvent, _Mapping]] = ..., wave_started: _Optional[_Union[WaveStartedEvent, _Mapping]] = ..., wave_stopped: _Optional[_Union[WaveStoppedEvent, _Mapping]] = ..., wave_activated: _Optional[_Union[WaveActivatedEvent, _Mapping]] = ..., wave_waiting: _Optional[_Union[WaveWaitingEvent, _Mapping]] = ..., scheduler_slot_acquired: _Optional[_Union[SchedulerSlotAcquiredEvent, _Mapping]] = ..., scheduler_slot_released: _Optional[_Union[SchedulerSlotReleasedEvent, _Mapping]] = ...) -> None: ...
 
-class SessionStartedEvent(_message.Message):
-    __slots__ = ("id", "step", "worktree", "wave_id", "flow_run_id", "step_index")
+class AgentStartedEvent(_message.Message):
+    __slots__ = ("id", "step", "worktree", "wave_id", "wave_run_id", "step_index")
     ID_FIELD_NUMBER: _ClassVar[int]
     STEP_FIELD_NUMBER: _ClassVar[int]
     WORKTREE_FIELD_NUMBER: _ClassVar[int]
     WAVE_ID_FIELD_NUMBER: _ClassVar[int]
-    FLOW_RUN_ID_FIELD_NUMBER: _ClassVar[int]
+    WAVE_RUN_ID_FIELD_NUMBER: _ClassVar[int]
     STEP_INDEX_FIELD_NUMBER: _ClassVar[int]
     id: str
     step: str
     worktree: str
     wave_id: str
-    flow_run_id: str
+    wave_run_id: str
     step_index: int
-    def __init__(
-        self,
-        id: _Optional[str] = ...,
-        step: _Optional[str] = ...,
-        worktree: _Optional[str] = ...,
-        wave_id: _Optional[str] = ...,
-        flow_run_id: _Optional[str] = ...,
-        step_index: _Optional[int] = ...,
-    ) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., step: _Optional[str] = ..., worktree: _Optional[str] = ..., wave_id: _Optional[str] = ..., wave_run_id: _Optional[str] = ..., step_index: _Optional[int] = ...) -> None: ...
 
-class SessionEndedEvent(_message.Message):
-    __slots__ = ("id", "status", "wave_id", "flow_run_id", "flow_will_continue")
+class AgentEndedEvent(_message.Message):
+    __slots__ = ("id", "status", "wave_id", "wave_run_id", "flow_will_continue")
     ID_FIELD_NUMBER: _ClassVar[int]
     STATUS_FIELD_NUMBER: _ClassVar[int]
     WAVE_ID_FIELD_NUMBER: _ClassVar[int]
-    FLOW_RUN_ID_FIELD_NUMBER: _ClassVar[int]
+    WAVE_RUN_ID_FIELD_NUMBER: _ClassVar[int]
     FLOW_WILL_CONTINUE_FIELD_NUMBER: _ClassVar[int]
     id: str
     status: str
     wave_id: str
-    flow_run_id: str
+    wave_run_id: str
     flow_will_continue: bool
-    def __init__(
-        self,
-        id: _Optional[str] = ...,
-        status: _Optional[str] = ...,
-        wave_id: _Optional[str] = ...,
-        flow_run_id: _Optional[str] = ...,
-        flow_will_continue: bool = ...,
-    ) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., status: _Optional[str] = ..., wave_id: _Optional[str] = ..., wave_run_id: _Optional[str] = ..., flow_will_continue: bool = ...) -> None: ...
 
 class OutputLineEvent(_message.Message):
-    __slots__ = ("session_id", "text")
-    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    __slots__ = ("agent_id", "text")
+    AGENT_ID_FIELD_NUMBER: _ClassVar[int]
     TEXT_FIELD_NUMBER: _ClassVar[int]
-    session_id: str
+    agent_id: str
     text: str
-    def __init__(self, session_id: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
+    def __init__(self, agent_id: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
 
 class WorktreeUpdatedEvent(_message.Message):
     __slots__ = ("branch", "reason", "repo", "worktree", "changes")
@@ -1078,14 +885,7 @@ class WorktreeUpdatedEvent(_message.Message):
     repo: str
     worktree: WorktreeState
     changes: WorktreeChanges
-    def __init__(
-        self,
-        branch: _Optional[str] = ...,
-        reason: _Optional[_Union[WorktreeChangeReason, str]] = ...,
-        repo: _Optional[str] = ...,
-        worktree: _Optional[_Union[WorktreeState, _Mapping]] = ...,
-        changes: _Optional[_Union[WorktreeChanges, _Mapping]] = ...,
-    ) -> None: ...
+    def __init__(self, branch: _Optional[str] = ..., reason: _Optional[_Union[WorktreeChangeReason, str]] = ..., repo: _Optional[str] = ..., worktree: _Optional[_Union[WorktreeState, _Mapping]] = ..., changes: _Optional[_Union[WorktreeChanges, _Mapping]] = ...) -> None: ...
 
 class WorktreeChanges(_message.Message):
     __slots__ = ("ci_state", "pr_state")
@@ -1093,11 +893,7 @@ class WorktreeChanges(_message.Message):
     PR_STATE_FIELD_NUMBER: _ClassVar[int]
     ci_state: CIState
     pr_state: PRState
-    def __init__(
-        self,
-        ci_state: _Optional[_Union[CIState, str]] = ...,
-        pr_state: _Optional[_Union[PRState, str]] = ...,
-    ) -> None: ...
+    def __init__(self, ci_state: _Optional[_Union[CIState, str]] = ..., pr_state: _Optional[_Union[PRState, str]] = ...) -> None: ...
 
 class WorktreePrunedEvent(_message.Message):
     __slots__ = ("branch", "repo")
@@ -1140,38 +936,34 @@ class WaveStoppedEvent(_message.Message):
     def __init__(self, wave_id: _Optional[str] = ...) -> None: ...
 
 class WaveActivatedEvent(_message.Message):
-    __slots__ = ("wave_id", "stimulus")
+    __slots__ = ("wave_id", "stimulus", "triggering_stimuli", "from_sha", "to_sha")
     WAVE_ID_FIELD_NUMBER: _ClassVar[int]
     STIMULUS_FIELD_NUMBER: _ClassVar[int]
+    TRIGGERING_STIMULI_FIELD_NUMBER: _ClassVar[int]
+    FROM_SHA_FIELD_NUMBER: _ClassVar[int]
+    TO_SHA_FIELD_NUMBER: _ClassVar[int]
     wave_id: str
     stimulus: StimulusKind
-    def __init__(
-        self, wave_id: _Optional[str] = ..., stimulus: _Optional[_Union[StimulusKind, str]] = ...
-    ) -> None: ...
+    triggering_stimuli: _containers.RepeatedScalarFieldContainer[str]
+    from_sha: str
+    to_sha: str
+    def __init__(self, wave_id: _Optional[str] = ..., stimulus: _Optional[_Union[StimulusKind, str]] = ..., triggering_stimuli: _Optional[_Iterable[str]] = ..., from_sha: _Optional[str] = ..., to_sha: _Optional[str] = ...) -> None: ...
 
 class WaveWaitingEvent(_message.Message):
-    __slots__ = ("wave_id", "step", "step_run_id", "flow_run_id", "step_index", "reason")
+    __slots__ = ("wave_id", "step", "agent_id", "flow_run_id", "step_index", "reason")
     WAVE_ID_FIELD_NUMBER: _ClassVar[int]
     STEP_FIELD_NUMBER: _ClassVar[int]
-    STEP_RUN_ID_FIELD_NUMBER: _ClassVar[int]
+    AGENT_ID_FIELD_NUMBER: _ClassVar[int]
     FLOW_RUN_ID_FIELD_NUMBER: _ClassVar[int]
     STEP_INDEX_FIELD_NUMBER: _ClassVar[int]
     REASON_FIELD_NUMBER: _ClassVar[int]
     wave_id: str
     step: str
-    step_run_id: str
+    agent_id: str
     flow_run_id: str
     step_index: int
     reason: WaitingReason
-    def __init__(
-        self,
-        wave_id: _Optional[str] = ...,
-        step: _Optional[str] = ...,
-        step_run_id: _Optional[str] = ...,
-        flow_run_id: _Optional[str] = ...,
-        step_index: _Optional[int] = ...,
-        reason: _Optional[_Union[WaitingReason, str]] = ...,
-    ) -> None: ...
+    def __init__(self, wave_id: _Optional[str] = ..., step: _Optional[str] = ..., agent_id: _Optional[str] = ..., flow_run_id: _Optional[str] = ..., step_index: _Optional[int] = ..., reason: _Optional[_Union[WaitingReason, str]] = ...) -> None: ...
 
 class SchedulerSlotAcquiredEvent(_message.Message):
     __slots__ = ("run_id", "slots_used")
@@ -1204,12 +996,12 @@ class NotifyResponse(_message.Message):
     def __init__(self, event: _Optional[str] = ...) -> None: ...
 
 class StreamOutputRequest(_message.Message):
-    __slots__ = ("step_run_id", "text")
-    STEP_RUN_ID_FIELD_NUMBER: _ClassVar[int]
+    __slots__ = ("agent_id", "text")
+    AGENT_ID_FIELD_NUMBER: _ClassVar[int]
     TEXT_FIELD_NUMBER: _ClassVar[int]
-    step_run_id: str
+    agent_id: str
     text: str
-    def __init__(self, step_run_id: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
+    def __init__(self, agent_id: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
 
 class StreamOutputResponse(_message.Message):
     __slots__ = ()

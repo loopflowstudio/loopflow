@@ -89,9 +89,9 @@ let flow = load_flow("ship", &repo)?;  // Returns early if Err
 
 ```rust
 pub trait RunStore {
-    fn get_run(&self, id: &RunId) -> Result<FlowRun, StoreError>;
-    fn update_run(&self, run: &FlowRun) -> Result<(), StoreError>;
-    fn create_step_run(&self, step_run: &StepRun) -> Result<(), StoreError>;
+    fn get_run(&self, id: &RunId) -> Result<WaveRun, StoreError>;
+    fn update_run(&self, run: &WaveRun) -> Result<(), StoreError>;
+    fn create_agent(&self, agent: &Agent) -> Result<(), StoreError>;
 }
 ```
 
@@ -108,7 +108,7 @@ tick_flow() → StepComplete    (auto step finished, call again)
            → StepFailed       (step errored)
 ```
 
-Interactive steps pause execution until the user connects. The daemon calls `tick_flow` again when `StepRunEnd` signals completion.
+Interactive steps pause execution until the user connects. The daemon calls `tick_flow` again when `AgentEnd` signals completion.
 
 ## Style Guide
 
@@ -131,7 +131,7 @@ Always derive `Debug` on public types. Add `Clone`, `PartialEq`, `Default` where
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct FlowRunStatus { ... }
+pub struct WaveRunStatus { ... }
 ```
 
 ### Traits for Injection

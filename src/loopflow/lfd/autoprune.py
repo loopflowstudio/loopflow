@@ -83,15 +83,15 @@ def get_repos_to_check() -> list[Path]:
 
     Returns repos that have worktrees (i.e., main repo roots).
     """
-    from loopflow.lfd.step_run import load_step_runs
+    from loopflow.lfd.agent import load_agents
     from loopflow.lfd.wave import list_waves
 
     repos = set()
 
-    # Get repos from active step runs
-    for step_run in load_step_runs(active_only=True):
-        if step_run.repo:
-            repos.add(Path(step_run.repo))
+    # Get repos from active agents
+    for agent in load_agents(active_only=True):
+        if agent.repo:
+            repos.add(Path(agent.repo))
 
     # Get repos from waves
     for wave in list_waves():

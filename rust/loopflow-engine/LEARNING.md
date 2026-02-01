@@ -48,7 +48,7 @@ pub fn tick_flow_with_runner(
     store: &dyn RunStore,   // borrowed trait object
     runner: &dyn StepRunner,
 ) -> Result<TickResult, CoreError> {
-    let mut run = store.get_run(run_id)?;  // We OWN this FlowRun now
+    let mut run = store.get_run(run_id)?;  // We OWN this WaveRun now
     // ...
     store.update_run(&run)?;  // Pass a borrow, we keep ownership
 ```
@@ -105,7 +105,7 @@ Pattern matching with `match` (like Python's `match` but exhaustive):
 let step = match next_item {
     FlowItem::Step(step) => step,        // Extract the Step
     _ => {                                // _ = catch-all
-        run.status = FlowRunStatus::Failed;
+        run.status = WaveRunStatus::Failed;
         // ...
         return Ok(TickResult::StepFailed);
     }
@@ -160,9 +160,9 @@ Traits define shared behavior. See `store.rs`:
 
 ```rust
 pub trait RunStore {
-    fn get_run(&self, id: &str) -> Result<FlowRun, StoreError>;
-    fn update_run(&self, run: &FlowRun) -> Result<(), StoreError>;
-    fn create_step_run(&self, step_run: &StepRun) -> Result<(), StoreError>;
+    fn get_run(&self, id: &str) -> Result<WaveRun, StoreError>;
+    fn update_run(&self, run: &WaveRun) -> Result<(), StoreError>;
+    fn create_agent(&self, agent: &Agent) -> Result<(), StoreError>;
 }
 ```
 
@@ -195,7 +195,7 @@ Those `#[derive(...)]` annotations auto-generate code:
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct FlowRun {
+pub struct WaveRun {
 ```
 
 - `Debug` = can print with `{:?}` (like Python's `__repr__`)

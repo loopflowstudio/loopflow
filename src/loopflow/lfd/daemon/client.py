@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any, AsyncIterator
 
-from loopflow.lfd.step_run import SOCKET_PATH
+from loopflow.lfd.agent import SOCKET_PATH
 
 
 class DaemonClient:

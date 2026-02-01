@@ -127,7 +127,7 @@ message HealthMetrics {
   uint32 waves_total = 1;
   uint32 waves_running = 2;
   uint32 agents_active = 3;
-  uint32 flow_runs_total = 4;
+  uint32 wave_runs_total = 4;
 }
 
 // -----------------------------------------------------------------------------
@@ -312,7 +312,7 @@ message ConnectWaveResponse {
   string step = 2;
   string agent_id = 3;
   string prompt_file = 4;          // Path to the step prompt file
-  optional string flow_run_id = 5; // Current flow run if in a flow
+  optional string wave_run_id = 5; // Current wave run if in a flow
   uint32 step_index = 6;           // Position in flow (0 if single step)
 }
 
@@ -547,7 +547,7 @@ message Agent {
   string repo = 3;
   string worktree = 4;
 
-  optional string flow_run_id = 5;
+  optional string wave_run_id = 5;
   optional string wave_id = 6;
 
   AgentStatus status = 7;
@@ -597,17 +597,17 @@ message EndAgentResponse {
 // -----------------------------------------------------------------------------
 
 message SubscribeRequest {
-  repeated string patterns = 1;  // Glob patterns like "wave.*", "session.*"
+  repeated string patterns = 1;  // Glob patterns like "wave.*", "agent.*"
 }
 
 // Event is a union type for all streamable events.
 message Event {
-  string event = 1;  // Event type (e.g., "wave.started", "session.ended")
+  string event = 1;  // Event type (e.g., "wave.started", "agent.ended")
   google.protobuf.Timestamp timestamp = 2;
 
   oneof payload {
-    SessionStartedEvent session_started = 10;
-    SessionEndedEvent session_ended = 11;
+    AgentStartedEvent agent_started = 10;
+    AgentEndedEvent agent_ended = 11;
     OutputLineEvent output_line = 12;
     WorktreeUpdatedEvent worktree_updated = 13;
     WorktreePrunedEvent worktree_pruned = 14;
@@ -623,27 +623,27 @@ message Event {
   }
 }
 
-message SessionStartedEvent {
+message AgentStartedEvent {
   string id = 1;
   string step = 2;
   string worktree = 3;
-  // Connection context (present when session is from ConnectWave)
+  // Connection context (present when agent is from ConnectWave)
   optional string wave_id = 4;
-  optional string flow_run_id = 5;
+  optional string wave_run_id = 5;
   optional uint32 step_index = 6;
 }
 
-message SessionEndedEvent {
+message AgentEndedEvent {
   string id = 1;
   string status = 2;  // "completed" or "failed"
-  // Connection context (present when session was from ConnectWave)
+  // Connection context (present when agent was from ConnectWave)
   optional string wave_id = 3;
-  optional string flow_run_id = 4;
+  optional string wave_run_id = 4;
   optional bool flow_will_continue = 5;  // True if daemon will tick_flow after this
 }
 
 message OutputLineEvent {
-  string session_id = 1;
+  string agent_id = 1;
   string text = 2;
   // timestamp is in the parent Event message
 }

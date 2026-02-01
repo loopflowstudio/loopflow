@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS agents (
     step TEXT NOT NULL,
     repo TEXT NOT NULL,
     worktree TEXT NOT NULL,
-    flow_run_id TEXT,
+    wave_run_id TEXT,
     wave_id TEXT,
     status INTEGER NOT NULL,
     started_at BIGINT NOT NULL,

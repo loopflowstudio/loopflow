@@ -44,8 +44,8 @@ from loopflow.lf.messages import generate_pr_message
 from loopflow.lf.tokens import MAX_SAFE_TOKENS, analyze_components
 from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
-from loopflow.lfd.models import StepRun, StepRunStatus
-from loopflow.lfd.step_run import log_step_run_end, log_step_run_start
+from loopflow.lfd.agent import log_agent_end, log_agent_start
+from loopflow.lfd.models import Agent, AgentStatus
 
 FlowItem = Step | Fork | Choose | LoopUntilEmpty
 
@@ -347,18 +347,18 @@ def _run_worktree_tasks(
         prompt = format_prompt(components)
         prompt_file = write_prompt_file(prompt)
 
-        step_run = StepRun(
+        agent = Agent(
             id=str(uuid.uuid4()),
             step=wt_task.step,
             repo=str(main_repo),
             worktree=str(wt_path),
-            status=StepRunStatus.RUNNING,
+            status=AgentStatus.RUNNING,
             started_at=datetime.now(),
             pid=None,
             model=wt_task.backend,
             run_mode="auto",
         )
-        log_step_run_start(step_run)
+        log_agent_start(agent)
 
         command = build_model_command(
             wt_task.backend,
@@ -375,8 +375,8 @@ def _run_worktree_tasks(
             sys.executable,
             "-m",
             "loopflow.lfd.execution.collector",
-            "--step-run-id",
-            step_run.id,
+            "--agent-id",
+            agent.id,
             "--step",
             wt_task.step,
             "--repo-root",
@@ -392,7 +392,7 @@ def _run_worktree_tasks(
 
         print(f"[{wt_task.label}] Starting in {wt_path.name}...")
         process = subprocess.Popen(collector_cmd, cwd=wt_path)
-        processes.append((wt_task, process, wt_path, prompt_file, step_run.id))
+        processes.append((wt_task, process, wt_path, prompt_file, agent.id))
 
     # Wait for all to complete
     results: list[_WorktreeResult] = []
@@ -404,8 +404,8 @@ def _run_worktree_tasks(
         except OSError:
             pass
 
-        status = StepRunStatus.COMPLETED if exit_code == 0 else StepRunStatus.FAILED
-        log_step_run_end(session_id, status)
+        status = AgentStatus.COMPLETED if exit_code == 0 else AgentStatus.FAILED
+        log_agent_end(session_id, status)
 
         branch = _current_branch(wt_path) or wt_path.name
         results.append(_WorktreeResult(wt_task.label, wt_path, branch, exit_code, session_id))

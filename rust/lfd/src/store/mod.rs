@@ -199,7 +199,7 @@ mod tests {
             step: "plan".to_string(),
             repo: "/repo".to_string(),
             worktree: "/repo".to_string(),
-            flow_run_id: None,
+            wave_run_id: None,
             wave_id: wave_id.map(|value| value.to_string()),
             status: status as i32,
             started_at: Some(Timestamp {

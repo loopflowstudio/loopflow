@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from loopflow.lfd.models import MergeMode, StepRun, StepRunStatus, Stimulus, Wave, WaveStatus
+from loopflow.lfd.models import Agent, AgentStatus, MergeMode, Stimulus, Wave, WaveStatus
 
 PROTO_VERSION = (1, 0, 0)
 
@@ -29,11 +29,11 @@ _MERGE_MODE = {
     MergeMode.LAND: "MERGE_LAND",
 }
 
-_STEP_RUN_STATUS = {
-    StepRunStatus.RUNNING: "STEP_RUNNING",
-    StepRunStatus.WAITING: "STEP_WAITING",
-    StepRunStatus.COMPLETED: "STEP_COMPLETED",
-    StepRunStatus.FAILED: "STEP_FAILED",
+_AGENT_STATUS = {
+    AgentStatus.RUNNING: "AGENT_RUNNING",
+    AgentStatus.WAITING: "AGENT_WAITING",
+    AgentStatus.COMPLETED: "AGENT_COMPLETED",
+    AgentStatus.FAILED: "AGENT_FAILED",
 }
 
 _OPERATION_STATE = {
@@ -112,22 +112,23 @@ def wave_to_proto(wave: Wave, stimuli: list[Stimulus] | None = None) -> dict[str
     return data
 
 
-def step_run_to_proto(step_run: StepRun) -> dict[str, Any]:
+def agent_to_proto(agent: Agent) -> dict[str, Any]:
+    """Convert Agent to proto-compatible dict."""
     data: dict[str, Any] = {
-        "id": step_run.id,
-        "step": step_run.step,
-        "repo": step_run.repo,
-        "worktree": step_run.worktree,
-        "status": _STEP_RUN_STATUS.get(step_run.status, "STEP_RUN_STATUS_UNSPECIFIED"),
-        "started_at": _format_timestamp(step_run.started_at),
-        "model": step_run.model,
-        "run_mode": step_run.run_mode,
+        "id": agent.id,
+        "step": agent.step,
+        "repo": agent.repo,
+        "worktree": agent.worktree,
+        "status": _AGENT_STATUS.get(agent.status, "AGENT_STATUS_UNSPECIFIED"),
+        "started_at": _format_timestamp(agent.started_at),
+        "model": agent.model,
+        "run_mode": agent.run_mode,
     }
 
-    _maybe(data, "flow_run_id", step_run.flow_run_id)
-    _maybe(data, "wave_id", step_run.wave_id)
-    _maybe(data, "ended_at", _format_timestamp(step_run.ended_at) if step_run.ended_at else None)
-    _maybe(data, "pid", step_run.pid)
+    _maybe(data, "wave_run_id", agent.wave_run_id)
+    _maybe(data, "wave_id", agent.wave_id)
+    _maybe(data, "ended_at", _format_timestamp(agent.ended_at) if agent.ended_at else None)
+    _maybe(data, "pid", agent.pid)
     return data
 
 
@@ -188,7 +189,7 @@ def _recent_step_to_proto(step: dict[str, Any]) -> dict[str, Any]:
     data: dict[str, Any] = {
         "id": step.get("id", ""),
         "step": step.get("step", ""),
-        "status": _step_run_status_name(step.get("status")),
+        "status": _agent_status_name(step.get("status")),
     }
 
     _maybe(data, "started_at", step.get("startedAt"))
@@ -196,11 +197,11 @@ def _recent_step_to_proto(step: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
-def _step_run_status_name(status: str | None) -> str:
+def _agent_status_name(status: str | None) -> str:
     if not status:
         return "STEP_RUN_STATUS_UNSPECIFIED"
     try:
-        return _STEP_RUN_STATUS[StepRunStatus(status)]
+        return _AGENT_STATUS[AgentStatus(status)]
     except ValueError:
         return "STEP_RUN_STATUS_UNSPECIFIED"
 

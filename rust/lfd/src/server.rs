@@ -159,7 +159,7 @@ impl ControlService for ControlServer {
                 waves_total: waves_defined,
                 waves_running,
                 agents_active,
-                flow_runs_total: 0,
+                wave_runs_total: 0,
             }),
             protocol_version: Some(ProtocolVersion {
                 major: 1,
@@ -603,7 +603,7 @@ impl ControlService for ControlServer {
             step: agent.step,
             agent_id: agent.id,
             prompt_file: String::new(),
-            flow_run_id: agent.flow_run_id,
+            wave_run_id: agent.wave_run_id,
             step_index: wave.step_index,
         }))
     }

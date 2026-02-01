@@ -3,20 +3,20 @@ use std::fs;
 use std::sync::Mutex;
 
 use loopflow_engine::runtime::{
-    tick_flow_with_runner, Agent, AgentStatus, FlowRun, FlowRunStatus, ForkRun, ForkRunStatus,
-    StepResult, TickResult,
+    tick_flow_with_runner, Agent, AgentStatus, ForkRun, ForkRunStatus, StepResult, TickResult,
+    WaveRun, WaveRunStatus,
 };
 use loopflow_engine::{load_flow, RunId, RunStore, Step};
 use tempfile::TempDir;
 
 struct MemoryStore {
-    runs: Mutex<HashMap<RunId, FlowRun>>,
+    runs: Mutex<HashMap<RunId, WaveRun>>,
     agents: Mutex<Vec<Agent>>,
     fork_runs: Mutex<HashMap<(RunId, usize, usize), ForkRun>>,
 }
 
 impl MemoryStore {
-    fn new(run: FlowRun) -> Self {
+    fn new(run: WaveRun) -> Self {
         let mut map = HashMap::new();
         map.insert(run.id.clone(), run);
         Self {
@@ -26,7 +26,7 @@ impl MemoryStore {
         }
     }
 
-    fn get_run_copy(&self, id: &RunId) -> FlowRun {
+    fn get_run_copy(&self, id: &RunId) -> WaveRun {
         self.runs.lock().unwrap().get(id).unwrap().clone()
     }
 
@@ -36,7 +36,7 @@ impl MemoryStore {
 }
 
 impl RunStore for MemoryStore {
-    fn get_run(&self, id: &RunId) -> Result<FlowRun, loopflow_engine::StoreError> {
+    fn get_run(&self, id: &RunId) -> Result<WaveRun, loopflow_engine::StoreError> {
         self.runs
             .lock()
             .unwrap()
@@ -45,7 +45,7 @@ impl RunStore for MemoryStore {
             .ok_or_else(|| loopflow_engine::StoreError::RunNotFound(id.to_string()))
     }
 
-    fn update_run(&self, run: &FlowRun) -> Result<(), loopflow_engine::StoreError> {
+    fn update_run(&self, run: &WaveRun) -> Result<(), loopflow_engine::StoreError> {
         self.runs
             .lock()
             .unwrap()
@@ -157,13 +157,13 @@ fn tick_auto_flow_end_to_end() {
     write_flow(repo, "auto", "- implement\n- polish\n");
 
     let run_id = RunId::new("run-1");
-    let run = FlowRun {
+    let run = WaveRun {
         id: run_id.clone(),
         flow: "auto".to_string(),
         direction: vec!["product-engineer".to_string()],
         area: vec![".".to_string()],
         repo: repo.to_path_buf(),
-        status: FlowRunStatus::Running,
+        status: WaveRunStatus::Running,
         step_index: 0,
         worktree: None,
         current_step: None,
@@ -179,7 +179,7 @@ fn tick_auto_flow_end_to_end() {
     let third = tick_flow_with_runner(&run_id, &store, &runner).unwrap();
     assert_eq!(third, TickResult::FlowComplete);
     let updated = store.get_run_copy(&run_id);
-    assert_eq!(updated.status, FlowRunStatus::Completed);
+    assert_eq!(updated.status, WaveRunStatus::Completed);
 }
 
 #[test]
@@ -193,13 +193,13 @@ fn tick_interactive_pauses() {
     );
 
     let run_id = RunId::new("run-2");
-    let run = FlowRun {
+    let run = WaveRun {
         id: run_id.clone(),
         flow: "interactive".to_string(),
         direction: vec!["designer".to_string()],
         area: vec![".".to_string()],
         repo: repo.to_path_buf(),
-        status: FlowRunStatus::Running,
+        status: WaveRunStatus::Running,
         step_index: 0,
         worktree: None,
         current_step: None,
@@ -211,7 +211,7 @@ fn tick_interactive_pauses() {
     let result = tick_flow_with_runner(&run_id, &store, &runner).unwrap();
     assert_eq!(result, TickResult::WaitingInteractive);
     let updated = store.get_run_copy(&run_id);
-    assert_eq!(updated.status, FlowRunStatus::Waiting);
+    assert_eq!(updated.status, WaveRunStatus::Waiting);
     assert_eq!(updated.step_index, 0);
 
     let agents = store.agents();
@@ -236,13 +236,13 @@ fn tick_fork_advances_after_branches() {
     );
 
     let run_id = RunId::new("run-fork");
-    let run = FlowRun {
+    let run = WaveRun {
         id: run_id.clone(),
         flow: "forked".to_string(),
         direction: vec!["product-engineer".to_string()],
         area: vec![".".to_string()],
         repo: repo.to_path_buf(),
-        status: FlowRunStatus::Running,
+        status: WaveRunStatus::Running,
         step_index: 0,
         worktree: None,
         current_step: None,
@@ -261,7 +261,7 @@ fn tick_fork_advances_after_branches() {
     assert_eq!(result, TickResult::StepComplete);
     let updated = store.get_run_copy(&run_id);
     assert_eq!(updated.step_index, 1);
-    assert_eq!(updated.status, FlowRunStatus::Running);
+    assert_eq!(updated.status, WaveRunStatus::Running);
 
     let fork_runs = store
         .fork_runs
@@ -292,13 +292,13 @@ fn tick_choose_selects_branch() {
     );
 
     let run_id = RunId::new("run-choose");
-    let run = FlowRun {
+    let run = WaveRun {
         id: run_id.clone(),
         flow: "choose-flow".to_string(),
         direction: vec!["product-engineer".to_string()],
         area: vec![".".to_string()],
         repo: repo.to_path_buf(),
-        status: FlowRunStatus::Running,
+        status: WaveRunStatus::Running,
         step_index: 0,
         worktree: None,
         current_step: None,
@@ -342,13 +342,13 @@ fn tick_loop_until_empty_terminates() {
     fs::write(wave_dir.join("item.md"), "todo").unwrap();
 
     let run_id = RunId::new("run-loop");
-    let run = FlowRun {
+    let run = WaveRun {
         id: run_id.clone(),
         flow: "looped".to_string(),
         direction: vec!["product-engineer".to_string()],
         area: vec![".".to_string()],
         repo: repo.to_path_buf(),
-        status: FlowRunStatus::Running,
+        status: WaveRunStatus::Running,
         step_index: 0,
         worktree: None,
         current_step: None,

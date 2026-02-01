@@ -30,7 +30,7 @@ Client-facing API for wave management, observability, and event streaming.
 - Flow discovery
 - Worktree management
 - Scheduler slots
-- StepRun tracking
+- Agent tracking
 - Event subscriptions
 
 ### Engine Contract (`engine/v1`)
@@ -90,8 +90,8 @@ Control plane events for real-time updates:
 | `wave.created` | New wave added |
 | `wave.started` | Wave execution began |
 | `wave.stopped` | Wave execution ended |
-| `session.started` | StepRun began |
-| `session.ended` | StepRun completed |
+| `session.started` | Agent execution began |
+| `session.ended` | Agent execution completed |
 | `output.line` | Streaming output |
 | `worktree.updated` | Branch/PR state changed |
 

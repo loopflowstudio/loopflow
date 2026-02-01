@@ -307,7 +307,7 @@ def delete_wave(wave_id: str, db_path: Path | None = None) -> bool:
 
     full_id = row["id"]
 
-    conn.execute("DELETE FROM runs WHERE wave = ?", (full_id,))
+    conn.execute("DELETE FROM wave_runs WHERE wave_id = ?", (full_id,))
     cursor = conn.execute("DELETE FROM waves WHERE id = ?", (full_id,))
 
     conn.commit()

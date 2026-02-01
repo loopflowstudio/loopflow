@@ -1,6 +1,7 @@
 import XCTest
 
 final class ScreenshotPipelineTests: XCTestCase {
+    @MainActor
     func testCapture() throws {
         let environment = ProcessInfo.processInfo.environment
         let outputName = environment["CONCERTO_UI_TEST_NAME"] ?? "concerto-uitest"

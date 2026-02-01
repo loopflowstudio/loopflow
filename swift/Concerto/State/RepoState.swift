@@ -160,6 +160,7 @@ final class RepoState {
     }
 
     func configureMockWaves() {
+        lfdConnected = true
         waves = [
             Wave(
                 id: "mock-wave-1",
@@ -237,7 +238,7 @@ final class RepoState {
         lfdConnected = true
     }
 
-    func openRepo(_ url: URL, launcherState: LauncherState, sessionState: SessionState) async {
+    func openRepo(_ url: URL, launcherState: LauncherState, sessionState: SessionState, skipBackgroundRefresh: Bool = false) async {
         let startTime = CFAbsoluteTimeGetCurrent()
         currentRepo = url
         isLoading = true
@@ -270,18 +271,20 @@ final class RepoState {
         isLoading = false
         LoggingService.append("openRepo.total elapsed=\(Int((CFAbsoluteTimeGetCurrent() - startTime) * 1000))ms")
 
-        // Background operations
-        Task {
-            let setupService = SetupService()
-            try? await setupService.ensureDaemonRunning()
-            startEventSubscription(sessionState: sessionState)
+        // Background operations (skip in screenshot mode to avoid overwriting mock data)
+        if !skipBackgroundRefresh {
+            Task {
+                let setupService = SetupService()
+                try? await setupService.ensureDaemonRunning()
+                startEventSubscription(sessionState: sessionState)
 
-            await refreshWaves()
-            await refreshFlowsAsync()
-            await launcherState.estimateTokens(repoURL: url)
+                await refreshWaves()
+                await refreshFlowsAsync()
+                await launcherState.estimateTokens(repoURL: url)
+            }
+
+            startAutoSyncTimer()
         }
-
-        startAutoSyncTimer()
     }
 
     // MARK: - Refresh Operations

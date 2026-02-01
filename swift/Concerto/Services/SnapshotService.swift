@@ -45,6 +45,8 @@ struct SnapshotService {
             throw SnapshotError.noContentView
         }
 
+        // Force window and view to update
+        window.displayIfNeeded()
         view.layoutSubtreeIfNeeded()
         let bounds = view.bounds
 

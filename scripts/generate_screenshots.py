@@ -55,7 +55,6 @@ def load_manifest(path: Path) -> Manifest:
     screenshots = []
     for shot in data.get("screenshots", []):
         size = shot.get("window_size")
-        viewport = shot.get("viewport")
         screenshots.append(
             Screenshot(
                 name=shot["name"],
@@ -66,9 +65,6 @@ def load_manifest(path: Path) -> Manifest:
                 ui_test_mode=shot.get("ui_test_mode"),
                 ui_test_select_branch=shot.get("ui_test_select_branch"),
                 ui_test_delay=shot.get("ui_test_delay"),
-                url=shot.get("url"),
-                viewport=tuple(viewport) if viewport else None,
-                wait_for=shot.get("wait_for"),
             )
         )
 

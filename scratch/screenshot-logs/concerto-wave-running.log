@@ -1,22 +1,9 @@
-time: 2026-01-31T14:42:52.003844
+time: 2026-01-31T16:00:39.892354
 args: /Applications/Concerto.app/Contents/MacOS/Concerto --snapshot /Users/jack/src/loopflow.concerto-next/docs/screenshots/concerto-wave-running.png --repo /Users/jack/src/loopflow-demos --size 1200x800 --select wave-auth-feature --mock-loops
 returncode: 0
-duration_seconds: 1.31
+duration_seconds: 2.31
 stdout:
-2026-01-31T22:42:50.933Z [WORKTREES] openRepo.config elapsed=0ms
-2026-01-31T22:42:50.934Z [WORKTREES] openRepo.prompts elapsed=0ms
-2026-01-31T22:42:50.934Z [WORKTREES] openRepo.total elapsed=1ms
-2026-01-31T22:42:50.971Z [LFD] startEventSubscription called
-2026-01-31T22:42:50.971Z [LFD] creating LFDEventService
-2026-01-31T22:42:50.971Z [MODEL] refreshWaves: starting for repo=/Users/jack/src/loopflow-demos
-2026-01-31T22:42:50.971Z [LFD] listWaves: GET http://127.0.0.1:8765/waves?repo=/Users/jack/src/loopflow-demos
-2026-01-31T22:42:50.972Z [LFD] EventService.subscribe: patterns=["worktree.*", "session.*", "output.line", "wave.*"]
-2026-01-31T22:42:50.972Z [LFD] connecting to /Users/jack/.lf/lfd.sock
-2026-01-31T22:42:50.972Z [LFD] connected
-2026-01-31T22:42:50.972Z [LFD] onConnectionChange: connected=true
-2026-01-31T22:42:51.015Z [WORKTREES] worktrees.list source=lfd http_ms=43 count=3
-2026-01-31T22:42:51.015Z [LFD] listWaves: status=200
-2026-01-31T22:42:51.015Z [LFD] listWaves: found 0 waves
-2026-01-31T22:42:51.015Z [MODEL] refreshWaves: got 0 waves
-2026-01-31T22:42:51.015Z [WORKTREES] worktrees.list source=lfd count=3 total_ms=44
+2026-02-01T00:00:37.755Z [WORKTREES] openRepo.config elapsed=0ms
+2026-02-01T00:00:37.756Z [WORKTREES] openRepo.prompts elapsed=0ms
+2026-02-01T00:00:37.756Z [WORKTREES] openRepo.total elapsed=1ms
 

@@ -90,9 +90,7 @@ def load_agents_for_worktree(
     return agents
 
 
-def load_agents_for_repo(
-    repo: str, limit: int = 50, db_path: Path | None = None
-) -> list[Agent]:
+def load_agents_for_repo(repo: str, limit: int = 50, db_path: Path | None = None) -> list[Agent]:
     """Load recent agents across all worktrees in a repo."""
     conn = _get_db(db_path)
 
@@ -106,9 +104,7 @@ def load_agents_for_repo(
     return agents
 
 
-def update_agent_status(
-    agent_id: str, status: AgentStatus, db_path: Path | None = None
-) -> bool:
+def update_agent_status(agent_id: str, status: AgentStatus, db_path: Path | None = None) -> bool:
     """Update agent status."""
     conn = _get_db(db_path)
 

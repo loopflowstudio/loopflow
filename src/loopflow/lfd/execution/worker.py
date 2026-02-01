@@ -17,7 +17,6 @@ from loopflow.lf.flows import Step, load_flow
 from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lfd.daemon.client import notify_event
 from loopflow.lfd.execution.runner import IterationResult, run_iteration, tick_flow
-from loopflow.lfd.wave_run import save_wave_run
 from loopflow.lfd.logging import worker_log
 from loopflow.lfd.models import TickResult, Wave, WaveRun, WaveRunStatus, WaveStatus
 from loopflow.lfd.wave import (
@@ -29,6 +28,7 @@ from loopflow.lfd.wave import (
     update_wave_status,
     update_wave_worktree_branch,
 )
+from loopflow.lfd.wave_run import save_wave_run
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 MANAGER_POLL_INTERVAL = 30  # seconds between slot checks

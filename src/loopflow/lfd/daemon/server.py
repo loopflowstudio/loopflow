@@ -8,13 +8,6 @@ from asyncio import StreamReader, StreamWriter
 from datetime import datetime
 from pathlib import Path
 
-from loopflow.lfd.daemon import metrics
-from loopflow.lfd.daemon.manager import Manager, load_manager_config
-from loopflow.lfd.daemon.protocol import Event, Request, Response, error, success
-from loopflow.lfd.daemon.status import compute_status
-from loopflow.lfd.db import update_dead_processes
-from loopflow.lfd.wave_run import cleanup_stale_wave_runs
-from loopflow.lfd.git_hooks import hooks_status, install_hooks
 from loopflow.lfd.agent import (
     load_agents,
     load_agents_for_repo,
@@ -22,9 +15,16 @@ from loopflow.lfd.agent import (
     save_agent,
     update_agent_status,
 )
+from loopflow.lfd.daemon import metrics
+from loopflow.lfd.daemon.manager import Manager, load_manager_config
+from loopflow.lfd.daemon.protocol import Event, Request, Response, error, success
+from loopflow.lfd.daemon.status import compute_status
+from loopflow.lfd.db import update_dead_processes
+from loopflow.lfd.git_hooks import hooks_status, install_hooks
 from loopflow.lfd.models import Agent, AgentStatus
 from loopflow.lfd.pr_poller import PRPoller
 from loopflow.lfd.wave import run_cron_check, run_watch_check
+from loopflow.lfd.wave_run import cleanup_stale_wave_runs
 from loopflow.lfd.worktree_state import get_worktree_state_service
 
 

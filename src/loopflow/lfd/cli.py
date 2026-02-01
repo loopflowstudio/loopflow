@@ -27,18 +27,17 @@ from loopflow.lf.launcher import build_model_interactive_command
 from loopflow.lf.logging import get_log_dir
 from loopflow.lf.naming import generate_next_branch
 from loopflow.lf.ops.shell import write_directive
+from loopflow.lfd.agent import get_waiting_agent, update_agent_status
 from loopflow.lfd.daemon.launchd import install as launchd_install
 from loopflow.lfd.daemon.launchd import is_running
 from loopflow.lfd.daemon.launchd import uninstall as launchd_uninstall
 from loopflow.lfd.daemon.server import run_server
 from loopflow.lfd.db import reset_db
-from loopflow.lfd.wave_run import list_wave_runs_for_wave
 from loopflow.lfd.git_hooks import (
     hooks_status,
     install_hooks,
     uninstall_hooks,
 )
-from loopflow.lfd.agent import get_waiting_agent, update_agent_status
 from loopflow.lfd.models import AgentStatus, MergeMode, Wave, WaveStatus
 from loopflow.lfd.stimulus import (
     create_stimulus,
@@ -63,6 +62,7 @@ from loopflow.lfd.wave import (
     update_wave_status,
     update_wave_worktree_branch,
 )
+from loopflow.lfd.wave_run import list_wave_runs_for_wave
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 

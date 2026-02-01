@@ -8,9 +8,7 @@ DESCRIPTION = "rename runs to wave_runs, flow_run_id to wave_run_id"
 
 def apply(conn: sqlite3.Connection) -> None:
     # Check if the old 'runs' table exists
-    cursor = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='runs'"
-    )
+    cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='runs'")
     if cursor.fetchone():
         # Rename the table
         conn.execute("ALTER TABLE runs RENAME TO wave_runs")

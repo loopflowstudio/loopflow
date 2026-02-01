@@ -13,10 +13,6 @@ import grpc
 from google.protobuf import timestamp_pb2
 
 from loopflow import __version__
-from loopflow.lfd.daemon import metrics
-from loopflow.lfd.daemon.manager import Manager
-from loopflow.lfd.daemon.status import compute_status
-from loopflow.lfd.migrations.baseline import SCHEMA_VERSION
 from loopflow.lfd.agent import (
     load_agents,
     load_agents_for_repo,
@@ -24,6 +20,10 @@ from loopflow.lfd.agent import (
     save_agent,
     update_agent_status,
 )
+from loopflow.lfd.daemon import metrics
+from loopflow.lfd.daemon.manager import Manager
+from loopflow.lfd.daemon.status import compute_status
+from loopflow.lfd.migrations.baseline import SCHEMA_VERSION
 from loopflow.lfd.models import Agent, AgentStatus
 from loopflow.lfd.worktree_state import get_worktree_state_service
 from loopflow.proto.loopflow.control.v1 import control_pb2, control_pb2_grpc
@@ -103,9 +103,7 @@ class ControlServiceServicer(control_pb2_grpc.ControlServiceServicer):
         """List all active agents."""
         metrics.increment("grpc_requests")
         agents = load_agents()
-        return control_pb2.ListAgentsResponse(
-            agents=[_agent_to_proto(a) for a in agents]
-        )
+        return control_pb2.ListAgentsResponse(agents=[_agent_to_proto(a) for a in agents])
 
     async def GetAgentHistory(self, request, context):
         """Return agent history for a worktree or repo."""
@@ -119,9 +117,7 @@ class ControlServiceServicer(control_pb2_grpc.ControlServiceServicer):
         else:
             agents = load_agents()[:limit]
 
-        return control_pb2.GetAgentHistoryResponse(
-            agents=[_agent_to_proto(a) for a in agents]
-        )
+        return control_pb2.GetAgentHistoryResponse(agents=[_agent_to_proto(a) for a in agents])
 
     async def StartAgent(self, request, context):
         """Record an agent start."""

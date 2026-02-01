@@ -15,6 +15,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from loopflow import __version__
+from loopflow.lfd.agent import (
+    get_waiting_agent,
+    load_agents,
+    load_agents_for_repo,
+    load_agents_for_worktree,
+    save_agent,
+    update_agent_status,
+)
 from loopflow.lfd.daemon import metrics
 from loopflow.lfd.daemon.client import _notify_event
 from loopflow.lfd.daemon.status import compute_status
@@ -25,14 +33,6 @@ from loopflow.lfd.protocol_v1 import (
     protocol_version,
     wave_to_proto,
     worktree_to_proto,
-)
-from loopflow.lfd.agent import (
-    get_waiting_agent,
-    load_agents,
-    load_agents_for_repo,
-    load_agents_for_worktree,
-    save_agent,
-    update_agent_status,
 )
 from loopflow.lfd.stimulus import create_stimulus, list_stimuli
 from loopflow.lfd.wave import (

@@ -12,8 +12,8 @@ from loopflow.lfd.migrations import m_2026_01_25_agent_paused as agent_paused
 from loopflow.lfd.migrations import m_2026_01_26_step_index as step_index
 from loopflow.lfd.migrations import m_2026_01_28_wave_stacking as wave_stacking
 from loopflow.lfd.migrations import m_2026_01_29_stimuli as stimuli
-from loopflow.lfd.migrations import m_2026_01_31_rename_step_runs_to_agents as rename_agents
 from loopflow.lfd.migrations import m_2026_01_31_rename_runs_to_wave_runs as rename_wave_runs
+from loopflow.lfd.migrations import m_2026_01_31_rename_step_runs_to_agents as rename_agents
 
 
 @dataclass
@@ -37,5 +37,9 @@ MIGRATIONS = [
     Migration(wave_stacking.VERSION, wave_stacking.DESCRIPTION, wave_stacking.apply),
     Migration(stimuli.VERSION, stimuli.DESCRIPTION, stimuli.apply),
     Migration(rename_agents.VERSION, rename_agents.DESCRIPTION, rename_agents.apply),
-    Migration(rename_wave_runs.SCHEMA_VERSION, rename_wave_runs.DESCRIPTION, rename_wave_runs.apply),
+    Migration(
+        rename_wave_runs.SCHEMA_VERSION,
+        rename_wave_runs.DESCRIPTION,
+        rename_wave_runs.apply,
+    ),
 ]

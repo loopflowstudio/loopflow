@@ -219,9 +219,7 @@ def delete_wave_run(run_id: str, db_path: Path | None = None) -> bool:
     """Delete a wave run."""
     conn = _get_db(db_path)
 
-    cursor = conn.execute(
-        "DELETE FROM wave_runs WHERE id = ? OR id LIKE ?", (run_id, f"{run_id}%")
-    )
+    cursor = conn.execute("DELETE FROM wave_runs WHERE id = ? OR id LIKE ?", (run_id, f"{run_id}%"))
 
     conn.commit()
     deleted = cursor.rowcount > 0

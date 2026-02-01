@@ -2,8 +2,8 @@
 
 import os
 
-from loopflow.lfd.models import WaveStatus
 from loopflow.lfd.agent import load_agents
+from loopflow.lfd.models import WaveStatus
 from loopflow.lfd.wave import list_waves
 
 

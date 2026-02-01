@@ -42,15 +42,8 @@ from loopflow.lf.messages import generate_pr_message
 from loopflow.lf.worktrees import WorktreeError
 from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lf.worktrees import remove as remove_worktree
+from loopflow.lfd.agent import save_agent
 from loopflow.lfd.daemon.client import notify_event
-from loopflow.lfd.wave_run import (
-    get_wave_run,
-    save_wave_run,
-    update_wave_run_index,
-    update_wave_run_pr,
-    update_wave_run_status,
-    update_wave_run_step,
-)
 from loopflow.lfd.models import (
     Agent,
     AgentStatus,
@@ -60,8 +53,15 @@ from loopflow.lfd.models import (
     WaveRunStatus,
     WaveStatus,
 )
-from loopflow.lfd.agent import save_agent
 from loopflow.lfd.wave import get_wave, update_wave_status
+from loopflow.lfd.wave_run import (
+    get_wave_run,
+    save_wave_run,
+    update_wave_run_index,
+    update_wave_run_pr,
+    update_wave_run_status,
+    update_wave_run_step,
+)
 
 
 @dataclass
@@ -663,7 +663,8 @@ def run_iteration(
                     )
 
                     if result_code != 0:
-                        update_wave_run_status(run.id, WaveRunStatus.FAILED, error=f"{step_name} failed")
+                        error_msg = f"{step_name} failed"
+                        update_wave_run_status(run.id, WaveRunStatus.FAILED, error=error_msg)
                         _cleanup_worktree(wave.repo, worktree_path, branch)
                         return IterationResult(success=False)
                     continue
@@ -725,7 +726,8 @@ def run_iteration(
                 if any(exit_code != 0 for _, _, exit_code in results):
                     for _, wt_path, _ in results:
                         remove_worktree(wave.repo, wt_path.name.split(".")[-1])
-                    update_wave_run_status(run.id, WaveRunStatus.FAILED, error="Parallel step failed")
+                    error_msg = "Parallel step failed"
+                    update_wave_run_status(run.id, WaveRunStatus.FAILED, error=error_msg)
                     _cleanup_worktree(wave.repo, worktree_path, branch)
                     return IterationResult(success=False)
 
@@ -924,7 +926,8 @@ def tick_flow(wave_run_id: str) -> TickResult:
     )
 
     if not prompt_result:
-        update_wave_run_status(wave_run.id, WaveRunStatus.FAILED, error=f"Step not found: {step_name}")
+        error_msg = f"Step not found: {step_name}"
+        update_wave_run_status(wave_run.id, WaveRunStatus.FAILED, error=error_msg)
         return TickResult.STEP_FAILED
 
     prompt, _step_file = prompt_result

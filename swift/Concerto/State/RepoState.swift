@@ -10,6 +10,7 @@ final class RepoState {
     enum UITestMode: String {
         case emptyWorkspaces = "empty-workspaces"
         case sampleWorkspaces = "sample-workspaces"
+        case mockWaves = "mock-waves"
     }
 
     struct ScreenshotMode {
@@ -21,12 +22,12 @@ final class RepoState {
 
         static func fromArgs() -> ScreenshotMode? {
             let args = ProcessInfo.processInfo.arguments
-            guard let captureIndex = args.firstIndex(of: "--capture"),
-                  args.count > captureIndex + 1 else {
+            guard let snapshotIndex = args.firstIndex(of: "--snapshot"),
+                  args.count > snapshotIndex + 1 else {
                 return nil
             }
 
-            let outputPath = args[captureIndex + 1]
+            let outputPath = args[snapshotIndex + 1]
             var repoPath: String?
             var windowSize: (Int, Int)?
             var selectBranch: String?
@@ -124,6 +125,7 @@ final class RepoState {
         selectedWave = nil
         isLoading = false
         errorMessage = nil
+        let selectBranch = ProcessInfo.processInfo.environment["CONCERTO_UI_TEST_SELECT_BRANCH"]
 
         switch mode {
         case .emptyWorkspaces:
@@ -148,10 +150,17 @@ final class RepoState {
                     hasDiff: true
                 )
             ]
+        case .mockWaves:
+            worktrees = []
+            configureMockWaves()
+            if let selectBranch {
+                selectedWave = waves.first { $0.branch == selectBranch }
+            }
         }
     }
 
     func configureMockWaves() {
+        lfdConnected = true
         waves = [
             Wave(
                 id: "mock-wave-1",
@@ -229,7 +238,7 @@ final class RepoState {
         lfdConnected = true
     }
 
-    func openRepo(_ url: URL, launcherState: LauncherState, sessionState: SessionState) async {
+    func openRepo(_ url: URL, launcherState: LauncherState, sessionState: SessionState, skipBackgroundRefresh: Bool = false) async {
         let startTime = CFAbsoluteTimeGetCurrent()
         currentRepo = url
         isLoading = true
@@ -262,18 +271,20 @@ final class RepoState {
         isLoading = false
         LoggingService.append("openRepo.total elapsed=\(Int((CFAbsoluteTimeGetCurrent() - startTime) * 1000))ms")
 
-        // Background operations
-        Task {
-            let setupService = SetupService()
-            try? await setupService.ensureDaemonRunning()
-            startEventSubscription(sessionState: sessionState)
+        // Background operations (skip in screenshot mode to avoid overwriting mock data)
+        if !skipBackgroundRefresh {
+            Task {
+                let setupService = SetupService()
+                try? await setupService.ensureDaemonRunning()
+                startEventSubscription(sessionState: sessionState)
 
-            await refreshWaves()
-            await refreshFlowsAsync()
-            await launcherState.estimateTokens(repoURL: url)
+                await refreshWaves()
+                await refreshFlowsAsync()
+                await launcherState.estimateTokens(repoURL: url)
+            }
+
+            startAutoSyncTimer()
         }
-
-        startAutoSyncTimer()
     }
 
     // MARK: - Refresh Operations

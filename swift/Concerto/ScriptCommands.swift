@@ -8,9 +8,9 @@ class CaptureScreenshotCommand: NSScriptCommand {
         var errorString: String?
 
         MainActor.assumeIsolated {
-            let service = CaptureService()
+            let service = SnapshotService()
             do {
-                let screenshotURL = try service.captureKeyWindow()
+                let screenshotURL = try service.snapshotKeyWindow()
                 result = screenshotURL.path
             } catch {
                 errorString = error.localizedDescription

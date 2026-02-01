@@ -1,9 +1,9 @@
-// TransitionBar - sticky footer for transitioning from Improvise to Conduct mode.
+// NextActionsBar - sticky footer for next actions after running steps.
 
 import SwiftUI
 import LoopflowCore
 
-struct TransitionBar: View {
+struct NextActionsBar: View {
     let wave: Wave
 
     @Environment(RepoState.self) private var repoState
@@ -321,7 +321,7 @@ struct StimulusPicker: View {
 
     return VStack {
         Spacer()
-        TransitionBar(wave: wave)
+        NextActionsBar(wave: wave)
     }
     .environment(repoState)
     .frame(width: 600, height: 200)

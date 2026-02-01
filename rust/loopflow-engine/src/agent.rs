@@ -81,7 +81,10 @@ pub fn build_codex_command(config: &LaunchConfig) -> Vec<String> {
     }
 
     if config.skip_permissions {
-        cmd.push("--dangerously-bypass-approvals-and-sandbox".to_string());
+        cmd.push("--sandbox".to_string());
+        cmd.push("danger-full-access".to_string());
+        cmd.push("-c".to_string());
+        cmd.push("approval_policy=\"never\"".to_string());
     } else {
         cmd.push("--sandbox".to_string());
         cmd.push("workspace-write".to_string());

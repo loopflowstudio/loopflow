@@ -254,14 +254,14 @@ Auto-push after commits in auto mode.
 
 ### Yolo
 
-Skip permissions. Codex also disables sandboxing.
+Skip permissions. Codex uses the danger-full-access sandbox.
 
 | | |
 |---|---|
 | **Config** | `yolo: true` |
 | **Default** | `false` |
 
-Claude: `--dangerously-skip-permissions`. Codex: `--dangerously-bypass-approvals-and-sandbox`. Gemini: `--yolo`.
+Claude: `--dangerously-skip-permissions`. Codex: `--sandbox danger-full-access` with `approval_policy="never"`. Gemini: `--yolo`.
 
 ### Autoprune
 

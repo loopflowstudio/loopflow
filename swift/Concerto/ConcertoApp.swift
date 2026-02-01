@@ -8,8 +8,8 @@ import LoopflowCore
 struct ConcertoApp: App {
     @State private var recentsService = RecentsService()
     @Environment(\.openWindow) private var openWindow
-    @State private var captureError: String?
-    @State private var showCaptureError = false
+    @State private var snapshotError: String?
+    @State private var showSnapshotError = false
     @AppStorage("appearanceMode") private var appearanceMode = AppearanceMode.system.rawValue
 
     init() {
@@ -81,8 +81,8 @@ struct ConcertoApp: App {
             }
 
             CommandGroup(after: .saveItem) {
-                Button("Capture for Review") {
-                    captureCurrentWindow()
+                Button("Snapshot for Review") {
+                    snapshotCurrentWindow()
                 }
                 .keyboardShortcut("4", modifiers: [.command])
             }
@@ -120,16 +120,16 @@ struct ConcertoApp: App {
     }
 
     @MainActor
-    private func captureCurrentWindow() {
-        let captureService = CaptureService()
+    private func snapshotCurrentWindow() {
+        let snapshotService = SnapshotService()
 
         do {
-            let outputURL = try captureService.captureKeyWindow()
+            let outputURL = try snapshotService.snapshotKeyWindow()
             NSSound.beep()
             NSWorkspace.shared.activateFileViewerSelecting([outputURL])
         } catch {
-            captureError = error.localizedDescription
-            showCaptureError = true
+            snapshotError = error.localizedDescription
+            showSnapshotError = true
         }
     }
 }

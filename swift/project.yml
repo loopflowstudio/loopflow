@@ -65,3 +65,15 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: YES
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/Concerto.app/Contents/MacOS/Concerto
+
+  ConcertoUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: ConcertoUITests
+    dependencies:
+      - target: Concerto
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Concerto

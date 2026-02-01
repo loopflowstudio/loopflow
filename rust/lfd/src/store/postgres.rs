@@ -1,4 +1,5 @@
 use std::future::Future;
+use std::time::Duration;
 
 use deadpool_postgres::{Manager, Pool};
 use prost_types::Timestamp;
@@ -9,6 +10,12 @@ use tokio_postgres::{NoTls, Row};
 use crate::id::LfdId;
 use crate::proto::control::{Agent, AgentStatus, PendingActivation, Stimulus, Wave};
 use crate::store::{ForkRun, ForkRunStatus, RunStore, StoreError, StoreResult};
+
+const RETRY_DELAYS: [Duration; 3] = [
+    Duration::from_millis(100),
+    Duration::from_millis(500),
+    Duration::from_secs(2),
+];
 
 const SCHEMA_VERSION: u32 = 1;
 const MIGRATION_001: &str = include_str!("migrations/postgres/001_initial.sql");
@@ -97,7 +104,7 @@ impl PostgresStore {
         Fut: Future<Output = StoreResult<T>>,
     {
         self.block_on(async {
-            let client = self.pool.get().await?;
+            let client = get_client_with_retry(&self.pool).await?;
             func(client).await
         })
     }
@@ -830,6 +837,24 @@ fn build_pool(database_url: &str) -> StoreResult<Pool> {
         .build()
         .map_err(|err| StoreError::InvalidData(format!("failed to build pool: {err}")))?;
     Ok(pool)
+}
+
+async fn get_client_with_retry(
+    pool: &Pool,
+) -> Result<deadpool_postgres::Client, deadpool_postgres::PoolError> {
+    let mut last_error = None;
+    for (attempt, delay) in RETRY_DELAYS.iter().enumerate() {
+        match pool.get().await {
+            Ok(client) => return Ok(client),
+            Err(err) => {
+                last_error = Some(err);
+                if attempt < RETRY_DELAYS.len() - 1 {
+                    tokio::time::sleep(*delay).await;
+                }
+            }
+        }
+    }
+    Err(last_error.expect("retry loop always sets last_error"))
 }
 
 fn unix_to_timestamp(seconds: i64) -> Timestamp {

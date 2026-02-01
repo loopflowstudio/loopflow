@@ -588,8 +588,10 @@ mod tests {
 
     #[test]
     fn format_prompt_basic() {
-        let mut components = PromptComponents::default();
-        components.run_mode = Some("auto".to_string());
+        let components = PromptComponents {
+            run_mode: Some("auto".to_string()),
+            ..Default::default()
+        };
 
         let prompt = format_prompt(&components);
         assert!(prompt.contains("Run mode is auto"));
@@ -597,8 +599,10 @@ mod tests {
 
     #[test]
     fn format_prompt_with_wave() {
-        let mut components = PromptComponents::default();
-        components.wave = Some("rust".to_string());
+        let components = PromptComponents {
+            wave: Some("rust".to_string()),
+            ..Default::default()
+        };
 
         let prompt = format_prompt(&components);
         assert!(prompt.contains("lf:wave"));

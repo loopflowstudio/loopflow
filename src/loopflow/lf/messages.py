@@ -10,9 +10,13 @@ from pathlib import Path
 
 from loopflow.lf.builtins.prompts import get_builtin_prompt
 from loopflow.lf.config import load_config, parse_model
-from loopflow.lf.context import gather_diff, gather_docs
+from loopflow.lf.context import gather_diff
 from loopflow.lf.launcher import build_claude_command, build_codex_command
 from loopflow.lf.logging import get_model_env
+from loopflow.lf.tokens import count_tokens
+
+# Token budget for diff in PR/commit messages
+_DIFF_BUDGET = 120000
 
 
 @dataclass
@@ -44,20 +48,27 @@ def _get_staged_diff(repo_root: Path) -> str | None:
     return result.stdout
 
 
+def _limit_diff(diff: str, token_budget: int) -> str:
+    """Limit diff to fit within token budget."""
+    tokens = count_tokens(diff)
+    if tokens <= token_budget:
+        return diff
+    # Truncate to fit budget (~3.5 chars per token)
+    char_limit = int(token_budget * 3.5)
+    return diff[:char_limit] + "\n\n[...diff truncated to fit context limit...]"
+
+
 def _build_message_prompt(repo_root: Path, diff: str | None, task_prompt: str) -> str:
+    """Build prompt for commit/PR message generation.
+
+    Unlike step prompts, message prompts skip repo docs since they're not needed
+    for generating titles and descriptions from diffs.
+    """
     parts = []
 
-    root_docs = gather_docs(repo_root, repo_root)
-    if root_docs:
-        doc_parts = []
-        for doc_path, content in root_docs:
-            name = doc_path.stem
-            doc_parts.append(f"<lf:{name}>\n{content}\n</lf:{name}>")
-        docs_body = "\n\n".join(doc_parts)
-        parts.append(f"<lf:docs>\n{docs_body}\n</lf:docs>")
-
     if diff:
-        parts.append(f"<lf:diff>\n{diff}\n</lf:diff>")
+        limited_diff = _limit_diff(diff, _DIFF_BUDGET)
+        parts.append(f"<lf:diff>\n{limited_diff}\n</lf:diff>")
 
     parts.append(f"<lf:task>\n{task_prompt}\n</lf:task>")
     return "\n\n".join(parts)

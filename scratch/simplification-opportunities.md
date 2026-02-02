@@ -2,139 +2,188 @@
 
 ## Product intent
 
-Loopflow wants to be a single tool for running AI-assisted coding workflows: steps (single prompts), flows (sequences of steps), and waves (automated triggers). Users should be able to type `lf debug` and have the right context assembled, the right agent launched, and the result tracked—whether running interactively at a terminal or automatically in the background.
+Loopflow is a step/flow runner for coding agents. Users write markdown steps, compose them into flows, and execute them with `lf` (one-shot) or as daemon-managed waves (continuous). The product wants to be **simple local-first execution with optional persistence for automation**.
 
-## Opportunity 1: Collapse the daemon's role into orchestration-only
+## Opportunity 1: Collapse the two RunStore traits
 
-**Misalignment**: The product has two execution models fighting each other. The CLI (`lf`) can run flows directly using `tick_flow()` from the engine. The daemon (`lfd`) can also run flows using the same engine. But the daemon adds a layer of stimulus management, slot scheduling, and persistence that the CLI ignores entirely.
+**Misalignment**: The engine's `RunStore` (6 methods, ephemeral runs) and lfd's `RunStore` (25+ methods, persistent waves) share a name but are incompatible interfaces for different concepts.
 
-The roadmap says "daemon is for waves and automation; CLI is for humans." But the implementation makes them parallel execution paths rather than layered ones. The CLI builds its own `InMemoryStore` and runs flows in a loop. The daemon builds a `SharedStore` and runs flows in a timer-driven loop. Same engine, two different orchestration layers.
+**Symptom**: `LfCoreStoreAdapter` in `loop_ticker.rs` (180 lines) exists solely to bridge these two interfaces. Every method manually converts between:
+- `RunId` ↔ `LfdId`
+- `WaveRun` ↔ `Wave`
+- `WaveRunStatus` (4 states) ↔ `WaveStatus` (5 states)
+- `ForkRunStatus` (engine) ↔ `ForkRunStatus` (lfd)
+- `Agent` (engine) ↔ `Agent` (proto)
 
-**Symptom**:
-- `lf/src/commands/flow.rs` creates an `InMemoryStore` and calls `tick_flow_with_runner()` in a loop
-- `lfd/src/loops/loop_ticker.rs` creates an adapter and calls `tick_flow()` on a timer
-- Both implement "run a flow to completion" but with different persistence, error handling, and lifecycle semantics
-- No code path for "CLI asks daemon to run a flow" despite the gRPC API existing
+Status conversion is lossy—`WaveIdle` maps to `Completed`, `WaveError` maps to `Failed`. This semantic gap causes subtle bugs.
 
-**Realignment**: Make the daemon the only place that runs multi-step flows with persistence. The CLI becomes a thin client that either:
-1. Runs single steps directly (stateless, current behavior)
-2. Submits flow runs to the daemon and streams output back
-
-The engine provides the state machine (`tick_flow`). The daemon provides orchestration (scheduling, persistence, stimuli). The CLI provides the interface. Each layer has one job.
-
-**Cascade**:
-- Delete `InMemoryStore` from the CLI; it's a test double pretending to be production code
-- Flow resumption after interactive steps becomes obvious: daemon tracks state, CLI reconnects
-- Wave management commands (`lf wave create`) become natural: they're just RPC calls
-- The "stimulus" concept can live entirely in the daemon without touching the engine
-
----
-
-## Opportunity 2: Unify the store abstraction
-
-**Misalignment**: The engine defines `RunStore` (get_run, update_run, create_agent). The daemon defines a richer store with Wave, Stimulus, Agent, ForkRun, PendingActivation, Worktree tables. An adapter bridges them, but it's awkward.
-
-The engine's `RunStore` speaks in terms of "runs" (transient execution state). The daemon's store speaks in terms of "waves" (persistent automation definitions). These are different concepts getting merged through an adapter that loses information both ways.
-
-**Symptom**:
-- `lfd/src/store/lf_core_adapter.rs` exists solely to translate between two store abstractions
-- The engine's `WaveRun` struct has `id, flow, directions, areas, repo, status, step_index, worktree`
-- The daemon's `Wave` proto has `id, name, repo, flow, status, paused, consecutive_failures, error`
-- These overlap but don't match; the adapter copies fields back and forth
-- Stimulus evaluation logic (`watch_poller.rs`, `cron_poller.rs`) queries the daemon store directly, bypassing the engine entirely
-
-**Realignment**: The engine should not have a store abstraction. It should be pure: take flow state in, return new state out. The daemon owns all persistence.
+**Realignment**: The engine should define **one canonical store interface** that lfd implements. The daemon-specific state (stimuli, pending activations, CI status) lives in a **separate DaemonStore** that composes with the core interface:
 
 ```rust
-// Engine becomes stateless
-fn tick_flow(run: &WaveRun, step_runner: &impl StepRunner) -> TickResult {
-    // No store calls; just state transitions
+// loopflow-engine: core execution state
+pub trait RunStore {
+    fn get_run(&self, id: &str) -> Result<Run>;
+    fn update_run(&self, run: &Run) -> Result<()>;
+    fn create_agent(&self, agent: &Agent) -> Result<()>;
+    fn list_fork_runs(&self, run_id: &str, step_index: usize) -> Result<Vec<ForkRun>>;
+    // ...
 }
 
-// Daemon handles persistence
-async fn run_wave(&self, wave_id: &str) {
-    let wave = self.store.get_wave(wave_id)?;
-    let mut run = wave.to_run_state();
-
-    loop {
-        match tick_flow(&run, &self.runner) {
-            TickResult::StepComplete(new_state) => {
-                run = new_state;
-                self.store.update_wave_state(&wave_id, &run)?;
-            }
-            // ...
-        }
-    }
+// lfd extends for daemon-specific orchestration state
+pub trait DaemonStore: RunStore {
+    fn list_waves(&self, repo: Option<&str>) -> Result<Vec<Wave>>;
+    fn list_stimuli(&self, wave_id: Option<&str>) -> Result<Vec<Stimulus>>;
+    fn create_pending_activation(&self, activation: &PendingActivation) -> Result<()>;
+    // ...
 }
 ```
 
 **Cascade**:
-- Delete `RunStore` trait from the engine
-- Delete `LfCoreStoreAdapter` from the daemon
-- Engine becomes testable without any storage mocks
-- The daemon's store schema becomes the single source of truth
-- Direction merging, config loading, worktree management all live in the daemon's orchestration layer
+- Delete `LfCoreStoreAdapter` entirely
+- Delete all `flow_status_from_wave`/`wave_status_from_flow` functions
+- Delete duplicate `ForkRunStatus` enum from `lfd/src/store/mod.rs`
+- Engine's `tick_flow()` works directly with lfd's store without adapter
 
----
+## Opportunity 2: Merge RunId and LfdId
 
-## Opportunity 3: Make steps the only primitive
+**Misalignment**: Two identical newtype wrappers for UUID strings exist independently—`RunId` in engine, `LfdId` in lfd.
 
-**Misalignment**: The engine has three concepts that are all "run a prompt": Step, FlowItem::Step, and inline prompts (`lf : "prompt"`). Flows add Fork, Choose, and LoopUntilEmpty. But the product intent is simpler: users want to run prompts with context.
-
-Fork is "run these steps in parallel." Choose is "ask an agent which step to run." LoopUntilEmpty is "keep running a step until a condition." These are orchestration patterns, not new primitives. The engine treats them as first-class flow items, which adds parsing complexity and special-case handling.
-
-**Symptom**:
-- `flow.rs` has 200+ lines parsing Fork with branches, synthesize steps, Choose with options and prompts
-- `runtime.rs` has separate code paths for `run_step_item`, `run_fork_item`, `run_choose_item`, `run_loop_item`
-- Fork creates `ForkRun` records with `wave_id`, `branch_name`, `status`, `merge_point`
-- The CLI's flow runner doesn't support Fork properly (uses `InMemoryStore` with incomplete ForkRun tracking)
-
-**Realignment**: Fork, Choose, and LoopUntilEmpty become orchestration strategies in the daemon, not flow parsing primitives. A flow is a list of steps with optional control metadata.
-
-```yaml
-# Instead of special syntax for Fork:
-items:
-  - fork:
-      branches:
-        - steps: [a, b]
-        - steps: [c, d]
-      synthesize: merge
-
-# Use declarative metadata:
-items:
-  - step: a
-    parallel_group: branch-1
-  - step: b
-    parallel_group: branch-1
-    after: a
-  - step: c
-    parallel_group: branch-2
-  - step: d
-    parallel_group: branch-2
-    after: c
-  - step: merge
-    after: [b, d]  # runs after both branches complete
+**Symptom**: Every ID crossing the crate boundary requires explicit parsing:
+```rust
+let wave_id = LfdId::parse(run_id.as_str())?;  // 15+ occurrences
 ```
 
-This is more verbose but makes the data model flat: flows are DAGs of steps, not recursive trees of items. The daemon interprets the DAG; the engine just runs individual steps.
+Both types validate UUIDs, implement Display, wrap `String`. Zero code sharing.
+
+**Realignment**: Define `RunId` once in the engine with a proper API:
+
+```rust
+// loopflow-engine
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct RunId(Uuid);
+
+impl RunId {
+    pub fn new() -> Self { Self(Uuid::new_v4()) }
+    pub fn parse(s: &str) -> Result<Self, ParseError> { ... }
+}
+```
+
+lfd uses `RunId` directly—no `LfdId` type.
 
 **Cascade**:
-- Delete `FlowItem` enum; flows become `Vec<Step>` with dependency metadata
-- Delete Fork/Choose/Loop handling from the engine
-- The daemon's scheduler already has "run steps in parallel" via slot management; extend it to handle step dependencies
-- Flow files become simpler to parse and validate
-- Worktree creation becomes explicit: a step can declare `worktree: new` and the daemon creates one before running
+- Delete `lfd/src/id.rs` entirely (~80 lines)
+- Delete all `LfdId::parse()` calls throughout lfd
+- Proto messages use `string id` but Rust code converts once at the gRPC boundary
 
----
+## Opportunity 3: Unify status enums
+
+**Misalignment**: Four parallel status hierarchies exist:
+- Engine `WaveRunStatus`: Running, Waiting, Completed, Failed
+- Proto `WaveStatus`: WaveIdle, WaveRunning, WaveWaiting, WaveError
+- Engine `AgentStatus`: Running, Waiting, Completed, Failed
+- Proto `AgentStatus`: AgentRunning, AgentWaiting, AgentCompleted, AgentFailed
+
+**Symptom**: `flow_status_from_wave()`, `wave_status_from_flow()`, `map_fork_status()`, `map_fork_status_back()`—four conversion functions for concepts that should be the same type.
+
+Proto adds `WaveIdle` and `WaveError` as daemon-specific states. But `Completed`→`WaveIdle` and `Failed`→`WaveError` mappings leak daemon semantics into engine code.
+
+**Realignment**: Engine defines canonical status. Daemon extends it:
+
+```rust
+// loopflow-engine: execution states
+pub enum RunStatus {
+    Running,
+    Waiting,
+    Completed,
+    Failed,
+}
+
+// lfd extends for daemon lifecycle
+pub enum WaveStatus {
+    Idle,           // daemon-only: between iterations
+    Active(RunStatus),  // wraps engine status during execution
+}
+```
+
+Proto generates into Rust enums, but gRPC handlers convert at the boundary.
+
+**Cascade**:
+- Delete all status mapping functions
+- Proto becomes a serialization format, not a source of domain types
+- Single `match` at gRPC boundary handles all conversion
+
+## Opportunity 4: Remove CLI's InMemoryStore duplication
+
+**Misalignment**: `lf flow` creates an `InMemoryStore` that reimplements `RunStore` for ephemeral local execution. Meanwhile, lfd has full `SqliteStore`/`PostgresStore` implementations.
+
+**Symptom**: `lf/src/commands/flow.rs` contains 90 lines of `InMemoryStore` that duplicates what lfd's stores already do. The engine already defines the trait; we just keep reimplementing it.
+
+**Realignment**: Engine provides an `InMemoryStore` reference implementation. CLI and tests use it directly:
+
+```rust
+// loopflow-engine (not lf)
+pub mod store {
+    pub trait RunStore { ... }
+    pub struct InMemoryStore { ... }  // reference implementation
+}
+```
+
+**Cascade**:
+- Delete `InMemoryStore` from `lf/src/commands/flow.rs`
+- Engine tests use the same in-memory store
+- lfd's stores implement the trait; no new code
+
+## Opportunity 5: Proto as wire format, not domain model
+
+**Misalignment**: lfd uses generated proto types (`Wave`, `Agent`, `Stimulus`) as internal domain objects. These carry proto baggage (optional fields as `Option<Timestamp>`, `i32` for enums) throughout business logic.
+
+**Symptom**: Throughout lfd:
+```rust
+wave.status != WaveStatus::WaveRunning as i32  // compare i32, not enum
+stimulus.enabled  // proto bool, no type safety
+agent.started_at.map(|t| t.seconds)  // unwrap Timestamp wrapper
+```
+
+Proto types leak into store trait signatures, loop logic, scheduler logic.
+
+**Realignment**: Define internal domain types in Rust. Convert at gRPC/HTTP boundaries only:
+
+```rust
+// lfd internal types
+pub struct Wave {
+    pub id: RunId,
+    pub status: WaveStatus,  // real enum
+    pub consecutive_failures: u32,  // not i32
+    pub created_at: time::OffsetDateTime,  // not Timestamp
+}
+
+// conversion only at proto boundary
+impl From<proto::Wave> for Wave { ... }
+impl From<Wave> for proto::Wave { ... }
+```
+
+**Cascade**:
+- Clean Rust types throughout lfd business logic
+- Proto changes don't ripple into domain code
+- Type safety for enums, timestamps, IDs
+- Store trait uses domain types, not proto types
 
 ## Aligned areas
 
-**Prompt assembly (`prompt.rs`)**: The context gathering logic matches the product well. Users specify directions and areas; the engine finds the right files, diffs, and clips them together. The component model (PromptComponents) is clean.
+**Engine's flow execution model**: `tick_flow()` with `StepRunner` trait injection is well-aligned. The state machine is clear, the runner abstraction enables testing.
 
-**Agent invocation (`agent.rs`)**: Building CLI commands for claude/codex/gemini is straightforward. The abstraction is right: take a prompt and config, return a subprocess. No unnecessary generalization.
+**Agent launching**: `launch_agent()` cleanly abstracts over Claude/Codex/Gemini CLIs. The `LaunchConfig` structure matches product needs.
 
-**Config merging (`config.rs`)**: Global + repo + CLI override is the right hierarchy. The implementation is simple. Keep it.
+**Context gathering**: `gather_context()` with `GatherContextOpts` matches the CLI's needs directly. No translation layer.
 
-**Step/direction discovery (`lf/discovery.rs`)**: Finding markdown files in `.lf/steps`, `.claude/commands`, global directories—this is well-aligned with how users organize their prompts.
+**Scheduler slot management**: lfd's `Scheduler` with semaphore-based slots is simple and correct for the problem.
 
-**gRPC API design (`control.proto`)**: The service methods (CreateWave, RunWave, StopWave, ListStimuli) match what users need. The proto is clean. The problem is that nothing calls it.
+**gRPC/HTTP separation**: lfd separates gRPC control plane from HTTP health/metrics cleanly.
+
+## Priority order
+
+1. **Merge ID types** (Opportunity 2) — smallest change, immediate cleanup
+2. **Unify status enums** (Opportunity 3) — removes conversion functions
+3. **Collapse RunStore traits** (Opportunity 1) — biggest impact, removes adapter layer
+4. **Remove InMemoryStore duplication** (Opportunity 4) — cleanup after #3
+5. **Proto as wire format** (Opportunity 5) — larger refactor, do after others stabilize

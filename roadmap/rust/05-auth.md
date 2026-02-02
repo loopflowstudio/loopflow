@@ -10,7 +10,7 @@ For remote access (phone, laptop, different machine), we need authentication.
 
 ## Goal
 
-1. loopflow.studio provides auth service (Clerk integration)
+1. loopflow.studio provides auth service (WorkOS AuthKit integration)
 2. `lf auth login` performs browser OAuth flow
 3. lfd validates JWTs against loopflow.studio
 4. Self-hosters control who can access their daemon
@@ -19,10 +19,10 @@ For remote access (phone, laptop, different machine), we need authentication.
 
 ```
 ┌───────────────┐    ┌───────────────────┐    ┌───────────────────────┐
-│ User          │    │ loopflow.studio   │    │ Clerk                 │
+│ User          │    │ loopflow.studio   │    │ WorkOS AuthKit        │
 │               │    │                   │    │                       │
 │ lf auth login │───▶│ /auth/login       │───▶│ OAuth (Google/GitHub) │
-│               │    │                   │    │                       │
+│               │    │                   │    │ + Enterprise SSO      │
 │               │◀───│ JWT               │◀───│ User info             │
 │               │    │                   │    │                       │
 └───────────────┘    └───────────────────┘    └───────────────────────┘
@@ -49,10 +49,10 @@ Minimal service - just auth, nothing else yet.
 
 ```
 GET  /auth/login
-  → Redirect to Clerk hosted login
+  → Redirect to WorkOS AuthKit hosted login
 
 GET  /auth/callback
-  → Receive Clerk callback
+  → Receive WorkOS callback
   → Create session
   → Issue loopflow JWT
   → Redirect to CLI callback
@@ -74,10 +74,11 @@ POST /auth/device/token
 
 ```typescript
 // loopflow-studio/src/auth.ts
-import { Clerk } from '@clerk/clerk-sdk-node';
+import { WorkOS } from '@workos-inc/node';
 import jwt from 'jsonwebtoken';
 
-const clerk = new Clerk({ secretKey: process.env.CLERK_SECRET_KEY });
+const workos = new WorkOS(process.env.WORKOS_API_KEY);
+const clientId = process.env.WORKOS_CLIENT_ID;
 
 // Key pair for signing JWTs
 const privateKey = fs.readFileSync('keys/private.pem');
@@ -85,13 +86,19 @@ const publicKey = fs.readFileSync('keys/public.pem');
 
 export async function handleLogin(req: Request, res: Response) {
   const state = crypto.randomBytes(16).toString('hex');
-  const redirectUrl = `https://loopflow.studio/auth/callback?state=${state}`;
 
   // Store state for validation
   await redis.set(`auth:state:${state}`, req.query.redirect_uri, 'EX', 300);
 
-  // Redirect to Clerk
-  res.redirect(clerk.redirectToSignIn({ redirectUrl }));
+  // Redirect to WorkOS AuthKit
+  const authorizationUrl = workos.userManagement.getAuthorizationUrl({
+    clientId,
+    redirectUri: 'https://loopflow.studio/auth/callback',
+    state,
+    provider: req.query.provider || undefined,  // Optional: 'GoogleOAuth', 'GitHubOAuth'
+  });
+
+  res.redirect(authorizationUrl);
 }
 
 export async function handleCallback(req: Request, res: Response) {
@@ -103,15 +110,17 @@ export async function handleCallback(req: Request, res: Response) {
     return res.status(400).send('Invalid state');
   }
 
-  // Exchange code for Clerk session
-  const session = await clerk.sessions.verifySession(code);
-  const user = await clerk.users.getUser(session.userId);
+  // Exchange code for WorkOS user
+  const { user } = await workos.userManagement.authenticateWithCode({
+    clientId,
+    code,
+  });
 
   // Issue loopflow JWT
   const token = jwt.sign(
     {
       sub: user.id,
-      email: user.emailAddresses[0].emailAddress,
+      email: user.email,
       name: `${user.firstName} ${user.lastName}`,
     },
     privateKey,
@@ -315,7 +324,7 @@ auth:
   # Or: loopflow.studio (Phase 2)
   provider: loopflow.studio
   allowed_users:
-    - user_abc123           # Clerk user ID
+    - user_abc123           # WorkOS user ID
     - user@example.com      # Or by email
   jwks_url: https://loopflow.studio/.well-known/jwks.json
   audience: loopflow-lfd
@@ -466,7 +475,7 @@ async fn run_grpc_server(config: &Config, store: SharedStore) -> Result<()> {
 
 ## Done When
 
-- [ ] loopflow.studio `/auth/login` redirects to Clerk
+- [ ] loopflow.studio `/auth/login` redirects to WorkOS AuthKit
 - [ ] loopflow.studio `/auth/callback` issues JWTs
 - [ ] loopflow.studio `/.well-known/jwks.json` returns public keys
 - [ ] `lf auth login` opens browser, receives token

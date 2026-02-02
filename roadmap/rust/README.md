@@ -18,8 +18,8 @@ A protocol-first, Rust-based control plane that can be driven locally or remotel
 | Phase | Focus | lfd Runs | Agents Run | Claude Auth | User Auth |
 |-------|-------|----------|------------|-------------|-----------|
 | 1 | Rust port | Local | Local process | ~/.claude | Unix socket |
-| 2 | Self-hosted | Self-hosted | Local/Container/K8s | ~/.claude (mounted) | Clerk JWT |
-| 3 | Hosted teams | Our cloud | K8s Jobs | Device flow | Clerk JWT |
+| 2 | Self-hosted | Self-hosted | Local/Container/K8s | ~/.claude (mounted) | WorkOS JWT |
+| 3 | Hosted teams | Our cloud | K8s Jobs | Device flow | WorkOS JWT |
 
 ### Phase 1: Full Rust Port
 
@@ -38,7 +38,7 @@ Enable remote access with authentication. Containers optional but supported.
 
 | Doc | Scope |
 |-----|-------|
-| [05-auth](05-auth.md) | loopflow.studio auth service, Clerk, JWT |
+| [05-auth](05-auth.md) | loopflow.studio auth service, WorkOS AuthKit, JWT |
 | [06-executors](06-executors.md) | Executor abstraction, container/K8s support |
 | [07-deployment](07-deployment.md) | Docker Compose, Helm chart, images |
 

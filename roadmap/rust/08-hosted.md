@@ -28,7 +28,7 @@ loopflow.studio becomes a full product:
 │  ┌──────────────────────────────────────────────────────────────────────┐ │
 │  │ Control Plane                                                        │ │
 │  │                                                                      │ │
-│  │  Auth (Clerk) ─── Web UI ─── API ─── Web Terminal                   │ │
+│  │  Auth (WorkOS) ─── Web UI ─── API ─── Web Terminal                  │ │
 │  │                                                                      │ │
 │  └──────────────────────────────────────────────────────────────────────┘ │
 │                            │                                               │
@@ -58,7 +58,7 @@ loopflow.studio becomes a full product:
 
 ```typescript
 // loopflow-studio/src/api/
-├── auth/           # Clerk integration (from Phase 2)
+├── auth/           # WorkOS AuthKit integration (from Phase 2)
 ├── waves/          # Wave CRUD, proxies to customer lfd
 ├── agents/         # Agent status, logs
 ├── git/            # GitHub/GitLab OAuth
@@ -342,7 +342,7 @@ export const plans = {
 ```
 User signs up
     ↓
-Create Clerk user
+Create WorkOS user
     ↓
 Create K8s namespace (lf-customer-{id})
     ↓
@@ -386,7 +386,7 @@ Waves run in customer namespace
 
 - **Multi-region**: Deploy data plane to multiple regions
 - **Custom domains**: Let customers use their own domain
-- **SSO**: SAML/OIDC for enterprise customers
+- **SSO**: SAML/OIDC for enterprise customers (built into WorkOS)
 - **Audit logs**: Track all actions for compliance
 - **SLA**: Uptime guarantees for higher tiers
 

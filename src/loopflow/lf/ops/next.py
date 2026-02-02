@@ -9,7 +9,14 @@ import typer
 from loopflow.lf.context import find_worktree_root
 from loopflow.lf.git import find_main_repo, get_current_branch
 from loopflow.lf.messages import generate_pr_message
-from loopflow.lf.naming import extract_iteration_suffix, generate_next_branch, parse_branch_base
+from loopflow.lf.naming import (
+    _is_timestamp,
+    _is_word_pair,
+    generate_next_branch,
+    generate_timestamp,
+    generate_word_pair,
+    parse_branch_base,
+)
 from loopflow.lf.ops._helpers import add_commit_push, get_default_branch
 from loopflow.lf.ops.git import GitError
 from loopflow.lf.ops.git import create_branch as git_create_branch
@@ -152,13 +159,46 @@ def _open_terminal(path: Path) -> None:
 
 def _preserve_worktree(repo_root: Path, branch: str, wave_name: str) -> Path | None:
     """Move current worktree to preserve it. Returns new path or None if failed."""
-    suffix = extract_iteration_suffix(branch)
-    if not suffix:
-        # No iteration suffix - use branch name directly
-        suffix = branch
-
     main_repo = find_main_repo(repo_root) or repo_root
-    new_path = main_repo.parent / f"{main_repo.name}.{wave_name}.{suffix}"
+
+    # Derive the new path from the current worktree path, not by rebuilding from scratch.
+    # This preserves the actual structure even if it differs from the expected pattern.
+    worktree_name = repo_root.name
+    main_repo_name = main_repo.name
+
+    # Strip main repo prefix to get the worktree-specific part
+    if worktree_name.startswith(f"{main_repo_name}."):
+        worktree_suffix_part = worktree_name[len(main_repo_name) + 1 :]
+    else:
+        worktree_suffix_part = worktree_name
+
+    # Strip the iteration suffix (timestamp or timestamp.words) from the worktree path
+    # Try stripping timestamp.words first, then just timestamp
+    parts = worktree_suffix_part.rsplit(".", 2)
+    if len(parts) >= 3:
+        maybe_words = parts[-1]
+        maybe_timestamp = parts[-2]
+        # Check if ends with timestamp.word-pair
+        if _is_word_pair(maybe_words) and _is_timestamp(maybe_timestamp):
+            base_part = ".".join(parts[:-2])
+        elif _is_timestamp(parts[-1]):
+            # Ends with just timestamp
+            base_part = ".".join(parts[:-1])
+        else:
+            base_part = worktree_suffix_part
+    elif len(parts) >= 2 and _is_timestamp(parts[-1]):
+        base_part = ".".join(parts[:-1])
+    else:
+        base_part = worktree_suffix_part
+
+    # Generate new suffix and build path
+    new_suffix = f"{generate_timestamp()}.{generate_word_pair()}"
+    new_path = repo_root.parent / f"{main_repo_name}.{base_part}.{new_suffix}"
+
+    # If path already exists, generate fresh suffix
+    if new_path.exists():
+        new_suffix = f"{generate_timestamp()}.{generate_word_pair()}"
+        new_path = repo_root.parent / f"{main_repo_name}.{base_part}.{new_suffix}"
 
     if new_path.exists():
         typer.echo(f"Error: Cannot preserve worktree, path exists: {new_path}", err=True)

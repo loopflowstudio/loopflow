@@ -145,28 +145,58 @@ class ControlServiceStub(object):
             response_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.ReleaseSlotResponse.FromString,
             _registered_method=True,
         )
-        self.ListStepRuns = channel.unary_unary(
-            "/loopflow.control.v1.ControlService/ListStepRuns",
-            request_serializer=loopflow_dot_control_dot_v1_dot_control__pb2.ListStepRunsRequest.SerializeToString,
-            response_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.ListStepRunsResponse.FromString,
+        self.ListStimuli = channel.unary_unary(
+            "/loopflow.control.v1.ControlService/ListStimuli",
+            request_serializer=loopflow_dot_control_dot_v1_dot_control__pb2.ListStimuliRequest.SerializeToString,
+            response_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.ListStimuliResponse.FromString,
             _registered_method=True,
         )
-        self.GetStepRunHistory = channel.unary_unary(
-            "/loopflow.control.v1.ControlService/GetStepRunHistory",
-            request_serializer=loopflow_dot_control_dot_v1_dot_control__pb2.GetStepRunHistoryRequest.SerializeToString,
-            response_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.GetStepRunHistoryResponse.FromString,
+        self.GetStimulus = channel.unary_unary(
+            "/loopflow.control.v1.ControlService/GetStimulus",
+            request_serializer=loopflow_dot_control_dot_v1_dot_control__pb2.GetStimulusRequest.SerializeToString,
+            response_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.GetStimulusResponse.FromString,
             _registered_method=True,
         )
-        self.StartStepRun = channel.unary_unary(
-            "/loopflow.control.v1.ControlService/StartStepRun",
-            request_serializer=loopflow_dot_control_dot_v1_dot_control__pb2.StartStepRunRequest.SerializeToString,
-            response_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.StartStepRunResponse.FromString,
+        self.CreateStimulus = channel.unary_unary(
+            "/loopflow.control.v1.ControlService/CreateStimulus",
+            request_serializer=loopflow_dot_control_dot_v1_dot_control__pb2.CreateStimulusRequest.SerializeToString,
+            response_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.CreateStimulusResponse.FromString,
             _registered_method=True,
         )
-        self.EndStepRun = channel.unary_unary(
-            "/loopflow.control.v1.ControlService/EndStepRun",
-            request_serializer=loopflow_dot_control_dot_v1_dot_control__pb2.EndStepRunRequest.SerializeToString,
-            response_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.EndStepRunResponse.FromString,
+        self.UpdateStimulus = channel.unary_unary(
+            "/loopflow.control.v1.ControlService/UpdateStimulus",
+            request_serializer=loopflow_dot_control_dot_v1_dot_control__pb2.UpdateStimulusRequest.SerializeToString,
+            response_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.UpdateStimulusResponse.FromString,
+            _registered_method=True,
+        )
+        self.DeleteStimulus = channel.unary_unary(
+            "/loopflow.control.v1.ControlService/DeleteStimulus",
+            request_serializer=loopflow_dot_control_dot_v1_dot_control__pb2.DeleteStimulusRequest.SerializeToString,
+            response_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.DeleteStimulusResponse.FromString,
+            _registered_method=True,
+        )
+        self.ListAgents = channel.unary_unary(
+            "/loopflow.control.v1.ControlService/ListAgents",
+            request_serializer=loopflow_dot_control_dot_v1_dot_control__pb2.ListAgentsRequest.SerializeToString,
+            response_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.ListAgentsResponse.FromString,
+            _registered_method=True,
+        )
+        self.GetAgentHistory = channel.unary_unary(
+            "/loopflow.control.v1.ControlService/GetAgentHistory",
+            request_serializer=loopflow_dot_control_dot_v1_dot_control__pb2.GetAgentHistoryRequest.SerializeToString,
+            response_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.GetAgentHistoryResponse.FromString,
+            _registered_method=True,
+        )
+        self.StartAgent = channel.unary_unary(
+            "/loopflow.control.v1.ControlService/StartAgent",
+            request_serializer=loopflow_dot_control_dot_v1_dot_control__pb2.StartAgentRequest.SerializeToString,
+            response_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.StartAgentResponse.FromString,
+            _registered_method=True,
+        )
+        self.EndAgent = channel.unary_unary(
+            "/loopflow.control.v1.ControlService/EndAgent",
+            request_serializer=loopflow_dot_control_dot_v1_dot_control__pb2.EndAgentRequest.SerializeToString,
+            response_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.EndAgentResponse.FromString,
             _registered_method=True,
         )
         self.Subscribe = channel.unary_stream(
@@ -299,25 +329,55 @@ class ControlServiceServicer(object):
         context.set_details("Method not implemented!")
         raise NotImplementedError("Method not implemented!")
 
-    def ListStepRuns(self, request, context):
-        """StepRun management"""
+    def ListStimuli(self, request, context):
+        """Stimulus management (triggers for waves)"""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details("Method not implemented!")
         raise NotImplementedError("Method not implemented!")
 
-    def GetStepRunHistory(self, request, context):
+    def GetStimulus(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details("Method not implemented!")
         raise NotImplementedError("Method not implemented!")
 
-    def StartStepRun(self, request, context):
+    def CreateStimulus(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details("Method not implemented!")
         raise NotImplementedError("Method not implemented!")
 
-    def EndStepRun(self, request, context):
+    def UpdateStimulus(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
+    def DeleteStimulus(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
+    def ListAgents(self, request, context):
+        """Agent management"""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
+    def GetAgentHistory(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
+    def StartAgent(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
+    def EndAgent(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details("Method not implemented!")
@@ -429,25 +489,50 @@ def add_ControlServiceServicer_to_server(servicer, server):
             request_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.ReleaseSlotRequest.FromString,
             response_serializer=loopflow_dot_control_dot_v1_dot_control__pb2.ReleaseSlotResponse.SerializeToString,
         ),
-        "ListStepRuns": grpc.unary_unary_rpc_method_handler(
-            servicer.ListStepRuns,
-            request_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.ListStepRunsRequest.FromString,
-            response_serializer=loopflow_dot_control_dot_v1_dot_control__pb2.ListStepRunsResponse.SerializeToString,
+        "ListStimuli": grpc.unary_unary_rpc_method_handler(
+            servicer.ListStimuli,
+            request_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.ListStimuliRequest.FromString,
+            response_serializer=loopflow_dot_control_dot_v1_dot_control__pb2.ListStimuliResponse.SerializeToString,
         ),
-        "GetStepRunHistory": grpc.unary_unary_rpc_method_handler(
-            servicer.GetStepRunHistory,
-            request_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.GetStepRunHistoryRequest.FromString,
-            response_serializer=loopflow_dot_control_dot_v1_dot_control__pb2.GetStepRunHistoryResponse.SerializeToString,
+        "GetStimulus": grpc.unary_unary_rpc_method_handler(
+            servicer.GetStimulus,
+            request_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.GetStimulusRequest.FromString,
+            response_serializer=loopflow_dot_control_dot_v1_dot_control__pb2.GetStimulusResponse.SerializeToString,
         ),
-        "StartStepRun": grpc.unary_unary_rpc_method_handler(
-            servicer.StartStepRun,
-            request_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.StartStepRunRequest.FromString,
-            response_serializer=loopflow_dot_control_dot_v1_dot_control__pb2.StartStepRunResponse.SerializeToString,
+        "CreateStimulus": grpc.unary_unary_rpc_method_handler(
+            servicer.CreateStimulus,
+            request_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.CreateStimulusRequest.FromString,
+            response_serializer=loopflow_dot_control_dot_v1_dot_control__pb2.CreateStimulusResponse.SerializeToString,
         ),
-        "EndStepRun": grpc.unary_unary_rpc_method_handler(
-            servicer.EndStepRun,
-            request_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.EndStepRunRequest.FromString,
-            response_serializer=loopflow_dot_control_dot_v1_dot_control__pb2.EndStepRunResponse.SerializeToString,
+        "UpdateStimulus": grpc.unary_unary_rpc_method_handler(
+            servicer.UpdateStimulus,
+            request_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.UpdateStimulusRequest.FromString,
+            response_serializer=loopflow_dot_control_dot_v1_dot_control__pb2.UpdateStimulusResponse.SerializeToString,
+        ),
+        "DeleteStimulus": grpc.unary_unary_rpc_method_handler(
+            servicer.DeleteStimulus,
+            request_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.DeleteStimulusRequest.FromString,
+            response_serializer=loopflow_dot_control_dot_v1_dot_control__pb2.DeleteStimulusResponse.SerializeToString,
+        ),
+        "ListAgents": grpc.unary_unary_rpc_method_handler(
+            servicer.ListAgents,
+            request_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.ListAgentsRequest.FromString,
+            response_serializer=loopflow_dot_control_dot_v1_dot_control__pb2.ListAgentsResponse.SerializeToString,
+        ),
+        "GetAgentHistory": grpc.unary_unary_rpc_method_handler(
+            servicer.GetAgentHistory,
+            request_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.GetAgentHistoryRequest.FromString,
+            response_serializer=loopflow_dot_control_dot_v1_dot_control__pb2.GetAgentHistoryResponse.SerializeToString,
+        ),
+        "StartAgent": grpc.unary_unary_rpc_method_handler(
+            servicer.StartAgent,
+            request_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.StartAgentRequest.FromString,
+            response_serializer=loopflow_dot_control_dot_v1_dot_control__pb2.StartAgentResponse.SerializeToString,
+        ),
+        "EndAgent": grpc.unary_unary_rpc_method_handler(
+            servicer.EndAgent,
+            request_deserializer=loopflow_dot_control_dot_v1_dot_control__pb2.EndAgentRequest.FromString,
+            response_serializer=loopflow_dot_control_dot_v1_dot_control__pb2.EndAgentResponse.SerializeToString,
         ),
         "Subscribe": grpc.unary_stream_rpc_method_handler(
             servicer.Subscribe,
@@ -992,7 +1077,7 @@ class ControlService(object):
         )
 
     @staticmethod
-    def ListStepRuns(
+    def ListStimuli(
         request,
         target,
         options=(),
@@ -1007,9 +1092,9 @@ class ControlService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/loopflow.control.v1.ControlService/ListStepRuns",
-            loopflow_dot_control_dot_v1_dot_control__pb2.ListStepRunsRequest.SerializeToString,
-            loopflow_dot_control_dot_v1_dot_control__pb2.ListStepRunsResponse.FromString,
+            "/loopflow.control.v1.ControlService/ListStimuli",
+            loopflow_dot_control_dot_v1_dot_control__pb2.ListStimuliRequest.SerializeToString,
+            loopflow_dot_control_dot_v1_dot_control__pb2.ListStimuliResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -1022,7 +1107,7 @@ class ControlService(object):
         )
 
     @staticmethod
-    def GetStepRunHistory(
+    def GetStimulus(
         request,
         target,
         options=(),
@@ -1037,9 +1122,9 @@ class ControlService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/loopflow.control.v1.ControlService/GetStepRunHistory",
-            loopflow_dot_control_dot_v1_dot_control__pb2.GetStepRunHistoryRequest.SerializeToString,
-            loopflow_dot_control_dot_v1_dot_control__pb2.GetStepRunHistoryResponse.FromString,
+            "/loopflow.control.v1.ControlService/GetStimulus",
+            loopflow_dot_control_dot_v1_dot_control__pb2.GetStimulusRequest.SerializeToString,
+            loopflow_dot_control_dot_v1_dot_control__pb2.GetStimulusResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -1052,7 +1137,7 @@ class ControlService(object):
         )
 
     @staticmethod
-    def StartStepRun(
+    def CreateStimulus(
         request,
         target,
         options=(),
@@ -1067,9 +1152,9 @@ class ControlService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/loopflow.control.v1.ControlService/StartStepRun",
-            loopflow_dot_control_dot_v1_dot_control__pb2.StartStepRunRequest.SerializeToString,
-            loopflow_dot_control_dot_v1_dot_control__pb2.StartStepRunResponse.FromString,
+            "/loopflow.control.v1.ControlService/CreateStimulus",
+            loopflow_dot_control_dot_v1_dot_control__pb2.CreateStimulusRequest.SerializeToString,
+            loopflow_dot_control_dot_v1_dot_control__pb2.CreateStimulusResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -1082,7 +1167,7 @@ class ControlService(object):
         )
 
     @staticmethod
-    def EndStepRun(
+    def UpdateStimulus(
         request,
         target,
         options=(),
@@ -1097,9 +1182,159 @@ class ControlService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/loopflow.control.v1.ControlService/EndStepRun",
-            loopflow_dot_control_dot_v1_dot_control__pb2.EndStepRunRequest.SerializeToString,
-            loopflow_dot_control_dot_v1_dot_control__pb2.EndStepRunResponse.FromString,
+            "/loopflow.control.v1.ControlService/UpdateStimulus",
+            loopflow_dot_control_dot_v1_dot_control__pb2.UpdateStimulusRequest.SerializeToString,
+            loopflow_dot_control_dot_v1_dot_control__pb2.UpdateStimulusResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )
+
+    @staticmethod
+    def DeleteStimulus(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/loopflow.control.v1.ControlService/DeleteStimulus",
+            loopflow_dot_control_dot_v1_dot_control__pb2.DeleteStimulusRequest.SerializeToString,
+            loopflow_dot_control_dot_v1_dot_control__pb2.DeleteStimulusResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )
+
+    @staticmethod
+    def ListAgents(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/loopflow.control.v1.ControlService/ListAgents",
+            loopflow_dot_control_dot_v1_dot_control__pb2.ListAgentsRequest.SerializeToString,
+            loopflow_dot_control_dot_v1_dot_control__pb2.ListAgentsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )
+
+    @staticmethod
+    def GetAgentHistory(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/loopflow.control.v1.ControlService/GetAgentHistory",
+            loopflow_dot_control_dot_v1_dot_control__pb2.GetAgentHistoryRequest.SerializeToString,
+            loopflow_dot_control_dot_v1_dot_control__pb2.GetAgentHistoryResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )
+
+    @staticmethod
+    def StartAgent(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/loopflow.control.v1.ControlService/StartAgent",
+            loopflow_dot_control_dot_v1_dot_control__pb2.StartAgentRequest.SerializeToString,
+            loopflow_dot_control_dot_v1_dot_control__pb2.StartAgentResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )
+
+    @staticmethod
+    def EndAgent(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/loopflow.control.v1.ControlService/EndAgent",
+            loopflow_dot_control_dot_v1_dot_control__pb2.EndAgentRequest.SerializeToString,
+            loopflow_dot_control_dot_v1_dot_control__pb2.EndAgentResponse.FromString,
             options,
             channel_credentials,
             insecure,

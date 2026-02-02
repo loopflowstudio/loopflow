@@ -240,7 +240,7 @@ pub fn check_cli_available(cli: &str) -> bool {
 }
 
 /// Agent runner trait for dependency injection in tests.
-pub trait AgentRunner: Send + Sync {
+pub trait Runner: Send + Sync {
     fn launch(
         &self,
         model: &str,
@@ -251,9 +251,9 @@ pub trait AgentRunner: Send + Sync {
 
 /// Default agent runner that spawns actual processes.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct DefaultAgentRunner;
+pub struct DefaultRunner;
 
-impl AgentRunner for DefaultAgentRunner {
+impl Runner for DefaultRunner {
     fn launch(
         &self,
         model: &str,

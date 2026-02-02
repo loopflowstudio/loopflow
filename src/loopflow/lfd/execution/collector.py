@@ -19,16 +19,16 @@ from loopflow.lf.logging import (
     open_log_file,
     write_log_line,
 )
-from loopflow.lfd.step_run import _send_fire_and_forget
+from loopflow.lfd.agent import _send_fire_and_forget
 
 
-def _send_output_line(step_run_id: str, text: str) -> None:
+def _send_output_line(agent_id: str, text: str) -> None:
     """Send output line to lfd for live streaming. Fire-and-forget."""
-    _send_fire_and_forget("output.line", {"step_run_id": step_run_id, "text": text})
+    _send_fire_and_forget("output.line", {"agent_id": agent_id, "text": text})
 
 
 def collect_output(
-    step_run_id: str,
+    agent_id: str,
     command: list[str],
     step: str | None,
     repo_root: Path | None,
@@ -41,8 +41,8 @@ def collect_output(
     prefix: str | None = None,
 ) -> int:
     """Run command and collect output to log files."""
-    log_file = open_log_file(repo_root, step_run_id)
-    json_log = open_json_log(repo_root, step_run_id)
+    log_file = open_log_file(repo_root, agent_id)
+    json_log = open_json_log(repo_root, agent_id)
 
     # Show startup header with token breakdown
     if foreground and token_summary:
@@ -50,14 +50,14 @@ def collect_output(
 
     if interactive:
         exit_code = _run_interactive(
-            command, log_file, json_log, foreground, prompt, step_run_id, prefix
+            command, log_file, json_log, foreground, prompt, agent_id, prefix
         )
     else:
         exit_code = _run_streaming(
-            command, log_file, json_log, foreground, prompt, step_run_id, prefix
+            command, log_file, json_log, foreground, prompt, agent_id, prefix
         )
 
-    # StepRun status is updated by the parent process via lfd client
+    # Agent status is updated by the parent process via lfd client
 
     if autocommit and exit_code == 0 and step and repo_root:
         git_autocommit(repo_root, step, push=push)
@@ -73,7 +73,7 @@ def collect_output(
 def main():
     """Entry point for collector subprocess."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--step-run-id", required=True)
+    parser.add_argument("--agent-id", required=True)
     parser.add_argument("--step", default=None)
     parser.add_argument("--repo-root", default=None)
     parser.add_argument("--autocommit", action="store_true")
@@ -116,7 +116,7 @@ def main():
 
     repo_root = Path(args.repo_root).resolve() if args.repo_root else None
     exit_code = collect_output(
-        args.step_run_id,
+        args.agent_id,
         command,
         args.step,
         repo_root,
@@ -180,7 +180,7 @@ def _run_streaming(
     json_log,
     foreground: bool,
     prompt: str | None = None,
-    step_run_id: str | None = None,
+    agent_id: str | None = None,
     prefix: str | None = None,
 ) -> int:
     """Run a non-interactive command and stream output to logs.
@@ -244,8 +244,8 @@ def _run_streaming(
             write_log_line(log_file, display_line)
             if foreground:
                 print(display_line, flush=True)
-            if step_run_id:
-                _send_output_line(step_run_id, display_line)
+            if agent_id:
+                _send_output_line(agent_id, display_line)
 
     # Stop spinner if no output was received
     if spinner and first_output:
@@ -260,7 +260,7 @@ def _run_interactive(
     json_log,
     foreground: bool,
     prompt: str | None = None,
-    step_run_id: str | None = None,
+    agent_id: str | None = None,
     prefix: str | None = None,
 ) -> int:
     """Run an interactive command using pty.spawn.
@@ -282,8 +282,8 @@ def _run_interactive(
             if log_file:
                 for line in decoded.splitlines():
                     write_log_line(log_file, line)
-                    if step_run_id:
-                        _send_output_line(step_run_id, line)
+                    if agent_id:
+                        _send_output_line(agent_id, line)
         return data
 
     # Remove API keys so CLIs use subscriptions instead of API credits

@@ -8,23 +8,23 @@ from asyncio import StreamReader, StreamWriter
 from datetime import datetime
 from pathlib import Path
 
+from loopflow.lfd.agent import (
+    load_agents,
+    load_agents_for_repo,
+    load_agents_for_worktree,
+    save_agent,
+    update_agent_status,
+)
 from loopflow.lfd.daemon import metrics
 from loopflow.lfd.daemon.manager import Manager, load_manager_config
 from loopflow.lfd.daemon.protocol import Event, Request, Response, error, success
 from loopflow.lfd.daemon.status import compute_status
 from loopflow.lfd.db import update_dead_processes
-from loopflow.lfd.flow_run import cleanup_stale_runs
 from loopflow.lfd.git_hooks import hooks_status, install_hooks
-from loopflow.lfd.models import StepRun, StepRunStatus
+from loopflow.lfd.models import Agent, AgentStatus
 from loopflow.lfd.pr_poller import PRPoller
-from loopflow.lfd.step_run import (
-    load_step_runs,
-    load_step_runs_for_repo,
-    load_step_runs_for_worktree,
-    save_step_run,
-    update_step_run_status,
-)
 from loopflow.lfd.wave import run_cron_check, run_watch_check
+from loopflow.lfd.wave_run import cleanup_stale_wave_runs
 from loopflow.lfd.worktree_state import get_worktree_state_service
 
 
@@ -46,7 +46,7 @@ class Server:
 
         # Cleanup stale state from previous runs
         update_dead_processes()
-        cleanup_stale_runs()
+        cleanup_stale_wave_runs()
 
         server = await asyncio.start_unix_server(
             self._handle_client,
@@ -119,14 +119,14 @@ class Server:
 
         if method == "status":
             return await self._handle_status()
-        elif method == "step_runs.list":
-            return await self._handle_step_runs_list()
-        elif method == "step_runs.history":
-            return await self._handle_step_runs_history(params)
-        elif method == "step_runs.start":
-            return await self._handle_step_runs_start(params)
-        elif method == "step_runs.end":
-            return await self._handle_step_runs_end(params)
+        elif method == "agents.list":
+            return await self._handle_agents_list()
+        elif method == "agents.history":
+            return await self._handle_agents_history(params)
+        elif method == "agents.start":
+            return await self._handle_agents_start(params)
+        elif method == "agents.end":
+            return await self._handle_agents_end(params)
         elif method == "subscribe":
             return await self._handle_subscribe(params, writer)
         elif method == "notify":
@@ -149,57 +149,57 @@ class Server:
     async def _handle_status(self) -> Response:
         return success(compute_status())
 
-    async def _handle_step_runs_list(self) -> Response:
-        step_runs = load_step_runs()
-        return success([s.to_dict() for s in step_runs])
+    async def _handle_agents_list(self) -> Response:
+        agents = load_agents()
+        return success([a.to_dict() for a in agents])
 
-    async def _handle_step_runs_history(self, params: dict) -> Response:
-        """Return step run history for a worktree or repo."""
+    async def _handle_agents_history(self, params: dict) -> Response:
+        """Return agent history for a worktree or repo."""
         worktree = params.get("worktree")
         repo = params.get("repo")
         limit = params.get("limit", 20)
 
         if worktree:
-            step_runs = load_step_runs_for_worktree(worktree, limit)
+            agents = load_agents_for_worktree(worktree, limit)
         elif repo:
-            step_runs = load_step_runs_for_repo(repo, limit)
+            agents = load_agents_for_repo(repo, limit)
         else:
-            step_runs = load_step_runs()[:limit]
+            agents = load_agents()[:limit]
 
-        return success([s.to_dict() for s in step_runs])
+        return success([a.to_dict() for a in agents])
 
-    async def _handle_step_runs_start(self, params: dict) -> Response:
-        """Record a step run start."""
-        step_run_data = params.get("step_run")
-        if not step_run_data:
-            return error("Missing 'step_run' parameter")
+    async def _handle_agents_start(self, params: dict) -> Response:
+        """Record an agent start."""
+        agent_data = params.get("agent")
+        if not agent_data:
+            return error("Missing 'agent' parameter")
 
-        step_run = StepRun.from_dict(step_run_data)
-        save_step_run(step_run)
+        agent = Agent.from_dict(agent_data)
+        save_agent(agent)
         await self._broadcast(
             Event(
-                "session.started",
+                "agent.started",
                 {
-                    "id": step_run.id,
-                    "step": step_run.step,
-                    "worktree": step_run.worktree,
+                    "id": agent.id,
+                    "step": agent.step,
+                    "worktree": agent.worktree,
                 },
             )
         )
-        return success({"id": step_run.id})
+        return success({"id": agent.id})
 
-    async def _handle_step_runs_end(self, params: dict) -> Response:
-        """Record a step run end."""
-        step_run_id = params.get("step_run_id")
+    async def _handle_agents_end(self, params: dict) -> Response:
+        """Record an agent end."""
+        agent_id = params.get("agent_id")
         status_str = params.get("status")
 
-        if not step_run_id or not status_str:
-            return error("Missing 'step_run_id' or 'status' parameter")
+        if not agent_id or not status_str:
+            return error("Missing 'agent_id' or 'status' parameter")
 
-        status = StepRunStatus(status_str)
-        update_step_run_status(step_run_id, status)
-        await self._broadcast(Event("session.ended", {"id": step_run_id, "status": status_str}))
-        return success({"id": step_run_id})
+        status = AgentStatus(status_str)
+        update_agent_status(agent_id, status)
+        await self._broadcast(Event("agent.ended", {"id": agent_id, "status": status_str}))
+        return success({"id": agent_id})
 
     async def _handle_subscribe(self, params: dict, writer: StreamWriter) -> Response:
         events = params.get("events", [])
@@ -253,17 +253,17 @@ class Server:
 
     async def _handle_output_line(self, params: dict) -> Response:
         """Accept output lines from collector and broadcast to subscribers."""
-        step_run_id = params.get("step_run_id")
+        agent_id = params.get("agent_id")
         text = params.get("text")
 
-        if not step_run_id or text is None:
-            return error("Missing 'step_run_id' or 'text' parameter")
+        if not agent_id or text is None:
+            return error("Missing 'agent_id' or 'text' parameter")
 
         await self._broadcast(
             Event(
                 "output.line",
                 {
-                    "session_id": step_run_id,
+                    "agent_id": agent_id,
                     "text": text,
                     "timestamp": datetime.now().isoformat(),
                 },
@@ -436,7 +436,7 @@ class Server:
             try:
                 await asyncio.sleep(30)
                 update_dead_processes()
-                cleanup_stale_runs()
+                cleanup_stale_wave_runs()
 
                 # Check watch stimulus waves (file changes on main)
                 activated_watch = run_watch_check()

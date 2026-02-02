@@ -13,18 +13,18 @@ import grpc
 from google.protobuf import timestamp_pb2
 
 from loopflow import __version__
+from loopflow.lfd.agent import (
+    load_agents,
+    load_agents_for_repo,
+    load_agents_for_worktree,
+    save_agent,
+    update_agent_status,
+)
 from loopflow.lfd.daemon import metrics
 from loopflow.lfd.daemon.manager import Manager
 from loopflow.lfd.daemon.status import compute_status
 from loopflow.lfd.migrations.baseline import SCHEMA_VERSION
-from loopflow.lfd.models import StepRun, StepRunStatus
-from loopflow.lfd.step_run import (
-    load_step_runs,
-    load_step_runs_for_repo,
-    load_step_runs_for_worktree,
-    save_step_run,
-    update_step_run_status,
-)
+from loopflow.lfd.models import Agent, AgentStatus
 from loopflow.lfd.worktree_state import get_worktree_state_service
 from loopflow.proto.loopflow.control.v1 import control_pb2, control_pb2_grpc
 
@@ -59,7 +59,7 @@ class ControlServiceServicer(control_pb2_grpc.ControlServiceServicer):
             pid=status.get("pid", 0),
             waves_defined=status.get("waves_defined", 0),
             waves_running=status.get("waves_running", 0),
-            step_runs_active=status.get("step_runs_active", 0),
+            agents_active=status.get("agents_active", 0),
         )
 
     async def GetHealth(self, request, context):
@@ -93,89 +93,85 @@ class ControlServiceServicer(control_pb2_grpc.ControlServiceServicer):
             metrics=control_pb2.HealthMetrics(
                 waves_total=all_metrics.get("waves_total", 0),
                 waves_running=all_metrics.get("waves_running", 0),
-                step_runs_active=all_metrics.get("step_runs_active", 0),
-                flow_runs_total=all_metrics.get("flow_runs_total", 0),
+                agents_active=all_metrics.get("agents_active", 0),
+                wave_runs_total=all_metrics.get("wave_runs_total", 0),
             ),
             protocol_version=PROTOCOL_VERSION,
         )
 
-    async def ListStepRuns(self, request, context):
-        """List all active step runs."""
+    async def ListAgents(self, request, context):
+        """List all active agents."""
         metrics.increment("grpc_requests")
-        step_runs = load_step_runs()
-        return control_pb2.ListStepRunsResponse(
-            step_runs=[_step_run_to_proto(sr) for sr in step_runs]
-        )
+        agents = load_agents()
+        return control_pb2.ListAgentsResponse(agents=[_agent_to_proto(a) for a in agents])
 
-    async def GetStepRunHistory(self, request, context):
-        """Return step run history for a worktree or repo."""
+    async def GetAgentHistory(self, request, context):
+        """Return agent history for a worktree or repo."""
         metrics.increment("grpc_requests")
         limit = request.limit if request.limit else 20
 
         if request.worktree:
-            step_runs = load_step_runs_for_worktree(request.worktree, limit)
+            agents = load_agents_for_worktree(request.worktree, limit)
         elif request.repo:
-            step_runs = load_step_runs_for_repo(request.repo, limit)
+            agents = load_agents_for_repo(request.repo, limit)
         else:
-            step_runs = load_step_runs()[:limit]
+            agents = load_agents()[:limit]
 
-        return control_pb2.GetStepRunHistoryResponse(
-            step_runs=[_step_run_to_proto(sr) for sr in step_runs]
-        )
+        return control_pb2.GetAgentHistoryResponse(agents=[_agent_to_proto(a) for a in agents])
 
-    async def StartStepRun(self, request, context):
-        """Record a step run start."""
+    async def StartAgent(self, request, context):
+        """Record an agent start."""
         metrics.increment("grpc_requests")
-        sr = request.step_run
+        a = request.agent
 
-        step_run = StepRun(
-            id=sr.id,
-            step=sr.step,
-            repo=sr.repo,
-            worktree=sr.worktree,
-            flow_run_id=sr.flow_run_id if sr.HasField("flow_run_id") else None,
-            wave_id=sr.wave_id if sr.HasField("wave_id") else None,
-            status=StepRunStatus(sr.status) if sr.status else StepRunStatus.RUNNING,
-            started_at=sr.started_at.ToDatetime() if sr.HasField("started_at") else datetime.now(),
-            model=sr.model,
-            run_mode=sr.run_mode,
+        agent = Agent(
+            id=a.id,
+            step=a.step,
+            repo=a.repo,
+            worktree=a.worktree,
+            wave_run_id=a.wave_run_id if a.HasField("wave_run_id") else None,
+            wave_id=a.wave_id if a.HasField("wave_id") else None,
+            status=AgentStatus(a.status) if a.status else AgentStatus.RUNNING,
+            started_at=a.started_at.ToDatetime() if a.HasField("started_at") else datetime.now(),
+            model=a.model,
+            run_mode=a.run_mode,
         )
-        save_step_run(step_run)
+        save_agent(agent)
 
         if self._broadcast:
             await self._broadcast_event(
-                "session.started",
-                control_pb2.SessionStartedEvent(
-                    id=step_run.id,
-                    step=step_run.step,
-                    worktree=step_run.worktree,
+                "agent.started",
+                control_pb2.AgentStartedEvent(
+                    id=agent.id,
+                    step=agent.step,
+                    worktree=agent.worktree,
                 ),
             )
 
-        return control_pb2.StartStepRunResponse(id=step_run.id)
+        return control_pb2.StartAgentResponse(id=agent.id)
 
-    async def EndStepRun(self, request, context):
-        """Record a step run end."""
+    async def EndAgent(self, request, context):
+        """Record an agent end."""
         metrics.increment("grpc_requests")
 
-        if not request.step_run_id:
+        if not request.agent_id:
             context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-            context.set_details("Missing step_run_id")
-            return control_pb2.EndStepRunResponse()
+            context.set_details("Missing agent_id")
+            return control_pb2.EndAgentResponse()
 
-        status = StepRunStatus(request.status) if request.status else StepRunStatus.COMPLETED
-        update_step_run_status(request.step_run_id, status)
+        status = AgentStatus(request.status) if request.status else AgentStatus.COMPLETED
+        update_agent_status(request.agent_id, status)
 
         if self._broadcast:
             await self._broadcast_event(
-                "session.ended",
-                control_pb2.SessionEndedEvent(
-                    id=request.step_run_id,
+                "agent.ended",
+                control_pb2.AgentEndedEvent(
+                    id=request.agent_id,
                     status=status.value,
                 ),
             )
 
-        return control_pb2.EndStepRunResponse(id=request.step_run_id)
+        return control_pb2.EndAgentResponse(id=request.agent_id)
 
     async def GetSchedulerStatus(self, request, context):
         """Return scheduler status."""
@@ -312,16 +308,16 @@ class ControlServiceServicer(control_pb2_grpc.ControlServiceServicer):
         """Accept output lines and broadcast to subscribers."""
         metrics.increment("grpc_requests")
 
-        if not request.step_run_id or request.text is None:
+        if not request.agent_id or request.text is None:
             context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-            context.set_details("Missing step_run_id or text parameter")
+            context.set_details("Missing agent_id or text parameter")
             return control_pb2.StreamOutputResponse()
 
         if self._broadcast:
             await self._broadcast_event(
                 "output.line",
                 control_pb2.OutputLineEvent(
-                    session_id=request.step_run_id,
+                    agent_id=request.agent_id,
                     text=request.text,
                 ),
             )
@@ -351,41 +347,41 @@ class ControlServiceServicer(control_pb2_grpc.ControlServiceServicer):
             await self._broadcast(Event(event_type, data))
 
 
-def _step_run_to_proto(sr: StepRun) -> control_pb2.StepRun:
-    """Convert StepRun model to protobuf message."""
-    proto = control_pb2.StepRun(
-        id=sr.id,
-        step=sr.step,
-        repo=sr.repo,
-        worktree=sr.worktree,
-        status=_step_status_to_proto(sr.status),
-        model=sr.model or "",
-        run_mode=sr.run_mode or "",
+def _agent_to_proto(agent: Agent) -> control_pb2.Agent:
+    """Convert Agent model to protobuf message."""
+    proto = control_pb2.Agent(
+        id=agent.id,
+        step=agent.step,
+        repo=agent.repo,
+        worktree=agent.worktree,
+        status=_agent_status_to_proto(agent.status),
+        model=agent.model or "",
+        run_mode=agent.run_mode or "",
     )
 
-    if sr.flow_run_id:
-        proto.flow_run_id = sr.flow_run_id
-    if sr.wave_id:
-        proto.wave_id = sr.wave_id
-    if sr.started_at:
-        proto.started_at.FromDatetime(sr.started_at)
-    if sr.ended_at:
-        proto.ended_at.FromDatetime(sr.ended_at)
-    if sr.pid:
-        proto.pid = sr.pid
+    if agent.wave_run_id:
+        proto.wave_run_id = agent.wave_run_id
+    if agent.wave_id:
+        proto.wave_id = agent.wave_id
+    if agent.started_at:
+        proto.started_at.FromDatetime(agent.started_at)
+    if agent.ended_at:
+        proto.ended_at.FromDatetime(agent.ended_at)
+    if agent.pid:
+        proto.pid = agent.pid
 
     return proto
 
 
-def _step_status_to_proto(status: StepRunStatus) -> int:
-    """Convert StepRunStatus to protobuf enum value."""
+def _agent_status_to_proto(status: AgentStatus) -> int:
+    """Convert AgentStatus to protobuf enum value."""
     mapping = {
-        StepRunStatus.RUNNING: control_pb2.STEP_RUNNING,
-        StepRunStatus.WAITING: control_pb2.STEP_WAITING,
-        StepRunStatus.COMPLETED: control_pb2.STEP_COMPLETED,
-        StepRunStatus.FAILED: control_pb2.STEP_FAILED,
+        AgentStatus.RUNNING: control_pb2.AGENT_RUNNING,
+        AgentStatus.WAITING: control_pb2.AGENT_WAITING,
+        AgentStatus.COMPLETED: control_pb2.AGENT_COMPLETED,
+        AgentStatus.FAILED: control_pb2.AGENT_FAILED,
     }
-    return mapping.get(status, control_pb2.STEP_RUN_STATUS_UNSPECIFIED)
+    return mapping.get(status, control_pb2.AGENT_STATUS_UNSPECIFIED)
 
 
 def _worktree_reason_to_proto(reason: str) -> int:
@@ -439,7 +435,7 @@ def _worktree_to_proto(wt: dict) -> control_pb2.WorktreeState:
         prunable=wt.get("prunable", False),
         staleness=_staleness_to_proto(wt.get("staleness")),
         staleness_days=wt.get("staleness_days"),
-        recent_steps=[_recent_step_to_proto(s) for s in wt.get("recent_steps", [])],
+        recent_steps=[_recent_agent_to_proto(s) for s in wt.get("recent_steps", [])],
     )
 
     if wt.get("operation_state"):
@@ -494,31 +490,31 @@ def _operation_state_to_proto(state: str | None) -> int:
     return mapping.get(state.lower(), control_pb2.OPERATION_STATE_UNSPECIFIED)
 
 
-def _recent_step_to_proto(step: dict) -> control_pb2.RecentStepRun:
-    """Convert recent step dict to protobuf message."""
-    proto = control_pb2.RecentStepRun(
-        id=step.get("id", ""),
-        step=step.get("step", ""),
-        status=_step_status_str_to_proto(step.get("status")),
+def _recent_agent_to_proto(agent: dict) -> control_pb2.RecentAgent:
+    """Convert recent agent dict to protobuf message."""
+    proto = control_pb2.RecentAgent(
+        id=agent.get("id", ""),
+        step=agent.get("step", ""),
+        status=_agent_status_str_to_proto(agent.get("status")),
     )
-    if step.get("started_at"):
-        proto.started_at.FromDatetime(datetime.fromisoformat(step["started_at"]))
-    if step.get("ended_at"):
-        proto.ended_at.FromDatetime(datetime.fromisoformat(step["ended_at"]))
+    if agent.get("started_at"):
+        proto.started_at.FromDatetime(datetime.fromisoformat(agent["started_at"]))
+    if agent.get("ended_at"):
+        proto.ended_at.FromDatetime(datetime.fromisoformat(agent["ended_at"]))
     return proto
 
 
-def _step_status_str_to_proto(status: str | None) -> int:
-    """Convert step status string to protobuf enum."""
+def _agent_status_str_to_proto(status: str | None) -> int:
+    """Convert agent status string to protobuf enum."""
     if not status:
-        return control_pb2.STEP_RUN_STATUS_UNSPECIFIED
+        return control_pb2.AGENT_STATUS_UNSPECIFIED
     mapping = {
-        "running": control_pb2.STEP_RUNNING,
-        "waiting": control_pb2.STEP_WAITING,
-        "completed": control_pb2.STEP_COMPLETED,
-        "failed": control_pb2.STEP_FAILED,
+        "running": control_pb2.AGENT_RUNNING,
+        "waiting": control_pb2.AGENT_WAITING,
+        "completed": control_pb2.AGENT_COMPLETED,
+        "failed": control_pb2.AGENT_FAILED,
     }
-    return mapping.get(status.lower(), control_pb2.STEP_RUN_STATUS_UNSPECIFIED)
+    return mapping.get(status.lower(), control_pb2.AGENT_STATUS_UNSPECIFIED)
 
 
 class GrpcServer:

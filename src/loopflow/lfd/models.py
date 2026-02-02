@@ -292,11 +292,11 @@ def pending_activation_from_row(row: dict) -> PendingActivation:
     )
 
 
-# FlowRun: an execution instance of a Flow
+# WaveRun: a single run of a Wave
 
 
-class FlowRunStatus(str, Enum):
-    """Status of a FlowRun execution."""
+class WaveRunStatus(str, Enum):
+    """Status of a WaveRun execution."""
 
     PENDING = "pending"
     RUNNING = "running"
@@ -314,8 +314,8 @@ class TickResult(str, Enum):
     STEP_FAILED = "step_failed"  # Step failed
 
 
-class FlowRun(LfdModel):
-    """An execution instance of a Flow, spawned by a Wave."""
+class WaveRun(LfdModel):
+    """A single run of a Wave, executing the wave's flow."""
 
     id: str
     wave_id: str | None = None
@@ -325,7 +325,7 @@ class FlowRun(LfdModel):
     area: list[str] = Field(min_length=1)
     repo: Path
 
-    status: FlowRunStatus = FlowRunStatus.PENDING
+    status: WaveRunStatus = WaveRunStatus.PENDING
     iteration: int = 0
     step_index: int = 0  # Position in flow.steps list for tick-based execution
 
@@ -340,11 +340,11 @@ class FlowRun(LfdModel):
     created_at: datetime = Field(default_factory=datetime.now)
 
 
-# StepRun: an execution of a single step
+# Agent: a Claude Code (or other model) process execution
 
 
-class StepRunStatus(str, Enum):
-    """Status of a StepRun execution."""
+class AgentStatus(str, Enum):
+    """Status of an Agent execution."""
 
     RUNNING = "running"
     WAITING = "waiting"
@@ -352,10 +352,10 @@ class StepRunStatus(str, Enum):
     FAILED = "failed"
 
 
-class StepRun(LfdModel):
-    """An execution of a single step.
+class Agent(LfdModel):
+    """A Claude Code process execution.
 
-    Can belong to a FlowRun (wave-spawned) or be standalone (interactive).
+    Can belong to a WaveRun (wave-spawned) or be standalone (interactive).
     """
 
     id: str
@@ -363,10 +363,10 @@ class StepRun(LfdModel):
     repo: str
     worktree: str
 
-    flow_run_id: str | None = None
+    wave_run_id: str | None = None
     wave_id: str | None = None
 
-    status: StepRunStatus = StepRunStatus.RUNNING
+    status: AgentStatus = AgentStatus.RUNNING
     started_at: datetime = Field(default_factory=datetime.now)
     ended_at: datetime | None = None
 
@@ -380,7 +380,7 @@ class StepRun(LfdModel):
             "step": self.step,
             "repo": self.repo,
             "worktree": self.worktree,
-            "flow_run_id": self.flow_run_id,
+            "wave_run_id": self.wave_run_id,
             "wave_id": self.wave_id,
             "status": self.status.value,
             "started_at": self.started_at.isoformat(),
@@ -391,15 +391,15 @@ class StepRun(LfdModel):
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "StepRun":
+    def from_dict(cls, data: dict) -> "Agent":
         return cls(
             id=data["id"],
             step=data["step"],
             repo=data["repo"],
             worktree=data["worktree"],
-            flow_run_id=data.get("flow_run_id"),
+            wave_run_id=data.get("wave_run_id"),
             wave_id=data.get("wave_id"),
-            status=StepRunStatus(data["status"]),
+            status=AgentStatus(data["status"]),
             started_at=datetime.fromisoformat(data["started_at"]),
             ended_at=datetime.fromisoformat(data["ended_at"]) if data.get("ended_at") else None,
             pid=data.get("pid"),

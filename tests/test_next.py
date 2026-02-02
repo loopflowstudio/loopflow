@@ -9,6 +9,7 @@ from loopflow.lf.ops.next import (
     _enable_auto_merge,
     _get_pr_number,
     _get_pr_state,
+    _preserve_worktree,
     next_worktree,
 )
 
@@ -196,3 +197,84 @@ def test_next_starts_fresh_when_already_merged(tmp_path):
 
     assert result is not None
     assert result == new_worktree
+
+
+def test_preserve_worktree_generates_suffix_for_branch_without_word_pair(tmp_path):
+    """When branch has no word pair suffix, generate a new one to avoid collision."""
+    main_repo = tmp_path / "loopflow"
+    main_repo.mkdir()
+    worktree = tmp_path / "loopflow.wave.20260130_1943"
+    worktree.mkdir()
+
+    with patch("loopflow.lf.ops.next.find_main_repo", return_value=main_repo):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            result = _preserve_worktree(
+                worktree,
+                branch="wave.20260130_1943",  # timestamp but no word pair
+                wave_name="wave",
+            )
+
+    # Should return a new path, not the same as input
+    assert result is not None
+    assert result != worktree
+    # Should contain a word pair in the suffix
+    assert result.name.count(".") >= 2  # main.wave.timestamp.words
+
+
+def test_preserve_worktree_handles_existing_path_collision(tmp_path):
+    """When generated path exists, generate a fresh suffix."""
+    main_repo = tmp_path / "loopflow"
+    main_repo.mkdir()
+    worktree = tmp_path / "loopflow.wave.20260130_1943"
+    worktree.mkdir()
+
+    with patch("loopflow.lf.ops.next.find_main_repo", return_value=main_repo):
+        with patch("loopflow.lf.ops.next.generate_timestamp", return_value="20260130_1943"):
+            with patch(
+                "loopflow.lf.ops.next.generate_word_pair",
+                side_effect=["wisp-forte", "aurora-melody"],
+            ):
+                # Create the first path to force collision
+                first_collision = tmp_path / "loopflow.wave.20260130_1943.wisp-forte"
+                first_collision.mkdir()
+
+                with patch("subprocess.run") as mock_run:
+                    mock_run.return_value = MagicMock(returncode=0)
+                    result = _preserve_worktree(
+                        worktree,
+                        branch="wave.20260130_1943",
+                        wave_name="wave",
+                    )
+
+    # Should use the second word pair
+    assert result is not None
+    assert "aurora-melody" in result.name
+
+
+def test_preserve_worktree_with_doubled_wave_name(tmp_path):
+    """When worktree path has different structure than branch, preserve the actual structure."""
+    main_repo = tmp_path / "loopflow"
+    main_repo.mkdir()
+    # Worktree has wave name doubled (from a previous bug or manual creation)
+    worktree = tmp_path / "loopflow.jack-heart.rust.jack-heart.rust.20260130_1943"
+    worktree.mkdir()
+
+    with patch("loopflow.lf.ops.next.find_main_repo", return_value=main_repo):
+        with patch("loopflow.lf.ops.next.generate_timestamp", return_value="20260131_1200"):
+            with patch("loopflow.lf.ops.next.generate_word_pair", return_value="echo-melody"):
+                with patch("subprocess.run") as mock_run:
+                    mock_run.return_value = MagicMock(returncode=0)
+                    result = _preserve_worktree(
+                        worktree,
+                        branch="jack-heart.rust.20260130_1943",
+                        wave_name="jack-heart.rust",
+                    )
+
+    # Should preserve the doubled structure and just change suffix
+    assert result is not None
+    assert result != worktree  # Different from current
+    # The doubled wave name should be preserved
+    assert "jack-heart.rust.jack-heart.rust" in result.name
+    # Should have new suffix
+    assert "20260131_1200.echo-melody" in result.name

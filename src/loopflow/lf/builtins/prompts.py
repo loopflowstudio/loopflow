@@ -2,10 +2,9 @@
 
 from pathlib import Path
 
-_BUILTINS_DIR = Path(__file__).parent
+_OPS_DIR = Path(__file__).parent / "ops"
 
 
-def get_builtin_prompt(name: str) -> str:
-    """Get a builtin prompt by name. Raises FileNotFoundError if not found."""
-    prompt_file = _BUILTINS_DIR / f"{name}.txt"
-    return prompt_file.read_text()
+def get_builtin_ops_prompt(name: str) -> str:
+    """Get a builtin ops prompt by name. Raises FileNotFoundError if not found."""
+    return (_OPS_DIR / f"{name}.md").read_text()

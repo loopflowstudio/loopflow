@@ -3,12 +3,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use loopflow_engine::error::StoreError as CoreStoreError;
-use loopflow_engine::runtime::{FlowRun, FlowRunStatus, RunId, TickResult};
+use loopflow_engine::runtime::{RunId, TickResult, WaveRun, WaveRunStatus};
 use loopflow_engine::store as core_store;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::proto::control::{StepRun, StepRunStatus, StimulusKind, Wave, WaveStatus};
+use crate::id::LfdId;
+use crate::proto::control::{Agent, AgentStatus, StimulusKind, Wave, WaveStatus};
 use crate::scheduler::Scheduler;
 use crate::store::{SharedStore, StoreError};
 
@@ -49,7 +50,14 @@ async fn tick_loop_waves(scheduler: &Scheduler, store: &SharedStore) {
         }
 
         // Get the wave for this stimulus
-        let wave = match store.get_wave(&stimulus.wave_id) {
+        let wave_id = match LfdId::parse(&stimulus.wave_id) {
+            Ok(id) => id,
+            Err(err) => {
+                tracing::warn!(stimulus_id = %stimulus.id, error = %err, "invalid wave id");
+                continue;
+            }
+        };
+        let wave = match store.get_wave(&wave_id) {
             Ok(Some(wave)) => wave,
             Ok(None) => {
                 tracing::warn!(stimulus_id = %stimulus.id, "stimulus references missing wave");
@@ -96,8 +104,14 @@ fn handle_tick_result(
     result: Result<TickResult, loopflow_engine::error::CoreError>,
     store: &SharedStore,
 ) {
-    let step_run_index = wave.step_index;
-    let mut wave = match store.get_wave(&wave.id) {
+    let wave_id = match LfdId::parse(&wave.id) {
+        Ok(id) => id,
+        Err(err) => {
+            tracing::warn!(wave_id = %wave.id, error = %err, "invalid wave id");
+            return;
+        }
+    };
+    let mut wave = match store.get_wave(&wave_id) {
         Ok(Some(wave)) => wave,
         Ok(None) => return,
         Err(err) => {
@@ -108,12 +122,7 @@ fn handle_tick_result(
 
     match result {
         Ok(TickResult::StepComplete) => {
-            finish_step_run(
-                store,
-                &wave.id,
-                step_run_index,
-                StepRunStatus::StepCompleted,
-            );
+            finish_agent(store, &wave.id, AgentStatus::AgentCompleted);
             wave.consecutive_failures = 0;
             let _ = store.update_wave(&wave);
         }
@@ -135,7 +144,7 @@ fn handle_tick_result(
             tracing::info!(wave_id = %wave.id, "waiting for interactive step");
         }
         Ok(TickResult::StepFailed) | Err(_) => {
-            finish_step_run(store, &wave.id, step_run_index, StepRunStatus::StepFailed);
+            finish_agent(store, &wave.id, AgentStatus::AgentFailed);
             wave.consecutive_failures += 1;
             if wave.consecutive_failures >= 3 {
                 wave.status = WaveStatus::WaveError as i32;
@@ -149,16 +158,22 @@ fn handle_tick_result(
     }
 }
 
-fn finish_step_run(store: &SharedStore, wave_id: &str, step_index: u32, status: StepRunStatus) {
-    let step_run_id = format!("{wave_id}:{step_index}");
+fn finish_agent(store: &SharedStore, wave_id: &str, status: AgentStatus) {
+    let wave_id = match LfdId::parse(wave_id) {
+        Ok(id) => id,
+        Err(_) => {
+            tracing::warn!(wave_id = %wave_id, "invalid wave_id when finishing step run");
+            return;
+        }
+    };
     let ended_at = time::OffsetDateTime::now_utc().unix_timestamp();
-    match store.end_step_run(&step_run_id, status as i32, ended_at) {
+    match store.end_active_agent_for_wave(&wave_id, status as i32, ended_at) {
         Ok(()) => {}
         Err(StoreError::NotFound) => {
-            tracing::debug!(step_run_id = %step_run_id, "step run not found when finishing");
+            tracing::debug!(wave_id = %wave_id, "no active step run found when finishing");
         }
         Err(err) => {
-            tracing::warn!(step_run_id = %step_run_id, error = %err, "failed to finish step run");
+            tracing::warn!(wave_id = %wave_id, error = %err, "failed to finish step run");
         }
     }
 }
@@ -175,14 +190,16 @@ impl LfCoreStoreAdapter {
 }
 
 impl core_store::RunStore for LfCoreStoreAdapter {
-    fn get_run(&self, id: &RunId) -> Result<FlowRun, CoreStoreError> {
+    fn get_run(&self, id: &RunId) -> Result<WaveRun, CoreStoreError> {
+        let wave_id =
+            LfdId::parse(id.as_str()).map_err(|err| CoreStoreError::Other(err.to_string()))?;
         let wave = self
             .store
-            .get_wave(id.as_str())
+            .get_wave(&wave_id)
             .map_err(|err| CoreStoreError::Other(err.to_string()))?
             .ok_or_else(|| CoreStoreError::RunNotFound(id.as_str().to_string()))?;
 
-        Ok(FlowRun {
+        Ok(WaveRun {
             id: RunId::new(wave.id.clone()),
             flow: wave.flow,
             direction: wave.direction,
@@ -200,10 +217,12 @@ impl core_store::RunStore for LfCoreStoreAdapter {
         })
     }
 
-    fn update_run(&self, run: &FlowRun) -> Result<(), CoreStoreError> {
+    fn update_run(&self, run: &WaveRun) -> Result<(), CoreStoreError> {
+        let wave_id =
+            LfdId::parse(run.id.as_str()).map_err(|err| CoreStoreError::Other(err.to_string()))?;
         let mut wave = self
             .store
-            .get_wave(run.id.as_str())
+            .get_wave(&wave_id)
             .map_err(|err| CoreStoreError::Other(err.to_string()))?
             .ok_or_else(|| CoreStoreError::RunNotFound(run.id.as_str().to_string()))?;
 
@@ -218,30 +237,25 @@ impl core_store::RunStore for LfCoreStoreAdapter {
         Ok(())
     }
 
-    fn create_step_run(
-        &self,
-        step_run: &loopflow_engine::runtime::StepRun,
-    ) -> Result<(), CoreStoreError> {
-        let status = match step_run.status {
-            loopflow_engine::runtime::StepRunStatus::Running => StepRunStatus::StepRunning as i32,
-            loopflow_engine::runtime::StepRunStatus::Waiting => StepRunStatus::StepWaiting as i32,
-            loopflow_engine::runtime::StepRunStatus::Completed => {
-                StepRunStatus::StepCompleted as i32
-            }
-            loopflow_engine::runtime::StepRunStatus::Failed => StepRunStatus::StepFailed as i32,
+    fn create_agent(&self, agent: &loopflow_engine::runtime::Agent) -> Result<(), CoreStoreError> {
+        let status = match agent.status {
+            loopflow_engine::runtime::AgentStatus::Running => AgentStatus::AgentRunning as i32,
+            loopflow_engine::runtime::AgentStatus::Waiting => AgentStatus::AgentWaiting as i32,
+            loopflow_engine::runtime::AgentStatus::Completed => AgentStatus::AgentCompleted as i32,
+            loopflow_engine::runtime::AgentStatus::Failed => AgentStatus::AgentFailed as i32,
         };
 
-        let step_run = StepRun {
-            id: step_run.id.clone(),
-            step: step_run.step.clone(),
-            repo: step_run.repo.clone(),
-            worktree: step_run.worktree.clone(),
-            flow_run_id: step_run
-                .flow_run_id
+        let agent = Agent {
+            id: agent.id.clone(),
+            step: agent.step.clone(),
+            repo: agent.repo.clone(),
+            worktree: agent.worktree.clone(),
+            wave_run_id: agent
+                .wave_run_id
                 .as_ref()
                 .map(|run_id| run_id.as_str().to_string()),
-            wave_id: step_run
-                .flow_run_id
+            wave_id: agent
+                .wave_run_id
                 .as_ref()
                 .map(|run_id| run_id.as_str().to_string()),
             status,
@@ -253,7 +267,7 @@ impl core_store::RunStore for LfCoreStoreAdapter {
         };
 
         self.store
-            .start_step_run(&step_run)
+            .start_agent(&agent)
             .map_err(|err| CoreStoreError::Other(err.to_string()))?;
         Ok(())
     }
@@ -263,15 +277,17 @@ impl core_store::RunStore for LfCoreStoreAdapter {
         run_id: &RunId,
         step_index: usize,
     ) -> Result<Vec<loopflow_engine::runtime::ForkRun>, CoreStoreError> {
+        let run_id =
+            LfdId::parse(run_id.as_str()).map_err(|err| CoreStoreError::Other(err.to_string()))?;
         let fork_runs = self
             .store
-            .list_fork_runs(run_id.as_str(), step_index as u32)
+            .list_fork_runs(&run_id, step_index as u32)
             .map_err(|err| CoreStoreError::Other(err.to_string()))?;
         Ok(fork_runs
             .into_iter()
             .map(|fork_run| loopflow_engine::runtime::ForkRun {
-                id: fork_run.id,
-                run_id: RunId::new(fork_run.wave_id),
+                id: fork_run.id.to_string(),
+                run_id: RunId::new(fork_run.wave_id.to_string()),
                 step_index: fork_run.step_index as usize,
                 branch_index: fork_run.branch_index as usize,
                 status: map_fork_status(fork_run.status),
@@ -286,8 +302,8 @@ impl core_store::RunStore for LfCoreStoreAdapter {
     ) -> Result<(), CoreStoreError> {
         let status = map_fork_status_back(fork_run.status);
         let record = crate::store::ForkRun {
-            id: fork_run.id.clone(),
-            wave_id: fork_run.run_id.as_str().to_string(),
+            id: LfdId::parse(&fork_run.id).expect("fork_run.id should be valid UUID"),
+            wave_id: LfdId::parse(fork_run.run_id.as_str()).expect("run_id should be valid UUID"),
             step_index: fork_run.step_index as u32,
             branch_index: fork_run.branch_index as u32,
             status,
@@ -300,28 +316,30 @@ impl core_store::RunStore for LfCoreStoreAdapter {
     }
 
     fn delete_fork_runs(&self, run_id: &RunId, step_index: usize) -> Result<(), CoreStoreError> {
+        let run_id =
+            LfdId::parse(run_id.as_str()).map_err(|err| CoreStoreError::Other(err.to_string()))?;
         self.store
-            .delete_fork_runs(run_id.as_str(), step_index as u32)
+            .delete_fork_runs(&run_id, step_index as u32)
             .map_err(|err| CoreStoreError::Other(err.to_string()))?;
         Ok(())
     }
 }
 
-fn flow_status_from_wave(status: i32) -> FlowRunStatus {
+fn flow_status_from_wave(status: i32) -> WaveRunStatus {
     match WaveStatus::try_from(status) {
-        Ok(WaveStatus::WaveWaiting) => FlowRunStatus::Waiting,
-        Ok(WaveStatus::WaveError) => FlowRunStatus::Failed,
-        Ok(WaveStatus::WaveIdle) => FlowRunStatus::Completed,
-        _ => FlowRunStatus::Running,
+        Ok(WaveStatus::WaveWaiting) => WaveRunStatus::Waiting,
+        Ok(WaveStatus::WaveError) => WaveRunStatus::Failed,
+        Ok(WaveStatus::WaveIdle) => WaveRunStatus::Completed,
+        _ => WaveRunStatus::Running,
     }
 }
 
-fn wave_status_from_flow(status: FlowRunStatus) -> WaveStatus {
+fn wave_status_from_flow(status: WaveRunStatus) -> WaveStatus {
     match status {
-        FlowRunStatus::Running => WaveStatus::WaveRunning,
-        FlowRunStatus::Waiting => WaveStatus::WaveWaiting,
-        FlowRunStatus::Completed => WaveStatus::WaveIdle,
-        FlowRunStatus::Failed => WaveStatus::WaveError,
+        WaveRunStatus::Running => WaveStatus::WaveRunning,
+        WaveRunStatus::Waiting => WaveStatus::WaveWaiting,
+        WaveRunStatus::Completed => WaveStatus::WaveIdle,
+        WaveRunStatus::Failed => WaveStatus::WaveError,
     }
 }
 
@@ -362,7 +380,8 @@ mod tests {
     use std::sync::Mutex;
 
     use super::handle_tick_result;
-    use crate::proto::control::{StepRunStatus, Wave, WaveStatus};
+    use crate::id::LfdId;
+    use crate::proto::control::{AgentStatus, Wave, WaveStatus};
     use crate::store::{ForkRun, RunStore, SharedStore, StoreError, StoreResult};
 
     #[derive(Debug, Default)]
@@ -397,9 +416,9 @@ mod tests {
             unused()
         }
 
-        fn get_wave(&self, wave_id: &str) -> StoreResult<Option<Wave>> {
+        fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>> {
             let wave = self.wave.lock().expect("wave mutex poisoned");
-            if wave.id == wave_id {
+            if wave.id == wave_id.as_str() {
                 Ok(Some(wave.clone()))
             } else {
                 Ok(None)
@@ -416,14 +435,14 @@ mod tests {
             Ok(())
         }
 
-        fn delete_wave(&self, _wave_id: &str) -> StoreResult<()> {
+        fn delete_wave(&self, _wave_id: &LfdId) -> StoreResult<()> {
             unused()
         }
 
         // Stimulus methods
         fn list_stimuli(
             &self,
-            _wave_id: Option<&str>,
+            _wave_id: Option<&LfdId>,
         ) -> StoreResult<Vec<crate::proto::control::Stimulus>> {
             unused()
         }
@@ -437,7 +456,7 @@ mod tests {
 
         fn get_stimulus(
             &self,
-            _stimulus_id: &str,
+            _stimulus_id: &LfdId,
         ) -> StoreResult<Option<crate::proto::control::Stimulus>> {
             unused()
         }
@@ -450,18 +469,18 @@ mod tests {
             unused()
         }
 
-        fn delete_stimulus(&self, _stimulus_id: &str) -> StoreResult<()> {
+        fn delete_stimulus(&self, _stimulus_id: &LfdId) -> StoreResult<()> {
             unused()
         }
 
-        fn delete_stimuli_for_wave(&self, _wave_id: &str) -> StoreResult<u32> {
+        fn delete_stimuli_for_wave(&self, _wave_id: &LfdId) -> StoreResult<u32> {
             unused()
         }
 
         // Pending activation methods
         fn list_pending_activations(
             &self,
-            _wave_id: &str,
+            _wave_id: &LfdId,
         ) -> StoreResult<Vec<crate::proto::control::PendingActivation>> {
             unused()
         }
@@ -480,33 +499,33 @@ mod tests {
             unused()
         }
 
-        fn delete_pending_activations(&self, _wave_id: &str) -> StoreResult<u32> {
+        fn delete_pending_activations(&self, _wave_id: &LfdId) -> StoreResult<u32> {
             unused()
         }
 
         fn get_pending_for_stimulus(
             &self,
-            _wave_id: &str,
-            _stimulus_id: &str,
+            _wave_id: &LfdId,
+            _stimulus_id: &LfdId,
         ) -> StoreResult<Option<crate::proto::control::PendingActivation>> {
             unused()
         }
 
         // Step run methods
-        fn list_step_runs(&self) -> StoreResult<Vec<crate::proto::control::StepRun>> {
+        fn list_agents(&self) -> StoreResult<Vec<crate::proto::control::Agent>> {
             unused()
         }
 
-        fn list_step_run_history(
+        fn list_agent_history(
             &self,
             _worktree: Option<&str>,
             _repo: Option<&str>,
             _limit: Option<u32>,
-        ) -> StoreResult<Vec<crate::proto::control::StepRun>> {
+        ) -> StoreResult<Vec<crate::proto::control::Agent>> {
             unused()
         }
 
-        fn list_fork_runs(&self, _wave_id: &str, _step_index: u32) -> StoreResult<Vec<ForkRun>> {
+        fn list_fork_runs(&self, _wave_id: &LfdId, _step_index: u32) -> StoreResult<Vec<ForkRun>> {
             unused()
         }
 
@@ -514,55 +533,67 @@ mod tests {
             unused()
         }
 
-        fn delete_fork_runs(&self, _wave_id: &str, _step_index: u32) -> StoreResult<u32> {
+        fn delete_fork_runs(&self, _wave_id: &LfdId, _step_index: u32) -> StoreResult<u32> {
             unused()
         }
 
-        fn get_step_run(
+        fn get_agent(
             &self,
-            _step_run_id: &str,
-        ) -> StoreResult<Option<crate::proto::control::StepRun>> {
+            _agent_id: &LfdId,
+        ) -> StoreResult<Option<crate::proto::control::Agent>> {
             unused()
         }
 
-        fn get_waiting_step_run(
+        fn get_waiting_agent(
             &self,
-            _wave_id: &str,
-        ) -> StoreResult<Option<crate::proto::control::StepRun>> {
+            _wave_id: &LfdId,
+        ) -> StoreResult<Option<crate::proto::control::Agent>> {
             unused()
         }
 
-        fn start_step_run(&self, _step_run: &crate::proto::control::StepRun) -> StoreResult<()> {
+        fn start_agent(&self, _agent: &crate::proto::control::Agent) -> StoreResult<()> {
             unused()
         }
 
-        fn update_step_run_status(
+        fn update_agent_status(
             &self,
-            _step_run_id: &str,
+            _agent_id: &LfdId,
             _status: i32,
             _pid: Option<u32>,
         ) -> StoreResult<()> {
             unused()
         }
 
-        fn end_step_run(&self, step_run_id: &str, status: i32, _ended_at: i64) -> StoreResult<()> {
+        fn end_agent(&self, agent_id: &LfdId, status: i32, _ended_at: i64) -> StoreResult<()> {
             let mut ended = self.ended.lock().expect("ended mutex poisoned");
-            ended.push((step_run_id.to_string(), status));
+            ended.push((agent_id.to_string(), status));
             Ok(())
         }
 
-        fn get_stuck_step_runs(
+        fn end_active_agent_for_wave(
+            &self,
+            wave_id: &LfdId,
+            status: i32,
+            _ended_at: i64,
+        ) -> StoreResult<()> {
+            let mut ended = self.ended.lock().expect("ended mutex poisoned");
+            ended.push((wave_id.to_string(), status));
+            Ok(())
+        }
+
+        fn get_stuck_agents(
             &self,
             _older_than_secs: u64,
-        ) -> StoreResult<Vec<crate::proto::control::StepRun>> {
+        ) -> StoreResult<Vec<crate::proto::control::Agent>> {
             unused()
         }
     }
 
     fn base_wave() -> Wave {
+        let id = LfdId::new().to_string();
         Wave {
-            id: "wave-1".to_string(),
-            name: "wave-1".to_string(),
+            id: id.clone(),
+            name: id,
             repo: "/tmp".to_string(),
             flow: "ship".to_string(),
             direction: Vec::new(),
@@ -583,7 +614,7 @@ mod tests {
     }
 
     #[test]
-    fn handle_tick_result_ends_step_run_on_success() {
+    fn handle_tick_result_ends_agent_on_success() {
         let wave = base_wave();
         let store = std::sync::Arc::new(TestStore::new(wave.clone()));
         let shared: SharedStore = store.clone();
@@ -596,14 +627,11 @@ mod tests {
 
         let ended = store.ended.lock().expect("ended mutex poisoned").clone();
 
-        assert_eq!(
-            ended,
-            vec![("wave-1:3".to_string(), StepRunStatus::StepCompleted as i32)]
-        );
+        assert_eq!(ended, vec![(wave.id, AgentStatus::AgentCompleted as i32)]);
     }
 
     #[test]
-    fn handle_tick_result_ends_step_run_on_failure() {
+    fn handle_tick_result_ends_agent_on_failure() {
         let wave = base_wave();
         let store = std::sync::Arc::new(TestStore::new(wave.clone()));
         let shared: SharedStore = store.clone();
@@ -616,9 +644,6 @@ mod tests {
 
         let ended = store.ended.lock().expect("ended mutex poisoned").clone();
 
-        assert_eq!(
-            ended,
-            vec![("wave-1:3".to_string(), StepRunStatus::StepFailed as i32)]
-        );
+        assert_eq!(ended, vec![(wave.id, AgentStatus::AgentFailed as i32)]);
     }
 }

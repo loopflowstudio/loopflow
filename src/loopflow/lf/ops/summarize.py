@@ -263,12 +263,12 @@ RECURSIVE_THRESHOLD = 400000
 
 def _load_summarize_prompt(repo_root: Path) -> str:
     """Load summarize prompt, checking for override first."""
-    from loopflow.lf.builtins.prompts import get_builtin_prompt
+    from loopflow.lf.builtins.prompts import get_builtin_ops_prompt
 
     override = repo_root / ".lf" / "SUMMARIZE.md"
     if override.exists():
         return override.read_text()
-    return get_builtin_prompt("summarize")
+    return get_builtin_ops_prompt("summarize")
 
 
 def _list_subdirectories(path: Path, repo_root: Path) -> list[Path]:

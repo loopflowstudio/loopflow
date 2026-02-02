@@ -9,7 +9,7 @@ To add schema changes, create a new migration file in this directory.
 import sqlite3
 
 SCHEMA_VERSION = "2026-01-25T23:59:59Z_baseline"
-DESCRIPTION = "baseline schema with step_index for tick-based flow execution"
+DESCRIPTION = "baseline schema with agents table and step_index for tick-based flow execution"
 
 
 def apply(conn: sqlite3.Connection) -> None:
@@ -48,10 +48,10 @@ def apply(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_waves_repo ON waves(repo);
         CREATE INDEX IF NOT EXISTS idx_waves_status ON waves(status);
 
-        -- Runs: flow execution instances
-        CREATE TABLE IF NOT EXISTS runs (
+        -- WaveRuns: a single run of a wave
+        CREATE TABLE IF NOT EXISTS wave_runs (
             id TEXT PRIMARY KEY,
-            wave TEXT,  -- wave ID (nullable for one-off runs)
+            wave_id TEXT,  -- wave ID (nullable for one-off runs)
 
             flow TEXT NOT NULL,
             direction TEXT,            -- JSON array (nullable)
@@ -73,19 +73,19 @@ def apply(conn: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL
         );
 
-        CREATE INDEX IF NOT EXISTS idx_runs_wave ON runs(wave);
-        CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
-        CREATE INDEX IF NOT EXISTS idx_runs_repo ON runs(repo);
+        CREATE INDEX IF NOT EXISTS idx_wave_runs_wave ON wave_runs(wave_id);
+        CREATE INDEX IF NOT EXISTS idx_wave_runs_status ON wave_runs(status);
+        CREATE INDEX IF NOT EXISTS idx_wave_runs_repo ON wave_runs(repo);
 
-        -- Step runs: individual step executions
-        CREATE TABLE IF NOT EXISTS step_runs (
+        -- Agents: individual step executions (Claude Code processes)
+        CREATE TABLE IF NOT EXISTS agents (
             id TEXT PRIMARY KEY,
             step TEXT NOT NULL,
             repo TEXT NOT NULL,
             worktree TEXT NOT NULL,
 
-            flow_run_id TEXT,  -- parent run (nullable for standalone)
-            wave_id TEXT,     -- parent wave (nullable for standalone)
+            wave_run_id TEXT,  -- parent wave run (nullable for standalone)
+            wave_id TEXT,      -- parent wave (nullable for standalone)
 
             status TEXT NOT NULL DEFAULT 'running',
             started_at TEXT NOT NULL,
@@ -96,8 +96,8 @@ def apply(conn: sqlite3.Connection) -> None:
             run_mode TEXT NOT NULL DEFAULT 'auto'
         );
 
-        CREATE INDEX IF NOT EXISTS idx_step_runs_status ON step_runs(status);
-        CREATE INDEX IF NOT EXISTS idx_step_runs_flow_run ON step_runs(flow_run_id);
+        CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
+        CREATE INDEX IF NOT EXISTS idx_agents_wave_run ON agents(wave_run_id);
 
         -- Summaries: cached codebase summaries
         CREATE TABLE IF NOT EXISTS summaries (

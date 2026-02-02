@@ -17,9 +17,8 @@ from loopflow.lf.flows import Step, load_flow
 from loopflow.lf.worktrees import create as create_worktree
 from loopflow.lfd.daemon.client import notify_event
 from loopflow.lfd.execution.runner import IterationResult, run_iteration, tick_flow
-from loopflow.lfd.flow_run import save_run
 from loopflow.lfd.logging import worker_log
-from loopflow.lfd.models import FlowRun, FlowRunStatus, TickResult, Wave, WaveStatus
+from loopflow.lfd.models import TickResult, Wave, WaveRun, WaveRunStatus, WaveStatus
 from loopflow.lfd.wave import (
     count_outstanding,
     get_wave,
@@ -29,6 +28,7 @@ from loopflow.lfd.wave import (
     update_wave_status,
     update_wave_worktree_branch,
 )
+from loopflow.lfd.wave_run import save_wave_run
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 MANAGER_POLL_INTERVAL = 30  # seconds between slot checks
@@ -135,7 +135,7 @@ def _iteration_branch_prefix(main_branch: str) -> str:
 def _run_tick_loop(wave: Wave, iteration: int, run_id: str) -> IterationResult:
     """Run a flow using tick_flow() for interactive step support.
 
-    Creates a FlowRun, then ticks through steps until:
+    Creates a WaveRun, then ticks through steps until:
     - WAITING_INTERACTIVE: pause for user connection
     - FLOW_COMPLETE: all steps done
     - STEP_FAILED: error occurred
@@ -152,28 +152,28 @@ def _run_tick_loop(wave: Wave, iteration: int, run_id: str) -> IterationResult:
         worker_log.error(f"[{short_id}] failed to create worktree: {e}")
         return IterationResult(success=False)
 
-    # Create FlowRun record
-    flow_run = FlowRun(
+    # Create WaveRun record
+    wave_run = WaveRun(
         id=run_id,
         wave_id=wave.id,
         flow=wave.flow,
         direction=wave.direction,
         area=wave.area,
         repo=wave.repo,
-        status=FlowRunStatus.RUNNING,
+        status=WaveRunStatus.RUNNING,
         iteration=iteration,
         step_index=0,
         worktree=str(worktree_path),
         branch=branch,
         started_at=datetime.now(),
     )
-    save_run(flow_run)
+    save_wave_run(wave_run)
 
     notify_event(
         "wave.started",
         {
             "wave_id": wave.id,
-            "flow_run_id": flow_run.id,
+            "wave_run_id": wave_run.id,
             "iteration": iteration,
             "mode": "tick",
         },
@@ -181,7 +181,7 @@ def _run_tick_loop(wave: Wave, iteration: int, run_id: str) -> IterationResult:
 
     # Tick loop
     while True:
-        result = tick_flow(flow_run.id)
+        result = tick_flow(wave_run.id)
 
         if result == TickResult.FLOW_COMPLETE:
             worker_log.info(f"[{short_id}] flow complete via tick loop")

@@ -7,6 +7,7 @@ use tokio_util::sync::CancellationToken;
 use tonic::transport::Server;
 
 mod http;
+mod id;
 mod loops;
 mod obs;
 mod proto;
@@ -19,12 +20,30 @@ use crate::http::HttpState;
 use crate::proto::control::control_service_server::ControlServiceServer;
 use crate::scheduler::Scheduler;
 use crate::server::ControlServer;
+use crate::store::postgres::PostgresStore;
 use crate::store::sqlite::SqliteStore;
 use crate::store::SharedStore;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     obs::init_tracing();
+
+    let mut args = std::env::args();
+    if let Some(command) = args.nth(1) {
+        if command == "migrate" {
+            let status_only = args.any(|arg| arg == "--status");
+            let database_url = std::env::var("LFD_DATABASE_URL")
+                .expect("LFD_DATABASE_URL required for postgres migrations");
+            if status_only {
+                let version = PostgresStore::migrate_status_async(&database_url).await?;
+                println!("schema_version={version}");
+            } else {
+                let version = PostgresStore::migrate_async(&database_url).await?;
+                println!("migrated schema to version {version}");
+            }
+            return Ok(());
+        }
+    }
 
     let grpc_addr: SocketAddr = std::env::var("LFD_GRPC_ADDR")
         .unwrap_or_else(|_| "127.0.0.1:50051".to_string())
@@ -35,13 +54,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_path = std::env::var("LFD_DB_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|_| default_db_path());
+    let storage = std::env::var("LFD_STORAGE").unwrap_or_else(|_| "sqlite".to_string());
 
     let max_slots = std::env::var("LFD_MAX_SLOTS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or_else(default_max_slots);
 
-    let store = Arc::new(SqliteStore::new(&db_path)?) as SharedStore;
+    let store = match storage.as_str() {
+        "postgres" => {
+            let database_url = std::env::var("LFD_DATABASE_URL")
+                .expect("LFD_DATABASE_URL required for postgres storage");
+            Arc::new(PostgresStore::connect_async(&database_url).await?) as SharedStore
+        }
+        _ => Arc::new(SqliteStore::new(&db_path)?) as SharedStore,
+    };
     let scheduler = Arc::new(Scheduler::new(max_slots));
     let cancel = CancellationToken::new();
     let loop_handles = scheduler.clone().start_loops(store.clone(), cancel.clone());

@@ -1,32 +1,31 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
-use prost_types::Timestamp;
-use time::OffsetDateTime;
-use tokio_stream::Stream;
-use tonic::{Request, Response, Status};
-use uuid::Uuid;
-
+use crate::id::LfdId;
 use crate::proto::control::control_service_server::ControlService;
 use crate::proto::control::{
-    AcquireSlotRequest, AcquireSlotResponse, CloneWaveRequest, CloneWaveResponse,
-    ConnectWaveRequest, ConnectWaveResponse, CreateStimulusRequest, CreateStimulusResponse,
-    CreateWaveRequest, CreateWaveResponse, DeleteStimulusRequest, DeleteStimulusResponse,
-    DeleteWaveRequest, DeleteWaveResponse, EndStepRunRequest, EndStepRunResponse, Event,
-    GetHealthRequest, GetHealthResponse, GetSchedulerStatusRequest, GetSchedulerStatusResponse,
-    GetStatusRequest, GetStatusResponse, GetStimulusRequest, GetStimulusResponse, HealthChecks,
-    HealthMetrics, ListFlowsRequest, ListFlowsResponse, ListStepRunsRequest, ListStepRunsResponse,
-    ListStimuliRequest, ListStimuliResponse, ListWavesRequest, ListWavesResponse,
-    ListWorktreesRequest, ListWorktreesResponse, MergeMode, NotifyRequest, NotifyResponse,
-    NotifyWorktreeChangedRequest, NotifyWorktreeChangedResponse, ProtocolVersion,
-    ReleaseSlotRequest, ReleaseSlotResponse, RunWaveRequest, RunWaveResponse, StepRun,
-    StepRunStatus, Stimulus, StopWaveRequest, StopWaveResponse, StreamOutputRequest,
-    StreamOutputResponse, UpdateStimulusRequest, UpdateStimulusResponse, UpdateWaveRequest,
-    UpdateWaveResponse, Wave, WaveStatus,
+    AcquireSlotRequest, AcquireSlotResponse, Agent, AgentStatus, CloneWaveRequest,
+    CloneWaveResponse, ConnectWaveRequest, ConnectWaveResponse, CreateStimulusRequest,
+    CreateStimulusResponse, CreateWaveRequest, CreateWaveResponse, DeleteStimulusRequest,
+    DeleteStimulusResponse, DeleteWaveRequest, DeleteWaveResponse, EndAgentRequest,
+    EndAgentResponse, Event, GetHealthRequest, GetHealthResponse, GetSchedulerStatusRequest,
+    GetSchedulerStatusResponse, GetStatusRequest, GetStatusResponse, GetStimulusRequest,
+    GetStimulusResponse, HealthChecks, HealthMetrics, ListAgentsRequest, ListAgentsResponse,
+    ListFlowsRequest, ListFlowsResponse, ListStimuliRequest, ListStimuliResponse, ListWavesRequest,
+    ListWavesResponse, ListWorktreesRequest, ListWorktreesResponse, MergeMode, NotifyRequest,
+    NotifyResponse, NotifyWorktreeChangedRequest, NotifyWorktreeChangedResponse, ProtocolVersion,
+    ReleaseSlotRequest, ReleaseSlotResponse, RunWaveRequest, RunWaveResponse, Stimulus,
+    StopWaveRequest, StopWaveResponse, StreamOutputRequest, StreamOutputResponse,
+    UpdateStimulusRequest, UpdateStimulusResponse, UpdateWaveRequest, UpdateWaveResponse, Wave,
+    WaveStatus,
 };
 use crate::scheduler::Scheduler;
 use crate::sessions::{run_pty_command, PtyCommand};
 use crate::store::{SharedStore, StoreError, StoreResult};
+use prost_types::Timestamp;
+use time::OffsetDateTime;
+use tokio_stream::Stream;
+use tonic::{Request, Response, Status};
 
 #[derive(Clone)]
 pub struct ControlServer {
@@ -54,6 +53,12 @@ impl ControlServer {
         }
     }
 
+    #[allow(clippy::result_large_err)]
+    fn parse_id(value: &str, name: &str) -> Result<LfdId, Status> {
+        LfdId::parse(value)
+            .map_err(|err| Status::invalid_argument(format!("invalid {name}: {err}")))
+    }
+
     async fn run_store<T, F>(&self, func: F) -> Result<T, Status>
     where
         T: Send + 'static,
@@ -66,20 +71,20 @@ impl ControlServer {
             .map_err(Self::store_error)
     }
 
-    fn status_counts(waves: &[Wave], step_runs: &[StepRun]) -> (u32, u32, u32) {
+    fn status_counts(waves: &[Wave], agents: &[Agent]) -> (u32, u32, u32) {
         let waves_defined = waves.len() as u32;
         let waves_running = waves
             .iter()
             .filter(|wave| wave.status == WaveStatus::WaveRunning as i32)
             .count() as u32;
-        let step_runs_active = step_runs
+        let agents_active = agents
             .iter()
             .filter(|run| {
-                run.status == StepRunStatus::StepRunning as i32
-                    || run.status == StepRunStatus::StepWaiting as i32
+                run.status == AgentStatus::AgentRunning as i32
+                    || run.status == AgentStatus::AgentWaiting as i32
             })
             .count() as u32;
-        (waves_defined, waves_running, step_runs_active)
+        (waves_defined, waves_running, agents_active)
     }
 
     fn now_timestamp() -> Timestamp {
@@ -96,6 +101,8 @@ impl ControlServer {
             StoreError::InvalidData(message) => Status::invalid_argument(message),
             StoreError::Serde(err) => Status::internal(format!("serialization error: {err}")),
             StoreError::Sqlite(err) => Status::internal(format!("database error: {err}")),
+            StoreError::Postgres(err) => Status::internal(format!("database error: {err}")),
+            StoreError::PostgresPool(err) => Status::internal(format!("database error: {err}")),
         }
     }
 
@@ -104,8 +111,8 @@ impl ControlServer {
             .await
     }
 
-    async fn list_step_runs_inner(&self) -> Result<Vec<StepRun>, Status> {
-        self.run_store(|store| store.list_step_runs()).await
+    async fn list_agents_inner(&self) -> Result<Vec<Agent>, Status> {
+        self.run_store(|store| store.list_agents()).await
     }
 }
 
@@ -116,15 +123,14 @@ impl ControlService for ControlServer {
         _request: Request<GetStatusRequest>,
     ) -> Result<Response<GetStatusResponse>, Status> {
         let waves = self.list_waves_inner(None).await?;
-        let step_runs = self.list_step_runs_inner().await?;
-        let (waves_defined, waves_running, step_runs_active) =
-            Self::status_counts(&waves, &step_runs);
+        let agents = self.list_agents_inner().await?;
+        let (waves_defined, waves_running, agents_active) = Self::status_counts(&waves, &agents);
 
         Ok(Response::new(GetStatusResponse {
             pid: std::process::id(),
             waves_defined,
             waves_running,
-            step_runs_active,
+            agents_active,
         }))
     }
 
@@ -136,9 +142,8 @@ impl ControlService for ControlServer {
         let database_ok = self.run_store(|store| store.health_check()).await.is_ok();
 
         let waves = self.list_waves_inner(None).await?;
-        let step_runs = self.list_step_runs_inner().await?;
-        let (waves_defined, waves_running, step_runs_active) =
-            Self::status_counts(&waves, &step_runs);
+        let agents = self.list_agents_inner().await?;
+        let (waves_defined, waves_running, agents_active) = Self::status_counts(&waves, &agents);
 
         let uptime = OffsetDateTime::now_utc() - self.started_at;
 
@@ -153,8 +158,8 @@ impl ControlService for ControlServer {
             metrics: Some(HealthMetrics {
                 waves_total: waves_defined,
                 waves_running,
-                step_runs_active,
-                flow_runs_total: 0,
+                agents_active,
+                wave_runs_total: 0,
             }),
             protocol_version: Some(ProtocolVersion {
                 major: 1,
@@ -182,6 +187,7 @@ impl ControlService for ControlServer {
         request: Request<crate::proto::control::GetWaveRequest>,
     ) -> Result<Response<crate::proto::control::GetWaveResponse>, Status> {
         let wave_id = request.into_inner().wave_id;
+        let wave_id = Self::parse_id(&wave_id, "wave_id")?;
         let wave = self
             .run_store(move |store| store.get_wave(&wave_id))
             .await?
@@ -196,7 +202,7 @@ impl ControlService for ControlServer {
         request: Request<CreateWaveRequest>,
     ) -> Result<Response<CreateWaveResponse>, Status> {
         let req = request.into_inner();
-        let id = Uuid::new_v4().to_string();
+        let id = LfdId::new().to_string();
         let name = req.name.unwrap_or_else(|| format!("wave-{id}"));
         let flow = req.flow.unwrap_or_else(|| "ship".to_string());
 
@@ -234,6 +240,7 @@ impl ControlService for ControlServer {
     ) -> Result<Response<UpdateWaveResponse>, Status> {
         let req = request.into_inner();
         let wave_id = req.wave_id;
+        let wave_id = Self::parse_id(&wave_id, "wave_id")?;
         let mut wave = self
             .run_store(move |store| store.get_wave(&wave_id))
             .await?
@@ -265,6 +272,7 @@ impl ControlService for ControlServer {
         request: Request<DeleteWaveRequest>,
     ) -> Result<Response<DeleteWaveResponse>, Status> {
         let wave_id = request.into_inner().wave_id;
+        let wave_id = Self::parse_id(&wave_id, "wave_id")?;
         self.run_store(move |store| store.delete_wave(&wave_id))
             .await?;
         Ok(Response::new(DeleteWaveResponse {}))
@@ -275,13 +283,13 @@ impl ControlService for ControlServer {
         request: Request<CloneWaveRequest>,
     ) -> Result<Response<CloneWaveResponse>, Status> {
         let req = request.into_inner();
-        let wave_id = req.wave_id.clone();
+        let wave_id = Self::parse_id(&req.wave_id, "wave_id")?;
         let mut wave = self
             .run_store(move |store| store.get_wave(&wave_id))
             .await?
             .ok_or_else(|| Status::not_found("wave not found"))?;
 
-        let new_id = Uuid::new_v4().to_string();
+        let new_id = LfdId::new().to_string();
         wave.id = new_id;
         wave.name = req.name.unwrap_or_else(|| format!("{}-copy", wave.name));
         wave.created_at = Some(Self::now_timestamp());
@@ -299,6 +307,7 @@ impl ControlService for ControlServer {
     ) -> Result<Response<RunWaveResponse>, Status> {
         let req = request.into_inner();
         let wave_id = req.wave_id;
+        let wave_id = Self::parse_id(&wave_id, "wave_id")?;
         let mut wave = self
             .run_store(move |store| store.get_wave(&wave_id))
             .await?
@@ -333,6 +342,7 @@ impl ControlService for ControlServer {
         request: Request<StopWaveRequest>,
     ) -> Result<Response<StopWaveResponse>, Status> {
         let wave_id = request.into_inner().wave_id;
+        let wave_id = Self::parse_id(&wave_id, "wave_id")?;
         let mut wave = self
             .run_store(move |store| store.get_wave(&wave_id))
             .await?
@@ -355,17 +365,17 @@ impl ControlService for ControlServer {
         request: Request<ListStimuliRequest>,
     ) -> Result<Response<ListStimuliResponse>, Status> {
         let req = request.into_inner();
-        let wave_id = req
-            .wave_id
-            .as_deref()
-            .filter(|value| !value.is_empty())
-            .map(str::to_string);
+        let wave_id = req.wave_id.as_deref().filter(|value| !value.is_empty());
+        let wave_id = match wave_id {
+            Some(value) => Some(Self::parse_id(value, "wave_id")?),
+            None => None,
+        };
 
         let stimuli = if let Some(kind) = req.kind {
             self.run_store(move |store| store.list_stimuli_by_kind(kind))
                 .await?
         } else {
-            self.run_store(move |store| store.list_stimuli(wave_id.as_deref()))
+            self.run_store(move |store| store.list_stimuli(wave_id.as_ref()))
                 .await?
         };
 
@@ -377,6 +387,7 @@ impl ControlService for ControlServer {
         request: Request<GetStimulusRequest>,
     ) -> Result<Response<GetStimulusResponse>, Status> {
         let stimulus_id = request.into_inner().stimulus_id;
+        let stimulus_id = Self::parse_id(&stimulus_id, "stimulus_id")?;
         let stimulus = self
             .run_store(move |store| store.get_stimulus(&stimulus_id))
             .await?
@@ -393,13 +404,13 @@ impl ControlService for ControlServer {
         let req = request.into_inner();
 
         // Verify wave exists
-        let wave_id = req.wave_id.clone();
+        let wave_id = Self::parse_id(&req.wave_id, "wave_id")?;
         self.run_store(move |store| store.get_wave(&wave_id))
             .await?
             .ok_or_else(|| Status::not_found("wave not found"))?;
 
         let stimulus = Stimulus {
-            id: Uuid::new_v4().to_string(),
+            id: LfdId::new().to_string(),
             wave_id: req.wave_id,
             kind: req.kind,
             cron: req.cron,
@@ -424,6 +435,7 @@ impl ControlService for ControlServer {
     ) -> Result<Response<UpdateStimulusResponse>, Status> {
         let req = request.into_inner();
         let stimulus_id = req.stimulus_id;
+        let stimulus_id = Self::parse_id(&stimulus_id, "stimulus_id")?;
         let mut stimulus = self
             .run_store(move |store| store.get_stimulus(&stimulus_id))
             .await?
@@ -450,6 +462,7 @@ impl ControlService for ControlServer {
         request: Request<DeleteStimulusRequest>,
     ) -> Result<Response<DeleteStimulusResponse>, Status> {
         let stimulus_id = request.into_inner().stimulus_id;
+        let stimulus_id = Self::parse_id(&stimulus_id, "stimulus_id")?;
         self.run_store(move |store| store.delete_stimulus(&stimulus_id))
             .await?;
         Ok(Response::new(DeleteStimulusResponse {}))
@@ -460,6 +473,7 @@ impl ControlService for ControlServer {
         request: Request<ConnectWaveRequest>,
     ) -> Result<Response<ConnectWaveResponse>, Status> {
         let wave_id = request.into_inner().wave_id;
+        let wave_id = Self::parse_id(&wave_id, "wave_id")?;
         let mut wave = self
             .run_store({
                 let wave_id = wave_id.clone();
@@ -468,43 +482,43 @@ impl ControlService for ControlServer {
             .await?
             .ok_or_else(|| Status::not_found("wave not found"))?;
 
-        if !self.scheduler.register_session(&wave_id) {
+        if !self.scheduler.register_session(wave_id.as_str()) {
             return Err(Status::failed_precondition("session already active"));
         }
 
-        let step_run = match self
+        let agent = match self
             .run_store({
                 let wave_id = wave_id.clone();
-                move |store| store.get_waiting_step_run(&wave_id)
+                move |store| store.get_waiting_agent(&wave_id)
             })
             .await
         {
-            Ok(Some(step_run)) => step_run,
+            Ok(Some(agent)) => agent,
             Ok(None) => {
-                self.scheduler.unregister_session(&wave_id);
+                self.scheduler.unregister_session(wave_id.as_str());
                 return Err(Status::not_found("no waiting step run"));
             }
             Err(err) => {
-                self.scheduler.unregister_session(&wave_id);
+                self.scheduler.unregister_session(wave_id.as_str());
                 return Err(err);
             }
         };
 
-        let step_run_id = step_run.id.clone();
+        let agent_id = agent.id.clone();
         if let Err(err) = self
             .run_store({
-                let step_run_id = step_run_id.clone();
+                let agent_id = agent_id.clone();
                 move |store| {
-                    store.update_step_run_status(
-                        &step_run_id,
-                        StepRunStatus::StepRunning as i32,
+                    store.update_agent_status(
+                        &LfdId::from_raw(agent_id),
+                        AgentStatus::AgentRunning as i32,
                         None,
                     )
                 }
             })
             .await
         {
-            self.scheduler.unregister_session(&wave_id);
+            self.scheduler.unregister_session(wave_id.as_str());
             return Err(err);
         }
 
@@ -514,16 +528,18 @@ impl ControlService for ControlServer {
             .run_store(move |store| store.update_wave(&wave_clone))
             .await
         {
-            self.scheduler.unregister_session(&wave_id);
+            self.scheduler.unregister_session(wave_id.as_str());
             return Err(err);
         }
 
         let store = self.store.clone();
         let scheduler = self.scheduler.clone();
         let directions = wave.direction.clone();
-        let worktree = step_run.worktree.clone();
-        let step = step_run.step.clone();
+        let worktree = agent.worktree.clone();
+        let step = agent.step.clone();
         let wave_id_task = wave.id.clone();
+        let wave_id_task_id =
+            LfdId::parse(&wave.id).unwrap_or_else(|_| LfdId::from_raw(wave.id.clone()));
 
         tokio::spawn(async move {
             let mut command = PtyCommand::new("lf")
@@ -550,18 +566,19 @@ impl ControlService for ControlServer {
             };
 
             let status = if exit_code == 0 {
-                StepRunStatus::StepCompleted
+                AgentStatus::AgentCompleted
             } else {
-                StepRunStatus::StepFailed
+                AgentStatus::AgentFailed
             };
 
             let ended_at = OffsetDateTime::now_utc().unix_timestamp();
-            if let Err(err) = store.end_step_run(&step_run_id, status as i32, ended_at) {
+            let agent_id = LfdId::from_raw(agent_id);
+            if let Err(err) = store.end_agent(&agent_id, status as i32, ended_at) {
                 tracing::warn!(wave_id = %wave_id_task, error = %err, "failed to end step run");
             }
 
-            if let Ok(Some(mut wave)) = store.get_wave(&wave_id_task) {
-                if status == StepRunStatus::StepCompleted {
+            if let Ok(Some(mut wave)) = store.get_wave(&wave_id_task_id) {
+                if status == AgentStatus::AgentCompleted {
                     wave.step_index += 1;
                     wave.consecutive_failures = 0;
                     wave.status = WaveStatus::WaveRunning as i32;
@@ -582,11 +599,11 @@ impl ControlService for ControlServer {
         });
 
         Ok(Response::new(ConnectWaveResponse {
-            worktree: step_run.worktree,
-            step: step_run.step,
-            step_run_id: step_run.id,
+            worktree: agent.worktree,
+            step: agent.step,
+            agent_id: agent.id,
             prompt_file: String::new(),
-            flow_run_id: step_run.flow_run_id,
+            wave_run_id: agent.wave_run_id,
             step_index: wave.step_index,
         }))
     }
@@ -656,94 +673,92 @@ impl ControlService for ControlServer {
         Ok(Response::new(ReleaseSlotResponse { slots_used }))
     }
 
-    async fn list_step_runs(
+    async fn list_agents(
         &self,
-        _request: Request<ListStepRunsRequest>,
-    ) -> Result<Response<ListStepRunsResponse>, Status> {
-        let runs = self.list_step_runs_inner().await?;
-        Ok(Response::new(ListStepRunsResponse { step_runs: runs }))
+        _request: Request<ListAgentsRequest>,
+    ) -> Result<Response<ListAgentsResponse>, Status> {
+        let runs = self.list_agents_inner().await?;
+        Ok(Response::new(ListAgentsResponse { agents: runs }))
     }
 
-    async fn get_step_run_history(
+    async fn get_agent_history(
         &self,
-        request: Request<crate::proto::control::GetStepRunHistoryRequest>,
-    ) -> Result<Response<crate::proto::control::GetStepRunHistoryResponse>, Status> {
+        request: Request<crate::proto::control::GetAgentHistoryRequest>,
+    ) -> Result<Response<crate::proto::control::GetAgentHistoryResponse>, Status> {
         let req = request.into_inner();
         let worktree = req.worktree.clone();
         let repo = req.repo.clone();
         let limit = req.limit;
         let runs = self
             .run_store(move |store| {
-                store.list_step_run_history(worktree.as_deref(), repo.as_deref(), limit)
+                store.list_agent_history(worktree.as_deref(), repo.as_deref(), limit)
             })
             .await?;
 
         Ok(Response::new(
-            crate::proto::control::GetStepRunHistoryResponse { step_runs: runs },
+            crate::proto::control::GetAgentHistoryResponse { agents: runs },
         ))
     }
 
-    async fn start_step_run(
+    async fn start_agent(
         &self,
-        request: Request<crate::proto::control::StartStepRunRequest>,
-    ) -> Result<Response<crate::proto::control::StartStepRunResponse>, Status> {
-        let step_run = request
+        request: Request<crate::proto::control::StartAgentRequest>,
+    ) -> Result<Response<crate::proto::control::StartAgentResponse>, Status> {
+        let agent = request
             .into_inner()
-            .step_run
-            .ok_or_else(|| Status::invalid_argument("missing step_run"))?;
-        let id = if step_run.id.is_empty() {
-            Uuid::new_v4().to_string()
+            .agent
+            .ok_or_else(|| Status::invalid_argument("missing agent"))?;
+        let id = if agent.id.is_empty() {
+            LfdId::new().to_string()
         } else {
-            step_run.id.clone()
+            agent.id.clone()
         };
 
-        let mut stored = step_run.clone();
+        let mut stored = agent.clone();
         stored.id = id.clone();
         if stored.started_at.is_none() {
             stored.started_at = Some(Self::now_timestamp());
         }
 
         let stored_clone = stored.clone();
-        self.run_store(move |store| store.start_step_run(&stored_clone))
+        self.run_store(move |store| store.start_agent(&stored_clone))
             .await?;
 
-        Ok(Response::new(crate::proto::control::StartStepRunResponse {
+        Ok(Response::new(crate::proto::control::StartAgentResponse {
             id,
         }))
     }
 
-    async fn end_step_run(
+    async fn end_agent(
         &self,
-        request: Request<EndStepRunRequest>,
-    ) -> Result<Response<EndStepRunResponse>, Status> {
+        request: Request<EndAgentRequest>,
+    ) -> Result<Response<EndAgentResponse>, Status> {
         let req = request.into_inner();
-        let step_run_id = req.step_run_id.clone();
+        let agent_id = req.agent_id.clone();
+        let agent_id_for_end = LfdId::from_raw(agent_id.clone());
         let ended_at = Self::now_timestamp().seconds;
-        let step_run_id_for_end = step_run_id.clone();
-        self.run_store(move |store| store.end_step_run(&step_run_id_for_end, req.status, ended_at))
+        self.run_store(move |store| store.end_agent(&agent_id_for_end, req.status, ended_at))
             .await?;
 
-        if let Ok(Some(step_run)) = self
+        if let Ok(Some(agent)) = self
             .run_store({
-                let step_run_id = step_run_id.clone();
-                move |store| store.get_step_run(&step_run_id)
+                let agent_id = LfdId::from_raw(agent_id.clone());
+                move |store| store.get_agent(&agent_id)
             })
             .await
         {
-            if let Some(wave_id) = step_run.wave_id {
+            if let Some(wave_id) = agent.wave_id {
+                let wave_id = Self::parse_id(&wave_id, "wave_id")?;
                 let wave = self
-                    .run_store({
-                        let wave_id = wave_id.clone();
-                        move |store| store.get_wave(&wave_id)
-                    })
+                    .run_store(move |store| store.get_wave(&wave_id))
                     .await?;
 
                 if let Some(mut wave) = wave {
-                    if req.status == StepRunStatus::StepCompleted as i32 {
+                    if req.status == AgentStatus::AgentCompleted as i32 {
                         wave.step_index += 1;
                         wave.consecutive_failures = 0;
                         wave.status = WaveStatus::WaveRunning as i32;
-                    } else if req.status == StepRunStatus::StepFailed as i32 {
+                    } else if req.status == AgentStatus::AgentFailed as i32 {
                         wave.consecutive_failures += 1;
                         if wave.consecutive_failures >= 3 {
                             wave.status = WaveStatus::WaveError as i32;
@@ -759,9 +774,7 @@ impl ControlService for ControlServer {
             }
         }
 
-        Ok(Response::new(EndStepRunResponse {
-            id: req.step_run_id,
-        }))
+        Ok(Response::new(EndAgentResponse { id: req.agent_id }))
     }
 
     type SubscribeStream = Pin<Box<dyn Stream<Item = Result<Event, Status>> + Send>>;

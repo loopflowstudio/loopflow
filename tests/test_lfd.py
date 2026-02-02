@@ -4,33 +4,25 @@ import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from loopflow.lfd.agent import (
+    load_agents,
+    load_agents_for_repo,
+    load_agents_for_worktree,
+    save_agent,
+    update_agent_status,
+)
 from loopflow.lfd.daemon.protocol import Event, Request, error, success
 from loopflow.lfd.db import _get_db
-from loopflow.lfd.flow_run import (
-    get_latest_run_for_wave,
-    list_runs_for_wave,
-    save_run,
-    update_run_pr,
-    update_run_status,
-    update_run_step,
-)
 from loopflow.lfd.migrations.registry import MIGRATIONS
 from loopflow.lfd.models import (
-    FlowRun,
-    FlowRunStatus,
+    Agent,
+    AgentStatus,
     MergeMode,
-    StepRun,
-    StepRunStatus,
     Stimulus,
     Wave,
+    WaveRun,
+    WaveRunStatus,
     WaveStatus,
-)
-from loopflow.lfd.step_run import (
-    load_step_runs,
-    load_step_runs_for_repo,
-    load_step_runs_for_worktree,
-    save_step_run,
-    update_step_run_status,
 )
 from loopflow.lfd.wave import (
     delete_wave,
@@ -42,23 +34,31 @@ from loopflow.lfd.wave import (
     update_wave_pid,
     update_wave_status,
 )
+from loopflow.lfd.wave_run import (
+    get_latest_wave_run_for_wave,
+    list_wave_runs_for_wave,
+    save_wave_run,
+    update_wave_run_pr,
+    update_wave_run_status,
+    update_wave_run_step,
+)
 
 
-def test_session_serialization():
-    session = StepRun(
-        id="sess-1",
+def test_agent_serialization():
+    agent = Agent(
+        id="agent-1",
         step="implement",
         repo="/tmp/repo",
         worktree="/tmp/repo.feature",
-        status=StepRunStatus.RUNNING,
+        status=AgentStatus.RUNNING,
         started_at=datetime(2024, 1, 1, 12, 0, 0),
         model="claude-code",
         run_mode="auto",
     )
-    data = session.to_dict()
-    restored = StepRun.from_dict(data)
+    data = agent.to_dict()
+    restored = Agent.from_dict(data)
     assert restored.step == "implement"
-    assert restored.status == StepRunStatus.RUNNING
+    assert restored.status == AgentStatus.RUNNING
 
 
 def test_protocol_request_parse():
@@ -88,22 +88,22 @@ def test_protocol_event_serialize():
     assert '"event": "wave.started"' in serialized
 
 
-def test_db_save_and_load_session():
+def test_db_save_and_load_agent():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
-        session = StepRun(
-            id="sess-1",
+        agent = Agent(
+            id="agent-1",
             step="implement",
             repo="/tmp/repo",
             worktree="/tmp/repo.feature",
-            status=StepRunStatus.RUNNING,
+            status=AgentStatus.RUNNING,
             started_at=datetime.now(),
         )
-        save_step_run(session, db_path)
+        save_agent(agent, db_path)
 
-        sessions = load_step_runs(db_path=db_path)
-        assert len(sessions) == 1
-        assert sessions[0].step == "implement"
+        agents = load_agents(db_path=db_path)
+        assert len(agents) == 1
+        assert agents[0].step == "implement"
 
 
 def test_db_records_migrations():
@@ -246,19 +246,19 @@ def test_migrations_cover_all_wave_fields():
         assert loaded.pid == wave.pid
 
 
-def test_migrations_cover_all_run_fields():
-    """Migrations create columns for all Run model fields."""
+def test_migrations_cover_all_wave_run_fields():
+    """Migrations create columns for all WaveRun model fields."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        run = FlowRun(
-            id="test-run-all-fields",
+        wave_run = WaveRun(
+            id="test-wave-run-all-fields",
             wave_id="wave-id",
             flow="ship",
             area=["src/test/"],
             direction=["direction-a", "direction-b"],
             repo=Path("/tmp/repo"),
-            status=FlowRunStatus.RUNNING,
+            status=WaveRunStatus.RUNNING,
             iteration=3,
             worktree="/tmp/repo.worktree",
             branch="feature-branch",
@@ -269,38 +269,38 @@ def test_migrations_cover_all_run_fields():
             ended_at=datetime(2024, 1, 15, 11, 45, 0),
         )
 
-        save_run(run, db_path)
-        runs = list_runs_for_wave("wave-id", db_path=db_path)
-        loaded = runs[0]
+        save_wave_run(wave_run, db_path)
+        wave_runs = list_wave_runs_for_wave("wave-id", db_path=db_path)
+        loaded = wave_runs[0]
 
-        assert loaded.id == run.id
-        assert loaded.wave_id == run.wave_id
-        assert loaded.flow == run.flow
-        assert loaded.area == run.area
-        assert loaded.direction == run.direction
-        assert loaded.repo == run.repo
-        assert loaded.status == run.status
-        assert loaded.iteration == run.iteration
-        assert loaded.worktree == run.worktree
-        assert loaded.branch == run.branch
-        assert loaded.current_step == run.current_step
-        assert loaded.error == run.error
-        assert loaded.pr_url == run.pr_url
-        assert loaded.started_at == run.started_at
-        assert loaded.ended_at == run.ended_at
+        assert loaded.id == wave_run.id
+        assert loaded.wave_id == wave_run.wave_id
+        assert loaded.flow == wave_run.flow
+        assert loaded.area == wave_run.area
+        assert loaded.direction == wave_run.direction
+        assert loaded.repo == wave_run.repo
+        assert loaded.status == wave_run.status
+        assert loaded.iteration == wave_run.iteration
+        assert loaded.worktree == wave_run.worktree
+        assert loaded.branch == wave_run.branch
+        assert loaded.current_step == wave_run.current_step
+        assert loaded.error == wave_run.error
+        assert loaded.pr_url == wave_run.pr_url
+        assert loaded.started_at == wave_run.started_at
+        assert loaded.ended_at == wave_run.ended_at
 
 
-def test_migrations_cover_all_session_fields():
-    """Migrations create columns for all Session model fields."""
+def test_migrations_cover_all_agent_fields():
+    """Migrations create columns for all Agent model fields."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        session = StepRun(
-            id="test-session-all-fields",
+        agent = Agent(
+            id="test-agent-all-fields",
             step="implement",
             repo="/tmp/repo",
             worktree="/tmp/repo.feature",
-            status=StepRunStatus.RUNNING,
+            status=AgentStatus.RUNNING,
             started_at=datetime(2024, 1, 15, 10, 30, 0),
             ended_at=datetime(2024, 1, 15, 11, 45, 0),
             pid=54321,
@@ -308,20 +308,20 @@ def test_migrations_cover_all_session_fields():
             run_mode="interactive",
         )
 
-        save_step_run(session, db_path)
-        sessions = load_step_runs(db_path=db_path)
-        loaded = sessions[0]
+        save_agent(agent, db_path)
+        agents = load_agents(db_path=db_path)
+        loaded = agents[0]
 
-        assert loaded.id == session.id
-        assert loaded.step == session.step
-        assert loaded.repo == session.repo
-        assert loaded.worktree == session.worktree
-        assert loaded.status == session.status
-        assert loaded.started_at == session.started_at
-        assert loaded.ended_at == session.ended_at
-        assert loaded.pid == session.pid
-        assert loaded.model == session.model
-        assert loaded.run_mode == session.run_mode
+        assert loaded.id == agent.id
+        assert loaded.step == agent.step
+        assert loaded.repo == agent.repo
+        assert loaded.worktree == agent.worktree
+        assert loaded.status == agent.status
+        assert loaded.started_at == agent.started_at
+        assert loaded.ended_at == agent.ended_at
+        assert loaded.pid == agent.pid
+        assert loaded.model == agent.model
+        assert loaded.run_mode == agent.run_mode
 
 
 def test_migrations_cover_summary_fields():
@@ -355,113 +355,113 @@ def test_migrations_cover_summary_fields():
         assert loaded["created_at"] is not None
 
 
-def test_db_load_step_runs_for_worktree():
+def test_db_load_agents_for_worktree():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        session1 = StepRun(
-            id="sess-1",
+        agent1 = Agent(
+            id="agent-1",
             step="implement",
             repo="/tmp/repo",
             worktree="/tmp/repo.feature-a",
-            status=StepRunStatus.COMPLETED,
+            status=AgentStatus.COMPLETED,
             started_at=datetime(2024, 1, 1, 12, 0, 0),
         )
-        session2 = StepRun(
-            id="sess-2",
+        agent2 = Agent(
+            id="agent-2",
             step="review",
             repo="/tmp/repo",
             worktree="/tmp/repo.feature-a",
-            status=StepRunStatus.COMPLETED,
+            status=AgentStatus.COMPLETED,
             started_at=datetime(2024, 1, 2, 12, 0, 0),
         )
-        session3 = StepRun(
-            id="sess-3",
+        agent3 = Agent(
+            id="agent-3",
             step="implement",
             repo="/tmp/repo",
             worktree="/tmp/repo.feature-b",
-            status=StepRunStatus.COMPLETED,
+            status=AgentStatus.COMPLETED,
             started_at=datetime.now(),
         )
 
-        save_step_run(session1, db_path)
-        save_step_run(session2, db_path)
-        save_step_run(session3, db_path)
+        save_agent(agent1, db_path)
+        save_agent(agent2, db_path)
+        save_agent(agent3, db_path)
 
-        sessions = load_step_runs_for_worktree("/tmp/repo.feature-a", db_path=db_path)
-        assert len(sessions) == 2
+        agents = load_agents_for_worktree("/tmp/repo.feature-a", db_path=db_path)
+        assert len(agents) == 2
         # Should be ordered by started_at DESC
-        assert sessions[0].id == "sess-2"
-        assert sessions[1].id == "sess-1"
+        assert agents[0].id == "agent-2"
+        assert agents[1].id == "agent-1"
 
 
-def test_db_load_step_runs_for_repo():
+def test_db_load_agents_for_repo():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        session1 = StepRun(
-            id="sess-1",
+        agent1 = Agent(
+            id="agent-1",
             step="implement",
             repo="/tmp/repo-a",
             worktree="/tmp/repo-a.feature",
-            status=StepRunStatus.COMPLETED,
+            status=AgentStatus.COMPLETED,
             started_at=datetime.now(),
         )
-        session2 = StepRun(
-            id="sess-2",
+        agent2 = Agent(
+            id="agent-2",
             step="review",
             repo="/tmp/repo-b",
             worktree="/tmp/repo-b.feature",
-            status=StepRunStatus.COMPLETED,
+            status=AgentStatus.COMPLETED,
             started_at=datetime.now(),
         )
 
-        save_step_run(session1, db_path)
-        save_step_run(session2, db_path)
+        save_agent(agent1, db_path)
+        save_agent(agent2, db_path)
 
-        sessions = load_step_runs_for_repo("/tmp/repo-a", db_path=db_path)
-        assert len(sessions) == 1
-        assert sessions[0].id == "sess-1"
+        agents = load_agents_for_repo("/tmp/repo-a", db_path=db_path)
+        assert len(agents) == 1
+        assert agents[0].id == "agent-1"
 
 
-def test_db_update_step_run_status():
+def test_db_update_agent_status():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        session = StepRun(
-            id="sess-1",
+        agent = Agent(
+            id="agent-1",
             step="implement",
             repo="/tmp/repo",
             worktree="/tmp/repo.feature",
-            status=StepRunStatus.RUNNING,
+            status=AgentStatus.RUNNING,
             started_at=datetime.now(),
         )
-        save_step_run(session, db_path)
+        save_agent(agent, db_path)
 
-        updated = update_step_run_status("sess-1", StepRunStatus.COMPLETED, db_path)
+        updated = update_agent_status("agent-1", AgentStatus.COMPLETED, db_path)
         assert updated is True
 
-        sessions = load_step_runs_for_worktree("/tmp/repo.feature", db_path=db_path)
-        assert len(sessions) == 1
-        assert sessions[0].status == StepRunStatus.COMPLETED
-        assert sessions[0].ended_at is not None
+        agents = load_agents_for_worktree("/tmp/repo.feature", db_path=db_path)
+        assert len(agents) == 1
+        assert agents[0].status == AgentStatus.COMPLETED
+        assert agents[0].ended_at is not None
 
 
-def test_db_update_step_run_status_nonexistent():
+def test_db_update_agent_status_nonexistent():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         # Initialize DB by saving and then checking update
-        session = StepRun(
-            id="sess-1",
+        agent = Agent(
+            id="agent-1",
             step="implement",
             repo="/tmp/repo",
             worktree="/tmp/repo.feature",
-            status=StepRunStatus.RUNNING,
+            status=AgentStatus.RUNNING,
             started_at=datetime.now(),
         )
-        save_step_run(session, db_path)
+        save_agent(agent, db_path)
 
-        updated = update_step_run_status("nonexistent", StepRunStatus.COMPLETED, db_path)
+        updated = update_agent_status("nonexistent", AgentStatus.COMPLETED, db_path)
         assert updated is False
 
 
@@ -482,7 +482,7 @@ def test_server_handle_output_line_returns_success():
             # Mock broadcast to prevent side effects
             server._broadcast = lambda e: asyncio.sleep(0)
 
-            params = {"step_run_id": "test-step-run-123", "text": "→ Read: foo.py"}
+            params = {"agent_id": "test-agent-123", "text": "→ Read: foo.py"}
             response = await server._handle_output_line(params)
 
             assert response.ok is True
@@ -491,8 +491,8 @@ def test_server_handle_output_line_returns_success():
     asyncio.run(run_test())
 
 
-def test_server_handle_output_line_missing_step_run_id():
-    """output.line handler returns error for missing step_run_id."""
+def test_server_handle_output_line_missing_agent_id():
+    """output.line handler returns error for missing agent_id."""
     import asyncio
 
     from loopflow.lfd.daemon.server import Server
@@ -506,7 +506,7 @@ def test_server_handle_output_line_missing_step_run_id():
             response = await server._handle_output_line(params)
 
             assert response.ok is False
-            assert "step_run_id" in response.error
+            assert "agent_id" in response.error
 
     asyncio.run(run_test())
 
@@ -522,7 +522,7 @@ def test_server_handle_output_line_missing_text():
             socket_path = Path(tmpdir) / "test.sock"
             server = Server(socket_path)
 
-            params = {"step_run_id": "test-step-run-123"}
+            params = {"agent_id": "test-agent-123"}
             response = await server._handle_output_line(params)
 
             assert response.ok is False
@@ -546,7 +546,7 @@ def test_server_handle_output_line_allows_empty_text():
             server._broadcast = lambda e: asyncio.sleep(0)
 
             # Empty string should be allowed (it's a blank line in output)
-            params = {"step_run_id": "test-step-run-123", "text": ""}
+            params = {"agent_id": "test-agent-123", "text": ""}
             response = await server._handle_output_line(params)
 
             assert response.ok is True
@@ -625,27 +625,27 @@ def test_stimulus_model():
     assert str(loop_stimulus) == "loop"
 
 
-def test_run_model():
-    """Run model stores execution data."""
-    run = FlowRun(
-        id="run-1",
+def test_wave_run_model():
+    """WaveRun model stores execution data."""
+    wave_run = WaveRun(
+        id="wave-run-1",
         wave_id="wave-1",
         flow="ship",
         area=["src/test/"],
         direction=["default"],
         repo=Path("/tmp/repo"),
-        status=FlowRunStatus.RUNNING,
+        status=WaveRunStatus.RUNNING,
         iteration=3,
         worktree="/tmp/repo.wt",
         current_step="implement",
         started_at=datetime.now(),
     )
-    assert run.iteration == 3
-    assert run.status == FlowRunStatus.RUNNING
-    assert run.current_step == "implement"
-    assert run.ended_at is None
-    assert run.error is None
-    assert run.pr_url is None
+    assert wave_run.iteration == 3
+    assert wave_run.status == WaveRunStatus.RUNNING
+    assert wave_run.current_step == "implement"
+    assert wave_run.ended_at is None
+    assert wave_run.error is None
+    assert wave_run.pr_url is None
 
 
 # Wave database tests
@@ -771,7 +771,7 @@ def test_db_update_wave_iteration():
 
 
 def test_db_delete_wave():
-    """Delete wave and its runs."""
+    """Delete wave and its wave_runs."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
         wave = _make_wave(
@@ -783,33 +783,33 @@ def test_db_delete_wave():
         )
         save_wave(wave, db_path)
 
-        # Add a run
-        run = FlowRun(
-            id="run-1",
+        # Add a wave_run
+        wave_run = WaveRun(
+            id="wave-run-1",
             wave_id="wave-1",
             flow="ship",
             area=["src/test/"],
             direction=["default"],
             repo=Path("/tmp/repo"),
             iteration=1,
-            status=FlowRunStatus.RUNNING,
+            status=WaveRunStatus.RUNNING,
             started_at=datetime.now(),
         )
-        save_run(run, db_path)
+        save_wave_run(wave_run, db_path)
 
-        # Delete wave (should also delete runs)
+        # Delete wave (should also delete wave_runs)
         deleted = delete_wave("wave-1", db_path)
         assert deleted is True
 
         assert get_wave("wave-1", db_path) is None
-        assert list_runs_for_wave("wave-1", db_path=db_path) == []
+        assert list_wave_runs_for_wave("wave-1", db_path=db_path) == []
 
 
 # Run database tests
 
 
-def test_db_save_and_get_runs():
-    """Save and retrieve runs."""
+def test_db_save_and_get_wave_runs():
+    """Save and retrieve wave_runs."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
@@ -817,157 +817,157 @@ def test_db_save_and_get_runs():
         wave = _make_wave(id="wave-1")
         save_wave(wave, db_path)
 
-        run1 = FlowRun(
-            id="run-1",
+        wave_run1 = WaveRun(
+            id="wave-run-1",
             wave_id="wave-1",
             flow="ship",
             area=["src/test/"],
             direction=["default"],
             repo=Path("/tmp/repo"),
             iteration=1,
-            status=FlowRunStatus.COMPLETED,
+            status=WaveRunStatus.COMPLETED,
             started_at=datetime(2024, 1, 1, 12, 0, 0),
             pr_url="https://github.com/user/repo/pull/1",
         )
-        run2 = FlowRun(
-            id="run-2",
+        wave_run2 = WaveRun(
+            id="wave-run-2",
             wave_id="wave-1",
             flow="ship",
             area=["src/test/"],
             direction=["default"],
             repo=Path("/tmp/repo"),
             iteration=2,
-            status=FlowRunStatus.RUNNING,
+            status=WaveRunStatus.RUNNING,
             started_at=datetime(2024, 1, 2, 12, 0, 0),
         )
-        save_run(run1, db_path)
-        save_run(run2, db_path)
+        save_wave_run(wave_run1, db_path)
+        save_wave_run(wave_run2, db_path)
 
-        runs = list_runs_for_wave("wave-1", db_path=db_path)
-        assert len(runs) == 2
+        wave_runs = list_wave_runs_for_wave("wave-1", db_path=db_path)
+        assert len(wave_runs) == 2
 
 
-def test_db_get_latest_run_for_wave():
-    """Get most recent run for a wave."""
+def test_db_get_latest_wave_run_for_wave():
+    """Get most recent wave_run for a wave."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
         wave = _make_wave(id="wave-1")
         save_wave(wave, db_path)
 
-        run1 = FlowRun(
-            id="run-1",
+        wave_run1 = WaveRun(
+            id="wave-run-1",
             wave_id="wave-1",
             flow="ship",
             area=["src/test/"],
             direction=["default"],
             repo=Path("/tmp/repo"),
             iteration=1,
-            status=FlowRunStatus.COMPLETED,
+            status=WaveRunStatus.COMPLETED,
             started_at=datetime(2024, 1, 1, 12, 0, 0),
         )
-        run2 = FlowRun(
-            id="run-2",
+        wave_run2 = WaveRun(
+            id="wave-run-2",
             wave_id="wave-1",
             flow="ship",
             area=["src/test/"],
             direction=["default"],
             repo=Path("/tmp/repo"),
             iteration=2,
-            status=FlowRunStatus.RUNNING,
+            status=WaveRunStatus.RUNNING,
             started_at=datetime(2024, 1, 2, 12, 0, 0),
         )
-        save_run(run1, db_path)
-        save_run(run2, db_path)
+        save_wave_run(wave_run1, db_path)
+        save_wave_run(wave_run2, db_path)
 
-        latest = get_latest_run_for_wave("wave-1", db_path)
+        latest = get_latest_wave_run_for_wave("wave-1", db_path)
         assert latest is not None
-        assert latest.id == "run-2"
+        assert latest.id == "wave-run-2"
 
 
-def test_db_update_run_status():
-    """Update run status."""
+def test_db_update_wave_run_status():
+    """Update wave_run status."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
         wave = _make_wave(id="wave-1")
         save_wave(wave, db_path)
 
-        run = FlowRun(
-            id="run-1",
+        wave_run = WaveRun(
+            id="wave-run-1",
             wave_id="wave-1",
             flow="ship",
             area=["src/test/"],
             direction=["default"],
             repo=Path("/tmp/repo"),
             iteration=1,
-            status=FlowRunStatus.RUNNING,
+            status=WaveRunStatus.RUNNING,
             started_at=datetime.now(),
         )
-        save_run(run, db_path)
+        save_wave_run(wave_run, db_path)
 
-        updated = update_run_status("run-1", FlowRunStatus.COMPLETED, db_path=db_path)
+        updated = update_wave_run_status("wave-run-1", WaveRunStatus.COMPLETED, db_path=db_path)
         assert updated is True
 
-        runs = list_runs_for_wave("wave-1", db_path=db_path)
-        assert runs[0].status == FlowRunStatus.COMPLETED
-        assert runs[0].ended_at is not None
+        wave_runs = list_wave_runs_for_wave("wave-1", db_path=db_path)
+        assert wave_runs[0].status == WaveRunStatus.COMPLETED
+        assert wave_runs[0].ended_at is not None
 
 
-def test_db_update_run_step():
-    """Update run's current step."""
+def test_db_update_wave_run_step():
+    """Update wave_run's current step."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
         wave = _make_wave(id="wave-1")
         save_wave(wave, db_path)
 
-        run = FlowRun(
-            id="run-1",
+        wave_run = WaveRun(
+            id="wave-run-1",
             wave_id="wave-1",
             flow="ship",
             area=["src/test/"],
             direction=["default"],
             repo=Path("/tmp/repo"),
             iteration=1,
-            status=FlowRunStatus.RUNNING,
+            status=WaveRunStatus.RUNNING,
             started_at=datetime.now(),
         )
-        save_run(run, db_path)
+        save_wave_run(wave_run, db_path)
 
-        updated = update_run_step("run-1", "implement", db_path)
+        updated = update_wave_run_step("wave-run-1", "implement", db_path)
         assert updated is True
 
-        runs = list_runs_for_wave("wave-1", db_path=db_path)
-        assert runs[0].current_step == "implement"
+        wave_runs = list_wave_runs_for_wave("wave-1", db_path=db_path)
+        assert wave_runs[0].current_step == "implement"
 
 
-def test_db_update_run_pr():
-    """Update run's PR URL."""
+def test_db_update_wave_run_pr():
+    """Update wave_run's PR URL."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
         wave = _make_wave(id="wave-1")
         save_wave(wave, db_path)
 
-        run = FlowRun(
-            id="run-1",
+        wave_run = WaveRun(
+            id="wave-run-1",
             wave_id="wave-1",
             flow="ship",
             area=["src/test/"],
             direction=["default"],
             repo=Path("/tmp/repo"),
             iteration=1,
-            status=FlowRunStatus.RUNNING,
+            status=WaveRunStatus.RUNNING,
             started_at=datetime.now(),
         )
-        save_run(run, db_path)
+        save_wave_run(wave_run, db_path)
 
-        updated = update_run_pr("run-1", "https://github.com/user/repo/pull/42", db_path)
+        updated = update_wave_run_pr("wave-run-1", "https://github.com/user/repo/pull/42", db_path)
         assert updated is True
 
-        runs = list_runs_for_wave("wave-1", db_path=db_path)
-        assert runs[0].pr_url == "https://github.com/user/repo/pull/42"
+        wave_runs = list_wave_runs_for_wave("wave-1", db_path=db_path)
+        assert wave_runs[0].pr_url == "https://github.com/user/repo/pull/42"
 
 
 def test_db_update_wave_pid():
@@ -1251,39 +1251,39 @@ def test_word_lists_have_sufficient_variety():
 # =============================================================================
 
 
-def test_cleanup_stale_runs_marks_orphaned():
-    """cleanup_stale_runs marks runs without waves as FAILED."""
-    from loopflow.lfd.flow_run import cleanup_stale_runs, get_run, save_run
+def test_cleanup_stale_wave_runs_marks_orphaned():
+    """cleanup_stale_wave_runs marks wave_runs without waves as FAILED."""
+    from loopflow.lfd.wave_run import cleanup_stale_wave_runs, get_wave_run, save_wave_run
 
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        # Create a run with no wave
-        run = FlowRun(
-            id="orphan-run",
+        # Create a wave_run with no wave
+        wave_run = WaveRun(
+            id="orphan-wave-run",
             wave_id=None,
             flow="ship",
             area=["src/"],
             direction=["default"],
             repo=Path("/tmp/repo"),
-            status=FlowRunStatus.RUNNING,
+            status=WaveRunStatus.RUNNING,
             started_at=datetime.now(),
         )
-        save_run(run, db_path)
+        save_wave_run(wave_run, db_path)
 
         # Run cleanup
-        cleaned = cleanup_stale_runs(db_path)
+        cleaned = cleanup_stale_wave_runs(db_path)
         assert cleaned == 1
 
-        # Verify run is now FAILED
-        updated = get_run("orphan-run", db_path)
-        assert updated.status == FlowRunStatus.FAILED
+        # Verify wave_run is now FAILED
+        updated = get_wave_run("orphan-wave-run", db_path)
+        assert updated.status == WaveRunStatus.FAILED
         assert "Orphaned" in updated.error
 
 
-def test_cleanup_stale_runs_marks_dead_wave():
-    """cleanup_stale_runs marks runs with dead wave PID as FAILED."""
-    from loopflow.lfd.flow_run import cleanup_stale_runs, get_run, save_run
+def test_cleanup_stale_wave_runs_marks_dead_wave():
+    """cleanup_stale_wave_runs marks wave_runs with dead wave PID as FAILED."""
+    from loopflow.lfd.wave_run import cleanup_stale_wave_runs, get_wave_run, save_wave_run
 
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
@@ -1292,34 +1292,34 @@ def test_cleanup_stale_runs_marks_dead_wave():
         wave = _make_wave(id="wave-dead", pid=99999999)
         save_wave(wave, db_path)
 
-        # Create run for that wave
-        run = FlowRun(
-            id="run-dead-wave",
+        # Create wave_run for that wave
+        wave_run = WaveRun(
+            id="wave-run-dead-wave",
             wave_id="wave-dead",
             flow="ship",
             area=["src/"],
             direction=["default"],
             repo=Path("/tmp/repo"),
-            status=FlowRunStatus.RUNNING,
+            status=WaveRunStatus.RUNNING,
             started_at=datetime.now(),
         )
-        save_run(run, db_path)
+        save_wave_run(wave_run, db_path)
 
         # Run cleanup
-        cleaned = cleanup_stale_runs(db_path)
+        cleaned = cleanup_stale_wave_runs(db_path)
         assert cleaned == 1
 
-        # Verify run is now FAILED
-        updated = get_run("run-dead-wave", db_path)
-        assert updated.status == FlowRunStatus.FAILED
+        # Verify wave_run is now FAILED
+        updated = get_wave_run("wave-run-dead-wave", db_path)
+        assert updated.status == WaveRunStatus.FAILED
         assert "died" in updated.error
 
 
-def test_cleanup_stale_runs_skips_active():
-    """cleanup_stale_runs does not touch runs with live waves."""
+def test_cleanup_stale_wave_runs_skips_active():
+    """cleanup_stale_wave_runs does not touch wave_runs with live waves."""
     import os
 
-    from loopflow.lfd.flow_run import cleanup_stale_runs, get_run, save_run
+    from loopflow.lfd.wave_run import cleanup_stale_wave_runs, get_wave_run, save_wave_run
 
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
@@ -1328,81 +1328,81 @@ def test_cleanup_stale_runs_skips_active():
         wave = _make_wave(id="wave-alive", pid=os.getpid())
         save_wave(wave, db_path)
 
-        # Create run for that wave
-        run = FlowRun(
-            id="run-active",
+        # Create wave_run for that wave
+        wave_run = WaveRun(
+            id="wave-run-active",
             wave_id="wave-alive",
             flow="ship",
             area=["src/"],
             direction=["default"],
             repo=Path("/tmp/repo"),
-            status=FlowRunStatus.RUNNING,
+            status=WaveRunStatus.RUNNING,
             started_at=datetime.now(),
         )
-        save_run(run, db_path)
+        save_wave_run(wave_run, db_path)
 
         # Run cleanup
-        cleaned = cleanup_stale_runs(db_path)
+        cleaned = cleanup_stale_wave_runs(db_path)
         assert cleaned == 0
 
-        # Verify run is still RUNNING
-        updated = get_run("run-active", db_path)
-        assert updated.status == FlowRunStatus.RUNNING
+        # Verify wave_run is still RUNNING
+        updated = get_wave_run("wave-run-active", db_path)
+        assert updated.status == WaveRunStatus.RUNNING
 
 
-def test_cleanup_stale_runs_handles_deleted_wave():
-    """cleanup_stale_runs marks runs whose wave was deleted."""
-    from loopflow.lfd.flow_run import cleanup_stale_runs, get_run, save_run
+def test_cleanup_stale_wave_runs_handles_deleted_wave():
+    """cleanup_stale_wave_runs marks wave_runs whose wave was deleted."""
+    from loopflow.lfd.wave_run import cleanup_stale_wave_runs, get_wave_run, save_wave_run
 
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        # Create run referencing non-existent wave
-        run = FlowRun(
-            id="run-missing-wave",
+        # Create wave_run referencing non-existent wave
+        wave_run = WaveRun(
+            id="wave-run-missing-wave",
             wave_id="wave-that-was-deleted",
             flow="ship",
             area=["src/"],
             direction=["default"],
             repo=Path("/tmp/repo"),
-            status=FlowRunStatus.RUNNING,
+            status=WaveRunStatus.RUNNING,
             started_at=datetime.now(),
         )
-        save_run(run, db_path)
+        save_wave_run(wave_run, db_path)
 
         # Run cleanup
-        cleaned = cleanup_stale_runs(db_path)
+        cleaned = cleanup_stale_wave_runs(db_path)
         assert cleaned == 1
 
-        # Verify run is now FAILED
-        updated = get_run("run-missing-wave", db_path)
-        assert updated.status == FlowRunStatus.FAILED
+        # Verify wave_run is now FAILED
+        updated = get_wave_run("wave-run-missing-wave", db_path)
+        assert updated.status == WaveRunStatus.FAILED
         assert "no longer exists" in updated.error
 
 
-def test_mark_run_failed():
-    """mark_run_failed sets status to FAILED with error."""
-    from loopflow.lfd.flow_run import get_run, mark_run_failed, save_run
+def test_mark_wave_run_failed():
+    """mark_wave_run_failed sets status to FAILED with error."""
+    from loopflow.lfd.wave_run import get_wave_run, mark_wave_run_failed, save_wave_run
 
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
 
-        run = FlowRun(
-            id="run-to-fail",
+        wave_run = WaveRun(
+            id="wave-run-to-fail",
             flow="ship",
             area=["src/"],
             direction=["default"],
             repo=Path("/tmp/repo"),
-            status=FlowRunStatus.RUNNING,
+            status=WaveRunStatus.RUNNING,
             started_at=datetime.now(),
         )
-        save_run(run, db_path)
+        save_wave_run(wave_run, db_path)
 
-        result = mark_run_failed("run-to-fail", "Something went wrong", db_path)
+        result = mark_wave_run_failed("wave-run-to-fail", "Something went wrong", db_path)
         assert result is True
 
-        updated = get_run("run-to-fail", db_path)
-        assert updated.status == FlowRunStatus.FAILED
+        updated = get_wave_run("wave-run-to-fail", db_path)
+        assert updated.status == WaveRunStatus.FAILED
         assert updated.error == "Something went wrong"
         assert updated.ended_at is not None
 
@@ -1466,27 +1466,27 @@ def test_fire_and_forget_succeeds_without_daemon():
     This is critical: lf commands must work even when lfd daemon is not
     running. The logging is best-effort and should never block the CLI.
     """
-    from loopflow.lfd.step_run import log_step_run_end, log_step_run_start
+    from loopflow.lfd.agent import log_agent_end, log_agent_start
 
-    step_run = StepRun(
+    agent = Agent(
         id="test-no-daemon",
         step="implement",
         repo="/tmp/repo",
         worktree="/tmp/repo.feature",
-        status=StepRunStatus.RUNNING,
+        status=AgentStatus.RUNNING,
         started_at=datetime.now(),
     )
 
     # These should complete without raising, even with no daemon
-    log_step_run_start(step_run)
-    log_step_run_end(step_run.id, StepRunStatus.COMPLETED)
+    log_agent_start(agent)
+    log_agent_end(agent.id, AgentStatus.COMPLETED)
 
     # If we got here without exception, the test passes
 
 
 def test_fire_and_forget_handles_connection_refused():
     """Fire-and-forget handles socket connection errors gracefully."""
-    from loopflow.lfd.step_run import _send_fire_and_forget
+    from loopflow.lfd.agent import _send_fire_and_forget
 
     # Should not raise, even with bad socket path
     _send_fire_and_forget("test.method", {"key": "value"})
@@ -1503,7 +1503,7 @@ def test_lfd_imports_have_no_side_effects():
     # Remove cached modules to test fresh import
     modules_to_test = [
         "loopflow.lfd.models",
-        "loopflow.lfd.step_run",
+        "loopflow.lfd.agent",
     ]
 
     for mod in modules_to_test:
@@ -1511,19 +1511,19 @@ def test_lfd_imports_have_no_side_effects():
             del sys.modules[mod]
 
     # Fresh import should not raise or touch the database
-    from loopflow.lfd.models import StepRun as SR
-    from loopflow.lfd.models import StepRunStatus as SRS
+    from loopflow.lfd.models import Agent as A
+    from loopflow.lfd.models import AgentStatus as AS
 
     # Verify we can create objects without database
-    step_run = SR(
+    agent = A(
         id="test-import",
         step="test",
         repo="/tmp/repo",
         worktree="/tmp/repo",
-        status=SRS.RUNNING,
+        status=AS.RUNNING,
         started_at=datetime.now(),
     )
-    assert step_run.id == "test-import"
+    assert agent.id == "test-import"
 
 
 def test_summary_functions_work_after_schema_reset():

@@ -18,8 +18,8 @@ from loopflow.lf.launcher import build_model_command, build_model_interactive_co
 from loopflow.lf.logging import write_prompt_file
 from loopflow.lf.output import print_step_header, warn_if_context_too_large
 from loopflow.lf.tokens import analyze_components
-from loopflow.lfd.models import StepRun, StepRunStatus
-from loopflow.lfd.step_run import log_step_run_end, log_step_run_start
+from loopflow.lfd.agent import log_agent_end, log_agent_start
+from loopflow.lfd.models import Agent, AgentStatus
 
 
 @dataclass
@@ -71,18 +71,18 @@ def execute_step(params: ExecutionParams) -> int:
     main_repo = find_main_repo(params.repo_root) or params.repo_root
     run_mode = "interactive" if params.is_interactive else "auto"
 
-    step_run = StepRun(
+    agent = Agent(
         id=str(uuid.uuid4()),
         step=params.step_name,
         repo=str(main_repo),
         worktree=str(params.repo_root),
-        status=StepRunStatus.RUNNING,
+        status=AgentStatus.RUNNING,
         started_at=datetime.now(),
         pid=os.getpid() if params.is_interactive and params.use_execvp else None,
         model=params.backend,
         run_mode=run_mode,
     )
-    log_step_run_start(step_run)
+    log_agent_start(agent)
 
     # Print header
     if params.is_interactive:
@@ -101,14 +101,14 @@ def execute_step(params: ExecutionParams) -> int:
     )
 
     if params.is_interactive:
-        return _execute_interactive(params, step_run, prompt)
+        return _execute_interactive(params, agent, prompt)
     else:
-        return _execute_auto(params, step_run, prompt)
+        return _execute_auto(params, agent, prompt)
 
 
 def _execute_interactive(
     params: ExecutionParams,
-    step_run: StepRun,
+    agent: Agent,
     prompt: str,
 ) -> int:
     """Execute step in interactive mode."""
@@ -141,8 +141,8 @@ def _execute_interactive(
     # Flow: use subprocess.run to allow flow to continue
     result = subprocess.run(cmd_with_prompt, cwd=params.repo_root, env=env)
 
-    status = StepRunStatus.COMPLETED if result.returncode == 0 else StepRunStatus.FAILED
-    log_step_run_end(step_run.id, status)
+    status = AgentStatus.COMPLETED if result.returncode == 0 else AgentStatus.FAILED
+    log_agent_end(agent.id, status)
 
     if result.returncode != 0:
         print(f"\n[{params.step_name}] failed with exit code {result.returncode}")
@@ -152,7 +152,7 @@ def _execute_interactive(
 
 def _execute_auto(
     params: ExecutionParams,
-    step_run: StepRun,
+    agent: Agent,
     prompt: str,
 ) -> int:
     """Execute step in auto mode using collector."""
@@ -175,8 +175,8 @@ def _execute_auto(
         sys.executable,
         "-m",
         "loopflow.lfd.execution.collector",
-        "--step-run-id",
-        step_run.id,
+        "--agent-id",
+        agent.id,
         "--step",
         params.step_name,
         "--repo-root",
@@ -200,8 +200,8 @@ def _execute_auto(
     except OSError:
         pass
 
-    status = StepRunStatus.COMPLETED if result_code == 0 else StepRunStatus.FAILED
-    log_step_run_end(step_run.id, status)
+    status = AgentStatus.COMPLETED if result_code == 0 else AgentStatus.FAILED
+    log_agent_end(agent.id, status)
 
     if result_code != 0:
         print(f"\n[{params.step_name}] failed with exit code {result_code}")

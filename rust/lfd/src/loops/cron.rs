@@ -5,8 +5,8 @@ use chrono::{DateTime, Utc};
 use cron::Schedule;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use uuid::Uuid;
 
+use crate::id::LfdId;
 use crate::proto::control::{PendingActivation, StimulusKind, WaveStatus};
 use crate::store::SharedStore;
 
@@ -42,7 +42,14 @@ fn check_cron_stimuli(store: &SharedStore) {
         }
 
         // Get the wave for this stimulus
-        let wave = match store.get_wave(&stimulus.wave_id) {
+        let wave_id = match LfdId::parse(&stimulus.wave_id) {
+            Ok(id) => id,
+            Err(err) => {
+                tracing::warn!(stimulus_id = %stimulus.id, error = %err, "invalid wave id");
+                continue;
+            }
+        };
+        let wave = match store.get_wave(&wave_id) {
             Ok(Some(wave)) => wave,
             Ok(None) => {
                 tracing::warn!(stimulus_id = %stimulus.id, "stimulus references missing wave");
@@ -77,7 +84,9 @@ fn check_cron_stimuli(store: &SharedStore) {
                 || wave.status == WaveStatus::WaveWaiting as i32
             {
                 // Wave is busy - queue a pending activation (coalesce if exists)
-                queue_or_coalesce_activation(store, &wave.id, &stimulus.id);
+                let stimulus_id = LfdId::parse(&stimulus.id)
+                    .unwrap_or_else(|_| LfdId::from_raw(stimulus.id.clone()));
+                queue_or_coalesce_activation(store, &wave_id, &stimulus_id);
                 tracing::debug!(wave_id = %wave.id, stimulus_id = %stimulus.id, "cron: queued activation");
             } else if wave.status == WaveStatus::WaveIdle as i32 {
                 // Activate the wave
@@ -112,7 +121,7 @@ fn should_activate_cron(cron_expr: &str, last_triggered: Option<DateTime<Utc>>) 
     false
 }
 
-fn queue_or_coalesce_activation(store: &SharedStore, wave_id: &str, stimulus_id: &str) {
+fn queue_or_coalesce_activation(store: &SharedStore, wave_id: &LfdId, stimulus_id: &LfdId) {
     // Check if there's already a pending activation for this stimulus
     match store.get_pending_for_stimulus(wave_id, stimulus_id) {
         Ok(Some(_existing)) => {
@@ -122,7 +131,7 @@ fn queue_or_coalesce_activation(store: &SharedStore, wave_id: &str, stimulus_id:
         Ok(None) => {
             // Create new pending activation
             let activation = PendingActivation {
-                id: Uuid::new_v4().to_string(),
+                id: LfdId::new().to_string(),
                 wave_id: wave_id.to_string(),
                 stimulus_id: stimulus_id.to_string(),
                 from_sha: String::new(),

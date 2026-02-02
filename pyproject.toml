@@ -65,6 +65,8 @@ include = [
     "src/loopflow/templates/**/*.md",
     "src/loopflow/templates/**/*.yaml",
     "src/loopflow/templates/goals/*.md",
+    "src/loopflow/lf/builtins/**/*.md",
+    "src/loopflow/lf/builtins/**/*.yaml",
 ]
 
 [tool.hatch.build.targets.sdist]
@@ -73,6 +75,8 @@ include = [
     "src/loopflow/LOOPFLOW.md",
     "src/loopflow/templates/**/*.md",
     "src/loopflow/templates/**/*.yaml",
+    "src/loopflow/lf/builtins/**/*.md",
+    "src/loopflow/lf/builtins/**/*.yaml",
 ]
 
 [tool.hatch.version]

@@ -27,19 +27,18 @@ from loopflow.lf.launcher import build_model_interactive_command
 from loopflow.lf.logging import get_log_dir
 from loopflow.lf.naming import generate_next_branch
 from loopflow.lf.ops.shell import write_directive
+from loopflow.lfd.agent import get_waiting_agent, update_agent_status
 from loopflow.lfd.daemon.launchd import install as launchd_install
 from loopflow.lfd.daemon.launchd import is_running
 from loopflow.lfd.daemon.launchd import uninstall as launchd_uninstall
 from loopflow.lfd.daemon.server import run_server
 from loopflow.lfd.db import reset_db
-from loopflow.lfd.flow_run import list_runs_for_wave
 from loopflow.lfd.git_hooks import (
     hooks_status,
     install_hooks,
     uninstall_hooks,
 )
-from loopflow.lfd.models import MergeMode, StepRunStatus, Wave, WaveStatus
-from loopflow.lfd.step_run import get_waiting_step_run, update_step_run_status
+from loopflow.lfd.models import AgentStatus, MergeMode, Wave, WaveStatus
 from loopflow.lfd.stimulus import (
     create_stimulus,
     delete_stimulus,
@@ -63,6 +62,7 @@ from loopflow.lfd.wave import (
     update_wave_status,
     update_wave_worktree_branch,
 )
+from loopflow.lfd.wave_run import list_wave_runs_for_wave
 
 SOCKET_PATH = Path.home() / ".lf" / "lfd.sock"
 
@@ -692,17 +692,17 @@ def connect(
         typer.echo("Only waves paused at interactive steps can be connected to.")
         raise typer.Exit(1)
 
-    # Find the waiting StepRun
-    step_run = get_waiting_step_run(wave.id)
-    if not step_run:
-        typer.echo(f"{c['red']}Error:{c['reset']} No waiting step found for wave", err=True)
+    # Find the waiting Agent
+    agent = get_waiting_agent(wave.id)
+    if not agent:
+        typer.echo(f"{c['red']}Error:{c['reset']} No waiting agent found for wave", err=True)
         raise typer.Exit(1)
 
-    step_name = step_run.step
-    worktree_path = Path(step_run.worktree)
+    step_name = agent.step
+    worktree_path = Path(agent.worktree)
 
     # Update statuses to RUNNING
-    update_step_run_status(step_run.id, StepRunStatus.RUNNING)
+    update_agent_status(agent.id, AgentStatus.RUNNING)
     update_wave_status(wave.id, WaveStatus.RUNNING)
 
     # Load config and resolve directions
@@ -725,7 +725,7 @@ def connect(
 
     if not components.step:
         typer.echo(f"{c['red']}Error:{c['reset']} Step '{step_name}' not found", err=True)
-        update_step_run_status(step_run.id, StepRunStatus.FAILED)
+        update_agent_status(agent.id, AgentStatus.FAILED)
         update_wave_status(wave.id, WaveStatus.IDLE)
         raise typer.Exit(1)
 
@@ -766,7 +766,7 @@ def connect(
         autocommit(worktree_path, step_name)
 
         # Update statuses
-        update_step_run_status(step_run.id, StepRunStatus.COMPLETED)
+        update_agent_status(agent.id, AgentStatus.COMPLETED)
         update_wave_status(wave.id, WaveStatus.RUNNING)
 
         typer.echo(f"{c['dim']}Changes committed. Daemon will continue flow.{c['reset']}")
@@ -774,7 +774,7 @@ def connect(
         typer.echo(f"\n{c['yellow']}Session aborted (exit code {exit_code}){c['reset']}")
 
         # Mark failed, return to idle
-        update_step_run_status(step_run.id, StepRunStatus.FAILED)
+        update_agent_status(agent.id, AgentStatus.FAILED)
         update_wave_status(wave.id, WaveStatus.IDLE)
 
         msg = f"Wave returned to idle. Run 'lfd connect {wave.name}' to retry."
@@ -1069,17 +1069,17 @@ def _print_wave_detail(wave: Wave, c: dict[str, str]) -> None:
     typer.echo(f"  Iteration: {wave.iteration}")
 
     # Show recent runs
-    runs = list_runs_for_wave(wave.id, limit=5)
+    runs = list_wave_runs_for_wave(wave.id, limit=5)
     if runs:
         typer.echo(f"\n  {c['dim']}Recent runs:{c['reset']}")
         for run in runs:
-            from loopflow.lfd.models import FlowRunStatus
+            from loopflow.lfd.models import WaveRunStatus
 
             run_status_c = (
                 c["green"]
-                if run.status == FlowRunStatus.COMPLETED
+                if run.status == WaveRunStatus.COMPLETED
                 else c["red"]
-                if run.status == FlowRunStatus.FAILED
+                if run.status == WaveRunStatus.FAILED
                 else c["dim"]
             )
             pr_info = f" → {run.pr_url}" if run.pr_url else ""
@@ -1149,7 +1149,7 @@ def prs(
         typer.echo(f"{c['red']}Error:{c['reset']} Wave '{wave_id}' not found", err=True)
         raise typer.Exit(1)
 
-    runs = list_runs_for_wave(wave.id, limit=limit)
+    runs = list_wave_runs_for_wave(wave.id, limit=limit)
     runs_with_prs = [r for r in runs if r.pr_url]
 
     if not runs_with_prs:
@@ -1159,10 +1159,10 @@ def prs(
     typer.echo(f"{c['bold']}{wave.area_display}{c['reset']} PRs ({wave.short_id()})")
     typer.echo("")
 
-    from loopflow.lfd.models import FlowRunStatus
+    from loopflow.lfd.models import WaveRunStatus
 
     for run in runs_with_prs:
-        status_c = c["green"] if run.status == FlowRunStatus.COMPLETED else c["red"]
+        status_c = c["green"] if run.status == WaveRunStatus.COMPLETED else c["red"]
         started = run.started_at.strftime("%Y-%m-%d") if run.started_at else "?"
         typer.echo(
             f"  #{run.iteration:<3} {status_c}{run.status.value:<10}{c['reset']} "
@@ -1218,7 +1218,7 @@ def logs(
         raise typer.Exit(1)
 
     # Get latest run for this wave
-    runs = list_runs_for_wave(wave.id, limit=1)
+    runs = list_wave_runs_for_wave(wave.id, limit=1)
     if not runs:
         typer.echo(f"{c['dim']}No runs found for '{wave.area_display}'{c['reset']}")
         return

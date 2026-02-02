@@ -14,7 +14,7 @@ mod python;
 
 pub use agent::{
     build_claude_command, build_codex_command, build_gemini_command, build_model_command,
-    check_cli_available, launch_agent, AgentRunner, DefaultAgentRunner, LaunchConfig, LaunchResult,
+    check_cli_available, launch_agent, DefaultRunner, LaunchConfig, LaunchResult, Runner,
 };
 pub use config::{load_config, load_config_or_default, parse_model, Config};
 pub use error::{CoreError, GitError, LoadError, StoreError};
@@ -24,7 +24,7 @@ pub use prompt::{
     GatherContextOpts, PromptComponents,
 };
 pub use runtime::{
-    run_step, tick_flow, tick_flow_with_runner, FlowRun, FlowRunStatus, ForkRun, ForkRunStatus,
-    RunId, StepResult, StepRun, StepRunStatus, TickResult,
+    run_step, tick_flow, tick_flow_with_runner, Agent, AgentStatus, ForkRun, ForkRunStatus, RunId,
+    StepResult, TickResult, WaveRun, WaveRunStatus,
 };
 pub use store::RunStore;

@@ -20,7 +20,7 @@ struct HealthResponse {
     uptime_seconds: i64,
     database: bool,
     waves_running: u32,
-    step_runs_active: u32,
+    agents_active: u32,
 }
 
 #[derive(Serialize)]
@@ -28,7 +28,7 @@ struct StatusResponse {
     pid: u32,
     waves_defined: u32,
     waves_running: u32,
-    step_runs_active: u32,
+    agents_active: u32,
     slots_used: u32,
     slots_total: u32,
 }
@@ -37,7 +37,7 @@ struct StatusResponse {
 struct MetricsResponse {
     waves_total: u32,
     waves_running: u32,
-    step_runs_active: u32,
+    agents_active: u32,
     slots_used: u32,
     slots_total: u32,
 }
@@ -57,7 +57,7 @@ async fn health_handler(state: axum::extract::State<HttpState>) -> Json<HealthRe
         uptime_seconds: (OffsetDateTime::now_utc() - state.started_at).whole_seconds(),
         database: counts.database_ok,
         waves_running: counts.waves_running,
-        step_runs_active: counts.step_runs_active,
+        agents_active: counts.agents_active,
     })
 }
 
@@ -67,7 +67,7 @@ async fn status_handler(state: axum::extract::State<HttpState>) -> Json<StatusRe
         pid: std::process::id(),
         waves_defined: counts.waves_defined,
         waves_running: counts.waves_running,
-        step_runs_active: counts.step_runs_active,
+        agents_active: counts.agents_active,
         slots_used: state.scheduler.slots_used(),
         slots_total: state.scheduler.max_slots() as u32,
     })
@@ -78,7 +78,7 @@ async fn metrics_handler(state: axum::extract::State<HttpState>) -> Json<Metrics
     Json(MetricsResponse {
         waves_total: counts.waves_defined,
         waves_running: counts.waves_running,
-        step_runs_active: counts.step_runs_active,
+        agents_active: counts.agents_active,
         slots_used: state.scheduler.slots_used(),
         slots_total: state.scheduler.max_slots() as u32,
     })
@@ -87,7 +87,7 @@ async fn metrics_handler(state: axum::extract::State<HttpState>) -> Json<Metrics
 struct Counts {
     waves_defined: u32,
     waves_running: u32,
-    step_runs_active: u32,
+    agents_active: u32,
     database_ok: bool,
 }
 
@@ -100,7 +100,7 @@ async fn counts(state: &HttpState) -> Counts {
         .unwrap_or_default();
 
     let store = state.store.clone();
-    let step_runs = tokio::task::spawn_blocking(move || store.list_step_runs())
+    let agents = tokio::task::spawn_blocking(move || store.list_agents())
         .await
         .ok()
         .and_then(|result| result.ok())
@@ -118,18 +118,18 @@ async fn counts(state: &HttpState) -> Counts {
         .iter()
         .filter(|wave| wave.status == crate::proto::control::WaveStatus::WaveRunning as i32)
         .count() as u32;
-    let step_runs_active = step_runs
+    let agents_active = agents
         .iter()
         .filter(|run| {
-            run.status == crate::proto::control::StepRunStatus::StepRunning as i32
-                || run.status == crate::proto::control::StepRunStatus::StepWaiting as i32
+            run.status == crate::proto::control::AgentStatus::AgentRunning as i32
+                || run.status == crate::proto::control::AgentStatus::AgentWaiting as i32
         })
         .count() as u32;
 
     Counts {
         waves_defined,
         waves_running,
-        step_runs_active,
+        agents_active,
         database_ok,
     }
 }

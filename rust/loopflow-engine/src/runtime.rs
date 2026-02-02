@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::agent::{launch_agent, LaunchConfig};
 use crate::config::load_config_or_default;
@@ -41,7 +42,7 @@ impl std::fmt::Display for RunId {
 // -----------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub enum FlowRunStatus {
+pub enum WaveRunStatus {
     #[default]
     Running,
     Waiting,
@@ -50,7 +51,7 @@ pub enum FlowRunStatus {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub enum StepRunStatus {
+pub enum AgentStatus {
     #[default]
     Running,
     Waiting,
@@ -63,13 +64,13 @@ pub enum StepRunStatus {
 // -----------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct FlowRun {
+pub struct WaveRun {
     pub id: RunId,
     pub flow: String,
     pub direction: Vec<String>,
     pub area: Vec<String>,
     pub repo: PathBuf,
-    pub status: FlowRunStatus,
+    pub status: WaveRunStatus,
     pub step_index: usize,
     pub worktree: Option<String>,
     pub current_step: Option<String>,
@@ -77,13 +78,13 @@ pub struct FlowRun {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct StepRun {
+pub struct Agent {
     pub id: String,
     pub step: String,
     pub repo: String,
     pub worktree: String,
-    pub flow_run_id: Option<RunId>,
-    pub status: StepRunStatus,
+    pub wave_run_id: Option<RunId>,
+    pub status: AgentStatus,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -220,10 +221,10 @@ pub fn tick_flow_with_runner(
     runner: &dyn StepRunner,
 ) -> Result<TickResult, CoreError> {
     let mut run = store.get_run(run_id)?;
-    if matches!(run.status, FlowRunStatus::Completed) {
+    if matches!(run.status, WaveRunStatus::Completed) {
         return Ok(TickResult::FlowComplete);
     }
-    if matches!(run.status, FlowRunStatus::Failed) {
+    if matches!(run.status, WaveRunStatus::Failed) {
         return Ok(TickResult::StepFailed);
     }
 
@@ -231,7 +232,7 @@ pub fn tick_flow_with_runner(
     let next_item = match flow.items.get(run.step_index) {
         Some(item) => item.clone(),
         None => {
-            run.status = FlowRunStatus::Completed;
+            run.status = WaveRunStatus::Completed;
             store.update_run(&run)?;
             return Ok(TickResult::FlowComplete);
         }
@@ -271,42 +272,42 @@ pub fn tick_flow_with_runner(
         .unwrap_or_else(|| run.repo.clone());
 
     if step.interactive.unwrap_or(false) {
-        let step_run = StepRun {
-            id: format!("{}:{}", run.id.as_str(), run.step_index),
+        let step_run = Agent {
+            id: Uuid::new_v4().to_string(),
             step: step.name.clone(),
             repo: run.repo.to_string_lossy().to_string(),
             worktree: worktree.to_string_lossy().to_string(),
-            flow_run_id: Some(run.id.clone()),
-            status: StepRunStatus::Waiting,
+            wave_run_id: Some(run.id.clone()),
+            status: AgentStatus::Waiting,
         };
-        store.create_step_run(&step_run)?;
-        run.status = FlowRunStatus::Waiting;
+        store.create_agent(&step_run)?;
+        run.status = WaveRunStatus::Waiting;
         run.current_step = Some(step.name);
         store.update_run(&run)?;
         return Ok(TickResult::WaitingInteractive);
     }
 
-    let step_run = StepRun {
-        id: format!("{}:{}", run.id.as_str(), run.step_index),
+    let step_run = Agent {
+        id: Uuid::new_v4().to_string(),
         step: step.name.clone(),
         repo: run.repo.to_string_lossy().to_string(),
         worktree: worktree.to_string_lossy().to_string(),
-        flow_run_id: Some(run.id.clone()),
-        status: StepRunStatus::Running,
+        wave_run_id: Some(run.id.clone()),
+        status: AgentStatus::Running,
     };
-    store.create_step_run(&step_run)?;
+    store.create_agent(&step_run)?;
 
     let step_directions = merge_directions(&run.direction, &step.directions);
     let result = runner.run(&step, &worktree, &step_directions)?;
     if result.exit_code == 0 {
         run.step_index += 1;
-        run.status = FlowRunStatus::Running;
+        run.status = WaveRunStatus::Running;
         run.current_step = None;
         store.update_run(&run)?;
         return Ok(TickResult::StepComplete);
     }
 
-    run.status = FlowRunStatus::Failed;
+    run.status = WaveRunStatus::Failed;
     run.error = Some(result.stderr);
     store.update_run(&run)?;
     Ok(TickResult::StepFailed)
@@ -321,7 +322,7 @@ pub fn run_step(
 }
 
 fn run_fork_item(
-    run: &mut FlowRun,
+    run: &mut WaveRun,
     branches: Vec<FlowItem>,
     synthesize: Option<&str>,
     store: &dyn RunStore,
@@ -329,24 +330,24 @@ fn run_fork_item(
 ) -> Result<TickResult, CoreError> {
     let mut fork_runs = store.list_fork_runs(&run.id, run.step_index)?;
     if fork_runs.is_empty() {
-        let step_run = StepRun {
-            id: format!("{}:{}", run.id.as_str(), run.step_index),
+        let step_run = Agent {
+            id: Uuid::new_v4().to_string(),
             step: "fork".to_string(),
             repo: run.repo.to_string_lossy().to_string(),
             worktree: run
                 .worktree
                 .clone()
                 .unwrap_or_else(|| run.repo.to_string_lossy().to_string()),
-            flow_run_id: Some(run.id.clone()),
-            status: StepRunStatus::Running,
+            wave_run_id: Some(run.id.clone()),
+            status: AgentStatus::Running,
         };
-        store.create_step_run(&step_run)?;
+        store.create_agent(&step_run)?;
 
         for (index, branch) in branches.iter().enumerate() {
             let step = match branch {
                 FlowItem::Step(step) => step,
                 _ => {
-                    run.status = FlowRunStatus::Failed;
+                    run.status = WaveRunStatus::Failed;
                     run.error = Some("non-step fork branches are not supported".to_string());
                     store.update_run(run)?;
                     return Ok(TickResult::StepFailed);
@@ -359,7 +360,7 @@ fn run_fork_item(
                 if let Err(err) =
                     create_worktree(&run.repo, Path::new(&fork_worktree), &fork_branch)
                 {
-                    run.status = FlowRunStatus::Failed;
+                    run.status = WaveRunStatus::Failed;
                     run.error = Some(err.to_string());
                     store.update_run(run)?;
                     return Ok(TickResult::StepFailed);
@@ -387,7 +388,7 @@ fn run_fork_item(
         let step = match branch {
             FlowItem::Step(step) => step,
             _ => {
-                run.status = FlowRunStatus::Failed;
+                run.status = WaveRunStatus::Failed;
                 run.error = Some("non-step fork branches are not supported".to_string());
                 store.update_run(run)?;
                 return Ok(TickResult::StepFailed);
@@ -395,7 +396,7 @@ fn run_fork_item(
         };
 
         if step.interactive.unwrap_or(false) {
-            run.status = FlowRunStatus::Failed;
+            run.status = WaveRunStatus::Failed;
             run.error = Some("interactive fork branches are not supported".to_string());
             store.update_run(run)?;
             return Ok(TickResult::StepFailed);
@@ -404,7 +405,7 @@ fn run_fork_item(
         let mut fork_run = match fork_runs.iter().find(|fork| fork.branch_index == index) {
             Some(fork_run) => fork_run.clone(),
             None => {
-                run.status = FlowRunStatus::Failed;
+                run.status = WaveRunStatus::Failed;
                 run.error = Some("fork run missing branch metadata".to_string());
                 store.update_run(run)?;
                 return Ok(TickResult::StepFailed);
@@ -428,7 +429,7 @@ fn run_fork_item(
 
         fork_run.status = ForkRunStatus::Failed;
         store.upsert_fork_run(&fork_run)?;
-        run.status = FlowRunStatus::Failed;
+        run.status = WaveRunStatus::Failed;
         run.error = Some(result.stderr);
         store.update_run(run)?;
         return Ok(TickResult::StepFailed);
@@ -439,7 +440,7 @@ fn run_fork_item(
         .iter()
         .all(|fork| matches!(fork.status, ForkRunStatus::Completed));
     if !all_done {
-        run.status = FlowRunStatus::Failed;
+        run.status = WaveRunStatus::Failed;
         run.error = Some("fork branches did not complete".to_string());
         store.update_run(run)?;
         return Ok(TickResult::StepFailed);
@@ -461,7 +462,7 @@ fn run_fork_item(
 
         let result = runner.run(&synth_step, &base_worktree, &run.direction)?;
         if result.exit_code != 0 {
-            run.status = FlowRunStatus::Failed;
+            run.status = WaveRunStatus::Failed;
             run.error = Some(result.stderr);
             store.update_run(run)?;
             return Ok(TickResult::StepFailed);
@@ -478,17 +479,17 @@ fn run_fork_item(
     store.delete_fork_runs(&run.id, run.step_index)?;
 
     run.step_index += 1;
-    run.status = FlowRunStatus::Running;
+    run.status = WaveRunStatus::Running;
     run.current_step = None;
     store.update_run(run)?;
     Ok(TickResult::StepComplete)
 }
 
-fn fork_run_id(run: &FlowRun, branch_index: usize) -> String {
-    format!("{}:{}:{}", run.id.as_str(), run.step_index, branch_index)
+fn fork_run_id(_run: &WaveRun, _branch_index: usize) -> String {
+    Uuid::new_v4().to_string()
 }
 
-fn fork_worktree_path(run: &FlowRun, branch_index: usize) -> String {
+fn fork_worktree_path(run: &WaveRun, branch_index: usize) -> String {
     let base = run
         .worktree
         .clone()
@@ -519,7 +520,7 @@ fn merge_directions(base: &[String], extra: &[String]) -> Vec<String> {
 /// For now, we select the first option (deterministic for testing).
 /// In production, this would invoke an LLM to evaluate the prompt.
 fn run_choose_item(
-    run: &mut FlowRun,
+    run: &mut WaveRun,
     _prompt: &str,
     options: HashMap<String, Vec<FlowItem>>,
     store: &dyn RunStore,
@@ -533,7 +534,7 @@ fn run_choose_item(
     let selected_key = match option_keys.first() {
         Some(key) => (*key).clone(),
         None => {
-            run.status = FlowRunStatus::Failed;
+            run.status = WaveRunStatus::Failed;
             run.error = Some("choose has no options".to_string());
             store.update_run(run)?;
             return Ok(TickResult::StepFailed);
@@ -543,7 +544,7 @@ fn run_choose_item(
     let selected_items = match options.get(&selected_key) {
         Some(items) => items.clone(),
         None => {
-            run.status = FlowRunStatus::Failed;
+            run.status = WaveRunStatus::Failed;
             run.error = Some(format!("choose option '{}' not found", selected_key));
             store.update_run(run)?;
             return Ok(TickResult::StepFailed);
@@ -561,14 +562,14 @@ fn run_choose_item(
         match item {
             FlowItem::Step(step) => {
                 if step.interactive.unwrap_or(false) {
-                    run.status = FlowRunStatus::Failed;
+                    run.status = WaveRunStatus::Failed;
                     run.error =
                         Some("interactive steps in choose branches not supported".to_string());
                     store.update_run(run)?;
                     return Ok(TickResult::StepFailed);
                 }
 
-                let step_run = StepRun {
+                let step_run = Agent {
                     id: format!(
                         "{}:{}:choose:{}",
                         run.id.as_str(),
@@ -578,15 +579,15 @@ fn run_choose_item(
                     step: step.name.clone(),
                     repo: run.repo.to_string_lossy().to_string(),
                     worktree: worktree.to_string_lossy().to_string(),
-                    flow_run_id: Some(run.id.clone()),
-                    status: StepRunStatus::Running,
+                    wave_run_id: Some(run.id.clone()),
+                    status: AgentStatus::Running,
                 };
-                store.create_step_run(&step_run)?;
+                store.create_agent(&step_run)?;
 
                 let directions = merge_directions(&run.direction, &step.directions);
                 let result = runner.run(&step, &worktree, &directions)?;
                 if result.exit_code != 0 {
-                    run.status = FlowRunStatus::Failed;
+                    run.status = WaveRunStatus::Failed;
                     run.error = Some(result.stderr);
                     store.update_run(run)?;
                     return Ok(TickResult::StepFailed);
@@ -594,7 +595,7 @@ fn run_choose_item(
             }
             _ => {
                 // Nested choose/fork/loop not supported yet
-                run.status = FlowRunStatus::Failed;
+                run.status = WaveRunStatus::Failed;
                 run.error = Some("nested flow items in choose not supported".to_string());
                 store.update_run(run)?;
                 return Ok(TickResult::StepFailed);
@@ -603,7 +604,7 @@ fn run_choose_item(
     }
 
     run.step_index += 1;
-    run.status = FlowRunStatus::Running;
+    run.status = WaveRunStatus::Running;
     run.current_step = None;
     store.update_run(run)?;
     Ok(TickResult::StepComplete)
@@ -619,7 +620,7 @@ fn run_choose_item(
 /// each step once (single iteration). In production, the loop would
 /// continue until the steps indicate completion (e.g., no more items to process).
 fn run_loop_until_empty(
-    run: &mut FlowRun,
+    run: &mut WaveRun,
     steps: &[FlowItem],
     wave: Option<&str>,
     max_iterations: usize,
@@ -634,7 +635,7 @@ fn run_loop_until_empty(
 
     let wave_name = resolve_wave_name(&run.repo, wave);
     if steps.is_empty() && !is_wave_empty(&run.repo, &wave_name) {
-        run.status = FlowRunStatus::Failed;
+        run.status = WaveRunStatus::Failed;
         run.error = Some("loop_until_empty has no steps".to_string());
         store.update_run(run)?;
         return Ok(TickResult::StepFailed);
@@ -644,7 +645,7 @@ fn run_loop_until_empty(
     while !is_wave_empty(&run.repo, &wave_name) {
         iteration += 1;
         if iteration > max_iterations {
-            run.status = FlowRunStatus::Failed;
+            run.status = WaveRunStatus::Failed;
             run.error = Some(format!(
                 "loop_until_empty max iterations ({}) reached",
                 max_iterations
@@ -657,13 +658,13 @@ fn run_loop_until_empty(
             match item {
                 FlowItem::Step(step) => {
                     if step.interactive.unwrap_or(false) {
-                        run.status = FlowRunStatus::Failed;
+                        run.status = WaveRunStatus::Failed;
                         run.error = Some("interactive steps in loop not supported".to_string());
                         store.update_run(run)?;
                         return Ok(TickResult::StepFailed);
                     }
 
-                    let step_run = StepRun {
+                    let step_run = Agent {
                         id: format!(
                             "{}:{}:loop:{}:{}",
                             run.id.as_str(),
@@ -674,22 +675,22 @@ fn run_loop_until_empty(
                         step: step.name.clone(),
                         repo: run.repo.to_string_lossy().to_string(),
                         worktree: worktree.to_string_lossy().to_string(),
-                        flow_run_id: Some(run.id.clone()),
-                        status: StepRunStatus::Running,
+                        wave_run_id: Some(run.id.clone()),
+                        status: AgentStatus::Running,
                     };
-                    store.create_step_run(&step_run)?;
+                    store.create_agent(&step_run)?;
 
                     let directions = merge_directions(&run.direction, &step.directions);
                     let result = runner.run(step, &worktree, &directions)?;
                     if result.exit_code != 0 {
-                        run.status = FlowRunStatus::Failed;
+                        run.status = WaveRunStatus::Failed;
                         run.error = Some(result.stderr);
                         store.update_run(run)?;
                         return Ok(TickResult::StepFailed);
                     }
                 }
                 _ => {
-                    run.status = FlowRunStatus::Failed;
+                    run.status = WaveRunStatus::Failed;
                     run.error = Some("nested flow items in loop not supported".to_string());
                     store.update_run(run)?;
                     return Ok(TickResult::StepFailed);
@@ -699,7 +700,7 @@ fn run_loop_until_empty(
     }
 
     run.step_index += 1;
-    run.status = FlowRunStatus::Running;
+    run.status = WaveRunStatus::Running;
     run.current_step = None;
     store.update_run(run)?;
     Ok(TickResult::StepComplete)

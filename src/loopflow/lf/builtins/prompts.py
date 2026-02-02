@@ -1,8 +1,10 @@
 """Load builtin prompts used by loopflow's own commands."""
 
-from importlib.resources import files
+from pathlib import Path
+
+_OPS_DIR = Path(__file__).parent / "ops"
 
 
-def get_builtin_prompt(name: str) -> str:
-    """Get a builtin prompt by name. Raises FileNotFoundError if not found."""
-    return files(__package__).joinpath(f"{name}.txt").read_text()
+def get_builtin_ops_prompt(name: str) -> str:
+    """Get a builtin ops prompt by name. Raises FileNotFoundError if not found."""
+    return (_OPS_DIR / f"{name}.md").read_text()

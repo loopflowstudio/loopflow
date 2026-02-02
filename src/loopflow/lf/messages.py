@@ -8,7 +8,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from loopflow.lf.builtins.prompts import get_builtin_prompt
+from loopflow.lf.builtins.prompts import get_builtin_ops_prompt
 from loopflow.lf.config import load_config, parse_model
 from loopflow.lf.context import gather_diff
 from loopflow.lf.launcher import build_claude_command, build_codex_command
@@ -203,14 +203,14 @@ def _generate_message(repo_root: Path, prompt: str, action: str) -> CommitMessag
 def generate_commit_message(repo_root: Path) -> CommitMessage:
     """Generate commit message for staged changes."""
     diff = _get_staged_diff(repo_root)
-    task_prompt = get_builtin_prompt("commit_message")
+    task_prompt = get_builtin_ops_prompt("commit_message")
     prompt = _build_message_prompt(repo_root, diff, task_prompt)
     return _generate_message(repo_root, prompt, "commit message")
 
 
 def generate_commit_message_from_diff(repo_root: Path, diff: str | None) -> CommitMessage:
     """Generate commit message for a provided diff."""
-    task_prompt = get_builtin_prompt("commit_message")
+    task_prompt = get_builtin_ops_prompt("commit_message")
     prompt = _build_message_prompt(repo_root, diff, task_prompt)
     return _generate_message(repo_root, prompt, "commit message")
 
@@ -218,14 +218,14 @@ def generate_commit_message_from_diff(repo_root: Path, diff: str | None) -> Comm
 def generate_pr_message(repo_root: Path) -> CommitMessage:
     """Generate PR title and body from the branch diff."""
     diff = gather_diff(repo_root)
-    task_prompt = get_builtin_prompt("pr_message")
+    task_prompt = get_builtin_ops_prompt("pr_message")
     prompt = _build_message_prompt(repo_root, diff, task_prompt)
     return _generate_message(repo_root, prompt, "pr message")
 
 
 def generate_pr_message_from_diff(repo_root: Path, diff: str | None) -> CommitMessage:
     """Generate PR title and body from a provided diff."""
-    task_prompt = get_builtin_prompt("pr_message")
+    task_prompt = get_builtin_ops_prompt("pr_message")
     prompt = _build_message_prompt(repo_root, diff, task_prompt)
     return _generate_message(repo_root, prompt, "pr message")
 
@@ -298,7 +298,7 @@ def generate_release_notes(repo_root: Path, old_version: str, new_version: str) 
     # For minor/major releases, include full commit messages
     is_minor_or_major = base_tag != f"v{old_version}"
     commits = _get_commits_since_tag(repo_root, base_tag, full=is_minor_or_major)
-    task_prompt = get_builtin_prompt("release_notes")
+    task_prompt = get_builtin_ops_prompt("release_notes")
 
     parts = [f"Version bump: {old_version} → {new_version}"]
     if is_minor_or_major:

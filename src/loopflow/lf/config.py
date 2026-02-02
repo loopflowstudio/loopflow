@@ -11,6 +11,23 @@ from pydantic import BaseModel, Field, field_validator
 _ADDITIVE_KEYS = {"context", "exclude", "skill_sources", "summaries"}
 
 
+def resolve_flag(cli: bool | None, config_val: bool | None, default: bool) -> bool:
+    """Resolve boolean flag: CLI > config > default."""
+    if cli is not None:
+        return cli
+    if config_val is not None:
+        return config_val
+    return default
+
+
+def extend_list(base: list[str] | None, extension: list[str] | None) -> list[str]:
+    """Build list from base + extension."""
+    result = list(base or [])
+    if extension:
+        result.extend(extension)
+    return result
+
+
 @dataclass
 class AutopruneConfig:
     """Auto-prune configuration for lfd daemon."""
@@ -120,7 +137,7 @@ class Config(BaseModel):
     ide: IdeConfig = Field(default_factory=IdeConfig)
     interactive: list[str] = Field(default_factory=list)  # Tasks that default to interactive
     include_loopflow_doc: bool = True  # Include bundled LOOPFLOW.md in prompts
-    lfdocs: bool = True  # Include reports/, roadmap/, scratch/, and root .md files
+    lfdocs: bool = True  # Include scratch/, root .md, and roadmap/<wave>/
     diff: bool = False  # Include raw branch diff against main
     diff_files: bool = True  # Include full content of files touched by branch
     paste: bool = False  # Include clipboard content by default

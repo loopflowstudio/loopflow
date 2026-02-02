@@ -113,7 +113,7 @@ def _launch_interactive_default(
         context_config=ContextConfig.for_interactive(
             paths=list(context) if context else [],
             exclude=list(config.exclude) if config and config.exclude else [],
-            lfdocs=config.include_loopflow_doc if config else True,
+            include_loopflow_doc=config.include_loopflow_doc if config else True,
             clipboard=include_clipboard,
         ),
         config=config,
@@ -155,7 +155,7 @@ def run(
         None, "-c", "-C", "--clipboard/--no-clipboard", help="Include clipboard content"
     ),
     docs: Optional[bool] = typer.Option(
-        None, "--lfdocs/--no-lfdocs", help="Include scratch/, root .md, and loopflow docs"
+        None, "--lfdocs/--no-lfdocs", help="Include scratch/, root .md, and roadmap/<wave>/"
     ),
     diff_mode: Optional[str] = typer.Option(
         None, "--diff-mode", help="How to include branch changes: files, diff, or none"
@@ -267,7 +267,7 @@ def run(
             ),
             area=resolved.area,
             wave=wave,
-            lfdocs=config.include_loopflow_doc if config else True,
+            include_loopflow_doc=config.include_loopflow_doc if config else True,
             clipboard=include_clipboard,
             budget_area=config.budgets.area if config else 50000,
             budget_docs=config.budgets.docs if config else 30000,
@@ -333,7 +333,7 @@ def inline(
         None, "-c", "-C", "--clipboard/--no-clipboard", help="Include clipboard content in prompt"
     ),
     docs: Optional[bool] = typer.Option(
-        None, "--lfdocs/--no-lfdocs", help="Include scratch/, root .md, and loopflow docs"
+        None, "--lfdocs/--no-lfdocs", help="Include scratch/, root .md, and roadmap/<wave>/"
     ),
     diff_mode: Optional[str] = typer.Option(
         None, "--diff-mode", help="How to include branch changes: files, diff, or none"
@@ -424,7 +424,7 @@ def inline(
             ),
             area=resolved.area,
             wave=wave,
-            lfdocs=config.include_loopflow_doc if config else True,
+            include_loopflow_doc=config.include_loopflow_doc if config else True,
             clipboard=include_clipboard,
             budget_area=config.budgets.area if config else 50000,
             budget_docs=config.budgets.docs if config else 30000,
@@ -540,7 +540,7 @@ def flow(
                     paths=list(all_context) if all_context else [],
                     exclude=list(exclude) if exclude else [],
                 ),
-                lfdocs=config.include_loopflow_doc if config else True,
+                include_loopflow_doc=config.include_loopflow_doc if config else True,
             ),
             config=config,
         )

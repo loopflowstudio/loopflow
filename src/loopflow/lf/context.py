@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from loopflow.lf.design import (
     gather_ancestral_docs,
     gather_area,
-    gather_design_docs,
+    gather_lfdocs,
 )
 from loopflow.lf.directions import Direction
 from loopflow.lf.files import (
@@ -23,7 +23,6 @@ from loopflow.lf.files import (
     find_md_in_dir,
     format_files,
     format_image_references,
-    gather_docs,
     gather_files,
     list_md_grouped,
 )
@@ -181,7 +180,7 @@ class ContextConfig(BaseModel):
     wave: str | None = None
 
     # Bundled LOOPFLOW.md system documentation
-    lfdocs: bool = True
+    include_loopflow_doc: bool = True
 
     # Extras
     clipboard: bool = False
@@ -197,7 +196,7 @@ class ContextConfig(BaseModel):
         return cls(
             diff_mode=DiffMode.DIFF,
             files=FilesetConfig(exclude=["scratch/", "reports/", "roadmap/", "*.md"]),
-            lfdocs=False,
+            include_loopflow_doc=False,
         )
 
     @classmethod
@@ -205,7 +204,7 @@ class ContextConfig(BaseModel):
         cls,
         paths: list[str] | None = None,
         exclude: list[str] | None = None,
-        lfdocs: bool = True,
+        include_loopflow_doc: bool = True,
         token_limit: int | None = None,
         clipboard: bool = True,
     ) -> "ContextConfig":
@@ -217,7 +216,7 @@ class ContextConfig(BaseModel):
                 exclude=exclude or [],
                 token_limit=token_limit,
             ),
-            lfdocs=lfdocs,
+            include_loopflow_doc=include_loopflow_doc,
             clipboard=clipboard,
         )
 
@@ -721,29 +720,6 @@ def _load_loopflow_doc() -> str:
     return resources.files("loopflow").joinpath("LOOPFLOW.md").read_text()
 
 
-def _gather_wave_roadmap(wave_roadmap_path: Path) -> list[tuple[Path, str]]:
-    """Gather docs from a wave-specific roadmap directory.
-
-    Prioritizes README.md first, then numbered stages (01-*, 02-*), then rest.
-    """
-    if not wave_roadmap_path.is_dir():
-        return []
-
-    docs = []
-    readme = wave_roadmap_path / "README.md"
-    if readme.exists():
-        docs.append((readme, readme.read_text()))
-
-    # Gather remaining files, sorted (numbered stages first)
-    for path in sorted(wave_roadmap_path.glob("*.md")):
-        if path.name == "README.md":
-            continue
-        if path.is_file():
-            docs.append((path, path.read_text()))
-
-    return docs
-
-
 def _trigger_background_refresh(repo_root: Path) -> None:
     """Spawn background process to refresh stale summaries.
 
@@ -822,21 +798,15 @@ def gather_prompt_components(
 
     # Determine wave context
     wave_ctx = determine_wave(repo_root, context_config.wave)
+    wave_name = wave_ctx.name if wave_ctx else None
 
     exclude = list(context_config.files.exclude) if context_config.files.exclude else []
 
-    # When wave is set, exclude roadmap/ from default docs and gather wave-specific roadmap
-    wave_roadmap_docs = []
-    if wave_ctx:
-        exclude.append("roadmap/")  # Exclude all of roadmap/ from default gathering
-        wave_roadmap_path = repo_root / "roadmap" / wave_ctx.name
-        if wave_roadmap_path.is_dir():
-            wave_roadmap_docs = _gather_wave_roadmap(wave_roadmap_path)
-
-    docs = gather_docs(repo_root, repo_root, exclude)
-
     # Load bundled LOOPFLOW.md (system documentation)
-    loopflow_doc = _load_loopflow_doc() if context_config.lfdocs else None
+    loopflow_doc = _load_loopflow_doc() if context_config.include_loopflow_doc else None
+
+    # Gather lfdocs: scratch/, roadmap/<wave>/, root .md
+    lfdocs_list = gather_lfdocs(repo_root, wave=wave_name)
 
     # Gather area-specific docs if area is set and parent_docs is enabled
     area_docs = []
@@ -856,21 +826,20 @@ def gather_prompt_components(
     if not area_summary_used and context_config.budget_area > 0 and area_docs:
         area_docs, _ = _limit_to_budget(area_docs, context_config.budget_area)
 
-    # Gather reference docs: scratch/ (ephemeral) and repo root .md
-    # reports/ is NOT included by default - use area to scope to relevant reports
-    design_docs = gather_design_docs(repo_root)
+    # Gather ancestral docs if area is set (parent READMEs + reports/<area>/)
     ancestral_docs = []
     if context_config.area:
-        # Area-scoped: ancestral docs (parent READMEs + reports/<area>/)
         ancestral_docs = gather_ancestral_docs(repo_root, context_config.area)
-    ref_docs = design_docs + ancestral_docs + docs
+
+    # Combine reference docs: lfdocs + ancestral docs
+    ref_docs = lfdocs_list + ancestral_docs
 
     # Apply docs budget to reference docs
     if context_config.budget_docs > 0 and ref_docs:
         ref_docs, _ = _limit_to_budget(ref_docs, context_config.budget_docs)
 
-    # Combine: wave roadmap first (if set), then area docs, then reference docs
-    docs = wave_roadmap_docs + area_docs + ref_docs
+    # Combine: area docs first, then reference docs
+    docs = area_docs + ref_docs
 
     # Gather diff based on mode
     diff = None

@@ -38,31 +38,13 @@ def temp_repo(tmp_path):
     return tmp_path
 
 
-def test_gather_files_includes_file_with_parent_docs(temp_repo):
-    """Requesting a file includes it plus parent .md documentation."""
+def test_gather_files_includes_requested_file(temp_repo):
+    """Requesting a file includes just that file."""
     result = gather_files(["src/app.py"], temp_repo)
     paths = [p for p, _ in result.text_files]
 
-    assert temp_repo / "README.md" in paths
-    assert temp_repo / "CONTRIBUTING.md" in paths
-    assert temp_repo / "src" / "README.md" in paths
     assert temp_repo / "src" / "app.py" in paths
-
-
-def test_gather_files_orders_root_to_leaf(temp_repo):
-    """Parent docs come before child docs, alphabetical within each directory."""
-    result = gather_files(["src/app.py"], temp_repo)
-    paths = [p for p, _ in result.text_files]
-
-    # Root docs before src docs before file
-    root_contrib = paths.index(temp_repo / "CONTRIBUTING.md")
-    root_readme = paths.index(temp_repo / "README.md")
-    src_readme = paths.index(temp_repo / "src" / "README.md")
-    src_app = paths.index(temp_repo / "src" / "app.py")
-
-    assert root_contrib < root_readme  # alphabetical in root
-    assert root_readme < src_readme  # root before src
-    assert src_readme < src_app  # docs before file
+    assert len(paths) == 1  # Just the file, no parent docs
 
 
 def test_gather_files_excludes_gitignored(temp_repo):
@@ -92,11 +74,12 @@ def test_gather_files_excludes_lf_directory(temp_repo):
 
 
 def test_gather_files_deduplicates_across_requests(temp_repo):
-    """Multiple file requests don't duplicate shared parent docs."""
-    result = gather_files(["main.py", "src/app.py"], temp_repo)
+    """Multiple file requests don't duplicate files."""
+    result = gather_files(["main.py", "main.py", "src/app.py"], temp_repo)
     paths = [p for p, _ in result.text_files]
 
-    assert paths.count(temp_repo / "README.md") == 1
+    assert paths.count(temp_repo / "main.py") == 1
+    assert paths.count(temp_repo / "src" / "app.py") == 1
 
 
 def test_format_files_uses_unique_delimiters(temp_repo):
@@ -170,13 +153,13 @@ def test_gather_files_mixed_paths(temp_repo):
 
 def test_gather_files_exclude_pattern(temp_repo):
     """Exclude patterns filter out matching files."""
-    result = gather_files(["main.py", "src/app.py"], temp_repo, exclude=["**/*.py"])
+    result = gather_files(["main.py", "src/app.py", "README.md"], temp_repo, exclude=["**/*.py"])
     paths = [p for p, _ in result.text_files]
 
     # Python files excluded (using **/*.py for all levels)
     assert temp_repo / "main.py" not in paths
     assert temp_repo / "src" / "app.py" not in paths
-    # Docs still included
+    # Explicitly requested docs still included
     assert temp_repo / "README.md" in paths
 
 

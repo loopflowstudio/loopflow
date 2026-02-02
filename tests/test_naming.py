@@ -159,7 +159,9 @@ def test_remove_doubled_prefix_single_segment():
 
 def test_remove_doubled_prefix_multi_segment():
     """Remove doubled multi-segment prefix."""
-    assert _remove_doubled_prefix("jack-heart.concerto.jack-heart.concerto") == "jack-heart.concerto"
+    assert (
+        _remove_doubled_prefix("jack-heart.concerto.jack-heart.concerto") == "jack-heart.concerto"
+    )
     assert _remove_doubled_prefix("foo.bar.foo.bar.baz") == "foo.bar.baz"
 
 

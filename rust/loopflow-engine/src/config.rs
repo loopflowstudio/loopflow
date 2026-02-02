@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::LoadError;
 
@@ -14,7 +14,7 @@ use crate::error::LoadError;
 const ADDITIVE_KEYS: &[&str] = &["context", "exclude", "skill_sources", "summaries"];
 
 /// Token budgets for prompt sections.
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BudgetConfig {
     #[serde(default = "default_area_budget")]
     pub area: usize,
@@ -35,7 +35,7 @@ fn default_diff_budget() -> usize {
 }
 
 /// Summary configuration for a specific path.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SummaryConfig {
     pub path: String,
     #[serde(default)]
@@ -49,7 +49,7 @@ fn default_summary_model() -> String {
 }
 
 /// External skill library configuration.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillSourceConfig {
     pub name: String,
     pub prefix: String,
@@ -57,7 +57,7 @@ pub struct SkillSourceConfig {
 }
 
 /// Branch naming configuration.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BranchNameConfig {
     #[serde(default = "default_branch_schema", alias = "schema")]
     pub schema_: String,
@@ -76,7 +76,7 @@ impl Default for BranchNameConfig {
 }
 
 /// Autoprune configuration.
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct AutopruneConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -88,8 +88,64 @@ fn default_poll_interval() -> u64 {
     60
 }
 
+// Custom deserializer to handle both `autoprune: true` and `autoprune: { enabled: true }`
+impl<'de> Deserialize<'de> for AutopruneConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{self, MapAccess, Visitor};
+
+        struct AutopruneVisitor;
+
+        impl<'de> Visitor<'de> for AutopruneVisitor {
+            type Value = AutopruneConfig;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("bool or autoprune config object")
+            }
+
+            fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(AutopruneConfig {
+                    enabled: v,
+                    poll_interval_seconds: default_poll_interval(),
+                })
+            }
+
+            fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+            where
+                M: MapAccess<'de>,
+            {
+                let mut enabled = None;
+                let mut poll_interval_seconds = None;
+
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "enabled" => enabled = Some(map.next_value()?),
+                        "poll_interval_seconds" => poll_interval_seconds = Some(map.next_value()?),
+                        _ => {
+                            let _ = map.next_value::<serde::de::IgnoredAny>()?;
+                        }
+                    }
+                }
+
+                Ok(AutopruneConfig {
+                    enabled: enabled.unwrap_or(false),
+                    poll_interval_seconds: poll_interval_seconds
+                        .unwrap_or_else(default_poll_interval),
+                })
+            }
+        }
+
+        deserializer.deserialize_any(AutopruneVisitor)
+    }
+}
+
 /// IDE configuration.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IdeConfig {
     #[serde(default = "default_true")]
     pub warp: bool,
@@ -114,7 +170,7 @@ impl Default for IdeConfig {
 }
 
 /// Main configuration struct.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     /// Model in format backend:variant (e.g., claude:opus, codex)
     #[serde(default = "default_agent_model")]
@@ -368,11 +424,22 @@ pub fn load_config_or_default(repo_root: Option<&Path>) -> Config {
 mod tests {
     use super::*;
 
+    // ==========================================================================
+    // parse_model tests
+    // ==========================================================================
+
     #[test]
     fn parse_model_with_variant() {
         let (backend, variant) = parse_model("claude:opus");
         assert_eq!(backend, "claude");
         assert_eq!(variant, Some("opus".to_string()));
+    }
+
+    #[test]
+    fn parse_model_with_complex_variant() {
+        let (backend, variant) = parse_model("gemini:2.5-pro");
+        assert_eq!(backend, "gemini");
+        assert_eq!(variant, Some("2.5-pro".to_string()));
     }
 
     #[test]
@@ -397,6 +464,24 @@ mod tests {
     }
 
     #[test]
+    fn parse_model_unknown_backend() {
+        let (backend, variant) = parse_model("unknown");
+        assert_eq!(backend, "unknown");
+        assert_eq!(variant, None);
+    }
+
+    #[test]
+    fn parse_model_unknown_with_variant() {
+        let (backend, variant) = parse_model("custom:model-v2");
+        assert_eq!(backend, "custom");
+        assert_eq!(variant, Some("model-v2".to_string()));
+    }
+
+    // ==========================================================================
+    // Default config tests
+    // ==========================================================================
+
+    #[test]
     fn default_config_values() {
         let config = Config::default();
         assert_eq!(config.agent_model, "claude:opus");
@@ -404,5 +489,459 @@ mod tests {
         assert!(config.lfdocs);
         assert!(config.diff_files);
         assert!(!config.diff);
+        assert!(!config.chrome);
+        assert!(!config.push);
+        assert!(!config.pr);
+        assert_eq!(config.land, "gh");
+        assert!(config.context.is_empty());
+        assert!(config.exclude.is_empty());
+        assert!(config.interactive.is_empty());
+        assert!(config.direction.is_none());
+        assert!(config.area.is_none());
+    }
+
+    #[test]
+    fn default_ide_config() {
+        let ide = IdeConfig::default();
+        assert!(ide.warp);
+        assert!(ide.cursor);
+        assert!(ide.workspace.is_none());
+    }
+
+    #[test]
+    fn default_autoprune_config() {
+        // Note: Default trait gives zeros, serde deserialize gives proper defaults
+        let autoprune = AutopruneConfig::default();
+        assert!(!autoprune.enabled);
+        // Default trait uses 0, serde uses default_poll_interval (60)
+        assert_eq!(autoprune.poll_interval_seconds, 0);
+    }
+
+    #[test]
+    fn default_budget_config() {
+        // Note: Default trait gives zeros, serde deserialize gives proper defaults
+        let budgets = BudgetConfig::default();
+        // Default trait uses 0, serde uses default functions
+        assert_eq!(budgets.area, 0);
+        assert_eq!(budgets.docs, 0);
+        assert_eq!(budgets.diff, 0);
+    }
+
+    #[test]
+    fn autoprune_config_from_empty_yaml() {
+        // When deserialized from YAML, gets proper defaults
+        let yaml = "autoprune: {}\n";
+        let config: Config = serde_yaml::from_str(yaml).expect("parse");
+        assert!(!config.autoprune.enabled);
+        assert_eq!(config.autoprune.poll_interval_seconds, 60);
+    }
+
+    #[test]
+    fn budget_config_from_empty_yaml() {
+        // When deserialized from YAML, gets proper defaults
+        let yaml = "budgets: {}\n";
+        let config: Config = serde_yaml::from_str(yaml).expect("parse");
+        assert_eq!(config.budgets.area, 50000);
+        assert_eq!(config.budgets.docs, 30000);
+        assert_eq!(config.budgets.diff, 20000);
+    }
+
+    // ==========================================================================
+    // YAML parsing tests
+    // ==========================================================================
+
+    #[test]
+    fn config_from_yaml_basic() {
+        let yaml = r#"
+agent_model: codex:o3
+yolo: true
+chrome: true
+"#;
+        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        assert_eq!(config.agent_model, "codex:o3");
+        assert!(config.yolo);
+        assert!(config.chrome);
+    }
+
+    #[test]
+    fn config_from_yaml_context_as_list() {
+        let yaml = r#"
+context:
+  - src/
+  - tests/
+"#;
+        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        assert_eq!(config.context, vec!["src/", "tests/"]);
+    }
+
+    #[test]
+    fn config_from_yaml_exclude_as_list() {
+        let yaml = r#"
+exclude:
+  - "*.log"
+  - build/
+  - node_modules/
+"#;
+        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        assert_eq!(config.exclude, vec!["*.log", "build/", "node_modules/"]);
+    }
+
+    #[test]
+    fn config_from_yaml_direction_as_list() {
+        let yaml = r#"
+direction:
+  - architect
+  - concise
+"#;
+        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        assert_eq!(
+            config.direction,
+            Some(vec!["architect".to_string(), "concise".to_string()])
+        );
+    }
+
+    #[test]
+    fn config_from_yaml_interactive_list() {
+        let yaml = r#"
+interactive:
+  - design
+  - iterate
+"#;
+        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        assert_eq!(config.interactive, vec!["design", "iterate"]);
+    }
+
+    #[test]
+    fn config_from_yaml_ide_settings() {
+        let yaml = r#"
+ide:
+  warp: false
+  cursor: true
+  workspace: myproject.code-workspace
+"#;
+        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        assert!(!config.ide.warp);
+        assert!(config.ide.cursor);
+        assert_eq!(
+            config.ide.workspace,
+            Some("myproject.code-workspace".to_string())
+        );
+    }
+
+    #[test]
+    fn config_from_yaml_ide_partial() {
+        let yaml = r#"
+ide:
+  cursor: false
+"#;
+        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        assert!(config.ide.warp); // default true
+        assert!(!config.ide.cursor);
+        assert!(config.ide.workspace.is_none());
+    }
+
+    #[test]
+    fn config_from_yaml_autoprune_bool_true() {
+        let yaml = "autoprune: true\n";
+        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        assert!(config.autoprune.enabled);
+        assert_eq!(config.autoprune.poll_interval_seconds, 60); // default
+    }
+
+    #[test]
+    fn config_from_yaml_autoprune_bool_false() {
+        let yaml = "autoprune: false\n";
+        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        assert!(!config.autoprune.enabled);
+    }
+
+    #[test]
+    fn config_from_yaml_autoprune_object() {
+        let yaml = r#"
+autoprune:
+  enabled: true
+  poll_interval_seconds: 120
+"#;
+        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        assert!(config.autoprune.enabled);
+        assert_eq!(config.autoprune.poll_interval_seconds, 120);
+    }
+
+    #[test]
+    fn config_from_yaml_autoprune_object_partial() {
+        let yaml = r#"
+autoprune:
+  enabled: true
+"#;
+        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        assert!(config.autoprune.enabled);
+        assert_eq!(config.autoprune.poll_interval_seconds, 60); // default
+    }
+
+    #[test]
+    fn config_from_yaml_budgets() {
+        let yaml = r#"
+budgets:
+  area: 100000
+  docs: 50000
+  diff: 30000
+"#;
+        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        assert_eq!(config.budgets.area, 100000);
+        assert_eq!(config.budgets.docs, 50000);
+        assert_eq!(config.budgets.diff, 30000);
+    }
+
+    #[test]
+    fn config_from_yaml_budgets_partial() {
+        let yaml = r#"
+budgets:
+  area: 80000
+"#;
+        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        assert_eq!(config.budgets.area, 80000);
+        assert_eq!(config.budgets.docs, 30000); // default
+        assert_eq!(config.budgets.diff, 20000); // default
+    }
+
+    #[test]
+    fn config_from_yaml_summaries() {
+        let yaml = r#"
+summaries:
+  - path: src/
+    tokens: 5000
+    model: claude
+  - path: tests/
+"#;
+        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        assert_eq!(config.summaries.len(), 2);
+        assert_eq!(config.summaries[0].path, "src/");
+        assert_eq!(config.summaries[0].tokens, Some(5000));
+        assert_eq!(config.summaries[0].model, "claude");
+        assert_eq!(config.summaries[1].path, "tests/");
+        assert_eq!(config.summaries[1].model, "gemini"); // default
+    }
+
+    #[test]
+    fn config_from_yaml_skill_sources() {
+        let yaml = r#"
+skill_sources:
+  - name: superpowers
+    prefix: sp
+    path: ~/.lf/skills/superpowers
+"#;
+        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        assert_eq!(config.skill_sources.len(), 1);
+        assert_eq!(config.skill_sources[0].name, "superpowers");
+        assert_eq!(config.skill_sources[0].prefix, "sp");
+    }
+
+    #[test]
+    fn config_from_yaml_branch_names() {
+        let yaml = r#"
+branch_names:
+  schema: "{user}.{name}.{date}_{ts}"
+"#;
+        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        assert!(config.branch_names.is_some());
+        assert_eq!(
+            config.branch_names.as_ref().unwrap().schema_,
+            "{user}.{name}.{date}_{ts}"
+        );
+    }
+
+    #[test]
+    fn config_from_yaml_lint_check() {
+        let yaml = r#"
+lint_check: "ruff check src/ && ruff format --check src/"
+"#;
+        let config: Config = serde_yaml::from_str(yaml).expect("parse config");
+        assert_eq!(
+            config.lint_check,
+            Some("ruff check src/ && ruff format --check src/".to_string())
+        );
+    }
+
+    // ==========================================================================
+    // Invalid YAML tests
+    // ==========================================================================
+
+    #[test]
+    fn config_from_yaml_invalid_type() {
+        let yaml = "summary_tokens: not_a_number\n";
+        let result: Result<Config, _> = serde_yaml::from_str(yaml);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn config_from_yaml_invalid_syntax() {
+        let yaml = "foo: [invalid\n";
+        let result: Result<Config, _> = serde_yaml::from_str(yaml);
+        assert!(result.is_err());
+    }
+
+    // ==========================================================================
+    // Config merge tests
+    // ==========================================================================
+
+    #[test]
+    fn merge_config_values_repo_overrides_scalar() {
+        let global: serde_yaml::Value = serde_yaml::from_str(
+            r#"
+agent_model: claude:opus
+yolo: false
+"#,
+        )
+        .unwrap();
+
+        let repo: serde_yaml::Value = serde_yaml::from_str(
+            r#"
+agent_model: codex
+"#,
+        )
+        .unwrap();
+
+        let merged = merge_config_values(Some(global), Some(repo));
+        let config: Config = serde_yaml::from_value(merged).unwrap();
+
+        assert_eq!(config.agent_model, "codex");
+        assert!(!config.yolo); // preserved from global
+    }
+
+    #[test]
+    fn merge_config_values_additive_keys_combine() {
+        let global: serde_yaml::Value = serde_yaml::from_str(
+            r#"
+context:
+  - global.md
+exclude:
+  - "*.log"
+"#,
+        )
+        .unwrap();
+
+        let repo: serde_yaml::Value = serde_yaml::from_str(
+            r#"
+context:
+  - local.md
+exclude:
+  - build/
+"#,
+        )
+        .unwrap();
+
+        let merged = merge_config_values(Some(global), Some(repo));
+        let config: Config = serde_yaml::from_value(merged).unwrap();
+
+        assert_eq!(config.context, vec!["global.md", "local.md"]);
+        assert_eq!(config.exclude, vec!["*.log", "build/"]);
+    }
+
+    #[test]
+    fn merge_config_values_global_only() {
+        let global: serde_yaml::Value = serde_yaml::from_str("agent_model: claude:opus\n").unwrap();
+
+        let merged = merge_config_values(Some(global), None);
+        let config: Config = serde_yaml::from_value(merged).unwrap();
+
+        assert_eq!(config.agent_model, "claude:opus");
+    }
+
+    #[test]
+    fn merge_config_values_repo_only() {
+        let repo: serde_yaml::Value = serde_yaml::from_str("agent_model: codex\n").unwrap();
+
+        let merged = merge_config_values(None, Some(repo));
+        let config: Config = serde_yaml::from_value(merged).unwrap();
+
+        assert_eq!(config.agent_model, "codex");
+    }
+
+    #[test]
+    fn merge_config_values_both_none() {
+        let merged = merge_config_values(None, None);
+        let config: Config = serde_yaml::from_value(merged).unwrap();
+
+        // Should get defaults
+        assert_eq!(config.agent_model, "claude:opus");
+    }
+
+    // ==========================================================================
+    // File-based config loading tests
+    // Note: These tests may be affected by the user's global ~/.lf/config.yaml
+    // ==========================================================================
+
+    #[test]
+    fn load_yaml_file_empty_returns_none() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let config_path = temp.path().join("config.yaml");
+        std::fs::write(&config_path, "").expect("write empty config");
+
+        let result = load_yaml_file(&config_path);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn load_yaml_file_whitespace_only_returns_none() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let config_path = temp.path().join("config.yaml");
+        std::fs::write(&config_path, "   \n\n  ").expect("write whitespace");
+
+        let result = load_yaml_file(&config_path);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn load_yaml_file_missing_returns_none() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let config_path = temp.path().join("nonexistent.yaml");
+
+        let result = load_yaml_file(&config_path);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn load_yaml_file_valid_content() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let config_path = temp.path().join("config.yaml");
+        std::fs::write(&config_path, "agent_model: codex\n").expect("write config");
+
+        let result = load_yaml_file(&config_path);
+        assert!(result.is_ok());
+        let value = result.unwrap().expect("should have value");
+        assert!(value.is_mapping());
+    }
+
+    #[test]
+    fn load_config_basic() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let config_dir = temp.path().join(".lf");
+        std::fs::create_dir_all(&config_dir).expect("create .lf dir");
+        std::fs::write(
+            config_dir.join("config.yaml"),
+            "agent_model: codex\nyolo: true\n",
+        )
+        .expect("write config");
+
+        let result = load_config(Some(temp.path()));
+        assert!(result.is_ok());
+        let config = result.unwrap().expect("config should exist");
+        assert_eq!(config.agent_model, "codex");
+        assert!(config.yolo);
+    }
+
+    #[test]
+    fn load_config_or_default_exists() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let config_dir = temp.path().join(".lf");
+        std::fs::create_dir_all(&config_dir).expect("create .lf dir");
+        std::fs::write(config_dir.join("config.yaml"), "agent_model: codex\n")
+            .expect("write config");
+
+        let config = load_config_or_default(Some(temp.path()));
+        assert_eq!(config.agent_model, "codex");
     }
 }

@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod builtins;
 pub mod config;
 pub mod error;
 pub mod event;

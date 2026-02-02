@@ -3,6 +3,7 @@ resolver = "2"
 members = [
   "rust/loopflow-engine",
   "rust/lfd",
+  "rust/lf",
 ]
 
 [workspace.package]

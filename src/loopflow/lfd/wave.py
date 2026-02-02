@@ -935,11 +935,17 @@ def collapse_prs(wave_id: str) -> CollapsePRsResult:
     # Get open PRs authored by current user for this repo
     result = subprocess.run(
         [
-            "gh", "pr", "list",
-            "--repo", owner_repo,
-            "--author", "@me",
-            "--state", "open",
-            "--json", "number,headRefName,title,body",
+            "gh",
+            "pr",
+            "list",
+            "--repo",
+            owner_repo,
+            "--author",
+            "@me",
+            "--state",
+            "open",
+            "--json",
+            "number,headRefName,title,body",
         ],
         cwd=repo,
         capture_output=True,
@@ -992,8 +998,7 @@ def collapse_prs(wave_id: str) -> CollapsePRsResult:
             subprocess.run(["git", "checkout", "-"], cwd=repo, capture_output=True)
             subprocess.run(["git", "branch", "-D", collapsed_branch], cwd=repo, capture_output=True)
             return CollapsePRsResult(
-                ok=False,
-                error=f"Merge conflict with {branch}. PRs may have incompatible changes."
+                ok=False, error=f"Merge conflict with {branch}. PRs may have incompatible changes."
             )
 
     # Generate commit message
@@ -1036,9 +1041,13 @@ def collapse_prs(wave_id: str) -> CollapsePRsResult:
     # Create new PR
     result = subprocess.run(
         [
-            "gh", "pr", "create",
-            "--title", title,
-            "--body", body,
+            "gh",
+            "pr",
+            "create",
+            "--title",
+            title,
+            "--body",
+            body,
         ],
         cwd=repo,
         capture_output=True,
@@ -1056,8 +1065,12 @@ def collapse_prs(wave_id: str) -> CollapsePRsResult:
     for pr_num in pr_numbers:
         subprocess.run(
             [
-                "gh", "pr", "close", str(pr_num),
-                "--comment", f"Collapsed into #{new_pr_number}",
+                "gh",
+                "pr",
+                "close",
+                str(pr_num),
+                "--comment",
+                f"Collapsed into #{new_pr_number}",
             ],
             cwd=repo,
             capture_output=True,
@@ -1098,7 +1111,7 @@ def _parse_github_remote(url: str) -> str | None:
         colon_idx = url.find(":")
         if colon_idx == -1:
             return None
-        path = url[colon_idx + 1:]
+        path = url[colon_idx + 1 :]
         if path.endswith(".git"):
             path = path[:-4]
         return path
@@ -1106,7 +1119,7 @@ def _parse_github_remote(url: str) -> str | None:
     # HTTPS format: https://github.com/owner/repo.git
     if "github.com/" in url:
         idx = url.find("github.com/")
-        path = url[idx + len("github.com/"):]
+        path = url[idx + len("github.com/") :]
         if path.endswith(".git"):
             path = path[:-4]
         return path

@@ -3,6 +3,7 @@
 //! This module handles gathering all context components (docs, diff, clipboard, etc.)
 //! and assembling them into a formatted prompt.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -27,6 +28,8 @@ pub struct GatherContextOpts {
     pub step_args: Vec<String>,
     pub run_mode: Option<String>,
     pub directions: Vec<String>,
+    /// Specific files to include in context
+    pub files: Vec<String>,
     /// Include lfdocs (roadmap/, scratch/, root .md files)
     pub lfdocs: bool,
     /// Include files changed on branch
@@ -156,6 +159,11 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
 
     // Load directions
     let mut directions = Vec::new();
+    if let Some(ref step) = step {
+        for name in &step.directions {
+            directions.push(load_direction(name, repo_root)?);
+        }
+    }
     for name in &opts.directions {
         directions.push(load_direction(name, repo_root)?);
     }
@@ -168,11 +176,14 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
     };
 
     // Gather diff files
-    let diff_files = if opts.diff_files {
-        gather_diff_files(repo_root)?
-    } else {
-        Vec::new()
-    };
+    let mut diff_files = Vec::new();
+    if opts.diff_files {
+        diff_files.extend(gather_diff_files(repo_root)?);
+    }
+    if !opts.files.is_empty() {
+        diff_files.extend(gather_files(repo_root, &opts.files)?);
+    }
+    dedup_documents(&mut diff_files);
 
     // Gather raw diff
     let diff = if opts.diff {
@@ -278,6 +289,94 @@ fn gather_md_files(dir: &Path, docs: &mut Vec<Document>, category: &str) -> Resu
     }
 
     Ok(())
+}
+
+fn gather_files(repo_root: &Path, files: &[String]) -> Result<Vec<Document>, CoreError> {
+    if files.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let gitignore = build_gitignore(repo_root);
+    let mut seen = HashSet::new();
+    let mut docs = Vec::new();
+
+    for file in files {
+        let path = match resolve_path(repo_root, file) {
+            Some(path) => path,
+            None => continue,
+        };
+
+        if !path.is_file() {
+            continue;
+        }
+
+        if should_exclude(repo_root, &path, &gitignore) {
+            continue;
+        }
+
+        let canonical = path.canonicalize().unwrap_or(path.clone());
+        if !seen.insert(canonical) {
+            continue;
+        }
+
+        let content = match read_text_file(&path) {
+            Some(content) => content,
+            None => continue,
+        };
+
+        let rel_path = path
+            .strip_prefix(repo_root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .to_string();
+
+        docs.push(Document {
+            path: rel_path,
+            content,
+            category: "diff_files".to_string(),
+        });
+    }
+
+    Ok(docs)
+}
+
+#[cfg(test)]
+fn gather_all_text_files(repo_root: &Path) -> Result<Vec<Document>, CoreError> {
+    let gitignore = build_gitignore(repo_root);
+    let mut docs = Vec::new();
+
+    let walker = ignore::WalkBuilder::new(repo_root)
+        .hidden(false)
+        .standard_filters(true)
+        .build();
+
+    for entry in walker {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => continue,
+        };
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        if should_exclude(repo_root, path, &gitignore) {
+            continue;
+        }
+        if let Some(content) = read_text_file(path) {
+            let rel_path = path
+                .strip_prefix(repo_root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .to_string();
+            docs.push(Document {
+                path: rel_path,
+                content,
+                category: "diff_files".to_string(),
+            });
+        }
+    }
+
+    Ok(docs)
 }
 
 /// Get files changed on this branch vs main.
@@ -391,6 +490,66 @@ fn read_clipboard() -> Option<String> {
         }
     }
     None
+}
+
+fn build_gitignore(repo_root: &Path) -> ignore::gitignore::Gitignore {
+    let mut builder = ignore::gitignore::GitignoreBuilder::new(repo_root);
+    let _ = builder.add(repo_root.join(".gitignore"));
+    match builder.build() {
+        Ok(gitignore) => gitignore,
+        Err(_) => ignore::gitignore::Gitignore::empty(),
+    }
+}
+
+fn resolve_path(repo_root: &Path, file: &str) -> Option<PathBuf> {
+    let path = Path::new(file);
+    let joined = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        repo_root.join(path)
+    };
+    if joined.exists() {
+        Some(joined)
+    } else if file.starts_with("./") {
+        let trimmed = file.trim_start_matches("./");
+        let joined = repo_root.join(trimmed);
+        if joined.exists() {
+            return Some(joined);
+        }
+        None
+    } else {
+        None
+    }
+}
+
+fn should_exclude(repo_root: &Path, path: &Path, gitignore: &ignore::gitignore::Gitignore) -> bool {
+    if path
+        .components()
+        .any(|component| component.as_os_str() == ".lf")
+    {
+        return true;
+    }
+
+    let relative = path.strip_prefix(repo_root).unwrap_or(path);
+    gitignore
+        .matched_path_or_any_parents(relative, path.is_dir())
+        .is_ignore()
+}
+
+fn read_text_file(path: &Path) -> Option<String> {
+    let bytes = fs::read(path).ok()?;
+    if bytes.is_empty() {
+        return Some(String::new());
+    }
+    if bytes.contains(&0) {
+        return None;
+    }
+    String::from_utf8(bytes).ok()
+}
+
+fn dedup_documents(docs: &mut Vec<Document>) {
+    let mut seen = HashSet::new();
+    docs.retain(|doc| seen.insert(doc.path.clone()));
 }
 
 /// Format all components into the final prompt string.
@@ -557,6 +716,31 @@ fn format_files(docs: &[Document]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::flow::{Direction, Step};
+    use std::path::{Path, PathBuf};
+
+    fn init_repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join(".lf/steps")).expect("create steps");
+        std::fs::create_dir_all(dir.path().join(".lf/directions")).expect("create directions");
+        dir
+    }
+
+    fn write_file(repo: &Path, path: &str, content: &str) {
+        let full_path = repo.join(path);
+        if let Some(parent) = full_path.parent() {
+            std::fs::create_dir_all(parent).expect("create parent");
+        }
+        std::fs::write(full_path, content).expect("write file");
+    }
+
+    fn write_binary(repo: &Path, path: &str, content: &[u8]) {
+        let full_path = repo.join(path);
+        if let Some(parent) = full_path.parent() {
+            std::fs::create_dir_all(parent).expect("create parent");
+        }
+        std::fs::write(full_path, content).expect("write binary file");
+    }
 
     #[test]
     fn count_tokens_basic() {
@@ -568,9 +752,72 @@ mod tests {
     }
 
     #[test]
+    fn count_tokens_empty() {
+        // Empty string should return 1 (minimum)
+        assert_eq!(count_tokens(""), 1);
+    }
+
+    #[test]
     fn analyze_tokens_empty() {
         let components = PromptComponents::default();
         assert_eq!(analyze_tokens(&components), 0);
+    }
+
+    #[test]
+    fn analyze_tokens_with_content() {
+        let components = PromptComponents {
+            docs: vec![Document {
+                path: "test.md".to_string(),
+                content: "Hello world".to_string(),
+                category: "docs".to_string(),
+            }],
+            clipboard: Some("Clipboard content".to_string()),
+            ..Default::default()
+        };
+
+        let tokens = analyze_tokens(&components);
+        assert!(tokens > 0);
+    }
+
+    #[test]
+    fn analyze_tokens_counts_all_sections() {
+        let components = PromptComponents {
+            loopflow_doc: Some("Loopflow doc".to_string()),
+            docs: vec![Document {
+                path: "test.md".to_string(),
+                content: "Doc content".to_string(),
+                category: "docs".to_string(),
+            }],
+            diff: Some("diff content".to_string()),
+            diff_files: vec![Document {
+                path: "file.rs".to_string(),
+                content: "fn main() {}".to_string(),
+                category: "diff_files".to_string(),
+            }],
+            step: Some(Step {
+                name: "implement".to_string(),
+                content: Some("Implement the feature".to_string()),
+                model: None,
+                directions: vec![],
+                interactive: None,
+            }),
+            directions: vec![Direction {
+                name: "concise".to_string(),
+                content: "Be concise".to_string(),
+                source: PathBuf::from(".lf/directions/concise.md"),
+            }],
+            summaries: vec![Document {
+                path: "summary.md".to_string(),
+                content: "Summary content".to_string(),
+                category: "summaries".to_string(),
+            }],
+            clipboard: Some("Clipboard".to_string()),
+            ..Default::default()
+        };
+
+        let tokens = analyze_tokens(&components);
+        // Should count all sections - tiktoken gives different counts than byte estimation
+        assert!(tokens > 0);
     }
 
     #[test]
@@ -587,6 +834,115 @@ mod tests {
     }
 
     #[test]
+    fn trim_context_drops_summaries_first() {
+        let components = PromptComponents {
+            docs: vec![Document {
+                path: "doc.md".to_string(),
+                content: "Doc content".to_string(),
+                category: "docs".to_string(),
+            }],
+            summaries: vec![Document {
+                path: "summary.md".to_string(),
+                content: "Summary content that is long enough to matter".to_string(),
+                category: "summaries".to_string(),
+            }],
+            ..Default::default()
+        };
+
+        // Set budget to only fit docs, not summaries
+        let doc_tokens = count_tokens("Doc content");
+        let trimmed = trim_context(components, doc_tokens + 5);
+
+        assert!(trimmed.summaries.is_empty());
+        assert_eq!(trimmed.docs.len(), 1);
+    }
+
+    #[test]
+    fn trim_context_drops_docs_after_summaries() {
+        let components = PromptComponents {
+            docs: vec![
+                Document {
+                    path: "doc1.md".to_string(),
+                    content: "First document with enough content to exceed token budget easily"
+                        .to_string(),
+                    category: "docs".to_string(),
+                },
+                Document {
+                    path: "doc2.md".to_string(),
+                    content: "Second document also has substantial content for testing".to_string(),
+                    category: "docs".to_string(),
+                },
+            ],
+            summaries: vec![],
+            step: Some(Step {
+                name: "test".to_string(),
+                content: Some("x".to_string()), // Minimal step content
+                model: None,
+                directions: vec![],
+                interactive: None,
+            }),
+            ..Default::default()
+        };
+
+        // Get token count of step only
+        let step_tokens = count_tokens("x");
+        // Budget allows step but not docs
+        let trimmed = trim_context(components, step_tokens + 1);
+        assert!(trimmed.docs.is_empty());
+        assert!(trimmed.step.is_some());
+    }
+
+    #[test]
+    fn trim_context_drops_diff_after_docs() {
+        let components = PromptComponents {
+            docs: vec![],
+            diff: Some("This is a large diff with many changes across multiple files that will definitely exceed our small token budget".to_string()),
+            step: Some(Step {
+                name: "test".to_string(),
+                content: Some("x".to_string()), // Minimal step content
+                model: None,
+                directions: vec![],
+                interactive: None,
+            }),
+            ..Default::default()
+        };
+
+        // Get token count of step only
+        let step_tokens = count_tokens("x");
+        // Budget allows step but not diff
+        let trimmed = trim_context(components, step_tokens + 1);
+        assert!(trimmed.diff.is_none());
+        assert!(trimmed.step.is_some());
+    }
+
+    #[test]
+    fn trim_context_never_drops_step() {
+        let components = PromptComponents {
+            step: Some(Step {
+                name: "implement".to_string(),
+                content: Some("Implement the feature with tests".to_string()),
+                model: None,
+                directions: vec![],
+                interactive: None,
+            }),
+            docs: vec![Document {
+                path: "doc.md".to_string(),
+                content: "Doc content that will exceed budget".to_string(),
+                category: "docs".to_string(),
+            }],
+            ..Default::default()
+        };
+
+        let trimmed = trim_context(components, 5);
+        assert!(trimmed.step.is_some());
+        assert!(trimmed.docs.is_empty());
+    }
+
+    // ==========================================================================
+    // format_prompt tests
+    // ==========================================================================
+
+    #[test]
     fn format_prompt_basic() {
         let components = PromptComponents {
             run_mode: Some("auto".to_string()),
@@ -595,6 +951,19 @@ mod tests {
 
         let prompt = format_prompt(&components);
         assert!(prompt.contains("Run mode is auto"));
+        assert!(prompt.contains("headless"));
+        assert!(prompt.contains("scratch/questions.md"));
+    }
+
+    #[test]
+    fn format_prompt_interactive_mode_no_auto_message() {
+        let components = PromptComponents {
+            run_mode: Some("interactive".to_string()),
+            ..Default::default()
+        };
+
+        let prompt = format_prompt(&components);
+        assert!(!prompt.contains("Run mode is auto"));
     }
 
     #[test]
@@ -605,7 +974,541 @@ mod tests {
         };
 
         let prompt = format_prompt(&components);
-        assert!(prompt.contains("lf:wave"));
-        assert!(prompt.contains("rust"));
+        assert!(prompt.contains("<lf:wave"));
+        assert!(prompt.contains("name=\"rust\""));
+        assert!(prompt.contains("rust program of work"));
+        assert!(prompt.contains("</lf:wave>"));
+    }
+
+    #[test]
+    fn format_prompt_with_docs() {
+        let components = PromptComponents {
+            docs: vec![
+                Document {
+                    path: "README.md".to_string(),
+                    content: "# Test Project".to_string(),
+                    category: "docs".to_string(),
+                },
+                Document {
+                    path: "STYLE.md".to_string(),
+                    content: "# Style Guide".to_string(),
+                    category: "docs".to_string(),
+                },
+            ],
+            ..Default::default()
+        };
+
+        let prompt = format_prompt(&components);
+        assert!(prompt.contains("<lf:docs>"));
+        assert!(prompt.contains("</lf:docs>"));
+        assert!(prompt.contains("<lf:README>"));
+        assert!(prompt.contains("# Test Project"));
+        assert!(prompt.contains("</lf:README>"));
+        assert!(prompt.contains("<lf:STYLE>"));
+        assert!(prompt.contains("# Style Guide"));
+        assert!(prompt.contains("Follow STYLE carefully"));
+    }
+
+    #[test]
+    fn format_prompt_claude_md_gets_follow_note() {
+        let components = PromptComponents {
+            docs: vec![Document {
+                path: "CLAUDE.md".to_string(),
+                content: "# Instructions".to_string(),
+                category: "docs".to_string(),
+            }],
+            ..Default::default()
+        };
+        let prompt = format_prompt(&components);
+        assert!(prompt.contains("CLAUDE"));
+        assert!(prompt.contains("Follow") || prompt.contains("carefully"));
+    }
+
+    #[test]
+    fn format_prompt_style_md_gets_follow_note() {
+        let components = PromptComponents {
+            docs: vec![Document {
+                path: "STYLE.md".to_string(),
+                content: "# Style Guide".to_string(),
+                category: "docs".to_string(),
+            }],
+            ..Default::default()
+        };
+        let prompt = format_prompt(&components);
+        assert!(prompt.contains("STYLE"));
+        assert!(prompt.contains("Follow") || prompt.contains("carefully"));
+    }
+
+    #[test]
+    fn format_prompt_with_single_direction() {
+        let components = PromptComponents {
+            directions: vec![Direction {
+                name: "concise".to_string(),
+                content: "Be concise and direct.".to_string(),
+                source: PathBuf::from(".lf/directions/concise.md"),
+            }],
+            ..Default::default()
+        };
+
+        let prompt = format_prompt(&components);
+        assert!(prompt.contains("<lf:direction:concise>"));
+        assert!(prompt.contains("Be concise and direct."));
+        assert!(prompt.contains("</lf:direction:concise>"));
+        assert!(prompt.contains("Direction for this work"));
+        // Should NOT use plural wrapper for single direction
+        assert!(!prompt.contains("<lf:directions>"));
+    }
+
+    #[test]
+    fn format_prompt_with_multiple_directions() {
+        let components = PromptComponents {
+            directions: vec![
+                Direction {
+                    name: "concise".to_string(),
+                    content: "Be concise.".to_string(),
+                    source: PathBuf::from(".lf/directions/concise.md"),
+                },
+                Direction {
+                    name: "architect".to_string(),
+                    content: "Think architecturally.".to_string(),
+                    source: PathBuf::from(".lf/directions/architect.md"),
+                },
+            ],
+            ..Default::default()
+        };
+
+        let prompt = format_prompt(&components);
+        assert!(prompt.contains("<lf:directions>"));
+        assert!(prompt.contains("</lf:directions>"));
+        assert!(prompt.contains("<lf:direction:concise>"));
+        assert!(prompt.contains("<lf:direction:architect>"));
+        assert!(prompt.contains("Directions for this work"));
+    }
+
+    #[test]
+    fn format_prompt_with_step() {
+        let components = PromptComponents {
+            step: Some(Step {
+                name: "implement".to_string(),
+                content: Some("Implement the feature described.".to_string()),
+                model: None,
+                directions: vec![],
+                interactive: None,
+            }),
+            ..Default::default()
+        };
+
+        let prompt = format_prompt(&components);
+        assert!(prompt.contains("<lf:step:implement>"));
+        assert!(prompt.contains("Implement the feature described."));
+        assert!(prompt.contains("</lf:step:implement>"));
+        assert!(prompt.contains("The step."));
+    }
+
+    #[test]
+    fn format_prompt_with_step_no_content() {
+        let components = PromptComponents {
+            step: Some(Step {
+                name: "review".to_string(),
+                content: None,
+                model: None,
+                directions: vec![],
+                interactive: None,
+            }),
+            ..Default::default()
+        };
+
+        let prompt = format_prompt(&components);
+        assert!(prompt.contains("<lf:step:review>"));
+        assert!(prompt.contains("</lf:step:review>"));
+    }
+
+    #[test]
+    fn format_prompt_with_diff() {
+        let components = PromptComponents {
+            diff: Some("diff --git a/file.rs\n+added line".to_string()),
+            ..Default::default()
+        };
+
+        let prompt = format_prompt(&components);
+        assert!(prompt.contains("<lf:diff>"));
+        assert!(prompt.contains("+added line"));
+        assert!(prompt.contains("</lf:diff>"));
+        assert!(prompt.contains("Changes on this branch"));
+    }
+
+    #[test]
+    fn format_prompt_with_diff_files() {
+        let components = PromptComponents {
+            diff_files: vec![Document {
+                path: "src/main.rs".to_string(),
+                content: "fn main() { println!(\"hello\"); }".to_string(),
+                category: "diff_files".to_string(),
+            }],
+            ..Default::default()
+        };
+
+        let prompt = format_prompt(&components);
+        assert!(prompt.contains("<lf:files>"));
+        assert!(prompt.contains("<lf:file path=\"src/main.rs\">"));
+        assert!(prompt.contains("fn main()"));
+        assert!(prompt.contains("</lf:file>"));
+        assert!(prompt.contains("</lf:files>"));
+    }
+
+    #[test]
+    fn format_prompt_with_clipboard() {
+        let components = PromptComponents {
+            clipboard: Some("Error: connection refused".to_string()),
+            ..Default::default()
+        };
+
+        let prompt = format_prompt(&components);
+        assert!(prompt.contains("<lf:clipboard>"));
+        assert!(prompt.contains("Error: connection refused"));
+        assert!(prompt.contains("</lf:clipboard>"));
+        assert!(prompt.contains("Content from clipboard"));
+    }
+
+    #[test]
+    fn format_prompt_with_summaries() {
+        let components = PromptComponents {
+            summaries: vec![Document {
+                path: "src/".to_string(),
+                content: "Source code summary".to_string(),
+                category: "summaries".to_string(),
+            }],
+            ..Default::default()
+        };
+
+        let prompt = format_prompt(&components);
+        assert!(prompt.contains("<lf:summaries>"));
+        assert!(prompt.contains("<lf:summary path=\"src/\">"));
+        assert!(prompt.contains("Source code summary"));
+        assert!(prompt.contains("</lf:summary>"));
+        assert!(prompt.contains("Pre-generated codebase summaries"));
+    }
+
+    #[test]
+    fn format_prompt_full_assembly() {
+        // Test a complete prompt with all sections
+        let components = PromptComponents {
+            run_mode: Some("auto".to_string()),
+            wave: Some("rust".to_string()),
+            loopflow_doc: Some("Loopflow instructions".to_string()),
+            docs: vec![Document {
+                path: "README.md".to_string(),
+                content: "# Project".to_string(),
+                category: "docs".to_string(),
+            }],
+            directions: vec![Direction {
+                name: "concise".to_string(),
+                content: "Be concise.".to_string(),
+                source: PathBuf::from(".lf/directions/concise.md"),
+            }],
+            step: Some(Step {
+                name: "implement".to_string(),
+                content: Some("Implement it.".to_string()),
+                model: None,
+                directions: vec![],
+                interactive: None,
+            }),
+            diff: Some("diff content".to_string()),
+            clipboard: Some("clipboard content".to_string()),
+            ..Default::default()
+        };
+
+        let prompt = format_prompt(&components);
+
+        // Verify order: loopflow -> run_mode -> wave -> docs -> directions -> step -> diff -> clipboard
+        let loopflow_pos = prompt.find("<lf:loopflow>").unwrap();
+        let auto_pos = prompt.find("Run mode is auto").unwrap();
+        let wave_pos = prompt.find("<lf:wave").unwrap();
+        let docs_pos = prompt.find("<lf:docs>").unwrap();
+        let direction_pos = prompt.find("<lf:direction:concise>").unwrap();
+        let step_pos = prompt.find("<lf:step:implement>").unwrap();
+        let diff_pos = prompt.find("<lf:diff>").unwrap();
+        let clipboard_pos = prompt.find("<lf:clipboard>").unwrap();
+
+        assert!(loopflow_pos < auto_pos);
+        assert!(auto_pos < wave_pos);
+        assert!(wave_pos < docs_pos);
+        assert!(docs_pos < direction_pos);
+        assert!(direction_pos < step_pos);
+        assert!(step_pos < diff_pos);
+        assert!(diff_pos < clipboard_pos);
+    }
+
+    #[test]
+    fn format_prompt_empty_components() {
+        let components = PromptComponents::default();
+        let prompt = format_prompt(&components);
+        // Should not crash, just return empty or minimal content
+        assert!(prompt.is_empty() || prompt.len() < 100);
+    }
+
+    // ==========================================================================
+    // file gathering tests
+    // ==========================================================================
+
+    #[test]
+    fn gather_files_excludes_gitignored() {
+        let repo = init_repo();
+        write_file(repo.path(), "src/main.rs", "fn main() {}");
+        write_file(repo.path(), "target/debug/main", "binary");
+        write_file(repo.path(), ".gitignore", "target/\n*.log");
+        write_file(repo.path(), "debug.log", "log content");
+
+        let files = gather_files(
+            repo.path(),
+            &[
+                "src/main.rs".to_string(),
+                "target/debug/main".to_string(),
+                "debug.log".to_string(),
+            ],
+        )
+        .expect("gather files");
+
+        assert!(files.iter().any(|f| f.path.ends_with("src/main.rs")));
+        assert!(!files.iter().any(|f| f.path.contains("target")));
+        assert!(!files.iter().any(|f| f.path.ends_with("debug.log")));
+    }
+
+    #[test]
+    fn gather_files_excludes_lf_directory() {
+        let repo = init_repo();
+        write_file(repo.path(), "src/lib.rs", "pub fn foo() {}");
+        write_file(repo.path(), ".lf/config.yaml", "model: claude");
+        write_file(repo.path(), ".lf/steps/debug.md", "# Debug step");
+
+        let files = gather_all_text_files(repo.path()).expect("gather files");
+
+        assert!(files.iter().any(|f| f.path.ends_with("src/lib.rs")));
+        assert!(!files.iter().any(|f| f.path.contains(".lf/")));
+    }
+
+    #[test]
+    fn gather_context_with_specific_files() {
+        let repo = init_repo();
+        write_file(repo.path(), "src/a.rs", "mod a;");
+        write_file(repo.path(), "src/b.rs", "mod b;");
+        write_file(repo.path(), "src/c.rs", "mod c;");
+
+        let opts = GatherContextOpts {
+            repo_root: repo.path().to_path_buf(),
+            files: vec!["src/a.rs".to_string(), "src/c.rs".to_string()],
+            lfdocs: false,
+            diff_files: false,
+            diff: false,
+            clipboard: false,
+            ..Default::default()
+        };
+        let ctx = gather_context(&opts).expect("gather context");
+        let prompt = format_prompt(&ctx);
+
+        assert!(prompt.contains("mod a;"));
+        assert!(prompt.contains("mod c;"));
+        assert!(!prompt.contains("mod b;"));
+    }
+
+    #[test]
+    fn gather_files_deduplicates_requests() {
+        let repo = init_repo();
+        write_file(repo.path(), "src/main.rs", "fn main() {}");
+
+        let files = gather_files(
+            repo.path(),
+            &[
+                "src/main.rs".to_string(),
+                "src/main.rs".to_string(),
+                "./src/main.rs".to_string(),
+            ],
+        )
+        .expect("gather files");
+
+        let main_count = files
+            .iter()
+            .filter(|f| f.path.ends_with("src/main.rs"))
+            .count();
+        assert_eq!(main_count, 1);
+    }
+
+    #[test]
+    fn gather_files_skips_binary_files() {
+        let repo = init_repo();
+        write_file(repo.path(), "src/main.rs", "fn main() {}");
+        write_binary(repo.path(), "assets/image.png", &[0x89, 0x50, 0x4E, 0x47]);
+
+        let files = gather_files(
+            repo.path(),
+            &["src/main.rs".to_string(), "assets/image.png".to_string()],
+        )
+        .expect("gather files");
+
+        assert!(files.iter().any(|f| f.path.ends_with("src/main.rs")));
+        assert!(!files.iter().any(|f| f.path.ends_with("image.png")));
+    }
+
+    // ==========================================================================
+    // gather_context tests (filesystem-based)
+    // ==========================================================================
+
+    #[test]
+    fn gather_context_minimal_repo() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let repo = temp.path();
+
+        // Create minimal structure
+        std::fs::create_dir_all(repo.join(".lf/steps")).expect("create .lf/steps");
+        std::fs::write(repo.join(".lf/steps/test.md"), "Test step content").expect("write step");
+
+        let opts = GatherContextOpts {
+            repo_root: repo.to_path_buf(),
+            step: Some("test".to_string()),
+            lfdocs: false,
+            diff_files: false,
+            diff: false,
+            clipboard: false,
+            ..Default::default()
+        };
+
+        let result = gather_context(&opts);
+        assert!(result.is_ok());
+        let components = result.unwrap();
+        assert!(components.step.is_some());
+        assert_eq!(components.step.as_ref().unwrap().name, "test");
+    }
+
+    #[test]
+    fn gather_context_with_lfdocs() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let repo = temp.path();
+
+        // Create docs
+        std::fs::write(repo.join("README.md"), "# Project").expect("write readme");
+        std::fs::create_dir_all(repo.join("scratch")).expect("create scratch");
+        std::fs::write(repo.join("scratch/plan.md"), "# Plan").expect("write plan");
+
+        let opts = GatherContextOpts {
+            repo_root: repo.to_path_buf(),
+            lfdocs: true,
+            diff_files: false,
+            diff: false,
+            clipboard: false,
+            ..Default::default()
+        };
+
+        let result = gather_context(&opts);
+        assert!(result.is_ok());
+        let components = result.unwrap();
+        assert!(!components.docs.is_empty());
+
+        // Should include README.md
+        let readme = components.docs.iter().find(|d| d.path.contains("README"));
+        assert!(readme.is_some());
+        assert!(readme.unwrap().content.contains("# Project"));
+    }
+
+    #[test]
+    fn gather_context_with_directions() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let repo = temp.path();
+
+        // Create direction
+        std::fs::create_dir_all(repo.join(".lf/directions")).expect("create directions");
+        std::fs::write(repo.join(".lf/directions/concise.md"), "Be concise.")
+            .expect("write direction");
+
+        let opts = GatherContextOpts {
+            repo_root: repo.to_path_buf(),
+            directions: vec!["concise".to_string()],
+            lfdocs: false,
+            diff_files: false,
+            diff: false,
+            clipboard: false,
+            ..Default::default()
+        };
+
+        let result = gather_context(&opts);
+        assert!(result.is_ok());
+        let components = result.unwrap();
+        assert_eq!(components.directions.len(), 1);
+        assert_eq!(components.directions[0].name, "concise");
+        assert!(components.directions[0].content.contains("Be concise"));
+    }
+
+    #[test]
+    fn directions_from_step_and_cli_combined() {
+        let repo = init_repo();
+        write_file(
+            repo.path(),
+            ".lf/steps/impl.md",
+            r#"---
+directions:
+  - thorough
+---
+# Implement
+"#,
+        );
+        write_file(repo.path(), ".lf/directions/thorough.md", "Be thorough.");
+        write_file(repo.path(), ".lf/directions/fast.md", "Be fast.");
+
+        let opts = GatherContextOpts {
+            repo_root: repo.path().to_path_buf(),
+            step: Some("impl".to_string()),
+            directions: vec!["fast".to_string()],
+            lfdocs: false,
+            diff_files: false,
+            diff: false,
+            clipboard: false,
+            ..Default::default()
+        };
+        let ctx = gather_context(&opts).expect("gather context");
+
+        assert_eq!(ctx.directions.len(), 2);
+        assert_eq!(ctx.directions[0].name, "thorough");
+        assert_eq!(ctx.directions[1].name, "fast");
+    }
+
+    #[test]
+    fn gather_context_run_mode_preserved() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let repo = temp.path();
+
+        let opts = GatherContextOpts {
+            repo_root: repo.to_path_buf(),
+            run_mode: Some("auto".to_string()),
+            lfdocs: false,
+            diff_files: false,
+            diff: false,
+            clipboard: false,
+            ..Default::default()
+        };
+
+        let result = gather_context(&opts);
+        assert!(result.is_ok());
+        let components = result.unwrap();
+        assert_eq!(components.run_mode, Some("auto".to_string()));
+    }
+
+    #[test]
+    fn gather_context_wave_preserved() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let repo = temp.path();
+
+        let opts = GatherContextOpts {
+            repo_root: repo.to_path_buf(),
+            wave: Some("rust-migration".to_string()),
+            lfdocs: false,
+            diff_files: false,
+            diff: false,
+            clipboard: false,
+            ..Default::default()
+        };
+
+        let result = gather_context(&opts);
+        assert!(result.is_ok());
+        let components = result.unwrap();
+        assert_eq!(components.wave, Some("rust-migration".to_string()));
     }
 }

@@ -294,6 +294,27 @@ mod tests {
     }
 
     #[test]
+    fn build_claude_command_with_model_variant() {
+        let config = LaunchConfig {
+            model_variant: Some("opus".to_string()),
+            ..Default::default()
+        };
+        let cmd = build_claude_command(&config);
+        assert!(cmd.contains(&"--model".to_string()));
+        assert!(cmd.contains(&"opus".to_string()));
+    }
+
+    #[test]
+    fn build_claude_command_with_chrome_flag() {
+        let config = LaunchConfig {
+            chrome: true,
+            ..Default::default()
+        };
+        let cmd = build_claude_command(&config);
+        assert!(cmd.contains(&"--chrome".to_string()));
+    }
+
+    #[test]
     fn build_codex_command_auto() {
         let config = LaunchConfig {
             auto: true,
@@ -307,6 +328,16 @@ mod tests {
     }
 
     #[test]
+    fn build_codex_command_with_model() {
+        let config = LaunchConfig {
+            model_variant: Some("o3".to_string()),
+            ..Default::default()
+        };
+        let cmd = build_codex_command(&config);
+        assert!(cmd.contains(&"model=\"o3\"".to_string()));
+    }
+
+    #[test]
     fn build_gemini_command_yolo() {
         let config = LaunchConfig {
             skip_permissions: true,
@@ -314,5 +345,16 @@ mod tests {
         };
         let cmd = build_gemini_command(&config);
         assert!(cmd.contains(&"--yolo".to_string()));
+    }
+
+    #[test]
+    fn build_gemini_command_with_model() {
+        let config = LaunchConfig {
+            model_variant: Some("gemini-1.5".to_string()),
+            ..Default::default()
+        };
+        let cmd = build_gemini_command(&config);
+        assert!(cmd.contains(&"-m".to_string()));
+        assert!(cmd.contains(&"gemini-1.5".to_string()));
     }
 }

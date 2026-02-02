@@ -68,15 +68,84 @@ pub fn load_flow(name: &str, repo: &Path) -> Result<Flow, LoadError> {
 }
 
 pub fn load_step(name: &str, repo: &Path) -> Result<Step, LoadError> {
-    let step_path = find_step_path(name, repo)?;
-    let content = fs::read_to_string(&step_path)?;
-    Ok(Step {
-        name: name.to_string(),
-        model: None,
-        directions: Vec::new(),
-        interactive: None,
-        content: Some(content),
-    })
+    // Try file-based lookup first (repo-local, then global)
+    if let Ok(step_path) = find_step_path(name, repo) {
+        let content = fs::read_to_string(&step_path)?;
+        let (frontmatter, body) = parse_step_frontmatter(&content)?;
+        return Ok(Step {
+            name: name.to_string(),
+            model: frontmatter.model,
+            directions: frontmatter.directions,
+            interactive: frontmatter.interactive,
+            content: Some(body),
+        });
+    }
+
+    // Fall back to built-in steps
+    if let Some(content) = crate::builtins::get_builtin_step(name) {
+        let (frontmatter, body) = parse_step_frontmatter(content)?;
+        return Ok(Step {
+            name: name.to_string(),
+            model: frontmatter.model,
+            directions: frontmatter.directions,
+            interactive: frontmatter.interactive,
+            content: Some(body),
+        });
+    }
+
+    Err(LoadError::StepNotFound(name.to_string()))
+}
+
+#[derive(Debug, Default)]
+struct StepFrontmatter {
+    model: Option<String>,
+    directions: Vec<String>,
+    interactive: Option<bool>,
+}
+
+fn parse_step_frontmatter(content: &str) -> Result<(StepFrontmatter, String), LoadError> {
+    let Some((frontmatter, body)) = split_frontmatter(content) else {
+        return Ok((StepFrontmatter::default(), content.to_string()));
+    };
+
+    let value: Value = serde_yaml::from_str(&frontmatter)
+        .map_err(|err| LoadError::InvalidStep(err.to_string()))?;
+    Ok((parse_frontmatter_value(&value), body))
+}
+
+fn split_frontmatter(content: &str) -> Option<(String, String)> {
+    if !content.starts_with("---") {
+        return None;
+    }
+    let mut parts = content.splitn(3, "---");
+    let _ = parts.next();
+    let frontmatter = parts.next()?;
+    let rest = parts.next()?;
+    let body = rest.strip_prefix('\n').unwrap_or(rest).to_string();
+    Some((frontmatter.to_string(), body))
+}
+
+fn parse_frontmatter_value(value: &Value) -> StepFrontmatter {
+    let map = match value.as_mapping() {
+        Some(map) => map,
+        None => return StepFrontmatter::default(),
+    };
+
+    let model = map
+        .get(key("model"))
+        .and_then(|val| val.as_str())
+        .map(|val| val.to_string());
+    let interactive = map.get(key("interactive")).and_then(|val| val.as_bool());
+    let mut directions = parse_string_list(map.get(key("directions")));
+    if directions.is_empty() {
+        directions = parse_string_list(map.get(key("direction")));
+    }
+
+    StepFrontmatter {
+        model,
+        directions,
+        interactive,
+    }
 }
 
 pub fn load_direction(name: &str, repo: &Path) -> Result<Direction, LoadError> {
@@ -104,15 +173,30 @@ fn find_flow_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
 }
 
 fn find_step_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
-    let candidates = [
+    // 1. Check repo-local paths
+    let repo_candidates = [
         repo.join(".lf/steps").join(format!("{name}.md")),
         repo.join(".claude/commands").join(format!("{name}.md")),
     ];
-    for path in candidates {
+    for path in repo_candidates {
         if path.exists() {
             return Ok(path);
         }
     }
+
+    // 2. Check global paths
+    if let Some(home) = home_dir() {
+        let global_candidates = [
+            home.join(".lf/steps").join(format!("{name}.md")),
+            home.join(".claude/commands").join(format!("{name}.md")),
+        ];
+        for path in global_candidates {
+            if path.exists() {
+                return Ok(path);
+            }
+        }
+    }
+
     Err(LoadError::StepNotFound(name.to_string()))
 }
 
@@ -310,4 +394,147 @@ fn parse_string_list(value: Option<&Value>) -> Vec<String> {
 
 fn default_loop_max_iterations() -> usize {
     100
+}
+
+/// Home directory for global lookups. Can be overridden for testing.
+fn home_dir() -> Option<PathBuf> {
+    dirs::home_dir()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn load_step_finds_repo_local_step() {
+        let tmp = TempDir::new().unwrap();
+        let steps_dir = tmp.path().join(".lf/steps");
+        fs::create_dir_all(&steps_dir).unwrap();
+        fs::write(steps_dir.join("mystep.md"), "# My Step\nDo the thing.").unwrap();
+
+        let step = load_step("mystep", tmp.path()).unwrap();
+        assert_eq!(step.name, "mystep");
+        assert!(step.content.unwrap().contains("Do the thing"));
+    }
+
+    #[test]
+    fn load_step_finds_builtin_step() {
+        // Builtin steps like "debug", "implement" should be available everywhere
+        let tmp = TempDir::new().unwrap();
+
+        let result = load_step("debug", tmp.path());
+        assert!(
+            result.is_ok(),
+            "builtin 'debug' step should be found: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn load_step_finds_all_builtins() {
+        let tmp = TempDir::new().unwrap();
+        let builtins = [
+            "debug",
+            "implement",
+            "design",
+            "review",
+            "iterate",
+            "polish",
+            "lint",
+        ];
+
+        for name in builtins {
+            let result = load_step(name, tmp.path());
+            assert!(
+                result.is_ok(),
+                "builtin '{}' step should be found: {:?}",
+                name,
+                result.err()
+            );
+        }
+    }
+
+    #[test]
+    fn load_step_parses_frontmatter_model() {
+        let tmp = TempDir::new().unwrap();
+        let steps_dir = tmp.path().join(".lf/steps");
+        fs::create_dir_all(&steps_dir).unwrap();
+        fs::write(
+            steps_dir.join("fast.md"),
+            r#"---
+model: claude:haiku
+---
+# Fast Step
+Do it quickly.
+"#,
+        )
+        .unwrap();
+
+        let step = load_step("fast", tmp.path()).unwrap();
+        assert_eq!(step.model, Some("claude:haiku".to_string()));
+    }
+
+    #[test]
+    fn load_step_parses_frontmatter_interactive() {
+        let tmp = TempDir::new().unwrap();
+        let steps_dir = tmp.path().join(".lf/steps");
+        fs::create_dir_all(&steps_dir).unwrap();
+        fs::write(
+            steps_dir.join("design.md"),
+            r#"---
+interactive: true
+---
+# Design Step
+Design the feature.
+"#,
+        )
+        .unwrap();
+
+        let step = load_step("design", tmp.path()).unwrap();
+        assert_eq!(step.interactive, Some(true));
+    }
+
+    #[test]
+    fn load_step_includes_frontmatter_directions() {
+        let tmp = TempDir::new().unwrap();
+        let steps_dir = tmp.path().join(".lf/steps");
+        fs::create_dir_all(&steps_dir).unwrap();
+        fs::write(
+            steps_dir.join("careful.md"),
+            r#"---
+directions:
+  - thorough
+  - tested
+---
+# Careful Step
+Be careful.
+"#,
+        )
+        .unwrap();
+
+        let step = load_step("careful", tmp.path()).unwrap();
+        assert_eq!(step.directions, vec!["thorough", "tested"]);
+    }
+
+    #[test]
+    fn load_step_not_found_error_message() {
+        let tmp = TempDir::new().unwrap();
+
+        let result = load_step("nonexistent", tmp.path());
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("nonexistent"));
+        assert!(err.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn load_direction_not_found_error() {
+        let tmp = TempDir::new().unwrap();
+
+        let result = load_direction("nonexistent", tmp.path());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("nonexistent"));
+    }
 }

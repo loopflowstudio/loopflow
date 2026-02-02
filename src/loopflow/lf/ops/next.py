@@ -12,7 +12,6 @@ from loopflow.lf.messages import generate_pr_message
 from loopflow.lf.naming import (
     _is_timestamp,
     _is_word_pair,
-    extract_iteration_suffix,
     generate_next_branch,
     generate_timestamp,
     generate_word_pair,

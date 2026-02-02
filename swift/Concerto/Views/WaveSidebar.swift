@@ -28,16 +28,36 @@ struct WaveSidebar: View {
         }
     }
 
+    /// Waves with activity in the last hour, excluding those already in blocked/PR sections.
+    private var recentActivityWaves: [Wave] {
+        let hourAgo = Date().addingTimeInterval(-3600)
+        return Array(repoState.waves
+            .filter { wave in
+                guard let lastActivity = wave.lastActivityAt else { return false }
+                return lastActivity > hourAgo && wave.status != .error && pendingPR(for: wave) == nil
+            }
+            .sorted { ($0.lastActivityAt ?? .distantPast) > ($1.lastActivityAt ?? .distantPast) }
+            .prefix(5))
+    }
+
+    /// IDs of waves shown in Recent Activity (to avoid duplication).
+    private var recentActivityWaveIds: Set<String> {
+        Set(recentActivityWaves.map(\.id))
+    }
+
     private var activeWaves: [Wave] {
         repoState.waves.filter { wave in
             (wave.status == .running || wave.status == .waiting) &&
-            pendingPR(for: wave) == nil
+            pendingPR(for: wave) == nil &&
+            !recentActivityWaveIds.contains(wave.id)
         }
     }
 
     private var idleWaves: [Wave] {
         repoState.waves.filter { wave in
-            wave.status == .idle && pendingPR(for: wave) == nil
+            wave.status == .idle &&
+            pendingPR(for: wave) == nil &&
+            !recentActivityWaveIds.contains(wave.id)
         }
     }
 
@@ -46,7 +66,7 @@ struct WaveSidebar: View {
     }
 
     private var allWavesInOrder: [Wave] {
-        blockedWaves + prWaves + activeWaves + idleWaves
+        blockedWaves + prWaves + recentActivityWaves + activeWaves + idleWaves
     }
 
     private func pendingPR(for wave: Wave) -> (number: Int, url: URL?)? {
@@ -291,6 +311,11 @@ struct WaveSidebar: View {
                 if !prWaves.isEmpty {
                     sectionHeader("Open PRs", icon: "arrow.triangle.pull", color: .green, count: prWaves.count)
                     waveRows(prWaves)
+                }
+
+                if !recentActivityWaves.isEmpty {
+                    sectionHeader("Recent Activity", icon: "clock.arrow.circlepath", color: .cyan, count: recentActivityWaves.count)
+                    waveRows(recentActivityWaves)
                 }
 
                 if !activeWaves.isEmpty {

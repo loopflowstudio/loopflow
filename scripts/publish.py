@@ -107,6 +107,9 @@ def _find_pending_release() -> str | None:
         # Match "release: v0.7.1" or "release: v0.7.1 [skip ci]"
         if line.startswith("release: v"):
             version = line.replace("release: v", "").split()[0]
+            if _tag_exists(version) and _is_on_pypi(version):
+                # Found a complete release - older incomplete releases are stale
+                return None
             if not _tag_exists(version) or not _is_on_pypi(version):
                 return version
     return None

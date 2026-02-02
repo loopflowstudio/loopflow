@@ -395,10 +395,9 @@ public struct Wave: Sendable, Identifiable, Hashable {
 
     /// Full progress display (e.g., "implement (2/4) · 3m 12s").
     public func progressDisplay(now: Date = Date()) -> String {
-        var parts = [progressText]
         if let elapsed = elapsedTime(from: now) {
-            parts.append(elapsed)
+            return "\(progressText) · \(elapsed)"
         }
-        return parts.joined(separator: " · ")
+        return progressText
     }
 }

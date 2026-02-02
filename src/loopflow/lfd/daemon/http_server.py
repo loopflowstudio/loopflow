@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from loopflow import __version__
+from loopflow.lf.flows import load_flow
 from loopflow.lfd.agent import (
     get_waiting_agent,
     load_agents,
@@ -346,8 +347,6 @@ def _wave_to_dict(wave, worktree_state: dict | None = None) -> dict:
             )
 
         # Get total steps from flow definition
-        from loopflow.lf.flows import load_flow
-
         flow = load_flow(wave.flow, wave.repo)
         if flow:
             result["total_steps"] = len(flow.steps)

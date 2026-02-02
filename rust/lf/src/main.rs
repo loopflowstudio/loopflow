@@ -1,5 +1,7 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
+use tracing::debug;
+use tracing_subscriber::EnvFilter;
 
 mod commands;
 mod discovery;
@@ -104,31 +106,11 @@ enum Commands {
         #[arg(trailing_var_arg = true)]
         prompt: Vec<String>,
     },
-    /// Show assembled context
-    Context {
-        #[arg(long)]
-        tokens: bool,
-        #[arg(long)]
-        trim: Option<usize>,
-    },
-    /// Show configuration
-    Config {
-        #[arg(long)]
-        global: bool,
-        #[arg(long)]
-        repo: bool,
-    },
     /// Git operations
     Ops {
         #[command(subcommand)]
         op: OpsCommand,
     },
-    /// List available flows
-    Flows,
-    /// List available steps
-    Steps,
-    /// List available directions
-    Directions,
     /// External: step name (when no subcommand matches)
     #[command(external_subcommand)]
     Step(Vec<String>),
@@ -165,7 +147,19 @@ pub enum OpsCommand {
 }
 
 fn main() -> anyhow::Result<()> {
+    // Initialize tracing with RUST_LOG env filter
+    // Usage: RUST_LOG=lf=debug lf debug
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::from_default_env()
+                .add_directive("lf=warn".parse().expect("valid directive")),
+        )
+        .with_writer(std::io::stderr)
+        .without_time()
+        .init();
+
     let cli = Cli::parse();
+    debug!(?cli, "parsed CLI arguments");
 
     if cli.list {
         return commands::list::show_all(&cli);
@@ -180,12 +174,7 @@ fn main() -> anyhow::Result<()> {
             pr,
         }) => commands::flow::run(name, area, model.as_deref(), *pr, &cli),
         Some(Commands::Inline { prompt }) => commands::inline::run(prompt, &cli),
-        Some(Commands::Context { tokens, trim }) => commands::context::show(*tokens, *trim, &cli),
-        Some(Commands::Config { global, repo }) => commands::config::show(*global, *repo),
         Some(Commands::Ops { op }) => commands::ops::run(op),
-        Some(Commands::Flows) => commands::list::flows(&cli),
-        Some(Commands::Steps) => commands::list::steps(&cli),
-        Some(Commands::Directions) => commands::list::directions(&cli),
         Some(Commands::Step(args)) => {
             let (step, step_args) = commands::step::split_step_args(args)?;
             commands::step::run(&step, &step_args, &cli)

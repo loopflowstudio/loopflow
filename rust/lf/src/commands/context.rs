@@ -28,6 +28,7 @@ pub fn show(tokens: bool, trim: Option<usize>, cli: &Cli) -> Result<()> {
         step_args: Vec::new(),
         run_mode: Some("auto".to_string()),
         directions,
+        files: Vec::new(),
         lfdocs: config.lfdocs,
         diff_files: config.diff_files,
         diff: config.diff,

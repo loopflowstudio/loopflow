@@ -264,26 +264,3 @@ pub fn show_all(cli: &Cli) -> Result<()> {
     Ok(())
 }
 
-pub fn steps(_cli: &Cli) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    for name in crate::discovery::list_steps(&repo_root) {
-        println!("{}", name);
-    }
-    Ok(())
-}
-
-pub fn flows(_cli: &Cli) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    for name in crate::discovery::list_flows(&repo_root) {
-        println!("{}", name);
-    }
-    Ok(())
-}
-
-pub fn directions(_cli: &Cli) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    for name in crate::discovery::list_directions(&repo_root) {
-        println!("{}", name);
-    }
-    Ok(())
-}

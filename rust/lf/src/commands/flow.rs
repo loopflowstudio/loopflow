@@ -123,6 +123,7 @@ impl StepRunner for FlowStepRunner {
             step_args: Vec::new(),
             run_mode: Some("auto".to_string()),
             directions: directions.to_vec(),
+            files: Vec::new(),
             lfdocs: self.lfdocs,
             diff_files: self.diff_files,
             diff: self.diff,

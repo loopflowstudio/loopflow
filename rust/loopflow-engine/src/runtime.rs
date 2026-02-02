@@ -182,6 +182,7 @@ impl StepRunner for AgentStepRunner {
             step_args: Vec::new(),
             run_mode: Some("auto".to_string()),
             directions: directions.to_vec(),
+            files: Vec::new(),
             lfdocs: config.lfdocs,
             diff_files: config.diff_files,
             diff: config.diff,

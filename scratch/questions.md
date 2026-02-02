@@ -1,6 +1,7 @@
 # Open Questions
 
-(none)
+- Should agent prompts be passed via stdin instead of CLI args for Claude/Codex/Gemini launches in Rust?
+- Do we want per-model token budgets in Rust config (parity with Python), or keep a single budget?
 
 # Decided
 

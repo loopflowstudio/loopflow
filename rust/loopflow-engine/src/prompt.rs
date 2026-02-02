@@ -3,6 +3,7 @@
 //! This module handles gathering all context components (docs, diff, clipboard, etc.)
 //! and assembling them into a formatted prompt.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -27,6 +28,8 @@ pub struct GatherContextOpts {
     pub step_args: Vec<String>,
     pub run_mode: Option<String>,
     pub directions: Vec<String>,
+    /// Specific files to include in context
+    pub files: Vec<String>,
     /// Include lfdocs (roadmap/, scratch/, root .md files)
     pub lfdocs: bool,
     /// Include files changed on branch
@@ -156,6 +159,11 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
 
     // Load directions
     let mut directions = Vec::new();
+    if let Some(ref step) = step {
+        for name in &step.directions {
+            directions.push(load_direction(name, repo_root)?);
+        }
+    }
     for name in &opts.directions {
         directions.push(load_direction(name, repo_root)?);
     }
@@ -168,11 +176,14 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
     };
 
     // Gather diff files
-    let diff_files = if opts.diff_files {
-        gather_diff_files(repo_root)?
-    } else {
-        Vec::new()
-    };
+    let mut diff_files = Vec::new();
+    if opts.diff_files {
+        diff_files.extend(gather_diff_files(repo_root)?);
+    }
+    if !opts.files.is_empty() {
+        diff_files.extend(gather_files(repo_root, &opts.files)?);
+    }
+    dedup_documents(&mut diff_files);
 
     // Gather raw diff
     let diff = if opts.diff {
@@ -278,6 +289,94 @@ fn gather_md_files(dir: &Path, docs: &mut Vec<Document>, category: &str) -> Resu
     }
 
     Ok(())
+}
+
+fn gather_files(repo_root: &Path, files: &[String]) -> Result<Vec<Document>, CoreError> {
+    if files.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let gitignore = build_gitignore(repo_root);
+    let mut seen = HashSet::new();
+    let mut docs = Vec::new();
+
+    for file in files {
+        let path = match resolve_path(repo_root, file) {
+            Some(path) => path,
+            None => continue,
+        };
+
+        if !path.is_file() {
+            continue;
+        }
+
+        if should_exclude(repo_root, &path, &gitignore) {
+            continue;
+        }
+
+        let canonical = path.canonicalize().unwrap_or(path.clone());
+        if !seen.insert(canonical) {
+            continue;
+        }
+
+        let content = match read_text_file(&path) {
+            Some(content) => content,
+            None => continue,
+        };
+
+        let rel_path = path
+            .strip_prefix(repo_root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .to_string();
+
+        docs.push(Document {
+            path: rel_path,
+            content,
+            category: "diff_files".to_string(),
+        });
+    }
+
+    Ok(docs)
+}
+
+#[cfg(test)]
+fn gather_all_text_files(repo_root: &Path) -> Result<Vec<Document>, CoreError> {
+    let gitignore = build_gitignore(repo_root);
+    let mut docs = Vec::new();
+
+    let walker = ignore::WalkBuilder::new(repo_root)
+        .hidden(false)
+        .standard_filters(true)
+        .build();
+
+    for entry in walker {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => continue,
+        };
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        if should_exclude(repo_root, path, &gitignore) {
+            continue;
+        }
+        if let Some(content) = read_text_file(path) {
+            let rel_path = path
+                .strip_prefix(repo_root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .to_string();
+            docs.push(Document {
+                path: rel_path,
+                content,
+                category: "diff_files".to_string(),
+            });
+        }
+    }
+
+    Ok(docs)
 }
 
 /// Get files changed on this branch vs main.
@@ -391,6 +490,66 @@ fn read_clipboard() -> Option<String> {
         }
     }
     None
+}
+
+fn build_gitignore(repo_root: &Path) -> ignore::gitignore::Gitignore {
+    let mut builder = ignore::gitignore::GitignoreBuilder::new(repo_root);
+    let _ = builder.add(repo_root.join(".gitignore"));
+    match builder.build() {
+        Ok(gitignore) => gitignore,
+        Err(_) => ignore::gitignore::Gitignore::empty(),
+    }
+}
+
+fn resolve_path(repo_root: &Path, file: &str) -> Option<PathBuf> {
+    let path = Path::new(file);
+    let joined = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        repo_root.join(path)
+    };
+    if joined.exists() {
+        Some(joined)
+    } else if file.starts_with("./") {
+        let trimmed = file.trim_start_matches("./");
+        let joined = repo_root.join(trimmed);
+        if joined.exists() {
+            return Some(joined);
+        }
+        None
+    } else {
+        None
+    }
+}
+
+fn should_exclude(repo_root: &Path, path: &Path, gitignore: &ignore::gitignore::Gitignore) -> bool {
+    if path
+        .components()
+        .any(|component| component.as_os_str() == ".lf")
+    {
+        return true;
+    }
+
+    let relative = path.strip_prefix(repo_root).unwrap_or(path);
+    gitignore
+        .matched_path_or_any_parents(relative, path.is_dir())
+        .is_ignore()
+}
+
+fn read_text_file(path: &Path) -> Option<String> {
+    let bytes = fs::read(path).ok()?;
+    if bytes.is_empty() {
+        return Some(String::new());
+    }
+    if bytes.iter().any(|b| *b == 0) {
+        return None;
+    }
+    String::from_utf8(bytes).ok()
+}
+
+fn dedup_documents(docs: &mut Vec<Document>) {
+    let mut seen = HashSet::new();
+    docs.retain(|doc| seen.insert(doc.path.clone()));
 }
 
 /// Format all components into the final prompt string.
@@ -558,7 +717,30 @@ fn format_files(docs: &[Document]) -> String {
 mod tests {
     use super::*;
     use crate::flow::{Direction, Step};
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
+
+    fn init_repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join(".lf/steps")).expect("create steps");
+        std::fs::create_dir_all(dir.path().join(".lf/directions")).expect("create directions");
+        dir
+    }
+
+    fn write_file(repo: &Path, path: &str, content: &str) {
+        let full_path = repo.join(path);
+        if let Some(parent) = full_path.parent() {
+            std::fs::create_dir_all(parent).expect("create parent");
+        }
+        std::fs::write(full_path, content).expect("write file");
+    }
+
+    fn write_binary(repo: &Path, path: &str, content: &[u8]) {
+        let full_path = repo.join(path);
+        if let Some(parent) = full_path.parent() {
+            std::fs::create_dir_all(parent).expect("create parent");
+        }
+        std::fs::write(full_path, content).expect("write binary file");
+    }
 
     #[test]
     fn count_tokens_basic() {
@@ -733,6 +915,29 @@ mod tests {
         assert!(trimmed.step.is_some());
     }
 
+    #[test]
+    fn trim_context_never_drops_step() {
+        let components = PromptComponents {
+            step: Some(Step {
+                name: "implement".to_string(),
+                content: Some("Implement the feature with tests".to_string()),
+                model: None,
+                directions: vec![],
+                interactive: None,
+            }),
+            docs: vec![Document {
+                path: "doc.md".to_string(),
+                content: "Doc content that will exceed budget".to_string(),
+                category: "docs".to_string(),
+            }],
+            ..Default::default()
+        };
+
+        let trimmed = trim_context(components, 5);
+        assert!(trimmed.step.is_some());
+        assert!(trimmed.docs.is_empty());
+    }
+
     // ==========================================================================
     // format_prompt tests
     // ==========================================================================
@@ -802,6 +1007,36 @@ mod tests {
         assert!(prompt.contains("<lf:STYLE>"));
         assert!(prompt.contains("# Style Guide"));
         assert!(prompt.contains("Follow STYLE carefully"));
+    }
+
+    #[test]
+    fn format_prompt_claude_md_gets_follow_note() {
+        let components = PromptComponents {
+            docs: vec![Document {
+                path: "CLAUDE.md".to_string(),
+                content: "# Instructions".to_string(),
+                category: "docs".to_string(),
+            }],
+            ..Default::default()
+        };
+        let prompt = format_prompt(&components);
+        assert!(prompt.contains("CLAUDE"));
+        assert!(prompt.contains("Follow") || prompt.contains("carefully"));
+    }
+
+    #[test]
+    fn format_prompt_style_md_gets_follow_note() {
+        let components = PromptComponents {
+            docs: vec![Document {
+                path: "STYLE.md".to_string(),
+                content: "# Style Guide".to_string(),
+                category: "docs".to_string(),
+            }],
+            ..Default::default()
+        };
+        let prompt = format_prompt(&components);
+        assert!(prompt.contains("STYLE"));
+        assert!(prompt.contains("Follow") || prompt.contains("carefully"));
     }
 
     #[test]
@@ -1013,6 +1248,108 @@ mod tests {
     }
 
     // ==========================================================================
+    // file gathering tests
+    // ==========================================================================
+
+    #[test]
+    fn gather_files_excludes_gitignored() {
+        let repo = init_repo();
+        write_file(repo.path(), "src/main.rs", "fn main() {}");
+        write_file(repo.path(), "target/debug/main", "binary");
+        write_file(repo.path(), ".gitignore", "target/\n*.log");
+        write_file(repo.path(), "debug.log", "log content");
+
+        let files = gather_files(
+            repo.path(),
+            &[
+                "src/main.rs".to_string(),
+                "target/debug/main".to_string(),
+                "debug.log".to_string(),
+            ],
+        )
+        .expect("gather files");
+
+        assert!(files.iter().any(|f| f.path.ends_with("src/main.rs")));
+        assert!(!files.iter().any(|f| f.path.contains("target")));
+        assert!(!files.iter().any(|f| f.path.ends_with("debug.log")));
+    }
+
+    #[test]
+    fn gather_files_excludes_lf_directory() {
+        let repo = init_repo();
+        write_file(repo.path(), "src/lib.rs", "pub fn foo() {}");
+        write_file(repo.path(), ".lf/config.yaml", "model: claude");
+        write_file(repo.path(), ".lf/steps/debug.md", "# Debug step");
+
+        let files = gather_all_text_files(repo.path()).expect("gather files");
+
+        assert!(files.iter().any(|f| f.path.ends_with("src/lib.rs")));
+        assert!(!files.iter().any(|f| f.path.contains(".lf/")));
+    }
+
+    #[test]
+    fn gather_context_with_specific_files() {
+        let repo = init_repo();
+        write_file(repo.path(), "src/a.rs", "mod a;");
+        write_file(repo.path(), "src/b.rs", "mod b;");
+        write_file(repo.path(), "src/c.rs", "mod c;");
+
+        let opts = GatherContextOpts {
+            repo_root: repo.path().to_path_buf(),
+            files: vec!["src/a.rs".to_string(), "src/c.rs".to_string()],
+            lfdocs: false,
+            diff_files: false,
+            diff: false,
+            clipboard: false,
+            ..Default::default()
+        };
+        let ctx = gather_context(&opts).expect("gather context");
+        let prompt = format_prompt(&ctx);
+
+        assert!(prompt.contains("mod a;"));
+        assert!(prompt.contains("mod c;"));
+        assert!(!prompt.contains("mod b;"));
+    }
+
+    #[test]
+    fn gather_files_deduplicates_requests() {
+        let repo = init_repo();
+        write_file(repo.path(), "src/main.rs", "fn main() {}");
+
+        let files = gather_files(
+            repo.path(),
+            &[
+                "src/main.rs".to_string(),
+                "src/main.rs".to_string(),
+                "./src/main.rs".to_string(),
+            ],
+        )
+        .expect("gather files");
+
+        let main_count = files
+            .iter()
+            .filter(|f| f.path.ends_with("src/main.rs"))
+            .count();
+        assert_eq!(main_count, 1);
+    }
+
+    #[test]
+    fn gather_files_skips_binary_files() {
+        let repo = init_repo();
+        write_file(repo.path(), "src/main.rs", "fn main() {}");
+        write_binary(repo.path(), "assets/image.png", &[0x89, 0x50, 0x4E, 0x47]);
+
+        let files = gather_files(
+            repo.path(),
+            &["src/main.rs".to_string(), "assets/image.png".to_string()],
+        )
+        .expect("gather files");
+
+        assert!(files.iter().any(|f| f.path.ends_with("src/main.rs")));
+        assert!(!files.iter().any(|f| f.path.ends_with("image.png")));
+    }
+
+    // ==========================================================================
     // gather_context tests (filesystem-based)
     // ==========================================================================
 
@@ -1098,6 +1435,39 @@ mod tests {
         assert_eq!(components.directions.len(), 1);
         assert_eq!(components.directions[0].name, "concise");
         assert!(components.directions[0].content.contains("Be concise"));
+    }
+
+    #[test]
+    fn directions_from_step_and_cli_combined() {
+        let repo = init_repo();
+        write_file(
+            repo.path(),
+            ".lf/steps/impl.md",
+            r#"---
+directions:
+  - thorough
+---
+# Implement
+"#,
+        );
+        write_file(repo.path(), ".lf/directions/thorough.md", "Be thorough.");
+        write_file(repo.path(), ".lf/directions/fast.md", "Be fast.");
+
+        let opts = GatherContextOpts {
+            repo_root: repo.path().to_path_buf(),
+            step: Some("impl".to_string()),
+            directions: vec!["fast".to_string()],
+            lfdocs: false,
+            diff_files: false,
+            diff: false,
+            clipboard: false,
+            ..Default::default()
+        };
+        let ctx = gather_context(&opts).expect("gather context");
+
+        assert_eq!(ctx.directions.len(), 2);
+        assert_eq!(ctx.directions[0].name, "thorough");
+        assert_eq!(ctx.directions[1].name, "fast");
     }
 
     #[test]

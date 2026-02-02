@@ -42,6 +42,7 @@ pub fn run(prompt_parts: &[String], cli: &Cli) -> Result<()> {
             .to_string(),
         ),
         directions,
+        files: Vec::new(),
         lfdocs: config.lfdocs,
         diff_files: config.diff_files,
         diff: config.diff,

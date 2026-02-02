@@ -71,46 +71,81 @@ pub fn load_step(name: &str, repo: &Path) -> Result<Step, LoadError> {
     // Try file-based lookup first (repo-local, then global)
     if let Ok(step_path) = find_step_path(name, repo) {
         let content = fs::read_to_string(&step_path)?;
+        let (frontmatter, body) = parse_step_frontmatter(&content)?;
         return Ok(Step {
             name: name.to_string(),
-            model: None,
-            directions: Vec::new(),
-            interactive: parse_interactive_from_frontmatter(&content),
-            content: Some(content),
+            model: frontmatter.model,
+            directions: frontmatter.directions,
+            interactive: frontmatter.interactive,
+            content: Some(body),
         });
     }
 
     // Fall back to built-in steps
     if let Some(content) = crate::builtins::get_builtin_step(name) {
+        let (frontmatter, body) = parse_step_frontmatter(content)?;
         return Ok(Step {
             name: name.to_string(),
-            model: None,
-            directions: Vec::new(),
-            interactive: parse_interactive_from_frontmatter(content),
-            content: Some(content.to_string()),
+            model: frontmatter.model,
+            directions: frontmatter.directions,
+            interactive: frontmatter.interactive,
+            content: Some(body),
         });
     }
 
     Err(LoadError::StepNotFound(name.to_string()))
 }
 
-/// Parse the `interactive` field from YAML frontmatter.
-fn parse_interactive_from_frontmatter(content: &str) -> Option<bool> {
+#[derive(Debug, Default)]
+struct StepFrontmatter {
+    model: Option<String>,
+    directions: Vec<String>,
+    interactive: Option<bool>,
+}
+
+fn parse_step_frontmatter(content: &str) -> Result<(StepFrontmatter, String), LoadError> {
+    let Some((frontmatter, body)) = split_frontmatter(content) else {
+        return Ok((StepFrontmatter::default(), content.to_string()));
+    };
+
+    let value: Value = serde_yaml::from_str(&frontmatter)
+        .map_err(|err| LoadError::InvalidStep(err.to_string()))?;
+    Ok((parse_frontmatter_value(&value), body))
+}
+
+fn split_frontmatter(content: &str) -> Option<(String, String)> {
     if !content.starts_with("---") {
         return None;
     }
-    let parts: Vec<&str> = content.splitn(3, "---").collect();
-    if parts.len() < 3 {
-        return None;
+    let mut parts = content.splitn(3, "---");
+    let _ = parts.next();
+    let frontmatter = parts.next()?;
+    let rest = parts.next()?;
+    let body = rest.strip_prefix('\n').unwrap_or(rest).to_string();
+    Some((frontmatter.to_string(), body))
+}
+
+fn parse_frontmatter_value(value: &Value) -> StepFrontmatter {
+    let map = match value.as_mapping() {
+        Some(map) => map,
+        None => return StepFrontmatter::default(),
+    };
+
+    let model = map
+        .get(key("model"))
+        .and_then(|val| val.as_str())
+        .map(|val| val.to_string());
+    let interactive = map.get(key("interactive")).and_then(|val| val.as_bool());
+    let mut directions = parse_string_list(map.get(key("directions")));
+    if directions.is_empty() {
+        directions = parse_string_list(map.get(key("direction")));
     }
-    for line in parts[1].lines() {
-        let line = line.trim();
-        if let Some(rest) = line.strip_prefix("interactive:") {
-            let val = rest.trim().to_lowercase();
-            return Some(val == "true" || val == "yes");
-        }
+
+    StepFrontmatter {
+        model,
+        directions,
+        interactive,
     }
-    None
 }
 
 pub fn load_direction(name: &str, repo: &Path) -> Result<Direction, LoadError> {
@@ -418,5 +453,88 @@ mod tests {
                 result.err()
             );
         }
+    }
+
+    #[test]
+    fn load_step_parses_frontmatter_model() {
+        let tmp = TempDir::new().unwrap();
+        let steps_dir = tmp.path().join(".lf/steps");
+        fs::create_dir_all(&steps_dir).unwrap();
+        fs::write(
+            steps_dir.join("fast.md"),
+            r#"---
+model: claude:haiku
+---
+# Fast Step
+Do it quickly.
+"#,
+        )
+        .unwrap();
+
+        let step = load_step("fast", tmp.path()).unwrap();
+        assert_eq!(step.model, Some("claude:haiku".to_string()));
+    }
+
+    #[test]
+    fn load_step_parses_frontmatter_interactive() {
+        let tmp = TempDir::new().unwrap();
+        let steps_dir = tmp.path().join(".lf/steps");
+        fs::create_dir_all(&steps_dir).unwrap();
+        fs::write(
+            steps_dir.join("design.md"),
+            r#"---
+interactive: true
+---
+# Design Step
+Design the feature.
+"#,
+        )
+        .unwrap();
+
+        let step = load_step("design", tmp.path()).unwrap();
+        assert_eq!(step.interactive, Some(true));
+    }
+
+    #[test]
+    fn load_step_includes_frontmatter_directions() {
+        let tmp = TempDir::new().unwrap();
+        let steps_dir = tmp.path().join(".lf/steps");
+        fs::create_dir_all(&steps_dir).unwrap();
+        fs::write(
+            steps_dir.join("careful.md"),
+            r#"---
+directions:
+  - thorough
+  - tested
+---
+# Careful Step
+Be careful.
+"#,
+        )
+        .unwrap();
+
+        let step = load_step("careful", tmp.path()).unwrap();
+        assert_eq!(step.directions, vec!["thorough", "tested"]);
+    }
+
+    #[test]
+    fn load_step_not_found_error_message() {
+        let tmp = TempDir::new().unwrap();
+
+        let result = load_step("nonexistent", tmp.path());
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("nonexistent"));
+        assert!(err.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn load_direction_not_found_error() {
+        let tmp = TempDir::new().unwrap();
+
+        let result = load_direction("nonexistent", tmp.path());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("nonexistent"));
     }
 }

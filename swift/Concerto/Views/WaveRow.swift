@@ -82,6 +82,19 @@ struct WaveRow: View {
                         .accessibilityIdentifier("wave-iteration")
                 }
 
+                // Activity timestamp (italic serif per VISUAL_DESIGN.md)
+                if let activity = wave.lastActivityDescription {
+                    Text("•")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.3))
+                    Text(activity)
+                        .font(.custom("Cormorant Garamond", size: 11))
+                        .italic()
+                        .foregroundStyle(.white.opacity(0.4))
+                        .accessibilityLabel(activityAccessibilityLabel)
+                        .accessibilityIdentifier("wave-activity")
+                }
+
                 if wave.status == .waiting {
                     Text("•")
                         .font(.caption)
@@ -162,5 +175,14 @@ struct WaveRow: View {
             return "9am weekdays"
         }
         return cron
+    }
+
+    /// Accessibility-friendly description of activity (e.g., "implement, 2 minutes ago").
+    private var activityAccessibilityLabel: String {
+        guard let step = wave.recentSteps.first else { return "" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        let time = formatter.localizedString(for: step.endedAt ?? step.startedAt, relativeTo: Date())
+        return "\(step.step), \(time)"
     }
 }

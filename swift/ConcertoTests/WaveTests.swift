@@ -246,6 +246,81 @@ struct WaveModelTests {
 
         #expect(wave.iterationText == "")
     }
+
+    // MARK: - Activity Tracking
+
+    @Test("lastActivityAt returns nil when no recent steps")
+    func lastActivityAtNilWithNoSteps() {
+        let wave = Wave(id: "test", repo: "/tmp", recentSteps: [])
+
+        #expect(wave.lastActivityAt == nil)
+    }
+
+    @Test("lastActivityAt returns endedAt when present")
+    func lastActivityAtUsesEndedAt() {
+        let startDate = Date().addingTimeInterval(-120)
+        let endDate = Date().addingTimeInterval(-60)
+        let step = StepRun(
+            id: "step-1",
+            step: "implement",
+            repo: "/tmp",
+            worktree: "/tmp/wt",
+            status: "completed",
+            startedAt: startDate,
+            endedAt: endDate,
+            model: "claude",
+            runMode: "auto"
+        )
+        let wave = Wave(id: "test", repo: "/tmp", recentSteps: [step])
+
+        #expect(wave.lastActivityAt == endDate)
+    }
+
+    @Test("lastActivityAt falls back to startedAt when endedAt is nil")
+    func lastActivityAtFallsBackToStartedAt() {
+        let startDate = Date().addingTimeInterval(-120)
+        let step = StepRun(
+            id: "step-1",
+            step: "implement",
+            repo: "/tmp",
+            worktree: "/tmp/wt",
+            status: "running",
+            startedAt: startDate,
+            endedAt: nil,
+            model: "claude",
+            runMode: "auto"
+        )
+        let wave = Wave(id: "test", repo: "/tmp", recentSteps: [step])
+
+        #expect(wave.lastActivityAt == startDate)
+    }
+
+    @Test("lastActivityDescription returns nil when no recent steps")
+    func lastActivityDescriptionNilWithNoSteps() {
+        let wave = Wave(id: "test", repo: "/tmp", recentSteps: [])
+
+        #expect(wave.lastActivityDescription == nil)
+    }
+
+    @Test("lastActivityDescription includes step name")
+    func lastActivityDescriptionIncludesStepName() {
+        let step = StepRun(
+            id: "step-1",
+            step: "implement",
+            repo: "/tmp",
+            worktree: "/tmp/wt",
+            status: "completed",
+            startedAt: Date().addingTimeInterval(-60),
+            endedAt: Date(),
+            model: "claude",
+            runMode: "auto"
+        )
+        let wave = Wave(id: "test", repo: "/tmp", recentSteps: [step])
+        let description = wave.lastActivityDescription
+
+        #expect(description != nil)
+        #expect(description!.hasPrefix("implement"))
+    }
 }
 
 @Suite("Stimulus")

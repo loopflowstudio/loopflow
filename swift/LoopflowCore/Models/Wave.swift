@@ -309,4 +309,20 @@ public struct Wave: Sendable, Identifiable, Hashable {
             return ("circle", .gray)
         }
     }
+
+    // MARK: - Activity Tracking
+
+    /// When the wave last had activity (most recent step's end or start time).
+    public var lastActivityAt: Date? {
+        recentSteps.first?.endedAt ?? recentSteps.first?.startedAt
+    }
+
+    /// Human-readable description of the last activity (e.g., "implement 2m ago").
+    public var lastActivityDescription: String? {
+        guard let step = recentSteps.first else { return nil }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        let time = formatter.localizedString(for: step.endedAt ?? step.startedAt, relativeTo: Date())
+        return "\(step.step) \(time)"
+    }
 }

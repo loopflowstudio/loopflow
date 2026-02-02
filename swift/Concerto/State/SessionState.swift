@@ -120,6 +120,18 @@ final class SessionState {
         activeSessions.values.first { $0.waveId == waveId }?.output ?? []
     }
 
+    /// Most recent output line for a wave (for activity summary display).
+    func recentOutput(for waveId: String, maxLength: Int = 60) -> String? {
+        guard let session = activeSessions.values.first(where: { $0.waveId == waveId }),
+              let lastLine = session.output.last else {
+            return nil
+        }
+        let text = lastLine.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty { return nil }
+        if text.count <= maxLength { return text }
+        return String(text.prefix(maxLength - 3)) + "..."
+    }
+
     func currentResult(for worktreePath: String?) -> StepRunResult? {
         let results = activeSessions.values.compactMap { $0.result }
         let filtered: [StepRunResult]

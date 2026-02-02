@@ -283,7 +283,8 @@ def gather_files(
                 continue
 
             # Images tracked separately
-            if path.is_file() and is_image(path) and not _is_ignored(path, repo_root, excluded_paths):
+            is_img = path.is_file() and is_image(path)
+            if is_img and not _is_ignored(path, repo_root, excluded_paths):
                 seen.add(path)
                 image_files.append(path)
                 continue

@@ -10,9 +10,9 @@ from loopflow.lf.config import load_config
 from loopflow.lf.context import find_worktree_root
 from loopflow.lf.design import gather_lfdocs
 from loopflow.lf.files import gather_files
-from loopflow.lf.wave import determine_wave
 from loopflow.lf.output import copy_to_clipboard, warn_if_context_too_large
 from loopflow.lf.tokens import TokenTree, count_tokens
+from loopflow.lf.wave import determine_wave
 
 
 def _gather_diff_file_paths(repo_root: Path) -> list[str]:
@@ -36,7 +36,10 @@ def _gather_diff_file_paths(repo_root: Path) -> list[str]:
     if result.returncode != 0:
         return []
 
-    return [line for line in result.stdout.strip().split("\n") if line and (repo_root / line).exists()]
+    return [
+        line for line in result.stdout.strip().split("\n")
+        if line and (repo_root / line).exists()
+    ]
 
 
 def register_commands(app: typer.Typer) -> None:

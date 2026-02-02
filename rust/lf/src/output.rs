@@ -1,8 +1,3 @@
-pub fn use_color() -> bool {
-    std::env::var("NO_COLOR").is_err() && atty::is(atty::Stream::Stdout)
-}
-
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub struct Colors {
     pub cyan: &'static str,
@@ -15,7 +10,8 @@ pub struct Colors {
 
 impl Colors {
     pub fn new() -> Self {
-        if use_color() {
+        let use_color = std::env::var("NO_COLOR").is_err() && atty::is(atty::Stream::Stdout);
+        if use_color {
             Self {
                 cyan: "\x1b[36m",
                 bold: "\x1b[1m",

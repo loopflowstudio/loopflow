@@ -5,45 +5,33 @@ use loopflow_engine::{
     check_cli_available, format_prompt, gather_context, launch_agent, load_config_or_default,
     parse_model, GatherContextOpts, LaunchConfig,
 };
-use tracing::{debug, info, instrument, trace, warn};
+use tracing::{debug, info, instrument, trace};
 
-#[instrument(skip(cli), fields(step = %step_name))]
+/// Run a step by name.
+#[instrument(skip(cli), fields(name = %step_name))]
 pub fn run(step_name: &str, step_args: &[String], cli: &Cli) -> Result<()> {
-    eprintln!("[step::run] entered with step={}", step_name);
     let repo_root = find_repo_root()?;
-    eprintln!("[step::run] repo_root={:?}", repo_root);
-    debug!(?repo_root, "found repository root");
-
-    eprintln!("[step::run] loading config...");
     let config = load_config_or_default(Some(&repo_root));
-    eprintln!("[step::run] config loaded");
     trace!(?config.agent_model, ?config.yolo, "loaded config");
 
-    eprintln!("[step::run] discovering step...");
     let step = crate::discovery::discover_step(&repo_root, step_name)?;
-    eprintln!("[step::run] step found: {}", step.name);
     debug!(step.name, step.interactive, "discovered step");
 
     let mut directions = config.direction.clone().unwrap_or_default();
     directions.extend(cli.direction.clone());
-    eprintln!("[step::run] directions merged");
 
     let is_interactive = cli.interactive
         || (!cli.batch
             && (step.interactive.unwrap_or(false) || config.interactive.contains(&step.name)));
-    eprintln!("[step::run] is_interactive={}", is_interactive);
 
     let area = if !cli.area.is_empty() {
         cli.area.first().map(|p| p.to_string_lossy().to_string())
     } else {
         config.area.clone()
     };
-    eprintln!("[step::run] area={:?}", area);
 
     let include_clipboard = cli.clipboard || config.paste;
-    eprintln!("[step::run] clipboard={}", include_clipboard);
 
-    eprintln!("[step::run] calling gather_context...");
     let components = gather_context(&GatherContextOpts {
         repo_root: repo_root.clone(),
         step: Some(step_name.to_string()),
@@ -66,17 +54,11 @@ pub fn run(step_name: &str, step_args: &[String], cli: &Cli) -> Result<()> {
         area,
         wave: cli.wave.clone(),
     })?;
-    eprintln!(
-        "[step::run] context gathered, {} docs",
-        components.docs.len()
-    );
 
     let prompt = format_prompt(&components);
-    eprintln!("[step::run] prompt formatted, len={}", prompt.len());
 
     let model = cli.model.as_deref().unwrap_or(&config.agent_model);
     let (backend, variant) = parse_model(model);
-    eprintln!("[step::run] model={}, backend={}", model, backend);
 
     if cli.web {
         info!("copying to clipboard and opening web client");

@@ -45,71 +45,11 @@ pub fn builtin_steps() -> HashSet<String> {
         .collect()
 }
 
-// =============================================================================
-// Step metadata from frontmatter
-// =============================================================================
-
-#[derive(Debug, Default)]
-pub struct StepInfo {
-    pub interactive: bool,
-    pub produces: Option<String>,
-}
-
-/// Parse YAML frontmatter from step content.
-pub fn parse_step_frontmatter(content: &str) -> StepInfo {
-    if !content.starts_with("---") {
-        return StepInfo::default();
-    }
-
-    let parts: Vec<&str> = content.splitn(3, "---").collect();
-    if parts.len() < 3 {
-        return StepInfo::default();
-    }
-
-    let frontmatter = parts[1];
-    let mut info = StepInfo::default();
-
-    for line in frontmatter.lines() {
-        let line = line.trim();
-        if let Some(rest) = line.strip_prefix("interactive:") {
-            let val = rest.trim().to_lowercase();
-            info.interactive = val == "true" || val == "yes";
-        } else if let Some(rest) = line.strip_prefix("produces:") {
-            let val = rest.trim().trim_matches('"').trim_matches('\'');
-            if !val.is_empty() {
-                info.produces = Some(val.to_string());
-            }
-        }
-    }
-
-    info
-}
-
-/// Get step info by reading the step file.
-pub fn get_step_info(repo: &Path, name: &str) -> StepInfo {
-    // Try repo-local first
-    for dir in [repo.join(".lf/steps"), repo.join(".claude/commands")] {
-        let path = dir.join(format!("{name}.md"));
-        if path.exists() {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                return parse_step_frontmatter(&content);
-            }
-        }
-    }
-
-    // Try global
-    if let Some(home) = dirs::home_dir() {
-        for dir in [home.join(".lf/steps"), home.join(".claude/commands")] {
-            let path = dir.join(format!("{name}.md"));
-            if path.exists() {
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    return parse_step_frontmatter(&content);
-                }
-            }
-        }
-    }
-
-    StepInfo::default()
+/// Check if a step is interactive by loading it via the engine.
+pub fn is_step_interactive(repo: &Path, name: &str) -> bool {
+    loopflow_engine::load_step(name, repo)
+        .map(|s| s.interactive.unwrap_or(false))
+        .unwrap_or(false)
 }
 
 // =============================================================================
@@ -196,20 +136,7 @@ fn discover_superpowers_skills(source_path: &Path) -> Vec<String> {
 }
 
 fn normalize_skill_name(dir_name: &str) -> String {
-    let mut name = dir_name.to_lowercase();
-    // brainstorming -> brainstorm
-    if name.ends_with("ing") {
-        name = name[..name.len() - 3].to_string();
-    }
-    // writing-plans -> writing-plan
-    if name.ends_with('s') && !name.ends_with("ss") {
-        name = name[..name.len() - 1].to_string();
-    }
-    name = name.replace('_', "-");
-    if name == "test-driven-development" {
-        return "tdd".to_string();
-    }
-    name
+    dir_name.to_lowercase().replace('_', "-")
 }
 
 /// List all external skills as (prefixed_name, source_name) tuples.
@@ -356,14 +283,6 @@ pub fn list_all_steps(repo: Option<&Path>) -> StepListResult {
     (user_sorted, global_sorted, builtin_sorted, external_skills)
 }
 
-/// List all steps (flat list for simple display).
-pub fn list_steps(repo: &Path) -> Vec<String> {
-    let (user, global, builtin, _) = list_all_steps(Some(repo));
-    let mut all: Vec<String> = user.into_iter().chain(global).chain(builtin).collect();
-    all.sort();
-    all.dedup();
-    all
-}
 
 // =============================================================================
 // Flow discovery and step chain extraction
@@ -470,28 +389,3 @@ fn extract_step_names_from_value(value: &serde_yaml::Value) -> Vec<String> {
     names
 }
 
-pub fn list_flows(repo: &Path) -> Vec<String> {
-    list_flows_with_steps(repo)
-        .into_iter()
-        .map(|f| f.name)
-        .collect()
-}
-
-pub fn list_directions(repo: &Path) -> Vec<String> {
-    let mut directions = Vec::new();
-    let dir = repo.join(".lf/directions");
-
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().map(|e| e == "md").unwrap_or(false) {
-                if let Some(name) = path.file_stem() {
-                    directions.push(name.to_string_lossy().to_string());
-                }
-            }
-        }
-    }
-
-    directions.sort();
-    directions
-}

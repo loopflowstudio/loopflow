@@ -541,7 +541,7 @@ fn read_text_file(path: &Path) -> Option<String> {
     if bytes.is_empty() {
         return Some(String::new());
     }
-    if bytes.iter().any(|b| *b == 0) {
+    if bytes.contains(&0) {
         return None;
     }
     String::from_utf8(bytes).ok()

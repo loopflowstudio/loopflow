@@ -1,14 +1,13 @@
 use crate::commands::util::find_repo_root;
 use crate::discovery::{
-    builtin_descriptions, builtin_steps, get_step_info, list_all_steps, list_flows_with_steps,
-    BUILTIN_CATEGORIES,
+    builtin_descriptions, builtin_steps, is_step_interactive, list_all_steps,
+    list_flows_with_steps, BUILTIN_CATEGORIES,
 };
 use crate::output::Colors;
-use crate::Cli;
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 
-pub fn show_all(cli: &Cli) -> Result<()> {
+pub fn show_all() -> Result<()> {
     let repo_root = find_repo_root().ok();
     let colors = Colors::default();
 
@@ -91,11 +90,10 @@ pub fn show_all(cli: &Cli) -> Result<()> {
 
         for name in category_steps {
             let desc = descriptions.get(name).copied().unwrap_or("");
-            let info = repo_root
+            let is_interactive = repo_root
                 .as_ref()
-                .map(|r| get_step_info(r, name))
-                .unwrap_or_default();
-            let badge = if info.interactive {
+                .is_some_and(|r| is_step_interactive(r, name));
+            let badge = if is_interactive {
                 format!(
                     "  {yellow}interactive{reset}",
                     yellow = colors.yellow,
@@ -141,13 +139,10 @@ pub fn show_all(cli: &Cli) -> Result<()> {
             reset = colors.reset
         );
         for name in custom {
-            let info = repo_root
+            let is_interactive = repo_root
                 .as_ref()
-                .map(|r| get_step_info(r, name))
-                .unwrap_or_default();
-            let desc = info.produces.as_deref().unwrap_or("");
-            let desc = if desc.len() > 34 { &desc[..34] } else { desc };
-            let badge = if info.interactive {
+                .is_some_and(|r| is_step_interactive(r, name));
+            let badge = if is_interactive {
                 format!(
                     "  {yellow}interactive{reset}",
                     yellow = colors.yellow,
@@ -157,12 +152,10 @@ pub fn show_all(cli: &Cli) -> Result<()> {
                 String::new()
             };
             println!(
-                "  {bold}{name:<14}{reset} {dim}{desc:<34}{reset}{badge}",
+                "  {bold}{name:<14}{reset}{badge}",
                 bold = colors.bold,
                 name = name,
                 reset = colors.reset,
-                dim = colors.dim,
-                desc = desc,
                 badge = badge
             );
         }
@@ -179,13 +172,10 @@ pub fn show_all(cli: &Cli) -> Result<()> {
             reset = colors.reset
         );
         for name in &global_steps {
-            let info = repo_root
+            let is_interactive = repo_root
                 .as_ref()
-                .map(|r| get_step_info(r, name))
-                .unwrap_or_default();
-            let desc = info.produces.as_deref().unwrap_or("");
-            let desc = if desc.len() > 34 { &desc[..34] } else { desc };
-            let badge = if info.interactive {
+                .is_some_and(|r| is_step_interactive(r, name));
+            let badge = if is_interactive {
                 format!(
                     "  {yellow}interactive{reset}",
                     yellow = colors.yellow,
@@ -195,12 +185,10 @@ pub fn show_all(cli: &Cli) -> Result<()> {
                 String::new()
             };
             println!(
-                "  {bold}{name:<14}{reset} {dim}{desc:<34}{reset}{badge}",
+                "  {bold}{name:<14}{reset}{badge}",
                 bold = colors.bold,
                 name = name,
                 reset = colors.reset,
-                dim = colors.dim,
-                desc = desc,
                 badge = badge
             );
         }
@@ -253,14 +241,11 @@ pub fn show_all(cli: &Cli) -> Result<()> {
     // =========================================================================
     // Footer
     // =========================================================================
-    if cli.list {
-        println!(
-            "{dim}Built-ins work anywhere. Run lf <step> or lf <step>: args{reset}",
-            dim = colors.dim,
-            reset = colors.reset
-        );
-    }
+    println!(
+        "{dim}Built-ins work anywhere. Run lf <step> or lf <step>: args{reset}",
+        dim = colors.dim,
+        reset = colors.reset
+    );
 
     Ok(())
 }
-

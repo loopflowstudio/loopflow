@@ -6,6 +6,51 @@ from pathlib import Path
 from loopflow.lf.directions import load_direction_content
 
 
+def gather_lfdocs(
+    repo_root: Path,
+    wave: str | None = None,
+    exclude: list[str] | None = None,
+) -> list[tuple[Path, str]]:
+    """Gather lfdocs: scratch/, root .md, and roadmap/<wave>/.
+
+    This is the ephemeral documentation that provides project context.
+    """
+    docs: list[tuple[Path, str]] = []
+    seen: set[Path] = set()
+    exclude_set = set(exclude or [])
+
+    def add(path: Path, content: str) -> None:
+        if path not in seen:
+            seen.add(path)
+            docs.append((path, content))
+
+    # 1. scratch/ (design docs, ephemeral per-PR)
+    scratch_dir = repo_root / "scratch"
+    if scratch_dir.is_dir():
+        for path in sorted(scratch_dir.rglob("*.md")):
+            if path.is_file():
+                add(path, path.read_text())
+
+    # 2. roadmap/<wave>/ (if wave is set)
+    if wave:
+        wave_dir = repo_root / "roadmap" / wave
+        if wave_dir.is_dir():
+            # README first, then numbered stages, then rest
+            readme = wave_dir / "README.md"
+            if readme.exists():
+                add(readme, readme.read_text())
+            for path in sorted(wave_dir.glob("*.md")):
+                if path.is_file() and path.name != "README.md":
+                    add(path, path.read_text())
+
+    # 3. Root .md files
+    for path in sorted(repo_root.glob("*.md")):
+        if path.is_file() and path.name not in exclude_set:
+            add(path, path.read_text())
+
+    return docs
+
+
 def gather_design_docs(repo_root: Path) -> list[tuple[Path, str]]:
     """Gather design docs from scratch/ for prompt context."""
     design_dir = repo_root / "scratch"

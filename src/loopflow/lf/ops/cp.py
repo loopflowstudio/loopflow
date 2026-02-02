@@ -1,45 +1,42 @@
 """Copy context to clipboard."""
 
+import subprocess
 from pathlib import Path
 from typing import Optional
 
 import typer
 
 from loopflow.lf.config import load_config
-from loopflow.lf.context import (
-    ContextConfig,
-    DiffMode,
-    FilesetConfig,
-    PromptComponents,
-    find_worktree_root,
-    gather_prompt_components,
-)
+from loopflow.lf.context import find_worktree_root
+from loopflow.lf.design import gather_lfdocs
+from loopflow.lf.files import gather_files
+from loopflow.lf.wave import determine_wave
 from loopflow.lf.output import copy_to_clipboard, warn_if_context_too_large
-from loopflow.lf.tokens import analyze_components
+from loopflow.lf.tokens import TokenTree, count_tokens
 
 
-def _format_files_raw(components: PromptComponents) -> str:
-    """Format file content with <lf:file> tags but no instructional prompts."""
-    all_files = list(components.docs) + list(components.diff_files)
+def _gather_diff_file_paths(repo_root: Path) -> list[str]:
+    """Get paths of files changed on this branch vs main."""
+    result = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    branch = result.stdout.strip()
+    if not branch or branch == "main":
+        return []
 
-    if not all_files and not components.diff and not components.clipboard:
-        return ""
+    result = subprocess.run(
+        ["git", "diff", "--name-only", "origin/main...HEAD"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return []
 
-    parts = []
-    for file_path, content in all_files:
-        relative = file_path.relative_to(components.repo_root)
-        parts.append(f'<lf:file path="{relative}">\n{content}\n</lf:file>')
-
-    # Raw diff (if using diff mode instead of files mode)
-    if components.diff:
-        parts.append(f"<lf:diff>\n{components.diff}\n</lf:diff>")
-
-    # Clipboard text
-    if components.clipboard and components.clipboard.text:
-        parts.append(f"<lf:clipboard>\n{components.clipboard.text}\n</lf:clipboard>")
-
-    body = "\n\n".join(parts)
-    return f"<lf:files>\n{body}\n</lf:files>"
+    return [line for line in result.stdout.strip().split("\n") if line and (repo_root / line).exists()]
 
 
 def register_commands(app: typer.Typer) -> None:
@@ -56,11 +53,8 @@ def register_commands(app: typer.Typer) -> None:
         clipboard: bool = typer.Option(
             False, "-c", "-C", "--clipboard", help="Include clipboard content"
         ),
-        docs: Optional[bool] = typer.Option(
-            None, "--lfdocs/--no-lfdocs", help="Include reports/, roadmap/, scratch/, and .md files"
-        ),
-        diff_mode: Optional[str] = typer.Option(
-            None, "--diff-mode", help="How to include branch changes: files, diff, or none"
+        lfdocs: Optional[bool] = typer.Option(
+            None, "--lfdocs/--no-lfdocs", help="Include scratch/, root .md, and roadmap/<wave>/"
         ),
     ):
         """Copy file context to clipboard for use with web clients."""
@@ -71,51 +65,56 @@ def register_commands(app: typer.Typer) -> None:
         config = load_config(repo_root) if (repo_root / ".lf" / "config.yaml").exists() else None
 
         # Merge positional paths and config context
-        all_context = list(paths or [])
+        all_paths = list(paths or [])
         if config and config.context:
-            all_context.extend(config.context)
+            all_paths.extend(config.context)
+
+        # If no paths specified, use branch diff files
+        if not all_paths:
+            all_paths = _gather_diff_file_paths(repo_root)
 
         # Merge exclude patterns
         exclude_patterns = list(exclude or [])
         if config and config.exclude:
             exclude_patterns.extend(config.exclude)
 
-        # Resolve flags (CLI overrides config)
-        include_docs = docs if docs is not None else (config.lfdocs if config else True)
+        # Resolve lfdocs flag (CLI overrides config)
+        include_lfdocs = lfdocs if lfdocs is not None else (config.lfdocs if config else True)
 
-        # Resolve diff_mode: CLI > config > default
-        resolved_diff_mode = DiffMode.FILES  # default
-        if diff_mode is not None:
-            resolved_diff_mode = DiffMode(diff_mode)
-        elif config and not config.diff_files:
-            resolved_diff_mode = DiffMode.NONE
-        elif config and config.diff:
-            resolved_diff_mode = DiffMode.DIFF
+        # Gather files from paths
+        result = gather_files(all_paths, repo_root, exclude_patterns)
+        files: list[tuple[Path, str]] = list(result.text_files)
 
-        components = gather_prompt_components(
-            repo_root,
-            step=None,
-            run_mode=None,
-            context_config=ContextConfig(
-                diff_mode=resolved_diff_mode,
-                files=FilesetConfig(
-                    paths=list(all_context) if all_context else [],
-                    exclude=list(exclude_patterns) if exclude_patterns else [],
-                ),
-                lfdocs=False,  # Never include loopflow docs for raw copy
-                clipboard=clipboard,
-            ),
-            config=config,
-        )
+        # Add lfdocs if enabled: scratch/, roadmap/<wave>/, root .md
+        if include_lfdocs:
+            wave_ctx = determine_wave(repo_root)
+            wave_name = wave_ctx.name if wave_ctx else None
+            seen = {p for p, _ in files}
+            for path, content in gather_lfdocs(repo_root, wave=wave_name):
+                if path not in seen:
+                    seen.add(path)
+                    files.append((path, content))
 
-        # Apply docs flag
-        if not include_docs:
-            components.docs = []
+        # Format output
+        parts = []
+        for file_path, content in files:
+            relative = file_path.relative_to(repo_root)
+            parts.append(f'<lf:file path="{relative}">\n{content}\n</lf:file>')
 
-        output = _format_files_raw(components)
+        # TODO: clipboard support if needed
+        body = "\n\n".join(parts)
+        output = f"<lf:files>\n{body}\n</lf:files>" if parts else ""
+
         copy_to_clipboard(output)
 
-        tree = analyze_components(components)
+        # Build token tree for display
+        tree = TokenTree()
+        for file_path, content in files:
+            tokens = count_tokens(content)
+            rel = file_path.relative_to(repo_root)
+            path_parts = list(rel.parts[:-1])
+            tree.add("files", rel.name, tokens, path=path_parts)
+
         typer.echo(tree.format())
         warn_if_context_too_large(tree)
         typer.echo("\nCopied to clipboard.")

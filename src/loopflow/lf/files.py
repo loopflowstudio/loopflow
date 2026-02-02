@@ -221,43 +221,6 @@ def _is_ignored(
     return False
 
 
-def _gather_docs(
-    path: Path,
-    repo_root: Path,
-    excluded_paths: set[Path] | None,
-) -> list[tuple[Path, str]]:
-    """Gather .md files from path up to repo root.
-
-    If path is a file, starts from its parent directory.
-    Returns docs in root-to-leaf order, sorted alphabetically within each dir.
-    """
-    docs_by_dir: list[list[tuple[Path, str]]] = []
-    current = path.parent if path.is_file() else path
-
-    while current >= repo_root:
-        dir_docs = []
-        for md_file in sorted(current.glob("*.md")):
-            if md_file.is_file() and not _is_ignored(md_file, repo_root, excluded_paths):
-                dir_docs.append((md_file, md_file.read_text()))
-        if dir_docs:
-            docs_by_dir.append(dir_docs)
-        current = current.parent
-
-    # Reverse directory order (root first), flatten
-    result = []
-    for dir_docs in reversed(docs_by_dir):
-        result.extend(dir_docs)
-    return result
-
-
-def gather_docs(
-    path: Path,
-    repo_root: Path,
-    exclude: Optional[list[str]] = None,
-) -> list[tuple[Path, str]]:
-    excluded_paths = _compile_exclude_patterns(exclude, repo_root) if exclude else None
-    return _gather_docs(path, repo_root, excluded_paths)
-
 
 def _gather_file(
     path: Path,
@@ -300,44 +263,32 @@ def _expand_path(path_str: str, repo_root: Path) -> list[Path]:
 
 
 def gather_files(
-    paths: list[str], repo_root: Path, exclude: Optional[list[str]] = None
+    paths: list[str],
+    repo_root: Path,
+    exclude: Optional[list[str]] = None,
 ) -> GatherResult:
-    """Gather files and their parent READMEs.
+    """Gather files from paths.
 
     Returns GatherResult with text files (path, content) and image file paths.
-    Images are tracked separately since they can't be embedded in text prompts.
     """
     seen: set[Path] = set()
     text_files: list[tuple[Path, str]] = []
     image_files: list[Path] = []
 
-    # Pre-compile exclude patterns once for the entire gather operation
     excluded_paths = _compile_exclude_patterns(exclude, repo_root) if exclude else None
 
     for path_str in paths:
-        expanded = _expand_path(path_str, repo_root)
-
-        for path in expanded:
+        for path in _expand_path(path_str, repo_root):
             if path in seen:
                 continue
 
-            # Check if this is an image
-            if (
-                path.is_file()
-                and is_image(path)
-                and not _is_ignored(path, repo_root, excluded_paths)
-            ):
+            # Images tracked separately
+            if path.is_file() and is_image(path) and not _is_ignored(path, repo_root, excluded_paths):
                 seen.add(path)
                 image_files.append(path)
                 continue
 
-            # Gather parent documentation first
-            for doc_path, content in _gather_docs(path, repo_root, excluded_paths):
-                if doc_path not in seen:
-                    seen.add(doc_path)
-                    text_files.append((doc_path, content))
-
-            # Gather the file itself (skips binary including images)
+            # Gather the file (skips binary)
             file_result = _gather_file(path, repo_root, excluded_paths)
             if file_result and file_result[0] not in seen:
                 seen.add(file_result[0])

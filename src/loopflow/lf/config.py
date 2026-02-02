@@ -120,7 +120,7 @@ class Config(BaseModel):
     ide: IdeConfig = Field(default_factory=IdeConfig)
     interactive: list[str] = Field(default_factory=list)  # Tasks that default to interactive
     include_loopflow_doc: bool = True  # Include bundled LOOPFLOW.md in prompts
-    lfdocs: bool = True  # Include reports/, roadmap/, scratch/, and root .md files
+    lfdocs: bool = True  # Include scratch/, root .md, and roadmap/<wave>/
     diff: bool = False  # Include raw branch diff against main
     diff_files: bool = True  # Include full content of files touched by branch
     paste: bool = False  # Include clipboard content by default

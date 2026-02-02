@@ -103,7 +103,9 @@ def register_commands(app: typer.Typer) -> None:
             relative = file_path.relative_to(repo_root)
             parts.append(f'<lf:file path="{relative}">\n{content}\n</lf:file>')
 
-        # TODO: clipboard support if needed
+        # Note: clipboard flag defined for interface consistency with `lf step`
+        # but not implemented - clipboard images require additional encoding work
+        _ = clipboard  # unused, acknowledged
         body = "\n\n".join(parts)
         output = f"<lf:files>\n{body}\n</lf:files>" if parts else ""
 

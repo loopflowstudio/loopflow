@@ -10,12 +10,36 @@ from loopflow.lf.context import (
     ContextConfig,
     DiffMode,
     FilesetConfig,
+    PromptComponents,
     find_worktree_root,
-    format_prompt,
     gather_prompt_components,
 )
 from loopflow.lf.output import copy_to_clipboard, warn_if_context_too_large
 from loopflow.lf.tokens import analyze_components
+
+
+def _format_files_raw(components: PromptComponents) -> str:
+    """Format file content with <lf:file> tags but no instructional prompts."""
+    all_files = list(components.docs) + list(components.diff_files)
+
+    if not all_files and not components.diff and not components.clipboard:
+        return ""
+
+    parts = []
+    for file_path, content in all_files:
+        relative = file_path.relative_to(components.repo_root)
+        parts.append(f'<lf:file path="{relative}">\n{content}\n</lf:file>')
+
+    # Raw diff (if using diff mode instead of files mode)
+    if components.diff:
+        parts.append(f"<lf:diff>\n{components.diff}\n</lf:diff>")
+
+    # Clipboard text
+    if components.clipboard and components.clipboard.text:
+        parts.append(f"<lf:clipboard>\n{components.clipboard.text}\n</lf:clipboard>")
+
+    body = "\n\n".join(parts)
+    return f"<lf:files>\n{body}\n</lf:files>"
 
 
 def register_commands(app: typer.Typer) -> None:
@@ -78,7 +102,7 @@ def register_commands(app: typer.Typer) -> None:
                     paths=list(all_context) if all_context else [],
                     exclude=list(exclude_patterns) if exclude_patterns else [],
                 ),
-                lfdocs=config.include_loopflow_doc if config else True,
+                lfdocs=False,  # Never include loopflow docs for raw copy
                 clipboard=clipboard,
             ),
             config=config,
@@ -88,8 +112,8 @@ def register_commands(app: typer.Typer) -> None:
         if not include_docs:
             components.docs = []
 
-        prompt = format_prompt(components)
-        copy_to_clipboard(prompt)
+        output = _format_files_raw(components)
+        copy_to_clipboard(output)
 
         tree = analyze_components(components)
         typer.echo(tree.format())

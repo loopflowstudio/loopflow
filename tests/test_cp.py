@@ -105,3 +105,25 @@ def test_cp_positional_args_as_context(temp_repo, monkeypatch):
     copied_text = mock_copy.call_args[0][0]
     assert "print('main')" in copied_text
     assert "print('test')" in copied_text
+
+
+def test_cp_outputs_files_without_instructional_prompts(temp_repo, monkeypatch):
+    """cp outputs file content with lf:file tags but no instructional text."""
+    (temp_repo / "main.py").write_text("print('hello')\n")
+    monkeypatch.chdir(temp_repo)
+    runner = CliRunner()
+
+    with patch("loopflow.lf.ops.cp.copy_to_clipboard") as mock_copy:
+        result = runner.invoke(app, ["ops", "cp", "main.py"])
+
+    assert result.exit_code == 0
+    copied_text = mock_copy.call_args[0][0]
+    # Should have file content with lf:file tags
+    assert "print('hello')" in copied_text
+    assert "<lf:files>" in copied_text
+    assert '<lf:file path="main.py">' in copied_text
+    # Should NOT have instructional wrapper content
+    assert "<lf:loopflow>" not in copied_text
+    assert "<lf:docs>" not in copied_text
+    assert "Repository documentation" not in copied_text
+    assert "Follow STYLE carefully" not in copied_text

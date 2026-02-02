@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 from loopflow.lf.naming import (
     MAGICAL,
     MUSICAL,
+    _remove_doubled_prefix,
     extract_iteration_suffix,
     generate_next_branch,
     generate_word_pair,
@@ -148,3 +149,34 @@ def test_extract_iteration_suffix_no_suffix():
 def test_extract_iteration_suffix_invalid_words():
     """Return None if words aren't magical-musical."""
     assert extract_iteration_suffix("rust.20260127_1234.foo-bar") is None
+
+
+def test_remove_doubled_prefix_single_segment():
+    """Remove doubled single segment prefix."""
+    assert _remove_doubled_prefix("foo.foo") == "foo"
+    assert _remove_doubled_prefix("foo.foo.bar") == "foo.bar"
+
+
+def test_remove_doubled_prefix_multi_segment():
+    """Remove doubled multi-segment prefix."""
+    assert _remove_doubled_prefix("jack-heart.concerto.jack-heart.concerto") == "jack-heart.concerto"
+    assert _remove_doubled_prefix("foo.bar.foo.bar.baz") == "foo.bar.baz"
+
+
+def test_remove_doubled_prefix_no_doubling():
+    """Leave non-doubled strings unchanged."""
+    assert _remove_doubled_prefix("foo.bar") == "foo.bar"
+    assert _remove_doubled_prefix("foo") == "foo"
+    assert _remove_doubled_prefix("foo.bar.baz") == "foo.bar.baz"
+
+
+def test_parse_branch_base_removes_doubled_prefix():
+    """Branch with doubled wave name gets deduplicated."""
+    result = parse_branch_base("jack-heart.concerto.jack-heart.concerto.20260130_2249")
+    assert result == "jack-heart.concerto"
+
+
+def test_parse_branch_base_removes_doubled_prefix_with_word_pair():
+    """Branch with doubled wave name and word pair gets deduplicated."""
+    result = parse_branch_base("foo.bar.foo.bar.20260130_2249.nova-sonata")
+    assert result == "foo.bar"

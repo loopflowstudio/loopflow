@@ -121,10 +121,31 @@ def _is_word_pair(s: str) -> bool:
     return word1 in MAGICAL and word2 in MUSICAL
 
 
+def _remove_doubled_prefix(s: str) -> str:
+    """Remove doubled prefix from a dot-separated string.
+
+    Examples:
+        'jack-heart.concerto.jack-heart.concerto' → 'jack-heart.concerto'
+        'foo.bar.foo.bar.baz' → 'foo.bar.baz'
+        'foo.bar' → 'foo.bar'
+    """
+    parts = s.split(".")
+    n = len(parts)
+    # Check for doubled prefix of length 1, 2, 3, etc.
+    for prefix_len in range(1, n // 2 + 1):
+        prefix = parts[:prefix_len]
+        next_segment = parts[prefix_len : prefix_len * 2]
+        if prefix == next_segment:
+            # Found a doubled prefix, remove it
+            return ".".join(parts[prefix_len:])
+    return s
+
+
 def parse_branch_base(branch: str) -> str:
     """Extract base branch name (wave name) for next iteration.
 
     Strips suffixes: .main, .timestamp.words, or .timestamp (recursively)
+    Also removes any doubled wave name prefix.
 
     Examples:
         'foo.main' → 'foo'
@@ -132,6 +153,7 @@ def parse_branch_base(branch: str) -> str:
         'foo.20260127_2204' → 'foo'
         'foo.20260127_2204.20260127_2205.wisp-forte' → 'foo'
         'foo' → 'foo'
+        'foo.bar.foo.bar.20260127_2204' → 'foo.bar'
     """
     if branch.endswith(".main"):
         return branch[:-5]
@@ -142,13 +164,15 @@ def parse_branch_base(branch: str) -> str:
         maybe_timestamp = parts[-2]
         if _is_word_pair(maybe_words) and _is_timestamp(maybe_timestamp):
             # Recursively strip in case of nested timestamps
-            return parse_branch_base(".".join(parts[:-2]))
+            result = parse_branch_base(".".join(parts[:-2]))
+            return _remove_doubled_prefix(result)
 
     # Also strip trailing timestamp without word pair (from branch naming schema)
     if len(parts) >= 2 and _is_timestamp(parts[-1]):
-        return ".".join(parts[:-1])
+        result = ".".join(parts[:-1])
+        return _remove_doubled_prefix(result)
 
-    return branch
+    return _remove_doubled_prefix(branch)
 
 
 def extract_iteration_suffix(branch: str) -> str | None:

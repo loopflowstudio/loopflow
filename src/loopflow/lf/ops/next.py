@@ -12,6 +12,7 @@ from loopflow.lf.messages import generate_pr_message
 from loopflow.lf.naming import (
     _is_timestamp,
     _is_word_pair,
+    _remove_doubled_prefix,
     generate_next_branch,
     generate_timestamp,
     generate_word_pair,
@@ -190,6 +191,9 @@ def _preserve_worktree(repo_root: Path, branch: str, wave_name: str) -> Path | N
         base_part = ".".join(parts[:-1])
     else:
         base_part = worktree_suffix_part
+
+    # Remove any doubled wave name prefix (fixes bugs where path got corrupted)
+    base_part = _remove_doubled_prefix(base_part)
 
     # Generate new suffix and build path
     new_suffix = f"{generate_timestamp()}.{generate_word_pair()}"

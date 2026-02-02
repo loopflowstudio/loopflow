@@ -15,6 +15,7 @@ from typing import Literal
 from croniter import croniter
 
 from loopflow.lf.context import find_worktree_root
+from loopflow.lf.messages import generate_pr_message
 from loopflow.lf.naming import generate_next_branch, generate_word_pair
 from loopflow.lf.worktrees import WorktreeError, get_path
 from loopflow.lfd.db import _get_db
@@ -1023,8 +1024,6 @@ def collapse_prs(wave_id: str) -> CollapsePRsResult:
         return CollapsePRsResult(ok=False, error=f"Could not push: {result.stderr}")
 
     # Generate PR description using lf toolchain
-    from loopflow.lf.messages import generate_pr_message
-
     try:
         pr_message = generate_pr_message(repo)
         title = pr_message.title

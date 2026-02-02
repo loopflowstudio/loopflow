@@ -253,7 +253,7 @@ def test_preserve_worktree_handles_existing_path_collision(tmp_path):
 
 
 def test_preserve_worktree_with_doubled_wave_name(tmp_path):
-    """When worktree path has different structure than branch, preserve the actual structure."""
+    """When worktree path has doubled wave name, deduplicate it."""
     main_repo = tmp_path / "loopflow"
     main_repo.mkdir()
     # Worktree has wave name doubled (from a previous bug or manual creation)
@@ -271,10 +271,10 @@ def test_preserve_worktree_with_doubled_wave_name(tmp_path):
                         wave_name="jack-heart.rust",
                     )
 
-    # Should preserve the doubled structure and just change suffix
+    # Should deduplicate the doubled wave name
     assert result is not None
     assert result != worktree  # Different from current
-    # The doubled wave name should be preserved
-    assert "jack-heart.rust.jack-heart.rust" in result.name
-    # Should have new suffix
-    assert "20260131_1200.echo-melody" in result.name
+    # The doubled wave name should be deduplicated (only one occurrence)
+    assert result.name == "loopflow.jack-heart.rust.20260131_1200.echo-melody"
+    # Should NOT have the doubled structure
+    assert "jack-heart.rust.jack-heart.rust" not in result.name

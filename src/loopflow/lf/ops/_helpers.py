@@ -68,7 +68,7 @@ def run_lint(repo_root: Path) -> bool:
     else:
         typer.echo("Running lint...")
 
-    agent_result = subprocess.run(["lf", "lint", "-a"], cwd=repo_root)
+    agent_result = subprocess.run(["lf", "lint", "-b"], cwd=repo_root)
     return agent_result.returncode == 0
 
 

@@ -720,7 +720,6 @@ def _load_loopflow_doc() -> str:
     return resources.files("loopflow").joinpath("LOOPFLOW.md").read_text()
 
 
-
 def _trigger_background_refresh(repo_root: Path) -> None:
     """Spawn background process to refresh stale summaries.
 

@@ -221,7 +221,6 @@ def _is_ignored(
     return False
 
 
-
 def _gather_file(
     path: Path,
     repo_root: Path,

@@ -37,8 +37,7 @@ def _gather_diff_file_paths(repo_root: Path) -> list[str]:
         return []
 
     return [
-        line for line in result.stdout.strip().split("\n")
-        if line and (repo_root / line).exists()
+        line for line in result.stdout.strip().split("\n") if line and (repo_root / line).exists()
     ]
 
 

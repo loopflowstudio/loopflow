@@ -1,0 +1,20 @@
+[package]
+name = "lf"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "lf"
+path = "src/main.rs"
+
+[dependencies]
+loopflow-engine = { path = "../loopflow-engine" }
+clap = { version = "4", features = ["derive", "env"] }
+anyhow = "1"
+thiserror = "1"
+atty = "0.2"
+dirs = "5"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"

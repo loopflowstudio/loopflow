@@ -31,18 +31,13 @@ struct WaveSidebar: View {
     /// Waves with activity in the last hour, excluding those already in blocked/PR sections.
     private var recentActivityWaves: [Wave] {
         let hourAgo = Date().addingTimeInterval(-3600)
-        return repoState.waves
+        return Array(repoState.waves
             .filter { wave in
                 guard let lastActivity = wave.lastActivityAt else { return false }
-                return lastActivity > hourAgo
-            }
-            .filter { wave in
-                // Exclude waves already in blocked/PR sections
-                wave.status != .error && pendingPR(for: wave) == nil
+                return lastActivity > hourAgo && wave.status != .error && pendingPR(for: wave) == nil
             }
             .sorted { ($0.lastActivityAt ?? .distantPast) > ($1.lastActivityAt ?? .distantPast) }
-            .prefix(5)
-            .map { $0 }
+            .prefix(5))
     }
 
     /// IDs of waves shown in Recent Activity (to avoid duplication).
@@ -320,7 +315,7 @@ struct WaveSidebar: View {
 
                 if !recentActivityWaves.isEmpty {
                     sectionHeader("Recent Activity", icon: "clock.arrow.circlepath", color: .cyan, count: recentActivityWaves.count)
-                    waveRows(Array(recentActivityWaves))
+                    waveRows(recentActivityWaves)
                 }
 
                 if !activeWaves.isEmpty {

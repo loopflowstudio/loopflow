@@ -1254,6 +1254,7 @@ dependencies = [
  "clap",
  "dirs",
  "loopflow-engine",
+ "serde_yaml",
  "tempfile",
  "thiserror",
  "uuid",

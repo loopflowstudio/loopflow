@@ -27,7 +27,7 @@ Complete the migration to Rust. Single-binary distribution, local-only operation
 
 | Doc | Scope |
 |-----|-------|
-| [01-lf-cli](01-lf-cli.md) | Rust CLI replacing Python lf |
+| [01-lf-ops-parity](01-lf-ops-parity.md) | Full ops command parity (worktrees, stacking, auto-merge) |
 | [02-lfd-primary](02-lfd-primary.md) | Wire lfd as primary execution path |
 | [03-service](03-service.md) | launchd/systemd integration |
 | [04-distribution](04-distribution.md) | Binary distribution |

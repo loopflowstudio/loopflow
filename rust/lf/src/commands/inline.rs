@@ -73,7 +73,7 @@ pub fn run(prompt_parts: &[String], cli: &Cli) -> Result<()> {
         stream: !is_interactive,
         skip_permissions: cli.yolo || config.yolo,
         model_variant: variant,
-        chrome: cli.chrome.unwrap_or(config.chrome),
+        chrome: cli.chrome_setting().unwrap_or(config.chrome),
         cwd: Some(repo_root),
     };
 

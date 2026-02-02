@@ -7,24 +7,33 @@ use loopflow_engine::{
 };
 
 pub fn run(step_name: &str, step_args: &[String], cli: &Cli) -> Result<()> {
+    eprintln!("[debug] running step: {}", step_name);
     let repo_root = find_repo_root()?;
+    eprintln!("[debug] repo_root: {:?}", repo_root);
     let config = load_config_or_default(Some(&repo_root));
+    eprintln!("[debug] config loaded");
 
     let step = crate::discovery::discover_step(&repo_root, step_name)?;
+    eprintln!("[debug] step found: {}", step.name);
     let mut directions = config.direction.clone().unwrap_or_default();
     directions.extend(cli.direction.clone());
+    eprintln!("[debug] directions: {:?}", directions);
 
     let is_interactive = cli.interactive
         || (!cli.batch
             && (step.interactive.unwrap_or(false) || config.interactive.contains(&step.name)));
+    eprintln!("[debug] is_interactive: {}", is_interactive);
 
     let area = if !cli.area.is_empty() {
         cli.area.first().map(|p| p.to_string_lossy().to_string())
     } else {
         config.area.clone()
     };
+    eprintln!("[debug] area: {:?}", area);
 
     let include_clipboard = cli.clipboard || config.paste;
+    eprintln!("[debug] clipboard: {}", include_clipboard);
+    eprintln!("[debug] calling gather_context...");
 
     let components = gather_context(&GatherContextOpts {
         repo_root: repo_root.clone(),
@@ -69,7 +78,7 @@ pub fn run(step_name: &str, step_args: &[String], cli: &Cli) -> Result<()> {
         stream: !is_interactive,
         skip_permissions: cli.yolo || config.yolo,
         model_variant: variant,
-        chrome: cli.chrome.unwrap_or(config.chrome),
+        chrome: cli.chrome_setting().unwrap_or(config.chrome),
         cwd: Some(repo_root),
     };
 
@@ -114,7 +123,7 @@ pub fn run_interactive(cli: &Cli) -> Result<()> {
         stream: false,
         skip_permissions: cli.yolo || config.yolo,
         model_variant: variant,
-        chrome: cli.chrome.unwrap_or(config.chrome),
+        chrome: cli.chrome_setting().unwrap_or(config.chrome),
         cwd: Some(repo_root),
     };
 

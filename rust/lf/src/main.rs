@@ -56,11 +56,28 @@ pub struct Cli {
 
     /// Enable Chrome integration (Claude)
     #[arg(long)]
-    chrome: Option<bool>,
+    chrome: bool,
+
+    /// Disable Chrome integration (Claude)
+    #[arg(long = "no-chrome", overrides_with = "chrome")]
+    no_chrome: bool,
 
     /// Wave name for roadmap scoping
     #[arg(short = 'w', long = "wave", short_alias = 'W')]
     wave: Option<String>,
+}
+
+impl Cli {
+    /// Get chrome setting: Some(true) if --chrome, Some(false) if --no-chrome, None if neither.
+    pub fn chrome_setting(&self) -> Option<bool> {
+        if self.chrome {
+            Some(true)
+        } else if self.no_chrome {
+            Some(false)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]

@@ -68,15 +68,49 @@ pub fn load_flow(name: &str, repo: &Path) -> Result<Flow, LoadError> {
 }
 
 pub fn load_step(name: &str, repo: &Path) -> Result<Step, LoadError> {
-    let step_path = find_step_path(name, repo)?;
-    let content = fs::read_to_string(&step_path)?;
-    Ok(Step {
-        name: name.to_string(),
-        model: None,
-        directions: Vec::new(),
-        interactive: None,
-        content: Some(content),
-    })
+    // Try file-based lookup first (repo-local, then global)
+    if let Ok(step_path) = find_step_path(name, repo) {
+        let content = fs::read_to_string(&step_path)?;
+        return Ok(Step {
+            name: name.to_string(),
+            model: None,
+            directions: Vec::new(),
+            interactive: parse_interactive_from_frontmatter(&content),
+            content: Some(content),
+        });
+    }
+
+    // Fall back to built-in steps
+    if let Some(content) = crate::builtins::get_builtin_step(name) {
+        return Ok(Step {
+            name: name.to_string(),
+            model: None,
+            directions: Vec::new(),
+            interactive: parse_interactive_from_frontmatter(content),
+            content: Some(content.to_string()),
+        });
+    }
+
+    Err(LoadError::StepNotFound(name.to_string()))
+}
+
+/// Parse the `interactive` field from YAML frontmatter.
+fn parse_interactive_from_frontmatter(content: &str) -> Option<bool> {
+    if !content.starts_with("---") {
+        return None;
+    }
+    let parts: Vec<&str> = content.splitn(3, "---").collect();
+    if parts.len() < 3 {
+        return None;
+    }
+    for line in parts[1].lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("interactive:") {
+            let val = rest.trim().to_lowercase();
+            return Some(val == "true" || val == "yes");
+        }
+    }
+    None
 }
 
 pub fn load_direction(name: &str, repo: &Path) -> Result<Direction, LoadError> {
@@ -104,15 +138,30 @@ fn find_flow_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
 }
 
 fn find_step_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
-    let candidates = [
+    // 1. Check repo-local paths
+    let repo_candidates = [
         repo.join(".lf/steps").join(format!("{name}.md")),
         repo.join(".claude/commands").join(format!("{name}.md")),
     ];
-    for path in candidates {
+    for path in repo_candidates {
         if path.exists() {
             return Ok(path);
         }
     }
+
+    // 2. Check global paths
+    if let Some(home) = home_dir() {
+        let global_candidates = [
+            home.join(".lf/steps").join(format!("{name}.md")),
+            home.join(".claude/commands").join(format!("{name}.md")),
+        ];
+        for path in global_candidates {
+            if path.exists() {
+                return Ok(path);
+            }
+        }
+    }
+
     Err(LoadError::StepNotFound(name.to_string()))
 }
 
@@ -310,4 +359,64 @@ fn parse_string_list(value: Option<&Value>) -> Vec<String> {
 
 fn default_loop_max_iterations() -> usize {
     100
+}
+
+/// Home directory for global lookups. Can be overridden for testing.
+fn home_dir() -> Option<PathBuf> {
+    dirs::home_dir()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn load_step_finds_repo_local_step() {
+        let tmp = TempDir::new().unwrap();
+        let steps_dir = tmp.path().join(".lf/steps");
+        fs::create_dir_all(&steps_dir).unwrap();
+        fs::write(steps_dir.join("mystep.md"), "# My Step\nDo the thing.").unwrap();
+
+        let step = load_step("mystep", tmp.path()).unwrap();
+        assert_eq!(step.name, "mystep");
+        assert!(step.content.unwrap().contains("Do the thing"));
+    }
+
+    #[test]
+    fn load_step_finds_builtin_step() {
+        // Builtin steps like "debug", "implement" should be available everywhere
+        let tmp = TempDir::new().unwrap();
+
+        let result = load_step("debug", tmp.path());
+        assert!(
+            result.is_ok(),
+            "builtin 'debug' step should be found: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn load_step_finds_all_builtins() {
+        let tmp = TempDir::new().unwrap();
+        let builtins = [
+            "debug",
+            "implement",
+            "design",
+            "review",
+            "iterate",
+            "polish",
+            "lint",
+        ];
+
+        for name in builtins {
+            let result = load_step(name, tmp.path());
+            assert!(
+                result.is_ok(),
+                "builtin '{}' step should be found: {:?}",
+                name,
+                result.err()
+            );
+        }
+    }
 }

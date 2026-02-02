@@ -1,89 +1,259 @@
 use crate::commands::util::find_repo_root;
+use crate::discovery::{
+    builtin_descriptions, builtin_steps, get_step_info, list_all_steps, list_flows_with_steps,
+    BUILTIN_CATEGORIES,
+};
 use crate::output::Colors;
 use crate::Cli;
 use anyhow::Result;
+use std::collections::{HashMap, HashSet};
 
 pub fn show_all(cli: &Cli) -> Result<()> {
-    let repo_root = find_repo_root()?;
+    let repo_root = find_repo_root().ok();
     let colors = Colors::default();
 
-    let steps = crate::discovery::list_steps(&repo_root);
-    let flows = crate::discovery::list_flows(&repo_root);
-    let directions = crate::discovery::list_directions(&repo_root);
+    let (user_steps, global_steps, builtin_only, external_skills) =
+        list_all_steps(repo_root.as_deref());
+    let user_step_set: HashSet<_> = user_steps.iter().cloned().collect();
+    let all_known_steps: HashSet<_> = user_steps
+        .iter()
+        .chain(global_steps.iter())
+        .chain(builtin_only.iter())
+        .cloned()
+        .collect();
 
-    println!(
-        "{bold}{cyan}STEPS{reset}",
-        bold = colors.bold,
-        cyan = colors.cyan,
-        reset = colors.reset
-    );
-    if steps.is_empty() {
-        println!(
-            "  {dim}(none){reset}",
-            dim = colors.dim,
-            reset = colors.reset
-        );
-    } else {
-        for name in steps {
+    let descriptions = builtin_descriptions();
+    let builtins = builtin_steps();
+
+    // =========================================================================
+    // FLOWS section
+    // =========================================================================
+    if let Some(ref repo) = repo_root {
+        let flows = list_flows_with_steps(repo);
+        if !flows.is_empty() {
             println!(
-                "  {bold}{name}{reset}",
+                "{cyan}{bold}FLOWS{reset}",
+                cyan = colors.cyan,
                 bold = colors.bold,
-                name = name,
                 reset = colors.reset
             );
+            for flow in flows {
+                let chain = flow
+                    .step_names
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(&format!(
+                        " {dim}→{reset} ",
+                        dim = colors.dim,
+                        reset = colors.reset
+                    ));
+                println!(
+                    "  {bold}{name:<14}{reset} {dim}{chain}{reset}",
+                    bold = colors.bold,
+                    name = flow.name,
+                    reset = colors.reset,
+                    dim = colors.dim,
+                    chain = chain
+                );
+            }
+            println!();
         }
     }
 
+    // =========================================================================
+    // STEPS section
+    // =========================================================================
+    println!(
+        "{cyan}{bold}STEPS{reset}",
+        cyan = colors.cyan,
+        bold = colors.bold,
+        reset = colors.reset
+    );
     println!();
-    println!(
-        "{bold}{cyan}FLOWS{reset}",
-        bold = colors.bold,
-        cyan = colors.cyan,
-        reset = colors.reset
-    );
-    if flows.is_empty() {
+
+    // Built-ins by category
+    for (category, step_names) in BUILTIN_CATEGORIES {
+        let category_steps: Vec<_> = step_names
+            .iter()
+            .filter(|t| all_known_steps.contains(**t))
+            .collect();
+        if category_steps.is_empty() {
+            continue;
+        }
+
         println!(
-            "  {dim}(none){reset}",
+            "{dim}{category}{reset}",
             dim = colors.dim,
+            category = category,
             reset = colors.reset
         );
-    } else {
-        for name in flows {
+
+        for name in category_steps {
+            let desc = descriptions.get(name).copied().unwrap_or("");
+            let info = repo_root
+                .as_ref()
+                .map(|r| get_step_info(r, name))
+                .unwrap_or_default();
+            let badge = if info.interactive {
+                format!(
+                    "  {yellow}interactive{reset}",
+                    yellow = colors.yellow,
+                    reset = colors.reset
+                )
+            } else {
+                String::new()
+            };
+            let custom_tag = if user_step_set.contains(*name) {
+                format!(
+                    " {dim}(customized){reset}",
+                    dim = colors.dim,
+                    reset = colors.reset
+                )
+            } else {
+                String::new()
+            };
             println!(
-                "  {bold}{name}{reset}",
+                "  {bold}{name:<14}{reset} {dim}{desc:<34}{reset}{badge}{custom_tag}",
                 bold = colors.bold,
                 name = name,
-                reset = colors.reset
+                reset = colors.reset,
+                dim = colors.dim,
+                desc = desc,
+                badge = badge,
+                custom_tag = custom_tag
             );
         }
-    }
-
-    println!();
-    println!(
-        "{bold}{cyan}DIRECTIONS{reset}",
-        bold = colors.bold,
-        cyan = colors.cyan,
-        reset = colors.reset
-    );
-    if directions.is_empty() {
-        println!(
-            "  {dim}(none){reset}",
-            dim = colors.dim,
-            reset = colors.reset
-        );
-    } else {
-        for name in directions {
-            println!(
-                "  {bold}{name}{reset}",
-                bold = colors.bold,
-                name = name,
-                reset = colors.reset
-            );
-        }
-    }
-
-    if cli.list {
         println!();
+    }
+
+    // =========================================================================
+    // Custom steps (user-defined, not overriding builtins)
+    // =========================================================================
+    let custom: Vec<_> = user_steps
+        .iter()
+        .filter(|t| !builtins.contains(*t))
+        .collect();
+    if !custom.is_empty() {
+        println!(
+            "{green}Custom{reset}",
+            green = colors.green,
+            reset = colors.reset
+        );
+        for name in custom {
+            let info = repo_root
+                .as_ref()
+                .map(|r| get_step_info(r, name))
+                .unwrap_or_default();
+            let desc = info.produces.as_deref().unwrap_or("");
+            let desc = if desc.len() > 34 { &desc[..34] } else { desc };
+            let badge = if info.interactive {
+                format!(
+                    "  {yellow}interactive{reset}",
+                    yellow = colors.yellow,
+                    reset = colors.reset
+                )
+            } else {
+                String::new()
+            };
+            println!(
+                "  {bold}{name:<14}{reset} {dim}{desc:<34}{reset}{badge}",
+                bold = colors.bold,
+                name = name,
+                reset = colors.reset,
+                dim = colors.dim,
+                desc = desc,
+                badge = badge
+            );
+        }
+        println!();
+    }
+
+    // =========================================================================
+    // Global steps
+    // =========================================================================
+    if !global_steps.is_empty() {
+        println!(
+            "{green}Global{reset}",
+            green = colors.green,
+            reset = colors.reset
+        );
+        for name in &global_steps {
+            let info = repo_root
+                .as_ref()
+                .map(|r| get_step_info(r, name))
+                .unwrap_or_default();
+            let desc = info.produces.as_deref().unwrap_or("");
+            let desc = if desc.len() > 34 { &desc[..34] } else { desc };
+            let badge = if info.interactive {
+                format!(
+                    "  {yellow}interactive{reset}",
+                    yellow = colors.yellow,
+                    reset = colors.reset
+                )
+            } else {
+                String::new()
+            };
+            println!(
+                "  {bold}{name:<14}{reset} {dim}{desc:<34}{reset}{badge}",
+                bold = colors.bold,
+                name = name,
+                reset = colors.reset,
+                dim = colors.dim,
+                desc = desc,
+                badge = badge
+            );
+        }
+        println!();
+    }
+
+    // =========================================================================
+    // EXTERNAL SKILLS section
+    // =========================================================================
+    if !external_skills.is_empty() {
+        // Group by source
+        let mut by_source: HashMap<String, Vec<String>> = HashMap::new();
+        for (prefixed_name, source_name) in external_skills {
+            by_source
+                .entry(source_name)
+                .or_default()
+                .push(prefixed_name);
+        }
+
+        println!(
+            "{cyan}{bold}EXTERNAL SKILLS{reset}",
+            cyan = colors.cyan,
+            bold = colors.bold,
+            reset = colors.reset
+        );
+        println!();
+
+        let mut sources: Vec<_> = by_source.into_iter().collect();
+        sources.sort_by(|a, b| a.0.cmp(&b.0));
+
+        for (source_name, skill_names) in sources {
+            println!(
+                "{dim}{source_name}{reset}",
+                dim = colors.dim,
+                source_name = source_name,
+                reset = colors.reset
+            );
+            for name in skill_names {
+                println!(
+                    "  {bold}{name:<20}{reset}",
+                    bold = colors.bold,
+                    name = name,
+                    reset = colors.reset
+                );
+            }
+            println!();
+        }
+    }
+
+    // =========================================================================
+    // Footer
+    // =========================================================================
+    if cli.list {
         println!(
             "{dim}Built-ins work anywhere. Run lf <step> or lf <step>: args{reset}",
             dim = colors.dim,

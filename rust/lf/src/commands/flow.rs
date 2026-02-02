@@ -53,7 +53,7 @@ pub fn run(
 
     let runner = FlowStepRunner {
         model,
-        chrome: cli.chrome.unwrap_or(config.chrome),
+        chrome: cli.chrome_setting().unwrap_or(config.chrome),
         yolo: cli.yolo || config.yolo,
         lfdocs: config.lfdocs,
         diff_files: config.diff_files,

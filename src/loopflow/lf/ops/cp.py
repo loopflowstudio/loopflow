@@ -1,44 +1,17 @@
 """Copy context to clipboard."""
 
-import subprocess
 from pathlib import Path
 from typing import Optional
 
 import typer
 
-from loopflow.lf.config import load_config
-from loopflow.lf.context import find_worktree_root
+from loopflow.lf.config import extend_list, load_config, resolve_flag
+from loopflow.lf.context import find_worktree_root, gather_diff_files
 from loopflow.lf.design import gather_lfdocs
-from loopflow.lf.files import gather_files
+from loopflow.lf.files import format_files_raw, gather_files
 from loopflow.lf.output import copy_to_clipboard, warn_if_context_too_large
 from loopflow.lf.tokens import TokenTree, count_tokens
 from loopflow.lf.wave import determine_wave
-
-
-def _gather_diff_file_paths(repo_root: Path) -> list[str]:
-    """Get paths of files changed on this branch vs main."""
-    result = subprocess.run(
-        ["git", "branch", "--show-current"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-    )
-    branch = result.stdout.strip()
-    if not branch or branch == "main":
-        return []
-
-    result = subprocess.run(
-        ["git", "diff", "--name-only", "origin/main...HEAD"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        return []
-
-    return [
-        line for line in result.stdout.strip().split("\n") if line and (repo_root / line).exists()
-    ]
 
 
 def register_commands(app: typer.Typer) -> None:
@@ -66,22 +39,12 @@ def register_commands(app: typer.Typer) -> None:
 
         config = load_config(repo_root) if (repo_root / ".lf" / "config.yaml").exists() else None
 
-        # Merge positional paths and config context
-        all_paths = list(paths or [])
-        if config and config.context:
-            all_paths.extend(config.context)
-
-        # If no paths specified, use branch diff files
+        all_paths = extend_list(paths, config.context if config else None)
         if not all_paths:
-            all_paths = _gather_diff_file_paths(repo_root)
+            all_paths = gather_diff_files(repo_root)
 
-        # Merge exclude patterns
-        exclude_patterns = list(exclude or [])
-        if config and config.exclude:
-            exclude_patterns.extend(config.exclude)
-
-        # Resolve lfdocs flag (CLI overrides config)
-        include_lfdocs = lfdocs if lfdocs is not None else (config.lfdocs if config else True)
+        exclude_patterns = extend_list(exclude, config.exclude if config else None)
+        include_lfdocs = resolve_flag(lfdocs, config.lfdocs if config else None, True)
 
         # Gather files from paths
         result = gather_files(all_paths, repo_root, exclude_patterns)
@@ -97,17 +60,11 @@ def register_commands(app: typer.Typer) -> None:
                     seen.add(path)
                     files.append((path, content))
 
-        # Format output
-        parts = []
-        for file_path, content in files:
-            relative = file_path.relative_to(repo_root)
-            parts.append(f'<lf:file path="{relative}">\n{content}\n</lf:file>')
-
         # Note: clipboard flag defined for interface consistency with `lf step`
         # but not implemented - clipboard images require additional encoding work
         _ = clipboard  # unused, acknowledged
-        body = "\n\n".join(parts)
-        output = f"<lf:files>\n{body}\n</lf:files>" if parts else ""
+
+        output = format_files_raw(files, repo_root)
 
         copy_to_clipboard(output)
 

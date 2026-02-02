@@ -11,6 +11,23 @@ from pydantic import BaseModel, Field, field_validator
 _ADDITIVE_KEYS = {"context", "exclude", "skill_sources", "summaries"}
 
 
+def resolve_flag(cli: bool | None, config_val: bool | None, default: bool) -> bool:
+    """Resolve boolean flag: CLI > config > default."""
+    if cli is not None:
+        return cli
+    if config_val is not None:
+        return config_val
+    return default
+
+
+def extend_list(base: list[str] | None, extension: list[str] | None) -> list[str]:
+    """Build list from base + extension."""
+    result = list(base or [])
+    if extension:
+        result.extend(extension)
+    return result
+
+
 @dataclass
 class AutopruneConfig:
     """Auto-prune configuration for lfd daemon."""

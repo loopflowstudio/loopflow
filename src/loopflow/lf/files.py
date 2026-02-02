@@ -297,8 +297,8 @@ def gather_files(
     return GatherResult(text_files=text_files, image_files=image_files)
 
 
-def format_files(files: list[tuple[Path, str]], repo_root: Path) -> str:
-    """Format files with unique delimiters for unambiguous parsing."""
+def format_files_raw(files: list[tuple[Path, str]], repo_root: Path) -> str:
+    """Format files as <lf:files> block without header."""
     if not files:
         return ""
 
@@ -308,8 +308,16 @@ def format_files(files: list[tuple[Path, str]], repo_root: Path) -> str:
         parts.append(f'<lf:file path="{relative}">\n{content}\n</lf:file>')
 
     body = "\n\n".join(parts)
+    return f"<lf:files>\n{body}\n</lf:files>"
+
+
+def format_files(files: list[tuple[Path, str]], repo_root: Path) -> str:
+    """Format files with header for prompt context."""
+    raw = format_files_raw(files, repo_root)
+    if not raw:
+        return ""
     header = "Reference files for this task. Includes parent documentation for context."
-    return f"{header}\n\n<lf:files>\n{body}\n</lf:files>"
+    return f"{header}\n\n{raw}"
 
 
 def format_image_references(images: list[Path], repo_root: Path) -> str:

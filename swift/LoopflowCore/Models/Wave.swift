@@ -73,6 +73,24 @@ public enum MergeMode: String, Sendable, Codable {
     case land
 }
 
+public enum WaitingReason: Sendable, Hashable {
+    case prLimitReached(open: Int, limit: Int)
+
+    public var description: String {
+        switch self {
+        case .prLimitReached(let open, let limit):
+            return "\(open)/\(limit) PRs open"
+        }
+    }
+
+    public var accessibilityDescription: String {
+        switch self {
+        case .prLimitReached(let open, let limit):
+            return "\(open) of \(limit) PRs open"
+        }
+    }
+}
+
 /// An interactive session running in the embedded terminal.
 public struct InteractiveSession: Sendable, Identifiable {
     public let id: String
@@ -162,6 +180,9 @@ public struct Wave: Sendable, Identifiable, Hashable {
     // Watch state
     public var lastMainSha: String?
 
+    // Waiting state
+    public var waitingReason: WaitingReason?
+
     public init(
         id: String,
         name: String = "",
@@ -192,7 +213,8 @@ public struct Wave: Sendable, Identifiable, Hashable {
         mergeMode: MergeMode = .pr,
         pid: Int? = nil,
         createdAt: Date = Date(),
-        lastMainSha: String? = nil
+        lastMainSha: String? = nil,
+        waitingReason: WaitingReason? = nil
     ) {
         self.id = id
         self.name = name
@@ -224,6 +246,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
         self.pid = pid
         self.createdAt = createdAt
         self.lastMainSha = lastMainSha
+        self.waitingReason = waitingReason
     }
 
     /// Check if wave has required config for running.

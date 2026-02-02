@@ -1762,3 +1762,70 @@ def test_metrics_increment_unknown_counter():
     # Should not raise
     metrics.increment("nonexistent_counter")
     metrics.increment("also_nonexistent", 100)
+
+
+# =============================================================================
+# GitHub remote URL parsing tests
+# =============================================================================
+
+
+def test_parse_github_remote_ssh():
+    """Parse SSH format GitHub remote URL."""
+    from loopflow.lfd.wave import _parse_github_remote
+
+    url = "git@github.com:owner/repo.git"
+    assert _parse_github_remote(url) == "owner/repo"
+
+
+def test_parse_github_remote_ssh_no_git_suffix():
+    """Parse SSH format without .git suffix."""
+    from loopflow.lfd.wave import _parse_github_remote
+
+    url = "git@github.com:owner/repo"
+    assert _parse_github_remote(url) == "owner/repo"
+
+
+def test_parse_github_remote_https():
+    """Parse HTTPS format GitHub remote URL."""
+    from loopflow.lfd.wave import _parse_github_remote
+
+    url = "https://github.com/owner/repo.git"
+    assert _parse_github_remote(url) == "owner/repo"
+
+
+def test_parse_github_remote_https_no_git_suffix():
+    """Parse HTTPS format without .git suffix."""
+    from loopflow.lfd.wave import _parse_github_remote
+
+    url = "https://github.com/owner/repo"
+    assert _parse_github_remote(url) == "owner/repo"
+
+
+def test_parse_github_remote_non_github():
+    """Non-GitHub URL returns None."""
+    from loopflow.lfd.wave import _parse_github_remote
+
+    assert _parse_github_remote("git@gitlab.com:owner/repo.git") is None
+    assert _parse_github_remote("https://bitbucket.org/owner/repo") is None
+
+
+def test_collapse_prs_result_model():
+    """CollapsePRsResult has expected fields."""
+    from loopflow.lfd.wave import CollapsePRsResult
+
+    # Success case
+    result = CollapsePRsResult(
+        ok=True,
+        new_pr_url="https://github.com/owner/repo/pull/100",
+        closed_prs=[1, 2, 3],
+    )
+    assert result.ok is True
+    assert result.new_pr_url == "https://github.com/owner/repo/pull/100"
+    assert result.closed_prs == [1, 2, 3]
+    assert result.error is None
+
+    # Error case
+    result = CollapsePRsResult(ok=False, error="Something went wrong")
+    assert result.ok is False
+    assert result.error == "Something went wrong"
+    assert result.new_pr_url is None

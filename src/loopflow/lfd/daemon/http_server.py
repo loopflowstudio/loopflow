@@ -37,6 +37,8 @@ from loopflow.lfd.protocol_v1 import (
 from loopflow.lfd.stimulus import create_stimulus, list_stimuli
 from loopflow.lfd.wave import (
     clone_wave,
+    collapse_prs,
+    count_outstanding,
     create_wave,
     delete_wave,
     get_wave,
@@ -325,6 +327,12 @@ def _wave_to_dict(wave, worktree_state: dict | None = None) -> dict:
         "created_at": wave.created_at.isoformat(),
     }
 
+    # Add waiting reason for blocked waves
+    if wave.status == WaveStatus.WAITING:
+        outstanding = count_outstanding(wave)
+        result["waiting_reason"] = "pr_limit_reached"
+        result["open_prs"] = outstanding
+
     # Enrich with worktree state if available
     if worktree_state:
         wt = worktree_state.get("working_tree", {})
@@ -603,6 +611,45 @@ async def stop_wave_by_id(wave_id: str):
             return LFDResponse(ok=True, result={"stopped": True})
         else:
             return LFDResponse(ok=False, error="Failed to stop wave")
+    except HTTPException:
+        raise
+    except Exception as e:
+        return LFDResponse(ok=False, error=str(e))
+
+
+@app.post("/waves/{wave_id}/collapse", response_model=LFDResponse)
+async def collapse_wave_prs(wave_id: str):
+    """Collapse all outstanding PRs for a wave into a single PR.
+
+    Combines multiple PRs into one, closes old PRs with a link to the new one,
+    and deletes old remote branches. Auto-resumes the wave if it was blocked.
+    """
+    try:
+        wave = get_wave(wave_id)
+        if not wave:
+            raise HTTPException(status_code=404, detail=f"Wave not found: {wave_id}")
+
+        # Run collapse in thread since it does blocking git/gh operations
+        result = await asyncio.to_thread(collapse_prs, wave_id)
+
+        if result.ok:
+            await _notify_event(
+                "wave.prs_collapsed",
+                {
+                    "wave_id": wave_id,
+                    "new_pr_url": result.new_pr_url,
+                    "closed_prs": result.closed_prs,
+                },
+            )
+            return LFDResponse(
+                ok=True,
+                result={
+                    "new_pr_url": result.new_pr_url,
+                    "closed_prs": result.closed_prs,
+                },
+            )
+        else:
+            return LFDResponse(ok=False, error=result.error)
     except HTTPException:
         raise
     except Exception as e:

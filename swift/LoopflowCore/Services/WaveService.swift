@@ -514,6 +514,39 @@ public struct WaveService: @unchecked Sendable {
         }
     }
 
+    /// Collapse all outstanding PRs for a wave into a single PR.
+    /// Returns the new PR URL on success.
+    public func collapsePRs(waveId: String) async throws -> CollapsePRsResult {
+        let baseURL = URL(string: "http://127.0.0.1:8765")!
+        let url = baseURL.appendingPathComponent("waves/\(waveId)/collapse")
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+
+        // Use longSession - collapse does multiple git/gh operations
+        let (data, response) = try await longSession.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let ok = json["ok"] as? Bool else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+
+        if ok, let result = json["result"] as? [String: Any] {
+            let newPRUrl = result["new_pr_url"] as? String
+            let closedPRs = result["closed_prs"] as? [Int] ?? []
+            return CollapsePRsResult(newPRUrl: newPRUrl, closedPRs: closedPRs)
+        } else {
+            let errorMsg = json["error"] as? String ?? "Collapse failed"
+            throw WaveServiceError.commandFailed(errorMsg)
+        }
+    }
+
     // MARK: - Private helpers
 
     private func decodeStringArray(_ str: String?) -> [String] {
@@ -576,5 +609,15 @@ public enum WaveServiceError: LocalizedError {
         case .commandFailed(let message):
             return message
         }
+    }
+}
+
+public struct CollapsePRsResult: Sendable {
+    public let newPRUrl: String?
+    public let closedPRs: [Int]
+
+    public init(newPRUrl: String?, closedPRs: [Int]) {
+        self.newPRUrl = newPRUrl
+        self.closedPRs = closedPRs
     }
 }

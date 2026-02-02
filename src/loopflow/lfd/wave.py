@@ -7,6 +7,7 @@ import signal
 import subprocess
 import sys
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
@@ -25,6 +26,18 @@ from loopflow.lfd.models import (
     WaveStatus,
     wave_from_row,
 )
+
+# Collapse PRs
+
+
+@dataclass
+class CollapsePRsResult:
+    """Result of collapsing PRs."""
+
+    ok: bool
+    new_pr_url: str | None = None
+    closed_prs: list[int] | None = None
+    error: str | None = None
 
 
 def get_wt_from_cwd() -> Path | None:
@@ -882,3 +895,221 @@ def run_cron_check() -> list[str]:
             stimulus_log.error(f"[{stimulus.short_id()}] cron check error: {e}")
 
     return activated
+
+
+# PR collapse operations
+
+
+def collapse_prs(wave_id: str) -> CollapsePRsResult:
+    """Collapse all outstanding PRs for a wave into a single PR.
+
+    1. Fetches open PRs for this wave from GitHub
+    2. Creates a new branch from main with all changes
+    3. Opens a single combined PR
+    4. Closes old PRs with comment linking to new one
+    5. Deletes old remote branches
+    6. Resumes the wave if it was blocked
+    """
+    wave = get_wave(wave_id)
+    if not wave:
+        return CollapsePRsResult(ok=False, error="Wave not found")
+
+    repo = wave.repo
+
+    # Get owner/repo from git remote
+    result = subprocess.run(
+        ["git", "remote", "get-url", "origin"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return CollapsePRsResult(ok=False, error="Could not get git remote")
+
+    remote_url = result.stdout.strip()
+    owner_repo = _parse_github_remote(remote_url)
+    if not owner_repo:
+        return CollapsePRsResult(ok=False, error="Could not parse GitHub remote URL")
+
+    # Get open PRs authored by current user for this repo
+    result = subprocess.run(
+        [
+            "gh", "pr", "list",
+            "--repo", owner_repo,
+            "--author", "@me",
+            "--state", "open",
+            "--json", "number,headRefName,title,body",
+        ],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return CollapsePRsResult(ok=False, error=f"gh pr list failed: {result.stderr}")
+
+    try:
+        prs = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return CollapsePRsResult(ok=False, error="Invalid JSON from gh pr list")
+
+    # Filter to PRs from this wave (branches starting with wave name)
+    wave_prs = [pr for pr in prs if pr["headRefName"].startswith(wave.name)]
+
+    if len(wave_prs) < 2:
+        return CollapsePRsResult(ok=False, error="Need at least 2 PRs to collapse")
+
+    pr_numbers = [pr["number"] for pr in wave_prs]
+    pr_branches = [pr["headRefName"] for pr in wave_prs]
+
+    # Fetch latest main and all PR branches
+    subprocess.run(["git", "fetch", "origin", "main"] + pr_branches, cwd=repo, capture_output=True)
+
+    # Create new collapsed branch from main
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    collapsed_branch = f"{wave.name}-collapsed-{timestamp}"
+
+    result = subprocess.run(
+        ["git", "checkout", "-b", collapsed_branch, "origin/main"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return CollapsePRsResult(ok=False, error=f"Could not create branch: {result.stderr}")
+
+    # Merge each PR branch with --squash
+    for branch in pr_branches:
+        result = subprocess.run(
+            ["git", "merge", "--squash", f"origin/{branch}"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            # Abort and clean up
+            subprocess.run(["git", "merge", "--abort"], cwd=repo, capture_output=True)
+            subprocess.run(["git", "checkout", "-"], cwd=repo, capture_output=True)
+            subprocess.run(["git", "branch", "-D", collapsed_branch], cwd=repo, capture_output=True)
+            return CollapsePRsResult(
+                ok=False,
+                error=f"Merge conflict with {branch}. PRs may have incompatible changes."
+            )
+
+    # Generate commit message
+    pr_refs = ", ".join([f"#{n}" for n in pr_numbers])
+    commit_msg = f"Combined changes from {wave.name}\n\nCollapses: {pr_refs}"
+
+    result = subprocess.run(
+        ["git", "commit", "-m", commit_msg],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        subprocess.run(["git", "checkout", "-"], cwd=repo, capture_output=True)
+        subprocess.run(["git", "branch", "-D", collapsed_branch], cwd=repo, capture_output=True)
+        return CollapsePRsResult(ok=False, error=f"Could not commit: {result.stderr}")
+
+    # Push new branch
+    result = subprocess.run(
+        ["git", "push", "-u", "origin", collapsed_branch],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        subprocess.run(["git", "checkout", "-"], cwd=repo, capture_output=True)
+        subprocess.run(["git", "branch", "-D", collapsed_branch], cwd=repo, capture_output=True)
+        return CollapsePRsResult(ok=False, error=f"Could not push: {result.stderr}")
+
+    # Generate PR description using lf toolchain
+    from loopflow.lf.messages import generate_pr_message
+
+    try:
+        pr_message = generate_pr_message(repo)
+        title = pr_message.title
+        body = pr_message.body + f"\n\n---\nCollapses: {pr_refs}"
+    except Exception:
+        # Fallback if generation fails
+        title = f"Combined: {wave.name} changes"
+        body = f"Collapses PRs: {pr_refs}"
+
+    # Create new PR
+    result = subprocess.run(
+        [
+            "gh", "pr", "create",
+            "--title", title,
+            "--body", body,
+        ],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return CollapsePRsResult(ok=False, error=f"Could not create PR: {result.stderr}")
+
+    new_pr_url = result.stdout.strip()
+
+    # Extract new PR number from URL
+    new_pr_number = new_pr_url.split("/")[-1] if "/" in new_pr_url else "new"
+
+    # Close old PRs with comment linking to new one
+    for pr_num in pr_numbers:
+        subprocess.run(
+            [
+                "gh", "pr", "close", str(pr_num),
+                "--comment", f"Collapsed into #{new_pr_number}",
+            ],
+            cwd=repo,
+            capture_output=True,
+        )
+
+    # Delete old remote branches (best effort)
+    for branch in pr_branches:
+        subprocess.run(
+            ["git", "push", "origin", "--delete", branch],
+            cwd=repo,
+            capture_output=True,
+        )
+
+    # Update wave to track new branch and resume if blocked
+    update_wave_worktree_branch(wave_id, wave.worktree, collapsed_branch)
+
+    if wave.status == WaveStatus.WAITING:
+        # Resume the wave since we're now under the PR limit
+        update_wave_status(wave_id, WaveStatus.IDLE)
+
+    # Go back to previous branch
+    subprocess.run(["git", "checkout", "-"], cwd=repo, capture_output=True)
+
+    return CollapsePRsResult(
+        ok=True,
+        new_pr_url=new_pr_url,
+        closed_prs=pr_numbers,
+    )
+
+
+def _parse_github_remote(url: str) -> str | None:
+    """Parse owner/repo from git remote URL."""
+    if "github.com" not in url:
+        return None
+
+    # SSH format: git@github.com:owner/repo.git
+    if url.startswith("git@"):
+        colon_idx = url.find(":")
+        if colon_idx == -1:
+            return None
+        path = url[colon_idx + 1:]
+        if path.endswith(".git"):
+            path = path[:-4]
+        return path
+
+    # HTTPS format: https://github.com/owner/repo.git
+    if "github.com/" in url:
+        idx = url.find("github.com/")
+        path = url[idx + len("github.com/"):]
+        if path.endswith(".git"):
+            path = path[:-4]
+        return path
+
+    return None

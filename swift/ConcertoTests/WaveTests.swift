@@ -366,6 +366,29 @@ struct WaitingReasonTests {
     }
 }
 
+@Suite("CollapsePRsResult")
+struct CollapsePRsResultTests {
+
+    @Test("initializes with URL and closed PRs")
+    func initializesWithUrlAndClosedPRs() {
+        let result = CollapsePRsResult(
+            newPRUrl: "https://github.com/owner/repo/pull/100",
+            closedPRs: [1, 2, 3]
+        )
+
+        #expect(result.newPRUrl == "https://github.com/owner/repo/pull/100")
+        #expect(result.closedPRs == [1, 2, 3])
+    }
+
+    @Test("initializes with nil URL")
+    func initializesWithNilUrl() {
+        let result = CollapsePRsResult(newPRUrl: nil, closedPRs: [])
+
+        #expect(result.newPRUrl == nil)
+        #expect(result.closedPRs.isEmpty)
+    }
+}
+
 @Suite("Stimulus")
 struct StimulusTests {
 

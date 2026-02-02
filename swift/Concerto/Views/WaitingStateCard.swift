@@ -7,8 +7,12 @@ struct WaitingStateCard: View {
     let wave: Wave
 
     @Environment(\.colorScheme) private var colorScheme
+    @State private var showCollapseConfirmation = false
+    @State private var isCollapsing = false
+    @State private var collapseError: String?
 
     private let terminalLauncher = TerminalLauncher()
+    private let waveService = WaveService()
     private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     var body: some View {
@@ -34,19 +38,83 @@ struct WaitingStateCard: View {
                     .foregroundStyle(.secondary)
             }
 
-            // Action button
-            Button {
-                openPRList()
-            } label: {
-                Label("Review PRs", systemImage: "arrow.up.right.square")
+            // Action buttons
+            HStack(spacing: Spacing.sm) {
+                Button {
+                    openPRList()
+                } label: {
+                    Label("Review PRs", systemImage: "arrow.up.right.square")
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Review open pull requests")
+
+                Button {
+                    showCollapseConfirmation = true
+                } label: {
+                    if isCollapsing {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Label("Collapse into One", systemImage: "arrow.triangle.merge")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.loopflowBurgundy)
+                .disabled(isCollapsing || !canCollapse)
+                .accessibilityLabel("Collapse all PRs into a single PR")
             }
-            .buttonStyle(.borderedProminent)
-            .tint(.loopflowBurgundy)
-            .accessibilityLabel("Review open pull requests")
+
+            if let error = collapseError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
         }
         .padding(Spacing.lg)
         .background(palette.surface)
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.lg))
+        .confirmationDialog(
+            "Collapse PRs?",
+            isPresented: $showCollapseConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Collapse into One PR") {
+                Task { await collapsePRs() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            if let reason = wave.waitingReason,
+               case .prLimitReached(let open, _) = reason {
+                Text("This will combine \(open) open PRs into a single PR, close the old PRs, and delete the old branches.")
+            } else {
+                Text("This will combine all open PRs into a single PR.")
+            }
+        }
+    }
+
+    private var canCollapse: Bool {
+        // Need at least 2 PRs to collapse
+        if let reason = wave.waitingReason,
+           case .prLimitReached(let open, _) = reason {
+            return open >= 2
+        }
+        return false
+    }
+
+    private func collapsePRs() async {
+        isCollapsing = true
+        collapseError = nil
+
+        do {
+            let result = try await waveService.collapsePRs(waveId: wave.id)
+            if let urlString = result.newPRUrl, let url = URL(string: urlString) {
+                terminalLauncher.openURL(url)
+            }
+        } catch {
+            collapseError = error.localizedDescription
+        }
+
+        isCollapsing = false
     }
 
     private func openPRList() {

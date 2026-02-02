@@ -323,6 +323,49 @@ struct WaveModelTests {
     }
 }
 
+@Suite("WaitingReason")
+struct WaitingReasonTests {
+
+    @Test("description shows count fraction")
+    func descriptionShowsCountFraction() {
+        let reason = WaitingReason.prLimitReached(open: 2, limit: 5)
+
+        #expect(reason.description == "2/5 PRs open")
+    }
+
+    @Test("accessibilityDescription shows full text")
+    func accessibilityDescriptionShowsFullText() {
+        let reason = WaitingReason.prLimitReached(open: 3, limit: 5)
+
+        #expect(reason.accessibilityDescription == "3 of 5 PRs open")
+    }
+
+    @Test("Wave with waitingReason stores it correctly")
+    func waveStoresWaitingReason() {
+        let wave = Wave(
+            id: "test",
+            repo: "/tmp",
+            status: .waiting,
+            waitingReason: .prLimitReached(open: 2, limit: 3)
+        )
+
+        #expect(wave.waitingReason != nil)
+        if case .prLimitReached(let open, let limit) = wave.waitingReason {
+            #expect(open == 2)
+            #expect(limit == 3)
+        } else {
+            Issue.record("Expected prLimitReached")
+        }
+    }
+
+    @Test("Wave without waitingReason has nil")
+    func waveWithoutWaitingReasonHasNil() {
+        let wave = Wave(id: "test", repo: "/tmp", status: .idle)
+
+        #expect(wave.waitingReason == nil)
+    }
+}
+
 @Suite("Stimulus")
 struct StimulusTests {
 

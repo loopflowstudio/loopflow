@@ -37,6 +37,7 @@ from loopflow.lfd.protocol_v1 import (
 from loopflow.lfd.stimulus import create_stimulus, list_stimuli
 from loopflow.lfd.wave import (
     clone_wave,
+    count_outstanding,
     create_wave,
     delete_wave,
     get_wave,
@@ -324,6 +325,12 @@ def _wave_to_dict(wave, worktree_state: dict | None = None) -> dict:
         "pid": wave.pid,
         "created_at": wave.created_at.isoformat(),
     }
+
+    # Add waiting reason for blocked waves
+    if wave.status == WaveStatus.WAITING:
+        outstanding = count_outstanding(wave)
+        result["waiting_reason"] = "pr_limit_reached"
+        result["open_prs"] = outstanding
 
     # Enrich with worktree state if available
     if worktree_state:

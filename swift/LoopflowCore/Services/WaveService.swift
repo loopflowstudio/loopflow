@@ -316,6 +316,15 @@ public struct WaveService: @unchecked Sendable {
             }
         }
 
+        // Parse waiting reason
+        var waitingReason: WaitingReason?
+        if let reason = json["waiting_reason"] as? String,
+           reason == "pr_limit_reached",
+           let openPRs = json["open_prs"] as? Int {
+            let prLimit = json["pr_limit"] as? Int ?? 5
+            waitingReason = .prLimitReached(open: openPRs, limit: prLimit)
+        }
+
         return Wave(
             id: json["id"] as? String ?? UUID().uuidString,
             name: json["name"] as? String ?? "",
@@ -345,7 +354,8 @@ public struct WaveService: @unchecked Sendable {
             prLimit: json["pr_limit"] as? Int ?? 5,
             mergeMode: MergeMode(rawValue: json["merge_mode"] as? String ?? "pr") ?? .pr,
             pid: json["pid"] as? Int,
-            createdAt: createdAt
+            createdAt: createdAt,
+            waitingReason: waitingReason
         )
     }
 

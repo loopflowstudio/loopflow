@@ -324,55 +324,54 @@ struct WaveDetailPanel: View {
 
     // MARK: - Run Progress Section
 
+    @ViewBuilder
     private var runProgressSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text("Progress")
-                    .font(.headline)
-                Spacer()
-            }
+        if wave.status == .waiting {
+            WaitingStateCard(wave: wave)
+        } else {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    Text("Progress")
+                        .font(.headline)
+                    Spacer()
+                }
 
-            // Status description
-            HStack(spacing: 8) {
-                switch wave.status {
-                case .running:
-                    ProgressView()
-                        .scaleEffect(0.8)
-                    Text("Running \(wave.flowDisplay) flow...")
-                        .foregroundStyle(.secondary)
+                // Status description
+                HStack(spacing: 8) {
+                    switch wave.status {
+                    case .running:
+                        ProgressView()
+                            .scaleEffect(0.8)
+                        Text("Running \(wave.flowDisplay) flow...")
+                            .foregroundStyle(.secondary)
 
-                case .waiting:
-                    Image(systemName: "pause.circle.fill")
-                        .foregroundStyle(.yellow)
-                    Text("Waiting (PR limit reached)")
-                        .foregroundStyle(.secondary)
+                    case .completed:
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Text("Completed")
+                            .foregroundStyle(.secondary)
 
-                case .completed:
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                    Text("Completed")
-                        .foregroundStyle(.secondary)
+                    case .error:
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.red)
+                        Text("Error occurred")
+                            .foregroundStyle(.secondary)
 
-                case .error:
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.red)
-                    Text("Error occurred")
-                        .foregroundStyle(.secondary)
+                    case .idle, .waiting:
+                        EmptyView()
+                    }
+                }
+                .font(.subheadline)
 
-                case .idle:
-                    EmptyView()
+                // Live output
+                if wave.status == .running {
+                    liveOutputSection
                 }
             }
-            .font(.subheadline)
-
-            // Live output
-            if wave.status == .running {
-                liveOutputSection
-            }
+            .padding(16)
+            .background(palette.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
         }
-        .padding(16)
-        .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private var liveOutputSection: some View {

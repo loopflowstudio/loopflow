@@ -36,14 +36,37 @@ gather_lfdocs()           │
 
 The key insight: `cp` needs *just* the files. `step` needs a complete prompt. They share `gather_lfdocs()` for consistency but diverge in how they format output.
 
-## Risks and bottlenecks
-
-- **`_gather_diff_file_paths()` duplicates `gather_diff_files()`**: The design doc notes this as "Opportunity 1" for future consolidation. Current duplication is acceptable because `cp` uses `origin/main...HEAD` while `context.py` uses a dynamic base ref.
+## Known limitations
 
 - **Clipboard flag unused**: The `-c` flag in `cp` is defined for interface consistency with `lf step` but not wired up. Clipboard image support requires additional encoding work.
 
-## What's not included
+## Future consolidation opportunities
 
-- **Full consolidation of context gathering**: The design doc identifies three simplification opportunities. This branch addresses Opportunity 2 (output formatting) partially. Opportunities 1 and 3 are noted for future work.
+### Opportunity 1: cp duplicates gather_diff_files
 
-- **Clipboard image support in `cp`**: The `-c` flag accepts but ignores the value. Implementing this requires clipboard image reading and encoding.
+`cp.py:_gather_diff_file_paths()` duplicates `context.py:gather_diff_files()`. Current duplication is acceptable because `cp` uses `origin/main...HEAD` while `context.py` uses a dynamic base ref.
+
+**Realignment**: `cp` should be a thin wrapper around `gather_prompt_components` with `DiffMode.NONE` and no step, similar to `--web` mode in `step.py`.
+
+### Opportunity 2: Output formatting spread across modules
+
+Formatting logic lives in three places with different conventions:
+- `files.py:format_files()` wraps with `<lf:files>` and adds header outside the tag
+- `cp.py` builds `<lf:file>` tags manually (no header)
+- `context.py:format_prompt()` uses `<lf:tag>` with inline doc comments
+
+**Realignment**: Single `format_files()` that returns just tagged content. Callers add context-appropriate headers.
+
+### Opportunity 3: Config merging duplicated
+
+`cp.py` manually loads config and resolves flags (lines 65-82). Same pattern appears in `step.py` lines 241-254 and 400-412.
+
+**Realignment**: Use `resolve_step_config()` from `frontmatter.py` or a simpler variant for commands without steps.
+
+## Aligned areas
+
+**GatherResult**: Clean data structure separating text files from images. The `(Path, str)` tuple pattern works well.
+
+**TokenTree**: Token counting and display is centralized. Both `cp.py` and `step.py` use the same analysis and warning infrastructure.
+
+**File exclusion**: The `_compile_exclude_patterns` + `_is_excluded_by_paths` pattern efficiently handles gitignore and explicit excludes with O(patterns) glob operations.

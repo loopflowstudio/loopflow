@@ -283,22 +283,14 @@ mod tests {
 
     #[test]
     fn reorder_args_flag_after_step() {
-        let args = vec![
-            "lf".to_string(),
-            "debug".to_string(),
-            "-c".to_string(),
-        ];
+        let args = vec!["lf".to_string(), "debug".to_string(), "-c".to_string()];
         let result = reorder_args(args);
         assert_eq!(result, vec!["lf", "-c", "debug"]);
     }
 
     #[test]
     fn reorder_args_flag_before_step() {
-        let args = vec![
-            "lf".to_string(),
-            "-c".to_string(),
-            "debug".to_string(),
-        ];
+        let args = vec!["lf".to_string(), "-c".to_string(), "debug".to_string()];
         let result = reorder_args(args);
         assert_eq!(result, vec!["lf", "-c", "debug"]);
     }

@@ -88,10 +88,9 @@ For flows, the CLI creates an `InMemoryStore` and calls `tick_flow_with_runner()
 ## Test results
 
 ```
-cargo test -p lf                    # 2 passed
-cargo test --workspace              # 37 passed (engine + daemon)
-cargo clippy -p lf -- -D warnings   # clean
+cargo test -p lf                    # 9 passed
+cargo test --workspace              # 133 passed (lf + engine + daemon)
+cargo clippy --workspace -- -D warnings   # clean
 cargo fmt --check                   # clean
 uv run pytest tests/                # 685 passed, 2 skipped
-swift test --filter WaitingReason   # 4 passed
 ```

@@ -283,7 +283,6 @@ pub fn list_all_steps(repo: Option<&Path>) -> StepListResult {
     (user_sorted, global_sorted, builtin_sorted, external_skills)
 }
 
-
 // =============================================================================
 // Flow discovery and step chain extraction
 // =============================================================================
@@ -388,4 +387,3 @@ fn extract_step_names_from_value(value: &serde_yaml::Value) -> Vec<String> {
 
     names
 }
-

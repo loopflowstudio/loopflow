@@ -33,18 +33,15 @@ pub enum FlowItem {
     FlowRef(String),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ForkSelect {
+    #[default]
     All,
     One,
-    Prompt { prompt: String },
-}
-
-impl Default for ForkSelect {
-    fn default() -> Self {
-        Self::All
-    }
+    Prompt {
+        prompt: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

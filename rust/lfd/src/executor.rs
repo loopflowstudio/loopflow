@@ -400,7 +400,7 @@ impl WaveExecutor {
                     .await;
 
                 let status = match result {
-                    Ok(code) if code == 0 => ForkRunStatus::Completed,
+                    Ok(0) => ForkRunStatus::Completed,
                     _ => ForkRunStatus::Failed,
                 };
                 let _ = store.upsert_fork_run(&ForkRun {
@@ -418,7 +418,7 @@ impl WaveExecutor {
         let mut completed = 0usize;
         while let Some((fork_id, result)) = rx.recv().await {
             match result {
-                Ok(code) if code == 0 => {
+                Ok(0) => {
                     completed += 1;
                     if completed == fork_runs.len() {
                         break;

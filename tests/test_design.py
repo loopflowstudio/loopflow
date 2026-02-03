@@ -4,7 +4,7 @@ from pathlib import Path
 
 from loopflow.lf.design import (
     _area_parent_paths,
-    clear_design_artifacts,
+    clear_scratch,
     gather_ancestral_docs,
     gather_area,
     gather_design_docs,
@@ -31,8 +31,8 @@ def test_gather_design_docs_reads_markdown(tmp_path):
     assert "# Intent" in content
 
 
-def test_clear_design_artifacts_keeps_folder(tmp_path):
-    """clear_design_artifacts removes contents but keeps scratch/."""
+def test_clear_scratch_keeps_folder(tmp_path):
+    """clear_scratch removes contents but keeps scratch/."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     scratch_dir = repo_root / "scratch"
@@ -42,7 +42,7 @@ def test_clear_design_artifacts_keeps_folder(tmp_path):
     (scratch_dir / "nested" / "more.md").write_text("More")
 
     assert has_design_artifacts(repo_root) is True
-    removed = clear_design_artifacts(repo_root)
+    removed = clear_scratch(repo_root)
 
     assert removed is True
     assert scratch_dir.exists() is True

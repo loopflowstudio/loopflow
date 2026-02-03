@@ -9,7 +9,7 @@ import typer
 
 from loopflow.lf.config import load_config, parse_model
 from loopflow.lf.context import find_worktree_root
-from loopflow.lf.design import clear_design_artifacts
+from loopflow.lf.design import clear_scratch
 from loopflow.lf.git import (
     GitError,
     ensure_ready_pr,
@@ -74,23 +74,13 @@ def _resolve_repos(worktree: str | None, strict: bool) -> tuple[Path, Path]:
     return repo_root, main_repo
 
 
-def _clear_design_and_push(repo_root: Path) -> bool:
+def _clear_scratch_and_push(repo_root: Path) -> bool:
     """Delete scratch/* contents, commit, push. Returns True if changes made."""
-    design_dir = repo_root / "scratch"
-    if not design_dir.exists():
+    if not clear_scratch(repo_root):
         return False
 
-    files = list(design_dir.glob("*"))
-    if not files:
-        return False
-
-    for f in files:
-        if f.is_file():
-            f.unlink()
-        else:
-            shutil.rmtree(f)
-
-    subprocess.run(["git", "add", "-A", str(design_dir)], cwd=repo_root, check=True)
+    scratch_dir = repo_root / "scratch"
+    subprocess.run(["git", "add", "-A", str(scratch_dir)], cwd=repo_root, check=True)
     subprocess.run(["git", "commit", "-m", "clear scratch/"], cwd=repo_root, check=True)
     subprocess.run(["git", "push"], cwd=repo_root, check=True)
     return True
@@ -368,7 +358,7 @@ def _land_pr(strict: bool, worktree: str | None, create_pr: bool = False) -> Non
 
     # Clear scratch/ before merge so it never touches main
     # Then update PR so it points to the new HEAD
-    if _clear_design_and_push(repo_root):
+    if _clear_scratch_and_push(repo_root):
         typer.echo("Cleared scratch/")
         subprocess.run(
             ["gh", "pr", "edit", str(pr_number), "--title", title, "--body", body],
@@ -540,7 +530,7 @@ def _land_local(strict: bool, worktree: str | None) -> None:
         raise typer.Exit(1)
 
     # Clear scratch/ artifacts
-    if clear_design_artifacts(main_repo):
+    if clear_scratch(main_repo):
         design_dir = main_repo / "scratch"
         if design_dir.exists():
             subprocess.run(["git", "add", "-A", str(design_dir)], cwd=main_repo, check=True)

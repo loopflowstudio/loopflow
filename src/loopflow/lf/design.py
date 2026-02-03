@@ -207,7 +207,7 @@ def has_design_artifacts(repo_root: Path) -> bool:
     return any(design_dir.iterdir())
 
 
-def clear_design_artifacts(repo_root: Path) -> bool:
+def clear_scratch(repo_root: Path) -> bool:
     """Remove scratch/ contents while keeping the folder."""
     design_dir = repo_root / "scratch"
     if design_dir.exists() and not design_dir.is_dir():

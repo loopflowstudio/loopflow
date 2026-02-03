@@ -15,7 +15,6 @@ from loopflow.lf.ops.git import GitError
 from loopflow.lf.ops.git import create_branch as git_create_branch
 from loopflow.lf.ops.git import push as git_push
 from loopflow.lf.ops.git import rebase as git_rebase
-from loopflow.lf.ops.shell import write_directive
 from loopflow.lfd.wave import get_wave_by_worktree, update_wave_worktree_branch
 
 

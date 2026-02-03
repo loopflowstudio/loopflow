@@ -1,6 +1,5 @@
 """Tests for branch naming utilities."""
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -218,7 +217,8 @@ def test_parse_branch_base_dotted_name(tmp_path):
 
     with patch("loopflow.lf.naming.load_config", return_value=config_mock):
         with patch("loopflow.lf.naming._get_git_username", return_value="jack-heart"):
-            result = parse_branch_base("jack-heart.my.feature.20260202_1700.aurora-melody", tmp_path)
+            branch = "jack-heart.my.feature.20260202_1700.aurora-melody"
+            result = parse_branch_base(branch, tmp_path)
     assert result == "my.feature"
 
 

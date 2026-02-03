@@ -3,14 +3,15 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from loopflow.lf.ops.next import (
     _enable_auto_merge,
     _get_pr_number,
     _get_pr_state,
     next_iteration,
 )
+
+# Module prefix for patch targets
+_MOD = "loopflow.lf.ops.next"
 
 
 def test_get_pr_number_returns_number():
@@ -95,19 +96,19 @@ def test_next_creates_branch_from_wave_name(tmp_path):
     mock_wave.name = "concerto"
     mock_wave.id = "wave-123"
 
-    with patch("loopflow.lf.ops.next.get_wave_by_worktree", return_value=mock_wave):
-        with patch("loopflow.lf.ops.next.find_main_repo", return_value=tmp_path):
-            with patch("loopflow.lf.ops.next.get_default_branch", return_value="main"):
-                with patch("loopflow.lf.ops.next.get_current_branch", return_value="feature"):
-                    with patch("loopflow.lf.ops.next._rebase_onto_main", return_value=True):
-                        with patch("loopflow.lf.ops.next._get_pr_number", return_value=None):
+    with patch(f"{_MOD}.get_wave_by_worktree", return_value=mock_wave):
+        with patch(f"{_MOD}.find_main_repo", return_value=tmp_path):
+            with patch(f"{_MOD}.get_default_branch", return_value="main"):
+                with patch(f"{_MOD}.get_current_branch", return_value="feature"):
+                    with patch(f"{_MOD}._rebase_onto_main", return_value=True):
+                        with patch(f"{_MOD}._get_pr_number", return_value=None):
                             with patch(
-                                "loopflow.lf.ops.next.generate_branch_name",
+                                f"{_MOD}.generate_branch_name",
                                 return_value="jack.concerto.20260202_1700.vale-tempo",
                             ) as mock_gen:
-                                with patch("loopflow.lf.ops.next.git_create_branch"):
+                                with patch(f"{_MOD}.git_create_branch"):
                                     with patch("subprocess.run"):
-                                        with patch("loopflow.lf.ops.next.update_wave_worktree_branch"):
+                                        with patch(f"{_MOD}.update_wave_worktree_branch"):
                                             result = next_iteration(tmp_path, rebase=True)
 
     # Should call generate_branch_name with wave name
@@ -121,22 +122,22 @@ def test_next_enables_auto_merge_for_open_pr(tmp_path):
     mock_wave.name = "test"
     mock_wave.id = "wave-123"
 
-    with patch("loopflow.lf.ops.next.get_wave_by_worktree", return_value=mock_wave):
-        with patch("loopflow.lf.ops.next.find_main_repo", return_value=tmp_path):
-            with patch("loopflow.lf.ops.next.get_default_branch", return_value="main"):
-                with patch("loopflow.lf.ops.next.get_current_branch", return_value="feature"):
-                    with patch("loopflow.lf.ops.next._rebase_onto_main", return_value=True):
-                        with patch("loopflow.lf.ops.next._get_pr_number", return_value=42):
-                            with patch("loopflow.lf.ops.next._get_pr_state", return_value="OPEN"):
-                                with patch("loopflow.lf.ops.next._enable_auto_merge") as mock_merge:
+    with patch(f"{_MOD}.get_wave_by_worktree", return_value=mock_wave):
+        with patch(f"{_MOD}.find_main_repo", return_value=tmp_path):
+            with patch(f"{_MOD}.get_default_branch", return_value="main"):
+                with patch(f"{_MOD}.get_current_branch", return_value="feature"):
+                    with patch(f"{_MOD}._rebase_onto_main", return_value=True):
+                        with patch(f"{_MOD}._get_pr_number", return_value=42):
+                            with patch(f"{_MOD}._get_pr_state", return_value="OPEN"):
+                                with patch(f"{_MOD}._enable_auto_merge") as mock_merge:
                                     mock_merge.return_value = True
                                     with patch(
-                                        "loopflow.lf.ops.next.generate_branch_name",
+                                        f"{_MOD}.generate_branch_name",
                                         return_value="new-branch",
                                     ):
-                                        with patch("loopflow.lf.ops.next.git_create_branch"):
+                                        with patch(f"{_MOD}.git_create_branch"):
                                             with patch("subprocess.run"):
-                                                with patch("loopflow.lf.ops.next.update_wave_worktree_branch"):
+                                                with patch(f"{_MOD}.update_wave_worktree_branch"):
                                                     next_iteration(tmp_path)
 
     mock_merge.assert_called_once_with(tmp_path, 42)

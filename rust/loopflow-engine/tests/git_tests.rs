@@ -8,7 +8,7 @@ use tempfile::TempDir;
 
 fn init_repo(dir: &Path) {
     Command::new("git")
-        .args(["init"])
+        .args(["init", "-b", "main"])
         .current_dir(dir)
         .output()
         .expect("git init");

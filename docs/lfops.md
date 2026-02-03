@@ -66,13 +66,13 @@ Enables auto-merge on your PR. GitHub merges when CI passes and the merge queue 
 
 ## lf ops next
 
-Land current PR and continue work on a new stacked branch.
+Preserve the current worktree and create a fresh branch.
 
 ```bash
 lf ops next
 ```
 
-Combines `lf ops land` + a branch switch in one command. After landing the current PR, it creates a new stacked branch from the current HEAD and switches the worktree to it. The worktree directory stays the same so you can keep working while the previous PR merges.
+Moves the current worktree to a timestamped path, creates a new branch from the default branch, and recreates the worktree at the original path. Use it to keep moving after a PR without losing the existing worktree.
 
 ## lf ops commit
 
@@ -149,9 +149,9 @@ Worktree helper commands.
 Create worktree with schema-based branch name.
 
 ```bash
-lf ops wt create my-feature       # creates ../repo.my-feature
-lf ops wt create my-feature -b develop   # from develop instead of main
-lf ops wt create feature-B --stack       # stack on current branch
+lf ops wt create my-feature            # creates ../my-feature
+lf ops wt create my-feature -b develop # from develop instead of main
+lf ops wt create feature-B --stack     # stack on current branch
 ```
 
 | Flag | Description |
@@ -159,14 +159,14 @@ lf ops wt create feature-B --stack       # stack on current branch
 | `-b, --base` | Base branch (default: main) |
 | `-s, --stack` | Stack on current branch (branch from it, PR targets it) |
 
-When using `--stack`, the new worktree branches from the current branch instead of main. PRs from stacked branches target their base branch while it's open, then retarget to main after the base PR merges.
+When using `--stack`, the new worktree branches from the current branch instead of main.
 
 ### lf ops wt switch
 
 Switch to a worktree by its short directory name.
 
 ```bash
-lf ops wt switch my-feature       # switches to ../repo.my-feature
+lf ops wt switch my-feature       # switches to ../my-feature
 ```
 
 ### lf ops wt list
@@ -175,6 +175,7 @@ List worktrees with prunable metadata.
 
 ```bash
 lf ops wt list
+lf ops wt list --format json
 ```
 
 ### lf ops wt ci
@@ -190,12 +191,12 @@ lf ops wt ci
 Remove worktrees whose branches have been merged.
 
 ```bash
-lf ops wt prune           # interactive confirmation
+lf ops wt prune           # show what would be pruned
 lf ops wt prune --dry-run # show what would be pruned
-lf ops wt prune --force   # skip confirmation
+lf ops wt prune --force   # remove prunable worktrees
 ```
 
-Finds worktrees where the PR was merged or the branch is an ancestor of `origin/main` (handles squash merges). Never prunes main/master or dirty worktrees.
+Finds worktrees where the branch is an ancestor of `origin/main` (handles squash merges). Never prunes main/master or dirty worktrees.
 
 | Flag | Description |
 |------|-------------|
@@ -224,12 +225,12 @@ lf ops shell init       # print shell integration code
 lf ops shell install    # install to shell config file
 ```
 
-Adds the `wt` function for quick worktree switching: `wt my-feature` switches to `../repo.my-feature`.
+Installs a wrapper that sources shell directives after `lf` commands (auto-cd into new worktrees).
 
 ## Typical Workflow
 
 ```bash
-lf ops wt create my-feature       # create worktree (../repo.my-feature)
+lf ops wt create my-feature       # create worktree (../my-feature)
 lf ops wt switch my-feature       # switch to worktree from another
 # ... work on feature ...
 lf ops commit                     # commit with generated message

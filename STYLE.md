@@ -55,6 +55,8 @@ When editing docs in `scratch/`:
 When editing `*.rs` files:
 - Run `cargo fmt` before committing; CI enforces it
 - Run `cargo clippy -- -D warnings` locally; CI treats warnings as errors
+- Dead code must be deleted, not commented out (use git for history)
+- If code is intentionally unused (e.g., for FFI/PyO3), use `#[allow(dead_code)]` with a comment explaining why
 - Derive `Debug` on all public types; add `Clone`, `PartialEq`, `Default` where sensible
 - Use `thiserror` for library error types callers need to match on
 - Use `expect("why this is safe")` over `unwrap()` outside tests

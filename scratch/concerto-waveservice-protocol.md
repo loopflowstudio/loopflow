@@ -1,50 +1,55 @@
 # WaveService Protocol Abstraction
 
-Abstract the transport layer so Concerto works with Python lfd (HTTP+socket), Rust lfd (gRPC), and remote lfd (HTTPS+auth).
+Transport-agnostic service layer for Concerto. Phase 1 complete; gRPC and remote implementations are Phase 2/3.
 
-## Problem
+## Current State
 
-Concerto currently hardcodes transport details throughout the codebase:
+Phase 1 shipped:
+- `WaveServiceProtocol` and `EventServiceProtocol` in LoopflowCore
+- `LocalWaveService` (HTTP) and `LocalEventService` (socket) conform to protocols
+- `WaveServiceFactory` for implementation selection
+- `/wave-runs` HTTP endpoint replaces direct SQLite reads
+- `LFDClient.swift` deleted (redundant)
 
-- `WaveService.swift` makes HTTP calls to `http://127.0.0.1:8765`
-- `LFDEventService.swift` connects to Unix socket at `~/.lf/lfd.sock`
-- `LFDClient.swift` duplicates some HTTP calls
-- Direct SQLite reads for FlowRuns bypass the daemon entirely
+## What's Next
 
-This coupling prevents:
-1. Switching to Rust lfd's gRPC endpoints (already implemented, 40+ RPCs)
-2. Remote access from mobile (Phase 3 goal)
-3. Testing with mock backends
+| Implementation | Transport | Phase | Depends on |
+|----------------|-----------|-------|------------|
+| `GRPCWaveService` | gRPC | 2 | grpc-swift dependency |
+| `GRPCEventService` | gRPC stream | 2 | grpc-swift dependency |
+| `RemoteWaveService` | HTTPS + auth | 3 | loopflow-auth |
 
-The user benefits from protocol abstraction because it unlocks mobile access—managing waves from iPhone/iPad while lfd runs on their Mac.
+### GRPCWaveService (Phase 2)
 
-## Approach
+Rust lfd already has 40+ gRPC RPCs. Swift implementation needs:
+1. Add grpc-swift dependency
+2. Generate Swift from `.proto` files
+3. Implement `GRPCWaveService` conforming to `WaveServiceProtocol`
+4. Implement `GRPCEventService` using `Subscribe()` streaming RPC
 
-Introduce a `WaveServiceProtocol` that captures all wave operations. Current code becomes `LocalWaveService`. Future implementations slot in without UI changes.
+### RemoteWaveService (Phase 3)
+
+Mobile access to lfd running on user's Mac:
+1. Depends on loopflow-auth (GitHub OAuth)
+2. Depends on lfd-registration (daemon registers with Loopflow service)
+3. HTTPS transport with auth tokens
+
+## Protocol Reference
 
 ```swift
-// Protocol defines what the app needs from lfd
 protocol WaveServiceProtocol: Sendable {
-    // Waves
     func listWaves(repo: URL) async throws -> [Wave]
     func createWave(name: String, repo: URL) async throws -> Wave
     func updateWave(_ id: String, config: WaveConfigUpdate) async throws -> Wave
     func deleteWave(_ id: String) async throws
     func cloneWave(_ id: String, name: String?) async throws -> Wave
-
-    // Wave control
     func run(_ id: String, overrides: RunOverrides?) async throws
     func stop(_ id: String) async throws
     func connect(_ id: String) async throws -> ConnectionInfo
-
-    // FlowRuns
-    func listFlowRuns(waveId: String?, repo: URL?, limit: Int) async throws -> [FlowRun]
-
-    // Collapse
+    func listWaveRuns(waveId: String?, repo: URL?, limit: Int) async throws -> [WaveRun]
     func collapsePRs(_ id: String) async throws -> CollapsePRsResult
 }
 
-// Event streaming as a separate protocol (different lifecycle)
 protocol EventServiceProtocol: Sendable {
     func subscribe(
         patterns: [String],
@@ -56,120 +61,8 @@ protocol EventServiceProtocol: Sendable {
 }
 ```
 
-### Supporting types
+## Key Decisions
 
-```swift
-struct WaveConfigUpdate {
-    var name: String?
-    var area: [String]?
-    var direction: [String]?
-    var flow: String?
-    var stimulus: Stimulus?
-    var paused: Bool?
-}
-
-struct RunOverrides {
-    var area: [String]?
-    var direction: [String]?
-    var flow: String?
-    var stimulus: Stimulus?
-}
-
-struct ConnectionInfo {
-    let worktree: String
-    let step: String
-    let agentId: String
-    let promptFile: String
-    let waveRunId: String?
-    let stepIndex: Int
-}
-```
-
-### Implementations
-
-| Implementation | Transport | Use case |
-|----------------|-----------|----------|
-| `LocalWaveService` | HTTP + Unix socket | Current Python lfd |
-| `GRPCWaveService` | gRPC | Future Rust lfd |
-| `RemoteWaveService` | HTTPS + auth tokens | Mobile to hosted lfd |
-
-### Migration path
-
-1. Extract protocol from current `WaveService` API surface
-2. Rename `WaveService` to `LocalWaveService`, conform to protocol
-3. Create `WaveServiceFactory` that returns appropriate implementation
-4. Update `RepoState` to use factory
-5. Delete `LFDClient.swift` (redundant with protocol)
-
-Factory logic:
-```swift
-struct WaveServiceFactory {
-    static func create(for context: Context) -> any WaveServiceProtocol {
-        switch context {
-        case .local:
-            return LocalWaveService()
-        case .grpc(let address):
-            return GRPCWaveService(address: address)
-        case .remote(let endpoint, let token):
-            return RemoteWaveService(endpoint: endpoint, token: token)
-        }
-    }
-}
-```
-
-### Event streaming
-
-Events need separate handling because:
-- Different connection lifecycle (persistent vs request/response)
-- Different reconnection semantics per transport
-- gRPC uses `Subscribe()` returning `stream Event`, not socket
-
-`LocalEventService` wraps current Unix socket approach. `GRPCEventService` uses the streaming RPC. Both conform to `EventServiceProtocol`.
-
-## Alternatives considered
-
-| Approach | Tradeoff | Why not |
-|----------|----------|---------|
-| Keep HTTP for Rust lfd | Simpler, no new dependencies | Rust lfd already has gRPC, HTTP would be duplicate effort |
-| Protocol-only, no factory | Less code | Factory needed for runtime switching (local vs remote) |
-| Merge events into main protocol | Simpler API surface | Event streaming has different lifecycle, would complicate protocol |
-| Abstract at view model level | Higher-level abstraction | Transport details leak into RepoState; better to abstract at service layer |
-
-## Key decisions
-
-1. **Separate protocol for events.** Event streaming has persistent connection semantics that don't fit request/response patterns. A separate protocol makes lifecycle explicit.
-
-2. **Factory pattern for implementation selection.** Mobile will need to switch between local and remote dynamically. Factory centralizes this logic.
-
-3. **Delete LFDClient.** It duplicates `WaveService` functionality. The protocol makes it redundant—`checkAvailability()` becomes a method on `WaveServiceProtocol`.
-
-4. **Move SQLite reads behind the protocol.** Current direct SQLite access in `listFlowRuns` bypasses the daemon. The protocol forces all data through the daemon, which matters for remote access.
-
-5. **Use `any WaveServiceProtocol` for existential.** Swift 6 requirement. The factory returns an existential; callers don't care about concrete type.
-
-## Scope
-
-**In scope:**
-- Protocol definition for wave operations
-- Protocol definition for event streaming
-- `LocalWaveService` implementation (current HTTP behavior)
-- `LocalEventService` implementation (current socket behavior)
-- Factory for implementation selection
-- Update `RepoState` to use protocol
-
-**Out of scope:**
-- `GRPCWaveService` implementation (Phase 2 follow-up)
-- `RemoteWaveService` implementation (Phase 3)
-- grpc-swift dependency (added when implementing GRPCWaveService)
-- Authentication (Phase 2: loopflow-auth)
-- Terminal streaming (Phase 2: grpc-terminal-streaming)
-
-## Done when
-
-1. `WaveServiceProtocol` and `EventServiceProtocol` defined in LoopflowCore
-2. `LocalWaveService` conforms to `WaveServiceProtocol`, passes existing behavior
-3. `LocalEventService` conforms to `EventServiceProtocol`
-4. `RepoState` uses protocols via factory
-5. `LFDClient.swift` deleted
-6. All existing UI tests pass with no changes
-7. No HTTP URLs or socket paths appear in `RepoState.swift`
+1. **Separate protocol for events.** Persistent connection lifecycle doesn't fit request/response.
+2. **Factory pattern.** Mobile needs runtime switching between local and remote.
+3. **All data through daemon.** No direct SQLite—required for remote access.

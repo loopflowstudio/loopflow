@@ -6,17 +6,21 @@ use tokio::signal;
 use tokio_util::sync::CancellationToken;
 use tonic::transport::Server;
 
+mod executor;
 mod http;
 mod id;
 mod loops;
 mod obs;
+mod output;
 mod proto;
 mod scheduler;
 mod server;
 mod sessions;
 mod store;
 
+use crate::executor::WaveExecutor;
 use crate::http::HttpState;
+use crate::output::OutputHub;
 use crate::proto::control::control_service_server::ControlServiceServer;
 use crate::scheduler::Scheduler;
 use crate::server::ControlServer;
@@ -70,10 +74,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => Arc::new(SqliteStore::new(&db_path)?) as SharedStore,
     };
     let scheduler = Arc::new(Scheduler::new(max_slots));
+    let output = OutputHub::new(2048);
+    let executor = WaveExecutor::new(store.clone(), scheduler.clone(), output.clone());
     let cancel = CancellationToken::new();
-    let loop_handles = scheduler.clone().start_loops(store.clone(), cancel.clone());
+    let loop_handles =
+        scheduler
+            .clone()
+            .start_loops(store.clone(), executor.clone(), cancel.clone());
 
-    let grpc_server = ControlServer::new(store.clone(), scheduler.clone());
+    let grpc_server = ControlServer::new(store.clone(), scheduler.clone(), executor, output);
 
     let http_state = HttpState {
         store: store.clone(),

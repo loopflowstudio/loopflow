@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -6,11 +7,17 @@ use cron::Schedule;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use super::common::{create_wave_run, spawn_run_task};
+use crate::executor::WaveExecutor;
 use crate::id::LfdId;
-use crate::proto::control::{PendingActivation, StimulusKind, WaveStatus};
+use crate::proto::control::{PendingActivation, StimulusKind};
 use crate::store::SharedStore;
 
-pub fn spawn_cron_poller(store: SharedStore, cancel: CancellationToken) -> JoinHandle<()> {
+pub fn spawn_cron_poller(
+    store: SharedStore,
+    executor: WaveExecutor,
+    cancel: CancellationToken,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(30));
         loop {
@@ -20,14 +27,14 @@ pub fn spawn_cron_poller(store: SharedStore, cancel: CancellationToken) -> JoinH
                     break;
                 }
                 _ = interval.tick() => {
-                    check_cron_stimuli(&store);
+                    check_cron_stimuli(&store, &executor).await;
                 }
             }
         }
     })
 }
 
-fn check_cron_stimuli(store: &SharedStore) {
+async fn check_cron_stimuli(store: &SharedStore, executor: &WaveExecutor) {
     let stimuli = match store.list_stimuli_by_kind(StimulusKind::StimulusCron as i32) {
         Ok(stimuli) => stimuli,
         Err(err) => {
@@ -36,12 +43,13 @@ fn check_cron_stimuli(store: &SharedStore) {
         }
     };
 
+    let mut started = HashSet::new();
+
     for stimulus in stimuli {
         if !stimulus.enabled || stimulus.cron.is_empty() {
             continue;
         }
 
-        // Get the wave for this stimulus
         let wave_id = match LfdId::parse(&stimulus.wave_id) {
             Ok(id) => id,
             Err(err) => {
@@ -51,10 +59,7 @@ fn check_cron_stimuli(store: &SharedStore) {
         };
         let wave = match store.get_wave(&wave_id) {
             Ok(Some(wave)) => wave,
-            Ok(None) => {
-                tracing::warn!(stimulus_id = %stimulus.id, "stimulus references missing wave");
-                continue;
-            }
+            Ok(None) => continue,
             Err(err) => {
                 tracing::error!(stimulus_id = %stimulus.id, error = %err, "failed to get wave");
                 continue;
@@ -65,39 +70,47 @@ fn check_cron_stimuli(store: &SharedStore) {
             continue;
         }
 
-        // Use stimulus.last_triggered_at for scheduling
+        if started.contains(&wave.id) {
+            continue;
+        }
+
+        if store.get_active_wave_run(&wave_id).ok().flatten().is_none() {
+            if let Ok(pending) = store.list_pending_activations(&wave_id) {
+                if !pending.is_empty() {
+                    if let Ok(run) = create_wave_run(store, &wave) {
+                        let _ = store.delete_pending_activations(&wave_id);
+                        started.insert(wave.id.clone());
+                        spawn_run_task(store.clone(), executor.clone(), run);
+                        continue;
+                    }
+                }
+            }
+        }
+
         let last_triggered = stimulus
             .last_triggered_at
             .and_then(|ts| DateTime::<Utc>::from_timestamp(ts, 0));
 
         if should_activate_cron(&stimulus.cron, last_triggered) {
-            // Update stimulus.last_triggered_at
             let mut stimulus = stimulus.clone();
             stimulus.last_triggered_at = Some(Utc::now().timestamp());
-            if let Err(err) = store.update_stimulus(&stimulus) {
-                tracing::error!(stimulus_id = %stimulus.id, error = %err, "failed to update stimulus");
-                continue;
-            }
+            let _ = store.update_stimulus(&stimulus);
 
-            // Activate or queue the wave
-            if wave.status == WaveStatus::WaveRunning as i32
-                || wave.status == WaveStatus::WaveWaiting as i32
-            {
-                // Wave is busy - queue a pending activation (coalesce if exists)
+            if let Ok(Some(_)) = store.get_active_wave_run(&wave_id) {
                 let stimulus_id = LfdId::parse(&stimulus.id)
                     .unwrap_or_else(|_| LfdId::from_raw(stimulus.id.clone()));
                 queue_or_coalesce_activation(store, &wave_id, &stimulus_id);
-                tracing::debug!(wave_id = %wave.id, stimulus_id = %stimulus.id, "cron: queued activation");
-            } else if wave.status == WaveStatus::WaveIdle as i32 {
-                // Activate the wave
-                let mut wave = wave.clone();
-                wave.status = WaveStatus::WaveRunning as i32;
-                if let Err(err) = store.update_wave(&wave) {
-                    tracing::error!(wave_id = %wave.id, error = %err, "failed to activate wave");
+                continue;
+            }
+
+            let run = match create_wave_run(store, &wave) {
+                Ok(run) => run,
+                Err(err) => {
+                    tracing::error!(wave_id = %wave.id, error = %err, "failed to create wave run");
                     continue;
                 }
-                tracing::info!(wave_id = %wave.id, cron = %stimulus.cron, "cron: activated");
-            }
+            };
+            spawn_run_task(store.clone(), executor.clone(), run);
         }
     }
 }
@@ -122,14 +135,11 @@ fn should_activate_cron(cron_expr: &str, last_triggered: Option<DateTime<Utc>>) 
 }
 
 fn queue_or_coalesce_activation(store: &SharedStore, wave_id: &LfdId, stimulus_id: &LfdId) {
-    // Check if there's already a pending activation for this stimulus
     match store.get_pending_for_stimulus(wave_id, stimulus_id) {
         Ok(Some(_existing)) => {
-            // Already queued - cron doesn't have SHA ranges to update, so just skip
             tracing::debug!(wave_id = %wave_id, stimulus_id = %stimulus_id, "cron activation already queued");
         }
         Ok(None) => {
-            // Create new pending activation
             let activation = PendingActivation {
                 id: LfdId::new().to_string(),
                 wave_id: wave_id.to_string(),
@@ -138,9 +148,7 @@ fn queue_or_coalesce_activation(store: &SharedStore, wave_id: &LfdId, stimulus_i
                 to_sha: String::new(),
                 queued_at: Utc::now().timestamp(),
             };
-            if let Err(err) = store.create_pending_activation(&activation) {
-                tracing::error!(wave_id = %wave_id, error = %err, "failed to queue activation");
-            }
+            let _ = store.create_pending_activation(&activation);
         }
         Err(err) => {
             tracing::error!(wave_id = %wave_id, error = %err, "failed to check pending activation");

@@ -27,11 +27,11 @@ In `rust/lf-core/src/lib.rs`:
 ```rust
 pub mod error;      // Declares "error" module, loads from error.rs
 pub mod flow;       // Each `mod X` looks for X.rs or X/mod.rs
-pub mod runtime;
+pub mod prompt;
 
 // Re-exports for public API
 pub use error::{CoreError, LoadError};
-pub use flow::{load_flow, Flow, Step};
+pub use flow::{expand_flow, load_flow, next_action, Flow, FlowAction, Step};
 ```
 
 **Python equivalent:** `lib.rs` is like `__init__.py`, but Rust requires explicit module declarations. The `pub` keyword = "public". Without it, things are private to the module.
@@ -40,18 +40,7 @@ pub use flow::{load_flow, Flow, Step};
 
 ## 2. Ownership and Borrowing (The Big One)
 
-Rust's killer feature is compile-time memory safety without garbage collection. Look at `runtime.rs:95`:
-
-```rust
-pub fn tick_flow_with_runner(
-    run_id: &str,           // & = "borrow" - we can read but don't own it
-    store: &dyn RunStore,   // borrowed trait object
-    runner: &dyn StepRunner,
-) -> Result<TickResult, CoreError> {
-    let mut run = store.get_run(run_id)?;  // We OWN this WaveRun now
-    // ...
-    store.update_run(&run)?;  // Pass a borrow, we keep ownership
-```
+Rust's killer feature is compile-time memory safety without garbage collection. Look at `flow.rs` and `prompt.rs`:
 
 **The rules:**
 - `String` = owned string (like Python's `str`, you own the memory)
@@ -84,15 +73,10 @@ pub enum FlowItem {
     Step(Step),                          // Holds a Step struct
     Fork {                               // Holds named fields
         branches: Vec<FlowItem>,
+        select: ForkSelect,
         synthesize: Option<String>,
     },
-    Choose {
-        prompt: String,
-        options: HashMap<String, Vec<FlowItem>>,
-    },
-    LoopUntilEmpty {
-        steps: Vec<FlowItem>,
-    },
+    FlowRef(String),                     // Nested flow reference
 }
 ```
 
@@ -101,14 +85,12 @@ pub enum FlowItem {
 Pattern matching with `match` (like Python's `match` but exhaustive):
 
 ```rust
-// From runtime.rs:120
-let step = match next_item {
-    FlowItem::Step(step) => step,        // Extract the Step
-    _ => {                                // _ = catch-all
-        run.status = WaveRunStatus::Failed;
-        // ...
-        return Ok(TickResult::StepFailed);
-    }
+let plan = expand_flow(&flow, repo_path)?;
+let action = match next_action(&plan, 0) {
+    FlowAction::RunStep { step } => step,
+    FlowAction::WaitInteractive { step } => step,
+    FlowAction::Complete => return,
+    _ => return,
 };
 ```
 
@@ -154,48 +136,13 @@ let model = map
 
 ---
 
-## 5. Traits (Like Protocols/Interfaces)
-
-Traits define shared behavior. See `store.rs`:
-
-```rust
-pub trait RunStore {
-    fn get_run(&self, id: &str) -> Result<WaveRun, StoreError>;
-    fn update_run(&self, run: &WaveRun) -> Result<(), StoreError>;
-    fn create_agent(&self, agent: &Agent) -> Result<(), StoreError>;
-}
-```
-
-**Python equivalent:** `typing.Protocol` or an ABC. Any type that implements these methods can be a `RunStore`.
-
-In `runtime.rs`:
-```rust
-pub trait StepRunner {
-    fn run(&self, step: &Step, worktree: &Path, directions: &[String])
-        -> Result<StepResult, CoreError>;
-}
-
-pub struct CommandStepRunner;  // Empty struct (unit struct)
-
-impl StepRunner for CommandStepRunner {
-    fn run(&self, step: &Step, worktree: &Path, directions: &[String])
-        -> Result<StepResult, CoreError> {
-        // Implementation...
-    }
-}
-```
-
-**Why we did this:** `tick_flow_with_runner` takes `&dyn StepRunner` - any type implementing the trait. This lets tests inject a mock runner without running actual `lf` commands.
-
----
-
-## 6. Derive Macros
+## 5. Derive Macros
 
 Those `#[derive(...)]` annotations auto-generate code:
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct WaveRun {
+pub struct Step {
 ```
 
 - `Debug` = can print with `{:?}` (like Python's `__repr__`)
@@ -244,7 +191,6 @@ Now `?` can convert `io::Error` -> `LoadError` automatically.
 
 | Decision | Why (Rust-specific reason) |
 |----------|---------------------------|
-| `RunStore` as trait | Dependency injection without runtime cost. Tests can mock it. |
 | `FlowItem` enum | Tagged unions are idiomatic. Compiler enforces handling all cases. |
 | `&str` in function args | Avoids unnecessary allocations. Accept borrowed data when you don't need ownership. |
 | `thiserror` for errors | Idiomatic error handling. Integrates with `?` operator. |
@@ -264,11 +210,6 @@ let model = map
 ```
 
 **Early returns with `?`** - keeps the happy path unindented.
-
-**Unit structs for stateless implementations**:
-```rust
-pub struct CommandStepRunner;  // No fields, just implements a trait
-```
 
 **Explicit `pub` visibility** - default is private, you opt into public.
 

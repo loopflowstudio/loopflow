@@ -85,6 +85,7 @@ path = "src/loopflow/__init__.py"
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+exclude = ["src/loopflow/proto/**/*_pb2*"]  # generated protobuf code
 
 [tool.ruff.lint]
 select = [

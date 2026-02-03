@@ -15,13 +15,11 @@ cargo fmt                     # Format
 
 ```
 loopflow-engine/
-├── agent.rs     # Agent invocation (Claude, Codex, Gemini)
+├── agent.rs     # Agent command building (Claude, Codex, Gemini)
 ├── config.rs    # Config loading (~/.lf/, .lf/)
 ├── flow.rs      # Flow/step/direction parsing from YAML
 ├── prompt.rs    # Context gathering and prompt formatting
-├── runtime.rs   # Tick-based execution engine
 ├── python.rs    # PyO3 bindings for Python integration
-├── store.rs     # RunStore trait for persistence
 ├── git.rs       # Git operations (rebase, push, branch)
 ├── worktree.rs  # Worktree creation/removal
 ├── error.rs     # Typed errors with thiserror
@@ -31,42 +29,30 @@ loopflow-engine/
 ## Core API
 
 ```rust
-use loopflow_engine::{load_flow, tick_flow, RunId, RunStore};
+use loopflow_engine::{expand_flow, load_flow, next_action, FlowAction};
 
 // Load a flow from .lf/flows/
 let flow = load_flow("ship", &repo_path)?;
+let plan = expand_flow(&flow, &repo_path)?;
 
-// Tick through execution (advances one step)
-let run_id = RunId::new("run-123");
-let result = tick_flow(&run_id, &store)?;
-match result {
-    TickResult::StepComplete => println!("Step done, continue ticking"),
-    TickResult::FlowComplete => println!("All steps done"),
-    TickResult::WaitingInteractive => println!("Paused for user input"),
-    TickResult::StepFailed => println!("Step failed"),
+// Determine what to do next
+match next_action(&plan, 0) {
+    FlowAction::RunStep { step } => println!("Run step: {}", step.step.name),
+    FlowAction::WaitInteractive { step } => println!("Wait at: {}", step.step.name),
+    FlowAction::Fork { .. } => println!("Fork branches"),
+    FlowAction::Complete => println!("All steps done"),
 }
 ```
 
 ## Key Types
 
-### RunId (newtype)
-
-```rust
-let id = RunId::new("my-run");
-println!("{}", id);           // Display
-println!("{}", id.as_str());  // Borrow as &str
-```
-
-Wraps `String` to prevent mixing run IDs with other strings. Implements `Hash` for use as map keys.
-
 ### FlowItem (enum)
 
 ```rust
 pub enum FlowItem {
-    Step(Step),                              // Single step
-    Fork { branches, synthesize },           // Parallel execution
-    Choose { prompt, options },              // User choice
-    LoopUntilEmpty { steps },                // Repeat until done
+    Step(Step),                                        // Single step
+    Fork { branches, select, synthesize },             // Fork or choose
+    FlowRef(String),                                   // Nested flow by name
 }
 ```
 
@@ -85,30 +71,10 @@ fn load_flow(name: &str) -> Result<Flow, LoadError> { ... }
 let flow = load_flow("ship", &repo)?;  // Returns early if Err
 ```
 
-### RunStore (trait)
-
-```rust
-pub trait RunStore {
-    fn get_run(&self, id: &RunId) -> Result<WaveRun, StoreError>;
-    fn update_run(&self, run: &WaveRun) -> Result<(), StoreError>;
-    fn create_agent(&self, agent: &Agent) -> Result<(), StoreError>;
-}
-```
-
-Implement this to plug in your storage backend (SQLite, in-memory, etc.).
-
 ## Flow Execution
 
-The engine uses **tick-based execution**. Each `tick_flow` call advances one step:
-
-```
-tick_flow() → StepComplete    (auto step finished, call again)
-           → FlowComplete     (all steps done)
-           → WaitingInteractive (paused at interactive step)
-           → StepFailed       (step errored)
-```
-
-Interactive steps pause execution until the user connects. The daemon calls `tick_flow` again when `AgentEnd` signals completion.
+The engine is **stateless**. It exposes pure helpers for flow parsing, prompt building,
+and agent command construction. Execution lives in lfd.
 
 ## Style Guide
 
@@ -123,7 +89,7 @@ Interactive steps pause execution until the user connects. The daemon calls `tic
 
 - Conversion: `as_` (cheap), `to_` (allocates), `into_` (consumes)
 - No `get_` prefix: `fn name(&self)` not `fn get_name(&self)`
-- Newtypes for domain concepts: `RunId(String)` not `type RunId = String`
+- Newtypes for domain concepts when needed (avoid `type Alias = String`)
 
 ### Derives
 
@@ -131,38 +97,8 @@ Always derive `Debug` on public types. Add `Clone`, `PartialEq`, `Default` where
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct WaveRunStatus { ... }
+pub struct Step { ... }
 ```
-
-### Traits for Injection
-
-Use traits for dependencies to enable testing:
-
-```rust
-pub trait StepRunner {
-    fn run(&self, step: &Step, ...) -> Result<StepResult, CoreError>;
-}
-
-// Real implementation
-pub struct CommandStepRunner;
-
-// Test implementation
-struct FakeRunner { exit_code: i32 }
-```
-
-## Testing
-
-```rust
-// Tests can use unwrap() freely
-#[test]
-fn tick_completes_flow() {
-    let store = MemoryStore::new(run);
-    let result = tick_flow(&run_id, &store).unwrap();
-    assert_eq!(result, TickResult::FlowComplete);
-}
-```
-
-Mock via traits: implement `RunStore` and `StepRunner` with test doubles.
 
 ## Token Counting
 
@@ -177,11 +113,9 @@ Falls back to bytes/3 heuristic if tiktoken fails to load.
 ## Status
 
 Working:
-- Flow parsing (step/fork/choose/loop)
-- Tick-based execution for all flow items
-- Fork execution with parallel worktrees
-- Choose execution (deterministic selection)
-- LoopUntilEmpty execution with wave termination
+- Flow parsing (step/fork/flow refs)
+- Flow expansion via `expand_flow`
+- Flow action selection via `next_action` on expanded plans
 - Agent invocation (Claude, Codex, Gemini)
 - Context assembly with docs, diff, clipboard
 - tiktoken-rs token counting
@@ -191,4 +125,4 @@ Working:
 Not yet implemented:
 - Summary loading
 - Bundled LOOPFLOW.md embedding
-- LLM-based choose prompt evaluation
+- LLM-based fork prompt selection

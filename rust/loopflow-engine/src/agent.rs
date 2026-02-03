@@ -128,6 +128,20 @@ pub fn build_model_command(model: &str, config: &LaunchConfig) -> Vec<String> {
     }
 }
 
+/// Build a full CLI command (including prompt) for a model.
+pub fn build_agent_command(model: &str, prompt: &str, config: &LaunchConfig) -> Vec<String> {
+    let (backend, variant) = parse_model(model);
+
+    let mut launch_config = config.clone();
+    if launch_config.model_variant.is_none() {
+        launch_config.model_variant = variant;
+    }
+
+    let mut cmd = build_model_command(&backend, &launch_config);
+    cmd.push(prompt.to_string());
+    cmd
+}
+
 /// Launch an agent with the given prompt.
 ///
 /// # Arguments

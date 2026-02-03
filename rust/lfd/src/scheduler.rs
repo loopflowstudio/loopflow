@@ -5,6 +5,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use crate::executor::WaveExecutor;
 use crate::loops;
 use crate::store::SharedStore;
 
@@ -75,13 +76,19 @@ impl Scheduler {
     pub fn start_loops(
         self: Arc<Self>,
         store: SharedStore,
+        executor: WaveExecutor,
         cancel: CancellationToken,
     ) -> Vec<JoinHandle<()>> {
         vec![
-            loops::spawn_loop_ticker(self.clone(), store.clone(), cancel.clone()),
-            loops::spawn_watch_poller(store.clone(), cancel.clone()),
-            loops::spawn_cron_poller(store.clone(), cancel.clone()),
-            loops::spawn_recovery_loop(store, cancel),
+            loops::spawn_loop_ticker(
+                self.clone(),
+                store.clone(),
+                executor.clone(),
+                cancel.clone(),
+            ),
+            loops::spawn_watch_poller(store.clone(), executor.clone(), cancel.clone()),
+            loops::spawn_cron_poller(store.clone(), executor.clone(), cancel.clone()),
+            loops::spawn_recovery_loop(store, executor, cancel),
         ]
     }
 }

@@ -11,10 +11,6 @@ categories = ["development-tools", "command-line-utilities"]
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-[[bin]]
-name = "lf-engine"
-path = "src/bin/lf-engine.rs"
-
 [features]
 default = []
 python = ["pyo3"]

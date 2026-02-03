@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 
 INSERT INTO meta (key, value)
-VALUES ('schema_version', '1')
+VALUES ('schema_version', '2')
 ON CONFLICT (key) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS waves (
@@ -40,7 +40,6 @@ CREATE TABLE IF NOT EXISTS agents (
     repo TEXT NOT NULL,
     worktree TEXT NOT NULL,
     wave_run_id TEXT,
-    wave_id TEXT,
     status INTEGER NOT NULL,
     started_at BIGINT NOT NULL,
     ended_at BIGINT,
@@ -74,16 +73,30 @@ CREATE TABLE IF NOT EXISTS pending_activations (
 
 CREATE INDEX IF NOT EXISTS idx_pending_wave_id ON pending_activations(wave_id);
 
-CREATE TABLE IF NOT EXISTS fork_runs (
+CREATE TABLE IF NOT EXISTS wave_runs (
     id TEXT PRIMARY KEY,
     wave_id TEXT NOT NULL REFERENCES waves(id) ON DELETE CASCADE,
+    iteration INTEGER NOT NULL,
+    step_index INTEGER NOT NULL DEFAULT 0,
+    status INTEGER NOT NULL,
+    worktree TEXT NOT NULL DEFAULT '',
+    branch TEXT NOT NULL DEFAULT '',
+    started_at BIGINT NOT NULL,
+    ended_at BIGINT,
+    error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_wave_runs_wave_id ON wave_runs(wave_id, started_at);
+
+CREATE TABLE IF NOT EXISTS fork_runs (
+    id TEXT PRIMARY KEY,
+    wave_run_id TEXT REFERENCES wave_runs(id) ON DELETE CASCADE,
     step_index INTEGER NOT NULL,
     branch_index INTEGER NOT NULL,
     status INTEGER NOT NULL,
     worktree TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_fork_runs_wave_id ON fork_runs(wave_id, step_index);
+CREATE INDEX IF NOT EXISTS idx_fork_runs_wave_run_id ON fork_runs(wave_run_id, step_index);
 
 CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
-CREATE INDEX IF NOT EXISTS idx_agents_wave ON agents(wave_id);

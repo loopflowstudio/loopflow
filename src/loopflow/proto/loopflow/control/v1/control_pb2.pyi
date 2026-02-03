@@ -18,19 +18,14 @@ class StimulusKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     STIMULUS_WATCH: _ClassVar[StimulusKind]
     STIMULUS_CRON: _ClassVar[StimulusKind]
 
-class WaveStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+class WaveRunStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
-    WAVE_STATUS_UNSPECIFIED: _ClassVar[WaveStatus]
-    WAVE_IDLE: _ClassVar[WaveStatus]
-    WAVE_RUNNING: _ClassVar[WaveStatus]
-    WAVE_WAITING: _ClassVar[WaveStatus]
-    WAVE_ERROR: _ClassVar[WaveStatus]
-
-class MergeMode(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
-    __slots__ = ()
-    MERGE_MODE_UNSPECIFIED: _ClassVar[MergeMode]
-    MERGE_PR: _ClassVar[MergeMode]
-    MERGE_LAND: _ClassVar[MergeMode]
+    WAVE_RUN_STATUS_UNSPECIFIED: _ClassVar[WaveRunStatus]
+    WAVE_RUN_PENDING: _ClassVar[WaveRunStatus]
+    WAVE_RUN_RUNNING: _ClassVar[WaveRunStatus]
+    WAVE_RUN_WAITING: _ClassVar[WaveRunStatus]
+    WAVE_RUN_COMPLETED: _ClassVar[WaveRunStatus]
+    WAVE_RUN_FAILED: _ClassVar[WaveRunStatus]
 
 class FlowType(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -88,20 +83,17 @@ class WaitingReason(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     WAITING_REASON_UNSPECIFIED: _ClassVar[WaitingReason]
     WAITING_INTERACTIVE_STEP: _ClassVar[WaitingReason]
     WAITING_PR_LIMIT: _ClassVar[WaitingReason]
-
 STIMULUS_KIND_UNSPECIFIED: StimulusKind
 STIMULUS_ONCE: StimulusKind
 STIMULUS_LOOP: StimulusKind
 STIMULUS_WATCH: StimulusKind
 STIMULUS_CRON: StimulusKind
-WAVE_STATUS_UNSPECIFIED: WaveStatus
-WAVE_IDLE: WaveStatus
-WAVE_RUNNING: WaveStatus
-WAVE_WAITING: WaveStatus
-WAVE_ERROR: WaveStatus
-MERGE_MODE_UNSPECIFIED: MergeMode
-MERGE_PR: MergeMode
-MERGE_LAND: MergeMode
+WAVE_RUN_STATUS_UNSPECIFIED: WaveRunStatus
+WAVE_RUN_PENDING: WaveRunStatus
+WAVE_RUN_RUNNING: WaveRunStatus
+WAVE_RUN_WAITING: WaveRunStatus
+WAVE_RUN_COMPLETED: WaveRunStatus
+WAVE_RUN_FAILED: WaveRunStatus
 FLOW_TYPE_UNSPECIFIED: FlowType
 FLOW_YAML: FlowType
 FLOW_PYTHON: FlowType
@@ -144,19 +136,10 @@ class ProtocolVersion(_message.Message):
     major: int
     minor: int
     patch: int
-    def __init__(
-        self, major: _Optional[int] = ..., minor: _Optional[int] = ..., patch: _Optional[int] = ...
-    ) -> None: ...
+    def __init__(self, major: _Optional[int] = ..., minor: _Optional[int] = ..., patch: _Optional[int] = ...) -> None: ...
 
 class ErrorDetail(_message.Message):
-    __slots__ = (
-        "code",
-        "message",
-        "retryable",
-        "retry_after_seconds",
-        "trace_id",
-        "idempotency_key",
-    )
+    __slots__ = ("code", "message", "retryable", "retry_after_seconds", "trace_id", "idempotency_key")
     CODE_FIELD_NUMBER: _ClassVar[int]
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
     RETRYABLE_FIELD_NUMBER: _ClassVar[int]
@@ -169,15 +152,7 @@ class ErrorDetail(_message.Message):
     retry_after_seconds: int
     trace_id: str
     idempotency_key: str
-    def __init__(
-        self,
-        code: _Optional[str] = ...,
-        message: _Optional[str] = ...,
-        retryable: bool = ...,
-        retry_after_seconds: _Optional[int] = ...,
-        trace_id: _Optional[str] = ...,
-        idempotency_key: _Optional[str] = ...,
-    ) -> None: ...
+    def __init__(self, code: _Optional[str] = ..., message: _Optional[str] = ..., retryable: bool = ..., retry_after_seconds: _Optional[int] = ..., trace_id: _Optional[str] = ..., idempotency_key: _Optional[str] = ...) -> None: ...
 
 class GetStatusRequest(_message.Message):
     __slots__ = ()
@@ -193,27 +168,14 @@ class GetStatusResponse(_message.Message):
     waves_defined: int
     waves_running: int
     agents_active: int
-    def __init__(
-        self,
-        pid: _Optional[int] = ...,
-        waves_defined: _Optional[int] = ...,
-        waves_running: _Optional[int] = ...,
-        agents_active: _Optional[int] = ...,
-    ) -> None: ...
+    def __init__(self, pid: _Optional[int] = ..., waves_defined: _Optional[int] = ..., waves_running: _Optional[int] = ..., agents_active: _Optional[int] = ...) -> None: ...
 
 class GetHealthRequest(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
 
 class GetHealthResponse(_message.Message):
-    __slots__ = (
-        "version",
-        "schema_version",
-        "uptime_seconds",
-        "checks",
-        "metrics",
-        "protocol_version",
-    )
+    __slots__ = ("version", "schema_version", "uptime_seconds", "checks", "metrics", "protocol_version")
     VERSION_FIELD_NUMBER: _ClassVar[int]
     SCHEMA_VERSION_FIELD_NUMBER: _ClassVar[int]
     UPTIME_SECONDS_FIELD_NUMBER: _ClassVar[int]
@@ -226,15 +188,7 @@ class GetHealthResponse(_message.Message):
     checks: HealthChecks
     metrics: HealthMetrics
     protocol_version: ProtocolVersion
-    def __init__(
-        self,
-        version: _Optional[str] = ...,
-        schema_version: _Optional[int] = ...,
-        uptime_seconds: _Optional[int] = ...,
-        checks: _Optional[_Union[HealthChecks, _Mapping]] = ...,
-        metrics: _Optional[_Union[HealthMetrics, _Mapping]] = ...,
-        protocol_version: _Optional[_Union[ProtocolVersion, _Mapping]] = ...,
-    ) -> None: ...
+    def __init__(self, version: _Optional[str] = ..., schema_version: _Optional[int] = ..., uptime_seconds: _Optional[int] = ..., checks: _Optional[_Union[HealthChecks, _Mapping]] = ..., metrics: _Optional[_Union[HealthMetrics, _Mapping]] = ..., protocol_version: _Optional[_Union[ProtocolVersion, _Mapping]] = ...) -> None: ...
 
 class HealthChecks(_message.Message):
     __slots__ = ("database", "socket")
@@ -254,25 +208,10 @@ class HealthMetrics(_message.Message):
     waves_running: int
     agents_active: int
     wave_runs_total: int
-    def __init__(
-        self,
-        waves_total: _Optional[int] = ...,
-        waves_running: _Optional[int] = ...,
-        agents_active: _Optional[int] = ...,
-        wave_runs_total: _Optional[int] = ...,
-    ) -> None: ...
+    def __init__(self, waves_total: _Optional[int] = ..., waves_running: _Optional[int] = ..., agents_active: _Optional[int] = ..., wave_runs_total: _Optional[int] = ...) -> None: ...
 
 class Stimulus(_message.Message):
-    __slots__ = (
-        "id",
-        "wave_id",
-        "kind",
-        "cron",
-        "last_main_sha",
-        "last_triggered_at",
-        "enabled",
-        "created_at",
-    )
+    __slots__ = ("id", "wave_id", "kind", "cron", "last_main_sha", "last_triggered_at", "enabled", "created_at")
     ID_FIELD_NUMBER: _ClassVar[int]
     WAVE_ID_FIELD_NUMBER: _ClassVar[int]
     KIND_FIELD_NUMBER: _ClassVar[int]
@@ -289,17 +228,7 @@ class Stimulus(_message.Message):
     last_triggered_at: int
     enabled: bool
     created_at: _timestamp_pb2.Timestamp
-    def __init__(
-        self,
-        id: _Optional[str] = ...,
-        wave_id: _Optional[str] = ...,
-        kind: _Optional[_Union[StimulusKind, str]] = ...,
-        cron: _Optional[str] = ...,
-        last_main_sha: _Optional[str] = ...,
-        last_triggered_at: _Optional[int] = ...,
-        enabled: bool = ...,
-        created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...,
-    ) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., wave_id: _Optional[str] = ..., kind: _Optional[_Union[StimulusKind, str]] = ..., cron: _Optional[str] = ..., last_main_sha: _Optional[str] = ..., last_triggered_at: _Optional[int] = ..., enabled: bool = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class PendingActivation(_message.Message):
     __slots__ = ("id", "wave_id", "stimulus_id", "from_sha", "to_sha", "queued_at")
@@ -315,37 +244,10 @@ class PendingActivation(_message.Message):
     from_sha: str
     to_sha: str
     queued_at: int
-    def __init__(
-        self,
-        id: _Optional[str] = ...,
-        wave_id: _Optional[str] = ...,
-        stimulus_id: _Optional[str] = ...,
-        from_sha: _Optional[str] = ...,
-        to_sha: _Optional[str] = ...,
-        queued_at: _Optional[int] = ...,
-    ) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., wave_id: _Optional[str] = ..., stimulus_id: _Optional[str] = ..., from_sha: _Optional[str] = ..., to_sha: _Optional[str] = ..., queued_at: _Optional[int] = ...) -> None: ...
 
 class Wave(_message.Message):
-    __slots__ = (
-        "id",
-        "name",
-        "repo",
-        "flow",
-        "direction",
-        "area",
-        "paused",
-        "status",
-        "iteration",
-        "worktree",
-        "branch",
-        "pr_limit",
-        "merge_mode",
-        "pid",
-        "created_at",
-        "consecutive_failures",
-        "pending_activations",
-        "step_index",
-    )
+    __slots__ = ("id", "name", "repo", "flow", "direction", "area", "paused", "created_at")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     REPO_FIELD_NUMBER: _ClassVar[int]
@@ -353,17 +255,7 @@ class Wave(_message.Message):
     DIRECTION_FIELD_NUMBER: _ClassVar[int]
     AREA_FIELD_NUMBER: _ClassVar[int]
     PAUSED_FIELD_NUMBER: _ClassVar[int]
-    STATUS_FIELD_NUMBER: _ClassVar[int]
-    ITERATION_FIELD_NUMBER: _ClassVar[int]
-    WORKTREE_FIELD_NUMBER: _ClassVar[int]
-    BRANCH_FIELD_NUMBER: _ClassVar[int]
-    PR_LIMIT_FIELD_NUMBER: _ClassVar[int]
-    MERGE_MODE_FIELD_NUMBER: _ClassVar[int]
-    PID_FIELD_NUMBER: _ClassVar[int]
     CREATED_AT_FIELD_NUMBER: _ClassVar[int]
-    CONSECUTIVE_FAILURES_FIELD_NUMBER: _ClassVar[int]
-    PENDING_ACTIVATIONS_FIELD_NUMBER: _ClassVar[int]
-    STEP_INDEX_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     repo: str
@@ -371,38 +263,34 @@ class Wave(_message.Message):
     direction: _containers.RepeatedScalarFieldContainer[str]
     area: _containers.RepeatedScalarFieldContainer[str]
     paused: bool
-    status: WaveStatus
+    created_at: _timestamp_pb2.Timestamp
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., repo: _Optional[str] = ..., flow: _Optional[str] = ..., direction: _Optional[_Iterable[str]] = ..., area: _Optional[_Iterable[str]] = ..., paused: bool = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class WaveRun(_message.Message):
+    __slots__ = ("id", "wave_id", "iteration", "step_index", "status", "worktree", "branch", "started_at", "ended_at", "error", "flow_parents")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    WAVE_ID_FIELD_NUMBER: _ClassVar[int]
+    ITERATION_FIELD_NUMBER: _ClassVar[int]
+    STEP_INDEX_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    WORKTREE_FIELD_NUMBER: _ClassVar[int]
+    BRANCH_FIELD_NUMBER: _ClassVar[int]
+    STARTED_AT_FIELD_NUMBER: _ClassVar[int]
+    ENDED_AT_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    FLOW_PARENTS_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    wave_id: str
     iteration: int
+    step_index: int
+    status: WaveRunStatus
     worktree: str
     branch: str
-    pr_limit: int
-    merge_mode: MergeMode
-    pid: int
-    created_at: _timestamp_pb2.Timestamp
-    consecutive_failures: int
-    pending_activations: int
-    step_index: int
-    def __init__(
-        self,
-        id: _Optional[str] = ...,
-        name: _Optional[str] = ...,
-        repo: _Optional[str] = ...,
-        flow: _Optional[str] = ...,
-        direction: _Optional[_Iterable[str]] = ...,
-        area: _Optional[_Iterable[str]] = ...,
-        paused: bool = ...,
-        status: _Optional[_Union[WaveStatus, str]] = ...,
-        iteration: _Optional[int] = ...,
-        worktree: _Optional[str] = ...,
-        branch: _Optional[str] = ...,
-        pr_limit: _Optional[int] = ...,
-        merge_mode: _Optional[_Union[MergeMode, str]] = ...,
-        pid: _Optional[int] = ...,
-        created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...,
-        consecutive_failures: _Optional[int] = ...,
-        pending_activations: _Optional[int] = ...,
-        step_index: _Optional[int] = ...,
-    ) -> None: ...
+    started_at: _timestamp_pb2.Timestamp
+    ended_at: _timestamp_pb2.Timestamp
+    error: str
+    flow_parents: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, id: _Optional[str] = ..., wave_id: _Optional[str] = ..., iteration: _Optional[int] = ..., step_index: _Optional[int] = ..., status: _Optional[_Union[WaveRunStatus, str]] = ..., worktree: _Optional[str] = ..., branch: _Optional[str] = ..., started_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., ended_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., error: _Optional[str] = ..., flow_parents: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class ListWavesRequest(_message.Message):
     __slots__ = ("repo",)
@@ -428,6 +316,32 @@ class GetWaveResponse(_message.Message):
     wave: Wave
     def __init__(self, wave: _Optional[_Union[Wave, _Mapping]] = ...) -> None: ...
 
+class ListWaveRunsRequest(_message.Message):
+    __slots__ = ("wave_id", "limit")
+    WAVE_ID_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    wave_id: str
+    limit: int
+    def __init__(self, wave_id: _Optional[str] = ..., limit: _Optional[int] = ...) -> None: ...
+
+class ListWaveRunsResponse(_message.Message):
+    __slots__ = ("runs",)
+    RUNS_FIELD_NUMBER: _ClassVar[int]
+    runs: _containers.RepeatedCompositeFieldContainer[WaveRun]
+    def __init__(self, runs: _Optional[_Iterable[_Union[WaveRun, _Mapping]]] = ...) -> None: ...
+
+class GetWaveRunRequest(_message.Message):
+    __slots__ = ("wave_run_id",)
+    WAVE_RUN_ID_FIELD_NUMBER: _ClassVar[int]
+    wave_run_id: str
+    def __init__(self, wave_run_id: _Optional[str] = ...) -> None: ...
+
+class GetWaveRunResponse(_message.Message):
+    __slots__ = ("run",)
+    RUN_FIELD_NUMBER: _ClassVar[int]
+    run: WaveRun
+    def __init__(self, run: _Optional[_Union[WaveRun, _Mapping]] = ...) -> None: ...
+
 class CreateWaveRequest(_message.Message):
     __slots__ = ("repo", "name", "flow", "direction", "area", "idempotency_key")
     REPO_FIELD_NUMBER: _ClassVar[int]
@@ -442,15 +356,7 @@ class CreateWaveRequest(_message.Message):
     direction: _containers.RepeatedScalarFieldContainer[str]
     area: _containers.RepeatedScalarFieldContainer[str]
     idempotency_key: str
-    def __init__(
-        self,
-        repo: _Optional[str] = ...,
-        name: _Optional[str] = ...,
-        flow: _Optional[str] = ...,
-        direction: _Optional[_Iterable[str]] = ...,
-        area: _Optional[_Iterable[str]] = ...,
-        idempotency_key: _Optional[str] = ...,
-    ) -> None: ...
+    def __init__(self, repo: _Optional[str] = ..., name: _Optional[str] = ..., flow: _Optional[str] = ..., direction: _Optional[_Iterable[str]] = ..., area: _Optional[_Iterable[str]] = ..., idempotency_key: _Optional[str] = ...) -> None: ...
 
 class CreateWaveResponse(_message.Message):
     __slots__ = ("wave",)
@@ -472,15 +378,7 @@ class UpdateWaveRequest(_message.Message):
     area: _containers.RepeatedScalarFieldContainer[str]
     paused: bool
     idempotency_key: str
-    def __init__(
-        self,
-        wave_id: _Optional[str] = ...,
-        flow: _Optional[str] = ...,
-        direction: _Optional[_Iterable[str]] = ...,
-        area: _Optional[_Iterable[str]] = ...,
-        paused: bool = ...,
-        idempotency_key: _Optional[str] = ...,
-    ) -> None: ...
+    def __init__(self, wave_id: _Optional[str] = ..., flow: _Optional[str] = ..., direction: _Optional[_Iterable[str]] = ..., area: _Optional[_Iterable[str]] = ..., paused: bool = ..., idempotency_key: _Optional[str] = ...) -> None: ...
 
 class UpdateWaveResponse(_message.Message):
     __slots__ = ("wave",)
@@ -506,12 +404,7 @@ class CloneWaveRequest(_message.Message):
     wave_id: str
     name: str
     idempotency_key: str
-    def __init__(
-        self,
-        wave_id: _Optional[str] = ...,
-        name: _Optional[str] = ...,
-        idempotency_key: _Optional[str] = ...,
-    ) -> None: ...
+    def __init__(self, wave_id: _Optional[str] = ..., name: _Optional[str] = ..., idempotency_key: _Optional[str] = ...) -> None: ...
 
 class CloneWaveResponse(_message.Message):
     __slots__ = ("wave",)
@@ -531,22 +424,17 @@ class RunWaveRequest(_message.Message):
     direction: _containers.RepeatedScalarFieldContainer[str]
     flow: str
     idempotency_key: str
-    def __init__(
-        self,
-        wave_id: _Optional[str] = ...,
-        area: _Optional[_Iterable[str]] = ...,
-        direction: _Optional[_Iterable[str]] = ...,
-        flow: _Optional[str] = ...,
-        idempotency_key: _Optional[str] = ...,
-    ) -> None: ...
+    def __init__(self, wave_id: _Optional[str] = ..., area: _Optional[_Iterable[str]] = ..., direction: _Optional[_Iterable[str]] = ..., flow: _Optional[str] = ..., idempotency_key: _Optional[str] = ...) -> None: ...
 
 class RunWaveResponse(_message.Message):
-    __slots__ = ("started", "wave_id")
+    __slots__ = ("started", "wave_id", "wave_run_id")
     STARTED_FIELD_NUMBER: _ClassVar[int]
     WAVE_ID_FIELD_NUMBER: _ClassVar[int]
+    WAVE_RUN_ID_FIELD_NUMBER: _ClassVar[int]
     started: bool
     wave_id: str
-    def __init__(self, started: bool = ..., wave_id: _Optional[str] = ...) -> None: ...
+    wave_run_id: str
+    def __init__(self, started: bool = ..., wave_id: _Optional[str] = ..., wave_run_id: _Optional[str] = ...) -> None: ...
 
 class StopWaveRequest(_message.Message):
     __slots__ = ("wave_id", "force")
@@ -582,15 +470,7 @@ class ConnectWaveResponse(_message.Message):
     prompt_file: str
     wave_run_id: str
     step_index: int
-    def __init__(
-        self,
-        worktree: _Optional[str] = ...,
-        step: _Optional[str] = ...,
-        agent_id: _Optional[str] = ...,
-        prompt_file: _Optional[str] = ...,
-        wave_run_id: _Optional[str] = ...,
-        step_index: _Optional[int] = ...,
-    ) -> None: ...
+    def __init__(self, worktree: _Optional[str] = ..., step: _Optional[str] = ..., agent_id: _Optional[str] = ..., prompt_file: _Optional[str] = ..., wave_run_id: _Optional[str] = ..., step_index: _Optional[int] = ...) -> None: ...
 
 class ListStimuliRequest(_message.Message):
     __slots__ = ("wave_id", "kind")
@@ -598,9 +478,7 @@ class ListStimuliRequest(_message.Message):
     KIND_FIELD_NUMBER: _ClassVar[int]
     wave_id: str
     kind: StimulusKind
-    def __init__(
-        self, wave_id: _Optional[str] = ..., kind: _Optional[_Union[StimulusKind, str]] = ...
-    ) -> None: ...
+    def __init__(self, wave_id: _Optional[str] = ..., kind: _Optional[_Union[StimulusKind, str]] = ...) -> None: ...
 
 class ListStimuliResponse(_message.Message):
     __slots__ = ("stimuli",)
@@ -630,13 +508,7 @@ class CreateStimulusRequest(_message.Message):
     kind: StimulusKind
     cron: str
     idempotency_key: str
-    def __init__(
-        self,
-        wave_id: _Optional[str] = ...,
-        kind: _Optional[_Union[StimulusKind, str]] = ...,
-        cron: _Optional[str] = ...,
-        idempotency_key: _Optional[str] = ...,
-    ) -> None: ...
+    def __init__(self, wave_id: _Optional[str] = ..., kind: _Optional[_Union[StimulusKind, str]] = ..., cron: _Optional[str] = ..., idempotency_key: _Optional[str] = ...) -> None: ...
 
 class CreateStimulusResponse(_message.Message):
     __slots__ = ("stimulus",)
@@ -654,13 +526,7 @@ class UpdateStimulusRequest(_message.Message):
     cron: str
     enabled: bool
     idempotency_key: str
-    def __init__(
-        self,
-        stimulus_id: _Optional[str] = ...,
-        cron: _Optional[str] = ...,
-        enabled: bool = ...,
-        idempotency_key: _Optional[str] = ...,
-    ) -> None: ...
+    def __init__(self, stimulus_id: _Optional[str] = ..., cron: _Optional[str] = ..., enabled: bool = ..., idempotency_key: _Optional[str] = ...) -> None: ...
 
 class UpdateStimulusResponse(_message.Message):
     __slots__ = ("stimulus",)
@@ -686,12 +552,7 @@ class FlowInfo(_message.Message):
     name: str
     type: FlowType
     steps: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(
-        self,
-        name: _Optional[str] = ...,
-        type: _Optional[_Union[FlowType, str]] = ...,
-        steps: _Optional[_Iterable[str]] = ...,
-    ) -> None: ...
+    def __init__(self, name: _Optional[str] = ..., type: _Optional[_Union[FlowType, str]] = ..., steps: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class StepInfo(_message.Message):
     __slots__ = ("name", "type")
@@ -713,11 +574,7 @@ class ListFlowsResponse(_message.Message):
     STEPS_FIELD_NUMBER: _ClassVar[int]
     flows: _containers.RepeatedCompositeFieldContainer[FlowInfo]
     steps: _containers.RepeatedCompositeFieldContainer[StepInfo]
-    def __init__(
-        self,
-        flows: _Optional[_Iterable[_Union[FlowInfo, _Mapping]]] = ...,
-        steps: _Optional[_Iterable[_Union[StepInfo, _Mapping]]] = ...,
-    ) -> None: ...
+    def __init__(self, flows: _Optional[_Iterable[_Union[FlowInfo, _Mapping]]] = ..., steps: _Optional[_Iterable[_Union[StepInfo, _Mapping]]] = ...) -> None: ...
 
 class WorkingTreeStatus(_message.Message):
     __slots__ = ("staged", "modified", "untracked", "diff_added", "diff_deleted")
@@ -731,14 +588,7 @@ class WorkingTreeStatus(_message.Message):
     untracked: bool
     diff_added: int
     diff_deleted: int
-    def __init__(
-        self,
-        staged: bool = ...,
-        modified: bool = ...,
-        untracked: bool = ...,
-        diff_added: _Optional[int] = ...,
-        diff_deleted: _Optional[int] = ...,
-    ) -> None: ...
+    def __init__(self, staged: bool = ..., modified: bool = ..., untracked: bool = ..., diff_added: _Optional[int] = ..., diff_deleted: _Optional[int] = ...) -> None: ...
 
 class MainStatus(_message.Message):
     __slots__ = ("ahead", "behind")
@@ -756,9 +606,7 @@ class RemoteStatus(_message.Message):
     name: str
     ahead: int
     behind: int
-    def __init__(
-        self, name: _Optional[str] = ..., ahead: _Optional[int] = ..., behind: _Optional[int] = ...
-    ) -> None: ...
+    def __init__(self, name: _Optional[str] = ..., ahead: _Optional[int] = ..., behind: _Optional[int] = ...) -> None: ...
 
 class CIStatus(_message.Message):
     __slots__ = ("source", "url", "state", "ci_state")
@@ -770,13 +618,7 @@ class CIStatus(_message.Message):
     url: str
     state: PRState
     ci_state: CIState
-    def __init__(
-        self,
-        source: _Optional[str] = ...,
-        url: _Optional[str] = ...,
-        state: _Optional[_Union[PRState, str]] = ...,
-        ci_state: _Optional[_Union[CIState, str]] = ...,
-    ) -> None: ...
+    def __init__(self, source: _Optional[str] = ..., url: _Optional[str] = ..., state: _Optional[_Union[PRState, str]] = ..., ci_state: _Optional[_Union[CIState, str]] = ...) -> None: ...
 
 class RecentAgent(_message.Message):
     __slots__ = ("id", "step", "status", "started_at", "ended_at")
@@ -790,31 +632,10 @@ class RecentAgent(_message.Message):
     status: AgentStatus
     started_at: _timestamp_pb2.Timestamp
     ended_at: _timestamp_pb2.Timestamp
-    def __init__(
-        self,
-        id: _Optional[str] = ...,
-        step: _Optional[str] = ...,
-        status: _Optional[_Union[AgentStatus, str]] = ...,
-        started_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...,
-        ended_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...,
-    ) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., step: _Optional[str] = ..., status: _Optional[_Union[AgentStatus, str]] = ..., started_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., ended_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class WorktreeState(_message.Message):
-    __slots__ = (
-        "branch",
-        "path",
-        "base_branch",
-        "working_tree",
-        "main",
-        "main_state",
-        "remote",
-        "operation_state",
-        "ci",
-        "prunable",
-        "staleness",
-        "staleness_days",
-        "recent_steps",
-    )
+    __slots__ = ("branch", "path", "base_branch", "working_tree", "main", "main_state", "remote", "operation_state", "ci", "prunable", "staleness", "staleness_days", "recent_steps")
     BRANCH_FIELD_NUMBER: _ClassVar[int]
     PATH_FIELD_NUMBER: _ClassVar[int]
     BASE_BRANCH_FIELD_NUMBER: _ClassVar[int]
@@ -841,22 +662,7 @@ class WorktreeState(_message.Message):
     staleness: Staleness
     staleness_days: int
     recent_steps: _containers.RepeatedCompositeFieldContainer[RecentAgent]
-    def __init__(
-        self,
-        branch: _Optional[str] = ...,
-        path: _Optional[str] = ...,
-        base_branch: _Optional[str] = ...,
-        working_tree: _Optional[_Union[WorkingTreeStatus, _Mapping]] = ...,
-        main: _Optional[_Union[MainStatus, _Mapping]] = ...,
-        main_state: _Optional[str] = ...,
-        remote: _Optional[_Union[RemoteStatus, _Mapping]] = ...,
-        operation_state: _Optional[_Union[OperationState, str]] = ...,
-        ci: _Optional[_Union[CIStatus, _Mapping]] = ...,
-        prunable: bool = ...,
-        staleness: _Optional[_Union[Staleness, str]] = ...,
-        staleness_days: _Optional[int] = ...,
-        recent_steps: _Optional[_Iterable[_Union[RecentAgent, _Mapping]]] = ...,
-    ) -> None: ...
+    def __init__(self, branch: _Optional[str] = ..., path: _Optional[str] = ..., base_branch: _Optional[str] = ..., working_tree: _Optional[_Union[WorkingTreeStatus, _Mapping]] = ..., main: _Optional[_Union[MainStatus, _Mapping]] = ..., main_state: _Optional[str] = ..., remote: _Optional[_Union[RemoteStatus, _Mapping]] = ..., operation_state: _Optional[_Union[OperationState, str]] = ..., ci: _Optional[_Union[CIStatus, _Mapping]] = ..., prunable: bool = ..., staleness: _Optional[_Union[Staleness, str]] = ..., staleness_days: _Optional[int] = ..., recent_steps: _Optional[_Iterable[_Union[RecentAgent, _Mapping]]] = ...) -> None: ...
 
 class ListWorktreesRequest(_message.Message):
     __slots__ = ("repo",)
@@ -868,9 +674,7 @@ class ListWorktreesResponse(_message.Message):
     __slots__ = ("worktrees",)
     WORKTREES_FIELD_NUMBER: _ClassVar[int]
     worktrees: _containers.RepeatedCompositeFieldContainer[WorktreeState]
-    def __init__(
-        self, worktrees: _Optional[_Iterable[_Union[WorktreeState, _Mapping]]] = ...
-    ) -> None: ...
+    def __init__(self, worktrees: _Optional[_Iterable[_Union[WorktreeState, _Mapping]]] = ...) -> None: ...
 
 class NotifyWorktreeChangedRequest(_message.Message):
     __slots__ = ("repo", "branch", "reason")
@@ -880,9 +684,7 @@ class NotifyWorktreeChangedRequest(_message.Message):
     repo: str
     branch: str
     reason: str
-    def __init__(
-        self, repo: _Optional[str] = ..., branch: _Optional[str] = ..., reason: _Optional[str] = ...
-    ) -> None: ...
+    def __init__(self, repo: _Optional[str] = ..., branch: _Optional[str] = ..., reason: _Optional[str] = ...) -> None: ...
 
 class NotifyWorktreeChangedResponse(_message.Message):
     __slots__ = ("branch", "reason")
@@ -908,14 +710,7 @@ class GetSchedulerStatusResponse(_message.Message):
     outstanding: int
     outstanding_limit: int
     running: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(
-        self,
-        slots_used: _Optional[int] = ...,
-        slots_total: _Optional[int] = ...,
-        outstanding: _Optional[int] = ...,
-        outstanding_limit: _Optional[int] = ...,
-        running: _Optional[_Iterable[str]] = ...,
-    ) -> None: ...
+    def __init__(self, slots_used: _Optional[int] = ..., slots_total: _Optional[int] = ..., outstanding: _Optional[int] = ..., outstanding_limit: _Optional[int] = ..., running: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class AcquireSlotRequest(_message.Message):
     __slots__ = ("run_id",)
@@ -931,9 +726,7 @@ class AcquireSlotResponse(_message.Message):
     acquired: bool
     reason: str
     slots_used: int
-    def __init__(
-        self, acquired: bool = ..., reason: _Optional[str] = ..., slots_used: _Optional[int] = ...
-    ) -> None: ...
+    def __init__(self, acquired: bool = ..., reason: _Optional[str] = ..., slots_used: _Optional[int] = ...) -> None: ...
 
 class ReleaseSlotRequest(_message.Message):
     __slots__ = ("run_id",)
@@ -948,26 +741,12 @@ class ReleaseSlotResponse(_message.Message):
     def __init__(self, slots_used: _Optional[int] = ...) -> None: ...
 
 class Agent(_message.Message):
-    __slots__ = (
-        "id",
-        "step",
-        "repo",
-        "worktree",
-        "wave_run_id",
-        "wave_id",
-        "status",
-        "started_at",
-        "ended_at",
-        "pid",
-        "model",
-        "run_mode",
-    )
+    __slots__ = ("id", "step", "repo", "worktree", "wave_run_id", "status", "started_at", "ended_at", "pid", "model", "run_mode")
     ID_FIELD_NUMBER: _ClassVar[int]
     STEP_FIELD_NUMBER: _ClassVar[int]
     REPO_FIELD_NUMBER: _ClassVar[int]
     WORKTREE_FIELD_NUMBER: _ClassVar[int]
     WAVE_RUN_ID_FIELD_NUMBER: _ClassVar[int]
-    WAVE_ID_FIELD_NUMBER: _ClassVar[int]
     STATUS_FIELD_NUMBER: _ClassVar[int]
     STARTED_AT_FIELD_NUMBER: _ClassVar[int]
     ENDED_AT_FIELD_NUMBER: _ClassVar[int]
@@ -979,28 +758,13 @@ class Agent(_message.Message):
     repo: str
     worktree: str
     wave_run_id: str
-    wave_id: str
     status: AgentStatus
     started_at: _timestamp_pb2.Timestamp
     ended_at: _timestamp_pb2.Timestamp
     pid: int
     model: str
     run_mode: str
-    def __init__(
-        self,
-        id: _Optional[str] = ...,
-        step: _Optional[str] = ...,
-        repo: _Optional[str] = ...,
-        worktree: _Optional[str] = ...,
-        wave_run_id: _Optional[str] = ...,
-        wave_id: _Optional[str] = ...,
-        status: _Optional[_Union[AgentStatus, str]] = ...,
-        started_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...,
-        ended_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...,
-        pid: _Optional[int] = ...,
-        model: _Optional[str] = ...,
-        run_mode: _Optional[str] = ...,
-    ) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., step: _Optional[str] = ..., repo: _Optional[str] = ..., worktree: _Optional[str] = ..., wave_run_id: _Optional[str] = ..., status: _Optional[_Union[AgentStatus, str]] = ..., started_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., ended_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., pid: _Optional[int] = ..., model: _Optional[str] = ..., run_mode: _Optional[str] = ...) -> None: ...
 
 class ListAgentsRequest(_message.Message):
     __slots__ = ()
@@ -1020,12 +784,7 @@ class GetAgentHistoryRequest(_message.Message):
     worktree: str
     repo: str
     limit: int
-    def __init__(
-        self,
-        worktree: _Optional[str] = ...,
-        repo: _Optional[str] = ...,
-        limit: _Optional[int] = ...,
-    ) -> None: ...
+    def __init__(self, worktree: _Optional[str] = ..., repo: _Optional[str] = ..., limit: _Optional[int] = ...) -> None: ...
 
 class GetAgentHistoryResponse(_message.Message):
     __slots__ = ("agents",)
@@ -1051,9 +810,7 @@ class EndAgentRequest(_message.Message):
     STATUS_FIELD_NUMBER: _ClassVar[int]
     agent_id: str
     status: AgentStatus
-    def __init__(
-        self, agent_id: _Optional[str] = ..., status: _Optional[_Union[AgentStatus, str]] = ...
-    ) -> None: ...
+    def __init__(self, agent_id: _Optional[str] = ..., status: _Optional[_Union[AgentStatus, str]] = ...) -> None: ...
 
 class EndAgentResponse(_message.Message):
     __slots__ = ("id",)
@@ -1068,24 +825,7 @@ class SubscribeRequest(_message.Message):
     def __init__(self, patterns: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class Event(_message.Message):
-    __slots__ = (
-        "event",
-        "timestamp",
-        "agent_started",
-        "agent_ended",
-        "output_line",
-        "worktree_updated",
-        "worktree_pruned",
-        "wave_created",
-        "wave_updated",
-        "wave_deleted",
-        "wave_started",
-        "wave_stopped",
-        "wave_activated",
-        "wave_waiting",
-        "scheduler_slot_acquired",
-        "scheduler_slot_released",
-    )
+    __slots__ = ("event", "timestamp", "agent_started", "agent_ended", "output_line", "worktree_updated", "worktree_pruned", "wave_created", "wave_updated", "wave_deleted", "wave_started", "wave_stopped", "wave_activated", "wave_waiting", "scheduler_slot_acquired", "scheduler_slot_released")
     EVENT_FIELD_NUMBER: _ClassVar[int]
     TIMESTAMP_FIELD_NUMBER: _ClassVar[int]
     AGENT_STARTED_FIELD_NUMBER: _ClassVar[int]
@@ -1118,25 +858,7 @@ class Event(_message.Message):
     wave_waiting: WaveWaitingEvent
     scheduler_slot_acquired: SchedulerSlotAcquiredEvent
     scheduler_slot_released: SchedulerSlotReleasedEvent
-    def __init__(
-        self,
-        event: _Optional[str] = ...,
-        timestamp: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...,
-        agent_started: _Optional[_Union[AgentStartedEvent, _Mapping]] = ...,
-        agent_ended: _Optional[_Union[AgentEndedEvent, _Mapping]] = ...,
-        output_line: _Optional[_Union[OutputLineEvent, _Mapping]] = ...,
-        worktree_updated: _Optional[_Union[WorktreeUpdatedEvent, _Mapping]] = ...,
-        worktree_pruned: _Optional[_Union[WorktreePrunedEvent, _Mapping]] = ...,
-        wave_created: _Optional[_Union[WaveCreatedEvent, _Mapping]] = ...,
-        wave_updated: _Optional[_Union[WaveUpdatedEvent, _Mapping]] = ...,
-        wave_deleted: _Optional[_Union[WaveDeletedEvent, _Mapping]] = ...,
-        wave_started: _Optional[_Union[WaveStartedEvent, _Mapping]] = ...,
-        wave_stopped: _Optional[_Union[WaveStoppedEvent, _Mapping]] = ...,
-        wave_activated: _Optional[_Union[WaveActivatedEvent, _Mapping]] = ...,
-        wave_waiting: _Optional[_Union[WaveWaitingEvent, _Mapping]] = ...,
-        scheduler_slot_acquired: _Optional[_Union[SchedulerSlotAcquiredEvent, _Mapping]] = ...,
-        scheduler_slot_released: _Optional[_Union[SchedulerSlotReleasedEvent, _Mapping]] = ...,
-    ) -> None: ...
+    def __init__(self, event: _Optional[str] = ..., timestamp: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., agent_started: _Optional[_Union[AgentStartedEvent, _Mapping]] = ..., agent_ended: _Optional[_Union[AgentEndedEvent, _Mapping]] = ..., output_line: _Optional[_Union[OutputLineEvent, _Mapping]] = ..., worktree_updated: _Optional[_Union[WorktreeUpdatedEvent, _Mapping]] = ..., worktree_pruned: _Optional[_Union[WorktreePrunedEvent, _Mapping]] = ..., wave_created: _Optional[_Union[WaveCreatedEvent, _Mapping]] = ..., wave_updated: _Optional[_Union[WaveUpdatedEvent, _Mapping]] = ..., wave_deleted: _Optional[_Union[WaveDeletedEvent, _Mapping]] = ..., wave_started: _Optional[_Union[WaveStartedEvent, _Mapping]] = ..., wave_stopped: _Optional[_Union[WaveStoppedEvent, _Mapping]] = ..., wave_activated: _Optional[_Union[WaveActivatedEvent, _Mapping]] = ..., wave_waiting: _Optional[_Union[WaveWaitingEvent, _Mapping]] = ..., scheduler_slot_acquired: _Optional[_Union[SchedulerSlotAcquiredEvent, _Mapping]] = ..., scheduler_slot_released: _Optional[_Union[SchedulerSlotReleasedEvent, _Mapping]] = ...) -> None: ...
 
 class AgentStartedEvent(_message.Message):
     __slots__ = ("id", "step", "worktree", "wave_id", "wave_run_id", "step_index")
@@ -1152,15 +874,7 @@ class AgentStartedEvent(_message.Message):
     wave_id: str
     wave_run_id: str
     step_index: int
-    def __init__(
-        self,
-        id: _Optional[str] = ...,
-        step: _Optional[str] = ...,
-        worktree: _Optional[str] = ...,
-        wave_id: _Optional[str] = ...,
-        wave_run_id: _Optional[str] = ...,
-        step_index: _Optional[int] = ...,
-    ) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., step: _Optional[str] = ..., worktree: _Optional[str] = ..., wave_id: _Optional[str] = ..., wave_run_id: _Optional[str] = ..., step_index: _Optional[int] = ...) -> None: ...
 
 class AgentEndedEvent(_message.Message):
     __slots__ = ("id", "status", "wave_id", "wave_run_id", "flow_will_continue")
@@ -1174,14 +888,7 @@ class AgentEndedEvent(_message.Message):
     wave_id: str
     wave_run_id: str
     flow_will_continue: bool
-    def __init__(
-        self,
-        id: _Optional[str] = ...,
-        status: _Optional[str] = ...,
-        wave_id: _Optional[str] = ...,
-        wave_run_id: _Optional[str] = ...,
-        flow_will_continue: bool = ...,
-    ) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., status: _Optional[str] = ..., wave_id: _Optional[str] = ..., wave_run_id: _Optional[str] = ..., flow_will_continue: bool = ...) -> None: ...
 
 class OutputLineEvent(_message.Message):
     __slots__ = ("agent_id", "text")
@@ -1203,14 +910,7 @@ class WorktreeUpdatedEvent(_message.Message):
     repo: str
     worktree: WorktreeState
     changes: WorktreeChanges
-    def __init__(
-        self,
-        branch: _Optional[str] = ...,
-        reason: _Optional[_Union[WorktreeChangeReason, str]] = ...,
-        repo: _Optional[str] = ...,
-        worktree: _Optional[_Union[WorktreeState, _Mapping]] = ...,
-        changes: _Optional[_Union[WorktreeChanges, _Mapping]] = ...,
-    ) -> None: ...
+    def __init__(self, branch: _Optional[str] = ..., reason: _Optional[_Union[WorktreeChangeReason, str]] = ..., repo: _Optional[str] = ..., worktree: _Optional[_Union[WorktreeState, _Mapping]] = ..., changes: _Optional[_Union[WorktreeChanges, _Mapping]] = ...) -> None: ...
 
 class WorktreeChanges(_message.Message):
     __slots__ = ("ci_state", "pr_state")
@@ -1218,11 +918,7 @@ class WorktreeChanges(_message.Message):
     PR_STATE_FIELD_NUMBER: _ClassVar[int]
     ci_state: CIState
     pr_state: PRState
-    def __init__(
-        self,
-        ci_state: _Optional[_Union[CIState, str]] = ...,
-        pr_state: _Optional[_Union[PRState, str]] = ...,
-    ) -> None: ...
+    def __init__(self, ci_state: _Optional[_Union[CIState, str]] = ..., pr_state: _Optional[_Union[PRState, str]] = ...) -> None: ...
 
 class WorktreePrunedEvent(_message.Message):
     __slots__ = ("branch", "repo")
@@ -1276,38 +972,25 @@ class WaveActivatedEvent(_message.Message):
     triggering_stimuli: _containers.RepeatedScalarFieldContainer[str]
     from_sha: str
     to_sha: str
-    def __init__(
-        self,
-        wave_id: _Optional[str] = ...,
-        stimulus: _Optional[_Union[StimulusKind, str]] = ...,
-        triggering_stimuli: _Optional[_Iterable[str]] = ...,
-        from_sha: _Optional[str] = ...,
-        to_sha: _Optional[str] = ...,
-    ) -> None: ...
+    def __init__(self, wave_id: _Optional[str] = ..., stimulus: _Optional[_Union[StimulusKind, str]] = ..., triggering_stimuli: _Optional[_Iterable[str]] = ..., from_sha: _Optional[str] = ..., to_sha: _Optional[str] = ...) -> None: ...
 
 class WaveWaitingEvent(_message.Message):
-    __slots__ = ("wave_id", "step", "agent_id", "flow_run_id", "step_index", "reason")
+    __slots__ = ("wave_id", "step", "agent_id", "wave_run_id", "step_index", "reason", "flow_parents")
     WAVE_ID_FIELD_NUMBER: _ClassVar[int]
     STEP_FIELD_NUMBER: _ClassVar[int]
     AGENT_ID_FIELD_NUMBER: _ClassVar[int]
-    FLOW_RUN_ID_FIELD_NUMBER: _ClassVar[int]
+    WAVE_RUN_ID_FIELD_NUMBER: _ClassVar[int]
     STEP_INDEX_FIELD_NUMBER: _ClassVar[int]
     REASON_FIELD_NUMBER: _ClassVar[int]
+    FLOW_PARENTS_FIELD_NUMBER: _ClassVar[int]
     wave_id: str
     step: str
     agent_id: str
-    flow_run_id: str
+    wave_run_id: str
     step_index: int
     reason: WaitingReason
-    def __init__(
-        self,
-        wave_id: _Optional[str] = ...,
-        step: _Optional[str] = ...,
-        agent_id: _Optional[str] = ...,
-        flow_run_id: _Optional[str] = ...,
-        step_index: _Optional[int] = ...,
-        reason: _Optional[_Union[WaitingReason, str]] = ...,
-    ) -> None: ...
+    flow_parents: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, wave_id: _Optional[str] = ..., step: _Optional[str] = ..., agent_id: _Optional[str] = ..., wave_run_id: _Optional[str] = ..., step_index: _Optional[int] = ..., reason: _Optional[_Union[WaitingReason, str]] = ..., flow_parents: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class SchedulerSlotAcquiredEvent(_message.Message):
     __slots__ = ("run_id", "slots_used")
@@ -1340,13 +1023,17 @@ class NotifyResponse(_message.Message):
     def __init__(self, event: _Optional[str] = ...) -> None: ...
 
 class StreamOutputRequest(_message.Message):
+    __slots__ = ("wave_run_id", "agent_id")
+    WAVE_RUN_ID_FIELD_NUMBER: _ClassVar[int]
+    AGENT_ID_FIELD_NUMBER: _ClassVar[int]
+    wave_run_id: str
+    agent_id: str
+    def __init__(self, wave_run_id: _Optional[str] = ..., agent_id: _Optional[str] = ...) -> None: ...
+
+class StreamOutputResponse(_message.Message):
     __slots__ = ("agent_id", "text")
     AGENT_ID_FIELD_NUMBER: _ClassVar[int]
     TEXT_FIELD_NUMBER: _ClassVar[int]
     agent_id: str
     text: str
     def __init__(self, agent_id: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
-
-class StreamOutputResponse(_message.Message):
-    __slots__ = ()
-    def __init__(self) -> None: ...

@@ -53,6 +53,7 @@ def push(repo_root: Path) -> bool:
 def autocommit(
     repo_root: Path,
     task: str,
+    flow_parents: list[str] | None = None,
     push: bool = False,
     verbose: bool = False,
 ) -> bool:
@@ -70,8 +71,11 @@ def autocommit(
             print(f"\n[{task}] no changes to commit")
         return False
 
-    # Build prefix: lf {task}
-    prefix = f"lf {task}"
+    # Build prefix: lf {flow_parents} {task}
+    if flow_parents:
+        prefix = f"lf {' '.join(flow_parents)} {task}"
+    else:
+        prefix = f"lf {task}"
 
     subprocess.run(["git", "add", "-A"], cwd=repo_root, check=True)
 

@@ -3,7 +3,6 @@ use std::process::Command;
 
 use loopflow_engine::git::{
     commit, create_branch, current_branch, get_default_branch, is_ancestor, is_clean, rebase,
-    sync_main,
 };
 use tempfile::TempDir;
 

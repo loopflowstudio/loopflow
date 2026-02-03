@@ -260,43 +260,58 @@ struct WaveSidebar: View {
             Spacer()
                 .frame(maxHeight: .infinity)
 
-            VStack(spacing: 12) {
-                Image(systemName: "cpu")
-                    .font(.system(size: 28))
-                    .foregroundStyle(.white.opacity(0.3))
-
-                VStack(spacing: 4) {
-                    Text("No waves yet")
-                        .fontWeight(.medium)
-                        .foregroundStyle(.white.opacity(0.7))
-                        .accessibilityIdentifier("wave-empty-title")
-                    Text("Create a wave to start AI-powered work on your codebase.")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.5))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 16)
-                        .accessibilityIdentifier("wave-empty-description")
+            VStack(spacing: Spacing.xl) {
+                // Quick experiment section (primary)
+                QuickExperimentSidebarView { step in
+                    launchQuickExperiment(step: step)
                 }
+                .accessibilityIdentifier("quick-experiment-section")
 
-                Button {
-                    createWaveDirectly()
-                } label: {
-                    Label("Create Wave", systemImage: "plus")
-                        .font(.caption)
+                // Divider
+                Rectangle()
+                    .fill(Color.white.opacity(0.1))
+                    .frame(height: 1)
+                    .padding(.horizontal, Spacing.lg)
+
+                // Create wave section (secondary)
+                VStack(spacing: Spacing.sm) {
+                    Button {
+                        createWaveDirectly()
+                    } label: {
+                        Label("Create Wave", systemImage: "plus")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(isCreatingWave)
+                    .accessibilityIdentifier("wave-empty-create")
+
+                    // Sidebar preview showing wave structure
+                    SidebarPreviewView()
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .disabled(isCreatingWave)
-                .accessibilityIdentifier("wave-empty-create")
             }
 
-            Spacer()
-                .frame(maxHeight: .infinity)
             Spacer()
                 .frame(maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity)
         .padding()
+    }
+
+    private func launchQuickExperiment(step: String) {
+        guard let repo = repoState.currentRepo else { return }
+
+        let terminalLauncher = TerminalLauncher()
+        let terminal = repoState.config?.terminalApp ?? .warp
+
+        // Launch terminal in main repo with the step command
+        let command = "lf \(step)"
+        do {
+            try terminalLauncher.launchTerminal(terminal, at: repo, command: command)
+        } catch {
+            actionError = "Failed to launch: \(error.localizedDescription)"
+            showingActionError = true
+        }
     }
 
     private var waveList: some View {

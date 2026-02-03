@@ -200,18 +200,25 @@ struct ContentView: View {
         } else if let wave = repoState.selectedWave {
             WaveDetailPanel(wave: wave)
         } else {
-            VStack(spacing: 16) {
-                Image(systemName: "cpu")
-                    .font(.system(size: 48))
-                    .foregroundStyle(.tertiary)
-                Text("Select a wave")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-                Text("Or create one to get started")
-                    .font(.subheadline)
-                    .foregroundStyle(.tertiary)
+            QuickExperimentDetailView { step in
+                launchQuickExperiment(step: step)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func launchQuickExperiment(step: String) {
+        guard let repo = repoState.currentRepo else { return }
+
+        let terminalLauncher = TerminalLauncher()
+        let terminal = repoState.config?.terminalApp ?? .warp
+
+        // Launch terminal in main repo with the step command
+        let command = "lf \(step)"
+        do {
+            try terminalLauncher.launchTerminal(terminal, at: repo, command: command)
+        } catch {
+            // Show error in UI
+            repoState.errorMessage = "Failed to launch: \(error.localizedDescription)"
         }
     }
 }

@@ -260,7 +260,8 @@ def _create_fresh_worktree(
     base_ref: str = "origin/main",
 ) -> Path | None:
     """Create new worktree at worktree_base path with new branch."""
-    worktree_path = main_repo.parent / f"{main_repo.name}.{worktree_base}"
+    new_suffix = f"{generate_timestamp()}.{generate_word_pair()}"
+    worktree_path = main_repo.parent / f"{main_repo.name}.{worktree_base}.{new_suffix}"
 
     result = subprocess.run(
         ["git", "worktree", "add", "-b", new_branch, str(worktree_path), base_ref],

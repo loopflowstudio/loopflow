@@ -1,8 +1,10 @@
-# Quick Experiment Path - Design Review
+# Quick Experiment Path
 
-## What was implemented
+Run loopflow steps directly on a codebase without creating a wave.
 
-Added a "Quick Experiment" feature to Concerto that lets users run loopflow steps (`design`, `review`, `debug`, `implement`) directly on their codebase without creating a wave. This appears in two places:
+## What it does
+
+Users can run `design`, `review`, `debug`, or `implement` directly from Concerto without first creating a wave. This appears in two places:
 
 1. **Sidebar empty state** - When no waves exist, users see quick experiment buttons prominently displayed
 2. **Detail panel placeholder** - When no wave is selected, users see the same quick experiment UI
@@ -11,7 +13,7 @@ Also replaced the old text-based running state progress display with visual `Flo
 
 ## Key choices
 
-**Quick experiments run on main repo, not worktrees.** The design doc specified this explicitly - worktree isolation isn't needed for one-off exploration. If the step makes changes, users can create a wave afterward.
+**Quick experiments run on main repo, not worktrees.** Worktree isolation isn't needed for one-off exploration. If the step makes changes, users can create a wave afterward.
 
 **Single source of truth for step definitions.** The `QuickExperiment` enum holds the four common steps and their descriptions once, used by both sidebar and detail views.
 
@@ -54,6 +56,6 @@ Also replaced the old text-based running state progress display with visual `Flo
 
 ## What's not included
 
-- **Clipboard paste detection** - The design mentioned improvisers wanting to "paste an error and run `lf debug`" but this auto-detection was explicitly out of scope
+- **Clipboard paste detection** - Auto-detecting pasted errors to run `lf debug`
 - **Auto-wave promotion** - Quick experiments don't track history or auto-promote to waves
-- **Session persistence** - Quick experiment terminal sessions aren't tracked; they're truly fire-and-forget
+- **Session persistence** - Terminal sessions aren't tracked; they're fire-and-forget

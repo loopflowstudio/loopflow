@@ -19,21 +19,29 @@ struct FlowProgressPills: View {
         HStack(spacing: Spacing.xs) {
             ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
                 if index > 0 {
-                    // Arrow separator
                     Image(systemName: "chevron.right")
                         .font(.system(size: 8, weight: .semibold))
                         .foregroundStyle(.tertiary)
+                        .accessibilityHidden(true)
                 }
 
                 stepPill(step: step, index: index)
             }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityDescription)
         .onReceive(timer) { _ in
             updateElapsedTime()
         }
         .onAppear {
             updateElapsedTime()
         }
+    }
+
+    private var accessibilityDescription: String {
+        let currentStep = steps.indices.contains(currentIndex) ? formatStepName(steps[currentIndex]) : "unknown"
+        let elapsed = formattedElapsedTime ?? "just started"
+        return "Step \(currentIndex + 1) of \(steps.count): \(currentStep), \(elapsed)"
     }
 
     @ViewBuilder

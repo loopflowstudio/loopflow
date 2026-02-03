@@ -324,49 +324,46 @@ struct WaveModelTests {
 
     // MARK: - Running State Progress
 
-    @Test("progressText shows step with position when totalSteps is set")
-    func progressTextWithTotalSteps() {
+    @Test("progressText shows step with position when flowSteps has multiple steps")
+    func progressTextWithFlowSteps() {
         let wave = Wave(
             id: "test",
             flow: "ship",
             repo: "/tmp",
             status: .running,
-            currentStep: "implement",
             stepIndex: 1,
-            totalSteps: 4
+            flowSteps: ["design", "implement", "review", "gate"]
         )
 
         #expect(wave.progressText == "implement (2/4)")
     }
 
-    @Test("progressText shows step only when totalSteps is zero")
-    func progressTextWithoutTotalSteps() {
+    @Test("progressText shows step only when flowSteps has single step")
+    func progressTextSingleStep() {
         let wave = Wave(
             id: "test",
             flow: "ship",
             repo: "/tmp",
             status: .running,
-            currentStep: "implement",
-            stepIndex: 1,
-            totalSteps: 0
+            stepIndex: 0,
+            flowSteps: ["implement"]
         )
 
         #expect(wave.progressText == "implement")
     }
 
-    @Test("progressText uses flow when currentStep is nil")
+    @Test("progressText uses flow when flowSteps is nil")
     func progressTextUsesFlow() {
         let wave = Wave(
             id: "test",
             flow: "ship",
             repo: "/tmp",
             status: .running,
-            currentStep: nil,
             stepIndex: 0,
-            totalSteps: 3
+            flowSteps: nil
         )
 
-        #expect(wave.progressText == "ship (1/3)")
+        #expect(wave.progressText == "ship")
     }
 
     @Test("elapsedTime formats seconds")
@@ -416,9 +413,8 @@ struct WaveModelTests {
             id: "test",
             flow: "ship",
             repo: "/tmp",
-            currentStep: "implement",
             stepIndex: 1,
-            totalSteps: 4,
+            flowSteps: ["design", "implement", "review", "gate"],
             runStartedAt: now.addingTimeInterval(-192)
         )
 
@@ -431,9 +427,8 @@ struct WaveModelTests {
             id: "test",
             flow: "ship",
             repo: "/tmp",
-            currentStep: "implement",
             stepIndex: 1,
-            totalSteps: 4,
+            flowSteps: ["design", "implement", "review", "gate"],
             runStartedAt: nil
         )
 

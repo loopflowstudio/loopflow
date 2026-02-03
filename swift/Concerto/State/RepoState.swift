@@ -89,7 +89,7 @@ final class RepoState {
     private let configLoader = ConfigLoader()
     private let promptService = PromptService()
     private let flowService = FlowService()
-    private let waveService = LocalWaveService()
+    private let waveService: any WaveServiceProtocol = WaveServiceFactory.create(for: .local)
     private let directionService = DirectionService()
     private var eventService: (any EventServiceProtocol)?
 

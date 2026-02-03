@@ -77,18 +77,20 @@ async fn tick_loop_waves(
             continue;
         }
 
-        let run = match create_wave_run(store, &wave) {
+        let run_id = LfdId::new();
+        let (acquired, _) = scheduler.acquire(run_id.as_str()).await;
+        if !acquired {
+            continue;
+        }
+
+        let run = match create_wave_run(store, &wave, &run_id) {
             Ok(run) => run,
             Err(err) => {
+                scheduler.release(run_id.as_str());
                 tracing::error!(wave_id = %wave.id, error = %err, "failed to create wave run");
                 continue;
             }
         };
-
-        let (acquired, _) = scheduler.acquire(&run.id).await;
-        if !acquired {
-            continue;
-        }
 
         let exec = executor.clone();
         let store = store.clone();
@@ -112,6 +114,7 @@ async fn tick_loop_waves(
 fn create_wave_run(
     store: &SharedStore,
     wave: &crate::proto::control::Wave,
+    run_id: &LfdId,
 ) -> anyhow::Result<WaveRun> {
     let wave_id = LfdId::parse(&wave.id)?;
     let last_run = store
@@ -121,7 +124,7 @@ fn create_wave_run(
     let iteration = last_run.map(|run| run.iteration + 1).unwrap_or(0);
 
     let run = WaveRun {
-        id: LfdId::new().to_string(),
+        id: run_id.to_string(),
         wave_id: wave.id.clone(),
         iteration,
         step_index: 0,

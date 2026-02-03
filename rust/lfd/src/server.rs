@@ -388,9 +388,20 @@ impl ControlService for ControlServer {
         self.run_store(move |store| store.update_wave(&wave_clone))
             .await?;
 
-        let run = self
+        let run_id = LfdId::new();
+        let (acquired, _) = self.scheduler.acquire(run_id.as_str()).await;
+        if !acquired {
+            return Ok(Response::new(RunWaveResponse {
+                started: false,
+                wave_id: wave.id,
+                wave_run_id: None,
+            }));
+        }
+
+        let run = match self
             .run_store({
                 let wave = wave.clone();
+                let run_id = run_id.clone();
                 move |store| {
                     let wave_id = LfdId::from_raw(wave.id.clone());
                     let last_run = store
@@ -399,11 +410,11 @@ impl ControlService for ControlServer {
                         .next();
                     let iteration = last_run.map(|run| run.iteration + 1).unwrap_or(0);
                     let run = WaveRun {
-                        id: LfdId::new().to_string(),
+                        id: run_id.to_string(),
                         wave_id: wave.id.clone(),
                         iteration,
                         step_index: 0,
-                        status: WaveRunStatus::WaveRunPending as i32,
+                        status: WaveRunStatus::WaveRunRunning as i32,
                         worktree: wave.repo.clone(),
                         branch: String::new(),
                         started_at: Some(Self::now_timestamp()),
@@ -414,38 +425,36 @@ impl ControlService for ControlServer {
                     Ok(run)
                 }
             })
-            .await?;
+            .await
+        {
+            Ok(run) => run,
+            Err(err) => {
+                self.scheduler.release(run_id.as_str());
+                return Err(err);
+            }
+        };
 
-        let (acquired, _) = self.scheduler.acquire(&run.id).await;
-        if acquired {
-            let mut running_run = run.clone();
-            running_run.status = WaveRunStatus::WaveRunRunning as i32;
-            let running_run_update = running_run.clone();
-            self.run_store(move |store| store.update_wave_run(&running_run_update))
-                .await?;
-
-            let exec = self.executor.clone();
-            let store = self.store.clone();
-            let scheduler = self.scheduler.clone();
-            let running_run_id = running_run.id.clone();
-            tokio::spawn(async move {
-                let run_id = LfdId::parse(&running_run_id)
-                    .unwrap_or_else(|_| LfdId::from_raw(running_run_id.clone()));
-                if let Err(err) = exec.execute(&run_id).await {
-                    tracing::error!(run_id = %running_run_id, error = %err, "run execution failed");
-                    if let Ok(Some(mut run)) = store.get_wave_run(&run_id) {
-                        run.status = WaveRunStatus::WaveRunFailed as i32;
-                        run.error = Some(err.to_string());
-                        run.ended_at = Some(Self::now_timestamp());
-                        let _ = store.update_wave_run(&run);
-                    }
+        let exec = self.executor.clone();
+        let store = self.store.clone();
+        let scheduler = self.scheduler.clone();
+        let running_run_id = run.id.clone();
+        tokio::spawn(async move {
+            let run_id = LfdId::parse(&running_run_id)
+                .unwrap_or_else(|_| LfdId::from_raw(running_run_id.clone()));
+            if let Err(err) = exec.execute(&run_id).await {
+                tracing::error!(run_id = %running_run_id, error = %err, "run execution failed");
+                if let Ok(Some(mut run)) = store.get_wave_run(&run_id) {
+                    run.status = WaveRunStatus::WaveRunFailed as i32;
+                    run.error = Some(err.to_string());
+                    run.ended_at = Some(Self::now_timestamp());
+                    let _ = store.update_wave_run(&run);
                 }
-                scheduler.release(&running_run_id);
-            });
-        }
+            }
+            scheduler.release(&running_run_id);
+        });
 
         Ok(Response::new(RunWaveResponse {
-            started: acquired,
+            started: true,
             wave_id: wave.id,
             wave_run_id: Some(run.id),
         }))

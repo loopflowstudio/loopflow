@@ -124,6 +124,7 @@ impl WaveExecutor {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)]
     pub fn with_runner(
         store: SharedStore,
         scheduler: Arc<Scheduler>,

@@ -51,7 +51,10 @@ pub fn main_repo_root(repo: &Path) -> Result<PathBuf, GitError> {
 
 pub fn worktree_path(repo: &Path, name: &str) -> PathBuf {
     let sanitized = name.replace(['/', '\\'], "-");
-    repo.parent().unwrap_or(repo).join(sanitized)
+    let repo_name = repo.file_name().and_then(|n| n.to_str()).unwrap_or("repo");
+    repo.parent()
+        .unwrap_or(repo)
+        .join(format!("{repo_name}.{sanitized}"))
 }
 
 fn branch_exists(repo: &Path, branch: &str) -> Result<bool, GitError> {

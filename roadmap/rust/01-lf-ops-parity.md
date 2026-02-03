@@ -152,7 +152,7 @@ pub mod git {
 - [x] `lf ops next` - worktree preservation (PR/stack handling deferred)
 - [ ] `lf ops commit` - agent-generated messages
 - [ ] `lf ops abandon` - PR close, worktree cleanup
-- [x] `lf ops wt create` - schema-based naming (stacking deferred, path layout needs fix)
+- [x] `lf ops wt create` - schema-based naming (stacking deferred)
 - [x] `lf ops wt switch` - auto-cd
 - [x] `lf ops wt list` - JSON output
 - [x] `lf ops wt prune` - merge detection
@@ -166,7 +166,3 @@ pub mod git {
 | Wave integration | Port wave module, defer, stub | Deferred |
 | Shell integration | Fish support? | zsh/bash first, fish later |
 | Lint integration | Run lf lint step vs config command | TBD |
-
-## Known Issues
-
-- **Worktree path layout**: Rust uses `../<name>`, Python uses `../repo.<name>`. Need to fix Rust to match Python behavior.

@@ -78,7 +78,7 @@ public protocol WaveServiceProtocol: Sendable {
     func run(_ id: String, overrides: RunOverrides?) async throws
     func stop(_ id: String) async throws
     func connect(_ id: String) async throws -> ConnectionInfo
-    func listFlowRuns(waveId: String?, repo: URL?, limit: Int) async throws -> [FlowRun]
+    func listWaveRuns(waveId: String?, repo: URL?, limit: Int) async throws -> [WaveRun]
     func collapsePRs(_ id: String) async throws -> CollapsePRsResult
     func checkAvailability() async -> Bool
     func connectLfd() async throws

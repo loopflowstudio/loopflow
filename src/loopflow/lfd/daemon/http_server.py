@@ -53,8 +53,8 @@ from loopflow.lfd.wave import (
 from loopflow.lfd.wave_run import get_latest_wave_run_for_wave, list_wave_runs
 from loopflow.lfd.worktree_state import get_worktree_state_service
 
-# Default port - matches webapp's expected default
-DEFAULT_PORT = 8765
+# Default port for lfd HTTP server
+DEFAULT_PORT = 2486
 
 # Track server start time for uptime calculation
 _start_time: float | None = None
@@ -294,8 +294,8 @@ async def get_waves(repo: str = Query(..., description="Repository path")):
         return LFDResponse(ok=False, error=str(e))
 
 
-@app.get("/flow-runs", response_model=LFDResponse)
-async def get_flow_runs(
+@app.get("/wave-runs", response_model=LFDResponse)
+async def get_wave_runs(
     repo: str | None = Query(default=None, description="Repository path"),
     wave_id: str | None = Query(default=None, description="Wave id"),
     limit: int = Query(default=50, ge=1, le=200),
@@ -307,7 +307,7 @@ async def get_flow_runs(
 
     try:
         runs = list_wave_runs(repo=repo_path, wave_id=wave_id, limit=limit)
-        return LFDResponse(ok=True, result={"flow_runs": [_wave_run_to_dict(run) for run in runs]})
+        return LFDResponse(ok=True, result={"wave_runs": [_wave_run_to_dict(run) for run in runs]})
     except Exception as e:
         return LFDResponse(ok=False, error=str(e))
 

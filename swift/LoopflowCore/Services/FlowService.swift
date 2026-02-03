@@ -24,7 +24,7 @@ public struct FlowService: @unchecked Sendable {
     /// Load all flows and steps from lfd API.
     /// Returns flows first (prioritized), then steps. Steps have type=.step.
     public func loadFlowsAsync(from repoURL: URL) async -> [Flow] {
-        let baseURL = URL(string: "http://127.0.0.1:8765")!
+        let baseURL = lfdBaseURL
         var components = URLComponents(url: baseURL.appendingPathComponent("flows"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "repo", value: repoURL.path)]
 

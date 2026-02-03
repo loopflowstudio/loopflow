@@ -5,7 +5,7 @@ import Foundation
 
 public struct WorktreeService: @unchecked Sendable {
     public init() {}
-    private let baseURL = URL(string: "http://127.0.0.1:8765")!
+    private let baseURL = lfdBaseURL
 
     private var session: URLSession {
         let config = URLSessionConfiguration.default

@@ -1,9 +1,9 @@
-// FlowRun - an execution instance of a Flow, spawned by a Wave.
+// WaveRun - a single execution of a Wave.
 
 import Foundation
 import SwiftUI
 
-public enum FlowRunStatus: String, Sendable, Codable {
+public enum WaveRunStatus: String, Sendable, Codable {
     case pending
     case running
     case completed
@@ -21,7 +21,7 @@ public enum FlowRunStatus: String, Sendable, Codable {
     }
 }
 
-public struct FlowRun: Sendable, Identifiable {
+public struct WaveRun: Sendable, Identifiable {
     public let id: String
     public let waveId: String?
 
@@ -30,7 +30,7 @@ public struct FlowRun: Sendable, Identifiable {
     public let repo: String
     public let direction: [String]
 
-    public var status: FlowRunStatus
+    public var status: WaveRunStatus
     public var iteration: Int
 
     public var worktree: String?
@@ -50,7 +50,7 @@ public struct FlowRun: Sendable, Identifiable {
         area: String,
         repo: String,
         direction: [String] = [],
-        status: FlowRunStatus = .pending,
+        status: WaveRunStatus = .pending,
         iteration: Int = 0,
         worktree: String? = nil,
         branch: String? = nil,

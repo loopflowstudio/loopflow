@@ -1,10 +1,10 @@
-// Service for loading Wave and FlowRun data from lfd daemon (HTTP).
+// Service for loading Wave and WaveRun data from lfd daemon (HTTP).
 
 import Foundation
 
 public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
     public init() {}
-    private let baseURL = URL(string: "http://127.0.0.1:8765")!
+    private let baseURL = lfdBaseURL
 
     private var session: URLSession {
         let config = URLSessionConfiguration.default
@@ -69,10 +69,10 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
         }
     }
 
-    // MARK: - FlowRuns
+    // MARK: - WaveRuns
 
-    public func listFlowRuns(waveId: String? = nil, repo: URL? = nil, limit: Int = 50) async throws -> [FlowRun] {
-        var components = URLComponents(url: baseURL.appendingPathComponent("flow-runs"), resolvingAgainstBaseURL: false)!
+    public func listWaveRuns(waveId: String? = nil, repo: URL? = nil, limit: Int = 50) async throws -> [WaveRun] {
+        var components = URLComponents(url: baseURL.appendingPathComponent("wave-runs"), resolvingAgainstBaseURL: false)!
         var queryItems: [URLQueryItem] = [URLQueryItem(name: "limit", value: String(limit))]
         if let waveId {
             queryItems.append(URLQueryItem(name: "wave_id", value: waveId))
@@ -83,42 +83,42 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
         components.queryItems = queryItems
 
         guard let url = components.url else {
-            LoggingService.lfd("listFlowRuns: invalid URL")
+            LoggingService.lfd("listWaveRuns: invalid URL")
             return []
         }
 
-        LoggingService.lfd("listFlowRuns: GET \(url)")
+        LoggingService.lfd("listWaveRuns: GET \(url)")
 
         do {
             let (data, response) = try await session.data(from: url)
 
             guard let httpResponse = response as? HTTPURLResponse else {
-                LoggingService.lfd("listFlowRuns: no HTTP response")
+                LoggingService.lfd("listWaveRuns: no HTTP response")
                 return []
             }
 
             guard httpResponse.statusCode == 200 else {
-                LoggingService.lfd("listFlowRuns: non-200 status")
+                LoggingService.lfd("listWaveRuns: non-200 status")
                 return []
             }
 
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let ok = json["ok"] as? Bool, ok,
                   let result = json["result"] as? [String: Any],
-                  let runsData = result["flow_runs"] as? [[String: Any]] else {
-                LoggingService.lfd("listFlowRuns: invalid JSON response")
+                  let runsData = result["wave_runs"] as? [[String: Any]] else {
+                LoggingService.lfd("listWaveRuns: invalid JSON response")
                 return []
             }
 
-            return runsData.compactMap { parseFlowRunFromJSON($0) }
+            return runsData.compactMap { parseWaveRunFromJSON($0) }
         } catch {
-            LoggingService.lfd("listFlowRuns: error=\(error.localizedDescription)")
+            LoggingService.lfd("listWaveRuns: error=\(error.localizedDescription)")
             return []
         }
     }
 
-    public func getFlowRuns(forWave waveId: String, limit: Int = 10) async throws -> [FlowRun] {
-        return try await listFlowRuns(waveId: waveId, limit: limit)
+    public func getWaveRuns(forWave waveId: String, limit: Int = 10) async throws -> [WaveRun] {
+        return try await listWaveRuns(waveId: waveId, limit: limit)
     }
 
     // MARK: - Actions
@@ -523,7 +523,7 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
 
     // MARK: - Private helpers
 
-    private func parseFlowRunFromJSON(_ json: [String: Any]) -> FlowRun? {
+    private func parseWaveRunFromJSON(_ json: [String: Any]) -> WaveRun? {
         guard let id = json["id"] as? String,
               let flow = json["flow"] as? String,
               let repoPath = json["repo"] as? String else {
@@ -533,11 +533,11 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
         let waveId = json["wave_id"] as? String
         let area = normalizeArea(json["area"])
         let direction = normalizeDirection(json["direction"])
-        let statusStr = json["status"] as? String ?? FlowRunStatus.pending.rawValue
-        let status = FlowRunStatus(rawValue: statusStr) ?? .pending
+        let statusStr = json["status"] as? String ?? WaveRunStatus.pending.rawValue
+        let status = WaveRunStatus(rawValue: statusStr) ?? .pending
         let iteration = normalizeInt(json["iteration"])
 
-        return FlowRun(
+        return WaveRun(
             id: id,
             waveId: waveId,
             flow: flow,

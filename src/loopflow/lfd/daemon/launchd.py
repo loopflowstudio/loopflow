@@ -136,13 +136,17 @@ def remove_pid() -> None:
     PID_PATH.unlink(missing_ok=True)
 
 
-def _kill_orphan_lfd(port: int = 8765) -> None:
+def _kill_orphan_lfd(port: int | None = None) -> None:
     """Kill orphan lfd processes on the HTTP port.
 
     Only kills processes that are actually lfd (checks command line).
     This handles cases where a dev `uv run lfd serve` or crashed daemon
     left an orphan process holding the port.
     """
+    from loopflow.lfd.daemon.http_server import DEFAULT_PORT
+
+    if port is None:
+        port = DEFAULT_PORT
     # Find PIDs on the port
     result = subprocess.run(
         ["lsof", "-ti", f":{port}"],

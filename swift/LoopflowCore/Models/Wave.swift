@@ -360,42 +360,4 @@ public struct Wave: Sendable, Identifiable, Hashable {
         return "\(step.step) \(time)"
     }
 
-    // MARK: - Running State Progress
-
-    /// Progress text for running waves (e.g., "implement (2/4)").
-    public var progressText: String {
-        guard let steps = flowSteps, !steps.isEmpty else { return flow }
-        let stepName = steps.indices.contains(stepIndex) ? steps[stepIndex] : flow
-        if steps.count > 1 {
-            return "\(stepName) (\(stepIndex + 1)/\(steps.count))"
-        }
-        return stepName
-    }
-
-    /// Elapsed time since run started, formatted as "3m 12s" or "1h 5m".
-    public func elapsedTime(from now: Date = Date()) -> String? {
-        guard let startedAt = runStartedAt else { return nil }
-        let elapsed = now.timeIntervalSince(startedAt)
-        guard elapsed > 0 else { return nil }
-
-        let hours = Int(elapsed) / 3600
-        let minutes = (Int(elapsed) % 3600) / 60
-        let seconds = Int(elapsed) % 60
-
-        if hours > 0 {
-            return "\(hours)h \(minutes)m"
-        } else if minutes > 0 {
-            return "\(minutes)m \(seconds)s"
-        } else {
-            return "\(seconds)s"
-        }
-    }
-
-    /// Full progress display (e.g., "implement (2/4) · 3m 12s").
-    public func progressDisplay(now: Date = Date()) -> String {
-        if let elapsed = elapsedTime(from: now) {
-            return "\(progressText) · \(elapsed)"
-        }
-        return progressText
-    }
 }

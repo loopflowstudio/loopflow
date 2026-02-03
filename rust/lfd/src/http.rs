@@ -107,6 +107,13 @@ async fn counts(state: &HttpState) -> Counts {
         .unwrap_or_default();
 
     let store = state.store.clone();
+    let wave_runs = tokio::task::spawn_blocking(move || store.list_wave_runs(None, None))
+        .await
+        .ok()
+        .and_then(|result| result.ok())
+        .unwrap_or_default();
+
+    let store = state.store.clone();
     let database_ok = tokio::task::spawn_blocking(move || store.health_check())
         .await
         .ok()
@@ -114,9 +121,13 @@ async fn counts(state: &HttpState) -> Counts {
         .is_some();
 
     let waves_defined = waves.len() as u32;
-    let waves_running = waves
+    let waves_running = wave_runs
         .iter()
-        .filter(|wave| wave.status == crate::proto::control::WaveStatus::WaveRunning as i32)
+        .filter(|run| {
+            run.status == crate::proto::control::WaveRunStatus::WaveRunRunning as i32
+                || run.status == crate::proto::control::WaveRunStatus::WaveRunWaiting as i32
+                || run.status == crate::proto::control::WaveRunStatus::WaveRunPending as i32
+        })
         .count() as u32;
     let agents_active = agents
         .iter()

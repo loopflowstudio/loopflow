@@ -32,6 +32,8 @@ service ControlService {
   rpc UpdateWave(UpdateWaveRequest) returns (UpdateWaveResponse);
   rpc DeleteWave(DeleteWaveRequest) returns (DeleteWaveResponse);
   rpc CloneWave(CloneWaveRequest) returns (CloneWaveResponse);
+  rpc ListWaveRuns(ListWaveRunsRequest) returns (ListWaveRunsResponse);
+  rpc GetWaveRun(GetWaveRunRequest) returns (GetWaveRunResponse);
 
   // Wave control
   rpc RunWave(RunWaveRequest) returns (RunWaveResponse);
@@ -70,7 +72,7 @@ service ControlService {
 
   // Notifications (fire-and-forget from external systems)
   rpc Notify(NotifyRequest) returns (NotifyResponse);
-  rpc StreamOutput(StreamOutputRequest) returns (StreamOutputResponse);
+  rpc StreamOutput(StreamOutputRequest) returns (stream StreamOutputResponse);
 }
 
 // -----------------------------------------------------------------------------
@@ -173,18 +175,13 @@ message PendingActivation {
   int64 queued_at = 6;  // Unix timestamp
 }
 
-enum WaveStatus {
-  WAVE_STATUS_UNSPECIFIED = 0;
-  WAVE_IDLE = 1;
-  WAVE_RUNNING = 2;
-  WAVE_WAITING = 3;  // Paused: interactive step awaiting connect, or PR limit reached
-  WAVE_ERROR = 4;
-}
-
-enum MergeMode {
-  MERGE_MODE_UNSPECIFIED = 0;
-  MERGE_PR = 1;    // Accumulate PRs for review
-  MERGE_LAND = 2;  // Auto-merge when CI passes
+enum WaveRunStatus {
+  WAVE_RUN_STATUS_UNSPECIFIED = 0;
+  WAVE_RUN_PENDING = 1;
+  WAVE_RUN_RUNNING = 2;
+  WAVE_RUN_WAITING = 3;
+  WAVE_RUN_COMPLETED = 4;
+  WAVE_RUN_FAILED = 5;
 }
 
 message Wave {
@@ -200,24 +197,24 @@ message Wave {
   reserved 7;  // was: Stimulus stimulus
 
   bool paused = 8;
-  WaveStatus status = 9;
-  uint32 iteration = 10;
-
-  string worktree = 11;
-  string branch = 12;
-  uint32 pr_limit = 13;
-  MergeMode merge_mode = 14;
-
-  optional uint32 pid = 15;
   google.protobuf.Timestamp created_at = 16;
 
   // Note: last_main_sha moved to Stimulus (per-stimulus state)
-  reserved 17;  // was: optional string last_main_sha
+  reserved 9, 10, 11, 12, 13, 14, 15;  // removed execution fields
+  reserved 17, 18, 19, 20;  // was: last_main_sha, consecutive_failures, pending_activations, step_index
+}
 
-  // Resilience
-  uint32 consecutive_failures = 18;
-  uint32 pending_activations = 19;
-  uint32 step_index = 20;
+message WaveRun {
+  string id = 1;
+  string wave_id = 2;
+  uint32 iteration = 3;
+  uint32 step_index = 4;
+  WaveRunStatus status = 5;
+  string worktree = 6;
+  string branch = 7;
+  google.protobuf.Timestamp started_at = 8;
+  optional google.protobuf.Timestamp ended_at = 9;
+  optional string error = 10;
 }
 
 message ListWavesRequest {
@@ -234,6 +231,23 @@ message GetWaveRequest {
 
 message GetWaveResponse {
   Wave wave = 1;
+}
+
+message ListWaveRunsRequest {
+  optional string wave_id = 1;
+  optional uint32 limit = 2;
+}
+
+message ListWaveRunsResponse {
+  repeated WaveRun runs = 1;
+}
+
+message GetWaveRunRequest {
+  string wave_run_id = 1;
+}
+
+message GetWaveRunResponse {
+  WaveRun run = 1;
 }
 
 message CreateWaveRequest {
@@ -292,6 +306,7 @@ message RunWaveRequest {
 message RunWaveResponse {
   bool started = 1;
   string wave_id = 2;
+  optional string wave_run_id = 3;
 }
 
 message StopWaveRequest {
@@ -548,15 +563,13 @@ message Agent {
   string worktree = 4;
 
   optional string wave_run_id = 5;
-  optional string wave_id = 6;
+  AgentStatus status = 6;
+  google.protobuf.Timestamp started_at = 7;
+  optional google.protobuf.Timestamp ended_at = 8;
 
-  AgentStatus status = 7;
-  google.protobuf.Timestamp started_at = 8;
-  optional google.protobuf.Timestamp ended_at = 9;
-
-  optional uint32 pid = 10;
-  string model = 11;
-  string run_mode = 12;
+  optional uint32 pid = 9;
+  string model = 10;
+  string run_mode = 11;
 }
 
 message ListAgentsRequest {}
@@ -711,7 +724,7 @@ message WaveWaitingEvent {
   string wave_id = 1;
   string step = 2;                  // Interactive step name (e.g., "design")
   string agent_id = 3;
-  optional string flow_run_id = 4;  // Flow run if in a flow
+  optional string wave_run_id = 4;  // Wave run if in a flow
   uint32 step_index = 5;            // Position in flow
   WaitingReason reason = 6;
 }
@@ -746,8 +759,11 @@ message NotifyResponse {
 }
 
 message StreamOutputRequest {
+  string wave_run_id = 1;
+  optional string agent_id = 2;  // filter to a specific agent
+}
+
+message StreamOutputResponse {
   string agent_id = 1;
   string text = 2;
 }
-
-message StreamOutputResponse {}

@@ -8,7 +8,9 @@ use tokio_postgres::types::ToSql;
 use tokio_postgres::{NoTls, Row};
 
 use crate::id::LfdId;
-use crate::proto::control::{Agent, AgentStatus, PendingActivation, Stimulus, Wave};
+use crate::proto::control::{
+    Agent, AgentStatus, PendingActivation, Stimulus, Wave, WaveRun, WaveRunStatus,
+};
 use crate::store::{ForkRun, ForkRunStatus, RunStore, StoreError, StoreResult};
 
 const RETRY_DELAYS: [Duration; 3] = [
@@ -17,7 +19,7 @@ const RETRY_DELAYS: [Duration; 3] = [
     Duration::from_secs(2),
 ];
 
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 const MIGRATION_001: &str = include_str!("migrations/postgres/001_initial.sql");
 
 // NOTE: Sync trait with block_on bridging
@@ -115,9 +117,7 @@ impl PostgresStore {
                 client
                     .query(
                         "
-                        SELECT id, name, repo, flow, direction, area, paused, status, iteration,
-                               worktree, branch, pr_limit, merge_mode, pid, created_at,
-                               consecutive_failures, pending_activations, step_index
+                        SELECT id, name, repo, flow, direction, area, paused, created_at
                         FROM waves
                         WHERE repo = $1
                         ORDER BY created_at DESC
@@ -129,9 +129,7 @@ impl PostgresStore {
                 client
                     .query(
                         "
-                        SELECT id, name, repo, flow, direction, area, paused, status, iteration,
-                               worktree, branch, pr_limit, merge_mode, pid, created_at,
-                               consecutive_failures, pending_activations, step_index
+                        SELECT id, name, repo, flow, direction, area, paused, created_at
                         FROM waves
                         ORDER BY created_at DESC
                         ",
@@ -158,7 +156,6 @@ impl PostgresStore {
                 .map(timestamp_to_unix)
                 .unwrap_or_else(now_unix);
 
-            let pid = wave.pid.map(|value| value as i32);
             client
                 .execute(
                     "
@@ -167,7 +164,7 @@ impl PostgresStore {
                         paused, status, iteration, worktree, branch, pr_limit, merge_mode, pid,
                         created_at, last_main_sha, consecutive_failures, pending_activations,
                         step_index
-                    ) VALUES ($1, $2, $3, $4, $5, $6, 1, '', $7, $8, $9, $10, $11, $12, $13, $14, $15, NULL, $16, $17, $18)
+                    ) VALUES ($1, $2, $3, $4, $5, $6, 1, '', $7, 1, 0, '', '', 0, 0, NULL, $8, NULL, 0, 0, 0)
                     ON CONFLICT(id) DO UPDATE SET
                         name = excluded.name,
                         repo = excluded.repo,
@@ -175,17 +172,7 @@ impl PostgresStore {
                         direction = excluded.direction,
                         area = excluded.area,
                         paused = excluded.paused,
-                        status = excluded.status,
-                        iteration = excluded.iteration,
-                        worktree = excluded.worktree,
-                        branch = excluded.branch,
-                        pr_limit = excluded.pr_limit,
-                        merge_mode = excluded.merge_mode,
-                        pid = excluded.pid,
-                        created_at = excluded.created_at,
-                        consecutive_failures = excluded.consecutive_failures,
-                        pending_activations = excluded.pending_activations,
-                        step_index = excluded.step_index
+                        created_at = excluded.created_at
                     ",
                     &[
                         &wave.id,
@@ -195,17 +182,7 @@ impl PostgresStore {
                         &direction_json,
                         &area_json,
                         &wave.paused,
-                        &wave.status,
-                        &(wave.iteration as i32),
-                        &wave.worktree,
-                        &wave.branch,
-                        &(wave.pr_limit as i32),
-                        &wave.merge_mode,
-                        &pid,
                         &created_at,
-                        &(wave.consecutive_failures as i32),
-                        &(wave.pending_activations as i32),
-                        &(wave.step_index as i32),
                     ],
                 )
                 .await?;
@@ -253,9 +230,7 @@ impl RunStore for PostgresStore {
             let row = client
                 .query_opt(
                     "
-                    SELECT id, name, repo, flow, direction, area, paused, status, iteration,
-                           worktree, branch, pr_limit, merge_mode, pid, created_at,
-                           consecutive_failures, pending_activations, step_index
+                    SELECT id, name, repo, flow, direction, area, paused, created_at
                     FROM waves
                     WHERE id = $1
                     ",
@@ -280,6 +255,152 @@ impl RunStore for PostgresStore {
             client
                 .execute("DELETE FROM waves WHERE id = $1", &[&wave_id])
                 .await?;
+            Ok(())
+        })
+    }
+
+    fn list_wave_runs(
+        &self,
+        wave_id: Option<&LfdId>,
+        limit: Option<u32>,
+    ) -> StoreResult<Vec<WaveRun>> {
+        self.with_client(|client| async move {
+            let mut query = String::from(
+                "
+                SELECT id, wave_id, iteration, step_index, status, worktree, branch,
+                       started_at, ended_at, error
+                FROM wave_runs
+                ",
+            );
+            let mut params: Vec<Box<dyn ToSql + Sync>> = Vec::new();
+            if let Some(wave_id) = wave_id {
+                query.push_str(" WHERE wave_id = $1");
+                params.push(Box::new(wave_id.clone()));
+            }
+            query.push_str(" ORDER BY started_at DESC");
+            if let Some(limit) = limit {
+                query.push_str(&format!(" LIMIT ${}", params.len() + 1));
+                params.push(Box::new(limit as i32));
+            }
+
+            let params_ref: Vec<&(dyn ToSql + Sync)> =
+                params.iter().map(|value| value.as_ref()).collect();
+            let rows = client.query(&query, &params_ref).await?;
+            let mut runs = Vec::new();
+            for row in rows {
+                runs.push(map_wave_run_row(&row)?);
+            }
+            Ok(runs)
+        })
+    }
+
+    fn get_wave_run(&self, wave_run_id: &LfdId) -> StoreResult<Option<WaveRun>> {
+        self.with_client(|client| async move {
+            let row = client
+                .query_opt(
+                    "
+                    SELECT id, wave_id, iteration, step_index, status, worktree, branch,
+                           started_at, ended_at, error
+                    FROM wave_runs
+                    WHERE id = $1
+                    ",
+                    &[&wave_run_id],
+                )
+                .await?;
+            row.map(|row| map_wave_run_row(&row)).transpose()
+        })
+    }
+
+    fn get_active_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
+        self.with_client(|client| async move {
+            let statuses = [
+                WaveRunStatus::WaveRunPending as i32,
+                WaveRunStatus::WaveRunRunning as i32,
+                WaveRunStatus::WaveRunWaiting as i32,
+            ];
+            let row = client
+                .query_opt(
+                    "
+                    SELECT id, wave_id, iteration, step_index, status, worktree, branch,
+                           started_at, ended_at, error
+                    FROM wave_runs
+                    WHERE wave_id = $1 AND status = ANY($2)
+                    ORDER BY started_at DESC
+                    LIMIT 1
+                    ",
+                    &[&wave_id, &&statuses[..]],
+                )
+                .await?;
+            row.map(|row| map_wave_run_row(&row)).transpose()
+        })
+    }
+
+    fn create_wave_run(&self, run: &WaveRun) -> StoreResult<()> {
+        self.with_client(|client| async move {
+            let started_at = run
+                .started_at
+                .as_ref()
+                .map(timestamp_to_unix)
+                .unwrap_or_else(now_unix);
+            let ended_at = run.ended_at.as_ref().map(timestamp_to_unix);
+            client
+                .execute(
+                    "
+                    INSERT INTO wave_runs (
+                        id, wave_id, iteration, step_index, status, worktree, branch,
+                        started_at, ended_at, error
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    ",
+                    &[
+                        &run.id,
+                        &run.wave_id,
+                        &(run.iteration as i32),
+                        &(run.step_index as i32),
+                        &run.status,
+                        &run.worktree,
+                        &run.branch,
+                        &started_at,
+                        &ended_at,
+                        &run.error,
+                    ],
+                )
+                .await?;
+            Ok(())
+        })
+    }
+
+    fn update_wave_run(&self, run: &WaveRun) -> StoreResult<()> {
+        self.with_client(|client| async move {
+            let updated = client
+                .execute(
+                    "
+                    UPDATE wave_runs
+                    SET iteration = $1,
+                        step_index = $2,
+                        status = $3,
+                        worktree = $4,
+                        branch = $5,
+                        started_at = $6,
+                        ended_at = $7,
+                        error = $8
+                    WHERE id = $9
+                    ",
+                    &[
+                        &(run.iteration as i32),
+                        &(run.step_index as i32),
+                        &run.status,
+                        &run.worktree,
+                        &run.branch,
+                        &run.started_at.as_ref().map(timestamp_to_unix),
+                        &run.ended_at.as_ref().map(timestamp_to_unix),
+                        &run.error,
+                        &run.id,
+                    ],
+                )
+                .await?;
+            if updated == 0 {
+                return Err(StoreError::NotFound);
+            }
             Ok(())
         })
     }
@@ -448,15 +569,6 @@ impl RunStore for PostgresStore {
                     ],
                 )
                 .await?;
-
-            transaction
-                .execute(
-                    "UPDATE waves SET pending_activations = (
-                        SELECT COUNT(*)::INTEGER FROM pending_activations WHERE wave_id = $1
-                     ) WHERE id = $1",
-                    &[&activation.wave_id],
-                )
-                .await?;
             transaction.commit().await?;
             Ok(())
         })
@@ -487,12 +599,6 @@ impl RunStore for PostgresStore {
                     &[&wave_id],
                 )
                 .await?;
-            transaction
-                .execute(
-                    "UPDATE waves SET pending_activations = 0 WHERE id = $1",
-                    &[&wave_id],
-                )
-                .await?;
             transaction.commit().await?;
             Ok(deleted as u32)
         })
@@ -515,14 +621,14 @@ impl RunStore for PostgresStore {
         })
     }
 
-    fn list_fork_runs(&self, wave_id: &LfdId, step_index: u32) -> StoreResult<Vec<ForkRun>> {
+    fn list_fork_runs(&self, wave_run_id: &LfdId, step_index: u32) -> StoreResult<Vec<ForkRun>> {
         self.with_client(|client| async move {
             let rows = client
                 .query(
-                    "SELECT id, wave_id, step_index, branch_index, status, worktree
-                     FROM fork_runs WHERE wave_id = $1 AND step_index = $2
+                    "SELECT id, wave_run_id, step_index, branch_index, status, worktree
+                     FROM fork_runs WHERE wave_run_id = $1 AND step_index = $2
                      ORDER BY branch_index ASC",
-                    &[&wave_id, &(step_index as i32)],
+                    &[&wave_run_id, &(step_index as i32)],
                 )
                 .await?;
             let mut runs = Vec::new();
@@ -538,10 +644,10 @@ impl RunStore for PostgresStore {
             client
                 .execute(
                     "
-                    INSERT INTO fork_runs (id, wave_id, step_index, branch_index, status, worktree)
+                    INSERT INTO fork_runs (id, wave_run_id, step_index, branch_index, status, worktree)
                     VALUES ($1, $2, $3, $4, $5, $6)
                     ON CONFLICT(id) DO UPDATE SET
-                        wave_id = excluded.wave_id,
+                        wave_run_id = excluded.wave_run_id,
                         step_index = excluded.step_index,
                         branch_index = excluded.branch_index,
                         status = excluded.status,
@@ -549,7 +655,7 @@ impl RunStore for PostgresStore {
                     ",
                     &[
                         &fork_run.id,
-                        &fork_run.wave_id,
+                        &fork_run.wave_run_id,
                         &(fork_run.step_index as i32),
                         &(fork_run.branch_index as i32),
                         &(fork_run.status as i32),
@@ -561,12 +667,12 @@ impl RunStore for PostgresStore {
         })
     }
 
-    fn delete_fork_runs(&self, wave_id: &LfdId, step_index: u32) -> StoreResult<u32> {
+    fn delete_fork_runs(&self, wave_run_id: &LfdId, step_index: u32) -> StoreResult<u32> {
         self.with_client(|client| async move {
             let deleted = client
                 .execute(
-                    "DELETE FROM fork_runs WHERE wave_id = $1 AND step_index = $2",
-                    &[&wave_id, &(step_index as i32)],
+                    "DELETE FROM fork_runs WHERE wave_run_id = $1 AND step_index = $2",
+                    &[&wave_run_id, &(step_index as i32)],
                 )
                 .await?;
             Ok(deleted as u32)
@@ -586,7 +692,7 @@ impl RunStore for PostgresStore {
         self.with_client(|client| async move {
             let mut query = String::from(
                 "
-                SELECT id, step, repo, worktree, wave_run_id, wave_id, status,
+                SELECT id, step, repo, worktree, wave_run_id, status,
                        started_at, ended_at, pid, model, run_mode
                 FROM agents
                 ",
@@ -628,7 +734,7 @@ impl RunStore for PostgresStore {
             let row = client
                 .query_opt(
                     "
-                    SELECT id, step, repo, worktree, wave_run_id, wave_id, status,
+                    SELECT id, step, repo, worktree, wave_run_id, status,
                            started_at, ended_at, pid, model, run_mode
                     FROM agents
                     WHERE id = $1
@@ -640,16 +746,17 @@ impl RunStore for PostgresStore {
         })
     }
 
-    fn get_waiting_agent(&self, wave_id: &LfdId) -> StoreResult<Option<Agent>> {
+    fn get_waiting_agent_for_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Agent>> {
         self.with_client(|client| async move {
             let row = client
                 .query_opt(
                     "
-                    SELECT id, step, repo, worktree, wave_run_id, wave_id, status,
-                           started_at, ended_at, pid, model, run_mode
-                    FROM agents
-                    WHERE wave_id = $1 AND status = $2
-                    ORDER BY started_at DESC
+                    SELECT a.id, a.step, a.repo, a.worktree, a.wave_run_id, a.status,
+                           a.started_at, a.ended_at, a.pid, a.model, a.run_mode
+                    FROM agents a
+                    JOIN wave_runs r ON a.wave_run_id = r.id
+                    WHERE r.wave_id = $1 AND a.status = $2
+                    ORDER BY a.started_at DESC
                     LIMIT 1
                     ",
                     &[&wave_id, &(AgentStatus::AgentWaiting as i32)],
@@ -672,9 +779,9 @@ impl RunStore for PostgresStore {
                 .execute(
                     "
                     INSERT INTO agents (
-                        id, step, repo, worktree, wave_run_id, wave_id, status, started_at,
+                        id, step, repo, worktree, wave_run_id, status, started_at,
                         ended_at, pid, model, run_mode
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                     ",
                     &[
                         &agent.id,
@@ -682,7 +789,6 @@ impl RunStore for PostgresStore {
                         &agent.repo,
                         &agent.worktree,
                         &agent.wave_run_id,
-                        &agent.wave_id,
                         &agent.status,
                         &started_at,
                         &ended_at,
@@ -742,7 +848,8 @@ impl RunStore for PostgresStore {
             let updated = client
                 .execute(
                     "UPDATE agents SET status = $1, ended_at = $2
-                     WHERE wave_id = $3 AND ended_at IS NULL",
+                     WHERE wave_run_id IN (SELECT id FROM wave_runs WHERE wave_id = $3)
+                     AND ended_at IS NULL",
                     &[&status, &ended_at, &wave_id.as_str()],
                 )
                 .await?;
@@ -759,7 +866,7 @@ impl RunStore for PostgresStore {
             let rows = client
                 .query(
                     "
-                    SELECT id, step, repo, worktree, wave_run_id, wave_id, status,
+                    SELECT id, step, repo, worktree, wave_run_id, status,
                            started_at, ended_at, pid, model, run_mode
                     FROM agents
                     WHERE ended_at IS NULL AND started_at <= $1
@@ -875,8 +982,7 @@ fn map_wave_row(row: &Row) -> StoreResult<Wave> {
     let direction = parse_json_vec(direction_json)?;
     let area = parse_json_vec(area_json)?;
 
-    let created_at = unix_to_timestamp(row.get::<_, i64>(14));
-    let pid: Option<i32> = row.get(13);
+    let created_at = unix_to_timestamp(row.get::<_, i64>(7));
 
     Ok(Wave {
         id: row.get(0),
@@ -886,17 +992,25 @@ fn map_wave_row(row: &Row) -> StoreResult<Wave> {
         direction,
         area,
         paused: row.get(6),
-        status: row.get::<_, i32>(7),
-        iteration: row.get::<_, i32>(8) as u32,
-        worktree: row.get(9),
-        branch: row.get(10),
-        pr_limit: row.get::<_, i32>(11) as u32,
-        merge_mode: row.get::<_, i32>(12),
-        pid: pid.map(|value| value as u32),
         created_at: Some(created_at),
-        consecutive_failures: row.get::<_, i32>(15) as u32,
-        pending_activations: row.get::<_, i32>(16) as u32,
-        step_index: row.get::<_, i32>(17) as u32,
+    })
+}
+
+fn map_wave_run_row(row: &Row) -> StoreResult<WaveRun> {
+    let started_at = unix_to_timestamp(row.get::<_, i64>(7));
+    let ended_at: Option<i64> = row.get(8);
+
+    Ok(WaveRun {
+        id: row.get(0),
+        wave_id: row.get(1),
+        iteration: row.get::<_, i32>(2) as u32,
+        step_index: row.get::<_, i32>(3) as u32,
+        status: row.get::<_, i32>(4),
+        worktree: row.get(5),
+        branch: row.get(6),
+        started_at: Some(started_at),
+        ended_at: ended_at.map(unix_to_timestamp),
+        error: row.get(9),
     })
 }
 
@@ -926,6 +1040,7 @@ fn map_pending_activation_row(row: &Row) -> StoreResult<PendingActivation> {
     })
 }
 
+#[allow(dead_code)]
 fn map_fork_run_row(row: &Row) -> StoreResult<ForkRun> {
     let status_value: i32 = row.get(4);
     let status = ForkRunStatus::from_i64(status_value as i64)
@@ -933,7 +1048,7 @@ fn map_fork_run_row(row: &Row) -> StoreResult<ForkRun> {
 
     Ok(ForkRun {
         id: LfdId::from_raw(row.get::<_, String>(0)),
-        wave_id: LfdId::from_raw(row.get::<_, String>(1)),
+        wave_run_id: LfdId::from_raw(row.get::<_, String>(1)),
         step_index: row.get::<_, i32>(2) as u32,
         branch_index: row.get::<_, i32>(3) as u32,
         status,
@@ -942,9 +1057,9 @@ fn map_fork_run_row(row: &Row) -> StoreResult<ForkRun> {
 }
 
 fn map_agent_row(row: &Row) -> StoreResult<Agent> {
-    let started_at = unix_to_timestamp(row.get::<_, i64>(7));
-    let ended_at: Option<i64> = row.get(8);
-    let pid: Option<i32> = row.get(9);
+    let started_at = unix_to_timestamp(row.get::<_, i64>(6));
+    let ended_at: Option<i64> = row.get(7);
+    let pid: Option<i32> = row.get(8);
 
     Ok(Agent {
         id: row.get(0),
@@ -952,13 +1067,12 @@ fn map_agent_row(row: &Row) -> StoreResult<Agent> {
         repo: row.get(2),
         worktree: row.get(3),
         wave_run_id: row.get(4),
-        wave_id: row.get(5),
-        status: row.get::<_, i32>(6),
+        status: row.get::<_, i32>(5),
         started_at: Some(started_at),
         ended_at: ended_at.map(unix_to_timestamp),
         pid: pid.map(|value| value as u32),
-        model: row.get(10),
-        run_mode: row.get(11),
+        model: row.get(9),
+        run_mode: row.get(10),
     })
 }
 

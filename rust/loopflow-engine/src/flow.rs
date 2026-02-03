@@ -33,13 +33,25 @@ pub enum FlowItem {
         prompt: String,
         options: HashMap<String, Vec<FlowItem>>,
     },
-    LoopUntilEmpty {
-        steps: Vec<FlowItem>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        wave: Option<String>,
-        #[serde(default = "default_loop_max_iterations")]
-        max_iterations: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FlowAction {
+    RunStep {
+        step: Step,
     },
+    WaitInteractive {
+        step: Step,
+    },
+    Fork {
+        branches: Vec<FlowItem>,
+        synthesize: Option<String>,
+    },
+    Choose {
+        prompt: String,
+        options: HashMap<String, Vec<FlowItem>>,
+    },
+    Complete,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -53,6 +65,30 @@ pub struct Direction {
     pub name: String,
     pub content: String,
     pub source: PathBuf,
+}
+
+pub fn next_action(flow: &Flow, step_index: usize) -> FlowAction {
+    let item = match flow.items.get(step_index) {
+        Some(item) => item,
+        None => return FlowAction::Complete,
+    };
+    match item.clone() {
+        FlowItem::Step(step) => {
+            if step.interactive.unwrap_or(false) {
+                FlowAction::WaitInteractive { step }
+            } else {
+                FlowAction::RunStep { step }
+            }
+        }
+        FlowItem::Fork {
+            branches,
+            synthesize,
+        } => FlowAction::Fork {
+            branches,
+            synthesize,
+        },
+        FlowItem::Choose { prompt, options } => FlowAction::Choose { prompt, options },
+    }
 }
 
 pub fn load_flow(name: &str, repo: &Path) -> Result<Flow, LoadError> {
@@ -259,11 +295,8 @@ fn parse_flow_mapping(map: &serde_yaml::Mapping) -> Result<FlowItem, LoadError> 
     if let Some(choose_value) = map.get(key("choose")) {
         return parse_choose_value(choose_value);
     }
-    if let Some(loop_value) = map.get(key("loop_until_empty")) {
-        return parse_loop_value(loop_value);
-    }
     Err(LoadError::InvalidFlow(
-        "flow item mapping must include step, fork, choose, or loop_until_empty".to_string(),
+        "flow item mapping must include step, fork, or choose".to_string(),
     ))
 }
 
@@ -357,30 +390,6 @@ fn parse_choose_value(value: &Value) -> Result<FlowItem, LoadError> {
     Ok(FlowItem::Choose { prompt, options })
 }
 
-fn parse_loop_value(value: &Value) -> Result<FlowItem, LoadError> {
-    let map = value
-        .as_mapping()
-        .ok_or_else(|| LoadError::InvalidFlow("loop_until_empty must be mapping".to_string()))?;
-    let steps_value = map
-        .get(key("steps"))
-        .ok_or_else(|| LoadError::InvalidFlow("loop_until_empty missing steps".to_string()))?;
-    let steps = parse_flow_items(steps_value)?;
-    let wave = map
-        .get(key("wave"))
-        .and_then(|val| val.as_str())
-        .map(|val| val.to_string());
-    let max_iterations = map
-        .get(key("max_iterations"))
-        .and_then(|val| val.as_i64())
-        .map(|val| val.max(1) as usize)
-        .unwrap_or_else(default_loop_max_iterations);
-    Ok(FlowItem::LoopUntilEmpty {
-        steps,
-        wave,
-        max_iterations,
-    })
-}
-
 fn parse_string_list(value: Option<&Value>) -> Vec<String> {
     match value {
         Some(Value::String(value)) => vec![value.to_string()],
@@ -390,10 +399,6 @@ fn parse_string_list(value: Option<&Value>) -> Vec<String> {
             .collect(),
         _ => Vec::new(),
     }
-}
-
-fn default_loop_max_iterations() -> usize {
-    100
 }
 
 /// Home directory for global lookups. Can be overridden for testing.
@@ -536,5 +541,33 @@ Be careful.
         let result = load_direction("nonexistent", tmp.path());
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("nonexistent"));
+    }
+
+    #[test]
+    fn next_action_marks_interactive_steps_as_wait() {
+        let flow = Flow {
+            name: "demo".to_string(),
+            items: vec![FlowItem::Step(Step {
+                name: "design".to_string(),
+                model: None,
+                directions: Vec::new(),
+                interactive: Some(true),
+                content: None,
+            })],
+        };
+
+        let action = next_action(&flow, 0);
+        assert!(matches!(action, FlowAction::WaitInteractive { .. }));
+    }
+
+    #[test]
+    fn next_action_marks_missing_steps_as_complete() {
+        let flow = Flow {
+            name: "demo".to_string(),
+            items: Vec::new(),
+        };
+
+        let action = next_action(&flow, 0);
+        assert!(matches!(action, FlowAction::Complete));
     }
 }

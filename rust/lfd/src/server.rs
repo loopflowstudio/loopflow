@@ -1,7 +1,9 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
+use crate::executor::WaveExecutor;
 use crate::id::LfdId;
+use crate::output::OutputHub;
 use crate::proto::control::control_service_server::ControlService;
 use crate::proto::control::{
     AcquireSlotRequest, AcquireSlotResponse, Agent, AgentStatus, CloneWaveRequest,
@@ -11,26 +13,29 @@ use crate::proto::control::{
     EndAgentResponse, Event, GetHealthRequest, GetHealthResponse, GetSchedulerStatusRequest,
     GetSchedulerStatusResponse, GetStatusRequest, GetStatusResponse, GetStimulusRequest,
     GetStimulusResponse, HealthChecks, HealthMetrics, ListAgentsRequest, ListAgentsResponse,
-    ListFlowsRequest, ListFlowsResponse, ListStimuliRequest, ListStimuliResponse, ListWavesRequest,
-    ListWavesResponse, ListWorktreesRequest, ListWorktreesResponse, MergeMode, NotifyRequest,
-    NotifyResponse, NotifyWorktreeChangedRequest, NotifyWorktreeChangedResponse, ProtocolVersion,
+    ListFlowsRequest, ListFlowsResponse, ListStimuliRequest, ListStimuliResponse,
+    ListWaveRunsRequest, ListWaveRunsResponse, ListWavesRequest, ListWavesResponse,
+    ListWorktreesRequest, ListWorktreesResponse, NotifyRequest, NotifyResponse,
+    NotifyWorktreeChangedRequest, NotifyWorktreeChangedResponse, ProtocolVersion,
     ReleaseSlotRequest, ReleaseSlotResponse, RunWaveRequest, RunWaveResponse, Stimulus,
     StopWaveRequest, StopWaveResponse, StreamOutputRequest, StreamOutputResponse,
     UpdateStimulusRequest, UpdateStimulusResponse, UpdateWaveRequest, UpdateWaveResponse, Wave,
-    WaveStatus,
+    WaveRun, WaveRunStatus,
 };
 use crate::scheduler::Scheduler;
 use crate::sessions::{run_pty_command, PtyCommand};
 use crate::store::{SharedStore, StoreError, StoreResult};
 use prost_types::Timestamp;
 use time::OffsetDateTime;
-use tokio_stream::Stream;
+use tokio_stream::{wrappers::BroadcastStream, Stream, StreamExt};
 use tonic::{Request, Response, Status};
 
 #[derive(Clone)]
 pub struct ControlServer {
     store: SharedStore,
     scheduler: Arc<Scheduler>,
+    executor: WaveExecutor,
+    output: OutputHub,
     started_at: OffsetDateTime,
 }
 
@@ -45,10 +50,17 @@ impl std::fmt::Debug for ControlServer {
 }
 
 impl ControlServer {
-    pub fn new(store: SharedStore, scheduler: Arc<Scheduler>) -> Self {
+    pub fn new(
+        store: SharedStore,
+        scheduler: Arc<Scheduler>,
+        executor: WaveExecutor,
+        output: OutputHub,
+    ) -> Self {
         Self {
             store,
             scheduler,
+            executor,
+            output,
             started_at: OffsetDateTime::now_utc(),
         }
     }
@@ -71,11 +83,15 @@ impl ControlServer {
             .map_err(Self::store_error)
     }
 
-    fn status_counts(waves: &[Wave], agents: &[Agent]) -> (u32, u32, u32) {
+    fn status_counts(waves: &[Wave], wave_runs: &[WaveRun], agents: &[Agent]) -> (u32, u32, u32) {
         let waves_defined = waves.len() as u32;
-        let waves_running = waves
+        let waves_running = wave_runs
             .iter()
-            .filter(|wave| wave.status == WaveStatus::WaveRunning as i32)
+            .filter(|run| {
+                run.status == WaveRunStatus::WaveRunRunning as i32
+                    || run.status == WaveRunStatus::WaveRunWaiting as i32
+                    || run.status == WaveRunStatus::WaveRunPending as i32
+            })
             .count() as u32;
         let agents_active = agents
             .iter()
@@ -114,6 +130,11 @@ impl ControlServer {
     async fn list_agents_inner(&self) -> Result<Vec<Agent>, Status> {
         self.run_store(|store| store.list_agents()).await
     }
+
+    async fn list_wave_runs_inner(&self, wave_id: Option<LfdId>) -> Result<Vec<WaveRun>, Status> {
+        self.run_store(move |store| store.list_wave_runs(wave_id.as_ref(), None))
+            .await
+    }
 }
 
 #[tonic::async_trait]
@@ -123,8 +144,10 @@ impl ControlService for ControlServer {
         _request: Request<GetStatusRequest>,
     ) -> Result<Response<GetStatusResponse>, Status> {
         let waves = self.list_waves_inner(None).await?;
+        let wave_runs = self.list_wave_runs_inner(None).await?;
         let agents = self.list_agents_inner().await?;
-        let (waves_defined, waves_running, agents_active) = Self::status_counts(&waves, &agents);
+        let (waves_defined, waves_running, agents_active) =
+            Self::status_counts(&waves, &wave_runs, &agents);
 
         Ok(Response::new(GetStatusResponse {
             pid: std::process::id(),
@@ -142,8 +165,10 @@ impl ControlService for ControlServer {
         let database_ok = self.run_store(|store| store.health_check()).await.is_ok();
 
         let waves = self.list_waves_inner(None).await?;
+        let wave_runs = self.list_wave_runs_inner(None).await?;
         let agents = self.list_agents_inner().await?;
-        let (waves_defined, waves_running, agents_active) = Self::status_counts(&waves, &agents);
+        let (waves_defined, waves_running, agents_active) =
+            Self::status_counts(&waves, &wave_runs, &agents);
 
         let uptime = OffsetDateTime::now_utc() - self.started_at;
 
@@ -159,7 +184,7 @@ impl ControlService for ControlServer {
                 waves_total: waves_defined,
                 waves_running,
                 agents_active,
-                wave_runs_total: 0,
+                wave_runs_total: wave_runs.len() as u32,
             }),
             protocol_version: Some(ProtocolVersion {
                 major: 1,
@@ -197,6 +222,38 @@ impl ControlService for ControlServer {
         }))
     }
 
+    async fn list_wave_runs(
+        &self,
+        request: Request<ListWaveRunsRequest>,
+    ) -> Result<Response<ListWaveRunsResponse>, Status> {
+        let req = request.into_inner();
+        let wave_id = req.wave_id.as_deref().filter(|value| !value.is_empty());
+        let wave_id = match wave_id {
+            Some(value) => Some(Self::parse_id(value, "wave_id")?),
+            None => None,
+        };
+        let limit = req.limit;
+        let runs = self
+            .run_store(move |store| store.list_wave_runs(wave_id.as_ref(), limit))
+            .await?;
+        Ok(Response::new(ListWaveRunsResponse { runs }))
+    }
+
+    async fn get_wave_run(
+        &self,
+        request: Request<crate::proto::control::GetWaveRunRequest>,
+    ) -> Result<Response<crate::proto::control::GetWaveRunResponse>, Status> {
+        let run_id = request.into_inner().wave_run_id;
+        let run_id = Self::parse_id(&run_id, "wave_run_id")?;
+        let run = self
+            .run_store(move |store| store.get_wave_run(&run_id))
+            .await?
+            .ok_or_else(|| Status::not_found("wave run not found"))?;
+        Ok(Response::new(crate::proto::control::GetWaveRunResponse {
+            run: Some(run),
+        }))
+    }
+
     async fn create_wave(
         &self,
         request: Request<CreateWaveRequest>,
@@ -214,17 +271,7 @@ impl ControlService for ControlServer {
             direction: req.direction,
             area: req.area,
             paused: false,
-            status: WaveStatus::WaveIdle as i32,
-            iteration: 0,
-            step_index: 0,
-            worktree: String::new(),
-            branch: String::new(),
-            pr_limit: 0,
-            merge_mode: MergeMode::MergePr as i32,
-            pid: None,
             created_at: Some(Self::now_timestamp()),
-            consecutive_failures: 0,
-            pending_activations: 0,
         };
 
         let wave_clone = wave.clone();
@@ -241,8 +288,9 @@ impl ControlService for ControlServer {
         let req = request.into_inner();
         let wave_id = req.wave_id;
         let wave_id = Self::parse_id(&wave_id, "wave_id")?;
+        let wave_id_for_lookup = wave_id.clone();
         let mut wave = self
-            .run_store(move |store| store.get_wave(&wave_id))
+            .run_store(move |store| store.get_wave(&wave_id_for_lookup))
             .await?
             .ok_or_else(|| Status::not_found("wave not found"))?;
 
@@ -308,13 +356,22 @@ impl ControlService for ControlServer {
         let req = request.into_inner();
         let wave_id = req.wave_id;
         let wave_id = Self::parse_id(&wave_id, "wave_id")?;
+        let wave_id_for_lookup = wave_id.clone();
         let mut wave = self
-            .run_store(move |store| store.get_wave(&wave_id))
+            .run_store(move |store| store.get_wave(&wave_id_for_lookup))
             .await?
             .ok_or_else(|| Status::not_found("wave not found"))?;
 
-        wave.status = WaveStatus::WaveRunning as i32;
-        wave.step_index = 0;
+        if let Ok(Some(_)) = self
+            .run_store({
+                let wave_id = wave_id.clone();
+                move |store| store.get_active_wave_run(&wave_id)
+            })
+            .await
+        {
+            return Err(Status::failed_precondition("wave already running"));
+        }
+
         wave.paused = false;
         if let Some(flow) = req.flow {
             wave.flow = flow;
@@ -331,9 +388,66 @@ impl ControlService for ControlServer {
         self.run_store(move |store| store.update_wave(&wave_clone))
             .await?;
 
+        let run = self
+            .run_store({
+                let wave = wave.clone();
+                move |store| {
+                    let wave_id = LfdId::from_raw(wave.id.clone());
+                    let last_run = store
+                        .list_wave_runs(Some(&wave_id), Some(1))?
+                        .into_iter()
+                        .next();
+                    let iteration = last_run.map(|run| run.iteration + 1).unwrap_or(0);
+                    let run = WaveRun {
+                        id: LfdId::new().to_string(),
+                        wave_id: wave.id.clone(),
+                        iteration,
+                        step_index: 0,
+                        status: WaveRunStatus::WaveRunPending as i32,
+                        worktree: wave.repo.clone(),
+                        branch: String::new(),
+                        started_at: Some(Self::now_timestamp()),
+                        ended_at: None,
+                        error: None,
+                    };
+                    store.create_wave_run(&run)?;
+                    Ok(run)
+                }
+            })
+            .await?;
+
+        let (acquired, _) = self.scheduler.acquire(&run.id).await;
+        if acquired {
+            let mut running_run = run.clone();
+            running_run.status = WaveRunStatus::WaveRunRunning as i32;
+            let running_run_update = running_run.clone();
+            self.run_store(move |store| store.update_wave_run(&running_run_update))
+                .await?;
+
+            let exec = self.executor.clone();
+            let store = self.store.clone();
+            let scheduler = self.scheduler.clone();
+            let running_run_id = running_run.id.clone();
+            tokio::spawn(async move {
+                let run_id = LfdId::parse(&running_run_id)
+                    .unwrap_or_else(|_| LfdId::from_raw(running_run_id.clone()));
+                if let Err(err) = exec.execute(&run_id).await {
+                    tracing::error!(run_id = %running_run_id, error = %err, "run execution failed");
+                    if let Ok(Some(mut run)) = store.get_wave_run(&run_id) {
+                        run.status = WaveRunStatus::WaveRunFailed as i32;
+                        run.error = Some(err.to_string());
+                        run.ended_at = Some(Self::now_timestamp());
+                        let _ = store.update_wave_run(&run);
+                    }
+                }
+                scheduler.release(&running_run_id);
+            });
+        }
+
         Ok(Response::new(RunWaveResponse {
-            started: true,
+            started: acquired,
             wave_id: wave.id,
+            wave_run_id: Some(run.id),
         }))
     }
 
@@ -343,17 +457,20 @@ impl ControlService for ControlServer {
     ) -> Result<Response<StopWaveResponse>, Status> {
         let wave_id = request.into_inner().wave_id;
         let wave_id = Self::parse_id(&wave_id, "wave_id")?;
-        let mut wave = self
-            .run_store(move |store| store.get_wave(&wave_id))
-            .await?
-            .ok_or_else(|| Status::not_found("wave not found"))?;
-
-        wave.status = WaveStatus::WaveIdle as i32;
-        wave.paused = true;
-
-        let wave_clone = wave.clone();
-        self.run_store(move |store| store.update_wave(&wave_clone))
+        let run = self
+            .run_store({
+                let wave_id = wave_id.clone();
+                move |store| store.get_active_wave_run(&wave_id)
+            })
             .await?;
+        if let Some(mut run) = run {
+            run.status = WaveRunStatus::WaveRunFailed as i32;
+            run.error = Some("stopped".to_string());
+            run.ended_at = Some(Self::now_timestamp());
+            let run_clone = run.clone();
+            self.run_store(move |store| store.update_wave_run(&run_clone))
+                .await?;
+        }
 
         Ok(Response::new(StopWaveResponse { stopped: true }))
     }
@@ -474,7 +591,7 @@ impl ControlService for ControlServer {
     ) -> Result<Response<ConnectWaveResponse>, Status> {
         let wave_id = request.into_inner().wave_id;
         let wave_id = Self::parse_id(&wave_id, "wave_id")?;
-        let mut wave = self
+        let wave = self
             .run_store({
                 let wave_id = wave_id.clone();
                 move |store| store.get_wave(&wave_id)
@@ -489,7 +606,7 @@ impl ControlService for ControlServer {
         let agent = match self
             .run_store({
                 let wave_id = wave_id.clone();
-                move |store| store.get_waiting_agent(&wave_id)
+                move |store| store.get_waiting_agent_for_wave(&wave_id)
             })
             .await
         {
@@ -522,10 +639,32 @@ impl ControlService for ControlServer {
             return Err(err);
         }
 
-        wave.status = WaveStatus::WaveRunning as i32;
-        let wave_clone = wave.clone();
+        let wave_run_id = agent.wave_run_id.clone();
+        let mut wave_run = if let Some(run_id) = wave_run_id.as_deref() {
+            match LfdId::parse(run_id) {
+                Ok(run_id) => self
+                    .run_store({
+                        let run_id = run_id.clone();
+                        move |store| store.get_wave_run(&run_id)
+                    })
+                    .await?
+                    .ok_or_else(|| Status::not_found("wave run not found"))?,
+                Err(err) => {
+                    self.scheduler.unregister_session(wave_id.as_str());
+                    return Err(Status::invalid_argument(format!(
+                        "invalid wave_run_id: {err}"
+                    )));
+                }
+            }
+        } else {
+            self.scheduler.unregister_session(wave_id.as_str());
+            return Err(Status::not_found("no wave run for waiting agent"));
+        };
+
+        wave_run.status = WaveRunStatus::WaveRunRunning as i32;
+        let wave_run_clone = wave_run.clone();
         if let Err(err) = self
-            .run_store(move |store| store.update_wave(&wave_clone))
+            .run_store(move |store| store.update_wave_run(&wave_run_clone))
             .await
         {
             self.scheduler.unregister_session(wave_id.as_str());
@@ -538,8 +677,10 @@ impl ControlService for ControlServer {
         let worktree = agent.worktree.clone();
         let step = agent.step.clone();
         let wave_id_task = wave.id.clone();
-        let wave_id_task_id =
-            LfdId::parse(&wave.id).unwrap_or_else(|_| LfdId::from_raw(wave.id.clone()));
+        let wave_run_id_task = wave_run.id.clone();
+        let wave_run_id_task_id =
+            LfdId::parse(&wave_run_id_task).unwrap_or_else(|_| LfdId::from_raw(wave_run_id_task));
+        let executor = self.executor.clone();
 
         tokio::spawn(async move {
             let mut command = PtyCommand::new("lf")
@@ -577,21 +718,20 @@ impl ControlService for ControlServer {
                 tracing::warn!(wave_id = %wave_id_task, error = %err, "failed to end step run");
             }
 
-            if let Ok(Some(mut wave)) = store.get_wave(&wave_id_task_id) {
+            if let Ok(Some(mut run)) = store.get_wave_run(&wave_run_id_task_id) {
                 if status == AgentStatus::AgentCompleted {
-                    wave.step_index += 1;
-                    wave.consecutive_failures = 0;
-                    wave.status = WaveStatus::WaveRunning as i32;
+                    run.step_index += 1;
+                    run.status = WaveRunStatus::WaveRunRunning as i32;
+                    let _ = store.update_wave_run(&run);
+                    let _ = executor.execute(&wave_run_id_task_id).await;
                 } else {
-                    wave.consecutive_failures += 1;
-                    if wave.consecutive_failures >= 3 {
-                        wave.status = WaveStatus::WaveError as i32;
-                    } else {
-                        wave.status = WaveStatus::WaveRunning as i32;
-                    }
-                }
-                if let Err(err) = store.update_wave(&wave) {
-                    tracing::warn!(wave_id = %wave.id, error = %err, "failed to update wave");
+                    run.status = WaveRunStatus::WaveRunFailed as i32;
+                    run.error = Some("interactive step failed".to_string());
+                    run.ended_at = Some(Timestamp {
+                        seconds: OffsetDateTime::now_utc().unix_timestamp(),
+                        nanos: 0,
+                    });
+                    let _ = store.update_wave_run(&run);
                 }
             }
 
@@ -604,7 +744,7 @@ impl ControlService for ControlServer {
             agent_id: agent.id,
             prompt_file: String::new(),
             wave_run_id: agent.wave_run_id,
-            step_index: wave.step_index,
+            step_index: wave_run.step_index,
         }))
     }
 
@@ -747,29 +887,35 @@ impl ControlService for ControlServer {
             })
             .await
         {
-            if let Some(wave_id) = agent.wave_id {
-                let wave_id = Self::parse_id(&wave_id, "wave_id")?;
-                let wave = self
-                    .run_store(move |store| store.get_wave(&wave_id))
+            if let Some(wave_run_id) = agent.wave_run_id {
+                let run_id = Self::parse_id(&wave_run_id, "wave_run_id")?;
+                let run = self
+                    .run_store({
+                        let run_id = run_id.clone();
+                        move |store| store.get_wave_run(&run_id)
+                    })
                     .await?;
-
-                if let Some(mut wave) = wave {
+                if let Some(mut run) = run {
                     if req.status == AgentStatus::AgentCompleted as i32 {
-                        wave.step_index += 1;
-                        wave.consecutive_failures = 0;
-                        wave.status = WaveStatus::WaveRunning as i32;
+                        run.step_index += 1;
+                        run.status = WaveRunStatus::WaveRunRunning as i32;
+                        let run_clone = run.clone();
+                        let _ = self
+                            .run_store(move |store| store.update_wave_run(&run_clone))
+                            .await;
+                        let exec = self.executor.clone();
+                        tokio::spawn(async move {
+                            let _ = exec.execute(&run_id).await;
+                        });
                     } else if req.status == AgentStatus::AgentFailed as i32 {
-                        wave.consecutive_failures += 1;
-                        if wave.consecutive_failures >= 3 {
-                            wave.status = WaveStatus::WaveError as i32;
-                        } else {
-                            wave.status = WaveStatus::WaveRunning as i32;
-                        }
+                        run.status = WaveRunStatus::WaveRunFailed as i32;
+                        run.error = Some("agent failed".to_string());
+                        run.ended_at = Some(Self::now_timestamp());
+                        let run_clone = run.clone();
+                        let _ = self
+                            .run_store(move |store| store.update_wave_run(&run_clone))
+                            .await;
                     }
-                    let wave_clone = wave.clone();
-                    let _ = self
-                        .run_store(move |store| store.update_wave(&wave_clone))
-                        .await;
                 }
             }
         }
@@ -778,6 +924,8 @@ impl ControlService for ControlServer {
     }
 
     type SubscribeStream = Pin<Box<dyn Stream<Item = Result<Event, Status>> + Send>>;
+    type StreamOutputStream =
+        Pin<Box<dyn Stream<Item = Result<StreamOutputResponse, Status>> + Send>>;
 
     async fn subscribe(
         &self,
@@ -797,8 +945,38 @@ impl ControlService for ControlServer {
 
     async fn stream_output(
         &self,
-        _request: Request<StreamOutputRequest>,
-    ) -> Result<Response<StreamOutputResponse>, Status> {
-        Ok(Response::new(StreamOutputResponse {}))
+        request: Request<StreamOutputRequest>,
+    ) -> Result<Response<Self::StreamOutputStream>, Status> {
+        let req = request.into_inner();
+        if req.wave_run_id.is_empty() {
+            return Err(Status::invalid_argument("wave_run_id required"));
+        }
+
+        let wave_run_id = req.wave_run_id.clone();
+        let agent_filter = req.agent_id.clone();
+        let receiver = self.output.subscribe();
+        let stream = BroadcastStream::new(receiver).filter_map(move |result| {
+            let wave_run_id = wave_run_id.clone();
+            let agent_filter = agent_filter.clone();
+            match result {
+                Ok(event) => {
+                    if event.wave_run_id != wave_run_id {
+                        return None;
+                    }
+                    if let Some(filter) = agent_filter.as_deref() {
+                        if event.agent_id != filter {
+                            return None;
+                        }
+                    }
+                    Some(Ok(StreamOutputResponse {
+                        agent_id: event.agent_id,
+                        text: event.text,
+                    }))
+                }
+                Err(_) => None,
+            }
+        });
+
+        Ok(Response::new(Box::pin(stream)))
     }
 }

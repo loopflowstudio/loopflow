@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from loopflow import __version__
+from loopflow.lf.flows import load_flow
 from loopflow.lfd.agent import (
     get_waiting_agent,
     load_agents,
@@ -49,6 +50,7 @@ from loopflow.lfd.wave import (
     update_wave,
     update_wave_status,
 )
+from loopflow.lfd.wave_run import get_latest_wave_run_for_wave
 from loopflow.lfd.worktree_state import get_worktree_state_service
 
 # Default port - matches webapp's expected default
@@ -325,6 +327,8 @@ def _wave_to_dict(wave, worktree_state: dict | None = None) -> dict:
         "merge_mode": wave.merge_mode.value,
         "pid": wave.pid,
         "created_at": wave.created_at.isoformat(),
+        # Running state progress
+        "step_index": wave.step_index,
     }
 
     # Add waiting reason for blocked waves
@@ -332,6 +336,20 @@ def _wave_to_dict(wave, worktree_state: dict | None = None) -> dict:
         outstanding = count_outstanding(wave)
         result["waiting_reason"] = "pr_limit_reached"
         result["open_prs"] = outstanding
+
+    # Add running state progress from current wave run
+    if wave.status == WaveStatus.RUNNING:
+        current_run = get_latest_wave_run_for_wave(wave.id)
+        if current_run:
+            result["current_step"] = current_run.current_step
+            result["run_started_at"] = (
+                current_run.started_at.isoformat() if current_run.started_at else None
+            )
+
+        # Get total steps from flow definition
+        flow = load_flow(wave.flow, wave.repo)
+        if flow:
+            result["total_steps"] = len(flow.steps)
 
     # Enrich with worktree state if available
     if worktree_state:

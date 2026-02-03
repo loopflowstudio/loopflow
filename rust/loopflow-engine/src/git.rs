@@ -489,7 +489,12 @@ mod tests {
         )
         .expect("add remote");
 
-        push(repo.path(), true).expect("push");
+        // Initial push to set upstream
+        push_with_upstream(repo.path(), "origin", "main").expect("initial push");
+
+        // Now test force-with-lease push
+        commit_file(repo.path(), "second.txt", "second commit");
+        push(repo.path(), true).expect("push force-with-lease");
     }
 
     #[test]

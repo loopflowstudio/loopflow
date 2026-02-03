@@ -22,9 +22,11 @@ struct WaveDetailPanel: View {
     @State private var isCloning = false
     @State private var editingName: String = ""
     @State private var isEditingName = false
+    @State private var currentTime = Date()
     @FocusState private var isNameFocused: Bool
 
     private let terminalLauncher = TerminalLauncher()
+    private let elapsedTimeTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     private let worktreeService = WorktreeService()
 
     private var ideApp: IDEApp { repoState.config?.ideApp ?? .cursor }
@@ -66,6 +68,12 @@ struct WaveDetailPanel: View {
             // Only respond if this wave is selected
             if repoState.selectedWave?.id == wave.id {
                 startNameEdit()
+            }
+        }
+        .onReceive(elapsedTimeTimer) { time in
+            // Update current time for elapsed time display (only when running)
+            if wave.status == .running {
+                currentTime = time
             }
         }
     }
@@ -334,15 +342,31 @@ struct WaveDetailPanel: View {
                     Text("Progress")
                         .font(.headline)
                     Spacer()
+
+                    // Connect button for running waves
+                    if wave.status == .running, let path = wave.worktreePath {
+                        Button {
+                            connectToRunning(path: path)
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "terminal")
+                                    .font(.caption)
+                                Text("Connect")
+                                    .font(.caption)
+                            }
+                        }
+                        .buttonStyle(DarkButtonStyle())
+                        .help("Connect to running terminal")
+                    }
                 }
 
-                // Status description
+                // Status description with progress
                 HStack(spacing: 8) {
                     switch wave.status {
                     case .running:
                         ProgressView()
                             .scaleEffect(0.8)
-                        Text("Running \(wave.flowDisplay) flow...")
+                        Text(wave.progressDisplay(now: currentTime))
                             .foregroundStyle(.secondary)
 
                     case .completed:
@@ -362,6 +386,20 @@ struct WaveDetailPanel: View {
                     }
                 }
                 .font(.subheadline)
+
+                // Activity summary (recent output line)
+                if wave.status == .running,
+                   let recentOutput = sessionState.recentOutput(for: wave.id) {
+                    Text(recentOutput)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(palette.background)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
 
                 // Live output
                 if wave.status == .running {
@@ -599,6 +637,17 @@ struct WaveDetailPanel: View {
             step: wave.flow,
             worktreePath: path
         )
+    }
+
+    private func connectToRunning(path: String) {
+        // Open a shell terminal in the worktree directory
+        // This lets users inspect/interact while the wave runs
+        do {
+            try terminalLauncher.launchTerminal(terminalApp, at: URL(fileURLWithPath: path))
+        } catch {
+            actionError = "Failed to connect: \(error.localizedDescription)"
+            showingActionError = true
+        }
     }
 
     private func cloneWave() {

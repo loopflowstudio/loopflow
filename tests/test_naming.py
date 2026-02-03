@@ -2,12 +2,14 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from loopflow.lf.naming import (
     MAGICAL,
     MUSICAL,
-    _remove_doubled_prefix,
-    extract_iteration_suffix,
-    generate_next_branch,
+    _is_timestamp,
+    _is_word_pair,
+    generate_branch_name,
     generate_word_pair,
     parse_branch_base,
 )
@@ -28,157 +30,205 @@ def test_generate_word_pair_randomness():
     assert len(results) > 1  # Very unlikely to get same pair 20 times
 
 
-def test_parse_branch_base_no_suffix():
-    """Branch without magical-musical suffix returns as-is."""
-    assert parse_branch_base("my-feature") == "my-feature"
+def test_is_timestamp_valid():
+    """Valid timestamps are recognized."""
+    assert _is_timestamp("20260202_1700")
+    assert _is_timestamp("19990101_0000")
 
 
-def test_parse_branch_base_with_timestamp_suffix():
-    """Branch with .timestamp.word1-word2 suffix strips both."""
-    result = parse_branch_base("my-feature.20260127_2204.aurora-melody")
-    assert result == "my-feature"
+def test_is_timestamp_invalid():
+    """Invalid timestamps are rejected."""
+    assert not _is_timestamp("2026020_1700")  # Too short
+    assert not _is_timestamp("202602021700")  # No underscore
+    assert not _is_timestamp("not-a-timestamp")
 
 
-def test_parse_branch_base_strips_main():
-    """Branch ending in .main strips it."""
-    assert parse_branch_base("my-feature.main") == "my-feature"
+def test_is_word_pair_valid():
+    """Valid magical-musical pairs are recognized."""
+    assert _is_word_pair("aurora-melody")
+    assert _is_word_pair("vale-tempo")
 
 
-def test_parse_branch_base_invalid_suffix_not_in_list():
-    """Suffix with words not in lists is preserved."""
-    result = parse_branch_base("my-feature.foo-bar")
-    assert result == "my-feature.foo-bar"
+def test_is_word_pair_invalid():
+    """Invalid word pairs are rejected."""
+    assert not _is_word_pair("foo-bar")  # Not in lists
+    assert not _is_word_pair("aurora-something")  # Second word not musical
+    assert not _is_word_pair("aurora")  # No dash
 
 
-def test_parse_branch_base_partial_match():
-    """Only magical-musical pair counts as suffix."""
-    # aurora is magical but "something" is not musical
-    assert parse_branch_base("my-feature.aurora-something") == "my-feature.aurora-something"
+def test_generate_branch_name_uses_config_schema(tmp_path):
+    """Branch name follows config schema."""
+    config_mock = MagicMock()
+    config_mock.user = "jack-heart"
+    config_mock.branch_names = MagicMock()
+    config_mock.branch_names.schema_ = "{user}.{name}.{timestamp}.{words}"
 
+    with patch("loopflow.lf.naming.load_config", return_value=config_mock):
+        with patch("loopflow.lf.naming.branch_exists", return_value=False):
+            result = generate_branch_name("concerto", tmp_path)
 
-def test_parse_branch_base_simple_branch():
-    """Simple branch name without dots."""
-    assert parse_branch_base("feature-branch") == "feature-branch"
-
-
-def test_parse_branch_base_recursive():
-    """Parsing a branch with suffix returns same base."""
-    base = "my-feature"
-    with_suffix = f"{base}.20260127_2204.aurora-melody"
-    assert parse_branch_base(with_suffix) == base
-    # Different suffix still yields same base
-    with_suffix2 = f"{base}.20260127_2204.frost-cadence"
-    assert parse_branch_base(with_suffix2) == base
-
-
-def test_generate_next_branch_appends_suffix():
-    """Next branch gets .timestamp.word1-word2 suffix."""
-    with patch("loopflow.lf.naming.branch_exists", return_value=False):
-        result = generate_next_branch("my-feature", MagicMock())
-    assert result.startswith("my-feature.")
-    # Should have timestamp.word1-word2 suffix
+    assert result.startswith("jack-heart.concerto.")
     parts = result.split(".")
-    assert len(parts) == 3  # base, timestamp, words
-    timestamp = parts[1]
-    assert len(timestamp) == 13  # YYYYMMDD_HHMM
-    assert "_" in timestamp
-    words = parts[2].split("-")
-    assert len(words) == 2
-    assert words[0] in MAGICAL
-    assert words[1] in MUSICAL
+    assert len(parts) == 4  # user, name, timestamp, words
+    assert parts[0] == "jack-heart"
+    assert parts[1] == "concerto"
+    assert _is_timestamp(parts[2])
+    assert _is_word_pair(parts[3])
 
 
-def test_generate_next_branch_retries_on_collision():
+def test_generate_branch_name_simple_schema(tmp_path):
+    """Branch name works with simple schema."""
+    config_mock = MagicMock()
+    config_mock.user = None
+    config_mock.branch_names = MagicMock()
+    config_mock.branch_names.schema_ = "{name}.{timestamp}.{words}"
+
+    with patch("loopflow.lf.naming.load_config", return_value=config_mock):
+        with patch("loopflow.lf.naming.branch_exists", return_value=False):
+            result = generate_branch_name("feature", tmp_path)
+
+    assert result.startswith("feature.")
+    parts = result.split(".")
+    assert len(parts) == 3  # name, timestamp, words
+
+
+def test_generate_branch_name_requires_user_when_in_schema(tmp_path):
+    """Raises error if schema requires user but user not configured."""
+    config_mock = MagicMock()
+    config_mock.user = None
+    config_mock.branch_names = MagicMock()
+    config_mock.branch_names.schema_ = "{user}.{name}.{timestamp}.{words}"
+
+    with patch("loopflow.lf.naming.load_config", return_value=config_mock):
+        with pytest.raises(ValueError, match="Config missing 'user' field"):
+            generate_branch_name("concerto", tmp_path)
+
+
+def test_generate_branch_name_retries_on_collision(tmp_path):
     """Retries when branch already exists."""
+    config_mock = MagicMock()
+    config_mock.user = "test"
+    config_mock.branch_names = MagicMock()
+    config_mock.branch_names.schema_ = "{user}.{name}.{timestamp}.{words}"
+
     call_count = [0]
 
     def mock_exists(repo, branch):
         call_count[0] += 1
-        # First 3 attempts collide, 4th succeeds
-        return call_count[0] < 4
+        return call_count[0] < 4  # First 3 attempts collide
 
-    with patch("loopflow.lf.naming.branch_exists", side_effect=mock_exists):
-        result = generate_next_branch("test", MagicMock())
+    with patch("loopflow.lf.naming.load_config", return_value=config_mock):
+        with patch("loopflow.lf.naming.branch_exists", side_effect=mock_exists):
+            result = generate_branch_name("test", tmp_path)
 
     assert call_count[0] == 4
-    assert result.startswith("test.")
+    assert result.startswith("test.test.")
 
 
-def test_generate_next_branch_raises_on_exhaustion():
+def test_generate_branch_name_raises_on_exhaustion(tmp_path):
     """Raises ValueError if can't find unique branch after 100 attempts."""
-    with patch("loopflow.lf.naming.branch_exists", return_value=True):
-        try:
-            generate_next_branch("test", MagicMock())
-            assert False, "Should have raised ValueError"
-        except ValueError as e:
-            assert "Could not generate unique branch" in str(e)
+    config_mock = MagicMock()
+    config_mock.user = "test"
+    config_mock.branch_names = MagicMock()
+    config_mock.branch_names.schema_ = "{user}.{name}.{timestamp}.{words}"
+
+    with patch("loopflow.lf.naming.load_config", return_value=config_mock):
+        with patch("loopflow.lf.naming.branch_exists", return_value=True):
+            with pytest.raises(ValueError, match="Could not generate unique branch"):
+                generate_branch_name("test", tmp_path)
 
 
-def test_parse_branch_base_strips_trailing_timestamp():
-    """Branch with trailing timestamp (from branch naming schema) strips it."""
-    # This handles branches created with schema like {user}.{name}.{date}_{ts}
-    result = parse_branch_base("jack-heart.concerto-next.20260129_2255")
-    assert result == "jack-heart.concerto-next"
+def test_generate_branch_name_default_schema_when_no_config(tmp_path):
+    """Uses default schema when no config."""
+    with patch("loopflow.lf.naming.load_config", return_value=None):
+        with pytest.raises(ValueError, match="Config missing 'user' field"):
+            # Default schema includes {user}, so should fail without user
+            generate_branch_name("test", tmp_path)
 
 
-def test_parse_branch_base_nested_timestamps():
-    """Branch with double timestamps strips both correctly."""
-    # First strip the .timestamp.word-pair, then the remaining .timestamp
-    result = parse_branch_base("jack-heart.concerto-next.20260129_2255.20260129_2318.aurora-rondo")
-    assert result == "jack-heart.concerto-next"
+# parse_branch_base tests
 
 
-def test_extract_iteration_suffix_with_suffix():
-    """Extract timestamp.words suffix from branch."""
-    result = extract_iteration_suffix("rust.20260127_1234.wisp-forte")
-    assert result == "20260127_1234.wisp-forte"
+def test_parse_branch_base_full_schema(tmp_path):
+    """Extracts wave name from full branch with user, timestamp, words."""
+    config_mock = MagicMock()
+    config_mock.branch_names = MagicMock()
+    config_mock.branch_names.schema_ = "{user}.{name}.{timestamp}.{words}"
+
+    with patch("loopflow.lf.naming.load_config", return_value=config_mock):
+        with patch("loopflow.lf.naming._get_git_username", return_value="jack-heart"):
+            result = parse_branch_base("jack-heart.concerto.20260202_1700.aurora-melody", tmp_path)
+    assert result == "concerto"
 
 
-def test_extract_iteration_suffix_with_username():
-    """Extract suffix from branch with username prefix."""
-    result = extract_iteration_suffix("jack.rust.20260127_1234.wisp-forte")
-    assert result == "20260127_1234.wisp-forte"
+def test_parse_branch_base_no_words(tmp_path):
+    """Extracts wave name when words suffix is missing."""
+    config_mock = MagicMock()
+    config_mock.branch_names = MagicMock()
+    config_mock.branch_names.schema_ = "{user}.{name}.{timestamp}.{words}"
+
+    with patch("loopflow.lf.naming.load_config", return_value=config_mock):
+        with patch("loopflow.lf.naming._get_git_username", return_value="jack-heart"):
+            result = parse_branch_base("jack-heart.concerto.20260202_1700", tmp_path)
+    assert result == "concerto"
 
 
-def test_extract_iteration_suffix_no_suffix():
-    """Return None for branch without iteration suffix."""
-    assert extract_iteration_suffix("rust") is None
-    assert extract_iteration_suffix("my-feature") is None
+def test_parse_branch_base_user_and_name_only(tmp_path):
+    """Extracts wave name when only user and name present."""
+    config_mock = MagicMock()
+    config_mock.branch_names = MagicMock()
+    config_mock.branch_names.schema_ = "{user}.{name}.{timestamp}.{words}"
+
+    with patch("loopflow.lf.naming.load_config", return_value=config_mock):
+        with patch("loopflow.lf.naming._get_git_username", return_value="jack-heart"):
+            result = parse_branch_base("jack-heart.concerto", tmp_path)
+    assert result == "concerto"
 
 
-def test_extract_iteration_suffix_invalid_words():
-    """Return None if words aren't magical-musical."""
-    assert extract_iteration_suffix("rust.20260127_1234.foo-bar") is None
+def test_parse_branch_base_name_only(tmp_path):
+    """Returns name as-is when it's just the wave name."""
+    config_mock = MagicMock()
+    config_mock.branch_names = MagicMock()
+    config_mock.branch_names.schema_ = "{user}.{name}.{timestamp}.{words}"
+
+    with patch("loopflow.lf.naming.load_config", return_value=config_mock):
+        with patch("loopflow.lf.naming._get_git_username", return_value="jack-heart"):
+            result = parse_branch_base("concerto", tmp_path)
+    assert result == "concerto"
 
 
-def test_remove_doubled_prefix_single_segment():
-    """Remove doubled single segment prefix."""
-    assert _remove_doubled_prefix("foo.foo") == "foo"
-    assert _remove_doubled_prefix("foo.foo.bar") == "foo.bar"
+def test_parse_branch_base_no_user_in_schema(tmp_path):
+    """Works with schema that has no user prefix."""
+    config_mock = MagicMock()
+    config_mock.branch_names = MagicMock()
+    config_mock.branch_names.schema_ = "{name}.{timestamp}.{words}"
+
+    with patch("loopflow.lf.naming.load_config", return_value=config_mock):
+        with patch("loopflow.lf.naming._get_git_username", return_value="anyone"):
+            result = parse_branch_base("concerto.20260202_1700.aurora-melody", tmp_path)
+    assert result == "concerto"
 
 
-def test_remove_doubled_prefix_multi_segment():
-    """Remove doubled multi-segment prefix."""
-    assert (
-        _remove_doubled_prefix("jack-heart.concerto.jack-heart.concerto") == "jack-heart.concerto"
-    )
-    assert _remove_doubled_prefix("foo.bar.foo.bar.baz") == "foo.bar.baz"
+def test_parse_branch_base_dotted_name(tmp_path):
+    """Handles wave names with dots."""
+    config_mock = MagicMock()
+    config_mock.branch_names = MagicMock()
+    config_mock.branch_names.schema_ = "{user}.{name}.{timestamp}.{words}"
+
+    with patch("loopflow.lf.naming.load_config", return_value=config_mock):
+        with patch("loopflow.lf.naming._get_git_username", return_value="jack-heart"):
+            branch = "jack-heart.my.feature.20260202_1700.aurora-melody"
+            result = parse_branch_base(branch, tmp_path)
+    assert result == "my.feature"
 
 
-def test_remove_doubled_prefix_no_doubling():
-    """Leave non-doubled strings unchanged."""
-    assert _remove_doubled_prefix("foo.bar") == "foo.bar"
-    assert _remove_doubled_prefix("foo") == "foo"
-    assert _remove_doubled_prefix("foo.bar.baz") == "foo.bar.baz"
+def test_parse_branch_base_ts_schema(tmp_path):
+    """Works with {ts} alias for timestamp."""
+    config_mock = MagicMock()
+    config_mock.branch_names = MagicMock()
+    config_mock.branch_names.schema_ = "{user}.{name}.{ts}"
 
-
-def test_parse_branch_base_removes_doubled_prefix():
-    """Branch with doubled wave name gets deduplicated."""
-    result = parse_branch_base("jack-heart.concerto.jack-heart.concerto.20260130_2249")
-    assert result == "jack-heart.concerto"
-
-
-def test_parse_branch_base_removes_doubled_prefix_with_word_pair():
-    """Branch with doubled wave name and word pair gets deduplicated."""
-    result = parse_branch_base("foo.bar.foo.bar.20260130_2249.nova-sonata")
-    assert result == "foo.bar"
+    with patch("loopflow.lf.naming.load_config", return_value=config_mock):
+        with patch("loopflow.lf.naming._get_git_username", return_value="jack-heart"):
+            result = parse_branch_base("jack-heart.concerto.20260202_1700", tmp_path)
+    assert result == "concerto"

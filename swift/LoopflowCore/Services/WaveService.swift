@@ -325,6 +325,12 @@ public struct WaveService: @unchecked Sendable {
             waitingReason = .prLimitReached(open: openPRs, limit: prLimit)
         }
 
+        // Parse running state progress
+        var runStartedAt: Date?
+        if let runStartedAtStr = json["run_started_at"] as? String {
+            runStartedAt = dateFormatter.date(from: runStartedAtStr)
+        }
+
         return Wave(
             id: json["id"] as? String ?? UUID().uuidString,
             name: json["name"] as? String ?? "",
@@ -355,7 +361,11 @@ public struct WaveService: @unchecked Sendable {
             mergeMode: MergeMode(rawValue: json["merge_mode"] as? String ?? "pr") ?? .pr,
             pid: json["pid"] as? Int,
             createdAt: createdAt,
-            waitingReason: waitingReason
+            waitingReason: waitingReason,
+            currentStep: json["current_step"] as? String,
+            stepIndex: json["step_index"] as? Int ?? 0,
+            totalSteps: json["total_steps"] as? Int ?? 0,
+            runStartedAt: runStartedAt
         )
     }
 

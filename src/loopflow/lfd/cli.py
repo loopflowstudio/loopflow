@@ -25,7 +25,7 @@ from loopflow.lf.flows import load_flow
 from loopflow.lf.git import autocommit, find_main_repo
 from loopflow.lf.launcher import build_model_interactive_command
 from loopflow.lf.logging import get_log_dir
-from loopflow.lf.naming import generate_next_branch
+from loopflow.lf.naming import generate_branch_name
 from loopflow.lf.ops.shell import write_directive
 from loopflow.lfd.agent import get_waiting_agent, update_agent_status
 from loopflow.lfd.daemon.launchd import install as launchd_install
@@ -1498,7 +1498,7 @@ def next_cmd(
         typer.echo(f"{c['yellow']}Warning:{c['reset']} Could not enable auto-merge", err=True)
 
     # Generate new branch name
-    new_branch = generate_next_branch(wave.name, main_repo)
+    new_branch = generate_branch_name(wave.name, main_repo)
 
     # Create new branch from current HEAD
     typer.echo(f"Creating stacked branch {c['bold']}{new_branch}{c['reset']}...")

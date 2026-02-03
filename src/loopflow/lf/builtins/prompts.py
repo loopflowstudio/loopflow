@@ -4,7 +4,12 @@ from pathlib import Path
 
 _OPS_DIR = Path(__file__).parent / "ops"
 
+# Load all prompts at import time. This prevents FileNotFoundError when
+# the worktree is moved mid-execution (e.g., during `lf ops next`).
+_OPS_PROMPTS = {path.stem: path.read_text() for path in _OPS_DIR.glob("*.md")}
+
 
 def get_builtin_ops_prompt(name: str) -> str:
-    """Get a builtin ops prompt by name. Raises FileNotFoundError if not found."""
-    return (_OPS_DIR / f"{name}.md").read_text()
+    if name not in _OPS_PROMPTS:
+        raise FileNotFoundError(f"Builtin ops prompt not found: {name}")
+    return _OPS_PROMPTS[name]

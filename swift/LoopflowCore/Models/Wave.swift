@@ -183,6 +183,12 @@ public struct Wave: Sendable, Identifiable, Hashable {
     // Waiting state
     public var waitingReason: WaitingReason?
 
+    // Running state progress
+    public var currentStep: String?  // Name of currently executing step
+    public var stepIndex: Int  // Position in flow (0-based)
+    public var totalSteps: Int  // Total steps in flow
+    public var runStartedAt: Date?  // When the current run started
+
     public init(
         id: String,
         name: String = "",
@@ -214,7 +220,11 @@ public struct Wave: Sendable, Identifiable, Hashable {
         pid: Int? = nil,
         createdAt: Date = Date(),
         lastMainSha: String? = nil,
-        waitingReason: WaitingReason? = nil
+        waitingReason: WaitingReason? = nil,
+        currentStep: String? = nil,
+        stepIndex: Int = 0,
+        totalSteps: Int = 0,
+        runStartedAt: Date? = nil
     ) {
         self.id = id
         self.name = name
@@ -247,6 +257,10 @@ public struct Wave: Sendable, Identifiable, Hashable {
         self.createdAt = createdAt
         self.lastMainSha = lastMainSha
         self.waitingReason = waitingReason
+        self.currentStep = currentStep
+        self.stepIndex = stepIndex
+        self.totalSteps = totalSteps
+        self.runStartedAt = runStartedAt
     }
 
     /// Check if wave has required config for running.
@@ -347,5 +361,43 @@ public struct Wave: Sendable, Identifiable, Hashable {
         formatter.unitsStyle = .abbreviated
         let time = formatter.localizedString(for: step.endedAt ?? step.startedAt, relativeTo: Date())
         return "\(step.step) \(time)"
+    }
+
+    // MARK: - Running State Progress
+
+    /// Progress text for running waves (e.g., "implement (2/4)").
+    public var progressText: String {
+        let stepName = currentStep ?? flow
+        if totalSteps > 0 {
+            return "\(stepName) (\(stepIndex + 1)/\(totalSteps))"
+        }
+        return stepName
+    }
+
+    /// Elapsed time since run started, formatted as "3m 12s" or "1h 5m".
+    public func elapsedTime(from now: Date = Date()) -> String? {
+        guard let startedAt = runStartedAt else { return nil }
+        let elapsed = now.timeIntervalSince(startedAt)
+        guard elapsed > 0 else { return nil }
+
+        let hours = Int(elapsed) / 3600
+        let minutes = (Int(elapsed) % 3600) / 60
+        let seconds = Int(elapsed) % 60
+
+        if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        } else if minutes > 0 {
+            return "\(minutes)m \(seconds)s"
+        } else {
+            return "\(seconds)s"
+        }
+    }
+
+    /// Full progress display (e.g., "implement (2/4) · 3m 12s").
+    public func progressDisplay(now: Date = Date()) -> String {
+        if let elapsed = elapsedTime(from: now) {
+            return "\(progressText) · \(elapsed)"
+        }
+        return progressText
     }
 }

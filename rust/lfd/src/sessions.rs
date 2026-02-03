@@ -89,6 +89,7 @@ mod tests {
     use super::{run_pty_command, PtyCommand};
 
     #[test]
+    #[ignore = "PTY tests hang in CI - no controlling terminal"]
     fn run_pty_command_returns_exit_code() {
         let command = PtyCommand::new("sh").arg("-c").arg("exit 0");
         let exit_code = run_pty_command(command).unwrap();

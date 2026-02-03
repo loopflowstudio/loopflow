@@ -16,7 +16,7 @@ from croniter import croniter
 
 from loopflow.lf.context import find_worktree_root
 from loopflow.lf.messages import generate_pr_message
-from loopflow.lf.naming import generate_next_branch, generate_word_pair
+from loopflow.lf.naming import generate_branch_name, generate_word_pair, parse_branch_base
 from loopflow.lf.worktrees import WorktreeError, get_path
 from loopflow.lfd.db import _get_db
 from loopflow.lfd.logging import stimulus_log
@@ -146,9 +146,18 @@ def get_wave_by_name(
 def get_wave_by_worktree(
     worktree: Path, repo: Path | None = None, db_path: Path | None = None
 ) -> Wave | None:
-    """Get a wave by its worktree path, optionally filtered by repo."""
+    """Get a wave by its worktree path, optionally filtered by repo.
+
+    Falls back to branch-based lookup if no direct worktree match:
+    1. Gets current branch from worktree
+    2. Parses wave name from branch using config schema
+    3. Looks up wave by name
+    """
+    from loopflow.lf.git import find_main_repo, get_current_branch
+
     conn = _get_db(db_path)
 
+    # Try direct worktree path match
     if repo:
         cursor = conn.execute(
             "SELECT * FROM waves WHERE worktree = ? AND repo = ?",
@@ -161,7 +170,18 @@ def get_wave_by_worktree(
         )
     row = cursor.fetchone()
     conn.close()
-    return wave_from_row(dict(row)) if row else None
+
+    if row:
+        return wave_from_row(dict(row))
+
+    # Fallback: parse wave name from current branch
+    main_repo = find_main_repo(worktree) or repo or worktree
+    branch = get_current_branch(worktree)
+    if branch:
+        wave_name = parse_branch_base(branch, main_repo)
+        return get_wave_by_name(wave_name, main_repo, db_path)
+
+    return None
 
 
 def list_waves(repo: Path | None = None, db_path: Path | None = None) -> list[Wave]:
@@ -419,7 +439,7 @@ def setup_wave_worktree(wave_id: str) -> bool:
     wave_name = wave.name
 
     # Branch name includes timestamp and words (evolves with each iteration)
-    branch = generate_next_branch(wave_name, repo)
+    branch = generate_branch_name(wave_name, repo)
     worktree_path = get_path(repo, wave_name)
 
     try:

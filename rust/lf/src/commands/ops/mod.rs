@@ -2,8 +2,8 @@ use crate::commands::util::find_repo_root;
 use crate::{OpsCommand, ShellCommand, WtCommand};
 use anyhow::{anyhow, Result};
 use loopflow_engine::git::{
-    commit, current_branch, delete_local_branch, get_default_branch, land, pr_create_draft, push,
-    push_with_upstream, rebase, sync_main, LandStrategy,
+    commit, current_branch, delete_local_branch, get_default_branch, is_clean, land,
+    pr_create_draft, push, push_with_upstream, rebase, sync_main, LandStrategy,
 };
 use loopflow_engine::worktrees::{
     create_with_schema, list_worktrees, main_repo_root, preserve_worktree, worktree_path,
@@ -190,7 +190,9 @@ fn wt_create(name: &str, base: Option<&str>, stack: bool) -> Result<()> {
         base_branch = Some(current);
     }
 
-    let config = loopflow_engine::config::load_config(&main_repo).ok();
+    let config = loopflow_engine::config::load_config(Some(&main_repo))
+        .ok()
+        .flatten();
     let branch_config = config.as_ref().and_then(|c| c.branch_names.as_ref());
     let result = create_with_schema(&main_repo, name, base_branch.as_deref(), branch_config)?;
 
@@ -272,6 +274,7 @@ fn wt_prune(dry_run: bool, force: bool) -> Result<()> {
         .into_iter()
         .filter(|wt| wt.prunable)
         .filter(|wt| wt.path != current_path)
+        .filter(|wt| is_clean(&wt.path).unwrap_or(false))
         .collect::<Vec<_>>();
 
     if prunable.is_empty() {
@@ -446,52 +449,52 @@ fn write_shell_directive(command: &str) -> Result<bool> {
 }
 
 const SHELL_INIT_ZSH: &str = r#"# loopflow shell integration for zsh
-+#
-+# Enables directory switching after `lf ops wt create`.
-+
-+if command -v lf >/dev/null 2>&1; then
-+    lf() {
-+        local directive_file exit_code=0
-+        directive_file="$(mktemp)"
-+
-+        LOOPFLOW_DIRECTIVE_FILE="$directive_file" command lf "$@" || exit_code=$?
-+
-+        if [[ -s "$directive_file" ]]; then
-+            source "$directive_file"
-+            if [[ $exit_code -eq 0 ]]; then
-+                exit_code=$?
-+            fi
-+        fi
-+
-+        rm -f "$directive_file"
-+        return "$exit_code"
-+    }
-+fi
-+"#;
+#
+# Enables directory switching after `lf ops wt create`.
+
+if command -v lf >/dev/null 2>&1; then
+    lf() {
+        local directive_file exit_code=0
+        directive_file="$(mktemp)"
+
+        LOOPFLOW_DIRECTIVE_FILE="$directive_file" command lf "$@" || exit_code=$?
+
+        if [[ -s "$directive_file" ]]; then
+            source "$directive_file"
+            if [[ $exit_code -eq 0 ]]; then
+                exit_code=$?
+            fi
+        fi
+
+        rm -f "$directive_file"
+        return "$exit_code"
+    }
+fi
+"#;
 
 const SHELL_INIT_BASH: &str = r#"# loopflow shell integration for bash
-+#
-+# Enables directory switching after `lf ops wt create`.
-+
-+if command -v lf >/dev/null 2>&1; then
-+    lf() {
-+        local directive_file exit_code=0
-+        directive_file="$(mktemp)"
-+
-+        LOOPFLOW_DIRECTIVE_FILE="$directive_file" command lf "$@" || exit_code=$?
-+
-+        if [[ -s "$directive_file" ]]; then
-+            source "$directive_file"
-+            if [[ $exit_code -eq 0 ]]; then
-+                exit_code=$?
-+            fi
-+        fi
-+
-+        rm -f "$directive_file"
-+        return "$exit_code"
-+    }
-+fi
-+"#;
+#
+# Enables directory switching after `lf ops wt create`.
+
+if command -v lf >/dev/null 2>&1; then
+    lf() {
+        local directive_file exit_code=0
+        directive_file="$(mktemp)"
+
+        LOOPFLOW_DIRECTIVE_FILE="$directive_file" command lf "$@" || exit_code=$?
+
+        if [[ -s "$directive_file" ]]; then
+            source "$directive_file"
+            if [[ $exit_code -eq 0 ]]; then
+                exit_code=$?
+            fi
+        fi
+
+        rm -f "$directive_file"
+        return "$exit_code"
+    }
+fi
+"#;
 
 const SHELL_INSTALL_LINE_ZSH: &str =
     "if command -v lf >/dev/null 2>&1; then eval \"$(command lf ops shell init zsh)\"; fi";

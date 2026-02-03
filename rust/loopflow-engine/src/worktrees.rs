@@ -50,7 +50,7 @@ pub fn main_repo_root(repo: &Path) -> Result<PathBuf, GitError> {
 }
 
 pub fn worktree_path(repo: &Path, name: &str) -> PathBuf {
-    let sanitized = name.replace('/', "-").replace('\\', "-");
+    let sanitized = name.replace(['/', '\\'], "-");
     repo.parent().unwrap_or(repo).join(sanitized)
 }
 
@@ -121,7 +121,7 @@ fn upstream_branch(worktree: &Path) -> Option<String> {
     if raw.is_empty() {
         return None;
     }
-    let branch = raw.split('/').last().unwrap_or(&raw).to_string();
+    let branch = raw.split('/').next_back().unwrap_or(&raw).to_string();
     Some(branch)
 }
 

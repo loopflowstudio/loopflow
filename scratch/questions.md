@@ -19,6 +19,7 @@ Questions that emerged during lfd-primary implementation. Need resolution before
 ## WaveService Protocol
 
 - Should `/wave-runs` move to a `/v1/` endpoint or keep legacy-style `ok/result` responses long-term?
+- Should `WaveServiceFactory` select contexts from config (grpc/remote) instead of always returning `LocalWaveService`?
 
 ## Concerto Wave Phase Status
 

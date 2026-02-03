@@ -278,3 +278,39 @@ def test_preserve_worktree_with_doubled_wave_name(tmp_path):
     assert result.name == "loopflow.jack-heart.rust.20260131_1200.echo-melody"
     # Should NOT have the doubled structure
     assert "jack-heart.rust.jack-heart.rust" not in result.name
+
+
+def test_extract_worktree_base_strips_timestamp_and_words():
+    """Extracts base from worktree path, stripping iteration suffixes."""
+    from loopflow.lf.ops.next import _extract_worktree_base
+
+    main_repo = Path("/src/loopflow")
+    worktree = Path("/src/loopflow.concerto.20260202_1559.mist-lilt")
+
+    result = _extract_worktree_base(worktree, main_repo)
+
+    assert result == "concerto"
+
+
+def test_extract_worktree_base_handles_branch_prefix_mismatch():
+    """Worktree base comes from path, not from branch naming convention.
+
+    Regression test: branch 'jack-heart.concerto.timestamp.words' should create
+    worktree at 'loopflow.concerto' (from existing worktree path structure),
+    not 'loopflow.jack-heart.concerto' (from branch name).
+    """
+    from loopflow.lf.ops.next import _extract_worktree_base
+
+    # Main repo
+    main_repo = Path("/src/loopflow")
+
+    # Worktree uses 'concerto' (without user prefix)
+    worktree = Path("/src/loopflow.concerto.20260202_1559.mist-lilt")
+
+    # Branch has user prefix 'jack-heart'
+    # The worktree base should come from worktree path, not branch
+    result = _extract_worktree_base(worktree, main_repo)
+
+    # Should be 'concerto', not 'jack-heart.concerto'
+    assert result == "concerto"
+    assert "jack-heart" not in result

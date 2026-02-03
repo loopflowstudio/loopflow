@@ -222,14 +222,45 @@ def _preserve_worktree(repo_root: Path, branch: str, wave_name: str) -> Path | N
     return new_path
 
 
+def _extract_worktree_base(repo_root: Path, main_repo: Path) -> str:
+    """Extract base name for worktree from current worktree path.
+
+    Strips iteration suffixes (timestamp.words) to get the stable worktree base.
+    """
+    worktree_name = repo_root.name
+    main_repo_name = main_repo.name
+
+    if worktree_name.startswith(f"{main_repo_name}."):
+        worktree_suffix_part = worktree_name[len(main_repo_name) + 1 :]
+    else:
+        worktree_suffix_part = worktree_name
+
+    parts = worktree_suffix_part.rsplit(".", 2)
+    if len(parts) >= 3:
+        maybe_words = parts[-1]
+        maybe_timestamp = parts[-2]
+        if _is_word_pair(maybe_words) and _is_timestamp(maybe_timestamp):
+            base_part = ".".join(parts[:-2])
+        elif _is_timestamp(parts[-1]):
+            base_part = ".".join(parts[:-1])
+        else:
+            base_part = worktree_suffix_part
+    elif len(parts) >= 2 and _is_timestamp(parts[-1]):
+        base_part = ".".join(parts[:-1])
+    else:
+        base_part = worktree_suffix_part
+
+    return _remove_doubled_prefix(base_part)
+
+
 def _create_fresh_worktree(
     main_repo: Path,
-    wave_name: str,
+    worktree_base: str,
     new_branch: str,
     base_ref: str = "origin/main",
 ) -> Path | None:
-    """Create new worktree at wave_name path with new branch."""
-    worktree_path = main_repo.parent / f"{main_repo.name}.{wave_name}"
+    """Create new worktree at worktree_base path with new branch."""
+    worktree_path = main_repo.parent / f"{main_repo.name}.{worktree_base}"
 
     result = subprocess.run(
         ["git", "worktree", "add", "-b", new_branch, str(worktree_path), base_ref],
@@ -350,6 +381,9 @@ def next_worktree(
     # Parse wave name from branch for new branch generation
     wave_name = parse_branch_base(branch)
 
+    # Extract worktree base from current path (may differ from wave_name)
+    worktree_base = _extract_worktree_base(repo_root, main_repo)
+
     # Preserve current worktree before making changes
     typer.echo("Preserving current worktree...")
     preserved = _preserve_worktree(repo_root, branch, wave_name)
@@ -365,7 +399,7 @@ def next_worktree(
         typer.echo("Creating fresh branch from main...")
         _fetch_main(main_repo)
         new_branch = generate_next_branch(wave_name, main_repo)
-        new_worktree = _create_fresh_worktree(main_repo, wave_name, new_branch)
+        new_worktree = _create_fresh_worktree(main_repo, worktree_base, new_branch)
         if not new_worktree:
             typer.echo("Error: Failed to create fresh worktree", err=True)
             return None
@@ -392,7 +426,7 @@ def next_worktree(
         # Generate new branch and create stacked worktree
         new_branch = generate_next_branch(wave_name, main_repo)
         typer.echo(f"Creating stacked branch {new_branch}...")
-        new_worktree = _create_fresh_worktree(main_repo, wave_name, new_branch, head_sha)
+        new_worktree = _create_fresh_worktree(main_repo, worktree_base, new_branch, head_sha)
         if not new_worktree:
             typer.echo("Error: Failed to create stacked worktree", err=True)
             return None

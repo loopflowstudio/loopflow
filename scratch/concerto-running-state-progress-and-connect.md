@@ -8,62 +8,48 @@ sources: [conductor, improviser, ceo, product-designer]
 
 # Show running progress and provide a clear connect path
 
-Running waves should show progress and offer a lightweight way to inspect or intervene.
+Running waves show progress via horizontal flow pills with elapsed time.
 
-## Problem
+## What was built
 
-Running state shows a spinner and "Running ship flow" with little progress detail. Users cannot tell if a wave is healthy or stuck, and cannot quickly inspect what's happening without stopping the wave.
-
-The conductor persona needs glanceable progress. The improviser needs to jump in mid-flow. Both are blocked by the current minimal UI.
-
-## Approach (Revised)
-
-Replace the spinner-and-text running state with horizontal flow pills:
+Replaced the spinner-and-text running state with flow pills:
 
 ```
-design → [implement · 2m] → compress → gate
+✓ design → [implement · 2m] → compress → gate
 ```
 
-1. **Flow pills**: Horizontal breadcrumb-style sequence showing all steps
-2. **Current step highlighted**: Visual "we are here" indicator with accent color
-3. **Elapsed time**: Shown inline with current step (e.g., "implement · 2m")
-4. **Live output**: Kept below pills for visibility into what's happening
-5. **Connect**: Only appears in waiting state (existing WaitingStateCard behavior)
+- **Flow pills**: Horizontal breadcrumb showing all steps
+- **Current step highlighted**: Accent-filled capsule with elapsed time
+- **Completed steps**: Checkmark + muted accent background
+- **Future steps**: Surface-colored capsule
 
-## Implementation
+## Files changed
 
-### Backend changes (`src/loopflow/lfd/daemon/http_server.py`)
-- Added `_get_flow_step_names()` helper to load flow and extract step names
-- Added `flow_steps` to wave API response
-- Added `run_started_at` for running waves (from latest wave_run)
-- Added `step_index` (already on model, now exposed in API)
+| File | Change |
+|------|--------|
+| `src/loopflow/lfd/daemon/http_server.py` | Added `_get_flow_step_names()`, `flow_steps`, `run_started_at` to API |
+| `swift/LoopflowCore/Models/Wave.swift` | Added `stepIndex`, `flowSteps`, `runStartedAt` fields |
+| `swift/LoopflowCore/Services/WaveService.swift` | Parse new fields from JSON |
+| `swift/Concerto/Views/FlowProgressPills.swift` | New component with accessibility |
+| `swift/Concerto/Views/WaveDetailPanel.swift` | Wire FlowProgressPills into running state |
 
-### Model changes (`swift/LoopflowCore/Models/Wave.swift`)
-- Added `stepIndex: Int` field
-- Added `flowSteps: [String]?` field
-- Added `runStartedAt: Date?` field
+## Key decisions
 
-### WaveService changes (`swift/LoopflowCore/Services/WaveService.swift`)
-- Parse `step_index`, `flow_steps`, `run_started_at` from API response
+**Server-side flow parsing.** Step names come from the API rather than parsing YAML client-side. Avoids Swift YAML dependency.
 
-### New component (`swift/Concerto/Views/FlowProgressPills.swift`)
-- Horizontal HStack of step pills with arrows between them
-- Current step highlighted with accent color + elapsed time
-- Completed steps show checkmark + muted accent
-- Timer updates elapsed time every second
+**Elapsed time inline.** Time appears next to the current step name, keeping UI compact.
 
-### WaveDetailPanel changes (`swift/Concerto/Views/WaveDetailPanel.swift`)
-- Replaced `ProgressView() + "Running flow..."` text with `FlowProgressPills`
+**Accessibility via combined element.** The pill row is a single accessibility element with label like "Step 2 of 4: implement, 2m".
 
-## Key decisions (revised)
+**Connect unchanged.** Connect button stays in waiting state only (WaitingStateCard). Connect during running would require interrupting the agent.
 
-**Horizontal pills over segmented bar.** User preferred pills showing step names rather than abstract segments. "We are here" is clearer when you can see the actual step names.
+## Known limitations
 
-**Elapsed time inline, not separate.** Keeps the UI compact. Elapsed time appears next to the current step name.
+**Flow loading on every API call.** `_get_flow_step_names()` loads YAML each time. Acceptable for small flows, could add caching if list operations become slow.
 
-**Small backend change acceptable.** Added `flow_steps` to API response rather than parsing YAML client-side. Cleaner than Swift YAML parsing.
+**Long flows may overflow.** No horizontal scroll or truncation. Acceptable for typical 3-5 step flows.
 
-**Connect unchanged.** Connect button stays in waiting state via existing WaitingStateCard. No changes needed.
+**No per-step timing.** Only run start time is tracked. Per-step duration would need additional backend work.
 
 ## Done when
 
@@ -71,15 +57,7 @@ design → [implement · 2m] → compress → gate
 # Verification
 1. Running wave shows flow pills: design → [implement · 2m] → compress → gate
 2. Current step highlighted with accent color
-3. Elapsed time updates next to current step (e.g., "implement · 2m")
-4. Completed steps show checkmark icon with muted styling
-5. Live output still appears below the pills
+3. Elapsed time updates next to current step
+4. Completed steps show checkmark icon
+5. Live output still appears below pills
 ```
-
-## Files changed
-
-- `src/loopflow/lfd/daemon/http_server.py` - API response
-- `swift/LoopflowCore/Models/Wave.swift` - Model fields
-- `swift/LoopflowCore/Services/WaveService.swift` - Parse new fields
-- `swift/Concerto/Views/FlowProgressPills.swift` - New component
-- `swift/Concerto/Views/WaveDetailPanel.swift` - Wire up component

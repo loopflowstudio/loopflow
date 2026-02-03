@@ -208,16 +208,10 @@ struct ContentView: View {
 
     private func launchQuickExperiment(step: String) {
         guard let repo = repoState.currentRepo else { return }
-
-        let terminalLauncher = TerminalLauncher()
         let terminal = repoState.config?.terminalApp ?? .warp
-
-        // Launch terminal in main repo with the step command
-        let command = "lf \(step)"
         do {
-            try terminalLauncher.launchTerminal(terminal, at: repo, command: command)
+            try TerminalLauncher().launchStep(step, terminal: terminal, at: repo)
         } catch {
-            // Show error in UI
             repoState.errorMessage = "Failed to launch: \(error.localizedDescription)"
         }
     }

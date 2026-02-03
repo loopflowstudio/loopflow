@@ -4,56 +4,16 @@
 import SwiftUI
 import LoopflowCore
 
-struct QuickExperimentView: View {
-    @Environment(RepoState.self) private var repoState
-    @Environment(\.colorScheme) private var colorScheme
-
-    /// Called when a step button is clicked with the step name
-    var onLaunchStep: ((String) -> Void)?
-
-    private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
-
-    // Common steps for quick experiments
-    private let quickSteps: [(name: String, description: String)] = [
+// Common steps for quick experiments - single source of truth
+enum QuickExperiment {
+    static let steps: [(name: String, description: String)] = [
         ("design", "Interactive design session"),
         ("review", "Analyze the codebase"),
         ("debug", "Fix an error"),
         ("implement", "Build from a design")
     ]
 
-    var body: some View {
-        VStack(spacing: Spacing.lg) {
-            // Header
-            VStack(spacing: Spacing.xs) {
-                Text("Quick Experiment")
-                    .font(.headline)
-                    .fontWeight(.semibold)
-
-                Text("Run a step without creating a wave")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            // Step buttons
-            HStack(spacing: Spacing.sm) {
-                ForEach(quickSteps, id: \.name) { step in
-                    Button {
-                        onLaunchStep?(step.name)
-                    } label: {
-                        Text(step.name)
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, Spacing.md)
-                            .background(palette.surface)
-                            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
-                    }
-                    .buttonStyle(.plain)
-                    .help(step.description)
-                }
-            }
-        }
-    }
+    static let stepNames: [String] = steps.map(\.name)
 }
 
 // MARK: - Sidebar Empty State Variant
@@ -61,8 +21,6 @@ struct QuickExperimentView: View {
 /// Compact version for the sidebar empty state with burgundy styling.
 struct QuickExperimentSidebarView: View {
     var onLaunchStep: ((String) -> Void)?
-
-    private let quickSteps = ["design", "review", "debug", "implement"]
 
     var body: some View {
         VStack(spacing: Spacing.md) {
@@ -79,7 +37,7 @@ struct QuickExperimentSidebarView: View {
 
             // Step buttons in 2x2 grid for sidebar width
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: Spacing.xs) {
-                ForEach(quickSteps, id: \.self) { step in
+                ForEach(QuickExperiment.stepNames, id: \.self) { step in
                     Button {
                         onLaunchStep?(step)
                     } label: {
@@ -153,13 +111,6 @@ struct QuickExperimentDetailView: View {
 
     private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
-    private let quickSteps: [(name: String, description: String)] = [
-        ("design", "Interactive design session"),
-        ("review", "Analyze the codebase"),
-        ("debug", "Fix an error"),
-        ("implement", "Build from a design")
-    ]
-
     var body: some View {
         VStack(spacing: Spacing.xxl) {
             Spacer()
@@ -182,7 +133,7 @@ struct QuickExperimentDetailView: View {
 
                 // Step buttons
                 HStack(spacing: Spacing.md) {
-                    ForEach(quickSteps, id: \.name) { step in
+                    ForEach(QuickExperiment.steps, id: \.name) { step in
                         Button {
                             onLaunchStep?(step.name)
                         } label: {

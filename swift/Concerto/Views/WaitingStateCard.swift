@@ -12,7 +12,7 @@ struct WaitingStateCard: View {
     @State private var collapseError: String?
 
     private let terminalLauncher = TerminalLauncher()
-    private let waveService = LocalWaveService()
+    private let waveService: any WaveServiceProtocol = WaveServiceFactory.create(for: .local)
     private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     var body: some View {

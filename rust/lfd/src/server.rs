@@ -420,6 +420,7 @@ impl ControlService for ControlServer {
                         started_at: Some(Self::now_timestamp()),
                         ended_at: None,
                         error: None,
+                        flow_parents: Vec::new(),
                     };
                     store.create_wave_run(&run)?;
                     Ok(run)

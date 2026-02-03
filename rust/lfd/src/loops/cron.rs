@@ -205,6 +205,7 @@ fn create_wave_run(
         started_at: Some(now_timestamp()),
         ended_at: None,
         error: None,
+        flow_parents: Vec::new(),
     };
     store.create_wave_run(&run)?;
     Ok(run)

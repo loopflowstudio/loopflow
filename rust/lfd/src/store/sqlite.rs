@@ -13,7 +13,7 @@ use crate::proto::control::{
 };
 use crate::store::{ForkRun, ForkRunStatus, RunStore, StoreError, StoreResult};
 
-const SCHEMA_VERSION: u32 = 2;
+const SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug)]
 pub struct SqliteStore {
@@ -46,7 +46,7 @@ impl SqliteStore {
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
-            INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', '2');
+            INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', '3');
 
             CREATE TABLE IF NOT EXISTS waves (
                 id TEXT PRIMARY KEY,
@@ -126,6 +126,7 @@ impl SqliteStore {
                 started_at INTEGER NOT NULL,
                 ended_at INTEGER,
                 error TEXT,
+                flow_parents TEXT NOT NULL DEFAULT '[]',
                 FOREIGN KEY (wave_id) REFERENCES waves(id) ON DELETE CASCADE
             );
 
@@ -145,12 +146,18 @@ impl SqliteStore {
             ",
         )?;
         ensure_column(&conn, "waves", "step_index", "INTEGER NOT NULL DEFAULT 0")?;
+        ensure_column(
+            &conn,
+            "wave_runs",
+            "flow_parents",
+            "TEXT NOT NULL DEFAULT '[]'",
+        )?;
         ensure_column(&conn, "fork_runs", "wave_run_id", "TEXT")?;
 
         // Migrate existing stimulus data from waves to stimuli table
         Self::migrate_stimuli_from_waves(&conn)?;
         conn.execute(
-            "UPDATE meta SET value = '2' WHERE key = 'schema_version'",
+            "UPDATE meta SET value = '3' WHERE key = 'schema_version'",
             [],
         )?;
 
@@ -344,7 +351,7 @@ impl RunStore for SqliteStore {
         let mut query = String::from(
             "
             SELECT id, wave_id, iteration, step_index, status, worktree, branch,
-                   started_at, ended_at, error
+                   started_at, ended_at, error, flow_parents
             FROM wave_runs
             ",
         );
@@ -375,7 +382,7 @@ impl RunStore for SqliteStore {
         let mut stmt = conn.prepare(
             "
             SELECT id, wave_id, iteration, step_index, status, worktree, branch,
-                   started_at, ended_at, error
+                   started_at, ended_at, error, flow_parents
             FROM wave_runs
             WHERE id = ?1
             ",
@@ -391,7 +398,7 @@ impl RunStore for SqliteStore {
         let mut stmt = conn.prepare(
             "
             SELECT id, wave_id, iteration, step_index, status, worktree, branch,
-                   started_at, ended_at, error
+                   started_at, ended_at, error, flow_parents
             FROM wave_runs
             WHERE wave_id = ?1 AND status IN (?2, ?3, ?4)
             ORDER BY started_at DESC
@@ -419,12 +426,13 @@ impl RunStore for SqliteStore {
             .as_ref()
             .map(timestamp_to_unix)
             .unwrap_or_else(now_unix);
+        let flow_parents_json = serde_json::to_string(&run.flow_parents)?;
         conn.execute(
             "
             INSERT INTO wave_runs (
                 id, wave_id, iteration, step_index, status, worktree, branch,
-                started_at, ended_at, error
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                started_at, ended_at, error, flow_parents
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
             ",
             params![
                 run.id,
@@ -437,6 +445,7 @@ impl RunStore for SqliteStore {
                 started_at,
                 run.ended_at.as_ref().map(timestamp_to_unix),
                 run.error,
+                flow_parents_json,
             ],
         )?;
         Ok(())
@@ -444,6 +453,7 @@ impl RunStore for SqliteStore {
 
     fn update_wave_run(&self, run: &WaveRun) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        let flow_parents_json = serde_json::to_string(&run.flow_parents)?;
         let updated = conn.execute(
             "
             UPDATE wave_runs
@@ -454,8 +464,9 @@ impl RunStore for SqliteStore {
                 branch = ?5,
                 started_at = ?6,
                 ended_at = ?7,
-                error = ?8
-            WHERE id = ?9
+                error = ?8,
+                flow_parents = ?9
+            WHERE id = ?10
             ",
             params![
                 run.iteration as i64,
@@ -466,6 +477,7 @@ impl RunStore for SqliteStore {
                 run.started_at.as_ref().map(timestamp_to_unix),
                 run.ended_at.as_ref().map(timestamp_to_unix),
                 run.error,
+                flow_parents_json,
                 run.id,
             ],
         )?;
@@ -1057,6 +1069,8 @@ fn map_wave_row(row: &Row<'_>) -> Result<Wave, rusqlite::Error> {
 fn map_wave_run_row(row: &Row<'_>) -> Result<WaveRun, rusqlite::Error> {
     let started_at = unix_to_timestamp(row.get::<_, i64>(7)?);
     let ended_at: Option<i64> = row.get(8)?;
+    let flow_parents_json: String = row.get(10)?;
+    let flow_parents = parse_json_vec(&flow_parents_json)?;
 
     Ok(WaveRun {
         id: row.get(0)?,
@@ -1069,6 +1083,7 @@ fn map_wave_run_row(row: &Row<'_>) -> Result<WaveRun, rusqlite::Error> {
         started_at: Some(started_at),
         ended_at: ended_at.map(unix_to_timestamp),
         error: row.get(9)?,
+        flow_parents,
     })
 }
 

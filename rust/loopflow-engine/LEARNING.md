@@ -31,7 +31,7 @@ pub mod prompt;
 
 // Re-exports for public API
 pub use error::{CoreError, LoadError};
-pub use flow::{load_flow, next_action, Flow, FlowAction, Step};
+pub use flow::{expand_flow, load_flow, next_action, Flow, FlowAction, Step};
 ```
 
 **Python equivalent:** `lib.rs` is like `__init__.py`, but Rust requires explicit module declarations. The `pub` keyword = "public". Without it, things are private to the module.
@@ -73,12 +73,10 @@ pub enum FlowItem {
     Step(Step),                          // Holds a Step struct
     Fork {                               // Holds named fields
         branches: Vec<FlowItem>,
+        select: ForkSelect,
         synthesize: Option<String>,
     },
-    Choose {
-        prompt: String,
-        options: HashMap<String, Vec<FlowItem>>,
-    },
+    FlowRef(String),                     // Nested flow reference
 }
 ```
 
@@ -87,7 +85,8 @@ pub enum FlowItem {
 Pattern matching with `match` (like Python's `match` but exhaustive):
 
 ```rust
-let action = match next_action(&flow, 0) {
+let plan = expand_flow(&flow, repo_path)?;
+let action = match next_action(&plan, 0) {
     FlowAction::RunStep { step } => step,
     FlowAction::WaitInteractive { step } => step,
     FlowAction::Complete => return,

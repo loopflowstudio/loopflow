@@ -215,6 +215,7 @@ message WaveRun {
   google.protobuf.Timestamp started_at = 8;
   optional google.protobuf.Timestamp ended_at = 9;
   optional string error = 10;
+  repeated string flow_parents = 11;
 }
 
 message ListWavesRequest {
@@ -727,6 +728,7 @@ message WaveWaitingEvent {
   optional string wave_run_id = 4;  // Wave run if in a flow
   uint32 step_index = 5;            // Position in flow
   WaitingReason reason = 6;
+  repeated string flow_parents = 7;
 }
 
 enum WaitingReason {

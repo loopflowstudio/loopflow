@@ -29,17 +29,17 @@ loopflow-engine/
 ## Core API
 
 ```rust
-use loopflow_engine::{load_flow, next_action, FlowAction};
+use loopflow_engine::{expand_flow, load_flow, next_action, FlowAction};
 
 // Load a flow from .lf/flows/
 let flow = load_flow("ship", &repo_path)?;
+let plan = expand_flow(&flow, &repo_path)?;
 
 // Determine what to do next
-match next_action(&flow, 0) {
-    FlowAction::RunStep { step } => println!("Run step: {}", step.name),
-    FlowAction::WaitInteractive { step } => println!("Wait at: {}", step.name),
+match next_action(&plan, 0) {
+    FlowAction::RunStep { step } => println!("Run step: {}", step.step.name),
+    FlowAction::WaitInteractive { step } => println!("Wait at: {}", step.step.name),
     FlowAction::Fork { .. } => println!("Fork branches"),
-    FlowAction::Choose { .. } => println!("Choose branch"),
     FlowAction::Complete => println!("All steps done"),
 }
 ```
@@ -50,9 +50,9 @@ match next_action(&flow, 0) {
 
 ```rust
 pub enum FlowItem {
-    Step(Step),                              // Single step
-    Fork { branches, synthesize },           // Parallel execution
-    Choose { prompt, options },              // User choice
+    Step(Step),                                        // Single step
+    Fork { branches, select, synthesize },             // Fork or choose
+    FlowRef(String),                                   // Nested flow by name
 }
 ```
 
@@ -113,8 +113,9 @@ Falls back to bytes/3 heuristic if tiktoken fails to load.
 ## Status
 
 Working:
-- Flow parsing (step/fork/choose)
-- Flow action selection via `next_action`
+- Flow parsing (step/fork/flow refs)
+- Flow expansion via `expand_flow`
+- Flow action selection via `next_action` on expanded plans
 - Agent invocation (Claude, Codex, Gemini)
 - Context assembly with docs, diff, clipboard
 - tiktoken-rs token counting
@@ -124,4 +125,4 @@ Working:
 Not yet implemented:
 - Summary loading
 - Bundled LOOPFLOW.md embedding
-- LLM-based choose prompt evaluation
+- LLM-based fork prompt selection

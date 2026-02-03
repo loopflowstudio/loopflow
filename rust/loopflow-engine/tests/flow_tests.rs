@@ -1,8 +1,8 @@
 use std::fs;
 use std::path::Path;
 
-use loopflow_engine::flow::{FlowItem, Step};
-use loopflow_engine::load_flow;
+use loopflow_engine::flow::{ConcreteItem, FlowItem, ForkSelect, Step};
+use loopflow_engine::{expand_flow, load_flow};
 use tempfile::TempDir;
 
 fn write_flow(repo: &Path, name: &str, content: &str) {
@@ -64,17 +64,15 @@ fn golden_flows() {
     branches:
       - step: { name: implement }
       - step: { name: polish }
+    select: all
     synthesize: consolidate
-- choose:
+- fork:
+    branches:
+      - step: { name: quick }
+      - step: { name: deep }
+    select: prompt
     prompt: Pick a path
-    options:
-      fast:
-        - step: { name: quick }
-      thorough:
-        - step: { name: deep }
-- loop_until_empty:
-    steps:
-      - step: { name: iterate }
+- flow: nested
 "#,
     );
 
@@ -83,41 +81,87 @@ fn golden_flows() {
     match &flow.items[0] {
         FlowItem::Fork {
             branches,
+            select,
             synthesize,
         } => {
             assert_eq!(branches.len(), 2);
+            assert_eq!(select, &ForkSelect::All);
             assert_eq!(synthesize.as_deref(), Some("consolidate"));
         }
         _ => panic!("expected fork"),
     }
     match &flow.items[1] {
-        FlowItem::Choose { prompt, options } => {
-            assert_eq!(prompt, "Pick a path");
-            assert!(options.contains_key("fast"));
-            assert!(options.contains_key("thorough"));
-        }
-        _ => panic!("expected choose"),
-    }
-    match &flow.items[2] {
-        FlowItem::LoopUntilEmpty {
-            steps,
-            wave,
-            max_iterations,
-        } => {
-            assert_eq!(steps.len(), 1);
-            assert!(wave.is_none());
-            assert_eq!(*max_iterations, 100);
+        FlowItem::Fork { select, .. } => {
             assert_eq!(
-                steps[0],
-                FlowItem::Step(Step {
-                    name: "iterate".to_string(),
-                    model: None,
-                    directions: vec![],
-                    interactive: None,
-                    content: None,
-                })
+                select,
+                &ForkSelect::Prompt {
+                    prompt: "Pick a path".to_string()
+                }
             );
         }
-        _ => panic!("expected loop"),
+        _ => panic!("expected prompt fork"),
+    }
+    match &flow.items[2] {
+        FlowItem::FlowRef(name) => {
+            assert_eq!(name, "nested");
+        }
+        _ => panic!("expected flow ref"),
+    }
+}
+
+#[test]
+fn flow_ref_parses_into_items() {
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path();
+    write_flow(
+        repo,
+        "child",
+        r#"
+- implement
+"#,
+    );
+    write_flow(
+        repo,
+        "parent",
+        r#"
+- flow: child
+- review
+"#,
+    );
+
+    let flow = load_flow("parent", repo).unwrap();
+    assert_eq!(flow.items.len(), 2);
+    assert!(matches!(flow.items[0], FlowItem::FlowRef(_)));
+    assert!(matches!(flow.items[1], FlowItem::Step(_)));
+}
+
+#[test]
+fn expand_flow_tracks_parents() {
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path();
+    write_flow(
+        repo,
+        "child",
+        r#"
+- implement
+"#,
+    );
+    write_flow(
+        repo,
+        "parent",
+        r#"
+- flow: child
+- review
+"#,
+    );
+
+    let flow = load_flow("parent", repo).unwrap();
+    let items = expand_flow(&flow, repo).unwrap();
+    match &items[0] {
+        ConcreteItem::Step(step) => {
+            assert_eq!(step.step.name, "implement");
+            assert_eq!(step.flow_parents, vec!["parent", "child"]);
+        }
+        _ => panic!("expected expanded step"),
     }
 }

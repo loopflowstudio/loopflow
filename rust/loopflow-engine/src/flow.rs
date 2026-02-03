@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -26,31 +25,33 @@ pub enum FlowItem {
     Step(Step),
     Fork {
         branches: Vec<FlowItem>,
+        #[serde(default)]
+        select: ForkSelect,
         #[serde(skip_serializing_if = "Option::is_none")]
         synthesize: Option<String>,
     },
-    Choose {
-        prompt: String,
-        options: HashMap<String, Vec<FlowItem>>,
-    },
+    FlowRef(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ForkSelect {
+    All,
+    One,
+    Prompt { prompt: String },
+}
+
+impl Default for ForkSelect {
+    fn default() -> Self {
+        Self::All
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FlowAction {
-    RunStep {
-        step: Step,
-    },
-    WaitInteractive {
-        step: Step,
-    },
-    Fork {
-        branches: Vec<FlowItem>,
-        synthesize: Option<String>,
-    },
-    Choose {
-        prompt: String,
-        options: HashMap<String, Vec<FlowItem>>,
-    },
+    RunStep { step: ConcreteStep },
+    WaitInteractive { step: ConcreteStep },
+    Fork { fork: ConcreteFork },
     Complete,
 }
 
@@ -60,6 +61,40 @@ pub struct Flow {
     pub items: Vec<FlowItem>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConcreteStep {
+    pub step: Step,
+    pub flow_parents: Vec<String>,
+}
+
+impl ConcreteStep {
+    pub fn display_path(&self) -> String {
+        let mut parts = self.flow_parents.clone();
+        if let Some(last) = parts.last() {
+            let fork_label = format!("fork/{}", self.step.name);
+            if last == &fork_label {
+                return parts.join(" ");
+            }
+        }
+        parts.push(self.step.name.clone());
+        parts.join(" ")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConcreteFork {
+    pub branches: Vec<ConcreteStep>,
+    pub select: ForkSelect,
+    pub synthesize: Option<String>,
+    pub flow_parents: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConcreteItem {
+    Step(ConcreteStep),
+    Fork(ConcreteFork),
+}
+
 #[derive(Debug, Clone)]
 pub struct Direction {
     pub name: String,
@@ -67,27 +102,20 @@ pub struct Direction {
     pub source: PathBuf,
 }
 
-pub fn next_action(flow: &Flow, step_index: usize) -> FlowAction {
-    let item = match flow.items.get(step_index) {
+pub fn next_action(items: &[ConcreteItem], step_index: usize) -> FlowAction {
+    let item = match items.get(step_index) {
         Some(item) => item,
         None => return FlowAction::Complete,
     };
     match item.clone() {
-        FlowItem::Step(step) => {
-            if step.interactive.unwrap_or(false) {
+        ConcreteItem::Step(step) => {
+            if step.step.interactive.unwrap_or(false) {
                 FlowAction::WaitInteractive { step }
             } else {
                 FlowAction::RunStep { step }
             }
         }
-        FlowItem::Fork {
-            branches,
-            synthesize,
-        } => FlowAction::Fork {
-            branches,
-            synthesize,
-        },
-        FlowItem::Choose { prompt, options } => FlowAction::Choose { prompt, options },
+        ConcreteItem::Fork(fork) => FlowAction::Fork { fork },
     }
 }
 
@@ -101,6 +129,10 @@ pub fn load_flow(name: &str, repo: &Path) -> Result<Flow, LoadError> {
         name: name.to_string(),
         items,
     })
+}
+
+pub fn expand_flow(flow: &Flow, repo: &Path) -> Result<Vec<ConcreteItem>, LoadError> {
+    expand_with_chain(flow, repo, vec![flow.name.clone()], 0)
 }
 
 pub fn load_step(name: &str, repo: &Path) -> Result<Step, LoadError> {
@@ -289,14 +321,14 @@ fn parse_flow_mapping(map: &serde_yaml::Mapping) -> Result<FlowItem, LoadError> 
     if let Some(step_value) = map.get(key("step")) {
         return Ok(FlowItem::Step(parse_step_value(step_value)?));
     }
+    if let Some(flow_value) = map.get(key("flow")) {
+        return parse_flow_ref_value(flow_value);
+    }
     if let Some(fork_value) = map.get(key("fork")) {
         return parse_fork_value(fork_value);
     }
-    if let Some(choose_value) = map.get(key("choose")) {
-        return parse_choose_value(choose_value);
-    }
     Err(LoadError::InvalidFlow(
-        "flow item mapping must include step, fork, or choose".to_string(),
+        "flow item mapping must include step, flow, or fork".to_string(),
     ))
 }
 
@@ -357,37 +389,43 @@ fn parse_fork_value(value: &Value) -> Result<FlowItem, LoadError> {
         .get(key("synthesize"))
         .and_then(|val| val.as_str())
         .map(|val| val.to_string());
+    let select = parse_fork_select(map)?;
     Ok(FlowItem::Fork {
         branches,
+        select,
         synthesize,
     })
 }
 
-fn parse_choose_value(value: &Value) -> Result<FlowItem, LoadError> {
-    let map = value
-        .as_mapping()
-        .ok_or_else(|| LoadError::InvalidFlow("choose must be mapping".to_string()))?;
-    let prompt = map
-        .get(key("prompt"))
-        .and_then(|val| val.as_str())
-        .ok_or_else(|| LoadError::InvalidFlow("choose missing prompt".to_string()))?
-        .to_string();
-    let options_value = map
-        .get(key("options"))
-        .ok_or_else(|| LoadError::InvalidFlow("choose missing options".to_string()))?;
-    let options_map = options_value
-        .as_mapping()
-        .ok_or_else(|| LoadError::InvalidFlow("choose options must be mapping".to_string()))?;
-    let mut options = HashMap::new();
-    for (k, v) in options_map {
-        let k = k
-            .as_str()
-            .ok_or_else(|| LoadError::InvalidFlow("choose option key must be string".to_string()))?
-            .to_string();
-        let items = parse_flow_items(v)?;
-        options.insert(k, items);
-    }
-    Ok(FlowItem::Choose { prompt, options })
+fn parse_flow_ref_value(value: &Value) -> Result<FlowItem, LoadError> {
+    let name = value
+        .as_str()
+        .ok_or_else(|| LoadError::InvalidFlow("flow ref must be string".to_string()))?;
+    Ok(FlowItem::FlowRef(name.to_string()))
+}
+
+fn parse_fork_select(map: &serde_yaml::Mapping) -> Result<ForkSelect, LoadError> {
+    let select_value = map.get(key("select"));
+    let select = match select_value.and_then(|val| val.as_str()) {
+        None => ForkSelect::All,
+        Some("all") => ForkSelect::All,
+        Some("one") => ForkSelect::One,
+        Some("prompt") => {
+            let prompt = map
+                .get(key("prompt"))
+                .and_then(|val| val.as_str())
+                .ok_or_else(|| LoadError::InvalidFlow("fork select prompt missing".to_string()))?;
+            ForkSelect::Prompt {
+                prompt: prompt.to_string(),
+            }
+        }
+        Some(other) => {
+            return Err(LoadError::InvalidFlow(format!(
+                "unknown fork select mode: {other}"
+            )))
+        }
+    };
+    Ok(select)
 }
 
 fn parse_string_list(value: Option<&Value>) -> Vec<String> {
@@ -399,6 +437,98 @@ fn parse_string_list(value: Option<&Value>) -> Vec<String> {
             .collect(),
         _ => Vec::new(),
     }
+}
+
+fn expand_with_chain(
+    flow: &Flow,
+    repo: &Path,
+    chain: Vec<String>,
+    depth: usize,
+) -> Result<Vec<ConcreteItem>, LoadError> {
+    const MAX_DEPTH: usize = 5;
+    if depth > MAX_DEPTH {
+        return Err(LoadError::InvalidFlow(format!(
+            "flow nesting exceeds max depth {MAX_DEPTH}"
+        )));
+    }
+
+    let mut items = Vec::new();
+    for item in &flow.items {
+        match item {
+            FlowItem::Step(step) => {
+                items.push(ConcreteItem::Step(ConcreteStep {
+                    step: step.clone(),
+                    flow_parents: chain.clone(),
+                }));
+            }
+            FlowItem::FlowRef(name) => {
+                if chain.contains(name) {
+                    return Err(LoadError::InvalidFlow(format!(
+                        "flow cycle detected: {} -> {name}",
+                        chain.join(" ")
+                    )));
+                }
+                let nested = load_flow(name, repo)?;
+                let mut nested_chain = chain.clone();
+                nested_chain.push(name.clone());
+                items.extend(expand_with_chain(&nested, repo, nested_chain, depth + 1)?);
+            }
+            FlowItem::Fork {
+                branches,
+                select,
+                synthesize,
+            } => {
+                let fork = expand_fork(branches, select, synthesize, repo, &chain, depth)?;
+                items.push(ConcreteItem::Fork(fork));
+            }
+        }
+    }
+
+    Ok(items)
+}
+
+fn expand_fork(
+    branches: &[FlowItem],
+    select: &ForkSelect,
+    synthesize: &Option<String>,
+    repo: &Path,
+    chain: &[String],
+    depth: usize,
+) -> Result<ConcreteFork, LoadError> {
+    let mut expanded_branches = Vec::new();
+    for branch in branches {
+        let (step, label) = match branch {
+            FlowItem::Step(step) => (step.clone(), step.name.clone()),
+            FlowItem::FlowRef(name) => {
+                let nested = load_flow(name, repo)?;
+                let nested_items = expand_with_chain(&nested, repo, chain.to_vec(), depth + 1)?;
+                match nested_items.as_slice() {
+                    [ConcreteItem::Step(step)] => (step.step.clone(), name.clone()),
+                    _ => {
+                        return Err(LoadError::InvalidFlow(format!(
+                            "fork flow ref {name} must expand to a single step"
+                        )))
+                    }
+                }
+            }
+            FlowItem::Fork { .. } => {
+                return Err(LoadError::InvalidFlow(
+                    "fork branches cannot contain nested forks".to_string(),
+                ))
+            }
+        };
+
+        let mut flow_parents = chain.to_vec();
+        flow_parents.push(format!("fork/{label}"));
+        expanded_branches.push(ConcreteStep { step, flow_parents });
+    }
+
+    Ok(ConcreteFork {
+        branches: expanded_branches,
+        select: select.clone(),
+        synthesize: synthesize.clone(),
+        flow_parents: chain.to_vec(),
+    })
 }
 
 /// Home directory for global lookups. Can be overridden for testing.
@@ -556,7 +686,9 @@ Be careful.
             })],
         };
 
-        let action = next_action(&flow, 0);
+        let repo = TempDir::new().unwrap();
+        let items = expand_flow(&flow, repo.path()).unwrap();
+        let action = next_action(&items, 0);
         assert!(matches!(action, FlowAction::WaitInteractive { .. }));
     }
 
@@ -567,7 +699,9 @@ Be careful.
             items: Vec::new(),
         };
 
-        let action = next_action(&flow, 0);
+        let repo = TempDir::new().unwrap();
+        let items = expand_flow(&flow, repo.path()).unwrap();
+        let action = next_action(&items, 0);
         assert!(matches!(action, FlowAction::Complete));
     }
 }

@@ -267,6 +267,7 @@ mod tests {
             started_at: Some(now_timestamp()),
             ended_at: None,
             error: None,
+            flow_parents: Vec::new(),
         };
         store.create_wave_run(&run).unwrap();
         let loaded_run = store

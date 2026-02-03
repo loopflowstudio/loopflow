@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -12,7 +11,10 @@ use uuid::Uuid;
 
 use loopflow_engine::agent::{build_agent_command, LaunchConfig};
 use loopflow_engine::config::load_config_or_default;
-use loopflow_engine::flow::{load_flow, next_action, FlowAction, FlowItem, Step};
+use loopflow_engine::flow::{
+    expand_flow, load_flow, next_action, ConcreteFork, ConcreteItem, ConcreteStep, FlowAction,
+    ForkSelect, Step,
+};
 use loopflow_engine::prompt::{format_prompt, gather_context, GatherContextOpts};
 use loopflow_engine::worktree::{create_worktree, remove_worktree};
 
@@ -156,42 +158,53 @@ impl WaveExecutor {
             .get_wave(&wave_id)?
             .ok_or_else(|| anyhow!("wave not found"))?;
         let flow = load_flow(&wave.flow, Path::new(&wave.repo))?;
+        let plan = expand_flow(&flow, Path::new(&wave.repo))?;
 
         loop {
-            match next_action(&flow, run.step_index as usize) {
+            let current_flow_parents = flow_parents_for_index(&plan, run.step_index);
+            if run.flow_parents != current_flow_parents {
+                run.flow_parents = current_flow_parents;
+                self.store.update_wave_run(&run)?;
+            }
+
+            match next_action(&plan, run.step_index as usize) {
                 FlowAction::RunStep { step } => {
                     let exit_code = self.run_step(&wave, &mut run, &step).await?;
                     if exit_code == 0 {
                         run.step_index += 1;
                         run.status = WaveRunStatus::WaveRunRunning as i32;
+                        run.flow_parents = flow_parents_for_index(&plan, run.step_index);
                         self.store.update_wave_run(&run)?;
                     } else {
                         run.status = WaveRunStatus::WaveRunFailed as i32;
                         run.ended_at = Some(now_timestamp());
-                        run.error = Some(format!("step {} failed", step.name));
+                        run.error = Some(format!("step {} failed", step.step.name));
                         self.store.update_wave_run(&run)?;
                         return Ok(());
                     }
                 }
                 FlowAction::WaitInteractive { step } => {
-                    let model = step.model.clone().unwrap_or_else(|| "unknown".to_string());
+                    let model = step
+                        .step
+                        .model
+                        .clone()
+                        .unwrap_or_else(|| "unknown".to_string());
                     let agent =
                         self.new_agent(&run, &wave.repo, &step, AgentStatus::AgentWaiting, &model);
                     self.store.start_agent(&agent)?;
                     run.status = WaveRunStatus::WaveRunWaiting as i32;
+                    run.flow_parents = step.flow_parents.clone();
                     self.store.update_wave_run(&run)?;
                     return Ok(());
                 }
-                FlowAction::Fork {
-                    branches,
-                    synthesize,
-                } => {
-                    self.run_fork(&wave, &mut run, branches, synthesize.as_deref())
-                        .await?;
-                }
-                FlowAction::Choose { prompt, options } => {
-                    self.run_choose(&wave, &mut run, &prompt, &options).await?;
-                }
+                FlowAction::Fork { fork } => match &fork.select {
+                    ForkSelect::All => {
+                        self.run_fork(&wave, &mut run, &plan, &fork).await?;
+                    }
+                    ForkSelect::One | ForkSelect::Prompt { .. } => {
+                        self.run_choose(&wave, &mut run, &plan, &fork).await?;
+                    }
+                },
                 FlowAction::Complete => {
                     run.status = WaveRunStatus::WaveRunCompleted as i32;
                     run.ended_at = Some(now_timestamp());
@@ -206,12 +219,13 @@ impl WaveExecutor {
         &self,
         wave: &crate::proto::control::Wave,
         run: &mut WaveRun,
-        step: &Step,
+        step: &ConcreteStep,
     ) -> Result<i32> {
         let worktree = worktree_path(run, wave);
         let prompt = self.build_prompt(wave, step, &worktree)?;
         let config = load_config_or_default(Some(&PathBuf::from(&worktree)));
         let model = step
+            .step
             .model
             .clone()
             .unwrap_or_else(|| config.agent_model.clone());
@@ -251,57 +265,40 @@ impl WaveExecutor {
         &self,
         wave: &crate::proto::control::Wave,
         run: &mut WaveRun,
-        _prompt: &str,
-        options: &HashMap<String, Vec<FlowItem>>,
+        plan: &[ConcreteItem],
+        fork: &ConcreteFork,
     ) -> Result<()> {
-        if options.is_empty() {
+        if fork.branches.is_empty() {
             run.status = WaveRunStatus::WaveRunFailed as i32;
-            run.error = Some("choose has no options".to_string());
+            run.error = Some("fork has no branches".to_string());
             self.store.update_wave_run(run)?;
             return Ok(());
         }
 
-        let mut option_keys: Vec<&String> = options.keys().collect();
-        option_keys.sort();
-        let selected = option_keys
+        let selected = fork
+            .branches
             .first()
-            .ok_or_else(|| anyhow!("choose has no options"))?
-            .to_string();
-
-        let steps = options
-            .get(&selected)
-            .ok_or_else(|| anyhow!("invalid choice"))?
+            .ok_or_else(|| anyhow!("fork has no branches"))?
             .clone();
 
-        for item in steps {
-            let step = match item {
-                FlowItem::Step(step) => step,
-                _ => {
-                    run.status = WaveRunStatus::WaveRunFailed as i32;
-                    run.error = Some("nested choose items not supported".to_string());
-                    self.store.update_wave_run(run)?;
-                    return Ok(());
-                }
-            };
+        if selected.step.interactive.unwrap_or(false) {
+            run.status = WaveRunStatus::WaveRunFailed as i32;
+            run.error = Some("interactive fork branches are not supported".to_string());
+            self.store.update_wave_run(run)?;
+            return Ok(());
+        }
 
-            if step.interactive.unwrap_or(false) {
-                run.status = WaveRunStatus::WaveRunFailed as i32;
-                run.error = Some("interactive choose steps not supported".to_string());
-                self.store.update_wave_run(run)?;
-                return Ok(());
-            }
-
-            let exit_code = self.run_step(wave, run, &step).await?;
-            if exit_code != 0 {
-                run.status = WaveRunStatus::WaveRunFailed as i32;
-                run.error = Some(format!("choose step {} failed", step.name));
-                self.store.update_wave_run(run)?;
-                return Ok(());
-            }
+        let exit_code = self.run_step(wave, run, &selected).await?;
+        if exit_code != 0 {
+            run.status = WaveRunStatus::WaveRunFailed as i32;
+            run.error = Some(format!("fork step {} failed", selected.step.name));
+            self.store.update_wave_run(run)?;
+            return Ok(());
         }
 
         run.step_index += 1;
         run.status = WaveRunStatus::WaveRunRunning as i32;
+        run.flow_parents = flow_parents_for_index(plan, run.step_index);
         self.store.update_wave_run(run)?;
         Ok(())
     }
@@ -310,22 +307,12 @@ impl WaveExecutor {
         &self,
         wave: &crate::proto::control::Wave,
         run: &mut WaveRun,
-        branches: Vec<FlowItem>,
-        synthesize: Option<&str>,
+        plan: &[ConcreteItem],
+        fork: &ConcreteFork,
     ) -> Result<()> {
         let mut fork_runs = Vec::new();
-        for (index, branch) in branches.iter().enumerate() {
-            let step = match branch {
-                FlowItem::Step(step) => step.clone(),
-                _ => {
-                    run.status = WaveRunStatus::WaveRunFailed as i32;
-                    run.error = Some("non-step fork branches are not supported".to_string());
-                    self.store.update_wave_run(run)?;
-                    return Ok(());
-                }
-            };
-
-            if step.interactive.unwrap_or(false) {
+        for (index, branch) in fork.branches.iter().enumerate() {
+            if branch.step.interactive.unwrap_or(false) {
                 run.status = WaveRunStatus::WaveRunFailed as i32;
                 run.error = Some("interactive fork branches are not supported".to_string());
                 self.store.update_wave_run(run)?;
@@ -350,7 +337,7 @@ impl WaveExecutor {
                 worktree: fork_worktree,
             };
             self.store.upsert_fork_run(&fork_run)?;
-            fork_runs.push((fork_run, step));
+            fork_runs.push((fork_run, branch.clone()));
         }
 
         let cancel = CancellationToken::new();
@@ -460,13 +447,16 @@ impl WaveExecutor {
             return Ok(());
         }
 
-        if let Some(step_name) = synthesize {
-            let synth_step = Step {
-                name: step_name.to_string(),
-                model: None,
-                directions: Vec::new(),
-                interactive: None,
-                content: None,
+        if let Some(step_name) = fork.synthesize.as_deref() {
+            let synth_step = ConcreteStep {
+                step: Step {
+                    name: step_name.to_string(),
+                    model: None,
+                    directions: Vec::new(),
+                    interactive: None,
+                    content: None,
+                },
+                flow_parents: fork.flow_parents.clone(),
             };
             let exit_code = self.run_step(wave, run, &synth_step).await?;
             if exit_code != 0 {
@@ -481,11 +471,12 @@ impl WaveExecutor {
         self.cleanup_fork(run, &fork_runs).await;
         run.step_index += 1;
         run.status = WaveRunStatus::WaveRunRunning as i32;
+        run.flow_parents = flow_parents_for_index(plan, run.step_index);
         self.store.update_wave_run(run)?;
         Ok(())
     }
 
-    async fn cleanup_fork(&self, run: &WaveRun, fork_runs: &[(ForkRun, Step)]) {
+    async fn cleanup_fork(&self, run: &WaveRun, fork_runs: &[(ForkRun, ConcreteStep)]) {
         for (fork_run, _) in fork_runs {
             let worktree_path = Path::new(&fork_run.worktree);
             if worktree_path.join(".git").exists() {
@@ -501,14 +492,14 @@ impl WaveExecutor {
     fn build_prompt(
         &self,
         wave: &crate::proto::control::Wave,
-        step: &Step,
+        step: &ConcreteStep,
         worktree: &str,
     ) -> Result<String> {
         let config = load_config_or_default(Some(Path::new(worktree)));
-        let directions = merge_directions(&wave.direction, &step.directions);
+        let directions = merge_directions(&wave.direction, &step.step.directions);
         let opts = GatherContextOpts {
             repo_root: PathBuf::from(worktree),
-            step: Some(step.name.clone()),
+            step: Some(step.step.name.clone()),
             inline: None,
             step_args: Vec::new(),
             run_mode: Some("auto".to_string()),
@@ -530,7 +521,7 @@ impl WaveExecutor {
         &self,
         run: &WaveRun,
         repo: &str,
-        step: &Step,
+        step: &ConcreteStep,
         status: AgentStatus,
         model: &str,
     ) -> Agent {
@@ -541,7 +532,7 @@ impl WaveExecutor {
         };
         Agent {
             id: Uuid::new_v4().to_string(),
-            step: step.name.clone(),
+            step: step.step.name.clone(),
             repo: repo.to_string(),
             worktree,
             wave_run_id: Some(run.id.clone()),
@@ -585,18 +576,26 @@ fn merge_directions(base: &[String], extra: &[String]) -> Vec<String> {
     combined
 }
 
+fn flow_parents_for_index(items: &[ConcreteItem], step_index: u32) -> Vec<String> {
+    match items.get(step_index as usize) {
+        Some(ConcreteItem::Step(step)) => step.flow_parents.clone(),
+        Some(ConcreteItem::Fork(fork)) => fork.flow_parents.clone(),
+        None => Vec::new(),
+    }
+}
+
 fn build_prompt_for_step(
     repo: &str,
     worktree: &str,
-    step: &Step,
+    step: &ConcreteStep,
     directions: &[String],
     wave_run_id: &str,
 ) -> Result<(Vec<String>, Agent)> {
     let config = load_config_or_default(Some(Path::new(worktree)));
-    let directions = merge_directions(directions, &step.directions);
+    let directions = merge_directions(directions, &step.step.directions);
     let opts = GatherContextOpts {
         repo_root: PathBuf::from(worktree),
-        step: Some(step.name.clone()),
+        step: Some(step.step.name.clone()),
         inline: None,
         step_args: Vec::new(),
         run_mode: Some("auto".to_string()),
@@ -613,6 +612,7 @@ fn build_prompt_for_step(
     let components = gather_context(&opts)?;
     let prompt = format_prompt(&components);
     let model = step
+        .step
         .model
         .clone()
         .unwrap_or_else(|| config.agent_model.clone());
@@ -628,7 +628,7 @@ fn build_prompt_for_step(
     let cmd = build_agent_command(&model, &prompt, &launch);
     let agent = Agent {
         id: Uuid::new_v4().to_string(),
-        step: step.name.clone(),
+        step: step.step.name.clone(),
         repo: repo.to_string(),
         worktree: worktree.to_string(),
         wave_run_id: Some(wave_run_id.to_string()),

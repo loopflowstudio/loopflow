@@ -21,7 +21,8 @@ pub use agent::{
 pub use config::{load_config, load_config_or_default, parse_model, Config};
 pub use error::{CoreError, GitError, LoadError, StoreError};
 pub use flow::{
-    load_direction, load_flow, load_step, next_action, Direction, Flow, FlowAction, FlowItem, Step,
+    expand_flow, load_direction, load_flow, load_step, next_action, ConcreteFork, ConcreteItem,
+    ConcreteStep, Direction, Flow, FlowAction, FlowItem, ForkSelect, Step,
 };
 pub use prompt::{
     analyze_tokens, count_tokens, format_prompt, gather_context, trim_context, Document,

@@ -124,6 +124,95 @@ def _is_word_pair(s: str) -> bool:
     return parts[0] in MAGICAL and parts[1] in MUSICAL
 
 
+def _get_git_username() -> str:
+    """Get username from git config user.name or $USER env var."""
+    import os
+
+    result = subprocess.run(
+        ["git", "config", "user.name"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        return _sanitize_for_branch(result.stdout.strip())
+
+    return _sanitize_for_branch(os.environ.get("USER", "user"))
+
+
+def _sanitize_for_branch(s: str) -> str:
+    """Replace spaces, special chars with hyphens for valid git branch names."""
+    result = re.sub(r"[\s@#$%^&*()+=\[\]{}|\\:;\"'<>,?!~`]+", "-", s)
+    result = result.strip("-")
+    result = re.sub(r"-+", "-", result)
+    return result.lower()
+
+
+def parse_branch_base(branch: str, repo: Path) -> str:
+    """Extract wave name from branch using the schema to know what to strip.
+
+    Inverse of generate_branch_name. Uses the config schema to identify
+    which parts are {user}, {ts}/{timestamp}, {words} and strips them,
+    leaving only the {name} portion.
+
+    Gets user from git config (same source as branch generation).
+
+    Examples (with schema="{user}.{name}.{ts}", user="jack-heart"):
+        'jack-heart.concerto.20260202_1700' → 'concerto'
+        'jack-heart.concerto' → 'concerto'
+        'concerto.20260202_1700' → 'concerto'
+        'concerto' → 'concerto'
+    """
+    config = load_config(repo)
+
+    if config and config.branch_names:
+        schema = config.branch_names.schema_
+    else:
+        schema = "{user}.{name}.{timestamp}.{words}"
+
+    # Get user from git config (same source as branch generation)
+    user = _get_git_username()
+
+    # Build a regex from the schema to extract {name}
+    pattern = re.escape(schema)
+
+    # {user} matches the git username
+    pattern = pattern.replace(r"\{user\}", re.escape(user))
+
+    # {name} is what we want to capture
+    pattern = pattern.replace(r"\{name\}", r"(?P<name>.+?)")
+
+    # {ts} and {timestamp} match YYYYMMDD_HHMM
+    pattern = pattern.replace(r"\{ts\}", r"\d{8}_\d{4}")
+    pattern = pattern.replace(r"\{timestamp\}", r"\d{8}_\d{4}")
+
+    # {date} matches YYYYMMDD
+    pattern = pattern.replace(r"\{date\}", r"\d{8}")
+
+    # {words} matches magical-musical word pairs
+    word_pattern = r"(?:" + "|".join(MAGICAL) + r")-(?:" + "|".join(MUSICAL) + r")"
+    pattern = pattern.replace(r"\{words\}", word_pattern)
+
+    # Try matching with full pattern first
+    match = re.fullmatch(pattern, branch)
+    if match and "name" in match.groupdict():
+        return match.group("name")
+
+    # Fallback: strip known suffixes manually
+    parts = branch.split(".")
+
+    # Strip trailing word pair and timestamp
+    if len(parts) >= 2 and _is_word_pair(parts[-1]) and _is_timestamp(parts[-2]):
+        parts = parts[:-2]
+    elif len(parts) >= 1 and _is_timestamp(parts[-1]):
+        parts = parts[:-1]
+
+    # Strip leading user prefix
+    if parts and parts[0] == user:
+        parts = parts[1:]
+
+    return ".".join(parts) if parts else branch
+
+
 def generate_branch_name(wave_name: str, repo: Path) -> str:
     """Generate unique branch name for a wave using config schema.
 

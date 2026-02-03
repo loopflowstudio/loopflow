@@ -12,6 +12,7 @@ from loopflow.lf.naming import (
     _is_word_pair,
     generate_branch_name,
     generate_word_pair,
+    parse_branch_base,
 )
 
 
@@ -144,3 +145,90 @@ def test_generate_branch_name_default_schema_when_no_config(tmp_path):
         with pytest.raises(ValueError, match="Config missing 'user' field"):
             # Default schema includes {user}, so should fail without user
             generate_branch_name("test", tmp_path)
+
+
+# parse_branch_base tests
+
+
+def test_parse_branch_base_full_schema(tmp_path):
+    """Extracts wave name from full branch with user, timestamp, words."""
+    config_mock = MagicMock()
+    config_mock.branch_names = MagicMock()
+    config_mock.branch_names.schema_ = "{user}.{name}.{timestamp}.{words}"
+
+    with patch("loopflow.lf.naming.load_config", return_value=config_mock):
+        with patch("loopflow.lf.naming._get_git_username", return_value="jack-heart"):
+            result = parse_branch_base("jack-heart.concerto.20260202_1700.aurora-melody", tmp_path)
+    assert result == "concerto"
+
+
+def test_parse_branch_base_no_words(tmp_path):
+    """Extracts wave name when words suffix is missing."""
+    config_mock = MagicMock()
+    config_mock.branch_names = MagicMock()
+    config_mock.branch_names.schema_ = "{user}.{name}.{timestamp}.{words}"
+
+    with patch("loopflow.lf.naming.load_config", return_value=config_mock):
+        with patch("loopflow.lf.naming._get_git_username", return_value="jack-heart"):
+            result = parse_branch_base("jack-heart.concerto.20260202_1700", tmp_path)
+    assert result == "concerto"
+
+
+def test_parse_branch_base_user_and_name_only(tmp_path):
+    """Extracts wave name when only user and name present."""
+    config_mock = MagicMock()
+    config_mock.branch_names = MagicMock()
+    config_mock.branch_names.schema_ = "{user}.{name}.{timestamp}.{words}"
+
+    with patch("loopflow.lf.naming.load_config", return_value=config_mock):
+        with patch("loopflow.lf.naming._get_git_username", return_value="jack-heart"):
+            result = parse_branch_base("jack-heart.concerto", tmp_path)
+    assert result == "concerto"
+
+
+def test_parse_branch_base_name_only(tmp_path):
+    """Returns name as-is when it's just the wave name."""
+    config_mock = MagicMock()
+    config_mock.branch_names = MagicMock()
+    config_mock.branch_names.schema_ = "{user}.{name}.{timestamp}.{words}"
+
+    with patch("loopflow.lf.naming.load_config", return_value=config_mock):
+        with patch("loopflow.lf.naming._get_git_username", return_value="jack-heart"):
+            result = parse_branch_base("concerto", tmp_path)
+    assert result == "concerto"
+
+
+def test_parse_branch_base_no_user_in_schema(tmp_path):
+    """Works with schema that has no user prefix."""
+    config_mock = MagicMock()
+    config_mock.branch_names = MagicMock()
+    config_mock.branch_names.schema_ = "{name}.{timestamp}.{words}"
+
+    with patch("loopflow.lf.naming.load_config", return_value=config_mock):
+        with patch("loopflow.lf.naming._get_git_username", return_value="anyone"):
+            result = parse_branch_base("concerto.20260202_1700.aurora-melody", tmp_path)
+    assert result == "concerto"
+
+
+def test_parse_branch_base_dotted_name(tmp_path):
+    """Handles wave names with dots."""
+    config_mock = MagicMock()
+    config_mock.branch_names = MagicMock()
+    config_mock.branch_names.schema_ = "{user}.{name}.{timestamp}.{words}"
+
+    with patch("loopflow.lf.naming.load_config", return_value=config_mock):
+        with patch("loopflow.lf.naming._get_git_username", return_value="jack-heart"):
+            result = parse_branch_base("jack-heart.my.feature.20260202_1700.aurora-melody", tmp_path)
+    assert result == "my.feature"
+
+
+def test_parse_branch_base_ts_schema(tmp_path):
+    """Works with {ts} alias for timestamp."""
+    config_mock = MagicMock()
+    config_mock.branch_names = MagicMock()
+    config_mock.branch_names.schema_ = "{user}.{name}.{ts}"
+
+    with patch("loopflow.lf.naming.load_config", return_value=config_mock):
+        with patch("loopflow.lf.naming._get_git_username", return_value="jack-heart"):
+            result = parse_branch_base("jack-heart.concerto.20260202_1700", tmp_path)
+    assert result == "concerto"

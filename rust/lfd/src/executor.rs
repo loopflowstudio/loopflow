@@ -6,7 +6,7 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -22,14 +22,6 @@ use crate::proto::control::{Agent, AgentStatus, WaveRun, WaveRunStatus};
 use crate::scheduler::Scheduler;
 use crate::store::{ForkRun, ForkRunStatus, SharedStore};
 
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct StepResult {
-    pub exit_code: i32,
-    pub stdout: String,
-    pub stderr: String,
-}
-
 #[async_trait]
 pub trait StepRunner: Send + Sync {
     async fn run(
@@ -39,7 +31,7 @@ pub trait StepRunner: Send + Sync {
         agent_id: &str,
         wave_run_id: &str,
         output: &OutputHub,
-    ) -> Result<StepResult>;
+    ) -> Result<i32>;
 }
 
 #[derive(Debug, Default)]
@@ -54,7 +46,7 @@ impl StepRunner for AgentRunner {
         agent_id: &str,
         wave_run_id: &str,
         output: &OutputHub,
-    ) -> Result<StepResult> {
+    ) -> Result<i32> {
         if cmd.is_empty() {
             return Err(anyhow!("empty agent command"));
         }
@@ -75,19 +67,14 @@ impl StepRunner for AgentRunner {
             .take()
             .ok_or_else(|| anyhow!("missing stderr"))?;
 
-        let stdout_buf = Arc::new(Mutex::new(String::new()));
-        let stderr_buf = Arc::new(Mutex::new(String::new()));
-
         let stdout_task = tokio::spawn(read_stream(
             stdout,
-            stdout_buf.clone(),
             output.clone(),
             wave_run_id.to_string(),
             agent_id.to_string(),
         ));
         let stderr_task = tokio::spawn(read_stream(
             stderr,
-            stderr_buf.clone(),
             output.clone(),
             wave_run_id.to_string(),
             agent_id.to_string(),
@@ -98,31 +85,18 @@ impl StepRunner for AgentRunner {
         let _ = stderr_task.await;
 
         let exit_code = status.code().unwrap_or(1);
-        let stdout = stdout_buf.lock().await.clone();
-        let stderr = stderr_buf.lock().await.clone();
-
-        Ok(StepResult {
-            exit_code,
-            stdout,
-            stderr,
-        })
+        Ok(exit_code)
     }
 }
 
 async fn read_stream<R: tokio::io::AsyncRead + Unpin>(
     reader: R,
-    buffer: Arc<Mutex<String>>,
     output: OutputHub,
     wave_run_id: String,
     agent_id: String,
 ) {
     let mut lines = BufReader::new(reader).lines();
     while let Ok(Some(line)) = lines.next_line().await {
-        {
-            let mut buf = buffer.lock().await;
-            buf.push_str(&line);
-            buf.push('\n');
-        }
         output.send(OutputEvent {
             wave_run_id: wave_run_id.clone(),
             agent_id: agent_id.clone(),
@@ -255,13 +229,13 @@ impl WaveExecutor {
         let agent_id = agent.id.clone();
         self.store.start_agent(&agent)?;
 
-        let result = self
+        let exit_code = self
             .runner
             .run(cmd, Path::new(&worktree), &agent_id, &run.id, &self.output)
             .await?;
 
         let ended_at = time::OffsetDateTime::now_utc().unix_timestamp();
-        let status = if result.exit_code == 0 {
+        let status = if exit_code == 0 {
             AgentStatus::AgentCompleted
         } else {
             AgentStatus::AgentFailed
@@ -269,7 +243,7 @@ impl WaveExecutor {
         self.store
             .end_agent(&LfdId::parse(&agent_id)?, status as i32, ended_at)?;
 
-        Ok(result.exit_code)
+        Ok(exit_code)
     }
 
     async fn run_choose(
@@ -438,16 +412,14 @@ impl WaveExecutor {
                     .await;
 
                 let status = match result {
-                    Ok(ref result) if result.exit_code == 0 => ForkRunStatus::Completed,
+                    Ok(code) if code == 0 => ForkRunStatus::Completed,
                     _ => ForkRunStatus::Failed,
                 };
                 let _ = store.upsert_fork_run(&ForkRun {
                     status,
                     ..fork_run.clone()
                 });
-                let _ = tx
-                    .send((fork_run_id.to_string(), result.map(|r| r.exit_code)))
-                    .await;
+                let _ = tx.send((fork_run_id.to_string(), result)).await;
                 scheduler.release(fork_run_id.as_str());
             });
 

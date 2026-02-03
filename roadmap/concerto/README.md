@@ -56,17 +56,17 @@ uv run lf ux-review --direction listener --area docs/screenshots/
 
 Run the pipeline and review the output in `roadmap/concerto/` before promoting items.
 
-## Phase 1 ordered set
+## Phase 1 summary
 
-Use the ordered backlog below as the canonical Phase 1 list:
+Shipped polish for local macOS workflows:
+- Attention summary and grouping in the sidebar
+- History and recency for recent activity
+- Waiting state actions (connect + PR badges)
+- Running state progress and elapsed time
+- Empty state that teaches and invites action
+- Quick experiment flow without waves
 
-1. `20260131-02-history-and-recency.md`
-2. `20260131-03-waiting-state-actionable.md`
-3. `20260131-04-running-state-progress-and-connect.md`
-4. `20260131-05-empty-state-creates-and-teaches.md`
-5. `20260131-06-quick-experiment-path.md`
-
-Attention summary and grouping (formerly item 01) is complete—shipped in the current branch.
+Phase 2 is now the active focus.
 
 ## If screenshots are blocked
 

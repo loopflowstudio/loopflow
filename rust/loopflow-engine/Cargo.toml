@@ -30,6 +30,8 @@ serde_yaml = "0.9"
 thiserror = "1.0"
 tiktoken-rs = "0.6"
 uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+rand = "0.8"
 
 [dev-dependencies]
 tempfile = "3.9"

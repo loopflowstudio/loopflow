@@ -5,10 +5,12 @@ pub mod error;
 pub mod event;
 pub mod flow;
 pub mod git;
+pub mod naming;
 pub mod prompt;
 pub mod runtime;
 pub mod store;
 pub mod worktree;
+pub mod worktrees;
 
 #[cfg(feature = "python")]
 mod python;

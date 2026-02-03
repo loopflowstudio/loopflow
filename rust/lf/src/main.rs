@@ -134,6 +134,66 @@ pub enum OpsCommand {
         #[arg(long)]
         force: bool,
     },
+    /// Worktree operations
+    Wt {
+        #[command(subcommand)]
+        cmd: WtCommand,
+    },
+    /// Shell integration
+    Shell {
+        #[command(subcommand)]
+        cmd: ShellCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum WtCommand {
+    Create {
+        name: String,
+        #[arg(short = 'b', long = "base")]
+        base: Option<String>,
+        #[arg(short = 's', long = "stack")]
+        stack: bool,
+    },
+    Switch {
+        name: String,
+    },
+    List {
+        #[arg(long)]
+        format: Option<String>,
+        #[arg(long)]
+        full: bool,
+        #[arg(long)]
+        sync: bool,
+    },
+    Prune {
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        debug: bool,
+    },
+    Ci {
+        #[arg(short = 'w', long = "watch")]
+        watch: bool,
+        #[arg(short = 'l', long = "logs")]
+        logs: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ShellCommand {
+    Init {
+        shell: Option<String>,
+    },
+    Install {
+        shell: Option<String>,
+    },
+    Directive {
+        #[arg(trailing_var_arg = true)]
+        command: Vec<String>,
+    },
 }
 
 /// Flags that take a value (next arg is the value).

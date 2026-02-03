@@ -6,8 +6,8 @@ Pickable work items for Concerto, the loopflow macOS app.
 
 | Phase | Focus | Status |
 |-------|-------|--------|
-| 1 | Polish (macOS local) | In progress |
-| 2 | Remote access foundation | Planning |
+| 1 | Polish (macOS local) | Complete |
+| 2 | Remote access foundation | In progress |
 | 3 | Mobile (iOS/iPad) | Future |
 
 ## Screenshot pipeline

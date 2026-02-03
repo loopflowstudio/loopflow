@@ -296,7 +296,8 @@ Detailed gap analysis between Python and Rust `lf ops` implementations, with a p
 | **`lf ops cp`** | Copy context to clipboard for web clients | Low |
 | **`lf ops doctor`** | Check dependencies (wt, gh, claude, codex, etc.) | Medium |
 | **`lf ops version`** | Show loopflow version | Low |
-| **`lf ops summarize`** | LLM-generated codebase summaries with caching | Low |
+
+Note: `summarize` moves from `lf ops` to `lfd`. See `02b-summarize.md`.
 
 ---
 

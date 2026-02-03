@@ -69,9 +69,16 @@ class SkillRegistryConfig(BaseModel):
 
 
 class BranchNameConfig(BaseModel):
-    """Configuration for branch name generation."""
+    """Configuration for branch name generation.
 
-    schema_: str = Field(default="{name}", alias="schema")
+    Schema placeholders:
+        {user} - user identifier from config
+        {name} - wave name
+        {timestamp} - YYYYMMDD_HHMM format
+        {words} - magical-musical word pair (e.g., aurora-melody)
+    """
+
+    schema_: str = Field(default="{user}.{name}.{timestamp}.{words}", alias="schema")
 
 
 class BudgetConfig(BaseModel):
@@ -125,6 +132,8 @@ def parse_model(model: str) -> tuple[str, str | None]:
 
 
 class Config(BaseModel):
+    # User identifier for branch naming (e.g., "jack-heart")
+    user: Optional[str] = None
     # Format: backend:variant (e.g., claude:opus, claude:sonnet, codex)
     agent_model: str = "claude:opus"
     yolo: bool = False  # Skip permissions; Codex uses danger-full-access sandbox

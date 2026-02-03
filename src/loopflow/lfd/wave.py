@@ -16,7 +16,7 @@ from croniter import croniter
 
 from loopflow.lf.context import find_worktree_root
 from loopflow.lf.messages import generate_pr_message
-from loopflow.lf.naming import generate_next_branch, generate_word_pair
+from loopflow.lf.naming import generate_branch_name, generate_word_pair
 from loopflow.lf.worktrees import WorktreeError, get_path
 from loopflow.lfd.db import _get_db
 from loopflow.lfd.logging import stimulus_log
@@ -419,7 +419,7 @@ def setup_wave_worktree(wave_id: str) -> bool:
     wave_name = wave.name
 
     # Branch name includes timestamp and words (evolves with each iteration)
-    branch = generate_next_branch(wave_name, repo)
+    branch = generate_branch_name(wave_name, repo)
     worktree_path = get_path(repo, wave_name)
 
     try:

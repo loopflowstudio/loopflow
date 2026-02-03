@@ -66,7 +66,12 @@ Shipped polish for local macOS workflows:
 - Empty state that teaches and invites action
 - Quick experiment flow without waves
 
-Phase 2 is now the active focus.
+## Phase 2 focus
+
+Remote access foundation:
+- WaveService protocol abstraction (transport-agnostic service layer)
+- lfd registration + auth groundwork (see Phase 2 items)
+- gRPC terminal streaming groundwork
 
 ## If screenshots are blocked
 

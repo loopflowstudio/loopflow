@@ -359,5 +359,4 @@ public struct Wave: Sendable, Identifiable, Hashable {
         let time = formatter.localizedString(for: step.endedAt ?? step.startedAt, relativeTo: Date())
         return "\(step.step) \(time)"
     }
-
 }

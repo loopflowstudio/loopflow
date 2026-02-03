@@ -139,18 +139,9 @@ private struct ScreenshotLayout: View {
         } else if let wave = repoState.selectedWave {
             WaveDetailPanel(wave: wave)
         } else {
-            VStack(spacing: 16) {
-                Image(systemName: "cpu")
-                    .font(.system(size: 48))
-                    .foregroundStyle(.tertiary)
-                Text("Select a wave")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-                Text("Or create one to get started")
-                    .font(.subheadline)
-                    .foregroundStyle(.tertiary)
+            QuickExperimentDetailView { _ in
+                // No-op for screenshots - just display the view
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }

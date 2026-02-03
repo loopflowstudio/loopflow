@@ -321,7 +321,6 @@ struct WaveModelTests {
         #expect(description != nil)
         #expect(description!.hasPrefix("implement"))
     }
-
 }
 
 @Suite("WaitingReason")

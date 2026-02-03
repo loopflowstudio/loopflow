@@ -183,11 +183,10 @@ public struct Wave: Sendable, Identifiable, Hashable {
     // Waiting state
     public var waitingReason: WaitingReason?
 
-    // Running state progress
-    public var currentStep: String?  // Name of currently executing step
-    public var stepIndex: Int  // Position in flow (0-based)
-    public var totalSteps: Int  // Total steps in flow
-    public var runStartedAt: Date?  // When the current run started
+    // Flow progress (for running state UI)
+    public var stepIndex: Int
+    public var flowSteps: [String]?
+    public var runStartedAt: Date?
 
     public init(
         id: String,
@@ -221,9 +220,8 @@ public struct Wave: Sendable, Identifiable, Hashable {
         createdAt: Date = Date(),
         lastMainSha: String? = nil,
         waitingReason: WaitingReason? = nil,
-        currentStep: String? = nil,
         stepIndex: Int = 0,
-        totalSteps: Int = 0,
+        flowSteps: [String]? = nil,
         runStartedAt: Date? = nil
     ) {
         self.id = id
@@ -257,9 +255,8 @@ public struct Wave: Sendable, Identifiable, Hashable {
         self.createdAt = createdAt
         self.lastMainSha = lastMainSha
         self.waitingReason = waitingReason
-        self.currentStep = currentStep
         self.stepIndex = stepIndex
-        self.totalSteps = totalSteps
+        self.flowSteps = flowSteps
         self.runStartedAt = runStartedAt
     }
 
@@ -367,9 +364,10 @@ public struct Wave: Sendable, Identifiable, Hashable {
 
     /// Progress text for running waves (e.g., "implement (2/4)").
     public var progressText: String {
-        let stepName = currentStep ?? flow
-        if totalSteps > 0 {
-            return "\(stepName) (\(stepIndex + 1)/\(totalSteps))"
+        guard let steps = flowSteps, !steps.isEmpty else { return flow }
+        let stepName = steps.indices.contains(stepIndex) ? steps[stepIndex] : flow
+        if steps.count > 1 {
+            return "\(stepName) (\(stepIndex + 1)/\(steps.count))"
         }
         return stepName
     }

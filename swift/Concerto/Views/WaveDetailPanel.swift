@@ -364,10 +364,11 @@ struct WaveDetailPanel: View {
                 HStack(spacing: 8) {
                     switch wave.status {
                     case .running:
-                        ProgressView()
-                            .scaleEffect(0.8)
-                        Text(wave.progressDisplay(now: currentTime))
-                            .foregroundStyle(.secondary)
+                        FlowProgressPills(
+                            steps: wave.flowSteps ?? [wave.flow],
+                            currentIndex: wave.stepIndex,
+                            startedAt: wave.runStartedAt
+                        )
 
                     case .completed:
                         Image(systemName: "checkmark.circle.fill")

@@ -1,5 +1,5 @@
 ---
-status: todo
+status: in-progress
 phase: 1
 persona: concerto
 order: 4
@@ -16,55 +16,70 @@ Running state shows a spinner and "Running ship flow" with little progress detai
 
 The conductor persona needs glanceable progress. The improviser needs to jump in mid-flow. Both are blocked by the current minimal UI.
 
-## Approach
+## Approach (Revised)
 
-Replace the current spinner-and-text running state with a `RunningStateCard` that surfaces:
+Replace the spinner-and-text running state with horizontal flow pills:
 
-1. **Step progress**: "Step 2 of 4 · implement" with a segmented progress bar
-2. **Elapsed time**: "Running for 3m 42s" updated live
-3. **Connect action**: Distinct button to attach to a running wave's terminal without stopping it
+```
+design → [implement · 2m] → compress → gate
+```
 
-The Connect button opens the wave's worktree in an interactive terminal session, allowing the user to observe or intervene while the wave continues.
+1. **Flow pills**: Horizontal breadcrumb-style sequence showing all steps
+2. **Current step highlighted**: Visual "we are here" indicator with accent color
+3. **Elapsed time**: Shown inline with current step (e.g., "implement · 2m")
+4. **Live output**: Kept below pills for visibility into what's happening
+5. **Connect**: Only appears in waiting state (existing WaitingStateCard behavior)
 
-## Alternatives considered
+## Implementation
 
-| Approach | Tradeoff | Why not |
-|----------|----------|---------|
-| Show step progress in sidebar row | Less intrusive | Not enough space—row is already dense with status icon, name, iteration, last activity |
-| Auto-expand live output for running waves | More immediate visibility | Users already complained about too much output; adds noise for conductors who just want glanceable status |
-| Replace Connect with "Observe" read-only mode | Safer, no accidental intervention | lfd already has Connect endpoint that resumes agent state; observe-only would require new protocol work |
+### Backend changes (`src/loopflow/lfd/daemon/http_server.py`)
+- Added `_get_flow_step_names()` helper to load flow and extract step names
+- Added `flow_steps` to wave API response
+- Added `run_started_at` for running waves (from latest wave_run)
+- Added `step_index` (already on model, now exposed in API)
 
-## Key decisions
+### Model changes (`swift/LoopflowCore/Models/Wave.swift`)
+- Added `stepIndex: Int` field
+- Added `flowSteps: [String]?` field
+- Added `runStartedAt: Date?` field
 
-**Segmented progress bar over linear fill.** Flows have discrete steps. A segmented bar (like macOS installer) shows which step is current, not just "how far." This matches the conductor's mental model of "what's running now?"
+### WaveService changes (`swift/LoopflowCore/Services/WaveService.swift`)
+- Parse `step_index`, `flow_steps`, `run_started_at` from API response
 
-**Elapsed time, not ETA.** ETAs are unreliable for AI work. Elapsed time gives the same "is this stuck?" signal without promising completion times.
+### New component (`swift/Concerto/Views/FlowProgressPills.swift`)
+- Horizontal HStack of step pills with arrows between them
+- Current step highlighted with accent color + elapsed time
+- Completed steps show checkmark + muted accent
+- Timer updates elapsed time every second
 
-**Connect opens inline Ghostty terminal.** The embedded terminal already exists (`GhosttyTerminalView`). Connect just switches the detail panel to show it with the running session attached. No external window management.
+### WaveDetailPanel changes (`swift/Concerto/Views/WaveDetailPanel.swift`)
+- Replaced `ProgressView() + "Running flow..."` text with `FlowProgressPills`
 
-**Minimal backend changes.** The `session.started` event already includes `step_index`. Flow step count can be derived client-side by loading the flow definition. The `/v1/waves/{wave_id}/connect` endpoint exists.
+## Key decisions (revised)
 
-## Scope
+**Horizontal pills over segmented bar.** User preferred pills showing step names rather than abstract segments. "We are here" is clearer when you can see the actual step names.
 
-**In scope:**
-- `RunningStateCard` SwiftUI component with step progress, elapsed time, Connect button
-- Wire `step_index` from session events through to Wave model
-- Load flow step count from `.lf/flows/` when wave starts running
-- Connect button calls existing lfd endpoint and switches to terminal view
+**Elapsed time inline, not separate.** Keeps the UI compact. Elapsed time appears next to the current step name.
 
-**Out of scope:**
-- Backend changes to add step count to events (derive client-side)
-- Read-only observation mode (full intervention via Connect is fine)
-- Sidebar row changes (keep detail panel focused)
-- Mobile/remote connect (Phase 2+)
+**Small backend change acceptable.** Added `flow_steps` to API response rather than parsing YAML client-side. Cleaner than Swift YAML parsing.
+
+**Connect unchanged.** Connect button stays in waiting state via existing WaitingStateCard. No changes needed.
 
 ## Done when
 
 ```bash
 # Verification
-1. Running wave shows "Step 2 of 4 · implement" with segmented progress
-2. Elapsed time updates every second while running
-3. Connect button appears for running waves with waiting agents
-4. Clicking Connect opens Ghostty terminal with the running session
-5. Wave continues running after Connect (no stop required)
+1. Running wave shows flow pills: design → [implement · 2m] → compress → gate
+2. Current step highlighted with accent color
+3. Elapsed time updates next to current step (e.g., "implement · 2m")
+4. Completed steps show checkmark icon with muted styling
+5. Live output still appears below the pills
 ```
+
+## Files changed
+
+- `src/loopflow/lfd/daemon/http_server.py` - API response
+- `swift/LoopflowCore/Models/Wave.swift` - Model fields
+- `swift/LoopflowCore/Services/WaveService.swift` - Parse new fields
+- `swift/Concerto/Views/FlowProgressPills.swift` - New component
+- `swift/Concerto/Views/WaveDetailPanel.swift` - Wire up component

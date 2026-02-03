@@ -325,10 +325,12 @@ public struct WaveService: @unchecked Sendable {
             waitingReason = .prLimitReached(open: openPRs, limit: prLimit)
         }
 
-        // Parse running state progress
+        // Parse flow progress fields
+        let stepIndex = json["step_index"] as? Int ?? 0
+        let flowSteps = json["flow_steps"] as? [String]
         var runStartedAt: Date?
-        if let runStartedAtStr = json["run_started_at"] as? String {
-            runStartedAt = dateFormatter.date(from: runStartedAtStr)
+        if let dateStr = json["run_started_at"] as? String {
+            runStartedAt = dateFormatter.date(from: dateStr)
         }
 
         return Wave(
@@ -362,9 +364,8 @@ public struct WaveService: @unchecked Sendable {
             pid: json["pid"] as? Int,
             createdAt: createdAt,
             waitingReason: waitingReason,
-            currentStep: json["current_step"] as? String,
-            stepIndex: json["step_index"] as? Int ?? 0,
-            totalSteps: json["total_steps"] as? Int ?? 0,
+            stepIndex: stepIndex,
+            flowSteps: flowSteps,
             runStartedAt: runStartedAt
         )
     }

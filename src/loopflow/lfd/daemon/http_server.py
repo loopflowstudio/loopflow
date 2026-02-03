@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from loopflow import __version__
-from loopflow.lf.flows import load_flow
+from loopflow.lf.flows import Step, load_flow
 from loopflow.lfd.agent import (
     get_waiting_agent,
     load_agents,
@@ -301,6 +301,15 @@ class CreateWaveRequest(BaseModel):
     area: list[str] | None = None
 
 
+def _get_flow_step_names(flow_name: str, repo: Path) -> list[str]:
+    """Load flow and return list of step names for UI display."""
+    try:
+        flow = load_flow(flow_name, repo)
+        return [item.name for item in flow.steps if isinstance(item, Step)]
+    except Exception:
+        return [flow_name]
+
+
 def _wave_to_dict(wave, worktree_state: dict | None = None) -> dict:
     """Convert wave to API response dict, enriched with worktree state."""
     # Get primary stimulus (first one) for backwards compat
@@ -327,8 +336,8 @@ def _wave_to_dict(wave, worktree_state: dict | None = None) -> dict:
         "merge_mode": wave.merge_mode.value,
         "pid": wave.pid,
         "created_at": wave.created_at.isoformat(),
-        # Running state progress
         "step_index": wave.step_index,
+        "flow_steps": _get_flow_step_names(wave.flow, Path(wave.repo)),
     }
 
     # Add waiting reason for blocked waves
@@ -337,19 +346,11 @@ def _wave_to_dict(wave, worktree_state: dict | None = None) -> dict:
         result["waiting_reason"] = "pr_limit_reached"
         result["open_prs"] = outstanding
 
-    # Add running state progress from current wave run
+    # Add run start time for running waves
     if wave.status == WaveStatus.RUNNING:
-        current_run = get_latest_wave_run_for_wave(wave.id)
-        if current_run:
-            result["current_step"] = current_run.current_step
-            result["run_started_at"] = (
-                current_run.started_at.isoformat() if current_run.started_at else None
-            )
-
-        # Get total steps from flow definition
-        flow = load_flow(wave.flow, wave.repo)
-        if flow:
-            result["total_steps"] = len(flow.steps)
+        wave_run = get_latest_wave_run_for_wave(wave.id)
+        if wave_run and wave_run.started_at:
+            result["run_started_at"] = wave_run.started_at.isoformat()
 
     # Enrich with worktree state if available
     if worktree_state:

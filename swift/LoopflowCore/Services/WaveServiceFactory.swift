@@ -7,15 +7,9 @@ public enum WaveServiceContext: Sendable {
 }
 
 public struct WaveServiceFactory {
-    public init() {}
-
     public static func create(for context: WaveServiceContext) -> any WaveServiceProtocol {
         switch context {
-        case .local:
-            return LocalWaveService()
-        case .grpc:
-            return LocalWaveService()
-        case .remote:
+        case .local, .grpc, .remote:
             return LocalWaveService()
         }
     }

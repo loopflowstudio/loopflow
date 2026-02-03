@@ -7,9 +7,10 @@ use cron::Schedule;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use super::common::{create_wave_run, spawn_run_task};
 use crate::executor::WaveExecutor;
 use crate::id::LfdId;
-use crate::proto::control::{PendingActivation, StimulusKind, WaveRun, WaveRunStatus};
+use crate::proto::control::{PendingActivation, StimulusKind};
 use crate::store::SharedStore;
 
 pub fn spawn_cron_poller(
@@ -79,21 +80,7 @@ async fn check_cron_stimuli(store: &SharedStore, executor: &WaveExecutor) {
                     if let Ok(run) = create_wave_run(store, &wave) {
                         let _ = store.delete_pending_activations(&wave_id);
                         started.insert(wave.id.clone());
-
-                        let exec = executor.clone();
-                        let store = store.clone();
-                        tokio::spawn(async move {
-                            let run_id = LfdId::parse(&run.id).expect("run id should be valid");
-                            if let Err(err) = exec.execute(&run_id).await {
-                                tracing::error!(run_id = %run.id, error = %err, "run execution failed");
-                                if let Ok(Some(mut run)) = store.get_wave_run(&run_id) {
-                                    run.status = WaveRunStatus::WaveRunFailed as i32;
-                                    run.error = Some(err.to_string());
-                                    run.ended_at = Some(now_timestamp());
-                                    let _ = store.update_wave_run(&run);
-                                }
-                            }
-                        });
+                        spawn_run_task(store.clone(), executor.clone(), run);
                         continue;
                     }
                 }
@@ -123,21 +110,7 @@ async fn check_cron_stimuli(store: &SharedStore, executor: &WaveExecutor) {
                     continue;
                 }
             };
-
-            let exec = executor.clone();
-            let store = store.clone();
-            tokio::spawn(async move {
-                let run_id = LfdId::parse(&run.id).expect("run id should be valid");
-                if let Err(err) = exec.execute(&run_id).await {
-                    tracing::error!(run_id = %run.id, error = %err, "run execution failed");
-                    if let Ok(Some(mut run)) = store.get_wave_run(&run_id) {
-                        run.status = WaveRunStatus::WaveRunFailed as i32;
-                        run.error = Some(err.to_string());
-                        run.ended_at = Some(now_timestamp());
-                        let _ = store.update_wave_run(&run);
-                    }
-                }
-            });
+            spawn_run_task(store.clone(), executor.clone(), run);
         }
     }
 }
@@ -180,41 +153,5 @@ fn queue_or_coalesce_activation(store: &SharedStore, wave_id: &LfdId, stimulus_i
         Err(err) => {
             tracing::error!(wave_id = %wave_id, error = %err, "failed to check pending activation");
         }
-    }
-}
-
-fn create_wave_run(
-    store: &SharedStore,
-    wave: &crate::proto::control::Wave,
-) -> anyhow::Result<WaveRun> {
-    let wave_id = LfdId::parse(&wave.id)?;
-    let last_run = store
-        .list_wave_runs(Some(&wave_id), Some(1))?
-        .into_iter()
-        .next();
-    let iteration = last_run.map(|run| run.iteration + 1).unwrap_or(0);
-
-    let run = WaveRun {
-        id: LfdId::new().to_string(),
-        wave_id: wave.id.clone(),
-        iteration,
-        step_index: 0,
-        status: WaveRunStatus::WaveRunRunning as i32,
-        worktree: wave.repo.clone(),
-        branch: String::new(),
-        started_at: Some(now_timestamp()),
-        ended_at: None,
-        error: None,
-        flow_parents: Vec::new(),
-    };
-    store.create_wave_run(&run)?;
-    Ok(run)
-}
-
-fn now_timestamp() -> prost_types::Timestamp {
-    let now = time::OffsetDateTime::now_utc();
-    prost_types::Timestamp {
-        seconds: now.unix_timestamp(),
-        nanos: 0,
     }
 }

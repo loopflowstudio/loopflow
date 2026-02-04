@@ -56,36 +56,38 @@ The remaining items in `roadmap/concerto/` are all Phase 2 or 3.
 
 - **Flow coverage**: Parity tests use `lf run <step> --dry-run` even in the `with-flow` fixture because Rust `lf` doesn't resolve flows yet. Should we add flow execution to Rust CLI (or switch the test to `lf flow` once parity exists)?
 
-## Rebase blocked (2026-02-04, updated)
+## Rebase blocked (2026-02-04)
 
-Rebase onto main aborted due to complex conflicts. Main already has `loopflow-ops` (commit 3b4f88f60), and this branch has a parallel implementation plus parity tests.
+Rebase onto main aborted due to complex conflicts. Main merged `loopflow-ops` in PR #267, and this branch has a parallel implementation.
 
-**Latest rebase attempt:**
-- Resolved `scratch/rust-lf-ops-parity.md` (deleted on main, accept deletion)
-- Resolved `scratch/questions.md` (merged both versions)
-- Hit 8 add/add conflicts in `loopflow-ops/` - aborted
+**Conflict summary:**
+- 8 add/add conflicts in `rust/loopflow-ops/src/*.rs` (both branches added these files)
+- 1 conflict in `rust/lf/src/commands/ops/mod.rs`
 
-**Conflicting files (add/add in loopflow-ops):**
-- `rust/loopflow-ops/src/abandon.rs`
-- `rust/loopflow-ops/src/commit.rs`
-- `rust/loopflow-ops/src/land.rs`
-- `rust/loopflow-ops/src/lint.rs`
-- `rust/loopflow-ops/src/next.rs`
-- `rust/loopflow-ops/src/pr.rs`
-- `rust/loopflow-ops/src/rebase.rs`
-- `rust/loopflow-ops/src/util.rs`
+**Unique to this branch (valuable, not on main):**
 
-Also conflicting: `rust/lf/src/commands/ops/mod.rs`
+| Content | Files | Value |
+|---------|-------|-------|
+| Parity test infrastructure | `tests/parity/` | High - enables prompt comparison |
+| `--dry-run` flag | `rust/lf/src/` + `src/loopflow/lf/step.py` | High - enables parity testing |
+| Roadmap doc updates | `roadmap/rust/01-lf-ops-parity.md` | Medium - documentation |
 
-**Unique to this branch (not on main):**
-- `tests/parity/` - parity test infrastructure and fixtures
-- `scratch/` design docs
-- Scheduler slot enforcement in lfd (cron/watch/resume)
-- `--dry-run` for step/inline/flow commands
+**Commits to cherry-pick (in order):**
+```
+be7096be6 Add prompt parity tests and dry-run output
+013aaa921 Simplify runner checks and parity git helpers
+d4538c83d lf consolidate: parity tests: add initial fixture set
+ad1acb3a4 lf lint: tests: normalize quotes in parity fixture
+```
+
+**Commits to skip (already on main via PR #267):**
+```
+cf6c3e64a lf implement: loopflow-ops: add workflow orchestration crate
+721d46372 lf gate: loopflow-ops: add workflow orchestration crate
+```
 
 **Recommended approach:**
-Cherry-pick only the unique commits onto a fresh branch from main:
-1. Create new branch from main
-2. Cherry-pick commits for parity tests, scheduler slots, and dry-run
-3. Skip the loopflow-ops implementation commits (main has that already)
-4. May need to adapt parity tests to work with main's loopflow-ops API
+1. Create fresh branch from main: `git checkout -b parity-tests origin/main`
+2. Cherry-pick parity test commits: `git cherry-pick be7096be6 013aaa921 d4538c83d ad1acb3a4`
+3. Resolve any minor conflicts (likely just import paths)
+4. Abandon this branch after cherry-pick succeeds

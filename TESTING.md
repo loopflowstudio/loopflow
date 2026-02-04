@@ -11,6 +11,8 @@ swift test --package-path swift         # Swift package
 cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS'  # Concerto UI
 ```
 
+Rust tests are available locally but are not wired into CI yet.
+
 ## Python Tests
 
 Unit and integration tests for the loopflow CLI.
@@ -50,3 +52,21 @@ See `.github/workflows/ci.yml`. Three parallel jobs:
 | `concerto-ui-test` | macos-15 | xcodegen + xcodebuild |
 
 All three must pass for PRs to merge.
+
+## Rust Tests
+
+Prompt parity and golden prompt tests live in Rust.
+
+```bash
+cargo test -p loopflow-engine golden_prompt
+uv run pytest tests/parity/test_prompt_parity.py
+```
+
+## E2E Tests
+
+Shell-based workflows for `lf ops` that exercise a full cycle and rebase conflicts.
+
+```bash
+./tests/e2e/test_full_cycle.sh
+./tests/e2e/test_rebase_conflict.sh
+```

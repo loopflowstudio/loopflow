@@ -7,15 +7,17 @@ use cron::Schedule;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use super::common::{create_wave_run, spawn_run_task};
+use super::common::{create_wave_run_with_id, spawn_run_task_with_slot};
 use crate::executor::WaveExecutor;
 use crate::id::LfdId;
 use crate::proto::control::{PendingActivation, StimulusKind};
+use crate::scheduler::Scheduler;
 use crate::store::SharedStore;
 
 pub fn spawn_cron_poller(
     store: SharedStore,
     executor: WaveExecutor,
+    scheduler: std::sync::Arc<Scheduler>,
     cancel: CancellationToken,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
@@ -27,14 +29,18 @@ pub fn spawn_cron_poller(
                     break;
                 }
                 _ = interval.tick() => {
-                    check_cron_stimuli(&store, &executor).await;
+                    check_cron_stimuli(&store, &executor, &scheduler).await;
                 }
             }
         }
     })
 }
 
-async fn check_cron_stimuli(store: &SharedStore, executor: &WaveExecutor) {
+async fn check_cron_stimuli(
+    store: &SharedStore,
+    executor: &WaveExecutor,
+    scheduler: &std::sync::Arc<Scheduler>,
+) {
     let stimuli = match store.list_stimuli_by_kind(StimulusKind::StimulusCron as i32) {
         Ok(stimuli) => stimuli,
         Err(err) => {
@@ -77,12 +83,30 @@ async fn check_cron_stimuli(store: &SharedStore, executor: &WaveExecutor) {
         if store.get_active_wave_run(&wave_id).ok().flatten().is_none() {
             if let Ok(pending) = store.list_pending_activations(&wave_id) {
                 if !pending.is_empty() {
-                    if let Ok(run) = create_wave_run(store, &wave) {
-                        let _ = store.delete_pending_activations(&wave_id);
-                        started.insert(wave.id.clone());
-                        spawn_run_task(store.clone(), executor.clone(), run);
+                    let run_id = LfdId::new();
+                    let (acquired, reason) = scheduler.acquire(run_id.as_str()).await;
+                    if !acquired {
+                        tracing::warn!(
+                            wave_id = %wave.id,
+                            reason = ?reason,
+                            "scheduler at capacity; cron activation deferred"
+                        );
                         continue;
                     }
+
+                    if let Ok(run) = create_wave_run_with_id(store, &wave, &run_id) {
+                        let _ = store.delete_pending_activations(&wave_id);
+                        started.insert(wave.id.clone());
+                        spawn_run_task_with_slot(
+                            store.clone(),
+                            executor.clone(),
+                            scheduler.clone(),
+                            run,
+                        );
+                        continue;
+                    }
+
+                    scheduler.release(run_id.as_str());
                 }
             }
         }
@@ -103,14 +127,26 @@ async fn check_cron_stimuli(store: &SharedStore, executor: &WaveExecutor) {
                 continue;
             }
 
-            let run = match create_wave_run(store, &wave) {
+            let run_id = LfdId::new();
+            let (acquired, reason) = scheduler.acquire(run_id.as_str()).await;
+            if !acquired {
+                tracing::warn!(
+                    wave_id = %wave.id,
+                    reason = ?reason,
+                    "scheduler at capacity; cron activation deferred"
+                );
+                continue;
+            }
+
+            let run = match create_wave_run_with_id(store, &wave, &run_id) {
                 Ok(run) => run,
                 Err(err) => {
+                    scheduler.release(run_id.as_str());
                     tracing::error!(wave_id = %wave.id, error = %err, "failed to create wave run");
                     continue;
                 }
             };
-            spawn_run_task(store.clone(), executor.clone(), run);
+            spawn_run_task_with_slot(store.clone(), executor.clone(), scheduler.clone(), run);
         }
     }
 }

@@ -482,6 +482,7 @@ impl WaveExecutor {
             if worktree_path.join(".git").exists() {
                 let _ = remove_worktree(worktree_path, true);
             }
+            self.scheduler.release(fork_run.id.as_str());
         }
         let _ = self.store.delete_fork_runs(
             &LfdId::parse(&run.id).unwrap_or_else(|_| LfdId::new()),

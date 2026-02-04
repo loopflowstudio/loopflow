@@ -631,24 +631,6 @@ impl ControlService for ControlServer {
             }
         };
 
-        let agent_id = agent.id.clone();
-        if let Err(err) = self
-            .run_store({
-                let agent_id = agent_id.clone();
-                move |store| {
-                    store.update_agent_status(
-                        &LfdId::from_raw(agent_id),
-                        AgentStatus::AgentRunning as i32,
-                        None,
-                    )
-                }
-            })
-            .await
-        {
-            self.scheduler.unregister_session(wave_id.as_str());
-            return Err(err);
-        }
-
         let wave_run_id = agent.wave_run_id.clone();
         let mut wave_run = if let Some(run_id) = wave_run_id.as_deref() {
             match LfdId::parse(run_id) {
@@ -671,12 +653,41 @@ impl ControlService for ControlServer {
             return Err(Status::not_found("no wave run for waiting agent"));
         };
 
+        let (acquired, reason) = self.scheduler.acquire(wave_run.id.as_str()).await;
+        if !acquired {
+            self.scheduler.unregister_session(wave_id.as_str());
+            return Err(Status::resource_exhausted(format!(
+                "scheduler at capacity: {}",
+                reason.unwrap_or_else(|| "no slots available".to_string())
+            )));
+        }
+
+        let agent_id = agent.id.clone();
+        if let Err(err) = self
+            .run_store({
+                let agent_id = agent_id.clone();
+                move |store| {
+                    store.update_agent_status(
+                        &LfdId::from_raw(agent_id),
+                        AgentStatus::AgentRunning as i32,
+                        None,
+                    )
+                }
+            })
+            .await
+        {
+            self.scheduler.release(wave_run.id.as_str());
+            self.scheduler.unregister_session(wave_id.as_str());
+            return Err(err);
+        }
+
         wave_run.status = WaveRunStatus::WaveRunRunning as i32;
         let wave_run_clone = wave_run.clone();
         if let Err(err) = self
             .run_store(move |store| store.update_wave_run(&wave_run_clone))
             .await
         {
+            self.scheduler.release(wave_run.id.as_str());
             self.scheduler.unregister_session(wave_id.as_str());
             return Err(err);
         }
@@ -688,8 +699,8 @@ impl ControlService for ControlServer {
         let step = agent.step.clone();
         let wave_id_task = wave.id.clone();
         let wave_run_id_task = wave_run.id.clone();
-        let wave_run_id_task_id =
-            LfdId::parse(&wave_run_id_task).unwrap_or_else(|_| LfdId::from_raw(wave_run_id_task));
+        let wave_run_id_task_id = LfdId::parse(&wave_run_id_task)
+            .unwrap_or_else(|_| LfdId::from_raw(wave_run_id_task.clone()));
         let executor = self.executor.clone();
 
         tokio::spawn(async move {
@@ -745,6 +756,7 @@ impl ControlService for ControlServer {
                 }
             }
 
+            scheduler.release(&wave_run_id_task);
             scheduler.unregister_session(&wave_id_task);
         });
 
@@ -907,15 +919,30 @@ impl ControlService for ControlServer {
                     .await?;
                 if let Some(mut run) = run {
                     if req.status == AgentStatus::AgentCompleted as i32 {
+                        let (acquired, reason) = self.scheduler.acquire(run_id.as_str()).await;
+                        if !acquired {
+                            return Err(Status::resource_exhausted(format!(
+                                "scheduler at capacity: {}",
+                                reason.unwrap_or_else(|| "no slots available".to_string())
+                            )));
+                        }
+
                         run.step_index += 1;
                         run.status = WaveRunStatus::WaveRunRunning as i32;
                         let run_clone = run.clone();
-                        let _ = self
+                        if let Err(err) = self
                             .run_store(move |store| store.update_wave_run(&run_clone))
-                            .await;
+                            .await
+                        {
+                            self.scheduler.release(run_id.as_str());
+                            return Err(err);
+                        }
                         let exec = self.executor.clone();
+                        let scheduler = self.scheduler.clone();
+                        let run_id_for_release = run_id.to_string();
                         tokio::spawn(async move {
                             let _ = exec.execute(&run_id).await;
+                            scheduler.release(&run_id_for_release);
                         });
                     } else if req.status == AgentStatus::AgentFailed as i32 {
                         run.status = WaveRunStatus::WaveRunFailed as i32;

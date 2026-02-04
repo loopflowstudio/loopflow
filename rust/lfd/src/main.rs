@@ -9,6 +9,7 @@ use tonic::transport::Server;
 mod auth;
 mod config;
 mod credentials;
+mod events;
 mod executor;
 mod http;
 mod id;
@@ -25,6 +26,7 @@ mod store;
 
 use crate::auth::AuthContext;
 use crate::config::LfdConfig;
+use crate::events::EventHub;
 use crate::executor::WaveExecutor;
 use crate::http::HttpState;
 use crate::output::OutputHub;
@@ -83,6 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let scheduler = Arc::new(Scheduler::new(max_slots));
     let output = OutputHub::new(2048);
+    let events = EventHub::new(2048);
     let executor = WaveExecutor::new(store.clone(), scheduler.clone(), output.clone());
     let cancel = CancellationToken::new();
     let loop_handles =
@@ -100,6 +103,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         scheduler.clone(),
         executor,
         output,
+        events,
         auth_context.clone(),
     );
 

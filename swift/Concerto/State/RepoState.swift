@@ -89,7 +89,7 @@ final class RepoState {
     private let configLoader = ConfigLoader()
     private let promptService = PromptService()
     private let flowService = FlowService()
-    private let waveService = LocalWaveService()
+    private let waveService = GrpcWaveService()
     private let directionService = DirectionService()
     private var eventService: (any EventServiceProtocol)?
 
@@ -493,8 +493,8 @@ final class RepoState {
     func startEventSubscription(sessionState: SessionState) {
         LoggingService.append("startEventSubscription called", category: LoggingService.Category.lfd)
         if eventService != nil { return }
-        LoggingService.append("creating LocalEventService", category: LoggingService.Category.lfd)
-        eventService = LocalEventService()
+        LoggingService.append("creating GrpcEventService", category: LoggingService.Category.lfd)
+        eventService = GrpcEventService()
 
         Task {
             await eventService?.subscribe(

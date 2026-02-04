@@ -21,14 +21,6 @@ def _golden_cases() -> list[Path]:
     return sorted(path for path in root.glob("*.yaml") if path.is_file())
 
 
-def _diff_mode(diff: bool, diff_files: bool) -> DiffMode:
-    if diff:
-        return DiffMode.DIFF
-    if diff_files:
-        return DiffMode.FILES
-    return DiffMode.NONE
-
-
 def _normalize_prompt(prompt: str, repo_root: Path) -> str:
     return (
         prompt.replace("\r\n", "\n")
@@ -43,8 +35,17 @@ def _python_prompt(case: dict, repo_root: Path) -> str:
         resolve_directions(repo_root, directions) if directions else None
     )
 
+    diff = case.get("diff", False)
+    diff_files = case.get("diff_files", False)
+    if diff:
+        diff_mode = DiffMode.DIFF
+    elif diff_files:
+        diff_mode = DiffMode.FILES
+    else:
+        diff_mode = DiffMode.NONE
+
     context_config = ContextConfig(
-        diff_mode=_diff_mode(case.get("diff", False), case.get("diff_files", False)),
+        diff_mode=diff_mode,
         files=FilesetConfig(paths=[], exclude=[], parent_docs=False),
         area=case.get("area"),
         wave=case.get("wave"),
@@ -86,9 +87,7 @@ def _build_rust_prompt_bin() -> Path:
 
 
 def _rust_prompt(case: dict, repo_root: Path) -> str:
-    binary = Path(
-        case.get("prompt_bin") or _build_rust_prompt_bin()
-    )
+    binary = _build_rust_prompt_bin()
 
     cmd = [
         str(binary),

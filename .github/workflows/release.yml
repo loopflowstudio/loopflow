@@ -12,13 +12,17 @@ jobs:
         include:
           - os: macos-13
             target: x86_64-apple-darwin
+            build_cmd: cargo build --release --target x86_64-apple-darwin -p lf
           - os: macos-14
             target: aarch64-apple-darwin
+            build_cmd: cargo build --release --target aarch64-apple-darwin -p lf
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            build_cmd: cargo build --release --target x86_64-unknown-linux-gnu -p lf
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             use_cross: true
+            build_cmd: cross build --release --target aarch64-unknown-linux-gnu -p lf
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -29,12 +33,7 @@ jobs:
         if: matrix.use_cross
         run: cargo install cross
       - name: Build lf
-        run: |
-          if [ "${{ matrix.use_cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.target }} -p lf
-          else
-            cargo build --release --target ${{ matrix.target }} -p lf
-          fi
+        run: ${{ matrix.build_cmd }}
       - name: Package binary
         run: |
           cp "target/${{ matrix.target }}/release/lf" "lf-${{ matrix.target }}"

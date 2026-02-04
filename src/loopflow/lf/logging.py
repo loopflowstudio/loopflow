@@ -28,9 +28,14 @@ def write_prompt_log(
 
     File format: {timestamp}-{flow_parents}.{step}.md or {timestamp}-{step}.md
     Files are preserved for debugging/history.
+
+    Ensures .lf/log/ is in the repo's root .gitignore.
     """
     log_dir = repo_root / ".lf" / "log"
     log_dir.mkdir(parents=True, exist_ok=True)
+
+    # Ensure .lf/log/ is in repo .gitignore
+    _ensure_gitignore_entry(repo_root, ".lf/log/")
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     if flow_parents:
@@ -42,6 +47,24 @@ def write_prompt_log(
 
     path.write_text(prompt, encoding="utf-8")
     return path
+
+
+def _ensure_gitignore_entry(repo_root: Path, entry: str) -> None:
+    """Ensure an entry exists in the repo's root .gitignore."""
+    gitignore_path = repo_root / ".gitignore"
+    entry_line = entry.strip()
+
+    if gitignore_path.exists():
+        content = gitignore_path.read_text(encoding="utf-8")
+        if any(line.strip() == entry_line for line in content.splitlines()):
+            return
+        # Add entry on new line
+        if content and not content.endswith("\n"):
+            content += "\n"
+        content += entry_line + "\n"
+        gitignore_path.write_text(content, encoding="utf-8")
+    else:
+        gitignore_path.write_text(entry_line + "\n", encoding="utf-8")
 
 
 def get_model_env(

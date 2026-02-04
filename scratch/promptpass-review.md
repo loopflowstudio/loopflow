@@ -16,7 +16,7 @@ Native context loading for all backends (Claude, Codex, Gemini).
 - `build_codex_command()` uses `-c model_instructions_file="..."`
 - `launch_agent()` sets `GEMINI_SYSTEM_MD` env var for Gemini
 - `format_context_prompt()` and `format_task_prompt()` split prompt assembly
-- `write_prompt_log()` writes to `.lf/log/` and creates `.lf/.gitignore` automatically
+- `write_prompt_log()` writes to `.lf/log/` and ensures `.lf/log/` is in repo `.gitignore`
 - Bundled `LOOPFLOW.md` in binary via `include_str!`
 - Wave-scoped roadmap filtering (only `roadmap/<wave>/` included when wave is set)
 - Interactive mode message for `run_mode=interactive`

@@ -12,7 +12,8 @@ swift/dist/
 # Claude Code (personal state)
 .claude/settings.local.json
 
-# Loopflow (generated cache)
+# Loopflow (generated)
+.lf/log/
 .lf/summaries/
 *.profraw
 .DS_Store

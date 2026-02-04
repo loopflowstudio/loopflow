@@ -598,6 +598,35 @@ fn dedup_documents(docs: &mut Vec<Document>) {
     docs.retain(|doc| seen.insert(doc.path.clone()));
 }
 
+/// Ensure an entry exists in the repo's root .gitignore.
+///
+/// Adds the entry on a new line if not already present.
+fn ensure_gitignore_entry(repo_root: &Path, entry: &str) -> Result<(), CoreError> {
+    let gitignore_path = repo_root.join(".gitignore");
+    let content = if gitignore_path.exists() {
+        fs::read_to_string(&gitignore_path)?
+    } else {
+        String::new()
+    };
+
+    // Check if entry already exists (as a line)
+    let entry_line = entry.trim();
+    let already_present = content.lines().any(|line| line.trim() == entry_line);
+
+    if !already_present {
+        let mut new_content = content;
+        // Ensure file ends with newline before adding entry
+        if !new_content.is_empty() && !new_content.ends_with('\n') {
+            new_content.push('\n');
+        }
+        new_content.push_str(entry_line);
+        new_content.push('\n');
+        fs::write(&gitignore_path, new_content)?;
+    }
+
+    Ok(())
+}
+
 /// Format all components into the final prompt string.
 pub fn format_prompt(components: &PromptComponents) -> String {
     let mut parts = Vec::new();
@@ -927,7 +956,7 @@ pub fn format_task_prompt(components: &PromptComponents) -> String {
 ///
 /// File format: `{timestamp}-{flow_parents}.{step}.md` or `{timestamp}-{step}.md`
 ///
-/// Creates `.lf/.gitignore` with `log/` if it doesn't exist.
+/// Ensures `.lf/log/` is in the repo's root `.gitignore`.
 pub fn write_prompt_log(
     repo_root: &Path,
     prompt: &str,
@@ -938,11 +967,8 @@ pub fn write_prompt_log(
     let log_dir = lf_dir.join("log");
     fs::create_dir_all(&log_dir)?;
 
-    // Ensure .lf/.gitignore exists with log/
-    let gitignore_path = lf_dir.join(".gitignore");
-    if !gitignore_path.exists() {
-        fs::write(&gitignore_path, "log/\n")?;
-    }
+    // Ensure .lf/log/ is in repo .gitignore
+    ensure_gitignore_entry(repo_root, ".lf/log/")?;
 
     let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
     let name_part = match flow_parents {
@@ -1795,9 +1821,9 @@ directions:
     }
 
     #[test]
-    fn write_prompt_log_creates_gitignore() {
+    fn write_prompt_log_adds_to_repo_gitignore() {
         let repo = init_repo();
-        let gitignore_path = repo.path().join(".lf/.gitignore");
+        let gitignore_path = repo.path().join(".gitignore");
 
         assert!(!gitignore_path.exists());
 
@@ -1805,7 +1831,7 @@ directions:
 
         assert!(gitignore_path.exists());
         let content = fs::read_to_string(&gitignore_path).unwrap();
-        assert_eq!(content, "log/\n");
+        assert!(content.contains(".lf/log/"));
     }
 
     #[test]
@@ -1825,14 +1851,28 @@ directions:
     #[test]
     fn write_prompt_log_preserves_existing_gitignore() {
         let repo = init_repo();
-        let lf_dir = repo.path().join(".lf");
-        fs::create_dir_all(&lf_dir).unwrap();
-        fs::write(lf_dir.join(".gitignore"), "log/\ncustom/\n").unwrap();
+        let gitignore_path = repo.path().join(".gitignore");
+        fs::write(&gitignore_path, "target/\n.lf/log/\n").unwrap();
 
         write_prompt_log(repo.path(), "test", "step", None).unwrap();
 
-        let content = fs::read_to_string(lf_dir.join(".gitignore")).unwrap();
-        assert_eq!(content, "log/\ncustom/\n");
+        let content = fs::read_to_string(&gitignore_path).unwrap();
+        // Should not duplicate the entry
+        assert_eq!(content, "target/\n.lf/log/\n");
+    }
+
+    #[test]
+    fn write_prompt_log_appends_to_existing_gitignore() {
+        let repo = init_repo();
+        let gitignore_path = repo.path().join(".gitignore");
+        fs::write(&gitignore_path, "target/\nnode_modules/\n").unwrap();
+
+        write_prompt_log(repo.path(), "test", "step", None).unwrap();
+
+        let content = fs::read_to_string(&gitignore_path).unwrap();
+        assert!(content.contains("target/"));
+        assert!(content.contains("node_modules/"));
+        assert!(content.contains(".lf/log/"));
     }
 
     // ==========================================================================

@@ -2,8 +2,8 @@ use crate::commands::util::{copy_to_clipboard, find_repo_root, open_web_client};
 use crate::Cli;
 use anyhow::{anyhow, Result};
 use loopflow_engine::{
-    check_cli_available, format_prompt, gather_context, launch_agent, load_config_or_default,
-    parse_model, GatherContextOpts, LaunchConfig,
+    check_cli_available, format_context_prompt, format_prompt, gather_context, launch_agent,
+    load_config_or_default, parse_model, write_prompt_log, GatherContextOpts, LaunchConfig,
 };
 
 pub fn run(prompt_parts: &[String], cli: &Cli) -> Result<()> {
@@ -52,14 +52,13 @@ pub fn run(prompt_parts: &[String], cli: &Cli) -> Result<()> {
         wave: cli.wave.clone(),
     })?;
 
-    let mut prompt = format_prompt(&components);
-    prompt.push_str("\n\n");
-    prompt.push_str(&prompt_text);
-
     let model = cli.model.as_deref().unwrap_or(&config.agent_model);
     let (backend, variant) = parse_model(model);
 
     if cli.web {
+        let mut prompt = format_prompt(&components);
+        prompt.push_str("\n\n");
+        prompt.push_str(&prompt_text);
         copy_to_clipboard(&prompt)?;
         open_web_client(&backend)?;
         println!("Copied to clipboard.");
@@ -70,6 +69,10 @@ pub fn run(prompt_parts: &[String], cli: &Cli) -> Result<()> {
         return Err(anyhow!("'{}' CLI not found", backend));
     }
 
+    // Context goes to file, inline prompt is the task
+    let context_prompt = format_context_prompt(&components);
+    let context_file = write_prompt_log(&repo_root, &context_prompt, "inline.context", None)?;
+
     let launch_config = LaunchConfig {
         auto: !is_interactive,
         stream: !is_interactive,
@@ -77,9 +80,9 @@ pub fn run(prompt_parts: &[String], cli: &Cli) -> Result<()> {
         model_variant: variant,
         chrome: cli.chrome_setting().unwrap_or(config.chrome),
         cwd: Some(repo_root),
-        context_file: None, // Inline prompts are typically short, no need for context file
+        context_file: Some(context_file),
     };
 
-    let result = launch_agent(model, &prompt, &launch_config)?;
+    let result = launch_agent(model, &prompt_text, &launch_config)?;
     std::process::exit(result.exit_code);
 }

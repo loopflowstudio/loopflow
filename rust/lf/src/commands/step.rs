@@ -2,8 +2,9 @@ use crate::commands::util::{copy_to_clipboard, find_repo_root, open_web_client};
 use crate::Cli;
 use anyhow::{anyhow, Result};
 use loopflow_engine::{
-    check_cli_available, format_prompt, gather_context, launch_agent, load_config_or_default,
-    parse_model, GatherContextOpts, LaunchConfig,
+    check_cli_available, format_context_prompt, format_prompt, format_task_prompt, gather_context,
+    launch_agent, load_config_or_default, parse_model, write_prompt_log, GatherContextOpts,
+    LaunchConfig,
 };
 use tracing::{debug, info, instrument, trace};
 
@@ -37,6 +38,7 @@ pub fn run(step_name: &str, step_args: &[String], cli: &Cli) -> Result<()> {
         step: Some(step_name.to_string()),
         inline: None,
         step_args: step_args.to_vec(),
+        message: None,
         run_mode: Some(
             if is_interactive {
                 "interactive"
@@ -72,6 +74,22 @@ pub fn run(step_name: &str, step_args: &[String], cli: &Cli) -> Result<()> {
         return Err(anyhow!("'{}' CLI not found", backend));
     }
 
+    // Write full prompt to .lf/log/ for debugging
+    write_prompt_log(&repo_root, &prompt, step_name, None)?;
+
+    // Write context separately for system prompt loading via native mechanisms:
+    // - Claude: --append-system-prompt-file
+    // - Codex: -c model_instructions_file="..."
+    // - Gemini: GEMINI_SYSTEM_MD env var
+    let context_prompt = format_context_prompt(&components);
+    let task_prompt = format_task_prompt(&components);
+    let context_file = write_prompt_log(
+        &repo_root,
+        &context_prompt,
+        &format!("{}.context", step_name),
+        None,
+    )?;
+
     let launch_config = LaunchConfig {
         auto: !is_interactive,
         stream: !is_interactive,
@@ -79,10 +97,11 @@ pub fn run(step_name: &str, step_args: &[String], cli: &Cli) -> Result<()> {
         model_variant: variant,
         chrome: cli.chrome_setting().unwrap_or(config.chrome),
         cwd: Some(repo_root),
+        context_file: Some(context_file),
     };
     debug!(?launch_config, "launching agent");
 
-    let result = launch_agent(model, &prompt, &launch_config)?;
+    let result = launch_agent(model, &task_prompt, &launch_config)?;
     debug!(exit_code = result.exit_code, "agent completed");
     std::process::exit(result.exit_code);
 }
@@ -105,6 +124,7 @@ pub fn run_interactive(cli: &Cli) -> Result<()> {
         step: None,
         inline: None,
         step_args: Vec::new(),
+        message: None,
         run_mode: Some("interactive".to_string()),
         directions,
         files: Vec::new(),
@@ -124,6 +144,17 @@ pub fn run_interactive(cli: &Cli) -> Result<()> {
         return Err(anyhow!("'{}' CLI not found", backend));
     }
 
+    // Write full prompt to .lf/log/ for debugging
+    write_prompt_log(&repo_root, &prompt, "chat", None)?;
+
+    // Write context separately for system prompt loading via native mechanisms:
+    // - Claude: --append-system-prompt-file
+    // - Codex: -c model_instructions_file="..."
+    // - Gemini: GEMINI_SYSTEM_MD env var
+    let context_prompt = format_context_prompt(&components);
+    let task_prompt = format_task_prompt(&components);
+    let context_file = write_prompt_log(&repo_root, &context_prompt, "chat.context", None)?;
+
     let launch_config = LaunchConfig {
         auto: false,
         stream: false,
@@ -131,10 +162,11 @@ pub fn run_interactive(cli: &Cli) -> Result<()> {
         model_variant: variant,
         chrome: cli.chrome_setting().unwrap_or(config.chrome),
         cwd: Some(repo_root),
+        context_file: Some(context_file),
     };
     debug!(?launch_config, "launching interactive agent");
 
-    let result = launch_agent(model, &prompt, &launch_config)?;
+    let result = launch_agent(model, &task_prompt, &launch_config)?;
     std::process::exit(result.exit_code);
 }
 

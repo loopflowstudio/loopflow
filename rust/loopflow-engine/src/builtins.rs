@@ -1,10 +1,13 @@
-//! Built-in step definitions embedded in the binary.
+//! Built-in step definitions and system docs embedded in the binary.
 //!
-//! These are the core steps that work everywhere, even without
-//! any local step files.
+//! These are the core steps and documentation that work everywhere,
+//! even without any local step files.
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
+
+/// Bundled LOOPFLOW.md system documentation.
+pub const LOOPFLOW_DOC: &str = include_str!("builtins/LOOPFLOW.md");
 
 /// Returns the content of a built-in step, if it exists.
 pub fn get_builtin_step(name: &str) -> Option<&'static str> {

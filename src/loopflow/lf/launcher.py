@@ -229,10 +229,12 @@ def build_claude_command(
     skip_permissions: bool,
     model_variant: str | None = None,
     chrome: bool = False,
+    context_file: Path | None = None,
 ) -> list[str]:
     """Build Claude CLI command for the requested run mode.
 
     Prompt should be appended as a CLI argument.
+    context_file: Path to context file (appended to system prompt via --append-system-prompt-file).
     """
     cmd = ["claude"]
 
@@ -241,6 +243,9 @@ def build_claude_command(
 
     if model_variant:
         cmd.extend(["--model", model_variant])
+
+    if context_file:
+        cmd.extend(["--append-system-prompt-file", str(context_file)])
 
     if auto:
         # Batch mode always skips permissions (no way to grant them interactively)
@@ -262,13 +267,18 @@ def build_codex_command(
     sandbox_root: Path | None = None,
     workdir: Path | None = None,
     images: list[Path] | None = None,
+    context_file: Path | None = None,
 ) -> list[str]:
     """Build Codex CLI command for the requested run mode.
 
     Prompt should be appended as a CLI argument.
     yolo bypasses approvals and sandboxing.
+    context_file: Path to context file (replaces AGENTS.md via model_instructions_file).
     """
     cmd = ["codex", "exec"]
+
+    if context_file:
+        cmd.extend(["-c", f'model_instructions_file="{context_file}"'])
 
     if model_variant:
         cmd.extend(["-c", f'model="{model_variant}"'])
@@ -325,13 +335,17 @@ def build_codex_interactive_command(
     sandbox_root: Path | None = None,
     workdir: Path | None = None,
     images: list[Path] | None = None,
+    context_file: Path | None = None,
 ) -> list[str]:
     """Build Codex CLI command for interactive mode.
 
     Prompt should be appended as a CLI argument.
     yolo bypasses approvals and sandboxing.
+    context_file: Path to context file (replaces AGENTS.md via model_instructions_file).
     """
     cmd = ["codex"]
+    if context_file:
+        cmd.extend(["-c", f'model_instructions_file="{context_file}"'])
     if model_variant:
         cmd.extend(["-c", f'model="{model_variant}"'])
     if workdir:
@@ -422,11 +436,13 @@ def build_model_command(
     workdir: Path | None = None,
     images: list[Path] | None = None,
     chrome: bool = False,
+    context_file: Path | None = None,
 ) -> list[str]:
     """Build a model command for auto/background execution.
 
     Prompt should be appended as a CLI argument.
     Images are passed to Codex via -i flag; Claude/Gemini read from filesystem.
+    context_file: Path to context file loaded separately from the task prompt.
     """
     if model == "claude":
         return build_claude_command(
@@ -435,6 +451,7 @@ def build_model_command(
             skip_permissions=skip_permissions,
             model_variant=model_variant,
             chrome=chrome,
+            context_file=context_file,
         )
     if model == "gemini":
         return build_gemini_command(
@@ -454,6 +471,7 @@ def build_model_command(
         sandbox_root=sandbox_root,
         workdir=workdir,
         images=images,
+        context_file=context_file,
     )
 
 
@@ -466,11 +484,13 @@ def build_model_interactive_command(
     workdir: Path | None = None,
     images: list[Path] | None = None,
     chrome: bool = False,
+    context_file: Path | None = None,
 ) -> list[str]:
     """Build a model command for interactive execution.
 
     Prompt should be appended as a CLI argument.
     Images are passed to Codex via -i flag; Claude/Gemini read from filesystem.
+    context_file: Path to context file loaded separately from the task prompt.
     """
     if model == "claude":
         return build_claude_command(
@@ -479,6 +499,7 @@ def build_model_interactive_command(
             skip_permissions=skip_permissions,
             model_variant=model_variant,
             chrome=chrome,
+            context_file=context_file,
         )
     if model == "gemini":
         return build_gemini_interactive_command(
@@ -494,6 +515,7 @@ def build_model_interactive_command(
         sandbox_root=sandbox_root,
         workdir=workdir,
         images=images,
+        context_file=context_file,
     )
 
 

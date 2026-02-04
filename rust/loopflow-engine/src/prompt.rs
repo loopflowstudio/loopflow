@@ -26,6 +26,8 @@ pub struct GatherContextOpts {
     pub step: Option<String>,
     pub inline: Option<String>,
     pub step_args: Vec<String>,
+    /// User message (positional args after step/flow name)
+    pub message: Option<String>,
     pub run_mode: Option<String>,
     pub directions: Vec<String>,
     /// Specific files to include in context
@@ -58,6 +60,8 @@ pub struct PromptComponents {
     pub summaries: Vec<Document>,
     pub wave: Option<String>,
     pub loopflow_doc: Option<String>,
+    /// User message (positional args after step/flow name)
+    pub message: Option<String>,
 }
 
 /// Count tokens using tiktoken (cl100k_base encoding).
@@ -170,7 +174,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
 
     // Gather docs
     let docs = if opts.lfdocs {
-        gather_docs(repo_root)?
+        gather_docs(repo_root, opts.wave.as_deref())?
     } else {
         Vec::new()
     };
@@ -199,8 +203,8 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         None
     };
 
-    // Load bundled LOOPFLOW.md (placeholder - would need to embed this)
-    let loopflow_doc = None; // TODO: embed LOOPFLOW.md in binary
+    // Load bundled LOOPFLOW.md
+    let loopflow_doc = Some(crate::builtins::LOOPFLOW_DOC.to_string());
 
     Ok(PromptComponents {
         run_mode: opts.run_mode.clone(),
@@ -214,48 +218,90 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         summaries: Vec::new(), // TODO: implement summary loading
         wave: opts.wave.clone(),
         loopflow_doc,
+        message: opts.message.clone(),
     })
 }
 
-/// Gather docs from repo (roadmap/, scratch/, root .md files).
-fn gather_docs(repo_root: &Path) -> Result<Vec<Document>, CoreError> {
+/// Gather docs from repo (scratch/, roadmap/<wave>/, root .md files).
+///
+/// Matches Python's gather_lfdocs behavior:
+/// 1. scratch/ (design docs, ephemeral per-PR)
+/// 2. roadmap/<wave>/ (only if wave is set)
+/// 3. Root .md files
+fn gather_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document>, CoreError> {
     let mut docs = Vec::new();
 
-    // Root .md files
-    for entry in fs::read_dir(repo_root)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.extension().map(|e| e == "md").unwrap_or(false) {
-            if let Ok(content) = fs::read_to_string(&path) {
-                docs.push(Document {
-                    path: path
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_string(),
-                    content,
-                    category: "docs".to_string(),
-                });
-            }
-        }
-    }
-
-    // scratch/
+    // 1. scratch/ (design docs, ephemeral per-PR)
     let scratch_dir = repo_root.join("scratch");
     if scratch_dir.is_dir() {
         gather_md_files(&scratch_dir, &mut docs, "scratch")?;
     }
 
-    // roadmap/
-    let roadmap_dir = repo_root.join("roadmap");
-    if roadmap_dir.is_dir() {
-        gather_md_files(&roadmap_dir, &mut docs, "roadmap")?;
+    // 2. roadmap/<wave>/ (only if wave is set)
+    if let Some(wave_name) = wave {
+        let wave_dir = repo_root.join("roadmap").join(wave_name);
+        if wave_dir.is_dir() {
+            // README first
+            let readme = wave_dir.join("README.md");
+            if readme.is_file() {
+                if let Ok(content) = fs::read_to_string(&readme) {
+                    docs.push(Document {
+                        path: format!("roadmap/{}/README.md", wave_name),
+                        content,
+                        category: "roadmap".to_string(),
+                    });
+                }
+            }
+            // Then other .md files (sorted)
+            let mut entries: Vec<_> = fs::read_dir(&wave_dir)?
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    let path = e.path();
+                    path.is_file()
+                        && path.extension().map(|ext| ext == "md").unwrap_or(false)
+                        && path.file_name().map(|n| n != "README.md").unwrap_or(false)
+                })
+                .collect();
+            entries.sort_by_key(|e| e.path());
+            for entry in entries {
+                let path = entry.path();
+                if let Ok(content) = fs::read_to_string(&path) {
+                    docs.push(Document {
+                        path: format!(
+                            "roadmap/{}/{}",
+                            wave_name,
+                            path.file_name().unwrap_or_default().to_string_lossy()
+                        ),
+                        content,
+                        category: "roadmap".to_string(),
+                    });
+                }
+            }
+        }
     }
 
-    // reports/
-    let reports_dir = repo_root.join("reports");
-    if reports_dir.is_dir() {
-        gather_md_files(&reports_dir, &mut docs, "reports")?;
+    // 3. Root .md files (sorted)
+    let mut entries: Vec<_> = fs::read_dir(repo_root)?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let path = e.path();
+            path.is_file() && path.extension().map(|ext| ext == "md").unwrap_or(false)
+        })
+        .collect();
+    entries.sort_by_key(|e| e.path());
+    for entry in entries {
+        let path = entry.path();
+        if let Ok(content) = fs::read_to_string(&path) {
+            docs.push(Document {
+                path: path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string(),
+                content,
+                category: "docs".to_string(),
+            });
+        }
     }
 
     Ok(docs)
@@ -569,6 +615,12 @@ pub fn format_prompt(components: &PromptComponents) -> String {
              any open questions to `scratch/questions.md`."
                 .to_string(),
         );
+    } else if components.run_mode.as_deref() == Some("interactive") {
+        parts.push(
+            "Run mode is interactive. This is a conversation—ask questions, \
+             propose approaches, and wait for feedback before taking major actions."
+                .to_string(),
+        );
     }
 
     // 2.5. Wave context
@@ -691,7 +743,227 @@ pub fn format_prompt(components: &PromptComponents) -> String {
         ));
     }
 
+    // 6. User message (additional instructions)
+    if let Some(ref message) = components.message {
+        parts.push(format!(
+            "Additional instructions from user.\n\n\
+             <lf:message>\n{}\n</lf:message>",
+            message
+        ));
+    }
+
     parts.join("\n\n")
+}
+
+/// Format context components for system prompt (everything except step).
+///
+/// This is used with `--append-system-prompt-file` to load context into the
+/// system prompt without a tool call, keeping input history clean.
+pub fn format_context_prompt(components: &PromptComponents) -> String {
+    let mut parts = Vec::new();
+
+    // 1. System docs (loopflow)
+    if let Some(ref doc) = components.loopflow_doc {
+        parts.push(format!("<lf:loopflow>\n{}\n</lf:loopflow>", doc));
+    }
+
+    // 2. Run mode
+    if components.run_mode.as_deref() == Some("auto") {
+        parts.push(
+            "Run mode is auto (headless). Proceed without pausing for questions. \
+             If you need clarification, make the best assumption you can and append \
+             any open questions to `scratch/questions.md`."
+                .to_string(),
+        );
+    } else if components.run_mode.as_deref() == Some("interactive") {
+        parts.push(
+            "Run mode is interactive. This is a conversation—ask questions, \
+             propose approaches, and wait for feedback before taking major actions."
+                .to_string(),
+        );
+    }
+
+    // 2.5. Wave context
+    if let Some(ref wave) = components.wave {
+        parts.push(format!(
+            "<lf:wave name=\"{}\">\n\
+             You are building toward the {} program of work.\n\
+             Roadmap context is included in docs below.\n\
+             </lf:wave>",
+            wave, wave
+        ));
+    }
+
+    // 3. Reference material (docs, summaries)
+    if !components.docs.is_empty() {
+        let doc_parts: Vec<String> = components
+            .docs
+            .iter()
+            .map(|doc| {
+                let name = Path::new(&doc.path)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| doc.path.clone());
+                format!("<lf:{}>\n{}\n</lf:{}>", name, doc.content, name)
+            })
+            .collect();
+
+        let docs_body = doc_parts.join("\n\n");
+        parts.push(format!(
+            "Repository documentation. Follow STYLE carefully. \
+             May include design artifacts (scratch/) and internal docs (reports/).\n\n\
+             <lf:docs>\n{}\n</lf:docs>",
+            docs_body
+        ));
+    }
+
+    if !components.summaries.is_empty() {
+        let summary_parts: Vec<String> = components
+            .summaries
+            .iter()
+            .map(|s| {
+                format!(
+                    "<lf:summary path=\"{}\">\n{}\n</lf:summary>",
+                    s.path, s.content
+                )
+            })
+            .collect();
+        let summaries_body = summary_parts.join("\n\n");
+        parts.push(format!(
+            "Pre-generated codebase summaries.\n\n\
+             <lf:summaries>\n{}\n</lf:summaries>",
+            summaries_body
+        ));
+    }
+
+    // 4. Directions (but NOT step - step goes in task prompt)
+    if !components.directions.is_empty() {
+        if components.directions.len() == 1 {
+            let d = &components.directions[0];
+            parts.push(format!(
+                "Direction for this work.\n\n\
+                 <lf:direction:{}>\n{}\n</lf:direction:{}>",
+                d.name, d.content, d.name
+            ));
+        } else {
+            let direction_parts: Vec<String> = components
+                .directions
+                .iter()
+                .map(|d| {
+                    format!(
+                        "<lf:direction:{}>\n{}\n</lf:direction:{}>",
+                        d.name, d.content, d.name
+                    )
+                })
+                .collect();
+            parts.push(format!(
+                "Directions for this work.\n\n\
+                 <lf:directions>\n{}\n</lf:directions>",
+                direction_parts.join("\n")
+            ));
+        }
+    }
+
+    // 5. Working context (diff, diff_files, clipboard)
+    if components.diff.is_some() || !components.diff_files.is_empty() {
+        let mut diff_parts = Vec::new();
+
+        if let Some(ref diff) = components.diff {
+            diff_parts.push(format!("<lf:diff>\n{}\n</lf:diff>", diff));
+        }
+
+        if !components.diff_files.is_empty() {
+            let files_content = format_files(&components.diff_files);
+            diff_parts.push(files_content);
+        }
+
+        parts.push(format!(
+            "Changes on this branch (diff against main).\n\n{}",
+            diff_parts.join("\n\n")
+        ));
+    }
+
+    if let Some(ref clipboard) = components.clipboard {
+        parts.push(format!(
+            "Content from clipboard.\n\n\
+             <lf:clipboard>\n{}\n</lf:clipboard>",
+            clipboard
+        ));
+    }
+
+    // Note: step is NOT included in context - it goes in task prompt
+
+    // 6. User message (additional instructions)
+    if let Some(ref message) = components.message {
+        parts.push(format!(
+            "Additional instructions from user.\n\n\
+             <lf:message>\n{}\n</lf:message>",
+            message
+        ));
+    }
+
+    parts.join("\n\n")
+}
+
+/// Format step/task for user message (just the step content).
+///
+/// This is passed as the CLI argument when using `--append-system-prompt-file`.
+pub fn format_task_prompt(components: &PromptComponents) -> String {
+    let Some(ref step) = components.step else {
+        return String::new();
+    };
+
+    if let Some(ref content) = step.content {
+        format!(
+            "<lf:step:{}>\n{}\n</lf:step:{}>",
+            step.name, content, step.name
+        )
+    } else {
+        format!("<lf:step:{}>\n</lf:step:{}>", step.name, step.name)
+    }
+}
+
+/// Write prompt to log file and return the path.
+///
+/// File format: `{timestamp}-{flow_parents}.{step}.md` or `{timestamp}-{step}.md`
+///
+/// Creates `.lf/.gitignore` with `log/` if it doesn't exist.
+pub fn write_prompt_log(
+    repo_root: &Path,
+    prompt: &str,
+    step_name: &str,
+    flow_parents: Option<&[String]>,
+) -> Result<PathBuf, CoreError> {
+    let lf_dir = repo_root.join(".lf");
+    let log_dir = lf_dir.join("log");
+    fs::create_dir_all(&log_dir)?;
+
+    // Ensure .lf/.gitignore exists with log/
+    let gitignore_path = lf_dir.join(".gitignore");
+    if !gitignore_path.exists() {
+        fs::write(&gitignore_path, "log/\n")?;
+    }
+
+    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let name_part = match flow_parents {
+        Some(parents) if !parents.is_empty() => {
+            format!("{}.{}", parents.join("."), step_name)
+        }
+        _ => step_name.to_string(),
+    };
+    let filename = format!("{}-{}.md", timestamp, name_part);
+    let path = log_dir.join(&filename);
+
+    fs::write(&path, prompt)?;
+    Ok(path)
+}
+
+/// Build the short bootstrap prompt that instructs the agent to read the prompt file.
+pub fn build_bootstrap_prompt(prompt_path: &Path) -> String {
+    format!(
+        "Read {} for your initial context and then engage.",
+        prompt_path.display()
+    )
 }
 
 /// Format file documents for inclusion in prompt.
@@ -1510,5 +1782,198 @@ directions:
         assert!(result.is_ok());
         let components = result.unwrap();
         assert_eq!(components.wave, Some("rust-migration".to_string()));
+    }
+
+    // ==========================================================================
+    // prompt log tests
+    // ==========================================================================
+
+    #[test]
+    fn build_bootstrap_prompt_formats_path() {
+        let path = Path::new("/repo/.lf/log/20260204-123456-implement.md");
+        let bootstrap = build_bootstrap_prompt(path);
+        assert_eq!(
+            bootstrap,
+            "Read /repo/.lf/log/20260204-123456-implement.md for your initial context and then engage."
+        );
+    }
+
+    #[test]
+    fn write_prompt_log_creates_file() {
+        let repo = init_repo();
+        let prompt = "Test prompt content";
+        let path = write_prompt_log(repo.path(), prompt, "implement", None).unwrap();
+
+        assert!(path.exists());
+        assert!(path.to_string_lossy().contains(".lf/log/"));
+        assert!(path.to_string_lossy().ends_with("-implement.md"));
+
+        let content = fs::read_to_string(&path).unwrap();
+        assert_eq!(content, prompt);
+    }
+
+    #[test]
+    fn write_prompt_log_creates_gitignore() {
+        let repo = init_repo();
+        let gitignore_path = repo.path().join(".lf/.gitignore");
+
+        assert!(!gitignore_path.exists());
+
+        write_prompt_log(repo.path(), "test", "step", None).unwrap();
+
+        assert!(gitignore_path.exists());
+        let content = fs::read_to_string(&gitignore_path).unwrap();
+        assert_eq!(content, "log/\n");
+    }
+
+    #[test]
+    fn write_prompt_log_with_flow_parents() {
+        let repo = init_repo();
+        let path = write_prompt_log(
+            repo.path(),
+            "content",
+            "implement",
+            Some(&["ship".to_string(), "grind".to_string()]),
+        )
+        .unwrap();
+
+        assert!(path.to_string_lossy().contains("ship.grind.implement.md"));
+    }
+
+    #[test]
+    fn write_prompt_log_preserves_existing_gitignore() {
+        let repo = init_repo();
+        let lf_dir = repo.path().join(".lf");
+        fs::create_dir_all(&lf_dir).unwrap();
+        fs::write(lf_dir.join(".gitignore"), "log/\ncustom/\n").unwrap();
+
+        write_prompt_log(repo.path(), "test", "step", None).unwrap();
+
+        let content = fs::read_to_string(lf_dir.join(".gitignore")).unwrap();
+        assert_eq!(content, "log/\ncustom/\n");
+    }
+
+    // ==========================================================================
+    // format_context_prompt tests
+    // ==========================================================================
+
+    #[test]
+    fn format_context_prompt_excludes_step() {
+        let components = PromptComponents {
+            run_mode: Some("auto".to_string()),
+            step: Some(Step {
+                name: "implement".to_string(),
+                content: Some("Implement the feature.".to_string()),
+                model: None,
+                directions: vec![],
+                interactive: None,
+            }),
+            ..Default::default()
+        };
+
+        let context = format_context_prompt(&components);
+        // Should NOT include step content
+        assert!(!context.contains("<lf:step:implement>"));
+        assert!(!context.contains("Implement the feature."));
+        // Should include run mode
+        assert!(context.contains("Run mode is auto"));
+    }
+
+    #[test]
+    fn format_context_prompt_includes_all_context() {
+        let components = PromptComponents {
+            run_mode: Some("interactive".to_string()),
+            docs: vec![Document {
+                path: "README.md".to_string(),
+                content: "# Project".to_string(),
+                category: "docs".to_string(),
+            }],
+            directions: vec![Direction {
+                name: "concise".to_string(),
+                content: "Be concise.".to_string(),
+                source: PathBuf::from(".lf/directions/concise.md"),
+            }],
+            clipboard: Some("Error message".to_string()),
+            step: Some(Step {
+                name: "debug".to_string(),
+                content: Some("Fix the error.".to_string()),
+                model: None,
+                directions: vec![],
+                interactive: None,
+            }),
+            ..Default::default()
+        };
+
+        let context = format_context_prompt(&components);
+        // Should include context parts
+        assert!(context.contains("Run mode is interactive"));
+        assert!(context.contains("<lf:docs>"));
+        assert!(context.contains("# Project"));
+        assert!(context.contains("<lf:direction:concise>"));
+        assert!(context.contains("<lf:clipboard>"));
+        // Should NOT include step
+        assert!(!context.contains("<lf:step:debug>"));
+        assert!(!context.contains("Fix the error."));
+    }
+
+    #[test]
+    fn format_context_prompt_interactive_mode_message() {
+        let components = PromptComponents {
+            run_mode: Some("interactive".to_string()),
+            ..Default::default()
+        };
+
+        let context = format_context_prompt(&components);
+        assert!(context.contains("Run mode is interactive"));
+        assert!(context.contains("ask questions"));
+        assert!(context.contains("wait for feedback"));
+    }
+
+    // ==========================================================================
+    // format_task_prompt tests
+    // ==========================================================================
+
+    #[test]
+    fn format_task_prompt_returns_step_content() {
+        let components = PromptComponents {
+            step: Some(Step {
+                name: "implement".to_string(),
+                content: Some("Implement the feature.".to_string()),
+                model: None,
+                directions: vec![],
+                interactive: None,
+            }),
+            ..Default::default()
+        };
+
+        let task = format_task_prompt(&components);
+        assert!(task.contains("<lf:step:implement>"));
+        assert!(task.contains("Implement the feature."));
+        assert!(task.contains("</lf:step:implement>"));
+    }
+
+    #[test]
+    fn format_task_prompt_empty_when_no_step() {
+        let components = PromptComponents::default();
+        let task = format_task_prompt(&components);
+        assert!(task.is_empty());
+    }
+
+    #[test]
+    fn format_task_prompt_step_without_content() {
+        let components = PromptComponents {
+            step: Some(Step {
+                name: "review".to_string(),
+                content: None,
+                model: None,
+                directions: vec![],
+                interactive: None,
+            }),
+            ..Default::default()
+        };
+
+        let task = format_task_prompt(&components);
+        assert!(task.contains("<lf:step:review>"));
+        assert!(task.contains("</lf:step:review>"));
     }
 }

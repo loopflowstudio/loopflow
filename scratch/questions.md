@@ -44,3 +44,49 @@ The remaining items in `roadmap/concerto/` are all Phase 2 or 3.
 - Refresh endpoint response: assumed /auth/refresh returns JSON {token|jwt} or raw token string; confirm actual contract.
 - Package supports macOS 15 only; design doc targets macOS 14+/iOS 17+. If iOS support is required, update Swift package platforms and add iOS app target.
 - RemoteWaveService not present in repo; TokenProvider added but not wired into any remote service yet.
+
+## lf ops Rust-Native Workflow Engine
+
+### Architecture
+
+1. **Should `workflow` be a separate crate or module in `loopflow-engine`?**
+
+   Argument for module: simpler dependency graph, single crate to maintain.
+
+   Argument for crate: cleaner separation, workflow could depend on engine but engine doesn't know about workflow.
+
+   **Assumption made:** Module in `loopflow-engine` (simpler).
+
+2. **How to handle interactive confirmation in workflow functions?**
+
+   The `Progress` trait has `confirm(&self, msg: &str) -> bool`. For CLI this prompts stdin. For lfd, this should probably fail or use a config flag like `--yes`.
+
+   **Assumption made:** Progress trait handles it; implementations differ.
+
+### Agent Integration
+
+3. **Should agent-generated commit messages use a step file or inline prompt?**
+
+   Python has a `commit` step in `.lf/steps/commit.md`. The design assumes we load this step.
+
+   **Assumption made:** Use step files. If missing, fall back to inline prompt.
+
+4. **What happens if agent fails during lint fix or conflict resolution?**
+
+   Options: retry, abort workflow, prompt user.
+
+   **Assumption made:** Abort workflow with error. User can retry manually.
+
+### Parity Gaps
+
+5. **Should we support stacked PRs?**
+
+   Python detects if current branch has an open PR and stacks. The existing gap analysis mentions this.
+
+   **Assumption made:** In scope. Use `gh pr list --head BRANCH` to detect.
+
+6. **Should `lf ops next --block` poll for merge or use webhooks?**
+
+   Polling is simpler but wastes API calls. Webhooks require lfd to be running.
+
+   **Assumption made:** Polling with exponential backoff. `--block` is CLI-only anyway.

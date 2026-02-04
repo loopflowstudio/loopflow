@@ -1,494 +1,393 @@
-# lf ops: Full Parity Analysis
-
-Detailed gap analysis between Python and Rust `lf ops` implementations, with a plan to reach 100% feature parity.
+# lf ops: Rust-First Git Workflow
 
-## Architecture Simplification
-
-**Current state:** Python calls `lf-engine` binary (JSON wrapper around `loopflow-engine`) for git operations.
-
-**Target state:**
-- `loopflow-engine` - Rust library (shared between `lf` and `lfd`)
-- `lf` - Rust CLI using `loopflow-engine` directly
-- `lfd` - Rust daemon using `loopflow-engine` directly
-- Python `loopflow` - uses PyO3 bindings to `loopflow-engine`
-
-**Action:** Delete `lf-engine` binary. Python uses PyO3 or calls `lf` if needed.
-
----
-
-## Command-by-Command Gap Analysis
-
-### Core Git Workflow Commands
-
-#### `lf ops rebase`
-
-| Feature | Python | Rust | Gap |
-|---------|--------|------|-----|
-| Fetch origin/main first | Yes | Yes | - |
-| Rebase onto ref | Yes | Yes | - |
-| Conflict detection | Yes | Yes | - |
-| **Abort on conflict** | Yes, then launches assistant | No, just fails | **MISSING** |
-| **Launch `lf rebase` step on conflict** | Yes | No | **MISSING** |
-| Force-push after success | Yes | Yes | - |
-| Progress messages | "Fetching...", "Rebasing..." | Minimal | **UX gap** |
-
-**Work needed:**
-1. On conflict: abort rebase, list conflicted files
-2. Launch `lf rebase` step (agent) to resolve conflicts
-3. Wait for agent, verify rebase completed
-4. Add progress messages
-
----
-
-#### `lf ops push`
-
-| Feature | Python | Rust | Gap |
-|---------|--------|------|-----|
-| Basic push | Yes | Yes | - |
-| `--force-with-lease` | Yes, automatic fallback | Yes, via flag | - |
-
-**Status:** Mostly complete. Minor UX differences.
-
----
-
-#### `lf ops commit`
-
-| Feature | Python | Rust | Gap |
-|---------|--------|------|-----|
-| `-m/--message` | Yes | Yes | - |
-| **Auto-stage (`-a/--add`)** | Yes, default true | No | **MISSING** |
-| **Lint before commit (`--lint`)** | Yes, default true | No | **MISSING** |
-| **LLM-generated message** | Yes, via `lf commit` step | No, message required | **MISSING** |
-| **Push after commit (`-p/--push`)** | Yes | No | **MISSING** |
-| **Auto-create draft PR** | Yes, after push | No | **MISSING** |
-| Progress messages | Yes | Minimal | **UX gap** |
-
-**Work needed:**
-1. Add `--add/--no-add` flag (default: add)
-2. Add `--lint/--no-lint` flag (default: lint)
-3. Add `--push` flag
-4. Integrate agent for message generation when no `-m` provided
-5. Create draft PR after push if none exists
-
----
-
-#### `lf ops pr`
-
-| Feature | Python | Rust | Gap |
-|---------|--------|------|-----|
-| Create PR | Yes | Yes, via `gh pr create --fill` | - |
-| `--draft` | Yes | Yes | - |
-| **Auto-commit pending changes** | Yes | No | **MISSING** |
-| **Auto-rebase if behind main** | Yes | No | **MISSING** |
-| **LLM-generated title/body** | Yes | No, uses `--fill` | **MISSING** |
-| **Detect draft → mark ready** | Yes | No | **MISSING** |
-| **`--refresh` to regenerate** | Yes | No | **MISSING** |
-| **Stacked base branch detection** | Yes | No | **MISSING** |
-| **Open in browser after create** | Yes | No | **MISSING** |
-| **Lint before PR (`--lint`)** | Yes | No | **MISSING** |
-
-**Work needed:**
-1. Auto-commit workflow (calls `add_commit_push()` equivalent)
-2. Check if behind main, auto-rebase
-3. LLM message generation via agent
-4. Draft detection and `gh pr ready`
-5. `--refresh` flag to regenerate
-6. Stacked branch: detect parent branch, set as base
-7. Open browser: `gh pr view --web`
-8. Lint integration
-
----
-
-#### `lf ops land`
-
-| Feature | Python | Rust | Gap |
-|---------|--------|------|-----|
-| `--strategy` | Yes | Yes | - |
-| **Auto-commit (`--strict` to disable)** | Yes | No | **MISSING** |
-| **Auto-rebase onto main** | Yes | No | **MISSING** |
-| **Lint before land (`--lint`)** | Yes | No | **MISSING** |
-| **Clear `scratch/` before merge** | Yes | No | **MISSING** |
-| **Refresh PR with new message** | Yes | No | **MISSING** |
-| **Mark draft as ready** | Yes | No | **MISSING** |
-| **Enable auto-merge** | Yes, `gh pr merge --auto` | Has `pr_merge_squash_auto` | Needs integration |
-| **Wait for merge (`--block`)** | No (next has it) | No | - |
-| **Worktree cleanup** | Yes | Partial | **Gap** |
-| **`--local` vs `--gh` modes** | Yes | Yes via strategy | - |
-| **`-w/--worktree` target** | Yes | No | **MISSING** |
-| **`-c/--create-pr` option** | Yes | No | **MISSING** |
-| Conflict → agent handoff | Yes | No | **MISSING** |
-| Progress messages | Detailed | Minimal | **UX gap** |
-
-**Work needed:**
-1. `--strict` flag (disable auto-commit)
-2. Auto-rebase workflow with conflict agent handoff
-3. `--lint/--no-lint` integration
-4. `clear_scratch()` implementation
-5. PR refresh before merge
-6. Integrate auto-merge enablement
-7. `-w/--worktree` targeting
-8. `-c/--create-pr` shortcut
-
----
-
-#### `lf ops next`
-
-| Feature | Python | Rust | Gap |
-|---------|--------|------|-----|
-| Preserve current worktree | Yes | Yes | - |
-| Create new branch | Yes | Yes | - |
-| Shell directive for cd | Yes | Yes | - |
-| **Auto-commit pending changes** | Yes | No | **MISSING** |
-| **Auto-rebase (`--no-rebase` to skip)** | Yes | No | **MISSING** |
-| **Enable auto-merge on current PR** | Yes | No | **MISSING** |
-| **`--block` to wait for merge** | Yes | No | **MISSING** |
-| **`--create-pr` option** | Yes | No | **MISSING** |
-| **Stack vs fresh start logic** | Yes (PR open → stack, merged → fresh) | Always fresh? | **Verify** |
-| **Update wave metadata** | Yes | No | **MISSING** |
-| **Open terminal in new worktree** | Yes | No | **MISSING** |
-
-**Work needed:**
-1. Auto-commit workflow
-2. `--rebase/--no-rebase` flags
-3. Enable auto-merge on current PR before creating new
-4. `--block` with merge polling loop
-5. `--create-pr` option
-6. Stacking logic: if PR open, stack on HEAD; if merged, fresh from main
-7. Wave metadata update (when wave module exists)
-8. Terminal opening (configurable IDE/terminal)
-
----
-
-#### `lf ops abandon`
-
-| Feature | Python | Rust | Gap |
-|---------|--------|------|-----|
-| Delete local branch | Yes | Yes | - |
-| `--force` | Yes | Yes | - |
-| **Find worktree by branch** | Yes | No, operates on current | **MISSING** |
-| **Check uncommitted changes** | Yes | No | **MISSING** |
-| **Confirmation prompt** | Yes | No | **MISSING** |
-| **Close PR** | Yes, `gh pr close` | No | **MISSING** |
-| **Delete remote branch** | Yes | No | **MISSING** |
-| **Remove worktree** | Yes | No | **MISSING** |
-
-**Work needed:**
-1. Accept branch name argument (find worktree)
-2. Dirty check before abandon
-3. Confirmation unless `--force`
-4. `gh pr close` integration
-5. `git push origin --delete`
-6. `worktree_remove()` call
-
----
-
-#### `lf ops sync`
-
-| Feature | Python | Rust | Gap |
-|---------|--------|------|-----|
-| Fetch origin/main | Yes | Yes | - |
-| Reset local main | Yes | Yes | - |
-| Dirty check on main | Yes | Yes | - |
-
-**Status:** Complete.
-
----
-
-### Worktree Commands
-
-#### `lf ops wt create`
-
-| Feature | Python | Rust | Gap |
-|---------|--------|------|-----|
-| Schema-based naming | Yes | Yes | - |
-| `--base` branch | Yes | Yes | - |
-| `--stack` on current | Yes | Yes | - |
-| Shell directive for cd | Yes | Yes | - |
-| Fallback cd message | Yes | Yes | - |
-
-**Status:** Complete.
-
----
-
-#### `lf ops wt switch`
-
-| Feature | Python | Rust | Gap |
-|---------|--------|------|-----|
-| Match by short name | Yes | Yes | - |
-| Shell directive for cd | Yes | Yes | - |
-| Multiple match error | Yes | Yes | - |
-
-**Status:** Complete.
-
----
-
-#### `lf ops wt list`
-
-| Feature | Python | Rust | Gap |
-|---------|--------|------|-----|
-| `--format json` | Yes | Yes | - |
-| `--sync` before list | Yes | Flag accepted, **not implemented** | **Gap** |
-| `--full` details | Yes | Flag accepted, **not implemented** | **Gap** |
-| Prunable annotation | Yes | Yes | - |
-
-**Work needed:**
-1. Implement `--sync` (call `sync_main()` before listing)
-2. Implement `--full` (include commit info, PR status, etc.)
-
----
-
-#### `lf ops wt prune`
-
-| Feature | Python | Rust | Gap |
-|---------|--------|------|-----|
-| Merge detection | Yes | Yes | - |
-| `--dry-run` | Yes | Yes | - |
-| `--force` skip confirm | Yes | Yes | - |
-| `--debug` diagnostics | Yes | Yes | - |
-| Exclude current worktree | Yes | Yes | - |
-| Sync before prune | Yes | ? | **Verify** |
-| **Confirmation prompt** | Yes | No? | **Verify** |
-
-**Status:** Mostly complete. Verify confirmation UX.
-
----
-
-#### `lf ops wt ci`
-
-| Feature | Python | Rust | Gap |
-|---------|--------|------|-----|
-| Show CI status | Yes | Yes | - |
-| `--watch` | Yes | Yes | - |
-| `--logs` for failures | Yes | Yes | - |
-
-**Status:** Complete.
-
----
-
-### Shell Integration
-
-#### `lf ops shell init`
-
-| Feature | Python | Rust | Gap |
-|---------|--------|------|-----|
-| zsh support | Yes | Yes | - |
-| bash support | Yes | Yes | - |
-| **fish support** | Yes | No | **Deferred** |
-
----
-
-#### `lf ops shell install`
-
-| Feature | Python | Rust | Gap |
-|---------|--------|------|-----|
-| Auto-detect shell | Yes | Yes | - |
-| Append to config | Yes | Yes | - |
-| `-y/--yes` skip confirm | Yes | ? | **Verify** |
-| Already installed check | Yes | ? | **Verify** |
-
----
-
-### Missing Commands
-
-| Command | Python Behavior | Priority |
-|---------|-----------------|----------|
-| **`lf ops add`** | Create `.claude/commands/<name>.md` template | Low |
-| **`lf ops cp`** | Copy context to clipboard for web clients | Low |
-| **`lf ops doctor`** | Check dependencies (wt, gh, claude, codex, etc.) | Medium |
-| **`lf ops version`** | Show loopflow version | Low |
-
-Note: `summarize` moves from `lf ops` to `lfd`. See `02b-summarize.md`.
-
----
-
-## Cross-Cutting Concerns
-
-### 1. Auto-Commit Workflow
-
-Python has a shared `add_commit_push()` pattern used by:
-- `pr` (before creating/updating PR)
-- `land` (unless `--strict`)
-- `next` (before iterating)
-
-**Implementation:**
+## Problem
+
+The Python `lf ops` CLI has rich automation: auto-commit, auto-rebase, agent-assisted conflict resolution, LLM-generated messages, lint integration. The Rust implementation exists but lacks this automation. Users reaching for `lf ops commit`, `lf ops pr`, or `lf ops land` get a fraction of the capability.
+
+**Who benefits:** Anyone using `lf` for git workflows. The gap blocks the Phase 1 goal of making `lf` (Rust) the primary CLI.
+
+**Why now:** Phase 2 requires `lfd` to call git operations. Having one authoritative implementation (Rust) prevents drift between daemon and CLI.
+
+## Approach
+
+Replace Python `lf ops` with Rust entirely. Delete `lf-engine` binary. Expose `loopflow-engine` to Python via PyO3 for any remaining Python callers.
+
+Three priorities:
+1. **Agent integration** - Rust can launch agents for commit messages, PR descriptions, conflict resolution
+2. **Auto-commit workflow** - Stage, generate message, commit, push, ensure draft PR
+3. **Lint integration** - Check before commit/PR/land, launch fixer agent on failure
+
+The workflow commands (`commit`, `pr`, `land`, `next`) are interconnected. Fix all four together rather than incrementally.
+
+## Alternatives Considered
+
+| Approach | Tradeoff | Why Not |
+|----------|----------|---------|
+| Keep Python ops, call from Rust | Two implementations, maintenance burden | Goal is single source of truth |
+| Port incrementally, maintain parity | Longer timeline, feature drift | Users get inconsistent behavior |
+| Just expose Python to Rust via subprocess | Slow, awkward, circular deps | Defeats purpose of Rust-first |
+
+## Key Decisions
+
+**1. Agent invocation from Rust**
+
+The roadmap says: "protocol first... lf uses loopflow-engine directly."
+
+Rust `lf ops commit` without `-m` will:
+1. Build prompt via `loopflow_engine::prompt::gather_context()`
+2. Launch agent via `loopflow_engine::agent::launch_agent()`
+3. Parse agent output for commit message
+4. Commit with that message
+
+This is the same pattern Python uses, but without subprocess boundary.
+
+**2. Auto-commit is opt-out, not opt-in**
+
+The roadmap says: "start with minimal data structures and APIs."
+
+Current Rust: commit requires `-m`. Python: auto-generates message.
+
+Decision: Rust matches Python. `-m` is optional. If omitted, agent generates message. Add `--no-add` and `--no-lint` as opt-outs.
+
+**3. Conflict resolution launches rebase agent**
+
+When `lf ops rebase` or auto-rebase hits conflicts:
+1. Abort rebase (leave files in conflict state)
+2. Launch `lf rebase` step with conflict context
+3. Agent resolves, retries rebase
+4. Verify branch is ahead of base
+
+This matches Python's pattern and leverages existing `rebase` step infrastructure.
+
+**4. Delete lf-engine binary**
+
+The gap analysis notes: "Python calls `lf-engine` binary for git operations."
+
+Instead: Python imports `loopflow_engine` via PyO3. The `python` feature is already defined in Cargo.toml. No intermediate binary.
+
+## Scope
+
+### In scope
+
+**Core workflow commands:**
+- `commit` - auto-stage, lint, agent message, push, draft PR
+- `pr` - auto-commit, rebase, LLM title/body, draft→ready, browser open
+- `land` - auto-commit, rebase, lint, clear scratch/, auto-merge, worktree cleanup
+- `rebase` - conflict detection, agent handoff
+- `next` - auto-commit, auto-merge current PR, create stacked branch
+- `abandon` - close PR, delete remote, remove worktree
+
+**Supporting infrastructure:**
+- Agent launch from Rust (already exists: `loopflow_engine::agent`)
+- Lint check and agent fixer
+- Auto-commit workflow (stage, message, commit, push, draft PR)
+- Progress messages ("Fetching...", "Rebasing...", etc.)
+
+**Architecture cleanup:**
+- Delete `lf-engine` binary
+- Python uses PyO3 bindings exclusively
+
+### Out of scope
+
+- Wave integration (deferred to Phase 2 - depends on lfd primary)
+- Fish shell support (deferred - limited user base)
+- `lf ops doctor` command (useful but not blocking)
+- Container/K8s executors (Phase 2)
+
+## Implementation
+
+### Phase 1: Agent + Auto-commit (1 week)
+
+Add to `loopflow_engine`:
+
 ```rust
-fn add_commit_push(repo: &Path) -> Result<()> {
+// loopflow_engine/src/ops.rs (new module)
+
+/// Auto-commit workflow: stage, generate message, commit, push, draft PR.
+pub fn add_commit_push(repo: &Path, push: bool) -> Result<bool> {
+    if is_clean(repo)? {
+        if push {
+            push_branch(repo)?;
+            ensure_draft_pr(repo)?;
+        }
+        return Ok(false);
+    }
+
     stage_all(repo)?;
-    // Generate message via agent or use default
-    let msg = generate_commit_message(repo)?;
-    commit(repo, &msg)?;
-    push(repo)?;
-    ensure_draft_pr(repo)?;
+    let message = generate_commit_message(repo)?; // agent invocation
+    commit(repo, &message)?;
+
+    if push {
+        push_branch(repo)?;
+        ensure_draft_pr(repo)?;
+    }
+    Ok(true)
+}
+
+/// Lint check with agent fixer fallback.
+pub fn run_lint(repo: &Path) -> Result<bool> {
+    match check_lint(repo)? {
+        LintResult::Pass => Ok(true),
+        LintResult::Fail | LintResult::Unknown => {
+            launch_lint_fixer_agent(repo)?;
+            Ok(check_lint(repo)? == LintResult::Pass)
+        }
+    }
+}
+
+/// Generate commit message via agent.
+fn generate_commit_message(repo: &Path) -> Result<String> {
+    let components = gather_context(&GatherContextOpts {
+        repo_root: repo.to_path_buf(),
+        step: Some("commit".to_string()),
+        ..Default::default()
+    })?;
+    let prompt = format_prompt(&components);
+    let result = launch_agent("claude:opus", &prompt, &LaunchConfig::auto())?;
+    parse_commit_message(&result.stdout)
+}
+```
+
+Update `lf ops commit`:
+
+```rust
+fn commit_current(message: Option<&str>, add: bool, lint: bool, push: bool) -> Result<()> {
+    let repo = find_repo_root()?;
+
+    if add {
+        stage_all(&repo)?;
+    }
+
+    if lint && !run_lint(&repo)? {
+        return Err(anyhow!("lint failed"));
+    }
+
+    let msg = match message {
+        Some(m) => m.to_string(),
+        None => generate_commit_message(&repo)?,
+    };
+
+    commit(&repo, &msg)?;
+
+    if push {
+        push_branch(&repo)?;
+        ensure_draft_pr(&repo)?;
+    }
     Ok(())
 }
 ```
 
----
+### Phase 2: PR and Land (1 week)
 
-### 2. Lint Integration
+Update `lf ops pr`:
 
-Python commands support `--lint/--no-lint` with flow:
-1. Run `config.lint_check` command if set
-2. Fallback: try `ruff check` + `ruff format --check`
-3. On failure: run `lf lint` step (agent fixer)
-4. On pass: continue
+```rust
+fn create_or_update_pr(refresh: bool, lint: bool) -> Result<()> {
+    let repo = find_repo_root()?;
 
-**Commands needing lint:** `commit`, `pr`, `land`
+    if lint && !run_lint(&repo)? {
+        return Err(anyhow!("lint failed"));
+    }
 
----
+    sync_main(&repo, &get_default_branch(&repo)?)?;
+    add_commit_push(&repo, true)?;
 
-### 3. Agent Integration
+    if is_behind_main(&repo)? {
+        auto_rebase(&repo)?;
+    }
 
-Rust `lf ops` needs to invoke agents for:
-- Commit message generation (no `-m` provided)
-- PR title/body generation
-- Rebase conflict resolution
-- Lint fixing
+    let existing = get_pr_url(&repo)?;
+    if let Some(url) = existing {
+        if !refresh && !has_unpushed_commits(&repo)? && !is_draft_pr(&repo)? {
+            open_browser(&url)?;
+            return Ok(());
+        }
+        let message = generate_pr_message(&repo)?;
+        update_pr(&repo, &message)?;
+        if is_draft_pr(&repo)? {
+            mark_pr_ready(&repo)?;
+        }
+    } else {
+        let message = generate_pr_message(&repo)?;
+        let base = detect_stacked_base(&repo)?;
+        create_pr(&repo, &message, &base)?;
+    }
 
-**Pattern:** Use `loopflow-engine::agent::launch_agent()` with appropriate step.
+    open_browser(&get_pr_url(&repo)?.unwrap())?;
+    Ok(())
+}
+```
 
----
+Update `lf ops land`:
 
-### 4. Progress Messages & UX
+```rust
+fn land_current(strict: bool, worktree: Option<&str>, create_pr: bool, lint: bool) -> Result<()> {
+    let (repo, main_repo) = resolve_repos(worktree, strict)?;
 
-Python has polished UX with:
-- Progress: "Fetching origin/main...", "Rebasing...", "Pushing..."
-- Status: "No new commits. Opening existing PR..."
-- Errors: Detailed with suggestions
-- Confirmations: "Abandon branch 'X'? [y/N]:"
+    if lint && !run_lint(&repo)? {
+        return Err(anyhow!("lint failed"));
+    }
 
-Rust commands are terse. Add consistent messaging.
+    if !strict {
+        add_commit_push(&repo, true)?;
+    }
 
----
+    if !rebase_onto_main(&repo)? {  // launches agent on conflict
+        return Err(anyhow!("rebase failed"));
+    }
 
-### 5. Wave Integration
+    clear_scratch(&repo)?;  // delete scratch/*, commit, push
 
-Python tracks:
-- Current wave from worktree
-- Branch → wave mapping
-- Wave updates on `next`
+    if is_draft_pr(&repo)? {
+        mark_pr_ready(&repo)?;
+    }
 
-**Decision:** Defer until wave module ported. Add hooks for later.
+    let message = generate_pr_message(&repo)?;
+    update_pr(&repo, &message)?;
+    enable_auto_merge(&repo, &message)?;
 
----
+    open_browser(&get_pr_url(&repo)?)?;
+    Ok(())
+}
+```
 
-### 6. Scratch Clearing
+### Phase 3: Rebase + Next + Abandon (3 days)
 
-Before merge, Python calls `clear_scratch()`:
-1. Delete marked files in `scratch/`
-2. Commit the deletion
-3. Push before enabling auto-merge
+Update `lf ops rebase`:
 
-Prevents draft content from merging to main.
+```rust
+fn rebase_current(onto: Option<&str>) -> Result<()> {
+    let repo = find_repo_root()?;
+    let onto_ref = onto.unwrap_or(&format!("origin/{}", get_default_branch(&repo)?));
 
----
+    let result = rebase(&repo, onto_ref, None)?;
+    if !result.success {
+        // Rebase aborted, conflicts in working tree
+        println!("Conflicts detected, launching rebase assistant...");
+        launch_rebase_agent(&repo, &result.conflicts)?;
 
-## Implementation Phases
+        // Verify rebase completed
+        if !is_ahead_of(&repo, onto_ref)? {
+            return Err(anyhow!("rebase did not complete"));
+        }
+    }
 
-### Phase 1: Core Workflow Polish (High Impact)
+    // Force-push after rebase
+    if has_upstream(&repo)? {
+        push(&repo, true)?;
+    }
+    Ok(())
+}
+```
 
-1. **`commit` enhancements**
-   - `--add/--no-add` (stage all)
-   - `--push` (push + draft PR)
-   - Agent message generation when no `-m`
+Update `lf ops next`:
 
-2. **`pr` enhancements**
-   - Auto-commit before PR
-   - Auto-rebase if behind
-   - `--refresh` regeneration
-   - Mark draft as ready
-   - Open in browser
+```rust
+fn next_branch(block: bool, create_pr: bool, rebase: bool) -> Result<()> {
+    let repo = find_repo_root()?;
 
-3. **`land` enhancements**
-   - Auto-commit unless `--strict`
-   - Auto-rebase with conflict agent
-   - Clear scratch/
-   - Enable auto-merge
+    add_commit_push(&repo, true)?;
 
-4. **`abandon` full workflow**
-   - Branch argument (find worktree)
-   - Close PR
-   - Delete remote
-   - Remove worktree
-   - Confirmation prompt
+    if rebase && !rebase_onto_main(&repo)? {
+        return Err(anyhow!("rebase failed"));
+    }
 
----
+    if let Some(pr_number) = get_pr_number(&repo)? {
+        enable_auto_merge(&repo)?;
+        if block {
+            wait_for_merge(&repo, pr_number)?;
+        }
+    } else if create_pr {
+        create_or_update_pr(false, false)?;
+        enable_auto_merge(&repo)?;
+    }
 
-### Phase 2: Advanced Workflows
+    let new_branch = generate_branch_name(&repo)?;
+    create_branch(&repo, &new_branch)?;
+    push_with_upstream(&repo, &new_branch)?;
 
-1. **`rebase` conflict handling**
-   - Launch `lf rebase` step on conflict
-   - Wait for resolution
+    // Update wave metadata when wave module exists
+    // update_wave_branch(&repo, &new_branch)?;
 
-2. **`next` full workflow**
-   - `--block` merge waiting
-   - `--create-pr` option
-   - Auto-merge current PR
-   - Stack vs fresh logic
+    Ok(())
+}
+```
 
-3. **Lint integration**
-   - Shared lint check function
-   - Agent fixer on failure
-   - `--lint/--no-lint` flags
+Update `lf ops abandon`:
 
----
+```rust
+fn abandon_current(force: bool, branch: Option<&str>) -> Result<()> {
+    let repo = find_repo_root()?;
+    let main_repo = main_repo_root(&repo)?;
 
-### Phase 3: UX & Completeness
+    let target_branch = branch.or_else(|| current_branch(&repo).ok().flatten())
+        .ok_or_else(|| anyhow!("no branch specified"))?;
 
-1. **Progress messages**
-   - Consistent status output
-   - Clear error messages
+    let worktree = find_worktree_by_branch(&main_repo, &target_branch)?;
 
-2. **`wt list` full flags**
-   - `--sync` implementation
-   - `--full` details
+    if !force && !is_clean(&worktree)? {
+        return Err(anyhow!("uncommitted changes; use --force"));
+    }
 
-3. **Missing commands**
-   - `doctor` (dependency check)
-   - `version`
-   - `add` (prompt template)
+    // Close PR if exists
+    if let Ok(Some(_)) = get_pr_number(&worktree) {
+        close_pr(&worktree)?;
+    }
 
----
+    // Delete remote branch
+    let _ = delete_remote_branch(&main_repo, &target_branch);
 
-### Phase 4: Architecture Cleanup
+    // Remove worktree
+    worktree_remove(&main_repo, &worktree)?;
 
-1. **Delete `lf-engine` binary**
-   - Ensure PyO3 bindings cover all operations
-   - Update Python to use bindings
+    // Delete local branch
+    delete_local_branch(&main_repo, &target_branch)?;
 
-2. **Fish shell support**
-   - Add fish init script
+    Ok(())
+}
+```
 
----
+### Phase 4: Delete lf-engine (2 days)
 
-## Parity Checklist
+1. Verify PyO3 bindings in `loopflow_engine/src/python.rs` expose all needed functions
+2. Update Python `loopflow.lf.ops.git` to use PyO3 imports exclusively
+3. Delete `rust/loopflow-engine/src/bin/lf-engine.rs`
+4. Update `Cargo.toml` to remove the binary target
 
-### Commands
-- [ ] `rebase` - conflict → agent handoff
-- [ ] `push` - complete (verify UX)
-- [ ] `commit` - auto-stage, lint, agent message, push+PR
-- [ ] `pr` - auto-commit, rebase, refresh, draft→ready, browser
-- [ ] `land` - auto-commit, rebase, lint, scratch, auto-merge
-- [ ] `next` - block, create-pr, auto-merge, stack logic
-- [ ] `abandon` - full workflow with PR/remote cleanup
-- [x] `sync` - complete
-- [x] `wt create` - complete
-- [x] `wt switch` - complete
-- [ ] `wt list` - implement --sync, --full
-- [x] `wt prune` - complete (verify confirm)
-- [x] `wt ci` - complete
-- [x] `shell init` - complete (fish deferred)
-- [x] `shell install` - complete
+## Done When
 
-### Cross-Cutting
-- [ ] Auto-commit workflow
-- [ ] Lint integration
-- [ ] Agent integration for messages
-- [ ] Progress messages
-- [ ] Confirmation prompts
-- [ ] Scratch clearing
-- [ ] Browser opening
+```bash
+# These commands work identically to Python:
+lf ops commit                    # auto-stage, agent message, commit
+lf ops commit -p                 # + push + draft PR
+lf ops commit -m "msg"           # explicit message
+lf ops commit --no-lint          # skip lint check
 
-### Architecture
-- [ ] Delete `lf-engine` binary
-- [ ] Verify PyO3 bindings complete
+lf ops pr                        # auto-commit, rebase, LLM message, open browser
+lf ops pr --refresh              # regenerate title/body
+lf ops pr --no-lint              # skip lint
+
+lf ops land                      # auto-commit, rebase, clear scratch/, auto-merge
+lf ops land --strict             # fail on uncommitted changes
+lf ops land --local              # local merge (no PR)
+lf ops land -c                   # create PR and land
+lf ops land -w feature           # target specific worktree
+
+lf ops rebase                    # rebase, agent on conflict
+lf ops next                      # auto-commit, auto-merge, new branch
+lf ops next --block              # wait for merge
+lf ops next --create-pr          # create PR first
+
+lf ops abandon                   # close PR, delete remote, remove worktree
+lf ops abandon feature           # target by branch name
+lf ops abandon --force           # skip dirty check
+
+# Python callers use PyO3:
+from loopflow_engine import rebase, commit, push
+```
+
+Verification:
+- `cargo test` passes for all new ops functions
+- Golden flow set runs with Rust `lf`
+- `lf-engine` binary deleted from repo
+- Python tests pass with PyO3 backend

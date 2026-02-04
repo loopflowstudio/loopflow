@@ -104,6 +104,7 @@ fn generate_message(repo: &Path, prompt: &str) -> OpsResult<Message> {
         model_variant: None,
         chrome: config.chrome,
         cwd: Some(repo.to_path_buf()),
+        context_file: None,
     };
     let prompt = format!(
         "{}\n\nReturn JSON with keys: title, body. No extra text.",

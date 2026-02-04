@@ -44,11 +44,6 @@ def write_prompt_log(
     return path
 
 
-def build_bootstrap_prompt(prompt_path: Path) -> str:
-    """Build the short bootstrap prompt that tells the agent to read the file."""
-    return f"Read {prompt_path} for your initial context and then engage."
-
-
 def get_model_env(
     strip_api_keys: bool = True,
     gemini_context_file: Path | None = None,

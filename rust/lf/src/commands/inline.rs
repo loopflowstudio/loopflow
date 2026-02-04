@@ -33,6 +33,7 @@ pub fn run(prompt_parts: &[String], cli: &Cli) -> Result<()> {
         step: None,
         inline: Some(prompt_text.clone()),
         step_args: Vec::new(),
+        message: None,
         run_mode: Some(
             if is_interactive {
                 "interactive"
@@ -76,6 +77,7 @@ pub fn run(prompt_parts: &[String], cli: &Cli) -> Result<()> {
         model_variant: variant,
         chrome: cli.chrome_setting().unwrap_or(config.chrome),
         cwd: Some(repo_root),
+        context_file: None, // Inline prompts are typically short, no need for context file
     };
 
     let result = launch_agent(model, &prompt, &launch_config)?;

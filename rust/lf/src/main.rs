@@ -379,6 +379,19 @@ mod tests {
     }
 
     #[test]
+    fn reorder_args_value_flag_before_step() {
+        // lf -m codex implement -> should stay the same (already correct order)
+        let args = vec![
+            "lf".to_string(),
+            "-m".to_string(),
+            "codex".to_string(),
+            "implement".to_string(),
+        ];
+        let result = reorder_args(args);
+        assert_eq!(result, vec!["lf", "-m", "codex", "implement"]);
+    }
+
+    #[test]
     fn reorder_args_value_flag_after_step() {
         let args = vec![
             "lf".to_string(),

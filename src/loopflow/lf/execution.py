@@ -20,7 +20,7 @@ from loopflow.lf.context import (
 )
 from loopflow.lf.git import find_main_repo
 from loopflow.lf.launcher import build_model_command, build_model_interactive_command
-from loopflow.lf.logging import write_prompt_file, write_prompt_log
+from loopflow.lf.logging import get_model_env, write_prompt_file, write_prompt_log
 from loopflow.lf.output import print_step_header, warn_if_context_too_large
 from loopflow.lf.tokens import analyze_components
 from loopflow.lfd.agent import log_agent_end, log_agent_start
@@ -161,13 +161,8 @@ def _execute_interactive(
 
     cmd_with_prompt = command + [task_prompt]
 
-    # Remove API keys so CLIs use subscriptions
-    # For Gemini, also set GEMINI_SYSTEM_MD
-    env = os.environ.copy()
-    env.pop("ANTHROPIC_API_KEY", None)
-    env.pop("OPENAI_API_KEY", None)
-    if params.backend == "gemini":
-        env["GEMINI_SYSTEM_MD"] = str(context_file)
+    gemini_context = context_file if params.backend == "gemini" else None
+    env = get_model_env(gemini_context_file=gemini_context)
 
     if params.use_execvp:
         # Single-step: replace current process (doesn't return)
@@ -241,12 +236,8 @@ def _execute_auto(
         collector_cmd.append("--push")
     collector_cmd.extend(["--", *command])
 
-    # Build env: strip API keys, add Gemini context if needed
-    env = os.environ.copy()
-    env.pop("ANTHROPIC_API_KEY", None)
-    env.pop("OPENAI_API_KEY", None)
-    if params.backend == "gemini":
-        env["GEMINI_SYSTEM_MD"] = str(context_file)
+    gemini_context = context_file if params.backend == "gemini" else None
+    env = get_model_env(gemini_context_file=gemini_context)
 
     process = subprocess.Popen(collector_cmd, cwd=params.repo_root, env=env)
     result_code = process.wait()

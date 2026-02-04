@@ -3,7 +3,9 @@ interactive: true
 requires: none
 produces: scratch/<branch>.md
 ---
-Produce a short implementation spec that another LLM session can use to write a first draft.
+Help the user produce a short implementation spec that another LLM session can use to write a first draft.
+
+**Start by asking what they want to build.** Don't start writing or exploring until you understand the goal. This is a conversation.
 
 If on main, create a feature branch first: `git checkout -b <feature-name>`.
 
@@ -52,6 +54,8 @@ def create_user(email: str) -> User:
 - **Done when** — Verification command and expected output.
 
 ## Conversation guidance
+
+**Ask first, write second.** Start with "What are you trying to build?" Don't read files or start drafting until you understand the goal.
 
 Bias toward brevity. Ask only what's needed to start coding.
 

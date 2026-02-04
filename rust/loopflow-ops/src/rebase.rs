@@ -67,6 +67,7 @@ fn run_rebase_agent(repo: &Path, conflicts: &[String], progress: &impl Progress)
         step: None,
         inline: None,
         step_args: Vec::new(),
+        message: None,
         run_mode: Some("auto".to_string()),
         directions: config.direction.unwrap_or_default(),
         files: Vec::new(),
@@ -92,6 +93,7 @@ fn run_rebase_agent(repo: &Path, conflicts: &[String], progress: &impl Progress)
         model_variant: None,
         chrome: config.chrome,
         cwd: Some(repo.to_path_buf()),
+        context_file: None,
     };
 
     progress.status("Launching rebase assistant...");

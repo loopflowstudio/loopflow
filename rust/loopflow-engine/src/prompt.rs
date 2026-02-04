@@ -958,14 +958,6 @@ pub fn write_prompt_log(
     Ok(path)
 }
 
-/// Build the short bootstrap prompt that instructs the agent to read the prompt file.
-pub fn build_bootstrap_prompt(prompt_path: &Path) -> String {
-    format!(
-        "Read {} for your initial context and then engage.",
-        prompt_path.display()
-    )
-}
-
 /// Format file documents for inclusion in prompt.
 fn format_files(docs: &[Document]) -> String {
     let mut parts = Vec::new();
@@ -1787,16 +1779,6 @@ directions:
     // ==========================================================================
     // prompt log tests
     // ==========================================================================
-
-    #[test]
-    fn build_bootstrap_prompt_formats_path() {
-        let path = Path::new("/repo/.lf/log/20260204-123456-implement.md");
-        let bootstrap = build_bootstrap_prompt(path);
-        assert_eq!(
-            bootstrap,
-            "Read /repo/.lf/log/20260204-123456-implement.md for your initial context and then engage."
-        );
-    }
 
     #[test]
     fn write_prompt_log_creates_file() {

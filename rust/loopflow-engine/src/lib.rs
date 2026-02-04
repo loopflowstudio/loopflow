@@ -25,7 +25,6 @@ pub use flow::{
     ConcreteStep, Direction, Flow, FlowAction, FlowItem, ForkSelect, Step,
 };
 pub use prompt::{
-    analyze_tokens, build_bootstrap_prompt, count_tokens, format_context_prompt, format_prompt,
-    format_task_prompt, gather_context, trim_context, write_prompt_log, Document,
-    GatherContextOpts, PromptComponents,
+    analyze_tokens, count_tokens, format_context_prompt, format_prompt, format_task_prompt,
+    gather_context, trim_context, write_prompt_log, Document, GatherContextOpts, PromptComponents,
 };

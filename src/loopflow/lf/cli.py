@@ -345,10 +345,8 @@ def main():
                 elif has_step:
                     sys.argv.insert(1, "run")
                 else:
-                    # Step not found
-                    typer.echo(f"No step or flow named '{name}'", err=True)
-                    typer.echo("Run 'lf --list' to see available steps.", err=True)
-                    raise SystemExit(1)
+                    # Not a step or flow - treat as inline prompt
+                    sys.argv.insert(1, "inline")
 
         app()
     except ConfigError as e:

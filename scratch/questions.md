@@ -56,3 +56,4 @@ The remaining items in `roadmap/concerto/` are all Phase 2 or 3.
 
 - Do we want a dedicated mock GitHub provider for `lf ops` E2E tests, or should tests rely on an env flag that skips GH integration?
 - When parity reaches the target, should goldens switch to Rust as the source of truth or remain generated from Python until Python removal?
+- Rebase conflict E2E: should we add a test-only flag to skip the rebase assistant (agent) and assert a deterministic conflict failure instead?

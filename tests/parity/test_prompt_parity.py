@@ -7,8 +7,13 @@ from pathlib import Path
 
 import yaml
 
-from loopflow.lf.context import ContextConfig, DiffMode, FilesetConfig, format_prompt
-from loopflow.lf.context import gather_prompt_components
+from loopflow.lf.context import (
+    ContextConfig,
+    DiffMode,
+    FilesetConfig,
+    format_prompt,
+    gather_prompt_components,
+)
 from loopflow.lf.directions import resolve_directions
 
 
@@ -22,18 +27,12 @@ def _golden_cases() -> list[Path]:
 
 
 def _normalize_prompt(prompt: str, repo_root: Path) -> str:
-    return (
-        prompt.replace("\r\n", "\n")
-        .replace(str(repo_root), "<REPO>")
-        .strip()
-    )
+    return prompt.replace("\r\n", "\n").replace(str(repo_root), "<REPO>").strip()
 
 
 def _python_prompt(case: dict, repo_root: Path) -> str:
     directions = case.get("directions") or []
-    direction_objs = (
-        resolve_directions(repo_root, directions) if directions else None
-    )
+    direction_objs = resolve_directions(repo_root, directions) if directions else None
 
     diff = case.get("diff", False)
     diff_files = case.get("diff_files", False)

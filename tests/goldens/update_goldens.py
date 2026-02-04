@@ -4,8 +4,13 @@ from pathlib import Path
 
 import yaml
 
-from loopflow.lf.context import ContextConfig, DiffMode, FilesetConfig, format_prompt
-from loopflow.lf.context import gather_prompt_components
+from loopflow.lf.context import (
+    ContextConfig,
+    DiffMode,
+    FilesetConfig,
+    format_prompt,
+    gather_prompt_components,
+)
 from loopflow.lf.directions import resolve_directions
 
 
@@ -20,9 +25,7 @@ def _load_cases(goldens_dir: Path) -> list[Path]:
 
 def _render_prompt(case: dict, repo_root: Path) -> str:
     directions = case.get("directions") or []
-    direction_objs = (
-        resolve_directions(repo_root, directions) if directions else None
-    )
+    direction_objs = resolve_directions(repo_root, directions) if directions else None
 
     diff = case.get("diff", False)
     diff_files = case.get("diff_files", False)

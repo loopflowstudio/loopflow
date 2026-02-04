@@ -57,6 +57,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         step: args.step,
         inline: None,
         step_args: Vec::new(),
+        message: None,
         run_mode: args.run_mode,
         directions: args.directions,
         files: Vec::new(),

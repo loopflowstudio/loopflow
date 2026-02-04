@@ -59,6 +59,7 @@ fn golden_prompts_match_python() {
             step: case.step.clone(),
             inline: None,
             step_args: Vec::new(),
+            message: None,
             run_mode: case.run_mode.clone(),
             directions: case.directions.clone(),
             files: Vec::new(),

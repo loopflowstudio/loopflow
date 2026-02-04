@@ -45,53 +45,9 @@ The remaining items in `roadmap/concerto/` are all Phase 2 or 3.
 - Package supports macOS 15 only; design doc targets macOS 14+/iOS 17+. If iOS support is required, update Swift package platforms and add iOS app target.
 - RemoteWaveService not present in repo; TokenProvider added but not wired into any remote service yet.
 
-## lf ops Rust-Native Workflow Engine
-
-### Architecture
-
-1. **Should `workflow` be a separate crate or module in `loopflow-engine`?**
-
-   **Resolved:** Separate crate named `loopflow-ops`. Cleaner separation—ops depends on engine, engine doesn't know about ops. The name maps directly to `lf ops` commands.
-
-2. **How to handle interactive confirmation in workflow functions?**
-
-   **Resolved:** `Progress` trait with `confirm(&self, msg: &str) -> bool`. CLI prompts stdin; lfd uses config flags or fails.
-
-### Agent Integration
-
-3. **Should agent-generated commit messages use a step file or inline prompt?**
-
-   **Resolved:** No step file. Agent runs in batch mode with diff context, returns JSON `{title, body}`. Commit message style comes from CLAUDE.md (already in agent context). lf does `git commit` with the generated message.
-
-4. **What happens if agent fails during lint fix or conflict resolution?**
-
-   **Resolved:** Abort workflow with error. User can retry manually.
-
-5. **Should agent work be batched?**
-
-   **Resolved:** Yes. Pre-check all tasks (needs commit? needs conflict resolution?), then launch 0 or 1 agent call per operation with combined task list. Mechanical operations (clear scratch, push, pr ready, auto-merge) don't involve agent.
-
-### Commit Format
-
-6. **What format for commit messages?**
-
-   **Resolved:** `lf {flow_parents} {task}: {generated_title}` with optional body. flow_parents tracks the wave/flow hierarchy (ancestors, not siblings). Examples:
-   - `lf commit: add dark mode` (direct ops command)
-   - `lf my-wave ship implement: refactor auth` (step in flow in wave)
-
-### Parity Gaps
-
-7. **Should we support stacked PRs?**
-
-   **Resolved:** In scope. Use `gh pr list --head BRANCH` to detect.
-
-8. **Should `lf ops next --block` poll for merge or use webhooks?**
-
-   **Resolved:** Polling with exponential backoff. `--block` is CLI-only anyway.
-
-## loopflow-ops implementation notes (2026-02-04)
+## lf ops (Rust)
 
 1. **Rebase assistant prompt**: Rust ops uses a custom inline prompt instead of a dedicated `rebase` step file. There is no Rust builtin `rebase` step today. Should we add builtin ops steps to `loopflow-engine` and switch to them?
-2. **Next branch naming**: `lf ops next` in Rust still uses `next-<timestamp>` instead of wave-based branch naming (no wave metadata update in Rust yet). Should we wire it to wave naming once the wave module is ported?
+2. **Next branch naming**: `lf ops next` still uses `next-<timestamp>` instead of wave-based branch naming (no wave metadata update in Rust yet). Should we wire it to wave naming once the wave module is ported?
 3. **Land local strategy**: `lf ops land --local` uses squash merge via `git::land` and skips PR-related steps. Confirm if we need a local merge option or to support `--strategy` explicitly.
 4. **Lint fixer**: lint retry uses the built-in `lint` step via prompt context, not `lf lint -b` subprocess. Is that preferred for parity?

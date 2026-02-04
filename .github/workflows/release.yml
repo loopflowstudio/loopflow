@@ -1,0 +1,87 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-binaries:
+    strategy:
+      matrix:
+        include:
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            use_cross: true
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install cross
+        if: matrix.use_cross
+        run: cargo install cross
+      - name: Build lf
+        run: |
+          if [ "${{ matrix.use_cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }} -p lf
+          else
+            cargo build --release --target ${{ matrix.target }} -p lf
+          fi
+      - name: Package binary
+        run: |
+          cp "target/${{ matrix.target }}/release/lf" "lf-${{ matrix.target }}"
+          chmod +x "lf-${{ matrix.target }}"
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: lf-${{ matrix.target }}
+          path: lf-${{ matrix.target }}
+
+  build-wheel:
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Stage binaries
+        run: |
+          mkdir -p src/loopflow/bin
+          for bin in artifacts/lf-*/lf-*; do
+            cp "$bin" "src/loopflow/bin/$(basename "$bin")"
+          done
+          chmod +x src/loopflow/bin/lf-*
+      - name: Build wheel
+        run: |
+          uv pip install build
+          uv run python -m build --wheel
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels
+          path: dist/*.whl
+
+  release:
+    needs: build-wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/wheels/*.whl

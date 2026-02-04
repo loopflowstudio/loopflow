@@ -30,6 +30,14 @@ jobs:
         run: uv run maturin develop --manifest-path rust/loopflow-engine/Cargo.toml --features python
       - run: uv run pytest tests/
 
+  e2e-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run E2E smoke test
+        run: tests/e2e/test_smoke.sh
+
   swift-test:
     runs-on: macos-15
     steps:

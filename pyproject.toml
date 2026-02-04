@@ -51,7 +51,7 @@ dev = [
 ]
 
 [project.scripts]
-lf = "loopflow.lf.cli:main"
+lf = "loopflow._bin:main"
 lfd = "loopflow.lfd.cli:main"
 
 [build-system]
@@ -62,6 +62,7 @@ build-backend = "hatchling.build"
 packages = ["src/loopflow"]
 include = [
     "src/loopflow/LOOPFLOW.md",
+    "src/loopflow/bin/*",
     "src/loopflow/templates/**/*.md",
     "src/loopflow/templates/**/*.yaml",
     "src/loopflow/templates/goals/*.md",
@@ -73,6 +74,7 @@ include = [
 include = [
     "src/loopflow",
     "src/loopflow/LOOPFLOW.md",
+    "src/loopflow/bin/*",
     "src/loopflow/templates/**/*.md",
     "src/loopflow/templates/**/*.yaml",
     "src/loopflow/lf/builtins/**/*.md",

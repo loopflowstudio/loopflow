@@ -1,8 +1,3 @@
----
-status: todo
-phase: 2
----
-
 # lfd Registration
 
 lfd registers with Loopflow service to enable remote connections.

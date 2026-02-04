@@ -571,22 +571,27 @@ async def run_server(
     registration_jwt = None
     registration_machine_id = None
     lfd_config = load_lfd_config()
+    shutdown_complete = False
 
     # Write PID file for process tracking
     write_pid()
 
     async def shutdown():
+        nonlocal shutdown_complete, http_server, grpc_server, registration_client
         logger.info("Shutting down gracefully...")
 
         # Stop accepting new connections
         await server.stop()
         if http_server:
             await http_server.stop()
+            http_server = None
         if grpc_server:
             await grpc_server.stop()
+            grpc_server = None
 
         if registration_client and registration_jwt and registration_machine_id:
             await registration_client.deregister(registration_jwt, registration_machine_id)
+            registration_client = None
 
         # Checkpoint WAL to ensure all data is persisted
         try:
@@ -599,6 +604,7 @@ async def run_server(
             logger.warning(f"WAL checkpoint failed: {e}")
 
         remove_pid()
+        shutdown_complete = True
         logger.info("Shutdown complete")
 
     loop = asyncio.get_event_loop()
@@ -645,10 +651,11 @@ async def run_server(
 
         await server.start()
     finally:
-        if http_server:
-            await http_server.stop()
-        if grpc_server:
-            await grpc_server.stop()
-        if registration_client and registration_jwt and registration_machine_id:
-            await registration_client.deregister(registration_jwt, registration_machine_id)
-        remove_pid()
+        if not shutdown_complete:
+            if http_server:
+                await http_server.stop()
+            if grpc_server:
+                await grpc_server.stop()
+            if registration_client and registration_jwt and registration_machine_id:
+                await registration_client.deregister(registration_jwt, registration_machine_id)
+            remove_pid()

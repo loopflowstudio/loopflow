@@ -117,10 +117,6 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
         }
     }
 
-    public func getWaveRuns(forWave waveId: String, limit: Int = 10) async throws -> [WaveRun] {
-        return try await listWaveRuns(waveId: waveId, limit: limit)
-    }
-
     // MARK: - Actions
 
     public func connectLfd() async throws {

@@ -577,7 +577,6 @@ public struct WorktreeService: @unchecked Sendable {
 private struct LFDWorktreeResponse: Codable {
     let ok: Bool
     let result: LFDWorktreeResult?
-    let error: String?
 }
 
 private struct LFDWorktreeResult: Codable {

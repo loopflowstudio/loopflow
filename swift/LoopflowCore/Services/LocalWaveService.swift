@@ -1,12 +1,10 @@
-// Service for loading Wave and FlowRun data from lfd.db SQLite database.
+// Service for loading Wave and WaveRun data from lfd daemon (HTTP).
 
 import Foundation
-import SQLite3
 
-public struct WaveService: @unchecked Sendable {
+public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
     public init() {}
-    private let dbPath = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".lf/lfd.db").path
+    private let baseURL = lfdBaseURL
 
     private var session: URLSession {
         let config = URLSessionConfiguration.default
@@ -28,7 +26,6 @@ public struct WaveService: @unchecked Sendable {
     /// List waves for a repository via HTTP API.
     /// The API normalizes worktree paths to their main repo.
     public func listWaves(repo: URL) async throws -> [Wave] {
-        let baseURL = URL(string: "http://127.0.0.1:8765")!
         var components = URLComponents(url: baseURL.appendingPathComponent("waves"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "repo", value: repo.path)]
 
@@ -72,117 +69,56 @@ public struct WaveService: @unchecked Sendable {
         }
     }
 
-    // MARK: - FlowRuns
+    // MARK: - WaveRuns
 
-    public func listFlowRuns(waveId: String? = nil, repo: URL? = nil, limit: Int = 50) async throws -> [FlowRun] {
-        var flowRuns: [FlowRun] = []
-
-        var db: OpaquePointer?
-        guard sqlite3_open(dbPath, &db) == SQLITE_OK else {
-            return []
-        }
-        defer { sqlite3_close(db) }
-
-        var query = """
-            SELECT id, wave_id, flow, area, repo, direction, status, iteration,
-                   worktree, branch, current_step, error, pr_url,
-                   started_at, ended_at, created_at
-            FROM runs
-        """
-
-        var conditions: [String] = []
-        if waveId != nil {
-            conditions.append("wave_id = ?")
-        }
-        if repo != nil {
-            conditions.append("repo = ?")
-        }
-
-        if !conditions.isEmpty {
-            query += " WHERE " + conditions.joined(separator: " AND ")
-        }
-        query += " ORDER BY created_at DESC LIMIT ?"
-
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else {
-            return []
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        var paramIndex: Int32 = 1
+    public func listWaveRuns(waveId: String? = nil, repo: URL? = nil, limit: Int = 50) async throws -> [WaveRun] {
+        var components = URLComponents(url: baseURL.appendingPathComponent("wave-runs"), resolvingAgainstBaseURL: false)!
+        var queryItems: [URLQueryItem] = [URLQueryItem(name: "limit", value: String(limit))]
         if let waveId {
-            sqlite3_bind_text(stmt, paramIndex, waveId, -1, nil)
-            paramIndex += 1
+            queryItems.append(URLQueryItem(name: "wave_id", value: waveId))
         }
         if let repo {
-            sqlite3_bind_text(stmt, paramIndex, repo.path, -1, nil)
-            paramIndex += 1
+            queryItems.append(URLQueryItem(name: "repo", value: repo.path))
         }
-        sqlite3_bind_int(stmt, paramIndex, Int32(limit))
+        components.queryItems = queryItems
 
-        let dateFormatter = ISO8601DateFormatter()
-        dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            guard let id = columnText(stmt, 0),
-                  let flow = columnText(stmt, 2),
-                  let repoPath = columnText(stmt, 4),
-                  let statusStr = columnText(stmt, 6) else {
-                continue
-            }
-
-            let waveId = columnText(stmt, 1)
-            let area = columnText(stmt, 3) ?? "."
-            let direction = decodeStringArray(columnText(stmt, 5))
-            let iteration = Int(sqlite3_column_int(stmt, 7))
-            let worktree = columnText(stmt, 8)
-            let branch = columnText(stmt, 9)
-            let currentStep = columnText(stmt, 10)
-            let error = columnText(stmt, 11)
-            let prUrl = columnText(stmt, 12)
-
-            var startedAt: Date?
-            if let dateStr = columnText(stmt, 13) {
-                startedAt = dateFormatter.date(from: dateStr)
-            }
-
-            var endedAt: Date?
-            if let dateStr = columnText(stmt, 14) {
-                endedAt = dateFormatter.date(from: dateStr)
-            }
-
-            var createdAt = Date()
-            if let dateStr = columnText(stmt, 15) {
-                createdAt = dateFormatter.date(from: dateStr) ?? Date()
-            }
-
-            let status = FlowRunStatus(rawValue: statusStr) ?? .pending
-
-            flowRuns.append(FlowRun(
-                id: id,
-                waveId: waveId,
-                flow: flow,
-                area: area,
-                repo: repoPath,
-                direction: direction,
-                status: status,
-                iteration: iteration,
-                worktree: worktree,
-                branch: branch,
-                currentStep: currentStep,
-                error: error,
-                prUrl: prUrl,
-                startedAt: startedAt,
-                endedAt: endedAt,
-                createdAt: createdAt
-            ))
+        guard let url = components.url else {
+            LoggingService.lfd("listWaveRuns: invalid URL")
+            return []
         }
 
-        return flowRuns
+        LoggingService.lfd("listWaveRuns: GET \(url)")
+
+        do {
+            let (data, response) = try await session.data(from: url)
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                LoggingService.lfd("listWaveRuns: no HTTP response")
+                return []
+            }
+
+            guard httpResponse.statusCode == 200 else {
+                LoggingService.lfd("listWaveRuns: non-200 status")
+                return []
+            }
+
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let ok = json["ok"] as? Bool, ok,
+                  let result = json["result"] as? [String: Any],
+                  let runsData = result["wave_runs"] as? [[String: Any]] else {
+                LoggingService.lfd("listWaveRuns: invalid JSON response")
+                return []
+            }
+
+            return runsData.compactMap { parseWaveRunFromJSON($0) }
+        } catch {
+            LoggingService.lfd("listWaveRuns: error=\(error.localizedDescription)")
+            return []
+        }
     }
 
-    public func getFlowRuns(forWave waveId: String, limit: Int = 10) async throws -> [FlowRun] {
-        return try await listFlowRuns(waveId: waveId, limit: limit)
+    public func getWaveRuns(forWave waveId: String, limit: Int = 10) async throws -> [WaveRun] {
+        return try await listWaveRuns(waveId: waveId, limit: limit)
     }
 
     // MARK: - Actions
@@ -193,12 +129,21 @@ public struct WaveService: @unchecked Sendable {
         LoggingService.lfd("connectLfd: 'lfd install' completed")
     }
 
+    public func checkAvailability() async -> Bool {
+        let url = baseURL.appendingPathComponent("status")
+        do {
+            let (_, response) = try await session.data(from: url)
+            return (response as? HTTPURLResponse)?.statusCode == 200
+        } catch {
+            return false
+        }
+    }
+
     public func createWave(name: String, repo: URL) async throws -> Wave {
         LoggingService.lfd("createWave: name=\(name.isEmpty ? "(auto)" : name) repo=\(repo.path)")
 
         // Create wave via lfd HTTP API with minimal config
         // User configures area, direction, flow in detail panel before running
-        let baseURL = URL(string: "http://127.0.0.1:8765")!
         var components = URLComponents(url: baseURL.appendingPathComponent("waves"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "repo", value: repo.path)]
 
@@ -371,33 +316,24 @@ public struct WaveService: @unchecked Sendable {
     }
 
     /// Update wave configuration (name, area, direction, flow, stimulus, paused).
-    public func updateWave(
-        waveId: String,
-        name: String? = nil,
-        area: [String]? = nil,
-        direction: [String]? = nil,
-        flow: String? = nil,
-        stimulus: Stimulus? = nil,
-        paused: Bool? = nil
-    ) async throws -> Wave {
-        let baseURL = URL(string: "http://127.0.0.1:8765")!
-        let url = baseURL.appendingPathComponent("waves/\(waveId)")
+    public func updateWave(_ id: String, config: WaveConfigUpdate) async throws -> Wave {
+        let url = baseURL.appendingPathComponent("waves/\(id)")
 
         var request = URLRequest(url: url)
         request.httpMethod = "PATCH"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         var body: [String: Any] = [:]
-        if let name = name { body["name"] = name }
-        if let area = area { body["area"] = area }
-        if let direction = direction { body["direction"] = direction }
-        if let flow = flow { body["flow"] = flow }
-        if let stimulus = stimulus {
+        if let name = config.name { body["name"] = name }
+        if let area = config.area { body["area"] = area }
+        if let direction = config.direction { body["direction"] = direction }
+        if let flow = config.flow { body["flow"] = flow }
+        if let stimulus = config.stimulus {
             var stimDict: [String: Any] = ["kind": stimulus.kind.rawValue]
             if let cron = stimulus.cron { stimDict["cron"] = cron }
             body["stimulus"] = stimDict
         }
-        if let paused = paused { body["paused"] = paused }
+        if let paused = config.paused { body["paused"] = paused }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -421,15 +357,8 @@ public struct WaveService: @unchecked Sendable {
     }
 
     /// Run wave, optionally with one-time overrides.
-    public func run(
-        waveId: String,
-        area: [String]? = nil,
-        direction: [String]? = nil,
-        flow: String? = nil,
-        stimulus: Stimulus? = nil
-    ) async throws {
-        let baseURL = URL(string: "http://127.0.0.1:8765")!
-        let url = baseURL.appendingPathComponent("waves/\(waveId)/run")
+    public func run(_ id: String, overrides: RunOverrides?) async throws {
+        let url = baseURL.appendingPathComponent("waves/\(id)/run")
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -437,13 +366,15 @@ public struct WaveService: @unchecked Sendable {
 
         // Build body with any overrides
         var body: [String: Any] = [:]
-        if let area = area { body["area"] = area }
-        if let direction = direction { body["direction"] = direction }
-        if let flow = flow { body["flow"] = flow }
-        if let stimulus = stimulus {
-            var stimDict: [String: Any] = ["kind": stimulus.kind.rawValue]
-            if let cron = stimulus.cron { stimDict["cron"] = cron }
-            body["stimulus"] = stimDict
+        if let overrides {
+            if let area = overrides.area { body["area"] = area }
+            if let direction = overrides.direction { body["direction"] = direction }
+            if let flow = overrides.flow { body["flow"] = flow }
+            if let stimulus = overrides.stimulus {
+                var stimDict: [String: Any] = ["kind": stimulus.kind.rawValue]
+                if let cron = stimulus.cron { stimDict["cron"] = cron }
+                body["stimulus"] = stimDict
+            }
         }
 
         if !body.isEmpty {
@@ -465,14 +396,48 @@ public struct WaveService: @unchecked Sendable {
         }
     }
 
-    public func stopWave(waveId: String) async throws {
-        try await runShellCommand(["lfd", "stop", waveId])
+    public func connect(_ id: String) async throws -> ConnectionInfo {
+        let url = baseURL.appendingPathComponent("v1/waves/\(id)/connect")
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+
+        let (data, response) = try await session.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["detail"] as? String
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let worktree = json["worktree"] as? String,
+              let step = json["step"] as? String,
+              let agentId = json["agent_id"] as? String,
+              let promptFile = json["prompt_file"] as? String else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+
+        let waveRunId = json["wave_run_id"] as? String
+        let stepIndex = json["step_index"] as? Int ?? 0
+
+        return ConnectionInfo(
+            worktree: worktree,
+            step: step,
+            agentId: agentId,
+            promptFile: promptFile,
+            waveRunId: waveRunId,
+            stepIndex: stepIndex
+        )
+    }
+
+    public func stop(_ id: String) async throws {
+        try await runShellCommand(["lfd", "stop", id])
     }
 
     /// Clone a wave with a new name.
-    public func cloneWave(waveId: String, name: String? = nil) async throws -> Wave {
-        let baseURL = URL(string: "http://127.0.0.1:8765")!
-        let url = baseURL.appendingPathComponent("waves/\(waveId)/clone")
+    public func cloneWave(_ id: String, name: String?) async throws -> Wave {
+        let url = baseURL.appendingPathComponent("waves/\(id)/clone")
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -503,9 +468,8 @@ public struct WaveService: @unchecked Sendable {
     }
 
     /// Delete a wave.
-    public func deleteWave(waveId: String) async throws {
-        let baseURL = URL(string: "http://127.0.0.1:8765")!
-        let url = baseURL.appendingPathComponent("waves/\(waveId)")
+    public func deleteWave(_ id: String) async throws {
+        let url = baseURL.appendingPathComponent("waves/\(id)")
 
         var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
@@ -527,9 +491,8 @@ public struct WaveService: @unchecked Sendable {
 
     /// Collapse all outstanding PRs for a wave into a single PR.
     /// Returns the new PR URL on success.
-    public func collapsePRs(waveId: String) async throws -> CollapsePRsResult {
-        let baseURL = URL(string: "http://127.0.0.1:8765")!
-        let url = baseURL.appendingPathComponent("waves/\(waveId)/collapse")
+    public func collapsePRs(_ id: String) async throws -> CollapsePRsResult {
+        let url = baseURL.appendingPathComponent("waves/\(id)/collapse")
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -560,6 +523,76 @@ public struct WaveService: @unchecked Sendable {
 
     // MARK: - Private helpers
 
+    private func parseWaveRunFromJSON(_ json: [String: Any]) -> WaveRun? {
+        guard let id = json["id"] as? String,
+              let flow = json["flow"] as? String,
+              let repoPath = json["repo"] as? String else {
+            return nil
+        }
+
+        let waveId = json["wave_id"] as? String
+        let area = normalizeArea(json["area"])
+        let direction = normalizeDirection(json["direction"])
+        let statusStr = json["status"] as? String ?? WaveRunStatus.pending.rawValue
+        let status = WaveRunStatus(rawValue: statusStr) ?? .pending
+        let iteration = normalizeInt(json["iteration"])
+
+        return WaveRun(
+            id: id,
+            waveId: waveId,
+            flow: flow,
+            area: area,
+            repo: repoPath,
+            direction: direction,
+            status: status,
+            iteration: iteration,
+            worktree: json["worktree"] as? String,
+            branch: json["branch"] as? String,
+            currentStep: json["current_step"] as? String,
+            error: json["error"] as? String,
+            prUrl: json["pr_url"] as? String,
+            startedAt: parseDate(json["started_at"]),
+            endedAt: parseDate(json["ended_at"]),
+            createdAt: parseDate(json["created_at"]) ?? Date()
+        )
+    }
+
+    private func normalizeArea(_ value: Any?) -> String {
+        if let area = value as? String {
+            let decoded = decodeStringArray(area)
+            if decoded.count == 1 { return decoded[0] }
+            if !decoded.isEmpty { return decoded.joined(separator: ", ") }
+            return area
+        }
+        if let areas = value as? [String] {
+            if areas.count == 1 { return areas[0] }
+            if !areas.isEmpty { return areas.joined(separator: ", ") }
+        }
+        return "."
+    }
+
+    private func normalizeDirection(_ value: Any?) -> [String] {
+        if let list = value as? [String] { return list }
+        if let str = value as? String { return decodeStringArray(str) }
+        return []
+    }
+
+    private func normalizeInt(_ value: Any?) -> Int {
+        if let intValue = value as? Int { return intValue }
+        if let doubleValue = value as? Double { return Int(doubleValue) }
+        return 0
+    }
+
+    private func parseDate(_ value: Any?) -> Date? {
+        guard let dateStr = value as? String else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: dateStr) {
+            return date
+        }
+        return ISO8601DateFormatter().date(from: dateStr)
+    }
+
     private func decodeStringArray(_ str: String?) -> [String] {
         guard let str, !str.isEmpty else { return [] }
         guard let data = str.data(using: .utf8) else { return [str] }
@@ -570,11 +603,6 @@ public struct WaveService: @unchecked Sendable {
             return [decoded]
         }
         return [str]
-    }
-
-    private func columnText(_ stmt: OpaquePointer?, _ index: Int32) -> String? {
-        guard let ptr = sqlite3_column_text(stmt, index) else { return nil }
-        return String(cString: ptr)
     }
 
     private func runShellCommand(_ args: [String]) async throws {

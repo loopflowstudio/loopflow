@@ -5,6 +5,14 @@ import Foundation
 
 public struct WorktreeService: @unchecked Sendable {
     public init() {}
+    private let baseURL = lfdBaseURL
+
+    private var session: URLSession {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 2
+        config.timeoutIntervalForResource = 5
+        return URLSession(configuration: config)
+    }
 
     public enum WorktreeError: LocalizedError {
         case commandFailed(String)
@@ -105,7 +113,29 @@ public struct WorktreeService: @unchecked Sendable {
 
     private func listViaLFD(in repoURL: URL) async -> [Worktree]? {
         let t0 = CFAbsoluteTimeGetCurrent()
-        guard let jsonWorktrees = await LFDClient.shared.listWorktrees(repo: repoURL) else {
+        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
+        components.path = "/worktrees"
+        components.queryItems = [URLQueryItem(name: "repo", value: repoURL.path())]
+
+        guard let url = components.url else {
+            return nil
+        }
+
+        let jsonWorktrees: [WorktreeJSON]
+        do {
+            let (data, response) = try await session.data(from: url)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  httpResponse.statusCode == 200 else {
+                return nil
+            }
+
+            let decoded = try JSONDecoder().decode(LFDWorktreeResponse.self, from: data)
+            guard decoded.ok, let result = decoded.result else {
+                return nil
+            }
+            jsonWorktrees = result.worktrees
+        } catch {
+            LoggingService.append("lfd.http error=\(error.localizedDescription)", category: LoggingService.Category.lfd)
             return nil
         }
 
@@ -541,4 +571,15 @@ public struct WorktreeService: @unchecked Sendable {
         }
         return branches
     }
+}
+
+// Response types matching lfd HTTP API
+private struct LFDWorktreeResponse: Codable {
+    let ok: Bool
+    let result: LFDWorktreeResult?
+    let error: String?
+}
+
+private struct LFDWorktreeResult: Codable {
+    let worktrees: [WorktreeJSON]
 }

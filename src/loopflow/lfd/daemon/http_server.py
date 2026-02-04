@@ -50,11 +50,11 @@ from loopflow.lfd.wave import (
     update_wave,
     update_wave_status,
 )
-from loopflow.lfd.wave_run import get_latest_wave_run_for_wave
+from loopflow.lfd.wave_run import get_latest_wave_run_for_wave, list_wave_runs
 from loopflow.lfd.worktree_state import get_worktree_state_service
 
-# Default port - matches webapp's expected default
-DEFAULT_PORT = 8765
+# Default port for lfd HTTP server
+DEFAULT_PORT = 2486
 
 # Track server start time for uptime calculation
 _start_time: float | None = None
@@ -294,6 +294,24 @@ async def get_waves(repo: str = Query(..., description="Repository path")):
         return LFDResponse(ok=False, error=str(e))
 
 
+@app.get("/wave-runs", response_model=LFDResponse)
+async def get_wave_runs(
+    repo: str | None = Query(default=None, description="Repository path"),
+    wave_id: str | None = Query(default=None, description="Wave id"),
+    limit: int = Query(default=50, ge=1, le=200),
+):
+    """List wave runs with optional repo or wave filters."""
+    repo_path = Path(repo) if repo else None
+    if repo_path and not repo_path.exists():
+        raise HTTPException(status_code=404, detail=f"Repository not found: {repo}")
+
+    try:
+        runs = list_wave_runs(repo=repo_path, wave_id=wave_id, limit=limit)
+        return LFDResponse(ok=True, result={"wave_runs": [_wave_run_to_dict(run) for run in runs]})
+    except Exception as e:
+        return LFDResponse(ok=False, error=str(e))
+
+
 class CreateWaveRequest(BaseModel):
     name: str | None = None
     flow: str | None = None
@@ -395,6 +413,28 @@ def _extract_pr_number(url: str | None) -> int | None:
 
     match = re.search(r"/pull/(\d+)", url)
     return int(match.group(1)) if match else None
+
+
+def _wave_run_to_dict(run) -> dict:
+    """Convert WaveRun to API response dict."""
+    return {
+        "id": run.id,
+        "wave_id": run.wave_id,
+        "flow": run.flow,
+        "area": list(run.area),
+        "direction": list(run.direction),
+        "repo": str(run.repo),
+        "status": run.status.value,
+        "iteration": run.iteration,
+        "worktree": run.worktree,
+        "branch": run.branch,
+        "current_step": run.current_step,
+        "error": run.error,
+        "pr_url": run.pr_url,
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "ended_at": run.ended_at.isoformat() if run.ended_at else None,
+        "created_at": run.created_at.isoformat() if run.created_at else None,
+    }
 
 
 @app.post("/waves", response_model=LFDResponse)

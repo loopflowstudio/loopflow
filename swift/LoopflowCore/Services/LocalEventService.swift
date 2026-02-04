@@ -43,7 +43,7 @@ public enum LFDEvent: Sendable {
     case wave(WaveEvent)
 }
 
-public actor LFDEventService {
+public actor LocalEventService: EventServiceProtocol {
     private var connection: NWConnection?
     private let socketPath = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".lf/lfd.sock")
@@ -59,7 +59,7 @@ public actor LFDEventService {
     public var isConnected: Bool { _isConnected }
 
     public func subscribe(
-        to patterns: [String],
+        patterns: [String],
         onEvent: @escaping @Sendable (LFDEvent) -> Void,
         onConnectionChange: @escaping @Sendable (Bool) -> Void
     ) async {
@@ -238,7 +238,7 @@ public actor LFDEventService {
         onEvent?(event)
     }
 
-    public func disconnect() {
+    public func disconnect() async {
         reconnectTask?.cancel()
         reconnectTask = nil
         connection?.cancel()

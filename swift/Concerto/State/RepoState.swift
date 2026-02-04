@@ -89,9 +89,9 @@ final class RepoState {
     private let configLoader = ConfigLoader()
     private let promptService = PromptService()
     private let flowService = FlowService()
-    private let waveService = WaveService()
+    private let waveService = LocalWaveService()
     private let directionService = DirectionService()
-    private var eventService: LFDEventService?
+    private var eventService: (any EventServiceProtocol)?
 
     // Background tasks
     private var autoSyncTask: Task<Void, Never>?
@@ -345,7 +345,7 @@ final class RepoState {
         _ = try? await worktreeService.sync(in: repo)
         await _listWorktrees()
 
-        let lfdAvailable = await LFDClient.shared.isAvailable
+        let lfdAvailable = await waveService.checkAvailability()
         if !lfdAvailable {
             await detectStaleness()
             await fetchCIStatus()
@@ -493,12 +493,12 @@ final class RepoState {
     func startEventSubscription(sessionState: SessionState) {
         LoggingService.append("startEventSubscription called", category: LoggingService.Category.lfd)
         if eventService != nil { return }
-        LoggingService.append("creating LFDEventService", category: LoggingService.Category.lfd)
-        eventService = LFDEventService()
+        LoggingService.append("creating LocalEventService", category: LoggingService.Category.lfd)
+        eventService = LocalEventService()
 
         Task {
             await eventService?.subscribe(
-                to: ["worktree.*", "session.*", "output.line", "wave.*"],
+                patterns: ["worktree.*", "session.*", "output.line", "wave.*"],
                 onEvent: { [weak self, weak sessionState] event in
                     Task { @MainActor in
                         guard let self, let sessionState else { return }
@@ -719,31 +719,31 @@ final class RepoState {
         flow: String? = nil,
         stimulus: Stimulus? = nil
     ) async throws {
-        try await waveService.run(
-            waveId: wave.id,
+        let overrides = RunOverrides(
             area: area,
             direction: direction,
             flow: flow,
             stimulus: stimulus
         )
+        try await waveService.run(wave.id, overrides: overrides)
 
         await refreshWaves()
     }
 
     func stopWave(_ wave: Wave) async throws {
-        try await waveService.stopWave(waveId: wave.id)
+        try await waveService.stop(wave.id)
         await refreshWaves()
     }
 
     func cloneWave(_ wave: Wave) async throws -> Wave {
-        let cloned = try await waveService.cloneWave(waveId: wave.id)
+        let cloned = try await waveService.cloneWave(wave.id, name: nil)
         waves.insert(cloned, at: 0)
         selectedWave = cloned
         return cloned
     }
 
     func deleteWave(_ wave: Wave) async throws {
-        try await waveService.deleteWave(waveId: wave.id)
+        try await waveService.deleteWave(wave.id)
         waves.removeAll { $0.id == wave.id }
         if selectedWave?.id == wave.id {
             selectedWave = nil
@@ -751,7 +751,7 @@ final class RepoState {
     }
 
     func renameWave(_ wave: Wave, to newName: String) async throws {
-        _ = try await waveService.updateWave(waveId: wave.id, name: newName)
+        _ = try await waveService.updateWave(wave.id, config: WaveConfigUpdate(name: newName))
         await refreshWaves()
     }
 
@@ -763,14 +763,14 @@ final class RepoState {
         stimulus: Stimulus? = nil,
         paused: Bool? = nil
     ) async throws {
-        _ = try await waveService.updateWave(
-            waveId: wave.id,
+        let config = WaveConfigUpdate(
             area: area,
             direction: direction,
             flow: flow,
             stimulus: stimulus,
             paused: paused
         )
+        _ = try await waveService.updateWave(wave.id, config: config)
         await refreshWaves()
     }
 

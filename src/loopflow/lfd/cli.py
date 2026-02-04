@@ -952,7 +952,9 @@ def _get_daemon_health() -> dict | None:
     try:
         import urllib.request
 
-        req = urllib.request.Request("http://127.0.0.1:8765/health", method="GET")
+        from loopflow.lfd.daemon.http_server import DEFAULT_PORT
+
+        req = urllib.request.Request(f"http://127.0.0.1:{DEFAULT_PORT}/health", method="GET")
         with urllib.request.urlopen(req, timeout=2) as resp:
             import json
 

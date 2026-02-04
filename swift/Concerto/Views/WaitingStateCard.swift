@@ -12,7 +12,7 @@ struct WaitingStateCard: View {
     @State private var collapseError: String?
 
     private let terminalLauncher = TerminalLauncher()
-    private let waveService = WaveService()
+    private let waveService = LocalWaveService()
     private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     var body: some View {
@@ -106,7 +106,7 @@ struct WaitingStateCard: View {
         collapseError = nil
 
         do {
-            let result = try await waveService.collapsePRs(waveId: wave.id)
+            let result = try await waveService.collapsePRs(wave.id)
             if let urlString = result.newPRUrl, let url = URL(string: urlString) {
                 terminalLauncher.openURL(url)
             }

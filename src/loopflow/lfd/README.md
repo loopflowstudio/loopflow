@@ -77,6 +77,7 @@ GET    /waves/:id                                             → show
 DELETE /waves/:id                                             → delete
 POST   /waves/:id/run   {stimulus, cron?, path?}              → run
 POST   /waves/:id/stop                                        → stop
+GET    /wave-runs       {repo?, wave_id?, limit?}             → list runs
 ```
 
 - Create accepts minimal body (even empty → generates name)

@@ -510,10 +510,15 @@ class Server:
                 pass
 
 
-def _check_already_running(http_port: int = 8765) -> None:
+def _check_already_running(http_port: int | None = None) -> None:
     """Check if another lfd instance is running. Raises SystemExit if so."""
     import os
     import urllib.request
+
+    from loopflow.lfd.daemon.http_server import DEFAULT_PORT
+
+    if http_port is None:
+        http_port = DEFAULT_PORT
 
     try:
         req = urllib.request.Request(f"http://127.0.0.1:{http_port}/health", method="GET")
@@ -541,15 +546,20 @@ def _check_already_running(http_port: int = 8765) -> None:
         pass
 
 
-async def run_server(socket_path: Path, http_port: int = 8765, grpc_port: int = 50051) -> None:
+async def run_server(
+    socket_path: Path, http_port: int | None = None, grpc_port: int = 50051
+) -> None:
     """Main daemon entry point. Runs until terminated."""
     import logging
     import sqlite3
 
     from loopflow.lfd.daemon.grpc_server import start_grpc_server
-    from loopflow.lfd.daemon.http_server import start_http_server
+    from loopflow.lfd.daemon.http_server import DEFAULT_PORT, start_http_server
     from loopflow.lfd.daemon.launchd import remove_pid, write_pid
     from loopflow.lfd.db import DB_PATH
+
+    if http_port is None:
+        http_port = DEFAULT_PORT
 
     # Enforce single instance
     _check_already_running(http_port)

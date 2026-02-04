@@ -1,5 +1,24 @@
 # Rust Testing and Rollout
 
+## Status (2026-02-04)
+
+What is implemented today:
+- Prompt parity tooling (`lf-prompt` + golden tests) compares Rust prompt assembly against Python.
+- Ops parity tracing in Python and Rust, with a parity test that compares traces.
+- E2E shell tests (smoke, full cycle, rebase conflict) exist; smoke runs in CI.
+- Release workflow bundles platform `lf` binaries into the Python wheel; `src/loopflow/_bin.py` dispatches to the Rust binary.
+- Docs updated for Rust-first behavior and testing entry points.
+
+Key choices:
+- Trace-based ops parity emits JSON instead of running side effects for deterministic tests.
+- Golden prompts keep Python as the source of truth; Rust matches fixtures.
+- Rust-first CLI uses `LF_RUST=0` as the only escape hatch; default prefers Rust when a bundled binary exists.
+
+Risks and bottlenecks:
+- Ops trace parity currently covers `commit` only; other ops commands rely on behavioral tests.
+- E2E scripts compile `lf`/`loopflow-engine` during execution; CI runtime may be heavier than expected.
+- Release workflow ships only `lf`; `lfd` bundling remains undecided.
+
 ## Problem
 
 Rust `lf` claims feature parity with Python. We need confidence before shipping it as primary.

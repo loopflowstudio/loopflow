@@ -8,22 +8,50 @@ use loopflow_engine::{
 };
 use tracing::{debug, info, instrument, trace};
 
-/// Run a step by name.
-#[instrument(skip(cli), fields(name = %step_name))]
-pub fn run(step_name: &str, step_args: &[String], cli: &Cli) -> Result<()> {
+/// Unified entry point for running steps, inline prompts, or interactive chat.
+///
+/// | step | inline | behavior |
+/// |------|--------|----------|
+/// | Some | None   | Run named step |
+/// | None | Some   | Run inline prompt |
+/// | Some | Some   | Run step with inline as message/focus |
+/// | None | None   | Interactive chat |
+#[instrument(skip(cli), fields(step = ?step, has_inline = inline.is_some()))]
+pub fn run(
+    step: Option<&str>,
+    step_args: &[String],
+    inline: Option<&str>,
+    cli: &Cli,
+) -> Result<()> {
     let repo_root = find_repo_root()?;
     let config = load_config_or_default(Some(&repo_root));
     trace!(?config.agent_model, ?config.yolo, "loaded config");
 
-    let step = crate::discovery::discover_step(&repo_root, step_name)?;
-    debug!(step.name, step.interactive, "discovered step");
+    // Discover step if provided
+    let discovered_step = if let Some(step_name) = step {
+        Some(crate::discovery::discover_step(&repo_root, step_name)?)
+    } else {
+        None
+    };
+
+    if let Some(ref s) = discovered_step {
+        debug!(s.name, s.interactive, "discovered step");
+    }
 
     let mut directions = config.direction.clone().unwrap_or_default();
     directions.extend(cli.direction.clone());
 
+    // Determine interactive mode
     let is_interactive = cli.interactive
         || (!cli.batch
-            && (step.interactive.unwrap_or(false) || config.interactive.contains(&step.name)));
+            && (discovered_step
+                .as_ref()
+                .and_then(|s| s.interactive)
+                .unwrap_or(false)
+                || step
+                    .map(|s| config.interactive.contains(&s.to_string()))
+                    .unwrap_or(false)
+                || (step.is_none() && inline.is_none()))); // Pure interactive chat
 
     let area = if !cli.area.is_empty() {
         cli.area.first().map(|p| p.to_string_lossy().to_string())
@@ -35,8 +63,8 @@ pub fn run(step_name: &str, step_args: &[String], cli: &Cli) -> Result<()> {
 
     let components = gather_context(&GatherContextOpts {
         repo_root: repo_root.clone(),
-        step: Some(step_name.to_string()),
-        inline: None,
+        step: step.map(|s| s.to_string()),
+        inline: inline.map(|s| s.to_string()),
         step_args: step_args.to_vec(),
         message: None,
         run_mode: Some(
@@ -58,7 +86,6 @@ pub fn run(step_name: &str, step_args: &[String], cli: &Cli) -> Result<()> {
     })?;
 
     let prompt = format_prompt(&components);
-
     let model = cli.model.as_deref().unwrap_or(&config.agent_model);
     let (backend, variant) = parse_model(model);
 
@@ -74,8 +101,11 @@ pub fn run(step_name: &str, step_args: &[String], cli: &Cli) -> Result<()> {
         return Err(anyhow!("'{}' CLI not found", backend));
     }
 
+    // Log name for prompt files
+    let log_name = step.unwrap_or(if inline.is_some() { "inline" } else { "chat" });
+
     // Write full prompt to .lf/log/ for debugging
-    write_prompt_log(&repo_root, &prompt, step_name, None)?;
+    write_prompt_log(&repo_root, &prompt, log_name, None)?;
 
     // Write context separately for system prompt loading via native mechanisms:
     // - Claude: --append-system-prompt-file
@@ -86,7 +116,7 @@ pub fn run(step_name: &str, step_args: &[String], cli: &Cli) -> Result<()> {
     let context_file = write_prompt_log(
         &repo_root,
         &context_prompt,
-        &format!("{}.context", step_name),
+        &format!("{}.context", log_name),
         None,
     )?;
 
@@ -103,70 +133,6 @@ pub fn run(step_name: &str, step_args: &[String], cli: &Cli) -> Result<()> {
 
     let result = launch_agent(model, &task_prompt, &launch_config)?;
     debug!(exit_code = result.exit_code, "agent completed");
-    std::process::exit(result.exit_code);
-}
-
-#[instrument(skip(cli))]
-pub fn run_interactive(cli: &Cli) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    debug!(?repo_root, "found repository root");
-
-    let config = load_config_or_default(Some(&repo_root));
-
-    let mut directions = config.direction.clone().unwrap_or_default();
-    directions.extend(cli.direction.clone());
-
-    let include_clipboard = cli.clipboard || config.paste;
-
-    debug!("gathering context for interactive session");
-    let components = gather_context(&GatherContextOpts {
-        repo_root: repo_root.clone(),
-        step: None,
-        inline: None,
-        step_args: Vec::new(),
-        message: None,
-        run_mode: Some("interactive".to_string()),
-        directions,
-        files: Vec::new(),
-        lfdocs: config.lfdocs,
-        diff_files: config.diff_files,
-        diff: config.diff,
-        clipboard: include_clipboard,
-        area: config.area.clone(),
-        wave: cli.wave.clone(),
-    })?;
-
-    let prompt = format_prompt(&components);
-    let model = cli.model.as_deref().unwrap_or(&config.agent_model);
-    let (backend, variant) = parse_model(model);
-
-    if !check_cli_available(&backend) {
-        return Err(anyhow!("'{}' CLI not found", backend));
-    }
-
-    // Write full prompt to .lf/log/ for debugging
-    write_prompt_log(&repo_root, &prompt, "chat", None)?;
-
-    // Write context separately for system prompt loading via native mechanisms:
-    // - Claude: --append-system-prompt-file
-    // - Codex: -c model_instructions_file="..."
-    // - Gemini: GEMINI_SYSTEM_MD env var
-    let context_prompt = format_context_prompt(&components);
-    let task_prompt = format_task_prompt(&components);
-    let context_file = write_prompt_log(&repo_root, &context_prompt, "chat.context", None)?;
-
-    let launch_config = LaunchConfig {
-        auto: false,
-        stream: false,
-        skip_permissions: cli.yolo || config.yolo,
-        model_variant: variant,
-        chrome: cli.chrome_setting().unwrap_or(config.chrome),
-        cwd: Some(repo_root),
-        context_file: Some(context_file),
-    };
-    debug!(?launch_config, "launching interactive agent");
-
-    let result = launch_agent(model, &task_prompt, &launch_config)?;
     std::process::exit(result.exit_code);
 }
 

@@ -349,14 +349,17 @@ fn main() -> anyhow::Result<()> {
     }
 
     match &cli.command {
-        Some(Commands::Run { name, args }) => commands::step::run(name, args, &cli),
-        Some(Commands::Inline { prompt }) => commands::inline::run(prompt, &cli),
+        Some(Commands::Run { name, args }) => commands::run::run(Some(name), args, None, &cli),
+        Some(Commands::Inline { prompt }) => {
+            let text = prompt.join(" ");
+            commands::run::run(None, &[], Some(&text), &cli)
+        }
         Some(Commands::Ops { op }) => commands::ops::run(op),
         Some(Commands::External(args)) => {
-            let (name, step_args) = commands::step::split_step_args(args)?;
-            commands::step::run(&name, &step_args, &cli)
+            let (name, step_args) = commands::run::split_step_args(args)?;
+            commands::run::run(Some(&name), &step_args, None, &cli)
         }
-        None => commands::step::run_interactive(&cli),
+        None => commands::run::run(None, &[], None, &cli),
     }
 }
 

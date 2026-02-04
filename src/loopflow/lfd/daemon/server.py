@@ -19,14 +19,15 @@ from loopflow.lfd.agent import (
     save_agent,
     update_agent_status,
 )
+from loopflow.lfd.autoprune import AutopruneManager, get_repos_to_check
 from loopflow.lfd.daemon import metrics
 from loopflow.lfd.daemon.config import load_lfd_config
 from loopflow.lfd.daemon.credentials import load_jwt
 from loopflow.lfd.daemon.grpc_server import start_grpc_server
 from loopflow.lfd.daemon.http_server import DEFAULT_PORT, start_http_server
 from loopflow.lfd.daemon.launchd import remove_pid, write_pid
-from loopflow.lfd.daemon.manager import Manager, load_manager_config
 from loopflow.lfd.daemon.machine_id import get_machine_id, get_machine_name
+from loopflow.lfd.daemon.manager import Manager, load_manager_config
 from loopflow.lfd.daemon.protocol import Event, Request, Response, error, success
 from loopflow.lfd.daemon.registration import (
     RegistrationClient,
@@ -35,7 +36,6 @@ from loopflow.lfd.daemon.registration import (
 )
 from loopflow.lfd.daemon.status import compute_status
 from loopflow.lfd.db import DB_PATH, update_dead_processes
-from loopflow.lfd.autoprune import AutopruneManager, get_repos_to_check
 from loopflow.lfd.draft_prs import run_draft_pr_check
 from loopflow.lfd.git_hooks import hooks_status, install_hooks
 from loopflow.lfd.models import Agent, AgentStatus

@@ -54,6 +54,7 @@ def _abort_handler(handler: grpc.aio.RpcMethodHandler, message: str) -> grpc.Rpc
     response_serializer = handler.response_serializer
 
     if not handler.request_streaming and not handler.response_streaming:
+
         async def unary_unary(request, context):
             await context.abort(grpc.StatusCode.UNAUTHENTICATED, message)
 
@@ -64,6 +65,7 @@ def _abort_handler(handler: grpc.aio.RpcMethodHandler, message: str) -> grpc.Rpc
         )
 
     if not handler.request_streaming and handler.response_streaming:
+
         async def unary_stream(request, context):
             await context.abort(grpc.StatusCode.UNAUTHENTICATED, message)
             if False:
@@ -76,6 +78,7 @@ def _abort_handler(handler: grpc.aio.RpcMethodHandler, message: str) -> grpc.Rpc
         )
 
     if handler.request_streaming and not handler.response_streaming:
+
         async def stream_unary(request_iterator, context):
             await context.abort(grpc.StatusCode.UNAUTHENTICATED, message)
 

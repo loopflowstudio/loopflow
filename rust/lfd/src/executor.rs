@@ -19,7 +19,7 @@ use loopflow_engine::prompt::{format_prompt, gather_context, GatherContextOpts};
 use loopflow_engine::worktree::{create_worktree, remove_worktree};
 
 use crate::id::LfdId;
-use crate::loops::common::now_timestamp;
+use crate::loops::now_timestamp;
 use crate::output::{OutputEvent, OutputHub};
 use crate::proto::control::{Agent, AgentStatus, WaveRun, WaveRunStatus};
 use crate::scheduler::Scheduler;
@@ -190,8 +190,15 @@ impl WaveExecutor {
                         .model
                         .clone()
                         .unwrap_or_else(|| "unknown".to_string());
-                    let agent =
-                        self.new_agent(&run, &wave.repo, &step, AgentStatus::AgentWaiting, &model);
+                    let worktree = worktree_path(&run, &wave);
+                    let agent = build_agent_for_step(
+                        &run.id,
+                        &wave.repo,
+                        &worktree,
+                        &step,
+                        AgentStatus::AgentWaiting,
+                        &model,
+                    );
                     self.store.start_agent(&agent)?;
                     run.status = WaveRunStatus::WaveRunWaiting as i32;
                     run.flow_parents = step.flow_parents.clone();

@@ -1,7 +1,7 @@
 use crate::commands::util::find_repo_root;
 use crate::{OpsCommand, ShellCommand, WtCommand};
 use anyhow::{anyhow, Result};
-use loopflow_engine::git::{current_branch, delete_local_branch, get_default_branch};
+use loopflow_engine::git::{current_branch, delete_local_branch, get_default_branch, is_clean};
 use loopflow_engine::worktrees::{
     create_with_schema, list_worktrees, main_repo_root, worktree_path,
 };
@@ -181,7 +181,7 @@ fn commit_current(
 
 fn abandon_current(branch: Option<&str>, force: bool, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let _ = abandon_branch(
+    abandon_branch(
         &repo_root,
         &AbandonOptions {
             branch: branch.map(str::to_string),

@@ -35,10 +35,8 @@ pub fn commit_workflow(
         stage_all(repo)?;
     }
 
-    if options.lint {
-        if !crate::lint::ensure_lint_passes(repo, progress)? {
-            return Err(OpsError::LintFailed);
-        }
+    if options.lint && !crate::lint::ensure_lint_passes(repo, progress)? {
+        return Err(OpsError::LintFailed);
     }
 
     if !has_staged_changes(repo)? {

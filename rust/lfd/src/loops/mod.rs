@@ -4,6 +4,7 @@ mod loop_ticker;
 mod recovery;
 mod watch;
 
+pub use common::now_timestamp;
 pub use cron::spawn_cron_poller;
 pub use loop_ticker::spawn_loop_ticker;
 pub use recovery::spawn_recovery_loop;

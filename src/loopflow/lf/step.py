@@ -46,6 +46,18 @@ def _open_web_client(backend: str) -> None:
     subprocess.run(["open", url], check=True)
 
 
+def _ensure_runner_available(backend: str) -> None:
+    try:
+        runner = get_runner(backend)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    if not runner.is_available():
+        typer.echo(f"Error: '{backend}' CLI not found", err=True)
+        raise typer.Exit(1)
+
+
 def _run_step(
     step_name: str,
     repo_root: Path,
@@ -86,15 +98,7 @@ def _launch_interactive_default(
     agent_model = model or (config.agent_model if config else "claude:opus")
     backend, model_variant = parse_model(agent_model)
 
-    try:
-        runner = get_runner(backend)
-    except ValueError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
-
-    if not runner.is_available():
-        typer.echo(f"Error: '{backend}' CLI not found", err=True)
-        raise typer.Exit(1)
+    _ensure_runner_available(backend)
 
     skip_permissions = config.yolo if config else False
     direction_names = parse_direction_arg(direction) or (config.direction if config else None)
@@ -288,15 +292,7 @@ def run(
         _open_web_client(backend)
         raise typer.Exit(0)
 
-    try:
-        runner = get_runner(backend)
-    except ValueError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
-
-    if not runner.is_available():
-        typer.echo(f"Error: '{backend}' CLI not found", err=True)
-        raise typer.Exit(1)
+    _ensure_runner_available(backend)
 
     # Resolve chrome: CLI > frontmatter > config > default
     if chrome is not None:
@@ -451,15 +447,7 @@ def inline(
         _open_web_client(backend)
         raise typer.Exit(0)
 
-    try:
-        runner = get_runner(backend)
-    except ValueError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
-
-    if not runner.is_available():
-        typer.echo(f"Error: '{backend}' CLI not found", err=True)
-        raise typer.Exit(1)
+    _ensure_runner_available(backend)
 
     # Resolve chrome: CLI > config > default
     if chrome is not None:
@@ -562,15 +550,7 @@ def flow(
         _open_web_client(backend)
         raise typer.Exit(0)
 
-    try:
-        runner = get_runner(backend)
-    except ValueError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
-
-    if not runner.is_available():
-        typer.echo(f"Error: '{backend}' CLI not found", err=True)
-        raise typer.Exit(1)
+    _ensure_runner_available(backend)
 
     push_enabled = config.push if config else False
     pr_enabled = pr if pr is not None else (config.pr if config else False)

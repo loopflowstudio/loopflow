@@ -10,6 +10,15 @@ import pytest
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
+def run_git(repo: Path, args: list[str]) -> None:
+    subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+
+
 @pytest.fixture(scope="session")
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
@@ -39,32 +48,12 @@ def fixture_repo(request, tmp_path: Path) -> Generator[Path, None, None]:
 
     git_dir = fixture_dst / ".git"
     if not git_dir.exists():
-        subprocess.run(["git", "init"], cwd=fixture_dst, check=True, capture_output=True)
-        subprocess.run(
-            ["git", "config", "user.email", "test@test.com"],
-            cwd=fixture_dst,
-            check=True,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "config", "user.name", "Test"],
-            cwd=fixture_dst,
-            check=True,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "checkout", "-b", "main"],
-            cwd=fixture_dst,
-            check=True,
-            capture_output=True,
-        )
-        subprocess.run(["git", "add", "-A"], cwd=fixture_dst, check=True, capture_output=True)
-        subprocess.run(
-            ["git", "commit", "-m", "Initial"],
-            cwd=fixture_dst,
-            check=True,
-            capture_output=True,
-        )
+        run_git(fixture_dst, ["init"])
+        run_git(fixture_dst, ["config", "user.email", "test@test.com"])
+        run_git(fixture_dst, ["config", "user.name", "Test"])
+        run_git(fixture_dst, ["checkout", "-b", "main"])
+        run_git(fixture_dst, ["add", "-A"])
+        run_git(fixture_dst, ["commit", "-m", "Initial"])
 
     yield fixture_dst
 

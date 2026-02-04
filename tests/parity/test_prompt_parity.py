@@ -1,8 +1,11 @@
-import subprocess
-
 import pytest
 
-from tests.parity.conftest import get_python_prompt, get_rust_prompt, normalize_prompt
+from tests.parity.conftest import (
+    get_python_prompt,
+    get_rust_prompt,
+    normalize_prompt,
+    run_git,
+)
 
 
 @pytest.mark.parametrize("fixture_repo", ["minimal"], indirect=True)
@@ -17,25 +20,10 @@ def test_minimal_debug(fixture_repo, rust_binary):
 
 @pytest.mark.parametrize("fixture_repo", ["with-diff"], indirect=True)
 def test_with_diff_implement(fixture_repo, rust_binary):
-    subprocess.run(
-        ["git", "checkout", "-b", "feature"],
-        cwd=fixture_repo,
-        check=True,
-        capture_output=True,
-    )
+    run_git(fixture_repo, ["checkout", "-b", "feature"])
     (fixture_repo / "src" / "main.py").write_text("print('modified')\n")
-    subprocess.run(
-        ["git", "add", "src/main.py"],
-        cwd=fixture_repo,
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "commit", "-m", "Modify main"],
-        cwd=fixture_repo,
-        check=True,
-        capture_output=True,
-    )
+    run_git(fixture_repo, ["add", "src/main.py"])
+    run_git(fixture_repo, ["commit", "-m", "Modify main"])
 
     python_prompt = get_python_prompt(fixture_repo, ["run", "implement", "--dry-run"])
     rust_prompt = get_rust_prompt(fixture_repo, rust_binary, ["run", "implement", "--dry-run"])

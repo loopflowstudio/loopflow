@@ -179,6 +179,7 @@ fn py_gather_context(
         step: step.map(String::from),
         inline: None,
         step_args: Vec::new(),
+        message: None,
         run_mode: run_mode.map(String::from),
         directions: directions.unwrap_or_default(),
         files: Vec::new(),
@@ -216,6 +217,7 @@ fn py_launch_agent(
         model_variant,
         chrome,
         cwd: cwd.map(PathBuf::from),
+        context_file: None,
     };
 
     match launch_agent(model, prompt, &config) {
@@ -448,6 +450,7 @@ fn run_step(
         step: Some(step.to_string()),
         inline: None,
         step_args: Vec::new(),
+        message: None,
         run_mode: run_mode.map(String::from),
         directions: directions.unwrap_or_default(),
         files: Vec::new(),
@@ -472,6 +475,7 @@ fn run_step(
         model_variant: None,
         chrome: config.chrome,
         cwd: Some(repo),
+        context_file: None,
     };
 
     match launch_agent(model_str, &prompt, &launch_config) {

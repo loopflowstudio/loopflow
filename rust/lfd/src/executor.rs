@@ -546,6 +546,7 @@ fn build_step_prompt(
         step: Some(step.step.name.clone()),
         inline: None,
         step_args: Vec::new(),
+        message: None,
         run_mode: Some("auto".to_string()),
         directions,
         files: Vec::new(),
@@ -571,6 +572,7 @@ fn build_step_prompt(
         model_variant: None,
         chrome: config.chrome,
         cwd: Some(PathBuf::from(worktree)),
+        context_file: None,
     };
 
     Ok((prompt, model, launch))

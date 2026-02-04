@@ -12,10 +12,15 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from loopflow.lf.context import PromptComponents, format_prompt
+from loopflow.lf.context import (
+    PromptComponents,
+    format_context_prompt,
+    format_prompt,
+    format_task_prompt,
+)
 from loopflow.lf.git import find_main_repo
 from loopflow.lf.launcher import build_model_command, build_model_interactive_command
-from loopflow.lf.logging import write_prompt_file
+from loopflow.lf.logging import get_model_env, write_prompt_file, write_prompt_log
 from loopflow.lf.output import print_step_header, warn_if_context_too_large
 from loopflow.lf.tokens import analyze_components
 from loopflow.lfd.agent import log_agent_end, log_agent_start
@@ -44,6 +49,9 @@ class ExecutionParams:
     direction: list[str] | None = None
     context: list[str] | None = None
 
+    # Flow lineage for prompt log filenames
+    flow_parents: list[str] | None = None
+
     # Post-execution
     autocommit: bool = True
     push: bool = False
@@ -65,7 +73,10 @@ def execute_step(params: ExecutionParams) -> int:
     tree = analyze_components(params.components)
     warn_if_context_too_large(tree)
 
-    prompt = format_prompt(params.components)
+    # Split prompt into context (system) and task (user message)
+    full_prompt = format_prompt(params.components)
+    context_prompt = format_context_prompt(params.components)
+    task_prompt = format_task_prompt(params.components)
     token_summary = tree.format()
 
     main_repo = find_main_repo(params.repo_root) or params.repo_root
@@ -100,18 +111,42 @@ def execute_step(params: ExecutionParams) -> int:
         token_summary=token_summary,
     )
 
+    # Write full prompt to .lf/log/ for debugging
+    write_prompt_log(
+        params.repo_root,
+        full_prompt,
+        params.step_name,
+        params.flow_parents,
+    )
+
+    # Write context separately for backends that support split loading
+    context_file = write_prompt_log(
+        params.repo_root,
+        context_prompt,
+        f"{params.step_name}.context",
+        params.flow_parents,
+    )
+
     if params.is_interactive:
-        return _execute_interactive(params, agent, prompt)
+        return _execute_interactive(params, agent, task_prompt, context_file)
     else:
-        return _execute_auto(params, agent, prompt)
+        return _execute_auto(params, agent, task_prompt, context_file)
 
 
 def _execute_interactive(
     params: ExecutionParams,
     agent: Agent,
-    prompt: str,
+    task_prompt: str,
+    context_file: Path,
 ) -> int:
-    """Execute step in interactive mode."""
+    """Execute step in interactive mode.
+
+    Context is loaded via context_file using each backend's native mechanism:
+    - Claude: --append-system-prompt-file
+    - Codex: -c model_instructions_file="..."
+    - Gemini: GEMINI_SYSTEM_MD env var
+    Task is passed as the CLI argument (user message).
+    """
     command = build_model_interactive_command(
         params.backend,
         skip_permissions=params.skip_permissions,
@@ -121,13 +156,13 @@ def _execute_interactive(
         workdir=params.repo_root,
         images=params.components.image_files,
         chrome=params.chrome,
+        context_file=context_file,
     )
-    cmd_with_prompt = command + [prompt]
 
-    # Remove API keys so CLIs use subscriptions
-    env = os.environ.copy()
-    env.pop("ANTHROPIC_API_KEY", None)
-    env.pop("OPENAI_API_KEY", None)
+    cmd_with_prompt = command + [task_prompt]
+
+    gemini_context = context_file if params.backend == "gemini" else None
+    env = get_model_env(gemini_context_file=gemini_context)
 
     if params.use_execvp:
         # Single-step: replace current process (doesn't return)
@@ -153,11 +188,17 @@ def _execute_interactive(
 def _execute_auto(
     params: ExecutionParams,
     agent: Agent,
-    prompt: str,
+    task_prompt: str,
+    context_file: Path,
 ) -> int:
-    """Execute step in auto mode using collector."""
-    prompt_file = write_prompt_file(prompt)
+    """Execute step in auto mode using collector.
 
+    Context is loaded via context_file using each backend's native mechanism:
+    - Claude: --append-system-prompt-file
+    - Codex: -c model_instructions_file="..."
+    - Gemini: GEMINI_SYSTEM_MD env var
+    Task is passed as the CLI argument (user message).
+    """
     command = build_model_command(
         params.backend,
         auto=True,
@@ -169,7 +210,11 @@ def _execute_auto(
         workdir=params.repo_root,
         images=params.components.image_files,
         chrome=params.chrome,
+        context_file=context_file,
     )
+
+    # Write prompt to temp file for collector
+    prompt_file = write_prompt_file(task_prompt)
 
     collector_cmd = [
         sys.executable,
@@ -191,10 +236,13 @@ def _execute_auto(
         collector_cmd.append("--push")
     collector_cmd.extend(["--", *command])
 
-    process = subprocess.Popen(collector_cmd, cwd=params.repo_root)
+    gemini_context = context_file if params.backend == "gemini" else None
+    env = get_model_env(gemini_context_file=gemini_context)
+
+    process = subprocess.Popen(collector_cmd, cwd=params.repo_root, env=env)
     result_code = process.wait()
 
-    # Clean up prompt file
+    # Clean up temp file (prompt log is preserved in .lf/log/)
     try:
         os.unlink(prompt_file)
     except OSError:

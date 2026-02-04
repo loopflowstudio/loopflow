@@ -940,6 +940,11 @@ def format_prompt(components: PromptComponents) -> str:
             "If you need clarification, make the best assumption you can and append "
             "any open questions to `scratch/questions.md`."
         )
+    elif components.run_mode == "interactive":
+        parts.append(
+            "Run mode is interactive. This is a conversation—ask questions, "
+            "propose approaches, and wait for feedback before taking major actions."
+        )
 
     # 2.5. Wave context
     if components.wave:
@@ -1023,6 +1028,120 @@ def format_prompt(components: PromptComponents) -> str:
         parts.append(format_image_references(all_images, components.repo_root))
 
     return "\n\n".join(parts)
+
+
+def format_context_prompt(components: PromptComponents) -> str:
+    """Format context components for system prompt (everything except step).
+
+    Used with --append-system-prompt-file to load context without tool calls.
+    """
+    parts = []
+
+    # 1. System docs
+    if components.loopflow_doc:
+        parts.append(f"<lf:loopflow>\n{components.loopflow_doc}\n</lf:loopflow>")
+
+    # 2. Run mode
+    if components.run_mode == "auto":
+        parts.append(
+            "Run mode is auto (headless). Proceed without pausing for questions. "
+            "If you need clarification, make the best assumption you can and append "
+            "any open questions to `scratch/questions.md`."
+        )
+    elif components.run_mode == "interactive":
+        parts.append(
+            "Run mode is interactive. This is a conversation—ask questions, "
+            "propose approaches, and wait for feedback before taking major actions."
+        )
+
+    # 2.5. Wave context
+    if components.wave:
+        parts.append(
+            f'<lf:wave name="{components.wave.name}">\n'
+            f"You are building toward the {components.wave.name} program of work.\n"
+            f"Roadmap context is included in docs below.\n"
+            f"</lf:wave>"
+        )
+
+    # 3. Reference material (docs, summaries)
+    if components.docs:
+        doc_parts = []
+        for doc_path, content in components.docs:
+            name = doc_path.stem
+            doc_parts.append(f"<lf:{name}>\n{content}\n</lf:{name}>")
+        docs_body = "\n\n".join(doc_parts)
+        parts.append(
+            "Repository documentation. Follow STYLE carefully. "
+            "May include design artifacts (scratch/) and internal docs (reports/).\n\n"
+            f"<lf:docs>\n{docs_body}\n</lf:docs>"
+        )
+
+    if components.summaries:
+        summary_parts = []
+        for summary_path, content in components.summaries:
+            summary_parts.append(f'<lf:summary path="{summary_path}">\n{content}\n</lf:summary>')
+        summaries_body = "\n\n".join(summary_parts)
+        parts.append(
+            "Pre-generated codebase summaries.\n\n"
+            f"<lf:summaries>\n{summaries_body}\n</lf:summaries>"
+        )
+
+    # 4. Directions (but NOT step - that goes in user message)
+    if components.direction:
+        if len(components.direction) == 1:
+            d = components.direction[0]
+            parts.append(
+                f"Direction for this work.\n\n"
+                f"<lf:direction:{d.name}>\n{d.content}\n</lf:direction:{d.name}>"
+            )
+        else:
+            direction_parts = [
+                f"<lf:direction:{d.name}>\n{d.content}\n</lf:direction:{d.name}>"
+                for d in components.direction
+            ]
+            parts.append(
+                f"Directions for this work.\n\n"
+                f"<lf:directions>\n{chr(10).join(direction_parts)}\n</lf:directions>"
+            )
+
+    # 5. Working context (diff, clipboard, images)
+    if components.diff or components.diff_files:
+        diff_parts = []
+        if components.diff:
+            diff_parts.append(f"<lf:diff>\n{components.diff}\n</lf:diff>")
+        if components.diff_files:
+            diff_parts.append(format_files(components.diff_files, components.repo_root))
+        parts.append("Changes on this branch (diff against main).\n\n" + "\n\n".join(diff_parts))
+
+    if components.clipboard and components.clipboard.text:
+        parts.append(
+            f"Content from clipboard.\n\n"
+            f"<lf:clipboard>\n{components.clipboard.text}\n</lf:clipboard>"
+        )
+
+    all_images = list(components.image_files) if components.image_files else []
+    if components.clipboard and components.clipboard.image_path:
+        all_images.insert(0, components.clipboard.image_path)
+
+    if all_images:
+        parts.append(format_image_references(all_images, components.repo_root))
+
+    return "\n\n".join(parts)
+
+
+def format_task_prompt(components: PromptComponents) -> str:
+    """Format step/task for user message (just the step content).
+
+    Used as the CLI argument when context is loaded via --append-system-prompt-file.
+    """
+    if not components.step:
+        return ""
+
+    name, content = components.step
+    if name == "inline":
+        return f"<lf:step>\n{content}\n</lf:step>"
+    else:
+        return f"<lf:step:{name}>\n{content}\n</lf:step:{name}>"
 
 
 def build_prompt(

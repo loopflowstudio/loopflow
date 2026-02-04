@@ -32,6 +32,9 @@ pub struct LaunchConfig {
     pub chrome: bool,
     /// Working directory
     pub cwd: Option<std::path::PathBuf>,
+    /// Path to context file for system prompt loading (model-agnostic).
+    /// For Claude, this uses --append-system-prompt-file.
+    pub context_file: Option<std::path::PathBuf>,
 }
 
 /// Build Claude CLI command.
@@ -45,6 +48,12 @@ pub fn build_claude_command(config: &LaunchConfig) -> Vec<String> {
     if let Some(ref variant) = config.model_variant {
         cmd.push("--model".to_string());
         cmd.push(variant.clone());
+    }
+
+    // Load context via system prompt file for cleaner input history
+    if let Some(ref context_file) = config.context_file {
+        cmd.push("--append-system-prompt-file".to_string());
+        cmd.push(context_file.to_string_lossy().to_string());
     }
 
     if config.auto {
@@ -64,7 +73,21 @@ pub fn build_claude_command(config: &LaunchConfig) -> Vec<String> {
 
 /// Build Codex CLI command.
 pub fn build_codex_command(config: &LaunchConfig) -> Vec<String> {
-    let mut cmd = vec!["codex".to_string(), "exec".to_string()];
+    // `codex exec` for batch/auto mode, `codex` for interactive
+    let mut cmd = if config.auto {
+        vec!["codex".to_string(), "exec".to_string()]
+    } else {
+        vec!["codex".to_string()]
+    };
+
+    // Load context via model_instructions_file (replaces AGENTS.md)
+    if let Some(ref context_file) = config.context_file {
+        cmd.push("-c".to_string());
+        cmd.push(format!(
+            "model_instructions_file=\"{}\"",
+            context_file.display()
+        ));
+    }
 
     if let Some(ref variant) = config.model_variant {
         cmd.push("-c".to_string());
@@ -177,6 +200,16 @@ pub fn launch_agent(
 
     if let Some(ref cwd) = config.cwd {
         cmd.current_dir(cwd);
+    }
+
+    // For Gemini, set GEMINI_SYSTEM_MD env var to load context
+    if backend == "gemini" {
+        if let Some(ref context_file) = config.context_file {
+            cmd.env(
+                "GEMINI_SYSTEM_MD",
+                context_file.to_string_lossy().to_string(),
+            );
+        }
     }
 
     if config.auto && config.stream {
@@ -342,6 +375,22 @@ mod tests {
     }
 
     #[test]
+    fn build_codex_command_interactive() {
+        let config = LaunchConfig {
+            auto: false,
+            stream: false,
+            skip_permissions: false,
+            ..Default::default()
+        };
+        let cmd = build_codex_command(&config);
+        assert!(
+            !cmd.contains(&"exec".to_string()),
+            "interactive mode should not use 'exec'"
+        );
+        assert!(!cmd.contains(&"--full-auto".to_string()));
+    }
+
+    #[test]
     fn build_codex_command_with_model() {
         let config = LaunchConfig {
             model_variant: Some("o3".to_string()),
@@ -370,5 +419,27 @@ mod tests {
         let cmd = build_gemini_command(&config);
         assert!(cmd.contains(&"-m".to_string()));
         assert!(cmd.contains(&"gemini-1.5".to_string()));
+    }
+
+    #[test]
+    fn build_claude_command_with_context_file() {
+        let config = LaunchConfig {
+            context_file: Some(std::path::PathBuf::from("/tmp/context.md")),
+            ..Default::default()
+        };
+        let cmd = build_claude_command(&config);
+        assert!(cmd.contains(&"--append-system-prompt-file".to_string()));
+        assert!(cmd.contains(&"/tmp/context.md".to_string()));
+    }
+
+    #[test]
+    fn build_codex_command_with_context_file() {
+        let config = LaunchConfig {
+            context_file: Some(std::path::PathBuf::from("/tmp/context.md")),
+            ..Default::default()
+        };
+        let cmd = build_codex_command(&config);
+        assert!(cmd.contains(&"-c".to_string()));
+        assert!(cmd.contains(&"model_instructions_file=\"/tmp/context.md\"".to_string()));
     }
 }

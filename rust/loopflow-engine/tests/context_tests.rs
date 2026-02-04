@@ -65,6 +65,7 @@ fn gather_context_with_step() {
         step: Some("implement".to_string()),
         inline: None,
         step_args: vec![],
+        message: None,
         run_mode: Some("auto".to_string()),
         directions: vec![],
         files: vec![],
@@ -93,6 +94,7 @@ fn gather_context_with_inline_prompt() {
         step: None,
         inline: Some("Fix the bug in main.rs".to_string()),
         step_args: vec![],
+        message: None,
         run_mode: Some("interactive".to_string()),
         directions: vec![],
         files: vec![],
@@ -125,6 +127,7 @@ fn gather_context_with_directions() {
         step: Some("review".to_string()),
         inline: None,
         step_args: vec![],
+        message: None,
         run_mode: Some("auto".to_string()),
         directions: vec!["concise".to_string(), "security".to_string()],
         files: vec![],
@@ -159,6 +162,7 @@ fn gather_context_includes_readme() {
         step: Some("implement".to_string()),
         inline: None,
         step_args: vec![],
+        message: None,
         run_mode: Some("auto".to_string()),
         directions: vec![],
         files: vec![],
@@ -200,6 +204,7 @@ fn gather_context_includes_scratch_docs() {
         step: Some("implement".to_string()),
         inline: None,
         step_args: vec![],
+        message: None,
         run_mode: Some("auto".to_string()),
         directions: vec![],
         files: vec![],
@@ -245,6 +250,7 @@ fn gather_context_with_wave() {
         step: Some("implement".to_string()),
         inline: None,
         step_args: vec![],
+        message: None,
         run_mode: Some("auto".to_string()),
         directions: vec![],
         files: vec![],
@@ -277,6 +283,7 @@ fn gather_context_preserves_run_mode() {
         step: Some("debug".to_string()),
         inline: None,
         step_args: vec![],
+        message: None,
         run_mode: Some("auto".to_string()),
         directions: vec![],
         files: vec![],
@@ -294,6 +301,7 @@ fn gather_context_preserves_run_mode() {
         step: Some("debug".to_string()),
         inline: None,
         step_args: vec![],
+        message: None,
         run_mode: Some("interactive".to_string()),
         directions: vec![],
         files: vec![],
@@ -328,6 +336,7 @@ fn format_prompt_includes_step_content() {
         step: Some("implement".to_string()),
         inline: None,
         step_args: vec![],
+        message: None,
         run_mode: Some("auto".to_string()),
         directions: vec![],
         files: vec![],
@@ -358,6 +367,7 @@ fn format_prompt_includes_auto_mode_header() {
         step: Some("implement".to_string()),
         inline: None,
         step_args: vec![],
+        message: None,
         run_mode: Some("auto".to_string()),
         directions: vec![],
         files: vec![],
@@ -389,6 +399,7 @@ fn format_prompt_includes_directions() {
         step: Some("review".to_string()),
         inline: None,
         step_args: vec![],
+        message: None,
         run_mode: Some("auto".to_string()),
         directions: vec!["concise".to_string()],
         files: vec![],
@@ -425,6 +436,7 @@ fn format_prompt_includes_wave_context() {
         step: Some("implement".to_string()),
         inline: None,
         step_args: vec![],
+        message: None,
         run_mode: Some("auto".to_string()),
         directions: vec![],
         files: vec![],
@@ -439,4 +451,306 @@ fn format_prompt_includes_wave_context() {
 
     let prompt = format_prompt(&components);
     assert!(prompt.contains("payments"));
+}
+
+// =============================================================================
+// Wave filtering (fixture-based tests)
+// =============================================================================
+
+/// Setup multiple wave directories for isolation tests
+fn setup_multi_wave_repo(repo: &Path) {
+    // Create auth wave
+    fs::create_dir_all(repo.join("roadmap/auth")).unwrap();
+    fs::write(
+        repo.join("roadmap/auth/README.md"),
+        "# Auth Wave\nAuthentication system.",
+    )
+    .unwrap();
+    fs::write(
+        repo.join("roadmap/auth/oauth.md"),
+        "# OAuth\nOAuth provider setup.",
+    )
+    .unwrap();
+
+    // Create payments wave
+    fs::create_dir_all(repo.join("roadmap/payments")).unwrap();
+    fs::write(
+        repo.join("roadmap/payments/README.md"),
+        "# Payments Wave\nPayment processing.",
+    )
+    .unwrap();
+    fs::write(
+        repo.join("roadmap/payments/stripe.md"),
+        "# Stripe\nStripe integration guide.",
+    )
+    .unwrap();
+
+    // Create search wave
+    fs::create_dir_all(repo.join("roadmap/search")).unwrap();
+    fs::write(
+        repo.join("roadmap/search/README.md"),
+        "# Search Wave\nElastic search setup.",
+    )
+    .unwrap();
+}
+
+#[test]
+fn wave_filtering_includes_only_specified_wave() {
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path();
+    init_repo(repo);
+    setup_multi_wave_repo(repo);
+    write_step(repo, "implement", "Do work.");
+    make_commit(repo, "initial");
+
+    let components = gather_context(&GatherContextOpts {
+        repo_root: repo.to_path_buf(),
+        step: Some("implement".to_string()),
+        inline: None,
+        step_args: vec![],
+        message: None,
+        run_mode: Some("auto".to_string()),
+        directions: vec![],
+        files: vec![],
+        lfdocs: true,
+        diff_files: false,
+        diff: false,
+        clipboard: false,
+        area: None,
+        wave: Some("auth".to_string()),
+    })
+    .unwrap();
+
+    let docs_content: String = components
+        .docs
+        .iter()
+        .map(|d| d.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // Should include auth wave content
+    assert!(
+        docs_content.contains("Authentication system"),
+        "Should include auth wave README"
+    );
+    assert!(
+        docs_content.contains("OAuth provider setup"),
+        "Should include auth wave oauth.md"
+    );
+
+    // Should NOT include other waves
+    assert!(
+        !docs_content.contains("Payment processing"),
+        "Should NOT include payments wave"
+    );
+    assert!(
+        !docs_content.contains("Stripe integration"),
+        "Should NOT include stripe.md"
+    );
+    assert!(
+        !docs_content.contains("Elastic search"),
+        "Should NOT include search wave"
+    );
+}
+
+#[test]
+fn wave_filtering_excludes_all_roadmap_when_no_wave() {
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path();
+    init_repo(repo);
+    setup_multi_wave_repo(repo);
+    write_step(repo, "implement", "Do work.");
+    make_commit(repo, "initial");
+
+    let components = gather_context(&GatherContextOpts {
+        repo_root: repo.to_path_buf(),
+        step: Some("implement".to_string()),
+        inline: None,
+        step_args: vec![],
+        message: None,
+        run_mode: Some("auto".to_string()),
+        directions: vec![],
+        files: vec![],
+        lfdocs: true,
+        diff_files: false,
+        diff: false,
+        clipboard: false,
+        area: None,
+        wave: None, // No wave specified
+    })
+    .unwrap();
+
+    let docs_content: String = components
+        .docs
+        .iter()
+        .map(|d| d.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // Should NOT include ANY roadmap content
+    assert!(
+        !docs_content.contains("Authentication system"),
+        "Should NOT include auth wave"
+    );
+    assert!(
+        !docs_content.contains("Payment processing"),
+        "Should NOT include payments wave"
+    );
+    assert!(
+        !docs_content.contains("Elastic search"),
+        "Should NOT include search wave"
+    );
+}
+
+#[test]
+fn wave_filtering_handles_nonexistent_wave() {
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path();
+    init_repo(repo);
+    setup_multi_wave_repo(repo);
+    write_step(repo, "implement", "Do work.");
+    make_commit(repo, "initial");
+
+    // Specifying a wave that doesn't exist should not fail
+    let components = gather_context(&GatherContextOpts {
+        repo_root: repo.to_path_buf(),
+        step: Some("implement".to_string()),
+        inline: None,
+        step_args: vec![],
+        message: None,
+        run_mode: Some("auto".to_string()),
+        directions: vec![],
+        files: vec![],
+        lfdocs: true,
+        diff_files: false,
+        diff: false,
+        clipboard: false,
+        area: None,
+        wave: Some("nonexistent".to_string()),
+    })
+    .unwrap();
+
+    let docs_content: String = components
+        .docs
+        .iter()
+        .map(|d| d.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // Should NOT include ANY roadmap content (nonexistent wave)
+    assert!(
+        !docs_content.contains("Authentication system"),
+        "Should NOT include auth wave"
+    );
+    assert!(
+        !docs_content.contains("Payment processing"),
+        "Should NOT include payments wave"
+    );
+}
+
+#[test]
+fn wave_filtering_includes_all_files_in_wave_directory() {
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path();
+    init_repo(repo);
+
+    // Create wave with multiple files
+    fs::create_dir_all(repo.join("roadmap/features")).unwrap();
+    fs::write(
+        repo.join("roadmap/features/README.md"),
+        "# Features Overview\nMain features doc.",
+    )
+    .unwrap();
+    fs::write(
+        repo.join("roadmap/features/01-core.md"),
+        "# Core Features\nCore feature list.",
+    )
+    .unwrap();
+    fs::write(
+        repo.join("roadmap/features/02-advanced.md"),
+        "# Advanced Features\nAdvanced feature list.",
+    )
+    .unwrap();
+    fs::write(
+        repo.join("roadmap/features/03-experimental.md"),
+        "# Experimental\nExperimental features.",
+    )
+    .unwrap();
+
+    write_step(repo, "implement", "Do work.");
+    make_commit(repo, "initial");
+
+    let components = gather_context(&GatherContextOpts {
+        repo_root: repo.to_path_buf(),
+        step: Some("implement".to_string()),
+        inline: None,
+        step_args: vec![],
+        message: None,
+        run_mode: Some("auto".to_string()),
+        directions: vec![],
+        files: vec![],
+        lfdocs: true,
+        diff_files: false,
+        diff: false,
+        clipboard: false,
+        area: None,
+        wave: Some("features".to_string()),
+    })
+    .unwrap();
+
+    // Count roadmap docs
+    let roadmap_docs: Vec<_> = components
+        .docs
+        .iter()
+        .filter(|d| d.category == "roadmap")
+        .collect();
+
+    assert_eq!(
+        roadmap_docs.len(),
+        4,
+        "Should include all 4 files from features wave"
+    );
+
+    let docs_content: String = roadmap_docs.iter().map(|d| d.content.as_str()).collect();
+    assert!(docs_content.contains("Main features doc"));
+    assert!(docs_content.contains("Core feature list"));
+    assert!(docs_content.contains("Advanced feature list"));
+    assert!(docs_content.contains("Experimental features"));
+}
+
+#[test]
+fn loopflow_doc_always_included() {
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path();
+    init_repo(repo);
+    write_step(repo, "implement", "Do work.");
+    make_commit(repo, "initial");
+
+    let components = gather_context(&GatherContextOpts {
+        repo_root: repo.to_path_buf(),
+        step: Some("implement".to_string()),
+        inline: None,
+        step_args: vec![],
+        message: None,
+        run_mode: Some("auto".to_string()),
+        directions: vec![],
+        files: vec![],
+        lfdocs: false, // Even with lfdocs=false
+        diff_files: false,
+        diff: false,
+        clipboard: false,
+        area: None,
+        wave: None,
+    })
+    .unwrap();
+
+    // LOOPFLOW.md should always be present
+    assert!(
+        components.loopflow_doc.is_some(),
+        "LOOPFLOW.md should always be included"
+    );
+    assert!(
+        !components.loopflow_doc.as_ref().unwrap().is_empty(),
+        "LOOPFLOW.md should have content"
+    );
 }

@@ -77,14 +77,14 @@ This catches catastrophic failures. Not edge cases - those are covered by parity
 ### 3. Opt-in rollout via environment variable
 
 Phase 1: `LF_RUST=1` uses Rust binary
-Phase 2: `LF_RUST=1` is default, `LF_RUST=0` falls back to Python
+Phase 2: Rust is default, `LF_RUST=0` falls back to Python
 Phase 3: Python fallback removed
 
 Implementation: One-line change in `src/loopflow/_bin.py`:
 
 ```python
 def main():
-    if os.environ.get("LF_RUST", "0") == "1":
+    if os.environ.get("LF_RUST", "1") != "0":
         binary = _get_rust_binary()
         if binary and binary.exists():
             os.execv(str(binary), [str(binary)] + sys.argv[1:])

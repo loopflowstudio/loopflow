@@ -53,6 +53,7 @@ def _python_commit_trace(repo: Path, add: bool = True, lint: bool = True, push: 
     """Run Python lf ops commit with tracing and return trace."""
     env = os.environ.copy()
     env["LF_TRACE"] = "1"
+    env["LF_RUST"] = "0"
 
     # Use the repo's venv lf binary, not the global one
     lf_binary = _repo_root() / ".venv" / "bin" / "lf"

@@ -16,7 +16,7 @@ git init --bare "$origin_dir" >/dev/null
 
 git clone "$origin_dir" "$work_dir" >/dev/null
 
-git -C "$work_dir" checkout -b main >/dev/null
+git -C "$work_dir" checkout -B main >/dev/null
 
 git -C "$work_dir" config user.email "loopflow@example.com"
 git -C "$work_dir" config user.name "Loopflow"
@@ -27,7 +27,7 @@ git -C "$work_dir" commit -m "init" >/dev/null
 git -C "$work_dir" push -u origin main >/dev/null
 
 git clone "$origin_dir" "$other_dir" >/dev/null
-git -C "$other_dir" checkout -b main >/dev/null
+git -C "$other_dir" checkout -B main >/dev/null
 
 git -C "$other_dir" config user.email "loopflow@example.com"
 git -C "$other_dir" config user.name "Loopflow"
@@ -47,7 +47,7 @@ git -C "$work_dir" push -u origin feature/conflict >/dev/null
 
 set +e
 cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p lf -- \
-  ops rebase --onto origin/main
+  ops rebase origin/main
 status=$?
 set -e
 

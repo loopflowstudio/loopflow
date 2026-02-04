@@ -15,7 +15,7 @@ git init --bare "$origin_dir" >/dev/null
 git clone "$origin_dir" "$repo_dir" >/dev/null
 
 cd "$repo_dir"
-git checkout -b main >/dev/null
+git checkout -B main >/dev/null
 git config user.email "loopflow@example.com"
 git config user.name "Loopflow"
 git commit --allow-empty -m "init" >/dev/null

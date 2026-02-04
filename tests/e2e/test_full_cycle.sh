@@ -16,7 +16,7 @@ git init --bare "$origin_dir" >/dev/null
 git clone "$origin_dir" "$work_dir" >/dev/null
 
 cd "$work_dir"
-git checkout -b main >/dev/null
+git checkout -B main >/dev/null
 
 git config user.email "loopflow@example.com"
 git config user.name "Loopflow"

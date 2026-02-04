@@ -68,10 +68,21 @@ Shipped polish for local macOS workflows:
 
 ## Phase 2 focus
 
-Remote access foundation:
-- WaveService protocol abstraction (transport-agnostic service layer)
-- lfd registration + auth groundwork (see Phase 2 items)
-- gRPC terminal streaming groundwork
+Remote access foundation for three scenarios:
+
+| Scenario | Connection | Auth |
+|----------|-----------|------|
+| **Local** | `127.0.0.1:50051` | None (localhost is secure) |
+| **Remote self-hosted** | Relay via loopflow.studio | JWT |
+| **Remote loopflow-hosted** | Relay via loopflow.studio | JWT |
+
+Key infrastructure:
+- **lfd registration**: Daemon registers with loopflow.studio for discovery
+- **Relay tunnel**: lfd maintains outbound connection to loopflow.studio for NAT traversal
+- **JWT validation**: Connection tokens validated locally using cached JWKS (no roundtrip)
+- **gRPC terminal streaming**: Bidirectional stream for remote terminal I/O
+
+Local mode works today. Remote modes require loopflow.studio relay infrastructure.
 
 ## If screenshots are blocked
 

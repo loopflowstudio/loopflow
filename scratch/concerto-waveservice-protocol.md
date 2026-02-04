@@ -7,7 +7,6 @@ Transport-agnostic service layer for Concerto. Phase 1 complete; gRPC and remote
 Phase 1 shipped:
 - `WaveServiceProtocol` and `EventServiceProtocol` in LoopflowCore
 - `LocalWaveService` (HTTP) and `LocalEventService` (socket) conform to protocols
-- `WaveServiceFactory` for implementation selection
 - `/wave-runs` HTTP endpoint replaces direct SQLite reads
 - `LFDClient.swift` deleted (redundant)
 
@@ -64,5 +63,4 @@ protocol EventServiceProtocol: Sendable {
 ## Key Decisions
 
 1. **Separate protocol for events.** Persistent connection lifecycle doesn't fit request/response.
-2. **Factory pattern.** Mobile needs runtime switching between local and remote.
-3. **All data through daemon.** No direct SQLite—required for remote access.
+2. **All data through daemon.** No direct SQLite—required for remote access.

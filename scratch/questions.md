@@ -55,3 +55,26 @@ The remaining items in `roadmap/concerto/` are all Phase 2 or 3.
 ## Prompt parity tests
 
 - **Flow coverage**: Parity tests use `lf run <step> --dry-run` even in the `with-flow` fixture because Rust `lf` doesn't resolve flows yet. Should we add flow execution to Rust CLI (or switch the test to `lf flow` once parity exists)?
+
+## Rebase blocked (2026-02-04)
+
+Rebase onto main aborted due to complex conflicts. Main already has `loopflow-ops` (commit 3b4f88f60), and this branch has a parallel implementation plus parity tests.
+
+**Conflicting files (add/add in loopflow-ops):**
+- `rust/loopflow-ops/src/abandon.rs`
+- `rust/loopflow-ops/src/commit.rs`
+- `rust/loopflow-ops/src/land.rs`
+- `rust/loopflow-ops/src/lint.rs`
+- `rust/loopflow-ops/src/next.rs`
+- `rust/loopflow-ops/src/pr.rs`
+- `rust/loopflow-ops/src/rebase.rs`
+- `rust/loopflow-ops/src/util.rs`
+
+**Unique to this branch (not on main):**
+- `tests/parity/` - parity test infrastructure and fixtures
+- `scratch/` design docs
+
+**Options:**
+1. Manually merge each conflicting file (need to understand both implementations)
+2. Cherry-pick only the parity test commits onto a fresh branch from main
+3. Abandon this branch if main's implementation is sufficient

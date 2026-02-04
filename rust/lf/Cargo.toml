@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 loopflow-engine = { path = "../loopflow-engine" }
+loopflow-ops = { path = "../loopflow-ops" }
 clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1"
 thiserror = "1"

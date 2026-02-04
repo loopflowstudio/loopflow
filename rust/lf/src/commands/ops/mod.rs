@@ -1,169 +1,197 @@
 use crate::commands::util::find_repo_root;
 use crate::{OpsCommand, ShellCommand, WtCommand};
 use anyhow::{anyhow, Result};
-use loopflow_engine::git::{
-    commit, current_branch, delete_local_branch, get_default_branch, is_clean, land,
-    pr_create_draft, push, push_with_upstream, rebase, sync_main, LandStrategy,
+use loopflow_engine::git::{current_branch, delete_local_branch, get_default_branch};
+use loopflow_engine::worktrees::{create_with_schema, list_worktrees, main_repo_root, worktree_path};
+use loopflow_ops::{
+    abandon_branch, commit_workflow, create_or_update_pr, land, next_branch, rebase_with_recovery,
+    AbandonOptions, CommitOptions, LandOptions, NextOptions, PrOptions, Progress, RebaseOptions,
 };
-use loopflow_engine::worktrees::{
-    create_with_schema, list_worktrees, main_repo_root, preserve_worktree, worktree_path,
-};
+use std::io::{self, Write};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn run(op: &OpsCommand) -> Result<()> {
+    let progress = CliProgress;
     match op {
-        OpsCommand::Rebase { onto } => rebase_current(onto.as_deref()),
+        OpsCommand::Rebase { onto } => rebase_current(onto.as_deref(), &progress),
         OpsCommand::Push { force } => push_current(*force),
-        OpsCommand::Land { strategy } => land_current(strategy.as_deref()),
-        OpsCommand::Pr { title, draft } => open_pr(title.as_deref(), *draft),
+        OpsCommand::Land {
+            strict,
+            local,
+            create_pr,
+            worktree,
+            no_lint,
+        } => land_current(
+            *strict,
+            *local,
+            *create_pr,
+            worktree.as_deref(),
+            !no_lint,
+            &progress,
+        ),
+        OpsCommand::Pr { refresh, no_lint } => open_pr(*refresh, !no_lint, &progress),
         OpsCommand::Sync => sync_current(),
-        OpsCommand::Next => next_branch(),
-        OpsCommand::Commit { message } => commit_current(message.as_deref()),
-        OpsCommand::Abandon { force } => abandon_current(*force),
+        OpsCommand::Next {
+            block,
+            create_pr,
+            no_rebase,
+        } => next_branch_cmd(*block, *create_pr, !*no_rebase, &progress),
+        OpsCommand::Commit {
+            message,
+            push,
+            no_add,
+            no_lint,
+        } => commit_current(message.as_deref(), *push, !no_add, !no_lint, &progress),
+        OpsCommand::Abandon { force, branch } => abandon_current(branch.as_deref(), *force, &progress),
         OpsCommand::Wt { cmd } => run_worktree(cmd),
         OpsCommand::Shell { cmd } => run_shell(cmd),
     }
 }
 
-fn rebase_current(onto: Option<&str>) -> Result<()> {
+struct CliProgress;
+
+impl Progress for CliProgress {
+    fn status(&self, msg: &str) {
+        println!("{}", msg);
+    }
+
+    fn error(&self, msg: &str) {
+        eprintln!("{}", msg);
+    }
+
+    fn confirm(&self, msg: &str) -> bool {
+        print!("{} [y/N]: ", msg);
+        let _ = io::stdout().flush();
+        let mut input = String::new();
+        if io::stdin().read_line(&mut input).is_err() {
+            return false;
+        }
+        matches!(input.trim().to_lowercase().as_str(), "y" | "yes")
+    }
+}
+
+fn rebase_current(onto: Option<&str>, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
     let base = get_default_branch(&repo_root)?;
     let onto_ref = onto
         .map(|value| value.to_string())
         .unwrap_or_else(|| format!("origin/{base}"));
-    let result = rebase(&repo_root, &onto_ref, None)?;
-    if !result.success {
-        return Err(anyhow!("rebase failed"));
-    }
+    let _ = rebase_with_recovery(
+        &repo_root,
+        &RebaseOptions {
+            onto: onto_ref,
+            push: true,
+        },
+        progress,
+    )?;
     Ok(())
 }
 
 fn push_current(force: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
-    push(&repo_root, force).map_err(Into::into)
+    loopflow_engine::git::push(&repo_root, force).map_err(Into::into)
 }
 
-fn land_current(strategy: Option<&str>) -> Result<()> {
+fn land_current(
+    strict: bool,
+    local: bool,
+    create_pr: bool,
+    worktree: Option<&str>,
+    lint: bool,
+    progress: &impl Progress,
+) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let main_branch = get_default_branch(&repo_root)?;
-    let land_strategy = match strategy {
-        Some("local") | Some("merge") => LandStrategy::LocalMerge,
-        Some("squash") | Some("squash_merge") => LandStrategy::SquashMerge,
-        _ => LandStrategy::SquashMerge,
-    };
-    let _ = land(&repo_root, land_strategy, &main_branch)?;
+    let _ = land(
+        &repo_root,
+        &LandOptions {
+            strict,
+            local,
+            create_pr,
+            worktree: worktree.map(str::to_string),
+            lint,
+        },
+        progress,
+    )?;
     Ok(())
 }
 
-fn open_pr(title: Option<&str>, draft: bool) -> Result<()> {
+fn open_pr(refresh: bool, lint: bool, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
-    if draft {
-        let url = pr_create_draft(&repo_root)?;
-        println!("{}", url);
-        return Ok(());
-    }
-
-    let mut cmd = Command::new("gh");
-    cmd.arg("pr").arg("create").arg("--fill");
-    if let Some(title) = title {
-        cmd.arg("--title").arg(title);
-    }
-
-    let status = cmd.current_dir(&repo_root).status()?;
-    if !status.success() {
-        return Err(anyhow!("gh pr create failed"));
-    }
+    let result = create_or_update_pr(
+        &repo_root,
+        &PrOptions {
+            refresh,
+            lint,
+        },
+        progress,
+    )?;
+    println!("{}", result.url);
     Ok(())
 }
 
 fn sync_current() -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_branch = get_default_branch(&repo_root)?;
-    let ok = sync_main(&repo_root, &main_branch)?;
+    let ok = loopflow_engine::git::sync_main(&repo_root, &main_branch)?;
     if !ok {
         return Err(anyhow!("working tree dirty; sync aborted"));
     }
     Ok(())
 }
 
-fn next_branch() -> Result<()> {
+fn next_branch_cmd(
+    block: bool,
+    create_pr: bool,
+    rebase: bool,
+    progress: &impl Progress,
+) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let main_repo = main_repo_root(&repo_root)?;
-    let main_branch = get_default_branch(&main_repo)?;
-
-    let current = current_branch(&repo_root)?.ok_or_else(|| anyhow!("not on a branch"))?;
-    if current == main_branch {
-        return Err(anyhow!("cannot run next from {}", main_branch));
-    }
-
-    let preserved = preserve_worktree(&main_repo, &repo_root)?;
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let next_name = format!("next-{}", timestamp);
-
-    let status = Command::new("git")
-        .arg("worktree")
-        .arg("add")
-        .arg("-b")
-        .arg(&next_name)
-        .arg(&repo_root)
-        .arg(&main_branch)
-        .current_dir(&main_repo)
-        .status()?;
-    if !status.success() {
-        return Err(anyhow!("failed to create worktree {}", repo_root.display()));
-    }
-
-    let _ = push_with_upstream(&repo_root, "origin", &next_name);
-    let _ = write_shell_directive(&format!("cd {}", repo_root.display()));
-    println!("Preserved worktree: {}", preserved.display());
+    let result = next_branch(
+        &repo_root,
+        &NextOptions {
+            block,
+            create_pr,
+            rebase,
+        },
+        progress,
+    )?;
+    println!("{}", result.new_branch);
     Ok(())
 }
 
-fn commit_current(message: Option<&str>) -> Result<()> {
+fn commit_current(
+    message: Option<&str>,
+    push: bool,
+    add: bool,
+    lint: bool,
+    progress: &impl Progress,
+) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let message = message.ok_or_else(|| anyhow!("commit message required"))?;
-    commit(&repo_root, message).map_err(Into::into)
+    let _ = commit_workflow(
+        &repo_root,
+        &CommitOptions {
+            add,
+            lint,
+            push,
+            task: "commit".to_string(),
+            flow_parents: Vec::new(),
+            message: message.map(str::to_string),
+        },
+        progress,
+    )?;
+    Ok(())
 }
 
-fn abandon_current(force: bool) -> Result<()> {
+fn abandon_current(branch: Option<&str>, force: bool, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let main_branch = get_default_branch(&repo_root)?;
-    let branch = current_branch(&repo_root)?;
-
-    if branch.as_deref() == Some(&main_branch) {
-        println!("Already on {}", main_branch);
-        return Ok(());
-    }
-
-    let status = Command::new("git")
-        .arg("checkout")
-        .arg(&main_branch)
-        .current_dir(&repo_root)
-        .status()?;
-    if !status.success() {
-        return Err(anyhow!("failed to checkout {}", main_branch));
-    }
-
-    if let Some(branch) = branch {
-        if force {
-            delete_local_branch(&repo_root, &branch)?;
-        } else {
-            let status = Command::new("git")
-                .arg("branch")
-                .arg("-d")
-                .arg(&branch)
-                .current_dir(&repo_root)
-                .status()?;
-            if !status.success() {
-                return Err(anyhow!("failed to delete branch {}", branch));
-            }
-        }
-    }
-
+    let _ = abandon_branch(
+        &repo_root,
+        &AbandonOptions {
+            branch: branch.map(str::to_string),
+            force,
+        },
+        progress,
+    )?;
     Ok(())
 }
 

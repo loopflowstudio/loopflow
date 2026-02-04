@@ -117,21 +117,44 @@ pub enum OpsCommand {
     },
     Land {
         #[arg(long)]
-        strategy: Option<String>,
+        strict: bool,
+        #[arg(long)]
+        local: bool,
+        #[arg(short = 'c', long = "create-pr")]
+        create_pr: bool,
+        #[arg(short = 'w', long = "worktree")]
+        worktree: Option<String>,
+        #[arg(long = "no-lint")]
+        no_lint: bool,
     },
     Pr {
-        title: Option<String>,
-        #[arg(long)]
-        draft: bool,
+        #[arg(short = 'r', long = "refresh")]
+        refresh: bool,
+        #[arg(long = "no-lint")]
+        no_lint: bool,
     },
     Sync,
-    Next,
+    Next {
+        #[arg(long)]
+        block: bool,
+        #[arg(short = 'c', long = "create-pr")]
+        create_pr: bool,
+        #[arg(long = "no-rebase")]
+        no_rebase: bool,
+    },
     Commit {
         #[arg(short = 'm', long = "message", short_alias = 'M')]
         message: Option<String>,
+        #[arg(short = 'p', long = "push", short_alias = 'P')]
+        push: bool,
+        #[arg(long = "no-add")]
+        no_add: bool,
+        #[arg(long = "no-lint")]
+        no_lint: bool,
     },
     Abandon {
-        #[arg(long)]
+        branch: Option<String>,
+        #[arg(short = 'f', long)]
         force: bool,
     },
     /// Worktree operations

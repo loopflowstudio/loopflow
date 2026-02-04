@@ -12,133 +12,139 @@ Python `lf ops` orchestrates git, GitHub CLI, and agents into a single coherent 
 
 ## Approach
 
-Build a **workflow engine** inside `loopflow-engine`, not scattered command-line logic. Each operation (`commit`, `pr`, `land`, `next`, `abandon`) composes from primitives:
+Build a **separate `loopflow-ops` crate** for workflow orchestration. This crate depends on `loopflow-engine` for primitives (git, agent, config) and composes them into complete workflows.
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  loopflow-engine::workflow                              │
-│                                                         │
-│  ┌──────────────────────────────────────────────────┐   │
-│  │ Primitives                                       │   │
-│  │  stage_all()  commit()  push()  rebase()        │   │
-│  │  pr_create()  pr_ready()  pr_merge_auto()       │   │
-│  │  clear_scratch()  run_lint()  run_agent()       │   │
-│  └──────────────────────────────────────────────────┘   │
-│                                                         │
-│  ┌──────────────────────────────────────────────────┐   │
-│  │ Workflows (compose primitives)                  │   │
-│  │  add_commit_push()                               │   │
-│  │  rebase_with_conflict_recovery()                │   │
-│  │  land_with_auto_merge()                         │   │
-│  │  iterate_to_next_branch()                       │   │
-│  └──────────────────────────────────────────────────┘   │
-│                                                         │
-│  ┌──────────────────────────────────────────────────┐   │
-│  │ Agent Integration                                │   │
-│  │  generate_commit_message()                       │   │
-│  │  generate_pr_description()                       │   │
-│  │  resolve_rebase_conflicts()                      │   │
-│  │  fix_lint_issues()                               │   │
-│  └──────────────────────────────────────────────────┘   │
-│                                                         │
-└─────────────────────────────────────────────────────────┘
+rust/
+├── loopflow-engine/     # Primitives (git, agent, flow, prompt)
+├── loopflow-ops/        # Workflow orchestration (NEW)
+│   └── src/
+│       ├── lib.rs
+│       ├── messages.rs  # generate_commit_message(), generate_pr_message()
+│       ├── commit.rs    # commit()
+│       ├── pr.rs        # create_or_update_pr()
+│       ├── land.rs      # land()
+│       ├── rebase.rs    # rebase_with_recovery()
+│       ├── next.rs      # next_branch()
+│       ├── abandon.rs   # abandon_branch()
+│       ├── lint.rs      # ensure_lint_passes()
+│       └── progress.rs  # Progress trait
+├── lf/                  # CLI (thin wrapper, calls loopflow-ops)
+└── lfd/                 # Daemon (can also use loopflow-ops)
 ```
 
-The CLI becomes thin: parse args, call workflow, print output.
+The CLI becomes thin: parse args, call `loopflow_ops::land()`, print output.
 
 ### Key Design Decisions
 
-**1. Workflows are library code, not CLI code.**
+**1. Separate crate, not module.**
 
-Today's Rust CLI has `rebase_current()`, `push_current()`, `land_current()` as standalone functions. This scatters logic and prevents composition.
-
-Move workflows into `loopflow-engine::workflow`. The CLI calls `workflow::land(repo, config)`. This enables:
-- lfd to use the same workflows
+`loopflow-ops` is a standalone crate that depends on `loopflow-engine`. This provides:
+- Clear dependency direction (ops → engine, not engine → ops)
+- Cleaner separation of concerns (engine = primitives, ops = orchestration)
+- lfd can use loopflow-ops without circular dependencies
 - Testing without spawning processes
-- Consistent behavior across entry points
 
-**2. Agent integration via step execution.**
+**2. lf-driven, not agent-driven.**
 
-Python calls `generate_commit_message()` which internally runs an agent with a step. Rust should do the same.
+Agent generates messages; lf does git operations. This gives lf full control over orchestration.
 
 ```rust
-// loopflow-engine/src/workflow/agent.rs
+// loopflow-ops/src/messages.rs
 
-pub fn run_step_for_message(repo: &Path, step: &str) -> Result<String> {
-    let step = load_step(repo, step)?;
-    let config = load_config_or_default(Some(repo));
-    let launch = LaunchConfig {
-        auto: true,
-        stream: false,  // capture output
-        skip_permissions: config.yolo,
-        ..Default::default()
+pub fn generate_commit_message(repo: &Path) -> Result<CommitMessage> {
+    let diff = get_staged_diff(repo)?;
+    let prompt = build_message_prompt(&diff, COMMIT_MESSAGE_TEMPLATE);
+
+    // Run agent in batch mode, capture JSON output
+    let output = launch_agent_batch(repo, &prompt)?;
+
+    // Parse {title, body} from output
+    parse_commit_message(&output)
+}
+```
+
+The agent returns structured data (JSON `{title, body}`), lf runs `git commit`.
+
+**3. Batched agent calls.**
+
+Pre-check what needs to be done, then make 0 or 1 agent call per operation:
+
+```rust
+pub fn land(repo: &Path, config: &LandConfig, progress: &impl Progress) -> Result<LandResult> {
+    // Pre-check phase (no agent)
+    let needs_commit = !is_clean(repo)?;
+    let rebase_result = try_rebase(repo, &config.main_branch)?;
+    let needs_conflict_resolution = !rebase_result.success;
+
+    // Agent phase (0 or 1 call)
+    if needs_commit || needs_conflict_resolution {
+        let mut tasks = vec![];
+        if needs_commit { tasks.push("commit staged changes"); }
+        if needs_conflict_resolution { tasks.push("resolve rebase conflicts"); }
+        launch_agent_for_tasks(repo, &tasks)?;
+    }
+
+    // Mechanical phase (no agent)
+    clear_scratch(repo)?;  // Simple commit: "lf land: clear scratch/"
+    push(repo)?;
+    pr_ready(repo)?;
+    pr_merge_auto(repo)?;
+
+    Ok(LandResult { merged: true })
+}
+```
+
+**4. Commit message format with flow lineage.**
+
+All commits include the flow hierarchy for traceability:
+
+```
+lf {flow_parents} {task}: {generated_title}
+
+{generated_body}
+```
+
+Examples:
+- `lf commit: add dark mode toggle` (direct ops command)
+- `lf my-wave ship implement: refactor auth module` (step in flow in wave)
+
+```rust
+pub fn commit(
+    repo: &Path,
+    task: &str,
+    flow_parents: &[String],
+    progress: &impl Progress,
+) -> Result<bool> {
+    let generated = generate_commit_message(repo)?;
+
+    let prefix = if flow_parents.is_empty() {
+        format!("lf {task}")
+    } else {
+        format!("lf {} {task}", flow_parents.join(" "))
     };
-    let result = launch_agent_sync(&config.agent_model, &step.prompt, &launch)?;
-    Ok(result.output)
+
+    let message = format!("{prefix}: {}", generated.title);
+    git::commit(repo, &message)?;
+    Ok(true)
 }
 ```
 
-**3. Conflict recovery via agent handoff.**
+**5. Mechanical ops don't need agent.**
 
-When `rebase` hits conflicts, Python aborts the rebase and launches `lf rebase` step. The agent resolves conflicts, completes the rebase, and control returns.
+These operations are fully programmatic—no agent involvement:
+- `clear_scratch()` → delete files + commit "lf land: clear scratch/"
+- `push()` → `git push`
+- `pr_ready()` → `gh pr ready`
+- `pr_merge_auto()` → `gh pr merge --auto --squash`
 
-```rust
-pub fn rebase_with_recovery(repo: &Path, onto: &str) -> Result<RebaseResult> {
-    let result = git::rebase(repo, onto, None)?;
-    if result.success {
-        return Ok(result);
-    }
+Agent is only consulted for:
+- Commit message generation
+- PR description generation
+- Conflict resolution
+- Lint fixing (if lint fails)
 
-    // Abort and hand off to agent
-    git::rebase_abort(repo)?;
-
-    let step = load_step(repo, "rebase")?;
-    let prompt = format_rebase_prompt(&step, &result.conflicts);
-
-    launch_agent_interactive(repo, &prompt)?;
-
-    // Verify rebase completed
-    if !git::rebase_in_progress(repo)? {
-        Ok(RebaseResult { success: true, conflicts: None, new_head: Some(git::head(repo)?) })
-    } else {
-        Err(anyhow!("rebase still in progress after agent"))
-    }
-}
-```
-
-**4. Lint runs check first, agent on failure.**
-
-```rust
-pub fn ensure_lint_passes(repo: &Path) -> Result<bool> {
-    let config = load_config_or_default(Some(repo));
-
-    // Try configured command
-    if let Some(cmd) = &config.lint_check {
-        if run_command(repo, cmd)?.success() {
-            return Ok(true);
-        }
-    } else {
-        // Auto-detect ruff
-        if which("ruff").is_some() {
-            if run_ruff_check(repo)? {
-                return Ok(true);
-            }
-        }
-    }
-
-    // Lint failed - run fixer agent
-    launch_agent_sync(repo, "lint")?;
-
-    // Verify fixed
-    if let Some(cmd) = &config.lint_check {
-        Ok(run_command(repo, cmd)?.success())
-    } else {
-        run_ruff_check(repo)
-    }
-}
-```
-
-**5. Progress messages via callback.**
+**6. Progress messages via callback.**
 
 ```rust
 pub trait Progress {
@@ -146,22 +152,9 @@ pub trait Progress {
     fn error(&self, msg: &str);
     fn confirm(&self, msg: &str) -> bool;
 }
-
-pub fn land(repo: &Path, config: &LandConfig, progress: &impl Progress) -> Result<LandResult> {
-    progress.status("Checking for pending changes...");
-    if !config.strict && add_commit_push(repo, progress)? {
-        progress.status("Committed pending changes");
-    }
-
-    progress.status("Rebasing onto main...");
-    rebase_with_recovery(repo, &format!("origin/{}", config.main_branch))?;
-
-    progress.status("Enabling auto-merge...");
-    gh::pr_merge_auto(repo)?;
-
-    Ok(LandResult { merged: true })
-}
 ```
+
+CLI implementation prompts stdin. lfd implementation uses config flags or fails.
 
 ## Alternatives Considered
 
@@ -174,25 +167,26 @@ pub fn land(repo: &Path, config: &LandConfig, progress: &impl Progress) -> Resul
 
 ## Key Decisions
 
-**Stateless workflows.** Each workflow function takes a repo path and config, does work, returns result. No workflow state stored in engine. The CLI/lfd owns state.
+**Stateless workflows.** Each workflow function takes a repo path, config, and flow context. Returns result. No workflow state stored in the crate. The CLI/lfd owns execution state.
 
-> From wave principles: "loopflow-engine is a stateless library of pure functions"
-
-**Sync agent execution for workflows.** Commit message generation and conflict resolution are synchronous operations in user flow. Use `launch_agent_sync()` that blocks until agent completes. Reserve async for lfd's wave execution.
+**Sync agent execution.** Commit message generation and conflict resolution are synchronous operations in user flow. Use batch mode (`--print`) that blocks until agent completes. Reserve async for lfd's wave execution.
 
 **Config drives behavior.** `load_config_or_default()` returns config with sensible defaults. No hardcoded paths or tool assumptions. If user sets `lint_check`, use it. Otherwise auto-detect.
 
-**Composable primitives.** `add_commit_push()` is used by `pr`, `land`, and `next`. `rebase_with_recovery()` is used by `rebase`, `land`, and `next`. One implementation, tested once.
+**Composable primitives.** `commit()` is used by `pr`, `land`, and `next`. `rebase_with_recovery()` is used by `rebase`, `land`, and `next`. One implementation, tested once.
+
+**Commit messages from CLAUDE.md.** Commit message style is defined in repo's CLAUDE.md, which is included in agent context. No separate "commit" step needed—agent already knows the conventions.
 
 ## Scope
 
 ### In scope
 
-- Workflow engine in `loopflow-engine::workflow`
-- Agent integration for messages, conflicts, lint
+- `loopflow-ops` crate with workflow orchestration
+- Message generation (commit, PR) via agent batch mode
 - All `lf ops` commands reaching Python parity
 - Progress callback for UX
 - Confirmation prompts for destructive operations
+- Flow lineage in commit messages (`lf {flow_parents} {task}: ...`)
 
 ### Out of scope
 
@@ -224,8 +218,13 @@ lf ops land
 # Clearing scratch/...
 # Enabling auto-merge...
 
+# Commit messages have correct format
+git log --oneline
+# lf land: clear scratch/
+# lf my-wave ship implement: add auth middleware
+
 # Tests pass
-cargo test -p loopflow-engine workflow
+cargo test -p loopflow-ops
 ```
 
 Observable: A user can complete a full feature cycle (create branch → work → commit → pr → land) using only Rust `lf ops`, with the same experience as Python.

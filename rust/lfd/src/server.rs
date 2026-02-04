@@ -2,6 +2,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::auth::AuthContext;
+use crate::events::{matches_patterns, EventHub};
 use crate::executor::WaveExecutor;
 use crate::id::LfdId;
 use crate::output::OutputHub;
@@ -37,6 +38,7 @@ pub struct ControlServer {
     scheduler: Arc<Scheduler>,
     executor: WaveExecutor,
     output: OutputHub,
+    events: EventHub,
     auth: AuthContext,
     started_at: OffsetDateTime,
 }
@@ -57,6 +59,7 @@ impl ControlServer {
         scheduler: Arc<Scheduler>,
         executor: WaveExecutor,
         output: OutputHub,
+        events: EventHub,
         auth: AuthContext,
     ) -> Self {
         Self {
@@ -64,6 +67,7 @@ impl ControlServer {
             scheduler,
             executor,
             output,
+            events,
             auth,
             started_at: OffsetDateTime::now_utc(),
         }
@@ -985,9 +989,25 @@ impl ControlService for ControlServer {
 
     async fn subscribe(
         &self,
-        _request: Request<crate::proto::control::SubscribeRequest>,
+        request: Request<crate::proto::control::SubscribeRequest>,
     ) -> Result<Response<Self::SubscribeStream>, Status> {
-        let stream = tokio_stream::empty();
+        let patterns = request.into_inner().patterns;
+        let receiver = self.events.subscribe();
+
+        let stream = BroadcastStream::new(receiver).filter_map(move |result| {
+            let patterns = patterns.clone();
+            match result {
+                Ok(event) => {
+                    if matches_patterns(&event.event, &patterns) {
+                        Some(Ok(event))
+                    } else {
+                        None
+                    }
+                }
+                Err(_) => None,
+            }
+        });
+
         Ok(Response::new(Box::pin(stream)))
     }
 

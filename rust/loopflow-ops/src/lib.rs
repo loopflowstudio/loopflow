@@ -8,10 +8,11 @@ mod next;
 mod pr;
 mod progress;
 mod rebase;
+pub mod trace;
 mod util;
 
 pub use abandon::{abandon_branch, AbandonOptions};
-pub use commit::{commit_workflow, CommitOptions};
+pub use commit::{commit_workflow, commit_workflow_traced, CommitOptions};
 pub use error::{OpsError, OpsResult};
 pub use land::{land, LandOptions, LandResult};
 pub use lint::ensure_lint_passes;
@@ -20,3 +21,4 @@ pub use next::{next_branch, NextOptions, NextResult};
 pub use pr::{create_or_update_pr, PrOptions, PrResult};
 pub use progress::{NullProgress, Progress};
 pub use rebase::{rebase_with_recovery, RebaseOptions, RebaseResult};
+pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};

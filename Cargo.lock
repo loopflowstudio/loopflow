@@ -1471,9 +1471,11 @@ dependencies = [
 name = "loopflow-ops"
 version = "0.7.1"
 dependencies = [
+ "hex",
  "loopflow-engine",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror",
 ]
 

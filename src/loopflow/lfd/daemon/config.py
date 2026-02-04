@@ -6,7 +6,6 @@ from typing import Any
 
 import yaml
 
-
 DEFAULT_AUTH_BASE_URL = "https://loopflow.studio"
 
 

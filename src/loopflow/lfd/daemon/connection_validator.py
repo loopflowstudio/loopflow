@@ -29,11 +29,7 @@ class ConnectionValidator:
         if status == 200 and isinstance(data, dict):
             valid = bool(data.get("valid", False))
             expires = data.get("expires_at")
-            expiry = (
-                float(expires)
-                if isinstance(expires, (int, float))
-                else time.time() + 60
-            )
+            expiry = float(expires) if isinstance(expires, (int, float)) else time.time() + 60
             self._cache[token] = (valid, expiry)
             return valid
 

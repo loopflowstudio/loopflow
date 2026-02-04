@@ -19,6 +19,7 @@ use loopflow_engine::prompt::{format_prompt, gather_context, GatherContextOpts};
 use loopflow_engine::worktree::{create_worktree, remove_worktree};
 
 use crate::id::LfdId;
+use crate::loops::now_timestamp;
 use crate::output::{OutputEvent, OutputHub};
 use crate::proto::control::{Agent, AgentStatus, WaveRun, WaveRunStatus};
 use crate::scheduler::Scheduler;
@@ -189,8 +190,15 @@ impl WaveExecutor {
                         .model
                         .clone()
                         .unwrap_or_else(|| "unknown".to_string());
-                    let agent =
-                        self.new_agent(&run, &wave.repo, &step, AgentStatus::AgentWaiting, &model);
+                    let worktree = worktree_path(&run, &wave);
+                    let agent = build_agent_for_step(
+                        &run.id,
+                        &wave.repo,
+                        &worktree,
+                        &step,
+                        AgentStatus::AgentWaiting,
+                        &model,
+                    );
                     self.store.start_agent(&agent)?;
                     run.status = WaveRunStatus::WaveRunWaiting as i32;
                     run.flow_parents = step.flow_parents.clone();
@@ -222,25 +230,18 @@ impl WaveExecutor {
         step: &ConcreteStep,
     ) -> Result<i32> {
         let worktree = worktree_path(run, wave);
-        let prompt = self.build_prompt(wave, step, &worktree)?;
-        let config = load_config_or_default(Some(&PathBuf::from(&worktree)));
-        let model = step
-            .step
-            .model
-            .clone()
-            .unwrap_or_else(|| config.agent_model.clone());
-
-        let launch = LaunchConfig {
-            auto: true,
-            stream: true,
-            skip_permissions: config.yolo,
-            model_variant: None,
-            chrome: config.chrome,
-            cwd: Some(PathBuf::from(&worktree)),
-        };
+        let (prompt, model, launch) =
+            build_step_prompt(&worktree, step, &wave.direction, Some(&wave.name))?;
         let cmd = build_agent_command(&model, &prompt, &launch);
 
-        let agent = self.new_agent(run, &wave.repo, step, AgentStatus::AgentRunning, &model);
+        let agent = build_agent_for_step(
+            &run.id,
+            &wave.repo,
+            &worktree,
+            step,
+            AgentStatus::AgentRunning,
+            &model,
+        );
         let agent_id = agent.id.clone();
         self.store.start_agent(&agent)?;
 
@@ -378,21 +379,24 @@ impl WaveExecutor {
                     ..fork_run.clone()
                 });
 
-                let prompt = build_prompt_for_step(
-                    &wave_repo,
-                    &worktree,
-                    &step,
-                    &wave_directions,
-                    &wave_run_id,
-                );
-                let (cmd, agent) = match prompt {
-                    Ok((cmd, agent)) => (cmd, agent),
+                let prompt = build_step_prompt(&worktree, &step, &wave_directions, None);
+                let (prompt, model, launch) = match prompt {
+                    Ok(result) => result,
                     Err(err) => {
                         let _ = tx.send((fork_run_id.to_string(), Err(err))).await;
                         scheduler.release(fork_run_id.as_str());
                         return;
                     }
                 };
+                let cmd = build_agent_command(&model, &prompt, &launch);
+                let agent = build_agent_for_step(
+                    &wave_run_id,
+                    &wave_repo,
+                    &worktree,
+                    &step,
+                    AgentStatus::AgentRunning,
+                    &model,
+                );
                 let _ = store.start_agent(&agent);
 
                 let result = runner
@@ -482,67 +486,12 @@ impl WaveExecutor {
             if worktree_path.join(".git").exists() {
                 let _ = remove_worktree(worktree_path, true);
             }
+            self.scheduler.release(fork_run.id.as_str());
         }
         let _ = self.store.delete_fork_runs(
             &LfdId::parse(&run.id).unwrap_or_else(|_| LfdId::new()),
             run.step_index,
         );
-    }
-
-    fn build_prompt(
-        &self,
-        wave: &crate::proto::control::Wave,
-        step: &ConcreteStep,
-        worktree: &str,
-    ) -> Result<String> {
-        let config = load_config_or_default(Some(Path::new(worktree)));
-        let directions = merge_directions(&wave.direction, &step.step.directions);
-        let opts = GatherContextOpts {
-            repo_root: PathBuf::from(worktree),
-            step: Some(step.step.name.clone()),
-            inline: None,
-            step_args: Vec::new(),
-            run_mode: Some("auto".to_string()),
-            directions,
-            files: Vec::new(),
-            lfdocs: config.lfdocs,
-            diff_files: config.diff_files,
-            diff: config.diff,
-            clipboard: config.paste,
-            area: config.area.clone(),
-            wave: Some(wave.name.clone()),
-        };
-
-        let components = gather_context(&opts)?;
-        Ok(format_prompt(&components))
-    }
-
-    fn new_agent(
-        &self,
-        run: &WaveRun,
-        repo: &str,
-        step: &ConcreteStep,
-        status: AgentStatus,
-        model: &str,
-    ) -> Agent {
-        let worktree = if run.worktree.is_empty() {
-            repo.to_string()
-        } else {
-            run.worktree.clone()
-        };
-        Agent {
-            id: Uuid::new_v4().to_string(),
-            step: step.step.name.clone(),
-            repo: repo.to_string(),
-            worktree,
-            wave_run_id: Some(run.id.clone()),
-            status: status as i32,
-            started_at: Some(now_timestamp()),
-            ended_at: None,
-            pid: None,
-            model: model.to_string(),
-            run_mode: "auto".to_string(),
-        }
     }
 }
 
@@ -584,13 +533,12 @@ fn flow_parents_for_index(items: &[ConcreteItem], step_index: u32) -> Vec<String
     }
 }
 
-fn build_prompt_for_step(
-    repo: &str,
+fn build_step_prompt(
     worktree: &str,
     step: &ConcreteStep,
     directions: &[String],
-    wave_run_id: &str,
-) -> Result<(Vec<String>, Agent)> {
+    wave: Option<&str>,
+) -> Result<(String, String, LaunchConfig)> {
     let config = load_config_or_default(Some(Path::new(worktree)));
     let directions = merge_directions(directions, &step.step.directions);
     let opts = GatherContextOpts {
@@ -606,7 +554,7 @@ fn build_prompt_for_step(
         diff: config.diff,
         clipboard: config.paste,
         area: config.area.clone(),
-        wave: None,
+        wave: wave.map(str::to_string),
     };
 
     let components = gather_context(&opts)?;
@@ -625,28 +573,28 @@ fn build_prompt_for_step(
         cwd: Some(PathBuf::from(worktree)),
     };
 
-    let cmd = build_agent_command(&model, &prompt, &launch);
-    let agent = Agent {
+    Ok((prompt, model, launch))
+}
+
+fn build_agent_for_step(
+    wave_run_id: &str,
+    repo: &str,
+    worktree: &str,
+    step: &ConcreteStep,
+    status: AgentStatus,
+    model: &str,
+) -> Agent {
+    Agent {
         id: Uuid::new_v4().to_string(),
         step: step.step.name.clone(),
         repo: repo.to_string(),
         worktree: worktree.to_string(),
         wave_run_id: Some(wave_run_id.to_string()),
-        status: AgentStatus::AgentRunning as i32,
+        status: status as i32,
         started_at: Some(now_timestamp()),
         ended_at: None,
         pid: None,
-        model,
+        model: model.to_string(),
         run_mode: "auto".to_string(),
-    };
-
-    Ok((cmd, agent))
-}
-
-fn now_timestamp() -> prost_types::Timestamp {
-    let now = time::OffsetDateTime::now_utc();
-    prost_types::Timestamp {
-        seconds: now.unix_timestamp(),
-        nanos: 0,
     }
 }

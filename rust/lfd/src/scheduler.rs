@@ -86,9 +86,63 @@ impl Scheduler {
                 executor.clone(),
                 cancel.clone(),
             ),
-            loops::spawn_watch_poller(store.clone(), executor.clone(), cancel.clone()),
-            loops::spawn_cron_poller(store.clone(), executor.clone(), cancel.clone()),
+            loops::spawn_watch_poller(
+                store.clone(),
+                executor.clone(),
+                self.clone(),
+                cancel.clone(),
+            ),
+            loops::spawn_cron_poller(
+                store.clone(),
+                executor.clone(),
+                self.clone(),
+                cancel.clone(),
+            ),
             loops::spawn_recovery_loop(store, executor, cancel),
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Scheduler;
+
+    #[tokio::test]
+    async fn acquire_respects_slot_limit_and_release() {
+        let scheduler = Scheduler::new(1);
+
+        let (acquired, _) = scheduler.acquire("run-1").await;
+        assert!(acquired);
+
+        let (acquired, _) = scheduler.acquire("run-2").await;
+        assert!(!acquired);
+
+        scheduler.release("run-1");
+
+        let (acquired, _) = scheduler.acquire("run-2").await;
+        assert!(acquired);
+    }
+
+    #[tokio::test]
+    async fn acquire_is_idempotent_for_same_run_id() {
+        let scheduler = Scheduler::new(1);
+
+        let (acquired, _) = scheduler.acquire("run-1").await;
+        assert!(acquired);
+
+        let (acquired, _) = scheduler.acquire("run-1").await;
+        assert!(acquired);
+        assert_eq!(scheduler.slots_used(), 1);
+    }
+
+    #[test]
+    fn sessions_enforce_single_active_wave() {
+        let scheduler = Scheduler::new(1);
+
+        assert!(scheduler.register_session("wave-1"));
+        assert!(!scheduler.register_session("wave-1"));
+
+        scheduler.unregister_session("wave-1");
+        assert!(scheduler.register_session("wave-1"));
     }
 }

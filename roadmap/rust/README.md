@@ -28,7 +28,9 @@ Complete the migration to Rust. Single-binary distribution, local-only operation
 | Doc | Scope |
 |-----|-------|
 | [01-lf-ops-parity](01-lf-ops-parity.md) | Full ops command parity (worktrees, stacking, auto-merge) |
+| [01b-testing-and-rollout](01b-testing-and-rollout.md) | Parity testing, Python→Rust transition, PyO3 bindings |
 | [02-lfd-primary](02-lfd-primary.md) | Wire lfd as primary execution path |
+| [02b-summarize](02b-summarize.md) | Wave area summaries for LLM context |
 | [03-service](03-service.md) | launchd/systemd integration |
 | [04-distribution](04-distribution.md) | Binary distribution |
 

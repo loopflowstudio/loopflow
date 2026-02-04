@@ -57,6 +57,31 @@ pub fn worktree_path(repo: &Path, name: &str) -> PathBuf {
         .join(format!("{repo_name}.{sanitized}"))
 }
 
+/// Extract the short name (wave name) from a worktree directory.
+///
+/// Given a path like `../loopflow.my-feature`, returns `Some("my-feature")`.
+/// Returns `None` if not in a worktree (i.e., in the main repo).
+pub fn worktree_short_name(repo: &Path) -> Option<String> {
+    let main_repo = main_repo_root(repo).ok()?;
+    if repo == main_repo {
+        return None; // Not in a worktree
+    }
+
+    // Worktree path is "{repo_name}.{short_name}", so strip the repo prefix
+    let main_name = main_repo.file_name()?.to_str()?;
+    let dir_name = repo.file_name()?.to_str()?;
+
+    // Strip "{repo_name}." prefix to get the short name
+    let prefix = format!("{}.", main_name);
+    let short_name = dir_name.strip_prefix(&prefix)?;
+
+    if short_name.is_empty() {
+        None
+    } else {
+        Some(short_name.to_string())
+    }
+}
+
 fn branch_exists(repo: &Path, branch: &str) -> Result<bool, GitError> {
     let output = Command::new("git")
         .arg("-C")

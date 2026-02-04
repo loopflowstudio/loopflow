@@ -14,13 +14,6 @@ pub fn now_timestamp() -> prost_types::Timestamp {
     }
 }
 
-pub fn create_wave_run(
-    store: &SharedStore,
-    wave: &crate::proto::control::Wave,
-) -> anyhow::Result<WaveRun> {
-    create_wave_run_with_id(store, wave, &LfdId::new())
-}
-
 pub fn create_wave_run_with_id(
     store: &SharedStore,
     wave: &crate::proto::control::Wave,
@@ -48,13 +41,6 @@ pub fn create_wave_run_with_id(
     };
     store.create_wave_run(&run)?;
     Ok(run)
-}
-
-/// Spawn a task to execute a wave run, marking it failed on error.
-pub fn spawn_run_task(store: SharedStore, executor: WaveExecutor, run: WaveRun) {
-    tokio::spawn(async move {
-        execute_run_inner(&store, &executor, &run).await;
-    });
 }
 
 /// Spawn a task that executes a wave run and releases a scheduler slot on completion.

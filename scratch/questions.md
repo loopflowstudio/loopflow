@@ -56,9 +56,14 @@ The remaining items in `roadmap/concerto/` are all Phase 2 or 3.
 
 - **Flow coverage**: Parity tests use `lf run <step> --dry-run` even in the `with-flow` fixture because Rust `lf` doesn't resolve flows yet. Should we add flow execution to Rust CLI (or switch the test to `lf flow` once parity exists)?
 
-## Rebase blocked (2026-02-04)
+## Rebase blocked (2026-02-04, updated)
 
 Rebase onto main aborted due to complex conflicts. Main already has `loopflow-ops` (commit 3b4f88f60), and this branch has a parallel implementation plus parity tests.
+
+**Latest rebase attempt:**
+- Resolved `scratch/rust-lf-ops-parity.md` (deleted on main, accept deletion)
+- Resolved `scratch/questions.md` (merged both versions)
+- Hit 8 add/add conflicts in `loopflow-ops/` - aborted
 
 **Conflicting files (add/add in loopflow-ops):**
 - `rust/loopflow-ops/src/abandon.rs`
@@ -70,11 +75,17 @@ Rebase onto main aborted due to complex conflicts. Main already has `loopflow-op
 - `rust/loopflow-ops/src/rebase.rs`
 - `rust/loopflow-ops/src/util.rs`
 
+Also conflicting: `rust/lf/src/commands/ops/mod.rs`
+
 **Unique to this branch (not on main):**
 - `tests/parity/` - parity test infrastructure and fixtures
 - `scratch/` design docs
+- Scheduler slot enforcement in lfd (cron/watch/resume)
+- `--dry-run` for step/inline/flow commands
 
-**Options:**
-1. Manually merge each conflicting file (need to understand both implementations)
-2. Cherry-pick only the parity test commits onto a fresh branch from main
-3. Abandon this branch if main's implementation is sufficient
+**Recommended approach:**
+Cherry-pick only the unique commits onto a fresh branch from main:
+1. Create new branch from main
+2. Cherry-pick commits for parity tests, scheduler slots, and dry-run
+3. Skip the loopflow-ops implementation commits (main has that already)
+4. May need to adapt parity tests to work with main's loopflow-ops API

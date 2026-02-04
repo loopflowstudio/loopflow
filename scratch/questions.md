@@ -51,3 +51,7 @@ The remaining items in `roadmap/concerto/` are all Phase 2 or 3.
 2. **Next branch naming**: `lf ops next` still uses `next-<timestamp>` instead of wave-based branch naming (no wave metadata update in Rust yet). Should we wire it to wave naming once the wave module is ported?
 3. **Land local strategy**: `lf ops land --local` uses squash merge via `git::land` and skips PR-related steps. Confirm if we need a local merge option or to support `--strategy` explicitly.
 4. **Lint fixer**: lint retry uses the built-in `lint` step via prompt context, not `lf lint -b` subprocess. Is that preferred for parity?
+
+## Prompt parity tests
+
+- **Flow coverage**: Parity tests use `lf run <step> --dry-run` even in the `with-flow` fixture because Rust `lf` doesn't resolve flows yet. Should we add flow execution to Rust CLI (or switch the test to `lf flow` once parity exists)?

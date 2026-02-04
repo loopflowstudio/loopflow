@@ -60,6 +60,11 @@ pub fn run(step_name: &str, step_args: &[String], cli: &Cli) -> Result<()> {
     let model = cli.model.as_deref().unwrap_or(&config.agent_model);
     let (backend, variant) = parse_model(model);
 
+    if cli.dry_run {
+        println!("{prompt}");
+        return Ok(());
+    }
+
     if cli.web {
         info!("copying to clipboard and opening web client");
         copy_to_clipboard(&prompt)?;
@@ -119,6 +124,11 @@ pub fn run_interactive(cli: &Cli) -> Result<()> {
     let prompt = format_prompt(&components);
     let model = cli.model.as_deref().unwrap_or(&config.agent_model);
     let (backend, variant) = parse_model(model);
+
+    if cli.dry_run {
+        println!("{prompt}");
+        return Ok(());
+    }
 
     if !check_cli_available(&backend) {
         return Err(anyhow!("'{}' CLI not found", backend));

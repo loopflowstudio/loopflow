@@ -58,6 +58,11 @@ pub fn run(prompt_parts: &[String], cli: &Cli) -> Result<()> {
     let model = cli.model.as_deref().unwrap_or(&config.agent_model);
     let (backend, variant) = parse_model(model);
 
+    if cli.dry_run {
+        println!("{prompt}");
+        return Ok(());
+    }
+
     if cli.web {
         copy_to_clipboard(&prompt)?;
         open_web_client(&backend)?;

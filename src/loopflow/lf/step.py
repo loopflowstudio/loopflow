@@ -160,6 +160,7 @@ def run(
     diff_mode: Optional[str] = typer.Option(
         None, "--diff-mode", help="How to include branch changes: files, diff, or none"
     ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print prompt and exit"),
     model: ModelType = typer.Option(
         None, "-m", "-M", "--model", help="Model to use (backend or backend:variant)"
     ),
@@ -212,16 +213,6 @@ def run(
 
     is_interactive = resolved.interactive
     backend, model_variant = parse_model(resolved.model)
-
-    try:
-        runner = get_runner(backend)
-    except ValueError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
-
-    if not web and not runner.is_available():
-        typer.echo(f"Error: '{backend}' CLI not found", err=True)
-        raise typer.Exit(1)
 
     skip_permissions = config.yolo if config else False
 
@@ -282,6 +273,11 @@ def run(
 
     components = trim_components_if_needed(components)
 
+    if dry_run:
+        prompt = format_prompt(components)
+        typer.echo(prompt)
+        raise typer.Exit(0)
+
     if web:
         prompt = format_prompt(components)
         copy_to_clipboard(prompt)
@@ -291,6 +287,16 @@ def run(
         typer.echo("\nCopied to clipboard.")
         _open_web_client(backend)
         raise typer.Exit(0)
+
+    try:
+        runner = get_runner(backend)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    if not runner.is_available():
+        typer.echo(f"Error: '{backend}' CLI not found", err=True)
+        raise typer.Exit(1)
 
     # Resolve chrome: CLI > frontmatter > config > default
     if chrome is not None:
@@ -338,6 +344,7 @@ def inline(
     diff_mode: Optional[str] = typer.Option(
         None, "--diff-mode", help="How to include branch changes: files, diff, or none"
     ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print prompt and exit"),
     model: ModelType = typer.Option(
         None, "-m", "-M", "--model", help="Model to use (backend or backend:variant)"
     ),
@@ -373,16 +380,6 @@ def inline(
 
     is_interactive = resolved.interactive
     backend, model_variant = parse_model(resolved.model)
-
-    try:
-        runner = get_runner(backend)
-    except ValueError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
-
-    if not web and not runner.is_available():
-        typer.echo(f"Error: '{backend}' CLI not found", err=True)
-        raise typer.Exit(1)
 
     skip_permissions = config.yolo if config else False
 
@@ -439,6 +436,11 @@ def inline(
 
     components = trim_components_if_needed(components)
 
+    if dry_run:
+        prompt_text = format_prompt(components)
+        typer.echo(prompt_text)
+        raise typer.Exit(0)
+
     if web:
         prompt_text = format_prompt(components)
         copy_to_clipboard(prompt_text)
@@ -448,6 +450,16 @@ def inline(
         typer.echo("\nCopied to clipboard.")
         _open_web_client(backend)
         raise typer.Exit(0)
+
+    try:
+        runner = get_runner(backend)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    if not runner.is_available():
+        typer.echo(f"Error: '{backend}' CLI not found", err=True)
+        raise typer.Exit(1)
 
     # Resolve chrome: CLI > config > default
     if chrome is not None:
@@ -478,6 +490,7 @@ def flow(
     ),
     pr: bool = typer.Option(None, "--pr", help="Open PR when done"),
     web: bool = typer.Option(False, "--web", help="Copy to clipboard and open web client"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print prompt and exit"),
     model: ModelType = typer.Option(
         None, "-m", "-M", "--model", help="Model to use (backend or backend:variant)"
     ),
@@ -500,23 +513,13 @@ def flow(
     agent_model = model or (config.agent_model if config else "claude:opus")
     backend, model_variant = parse_model(agent_model)
 
-    try:
-        runner = get_runner(backend)
-    except ValueError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
-
-    if not web and not runner.is_available():
-        typer.echo(f"Error: '{backend}' CLI not found", err=True)
-        raise typer.Exit(1)
-
     all_context = list(config.context) if config and config.context else []
     if area:
         all_context.extend(area)
 
     exclude = list(config.exclude) if config and config.exclude else None
 
-    if web:
+    if dry_run or web:
         # Show tokens for first step in flow
         first_step = loaded_flow.steps[0].step if loaded_flow.steps else None
 
@@ -546,6 +549,10 @@ def flow(
         )
         components = trim_components_if_needed(components)
         prompt = format_prompt(components)
+        if dry_run:
+            typer.echo(prompt)
+            raise typer.Exit(0)
+
         copy_to_clipboard(prompt)
         tree = analyze_components(components)
         typer.echo(f"Flow '{name}' first step: {first_step}\n")
@@ -554,6 +561,16 @@ def flow(
         typer.echo("\nCopied to clipboard.")
         _open_web_client(backend)
         raise typer.Exit(0)
+
+    try:
+        runner = get_runner(backend)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    if not runner.is_available():
+        typer.echo(f"Error: '{backend}' CLI not found", err=True)
+        raise typer.Exit(1)
 
     push_enabled = config.push if config else False
     pr_enabled = pr if pr is not None else (config.pr if config else False)

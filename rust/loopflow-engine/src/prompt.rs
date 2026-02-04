@@ -11,6 +11,8 @@ use std::process::Command;
 use crate::error::CoreError;
 use crate::flow::{load_direction, load_step, Direction, Step};
 
+const LOOPFLOW_DOC: &str = include_str!("../../../src/loopflow/LOOPFLOW.md");
+
 /// A document included in context.
 #[derive(Debug, Clone)]
 pub struct Document {
@@ -199,8 +201,8 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         None
     };
 
-    // Load bundled LOOPFLOW.md (placeholder - would need to embed this)
-    let loopflow_doc = None; // TODO: embed LOOPFLOW.md in binary
+    // Load bundled LOOPFLOW.md for parity with Python prompts.
+    let loopflow_doc = Some(LOOPFLOW_DOC.to_string());
 
     Ok(PromptComponents {
         run_mode: opts.run_mode.clone(),
@@ -700,6 +702,7 @@ fn format_files(docs: &[Document]) -> String {
     parts.push(
         "Reference files for this task. Includes parent documentation for context.".to_string(),
     );
+    parts.push(String::new());
     parts.push("<lf:files>".to_string());
 
     for doc in docs {

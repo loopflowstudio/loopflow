@@ -56,6 +56,10 @@ pub struct Cli {
     #[arg(long)]
     web: bool,
 
+    /// Print prompt and exit
+    #[arg(long, global = true)]
+    dry_run: bool,
+
     /// Enable Chrome integration (Claude)
     #[arg(long)]
     chrome: bool,
@@ -243,6 +247,7 @@ const BOOL_FLAGS: &[&str] = &[
     "-b",
     "--batch",
     "--web",
+    "--dry-run",
     "--chrome",
     "--no-chrome",
     "-h",

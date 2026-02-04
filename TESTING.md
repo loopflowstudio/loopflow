@@ -18,6 +18,7 @@ Unit and integration tests for the loopflow CLI.
 ```bash
 uv run pytest tests/           # All Python tests
 uv run pytest tests/test_foo.py::test_bar -v  # Single test
+uv run pytest tests/parity/ -v  # Rust/Python prompt parity
 ```
 
 ## Swift Tests

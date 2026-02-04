@@ -155,6 +155,18 @@ tests/
 | with-wave | debug | `-w mywave` | Wave context |
 | complex | implement | `-c -d coding` | Full context assembly |
 
+### Initial Fixture Set (v1)
+
+Start small to get green parity runs quickly, then expand:
+
+| Fixture | What it tests |
+|---------|---------------|
+| minimal | Empty repo with `.lf/` config |
+| with-diff | Dirty working tree; diff inclusion |
+| with-flow | Flow parsing and step prompt |
+
+For v1, run `lf step <name> --dry-run` in both implementations so the parity surface stays narrow and avoids agent launch differences.
+
 ### Implementation
 
 ```python

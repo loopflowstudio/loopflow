@@ -6,9 +6,8 @@ from datetime import datetime
 from pathlib import Path
 
 from loopflow.lf.config import AutopruneConfig, load_config
-from loopflow.lf.context import find_worktree_root
-from loopflow.lf.ops.git import get_default_branch
-from loopflow.lf.worktrees import find_merged, remove
+from loopflow.lf.git import get_default_branch
+from loopflow.lf.worktrees import find_merged, find_worktree_root, remove
 
 log = logging.getLogger(__name__)
 

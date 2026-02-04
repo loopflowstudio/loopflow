@@ -1031,21 +1031,6 @@ def status(
             )
             typer.echo("")
 
-        if health:
-            registration = health.get("registration")
-            if isinstance(registration, dict):
-                if not registration.get("enabled"):
-                    typer.echo(f"Registration: {c['dim']}disabled{c['reset']}")
-                elif registration.get("registered"):
-                    name = registration.get("machine_name")
-                    label = f"registered ({name})" if name else "registered"
-                    typer.echo(f"Registration: {c['green']}{label}{c['reset']}")
-                else:
-                    err = registration.get("last_error")
-                    label = f"failed ({err})" if err else "not registered"
-                    typer.echo(f"Registration: {c['yellow']}{label}{c['reset']}")
-                typer.echo("")
-
         waves = list_waves()
         if not waves:
             typer.echo(f"{c['dim']}No waves configured{c['reset']}")

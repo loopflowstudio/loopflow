@@ -4,6 +4,7 @@ use axum::{routing::get, Json, Router};
 use serde::Serialize;
 use time::OffsetDateTime;
 
+use crate::registration::{RegistrationClient, RegistrationState};
 use crate::scheduler::Scheduler;
 use crate::store::SharedStore;
 
@@ -12,6 +13,7 @@ pub struct HttpState {
     pub store: SharedStore,
     pub scheduler: Arc<Scheduler>,
     pub started_at: OffsetDateTime,
+    pub registration: Option<RegistrationClient>,
 }
 
 #[derive(Serialize)]
@@ -21,6 +23,7 @@ struct HealthResponse {
     database: bool,
     waves_running: u32,
     agents_active: u32,
+    registration: Option<RegistrationState>,
 }
 
 #[derive(Serialize)]
@@ -31,6 +34,7 @@ struct StatusResponse {
     agents_active: u32,
     slots_used: u32,
     slots_total: u32,
+    registration: Option<RegistrationState>,
 }
 
 #[derive(Serialize)]
@@ -52,17 +56,26 @@ pub fn router(state: HttpState) -> Router {
 
 async fn health_handler(state: axum::extract::State<HttpState>) -> Json<HealthResponse> {
     let counts = counts(&state).await;
+    let registration = match &state.registration {
+        Some(client) => Some(client.status().await),
+        None => None,
+    };
     Json(HealthResponse {
         status: if counts.database_ok { "ok" } else { "degraded" }.to_string(),
         uptime_seconds: (OffsetDateTime::now_utc() - state.started_at).whole_seconds(),
         database: counts.database_ok,
         waves_running: counts.waves_running,
         agents_active: counts.agents_active,
+        registration,
     })
 }
 
 async fn status_handler(state: axum::extract::State<HttpState>) -> Json<StatusResponse> {
     let counts = counts(&state).await;
+    let registration = match &state.registration {
+        Some(client) => Some(client.status().await),
+        None => None,
+    };
     Json(StatusResponse {
         pid: std::process::id(),
         waves_defined: counts.waves_defined,
@@ -70,6 +83,7 @@ async fn status_handler(state: axum::extract::State<HttpState>) -> Json<StatusRe
         agents_active: counts.agents_active,
         slots_used: state.scheduler.slots_used(),
         slots_total: state.scheduler.max_slots() as u32,
+        registration,
     })
 }
 

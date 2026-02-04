@@ -3,7 +3,6 @@
 import os
 
 from loopflow.lfd.agent import load_agents
-from loopflow.lfd.daemon.registration import get_registration_status
 from loopflow.lfd.models import WaveStatus
 from loopflow.lfd.wave import list_waves
 
@@ -19,5 +18,4 @@ def compute_status() -> dict:
         "waves_defined": len(waves),
         "waves_running": len(running_waves),
         "agents_active": len(agents),
-        "registration": get_registration_status(),
     }

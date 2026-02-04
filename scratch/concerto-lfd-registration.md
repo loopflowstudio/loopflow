@@ -104,189 +104,161 @@ HTTP API remains localhost-only. This is the existing architecture—remote just
 
 ## Implementation
 
+Implemented in Rust lfd (`rust/lfd/`), not Python.
+
 ### Machine ID
 
-```python
-# loopflow/lfd/daemon/machine_id.py
+```rust
+// rust/lfd/src/machine_id.rs
 
-from pathlib import Path
-import uuid
+pub fn get_machine_id() -> String {
+    let machine_id_path = machine_id_path();
 
-def get_machine_id() -> str:
-    """Get or create persistent machine identifier."""
-    machine_id_path = Path.home() / ".lf" / "machine_id"
+    if let Ok(id) = std::fs::read_to_string(&machine_id_path) {
+        let id = id.trim();
+        if !id.is_empty() {
+            return id.to_string();
+        }
+    }
 
-    if machine_id_path.exists():
-        return machine_id_path.read_text().strip()
+    let id = Uuid::new_v4().to_string();
+    if let Some(parent) = machine_id_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&machine_id_path, &id);
+    id
+}
 
-    machine_id = str(uuid.uuid4())
-    machine_id_path.parent.mkdir(parents=True, exist_ok=True)
-    machine_id_path.write_text(machine_id)
-    return machine_id
-
-def get_machine_name() -> str:
-    """Get human-readable machine name."""
-    import socket
-    return socket.gethostname()
+pub fn get_machine_name() -> String {
+    gethostname::gethostname().to_string_lossy().into_owned()
+}
 ```
 
 ### Registration client
 
-```python
-# loopflow/lfd/daemon/registration.py
+```rust
+// rust/lfd/src/registration.rs
 
-import asyncio
-import httpx
-from dataclasses import dataclass
-from typing import Optional
+pub struct RegistrationClient {
+    base_url: String,
+    state: Arc<RwLock<RegistrationState>>,
+    connection_token: Arc<RwLock<Option<String>>>,
+}
 
-@dataclass
-class RegistrationState:
-    registered: bool = False
-    connection_token: Optional[str] = None
-    expires_at: Optional[float] = None
+impl RegistrationClient {
+    pub async fn register(
+        &self,
+        jwt: &str,
+        machine_id: &str,
+        machine_name: &str,
+    ) -> Result<String, RegistrationError> {
+        let client = reqwest::Client::new();
+        let url = format!("{}/api/v1/daemons/register", self.base_url);
 
-class RegistrationClient:
-    def __init__(self, base_url: str = "https://loopflow.studio"):
-        self.base_url = base_url
-        self.state = RegistrationState()
-        self._heartbeat_task: Optional[asyncio.Task] = None
+        let payload = serde_json::json!({
+            "machine_id": machine_id,
+            "machine_name": machine_name,
+            "capabilities": ["waves", "terminal", "grpc"],
+            "grpc_port": 50051,
+        });
 
-    async def register(self, jwt: str, machine_id: str, machine_name: str) -> str:
-        """Register daemon with loopflow.studio. Returns connection token."""
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{self.base_url}/api/v1/daemons/register",
-                headers={"Authorization": f"Bearer {jwt}"},
-                json={
-                    "machine_id": machine_id,
-                    "machine_name": machine_name,
-                    "capabilities": ["waves", "terminal", "grpc"],
-                    "grpc_port": 50051,
-                }
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        let response = client
+            .post(&url)
+            .header("Authorization", format!("Bearer {jwt}"))
+            .json(&payload)
+            .send()
+            .await?;
 
-        self.state.registered = True
-        self.state.connection_token = data["connection_token"]
-        self.state.expires_at = data["expires_at"]
+        // ... parse response, update state
+        Ok(data.connection_token)
+    }
 
-        return self.state.connection_token
+    pub fn start_heartbeat(
+        &self,
+        jwt: String,
+        machine_id: String,
+        cancel: CancellationToken,
+    ) -> JoinHandle<()> {
+        // Spawns background task that heartbeats every 30s
+    }
 
-    async def start_heartbeat(self, jwt: str, machine_id: str, interval: float = 30.0):
-        """Start background heartbeat task."""
-        async def heartbeat_loop():
-            while True:
-                await asyncio.sleep(interval)
-                try:
-                    await self._send_heartbeat(jwt, machine_id)
-                except Exception as e:
-                    # Log but don't crash—next heartbeat will retry
-                    pass
-
-        self._heartbeat_task = asyncio.create_task(heartbeat_loop())
-
-    async def _send_heartbeat(self, jwt: str, machine_id: str):
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{self.base_url}/api/v1/daemons/heartbeat",
-                headers={"Authorization": f"Bearer {jwt}"},
-                json={"machine_id": machine_id}
-            )
-            resp.raise_for_status()
-
-    async def deregister(self, jwt: str, machine_id: str):
-        """Deregister on shutdown."""
-        if self._heartbeat_task:
-            self._heartbeat_task.cancel()
-
-        if self.state.registered:
-            try:
-                async with httpx.AsyncClient() as client:
-                    await client.post(
-                        f"{self.base_url}/api/v1/daemons/deregister",
-                        headers={"Authorization": f"Bearer {jwt}"},
-                        json={"machine_id": machine_id}
-                    )
-            except Exception:
-                pass  # Best effort on shutdown
-
-        self.state = RegistrationState()
+        // Best effort deregister on shutdown
+    }
+}
 ```
 
 ### Connection validation
 
-```python
-# loopflow/lfd/daemon/connection_validator.py
+```rust
+// rust/lfd/src/registration.rs
 
-import time
-from functools import lru_cache
-import httpx
+pub struct ConnectionValidator {
+    base_url: String,
+    cache: Arc<RwLock<HashMap<String, (bool, Instant)>>>,
+}
 
-class ConnectionValidator:
-    def __init__(self, base_url: str = "https://loopflow.studio"):
-        self.base_url = base_url
-        self._cache: dict[str, tuple[bool, float]] = {}  # token -> (valid, expires)
+impl ConnectionValidator {
+    pub async fn validate(&self, token: &str) -> bool {
+        // Check cache first (60s TTL)
+        // If not cached, POST to /api/v1/daemons/validate-connection
+        // Cache result and return
+    }
+}
+```
 
-    async def validate_connection_token(self, token: str) -> bool:
-        """Validate a connection token from mobile client."""
-        # Check cache first
-        if token in self._cache:
-            valid, expires = self._cache[token]
-            if time.time() < expires:
-                return valid
-            del self._cache[token]
+### Auth context for gRPC
 
-        # Validate with loopflow.studio
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{self.base_url}/api/v1/daemons/validate-connection",
-                json={"connection_token": token}
-            )
+```rust
+// rust/lfd/src/auth.rs
 
-        if resp.status_code == 200:
-            data = resp.json()
-            valid = data.get("valid", False)
-            expires = data.get("expires_at", time.time() + 60)
-            self._cache[token] = (valid, expires)
-            return valid
+pub struct AuthContext {
+    pub enabled: Arc<RwLock<bool>>,
+    pub registered: Arc<RwLock<bool>>,
+    pub validator: Option<ConnectionValidator>,
+}
 
-        return False
+impl AuthContext {
+    /// Check if a request should be authenticated.
+    /// Returns Ok(()) if allowed, Err(Status) if denied.
+    pub async fn check_request<T>(&self, request: &Request<T>) -> Result<(), Status> {
+        // If registration not enabled/registered, allow all
+        // Otherwise, extract and validate connection token
+    }
+}
 ```
 
 ### Integration with daemon startup
 
-```python
-# In loopflow/lfd/daemon/server.py run_server()
+```rust
+// rust/lfd/src/main.rs
 
-async def run_server(socket_path: str) -> None:
-    # ... existing startup code ...
+async fn setup_registration(
+    config: &LfdConfig,
+    cancel: CancellationToken,
+) -> (Option<RegistrationClient>, AuthContext, Option<(String, String)>) {
+    if config.auth.provider != Some("loopflow.studio") {
+        return (None, AuthContext::disabled(), None);
+    }
 
-    # Registration (if auth configured)
-    config = load_config()
-    registration_client = None
+    let jwt = credentials::load_jwt()?;
+    let machine_id = machine_id::get_machine_id();
+    let machine_name = machine_id::get_machine_name();
 
-    if config.auth.provider == "loopflow.studio":
-        jwt = load_jwt()  # From ~/.lf/credentials.json
-        if jwt:
-            machine_id = get_machine_id()
-            machine_name = get_machine_name()
+    let client = RegistrationClient::new(&config.auth.base_url);
+    match client.register(&jwt, &machine_id, &machine_name).await {
+        Ok(_) => {
+            tracing::info!(machine_name = %machine_name, "registered with loopflow.studio");
+            client.start_heartbeat(jwt.clone(), machine_id.clone(), cancel);
+            (Some(client), auth_context, Some((jwt, machine_id)))
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "registration failed");
+            (Some(client), auth_context, None)
+        }
+    }
+}
 
-            registration_client = RegistrationClient()
-            try:
-                await registration_client.register(jwt, machine_id, machine_name)
-                await registration_client.start_heartbeat(jwt, machine_id)
-                logging.info(f"Registered with loopflow.studio as {machine_name}")
-            except Exception as e:
-                logging.warning(f"Registration failed: {e}")
-                # Continue without registration—local access still works
-
-    # ... existing server code ...
-
-    # On shutdown
-    if registration_client:
-        await registration_client.deregister(jwt, machine_id)
+// On shutdown: client.deregister(&jwt, &machine_id).await;
 ```
 
 ### loopflow.studio API (server-side reference)
@@ -338,13 +310,15 @@ interface Daemon {
 
 ## Done when
 
-- [ ] `~/.lf/machine_id` created on first run with persistent UUID
-- [ ] `lfd` registers on startup when `auth.provider: loopflow.studio` and JWT present
-- [ ] Heartbeat runs every 30s while registered
-- [ ] Clean deregister on graceful shutdown
-- [ ] Connection token validation works for incoming gRPC connections
-- [ ] Registration failure doesn't break local functionality
-- [ ] `lfd status` shows registration state
+- [x] `~/.lf/machine_id` created on first run with persistent UUID
+- [x] `lfd` registers on startup when `auth.provider: loopflow.studio` and JWT present
+- [x] Heartbeat runs every 30s while registered
+- [x] Clean deregister on graceful shutdown
+- [x] Connection token validation works for incoming gRPC connections
+- [x] Registration failure doesn't break local functionality
+- [x] `/status` and `/health` HTTP endpoints show registration state
+
+**Note:** Implemented in Rust lfd (`rust/lfd/`), not Python lfd. Python lfd is deprecated.
 
 ## Open questions
 

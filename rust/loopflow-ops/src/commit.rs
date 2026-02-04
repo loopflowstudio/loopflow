@@ -16,7 +16,11 @@ pub struct CommitOptions {
     pub message: Option<String>,
 }
 
-pub fn commit_workflow(repo: &Path, options: &CommitOptions, progress: &impl Progress) -> OpsResult<bool> {
+pub fn commit_workflow(
+    repo: &Path,
+    options: &CommitOptions,
+    progress: &impl Progress,
+) -> OpsResult<bool> {
     if is_clean(repo)? {
         progress.status("Nothing to commit");
         if options.push {
@@ -47,7 +51,12 @@ pub fn commit_workflow(repo: &Path, options: &CommitOptions, progress: &impl Pro
     } else {
         progress.status("Generating commit message...");
         let generated = generate_commit_message(repo)?;
-        format_commit_message(&options.task, &options.flow_parents, &generated.title, &generated.body)
+        format_commit_message(
+            &options.task,
+            &options.flow_parents,
+            &generated.title,
+            &generated.body,
+        )
     };
 
     progress.status("Committing...");
@@ -61,12 +70,7 @@ pub fn commit_workflow(repo: &Path, options: &CommitOptions, progress: &impl Pro
     Ok(true)
 }
 
-fn format_commit_message(
-    task: &str,
-    flow_parents: &[String],
-    title: &str,
-    body: &str,
-) -> String {
+fn format_commit_message(task: &str, flow_parents: &[String], title: &str, body: &str) -> String {
     let prefix = if flow_parents.is_empty() {
         format!("lf {task}")
     } else {
@@ -91,10 +95,9 @@ fn has_staged_changes(repo: &Path) -> OpsResult<bool> {
 }
 
 fn push_with_fallback(repo: &Path) -> OpsResult<()> {
-    if let Err(err) = push(repo, false) {
-        let force_result = push(repo, true);
-        if force_result.is_err() {
-            return Err(OpsError::Git(err));
+    if let Err(_err) = push(repo, false) {
+        if let Err(force_err) = push(repo, true) {
+            return Err(OpsError::Git(force_err));
         }
     }
     Ok(())
@@ -142,8 +145,8 @@ fn push_with_upstream_if_needed(repo: &Path) -> OpsResult<()> {
         return Ok(());
     }
 
-    let branch = current_branch(repo)?
-        .ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
+    let branch =
+        current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
     push_with_upstream(repo, "origin", &branch)?;
     Ok(())
 }

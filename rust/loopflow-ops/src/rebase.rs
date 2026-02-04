@@ -101,10 +101,7 @@ fn run_rebase_agent(repo: &Path, conflicts: &[String], progress: &impl Progress)
         return Err(OpsError::AgentFailed(result.stderr));
     }
 
-    let _ = Command::new("git")
-        .arg("status")
-        .current_dir(repo)
-        .status();
+    let _ = Command::new("git").arg("status").current_dir(repo).status();
 
     Ok(())
 }

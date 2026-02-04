@@ -1308,6 +1308,7 @@ dependencies = [
  "clap",
  "dirs",
  "loopflow-engine",
+ "loopflow-ops",
  "serde_json",
  "serde_yaml",
  "tempfile",
@@ -1464,6 +1465,16 @@ dependencies = [
  "thiserror",
  "tiktoken-rs",
  "uuid",
+]
+
+[[package]]
+name = "loopflow-ops"
+version = "0.7.1"
+dependencies = [
+ "loopflow-engine",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

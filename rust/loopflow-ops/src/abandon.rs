@@ -1,7 +1,9 @@
 use std::path::Path;
 use std::process::Command;
 
-use loopflow_engine::git::{current_branch, delete_local_branch, delete_remote_branch, is_clean, worktree_remove};
+use loopflow_engine::git::{
+    current_branch, delete_local_branch, delete_remote_branch, is_clean, worktree_remove,
+};
 use loopflow_engine::worktrees::{list_worktrees, main_repo_root};
 
 use crate::error::{OpsError, OpsResult};
@@ -13,11 +15,17 @@ pub struct AbandonOptions {
     pub force: bool,
 }
 
-pub fn abandon_branch(repo: &Path, options: &AbandonOptions, progress: &impl Progress) -> OpsResult<()> {
+pub fn abandon_branch(
+    repo: &Path,
+    options: &AbandonOptions,
+    progress: &impl Progress,
+) -> OpsResult<()> {
     let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
     let branch = match options.branch.as_deref() {
         Some(branch) => branch.to_string(),
-        None => current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?,
+        None => {
+            current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?
+        }
     };
 
     let worktree_path = find_worktree_path(&main_repo, &branch)?
@@ -25,7 +33,9 @@ pub fn abandon_branch(repo: &Path, options: &AbandonOptions, progress: &impl Pro
 
     if !is_clean(&worktree_path)? {
         if !options.force {
-            return Err(OpsError::Message("uncommitted changes; use --force".to_string()));
+            return Err(OpsError::Message(
+                "uncommitted changes; use --force".to_string(),
+            ));
         }
         progress.error("Abandoning worktree with uncommitted changes");
     }

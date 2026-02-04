@@ -22,13 +22,21 @@ pub struct NextResult {
     pub new_branch: String,
 }
 
-pub fn next_branch(repo: &Path, options: &NextOptions, progress: &impl Progress) -> OpsResult<NextResult> {
+pub fn next_branch(
+    repo: &Path,
+    options: &NextOptions,
+    progress: &impl Progress,
+) -> OpsResult<NextResult> {
     let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
     let base_branch = get_default_branch(&main_repo)?;
-    let current = current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
+    let current =
+        current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
 
     if current == base_branch {
-        return Err(OpsError::Message(format!("cannot run next from {}", base_branch)));
+        return Err(OpsError::Message(format!(
+            "cannot run next from {}",
+            base_branch
+        )));
     }
 
     let commit_options = CommitOptions {

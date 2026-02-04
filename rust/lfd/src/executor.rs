@@ -372,12 +372,7 @@ impl WaveExecutor {
                     ..fork_run.clone()
                 });
 
-                let prompt = build_step_prompt(
-                    &worktree,
-                    &step,
-                    &wave_directions,
-                    None,
-                );
+                let prompt = build_step_prompt(&worktree, &step, &wave_directions, None);
                 let (prompt, model, launch) = match prompt {
                     Ok(result) => result,
                     Err(err) => {
@@ -491,7 +486,6 @@ impl WaveExecutor {
             run.step_index,
         );
     }
-
 }
 
 fn worktree_path(run: &WaveRun, wave: &crate::proto::control::Wave) -> String {

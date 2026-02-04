@@ -2,7 +2,9 @@ use crate::commands::util::find_repo_root;
 use crate::{OpsCommand, ShellCommand, WtCommand};
 use anyhow::{anyhow, Result};
 use loopflow_engine::git::{current_branch, delete_local_branch, get_default_branch};
-use loopflow_engine::worktrees::{create_with_schema, list_worktrees, main_repo_root, worktree_path};
+use loopflow_engine::worktrees::{
+    create_with_schema, list_worktrees, main_repo_root, worktree_path,
+};
 use loopflow_ops::{
     abandon_branch, commit_workflow, create_or_update_pr, land, next_branch, rebase_with_recovery,
     AbandonOptions, CommitOptions, LandOptions, NextOptions, PrOptions, Progress, RebaseOptions,
@@ -42,7 +44,9 @@ pub fn run(op: &OpsCommand) -> Result<()> {
             no_add,
             no_lint,
         } => commit_current(message.as_deref(), *push, !no_add, !no_lint, &progress),
-        OpsCommand::Abandon { force, branch } => abandon_current(branch.as_deref(), *force, &progress),
+        OpsCommand::Abandon { force, branch } => {
+            abandon_current(branch.as_deref(), *force, &progress)
+        }
         OpsCommand::Wt { cmd } => run_worktree(cmd),
         OpsCommand::Shell { cmd } => run_shell(cmd),
     }
@@ -117,14 +121,7 @@ fn land_current(
 
 fn open_pr(refresh: bool, lint: bool, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let result = create_or_update_pr(
-        &repo_root,
-        &PrOptions {
-            refresh,
-            lint,
-        },
-        progress,
-    )?;
+    let result = create_or_update_pr(&repo_root, &PrOptions { refresh, lint }, progress)?;
     println!("{}", result.url);
     Ok(())
 }

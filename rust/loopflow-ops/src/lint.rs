@@ -17,7 +17,10 @@ pub fn ensure_lint_passes(repo: &Path, progress: &impl Progress) -> OpsResult<bo
             return Ok(true);
         }
         Some(false) => progress.status("Lint issues found, running fixer..."),
-        None => progress.status("Running lint..."),
+        None => {
+            progress.status("Lint skipped (no checker configured)");
+            return Ok(true);
+        }
     }
 
     run_lint_agent(repo, progress)?;

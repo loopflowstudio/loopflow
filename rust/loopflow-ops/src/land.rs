@@ -27,7 +27,9 @@ pub struct LandResult {
 pub fn land(repo: &Path, options: &LandOptions, progress: &impl Progress) -> OpsResult<LandResult> {
     let (repo_root, main_repo) = resolve_repos(repo, options.worktree.as_deref())?;
     if options.strict && !is_clean(&repo_root)? {
-        return Err(OpsError::Message("uncommitted changes; use --strict=false".to_string()));
+        return Err(OpsError::Message(
+            "uncommitted changes; commit, stash, or rerun without --strict".to_string(),
+        ));
     }
 
     if options.lint {
@@ -60,7 +62,7 @@ pub fn land(repo: &Path, options: &LandOptions, progress: &impl Progress) -> Ops
 
     if options.local {
         progress.status("Merging locally...");
-        let _ = git_land(&repo_root, LandStrategy::SquashMerge, &main_branch)?;
+        let _ = git_land(&repo_root, LandStrategy::LocalMerge, &main_branch)?;
         return Ok(LandResult { merged: true });
     }
 

@@ -122,8 +122,8 @@ pub fn pr_exists_for_current_branch(repo: &Path) -> OpsResult<bool> {
 }
 
 fn find_open_pr(repo: &Path) -> OpsResult<Option<GhPr>> {
-    let branch = current_branch(repo)?
-        .ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
+    let branch =
+        current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
     let output = Command::new("gh")
         .arg("pr")
         .arg("list")
@@ -182,7 +182,12 @@ fn mark_pr_ready(repo: &Path, number: u64) -> OpsResult<()> {
 
 fn create_pr(repo: &Path, title: &str, body: &str, base: Option<&str>) -> OpsResult<String> {
     let mut cmd = Command::new("gh");
-    cmd.arg("pr").arg("create").arg("--title").arg(title).arg("--body").arg(body);
+    cmd.arg("pr")
+        .arg("create")
+        .arg("--title")
+        .arg(title)
+        .arg("--body")
+        .arg(body);
     if let Some(base) = base {
         if base != "main" {
             cmd.arg("--base").arg(base);
@@ -198,11 +203,13 @@ fn create_pr(repo: &Path, title: &str, body: &str, base: Option<&str>) -> OpsRes
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-fn sync_main_repo(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
+fn sync_main_repo(repo: &Path, _progress: &impl Progress) -> OpsResult<()> {
     let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
     let base_branch = get_default_branch(&main_repo)?;
     if !sync_main(&main_repo, &base_branch)? {
-        progress.error("Working tree dirty; sync aborted");
+        return Err(OpsError::Message(
+            "working tree dirty; sync aborted".to_string(),
+        ));
     }
     Ok(())
 }
@@ -244,11 +251,14 @@ fn has_unpushed_commits(repo: &Path) -> OpsResult<bool> {
 
 fn pr_target(repo: &Path) -> OpsResult<Option<String>> {
     let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
-    let current_branch = current_branch(repo)?
-        .ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
+    let current_branch =
+        current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
 
     if let Ok(worktrees) = list_worktrees(&main_repo) {
-        if let Some(state) = worktrees.into_iter().find(|wt| wt.branch.as_deref() == Some(&current_branch)) {
+        if let Some(state) = worktrees
+            .into_iter()
+            .find(|wt| wt.branch.as_deref() == Some(&current_branch))
+        {
             if let Some(base_branch) = state.base_branch {
                 let target = resolve_pr_target(repo, &base_branch)?;
                 return Ok(Some(target));
@@ -275,7 +285,9 @@ fn resolve_pr_target(repo: &Path, base_branch: &str) -> OpsResult<String> {
         .current_dir(repo)
         .output()?;
     if output.status.success() {
-        let state = String::from_utf8_lossy(&output.stdout).trim().to_uppercase();
+        let state = String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .to_uppercase();
         if state == "MERGED" {
             return Ok("main".to_string());
         }

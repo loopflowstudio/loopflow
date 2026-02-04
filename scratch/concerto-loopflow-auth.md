@@ -140,6 +140,25 @@ This keeps `LocalWaveService` unchanged and enables testing with mock providers.
 - Multiple account support (single user for v1)
 - Offline mode (requires tokens, which require network)
 
+## Current status (2026-02-03)
+
+**Implemented:**
+- Swift auth client primitives (AuthService/AuthState/AuthError) with Keychain storage and ASWebAuthenticationSession flow.
+- WaveService/EventService protocol split with LocalWaveService/LocalEventService wiring.
+- HTTP API usage for waves, wave runs, and worktrees (plus parsing helpers and LFD base URL constant).
+- URL scheme registration for `loopflow://` callbacks.
+- Standardized lfd HTTP port via `http_server.DEFAULT_PORT` (2486).
+
+**Not implemented yet:**
+- RemoteWaveService and wiring TokenProvider into a remote client.
+- Server-side WorkOS integration and lfd JWT validation (see `roadmap/rust/05-auth.md`).
+- iOS target/platform support updates (package still macOS-focused).
+
+**Risks / bottlenecks:**
+- Token refresh contract assumed (`/auth/refresh` returning `token`, `jwt`, or raw string). If server differs, silent refresh fails.
+- Port change to 2486 requires external clients/scripts to follow DEFAULT_PORT.
+- AuthState refresh loop runs continuously; if refresh endpoint is flaky it may error quietly unless token expires.
+
 ## Implementation
 
 ### AuthService

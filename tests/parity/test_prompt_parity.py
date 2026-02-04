@@ -92,14 +92,10 @@ def _rust_prompt(case: dict, repo_root: Path) -> str:
         str(binary),
         "--repo",
         str(repo_root),
-        "--lfdocs",
-        str(case.get("lfdocs", False)).lower(),
-        "--diff-files",
-        str(case.get("diff_files", False)).lower(),
-        "--diff",
-        str(case.get("diff", False)).lower(),
-        "--clipboard",
-        str(case.get("clipboard", False)).lower(),
+        f"--lfdocs={str(case.get('lfdocs', False)).lower()}",
+        f"--diff-files={str(case.get('diff_files', False)).lower()}",
+        f"--diff={str(case.get('diff', False)).lower()}",
+        f"--clipboard={str(case.get('clipboard', False)).lower()}",
     ]
 
     if case.get("step"):

@@ -1,0 +1,11 @@
+name: with_lfdocs
+repo: tests/parity/fixtures/with_lfdocs
+step: test
+run_mode: auto
+directions: []
+lfdocs: true
+diff_files: false
+diff: false
+clipboard: false
+area: null
+wave: rust

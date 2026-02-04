@@ -25,23 +25,19 @@ struct Args {
     directions: Vec<String>,
 
     /// Include lfdocs (scratch/, roadmap/, root .md)
-    #[arg(long, default_value_t = true, value_parser = clap::builder::BoolishValueParser::new())]
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
     lfdocs: bool,
 
     /// Include diff files
-    #[arg(
-        long = "diff-files",
-        default_value_t = true,
-        value_parser = clap::builder::BoolishValueParser::new()
-    )]
+    #[arg(long = "diff-files", default_value = "true", action = clap::ArgAction::Set)]
     diff_files: bool,
 
     /// Include unified diff
-    #[arg(long, default_value_t = false, value_parser = clap::builder::BoolishValueParser::new())]
+    #[arg(long, default_value = "false", action = clap::ArgAction::Set)]
     diff: bool,
 
     /// Include clipboard content
-    #[arg(long, default_value_t = false, value_parser = clap::builder::BoolishValueParser::new())]
+    #[arg(long, default_value = "false", action = clap::ArgAction::Set)]
     clipboard: bool,
 
     /// Area scope

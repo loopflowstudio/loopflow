@@ -76,3 +76,13 @@ This resolves:
 - **JWT storage contract**: Assumed `~/.lf/credentials.json` contains a `jwt` or `token` string. Confirm actual key name and file format.
 - **gRPC auth metadata**: Assumed connection token arrives as `authorization: Bearer <token>` or `x-loopflow-connection-token`. Confirm the agreed header name.
 - **Auth gating behavior**: Local clients (`127.0.0.1`) bypass auth always. Remote connections through relay require valid JWT.
+
+## gRPC Terminal Streaming
+
+1. **Buffer size tuning**: 100KB ring buffer is a guess for reconnection replay. Should we make it configurable? Profile memory impact with many concurrent sessions?
+
+2. **Heartbeat/keepalive**: Should we add explicit heartbeat messages to TerminalStream, or rely on HTTP/2 PING frames? Mobile networks aggressively drop idle connections.
+
+3. **Session timeout**: If mobile disconnects and doesn't reconnect within X minutes, should lfd kill the agent? Or let it run indefinitely (current behavior for ConnectWave)?
+
+4. **Multiple clients same session**: Can two mobile clients connect to the same terminal session simultaneously? Current design says no (single subscriber). If we allow multiple, we'd need to coordinate input and prevent echo storms.

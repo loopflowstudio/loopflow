@@ -49,7 +49,7 @@ def _extract_connection_token(metadata: tuple[tuple[str, str], ...]) -> str | No
     return None
 
 
-def _abort_handler(handler: grpc.aio.RpcMethodHandler, message: str) -> grpc.RpcMethodHandler:
+def _abort_handler(handler: grpc.RpcMethodHandler, message: str) -> grpc.RpcMethodHandler:
     request_deserializer = handler.request_deserializer
     response_serializer = handler.response_serializer
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +17,7 @@ class AuthConfig:
 
 @dataclass
 class LfdConfig:
-    auth: AuthConfig = AuthConfig()
+    auth: AuthConfig = field(default_factory=AuthConfig)
 
 
 def load_lfd_config() -> LfdConfig:

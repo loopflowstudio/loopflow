@@ -35,6 +35,7 @@ Add a REST API and WebSocket endpoint to lfd's existing HTTP server. Reuse the e
 | HTTP polling only | Simpler, no WebSocket | Conductor persona needs instant updates, polling lag kills the experience |
 | Relay events through loopflow.studio | Centralizes traffic, solves NAT | Adds latency, makes studio a SPOF, privacy concerns with event data |
 | Server-Sent Events (SSE) | Simpler than WebSocket | One-directional, can't send ping/pong, worse iOS URLSession support |
+| GraphQL subscriptions | Schema-driven, typed | Over-engineered for event streaming, adds complexity without benefit |
 
 ---
 
@@ -62,8 +63,10 @@ If this becomes a problem later, add optional `?filter=wave.*` query param.
 pub struct HttpState {
     pub store: SharedStore,
     pub scheduler: Arc<Scheduler>,
-    pub event_hub: EventHub,        // Add this
-    pub output_hub: OutputHub,      // Add this
+    pub executor: Arc<WaveExecutor>,  // Add for action endpoints
+    pub event_hub: EventHub,          // Add for WebSocket
+    pub output_hub: OutputHub,        // Add for future output streaming
+    pub auth: AuthContext,            // Add for JWT validation
     pub registration: Option<RegistrationClient>,
     pub started_at: OffsetDateTime,
 }
@@ -83,6 +86,27 @@ Managed hosting (future) will use webhooks. The event bus is source-agnostic—c
 
 Axum has native WebSocket support via `axum::extract::ws`. No need to add `tokio-tungstenite` as a direct dependency. This keeps the dependency graph clean.
 
+### 7. TLS for remote connections
+
+Remote connections must use HTTPS/WSS. lfd already binds to `0.0.0.0:2486`. For TLS:
+- Use `rustls` with self-signed cert generated on first run
+- Store cert at `~/.lfd/server.{crt,key}`
+- Tailscale MagicDNS provides free certs via ACME—document as recommended setup
+
+### 8. Connection resilience via initial state dump
+
+On WebSocket connect, immediately send current state snapshot before streaming deltas:
+
+```json
+{"type": "connected", "waves": [...], "timestamp": "..."}
+```
+
+This eliminates the need for "catch up" logic after reconnect—client just uses fresh state.
+
+### 9. Heartbeat every 30 seconds
+
+Server sends `{"type": "ping"}`, client responds with `{"type": "pong"}`. Detects dead connections faster than TCP keepalive. Axum WebSocket handles the low-level ping/pong frames automatically.
+
 ---
 
 ## Scope
@@ -93,14 +117,14 @@ Axum has native WebSocket support via `axum::extract::ws`. No need to add `tokio
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| GET | `/waves` | List waves with current state |
-| POST | `/waves` | Create wave |
-| GET | `/waves/:id` | Get wave detail |
-| PATCH | `/waves/:id` | Update wave config |
-| DELETE | `/waves/:id` | Delete wave |
-| POST | `/waves/:id/run` | Run wave (triggers step execution) |
-| POST | `/waves/:id/stop` | Stop running wave |
-| POST | `/waves/:id/land` | Land PR for wave |
+| GET | `/api/waves` | List waves with current state |
+| POST | `/api/waves` | Create wave |
+| GET | `/api/waves/:id` | Get wave detail |
+| PATCH | `/api/waves/:id` | Update wave config |
+| DELETE | `/api/waves/:id` | Delete wave |
+| POST | `/api/waves/:id/run` | Run wave (triggers step execution) |
+| POST | `/api/waves/:id/stop` | Stop running wave |
+| POST | `/api/waves/:id/land` | Land PR for wave |
 
 **WebSocket endpoint:**
 
@@ -120,13 +144,17 @@ Axum has native WebSocket support via `axum::extract::ws`. No need to add `tokio
 
 **Event types:**
 ```json
+{"type": "connected", "waves": [...], "timestamp": "..."}
+{"type": "ping"}
 {"type": "wave.created", "wave_id": "...", "name": "..."}
-{"type": "wave.state_changed", "wave_id": "...", "state": "running"}
+{"type": "wave.updated", "wave_id": "...", "wave": {...}}
 {"type": "wave.deleted", "wave_id": "..."}
+{"type": "wave.state_changed", "wave_id": "...", "state": "running"}
 {"type": "step.started", "wave_id": "...", "step": "implement"}
 {"type": "step.completed", "wave_id": "...", "step": "implement", "success": true}
+{"type": "pr.opened", "wave_id": "...", "pr_url": "...", "pr_number": 123}
 {"type": "pr.status_changed", "wave_id": "...", "pr_url": "...", "status": "merged"}
-{"type": "ci.completed", "wave_id": "...", "passed": true}
+{"type": "ci.status_changed", "wave_id": "...", "status": "success"}
 ```
 
 **GitHub polling:**
@@ -148,24 +176,39 @@ Axum has native WebSocket support via `axum::extract::ws`. No need to add `tokio
 - UI changes (this is lfd backend only)
 - OAuth flow (loopflow.studio handles this)
 - JWT issuance (loopflow.studio handles this)
+- Rate limiting (add if abuse occurs)
 
 ---
 
 ## Implementation order
 
-1. **Share EventHub with HTTP layer** — Wire `event_hub` and `output_hub` into `HttpState`. Minimal change, unlocks everything else.
+1. **Wire EventHub and executor into HttpState** — Add `event_hub`, `output_hub`, `executor`, and `auth` to `HttpState`. Two-line struct change, two-line wiring change in main.rs. Unlocks everything else.
 
-2. **Add WebSocket endpoint** — `/ws` handler that upgrades and streams from `EventHub`. Test with `websocat`.
+2. **Add WebSocket endpoint** — `/ws` handler that:
+   - Validates JWT for remote clients (skip for localhost)
+   - Upgrades connection
+   - Sends initial state snapshot
+   - Subscribes to EventHub and streams events
+   - Handles ping/pong
+   - Test with `websocat ws://localhost:2486/ws`
 
-3. **Add wave CRUD endpoints** — `/waves` routes that delegate to existing `RunStore` methods. The store layer already has everything.
+3. **Add wave CRUD endpoints** — `/api/waves` routes that delegate to existing `RunStore` methods. The store layer already has `list_waves`, `get_wave`, `create_wave`, `update_wave`, `delete_wave`.
 
-4. **Add wave action endpoints** — `/waves/:id/run`, `/stop`, `/land`. Call existing executor methods.
+4. **Add wave action endpoints** — `/api/waves/:id/run`, `/stop`, `/land`. Delegate to `WaveExecutor` methods that already exist from gRPC implementation.
 
-5. **Add JWT auth middleware** — Extract and validate JWT for non-localhost requests. Reuse `ConnectionValidator` pattern from gRPC.
+5. **Add localhost bypass to auth** — Before checking JWT, check if peer addr is `127.0.0.1` or `::1`. If so, skip auth.
 
-6. **Add git hook endpoint** — `/hooks/git` that translates hook events into `EventHub` broadcasts.
+6. **Add git hook endpoint** — `/hooks/git` that:
+   - Accepts POST with JSON body `{"hook": "post-commit", "repo": "/path/to/repo"}`
+   - Looks up wave by repo path
+   - Broadcasts `wave.state_changed` event
+   - No auth (localhost only, enforced by hook script)
 
-7. **Add GitHub polling loop** — Background task that polls GitHub API and feeds results into `EventHub`.
+7. **Add GitHub polling loop** — Background task spawned at startup that:
+   - Every 30 seconds, queries store for waves with open PRs
+   - For each, calls GitHub API to check PR state and CI status
+   - Broadcasts events for state changes
+   - Uses `If-None-Match` headers for conditional requests
 
 8. **Add hook installation command** — `lfd hooks install <repo>` that writes hook scripts to `.git/hooks/`.
 
@@ -174,22 +217,60 @@ Axum has native WebSocket support via `axum::extract::ws`. No need to add `tokio
 ## Done when
 
 ```bash
-# WebSocket streams events
+# WebSocket streams events (with initial state)
 websocat ws://localhost:2486/ws
+# Should immediately receive: {"type": "connected", "waves": [...]}
 
 # Wave CRUD works
-curl http://localhost:2486/waves
-curl -X POST http://localhost:2486/waves -d '{"name": "test", ...}'
+curl http://localhost:2486/api/waves
+curl -X POST http://localhost:2486/api/waves -d '{"name": "test", ...}'
+curl http://localhost:2486/api/waves/123
+curl -X PATCH http://localhost:2486/api/waves/123 -d '{"paused": true}'
+curl -X DELETE http://localhost:2486/api/waves/123
 
 # Actions trigger execution
-curl -X POST http://localhost:2486/waves/123/run
-curl -X POST http://localhost:2486/waves/123/land
+curl -X POST http://localhost:2486/api/waves/123/run
+curl -X POST http://localhost:2486/api/waves/123/stop
+curl -X POST http://localhost:2486/api/waves/123/land
 
 # Git operations broadcast events
-git commit -m "test"  # triggers wave.state_changed event
+git commit -m "test"  # triggers wave.state_changed event over WebSocket
 
 # Remote access requires JWT
-curl -H "Authorization: Bearer <jwt>" http://100.x.x.x:2486/waves
+curl -H "Authorization: Bearer <jwt>" https://100.x.x.x:2486/api/waves
+
+# Hook installation works
+lfd hooks install .
+cat .git/hooks/post-commit  # Should show curl to localhost
 ```
 
-Verification: iOS simulator connects to lfd, sees wave list, receives live updates when git operations happen on laptop.
+**Verification:** iOS simulator connects to lfd, sees wave list, receives live updates when git operations happen on laptop.
+
+---
+
+## Success looks like
+
+Six months from now:
+- Conductors check wave status from their phones while commuting
+- "Land PR" from the couch works flawlessly
+- Nobody thinks about the WebSocket connection—it just works
+- The API is stable enough that we haven't changed it since v0
+- Response times are under 100ms for all endpoints
+- WebSocket reconnection is seamless (initial state dump makes it trivial)
+
+## Failure looks like
+
+Six months from now:
+- WebSocket connections drop constantly, users give up on mobile
+- We built a REST API that doesn't match what the iOS app actually needs
+- TLS setup is so painful that users only use localhost
+- GitHub polling hammers the API and runs out of quota
+- Event ordering issues cause UI glitches
+- We're on v3 of the API because v0 was wrong
+
+**Mitigations built into this design:**
+- Initial state dump eliminates reconnection complexity
+- API matches gRPC 1:1 to avoid mismatched abstractions
+- Tailscale recommended for TLS (free certs, easy setup)
+- Conditional requests + 30s polling keeps GitHub API usage minimal
+- Events are idempotent—duplicate delivery is fine

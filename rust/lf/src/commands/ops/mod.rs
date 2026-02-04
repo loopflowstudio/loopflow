@@ -149,6 +149,7 @@ fn next_branch_cmd(
             block,
             create_pr,
             rebase,
+            wave_name: None,
         },
         progress,
     )?;

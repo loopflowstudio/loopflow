@@ -111,6 +111,7 @@ pub fn format_branch_name(
 
     let mut result = schema.replace("{name}", short_name);
     result = result.replace("{user}", &user);
+    result = result.replace("{timestamp}", &ts);
     result = result.replace("{ts}", &ts);
     result = result.replace("{date}", &date);
     result = result.replace("{words}", &words);

@@ -2,19 +2,23 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
-use loopflow_engine::git::{create_branch, current_branch, get_default_branch};
-use loopflow_engine::worktrees::main_repo_root;
+use loopflow_engine::config::load_config_or_default;
+use loopflow_engine::git::{create_branch, current_branch, get_default_branch, push_with_upstream};
+use loopflow_engine::naming::format_branch_name;
+use loopflow_engine::worktrees::{main_repo_root, worktree_short_name};
 
 use crate::commit::{commit_workflow, CommitOptions};
 use crate::error::{OpsError, OpsResult};
 use crate::messages::generate_pr_message;
 use crate::progress::Progress;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct NextOptions {
     pub block: bool,
     pub create_pr: bool,
     pub rebase: bool,
+    /// Wave name override (used when lfd orchestrates). If None, inferred from worktree or branch.
+    pub wave_name: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -79,20 +83,22 @@ pub fn next_branch(
         }
     }
 
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let new_branch = format!("next-{}", timestamp);
+    // Infer wave name: explicit > worktree directory > current branch
+    let wave_name = options
+        .wave_name
+        .clone()
+        .or_else(|| worktree_short_name(repo))
+        .unwrap_or(current.clone());
 
+    // Generate new branch using schema
+    let config = load_config_or_default(Some(repo));
+    let branch_config = config.branch_names.as_ref();
+    let new_branch = format_branch_name(&wave_name, branch_config, repo)
+        .map_err(|e| OpsError::Message(format!("failed to generate branch name: {e}")))?;
+
+    progress.status(&format!("Creating branch: {}", new_branch));
     create_branch(repo, &new_branch)?;
-    let _ = Command::new("git")
-        .arg("push")
-        .arg("-u")
-        .arg("origin")
-        .arg(&new_branch)
-        .current_dir(repo)
-        .status();
+    push_with_upstream(repo, "origin", &new_branch)?;
 
     Ok(NextResult { new_branch })
 }

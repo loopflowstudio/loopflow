@@ -1,0 +1,12 @@
+name: with_direction
+repo: tests/parity/fixtures/with_direction
+step: test
+run_mode: auto
+directions:
+  - thorough
+lfdocs: false
+diff_files: false
+diff: false
+clipboard: false
+area: null
+wave: null

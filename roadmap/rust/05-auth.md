@@ -2,18 +2,55 @@
 
 Enable remote access to lfd with authentication via loopflow.studio.
 
-## Context
+## Deployment Scenarios
 
-Phase 1 lfd runs locally with no auth (Unix socket provides OS-level access control).
+Three scenarios, each with different requirements:
 
-For remote access (phone, laptop, different machine), we need authentication.
+| Scenario | Who runs lfd | Connection | TLS | Auth |
+|----------|-------------|------------|-----|------|
+| **Local** | Your Mac | `127.0.0.1` | None | None |
+| **Remote self-hosted** | Your EC2/server | Relay via loopflow.studio | loopflow.studio terminates | JWT |
+| **Remote loopflow-hosted** | loopflow.studio | Relay via loopflow.studio | loopflow.studio terminates | JWT |
+
+**Local** is the default. Concerto on your Mac talks to lfd on your Mac. No network, no auth, no TLS. Secure because localhost binding means only local processes can connect.
+
+**Remote self-hosted** is for accessing your own server (EC2, home server) from your phone. Relay through loopflow.studio handles NAT traversal and TLS termination.
+
+**Remote loopflow-hosted** is enterprise. loopflow.studio runs the lfd, handles everything. Users connect to `<team>.lfd.loopflow.studio`.
+
+## Connection Model
+
+Relay through loopflow.studio is the primary remote path:
+
+```
+Phone ──TLS──▶ loopflow.studio ──tunnel──▶ lfd (behind NAT)
+              (real certs)                 (outbound connection)
+```
+
+lfd maintains an outbound tunnel to loopflow.studio. Mobile requests route through that tunnel. This solves:
+- NAT traversal (lfd initiates outbound, no port forwarding needed)
+- TLS (loopflow.studio has real certs, no TOFU/fingerprints)
+- Discovery (loopflow.studio knows which daemons are online)
+
+Direct connections with self-signed certs are a power-user escape hatch, not the default.
+
+## Token Validation
+
+Connection tokens are short-lived JWTs (5 min) validated locally by lfd:
+
+1. loopflow.studio issues connection tokens as signed JWTs
+2. lfd fetches JWKS from `loopflow.studio/.well-known/jwks.json` (cached, refreshed hourly)
+3. lfd validates JWT signature locally - no roundtrip per request
+4. Revocation is delayed until token expiry (acceptable for 5 min tokens)
+
+This keeps loopflow.studio out of the hot path for every gRPC call.
 
 ## Goal
 
 1. loopflow.studio provides auth service (WorkOS AuthKit integration)
 2. `lf auth login` performs browser OAuth flow
-3. lfd validates JWTs against loopflow.studio
-4. Self-hosters control who can access their daemon
+3. lfd validates JWTs locally using cached JWKS
+4. Self-hosters control who can access their daemon via `allowed_users`
 
 ## Architecture
 

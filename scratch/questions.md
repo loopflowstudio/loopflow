@@ -52,14 +52,27 @@ The remaining items in `roadmap/concerto/` are all Phase 2 or 3.
 3. **Land local strategy**: `lf ops land --local` uses squash merge via `git::land` and skips PR-related steps. Confirm if we need a local merge option or to support `--strategy` explicitly.
 4. **Lint fixer**: lint retry uses the built-in `lint` step via prompt context, not `lf lint -b` subprocess. Is that preferred for parity?
 
-## lfd Registration (Phase 2)
+## lfd Registration (Phase 2) — RESOLVED
 
-- **Connection routing**: Direct connection requires knowing public IP. Should loopflow.studio track public IP from registration request, or do we need STUN/TURN for NAT traversal?
-- **Multiple networks**: If Mac has multiple IPs (WiFi + Ethernet), which to register? Register all and let client try each?
-- **Relay fallback**: When direct connection fails, should loopflow.studio relay traffic? Adds complexity and cost but improves reliability.
+**Decision**: Relay through loopflow.studio is the primary remote path. Direct connections are a power-user escape hatch.
+
+| Scenario | Connection | TLS | Auth |
+|----------|-----------|-----|------|
+| Local | `127.0.0.1` | None | None |
+| Remote self-hosted | Relay via loopflow.studio | loopflow.studio terminates | JWT |
+| Remote loopflow-hosted | Relay via loopflow.studio | loopflow.studio terminates | JWT |
+
+This resolves:
+- **Connection routing**: Relay handles NAT (lfd initiates outbound tunnel)
+- **Multiple networks**: Not relevant for relay model
+- **Relay fallback**: Relay is the default, not fallback
+
+**Token validation**: Local JWT validation using cached JWKS. Connection tokens are short-lived JWTs (5 min). No roundtrip to loopflow.studio per request.
+
+**Self-signed certs**: Only for direct connections (power users). Relay connections use loopflow.studio's real TLS certs.
 
 ## lfd Registration (Implementation assumptions)
 
 - **JWT storage contract**: Assumed `~/.lf/credentials.json` contains a `jwt` or `token` string. Confirm actual key name and file format.
 - **gRPC auth metadata**: Assumed connection token arrives as `authorization: Bearer <token>` or `x-loopflow-connection-token`. Confirm the agreed header name.
-- **Auth gating behavior**: Assumed gRPC requires a token only once registration is enabled *and* successfully registered. Confirm whether local clients should bypass auth even after registration.
+- **Auth gating behavior**: Local clients (`127.0.0.1`) bypass auth always. Remote connections through relay require valid JWT.

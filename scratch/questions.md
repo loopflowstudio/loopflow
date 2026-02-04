@@ -57,3 +57,9 @@ The remaining items in `roadmap/concerto/` are all Phase 2 or 3.
 - **Connection routing**: Direct connection requires knowing public IP. Should loopflow.studio track public IP from registration request, or do we need STUN/TURN for NAT traversal?
 - **Multiple networks**: If Mac has multiple IPs (WiFi + Ethernet), which to register? Register all and let client try each?
 - **Relay fallback**: When direct connection fails, should loopflow.studio relay traffic? Adds complexity and cost but improves reliability.
+
+## lfd Registration (Implementation assumptions)
+
+- **JWT storage contract**: Assumed `~/.lf/credentials.json` contains a `jwt` or `token` string. Confirm actual key name and file format.
+- **gRPC auth metadata**: Assumed connection token arrives as `authorization: Bearer <token>` or `x-loopflow-connection-token`. Confirm the agreed header name.
+- **Auth gating behavior**: Assumed gRPC requires a token only once registration is enabled *and* successfully registered. Confirm whether local clients should bypass auth even after registration.

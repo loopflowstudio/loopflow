@@ -1,6 +1,6 @@
 # Loopflow Auth (Concerto Client)
 
-Swift client authentication for remote lfd access. Sign in with GitHub via loopflow.studio, store tokens in Keychain, auto-refresh.
+Swift client authentication for remote lfd access. Sign in via loopflow.studio (GitHub, Google, or Apple), store tokens in Keychain, auto-refresh.
 
 ## Problem
 
@@ -10,17 +10,19 @@ The server-side auth (loopflow.studio + lfd JWT validation) is designed in `road
 
 ## Approach
 
-Use `ASWebAuthenticationSession` for OAuth flow, store JWT in Keychain, inject into all remote API calls. Automatic refresh before expiry.
+Use `ASWebAuthenticationSession` to open loopflow.studio's auth flow. loopflow.studio uses WorkOS to handle multiple OAuth providers (GitHub, Google, Apple) behind a uniform API. The client receives a JWT regardless of which provider the user chose.
 
 ```
 ┌─────────────────────┐     ┌────────────────────┐     ┌─────────────────────┐
-│   Concerto (Swift)  │     │  loopflow.studio   │     │   GitHub OAuth      │
+│   Concerto (Swift)  │     │  loopflow.studio   │     │       WorkOS        │
 │                     │     │                    │     │                     │
-│  ASWebAuth          │────▶│  /auth/login       │────▶│  Authorize app      │
-│  Session            │     │                    │     │                     │
-│                     │◀────│  JWT callback      │◀────│  Auth code          │
-│                     │     │                    │     │                     │
-│  Store in Keychain  │     │                    │     │                     │
+│  ASWebAuth ─────────┼────▶│  /auth/login       │────▶│  AuthKit hosted UI  │
+│                     │     │                    │     │  ┌───────────────┐  │
+│                     │     │                    │     │  │ ○ GitHub      │  │
+│                     │     │                    │     │  │ ○ Google      │  │
+│                     │◀────│  JWT callback      │◀────│  │ ○ Apple       │  │
+│                     │     │                    │     │  └───────────────┘  │
+│  Store in Keychain  │     │  (normalizes user) │     │                     │
 └─────────────────────┘     └────────────────────┘     └─────────────────────┘
          │
          │ Authorization: Bearer <JWT>
@@ -34,28 +36,27 @@ Use `ASWebAuthenticationSession` for OAuth flow, store JWT in Keychain, inject i
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Alternatives considered
+## Why WorkOS
 
-| Approach | Tradeoff | Why not |
-|----------|----------|---------|
-| Direct GitHub OAuth in app | More control, simpler | No central identity—can't tie lfd registration to user. Every user manages their own OAuth app. |
-| Sign in with Apple | Native iOS experience | GitHub is where developers are. Loopflow is dev tooling. |
-| Email/password | Universal | More friction, another password to manage. Devs have GitHub. |
-| Device code flow only | Works on tvOS/watchOS | Overkill for macOS/iOS where browser works fine. |
+| Approach | Tradeoff | Decision |
+|----------|----------|----------|
+| Single provider (GitHub only) | Simpler | Excludes non-GitHub devs, fails App Store guideline 4.8 |
+| Roll our own multi-provider | Full control | OAuth is tricky, maintenance burden, security risk |
+| WorkOS User Management | Adds dependency | Handles GitHub/Google/Apple uniformly, enterprise SSO ready |
 
-GitHub OAuth via loopflow.studio wins: single identity provider matches developer workflow, central service enables lfd registration and remote routing.
+WorkOS wins: client stays simple (one code path), App Store compliant (Sign in with Apple), enterprise-ready (SSO supported), and we don't maintain OAuth plumbing.
 
 ## Key decisions
 
 ### 1. ASWebAuthenticationSession, not WKWebView
 
 Apple's `ASWebAuthenticationSession` is the sanctioned approach for OAuth on macOS/iOS. It:
-- Shares cookies with Safari (SSO if already logged into GitHub)
+- Shares cookies with Safari (SSO if user is already logged into their provider)
 - Shows the domain to user (trust signal)
 - Handles callback URL registration automatically
 - Works on both macOS and iOS with same API
 
-WKWebView would require manual cookie handling and doesn't benefit from existing GitHub sessions.
+WKWebView would require manual cookie handling and doesn't benefit from existing provider sessions.
 
 ### 2. Keychain for token storage, not UserDefaults
 
@@ -124,7 +125,7 @@ This keeps `LocalWaveService` unchanged and enables testing with mock providers.
 
 **In scope:**
 - `AuthService` with sign-in/sign-out methods
-- `ASWebAuthenticationSession` OAuth flow
+- `ASWebAuthenticationSession` OAuth flow (provider-agnostic)
 - Keychain storage for JWT
 - Token refresh logic
 - `AuthState` observable for UI
@@ -132,7 +133,7 @@ This keeps `LocalWaveService` unchanged and enables testing with mock providers.
 - URL scheme registration for callback
 
 **Out of scope:**
-- loopflow.studio server changes (see `roadmap/rust/05-auth.md`)
+- loopflow.studio WorkOS integration (server-side, see `roadmap/rust/05-auth.md`)
 - lfd JWT validation (see `roadmap/rust/05-auth.md`)
 - lf CLI auth commands (see `roadmap/rust/05-auth.md`)
 - Device code flow (defer until watchOS/tvOS needed)
@@ -152,14 +153,14 @@ public final class AuthService: NSObject, Sendable {
     private let keychainService = "studio.loopflow.auth"
     private let baseURL = URL(string: "https://loopflow.studio")!
 
-    /// Sign in via GitHub OAuth. Returns JWT on success.
+    /// Sign in via loopflow.studio (GitHub, Google, or Apple). Returns JWT on success.
     @MainActor
     public func signIn() async throws -> String {
         let callbackScheme = "loopflow"
+        // WorkOS AuthKit shows provider picker—no need to specify provider client-side
         let authURL = baseURL.appendingPathComponent("auth/login")
             .appending(queryItems: [
-                URLQueryItem(name: "redirect_uri", value: "\(callbackScheme)://auth/callback"),
-                URLQueryItem(name: "provider", value: "GitHubOAuth")
+                URLQueryItem(name: "redirect_uri", value: "\(callbackScheme)://auth/callback")
             ])
 
         let callbackURL = try await withCheckedThrowingContinuation { continuation in
@@ -440,7 +441,7 @@ Add to Concerto's `Info.plist`:
 
 ## Done when
 
-- [ ] `AuthService.signIn()` opens GitHub OAuth via loopflow.studio
+- [ ] `AuthService.signIn()` opens loopflow.studio auth (provider picker via WorkOS)
 - [ ] JWT stored in Keychain after successful auth
 - [ ] `AuthState.isAuthenticated` reflects current state
 - [ ] Token expiry detected, user prompted to re-authenticate

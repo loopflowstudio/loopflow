@@ -38,3 +38,9 @@ Recent commits suggest items 04 and 06 have shipped. Item 01 is noted as complet
 3. Create the missing Phase 1 items if they're not actually done?
 
 The remaining items in `roadmap/concerto/` are all Phase 2 or 3.
+
+## Auth Implementation
+
+- Refresh endpoint response: assumed /auth/refresh returns JSON {token|jwt} or raw token string; confirm actual contract.
+- Package supports macOS 15 only; design doc targets macOS 14+/iOS 17+. If iOS support is required, update Swift package platforms and add iOS app target.
+- RemoteWaveService not present in repo; TokenProvider added but not wired into any remote service yet.

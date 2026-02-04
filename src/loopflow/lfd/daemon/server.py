@@ -3,11 +3,7 @@
 import asyncio
 import fnmatch
 import json
-import logging
-import os
 import signal
-import sqlite3
-import urllib.request
 from asyncio import StreamReader, StreamWriter
 from datetime import datetime
 from pathlib import Path
@@ -19,24 +15,11 @@ from loopflow.lfd.agent import (
     save_agent,
     update_agent_status,
 )
-from loopflow.lfd.autoprune import AutopruneManager, get_repos_to_check
 from loopflow.lfd.daemon import metrics
-from loopflow.lfd.daemon.config import load_lfd_config
-from loopflow.lfd.daemon.credentials import load_jwt
-from loopflow.lfd.daemon.grpc_server import start_grpc_server
-from loopflow.lfd.daemon.http_server import DEFAULT_PORT, start_http_server
-from loopflow.lfd.daemon.launchd import remove_pid, write_pid
-from loopflow.lfd.daemon.machine_id import get_machine_id, get_machine_name
 from loopflow.lfd.daemon.manager import Manager, load_manager_config
 from loopflow.lfd.daemon.protocol import Event, Request, Response, error, success
-from loopflow.lfd.daemon.registration import (
-    RegistrationClient,
-    set_registration_enabled,
-    set_registration_error,
-)
 from loopflow.lfd.daemon.status import compute_status
-from loopflow.lfd.db import DB_PATH, update_dead_processes
-from loopflow.lfd.draft_prs import run_draft_pr_check
+from loopflow.lfd.db import update_dead_processes
 from loopflow.lfd.git_hooks import hooks_status, install_hooks
 from loopflow.lfd.models import Agent, AgentStatus
 from loopflow.lfd.pr_poller import PRPoller
@@ -412,6 +395,8 @@ class Server:
 
     async def _init_pr_tracking(self) -> None:
         """Scan existing worktrees and track any with open PRs."""
+        from loopflow.lfd.autoprune import get_repos_to_check
+
         service = get_worktree_state_service()
         for repo in get_repos_to_check():
             try:
@@ -442,6 +427,9 @@ class Server:
 
     async def _periodic_check(self) -> None:
         """Periodically update dead processes and check wave stimuli."""
+        from loopflow.lfd.autoprune import AutopruneManager, get_repos_to_check
+        from loopflow.lfd.draft_prs import run_draft_pr_check
+
         autoprune_manager = AutopruneManager()
 
         while self._running:
@@ -524,12 +512,19 @@ class Server:
 
 def _check_already_running(http_port: int | None = None) -> None:
     """Check if another lfd instance is running. Raises SystemExit if so."""
+    import os
+    import urllib.request
+
+    from loopflow.lfd.daemon.http_server import DEFAULT_PORT
+
     if http_port is None:
         http_port = DEFAULT_PORT
 
     try:
         req = urllib.request.Request(f"http://127.0.0.1:{http_port}/health", method="GET")
         with urllib.request.urlopen(req, timeout=2) as resp:
+            import json
+
             data = json.loads(resp.read().decode())
             if data.get("ok"):
                 result = data.get("result", {})
@@ -555,6 +550,14 @@ async def run_server(
     socket_path: Path, http_port: int | None = None, grpc_port: int = 50051
 ) -> None:
     """Main daemon entry point. Runs until terminated."""
+    import logging
+    import sqlite3
+
+    from loopflow.lfd.daemon.grpc_server import start_grpc_server
+    from loopflow.lfd.daemon.http_server import DEFAULT_PORT, start_http_server
+    from loopflow.lfd.daemon.launchd import remove_pid, write_pid
+    from loopflow.lfd.db import DB_PATH
+
     if http_port is None:
         http_port = DEFAULT_PORT
 
@@ -567,31 +570,19 @@ async def run_server(
     server = Server(socket_path)
     http_server = None
     grpc_server = None
-    registration_client = None
-    registration_jwt = None
-    registration_machine_id = None
-    lfd_config = load_lfd_config()
-    shutdown_complete = False
 
     # Write PID file for process tracking
     write_pid()
 
     async def shutdown():
-        nonlocal shutdown_complete, http_server, grpc_server, registration_client
         logger.info("Shutting down gracefully...")
 
         # Stop accepting new connections
         await server.stop()
         if http_server:
             await http_server.stop()
-            http_server = None
         if grpc_server:
             await grpc_server.stop()
-            grpc_server = None
-
-        if registration_client and registration_jwt and registration_machine_id:
-            await registration_client.deregister(registration_jwt, registration_machine_id)
-            registration_client = None
 
         # Checkpoint WAL to ensure all data is persisted
         try:
@@ -604,7 +595,6 @@ async def run_server(
             logger.warning(f"WAL checkpoint failed: {e}")
 
         remove_pid()
-        shutdown_complete = True
         logger.info("Shutdown complete")
 
     loop = asyncio.get_event_loop()
@@ -615,47 +605,18 @@ async def run_server(
         # Start HTTP server alongside socket server
         http_server = await start_http_server(http_port)
 
-        if lfd_config.auth.provider == "loopflow.studio":
-            set_registration_enabled(True)
-            registration_jwt = load_jwt()
-            if registration_jwt:
-                registration_machine_id = get_machine_id()
-                machine_name = get_machine_name()
-                registration_client = RegistrationClient(base_url=lfd_config.auth.base_url)
-                try:
-                    await registration_client.register(
-                        registration_jwt, registration_machine_id, machine_name
-                    )
-                    await registration_client.start_heartbeat(
-                        registration_jwt, registration_machine_id
-                    )
-                    logger.info("Registered with loopflow.studio as %s", machine_name)
-                except Exception as e:
-                    set_registration_error(str(e))
-                    logger.warning("Registration failed: %s", e)
-            else:
-                set_registration_error("missing JWT")
-        else:
-            set_registration_enabled(False)
-
         # Start gRPC server on separate port
         grpc_server = await start_grpc_server(
             port=grpc_port,
             manager=server.manager,
             broadcast_callback=server._broadcast,
-            auth_base_url=lfd_config.auth.base_url
-            if lfd_config.auth.provider == "loopflow.studio"
-            else None,
         )
         logger.info(f"lfd ready (http={http_port}, grpc={grpc_port})")
 
         await server.start()
     finally:
-        if not shutdown_complete:
-            if http_server:
-                await http_server.stop()
-            if grpc_server:
-                await grpc_server.stop()
-            if registration_client and registration_jwt and registration_machine_id:
-                await registration_client.deregister(registration_jwt, registration_machine_id)
-            remove_pid()
+        if http_server:
+            await http_server.stop()
+        if grpc_server:
+            await grpc_server.stop()
+        remove_pid()

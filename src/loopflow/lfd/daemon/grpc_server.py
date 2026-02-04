@@ -21,9 +21,7 @@ from loopflow.lfd.agent import (
     update_agent_status,
 )
 from loopflow.lfd.daemon import metrics
-from loopflow.lfd.daemon.connection_validator import ConnectionValidator
 from loopflow.lfd.daemon.manager import Manager
-from loopflow.lfd.daemon.registration import get_registration_status
 from loopflow.lfd.daemon.status import compute_status
 from loopflow.lfd.migrations.baseline import SCHEMA_VERSION
 from loopflow.lfd.models import Agent, AgentStatus
@@ -34,94 +32,6 @@ PROTOCOL_VERSION = control_pb2.ProtocolVersion(major=1, minor=0, patch=0)
 
 # Default gRPC port
 DEFAULT_GRPC_PORT = 50051
-
-
-def _extract_connection_token(metadata: tuple[tuple[str, str], ...]) -> str | None:
-    headers = {key.lower(): value for key, value in metadata}
-    token = headers.get("x-loopflow-connection-token") or headers.get("connection-token")
-    if token:
-        return token
-
-    auth_header = headers.get("authorization")
-    if auth_header and auth_header.lower().startswith("bearer "):
-        return auth_header.split(" ", 1)[1].strip()
-
-    return None
-
-
-def _abort_handler(handler: grpc.RpcMethodHandler, message: str) -> grpc.RpcMethodHandler:
-    request_deserializer = handler.request_deserializer
-    response_serializer = handler.response_serializer
-
-    if not handler.request_streaming and not handler.response_streaming:
-
-        async def unary_unary(request, context):
-            await context.abort(grpc.StatusCode.UNAUTHENTICATED, message)
-
-        return grpc.unary_unary_rpc_method_handler(
-            unary_unary,
-            request_deserializer=request_deserializer,
-            response_serializer=response_serializer,
-        )
-
-    if not handler.request_streaming and handler.response_streaming:
-
-        async def unary_stream(request, context):
-            await context.abort(grpc.StatusCode.UNAUTHENTICATED, message)
-            if False:
-                yield None
-
-        return grpc.unary_stream_rpc_method_handler(
-            unary_stream,
-            request_deserializer=request_deserializer,
-            response_serializer=response_serializer,
-        )
-
-    if handler.request_streaming and not handler.response_streaming:
-
-        async def stream_unary(request_iterator, context):
-            await context.abort(grpc.StatusCode.UNAUTHENTICATED, message)
-
-        return grpc.stream_unary_rpc_method_handler(
-            stream_unary,
-            request_deserializer=request_deserializer,
-            response_serializer=response_serializer,
-        )
-
-    async def stream_stream(request_iterator, context):
-        await context.abort(grpc.StatusCode.UNAUTHENTICATED, message)
-        if False:
-            yield None
-
-    return grpc.stream_stream_rpc_method_handler(
-        stream_stream,
-        request_deserializer=request_deserializer,
-        response_serializer=response_serializer,
-    )
-
-
-class ConnectionAuthInterceptor(grpc.aio.ServerInterceptor):
-    def __init__(self, validator: ConnectionValidator):
-        self._validator = validator
-
-    async def intercept_service(self, continuation, handler_call_details):
-        handler = await continuation(handler_call_details)
-        if handler is None:
-            return None
-
-        status = get_registration_status()
-        if not status.get("enabled") or not status.get("registered"):
-            return handler
-
-        token = _extract_connection_token(handler_call_details.invocation_metadata or ())
-        if not token:
-            return _abort_handler(handler, "missing connection token")
-
-        valid = await self._validator.validate_connection_token(token)
-        if not valid:
-            return _abort_handler(handler, "invalid connection token")
-
-        return handler
 
 
 def _now_timestamp() -> timestamp_pb2.Timestamp:
@@ -615,23 +525,16 @@ class GrpcServer:
         port: int = DEFAULT_GRPC_PORT,
         manager: Manager = None,
         broadcast_callback=None,
-        auth_base_url: str | None = None,
     ):
         self.port = port
         self.manager = manager
         self._broadcast = broadcast_callback
-        self._auth_base_url = auth_base_url
         self._server: grpc.aio.Server | None = None
         self._start_time = time.time()
 
     async def start(self) -> None:
         """Start the gRPC server."""
-        interceptors = []
-        if self._auth_base_url:
-            interceptor = ConnectionAuthInterceptor(ConnectionValidator(self._auth_base_url))
-            interceptors.append(interceptor)
-
-        self._server = grpc.aio.server(interceptors=interceptors or None)
+        self._server = grpc.aio.server()
 
         servicer = ControlServiceServicer(
             manager=self.manager,
@@ -653,14 +556,12 @@ async def start_grpc_server(
     port: int = DEFAULT_GRPC_PORT,
     manager: Manager = None,
     broadcast_callback=None,
-    auth_base_url: str | None = None,
 ) -> GrpcServer:
     """Start the gRPC server. Returns server for cleanup."""
     server = GrpcServer(
         port=port,
         manager=manager,
         broadcast_callback=broadcast_callback,
-        auth_base_url=auth_base_url,
     )
     await server.start()
     return server

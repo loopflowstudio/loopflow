@@ -1,6 +1,7 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
+use crate::auth::AuthContext;
 use crate::executor::WaveExecutor;
 use crate::id::LfdId;
 use crate::output::OutputHub;
@@ -36,6 +37,7 @@ pub struct ControlServer {
     scheduler: Arc<Scheduler>,
     executor: WaveExecutor,
     output: OutputHub,
+    auth: AuthContext,
     started_at: OffsetDateTime,
 }
 
@@ -55,14 +57,20 @@ impl ControlServer {
         scheduler: Arc<Scheduler>,
         executor: WaveExecutor,
         output: OutputHub,
+        auth: AuthContext,
     ) -> Self {
         Self {
             store,
             scheduler,
             executor,
             output,
+            auth,
             started_at: OffsetDateTime::now_utc(),
         }
+    }
+
+    async fn check_auth<T>(&self, request: &Request<T>) -> Result<(), Status> {
+        self.auth.check_request(request).await
     }
 
     #[allow(clippy::result_large_err)]
@@ -258,6 +266,7 @@ impl ControlService for ControlServer {
         &self,
         request: Request<CreateWaveRequest>,
     ) -> Result<Response<CreateWaveResponse>, Status> {
+        self.check_auth(&request).await?;
         let req = request.into_inner();
         let id = LfdId::new().to_string();
         let name = req.name.unwrap_or_else(|| format!("wave-{id}"));
@@ -285,6 +294,7 @@ impl ControlService for ControlServer {
         &self,
         request: Request<UpdateWaveRequest>,
     ) -> Result<Response<UpdateWaveResponse>, Status> {
+        self.check_auth(&request).await?;
         let req = request.into_inner();
         let wave_id = req.wave_id;
         let wave_id = Self::parse_id(&wave_id, "wave_id")?;
@@ -319,6 +329,7 @@ impl ControlService for ControlServer {
         &self,
         request: Request<DeleteWaveRequest>,
     ) -> Result<Response<DeleteWaveResponse>, Status> {
+        self.check_auth(&request).await?;
         let wave_id = request.into_inner().wave_id;
         let wave_id = Self::parse_id(&wave_id, "wave_id")?;
         self.run_store(move |store| store.delete_wave(&wave_id))
@@ -353,6 +364,7 @@ impl ControlService for ControlServer {
         &self,
         request: Request<RunWaveRequest>,
     ) -> Result<Response<RunWaveResponse>, Status> {
+        self.check_auth(&request).await?;
         let req = request.into_inner();
         let wave_id = req.wave_id;
         let wave_id = Self::parse_id(&wave_id, "wave_id")?;
@@ -465,6 +477,7 @@ impl ControlService for ControlServer {
         &self,
         request: Request<StopWaveRequest>,
     ) -> Result<Response<StopWaveResponse>, Status> {
+        self.check_auth(&request).await?;
         let wave_id = request.into_inner().wave_id;
         let wave_id = Self::parse_id(&wave_id, "wave_id")?;
         let run = self
@@ -528,6 +541,7 @@ impl ControlService for ControlServer {
         &self,
         request: Request<CreateStimulusRequest>,
     ) -> Result<Response<CreateStimulusResponse>, Status> {
+        self.check_auth(&request).await?;
         let req = request.into_inner();
 
         // Verify wave exists
@@ -560,6 +574,7 @@ impl ControlService for ControlServer {
         &self,
         request: Request<UpdateStimulusRequest>,
     ) -> Result<Response<UpdateStimulusResponse>, Status> {
+        self.check_auth(&request).await?;
         let req = request.into_inner();
         let stimulus_id = req.stimulus_id;
         let stimulus_id = Self::parse_id(&stimulus_id, "stimulus_id")?;
@@ -588,6 +603,7 @@ impl ControlService for ControlServer {
         &self,
         request: Request<DeleteStimulusRequest>,
     ) -> Result<Response<DeleteStimulusResponse>, Status> {
+        self.check_auth(&request).await?;
         let stimulus_id = request.into_inner().stimulus_id;
         let stimulus_id = Self::parse_id(&stimulus_id, "stimulus_id")?;
         self.run_store(move |store| store.delete_stimulus(&stimulus_id))
@@ -599,6 +615,7 @@ impl ControlService for ControlServer {
         &self,
         request: Request<ConnectWaveRequest>,
     ) -> Result<Response<ConnectWaveResponse>, Status> {
+        self.check_auth(&request).await?;
         let wave_id = request.into_inner().wave_id;
         let wave_id = Self::parse_id(&wave_id, "wave_id")?;
         let wave = self
@@ -866,6 +883,7 @@ impl ControlService for ControlServer {
         &self,
         request: Request<crate::proto::control::StartAgentRequest>,
     ) -> Result<Response<crate::proto::control::StartAgentResponse>, Status> {
+        self.check_auth(&request).await?;
         let agent = request
             .into_inner()
             .agent
@@ -895,6 +913,7 @@ impl ControlService for ControlServer {
         &self,
         request: Request<EndAgentRequest>,
     ) -> Result<Response<EndAgentResponse>, Status> {
+        self.check_auth(&request).await?;
         let req = request.into_inner();
         let agent_id = req.agent_id.clone();
         let agent_id_for_end = LfdId::from_raw(agent_id.clone());

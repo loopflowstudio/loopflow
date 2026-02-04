@@ -6,22 +6,30 @@ use tokio::signal;
 use tokio_util::sync::CancellationToken;
 use tonic::transport::Server;
 
+mod auth;
+mod config;
+mod credentials;
 mod executor;
 mod http;
 mod id;
 mod loops;
+mod machine_id;
 mod obs;
 mod output;
 mod proto;
+mod registration;
 mod scheduler;
 mod server;
 mod sessions;
 mod store;
 
+use crate::auth::AuthContext;
+use crate::config::LfdConfig;
 use crate::executor::WaveExecutor;
 use crate::http::HttpState;
 use crate::output::OutputHub;
 use crate::proto::control::control_service_server::ControlServiceServer;
+use crate::registration::{ConnectionValidator, RegistrationClient};
 use crate::scheduler::Scheduler;
 use crate::server::ControlServer;
 use crate::store::postgres::PostgresStore;
@@ -82,12 +90,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .clone()
             .start_loops(store.clone(), executor.clone(), cancel.clone());
 
-    let grpc_server = ControlServer::new(store.clone(), scheduler.clone(), executor, output);
+    // Load config and set up registration
+    let lfd_config = LfdConfig::load();
+    let (registration_client, auth_context, registration_creds) =
+        setup_registration(&lfd_config, cancel.clone()).await;
+
+    let grpc_server = ControlServer::new(
+        store.clone(),
+        scheduler.clone(),
+        executor,
+        output,
+        auth_context.clone(),
+    );
 
     let http_state = HttpState {
         store: store.clone(),
         scheduler: scheduler.clone(),
         started_at: time::OffsetDateTime::now_utc(),
+        registration: registration_client.clone(),
     };
     let http_router = http::router(http_state);
 
@@ -115,12 +135,69 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Deregister on shutdown
+    if let (Some(client), Some((jwt, machine_id))) = (&registration_client, &registration_creds) {
+        tracing::info!("deregistering from loopflow.studio");
+        client.deregister(jwt, machine_id).await;
+    }
+
     cancel.cancel();
     for handle in loop_handles {
         let _ = handle.await;
     }
 
     Ok(())
+}
+
+async fn setup_registration(
+    config: &LfdConfig,
+    cancel: CancellationToken,
+) -> (
+    Option<RegistrationClient>,
+    AuthContext,
+    Option<(String, String)>,
+) {
+    let is_loopflow_studio = config
+        .auth
+        .provider
+        .as_deref()
+        .map(|p| p == "loopflow.studio")
+        .unwrap_or(false);
+
+    if !is_loopflow_studio {
+        tracing::debug!("registration disabled (auth.provider not set to loopflow.studio)");
+        return (None, AuthContext::disabled(), None);
+    }
+
+    let Some(jwt) = credentials::load_jwt() else {
+        tracing::warn!("registration enabled but no JWT found in ~/.lf/credentials.json");
+        let client = RegistrationClient::new(&config.auth.base_url);
+        client.set_enabled(true).await;
+        return (Some(client), AuthContext::disabled(), None);
+    };
+
+    let machine_id = machine_id::get_machine_id();
+    let machine_name = machine_id::get_machine_name();
+
+    let client = RegistrationClient::new(&config.auth.base_url);
+    client.set_enabled(true).await;
+
+    let validator = ConnectionValidator::new(&config.auth.base_url);
+    let auth_context = AuthContext::new(Some(validator));
+
+    match client.register(&jwt, &machine_id, &machine_name).await {
+        Ok(_token) => {
+            tracing::info!(machine_name = %machine_name, "registered with loopflow.studio");
+            auth_context.set_state(true, true).await;
+            client.start_heartbeat(jwt.clone(), machine_id.clone(), cancel);
+            (Some(client), auth_context, Some((jwt, machine_id)))
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "registration failed, continuing without remote access");
+            auth_context.set_state(true, false).await;
+            (Some(client), auth_context, None)
+        }
+    }
 }
 
 fn default_db_path() -> PathBuf {

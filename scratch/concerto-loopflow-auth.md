@@ -1,205 +1,450 @@
-# Loopflow Auth
+# Loopflow Auth (Concerto Client)
 
-WorkOS-based authentication for remote access. Local = no auth, remote = Loopflow account.
+Swift client authentication for remote lfd access. Sign in with GitHub via loopflow.studio, store tokens in Keychain, auto-refresh.
 
 ## Problem
 
-Concerto needs to access lfd remotely (phone connecting to Mac, laptop to server). Phase 1 assumes local-only access via Unix socket. Phase 2 needs authenticated remote access.
+Concerto currently only works locally—it connects to lfd on `127.0.0.1`. For Phase 3 mobile access, users need to authenticate to reach their Mac's lfd from their phone.
 
-Users expect:
-- Sign in once with familiar OAuth (Google, GitHub)
-- Stay signed in across app restarts
-- Seamless token refresh without manual re-auth
-- Self-hosters can control who accesses their daemon
+The server-side auth (loopflow.studio + lfd JWT validation) is designed in `roadmap/rust/05-auth.md`. This doc covers the **client side**: how Concerto authenticates and manages tokens.
 
 ## Approach
 
-Use WorkOS AuthKit as the identity provider. loopflow.studio handles OAuth orchestration and issues JWTs. Clients (Concerto, lf CLI) store tokens locally. lfd validates tokens against loopflow.studio's JWKS.
+Use `ASWebAuthenticationSession` for OAuth flow, store JWT in Keychain, inject into all remote API calls. Automatic refresh before expiry.
 
 ```
-┌─────────────┐      ┌───────────────────┐      ┌─────────────────┐
-│  Concerto   │─────►│  loopflow.studio  │─────►│  WorkOS AuthKit │
-│  (mobile)   │ JWT  │  (issues tokens)  │ OAuth│  (Google/GitHub)│
-└─────────────┘      └───────────────────┘      └─────────────────┘
-       │
-       │ Bearer token in gRPC metadata
-       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  lfd (self-hosted)                                              │
-│                                                                 │
-│  1. Extract token from Authorization/grpc-authorization header  │
-│  2. Validate JWT signature against cached JWKS                  │
-│  3. Check claims (exp, aud, iss)                                │
-│  4. Check user in allowed_users (if configured)                 │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────┐     ┌────────────────────┐     ┌─────────────────────┐
+│   Concerto (Swift)  │     │  loopflow.studio   │     │   GitHub OAuth      │
+│                     │     │                    │     │                     │
+│  ASWebAuth          │────▶│  /auth/login       │────▶│  Authorize app      │
+│  Session            │     │                    │     │                     │
+│                     │◀────│  JWT callback      │◀────│  Auth code          │
+│                     │     │                    │     │                     │
+│  Store in Keychain  │     │                    │     │                     │
+└─────────────────────┘     └────────────────────┘     └─────────────────────┘
+         │
+         │ Authorization: Bearer <JWT>
+         ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Remote lfd (user's Mac)                                                    │
+│                                                                             │
+│  Validates JWT against loopflow.studio JWKS                                 │
+│  Checks user in allowed_users config                                        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Alternatives considered
 
 | Approach | Tradeoff | Why not |
 |----------|----------|---------|
-| GitHub OAuth directly | Simpler, no WorkOS dependency | No enterprise SSO, limited providers, we'd build user management ourselves |
-| Firebase Auth | Good mobile SDKs | Vendor lock-in, harder for self-hosters |
-| Auth0 | Feature-rich | More expensive than WorkOS at scale, heavier integration |
-| Roll our own | Full control | Significant security surface area, enterprise SSO is hard |
+| Direct GitHub OAuth in app | More control, simpler | No central identity—can't tie lfd registration to user. Every user manages their own OAuth app. |
+| Sign in with Apple | Native iOS experience | GitHub is where developers are. Loopflow is dev tooling. |
+| Email/password | Universal | More friction, another password to manage. Devs have GitHub. |
+| Device code flow only | Works on tvOS/watchOS | Overkill for macOS/iOS where browser works fine. |
 
-WorkOS wins because: enterprise SSO for free (SAML, OIDC), familiar OAuth providers, clean SDK, straightforward JWT validation, and self-hosters can opt out entirely.
+GitHub OAuth via loopflow.studio wins: single identity provider matches developer workflow, central service enables lfd registration and remote routing.
 
 ## Key decisions
 
-**WorkOS AuthKit over raw OAuth.** AuthKit handles the OAuth dance, user management, and enterprise SSO. We just redirect and receive JWTs. Per the concerto wave principle of "existing tools > custom solutions."
+### 1. ASWebAuthenticationSession, not WKWebView
 
-**JWTs signed by loopflow.studio, validated by lfd.** The service issues tokens, daemons validate them. This separates identity (loopflow.studio) from authorization (lfd config). Self-hosters control `allowed_users` locally.
+Apple's `ASWebAuthenticationSession` is the sanctioned approach for OAuth on macOS/iOS. It:
+- Shares cookies with Safari (SSO if already logged into GitHub)
+- Shows the domain to user (trust signal)
+- Handles callback URL registration automatically
+- Works on both macOS and iOS with same API
 
-**Keychain storage on Apple platforms.** Tokens contain sensitive access. Keychain provides hardware-backed encryption and biometric protection. `SecAccessControlCreateFlags.biometryCurrentSet` requires Face ID/Touch ID for token access.
+WKWebView would require manual cookie handling and doesn't benefit from existing GitHub sessions.
 
-**Device flow for headless scenarios.** Servers and CI need `lf auth login --device` which shows a code instead of opening a browser. Same as GitHub CLI's device flow.
+### 2. Keychain for token storage, not UserDefaults
 
-**Graceful degradation to local-only.** If loopflow.studio is unreachable, local connections still work (auth: local in lfd config). Remote connections fail cleanly with "authentication service unavailable."
+JWTs are bearer tokens—anyone with the token has access. Keychain provides:
+- Hardware-backed encryption on Apple Silicon
+- Access control (require user presence, biometrics)
+- Secure across app reinstalls (optional)
+- Same API on macOS and iOS
+
+UserDefaults is plaintext. File-based storage requires manual encryption.
+
+### 3. JWT with 7-day expiry, silent refresh at 24h remaining
+
+loopflow.studio issues JWTs with 7-day expiry (per `roadmap/rust/05-auth.md`). Client-side:
+- Check expiry on every authenticated request
+- If <24h remaining, attempt silent refresh in background
+- If refresh fails, continue with current token until truly expired
+- On expiry, prompt user to re-authenticate
+
+This balances security (tokens expire) with UX (no random logouts).
+
+### 4. AuthState as @Observable, not Combine
+
+SwiftUI's `@Observable` macro (iOS 17+/macOS 14+) is the modern approach. Simpler than Combine publishers, better integration with SwiftUI lifecycle.
+
+```swift
+@Observable
+final class AuthState {
+    var isAuthenticated: Bool { token != nil && !isExpired }
+    private(set) var token: String?
+    private(set) var user: User?
+    private(set) var expiresAt: Date?
+
+    var isExpired: Bool {
+        guard let exp = expiresAt else { return true }
+        return Date() >= exp
+    }
+}
+```
+
+### 5. TokenProvider injection for WaveService
+
+`RemoteWaveService` (Phase 3) needs auth tokens. Rather than coupling auth into the service, inject a token provider:
+
+```swift
+protocol TokenProvider: Sendable {
+    func token() async throws -> String
+}
+
+// LocalWaveService doesn't need tokens
+struct NoAuthProvider: TokenProvider {
+    func token() async throws -> String { "" }
+}
+
+// RemoteWaveService uses real tokens
+final class KeychainTokenProvider: TokenProvider {
+    func token() async throws -> String {
+        // Read from Keychain, refresh if needed
+    }
+}
+```
+
+This keeps `LocalWaveService` unchanged and enables testing with mock providers.
 
 ## Scope
 
-In scope:
-- loopflow.studio auth endpoints (/auth/login, /auth/callback, /.well-known/jwks.json)
-- Concerto sign-in flow (ASWebAuthenticationSession → token → Keychain)
-- lf CLI auth commands (lf auth login, lf auth logout, lf auth status)
-- lfd JWT validation middleware (gRPC interceptor)
-- Token refresh before expiry
-- `allowed_users` config for self-hosters
+**In scope:**
+- `AuthService` with sign-in/sign-out methods
+- `ASWebAuthenticationSession` OAuth flow
+- Keychain storage for JWT
+- Token refresh logic
+- `AuthState` observable for UI
+- `TokenProvider` protocol for service injection
+- URL scheme registration for callback
 
-Out of scope:
-- lfd registration with loopflow.studio (separate item: lfd-registration)
-- Push notifications (separate item: push-notifications)
-- Enterprise SSO configuration UI (future)
-- Multi-device session management (future)
-- API key fallback (Phase 2.5)
+**Out of scope:**
+- loopflow.studio server changes (see `roadmap/rust/05-auth.md`)
+- lfd JWT validation (see `roadmap/rust/05-auth.md`)
+- lf CLI auth commands (see `roadmap/rust/05-auth.md`)
+- Device code flow (defer until watchOS/tvOS needed)
+- Multiple account support (single user for v1)
+- Offline mode (requires tokens, which require network)
 
 ## Implementation
 
-### loopflow.studio
-
-New TypeScript service at loopflow.studio:
-
-```
-loopflow-studio/
-├── src/
-│   ├── auth/
-│   │   ├── login.ts         # Redirect to WorkOS
-│   │   ├── callback.ts      # Handle WorkOS callback, issue JWT
-│   │   ├── jwks.ts          # Serve public keys
-│   │   └── device.ts        # Device code flow
-│   └── keys/
-│       ├── private.pem      # RS256 signing key
-│       └── public.pem       # Published via JWKS
-```
-
-JWT claims:
-```json
-{
-  "sub": "user_abc123",
-  "email": "user@example.com",
-  "name": "Jane Developer",
-  "iss": "https://loopflow.studio",
-  "aud": "loopflow-lfd",
-  "exp": 1234567890,
-  "iat": 1234567890
-}
-```
-
-### Concerto (Swift)
-
-New `AuthService` in LoopflowCore:
+### AuthService
 
 ```swift
-public protocol AuthServiceProtocol: Sendable {
-    func signIn() async throws -> User
-    func signOut() async throws
-    func refreshTokenIfNeeded() async throws -> String?
-    var currentUser: User? { get async }
-    var isSignedIn: Bool { get async }
-}
-```
+// swift/LoopflowCore/Services/AuthService.swift
 
-Sign-in flow:
-1. Present ASWebAuthenticationSession with `https://loopflow.studio/auth/login?redirect_uri=loopflow://auth/callback`
-2. Receive callback with token
-3. Decode JWT to get user info
-4. Store token in Keychain with biometric protection
-5. Update UI state
+import AuthenticationServices
 
-Token storage:
-- Key: `com.loopflow.auth.token`
-- Access: `.whenUnlockedThisDeviceOnly`
-- Protection: `.biometryCurrentSet`
+public final class AuthService: NSObject, Sendable {
+    private let keychainService = "studio.loopflow.auth"
+    private let baseURL = URL(string: "https://loopflow.studio")!
 
-### lf CLI (Rust)
+    /// Sign in via GitHub OAuth. Returns JWT on success.
+    @MainActor
+    public func signIn() async throws -> String {
+        let callbackScheme = "loopflow"
+        let authURL = baseURL.appendingPathComponent("auth/login")
+            .appending(queryItems: [
+                URLQueryItem(name: "redirect_uri", value: "\(callbackScheme)://auth/callback"),
+                URLQueryItem(name: "provider", value: "GitHubOAuth")
+            ])
 
-New auth subcommand:
+        let callbackURL = try await withCheckedThrowingContinuation { continuation in
+            let session = ASWebAuthenticationSession(
+                url: authURL,
+                callbackURLScheme: callbackScheme
+            ) { url, error in
+                if let error { continuation.resume(throwing: error) }
+                else if let url { continuation.resume(returning: url) }
+                else { continuation.resume(throwing: AuthError.noCallback) }
+            }
+            session.presentationContextProvider = self
+            session.prefersEphemeralWebBrowserSession = false // Share Safari cookies
+            session.start()
+        }
 
-```bash
-lf auth login          # Open browser, save token to ~/.lf/credentials.json
-lf auth login --device # Show code for headless
-lf auth logout         # Clear credentials
-lf auth status         # Show current user
-```
+        // Extract token from callback URL
+        guard let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false),
+              let token = components.queryItems?.first(where: { $0.name == "token" })?.value
+        else {
+            throw AuthError.invalidCallback
+        }
 
-Credentials file:
-```json
-{
-  "version": 1,
-  "tokens": {
-    "loopflow.studio": {
-      "token": "eyJ...",
-      "expires_at": "2024-03-01T00:00:00Z"
+        // Store in Keychain
+        try saveToken(token)
+
+        return token
     }
-  }
+
+    public func signOut() throws {
+        try deleteToken()
+    }
+
+    public func currentToken() -> String? {
+        loadToken()
+    }
+
+    public func tokenExpiresAt() -> Date? {
+        guard let token = loadToken() else { return nil }
+        return decodeExpiry(token)
+    }
+}
+
+// MARK: - Keychain
+
+extension AuthService {
+    private func saveToken(_ token: String) throws {
+        let data = Data(token.utf8)
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: "jwt",
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+        ]
+
+        SecItemDelete(query as CFDictionary) // Remove existing
+        let status = SecItemAdd(query as CFDictionary, nil)
+        guard status == errSecSuccess else {
+            throw AuthError.keychainWrite(status)
+        }
+    }
+
+    private func loadToken() -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: "jwt",
+            kSecReturnData as String: true
+        ]
+
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess, let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private func deleteToken() throws {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: "jwt"
+        ]
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw AuthError.keychainDelete(status)
+        }
+    }
+
+    private func decodeExpiry(_ token: String) -> Date? {
+        // JWT is base64url(header).base64url(payload).signature
+        let parts = token.split(separator: ".")
+        guard parts.count == 3,
+              let payloadData = base64UrlDecode(String(parts[1])),
+              let json = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any],
+              let exp = json["exp"] as? TimeInterval
+        else { return nil }
+        return Date(timeIntervalSince1970: exp)
+    }
+
+    private func base64UrlDecode(_ string: String) -> Data? {
+        var base64 = string
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        while base64.count % 4 != 0 { base64.append("=") }
+        return Data(base64Encoded: base64)
+    }
+}
+
+extension AuthService: ASWebAuthenticationPresentationContextProviding {
+    public func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        #if os(macOS)
+        NSApp.keyWindow ?? NSApp.windows.first!
+        #else
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first { $0.isKeyWindow }!
+        #endif
+    }
 }
 ```
 
-### lfd (Rust)
-
-Config addition to `~/.lf/lfd.yaml`:
-
-```yaml
-auth:
-  provider: loopflow.studio  # or "local" for no auth
-  jwks_url: https://loopflow.studio/.well-known/jwks.json
-  audience: loopflow-lfd
-  allowed_users:
-    - user_abc123
-    - user@example.com
-```
-
-gRPC interceptor validates Bearer token on all remote requests. Local Unix socket connections skip auth (OS provides identity).
-
-### RemoteWaveService (Swift)
-
-Wraps authenticated requests to remote lfd:
+### AuthState
 
 ```swift
-public struct RemoteWaveService: WaveServiceProtocol {
-    private let authService: AuthServiceProtocol
-    private let endpoint: URL
+// swift/LoopflowCore/Services/AuthState.swift
 
-    public func listWaves(repo: URL) async throws -> [Wave] {
-        let token = try await authService.refreshTokenIfNeeded()
-        // Add Authorization header, make request
+import Foundation
+
+@Observable
+public final class AuthState {
+    private let authService: AuthService
+    private var refreshTask: Task<Void, Never>?
+
+    public private(set) var token: String?
+    public private(set) var isLoading = false
+    public private(set) var error: AuthError?
+
+    public var isAuthenticated: Bool { token != nil && !isExpired }
+
+    public var isExpired: Bool {
+        guard let exp = authService.tokenExpiresAt() else { return true }
+        return Date() >= exp
+    }
+
+    public var needsRefresh: Bool {
+        guard let exp = authService.tokenExpiresAt() else { return false }
+        return Date().addingTimeInterval(24 * 3600) >= exp
+    }
+
+    public init(authService: AuthService = AuthService()) {
+        self.authService = authService
+        self.token = authService.currentToken()
+        startRefreshMonitor()
+    }
+
+    @MainActor
+    public func signIn() async {
+        isLoading = true
+        error = nil
+        do {
+            token = try await authService.signIn()
+        } catch let e as AuthError {
+            error = e
+        } catch {
+            self.error = .unknown(error)
+        }
+        isLoading = false
+    }
+
+    public func signOut() {
+        try? authService.signOut()
+        token = nil
+        error = nil
+    }
+
+    private func startRefreshMonitor() {
+        refreshTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(3600)) // Check hourly
+                if needsRefresh && !isExpired {
+                    await refreshTokenSilently()
+                }
+            }
+        }
+    }
+
+    private func refreshTokenSilently() async {
+        // Silent refresh: hit loopflow.studio/auth/refresh with current token
+        // If it fails, continue with current token until truly expired
     }
 }
+```
+
+### TokenProvider
+
+```swift
+// swift/LoopflowCore/Services/TokenProvider.swift
+
+public protocol TokenProvider: Sendable {
+    func token() async throws -> String
+}
+
+public struct NoAuthProvider: TokenProvider {
+    public init() {}
+    public func token() async throws -> String { "" }
+}
+
+public final class KeychainTokenProvider: TokenProvider, Sendable {
+    private let authService: AuthService
+
+    public init(authService: AuthService = AuthService()) {
+        self.authService = authService
+    }
+
+    public func token() async throws -> String {
+        guard let token = authService.currentToken() else {
+            throw AuthError.notAuthenticated
+        }
+
+        if let exp = authService.tokenExpiresAt(), Date() >= exp {
+            throw AuthError.tokenExpired
+        }
+
+        return token
+    }
+}
+```
+
+### AuthError
+
+```swift
+// swift/LoopflowCore/Services/AuthError.swift
+
+public enum AuthError: Error, Sendable {
+    case noCallback
+    case invalidCallback
+    case notAuthenticated
+    case tokenExpired
+    case keychainWrite(OSStatus)
+    case keychainDelete(OSStatus)
+    case unknown(Error)
+}
+
+extension AuthError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .noCallback: "Authentication was cancelled"
+        case .invalidCallback: "Invalid authentication response"
+        case .notAuthenticated: "Not signed in"
+        case .tokenExpired: "Session expired, please sign in again"
+        case .keychainWrite(let status): "Failed to save credentials (\(status))"
+        case .keychainDelete(let status): "Failed to clear credentials (\(status))"
+        case .unknown(let error): error.localizedDescription
+        }
+    }
+}
+```
+
+### URL Scheme Registration
+
+Add to Concerto's `Info.plist`:
+
+```xml
+<key>CFBundleURLTypes</key>
+<array>
+    <dict>
+        <key>CFBundleURLSchemes</key>
+        <array>
+            <string>loopflow</string>
+        </array>
+        <key>CFBundleURLName</key>
+        <string>studio.loopflow.auth</string>
+    </dict>
+</array>
 ```
 
 ## Done when
 
-- [ ] `https://loopflow.studio/auth/login` redirects to WorkOS
-- [ ] `https://loopflow.studio/auth/callback` issues JWT
-- [ ] `https://loopflow.studio/.well-known/jwks.json` returns public keys
-- [ ] Concerto shows "Sign In" button when not authenticated
-- [ ] Tapping "Sign In" opens web auth flow
-- [ ] Callback stores token in Keychain
-- [ ] Token refresh happens automatically before expiry
-- [ ] `lf auth login` opens browser and saves token
-- [ ] `lf auth login --device` shows verification code
-- [ ] lfd rejects requests with invalid/expired tokens
-- [ ] lfd `allowed_users` restricts access to listed users
-- [ ] Local connections (Unix socket) continue working without auth
+- [ ] `AuthService.signIn()` opens GitHub OAuth via loopflow.studio
+- [ ] JWT stored in Keychain after successful auth
+- [ ] `AuthState.isAuthenticated` reflects current state
+- [ ] Token expiry detected, user prompted to re-authenticate
+- [ ] `TokenProvider` injectable into `RemoteWaveService`
+- [ ] `signOut()` clears Keychain
+- [ ] URL scheme `loopflow://` registered and handles callback
+- [ ] Works on macOS 14+ and iOS 17+

@@ -1,13 +1,27 @@
 ---
-status: todo
-phase: 2
+status: deferred
+phase: 4
 ---
 
 # gRPC Terminal Streaming
 
-Bidirectional stream for remote terminal I/O. Mobile gets full interactive control over agents running on a remote Mac.
+Bidirectional stream for remote terminal I/O.
 
-## Problem
+## Status: Deferred
+
+This design was superseded by the non-interactive mobile approach. See `scratch/concerto-mobile-direction.md`.
+
+**Why deferred:**
+- Terminal UX on phones is poor
+- We support multiple agents (Claude Code, Codex, Gemini)—each has different terminal UI
+- Building an iOS terminal renderer is significant work
+- Mobile users want status and actions, not raw terminal
+
+**If we build it:** Power-user escape hatch, not the primary mobile experience.
+
+---
+
+## Original Problem
 
 Users want to manage waves from their phone while their Mac runs agents at home. Phase 2 registration gives us discovery (mobile can find the user's lfd), but there's no way to actually interact with a running terminal session.
 

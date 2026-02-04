@@ -44,9 +44,7 @@ class Tracer:
     options: dict[str, Any] = field(default_factory=dict)
     operations: list[OpTrace] = field(default_factory=list)
 
-    def trace(
-        self, op: str, result: str | None = None, **kwargs: Any
-    ) -> None:
+    def trace(self, op: str, result: str | None = None, **kwargs: Any) -> None:
         """Record an operation."""
         self.operations.append(OpTrace(op=op, result=result, args=kwargs))
 

@@ -39,9 +39,7 @@ def _create_test_repo() -> Path:
     # Initial commit
     (temp_dir / "file.txt").write_text("initial")
     subprocess.run(["git", "add", "-A"], cwd=temp_dir, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "commit", "-m", "init"], cwd=temp_dir, check=True, capture_output=True
-    )
+    subprocess.run(["git", "commit", "-m", "init"], cwd=temp_dir, check=True, capture_output=True)
 
     # Make a change to test commit
     (temp_dir / "file.txt").write_text("changed")
@@ -49,7 +47,9 @@ def _create_test_repo() -> Path:
     return temp_dir
 
 
-def _python_commit_trace(repo: Path, add: bool = True, lint: bool = True, push: bool = False) -> dict:
+def _python_commit_trace(
+    repo: Path, add: bool = True, lint: bool = True, push: bool = False
+) -> dict:
     """Run Python lf ops commit with tracing and return trace."""
     env = os.environ.copy()
     env["LF_TRACE"] = "1"
@@ -77,7 +77,9 @@ def _python_commit_trace(repo: Path, add: bool = True, lint: bool = True, push: 
     try:
         return json.loads(result.stdout)
     except json.JSONDecodeError:
-        raise RuntimeError(f"Failed to parse Python trace: {result.stdout}\nstderr: {result.stderr}")
+        raise RuntimeError(
+            f"Failed to parse Python trace: {result.stdout}\nstderr: {result.stderr}"
+        )
 
 
 def _rust_commit_trace(add: bool = True, lint: bool = True, push: bool = False) -> dict:

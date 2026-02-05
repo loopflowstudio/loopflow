@@ -6,9 +6,9 @@ use tokio_util::sync::CancellationToken;
 use super::common::{create_wave_run_with_id, spawn_run_task_with_slot};
 use crate::executor::WaveExecutor;
 use crate::id::LfdId;
-use crate::proto::control::StimulusKind;
 use crate::scheduler::Scheduler;
 use crate::store::SharedStore;
+use crate::types::StimulusKind;
 
 pub fn spawn_loop_ticker(
     scheduler: std::sync::Arc<Scheduler>,
@@ -37,7 +37,7 @@ async fn tick_loop_waves(
     store: &SharedStore,
     executor: &WaveExecutor,
 ) {
-    let stimuli = match store.list_stimuli_by_kind(StimulusKind::StimulusLoop as i32) {
+    let stimuli = match store.list_stimuli_by_kind(StimulusKind::Loop.as_i32()) {
         Ok(stimuli) => stimuli,
         Err(err) => {
             tracing::error!(error = %err, "failed to list loop stimuli");
@@ -50,18 +50,11 @@ async fn tick_loop_waves(
             continue;
         }
 
-        let wave_id = match LfdId::parse(&stimulus.wave_id) {
-            Ok(id) => id,
-            Err(err) => {
-                tracing::warn!(stimulus_id = %stimulus.id, error = %err, "invalid wave id");
-                continue;
-            }
-        };
-        let wave = match store.get_wave(&wave_id) {
+        let wave = match store.get_wave(&stimulus.wave_id) {
             Ok(Some(wave)) => wave,
             Ok(None) => continue,
             Err(err) => {
-                tracing::error!(wave_id = %wave_id, error = %err, "failed to load wave");
+                tracing::error!(wave_id = %stimulus.wave_id, error = %err, "failed to load wave");
                 continue;
             }
         };
@@ -70,11 +63,11 @@ async fn tick_loop_waves(
             continue;
         }
 
-        if scheduler.has_active_session(&wave.id) {
+        if scheduler.has_active_session(wave.id.as_str()) {
             continue;
         }
 
-        if let Ok(Some(_)) = store.get_active_wave_run(&wave_id) {
+        if let Ok(Some(_)) = store.get_active_wave_run(&stimulus.wave_id) {
             continue;
         }
 

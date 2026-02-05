@@ -2,16 +2,15 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Mutex;
 
-use prost_types::Timestamp;
 use rusqlite::types::Type;
 use rusqlite::{params, Connection, OptionalExtension, Row, ToSql};
 use time::OffsetDateTime;
 
 use crate::id::LfdId;
-use crate::proto::control::{
-    Agent, AgentStatus, PendingActivation, Stimulus, Wave, WaveRun, WaveRunStatus,
-};
 use crate::store::{ForkRun, ForkRunStatus, RunStore, StoreError, StoreResult};
+use crate::types::{
+    Agent, AgentStatus, PendingActivation, Stimulus, StimulusKind, Wave, WaveRun, WaveRunStatus,
+};
 
 const SCHEMA_VERSION: u32 = 3;
 
@@ -246,8 +245,7 @@ impl SqliteStore {
 
         let created_at = wave
             .created_at
-            .as_ref()
-            .map(timestamp_to_unix)
+            .map(|dt| dt.unix_timestamp())
             .unwrap_or_else(now_unix);
 
         // Note: stimulus_kind and stimulus_cron columns kept for backwards compat
@@ -409,9 +407,9 @@ impl RunStore for SqliteStore {
             .query_row(
                 params![
                     wave_id,
-                    WaveRunStatus::WaveRunPending as i32,
-                    WaveRunStatus::WaveRunRunning as i32,
-                    WaveRunStatus::WaveRunWaiting as i32
+                    WaveRunStatus::Pending.as_i32(),
+                    WaveRunStatus::Running.as_i32(),
+                    WaveRunStatus::Waiting.as_i32()
                 ],
                 map_wave_run_row,
             )
@@ -423,8 +421,7 @@ impl RunStore for SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let started_at = run
             .started_at
-            .as_ref()
-            .map(timestamp_to_unix)
+            .map(|dt| dt.unix_timestamp())
             .unwrap_or_else(now_unix);
         let flow_parents_json = serde_json::to_string(&run.flow_parents)?;
         conn.execute(
@@ -439,11 +436,11 @@ impl RunStore for SqliteStore {
                 run.wave_id,
                 run.iteration as i64,
                 run.step_index as i64,
-                run.status,
+                run.status.as_i32(),
                 run.worktree,
                 run.branch,
                 started_at,
-                run.ended_at.as_ref().map(timestamp_to_unix),
+                run.ended_at.map(|dt| dt.unix_timestamp()),
                 run.error,
                 flow_parents_json,
             ],
@@ -471,11 +468,11 @@ impl RunStore for SqliteStore {
             params![
                 run.iteration as i64,
                 run.step_index as i64,
-                run.status,
+                run.status.as_i32(),
                 run.worktree,
                 run.branch,
-                run.started_at.as_ref().map(timestamp_to_unix),
-                run.ended_at.as_ref().map(timestamp_to_unix),
+                run.started_at.map(|dt| dt.unix_timestamp()),
+                run.ended_at.map(|dt| dt.unix_timestamp()),
                 run.error,
                 flow_parents_json,
                 run.id,
@@ -549,8 +546,7 @@ impl RunStore for SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let created_at = stimulus
             .created_at
-            .as_ref()
-            .map(timestamp_to_unix)
+            .map(|dt| dt.unix_timestamp())
             .unwrap_or_else(now_unix);
 
         conn.execute(
@@ -559,7 +555,7 @@ impl RunStore for SqliteStore {
             params![
                 stimulus.id,
                 stimulus.wave_id,
-                stimulus.kind,
+                stimulus.kind.as_i32(),
                 stimulus.cron,
                 stimulus.last_main_sha,
                 stimulus.last_triggered_at,
@@ -579,7 +575,7 @@ impl RunStore for SqliteStore {
                 last_triggered_at = ?4, enabled = ?5
              WHERE id = ?6",
             params![
-                stimulus.kind,
+                stimulus.kind.as_i32(),
                 stimulus.cron,
                 stimulus.last_main_sha,
                 stimulus.last_triggered_at,
@@ -740,25 +736,7 @@ impl RunStore for SqliteStore {
 
         let mut stmt = conn.prepare(&query)?;
         let params_iter = params_vec.iter().map(|value| value.as_ref() as &dyn ToSql);
-        let rows = stmt.query_map(rusqlite::params_from_iter(params_iter), |row| {
-            let started_at = unix_to_timestamp(row.get::<_, i64>(6)?);
-            let ended_at: Option<i64> = row.get(7)?;
-            let pid: Option<i64> = row.get(8)?;
-
-            Ok(Agent {
-                id: row.get(0)?,
-                step: row.get(1)?,
-                repo: row.get(2)?,
-                worktree: row.get(3)?,
-                wave_run_id: row.get(4)?,
-                status: row.get::<_, i64>(5)? as i32,
-                started_at: Some(started_at),
-                ended_at: ended_at.map(unix_to_timestamp),
-                pid: pid.map(|value| value as u32),
-                model: row.get(9)?,
-                run_mode: row.get(10)?,
-            })
-        })?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(params_iter), map_agent_row)?;
 
         let mut runs = Vec::new();
         for run in rows {
@@ -851,25 +829,7 @@ impl RunStore for SqliteStore {
         )?;
 
         let run = stmt
-            .query_row(params![agent_id], |row| {
-                let started_at = unix_to_timestamp(row.get::<_, i64>(6)?);
-                let ended_at: Option<i64> = row.get(7)?;
-                let pid: Option<i64> = row.get(8)?;
-
-                Ok(Agent {
-                    id: row.get(0)?,
-                    step: row.get(1)?,
-                    repo: row.get(2)?,
-                    worktree: row.get(3)?,
-                    wave_run_id: row.get(4)?,
-                    status: row.get::<_, i64>(5)? as i32,
-                    started_at: Some(started_at),
-                    ended_at: ended_at.map(unix_to_timestamp),
-                    pid: pid.map(|value| value as u32),
-                    model: row.get(9)?,
-                    run_mode: row.get(10)?,
-                })
-            })
+            .query_row(params![agent_id], map_agent_row)
             .optional()?;
 
         Ok(run)
@@ -890,25 +850,10 @@ impl RunStore for SqliteStore {
         )?;
 
         let run = stmt
-            .query_row(params![wave_id, AgentStatus::AgentWaiting as i32], |row| {
-                let started_at = unix_to_timestamp(row.get::<_, i64>(6)?);
-                let ended_at: Option<i64> = row.get(7)?;
-                let pid: Option<i64> = row.get(8)?;
-
-                Ok(Agent {
-                    id: row.get(0)?,
-                    step: row.get(1)?,
-                    repo: row.get(2)?,
-                    worktree: row.get(3)?,
-                    wave_run_id: row.get(4)?,
-                    status: row.get::<_, i64>(5)? as i32,
-                    started_at: Some(started_at),
-                    ended_at: ended_at.map(unix_to_timestamp),
-                    pid: pid.map(|value| value as u32),
-                    model: row.get(9)?,
-                    run_mode: row.get(10)?,
-                })
-            })
+            .query_row(
+                params![wave_id, AgentStatus::Waiting.as_i32()],
+                map_agent_row,
+            )
             .optional()?;
 
         Ok(run)
@@ -918,8 +863,7 @@ impl RunStore for SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let started_at = agent
             .started_at
-            .as_ref()
-            .map(timestamp_to_unix)
+            .map(|dt| dt.unix_timestamp())
             .unwrap_or_else(now_unix);
         conn.execute(
             "
@@ -934,9 +878,9 @@ impl RunStore for SqliteStore {
                 agent.repo,
                 agent.worktree,
                 agent.wave_run_id,
-                agent.status,
+                agent.status.as_i32(),
                 started_at,
-                agent.ended_at.as_ref().map(timestamp_to_unix),
+                agent.ended_at.map(|dt| dt.unix_timestamp()),
                 agent.pid.map(|value| value as i64),
                 agent.model,
                 agent.run_mode,
@@ -1006,25 +950,7 @@ impl RunStore for SqliteStore {
             ",
         )?;
 
-        let rows = stmt.query_map(params![cutoff], |row| {
-            let started_at = unix_to_timestamp(row.get::<_, i64>(6)?);
-            let ended_at: Option<i64> = row.get(7)?;
-            let pid: Option<i64> = row.get(8)?;
-
-            Ok(Agent {
-                id: row.get(0)?,
-                step: row.get(1)?,
-                repo: row.get(2)?,
-                worktree: row.get(3)?,
-                wave_run_id: row.get(4)?,
-                status: row.get::<_, i64>(5)? as i32,
-                started_at: Some(started_at),
-                ended_at: ended_at.map(unix_to_timestamp),
-                pid: pid.map(|value| value as u32),
-                model: row.get(9)?,
-                run_mode: row.get(10)?,
-            })
-        })?;
+        let rows = stmt.query_map(params![cutoff], map_agent_row)?;
 
         let mut runs = Vec::new();
         for run in rows {
@@ -1034,12 +960,8 @@ impl RunStore for SqliteStore {
     }
 }
 
-fn unix_to_timestamp(seconds: i64) -> Timestamp {
-    Timestamp { seconds, nanos: 0 }
-}
-
-fn timestamp_to_unix(ts: &Timestamp) -> i64 {
-    ts.seconds
+fn unix_to_datetime(seconds: i64) -> OffsetDateTime {
+    OffsetDateTime::from_unix_timestamp(seconds).unwrap_or(OffsetDateTime::UNIX_EPOCH)
 }
 
 fn now_unix() -> i64 {
@@ -1052,7 +974,7 @@ fn map_wave_row(row: &Row<'_>) -> Result<Wave, rusqlite::Error> {
     let direction = parse_json_vec(&direction_json)?;
     let area = parse_json_vec(&area_json)?;
 
-    let created_at = unix_to_timestamp(row.get::<_, i64>(7)?);
+    let created_at = unix_to_datetime(row.get::<_, i64>(7)?);
 
     Ok(Wave {
         id: row.get(0)?,
@@ -1067,7 +989,7 @@ fn map_wave_row(row: &Row<'_>) -> Result<Wave, rusqlite::Error> {
 }
 
 fn map_wave_run_row(row: &Row<'_>) -> Result<WaveRun, rusqlite::Error> {
-    let started_at = unix_to_timestamp(row.get::<_, i64>(7)?);
+    let started_at = unix_to_datetime(row.get::<_, i64>(7)?);
     let ended_at: Option<i64> = row.get(8)?;
     let flow_parents_json: String = row.get(10)?;
     let flow_parents = parse_json_vec(&flow_parents_json)?;
@@ -1077,28 +999,49 @@ fn map_wave_run_row(row: &Row<'_>) -> Result<WaveRun, rusqlite::Error> {
         wave_id: row.get(1)?,
         iteration: row.get::<_, i64>(2)? as u32,
         step_index: row.get::<_, i64>(3)? as u32,
-        status: row.get::<_, i64>(4)? as i32,
+        status: WaveRunStatus::from_i32(row.get::<_, i64>(4)? as i32),
         worktree: row.get(5)?,
         branch: row.get(6)?,
         started_at: Some(started_at),
-        ended_at: ended_at.map(unix_to_timestamp),
+        ended_at: ended_at.map(unix_to_datetime),
         error: row.get(9)?,
         flow_parents,
     })
 }
 
 fn map_stimulus_row(row: &Row<'_>) -> Result<Stimulus, rusqlite::Error> {
-    let created_at = unix_to_timestamp(row.get::<_, i64>(7)?);
+    let created_at = unix_to_datetime(row.get::<_, i64>(7)?);
 
     Ok(Stimulus {
         id: row.get(0)?,
         wave_id: row.get(1)?,
-        kind: row.get::<_, i64>(2)? as i32,
+        kind: StimulusKind::from_i32(row.get::<_, i64>(2)? as i32),
         cron: row.get(3)?,
         last_main_sha: row.get(4)?,
         last_triggered_at: row.get(5)?,
         enabled: row.get::<_, i64>(6)? != 0,
         created_at: Some(created_at),
+    })
+}
+
+fn map_agent_row(row: &Row<'_>) -> Result<Agent, rusqlite::Error> {
+    let started_at = unix_to_datetime(row.get::<_, i64>(6)?);
+    let ended_at: Option<i64> = row.get(7)?;
+    let pid: Option<i64> = row.get(8)?;
+    let wave_run_id: Option<String> = row.get(4)?;
+
+    Ok(Agent {
+        id: row.get(0)?,
+        step: row.get(1)?,
+        repo: row.get(2)?,
+        worktree: row.get(3)?,
+        wave_run_id: wave_run_id.map(LfdId::from_raw),
+        status: AgentStatus::from_i32(row.get::<_, i64>(5)? as i32),
+        started_at: Some(started_at),
+        ended_at: ended_at.map(unix_to_datetime),
+        pid: pid.map(|value| value as u32),
+        model: row.get(9)?,
+        run_mode: row.get(10)?,
     })
 }
 

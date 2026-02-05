@@ -17,8 +17,6 @@ futures-util = "0.3"
 git2 = "0.18"
 loopflow-engine = { path = "../loopflow-engine" }
 loopflow-ops = { path = "../loopflow-ops" }
-prost = "0.12"
-prost-types = "0.12"
 portable-pty = "0.8"
 rusqlite = { version = "0.31", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
@@ -27,20 +25,15 @@ serde_yaml = "0.9"
 reqwest = { version = "0.12", features = ["json"] }
 gethostname = "0.4"
 thiserror = "1"
-time = { version = "0.3", features = ["formatting"] }
+time = { version = "0.3", features = ["formatting", "serde", "serde-well-known"] }
 tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-serde_json-1"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-util = { version = "0.7", features = ["rt"] }
-tonic = { version = "0.11", features = ["transport"] }
 tower-http = { version = "0.5", features = ["trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4"] }
-
-[build-dependencies]
-tonic-build = "0.11"
-protoc-bin-vendored = "3.2.0"
 
 [dev-dependencies]
 testcontainers = "0.15"

@@ -5,7 +5,6 @@ use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-const DEFAULT_GRPC_PORT: u16 = 50051;
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -61,8 +60,7 @@ impl RegistrationClient {
         let payload = serde_json::json!({
             "machine_id": machine_id,
             "machine_name": machine_name,
-            "capabilities": ["waves", "terminal", "grpc"],
-            "grpc_port": DEFAULT_GRPC_PORT,
+            "capabilities": ["waves", "terminal"],
         });
 
         let response = client

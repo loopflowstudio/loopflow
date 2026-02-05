@@ -1,3 +1,9 @@
+//! PTY session management for interactive terminal streaming.
+//!
+//! Reserved for future remote terminal support.
+
+#![allow(dead_code)]
+
 use std::io::Read;
 use std::path::PathBuf;
 

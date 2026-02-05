@@ -16,11 +16,12 @@ use tokio_stream::wrappers::BroadcastStream;
 use crate::auth::AuthContext;
 use crate::events::EventHub;
 use crate::executor::WaveExecutor;
+use crate::id::LfdId;
 use crate::output::OutputHub;
 use crate::registration::{RegistrationClient, RegistrationState};
 use crate::scheduler::Scheduler;
 use crate::store::{SharedStore, StoreError};
-use crate::{id::LfdId, proto::control};
+use crate::types::{AgentStatus, Event, Wave, WaveRun, WaveRunStatus};
 
 #[derive(Clone)]
 pub struct HttpState {
@@ -179,6 +180,7 @@ struct LandWaveRequest {
 
 #[derive(Deserialize)]
 struct GitHookRequest {
+    #[allow(dead_code)] // Received from hook script but currently unused.
     hook: String,
     repo: String,
     branch: Option<String>,
@@ -275,32 +277,27 @@ async fn create_wave_handler(
     Json(payload): Json<CreateWaveRequest>,
 ) -> ApiResult<WaveResponse> {
     ensure_auth(&state, &headers, &peer, None).await?;
-    let id = LfdId::new().to_string();
-    let name = payload.name.unwrap_or_else(|| format!("wave-{id}"));
+    let id = LfdId::new();
+    let name = payload.name.unwrap_or_else(|| format!("wave-{}", id));
     let flow = payload.flow.unwrap_or_else(|| "ship".to_string());
-    let wave = control::Wave {
-        id,
+    let wave = Wave {
+        id: id.clone(),
         name,
         repo: payload.repo,
         flow,
         direction: payload.direction.unwrap_or_default(),
         area: payload.area.unwrap_or_default(),
         paused: false,
-        created_at: Some(now_timestamp()),
+        created_at: Some(OffsetDateTime::now_utc()),
     };
     let wave_clone = wave.clone();
     run_store(&state.store, move |store| store.create_wave(&wave_clone))
         .await
         .map_err(map_store_error)?;
 
-    emit_event(
-        &state.event_hub,
-        "wave.created",
-        control::event::Payload::WaveCreated(control::WaveCreatedEvent {
-            wave_id: wave.id.clone(),
-            name: wave.name.clone(),
-        }),
-    );
+    state
+        .event_hub
+        .send(Event::wave_created(wave.id.clone(), wave.name.clone()));
 
     let view = build_wave_view(&state.store, wave)
         .await
@@ -365,13 +362,7 @@ async fn update_wave_handler(
         .await
         .map_err(map_store_error)?;
 
-    emit_event(
-        &state.event_hub,
-        "wave.updated",
-        control::event::Payload::WaveUpdated(control::WaveUpdatedEvent {
-            wave_id: wave.id.clone(),
-        }),
-    );
+    state.event_hub.send(Event::wave_updated(wave.id.clone()));
 
     let view = build_wave_view(&state.store, wave)
         .await
@@ -394,13 +385,7 @@ async fn delete_wave_handler(
     .await
     .map_err(map_store_error)?;
 
-    emit_event(
-        &state.event_hub,
-        "wave.deleted",
-        control::event::Payload::WaveDeleted(control::WaveDeletedEvent {
-            wave_id: wave_id.to_string(),
-        }),
-    );
+    state.event_hub.send(Event::wave_deleted(wave_id));
 
     Ok(Json(serde_json::json!({ "deleted": true })))
 }
@@ -461,7 +446,7 @@ async fn run_wave_handler(
     if !acquired {
         return Ok(Json(RunWaveResponse {
             started: false,
-            wave_id: wave.id,
+            wave_id: wave.id.to_string(),
             wave_run_id: None,
         }));
     }
@@ -493,32 +478,26 @@ async fn run_wave_handler(
     let scheduler = state.scheduler.clone();
     let run_id_for_release = run.id.clone();
     tokio::spawn(async move {
-        let run_id = LfdId::parse(&run_id_for_release)
-            .unwrap_or_else(|_| LfdId::from_raw(run_id_for_release.clone()));
-        if let Err(err) = exec.execute(&run_id).await {
+        if let Err(err) = exec.execute(&run_id_for_release).await {
             tracing::error!(run_id = %run_id_for_release, error = %err, "run execution failed");
-            if let Ok(Some(mut run)) = store.get_wave_run(&run_id) {
-                run.status = control::WaveRunStatus::WaveRunFailed as i32;
+            if let Ok(Some(mut run)) = store.get_wave_run(&run_id_for_release) {
+                run.status = WaveRunStatus::Failed;
                 run.error = Some(err.to_string());
-                run.ended_at = Some(now_timestamp());
+                run.ended_at = Some(OffsetDateTime::now_utc());
                 let _ = store.update_wave_run(&run);
             }
         }
-        scheduler.release(&run_id_for_release);
+        scheduler.release(run_id_for_release.as_str());
     });
 
-    emit_event(
-        &state.event_hub,
-        "wave.started",
-        control::event::Payload::WaveStarted(control::WaveStartedEvent {
-            wave_id: wave.id.clone(),
-        }),
-    );
+    state
+        .event_hub
+        .send(Event::wave_started(wave.id.clone(), run.id.clone()));
 
     Ok(Json(RunWaveResponse {
         started: true,
-        wave_id: wave.id,
-        wave_run_id: Some(run.id),
+        wave_id: wave.id.to_string(),
+        wave_run_id: Some(run.id.to_string()),
     }))
 }
 
@@ -538,22 +517,16 @@ async fn stop_wave_handler(
     .map_err(map_store_error)?;
 
     if let Some(mut run) = run {
-        run.status = control::WaveRunStatus::WaveRunFailed as i32;
+        run.status = WaveRunStatus::Failed;
         run.error = Some("stopped".to_string());
-        run.ended_at = Some(now_timestamp());
+        run.ended_at = Some(OffsetDateTime::now_utc());
         let run_clone = run.clone();
         run_store(&state.store, move |store| store.update_wave_run(&run_clone))
             .await
             .map_err(map_store_error)?;
     }
 
-    emit_event(
-        &state.event_hub,
-        "wave.stopped",
-        control::event::Payload::WaveStopped(control::WaveStoppedEvent {
-            wave_id: wave_id.to_string(),
-        }),
-    );
+    state.event_hub.send(Event::wave_stopped(wave_id));
 
     Ok(Json(StopWaveResponse { stopped: true }))
 }
@@ -621,27 +594,11 @@ async fn git_hook_handler(
         return Err(api_error(StatusCode::FORBIDDEN, "hooks require localhost"));
     }
 
-    let reason = match payload.hook.as_str() {
-        "post-commit" => control::WorktreeChangeReason::WorktreeCommit,
-        "post-checkout" => control::WorktreeChangeReason::WorktreeCheckout,
-        "post-merge" => control::WorktreeChangeReason::WorktreeMerged,
-        "post-rewrite" => control::WorktreeChangeReason::WorktreeChanged,
-        _ => control::WorktreeChangeReason::Unspecified,
-    };
-
-    let event = control::WorktreeUpdatedEvent {
-        branch: payload.branch.unwrap_or_default(),
-        reason: reason as i32,
-        repo: payload.repo.clone(),
-        worktree: None,
-        changes: None,
-    };
-
-    emit_event(
-        &state.event_hub,
-        "worktree.updated",
-        control::event::Payload::WorktreeUpdated(event),
-    );
+    state.event_hub.send(Event::worktree_updated(
+        payload.repo.clone(),
+        payload.repo,
+        payload.branch,
+    ));
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -700,8 +657,8 @@ async fn handle_ws(mut socket: WebSocket, state: HttpState) {
             maybe_event = events.next() => {
                 let Some(event) = maybe_event else { break };
                 if let Ok(event) = event {
-                    let payload = event_to_json(&event);
-                    if sender.send(Message::Text(payload.to_string())).await.is_err() {
+                    let json = serde_json::to_string(&event).unwrap_or_default();
+                    if sender.send(Message::Text(json)).await.is_err() {
                         break;
                     }
                 }
@@ -715,107 +672,6 @@ async fn handle_ws(mut socket: WebSocket, state: HttpState) {
                     Some(Err(_)) | None => break,
                 }
             }
-        }
-    }
-}
-
-fn event_to_json(event: &control::Event) -> serde_json::Value {
-    let timestamp = format_timestamp(event.timestamp.as_ref());
-    let payload = event.payload.as_ref().map(payload_to_json);
-    let mut root = serde_json::Map::new();
-    root.insert(
-        "type".to_string(),
-        serde_json::Value::String(event.event.clone()),
-    );
-    if let Some(timestamp) = timestamp {
-        root.insert(
-            "timestamp".to_string(),
-            serde_json::Value::String(timestamp),
-        );
-    }
-    if let Some(payload) = payload {
-        root.insert("data".to_string(), payload);
-    }
-    serde_json::Value::Object(root)
-}
-
-fn payload_to_json(payload: &control::event::Payload) -> serde_json::Value {
-    match payload {
-        control::event::Payload::WaveCreated(event) => {
-            serde_json::json!({ "wave_id": event.wave_id, "name": event.name })
-        }
-        control::event::Payload::WaveUpdated(event) => {
-            serde_json::json!({ "wave_id": event.wave_id })
-        }
-        control::event::Payload::WaveDeleted(event) => {
-            serde_json::json!({ "wave_id": event.wave_id })
-        }
-        control::event::Payload::WaveStarted(event) => {
-            serde_json::json!({ "wave_id": event.wave_id })
-        }
-        control::event::Payload::WaveStopped(event) => {
-            serde_json::json!({ "wave_id": event.wave_id })
-        }
-        control::event::Payload::WaveWaiting(event) => {
-            serde_json::json!({
-                "wave_id": event.wave_id,
-                "step": event.step,
-                "agent_id": event.agent_id,
-                "wave_run_id": event.wave_run_id,
-                "step_index": event.step_index,
-                "reason": control::WaitingReason::try_from(event.reason)
-                    .ok()
-                    .map(|reason| reason.as_str_name().to_string()),
-                "flow_parents": event.flow_parents,
-            })
-        }
-        control::event::Payload::WorktreeUpdated(event) => {
-            serde_json::json!({
-                "branch": event.branch,
-                "reason": control::WorktreeChangeReason::try_from(event.reason)
-                    .ok()
-                    .map(|reason| reason.as_str_name().to_string()),
-                "repo": event.repo,
-            })
-        }
-        control::event::Payload::WorktreePruned(event) => {
-            serde_json::json!({ "branch": event.branch, "repo": event.repo })
-        }
-        control::event::Payload::AgentStarted(event) => {
-            serde_json::json!({
-                "id": event.id,
-                "step": event.step,
-                "worktree": event.worktree,
-                "wave_id": event.wave_id,
-                "wave_run_id": event.wave_run_id,
-                "step_index": event.step_index,
-            })
-        }
-        control::event::Payload::AgentEnded(event) => {
-            serde_json::json!({
-                "id": event.id,
-                "status": event.status,
-                "wave_id": event.wave_id,
-                "wave_run_id": event.wave_run_id,
-                "flow_will_continue": event.flow_will_continue,
-            })
-        }
-        control::event::Payload::OutputLine(event) => {
-            serde_json::json!({ "agent_id": event.agent_id, "text": event.text })
-        }
-        control::event::Payload::WaveActivated(event) => {
-            serde_json::json!({
-                "wave_id": event.wave_id,
-                "triggering_stimuli": event.triggering_stimuli,
-                "from_sha": event.from_sha,
-                "to_sha": event.to_sha,
-            })
-        }
-        control::event::Payload::SchedulerSlotAcquired(event) => {
-            serde_json::json!({ "run_id": event.run_id, "slots_used": event.slots_used })
-        }
-        control::event::Payload::SchedulerSlotReleased(event) => {
-            serde_json::json!({ "run_id": event.run_id, "slots_used": event.slots_used })
         }
     }
 }
@@ -922,7 +778,7 @@ where
 
 async fn build_wave_views(
     store: &SharedStore,
-    waves: Vec<control::Wave>,
+    waves: Vec<Wave>,
 ) -> Result<Vec<WaveView>, StoreError> {
     let mut views = Vec::with_capacity(waves.len());
     for wave in waves {
@@ -931,19 +787,19 @@ async fn build_wave_views(
     Ok(views)
 }
 
-async fn build_wave_view(store: &SharedStore, wave: control::Wave) -> Result<WaveView, StoreError> {
-    let wave_id = LfdId::from_raw(wave.id.clone());
+async fn build_wave_view(store: &SharedStore, wave: Wave) -> Result<WaveView, StoreError> {
+    let wave_id = wave.id.clone();
     let active = run_store(store, move |store| store.get_active_wave_run(&wave_id)).await?;
 
     let summary = WaveSummary {
-        id: wave.id.clone(),
+        id: wave.id.to_string(),
         name: wave.name.clone(),
         repo: wave.repo.clone(),
         flow: wave.flow.clone(),
         direction: wave.direction.clone(),
         area: wave.area.clone(),
         paused: wave.paused,
-        created_at: format_timestamp(wave.created_at.as_ref()),
+        created_at: format_datetime(wave.created_at),
     };
 
     let active_run = active.map(wave_run_summary);
@@ -959,30 +815,30 @@ async fn build_wave_view(store: &SharedStore, wave: control::Wave) -> Result<Wav
     })
 }
 
-fn wave_run_summary(run: control::WaveRun) -> WaveRunSummary {
+fn wave_run_summary(run: WaveRun) -> WaveRunSummary {
     WaveRunSummary {
-        id: run.id,
-        wave_id: run.wave_id,
+        id: run.id.to_string(),
+        wave_id: run.wave_id.to_string(),
         iteration: run.iteration,
         step_index: run.step_index,
-        status: wave_run_status(run.status),
+        status: wave_run_status_str(run.status),
         worktree: run.worktree,
         branch: run.branch,
-        started_at: format_timestamp(run.started_at.as_ref()),
-        ended_at: format_timestamp(run.ended_at.as_ref()),
+        started_at: format_datetime(run.started_at),
+        ended_at: format_datetime(run.ended_at),
         error: run.error,
         flow_parents: run.flow_parents,
     }
 }
 
-fn wave_run_status(status: i32) -> String {
-    match control::WaveRunStatus::try_from(status).ok() {
-        Some(control::WaveRunStatus::WaveRunPending) => "pending",
-        Some(control::WaveRunStatus::WaveRunRunning) => "running",
-        Some(control::WaveRunStatus::WaveRunWaiting) => "waiting",
-        Some(control::WaveRunStatus::WaveRunCompleted) => "completed",
-        Some(control::WaveRunStatus::WaveRunFailed) => "failed",
-        _ => "unknown",
+fn wave_run_status_str(status: WaveRunStatus) -> String {
+    match status {
+        WaveRunStatus::Pending => "pending",
+        WaveRunStatus::Running => "running",
+        WaveRunStatus::Waiting => "waiting",
+        WaveRunStatus::Completed => "completed",
+        WaveRunStatus::Failed => "failed",
+        WaveRunStatus::Unspecified => "unknown",
     }
     .to_string()
 }
@@ -996,55 +852,32 @@ async fn current_snapshot(store: &SharedStore) -> Result<Vec<WaveView>, String> 
         .map_err(|err| err.to_string())
 }
 
-fn format_timestamp(timestamp: Option<&prost_types::Timestamp>) -> Option<String> {
-    let timestamp = timestamp?;
-    let seconds = timestamp.seconds;
-    let nanos = timestamp.nanos;
-    let datetime = OffsetDateTime::from_unix_timestamp(seconds).ok()?;
-    let datetime = datetime + time::Duration::nanoseconds(nanos as i64);
-    datetime
+fn format_datetime(datetime: Option<OffsetDateTime>) -> Option<String> {
+    datetime?
         .format(&time::format_description::well_known::Rfc3339)
         .ok()
 }
 
-fn emit_event(event_hub: &EventHub, name: &str, payload: control::event::Payload) {
-    let event = control::Event {
-        event: name.to_string(),
-        timestamp: Some(now_timestamp()),
-        payload: Some(payload),
-    };
-    event_hub.send(event);
-}
-
-fn now_timestamp() -> prost_types::Timestamp {
-    let now = OffsetDateTime::now_utc();
-    prost_types::Timestamp {
-        seconds: now.unix_timestamp(),
-        nanos: 0,
-    }
-}
-
 fn create_wave_run_with_id(
     store: &SharedStore,
-    wave: &control::Wave,
+    wave: &Wave,
     run_id: &LfdId,
-) -> Result<control::WaveRun, StoreError> {
-    let wave_id = LfdId::parse(&wave.id).map_err(|err| StoreError::InvalidData(err.to_string()))?;
+) -> Result<WaveRun, StoreError> {
     let last_run = store
-        .list_wave_runs(Some(&wave_id), Some(1))?
+        .list_wave_runs(Some(&wave.id), Some(1))?
         .into_iter()
         .next();
     let iteration = last_run.map(|run| run.iteration + 1).unwrap_or(0);
 
-    let run = control::WaveRun {
-        id: run_id.to_string(),
+    let run = WaveRun {
+        id: run_id.clone(),
         wave_id: wave.id.clone(),
         iteration,
         step_index: 0,
-        status: control::WaveRunStatus::WaveRunRunning as i32,
+        status: WaveRunStatus::Running,
         worktree: wave.repo.clone(),
         branch: String::new(),
-        started_at: Some(now_timestamp()),
+        started_at: Some(OffsetDateTime::now_utc()),
         ended_at: None,
         error: None,
         flow_parents: Vec::new(),
@@ -1093,17 +926,15 @@ async fn counts(state: &HttpState) -> Counts {
     let waves_running = wave_runs
         .iter()
         .filter(|run| {
-            run.status == crate::proto::control::WaveRunStatus::WaveRunRunning as i32
-                || run.status == crate::proto::control::WaveRunStatus::WaveRunWaiting as i32
-                || run.status == crate::proto::control::WaveRunStatus::WaveRunPending as i32
+            matches!(
+                run.status,
+                WaveRunStatus::Running | WaveRunStatus::Waiting | WaveRunStatus::Pending
+            )
         })
         .count() as u32;
     let agents_active = agents
         .iter()
-        .filter(|run| {
-            run.status == crate::proto::control::AgentStatus::AgentRunning as i32
-                || run.status == crate::proto::control::AgentStatus::AgentWaiting as i32
-        })
+        .filter(|agent| matches!(agent.status, AgentStatus::Running | AgentStatus::Waiting))
         .count() as u32;
 
     Counts {

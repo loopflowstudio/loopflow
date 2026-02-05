@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use tokio::signal;
 use tokio_util::sync::CancellationToken;
-use tonic::transport::Server;
 
 mod auth;
 mod config;
@@ -17,12 +16,11 @@ mod loops;
 mod machine_id;
 mod obs;
 mod output;
-mod proto;
 mod registration;
 mod scheduler;
-mod server;
 mod sessions;
 mod store;
+mod types;
 
 use crate::auth::AuthContext;
 use crate::config::LfdConfig;
@@ -30,10 +28,8 @@ use crate::events::EventHub;
 use crate::executor::WaveExecutor;
 use crate::http::HttpState;
 use crate::output::OutputHub;
-use crate::proto::control::control_service_server::ControlServiceServer;
 use crate::registration::{ConnectionValidator, RegistrationClient};
 use crate::scheduler::Scheduler;
-use crate::server::ControlServer;
 use crate::store::postgres::PostgresStore;
 use crate::store::sqlite::SqliteStore;
 use crate::store::SharedStore;
@@ -59,9 +55,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let grpc_addr: SocketAddr = std::env::var("LFD_GRPC_ADDR")
-        .unwrap_or_else(|_| "127.0.0.1:50051".to_string())
-        .parse()?;
     let http_addr: SocketAddr = std::env::var("LFD_HTTP_ADDR")
         .unwrap_or_else(|_| "0.0.0.0:2486".to_string())
         .parse()?;
@@ -102,15 +95,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (registration_client, auth_context, registration_creds) =
         setup_registration(&lfd_config, cancel.clone()).await;
 
-    let grpc_server = ControlServer::new(
-        store.clone(),
-        scheduler.clone(),
-        (*executor).clone(),
-        output.clone(),
-        events.clone(),
-        auth_context.clone(),
-    );
-
     let http_state = HttpState {
         store: store.clone(),
         scheduler: scheduler.clone(),
@@ -123,15 +107,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let http_router = http::router(http_state);
 
-    let grpc_task = tokio::spawn(async move {
-        Server::builder()
-            .add_service(ControlServiceServer::new(grpc_server))
-            .serve(grpc_addr)
-            .await
-    });
-
     let http_task = tokio::spawn(async move {
         let listener = tokio::net::TcpListener::bind(http_addr).await?;
+        tracing::info!(%http_addr, "lfd listening");
         axum::serve(
             listener,
             http_router.into_make_service_with_connect_info::<SocketAddr>(),
@@ -140,9 +118,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     tokio::select! {
-        result = grpc_task => {
-            result??;
-        }
         result = http_task => {
             result??;
         }

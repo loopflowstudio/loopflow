@@ -180,6 +180,41 @@ Server sends `{"type": "ping"}`, client responds with `{"type": "pong"}`. Detect
 
 ---
 
+## Status (as of February 4, 2026)
+
+### Implemented
+
+- HTTP REST + WebSocket endpoints for wave CRUD, actions, and live event streaming.
+- Shared `EventHub` broadcasting for both gRPC subscriptions and WebSocket clients.
+- loopflow.studio registration + heartbeat, connection-token validation, and HTTP/gRPC auth checks.
+- Git hooks now POST localhost HTTP events instead of using the UNIX socket.
+- Machine identity + config/credentials loading wired into startup.
+
+### Key choices confirmed in code
+
+- WebSocket auth accepts `?token=` or Authorization headers; localhost bypasses auth.
+- HTTP binds to `0.0.0.0:2486` and requires registration for non-loopback access.
+- Event payloads are normalized to JSON with `type` + `data`.
+- Registration failure allows local access while blocking remote access.
+
+### Not included yet
+
+- GitHub polling for PR/CI status.
+- TLS certificate management for remote HTTPS/WSS.
+- Output streaming over HTTP (reserved via `OutputHub` but not wired).
+
+### Risks and bottlenecks
+
+- Remote access depends on loopflow.studio registration + connection-token validation; mobile auth mismatch would block clients.
+- HTTP event payloads mirror proto structures; proto changes need JSON mapping updates.
+- `run_wave_handler`/`land_wave_handler` spawn blocking tasks; heavy load could saturate the blocking thread pool.
+
+### Open questions
+
+Tracked in `scratch/questions.md`.
+
+---
+
 ## Implementation order
 
 1. **Wire EventHub and executor into HttpState** — Add `event_hub`, `output_hub`, `executor`, and `auth` to `HttpState`. Two-line struct change, two-line wiring change in main.rs. Unlocks everything else.

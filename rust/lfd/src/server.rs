@@ -1046,6 +1046,7 @@ impl ControlService for ControlServer {
         &self,
         request: Request<crate::proto::control::SubscribeRequest>,
     ) -> Result<Response<Self::SubscribeStream>, Status> {
+        self.check_auth(&request).await?;
         let patterns = request.into_inner().patterns;
         let receiver = self.events.subscribe();
 

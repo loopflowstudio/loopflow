@@ -423,12 +423,13 @@ async fn run_wave_handler(
     .map_err(map_store_error)?
     .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
 
-    if let Ok(Some(_)) = run_store(&state.store, {
+    let active_run = run_store(&state.store, {
         let wave_id = wave_id.clone();
         move |store| store.get_active_wave_run(&wave_id)
     })
     .await
-    {
+    .map_err(map_store_error)?;
+    if active_run.is_some() {
         return Err(api_error(
             StatusCode::PRECONDITION_FAILED,
             "wave already running",
@@ -832,7 +833,10 @@ async fn ensure_auth(
     let enabled = *state.auth.enabled.read().await;
     let registered = *state.auth.registered.read().await;
     if !enabled || !registered {
-        return Ok(());
+        return Err(api_error(
+            StatusCode::FORBIDDEN,
+            "remote access requires loopflow.studio registration",
+        ));
     }
 
     let token = query_token

@@ -16,8 +16,6 @@ impl EventHub {
     }
 
     /// Send an event to all subscribers.
-    /// Currently unused - will be called from executor/store when emitting events.
-    #[allow(dead_code)]
     pub fn send(&self, event: Event) {
         let _ = self.sender.send(event);
     }

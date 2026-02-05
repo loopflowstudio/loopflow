@@ -5,7 +5,7 @@ phase: 4
 
 # Remote Terminal View
 
-Terminal view on mobile streaming from lfd via gRPC.
+Terminal view on mobile streaming from lfd.
 
 ## Status: Deferred
 
@@ -21,7 +21,7 @@ This was originally planned as the primary mobile interaction model. After recon
 Power-user escape hatch for those who really want raw terminal on mobile.
 
 - Terminal rendering component for iOS
-- Connects to gRPC terminal stream
+- Connects to WebSocket terminal stream
 - Keyboard input handling
 - Touch scrolling through history
 

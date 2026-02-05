@@ -1,3 +1,8 @@
+---
+status: todo
+phase: 2
+---
+
 # ConcertoMobile: v0
 
 iOS app for wave management. Non-interactive—status and actions only.

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use uuid::Uuid;
 
-pub fn get_machine_id() -> String {
+pub fn machine_id() -> String {
     let machine_id_path = machine_id_path();
 
     if let Ok(id) = std::fs::read_to_string(&machine_id_path) {
@@ -19,7 +19,7 @@ pub fn get_machine_id() -> String {
     id
 }
 
-pub fn get_machine_name() -> String {
+pub fn machine_name() -> String {
     gethostname::gethostname().to_string_lossy().into_owned()
 }
 

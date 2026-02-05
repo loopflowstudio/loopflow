@@ -1,4 +1,4 @@
-# gRPC Event Emission
+# Event Emission
 
 The `EventHub` infrastructure is in place but events aren't emitted yet. Wire up `events.send()` calls:
 
@@ -6,13 +6,8 @@ The `EventHub` infrastructure is in place but events aren't emitted yet. Wire up
 - **Agent lifecycle**: `agent.started`, `agent.ended`
 - **Worktree changes**: `worktree.updated`, `worktree.pruned`
 
-Emit from executor and store as state changes occur.
+Emit from executor and store as state changes occur. Events are delivered to clients via WebSocket subscriptions.
 
-## CollapsePRs RPC
+## CollapsePRs
 
-`CollapsePRs` is not in the proto. Options:
-
-1. Add `CollapsePRs` RPC to `control.proto`
-2. Keep HTTP fallback in Swift for this single operation
-
-The operation merges multiple wave PRs into one - used rarely, so HTTP fallback may be acceptable.
+`CollapsePRs` needs an HTTP endpoint. The operation merges multiple wave PRs into one—used rarely.

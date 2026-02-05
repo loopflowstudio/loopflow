@@ -1,3 +1,8 @@
+---
+status: todo
+phase: 2
+---
+
 # loopflow.studio: Auth v0
 
 Minimal auth service for mobile clients. Lives in `../studio` repo.

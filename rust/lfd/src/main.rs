@@ -167,8 +167,8 @@ async fn setup_registration(
         return (Some(client), AuthContext::disabled(), None);
     };
 
-    let machine_id = machine_id::get_machine_id();
-    let machine_name = machine_id::get_machine_name();
+    let machine_id = machine_id::machine_id();
+    let machine_name = machine_id::machine_name();
 
     let client = RegistrationClient::new(&config.auth.base_url);
     client.set_enabled(true).await;

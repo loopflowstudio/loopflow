@@ -10,7 +10,6 @@ RUN apt-get update \
 
 COPY Cargo.toml Cargo.lock ./
 COPY rust ./rust
-COPY proto ./proto
 
 RUN cargo build -p lfd --release
 
@@ -25,6 +24,6 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=builder /app/target/release/lfd /usr/local/bin/lfd
 
-EXPOSE 50051 8080
+EXPOSE 2486
 
 ENTRYPOINT ["lfd"]

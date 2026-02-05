@@ -63,7 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|_| "127.0.0.1:50051".to_string())
         .parse()?;
     let http_addr: SocketAddr = std::env::var("LFD_HTTP_ADDR")
-        .unwrap_or_else(|_| "127.0.0.1:8080".to_string())
+        .unwrap_or_else(|_| "0.0.0.0:2486".to_string())
         .parse()?;
     let db_path = std::env::var("LFD_DB_PATH")
         .map(PathBuf::from)
@@ -86,12 +86,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let scheduler = Arc::new(Scheduler::new(max_slots));
     let output = OutputHub::new(2048);
     let events = EventHub::new(2048);
-    let executor = WaveExecutor::new(store.clone(), scheduler.clone(), output.clone());
+    let executor = Arc::new(WaveExecutor::new(
+        store.clone(),
+        scheduler.clone(),
+        output.clone(),
+    ));
     let cancel = CancellationToken::new();
     let loop_handles =
         scheduler
             .clone()
-            .start_loops(store.clone(), executor.clone(), cancel.clone());
+            .start_loops(store.clone(), (*executor).clone(), cancel.clone());
 
     // Load config and set up registration
     let lfd_config = LfdConfig::load();
@@ -101,15 +105,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let grpc_server = ControlServer::new(
         store.clone(),
         scheduler.clone(),
-        executor,
-        output,
-        events,
+        (*executor).clone(),
+        output.clone(),
+        events.clone(),
         auth_context.clone(),
     );
 
     let http_state = HttpState {
         store: store.clone(),
         scheduler: scheduler.clone(),
+        executor: executor.clone(),
+        event_hub: events.clone(),
+        output_hub: output.clone(),
+        auth: auth_context.clone(),
         started_at: time::OffsetDateTime::now_utc(),
         registration: registration_client.clone(),
     };
@@ -124,7 +132,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let http_task = tokio::spawn(async move {
         let listener = tokio::net::TcpListener::bind(http_addr).await?;
-        axum::serve(listener, http_router).await
+        axum::serve(
+            listener,
+            http_router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
     });
 
     tokio::select! {

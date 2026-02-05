@@ -123,6 +123,15 @@ impl ControlServer {
         }
     }
 
+    fn emit_event(&self, name: &str, payload: crate::proto::control::event::Payload) {
+        let event = Event {
+            event: name.to_string(),
+            timestamp: Some(Self::now_timestamp()),
+            payload: Some(payload),
+        };
+        self.events.send(event);
+    }
+
     fn store_error(err: StoreError) -> Status {
         match err {
             StoreError::NotFound => Status::not_found("not found"),
@@ -291,6 +300,16 @@ impl ControlService for ControlServer {
         self.run_store(move |store| store.create_wave(&wave_clone))
             .await?;
 
+        self.emit_event(
+            "wave.created",
+            crate::proto::control::event::Payload::WaveCreated(
+                crate::proto::control::WaveCreatedEvent {
+                    wave_id: wave.id.clone(),
+                    name: wave.name.clone(),
+                },
+            ),
+        );
+
         Ok(Response::new(CreateWaveResponse { wave: Some(wave) }))
     }
 
@@ -326,6 +345,15 @@ impl ControlService for ControlServer {
         self.run_store(move |store| store.update_wave(&wave_clone))
             .await?;
 
+        self.emit_event(
+            "wave.updated",
+            crate::proto::control::event::Payload::WaveUpdated(
+                crate::proto::control::WaveUpdatedEvent {
+                    wave_id: wave.id.clone(),
+                },
+            ),
+        );
+
         Ok(Response::new(UpdateWaveResponse { wave: Some(wave) }))
     }
 
@@ -336,8 +364,17 @@ impl ControlService for ControlServer {
         self.check_auth(&request).await?;
         let wave_id = request.into_inner().wave_id;
         let wave_id = Self::parse_id(&wave_id, "wave_id")?;
-        self.run_store(move |store| store.delete_wave(&wave_id))
+        let wave_id_for_delete = wave_id.clone();
+        self.run_store(move |store| store.delete_wave(&wave_id_for_delete))
             .await?;
+        self.emit_event(
+            "wave.deleted",
+            crate::proto::control::event::Payload::WaveDeleted(
+                crate::proto::control::WaveDeletedEvent {
+                    wave_id: wave_id.to_string(),
+                },
+            ),
+        );
         Ok(Response::new(DeleteWaveResponse {}))
     }
 
@@ -470,6 +507,15 @@ impl ControlService for ControlServer {
             scheduler.release(&running_run_id);
         });
 
+        self.emit_event(
+            "wave.started",
+            crate::proto::control::event::Payload::WaveStarted(
+                crate::proto::control::WaveStartedEvent {
+                    wave_id: wave.id.clone(),
+                },
+            ),
+        );
+
         Ok(Response::new(RunWaveResponse {
             started: true,
             wave_id: wave.id,
@@ -498,6 +544,15 @@ impl ControlService for ControlServer {
             self.run_store(move |store| store.update_wave_run(&run_clone))
                 .await?;
         }
+
+        self.emit_event(
+            "wave.stopped",
+            crate::proto::control::event::Payload::WaveStopped(
+                crate::proto::control::WaveStoppedEvent {
+                    wave_id: wave_id.to_string(),
+                },
+            ),
+        );
 
         Ok(Response::new(StopWaveResponse { stopped: true }))
     }

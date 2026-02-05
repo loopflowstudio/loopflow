@@ -8,11 +8,11 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use super::common::{create_wave_run_with_id, spawn_run_task_with_slot};
-use crate::executor::WaveExecutor;
-use crate::id::LfdId;
-use crate::proto::control::{PendingActivation, Stimulus, StimulusKind};
-use crate::scheduler::Scheduler;
-use crate::store::SharedStore;
+use crate::lfd::executor::WaveExecutor;
+use crate::lfd::id::LfdId;
+use crate::lfd::proto::control::{PendingActivation, Stimulus, StimulusKind};
+use crate::lfd::scheduler::Scheduler;
+use crate::lfd::store::SharedStore;
 
 pub fn spawn_watch_poller(
     store: SharedStore,
@@ -172,7 +172,7 @@ struct WatchCheck {
 }
 
 fn check_watch_stimulus(
-    wave: &crate::proto::control::Wave,
+    wave: &crate::lfd::proto::control::Wave,
     stimulus: &Stimulus,
 ) -> Result<WatchCheck, git2::Error> {
     let repo = Repository::open(&wave.repo)?;

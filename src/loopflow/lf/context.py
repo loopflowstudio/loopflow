@@ -179,9 +179,6 @@ class ContextConfig(BaseModel):
     # When set, prioritizes roadmap/<wave>/ in docs gathering
     wave: str | None = None
 
-    # Bundled LOOPFLOW.md system documentation
-    include_loopflow_doc: bool = True
-
     # Extras
     clipboard: bool = False
 
@@ -196,7 +193,6 @@ class ContextConfig(BaseModel):
         return cls(
             diff_mode=DiffMode.DIFF,
             files=FilesetConfig(exclude=["scratch/", "reports/", "roadmap/", "*.md"]),
-            include_loopflow_doc=False,
         )
 
     @classmethod
@@ -204,7 +200,6 @@ class ContextConfig(BaseModel):
         cls,
         paths: list[str] | None = None,
         exclude: list[str] | None = None,
-        include_loopflow_doc: bool = True,
         token_limit: int | None = None,
         clipboard: bool = True,
     ) -> "ContextConfig":
@@ -216,7 +211,6 @@ class ContextConfig(BaseModel):
                 exclude=exclude or [],
                 token_limit=token_limit,
             ),
-            include_loopflow_doc=include_loopflow_doc,
             clipboard=clipboard,
         )
 
@@ -802,8 +796,8 @@ def gather_prompt_components(
 
     exclude = list(context_config.files.exclude) if context_config.files.exclude else []
 
-    # Load bundled LOOPFLOW.md (system documentation)
-    loopflow_doc = _load_loopflow_doc() if context_config.include_loopflow_doc else None
+    # Load bundled LOOPFLOW.md (system documentation, always included)
+    loopflow_doc = _load_loopflow_doc()
 
     # Gather lfdocs: scratch/, roadmap/<wave>/, root .md
     lfdocs_list = gather_lfdocs(repo_root, wave=wave_name)

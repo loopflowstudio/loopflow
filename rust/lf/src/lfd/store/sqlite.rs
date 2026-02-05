@@ -7,11 +7,11 @@ use rusqlite::types::Type;
 use rusqlite::{params, Connection, OptionalExtension, Row, ToSql};
 use time::OffsetDateTime;
 
-use crate::id::LfdId;
-use crate::proto::control::{
+use crate::lfd::id::LfdId;
+use crate::lfd::proto::control::{
     Agent, AgentStatus, PendingActivation, Stimulus, Wave, WaveRun, WaveRunStatus,
 };
-use crate::store::{ForkRun, ForkRunStatus, RunStore, StoreError, StoreResult};
+use crate::lfd::store::{ForkRun, ForkRunStatus, RunStore, StoreError, StoreResult};
 
 const SCHEMA_VERSION: u32 = 3;
 

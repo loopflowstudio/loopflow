@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use crate::executor::WaveExecutor;
-use crate::id::LfdId;
-use crate::proto::control::{WaveRun, WaveRunStatus};
-use crate::scheduler::Scheduler;
-use crate::store::SharedStore;
+use crate::lfd::executor::WaveExecutor;
+use crate::lfd::id::LfdId;
+use crate::lfd::proto::control::{WaveRun, WaveRunStatus};
+use crate::lfd::scheduler::Scheduler;
+use crate::lfd::store::SharedStore;
 
 pub fn now_timestamp() -> prost_types::Timestamp {
     let now = time::OffsetDateTime::now_utc();
@@ -16,7 +16,7 @@ pub fn now_timestamp() -> prost_types::Timestamp {
 
 pub fn create_wave_run_with_id(
     store: &SharedStore,
-    wave: &crate::proto::control::Wave,
+    wave: &crate::lfd::proto::control::Wave,
     run_id: &LfdId,
 ) -> anyhow::Result<WaveRun> {
     let wave_id = LfdId::parse(&wave.id)?;

@@ -1,11 +1,11 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
-use crate::executor::WaveExecutor;
-use crate::id::LfdId;
-use crate::output::OutputHub;
-use crate::proto::control::control_service_server::ControlService;
-use crate::proto::control::{
+use crate::lfd::executor::WaveExecutor;
+use crate::lfd::id::LfdId;
+use crate::lfd::output::OutputHub;
+use crate::lfd::proto::control::control_service_server::ControlService;
+use crate::lfd::proto::control::{
     AcquireSlotRequest, AcquireSlotResponse, Agent, AgentStatus, CloneWaveRequest,
     CloneWaveResponse, ConnectWaveRequest, ConnectWaveResponse, CreateStimulusRequest,
     CreateStimulusResponse, CreateWaveRequest, CreateWaveResponse, DeleteStimulusRequest,
@@ -22,9 +22,9 @@ use crate::proto::control::{
     UpdateStimulusRequest, UpdateStimulusResponse, UpdateWaveRequest, UpdateWaveResponse, Wave,
     WaveRun, WaveRunStatus,
 };
-use crate::scheduler::Scheduler;
-use crate::sessions::{run_pty_command, PtyCommand};
-use crate::store::{SharedStore, StoreError, StoreResult};
+use crate::lfd::scheduler::Scheduler;
+use crate::lfd::sessions::{run_pty_command, PtyCommand};
+use crate::lfd::store::{SharedStore, StoreError, StoreResult};
 use prost_types::Timestamp;
 use time::OffsetDateTime;
 use tokio_stream::{wrappers::BroadcastStream, Stream, StreamExt};
@@ -209,15 +209,15 @@ impl ControlService for ControlServer {
 
     async fn get_wave(
         &self,
-        request: Request<crate::proto::control::GetWaveRequest>,
-    ) -> Result<Response<crate::proto::control::GetWaveResponse>, Status> {
+        request: Request<crate::lfd::proto::control::GetWaveRequest>,
+    ) -> Result<Response<crate::lfd::proto::control::GetWaveResponse>, Status> {
         let wave_id = request.into_inner().wave_id;
         let wave_id = Self::parse_id(&wave_id, "wave_id")?;
         let wave = self
             .run_store(move |store| store.get_wave(&wave_id))
             .await?
             .ok_or_else(|| Status::not_found("wave not found"))?;
-        Ok(Response::new(crate::proto::control::GetWaveResponse {
+        Ok(Response::new(crate::lfd::proto::control::GetWaveResponse {
             wave: Some(wave),
         }))
     }
@@ -241,17 +241,17 @@ impl ControlService for ControlServer {
 
     async fn get_wave_run(
         &self,
-        request: Request<crate::proto::control::GetWaveRunRequest>,
-    ) -> Result<Response<crate::proto::control::GetWaveRunResponse>, Status> {
+        request: Request<crate::lfd::proto::control::GetWaveRunRequest>,
+    ) -> Result<Response<crate::lfd::proto::control::GetWaveRunResponse>, Status> {
         let run_id = request.into_inner().wave_run_id;
         let run_id = Self::parse_id(&run_id, "wave_run_id")?;
         let run = self
             .run_store(move |store| store.get_wave_run(&run_id))
             .await?
             .ok_or_else(|| Status::not_found("wave run not found"))?;
-        Ok(Response::new(crate::proto::control::GetWaveRunResponse {
-            run: Some(run),
-        }))
+        Ok(Response::new(
+            crate::lfd::proto::control::GetWaveRunResponse { run: Some(run) },
+        ))
     }
 
     async fn create_wave(
@@ -845,8 +845,8 @@ impl ControlService for ControlServer {
 
     async fn get_agent_history(
         &self,
-        request: Request<crate::proto::control::GetAgentHistoryRequest>,
-    ) -> Result<Response<crate::proto::control::GetAgentHistoryResponse>, Status> {
+        request: Request<crate::lfd::proto::control::GetAgentHistoryRequest>,
+    ) -> Result<Response<crate::lfd::proto::control::GetAgentHistoryResponse>, Status> {
         let req = request.into_inner();
         let worktree = req.worktree.clone();
         let repo = req.repo.clone();
@@ -858,14 +858,14 @@ impl ControlService for ControlServer {
             .await?;
 
         Ok(Response::new(
-            crate::proto::control::GetAgentHistoryResponse { agents: runs },
+            crate::lfd::proto::control::GetAgentHistoryResponse { agents: runs },
         ))
     }
 
     async fn start_agent(
         &self,
-        request: Request<crate::proto::control::StartAgentRequest>,
-    ) -> Result<Response<crate::proto::control::StartAgentResponse>, Status> {
+        request: Request<crate::lfd::proto::control::StartAgentRequest>,
+    ) -> Result<Response<crate::lfd::proto::control::StartAgentResponse>, Status> {
         let agent = request
             .into_inner()
             .agent
@@ -886,9 +886,9 @@ impl ControlService for ControlServer {
         self.run_store(move |store| store.start_agent(&stored_clone))
             .await?;
 
-        Ok(Response::new(crate::proto::control::StartAgentResponse {
-            id,
-        }))
+        Ok(Response::new(
+            crate::lfd::proto::control::StartAgentResponse { id },
+        ))
     }
 
     async fn end_agent(
@@ -966,7 +966,7 @@ impl ControlService for ControlServer {
 
     async fn subscribe(
         &self,
-        _request: Request<crate::proto::control::SubscribeRequest>,
+        _request: Request<crate::lfd::proto::control::SubscribeRequest>,
     ) -> Result<Response<Self::SubscribeStream>, Status> {
         let stream = tokio_stream::empty();
         Ok(Response::new(Box::pin(stream)))

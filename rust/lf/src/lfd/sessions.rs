@@ -86,7 +86,7 @@ pub fn run_pty_command(command: PtyCommand) -> Result<i32, SessionError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{run_pty_command, PtyCommand};
+    use crate::lfd::{run_pty_command, PtyCommand};
 
     #[test]
     #[ignore = "PTY tests hang in CI - no controlling terminal"]

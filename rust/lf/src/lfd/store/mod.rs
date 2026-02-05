@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use crate::id::LfdId;
-use crate::proto::control::Agent;
-use crate::proto::control::PendingActivation;
-use crate::proto::control::Stimulus;
-use crate::proto::control::Wave;
-use crate::proto::control::WaveRun;
+use crate::lfd::id::LfdId;
+use crate::lfd::proto::control::Agent;
+use crate::lfd::proto::control::PendingActivation;
+use crate::lfd::proto::control::Stimulus;
+use crate::lfd::proto::control::Wave;
+use crate::lfd::proto::control::WaveRun;
 
 pub mod postgres;
 pub mod sqlite;
@@ -138,11 +138,11 @@ pub type SharedStore = Arc<dyn RunStore>;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::id::LfdId;
-    use crate::proto::control::{
+    use crate::lfd::id::LfdId;
+    use crate::lfd::proto::control::{
         Agent, AgentStatus, PendingActivation, Stimulus, StimulusKind, Wave, WaveRun, WaveRunStatus,
     };
+    use crate::lfd::*;
     use prost_types::Timestamp;
     use std::env;
     use std::path::PathBuf;
@@ -391,7 +391,7 @@ mod tests {
             .join(format!("lfd-test-{}.db", Uuid::new_v4()))
             .to_string_lossy()
             .to_string();
-        let store = super::sqlite::SqliteStore::new(&PathBuf::from(path)).unwrap();
+        let store = crate::lfd::sqlite::SqliteStore::new(&PathBuf::from(path)).unwrap();
         run_store_suite(&store);
     }
 
@@ -403,9 +403,9 @@ mod tests {
         }
 
         if let Ok(url) = env::var("LFD_DATABASE_URL") {
-            super::postgres::PostgresStore::migrate(&url).unwrap();
+            crate::lfd::postgres::PostgresStore::migrate(&url).unwrap();
             reset_postgres(&url);
-            let store = super::postgres::PostgresStore::connect(&url).unwrap();
+            let store = crate::lfd::postgres::PostgresStore::connect(&url).unwrap();
             run_store_suite(&store);
             return;
         }
@@ -423,9 +423,9 @@ mod tests {
         let port = node.get_host_port_ipv4(5432);
         let url = format!("postgres://postgres:test@127.0.0.1:{port}/postgres");
 
-        super::postgres::PostgresStore::migrate(&url).unwrap();
+        crate::lfd::postgres::PostgresStore::migrate(&url).unwrap();
         reset_postgres(&url);
-        let store = super::postgres::PostgresStore::connect(&url).unwrap();
+        let store = crate::lfd::postgres::PostgresStore::connect(&url).unwrap();
         run_store_suite(&store);
     }
 }

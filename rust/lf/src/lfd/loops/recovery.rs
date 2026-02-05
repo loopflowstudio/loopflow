@@ -4,10 +4,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::executor::WaveExecutor;
-use crate::id::LfdId;
-use crate::proto::control::{AgentStatus, WaveRunStatus};
-use crate::store::SharedStore;
+use crate::lfd::executor::WaveExecutor;
+use crate::lfd::id::LfdId;
+use crate::lfd::proto::control::{AgentStatus, WaveRunStatus};
+use crate::lfd::store::SharedStore;
 
 pub fn spawn_recovery_loop(
     store: SharedStore,

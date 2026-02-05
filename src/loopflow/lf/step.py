@@ -113,7 +113,6 @@ def _launch_interactive_default(
         context_config=ContextConfig.for_interactive(
             paths=list(context) if context else [],
             exclude=list(config.exclude) if config and config.exclude else [],
-            include_loopflow_doc=config.include_loopflow_doc if config else True,
             clipboard=include_clipboard,
         ),
         config=config,
@@ -267,7 +266,6 @@ def run(
             ),
             area=resolved.area,
             wave=wave,
-            include_loopflow_doc=config.include_loopflow_doc if config else True,
             clipboard=include_clipboard,
             budget_area=config.budgets.area if config else 50000,
             budget_docs=config.budgets.docs if config else 30000,
@@ -424,7 +422,6 @@ def inline(
             ),
             area=resolved.area,
             wave=wave,
-            include_loopflow_doc=config.include_loopflow_doc if config else True,
             clipboard=include_clipboard,
             budget_area=config.budgets.area if config else 50000,
             budget_docs=config.budgets.docs if config else 30000,

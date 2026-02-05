@@ -41,7 +41,6 @@ def _render_prompt(case: dict, repo_root: Path) -> str:
         files=FilesetConfig(paths=[], exclude=[], parent_docs=False),
         area=case.get("area"),
         wave=case.get("wave"),
-        include_loopflow_doc=False,
         clipboard=case.get("clipboard", False),
         budget_area=0,
         budget_docs=0,

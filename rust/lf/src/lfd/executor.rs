@@ -18,12 +18,12 @@ use loopflow_engine::flow::{
 use loopflow_engine::prompt::{format_prompt, gather_context, GatherContextOpts};
 use loopflow_engine::worktree::{create_worktree, remove_worktree};
 
-use crate::id::LfdId;
-use crate::loops::now_timestamp;
-use crate::output::{OutputEvent, OutputHub};
-use crate::proto::control::{Agent, AgentStatus, WaveRun, WaveRunStatus};
-use crate::scheduler::Scheduler;
-use crate::store::{ForkRun, ForkRunStatus, SharedStore};
+use crate::lfd::id::LfdId;
+use crate::lfd::loops::now_timestamp;
+use crate::lfd::output::{OutputEvent, OutputHub};
+use crate::lfd::proto::control::{Agent, AgentStatus, WaveRun, WaveRunStatus};
+use crate::lfd::scheduler::Scheduler;
+use crate::lfd::store::{ForkRun, ForkRunStatus, SharedStore};
 
 #[async_trait]
 pub trait StepRunner: Send + Sync {
@@ -225,7 +225,7 @@ impl WaveExecutor {
 
     async fn run_step(
         &self,
-        wave: &crate::proto::control::Wave,
+        wave: &crate::lfd::proto::control::Wave,
         run: &mut WaveRun,
         step: &ConcreteStep,
     ) -> Result<i32> {
@@ -264,7 +264,7 @@ impl WaveExecutor {
 
     async fn run_choose(
         &self,
-        wave: &crate::proto::control::Wave,
+        wave: &crate::lfd::proto::control::Wave,
         run: &mut WaveRun,
         plan: &[ConcreteItem],
         fork: &ConcreteFork,
@@ -306,7 +306,7 @@ impl WaveExecutor {
 
     async fn run_fork(
         &self,
-        wave: &crate::proto::control::Wave,
+        wave: &crate::lfd::proto::control::Wave,
         run: &mut WaveRun,
         plan: &[ConcreteItem],
         fork: &ConcreteFork,
@@ -495,7 +495,7 @@ impl WaveExecutor {
     }
 }
 
-fn worktree_path(run: &WaveRun, wave: &crate::proto::control::Wave) -> String {
+fn worktree_path(run: &WaveRun, wave: &crate::lfd::proto::control::Wave) -> String {
     if run.worktree.is_empty() {
         wave.repo.clone()
     } else {
@@ -505,7 +505,7 @@ fn worktree_path(run: &WaveRun, wave: &crate::proto::control::Wave) -> String {
 
 fn fork_worktree_path(
     run: &WaveRun,
-    wave: &crate::proto::control::Wave,
+    wave: &crate::lfd::proto::control::Wave,
     branch_index: u32,
 ) -> String {
     let base = worktree_path(run, wave);

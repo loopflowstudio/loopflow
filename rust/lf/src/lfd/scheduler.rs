@@ -5,9 +5,9 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::executor::WaveExecutor;
-use crate::loops;
-use crate::store::SharedStore;
+use crate::lfd::executor::WaveExecutor;
+use crate::lfd::loops;
+use crate::lfd::store::SharedStore;
 
 #[derive(Debug)]
 pub struct Scheduler {
@@ -105,7 +105,7 @@ impl Scheduler {
 
 #[cfg(test)]
 mod tests {
-    use super::Scheduler;
+    use crate::lfd::Scheduler;
 
     #[tokio::test]
     async fn acquire_respects_slot_limit_and_release() {

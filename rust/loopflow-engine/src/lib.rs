@@ -10,9 +10,6 @@ pub mod prompt;
 pub mod worktree;
 pub mod worktrees;
 
-#[cfg(feature = "python")]
-mod python;
-
 pub use agent::{
     build_agent_command, build_claude_command, build_codex_command, build_gemini_command,
     build_model_command, check_cli_available, launch_agent, DefaultRunner, LaunchConfig,

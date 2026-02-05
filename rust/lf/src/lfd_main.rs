@@ -6,31 +6,21 @@ use tokio::signal;
 use tokio_util::sync::CancellationToken;
 use tonic::transport::Server;
 
-mod executor;
-mod http;
-mod id;
-mod loops;
-mod obs;
-mod output;
-mod proto;
-mod scheduler;
-mod server;
-mod sessions;
-mod store;
+mod lfd;
 
-use crate::executor::WaveExecutor;
-use crate::http::HttpState;
-use crate::output::OutputHub;
-use crate::proto::control::control_service_server::ControlServiceServer;
-use crate::scheduler::Scheduler;
-use crate::server::ControlServer;
-use crate::store::postgres::PostgresStore;
-use crate::store::sqlite::SqliteStore;
-use crate::store::SharedStore;
+use lfd::executor::WaveExecutor;
+use lfd::http::HttpState;
+use lfd::output::OutputHub;
+use lfd::proto::control::control_service_server::ControlServiceServer;
+use lfd::scheduler::Scheduler;
+use lfd::server::ControlServer;
+use lfd::store::postgres::PostgresStore;
+use lfd::store::sqlite::SqliteStore;
+use lfd::store::SharedStore;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    obs::init_tracing();
+    lfd::obs::init_tracing();
 
     let mut args = std::env::args();
     if let Some(command) = args.nth(1) {
@@ -89,7 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         scheduler: scheduler.clone(),
         started_at: time::OffsetDateTime::now_utc(),
     };
-    let http_router = http::router(http_state);
+    let http_router = lfd::http::router(http_state);
 
     let grpc_task = tokio::spawn(async move {
         Server::builder()

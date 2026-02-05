@@ -3,7 +3,6 @@ resolver = "2"
 members = [
   "rust/loopflow-engine",
   "rust/loopflow-ops",
-  "rust/lfd",
   "rust/lf",
 ]
 

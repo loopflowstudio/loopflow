@@ -108,6 +108,22 @@ enum Commands {
 
 #[derive(Subcommand, Debug)]
 pub enum OpsCommand {
+    /// Copy context to clipboard
+    Cp {
+        /// Patterns to exclude
+        #[arg(short = 'e', long = "exclude")]
+        exclude: Vec<String>,
+        /// Include lfdocs (scratch/, root .md, roadmap/)
+        #[arg(long)]
+        lfdocs: bool,
+        /// Exclude lfdocs
+        #[arg(long = "no-lfdocs")]
+        no_lfdocs: bool,
+        /// Files or directories to include
+        paths: Vec<String>,
+    },
+    /// Check loopflow dependencies
+    Doctor,
     Rebase {
         onto: Option<String>,
     },

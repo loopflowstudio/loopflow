@@ -203,7 +203,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         None
     };
 
-    // Load bundled LOOPFLOW.md
+    // Load bundled LOOPFLOW.md (system instructions, always included)
     let loopflow_doc = Some(crate::builtins::LOOPFLOW_DOC.to_string());
 
     Ok(PromptComponents {

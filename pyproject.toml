@@ -1,9 +1,9 @@
 [project]
 name = "loopflow"
-dynamic = ["version"]
+version = "0.8.0"
 description = "Run LLM coding agents from reusable prompt files"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.8"
 license = "MIT"
 authors = [{ name = "Jack" }]
 keywords = [
@@ -11,31 +11,14 @@ keywords = [
     "agents", "automation", "workflow", "prompts"
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Operating System :: MacOS",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Rust",
     "Topic :: Software Development",
-    "Typing :: Typed",
-]
-
-dependencies = [
-    "typer>=0.9.0",
-    "pathspec>=0.11.0",
-    "pyyaml>=6.0",
-    "pydantic>=2.12.5",
-    "tiktoken>=0.7.0",
-    "croniter>=2.0",
-    "fastapi>=0.115.0",
-    "uvicorn>=0.34.0",
-    "grpcio>=1.60.0",
-    "grpcio-tools>=1.60.0",
-    "protobuf>=4.25.0",
 ]
 
 [project.urls]
@@ -43,68 +26,19 @@ Homepage = "https://loopflowstudio.github.io/loopflow/"
 Repository = "https://github.com/loopflowstudio/loopflow"
 Documentation = "https://loopflowstudio.github.io/loopflow/"
 Issues = "https://github.com/loopflowstudio/loopflow/issues"
-Changelog = "https://github.com/loopflowstudio/loopflow/releases"
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.0.0",
-]
-
-[project.scripts]
-lf = "loopflow._bin:main"
-lfd = "loopflow.lfd.cli:main"
 
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["maturin>=1.4,<2.0"]
+build-backend = "maturin"
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/loopflow"]
-include = [
-    "src/loopflow/LOOPFLOW.md",
-    "src/loopflow/bin/*",
-    "src/loopflow/templates/**/*.md",
-    "src/loopflow/templates/**/*.yaml",
-    "src/loopflow/templates/goals/*.md",
-    "src/loopflow/lf/builtins/**/*.md",
-    "src/loopflow/lf/builtins/**/*.yaml",
-]
-
-[tool.hatch.build.targets.sdist]
-include = [
-    "src/loopflow",
-    "src/loopflow/LOOPFLOW.md",
-    "src/loopflow/bin/*",
-    "src/loopflow/templates/**/*.md",
-    "src/loopflow/templates/**/*.yaml",
-    "src/loopflow/lf/builtins/**/*.md",
-    "src/loopflow/lf/builtins/**/*.yaml",
-]
-
-[tool.hatch.version]
-path = "src/loopflow/__init__.py"
+[tool.maturin]
+bindings = "bin"
+manifest-path = "rust/lf/Cargo.toml"
+strip = true
 
 [tool.ruff]
 line-length = 100
 target-version = "py310"
-exclude = ["src/loopflow/proto/**/*_pb2*"]  # generated protobuf code
 
 [tool.ruff.lint]
-select = [
-    "E",   # pycodestyle errors
-    "F",   # pyflakes
-    "W",   # pycodestyle warnings
-    "I",   # isort (import sorting)
-]
-
-[tool.ruff.lint.per-file-ignores]
-"tests/*" = ["F841"]  # unused variables OK in test fixtures
-"src/loopflow/proto/**/*_pb2*" = ["E501", "F401", "F811", "I001", "E402"]  # generated protobuf code
-
-[dependency-groups]
-dev = [
-    "pytest>=9.0.2",
-    "boto3>=1.35.0",
-    "ruff>=0.9.0",
-    "maturin>=1.4,<2.0",
-]
+select = ["E", "F", "W", "I"]

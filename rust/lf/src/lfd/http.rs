@@ -4,8 +4,8 @@ use axum::{routing::get, Json, Router};
 use serde::Serialize;
 use time::OffsetDateTime;
 
-use crate::scheduler::Scheduler;
-use crate::store::SharedStore;
+use crate::lfd::scheduler::Scheduler;
+use crate::lfd::store::SharedStore;
 
 #[derive(Clone)]
 pub struct HttpState {
@@ -124,16 +124,16 @@ async fn counts(state: &HttpState) -> Counts {
     let waves_running = wave_runs
         .iter()
         .filter(|run| {
-            run.status == crate::proto::control::WaveRunStatus::WaveRunRunning as i32
-                || run.status == crate::proto::control::WaveRunStatus::WaveRunWaiting as i32
-                || run.status == crate::proto::control::WaveRunStatus::WaveRunPending as i32
+            run.status == crate::lfd::proto::control::WaveRunStatus::WaveRunRunning as i32
+                || run.status == crate::lfd::proto::control::WaveRunStatus::WaveRunWaiting as i32
+                || run.status == crate::lfd::proto::control::WaveRunStatus::WaveRunPending as i32
         })
         .count() as u32;
     let agents_active = agents
         .iter()
         .filter(|run| {
-            run.status == crate::proto::control::AgentStatus::AgentRunning as i32
-                || run.status == crate::proto::control::AgentStatus::AgentWaiting as i32
+            run.status == crate::lfd::proto::control::AgentStatus::AgentRunning as i32
+                || run.status == crate::lfd::proto::control::AgentStatus::AgentWaiting as i32
         })
         .count() as u32;
 

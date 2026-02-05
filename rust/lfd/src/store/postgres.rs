@@ -2,16 +2,16 @@ use std::future::Future;
 use std::time::Duration;
 
 use deadpool_postgres::{Manager, Pool};
-use prost_types::Timestamp;
+use time::OffsetDateTime;
 use tokio_postgres::error::SqlState;
 use tokio_postgres::types::ToSql;
 use tokio_postgres::{NoTls, Row};
 
 use crate::id::LfdId;
-use crate::proto::control::{
-    Agent, AgentStatus, PendingActivation, Stimulus, Wave, WaveRun, WaveRunStatus,
-};
 use crate::store::{ForkRun, ForkRunStatus, RunStore, StoreError, StoreResult};
+use crate::types::{
+    Agent, AgentStatus, PendingActivation, Stimulus, StimulusKind, Wave, WaveRun, WaveRunStatus,
+};
 
 const RETRY_DELAYS: [Duration; 3] = [
     Duration::from_millis(100),
@@ -153,8 +153,7 @@ impl PostgresStore {
             let area_json = serde_json::to_value(&wave.area)?;
             let created_at = wave
                 .created_at
-                .as_ref()
-                .map(timestamp_to_unix)
+                .map(|dt| dt.unix_timestamp())
                 .unwrap_or_else(now_unix);
 
             client
@@ -315,9 +314,9 @@ impl RunStore for PostgresStore {
     fn get_active_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
         self.with_client(|client| async move {
             let statuses = [
-                WaveRunStatus::WaveRunPending as i32,
-                WaveRunStatus::WaveRunRunning as i32,
-                WaveRunStatus::WaveRunWaiting as i32,
+                WaveRunStatus::Pending.as_i32(),
+                WaveRunStatus::Running.as_i32(),
+                WaveRunStatus::Waiting.as_i32(),
             ];
             let row = client
                 .query_opt(
@@ -340,10 +339,9 @@ impl RunStore for PostgresStore {
         self.with_client(|client| async move {
             let started_at = run
                 .started_at
-                .as_ref()
-                .map(timestamp_to_unix)
+                .map(|dt| dt.unix_timestamp())
                 .unwrap_or_else(now_unix);
-            let ended_at = run.ended_at.as_ref().map(timestamp_to_unix);
+            let ended_at = run.ended_at.map(|dt| dt.unix_timestamp());
             let flow_parents_json = serde_json::to_value(&run.flow_parents)?;
             client
                 .execute(
@@ -358,7 +356,7 @@ impl RunStore for PostgresStore {
                         &run.wave_id,
                         &(run.iteration as i32),
                         &(run.step_index as i32),
-                        &run.status,
+                        &run.status.as_i32(),
                         &run.worktree,
                         &run.branch,
                         &started_at,
@@ -393,11 +391,11 @@ impl RunStore for PostgresStore {
                     &[
                         &(run.iteration as i32),
                         &(run.step_index as i32),
-                        &run.status,
+                        &run.status.as_i32(),
                         &run.worktree,
                         &run.branch,
-                        &run.started_at.as_ref().map(timestamp_to_unix),
-                        &run.ended_at.as_ref().map(timestamp_to_unix),
+                        &run.started_at.map(|dt| dt.unix_timestamp()),
+                        &run.ended_at.map(|dt| dt.unix_timestamp()),
                         &run.error,
                         &flow_parents_json,
                         &run.id,
@@ -473,8 +471,7 @@ impl RunStore for PostgresStore {
         self.with_client(|client| async move {
             let created_at = stimulus
                 .created_at
-                .as_ref()
-                .map(timestamp_to_unix)
+                .map(|dt| dt.unix_timestamp())
                 .unwrap_or_else(now_unix);
 
             client
@@ -484,7 +481,7 @@ impl RunStore for PostgresStore {
                     &[
                         &stimulus.id,
                         &stimulus.wave_id,
-                        &stimulus.kind,
+                        &stimulus.kind.as_i32(),
                         &stimulus.cron,
                         &stimulus.last_main_sha,
                         &stimulus.last_triggered_at,
@@ -506,7 +503,7 @@ impl RunStore for PostgresStore {
                         last_triggered_at = $4, enabled = $5
                      WHERE id = $6",
                     &[
-                        &stimulus.kind,
+                        &stimulus.kind.as_i32(),
                         &stimulus.cron,
                         &stimulus.last_main_sha,
                         &stimulus.last_triggered_at,
@@ -765,7 +762,7 @@ impl RunStore for PostgresStore {
                     ORDER BY a.started_at DESC
                     LIMIT 1
                     ",
-                    &[&wave_id, &(AgentStatus::AgentWaiting as i32)],
+                    &[&wave_id, &AgentStatus::Waiting.as_i32()],
                 )
                 .await?;
             row.map(|row| map_agent_row(&row)).transpose()
@@ -776,10 +773,9 @@ impl RunStore for PostgresStore {
         self.with_client(|client| async move {
             let started_at = agent
                 .started_at
-                .as_ref()
-                .map(timestamp_to_unix)
+                .map(|dt| dt.unix_timestamp())
                 .unwrap_or_else(now_unix);
-            let ended_at = agent.ended_at.as_ref().map(timestamp_to_unix);
+            let ended_at = agent.ended_at.map(|dt| dt.unix_timestamp());
             let pid = agent.pid.map(|value| value as i32);
             client
                 .execute(
@@ -795,7 +791,7 @@ impl RunStore for PostgresStore {
                         &agent.repo,
                         &agent.worktree,
                         &agent.wave_run_id,
-                        &agent.status,
+                        &agent.status.as_i32(),
                         &started_at,
                         &ended_at,
                         &pid,
@@ -975,16 +971,12 @@ async fn get_client_with_retry(
     Err(last_error.expect("retry loop always sets last_error"))
 }
 
-fn unix_to_timestamp(seconds: i64) -> Timestamp {
-    Timestamp { seconds, nanos: 0 }
-}
-
-fn timestamp_to_unix(ts: &Timestamp) -> i64 {
-    ts.seconds
+fn unix_to_datetime(seconds: i64) -> OffsetDateTime {
+    OffsetDateTime::from_unix_timestamp(seconds).unwrap_or(OffsetDateTime::UNIX_EPOCH)
 }
 
 fn now_unix() -> i64 {
-    time::OffsetDateTime::now_utc().unix_timestamp()
+    OffsetDateTime::now_utc().unix_timestamp()
 }
 
 fn map_wave_row(row: &Row) -> StoreResult<Wave> {
@@ -993,7 +985,7 @@ fn map_wave_row(row: &Row) -> StoreResult<Wave> {
     let direction = parse_json_vec(direction_json)?;
     let area = parse_json_vec(area_json)?;
 
-    let created_at = unix_to_timestamp(row.get::<_, i64>(7));
+    let created_at = unix_to_datetime(row.get::<_, i64>(7));
 
     Ok(Wave {
         id: row.get(0),
@@ -1008,7 +1000,7 @@ fn map_wave_row(row: &Row) -> StoreResult<Wave> {
 }
 
 fn map_wave_run_row(row: &Row) -> StoreResult<WaveRun> {
-    let started_at = unix_to_timestamp(row.get::<_, i64>(7));
+    let started_at = unix_to_datetime(row.get::<_, i64>(7));
     let ended_at: Option<i64> = row.get(8);
     let flow_parents_json: serde_json::Value = row.get(10);
     let flow_parents = parse_json_vec(flow_parents_json)?;
@@ -1018,23 +1010,23 @@ fn map_wave_run_row(row: &Row) -> StoreResult<WaveRun> {
         wave_id: row.get(1),
         iteration: row.get::<_, i32>(2) as u32,
         step_index: row.get::<_, i32>(3) as u32,
-        status: row.get::<_, i32>(4),
+        status: WaveRunStatus::from_i32(row.get::<_, i32>(4)),
         worktree: row.get(5),
         branch: row.get(6),
         started_at: Some(started_at),
-        ended_at: ended_at.map(unix_to_timestamp),
+        ended_at: ended_at.map(unix_to_datetime),
         error: row.get(9),
         flow_parents,
     })
 }
 
 fn map_stimulus_row(row: &Row) -> StoreResult<Stimulus> {
-    let created_at = unix_to_timestamp(row.get::<_, i64>(7));
+    let created_at = unix_to_datetime(row.get::<_, i64>(7));
 
     Ok(Stimulus {
         id: row.get(0),
         wave_id: row.get(1),
-        kind: row.get::<_, i32>(2),
+        kind: StimulusKind::from_i32(row.get::<_, i32>(2)),
         cron: row.get(3),
         last_main_sha: row.get(4),
         last_triggered_at: row.get(5),
@@ -1054,7 +1046,7 @@ fn map_pending_activation_row(row: &Row) -> StoreResult<PendingActivation> {
     })
 }
 
-#[allow(dead_code)]
+#[allow(dead_code)] // Used by list_fork_runs which is called dynamically via trait.
 fn map_fork_run_row(row: &Row) -> StoreResult<ForkRun> {
     let status_value: i32 = row.get(4);
     let status = ForkRunStatus::from_i64(status_value as i64)
@@ -1071,19 +1063,20 @@ fn map_fork_run_row(row: &Row) -> StoreResult<ForkRun> {
 }
 
 fn map_agent_row(row: &Row) -> StoreResult<Agent> {
-    let started_at = unix_to_timestamp(row.get::<_, i64>(6));
+    let started_at = unix_to_datetime(row.get::<_, i64>(6));
     let ended_at: Option<i64> = row.get(7);
     let pid: Option<i32> = row.get(8);
+    let wave_run_id: Option<String> = row.get(4);
 
     Ok(Agent {
         id: row.get(0),
         step: row.get(1),
         repo: row.get(2),
         worktree: row.get(3),
-        wave_run_id: row.get(4),
-        status: row.get::<_, i32>(5),
+        wave_run_id: wave_run_id.map(LfdId::from_raw),
+        status: AgentStatus::from_i32(row.get::<_, i32>(5)),
         started_at: Some(started_at),
-        ended_at: ended_at.map(unix_to_timestamp),
+        ended_at: ended_at.map(unix_to_datetime),
         pid: pid.map(|value| value as u32),
         model: row.get(9),
         run_mode: row.get(10),

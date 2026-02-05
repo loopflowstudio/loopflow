@@ -1,40 +1,33 @@
 use std::sync::Arc;
 
+use time::OffsetDateTime;
+
 use crate::executor::WaveExecutor;
 use crate::id::LfdId;
-use crate::proto::control::{WaveRun, WaveRunStatus};
 use crate::scheduler::Scheduler;
 use crate::store::SharedStore;
-
-pub fn now_timestamp() -> prost_types::Timestamp {
-    let now = time::OffsetDateTime::now_utc();
-    prost_types::Timestamp {
-        seconds: now.unix_timestamp(),
-        nanos: 0,
-    }
-}
+use crate::types::{Wave, WaveRun, WaveRunStatus};
 
 pub fn create_wave_run_with_id(
     store: &SharedStore,
-    wave: &crate::proto::control::Wave,
+    wave: &Wave,
     run_id: &LfdId,
 ) -> anyhow::Result<WaveRun> {
-    let wave_id = LfdId::parse(&wave.id)?;
     let last_run = store
-        .list_wave_runs(Some(&wave_id), Some(1))?
+        .list_wave_runs(Some(&wave.id), Some(1))?
         .into_iter()
         .next();
     let iteration = last_run.map(|run| run.iteration + 1).unwrap_or(0);
 
     let run = WaveRun {
-        id: run_id.to_string(),
+        id: run_id.clone(),
         wave_id: wave.id.clone(),
         iteration,
         step_index: 0,
-        status: WaveRunStatus::WaveRunRunning as i32,
+        status: WaveRunStatus::Running,
         worktree: wave.repo.clone(),
         branch: String::new(),
-        started_at: Some(now_timestamp()),
+        started_at: Some(OffsetDateTime::now_utc()),
         ended_at: None,
         error: None,
         flow_parents: Vec::new(),
@@ -53,18 +46,17 @@ pub fn spawn_run_task_with_slot(
     let run_id_for_release = run.id.clone();
     tokio::spawn(async move {
         execute_run_inner(&store, &executor, &run).await;
-        scheduler.release(&run_id_for_release);
+        scheduler.release(run_id_for_release.as_str());
     });
 }
 
 async fn execute_run_inner(store: &SharedStore, executor: &WaveExecutor, run: &WaveRun) {
-    let run_id = LfdId::parse(&run.id).expect("run id should be valid");
-    if let Err(err) = executor.execute(&run_id).await {
+    if let Err(err) = executor.execute(&run.id).await {
         tracing::error!(run_id = %run.id, error = %err, "run execution failed");
-        if let Ok(Some(mut run)) = store.get_wave_run(&run_id) {
-            run.status = WaveRunStatus::WaveRunFailed as i32;
+        if let Ok(Some(mut run)) = store.get_wave_run(&run.id) {
+            run.status = WaveRunStatus::Failed;
             run.error = Some(err.to_string());
-            run.ended_at = Some(now_timestamp());
+            run.ended_at = Some(OffsetDateTime::now_utc());
             let _ = store.update_wave_run(&run);
         }
     }

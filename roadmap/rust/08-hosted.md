@@ -4,11 +4,27 @@ Full SaaS control plane. Same infrastructure self-hosters use, but we run it.
 
 ## Context
 
-Phase 2 delivers self-hosted with auth and container/K8s execution. The same Helm chart works for:
-- Self-hosters running on their own clusters
-- Us running for hosted customers
+Phase 2 delivers:
+- Self-hosted lfd with auth and container/K8s execution
+- loopflow.studio relay for remote access (handles NAT, TLS termination)
+- JWT-based auth with local validation
+
+The same infrastructure works for:
+- Self-hosters running on their own clusters (lfd connects to relay)
+- Us running for hosted customers (we run both lfd and relay)
 
 Phase 3 adds the control plane, multi-tenancy, and user-facing features.
+
+## Connection Model
+
+All remote access goes through loopflow.studio relay:
+
+```
+Mobile ──TLS──▶ loopflow.studio ──tunnel──▶ customer lfd
+              (real certs)                  (K8s namespace)
+```
+
+For hosted customers, loopflow.studio runs both the relay and the lfd. The architecture is the same - we're just the ones operating it.
 
 ## Goal
 

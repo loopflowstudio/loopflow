@@ -1,60 +1,59 @@
 # Concerto Backlog
 
-Pickable work items for Concerto, the loopflow macOS app.
+Pickable work items for Concerto, the loopflow app.
 
 ## Phases
 
 | Phase | Focus | Status |
 |-------|-------|--------|
 | 1 | Polish (macOS local) | Complete |
-| 2 | Remote access foundation | In progress |
-| 3 | Mobile (iOS/iPad) | Future |
+| 2 | Non-interactive mobile | In progress |
+| 3 | Chat experience | Future |
+| 4 | Agent harness | Future |
 
-## Screenshot pipeline
+## Phase 2: Non-interactive mobile
 
-```bash
-# Generate snapshots (fast, no permissions)
-uv run python scripts/generate_screenshots.py --snapshot-only --repo-path ~/src/loopflow-demos --no-clone
+Mobile as remote control. No chat, no terminal. Just status and actions.
 
-# Generate UI test screenshots (flow-focused, slower)
-uv run python scripts/generate_screenshots.py --ui-test-only --repo-path ~/src/loopflow-demos --no-clone
+**What mobile can do:**
+- See wave status (running, waiting, idle)
+- Trigger non-interactive steps/flows
+- Land PRs
+- Create waves
+- See results
 
-# Review with each persona
-uv run lf ux-review --direction conductor --area docs/screenshots/
-uv run lf ux-review --direction improviser --area docs/screenshots/
-uv run lf ux-review --direction listener --area docs/screenshots/
-```
+**Infrastructure:**
+- iOS app (shared SwiftUI views where possible)
+- Auth via loopflow.studio (JWT)
+- Remote lfd connection via HTTP API
+- Push notifications for "wave needs attention"
 
-Screenshots in `docs/screenshots/`:
-- `concerto-main.png` — sidebar with grouped waves
-- `concerto-wave-running.png` — running wave detail
-- `concerto-wave-waiting.png` — waiting wave detail
+**What's explicitly NOT in Phase 2:**
+- Terminal streaming
+- Chat/conversation
+- Interactive steps on mobile
 
-Swift screenshots are generated via in-app snapshots (no Screen Recording permission).
+Conductors check in, trigger actions, move on. Deep work happens at the laptop.
 
-## Item format
+## Phase 3: Chat experience
 
-```yaml
----
-status: todo | in-progress | done
-phase: 1 | 2 | 3
-persona: conductor | improviser | listener  # optional
-order: 1  # optional
-screenshot: path/to/evidence.png  # optional
----
-```
+Add LLM-powered conversation. No tools, no execution—just discussion.
 
-## Phase 1 items
+- "What's wrong with this PR?"
+- "How should I approach this bug?"
+- "Review this diff"
 
-```bash
-uv run python scripts/generate_screenshots.py --snapshot-only --repo-path ~/src/loopflow-demos --no-clone
-uv run python scripts/generate_screenshots.py --ui-test-only --repo-path ~/src/loopflow-demos --no-clone
-uv run lf ux-review --direction conductor --area docs/screenshots/
-uv run lf ux-review --direction improviser --area docs/screenshots/
-uv run lf ux-review --direction listener --area docs/screenshots/
-```
+Uses Claude/OpenAI/Gemini API directly. Context assembled from codebase. Suggestions can trigger Phase 2 actions.
 
-Run the pipeline and review the output in `roadmap/concerto/` before promoting items.
+## Phase 4: Agent harness
+
+Chat gains tools. Full agent on phone.
+
+- File read/write, bash, git
+- Structured permission prompts
+- Unified across LLM providers
+
+Significant work, but gives us control over the agent experience instead of wrapping three different CLI tools.
 
 ## Phase 1 summary
 
@@ -66,24 +65,24 @@ Shipped polish for local macOS workflows:
 - Empty state that teaches and invites action
 - Quick experiment flow without waves
 
-## Phase 2 focus
-
-Remote access foundation:
-- WaveService protocol abstraction (transport-agnostic service layer)
-- lfd registration + auth groundwork (see Phase 2 items)
-- gRPC terminal streaming groundwork
-
-## If screenshots are blocked
+## Screenshot pipeline
 
 ```bash
-# Run the UX experiments manually and log friction
-cat reports/concerto/07-ux-experiments.md
+uv run python scripts/generate_screenshots.py --snapshot-only --repo-path ~/src/loopflow-demos --no-clone
+uv run python scripts/generate_screenshots.py --ui-test-only --repo-path ~/src/loopflow-demos --no-clone
+uv run lf ux-review --direction conductor --area docs/screenshots/
 ```
 
-Write Phase 1 backlog items directly from observed friction in Concerto.
-Add `screenshot:` only when you have one.
+## Item format
+
+```yaml
+---
+status: todo | in-progress | done
+phase: 2 | 3 | 4
+---
+```
 
 ## Reference
 
-Design docs: `reports/concerto/`
+Design docs: `scratch/concerto-mobile-direction.md`
 Personas: `.lf/directions/{conductor,improviser,listener}.md`

@@ -196,5 +196,4 @@ def test_hook_content_has_correct_structure():
 
         # Should have the notification function
         assert "_lfd_notify" in content
-        assert "lfd.sock" in content
-        assert "nc -U" in content
+        assert "lfd.sock" in content or "127.0.0.1:2486" in content

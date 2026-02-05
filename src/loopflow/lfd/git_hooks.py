@@ -15,23 +15,23 @@ HOOK_TEMPLATE = """
 {marker}
 # Notify lfd of git operations (loopflow)
 _lfd_notify() {{
-    local socket="$HOME/.lf/lfd.sock" event="$1" repo branch
+    local hook="$1" repo branch
     repo="$(git rev-parse --show-toplevel 2>/dev/null)" || return
     branch="$(git branch --show-current 2>/dev/null)"
-    [ -S "$socket" ] || return
-    local msg='{{"method":"notify","params":{{"event":"git.'
-    msg+="$event"'","data":{{"repo":"'"$repo"'","branch":"'"$branch"'"}}}}}}'
-    printf '%s\\n' "$msg" | timeout 1 nc -U "$socket" 2>/dev/null &
+    curl -s --max-time 1 -X POST "http://127.0.0.1:2486/hooks/git" \\
+        -H "Content-Type: application/json" \\
+        -d "{{\\"hook\\":\\"$hook\\",\\"repo\\":\\"$repo\\",\\"branch\\":\\"$branch\\"}}" \\
+        >/dev/null 2>&1 &
 }}
-_lfd_notify "{event}"
+_lfd_notify "{hook}"
 {end_marker}
 """
 
 HOOK_EVENTS = {
-    "post-commit": "commit",
-    "post-checkout": "checkout",
-    "post-merge": "merge",
-    "post-rewrite": "rewrite",
+    "post-commit": "post-commit",
+    "post-checkout": "post-checkout",
+    "post-merge": "post-merge",
+    "post-rewrite": "post-rewrite",
 }
 
 
@@ -94,7 +94,7 @@ def install_hooks(repo: Path) -> list[str]:
         hook_code = HOOK_TEMPLATE.format(
             marker=HOOK_MARKER,
             end_marker=HOOK_END_MARKER,
-            event=event,
+            hook=event,
         )
 
         if _has_our_hooks(hook_path):

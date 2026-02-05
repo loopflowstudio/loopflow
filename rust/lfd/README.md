@@ -9,8 +9,8 @@ docker compose -f rust/lfd/docker-compose.yml down
 ```
 
 ```bash
-# Override host ports
-LFD_GRPC_PORT=50061 LFD_HTTP_PORT=8081 docker compose -f rust/lfd/docker-compose.yml up --build
+# Override HTTP port
+LFD_HTTP_PORT=8081 docker compose -f rust/lfd/docker-compose.yml up --build
 
 # External Postgres port override
 LFD_PG_PORT=5433 docker compose -f rust/lfd/docker-compose.yml up --build
@@ -30,4 +30,17 @@ docker compose -f rust/lfd/docker-compose.yml up -d lfd
 LFD_STORAGE=postgres \
 LFD_DATABASE_URL=postgres://postgres:test@localhost:5432/lfd \
 cargo run -p lfd
+```
+
+## API Endpoints
+
+```bash
+# Health check
+curl http://localhost:2486/health
+
+# List waves
+curl http://localhost:2486/api/waves
+
+# WebSocket (live events)
+websocat ws://localhost:2486/ws
 ```

@@ -1,13 +1,13 @@
 use std::process::Command;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
+use time::OffsetDateTime;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::executor::WaveExecutor;
-use crate::id::LfdId;
-use crate::proto::control::{AgentStatus, WaveRunStatus};
 use crate::store::SharedStore;
+use crate::types::{AgentStatus, WaveRunStatus};
 
 pub fn spawn_recovery_loop(
     store: SharedStore,
@@ -40,28 +40,22 @@ fn recover_stuck_runs(store: &SharedStore) {
         }
     };
 
-    for run in stuck_runs {
-        tracing::warn!(agent_id = %run.id, pid = ?run.pid, "step run stuck >4h, terminating");
+    for agent in stuck_runs {
+        tracing::warn!(agent_id = %agent.id, pid = ?agent.pid, "step run stuck >4h, terminating");
 
-        if let Some(pid) = run.pid {
+        if let Some(pid) = agent.pid {
             let _ = kill_process(pid);
         }
 
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time before unix epoch")
-            .as_secs() as i64;
-        let agent_id = LfdId::from_raw(run.id.clone());
-        let _ = store.end_agent(&agent_id, AgentStatus::AgentFailed as i32, now);
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let _ = store.end_agent(&agent.id, AgentStatus::Failed.as_i32(), now);
 
-        if let Some(run_id) = run.wave_run_id.as_deref() {
-            if let Ok(run_id) = LfdId::parse(run_id) {
-                if let Ok(Some(mut run)) = store.get_wave_run(&run_id) {
-                    run.status = WaveRunStatus::WaveRunFailed as i32;
-                    run.error = Some("agent stuck >4h".to_string());
-                    run.ended_at = Some(now_timestamp());
-                    let _ = store.update_wave_run(&run);
-                }
+        if let Some(ref run_id) = agent.wave_run_id {
+            if let Ok(Some(mut run)) = store.get_wave_run(run_id) {
+                run.status = WaveRunStatus::Failed;
+                run.error = Some("agent stuck >4h".to_string());
+                run.ended_at = Some(OffsetDateTime::now_utc());
+                let _ = store.update_wave_run(&run);
             }
         }
     }
@@ -72,12 +66,4 @@ fn kill_process(pid: u32) -> std::io::Result<()> {
         .args(["-TERM", &pid.to_string()])
         .status()?;
     Ok(())
-}
-
-fn now_timestamp() -> prost_types::Timestamp {
-    let now = time::OffsetDateTime::now_utc();
-    prost_types::Timestamp {
-        seconds: now.unix_timestamp(),
-        nanos: 0,
-    }
 }

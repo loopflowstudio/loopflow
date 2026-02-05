@@ -54,6 +54,7 @@ impl Scheduler {
         active.len() as u32
     }
 
+    #[allow(dead_code)] // Reserved for interactive session management.
     pub fn register_session(&self, wave_id: &str) -> bool {
         let mut sessions = self.sessions.lock().expect("scheduler mutex poisoned");
         if sessions.contains(wave_id) {
@@ -63,6 +64,7 @@ impl Scheduler {
         true
     }
 
+    #[allow(dead_code)] // Reserved for interactive session management.
     pub fn unregister_session(&self, wave_id: &str) {
         let mut sessions = self.sessions.lock().expect("scheduler mutex poisoned");
         sessions.remove(wave_id);

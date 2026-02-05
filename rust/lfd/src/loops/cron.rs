@@ -10,9 +10,9 @@ use tokio_util::sync::CancellationToken;
 use super::common::{create_wave_run_with_id, spawn_run_task_with_slot};
 use crate::executor::WaveExecutor;
 use crate::id::LfdId;
-use crate::proto::control::{PendingActivation, StimulusKind};
 use crate::scheduler::Scheduler;
 use crate::store::SharedStore;
+use crate::types::{PendingActivation, StimulusKind};
 
 pub fn spawn_cron_poller(
     store: SharedStore,
@@ -41,7 +41,7 @@ async fn check_cron_stimuli(
     executor: &WaveExecutor,
     scheduler: &std::sync::Arc<Scheduler>,
 ) {
-    let stimuli = match store.list_stimuli_by_kind(StimulusKind::StimulusCron as i32) {
+    let stimuli = match store.list_stimuli_by_kind(StimulusKind::Cron.as_i32()) {
         Ok(stimuli) => stimuli,
         Err(err) => {
             tracing::error!(error = %err, "failed to list cron stimuli");
@@ -56,14 +56,7 @@ async fn check_cron_stimuli(
             continue;
         }
 
-        let wave_id = match LfdId::parse(&stimulus.wave_id) {
-            Ok(id) => id,
-            Err(err) => {
-                tracing::warn!(stimulus_id = %stimulus.id, error = %err, "invalid wave id");
-                continue;
-            }
-        };
-        let wave = match store.get_wave(&wave_id) {
+        let wave = match store.get_wave(&stimulus.wave_id) {
             Ok(Some(wave)) => wave,
             Ok(None) => continue,
             Err(err) => {
@@ -80,8 +73,13 @@ async fn check_cron_stimuli(
             continue;
         }
 
-        if store.get_active_wave_run(&wave_id).ok().flatten().is_none() {
-            if let Ok(pending) = store.list_pending_activations(&wave_id) {
+        if store
+            .get_active_wave_run(&stimulus.wave_id)
+            .ok()
+            .flatten()
+            .is_none()
+        {
+            if let Ok(pending) = store.list_pending_activations(&stimulus.wave_id) {
                 if !pending.is_empty() {
                     let run_id = LfdId::new();
                     let (acquired, reason) = scheduler.acquire(run_id.as_str()).await;
@@ -95,7 +93,7 @@ async fn check_cron_stimuli(
                     }
 
                     if let Ok(run) = create_wave_run_with_id(store, &wave, &run_id) {
-                        let _ = store.delete_pending_activations(&wave_id);
+                        let _ = store.delete_pending_activations(&stimulus.wave_id);
                         started.insert(wave.id.clone());
                         spawn_run_task_with_slot(
                             store.clone(),
@@ -120,10 +118,8 @@ async fn check_cron_stimuli(
             stimulus.last_triggered_at = Some(Utc::now().timestamp());
             let _ = store.update_stimulus(&stimulus);
 
-            if let Ok(Some(_)) = store.get_active_wave_run(&wave_id) {
-                let stimulus_id = LfdId::parse(&stimulus.id)
-                    .unwrap_or_else(|_| LfdId::from_raw(stimulus.id.clone()));
-                queue_or_coalesce_activation(store, &wave_id, &stimulus_id);
+            if let Ok(Some(_)) = store.get_active_wave_run(&stimulus.wave_id) {
+                queue_or_coalesce_activation(store, &stimulus.wave_id, &stimulus.id);
                 continue;
             }
 
@@ -177,9 +173,9 @@ fn queue_or_coalesce_activation(store: &SharedStore, wave_id: &LfdId, stimulus_i
         }
         Ok(None) => {
             let activation = PendingActivation {
-                id: LfdId::new().to_string(),
-                wave_id: wave_id.to_string(),
-                stimulus_id: stimulus_id.to_string(),
+                id: LfdId::new(),
+                wave_id: wave_id.clone(),
+                stimulus_id: stimulus_id.clone(),
                 from_sha: String::new(),
                 to_sha: String::new(),
                 queued_at: Utc::now().timestamp(),

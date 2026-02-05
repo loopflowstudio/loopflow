@@ -21,11 +21,9 @@ services:
     environment:
       LFD_STORAGE: postgres
       LFD_DATABASE_URL: postgres://postgres:test@postgres:5432/lfd
-      LFD_GRPC_ADDR: 0.0.0.0:50051
-      LFD_HTTP_ADDR: 0.0.0.0:8080
+      LFD_HTTP_ADDR: 0.0.0.0:2486
     ports:
-      - "${LFD_GRPC_PORT:-50051}:50051"
-      - "${LFD_HTTP_PORT:-8080}:8080"
+      - "${LFD_HTTP_PORT:-2486}:2486"
     depends_on:
       postgres:
         condition: service_healthy

@@ -1,6 +1,6 @@
 ---
 status: todo
-phase: 3
+phase: 2
 ---
 
 # Push Notifications
@@ -16,17 +16,25 @@ Local macOS notifications via NotificationService.
 ```
 ┌─────────────┐     ┌─────────────────┐     ┌─────────────┐
 │   Your lfd  │────►│    Loopflow     │────►│    APNS     │
-│             │     │                 │     │             │
+│             │     │     Studio      │     │             │
 │ "wave needs │     │ looks up your   │     │ pushes to   │
 │  attention" │     │ device token    │     │ your phone  │
 └─────────────┘     └─────────────────┘     └─────────────┘
 ```
 
-- Mobile app registers device token with Loopflow
-- lfd sends events to Loopflow
-- Loopflow pushes to APNS
+- Mobile app registers device token with loopflow.studio
+- lfd sends events to loopflow.studio when wave needs attention
+- loopflow.studio pushes to APNS
 - Rich payload: wave_id, wave_name, step, reason
+
+## Notification triggers
+
+- Wave waiting for input (awareness—interactive action requires laptop)
+- Wave completed
+- Wave errored
+- PR ready for review
+- PR merged
 
 ## Done when
 
-Mobile gets push notification when wave needs attention, tapping opens that wave.
+Mobile gets push notification when wave needs attention, tapping opens that wave in app.

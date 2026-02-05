@@ -1,24 +1,35 @@
 ---
-status: todo
-phase: 3
+status: deferred
+phase: 4
 ---
 
 # Remote Terminal View
 
-Terminal view on mobile streaming from lfd via gRPC.
+Terminal view on mobile streaming from lfd.
 
-## Current
+## Status: Deferred
 
-Ghostty terminal embedded on macOS only.
+This was originally planned as the primary mobile interaction model. After reconsidering:
 
-## Build
+- Terminal UX on phones is poor
+- We support multiple agents (Claude Code, Codex, Gemini)—each has different terminal UI
+- Building an iOS terminal renderer is significant work
+- Mobile users (conductor persona) want status and actions, not terminal sessions
 
-- Terminal rendering component for iOS (not Ghostty—that's macOS only)
-- Connects to gRPC terminal stream from Phase 2
-- Keyboard input handling on iOS
-- Touch scrolling through terminal history
-- Continue button outside terminal (always visible, tappable)
+## If we build it
 
-## Done when
+Power-user escape hatch for those who really want raw terminal on mobile.
 
-Mobile user can interact with terminal session running on their Mac.
+- Terminal rendering component for iOS
+- Connects to WebSocket terminal stream
+- Keyboard input handling
+- Touch scrolling through history
+
+## Alternative
+
+Most users will use:
+- Phase 2: Non-interactive actions (land PR, trigger step)
+- Phase 3: Chat interface (discuss code, get suggestions)
+- Laptop: Interactive terminal sessions via Ghostty
+
+SSH/Tailscale remains an option for power users who need raw terminal access from mobile.

@@ -4,7 +4,7 @@ use crate::types::Event;
 
 /// EventHub broadcasts events to all subscribers.
 /// Events are fire-and-forget - if no one is listening, they're dropped.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct EventHub {
     sender: broadcast::Sender<Event>,
 }

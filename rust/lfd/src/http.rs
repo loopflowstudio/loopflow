@@ -686,9 +686,7 @@ async fn ensure_auth(
         return Ok(());
     }
 
-    let enabled = *state.auth.enabled.read().await;
-    let registered = *state.auth.registered.read().await;
-    if !enabled || !registered {
+    if !state.auth.enabled || !state.auth.registered {
         return Err(api_error(
             StatusCode::FORBIDDEN,
             "remote access requires loopflow.studio registration",

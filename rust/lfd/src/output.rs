@@ -12,7 +12,7 @@ pub struct OutputEvent {
     pub text: String,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct OutputHub {
     sender: broadcast::Sender<OutputEvent>,
 }

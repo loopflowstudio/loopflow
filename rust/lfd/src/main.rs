@@ -174,18 +174,17 @@ async fn setup_registration(
     client.set_enabled(true).await;
 
     let validator = ConnectionValidator::new(&config.auth.base_url);
-    let auth_context = AuthContext::new(Some(validator));
 
     match client.register(&jwt, &machine_id, &machine_name).await {
         Ok(_token) => {
             tracing::info!(machine_name = %machine_name, "registered with loopflow.studio");
-            auth_context.set_state(true, true).await;
+            let auth_context = AuthContext::new(true, true, Some(validator));
             client.start_heartbeat(jwt.clone(), machine_id.clone(), cancel);
             (Some(client), auth_context, Some((jwt, machine_id)))
         }
         Err(e) => {
             tracing::warn!(error = %e, "registration failed, continuing without remote access");
-            auth_context.set_state(true, false).await;
+            let auth_context = AuthContext::new(true, false, Some(validator));
             (Some(client), auth_context, None)
         }
     }

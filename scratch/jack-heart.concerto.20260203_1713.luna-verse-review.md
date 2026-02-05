@@ -105,10 +105,9 @@ HTTP API and WebSocket streaming for lfd, enabling mobile clients to connect wit
 
 | Suite | Status |
 |-------|--------|
-| Rust unit tests | 23 passed |
-| Rust integration tests | 31 passed |
+| Rust tests | 5 passed, 1 ignored (PTY) |
 | Python tests | 679 passed, 1 skipped |
-| Clippy | Clean |
+| Clippy | Clean (warnings = errors) |
 | Formatting | Clean |
 
 ---
@@ -117,7 +116,7 @@ HTTP API and WebSocket streaming for lfd, enabling mobile clients to connect wit
 
 | Category | Files |
 |----------|-------|
-| New HTTP layer | `http.rs` (947 lines) |
+| New HTTP layer | `http.rs` (945 lines) |
 | New auth/registration | `auth.rs`, `registration.rs`, `credentials.rs`, `config.rs`, `machine_id.rs` |
 | New types | `types/{mod,agent,event,stimulus,wave}.rs` |
 | New event broadcast | `events.rs` |

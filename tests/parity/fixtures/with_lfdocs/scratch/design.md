@@ -1,3 +1,0 @@
-# Design
-
-Current design notes.

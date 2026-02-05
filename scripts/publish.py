@@ -2,16 +2,15 @@
 """Publish loopflow to PyPI and Concerto DMG to R2.
 
 Local development:
-  python scripts/publish.py --local    # Build and install locally
+  python scripts/publish.py --local       # Build and install locally
 
-Release flow (CLI binaries):
-  1. Merge to main
-  2. python scripts/publish.py patch   # Bumps version, tags, pushes
-  3. CI builds wheels and publishes to PyPI
+Release flow (full):
+  python scripts/publish.py patch         # Version bump, screenshots, DMG, tag, push
 
-DMG publishing (Concerto app):
-  python scripts/publish.py --dmg      # Build and upload DMG
-  python scripts/publish.py --dmg-only # Just upload existing DMG
+Single-shot modes:
+  python scripts/publish.py --dmg-only        # Just upload existing DMG
+  python scripts/publish.py --screenshots-only # Just generate screenshots
+  python scripts/publish.py --tag-only        # Just bump, tag, push (skip screenshots/DMG)
 """
 
 import argparse
@@ -244,8 +243,14 @@ def generate_screenshots() -> tuple[bool, str]:
 # --- Release flow ---
 
 
-def create_release(bump_type: str, dry_run: bool) -> int:
-    """Bump version, commit, tag, and push."""
+def create_release(
+    bump_type: str,
+    dry_run: bool,
+    tag_only: bool = False,
+    skip_dmg: bool = False,
+    skip_screenshots: bool = False,
+) -> int:
+    """Full release: screenshots, DMG, version bump, tag, push."""
     # Check state
     ok, msg = check_on_main()
     if not ok:
@@ -255,17 +260,49 @@ def create_release(bump_type: str, dry_run: bool) -> int:
     old_version = get_version()
     new_version = bump_version(old_version, bump_type)
 
+    do_screenshots = not tag_only and not skip_screenshots
+    do_dmg = not tag_only and not skip_dmg
+
     if dry_run:
+        if do_screenshots:
+            print("Would generate screenshots")
+        if do_dmg:
+            print("Would build and upload DMG")
         print(f"Would bump version: {old_version} → {new_version}")
         print(f"Would commit and tag v{new_version}")
         print("Would push tag to trigger CI release")
         return 0
 
+    # Screenshots
+    if do_screenshots:
+        print("Generating screenshots...")
+        ok, output = generate_screenshots()
+        if not ok:
+            print(f"Screenshot generation failed (continuing):\n{output}", file=sys.stderr)
+        else:
+            print("Screenshots generated.")
+
+    # DMG
+    if do_dmg:
+        print("Building Concerto DMG...")
+        ok, output = build_dmg()
+        if not ok:
+            print(f"DMG build failed (continuing):\n{output}", file=sys.stderr)
+        else:
+            print("DMG built.")
+            print("Uploading DMG...")
+            ok, output = upload_dmg(new_version)
+            if not ok:
+                print(f"DMG upload failed (continuing):\n{output}", file=sys.stderr)
+            else:
+                print(output)
+
+    # Version bump
     print(f"Bumping version: {old_version} → {new_version}")
     write_version(new_version)
 
     # Commit
-    subprocess.run(["git", "add", "VERSION", "pyproject.toml", "Cargo.toml"], cwd=ROOT, check=True)
+    subprocess.run(["git", "add", "VERSION", "pyproject.toml", "Cargo.toml", "Cargo.lock"], cwd=ROOT, check=True)
     subprocess.run(
         ["git", "commit", "-m", f"release: v{new_version}"],
         cwd=ROOT,
@@ -300,19 +337,29 @@ def main() -> int:
         help="Build and install locally (no publish)",
     )
     parser.add_argument(
-        "--dmg",
-        action="store_true",
-        help="Build and upload Concerto DMG",
-    )
-    parser.add_argument(
         "--dmg-only",
         action="store_true",
-        help="Upload existing DMG (skip build)",
+        help="Just upload existing DMG",
     )
     parser.add_argument(
-        "--screenshots",
+        "--screenshots-only",
         action="store_true",
-        help="Generate screenshots",
+        help="Just generate screenshots",
+    )
+    parser.add_argument(
+        "--tag-only",
+        action="store_true",
+        help="Just bump, tag, push (skip screenshots/DMG)",
+    )
+    parser.add_argument(
+        "--skip-dmg",
+        action="store_true",
+        help="Skip DMG build/upload in release",
+    )
+    parser.add_argument(
+        "--skip-screenshots",
+        action="store_true",
+        help="Skip screenshot generation in release",
     )
     parser.add_argument(
         "-n", "--dry-run",
@@ -321,8 +368,8 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    # Screenshot mode
-    if args.screenshots:
+    # Screenshots-only mode
+    if args.screenshots_only:
         if args.dry_run:
             print("Would generate screenshots")
             return 0
@@ -334,24 +381,12 @@ def main() -> int:
         print("Screenshots generated.")
         return 0
 
-    # DMG mode
-    if args.dmg or args.dmg_only:
+    # DMG-only mode
+    if args.dmg_only:
         version = get_version()
-
         if args.dry_run:
-            if not args.dmg_only:
-                print("Would build Concerto DMG")
             print(f"Would upload DMG to {R2_PUBLIC_URL}/LoopflowConcerto-{version}.dmg")
             return 0
-
-        if not args.dmg_only:
-            print("Building Concerto DMG...")
-            ok, output = build_dmg()
-            if not ok:
-                print(f"DMG build failed:\n{output}", file=sys.stderr)
-                return 1
-            print("DMG built.")
-
         print("Uploading DMG...")
         ok, output = upload_dmg(version)
         if not ok:
@@ -396,7 +431,13 @@ def main() -> int:
         parser.print_help()
         return 1
 
-    return create_release(args.bump, args.dry_run)
+    return create_release(
+        args.bump,
+        args.dry_run,
+        tag_only=args.tag_only,
+        skip_dmg=args.skip_dmg,
+        skip_screenshots=args.skip_screenshots,
+    )
 
 
 if __name__ == "__main__":

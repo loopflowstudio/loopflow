@@ -111,7 +111,7 @@ fn categorized_listing_includes_known_steps() {
     let builtins = builtin_steps();
     for (_category, steps) in BUILTIN_CATEGORIES {
         for step in *steps {
-            assert!(builtins.contains(&step.to_string()));
+            assert!(builtins.contains(*step));
         }
     }
 }

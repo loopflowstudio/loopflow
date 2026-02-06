@@ -95,6 +95,11 @@ pub fn generate_pr_message(repo: &Path) -> OpsResult<Message> {
     generate_message(repo, &prompt)
 }
 
+pub fn generate_pr_message_from_diff(repo: &Path, diff: &str) -> OpsResult<Message> {
+    let prompt = build_message_prompt(Some(diff), PR_MESSAGE_PROMPT);
+    generate_message(repo, &prompt)
+}
+
 fn generate_message(repo: &Path, prompt: &str) -> OpsResult<Message> {
     let config = load_config_or_default(Some(repo));
     let launch_config = LaunchConfig {

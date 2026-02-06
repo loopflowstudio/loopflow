@@ -8,7 +8,7 @@ use loopflow_engine::worktrees::{list_worktrees, main_repo_root};
 
 use crate::commit::{commit_workflow, CommitOptions};
 use crate::error::{OpsError, OpsResult};
-use crate::messages::generate_pr_message;
+use crate::messages::{generate_pr_message, generate_pr_message_from_diff};
 use crate::progress::Progress;
 use crate::util::{command_exists, stderr_from_output};
 
@@ -84,7 +84,11 @@ pub fn create_or_update_pr(
         }
 
         progress.status("Updating PR...");
-        let message = generate_pr_message(repo)?;
+        let message = if let Some(diff) = get_pr_diff(repo)? {
+            generate_pr_message_from_diff(repo, &diff)?
+        } else {
+            generate_pr_message(repo)?
+        };
         update_pr(repo, pr.number, &message.title, &message.body)?;
         if pr.is_draft {
             mark_pr_ready(repo, pr.number)?;
@@ -116,6 +120,23 @@ pub fn create_or_update_pr(
 
 pub fn gh_available() -> bool {
     command_exists("gh")
+}
+
+fn get_pr_diff(repo: &Path) -> OpsResult<Option<String>> {
+    let output = Command::new("gh")
+        .arg("pr")
+        .arg("diff")
+        .current_dir(repo)
+        .output()?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let diff = String::from_utf8_lossy(&output.stdout).to_string();
+    if diff.trim().is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(diff))
+    }
 }
 
 pub fn pr_exists_for_current_branch(repo: &Path) -> OpsResult<bool> {

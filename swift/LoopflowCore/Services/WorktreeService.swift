@@ -6,6 +6,7 @@ import Foundation
 public struct WorktreeService: @unchecked Sendable {
     public init() {}
     private let baseURL = lfdBaseURL
+    private let apiBaseURL = lfdApiBaseURL
 
     private var session: URLSession {
         let config = URLSessionConfiguration.default
@@ -113,8 +114,7 @@ public struct WorktreeService: @unchecked Sendable {
 
     private func listViaLFD(in repoURL: URL) async -> [Worktree]? {
         let t0 = CFAbsoluteTimeGetCurrent()
-        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
-        components.path = "/worktrees"
+        var components = URLComponents(url: apiBaseURL.appendingPathComponent("worktrees"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "repo", value: repoURL.path())]
 
         guard let url = components.url else {
@@ -129,11 +129,8 @@ public struct WorktreeService: @unchecked Sendable {
                 return nil
             }
 
-            let decoded = try JSONDecoder().decode(LFDWorktreeResponse.self, from: data)
-            guard decoded.ok, let result = decoded.result else {
-                return nil
-            }
-            jsonWorktrees = result.worktrees
+            let decoded = try JSONDecoder().decode(LFDListResponse<WorktreeJSON>.self, from: data)
+            jsonWorktrees = decoded.data
         } catch {
             LoggingService.append("lfd.http error=\(error.localizedDescription)", category: LoggingService.Category.lfd)
             return nil
@@ -574,11 +571,13 @@ public struct WorktreeService: @unchecked Sendable {
 }
 
 // Response types matching lfd HTTP API
-private struct LFDWorktreeResponse: Codable {
-    let ok: Bool
-    let result: LFDWorktreeResult?
-}
+private struct LFDListResponse<T: Codable>: Codable {
+    let object: String
+    let data: [T]
+    let hasMore: Bool
 
-private struct LFDWorktreeResult: Codable {
-    let worktrees: [WorktreeJSON]
+    enum CodingKeys: String, CodingKey {
+        case object, data
+        case hasMore = "has_more"
+    }
 }

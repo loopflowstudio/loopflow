@@ -1,0 +1,3 @@
+- Not implementing idempotency key storage yet; POST/DELETE requests ignore Idempotency-Key for now.
+- Expand support is limited to expand[]=active_run on waves; other expansions (recent_steps, GitHub metadata) remain unimplemented.
+- /v1/worktrees returns only basic git worktree fields (branch/path/base_branch/prunable); staleness, CI, and recent steps are still sourced client-side.

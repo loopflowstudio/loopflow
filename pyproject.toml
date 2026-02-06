@@ -20,6 +20,10 @@ classifiers = [
     "Programming Language :: Rust",
     "Topic :: Software Development",
 ]
+dependencies = []
+
+[dependency-groups]
+dev = ["boto3", "maturin>=1.4,<2.0", "pyyaml>=6.0", "typer>=0.9"]
 
 [project.urls]
 Homepage = "https://loopflowstudio.github.io/loopflow/"

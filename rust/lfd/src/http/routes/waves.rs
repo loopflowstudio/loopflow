@@ -5,9 +5,10 @@ use serde::Deserialize;
 use time::OffsetDateTime;
 
 use crate::http::dto::{
-    LandWaveResponse, ListWavesResponse, RunWaveResponse, StopWaveResponse, WaveResponse,
+    DeletedResourceResponse, LandWaveResponse, ListResponse, RunWaveResponse, StopWaveResponse,
+    WaveDto,
 };
-use crate::http::routes::build_wave_view;
+use crate::http::routes::build_wave_dto;
 use crate::http::state::HttpState;
 use crate::http::{api_error, map_store_error, parse_id, run_store, ApiResult};
 use crate::id::LfdId;
@@ -17,6 +18,17 @@ use crate::types::{Event, Wave, WaveRun, WaveRunStatus};
 #[derive(Deserialize)]
 pub(crate) struct ListWavesQuery {
     repo: Option<String>,
+    limit: Option<u32>,
+    starting_after: Option<String>,
+    ending_before: Option<String>,
+    #[serde(rename = "expand[]")]
+    expand: Option<Vec<String>>,
+}
+
+#[derive(Deserialize, Default)]
+pub(crate) struct ExpandQuery {
+    #[serde(rename = "expand[]")]
+    expand: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -55,22 +67,33 @@ pub(crate) struct LandWaveRequest {
 pub async fn list_waves_handler(
     State(state): State<HttpState>,
     Query(query): Query<ListWavesQuery>,
-) -> ApiResult<ListWavesResponse> {
+) -> ApiResult<ListResponse<WaveDto>> {
     let waves = run_store(&state.store, move |store| {
         store.list_waves(query.repo.as_deref())
     })
     .await
     .map_err(map_store_error)?;
-    let views = crate::http::routes::build_wave_views(&state.store, waves)
+    let include_active_run = query
+        .expand
+        .as_ref()
+        .map(|values| values.iter().any(|value| value == "active_run"))
+        .unwrap_or(false);
+    let (waves, has_more) = paginate_waves(
+        waves,
+        query.limit,
+        query.starting_after.as_deref(),
+        query.ending_before.as_deref(),
+    );
+    let views = crate::http::routes::build_wave_dtos(&state.store, waves, include_active_run)
         .await
         .map_err(map_store_error)?;
-    Ok(Json(ListWavesResponse { waves: views }))
+    Ok(Json(ListResponse::new(views, has_more)))
 }
 
 pub async fn create_wave_handler(
     State(state): State<HttpState>,
     Json(payload): Json<CreateWaveRequest>,
-) -> ApiResult<WaveResponse> {
+) -> ApiResult<WaveDto> {
     let id = LfdId::new();
     let name = payload.name.unwrap_or_else(|| format!("wave-{}", id));
     let flow = payload.flow.unwrap_or_else(|| "ship".to_string());
@@ -93,32 +116,38 @@ pub async fn create_wave_handler(
         .event_hub
         .send(Event::wave_created(wave.id.clone(), wave.name.clone()));
 
-    let view = build_wave_view(&state.store, wave)
+    let view = build_wave_dto(&state.store, wave, false)
         .await
         .map_err(map_store_error)?;
-    Ok(Json(WaveResponse { wave: view }))
+    Ok(Json(view))
 }
 
 pub async fn get_wave_handler(
     State(state): State<HttpState>,
     Path(wave_id): Path<String>,
-) -> ApiResult<WaveResponse> {
+    Query(query): Query<ExpandQuery>,
+) -> ApiResult<WaveDto> {
     let wave_id = parse_id(&wave_id)?;
     let wave = run_store(&state.store, move |store| store.get_wave(&wave_id))
         .await
         .map_err(map_store_error)?
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
-    let view = build_wave_view(&state.store, wave)
+    let include_active_run = query
+        .expand
+        .as_ref()
+        .map(|values| values.iter().any(|value| value == "active_run"))
+        .unwrap_or(false);
+    let view = build_wave_dto(&state.store, wave, include_active_run)
         .await
         .map_err(map_store_error)?;
-    Ok(Json(WaveResponse { wave: view }))
+    Ok(Json(view))
 }
 
 pub async fn update_wave_handler(
     State(state): State<HttpState>,
     Path(wave_id): Path<String>,
     Json(payload): Json<UpdateWaveRequest>,
-) -> ApiResult<WaveResponse> {
+) -> ApiResult<WaveDto> {
     let wave_id = parse_id(&wave_id)?;
     let mut wave = run_store(&state.store, {
         let wave_id = wave_id.clone();
@@ -152,16 +181,16 @@ pub async fn update_wave_handler(
 
     state.event_hub.send(Event::wave_updated(wave.id.clone()));
 
-    let view = build_wave_view(&state.store, wave)
+    let view = build_wave_dto(&state.store, wave, false)
         .await
         .map_err(map_store_error)?;
-    Ok(Json(WaveResponse { wave: view }))
+    Ok(Json(view))
 }
 
 pub async fn delete_wave_handler(
     State(state): State<HttpState>,
     Path(wave_id): Path<String>,
-) -> ApiResult<serde_json::Value> {
+) -> ApiResult<DeletedResourceResponse> {
     let wave_id = parse_id(&wave_id)?;
     let wave_id_for_delete = wave_id.clone();
     run_store(&state.store, move |store| {
@@ -170,9 +199,13 @@ pub async fn delete_wave_handler(
     .await
     .map_err(map_store_error)?;
 
-    state.event_hub.send(Event::wave_deleted(wave_id));
+    state.event_hub.send(Event::wave_deleted(wave_id.clone()));
 
-    Ok(Json(serde_json::json!({ "deleted": true })))
+    Ok(Json(DeletedResourceResponse {
+        id: wave_id.to_string(),
+        object: "wave".to_string(),
+        deleted: true,
+    }))
 }
 
 pub async fn run_wave_handler(
@@ -387,4 +420,40 @@ fn create_wave_run_with_id(
     };
     store.create_wave_run(&run)?;
     Ok(run)
+}
+
+fn paginate_waves(
+    waves: Vec<Wave>,
+    limit: Option<u32>,
+    starting_after: Option<&str>,
+    ending_before: Option<&str>,
+) -> (Vec<Wave>, bool) {
+    let mut items = waves;
+    if let Some(starting_after) = starting_after {
+        if let Some(pos) = items
+            .iter()
+            .position(|wave| wave.id.to_string() == starting_after)
+        {
+            items = items.split_off(pos + 1);
+        }
+    }
+    if let Some(ending_before) = ending_before {
+        if let Some(pos) = items
+            .iter()
+            .position(|wave| wave.id.to_string() == ending_before)
+        {
+            items.truncate(pos);
+        }
+    }
+
+    let mut has_more = false;
+    if let Some(limit) = limit {
+        let limit = limit as usize;
+        if items.len() > limit {
+            items.truncate(limit);
+            has_more = true;
+        }
+    }
+
+    (items, has_more)
 }

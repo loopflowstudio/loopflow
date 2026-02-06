@@ -5,6 +5,7 @@ import Foundation
 public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
     public init() {}
     private let baseURL = lfdBaseURL
+    private let apiBaseURL = lfdApiBaseURL
 
     private var session: URLSession {
         let config = URLSessionConfiguration.default
@@ -26,7 +27,7 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
     /// List waves for a repository via HTTP API.
     /// The API normalizes worktree paths to their main repo.
     public func listWaves(repo: URL) async throws -> [Wave] {
-        var components = URLComponents(url: baseURL.appendingPathComponent("waves"), resolvingAgainstBaseURL: false)!
+        var components = URLComponents(url: apiBaseURL.appendingPathComponent("waves"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "repo", value: repo.path)]
 
         guard let url = components.url else {
@@ -53,9 +54,7 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
             }
 
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let ok = json["ok"] as? Bool, ok,
-                  let result = json["result"] as? [String: Any],
-                  let wavesData = result["waves"] as? [[String: Any]] else {
+                  let wavesData = json["data"] as? [[String: Any]] else {
                 LoggingService.lfd("listWaves: invalid JSON response")
                 return []
             }
@@ -72,7 +71,7 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
     // MARK: - WaveRuns
 
     public func listWaveRuns(waveId: String? = nil, repo: URL? = nil, limit: Int = 50) async throws -> [WaveRun] {
-        var components = URLComponents(url: baseURL.appendingPathComponent("wave-runs"), resolvingAgainstBaseURL: false)!
+        var components = URLComponents(url: apiBaseURL.appendingPathComponent("wave_runs"), resolvingAgainstBaseURL: false)!
         var queryItems: [URLQueryItem] = [URLQueryItem(name: "limit", value: String(limit))]
         if let waveId {
             queryItems.append(URLQueryItem(name: "wave_id", value: waveId))
@@ -103,9 +102,7 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
             }
 
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let ok = json["ok"] as? Bool, ok,
-                  let result = json["result"] as? [String: Any],
-                  let runsData = result["wave_runs"] as? [[String: Any]] else {
+                  let runsData = json["data"] as? [[String: Any]] else {
                 LoggingService.lfd("listWaveRuns: invalid JSON response")
                 return []
             }
@@ -140,7 +137,7 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
 
         // Create wave via lfd HTTP API with minimal config
         // User configures area, direction, flow in detail panel before running
-        var components = URLComponents(url: baseURL.appendingPathComponent("waves"), resolvingAgainstBaseURL: false)!
+        var components = URLComponents(url: apiBaseURL.appendingPathComponent("waves"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "repo", value: repo.path)]
 
         var request = URLRequest(url: components.url!)
@@ -175,16 +172,13 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
                 throw WaveServiceError.commandFailed("HTTP \(httpResponse.statusCode)")
             }
 
-            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let ok = json["ok"] as? Bool, ok,
-                  let result = json["result"] as? [String: Any],
-                  let waveData = result["wave"] as? [String: Any] else {
-                let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
-                LoggingService.lfd("createWave: invalid response error=\(errorMsg ?? "unknown")")
-                throw WaveServiceError.commandFailed(errorMsg ?? "Invalid response")
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                let errorMsg = parseErrorMessage(data) ?? "Invalid response"
+                LoggingService.lfd("createWave: invalid response error=\(errorMsg)")
+                throw WaveServiceError.commandFailed(errorMsg)
             }
 
-            let wave = parseWaveFromJSON(waveData)
+            let wave = parseWaveFromJSON(json)
             LoggingService.lfd("createWave: success id=\(wave.id) name=\(wave.name)")
             return wave
         } catch let error as WaveServiceError {
@@ -313,7 +307,7 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
 
     /// Update wave configuration (name, area, direction, flow, stimulus, paused).
     public func updateWave(_ id: String, config: WaveConfigUpdate) async throws -> Wave {
-        let url = baseURL.appendingPathComponent("waves/\(id)")
+        let url = apiBaseURL.appendingPathComponent("waves/\(id)")
 
         var request = URLRequest(url: url)
         request.httpMethod = "PATCH"
@@ -337,24 +331,21 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
 
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-            let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            let errorMsg = parseErrorMessage(data)
             throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
         }
 
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let ok = json["ok"] as? Bool, ok,
-              let result = json["result"] as? [String: Any],
-              let waveData = result["wave"] as? [String: Any] else {
-            let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            let errorMsg = parseErrorMessage(data)
             throw WaveServiceError.commandFailed(errorMsg ?? "Invalid response")
         }
 
-        return parseWaveFromJSON(waveData)
+        return parseWaveFromJSON(json)
     }
 
     /// Run wave, optionally with one-time overrides.
     public func run(_ id: String, overrides: RunOverrides?) async throws {
-        let url = baseURL.appendingPathComponent("waves/\(id)/run")
+        let url = apiBaseURL.appendingPathComponent("waves/\(id)/run")
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -381,19 +372,18 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
 
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-            let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            let errorMsg = parseErrorMessage(data)
             throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
         }
 
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let ok = json["ok"] as? Bool, ok else {
-            let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+        guard (try? JSONSerialization.jsonObject(with: data)) != nil else {
+            let errorMsg = parseErrorMessage(data)
             throw WaveServiceError.commandFailed(errorMsg ?? "Invalid response")
         }
     }
 
     public func connect(_ id: String) async throws -> ConnectionInfo {
-        let url = baseURL.appendingPathComponent("v1/waves/\(id)/connect")
+        let url = apiBaseURL.appendingPathComponent("waves/\(id)/connect")
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -433,7 +423,7 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
 
     /// Clone a wave with a new name.
     public func cloneWave(_ id: String, name: String?) async throws -> Wave {
-        let url = baseURL.appendingPathComponent("waves/\(id)/clone")
+        let url = apiBaseURL.appendingPathComponent("waves/\(id)/clone")
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -448,24 +438,21 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
 
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-            let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            let errorMsg = parseErrorMessage(data)
             throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
         }
 
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let ok = json["ok"] as? Bool, ok,
-              let result = json["result"] as? [String: Any],
-              let waveData = result["wave"] as? [String: Any] else {
-            let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            let errorMsg = parseErrorMessage(data)
             throw WaveServiceError.commandFailed(errorMsg ?? "Invalid response")
         }
 
-        return parseWaveFromJSON(waveData)
+        return parseWaveFromJSON(json)
     }
 
     /// Delete a wave.
     public func deleteWave(_ id: String) async throws {
-        let url = baseURL.appendingPathComponent("waves/\(id)")
+        let url = apiBaseURL.appendingPathComponent("waves/\(id)")
 
         var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
@@ -474,13 +461,12 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
 
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-            let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            let errorMsg = parseErrorMessage(data)
             throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
         }
 
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let ok = json["ok"] as? Bool, ok else {
-            let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+        guard (try? JSONSerialization.jsonObject(with: data)) != nil else {
+            let errorMsg = parseErrorMessage(data)
             throw WaveServiceError.commandFailed(errorMsg ?? "Invalid response")
         }
     }
@@ -488,7 +474,7 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
     /// Collapse all outstanding PRs for a wave into a single PR.
     /// Returns the new PR URL on success.
     public func collapsePRs(_ id: String) async throws -> CollapsePRsResult {
-        let url = baseURL.appendingPathComponent("waves/\(id)/collapse")
+        let url = apiBaseURL.appendingPathComponent("waves/\(id)/collapse")
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -498,7 +484,7 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
 
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-            let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            let errorMsg = parseErrorMessage(data)
             throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
         }
 
@@ -599,6 +585,20 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
             return [decoded]
         }
         return [str]
+    }
+
+    private func parseErrorMessage(_ data: Data) -> String? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        if let error = json["error"] as? String {
+            return error
+        }
+        if let error = json["error"] as? [String: Any],
+           let message = error["message"] as? String {
+            return message
+        }
+        return nil
     }
 
     private func runShellCommand(_ args: [String]) async throws {

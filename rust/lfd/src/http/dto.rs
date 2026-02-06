@@ -4,7 +4,7 @@ use time::OffsetDateTime;
 use crate::registration::RegistrationState;
 use crate::types::{Wave, WaveRun, WaveRunStatus};
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct HealthResponse {
     pub status: String,
     pub uptime_seconds: i64,
@@ -15,7 +15,7 @@ pub struct HealthResponse {
     pub registration: Option<RegistrationState>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct StatusResponse {
     pub pid: u32,
     pub waves_defined: u32,
@@ -27,7 +27,7 @@ pub struct StatusResponse {
     pub registration: Option<RegistrationState>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct MetricsResponse {
     pub waves_total: u32,
     pub waves_running: u32,
@@ -36,14 +36,41 @@ pub struct MetricsResponse {
     pub slots_total: u32,
 }
 
-#[derive(Serialize)]
-pub struct ErrorResponse {
-    pub error: String,
+#[derive(Debug, Serialize)]
+pub struct ErrorDetail {
+    #[serde(rename = "type")]
+    pub error_type: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub param: Option<String>,
 }
 
-#[derive(Serialize)]
-pub struct WaveSummaryDto {
+#[derive(Debug, Serialize)]
+pub struct ErrorResponse {
+    pub error: ErrorDetail,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ListResponse<T> {
+    pub object: String,
+    pub data: Vec<T>,
+    pub has_more: bool,
+}
+
+impl<T> ListResponse<T> {
+    pub fn new(data: Vec<T>, has_more: bool) -> Self {
+        Self {
+            object: "list".to_string(),
+            data,
+            has_more,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct WaveDto {
     pub id: String,
+    pub object: String,
     pub name: String,
     pub repo: String,
     pub flow: String,
@@ -51,12 +78,20 @@ pub struct WaveSummaryDto {
     pub area: Vec<String>,
     pub paused: bool,
     pub created_at: Option<String>,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_run: Option<WaveRunDto>,
 }
 
-#[derive(Serialize)]
-pub struct WaveRunSummaryDto {
+#[derive(Debug, Serialize)]
+pub struct WaveRunDto {
     pub id: String,
+    pub object: String,
     pub wave_id: String,
+    pub flow: String,
+    pub repo: String,
+    pub direction: Vec<String>,
+    pub area: Vec<String>,
     pub iteration: u32,
     pub step_index: u32,
     pub status: String,
@@ -66,40 +101,43 @@ pub struct WaveRunSummaryDto {
     pub ended_at: Option<String>,
     pub error: Option<String>,
     pub flow_parents: Vec<String>,
+    pub created_at: Option<String>,
 }
 
-#[derive(Serialize)]
-pub struct WaveViewDto {
-    pub wave: WaveSummaryDto,
-    pub status: String,
-    pub active_run: Option<WaveRunSummaryDto>,
-}
-
-#[derive(Serialize)]
-pub struct ListWavesResponse {
-    pub waves: Vec<WaveViewDto>,
-}
-
-#[derive(Serialize)]
-pub struct WaveResponse {
-    pub wave: WaveViewDto,
-}
-
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct RunWaveResponse {
     pub started: bool,
     pub wave_id: String,
     pub wave_run_id: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct StopWaveResponse {
     pub stopped: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct LandWaveResponse {
     pub merged: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeletedResourceResponse {
+    pub id: String,
+    pub object: String,
+    pub deleted: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WorktreeDto {
+    pub branch: String,
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_branch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prunable: Option<bool>,
 }
 
 pub fn format_datetime(datetime: Option<OffsetDateTime>) -> Option<String> {
@@ -108,10 +146,26 @@ pub fn format_datetime(datetime: Option<OffsetDateTime>) -> Option<String> {
         .ok()
 }
 
-pub fn wave_run_summary(run: WaveRun) -> WaveRunSummaryDto {
-    WaveRunSummaryDto {
+pub fn wave_run_dto(run: WaveRun, wave: Option<&Wave>) -> WaveRunDto {
+    let (flow, repo, direction, area) = wave
+        .map(|wave| {
+            (
+                wave.flow.clone(),
+                wave.repo.clone(),
+                wave.direction.clone(),
+                wave.area.clone(),
+            )
+        })
+        .unwrap_or_else(|| (String::new(), String::new(), Vec::new(), Vec::new()));
+
+    WaveRunDto {
         id: run.id.to_string(),
+        object: "wave_run".to_string(),
         wave_id: run.wave_id.to_string(),
+        flow,
+        repo,
+        direction,
+        area,
         iteration: run.iteration,
         step_index: run.step_index,
         status: wave_run_status_str(run.status),
@@ -121,12 +175,14 @@ pub fn wave_run_summary(run: WaveRun) -> WaveRunSummaryDto {
         ended_at: format_datetime(run.ended_at),
         error: run.error,
         flow_parents: run.flow_parents,
+        created_at: format_datetime(run.started_at),
     }
 }
 
-pub fn wave_summary(wave: &Wave) -> WaveSummaryDto {
-    WaveSummaryDto {
+pub fn wave_dto(wave: &Wave, status: String, active_run: Option<WaveRunDto>) -> WaveDto {
+    WaveDto {
         id: wave.id.to_string(),
+        object: "wave".to_string(),
         name: wave.name.clone(),
         repo: wave.repo.clone(),
         flow: wave.flow.clone(),
@@ -134,6 +190,8 @@ pub fn wave_summary(wave: &Wave) -> WaveSummaryDto {
         area: wave.area.clone(),
         paused: wave.paused,
         created_at: format_datetime(wave.created_at),
+        status,
+        active_run,
     }
 }
 

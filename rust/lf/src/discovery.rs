@@ -1,7 +1,31 @@
 use anyhow::Result;
-use loopflow_engine::Step;
+use loopflow_engine::{Flow, Step};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+
+// =============================================================================
+// Auto-dispatch: step or flow
+// =============================================================================
+
+#[derive(Debug)]
+pub enum Target {
+    Step(Step),
+    Flow(Flow),
+}
+
+/// Discover a step or flow by name. Tries step lookup first, falls back to flow.
+pub fn discover_target(repo: &Path, name: &str) -> Result<Target> {
+    match discover_step(repo, name) {
+        Ok(step) => Ok(Target::Step(step)),
+        Err(_) => match loopflow_engine::load_flow(name, repo) {
+            Ok(flow) => Ok(Target::Flow(flow)),
+            Err(_) => {
+                // Return the original step-not-found error for better messaging
+                Err(anyhow::anyhow!("step or flow not found: {name}"))
+            }
+        },
+    }
+}
 
 // =============================================================================
 // Built-in step metadata for formatted listing

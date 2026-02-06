@@ -2,7 +2,8 @@ use std::env;
 use std::sync::{Mutex, OnceLock};
 
 use lf::discovery::{
-    builtin_steps, list_all_steps, list_directions, list_flows_with_steps, BUILTIN_CATEGORIES,
+    builtin_steps, discover_target, list_all_steps, list_directions, list_flows_with_steps, Target,
+    BUILTIN_CATEGORIES,
 };
 use tempfile::TempDir;
 
@@ -104,6 +105,31 @@ fn discover_directions() {
     let directions = list_directions(Some(repo.path()));
     assert!(directions.contains(&"focus".to_string()));
     assert!(directions.contains(&"product-engineer".to_string()));
+}
+
+#[test]
+fn discover_target_finds_step() {
+    let _home = HomeGuard::new();
+    let repo = TempDir::new().expect("repo");
+    let target = discover_target(repo.path(), "debug").expect("should find builtin step");
+    assert!(matches!(target, Target::Step(_)));
+}
+
+#[test]
+fn discover_target_finds_flow() {
+    let _home = HomeGuard::new();
+    let repo = TempDir::new().expect("repo");
+    let target = discover_target(repo.path(), "ship").expect("should find builtin flow");
+    assert!(matches!(target, Target::Flow(_)));
+}
+
+#[test]
+fn discover_target_errors_for_unknown() {
+    let _home = HomeGuard::new();
+    let repo = TempDir::new().expect("repo");
+    let result = discover_target(repo.path(), "nonexistent");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("not found"));
 }
 
 #[test]

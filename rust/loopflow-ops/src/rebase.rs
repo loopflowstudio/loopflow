@@ -94,6 +94,7 @@ fn run_rebase_agent(repo: &Path, conflicts: &[String], progress: &impl Progress)
         chrome: config.chrome,
         cwd: Some(repo.to_path_buf()),
         context_file: None,
+        ..Default::default()
     };
 
     progress.status("Launching rebase assistant...");

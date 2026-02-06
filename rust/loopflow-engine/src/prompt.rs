@@ -910,16 +910,8 @@ fn get_default_base_ref(repo_root: &Path) -> String {
     "main".to_string()
 }
 
-/// Read clipboard content (macOS only).
 fn read_clipboard() -> Option<String> {
-    let output = Command::new("pbpaste").output().ok()?;
-    if output.status.success() {
-        let text = String::from_utf8_lossy(&output.stdout).to_string();
-        if !text.trim().is_empty() {
-            return Some(text);
-        }
-    }
-    None
+    crate::clipboard::read()
 }
 
 fn build_gitignore(repo_root: &Path) -> ignore::gitignore::Gitignore {

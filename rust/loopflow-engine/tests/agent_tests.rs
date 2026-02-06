@@ -81,6 +81,7 @@ fn base_config() -> LaunchConfig {
         chrome: false,
         cwd: None,
         context_file: None,
+        ..Default::default()
     }
 }
 

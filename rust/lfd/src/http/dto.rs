@@ -1,6 +1,7 @@
 use serde::Serialize;
 use time::OffsetDateTime;
 
+use crate::registration::RegistrationState;
 use crate::types::{Wave, WaveRun, WaveRunStatus};
 
 #[derive(Serialize)]
@@ -10,6 +11,8 @@ pub struct HealthResponse {
     pub database: bool,
     pub waves_running: u32,
     pub agents_active: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registration: Option<RegistrationState>,
 }
 
 #[derive(Serialize)]
@@ -20,6 +23,8 @@ pub struct StatusResponse {
     pub agents_active: u32,
     pub slots_used: u32,
     pub slots_total: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registration: Option<RegistrationState>,
 }
 
 #[derive(Serialize)]

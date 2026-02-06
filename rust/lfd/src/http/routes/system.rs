@@ -4,21 +4,25 @@ use time::OffsetDateTime;
 
 use crate::http::dto::{HealthResponse, MetricsResponse, StatusResponse};
 use crate::http::state::HttpState;
+use crate::registration::RegistrationState;
 use crate::types::{AgentStatus, WaveRunStatus};
 
 pub async fn health_handler(State(state): State<HttpState>) -> Json<HealthResponse> {
     let counts = counts(&state).await;
+    let registration = registration_state(&state).await;
     Json(HealthResponse {
         status: if counts.database_ok { "ok" } else { "degraded" }.to_string(),
         uptime_seconds: (OffsetDateTime::now_utc() - state.started_at).whole_seconds(),
         database: counts.database_ok,
         waves_running: counts.waves_running,
         agents_active: counts.agents_active,
+        registration,
     })
 }
 
 pub async fn status_handler(State(state): State<HttpState>) -> Json<StatusResponse> {
     let counts = counts(&state).await;
+    let registration = registration_state(&state).await;
     Json(StatusResponse {
         pid: std::process::id(),
         waves_defined: counts.waves_defined,
@@ -26,6 +30,7 @@ pub async fn status_handler(State(state): State<HttpState>) -> Json<StatusRespon
         agents_active: counts.agents_active,
         slots_used: state.scheduler.slots_used(),
         slots_total: state.scheduler.max_slots() as u32,
+        registration,
     })
 }
 
@@ -97,4 +102,9 @@ async fn counts(state: &HttpState) -> Counts {
         agents_active,
         database_ok,
     }
+}
+
+async fn registration_state(state: &HttpState) -> Option<RegistrationState> {
+    let client = state.registration.as_ref()?;
+    Some(client.status().await)
 }

@@ -103,3 +103,30 @@ fn next_detects_merged_pr_starts_fresh() {
     assert!(branch_exists(&repo, &result.new_branch));
     assert_eq!(repo.head_sha(), main_head);
 }
+
+#[test]
+fn next_appends_suffix_on_branch_name_collision() {
+    let gh_script = write_gh_script(None, None);
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str()), ("claude", MOCK_CLAUDE)]);
+    let repo = TestRepo::new();
+    // Schema {name} produces "wave" — but that branch already exists, triggering collision
+    repo.create_file(".lf/config.yaml", "branch_names:\n  schema: '{name}'\n");
+    repo.create_branch("wave");
+
+    let result = next_branch(
+        repo.path(),
+        &NextOptions {
+            block: false,
+            create_pr: false,
+            rebase: false,
+            wave_name: Some("wave".to_string()),
+        },
+        &NullProgress,
+    )
+    .expect("next should succeed despite name collision");
+
+    assert!(result.new_branch.starts_with("wave."));
+    assert!(result.new_branch.len() > "wave.".len());
+    assert!(branch_exists(&repo, &result.new_branch));
+    assert!(branch_exists(&repo, "wave"));
+}

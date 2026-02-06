@@ -334,10 +334,5 @@ pub fn default_base_ref(repo: &Path) -> OpsResult<String> {
 }
 
 fn open_url(url: &str) {
-    let open = if cfg!(target_os = "macos") {
-        "open"
-    } else {
-        "xdg-open"
-    };
-    let _ = Command::new(open).arg(url).status();
+    loopflow_engine::platform::open_url(url);
 }

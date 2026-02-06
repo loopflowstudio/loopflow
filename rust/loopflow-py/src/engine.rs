@@ -228,6 +228,7 @@ fn py_launch_agent(
         chrome,
         cwd: cwd.map(PathBuf::from),
         context_file: None,
+        ..Default::default()
     };
 
     match launch_agent(model, prompt, &config) {
@@ -462,6 +463,7 @@ fn run_step(
         chrome: config.chrome,
         cwd: Some(repo),
         context_file: None,
+        ..Default::default()
     };
 
     match launch_agent(model_str, &prompt, &launch_config) {

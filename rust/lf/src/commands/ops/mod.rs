@@ -611,17 +611,7 @@ fn copy_context(
 }
 
 fn copy_to_clipboard(text: &str) -> Result<()> {
-    use std::io::Write;
-
-    let mut child = Command::new("pbcopy")
-        .stdin(std::process::Stdio::piped())
-        .spawn()?;
-
-    if let Some(ref mut stdin) = child.stdin {
-        stdin.write_all(text.as_bytes())?;
-    }
-
-    child.wait()?;
+    loopflow_engine::clipboard::write(text)?;
     Ok(())
 }
 
@@ -656,11 +646,15 @@ fn doctor() -> Result<()> {
         all_ok = false;
     }
 
+    let is_macos = cfg!(target_os = "macos");
+
     // Optional: npm
     if which("npm") {
         println!("✓ npm");
-    } else {
+    } else if is_macos {
         println!("- npm: brew install node");
+    } else {
+        println!("- npm: https://nodejs.org/");
     }
 
     // Optional: coding agents
@@ -682,17 +676,19 @@ fn doctor() -> Result<()> {
         println!("- gemini: npm install -g @google/gemini-cli");
     }
 
-    // Optional: IDE/terminals
-    if which("warp") {
-        println!("✓ warp");
-    } else {
-        println!("- warp: brew install --cask warp");
-    }
+    // Optional: IDE/terminals (macOS-only apps)
+    if is_macos {
+        if which("warp") {
+            println!("✓ warp");
+        } else {
+            println!("- warp: brew install --cask warp");
+        }
 
-    if which("cursor") {
-        println!("✓ cursor");
-    } else {
-        println!("- cursor: brew install --cask cursor");
+        if which("cursor") {
+            println!("✓ cursor");
+        } else {
+            println!("- cursor: brew install --cask cursor");
+        }
     }
 
     // Optional: superpowers
@@ -708,8 +704,10 @@ fn doctor() -> Result<()> {
     // Optional: gh for PR creation
     if which("gh") {
         println!("✓ gh");
-    } else {
+    } else if is_macos {
         println!("- gh: brew install gh");
+    } else {
+        println!("- gh: https://cli.github.com/");
     }
 
     if all_ok {

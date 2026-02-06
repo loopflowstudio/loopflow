@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod builtins;
+pub mod clipboard;
 pub mod command;
 pub mod config;
 pub mod error;
@@ -7,7 +8,9 @@ pub mod event;
 pub mod flow;
 pub mod git;
 pub mod naming;
+pub mod platform;
 pub mod prompt;
+pub mod stream;
 pub mod worktree;
 pub mod worktrees;
 
@@ -28,4 +31,7 @@ pub use prompt::{
     format_context_prompt, format_prompt, format_task_prompt, gather_context, trim_context,
     trim_context_with_breakdown, write_prompt_log, ContextBreakdown, DiffTier, Document,
     GatherContextOpts, PromptComponents, DEFAULT_CONTEXT_BUDGET,
+};
+pub use stream::{
+    format_event, render_event, ParseResult, ResultSubtype, StreamEvent, StreamFormat, StreamParser,
 };

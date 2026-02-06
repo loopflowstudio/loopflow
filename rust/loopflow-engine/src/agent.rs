@@ -11,6 +11,7 @@ use std::time::Instant;
 
 use crate::config::parse_model;
 use crate::error::CoreError;
+use crate::stream::{format_event, ParseResult, StreamFormat, StreamParser};
 
 /// Result from launching a runner.
 #[derive(Debug, Clone, Default)]
@@ -38,6 +39,8 @@ pub struct LaunchConfig {
     /// Path to context file for system prompt loading (model-agnostic).
     /// For Claude, this uses --append-system-prompt-file.
     pub context_file: Option<std::path::PathBuf>,
+    /// How to display streaming output (Raw = dump JSON, Human = formatted).
+    pub stream_format: StreamFormat,
 }
 
 /// Build Claude CLI command.
@@ -225,7 +228,7 @@ pub fn launch_agent(
 
     if config.auto && config.stream {
         // Stream mode: capture stdout line by line
-        launch_streaming(&mut cmd)
+        launch_streaming(&mut cmd, config.stream_format)
     } else if config.auto {
         // Batch mode: capture all output
         launch_batch(&mut cmd)
@@ -268,7 +271,10 @@ fn launch_interactive(cmd: &mut Command) -> Result<LaunchResult, CoreError> {
     })
 }
 
-fn launch_streaming(cmd: &mut Command) -> Result<LaunchResult, CoreError> {
+fn launch_streaming(
+    cmd: &mut Command,
+    stream_format: StreamFormat,
+) -> Result<LaunchResult, CoreError> {
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
@@ -285,18 +291,18 @@ fn launch_streaming(cmd: &mut Command) -> Result<LaunchResult, CoreError> {
         .take()
         .ok_or_else(|| CoreError::ExecutionFailed("Failed to capture stderr".to_string()))?;
 
-    enum Stream {
+    enum StreamKind {
         Stdout,
         Stderr,
     }
 
-    let (tx, rx) = mpsc::channel::<(Stream, String)>();
+    let (tx, rx) = mpsc::channel::<(StreamKind, String)>();
 
     let tx_out = tx.clone();
     let stdout_handle = thread::spawn(move || {
         let reader = BufReader::new(stdout);
         for line in reader.lines().map_while(Result::ok) {
-            let _ = tx_out.send((Stream::Stdout, line));
+            let _ = tx_out.send((StreamKind::Stdout, line));
         }
     });
 
@@ -304,7 +310,7 @@ fn launch_streaming(cmd: &mut Command) -> Result<LaunchResult, CoreError> {
     let stderr_handle = thread::spawn(move || {
         let reader = BufReader::new(stderr);
         for line in reader.lines().map_while(Result::ok) {
-            let _ = tx_err.send((Stream::Stderr, line));
+            let _ = tx_err.send((StreamKind::Stderr, line));
         }
     });
 
@@ -313,6 +319,12 @@ fn launch_streaming(cmd: &mut Command) -> Result<LaunchResult, CoreError> {
     let mut stdout_content = String::new();
     let mut stderr_content = String::new();
     let mut logged_first_output = false;
+    let mut parser = StreamParser::new();
+
+    let use_color = match stream_format {
+        StreamFormat::Human(c) => Some(c),
+        StreamFormat::Raw => None,
+    };
 
     for (stream, line) in rx {
         if !logged_first_output {
@@ -323,12 +335,20 @@ fn launch_streaming(cmd: &mut Command) -> Result<LaunchResult, CoreError> {
             logged_first_output = true;
         }
         match stream {
-            Stream::Stdout => {
-                println!("{line}");
+            StreamKind::Stdout => {
+                if let Some(color) = use_color {
+                    match parser.feed_line(&line) {
+                        ParseResult::Event(event) => format_event(&event, color),
+                        ParseResult::Skipped => {}
+                        ParseResult::Passthrough => println!("{line}"),
+                    }
+                } else {
+                    println!("{line}");
+                }
                 stdout_content.push_str(&line);
                 stdout_content.push('\n');
             }
-            Stream::Stderr => {
+            StreamKind::Stderr => {
                 eprintln!("{line}");
                 stderr_content.push_str(&line);
                 stderr_content.push('\n');

@@ -5,19 +5,27 @@ use std::sync::Arc;
 use tokio::signal;
 use tokio_util::sync::CancellationToken;
 
+mod auth;
+mod config;
+mod credentials;
 mod events;
 mod executor;
 mod http;
 mod id;
 mod loops;
+mod machine_id;
 mod obs;
 mod output;
+mod registration;
 mod scheduler;
 mod sessions;
 mod store;
 mod types;
 
+use crate::auth::AuthContext;
+use crate::config::LfdConfig;
 use crate::events::EventHub;
+use crate::registration::{ConnectionValidator, RegistrationClient};
 use executor::WaveExecutor;
 use http::HttpState;
 use output::OutputHub;
@@ -60,6 +68,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or_else(default_max_slots);
 
+    // Load config and set up auth.
+    let lfd_config = LfdConfig::load();
+    let requires_auth = !http_addr.ip().is_loopback();
+    let cancel = CancellationToken::new();
+
+    let (registration_client, auth_context, registration_creds) = if requires_auth {
+        setup_registration(&lfd_config, cancel.clone()).await
+    } else {
+        (None, AuthContext::inactive(), None)
+    };
+
     let store = match storage.as_str() {
         "postgres" => {
             let database_url = std::env::var("LFD_DATABASE_URL")
@@ -72,7 +91,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let output = OutputHub::new(2048);
     let event_hub = EventHub::new(1024);
     let executor = WaveExecutor::new(store.clone(), scheduler.clone(), output.clone());
-    let cancel = CancellationToken::new();
     let loop_handles =
         scheduler
             .clone()
@@ -84,13 +102,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         executor: Arc::new(executor),
         event_hub,
         output_hub: output,
+        auth: auth_context,
+        registration: registration_client.clone(),
         started_at: time::OffsetDateTime::now_utc(),
     };
     let http_router = http::router(http_state);
 
     let http_task = tokio::spawn(async move {
         let listener = tokio::net::TcpListener::bind(http_addr).await?;
-        axum::serve(listener, http_router).await
+        tracing::info!(addr = %http_addr, "listening");
+        axum::serve(
+            listener,
+            http_router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
     });
 
     tokio::select! {
@@ -102,12 +127,60 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Deregister on shutdown.
+    if let (Some(client), Some((jwt, mid))) = (&registration_client, &registration_creds) {
+        tracing::info!("deregistering from loopflow.studio");
+        client.deregister(jwt, mid).await;
+    }
+
     cancel.cancel();
     for handle in loop_handles {
         let _ = handle.await;
     }
 
     Ok(())
+}
+
+/// Set up registration with auth.loopflow.studio.
+///
+/// Requires a JWT in `~/.lf/credentials.json`. If the JWT is missing or
+/// registration fails, lfd exits — you can't serve on a public address
+/// without auth.
+async fn setup_registration(
+    config: &LfdConfig,
+    cancel: CancellationToken,
+) -> (
+    Option<RegistrationClient>,
+    AuthContext,
+    Option<(String, String)>,
+) {
+    let Some(jwt) = credentials::load_jwt() else {
+        tracing::error!(
+            "non-loopback bind address requires auth — \
+             add your JWT to ~/.lf/credentials.json"
+        );
+        std::process::exit(1);
+    };
+
+    let mid = machine_id::machine_id();
+    let machine_name = machine_id::machine_name();
+    let base_url = &config.auth.base_url;
+
+    let client = RegistrationClient::new(base_url);
+    let validator = ConnectionValidator::new(base_url);
+
+    match client.register(&jwt, &mid, &machine_name).await {
+        Ok(_token) => {
+            tracing::info!(machine_name = %machine_name, "registered with loopflow.studio");
+            let auth = AuthContext::new(true, validator);
+            client.start_heartbeat(jwt.clone(), mid.clone(), cancel);
+            (Some(client), auth, Some((jwt, mid)))
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "registration with loopflow.studio failed");
+            std::process::exit(1);
+        }
+    }
 }
 
 fn default_db_path() -> PathBuf {

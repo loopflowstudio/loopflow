@@ -130,6 +130,7 @@ fn run_lint_agent(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
         chrome: config.chrome,
         cwd: Some(repo.to_path_buf()),
         context_file: None,
+        ..Default::default()
     };
 
     progress.status("Launching lint fixer...");

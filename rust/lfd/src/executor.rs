@@ -569,6 +569,7 @@ fn build_step_prompt(
         chrome: config.chrome,
         cwd: Some(PathBuf::from(worktree)),
         context_file: None,
+        ..Default::default()
     };
 
     Ok((prompt, model, launch))

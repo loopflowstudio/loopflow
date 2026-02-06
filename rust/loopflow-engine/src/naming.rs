@@ -77,7 +77,7 @@ fn generate_word_pair_with_rng<R: Rng + ?Sized>(rng: &mut R) -> String {
     format!("{magical}-{musical}")
 }
 
-fn generate_word_pair() -> String {
+pub fn generate_word_pair() -> String {
     let mut rng = rand::thread_rng();
     generate_word_pair_with_rng(&mut rng)
 }

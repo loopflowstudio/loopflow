@@ -6,7 +6,7 @@ use loopflow_engine::{
     check_cli_available, drop_native_instruction_docs, format_context_prompt, format_prompt,
     format_task_prompt, gather_context, launch_agent, load_config_or_default, parse_model,
     trim_context_with_breakdown, write_prompt_log, Config, ContextBreakdown, GatherContextOpts,
-    LaunchConfig, PromptComponents, DEFAULT_CONTEXT_BUDGET,
+    LaunchConfig, PromptComponents, StreamFormat, DEFAULT_CONTEXT_BUDGET,
 };
 use std::path::PathBuf;
 use std::time::Instant;
@@ -251,6 +251,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
         "wrote context log"
     );
 
+    let use_color = std::env::var("NO_COLOR").is_err() && atty::is(atty::Stream::Stderr);
     let launch_config = LaunchConfig {
         auto: !built.is_interactive,
         stream: !built.is_interactive,
@@ -259,6 +260,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
         chrome: cli.chrome_setting().unwrap_or(built.config.chrome),
         cwd: Some(built.repo_root.clone()),
         context_file,
+        stream_format: StreamFormat::Human(use_color),
     };
     debug!(?launch_config, "launching agent");
 

@@ -3,9 +3,11 @@ pub mod routes;
 pub mod state;
 
 use axum::http::StatusCode;
+use axum::middleware;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 
+use crate::auth;
 use crate::http::dto::ErrorResponse;
 use crate::http::routes::{hooks, system, waves, ws};
 use crate::id::LfdId;
@@ -16,24 +18,41 @@ pub use state::HttpState;
 pub type ApiResult<T> = Result<Json<T>, (StatusCode, Json<ErrorResponse>)>;
 
 pub fn router(state: HttpState) -> Router {
-    Router::new()
-        .route("/health", get(system::health_handler))
-        .route("/status", get(system::status_handler))
-        .route("/metrics", get(system::metrics_handler))
+    // API routes — protected by auth middleware.
+    let api_routes = Router::new()
         .route(
-            "/api/waves",
+            "/waves",
             get(waves::list_waves_handler).post(waves::create_wave_handler),
         )
         .route(
-            "/api/waves/:wave_id",
+            "/waves/:wave_id",
             get(waves::get_wave_handler)
                 .patch(waves::update_wave_handler)
                 .delete(waves::delete_wave_handler),
         )
-        .route("/api/waves/:wave_id/run", post(waves::run_wave_handler))
-        .route("/api/waves/:wave_id/stop", post(waves::stop_wave_handler))
-        .route("/api/waves/:wave_id/land", post(waves::land_wave_handler))
+        .route("/waves/:wave_id/run", post(waves::run_wave_handler))
+        .route("/waves/:wave_id/stop", post(waves::stop_wave_handler))
+        .route("/waves/:wave_id/land", post(waves::land_wave_handler))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::auth_middleware,
+        ));
+
+    // Status + WebSocket — also auth-protected.
+    let protected_routes = Router::new()
+        .route("/status", get(system::status_handler))
         .route("/ws", get(ws::ws_handler))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::auth_middleware,
+        ));
+
+    Router::new()
+        // Unauthenticated: health probes, metrics, git hooks.
+        .route("/health", get(system::health_handler))
+        .route("/metrics", get(system::metrics_handler))
+        .nest("/api/v1", api_routes)
+        .merge(protected_routes)
         .route("/hooks/git", post(hooks::git_hook_handler))
         .with_state(state)
 }

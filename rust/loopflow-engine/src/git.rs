@@ -297,8 +297,8 @@ pub fn worktree_add(
         ],
     )?;
     if !output.status.success() {
-        // Apple Git 2.50.1 returns exit code 1 even on successful creation.
-        // Verify the worktree was actually created before reporting failure.
+        // A failing post-checkout hook causes git to exit non-zero even when
+        // the worktree was created successfully. Verify before reporting failure.
         if path.join(".git").exists() {
             return Ok(());
         }

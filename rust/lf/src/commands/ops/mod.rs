@@ -636,14 +636,11 @@ fn doctor() -> Result<()> {
         println!("- not in a git repo");
     }
 
-    let mut all_ok = true;
-
-    // Required: worktrunk (wt)
+    // Optional: worktrunk (wt)
     if which("wt") {
         println!("✓ wt");
     } else {
-        println!("✗ wt - Run: lf init");
-        all_ok = false;
+        println!("- wt: brew install max-sixty/worktrunk/wt");
     }
 
     let is_macos = cfg!(target_os = "macos");
@@ -710,11 +707,7 @@ fn doctor() -> Result<()> {
         println!("- gh: https://cli.github.com/");
     }
 
-    if all_ok {
-        Ok(())
-    } else {
-        Err(anyhow!("some required dependencies are missing"))
-    }
+    Ok(())
 }
 
 fn which(cmd: &str) -> bool {

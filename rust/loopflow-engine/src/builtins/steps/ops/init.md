@@ -24,7 +24,7 @@ which npm     # Node.js (needed for coding agents)
 which claude  # Claude Code
 which codex   # Codex CLI
 which gemini  # Gemini CLI
-which wt      # worktrunk
+which wt      # worktrunk (optional)
 test -f .lf/config.yaml && echo "config exists"
 test -d ~/.superpowers && echo "superpowers exists"
 ```
@@ -35,7 +35,7 @@ Checking environment...
 ✓ Homebrew
 ✓ Node.js
 ✓ Claude Code (coding agent)
-✗ worktrunk (required)
+- worktrunk (optional)
 - superpowers (optional)
 
 Config: not initialized
@@ -63,9 +63,10 @@ If no coding agent is installed (none of claude, codex, or gemini found):
   - Skip: explain they need to install one manually before using loopflow
 
 If worktrunk is missing:
-- Ask: "worktrunk is required for worktree management. Install it?"
+- Mention: "worktrunk is optional. Loopflow has built-in worktree management via `lf ops wt`."
+- Ask: "Install worktrunk anyway? It provides `wt list` for quick worktree overview."
 - Yes: `brew install max-sixty/worktrunk/wt`
-- No: explain they can install it manually later with that command
+- No: skip
 
 ## Phase 3: Configure repository
 

@@ -133,6 +133,7 @@ fn finalize_remote(repo_root: &Path, progress: &impl Progress) -> OpsResult<()> 
     enable_auto_merge(repo_root, &message.title, &message.body)?;
 
     if let Some(url) = current_pr_url(repo_root)? {
+        progress.status(&format!("\n{url}\n"));
         open_url(&url);
     }
 

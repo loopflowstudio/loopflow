@@ -309,6 +309,7 @@ public struct Wave: Sendable, Identifiable, Hashable {
         case .idle: return "Idle"
         case .completed: return "Completed"
         case .error: return "Error"
+        case .paused: return "Paused"
         }
     }
 
@@ -344,6 +345,8 @@ public struct Wave: Sendable, Identifiable, Hashable {
                 return ("clock", .gray)
             }
             return ("circle", .gray)
+        case .paused:
+            return ("pause.circle", .gray)
         }
     }
 

@@ -34,7 +34,7 @@ uv pip install loopflow
 ```
 
 ```python
-import loopflow
+import loopflow.api as loopflow
 
 loopflow.waves()
 loopflow.create_wave("engbot", repo=".", flow="ship", direction=["product-engineer"])
@@ -174,9 +174,9 @@ Directions compose. A `product-engineer` direction sets intent. A `designer` dir
 The path you pass to `lfq`/`loopflow` when configuring waves. Scopes what the wave works on.
 
 ```bash
-lfq create shipper --repo .
+lfq create shipper .
 python - <<'PY'
-import loopflow
+import loopflow.api as loopflow
 
 loopflow.update_wave("shipper", flow="ship", area=["src/api/"])
 loopflow.run_wave("shipper")
@@ -187,7 +187,7 @@ Combined with flow and direction, area defines the wave:
 
 ```bash
 python - <<'PY'
-import loopflow
+import loopflow.api as loopflow
 
 loopflow.update_wave("shipper", flow="ship", area=["src/api/"], direction=["product-engineer"])
 loopflow.run_wave("shipper")

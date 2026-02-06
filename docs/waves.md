@@ -9,7 +9,7 @@ A wave is **area × direction × flow**. Stimuli (triggers) are separate entitie
 
 ```bash
 python - <<'PY'
-import loopflow
+import loopflow.api as loopflow
 
 loopflow.create_wave("shipper", repo=".", flow="ship", direction=["product-engineer"], area=["src/api/"])
 loopflow.run_wave("shipper")
@@ -33,7 +33,7 @@ Single execution. Run a flow once then stop.
 
 ```bash
 python - <<'PY'
-import loopflow
+import loopflow.api as loopflow
 
 loopflow.create_wave("runner", repo=".", flow="ship", area=["swift/"])
 loopflow.run_wave("runner")
@@ -46,7 +46,7 @@ Continuous work. Each iteration picks a task, runs the flow, creates a PR.
 
 ```bash
 python - <<'PY'
-import loopflow
+import loopflow.api as loopflow
 
 loopflow.create_wave("looper", repo=".", flow="ship", area=["src/"])
 loopflow.update_wave("looper", stimulus=loopflow.Stimulus(kind="loop"))
@@ -62,7 +62,7 @@ React to changes. When files in the area change on main, activates one iteration
 
 ```bash
 python - <<'PY'
-import loopflow
+import loopflow.api as loopflow
 
 loopflow.create_wave("watcher", repo=".", flow="ship", area=["src/api/"])
 loopflow.update_wave("watcher", stimulus=loopflow.Stimulus(kind="watch"))
@@ -78,7 +78,7 @@ Run on schedule. 24-hour grace period for laptops.
 
 ```bash
 python - <<'PY'
-import loopflow
+import loopflow.api as loopflow
 
 loopflow.create_wave("cronner", repo=".", flow="ship", area=["."])
 loopflow.update_wave("cronner", stimulus=loopflow.Stimulus(kind="cron", cron="0 9 * * *"))
@@ -93,7 +93,7 @@ A wave can have multiple stimuli. Any stimulus firing activates the wave.
 ```bash
 # Start with a watch stimulus
 python - <<'PY'
-import loopflow
+import loopflow.api as loopflow
 
 loopflow.create_wave("swift-falcon", repo=".", flow="ship", area=["src/"])
 loopflow.update_wave("swift-falcon", stimulus=loopflow.Stimulus(kind="watch"))
@@ -102,7 +102,7 @@ PY
 
 # Add a cron trigger too (9am daily)
 python - <<'PY'
-import loopflow
+import loopflow.api as loopflow
 
 loopflow.update_wave("swift-falcon", stimulus=loopflow.Stimulus(kind="cron", cron="0 9 * * *"))
 PY
@@ -112,7 +112,7 @@ lfq show swift-falcon
 
 # Disable one trigger
 python - <<'PY'
-import loopflow
+import loopflow.api as loopflow
 
 loopflow.update_wave("swift-falcon", status="paused")
 PY
@@ -137,7 +137,7 @@ Run exactly one iteration using the once stimulus:
 
 ```bash
 python - <<'PY'
-import loopflow
+import loopflow.api as loopflow
 
 loopflow.create_wave("runner", repo=".", flow="ship", area=["src/"])
 loopflow.run_wave("runner")

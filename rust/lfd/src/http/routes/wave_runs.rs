@@ -3,17 +3,17 @@ use std::collections::{HashMap, HashSet};
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::http::header;
-use axum::Json;
 use axum::response::Response;
+use axum::Json;
 use bytes::Bytes;
 use futures_util::StreamExt;
 use serde::Deserialize;
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 
 use crate::http::dto::{wave_run_dto, ListResponse, WaveRunDto};
+use crate::http::routes::{pr_for_run, resolve_wave_id};
 use crate::http::state::HttpState;
 use crate::http::{map_store_error, run_store, ApiResult};
-use crate::http::routes::{pr_for_run, resolve_wave_id};
 use crate::id::LfdId;
 use crate::output::OutputEvent;
 use crate::types::{Wave, WaveRun};
@@ -46,7 +46,13 @@ pub async fn list_wave_runs_for_wave_handler(
 pub async fn wave_logs_handler(
     State(state): State<HttpState>,
     Path(wave_id): Path<String>,
-) -> Result<Response, (axum::http::StatusCode, Json<crate::http::dto::ErrorResponse>)> {
+) -> Result<
+    Response,
+    (
+        axum::http::StatusCode,
+        Json<crate::http::dto::ErrorResponse>,
+    ),
+> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
     let output_rx = state.output_hub.subscribe();
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(128);
@@ -79,12 +85,7 @@ pub async fn wave_logs_handler(
                 matches
             };
 
-            if include
-                && tx
-                    .send(Ok(Bytes::from(format!("{text}\n"))))
-                    .await
-                    .is_err()
-            {
+            if include && tx.send(Ok(Bytes::from(format!("{text}\n")))).await.is_err() {
                 break;
             }
         }
@@ -93,9 +94,10 @@ pub async fn wave_logs_handler(
     let stream = ReceiverStream::new(rx);
     let body = Body::from_stream(stream);
     let mut response = Response::new(body);
-    response
-        .headers_mut()
-        .insert(header::CONTENT_TYPE, header::HeaderValue::from_static("text/plain"));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        header::HeaderValue::from_static("text/plain"),
+    );
     Ok(response)
 }
 

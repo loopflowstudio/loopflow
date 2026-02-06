@@ -7,15 +7,16 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-import loopflow
+from loopflow import api
 from loopflow.errors import LoopflowError
+from loopflow.models import Wave
 
 
 app = typer.Typer(help="Query lfd and manage waves.")
 console = Console()
 
 
-def _wave_table(waves: list[loopflow.Wave]) -> Table:
+def _wave_table(waves: list[Wave]) -> Table:
     table = Table(show_header=True, header_style="bold")
     table.add_column("name")
     table.add_column("status")
@@ -38,10 +39,10 @@ def main(ctx: typer.Context, json_output: bool = typer.Option(False, "--json", "
     if ctx.invoked_subcommand is not None:
         return
 
-    status = loopflow.status()
-    waves = loopflow.waves()
+    status = api.status()
+    waves = api.waves()
     if json_output:
-        typer.echo(json.dumps({"status": status, "waves": [w.model_dump() for w in waves]}, indent=2))
+        typer.echo(json.dumps({"status": status, "waves": [w.model_dump(mode="json") for w in waves]}, indent=2))
         return
 
     console.print(
@@ -60,9 +61,9 @@ def list_waves(
     repo: Optional[str] = None,
     json_output: bool = typer.Option(False, "--json", "-j"),
 ) -> None:
-    waves = loopflow.waves(repo=repo)
+    waves = api.waves(repo=repo)
     if json_output:
-        typer.echo(json.dumps([wave.model_dump() for wave in waves], indent=2))
+        typer.echo(json.dumps([wave.model_dump(mode="json") for wave in waves], indent=2))
         return
     if waves:
         console.print(_wave_table(waves))
@@ -72,11 +73,12 @@ def list_waves(
 
 @app.command("show")
 def show_wave(name_or_id: str, json_output: bool = typer.Option(False, "--json", "-j")) -> None:
-    wave = loopflow.wave(name_or_id)
+    wave = api.wave(name_or_id)
     if wave is None:
+        typer.echo(f"wave not found: {name_or_id}", err=True)
         raise typer.Exit(code=1)
     if json_output:
-        typer.echo(json.dumps(wave.model_dump(), indent=2))
+        typer.echo(json.dumps(wave.model_dump(mode="json"), indent=2))
         return
 
     data = wave.model_dump()
@@ -101,34 +103,34 @@ def create_wave(
     direction: Optional[list[str]] = typer.Option(None, "--direction", "-d"),
     area: Optional[list[str]] = typer.Option(None, "--area", "-a"),
 ) -> None:
-    wave = loopflow.create_wave(name, repo, flow=flow, direction=direction, area=area)
-    typer.echo(json.dumps(wave.model_dump(), indent=2))
+    wave = api.create_wave(name, repo, flow=flow, direction=direction, area=area)
+    typer.echo(json.dumps(wave.model_dump(mode="json"), indent=2))
 
 
 @app.command("run")
 def run_wave(name_or_id: str) -> None:
-    loopflow.run_wave(name_or_id)
+    api.run_wave(name_or_id)
 
 
 @app.command("stop")
 def stop_wave(name_or_id: str) -> None:
-    loopflow.stop_wave(name_or_id)
+    api.stop_wave(name_or_id)
 
 
 @app.command("delete")
 def delete_wave(name_or_id: str) -> None:
-    loopflow.delete_wave(name_or_id)
+    api.delete_wave(name_or_id)
 
 
 @app.command("land")
 def land_wave(name_or_id: str) -> None:
-    loopflow.land_wave(name_or_id)
+    api.land_wave(name_or_id)
 
 
 @app.command("logs")
 def logs_wave(name_or_id: str) -> None:
     try:
-        for line in loopflow.wave_logs(name_or_id):
+        for line in api.wave_logs(name_or_id):
             typer.echo(line)
     except LoopflowError as exc:
         typer.echo(str(exc), err=True)

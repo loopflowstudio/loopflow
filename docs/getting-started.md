@@ -107,9 +107,9 @@ lf ops land    # submit to merge queue
 Run waves overnight, review PRs when you wake.
 
 ```bash
-lfq create shipper --repo .
+lfq create shipper .
 python - <<'PY'
-import loopflow
+import loopflow.api as loopflow
 
 loopflow.update_wave("shipper", flow="ship", area=["src/"])
 loopflow.run_wave("shipper")

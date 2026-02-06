@@ -5,8 +5,6 @@ import Foundation
 
 public struct WorktreeService: @unchecked Sendable {
     public init() {}
-    private let baseURL = lfdBaseURL
-    private let apiBaseURL = lfdApiBaseURL
 
     private var session: URLSession {
         let config = URLSessionConfiguration.default
@@ -101,51 +99,8 @@ public struct WorktreeService: @unchecked Sendable {
     public func list(in repoURL: URL, full: Bool = true) async throws -> [Worktree] {
         let startTime = CFAbsoluteTimeGetCurrent()
 
-        // Try lfd HTTP endpoint first (includes staleness, recent steps, CI - no need for multi-pass)
-        if let worktrees = await listViaLFD(in: repoURL) {
-            let totalTime = Int((CFAbsoluteTimeGetCurrent() - startTime) * 1000)
-            LoggingService.append("worktrees.list source=lfd count=\(worktrees.count) total_ms=\(totalTime)")
-            return worktrees
-        }
-
         // Fall back to CLI
         return try await listViaCLI(in: repoURL, full: full, startTime: startTime)
-    }
-
-    private func listViaLFD(in repoURL: URL) async -> [Worktree]? {
-        let t0 = CFAbsoluteTimeGetCurrent()
-        var components = URLComponents(url: apiBaseURL.appendingPathComponent("worktrees"), resolvingAgainstBaseURL: false)!
-        components.queryItems = [URLQueryItem(name: "repo", value: repoURL.path())]
-
-        guard let url = components.url else {
-            return nil
-        }
-
-        let jsonWorktrees: [WorktreeJSON]
-        do {
-            let (data, response) = try await session.data(from: url)
-            guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200 else {
-                return nil
-            }
-
-            let decoded = try JSONDecoder().decode(LFDListResponse<WorktreeJSON>.self, from: data)
-            jsonWorktrees = decoded.data
-        } catch {
-            LoggingService.append("lfd.http error=\(error.localizedDescription)", category: LoggingService.Category.lfd)
-            return nil
-        }
-
-        let cmdTime = Int((CFAbsoluteTimeGetCurrent() - t0) * 1000)
-        LoggingService.append("worktrees.list source=lfd http_ms=\(cmdTime) count=\(jsonWorktrees.count)")
-
-        // lfd provides staleness and recent steps, no need for separate session lookup
-        var worktrees: [Worktree] = []
-        for json in jsonWorktrees where json.kind != "branch" {
-            let hasWorkspace = checkForCodeWorkspace(at: URL(fileURLWithPath: json.path))
-            worktrees.append(Worktree(from: json, hasCodeWorkspace: hasWorkspace))
-        }
-        return worktrees
     }
 
     private func listViaCLI(in repoURL: URL, full: Bool, startTime: CFAbsoluteTime) async throws -> [Worktree] {
@@ -567,17 +522,5 @@ public struct WorktreeService: @unchecked Sendable {
             }
         }
         return branches
-    }
-}
-
-// Response types matching lfd HTTP API
-private struct LFDListResponse<T: Codable>: Codable {
-    let object: String
-    let data: [T]
-    let hasMore: Bool
-
-    enum CodingKeys: String, CodingKey {
-        case object, data
-        case hasMore = "has_more"
     }
 }

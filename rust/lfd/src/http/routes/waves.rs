@@ -5,8 +5,8 @@ use serde::Deserialize;
 use time::OffsetDateTime;
 
 use crate::http::dto::{
-    ContinueWaveResponse, DeletedResourceResponse, LandWaveResponse, ListResponse,
-    RunWaveResponse, StopWaveResponse, WaveDto,
+    ContinueWaveResponse, DeletedResourceResponse, LandWaveResponse, ListResponse, RunWaveResponse,
+    StopWaveResponse, WaveDto,
 };
 use crate::http::routes::{build_wave_dto, resolve_wave_id};
 use crate::http::state::HttpState;
@@ -21,14 +21,53 @@ pub(crate) struct ListWavesQuery {
     limit: Option<u32>,
     starting_after: Option<String>,
     ending_before: Option<String>,
-    #[serde(rename = "expand[]")]
-    expand: Option<Vec<String>>,
+    #[serde(default, rename = "expand[]")]
+    expand: ExpandParam,
 }
 
 #[derive(Deserialize, Default)]
 pub(crate) struct ExpandQuery {
-    #[serde(rename = "expand[]")]
-    expand: Option<Vec<String>>,
+    #[serde(default, rename = "expand[]")]
+    expand: ExpandParam,
+}
+
+/// Accept `expand[]=value` as either a single string or repeated params.
+#[derive(Default, Clone)]
+pub(crate) struct ExpandParam(Vec<String>);
+
+impl ExpandParam {
+    fn contains(&self, value: &str) -> bool {
+        self.0.iter().any(|v| v == value)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ExpandParam {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de;
+
+        struct ExpandVisitor;
+        impl<'de> de::Visitor<'de> for ExpandVisitor {
+            type Value = ExpandParam;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a string or list of strings")
+            }
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<ExpandParam, E> {
+                Ok(ExpandParam(vec![v.to_string()]))
+            }
+            fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<ExpandParam, A::Error> {
+                let mut values = Vec::new();
+                while let Some(v) = seq.next_element::<String>()? {
+                    values.push(v);
+                }
+                Ok(ExpandParam(values))
+            }
+        }
+
+        deserializer.deserialize_any(ExpandVisitor)
+    }
 }
 
 #[derive(Deserialize)]
@@ -75,9 +114,7 @@ pub async fn list_waves_handler(
     .map_err(map_store_error)?;
     let include_active_run = query
         .expand
-        .as_ref()
-        .map(|values| values.iter().any(|value| value == "active_run"))
-        .unwrap_or(false);
+        .contains("active_run");
     let (waves, has_more) = paginate_waves(
         waves,
         query.limit,
@@ -134,9 +171,7 @@ pub async fn get_wave_handler(
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
     let include_active_run = query
         .expand
-        .as_ref()
-        .map(|values| values.iter().any(|value| value == "active_run"))
-        .unwrap_or(false);
+        .contains("active_run");
     let view = build_wave_dto(&state.store, wave, include_active_run)
         .await
         .map_err(map_store_error)?;
@@ -384,10 +419,7 @@ pub async fn continue_wave_handler(
     let worktree_path = worktree.clone();
     let step_name_for_commit = step_name.clone();
     tokio::task::spawn_blocking(move || {
-        auto_commit_if_dirty(
-            std::path::Path::new(&worktree_path),
-            &step_name_for_commit,
-        )
+        auto_commit_if_dirty(std::path::Path::new(&worktree_path), &step_name_for_commit)
     })
     .await
     .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
@@ -532,10 +564,7 @@ fn resolve_current_step_name(wave: &Wave, step_index: u32) -> String {
     name.unwrap_or_else(|| format!("step-{step_index}"))
 }
 
-fn auto_commit_if_dirty(
-    worktree: &std::path::Path,
-    step_name: &str,
-) -> Result<(), String> {
+fn auto_commit_if_dirty(worktree: &std::path::Path, step_name: &str) -> Result<(), String> {
     use loopflow_engine::git::{commit, is_clean, stage_all};
     if is_clean(worktree).map_err(|e| e.to_string())? {
         return Ok(());

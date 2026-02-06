@@ -150,29 +150,13 @@ pub struct DeletedResourceResponse {
     pub deleted: bool,
 }
 
-#[derive(Debug, Serialize)]
-pub struct WorktreeDto {
-    pub branch: String,
-    pub path: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub base_branch: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub prunable: Option<bool>,
-}
-
 pub fn format_datetime(datetime: Option<OffsetDateTime>) -> Option<String> {
     datetime?
         .format(&time::format_description::well_known::Rfc3339)
         .ok()
 }
 
-pub fn wave_run_dto(
-    run: WaveRun,
-    wave: Option<&Wave>,
-    pr: Option<PullRequestDto>,
-) -> WaveRunDto {
+pub fn wave_run_dto(run: WaveRun, wave: Option<&Wave>, pr: Option<PullRequestDto>) -> WaveRunDto {
     let (flow, repo, direction, area) = wave
         .map(|wave| {
             (

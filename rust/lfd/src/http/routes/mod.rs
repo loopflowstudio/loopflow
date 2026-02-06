@@ -2,7 +2,6 @@ pub mod hooks;
 pub mod system;
 pub mod wave_runs;
 pub mod waves;
-pub mod worktrees;
 pub mod ws;
 
 use axum::http::StatusCode;
@@ -106,11 +105,10 @@ pub async fn pr_for_run(
     }
 
     let worktree_path = worktree.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        loopflow_ops::current_pr(Path::new(&worktree_path))
-    })
-    .await
-    .map_err(|err| StoreError::InvalidData(err.to_string()))?;
+    let result =
+        tokio::task::spawn_blocking(move || loopflow_ops::current_pr(Path::new(&worktree_path)))
+            .await
+            .map_err(|err| StoreError::InvalidData(err.to_string()))?;
 
     match result {
         Ok(Some(pr)) => Ok(Some(PullRequestDto {
@@ -124,5 +122,3 @@ pub async fn pr_for_run(
         Err(_) => Ok(None),
     }
 }
-
-// Note: wave_run_dto is used directly in wave run routes.

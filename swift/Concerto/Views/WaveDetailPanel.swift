@@ -382,7 +382,7 @@ struct WaveDetailPanel: View {
                         Text("Error occurred")
                             .foregroundStyle(.secondary)
 
-                    case .idle, .waiting:
+                    case .idle, .waiting, .paused:
                         EmptyView()
                     }
                 }

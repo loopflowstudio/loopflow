@@ -14,7 +14,7 @@ Separately, the lfd HTTP surface needs a Stripe-style v1 contract so clients con
 ## Who uses what
 
 **`lfq`** — devops persona. Self-hosted developer checking if their server is running, viewing wave status, troubleshooting. Quick terminal feedback.  
-**`import loopflow`** — product/orchestration persona (humans or robots). Building systems that dynamically create and configure waves in response to incoming data. Python is the API for the wave data model; HTTP is an implementation detail.  
+**`import loopflow.api as loopflow`** — product/orchestration persona (humans or robots). Building systems that dynamically create and configure waves in response to incoming data. Python is the API for the wave data model; HTTP is an implementation detail.  
 **Concerto** (Swift) — primary GUI. Its Swift client and this Python package are sibling clients to the same lfd API. They should converge on the same abstractions.
 
 ## Three binaries
@@ -59,7 +59,7 @@ Priority: R >> D > C >>> U. Config updates happen through Python or Concerto. lf
 Full CRUD, all options. Sync to start. This is where dynamic orchestration lives.
 
 ```python
-import loopflow
+import loopflow.api as loopflow
 
 # Status
 loopflow.status()
@@ -226,11 +226,6 @@ GET /v1/waves/{id}/runs
 - `local_worktree`: human-friendly local path/name (may omit the fully-unique suffix).
 - `remote_branch`: canonical fully-unique branch name pushed to origin.
 - `pr`: optional PR object attached to the run (1:1). Waves may surface aggregates client-side.
-
-## Worktrees (if needed by Concerto)
-```
-GET /v1/worktrees
-```
 
 ## List responses (Stripe-style)
 ```

@@ -9,7 +9,7 @@ use axum::{Json, Router};
 
 use crate::auth;
 use crate::http::dto::{ErrorDetail, ErrorResponse};
-use crate::http::routes::{hooks, system, wave_runs, waves, worktrees, ws};
+use crate::http::routes::{hooks, system, wave_runs, waves, ws};
 use crate::store::{SharedStore, StoreError};
 
 pub use state::HttpState;
@@ -40,12 +40,8 @@ pub fn router(state: HttpState) -> Router {
             "/waves/:wave_id/runs",
             get(wave_runs::list_wave_runs_for_wave_handler),
         )
-        .route(
-            "/waves/:wave_id/logs",
-            get(wave_runs::wave_logs_handler),
-        )
+        .route("/waves/:wave_id/logs", get(wave_runs::wave_logs_handler))
         .route("/wave_runs", get(wave_runs::list_wave_runs_handler))
-        .route("/worktrees", get(worktrees::list_worktrees_handler))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::auth_middleware,
@@ -81,23 +77,6 @@ pub fn api_error(
                 error_type: "invalid_request_error".to_string(),
                 message: message.into(),
                 param: None,
-            },
-        }),
-    )
-}
-
-pub fn api_error_with_param(
-    status: StatusCode,
-    message: impl Into<String>,
-    param: impl Into<String>,
-) -> (StatusCode, Json<ErrorResponse>) {
-    (
-        status,
-        Json(ErrorResponse {
-            error: ErrorDetail {
-                error_type: "invalid_request_error".to_string(),
-                message: message.into(),
-                param: Some(param.into()),
             },
         }),
     )

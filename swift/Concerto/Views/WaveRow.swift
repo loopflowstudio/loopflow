@@ -165,6 +165,7 @@ struct WaveRow: View {
             return "Idle"
         case .completed: return "Completed"
         case .error: return "Error"
+        case .paused: return "Paused"
         }
     }
 

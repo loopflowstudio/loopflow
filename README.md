@@ -112,7 +112,7 @@ lf flow roadmap-reduce    # runs reduce 3x with different perspectives
 Once you have played with chaining steps into flows, you're ready to start running waves.
 
 ```bash
-lfq create engbot --repo .                # create a wave
+lfq create engbot .                # create a wave
 lfq run engbot                            # start a wave
 ```
 
@@ -120,7 +120,7 @@ Configure flow/area/direction with `loopflow.update_wave(...)`, then start it wi
 
 ```bash
 python - <<'PY'
-import loopflow
+import loopflow.api as loopflow
 
 loopflow.update_wave("engbot", flow="ship", direction=["designer"], area=["designs/"])
 loopflow.run_wave("engbot")
@@ -166,7 +166,7 @@ uv pip install loopflow
 ```
 
 ```python
-import loopflow
+import loopflow.api as loopflow
 
 loopflow.waves()
 loopflow.create_wave("engbot", repo=".", flow="ship", direction=["product-engineer"])

@@ -35,7 +35,7 @@ lfq logs engbot
 ```
 
 ```python
-import loopflow
+import loopflow.api as loopflow
 
 loopflow.create_wave("engbot", repo=".")
 loopflow.run_wave("engbot")

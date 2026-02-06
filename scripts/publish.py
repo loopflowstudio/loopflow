@@ -1,38 +1,37 @@
 #!/usr/bin/env python3
 """Publish loopflow to PyPI and Concerto DMG to R2.
 
-Local development:
-  python scripts/publish.py --local       # Build and install locally
-
-Release flow (full):
-  python scripts/publish.py patch         # Version bump, screenshots, DMG, tag, push
-
-Single-shot modes:
-  python scripts/publish.py --dmg-only        # Just upload existing DMG
-  python scripts/publish.py --screenshots-only # Just generate screenshots
-  python scripts/publish.py --tag-only        # Just bump, tag, push (skip screenshots/DMG)
+publish.py                # publish current version (tag + push)
+publish.py minor          # bump to next minor, then publish
+publish.py local          # build and install locally
+publish.py dmg            # upload existing DMG
+publish.py screenshots    # generate screenshots
 """
 
-import argparse
 import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 
+import typer
+
 ROOT = Path(__file__).parent.parent
 VERSION_FILE = ROOT / "VERSION"
 R2_PUBLIC_URL = "https://downloads.loopflow.studio"
+
+app = typer.Typer(
+    help="Build and publish loopflow.",
+    invoke_without_command=True,
+)
 
 
 # --- Version management ---
 
 
-def get_version() -> str:
-    """Read version from VERSION file."""
+def _get_version() -> str:
     if VERSION_FILE.exists():
         return VERSION_FILE.read_text().strip()
-    # Fallback to pyproject.toml
     pyproject = ROOT / "pyproject.toml"
     content = pyproject.read_text()
     match = re.search(r'^version = "([^"]+)"', content, re.MULTILINE)
@@ -41,8 +40,8 @@ def get_version() -> str:
     raise RuntimeError("Could not find version")
 
 
-def check_versions() -> tuple[bool, str]:
-    """Verify VERSION, Cargo.toml, and pyproject.toml all agree."""
+def _check_versions() -> str:
+    """Verify VERSION, Cargo.toml, and pyproject.toml all agree. Returns version or raises."""
     versions: dict[str, str] = {}
 
     if VERSION_FILE.exists():
@@ -63,12 +62,13 @@ def check_versions() -> tuple[bool, str]:
     unique = set(versions.values())
     if len(unique) != 1:
         lines = [f"  {f}: {v}" for f, v in versions.items()]
-        return False, "Version mismatch:\n" + "\n".join(lines)
-    return True, list(unique)[0]
+        typer.echo("Version mismatch:\n" + "\n".join(lines), err=True)
+        raise typer.Exit(code=1)
+
+    return list(unique)[0]
 
 
-def bump_version(version: str, bump_type: str) -> str:
-    """Calculate new version given bump type (patch/minor/major)."""
+def _bump_version(version: str, bump_type: str) -> str:
     parts = version.split(".")
     if len(parts) != 3:
         raise ValueError(f"Invalid version format: {version}")
@@ -78,42 +78,70 @@ def bump_version(version: str, bump_type: str) -> str:
         return f"{major + 1}.0.0"
     elif bump_type == "minor":
         return f"{major}.{minor + 1}.0"
-    else:  # patch
+    else:
         return f"{major}.{minor}.{patch + 1}"
 
 
-def write_version(version: str) -> None:
-    """Write version to all version files."""
-    # VERSION file
+def _write_version(version: str) -> None:
     VERSION_FILE.write_text(version + "\n")
 
-    # pyproject.toml
     pyproject = ROOT / "pyproject.toml"
     content = pyproject.read_text()
     content = re.sub(r'^version = "[^"]+"', f'version = "{version}"', content, flags=re.MULTILINE)
     pyproject.write_text(content)
 
-    # Cargo.toml (workspace)
     cargo_toml = ROOT / "Cargo.toml"
     content = cargo_toml.read_text()
     content = re.sub(r'^version = "[^"]+"', f'version = "{version}"', content, flags=re.MULTILINE)
     cargo_toml.write_text(content)
 
 
-# --- Build and install ---
+# --- Preconditions ---
 
 
-def build_local() -> tuple[bool, str]:
-    """Build wheel with maturin. Returns (success, output)."""
+def _check_on_main() -> None:
+    result = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    branch = result.stdout.strip()
+    if branch != "main":
+        typer.echo(f"Error: Not on main branch (current: {branch})", err=True)
+        raise typer.Exit(code=1)
+
+    subprocess.run(["git", "fetch", "origin", "main"], cwd=ROOT, capture_output=True)
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD", "origin/main"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    shas = result.stdout.strip().split("\n")
+    if len(shas) == 2 and shas[0] != shas[1]:
+        typer.echo("Error: Local main differs from origin/main. Pull or push first.", err=True)
+        raise typer.Exit(code=1)
+
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if result.stdout.strip():
+        typer.echo("Error: Uncommitted changes in working directory", err=True)
+        raise typer.Exit(code=1)
+
+
+# --- Build helpers ---
+
+
+def _build_wheel() -> tuple[bool, str]:
     result = subprocess.run(
         [
-            "uv",
-            "run",
-            "maturin",
-            "build",
-            "--release",
-            "--manifest-path",
-            str(ROOT / "rust" / "loopflow-py" / "Cargo.toml"),
+            "uv", "run", "maturin", "build", "--release",
+            "--manifest-path", str(ROOT / "rust" / "loopflow-py" / "Cargo.toml"),
         ],
         cwd=ROOT,
         capture_output=True,
@@ -122,23 +150,19 @@ def build_local() -> tuple[bool, str]:
     return result.returncode == 0, result.stdout + result.stderr
 
 
-def install_local() -> tuple[bool, str]:
-    """Install from built wheel. Returns (success, output)."""
+def _install_wheel() -> tuple[bool, str]:
     wheels = sorted((ROOT / "target" / "wheels").glob("loopflow-*.whl"))
     if not wheels:
         return False, "No wheel found in target/wheels/"
-
-    wheel = wheels[-1]
     result = subprocess.run(
-        ["uv", "tool", "install", "--force", str(wheel)],
+        ["uv", "tool", "install", "--force", str(wheels[-1])],
         capture_output=True,
         text=True,
     )
     return result.returncode == 0, result.stdout + result.stderr
 
 
-def install_local_binaries() -> tuple[bool, str]:
-    """Build lf/lfd and install to ~/.local/bin (or LF_INSTALL_DIR)."""
+def _install_binaries() -> tuple[bool, str]:
     install_dir = os.environ.get("LF_INSTALL_DIR", str(Path.home() / ".local" / "bin"))
     install_path = Path(install_dir)
     install_path.mkdir(parents=True, exist_ok=True)
@@ -163,55 +187,10 @@ def install_local_binaries() -> tuple[bool, str]:
     return True, f"Installed lf/lfd to {install_path}"
 
 
-# --- Release flow ---
-
-
-def check_on_main() -> tuple[bool, str]:
-    """Check if on main branch and synced."""
-    result = subprocess.run(
-        ["git", "branch", "--show-current"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    branch = result.stdout.strip()
-    if branch != "main":
-        return False, f"Not on main branch (current: {branch})"
-
-    # Check if synced with origin
-    subprocess.run(["git", "fetch", "origin", "main"], cwd=ROOT, capture_output=True)
-    result = subprocess.run(
-        ["git", "rev-parse", "HEAD", "origin/main"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    shas = result.stdout.strip().split("\n")
-    if len(shas) == 2 and shas[0] != shas[1]:
-        return False, "Local main differs from origin/main. Pull or push first."
-
-    # Check for uncommitted changes
-    result = subprocess.run(
-        ["git", "status", "--porcelain"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    if result.stdout.strip():
-        return False, "Uncommitted changes in working directory"
-
-    return True, "Ready"
-
-
-# --- DMG publishing ---
-
-
-def build_dmg() -> tuple[bool, str]:
-    """Build Concerto DMG. Returns (success, output)."""
+def _build_dmg() -> tuple[bool, str]:
     swift_dir = ROOT / "swift"
     if not swift_dir.exists():
         return False, f"swift directory not found: {swift_dir}"
-
     result = subprocess.run(
         [sys.executable, "scripts/dev.py", "release"],
         cwd=swift_dir,
@@ -221,13 +200,7 @@ def build_dmg() -> tuple[bool, str]:
     return result.returncode == 0, result.stdout + result.stderr
 
 
-def get_dmg_path() -> Path:
-    """Get path to built DMG."""
-    return ROOT / "swift" / "dist" / "LoopflowConcerto.dmg"
-
-
-def upload_dmg(version: str) -> tuple[bool, str]:
-    """Upload DMG to Cloudflare R2. Returns (success, output)."""
+def _upload_dmg(version: str) -> tuple[bool, str]:
     try:
         import boto3
     except ImportError:
@@ -246,7 +219,7 @@ def upload_dmg(version: str) -> tuple[bool, str]:
             "  R2_SECRET_ACCESS_KEY"
         )
 
-    dmg_path = get_dmg_path()
+    dmg_path = ROOT / "swift" / "dist" / "LoopflowConcerto.dmg"
     if not dmg_path.exists():
         return False, f"DMG not found: {dmg_path}"
 
@@ -261,35 +234,20 @@ def upload_dmg(version: str) -> tuple[bool, str]:
     latest_key = "LoopflowConcerto-latest.dmg"
 
     try:
-        # Upload versioned file (cache forever)
         client.upload_file(
-            str(dmg_path),
-            bucket,
-            versioned_key,
-            ExtraArgs={
-                "ContentType": "application/x-apple-diskimage",
-                "CacheControl": "public, max-age=31536000, immutable",
-            },
+            str(dmg_path), bucket, versioned_key,
+            ExtraArgs={"ContentType": "application/x-apple-diskimage", "CacheControl": "public, max-age=31536000, immutable"},
         )
-
-        # Upload as latest (short cache)
         client.upload_file(
-            str(dmg_path),
-            bucket,
-            latest_key,
-            ExtraArgs={
-                "ContentType": "application/x-apple-diskimage",
-                "CacheControl": "public, max-age=60",
-            },
+            str(dmg_path), bucket, latest_key,
+            ExtraArgs={"ContentType": "application/x-apple-diskimage", "CacheControl": "public, max-age=60"},
         )
-
         return True, f"Uploaded to {R2_PUBLIC_URL}/{versioned_key}"
     except Exception as e:
         return False, f"Upload failed: {e}"
 
 
-def generate_screenshots() -> tuple[bool, str]:
-    """Run screenshot generation. Returns (success, output)."""
+def _generate_screenshots() -> tuple[bool, str]:
     script = ROOT / "scripts" / "generate_screenshots.py"
     result = subprocess.run(
         [sys.executable, str(script)],
@@ -300,217 +258,190 @@ def generate_screenshots() -> tuple[bool, str]:
     return result.returncode == 0, result.stdout + result.stderr
 
 
-# --- Release flow ---
+# --- Git helpers ---
 
 
-def create_release(
-    bump_type: str,
-    dry_run: bool,
-    tag_only: bool = False,
-    skip_dmg: bool = False,
-    skip_screenshots: bool = False,
-) -> int:
-    """Full release: screenshots, DMG, version bump, tag, push."""
-    # Check state
-    ok, msg = check_on_main()
-    if not ok:
-        print(f"Error: {msg}", file=sys.stderr)
-        return 1
+def _tag_and_push(version: str) -> None:
+    subprocess.run(["git", "tag", f"v{version}"], cwd=ROOT, check=True)
+    typer.echo("Pushing to origin...")
+    subprocess.run(["git", "push", "origin", "main"], cwd=ROOT, check=True)
+    subprocess.run(["git", "push", "origin", f"v{version}"], cwd=ROOT, check=True)
 
-    ok, msg = check_versions()
-    if not ok:
-        print(f"Error: {msg}", file=sys.stderr)
-        return 1
 
-    old_version = get_version()
-    new_version = bump_version(old_version, bump_type)
+# --- Release helpers ---
 
-    do_screenshots = not tag_only and not skip_screenshots
-    do_dmg = not tag_only and not skip_dmg
+
+def _release(bump_type: str, dry_run: bool, skip_dmg: bool, skip_screenshots: bool) -> None:
+    _check_on_main()
+    version = _check_versions()
+    new_version = _bump_version(version, bump_type)
 
     if dry_run:
-        if do_screenshots:
-            print("Would generate screenshots")
-        if do_dmg:
-            print("Would build and upload DMG")
-        print(f"Would bump version: {old_version} → {new_version}")
-        print(f"Would commit and tag v{new_version}")
-        print("Would push tag to trigger CI release")
-        return 0
+        if not skip_screenshots:
+            typer.echo("Would generate screenshots")
+        if not skip_dmg:
+            typer.echo("Would build and upload DMG")
+        typer.echo(f"Would bump version: {version} → {new_version}")
+        typer.echo(f"Would commit and tag v{new_version}")
+        typer.echo("Would push tag to trigger CI release")
+        return
 
-    # Screenshots
-    if do_screenshots:
-        print("Generating screenshots...")
-        ok, output = generate_screenshots()
+    if not skip_screenshots:
+        typer.echo("Generating screenshots...")
+        ok, output = _generate_screenshots()
         if not ok:
-            print(f"Screenshot generation failed (continuing):\n{output}", file=sys.stderr)
+            typer.echo(f"Screenshot generation failed (continuing):\n{output}", err=True)
         else:
-            print("Screenshots generated.")
+            typer.echo("Screenshots generated.")
 
-    # DMG
-    if do_dmg:
-        print("Building Concerto DMG...")
-        ok, output = build_dmg()
+    if not skip_dmg:
+        typer.echo("Building Concerto DMG...")
+        ok, output = _build_dmg()
         if not ok:
-            print(f"DMG build failed (continuing):\n{output}", file=sys.stderr)
+            typer.echo(f"DMG build failed (continuing):\n{output}", err=True)
         else:
-            print("DMG built.")
-            print("Uploading DMG...")
-            ok, output = upload_dmg(new_version)
+            typer.echo("DMG built.")
+            typer.echo("Uploading DMG...")
+            ok, output = _upload_dmg(new_version)
             if not ok:
-                print(f"DMG upload failed (continuing):\n{output}", file=sys.stderr)
+                typer.echo(f"DMG upload failed (continuing):\n{output}", err=True)
             else:
-                print(output)
+                typer.echo(output)
 
-    # Version bump
-    print(f"Bumping version: {old_version} → {new_version}")
-    write_version(new_version)
-
-    # Commit
+    typer.echo(f"Bumping version: {version} → {new_version}")
+    _write_version(new_version)
     subprocess.run(["git", "add", "VERSION", "pyproject.toml", "Cargo.toml", "Cargo.lock"], cwd=ROOT, check=True)
-    subprocess.run(
-        ["git", "commit", "-m", f"release: v{new_version}"],
-        cwd=ROOT,
-        check=True,
-    )
+    subprocess.run(["git", "commit", "-m", f"release: v{new_version}"], cwd=ROOT, check=True)
 
-    # Tag
-    subprocess.run(["git", "tag", f"v{new_version}"], cwd=ROOT, check=True)
-
-    # Push
-    print("Pushing to origin...")
-    subprocess.run(["git", "push", "origin", "main"], cwd=ROOT, check=True)
-    subprocess.run(["git", "push", "origin", f"v{new_version}"], cwd=ROOT, check=True)
-
-    print(f"\nReleased v{new_version}")
-    print("CI will build and publish to PyPI.")
-    print("Watch: https://github.com/loopflow-ai/loopflow/actions")
-    return 0
+    _tag_and_push(new_version)
+    typer.echo(f"\nPublished v{new_version}")
+    typer.echo("CI will build and publish to PyPI.")
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Build and publish loopflow")
-    parser.add_argument(
-        "bump",
-        nargs="?",
-        choices=["patch", "minor", "major"],
-        help="Version bump type for release",
-    )
-    parser.add_argument(
-        "--local",
-        action="store_true",
-        help="Build and install locally (no publish)",
-    )
-    parser.add_argument(
-        "--dmg-only",
-        action="store_true",
-        help="Just upload existing DMG",
-    )
-    parser.add_argument(
-        "--screenshots-only",
-        action="store_true",
-        help="Just generate screenshots",
-    )
-    parser.add_argument(
-        "--tag-only",
-        action="store_true",
-        help="Just bump, tag, push (skip screenshots/DMG)",
-    )
-    parser.add_argument(
-        "--skip-dmg",
-        action="store_true",
-        help="Skip DMG build/upload in release",
-    )
-    parser.add_argument(
-        "--skip-screenshots",
-        action="store_true",
-        help="Skip screenshot generation in release",
-    )
-    parser.add_argument(
-        "-n", "--dry-run",
-        action="store_true",
-        help="Show what would be done",
-    )
-    args = parser.parse_args()
+# --- Commands ---
 
-    # Screenshots-only mode
-    if args.screenshots_only:
-        if args.dry_run:
-            print("Would generate screenshots")
-            return 0
-        print("Generating screenshots...")
-        ok, output = generate_screenshots()
-        if not ok:
-            print(f"Screenshot generation failed:\n{output}", file=sys.stderr)
-            return 1
-        print("Screenshots generated.")
-        return 0
 
-    # DMG-only mode
-    if args.dmg_only:
-        version = get_version()
-        if args.dry_run:
-            print(f"Would upload DMG to {R2_PUBLIC_URL}/LoopflowConcerto-{version}.dmg")
-            return 0
-        print("Uploading DMG...")
-        ok, output = upload_dmg(version)
-        if not ok:
-            print(f"DMG upload failed:\n{output}", file=sys.stderr)
-            return 1
-        print(output)
-        return 0
+@app.callback(invoke_without_command=True)
+def publish(
+    ctx: typer.Context,
+    dry_run: bool = typer.Option(False, "-n", "--dry-run", help="Show what would be done"),
+):
+    """Publish current version, or use a subcommand (patch/minor/major/local/dmg/screenshots)."""
+    if ctx.invoked_subcommand is not None:
+        return
 
-    # Local build mode
-    if args.local:
-        if args.dry_run:
-            print("Would build wheel with maturin")
-            print("Would install with uv tool install")
-            return 0
+    _check_on_main()
+    version = _check_versions()
 
-        print("Building wheel...")
-        ok, output = build_local()
-        if not ok:
-            print(f"Build failed:\n{output}", file=sys.stderr)
-            return 1
-        print("Build succeeded.")
+    if dry_run:
+        typer.echo(f"Would tag and push v{version}")
+        return
 
-        print("Installing locally...")
-        ok, output = install_local()
-        if not ok:
-            print(f"Install failed:\n{output}", file=sys.stderr)
-            return 1
-        print("Installed.")
+    _tag_and_push(version)
+    typer.echo(f"\nPublished v{version}")
+    typer.echo("CI will build and publish to PyPI.")
 
-        print("Installing lf/lfd binaries...")
-        ok, output = install_local_binaries()
-        if not ok:
-            print(f"Binary install failed:\n{output}", file=sys.stderr)
-            return 1
-        print(output)
 
-        # Show installed binaries
-        result = subprocess.run(["which", "lf"], capture_output=True, text=True)
+@app.command()
+def patch(
+    dry_run: bool = typer.Option(False, "-n", "--dry-run", help="Show what would be done"),
+    skip_dmg: bool = typer.Option(False, "--skip-dmg", help="Skip DMG build/upload"),
+    skip_screenshots: bool = typer.Option(False, "--skip-screenshots", help="Skip screenshot generation"),
+):
+    """Bump patch version and publish."""
+    _release("patch", dry_run, skip_dmg, skip_screenshots)
+
+
+@app.command()
+def minor(
+    dry_run: bool = typer.Option(False, "-n", "--dry-run", help="Show what would be done"),
+    skip_dmg: bool = typer.Option(False, "--skip-dmg", help="Skip DMG build/upload"),
+    skip_screenshots: bool = typer.Option(False, "--skip-screenshots", help="Skip screenshot generation"),
+):
+    """Bump minor version and publish."""
+    _release("minor", dry_run, skip_dmg, skip_screenshots)
+
+
+@app.command()
+def major(
+    dry_run: bool = typer.Option(False, "-n", "--dry-run", help="Show what would be done"),
+    skip_dmg: bool = typer.Option(False, "--skip-dmg", help="Skip DMG build/upload"),
+    skip_screenshots: bool = typer.Option(False, "--skip-screenshots", help="Skip screenshot generation"),
+):
+    """Bump major version and publish."""
+    _release("major", dry_run, skip_dmg, skip_screenshots)
+
+
+@app.command()
+def local(
+    dry_run: bool = typer.Option(False, "-n", "--dry-run", help="Show what would be done"),
+):
+    """Build and install locally (no publish)."""
+    if dry_run:
+        typer.echo("Would build wheel with maturin")
+        typer.echo("Would install with uv tool install")
+        typer.echo("Would install lf/lfd binaries")
+        return
+
+    typer.echo("Building wheel...")
+    ok, output = _build_wheel()
+    if not ok:
+        typer.echo(f"Build failed:\n{output}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo("Build succeeded.")
+
+    typer.echo("Installing locally...")
+    ok, output = _install_wheel()
+    if not ok:
+        typer.echo(f"Install failed:\n{output}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo("Installed.")
+
+    typer.echo("Installing lf/lfd binaries...")
+    ok, output = _install_binaries()
+    if not ok:
+        typer.echo(f"Binary install failed:\n{output}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(output)
+
+    for name in ("lf", "lfd"):
+        result = subprocess.run(["which", name], capture_output=True, text=True)
         if result.returncode == 0:
-            print(f"lf: {result.stdout.strip()}")
-        result = subprocess.run(["which", "lfd"], capture_output=True, text=True)
-        if result.returncode == 0:
-            print(f"lfd: {result.stdout.strip()}")
+            typer.echo(f"{name}: {result.stdout.strip()}")
 
-        return 0
 
-    # Release mode
-    if not args.bump:
-        parser.print_help()
-        return 1
+@app.command()
+def dmg(
+    dry_run: bool = typer.Option(False, "-n", "--dry-run", help="Show what would be done"),
+):
+    """Upload existing Concerto DMG to R2."""
+    version = _get_version()
+    if dry_run:
+        typer.echo(f"Would upload DMG to {R2_PUBLIC_URL}/LoopflowConcerto-{version}.dmg")
+        return
+    typer.echo("Uploading DMG...")
+    ok, output = _upload_dmg(version)
+    if not ok:
+        typer.echo(f"DMG upload failed:\n{output}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(output)
 
-    return create_release(
-        args.bump,
-        args.dry_run,
-        tag_only=args.tag_only,
-        skip_dmg=args.skip_dmg,
-        skip_screenshots=args.skip_screenshots,
-    )
+
+@app.command()
+def screenshots(
+    dry_run: bool = typer.Option(False, "-n", "--dry-run", help="Show what would be done"),
+):
+    """Generate app screenshots."""
+    if dry_run:
+        typer.echo("Would generate screenshots")
+        return
+    typer.echo("Generating screenshots...")
+    ok, output = _generate_screenshots()
+    if not ok:
+        typer.echo(f"Screenshot generation failed:\n{output}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo("Screenshots generated.")
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    app()

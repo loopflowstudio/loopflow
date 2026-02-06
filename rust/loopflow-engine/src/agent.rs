@@ -338,7 +338,11 @@ fn launch_streaming(
             StreamKind::Stdout => {
                 if let Some(color) = use_color {
                     match parser.feed_line(&line) {
-                        ParseResult::Event(event) => format_event(&event, color),
+                        ParseResult::Events(events) => {
+                            for event in &events {
+                                format_event(event, color);
+                            }
+                        }
                         ParseResult::Skipped => {}
                         ParseResult::Passthrough => println!("{line}"),
                     }

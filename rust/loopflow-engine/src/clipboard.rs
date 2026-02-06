@@ -46,9 +46,7 @@ fn write_via(cmd: &str, args: &[&str], text: &str) -> Result<(), std::io::Error>
 
     let status = child.wait()?;
     if !status.success() {
-        return Err(std::io::Error::other(format!(
-            "{cmd} exited with {status}"
-        )));
+        return Err(std::io::Error::other(format!("{cmd} exited with {status}")));
     }
     Ok(())
 }

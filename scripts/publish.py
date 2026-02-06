@@ -8,11 +8,14 @@ publish.py dmg            # upload existing DMG
 publish.py screenshots    # generate screenshots
 """
 
+import json
 import os
 import re
 import subprocess
 import sys
 from pathlib import Path
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 import typer
 
@@ -258,14 +261,172 @@ def _generate_screenshots() -> tuple[bool, str]:
     return result.returncode == 0, result.stdout + result.stderr
 
 
+# --- Registry checks ---
+
+
+def _pypi_has_version(version: str) -> bool:
+    try:
+        urlopen(Request(f"https://pypi.org/pypi/loopflow/{version}/json", method="HEAD"))
+        return True
+    except HTTPError:
+        return False
+
+
+CRATE_NAMES = ["loopflow-engine", "loopflow-ops"]
+
+
+def _crates_has_version(version: str) -> bool:
+    for crate in CRATE_NAMES:
+        try:
+            urlopen(Request(f"https://crates.io/api/v1/crates/{crate}/{version}", method="HEAD"))
+            return True
+        except HTTPError:
+            continue
+    return False
+
+
+def _registries_have_version(version: str) -> list[str]:
+    """Return list of registries that already have this version."""
+    found = []
+    if _pypi_has_version(version):
+        found.append("PyPI")
+    if _crates_has_version(version):
+        found.append("crates.io")
+    return found
+
+
 # --- Git helpers ---
 
 
-def _tag_and_push(version: str) -> None:
-    subprocess.run(["git", "tag", f"v{version}"], cwd=ROOT, check=True)
-    typer.echo("Pushing to origin...")
+def _head_sha() -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=True,
+    )
+    return result.stdout.strip()
+
+
+def _local_tag_sha(tag: str) -> str | None:
+    result = subprocess.run(
+        ["git", "rev-parse", f"refs/tags/{tag}"], cwd=ROOT, capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def _remote_tag_sha(tag: str) -> str | None:
+    result = subprocess.run(
+        ["git", "ls-remote", "origin", f"refs/tags/{tag}"], cwd=ROOT, capture_output=True, text=True,
+    )
+    line = result.stdout.strip()
+    if not line:
+        return None
+    return line.split()[0]
+
+
+def _release_workflow_status(version: str) -> str:
+    """Check the release workflow status for a tag. Returns 'success', 'failure', 'in_progress', or 'none'."""
+    result = subprocess.run(
+        ["gh", "run", "list", "--workflow=release.yml", "--limit=10", "--json=headBranch,conclusion,status"],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return "none"
+    runs = json.loads(result.stdout)
+    tag = f"v{version}"
+    for run in runs:
+        if run.get("headBranch") == tag:
+            if run.get("status") in ("in_progress", "queued", "waiting"):
+                return "in_progress"
+            return run.get("conclusion", "none")
+    return "none"
+
+
+def _rerun_release(version: str) -> bool:
+    result = subprocess.run(
+        ["gh", "run", "list", "--workflow=release.yml", "--limit=10", "--json=headBranch,databaseId,conclusion"],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return False
+    runs = json.loads(result.stdout)
+    tag = f"v{version}"
+    for run in runs:
+        if run.get("headBranch") == tag and run.get("conclusion") == "failure":
+            run_id = run["databaseId"]
+            typer.echo(f"Re-running failed release workflow (run {run_id})...")
+            result = subprocess.run(
+                ["gh", "run", "rerun", str(run_id), "--failed"],
+                cwd=ROOT, capture_output=True, text=True,
+            )
+            return result.returncode == 0
+    return False
+
+
+def _ensure_released(version: str) -> None:
+    """Ensure version is tagged, pushed, and CI release is running. Idempotent."""
+    tag = f"v{version}"
+    head = _head_sha()
+
+    # Step 1: Ensure local tag exists at HEAD
+    local_sha = _local_tag_sha(tag)
+    if local_sha is None:
+        typer.echo(f"Creating tag {tag}...")
+        subprocess.run(["git", "tag", tag], cwd=ROOT, check=True)
+    elif local_sha != head:
+        registries = _registries_have_version(version)
+        if registries:
+            typer.echo(
+                f"Error: {tag} points to a different commit, and {', '.join(registries)} already has v{version}.\n"
+                f"Use `publish.py patch` to release a new version.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        typer.echo(f"Moving tag {tag} to HEAD (previous release never completed)...")
+        subprocess.run(["git", "tag", "-f", tag], cwd=ROOT, check=True)
+    else:
+        typer.echo(f"Tag {tag} already exists at HEAD.")
+
+    # Step 2: Ensure main is pushed
     subprocess.run(["git", "push", "origin", "main"], cwd=ROOT, check=True)
-    subprocess.run(["git", "push", "origin", f"v{version}"], cwd=ROOT, check=True)
+
+    # Step 3: Ensure tag is on remote at HEAD
+    remote_sha = _remote_tag_sha(tag)
+    if remote_sha is None:
+        typer.echo(f"Pushing tag {tag}...")
+        subprocess.run(["git", "push", "origin", tag], cwd=ROOT, check=True)
+    elif remote_sha != head:
+        registries = _registries_have_version(version)
+        if registries:
+            typer.echo(
+                f"Error: Remote {tag} points to a different commit, and {', '.join(registries)} already has v{version}.\n"
+                f"Use `publish.py patch` to release a new version.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        typer.echo(f"Force-pushing tag {tag} to HEAD...")
+        subprocess.run(["git", "push", "--force", "origin", tag], cwd=ROOT, check=True)
+    else:
+        typer.echo(f"Tag {tag} already on remote.")
+
+    # Step 4: Check CI release status
+    status = _release_workflow_status(version)
+    if status == "success":
+        typer.echo(f"v{version} already released successfully.")
+        return
+    elif status == "in_progress":
+        typer.echo(f"Release workflow for v{version} is in progress.")
+        return
+    elif status == "failure":
+        if _rerun_release(version):
+            typer.echo("Release workflow re-triggered.")
+        else:
+            typer.echo("Could not re-trigger release. Re-run manually: gh run rerun <id> --failed", err=True)
+            raise typer.Exit(code=1)
+    else:
+        # Tag push should trigger CI. If we just pushed it, CI will pick it up.
+        # If tag was already on remote and no workflow found, force-push may have re-triggered.
+        typer.echo("Tag pushed. CI release workflow should start shortly.")
 
 
 # --- Release helpers ---
@@ -313,7 +474,7 @@ def _release(bump_type: str, dry_run: bool, skip_dmg: bool, skip_screenshots: bo
     subprocess.run(["git", "add", "VERSION", "pyproject.toml", "Cargo.toml", "Cargo.lock"], cwd=ROOT, check=True)
     subprocess.run(["git", "commit", "-m", f"release: v{new_version}"], cwd=ROOT, check=True)
 
-    _tag_and_push(new_version)
+    _ensure_released(new_version)
     typer.echo(f"\nPublished v{new_version}")
     typer.echo("CI will build and publish to PyPI.")
 
@@ -337,7 +498,7 @@ def publish(
         typer.echo(f"Would tag and push v{version}")
         return
 
-    _tag_and_push(version)
+    _ensure_released(version)
     typer.echo(f"\nPublished v{version}")
     typer.echo("CI will build and publish to PyPI.")
 

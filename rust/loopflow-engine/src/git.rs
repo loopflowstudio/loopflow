@@ -297,6 +297,11 @@ pub fn worktree_add(
         ],
     )?;
     if !output.status.success() {
+        // Apple Git 2.50.1 returns exit code 1 even on successful creation.
+        // Verify the worktree was actually created before reporting failure.
+        if path.join(".git").exists() {
+            return Ok(());
+        }
         return Err(GitError::CommandFailed {
             command: format!(
                 "git worktree add -b {} {} {}",

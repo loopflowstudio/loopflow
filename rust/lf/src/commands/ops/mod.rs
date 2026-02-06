@@ -636,13 +636,6 @@ fn doctor() -> Result<()> {
         println!("- not in a git repo");
     }
 
-    // Optional: worktrunk (wt)
-    if which("wt") {
-        println!("✓ wt");
-    } else {
-        println!("- wt: brew install max-sixty/worktrunk/wt");
-    }
-
     let is_macos = cfg!(target_os = "macos");
 
     // Optional: npm

@@ -154,9 +154,6 @@ Install the Rust binaries directly with cargo.
 - [Codex CLI](https://github.com/openai/codex) — OpenAI's coding agent
 - [Gemini CLI](https://github.com/google-gemini/gemini-cli) — Google's coding agent
 
-**Tools**
-- [worktrunk](https://github.com/loopflowstudio/worktrunk) — git worktree management (`wt` commands)
-
 **Skill Libraries**
 - [superpowers](https://github.com/obra/superpowers) — prompt library (`lf sp:<skill>`)
 - [SkillRegistry](https://skillregistry.io/) — remote skill directory (`lf sr:<skill>`)

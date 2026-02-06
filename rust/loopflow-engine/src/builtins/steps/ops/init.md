@@ -6,7 +6,7 @@ Guide the user through setting up loopflow in this repository.
 
 ## Prerequisites
 
-This prompt assumes loopflow is already installed globally via `uv tool install loopflow`. It handles everything after that: installing Claude Code, worktrunk, configuring the repo, and optional extras.
+This prompt assumes loopflow is already installed globally via `uv tool install loopflow`. It handles everything after that: installing Claude Code, configuring the repo, and optional extras.
 
 ## Phase 1: Check environment
 
@@ -24,7 +24,6 @@ which npm     # Node.js (needed for coding agents)
 which claude  # Claude Code
 which codex   # Codex CLI
 which gemini  # Gemini CLI
-which wt      # worktrunk (optional)
 test -f .lf/config.yaml && echo "config exists"
 test -d ~/.superpowers && echo "superpowers exists"
 ```
@@ -35,7 +34,6 @@ Checking environment...
 ✓ Homebrew
 ✓ Node.js
 ✓ Claude Code (coding agent)
-- worktrunk (optional)
 - superpowers (optional)
 
 Config: not initialized
@@ -61,12 +59,6 @@ If no coding agent is installed (none of claude, codex, or gemini found):
   - Codex CLI: `npm install -g @openai/codex`
   - Gemini CLI: `npm install -g @google/gemini-cli`
   - Skip: explain they need to install one manually before using loopflow
-
-If worktrunk is missing:
-- Mention: "worktrunk is optional. Loopflow has built-in worktree management via `lf ops wt`."
-- Ask: "Install worktrunk anyway? It provides `wt list` for quick worktree overview."
-- Yes: `brew install max-sixty/worktrunk/wt`
-- No: skip
 
 ## Phase 3: Configure repository
 
@@ -202,7 +194,6 @@ Setup complete!
 
 ✓ Node.js (already installed)
 ✓ Claude Code (coding agent)
-✓ worktrunk installed
 ✓ .lf/config.yaml created
 ✓ superpowers installed
 

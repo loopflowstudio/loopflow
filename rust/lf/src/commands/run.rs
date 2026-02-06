@@ -1,11 +1,14 @@
 use crate::commands::util::{copy_to_clipboard, find_repo_root, open_web_client};
+use crate::output::{format_context_header, format_reproducible_command, Colors};
 use crate::Cli;
 use anyhow::{anyhow, Result};
 use loopflow_engine::{
-    check_cli_available, format_context_prompt, format_prompt, format_task_prompt, gather_context,
-    launch_agent, load_config_or_default, parse_model, write_prompt_log, GatherContextOpts,
-    LaunchConfig,
+    check_cli_available, drop_native_instruction_docs, format_context_prompt, format_prompt,
+    format_task_prompt, gather_context, launch_agent, load_config_or_default, parse_model,
+    trim_context_with_breakdown, write_prompt_log, GatherContextOpts, LaunchConfig,
+    DEFAULT_CONTEXT_BUDGET,
 };
+use std::time::Instant;
 use tracing::{debug, info, instrument, trace};
 
 /// Unified entry point for running steps, inline prompts, or interactive chat.
@@ -23,16 +26,29 @@ pub fn run(
     inline: Option<&str>,
     cli: &Cli,
 ) -> Result<()> {
+    let start = Instant::now();
     let repo_root = find_repo_root()?;
+    debug!(elapsed_ms = start.elapsed().as_millis(), "found repo root");
+
+    let config_start = Instant::now();
     let config = load_config_or_default(Some(&repo_root));
+    debug!(
+        elapsed_ms = config_start.elapsed().as_millis(),
+        "loaded config"
+    );
     trace!(?config.agent_model, ?config.yolo, "loaded config");
 
     // Discover step if provided
+    let discover_start = Instant::now();
     let discovered_step = if let Some(step_name) = step {
         Some(crate::discovery::discover_step(&repo_root, step_name)?)
     } else {
         None
     };
+    debug!(
+        elapsed_ms = discover_start.elapsed().as_millis(),
+        "discovered step"
+    );
 
     if let Some(ref s) = discovered_step {
         debug!(s.name, s.interactive, "discovered step");
@@ -61,6 +77,8 @@ pub fn run(
 
     let include_clipboard = cli.clipboard || config.paste;
 
+    info!("gathering context");
+    let gather_start = Instant::now();
     let components = gather_context(&GatherContextOpts {
         repo_root: repo_root.clone(),
         step: step.map(|s| s.to_string()),
@@ -81,13 +99,60 @@ pub fn run(
         diff_files: config.diff_files,
         diff: config.diff,
         clipboard: include_clipboard,
-        area,
+        area: area.clone(),
         wave: cli.wave.clone(),
     })?;
-
-    let prompt = format_prompt(&components);
+    debug!(
+        elapsed_ms = gather_start.elapsed().as_millis(),
+        "gathered context"
+    );
     let model = cli.model.as_deref().unwrap_or(&config.agent_model);
     let (backend, variant) = parse_model(model);
+
+    let mut components = components;
+    drop_native_instruction_docs(&mut components, &repo_root);
+    let trim_start = Instant::now();
+    let (components, breakdown) =
+        trim_context_with_breakdown(components, DEFAULT_CONTEXT_BUDGET);
+    debug!(
+        elapsed_ms = trim_start.elapsed().as_millis(),
+        "trimmed context"
+    );
+
+    let colors = Colors::new();
+    let header = format_context_header(&breakdown, DEFAULT_CONTEXT_BUDGET);
+    let direction_names: Vec<String> = components
+        .directions
+        .iter()
+        .map(|d| d.name.clone())
+        .collect();
+    let cli_model = if cli.model.is_some() {
+        Some(model)
+    } else {
+        None
+    };
+    let command = format_reproducible_command(
+        step,
+        &direction_names,
+        components.wave.as_deref(),
+        area.as_deref(),
+        cli.clipboard,
+        cli_model,
+    );
+    eprintln!(
+        "{dim}{header}\n\n  {command}{reset}",
+        dim = colors.dim,
+        header = header,
+        command = command,
+        reset = colors.reset,
+    );
+
+    let prompt_start = Instant::now();
+    let prompt = format_prompt(&components);
+    debug!(
+        elapsed_ms = prompt_start.elapsed().as_millis(),
+        "formatted prompt"
+    );
 
     if cli.web {
         info!("copying to clipboard and opening web client");
@@ -97,28 +162,49 @@ pub fn run(
         return Ok(());
     }
 
+    let cli_check_start = Instant::now();
     if !check_cli_available(&backend) {
         return Err(anyhow!("'{}' CLI not found", backend));
     }
+    debug!(
+        elapsed_ms = cli_check_start.elapsed().as_millis(),
+        "checked cli availability"
+    );
 
     // Log name for prompt files
     let log_name = step.unwrap_or(if inline.is_some() { "inline" } else { "chat" });
 
     // Write full prompt to .lf/log/ for debugging
+    let write_prompt_start = Instant::now();
     write_prompt_log(&repo_root, &prompt, log_name, None)?;
+    debug!(
+        elapsed_ms = write_prompt_start.elapsed().as_millis(),
+        "wrote prompt log"
+    );
 
     // Write context separately for system prompt loading via native mechanisms:
     // - Claude: --append-system-prompt-file
     // - Codex: -c model_instructions_file="..."
     // - Gemini: GEMINI_SYSTEM_MD env var
+    let context_prompt_start = Instant::now();
     let context_prompt = format_context_prompt(&components);
     let task_prompt = format_task_prompt(&components);
-    let context_file = write_prompt_log(
+    debug!(
+        elapsed_ms = context_prompt_start.elapsed().as_millis(),
+        "formatted context/task prompt"
+    );
+    let context_file_start = Instant::now();
+    let context_file = Some(write_prompt_log(
         &repo_root,
         &context_prompt,
         &format!("{}.context", log_name),
         None,
-    )?;
+    )?);
+    debug!(
+        elapsed_ms = context_file_start.elapsed().as_millis(),
+        "wrote context log"
+    );
+    debug!(elapsed_ms = start.elapsed().as_millis(), "prepared prompts");
 
     let launch_config = LaunchConfig {
         auto: !is_interactive,
@@ -127,11 +213,17 @@ pub fn run(
         model_variant: variant,
         chrome: cli.chrome_setting().unwrap_or(config.chrome),
         cwd: Some(repo_root),
-        context_file: Some(context_file),
+        context_file,
     };
     debug!(?launch_config, "launching agent");
 
+    info!(backend = backend, "launching agent");
+    let launch_start = Instant::now();
     let result = launch_agent(model, &task_prompt, &launch_config)?;
+    debug!(
+        elapsed_ms = launch_start.elapsed().as_millis(),
+        "agent finished"
+    );
     debug!(exit_code = result.exit_code, "agent completed");
     std::process::exit(result.exit_code);
 }

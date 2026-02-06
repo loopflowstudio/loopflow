@@ -108,6 +108,22 @@ enum Commands {
 
 #[derive(Subcommand, Debug)]
 pub enum OpsCommand {
+    /// Copy context to clipboard
+    Cp {
+        /// Patterns to exclude
+        #[arg(short = 'e', long = "exclude")]
+        exclude: Vec<String>,
+        /// Include lfdocs (scratch/, root .md, roadmap/)
+        #[arg(long)]
+        lfdocs: bool,
+        /// Exclude lfdocs
+        #[arg(long = "no-lfdocs")]
+        no_lfdocs: bool,
+        /// Files or directories to include
+        paths: Vec<String>,
+    },
+    /// Check loopflow dependencies
+    Doctor,
     Rebase {
         onto: Option<String>,
     },
@@ -328,11 +344,10 @@ fn reorder_args(args: Vec<String>) -> Vec<String> {
 fn main() -> anyhow::Result<()> {
     // Initialize tracing with RUST_LOG env filter
     // Usage: RUST_LOG=lf=debug lf debug
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("lf=info,loopflow_engine=info"));
     tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::from_default_env()
-                .add_directive("lf=warn".parse().expect("valid directive")),
-        )
+        .with_env_filter(filter)
         .with_writer(std::io::stderr)
         .without_time()
         .init();

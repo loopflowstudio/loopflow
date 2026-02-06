@@ -10,9 +10,6 @@ pub mod prompt;
 pub mod worktree;
 pub mod worktrees;
 
-#[cfg(feature = "python")]
-mod python;
-
 pub use agent::{
     build_agent_command, build_claude_command, build_codex_command, build_gemini_command,
     build_model_command, check_cli_available, launch_agent, DefaultRunner, LaunchConfig,
@@ -25,6 +22,8 @@ pub use flow::{
     ConcreteStep, Direction, Flow, FlowAction, FlowItem, ForkSelect, Step,
 };
 pub use prompt::{
-    analyze_tokens, count_tokens, format_context_prompt, format_prompt, format_task_prompt,
-    gather_context, trim_context, write_prompt_log, Document, GatherContextOpts, PromptComponents,
+    analyze_context, analyze_tokens, count_tokens, drop_native_instruction_docs,
+    format_context_prompt, format_prompt, format_task_prompt, gather_context, trim_context,
+    trim_context_with_breakdown, write_prompt_log, ContextBreakdown, DiffTier, Document,
+    GatherContextOpts, PromptComponents, DEFAULT_CONTEXT_BUDGET,
 };

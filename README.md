@@ -140,6 +140,12 @@ uv tool install loopflow
 
 Built-in steps and flows included. `lf init` sets up your coding agent and preferences.
 
+```bash
+LF_RUST=0 lf debug    # force Python fallback
+```
+
+Set `LF_RUST=0` if you need the Python CLI instead of the bundled Rust binary.
+
 [Documentation →](docs/index.md)
 
 ## Integrations

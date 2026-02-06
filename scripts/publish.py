@@ -1,78 +1,261 @@
 #!/usr/bin/env python3
-"""Publish loopflow to PyPI and/or DMG to R2.
+"""Publish loopflow to PyPI and Concerto DMG to R2.
 
-Idempotent release flow:
-  1. First run: creates release PR, enables auto-merge
-  2. Second run (after merge): tags, publishes to PyPI, builds DMG
+Local development:
+  python scripts/publish.py --local       # Build and install locally
 
-Just run `python scripts/publish.py` and it figures out what to do.
+Release flow (full):
+  python scripts/publish.py patch         # Version bump, screenshots, DMG, tag, push
+
+Single-shot modes:
+  python scripts/publish.py --dmg-only        # Just upload existing DMG
+  python scripts/publish.py --screenshots-only # Just generate screenshots
+  python scripts/publish.py --tag-only        # Just bump, tag, push (skip screenshots/DMG)
 """
 
 import argparse
-import json
+import os
+import re
 import subprocess
 import sys
-import urllib.request
 from pathlib import Path
-
-from loopflow.lf.messages import generate_release_notes
-from loopflow.publish import (
-    R2_PUBLIC_URL,
-    build_dmg,
-    build_package,
-    build_rust_extension,
-    bump_version,
-    check_ci_passed,
-    check_publish_ready,
-    get_dmg_path,
-    get_version,
-    install_locally,
-    publish_package,
-    restart_daemon,
-    run_tests,
-    upload_dmg,
-    write_version,
-)
 
 ROOT = Path(__file__).parent.parent
 VERSION_FILE = ROOT / "VERSION"
+R2_PUBLIC_URL = "https://downloads.loopflow.studio"
 
 
 # --- Version management ---
 
 
-def _read_version() -> str:
+def get_version() -> str:
     """Read version from VERSION file."""
-    return VERSION_FILE.read_text().strip()
+    if VERSION_FILE.exists():
+        return VERSION_FILE.read_text().strip()
+    # Fallback to pyproject.toml
+    pyproject = ROOT / "pyproject.toml"
+    content = pyproject.read_text()
+    match = re.search(r'^version = "([^"]+)"', content, re.MULTILINE)
+    if match:
+        return match.group(1)
+    raise RuntimeError("Could not find version")
 
 
-def _write_version_file(version: str) -> None:
-    """Write version to VERSION file."""
+def check_versions() -> tuple[bool, str]:
+    """Verify VERSION, Cargo.toml, and pyproject.toml all agree."""
+    versions: dict[str, str] = {}
+
+    if VERSION_FILE.exists():
+        versions["VERSION"] = VERSION_FILE.read_text().strip()
+
+    cargo = ROOT / "Cargo.toml"
+    if cargo.exists():
+        m = re.search(r'^version = "([^"]+)"', cargo.read_text(), re.MULTILINE)
+        if m:
+            versions["Cargo.toml"] = m.group(1)
+
+    pyproject = ROOT / "pyproject.toml"
+    if pyproject.exists():
+        m = re.search(r'^version = "([^"]+)"', pyproject.read_text(), re.MULTILINE)
+        if m:
+            versions["pyproject.toml"] = m.group(1)
+
+    unique = set(versions.values())
+    if len(unique) != 1:
+        lines = [f"  {f}: {v}" for f, v in versions.items()]
+        return False, "Version mismatch:\n" + "\n".join(lines)
+    return True, list(unique)[0]
+
+
+def bump_version(version: str, bump_type: str) -> str:
+    """Calculate new version given bump type (patch/minor/major)."""
+    parts = version.split(".")
+    if len(parts) != 3:
+        raise ValueError(f"Invalid version format: {version}")
+    major, minor, patch = map(int, parts)
+
+    if bump_type == "major":
+        return f"{major + 1}.0.0"
+    elif bump_type == "minor":
+        return f"{major}.{minor + 1}.0"
+    else:  # patch
+        return f"{major}.{minor}.{patch + 1}"
+
+
+def write_version(version: str) -> None:
+    """Write version to all version files."""
+    # VERSION file
     VERSION_FILE.write_text(version + "\n")
 
+    # pyproject.toml
+    pyproject = ROOT / "pyproject.toml"
+    content = pyproject.read_text()
+    content = re.sub(r'^version = "[^"]+"', f'version = "{version}"', content, flags=re.MULTILINE)
+    pyproject.write_text(content)
 
-def _sync_versions(version: str) -> None:
-    """Sync version to Python and Rust."""
-    import re
-
-    # Python: src/loopflow/__init__.py
-    write_version(version)
-
-    # Rust: Cargo.toml workspace version
+    # Cargo.toml (workspace)
     cargo_toml = ROOT / "Cargo.toml"
     content = cargo_toml.read_text()
-    new_content = re.sub(r'version = "[^"]+"', f'version = "{version}"', content)
-    cargo_toml.write_text(new_content)
-
-    # VERSION file
-    _write_version_file(version)
+    content = re.sub(r'^version = "[^"]+"', f'version = "{version}"', content, flags=re.MULTILINE)
+    cargo_toml.write_text(content)
 
 
-# --- Screenshot generation ---
+# --- Build and install ---
 
 
-def _generate_screenshots() -> tuple[bool, str]:
-    """Run scripts/generate_screenshots.py, return (success, output)."""
+def build_local() -> tuple[bool, str]:
+    """Build wheel with maturin. Returns (success, output)."""
+    result = subprocess.run(
+        ["uv", "run", "maturin", "build", "--release"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0, result.stdout + result.stderr
+
+
+def install_local() -> tuple[bool, str]:
+    """Install from built wheel. Returns (success, output)."""
+    wheels = sorted((ROOT / "target" / "wheels").glob("loopflow-*.whl"))
+    if not wheels:
+        return False, "No wheel found in target/wheels/"
+
+    wheel = wheels[-1]
+    result = subprocess.run(
+        ["uv", "tool", "install", "--force", str(wheel)],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0, result.stdout + result.stderr
+
+
+# --- Release flow ---
+
+
+def check_on_main() -> tuple[bool, str]:
+    """Check if on main branch and synced."""
+    result = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    branch = result.stdout.strip()
+    if branch != "main":
+        return False, f"Not on main branch (current: {branch})"
+
+    # Check if synced with origin
+    subprocess.run(["git", "fetch", "origin", "main"], cwd=ROOT, capture_output=True)
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD", "origin/main"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    shas = result.stdout.strip().split("\n")
+    if len(shas) == 2 and shas[0] != shas[1]:
+        return False, "Local main differs from origin/main. Pull or push first."
+
+    # Check for uncommitted changes
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if result.stdout.strip():
+        return False, "Uncommitted changes in working directory"
+
+    return True, "Ready"
+
+
+# --- DMG publishing ---
+
+
+def build_dmg() -> tuple[bool, str]:
+    """Build Concerto DMG. Returns (success, output)."""
+    swift_dir = ROOT / "swift"
+    if not swift_dir.exists():
+        return False, f"swift directory not found: {swift_dir}"
+
+    result = subprocess.run(
+        [sys.executable, "scripts/dev.py", "release"],
+        cwd=swift_dir,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0, result.stdout + result.stderr
+
+
+def get_dmg_path() -> Path:
+    """Get path to built DMG."""
+    return ROOT / "swift" / "dist" / "LoopflowConcerto.dmg"
+
+
+def upload_dmg(version: str) -> tuple[bool, str]:
+    """Upload DMG to Cloudflare R2. Returns (success, output)."""
+    try:
+        import boto3
+    except ImportError:
+        return False, "boto3 required for DMG upload: pip install boto3"
+
+    account_id = os.environ.get("R2_ACCOUNT_ID")
+    access_key = os.environ.get("R2_ACCESS_KEY_ID")
+    secret_key = os.environ.get("R2_SECRET_ACCESS_KEY")
+    bucket = os.environ.get("R2_BUCKET_NAME", "loopflow-downloads")
+
+    if not all([account_id, access_key, secret_key]):
+        return False, (
+            "R2 credentials not set. Required environment variables:\n"
+            "  R2_ACCOUNT_ID\n"
+            "  R2_ACCESS_KEY_ID\n"
+            "  R2_SECRET_ACCESS_KEY"
+        )
+
+    dmg_path = get_dmg_path()
+    if not dmg_path.exists():
+        return False, f"DMG not found: {dmg_path}"
+
+    client = boto3.client(
+        "s3",
+        endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+    )
+
+    versioned_key = f"LoopflowConcerto-{version}.dmg"
+    latest_key = "LoopflowConcerto-latest.dmg"
+
+    try:
+        # Upload versioned file (cache forever)
+        client.upload_file(
+            str(dmg_path),
+            bucket,
+            versioned_key,
+            ExtraArgs={
+                "ContentType": "application/x-apple-diskimage",
+                "CacheControl": "public, max-age=31536000, immutable",
+            },
+        )
+
+        # Upload as latest (short cache)
+        client.upload_file(
+            str(dmg_path),
+            bucket,
+            latest_key,
+            ExtraArgs={
+                "ContentType": "application/x-apple-diskimage",
+                "CacheControl": "public, max-age=60",
+            },
+        )
+
+        return True, f"Uploaded to {R2_PUBLIC_URL}/{versioned_key}"
+    except Exception as e:
+        return False, f"Upload failed: {e}"
+
+
+def generate_screenshots() -> tuple[bool, str]:
+    """Run screenshot generation. Returns (success, output)."""
     script = ROOT / "scripts" / "generate_screenshots.py"
     result = subprocess.run(
         [sys.executable, str(script)],
@@ -80,537 +263,212 @@ def _generate_screenshots() -> tuple[bool, str]:
         capture_output=True,
         text=True,
     )
-    output = result.stdout + result.stderr
-    return result.returncode == 0, output
+    return result.returncode == 0, result.stdout + result.stderr
 
 
-# --- State detection ---
+# --- Release flow ---
 
 
-def _find_pending_release() -> str | None:
-    """Find a release commit on main that hasn't been tagged/published yet.
+def create_release(
+    bump_type: str,
+    dry_run: bool,
+    tag_only: bool = False,
+    skip_dmg: bool = False,
+    skip_screenshots: bool = False,
+) -> int:
+    """Full release: screenshots, DMG, version bump, tag, push."""
+    # Check state
+    ok, msg = check_on_main()
+    if not ok:
+        print(f"Error: {msg}", file=sys.stderr)
+        return 1
 
-    Searches the last 50 commits for release commits, robust to other commits
-    landing on main after the release PR merges.
-    """
-    subprocess.run(["git", "fetch", "origin", "main"], cwd=ROOT, capture_output=True)
-    result = subprocess.run(
-        ["git", "log", "origin/main", "-50", "--format=%s"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        return None
+    ok, msg = check_versions()
+    if not ok:
+        print(f"Error: {msg}", file=sys.stderr)
+        return 1
 
-    for line in result.stdout.strip().split("\n"):
-        # Match "release: v0.7.1" or "release: v0.7.1 [skip ci]"
-        if line.startswith("release: v"):
-            version = line.replace("release: v", "").split()[0]
-            if _tag_exists(version) and _is_on_pypi(version):
-                # Found a complete release - older incomplete releases are stale
-                return None
-            if not _tag_exists(version) or not _is_on_pypi(version):
-                return version
-    return None
+    old_version = get_version()
+    new_version = bump_version(old_version, bump_type)
 
+    do_screenshots = not tag_only and not skip_screenshots
+    do_dmg = not tag_only and not skip_dmg
 
-def _tag_exists(version: str) -> bool:
-    """Check if a tag exists locally or on remote."""
-    result = subprocess.run(
-        ["git", "tag", "-l", f"v{version}"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    return bool(result.stdout.strip())
+    if dry_run:
+        if do_screenshots:
+            print("Would generate screenshots")
+        if do_dmg:
+            print("Would build and upload DMG")
+        print(f"Would bump version: {old_version} → {new_version}")
+        print(f"Would commit and tag v{new_version}")
+        print("Would push tag to trigger CI release")
+        return 0
 
-
-def _get_open_release_pr() -> tuple[str | None, str | None]:
-    """Check for an open release PR. Returns (version, pr_url) or (None, None)."""
-    result = subprocess.run(
-        [
-            "gh",
-            "pr",
-            "list",
-            "--head",
-            "release/",
-            "--json",
-            "headRefName,url,state",
-            "--limit",
-            "10",
-        ],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        return None, None
-    try:
-        prs = json.loads(result.stdout)
-        for pr in prs:
-            if pr.get("state") == "OPEN" and pr.get("headRefName", "").startswith("release/v"):
-                version = pr["headRefName"].replace("release/v", "")
-                return version, pr.get("url")
-    except json.JSONDecodeError:
-        pass
-    return None, None
-
-
-def _is_on_pypi(version: str) -> bool:
-    """Check if version is already on PyPI."""
-    try:
-        with urllib.request.urlopen(
-            "https://pypi.org/pypi/loopflow/json", timeout=10
-        ) as response:
-            data = json.loads(response.read())
-            return version in data.get("releases", {})
-    except Exception:
-        return False
-
-
-# --- Release phases ---
-
-
-def _finalize_release(version: str, skip_dmg: bool) -> int:
-    """Complete release: tag, publish to PyPI, build DMG."""
-    print(f"Finalizing release v{version}...")
-
-    # Update local main to match origin
-    subprocess.run(["git", "checkout", "main"], cwd=ROOT, capture_output=True)
-    subprocess.run(["git", "pull", "--ff-only"], cwd=ROOT, check=True)
-
-    # Tag the release
-    if _tag_exists(version):
-        print(f"Tag v{version} already exists")
-    else:
-        print(f"Tagging v{version}...")
-        result = subprocess.run(
-            ["git", "tag", f"v{version}"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            print(f"Failed to create tag: {result.stderr}", file=sys.stderr)
-            return 1
-        result = subprocess.run(["git", "push", "origin", f"v{version}"], cwd=ROOT)
-        if result.returncode != 0:
-            print("Failed to push tags", file=sys.stderr)
-            return 1
-        print("Tag pushed.")
-
-    # Check if already on PyPI
-    if _is_on_pypi(version):
-        print(f"v{version} already on PyPI")
-    else:
-        # Build package
-        print("Building package...")
-        success, output = build_package(ROOT)
-        if not success:
-            print("Build failed:", file=sys.stderr)
-            print(output, file=sys.stderr)
-            return 1
-        print("Build succeeded.")
-
-        # Publish to PyPI
-        print("Publishing to PyPI...")
-        success, output = publish_package(ROOT)
-        if not success:
-            if "File already exists" in output:
-                print(f"v{version} already on PyPI (file exists)")
-            else:
-                print("Publish failed:", file=sys.stderr)
-                print(output, file=sys.stderr)
-                return 1
+    # Screenshots
+    if do_screenshots:
+        print("Generating screenshots...")
+        ok, output = generate_screenshots()
+        if not ok:
+            print(f"Screenshot generation failed (continuing):\n{output}", file=sys.stderr)
         else:
-            print("Published to PyPI.")
+            print("Screenshots generated.")
 
-    # Build and upload DMG
-    if not skip_dmg:
+    # DMG
+    if do_dmg:
         print("Building Concerto DMG...")
-        success, output = build_dmg(ROOT)
-        if not success:
-            print("DMG build failed (continuing):", file=sys.stderr)
-            print(output, file=sys.stderr)
+        ok, output = build_dmg()
+        if not ok:
+            print(f"DMG build failed (continuing):\n{output}", file=sys.stderr)
         else:
             print("DMG built.")
             print("Uploading DMG...")
-            dmg_path = get_dmg_path(ROOT)
-            success, output = upload_dmg(dmg_path, version)
-            if not success:
-                print("DMG upload failed (continuing):", file=sys.stderr)
-                print(output, file=sys.stderr)
+            ok, output = upload_dmg(new_version)
+            if not ok:
+                print(f"DMG upload failed (continuing):\n{output}", file=sys.stderr)
             else:
                 print(output)
 
-    # Install locally
-    print("Installing locally...")
-    success, output = install_locally(ROOT)
-    if not success:
-        print("Local install failed:", file=sys.stderr)
-        print(output, file=sys.stderr)
-        return 1
-    print("Installed locally.")
-
-    # Clean up release branch if it exists
-    release_branch = f"release/v{version}"
-    subprocess.run(
-        ["git", "push", "origin", "--delete", release_branch],
-        cwd=ROOT,
-        capture_output=True,
-    )
-
-    print(f"\nReleased v{version}")
-    print("https://pypi.org/project/loopflow/")
-    if not skip_dmg:
-        print(f"{R2_PUBLIC_URL}/LoopflowConcerto-{version}.dmg")
-    return 0
-
-
-def _create_release_pr(
-    bump: str,
-    skip_tests: bool,
-    skip_ci: bool,
-    skip_screenshots: bool,
-) -> int:
-    """Create release PR with version bump."""
-    # Step 1: Preflight checks
-    print("Checking publish readiness...")
-    state = check_publish_ready(ROOT)
-
-    if not state.ready:
-        print(f"Error: {state.message}", file=sys.stderr)
-        return 1
-
-    old_version = state.version
-    new_version = bump_version(old_version, bump)
-
-    # Step 2: Run tests
-    if not skip_tests:
-        print("Running tests...")
-        success, output = run_tests(ROOT)
-        if not success:
-            print("Tests failed:", file=sys.stderr)
-            print(output, file=sys.stderr)
-            return 1
-        print("Tests passed.")
-
-    # Step 3: Verify CI passed
-    if not skip_ci:
-        print("Verifying CI passed...")
-        success, message = check_ci_passed(ROOT)
-        if not success:
-            print(f"CI check failed: {message}", file=sys.stderr)
-            return 1
-        print(message)
-
-    # Step 4: Generate screenshots
-    if not skip_screenshots:
-        print("Generating screenshots...")
-        success, output = _generate_screenshots()
-        if not success:
-            print(f"Screenshot generation failed: {output}", file=sys.stderr)
-            return 1
-        print("Screenshots generated.")
-
-    # Step 5: Generate release notes
-    print("Generating release notes...")
-    try:
-        notes = generate_release_notes(ROOT, old_version, new_version)
-    except Exception as e:
-        print(f"Error generating release notes: {e}", file=sys.stderr)
-        return 1
-    print("Release notes generated.")
-
-    # Step 6: Bump version and build package (validate before committing)
+    # Version bump
     print(f"Bumping version: {old_version} → {new_version}")
     write_version(new_version)
 
-    print("Building package...")
-    success, output = build_package(ROOT)
-    if not success:
-        print("Build failed:", file=sys.stderr)
-        print(output, file=sys.stderr)
-        write_version(old_version)
-        return 1
-    print("Build succeeded.")
-
-    # Step 7: Write release notes, create release branch, commit, push, create PR
-    changes_md = "\n".join(f"- {change}" for change in notes.changes)
-    release_notes_content = f"# v{new_version}\n\n{notes.summary}\n\n## Changes\n\n{changes_md}\n"
-    (ROOT / "RELEASE_NOTES.md").write_text(release_notes_content)
-
-    release_branch = f"release/v{new_version}"
-    print(f"Creating release branch {release_branch}...")
-    result = subprocess.run(
-        ["git", "checkout", "-b", release_branch],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        print(f"Failed to create release branch: {result.stderr}", file=sys.stderr)
-        return 1
-
-    print("Committing release...")
+    # Commit
+    subprocess.run(["git", "add", "VERSION", "pyproject.toml", "Cargo.toml", "Cargo.lock"], cwd=ROOT, check=True)
     subprocess.run(
-        ["git", "add", "src/loopflow/__init__.py", "RELEASE_NOTES.md", "docs/*.png"],
-        cwd=ROOT,
-        check=True,
-    )
-    subprocess.run(
-        ["git", "commit", "-m", f"release: v{new_version}\n\n[skip ci]"],
+        ["git", "commit", "-m", f"release: v{new_version}"],
         cwd=ROOT,
         check=True,
     )
 
-    print("Pushing release branch...")
-    result = subprocess.run(
-        ["git", "push", "-u", "origin", release_branch],
-        cwd=ROOT,
-    )
-    if result.returncode != 0:
-        print("Failed to push release branch", file=sys.stderr)
-        return 1
+    # Tag
+    subprocess.run(["git", "tag", f"v{new_version}"], cwd=ROOT, check=True)
 
-    # Create PR
-    print("Creating PR...")
-    pr_body = f"Release v{new_version}\n\n{release_notes_content}"
-    result = subprocess.run(
-        [
-            "gh",
-            "pr",
-            "create",
-            "--base",
-            "main",
-            "--head",
-            release_branch,
-            "--title",
-            f"release: v{new_version}",
-            "--body",
-            pr_body,
-        ],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        print(f"Failed to create PR: {result.stderr}", file=sys.stderr)
-        return 1
-    pr_url = result.stdout.strip()
-    print(f"Created: {pr_url}")
+    # Push
+    print("Pushing to origin...")
+    subprocess.run(["git", "push", "origin", "main"], cwd=ROOT, check=True)
+    subprocess.run(["git", "push", "origin", f"v{new_version}"], cwd=ROOT, check=True)
 
-    # Enable admin auto-merge (bypasses branch protection since CI is skipped)
-    print("Enabling admin auto-merge...")
-    result = subprocess.run(
-        [
-            "gh", "pr", "merge", "--squash", "--auto", "--admin",
-            "--subject", f"release: v{new_version}",
-        ],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        error_msg = result.stderr.strip() or result.stdout.strip()
-        auto_merge_disabled = (
-            "auto merge is not allowed" in error_msg.lower()
-            or "enablepullrequestautomerge" in error_msg.lower()
-        )
-        if auto_merge_disabled:
-            print(
-                "Auto-merge not enabled for this repo. Merge manually.",
-                file=sys.stderr,
-            )
-        elif "must be a repository admin" in error_msg.lower():
-            print(
-                "Admin auto-merge requires admin rights. Merge manually.",
-                file=sys.stderr,
-            )
-        else:
-            print(f"Warning: Could not enable auto-merge: {error_msg}")
-    else:
-        print("Admin auto-merge enabled. PR will merge immediately.")
-
-    # Open PR in browser
-    subprocess.run(["open", pr_url])
-
-    # Return to main branch
-    subprocess.run(["git", "checkout", "main"], cwd=ROOT, capture_output=True)
-
-    print(f"\nRelease PR created for v{new_version}")
-    print("Run this command again after the PR merges to complete the release.")
+    print(f"\nReleased v{new_version}")
+    print("CI will build and publish to PyPI.")
+    print("Watch: https://github.com/loopflow-ai/loopflow/actions")
     return 0
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Publish loopflow to PyPI and DMG to R2. "
-            "Idempotent: run twice (once to create PR, once after merge)."
-        )
-    )
-    parser.add_argument("bump", nargs="?", choices=["patch", "minor", "major"], default="patch")
-    parser.add_argument("-n", "--dry-run", action="store_true", help="Show what would be done")
+    parser = argparse.ArgumentParser(description="Build and publish loopflow")
     parser.add_argument(
-        "--local", action="store_true", help="Build and install locally only (no publish)"
-    )
-    parser.add_argument("--skip-tests", action="store_true", help="Skip test run")
-    parser.add_argument("--skip-ci", action="store_true", help="Skip CI check")
-    parser.add_argument(
-        "--dmg-only", action="store_true", help="Only build and upload DMG (no PyPI)"
-    )
-    parser.add_argument("--skip-dmg", action="store_true", help="Skip DMG build/upload")
-    parser.add_argument(
-        "--skip-screenshots", action="store_true", help="Skip screenshot generation"
+        "bump",
+        nargs="?",
+        choices=["patch", "minor", "major"],
+        help="Version bump type for release",
     )
     parser.add_argument(
-        "--version",
-        type=str,
-        help="Explicitly specify version to finalize (bypasses state detection)",
+        "--local",
+        action="store_true",
+        help="Build and install locally (no publish)",
+    )
+    parser.add_argument(
+        "--dmg-only",
+        action="store_true",
+        help="Just upload existing DMG",
+    )
+    parser.add_argument(
+        "--screenshots-only",
+        action="store_true",
+        help="Just generate screenshots",
+    )
+    parser.add_argument(
+        "--tag-only",
+        action="store_true",
+        help="Just bump, tag, push (skip screenshots/DMG)",
+    )
+    parser.add_argument(
+        "--skip-dmg",
+        action="store_true",
+        help="Skip DMG build/upload in release",
+    )
+    parser.add_argument(
+        "--skip-screenshots",
+        action="store_true",
+        help="Skip screenshot generation in release",
+    )
+    parser.add_argument(
+        "-n", "--dry-run",
+        action="store_true",
+        help="Show what would be done",
     )
     args = parser.parse_args()
 
-    # Validate args
-    if args.dmg_only and args.skip_dmg:
-        print("Error: --dmg-only and --skip-dmg are mutually exclusive", file=sys.stderr)
-        return 1
-
-    # Handle DMG-only mode
-    if args.dmg_only:
-        version = get_version()
-        print(f"Current version: {version}")
-
+    # Screenshots-only mode
+    if args.screenshots_only:
         if args.dry_run:
-            print("Would build Concerto DMG")
-            print(f"Would upload DMG to {R2_PUBLIC_URL}/LoopflowConcerto-{version}.dmg")
-            print(f"Would upload DMG to {R2_PUBLIC_URL}/LoopflowConcerto-latest.dmg")
+            print("Would generate screenshots")
             return 0
-
-        print("Building Concerto DMG...")
-        success, output = build_dmg(ROOT)
-        if not success:
-            print("DMG build failed:", file=sys.stderr)
-            print(output, file=sys.stderr)
+        print("Generating screenshots...")
+        ok, output = generate_screenshots()
+        if not ok:
+            print(f"Screenshot generation failed:\n{output}", file=sys.stderr)
             return 1
-        print("DMG built.")
-
-        print("Uploading DMG...")
-        dmg_path = get_dmg_path(ROOT)
-        success, output = upload_dmg(dmg_path, version)
-        if not success:
-            print("DMG upload failed:", file=sys.stderr)
-            print(output, file=sys.stderr)
-            return 1
-        print(output)
-
-        print(f"\nDMG published: {R2_PUBLIC_URL}/LoopflowConcerto-{version}.dmg")
+        print("Screenshots generated.")
         return 0
 
-    # Handle --local mode: build, install, and restart daemon
+    # DMG-only mode
+    if args.dmg_only:
+        version = get_version()
+        if args.dry_run:
+            print(f"Would upload DMG to {R2_PUBLIC_URL}/LoopflowConcerto-{version}.dmg")
+            return 0
+        print("Uploading DMG...")
+        ok, output = upload_dmg(version)
+        if not ok:
+            print(f"DMG upload failed:\n{output}", file=sys.stderr)
+            return 1
+        print(output)
+        return 0
+
+    # Local build mode
     if args.local:
         if args.dry_run:
-            print("Would build Rust extension, Python package, install locally, and restart daemon")
+            print("Would build wheel with maturin")
+            print("Would install with uv tool install")
             return 0
 
-        print("Building Rust extension...")
-        success, output = build_rust_extension(ROOT)
-        if not success:
-            print("Rust extension build failed:", file=sys.stderr)
-            print(output, file=sys.stderr)
-            return 1
-        print("Rust extension built.")
-
-        print("Building package...")
-        success, output = build_package(ROOT)
-        if not success:
-            print("Build failed:", file=sys.stderr)
-            print(output, file=sys.stderr)
+        print("Building wheel...")
+        ok, output = build_local()
+        if not ok:
+            print(f"Build failed:\n{output}", file=sys.stderr)
             return 1
         print("Build succeeded.")
 
         print("Installing locally...")
-        success, output = install_locally(ROOT)
-        if not success:
-            print("Local install failed:", file=sys.stderr)
-            print(output, file=sys.stderr)
+        ok, output = install_local()
+        if not ok:
+            print(f"Install failed:\n{output}", file=sys.stderr)
             return 1
-        print("Installed locally.")
+        print("Installed.")
 
-        print("Restarting daemon...")
-        success, message = restart_daemon()
-        if success:
-            print(message)
-        else:
-            print(f"Warning: {message}", file=sys.stderr)
+        # Show installed binaries
+        result = subprocess.run(["which", "lf"], capture_output=True, text=True)
+        if result.returncode == 0:
+            print(f"lf: {result.stdout.strip()}")
+        result = subprocess.run(["which", "lfd"], capture_output=True, text=True)
+        if result.returncode == 0:
+            print(f"lfd: {result.stdout.strip()}")
 
         return 0
 
-    # --- Idempotent release flow: detect state and act accordingly ---
+    # Release mode
+    if not args.bump:
+        parser.print_help()
+        return 1
 
-    # Handle explicit --version: bypass state detection and finalize directly
-    if args.version:
-        version = args.version.lstrip("v")
-        print(f"Finalizing specified version v{version}...")
-        if args.dry_run:
-            print(f"Would finalize release v{version}:")
-            print("  - Tag and push (if not exists)")
-            print("  - Publish to PyPI (if not published)")
-            if not args.skip_dmg:
-                print("  - Build and upload DMG")
-            print("  - Install locally")
-            return 0
-        return _finalize_release(version, args.skip_dmg)
-
-    print("Checking release state...")
-
-    # State 1: Release commit on main, not yet tagged/published → finalize
-    release_version = _find_pending_release()
-    if release_version:
-        if _tag_exists(release_version) and _is_on_pypi(release_version):
-            print(f"v{release_version} already released (tagged and on PyPI)")
-            return 0
-
-        if args.dry_run:
-            print(f"Would finalize release v{release_version}:")
-            print("  - Tag and push")
-            print("  - Publish to PyPI")
-            if not args.skip_dmg:
-                print("  - Build and upload DMG")
-            print("  - Install locally")
-            return 0
-
-        return _finalize_release(release_version, args.skip_dmg)
-
-    # State 2: Open release PR exists → tell user to wait
-    pr_version, pr_url = _get_open_release_pr()
-    if pr_version:
-        print(f"Release PR for v{pr_version} is open: {pr_url}")
-        print("Waiting for CI to pass and PR to merge.")
-        print("Run this command again after the PR merges.")
-        return 0
-
-    # State 3: No release in progress → start new release
-    if args.dry_run:
-        state = check_publish_ready(ROOT)
-        if not state.ready:
-            print(f"Error: {state.message}", file=sys.stderr)
-            return 1
-        new_version = bump_version(state.version, args.bump)
-        print(f"Would create release PR for v{new_version}:")
-        print(f"  - Bump version: {state.version} → {new_version}")
-        print("  - Run tests" if not args.skip_tests else "  - Skip tests")
-        print("  - Verify CI passed" if not args.skip_ci else "  - Skip CI check")
-        print("  - Generate screenshots" if not args.skip_screenshots else "  - Skip screenshots")
-        print("  - Generate release notes")
-        print("  - Build package")
-        print(f"  - Create branch release/v{new_version}")
-        print("  - Create PR with auto-merge")
-        print("\nAfter PR merges, run again to finalize (tag, publish, DMG).")
-        return 0
-
-    return _create_release_pr(args.bump, args.skip_tests, args.skip_ci, args.skip_screenshots)
+    return create_release(
+        args.bump,
+        args.dry_run,
+        tag_only=args.tag_only,
+        skip_dmg=args.skip_dmg,
+        skip_screenshots=args.skip_screenshots,
+    )
 
 
 if __name__ == "__main__":

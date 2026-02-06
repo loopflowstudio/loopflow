@@ -222,10 +222,12 @@ fn get_staged_diff(repo: &Path) -> OpsResult<Option<String>> {
 }
 
 fn get_branch_diff(repo: &Path) -> OpsResult<Option<String>> {
-    let base_ref = crate::pr::default_base_ref(repo)?;
+    let main_repo =
+        loopflow_engine::worktrees::main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
+    let base_branch = loopflow_engine::git::get_default_branch(&main_repo)?;
     let output = std::process::Command::new("git")
         .arg("diff")
-        .arg(format!("{}...HEAD", base_ref))
+        .arg(format!("origin/{}...HEAD", base_branch))
         .current_dir(repo)
         .output()?;
     if !output.status.success() {

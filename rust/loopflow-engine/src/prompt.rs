@@ -816,8 +816,8 @@ fn gather_diff_tiered(repo_root: &Path) -> Result<(Option<String>, DiffTier, usi
         return Ok((None, DiffTier::None, 0));
     }
 
-    let base_ref = get_default_base_ref(repo_root);
-    let diff_ref = format!("{}...HEAD", base_ref);
+    let base_branch = crate::git::get_default_branch(repo_root).unwrap_or("main".to_string());
+    let diff_ref = format!("origin/{}...HEAD", base_branch);
 
     // Count changed files
     let name_output = Command::new("git")
@@ -893,21 +893,6 @@ fn parse_shortstat_total_lines(output: &str) -> Option<usize> {
         return Some(0);
     }
     Some(numbers[1..].iter().sum())
-}
-
-/// Get default base ref for diffs.
-fn get_default_base_ref(repo_root: &Path) -> String {
-    // Try origin/main first
-    let check = Command::new("git")
-        .args(["rev-parse", "--verify", "origin/main"])
-        .current_dir(repo_root)
-        .output();
-
-    if check.map(|o| o.status.success()).unwrap_or(false) {
-        return "origin/main".to_string();
-    }
-
-    "main".to_string()
 }
 
 fn read_clipboard() -> Option<String> {

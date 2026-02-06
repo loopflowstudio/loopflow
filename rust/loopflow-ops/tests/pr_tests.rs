@@ -21,6 +21,10 @@ exit 0
     .to_string()
 }
 
+fn noop_script() -> &'static str {
+    "#!/bin/sh\nexit 0\n"
+}
+
 fn push_branch(repo: &TestRepo, name: &str) {
     let _ = Command::new("git")
         .args(["push", "-u", "origin", name])
@@ -35,6 +39,7 @@ fn pr_create_calls_gh() {
     let _env = EnvGuard::new(&[
         ("gh", gh_script.as_str()),
         ("claude", claude_script.as_str()),
+        ("open", noop_script()),
     ]);
     let repo = TestRepo::new();
     repo.create_branch("feature");
@@ -64,6 +69,7 @@ fn pr_update_refreshes_body() {
     let _env = EnvGuard::new(&[
         ("gh", gh_script.as_str()),
         ("claude", claude_script.as_str()),
+        ("open", noop_script()),
     ]);
     let repo = TestRepo::new();
     repo.create_branch("feature");
@@ -93,6 +99,7 @@ fn pr_skips_when_no_diff() {
     let _env = EnvGuard::new(&[
         ("gh", gh_script.as_str()),
         ("claude", claude_script.as_str()),
+        ("open", noop_script()),
     ]);
     let repo = TestRepo::new();
     repo.create_branch("feature");

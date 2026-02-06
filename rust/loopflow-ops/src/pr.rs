@@ -62,11 +62,12 @@ pub fn create_or_update_pr(
 
     if commits_behind_main(repo)? > 0 {
         progress.status("Branch behind base, rebasing...");
-        let base_ref = default_base_ref(repo)?;
+        let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
+        let base_branch = get_default_branch(&main_repo)?;
         crate::rebase::rebase_with_recovery(
             repo,
             &crate::rebase::RebaseOptions {
-                onto: base_ref,
+                onto: format!("origin/{base_branch}"),
                 push: true,
             },
             progress,
@@ -104,7 +105,7 @@ pub fn create_or_update_pr(
     progress.status("Creating PR...");
     let message = generate_pr_message(repo)?;
     let base = pr_target(repo)?;
-    let url = create_pr(repo, &message.title, &message.body, base.as_deref())?;
+    let url = create_pr(repo, &message.title, &message.body, &base)?;
     if let Some(pr) = find_open_pr(repo)? {
         if pr.is_draft {
             mark_pr_ready(repo, pr.number)?;
@@ -202,19 +203,16 @@ fn mark_pr_ready(repo: &Path, number: u64) -> OpsResult<()> {
     Ok(())
 }
 
-fn create_pr(repo: &Path, title: &str, body: &str, base: Option<&str>) -> OpsResult<String> {
+fn create_pr(repo: &Path, title: &str, body: &str, base: &str) -> OpsResult<String> {
     let mut cmd = Command::new("gh");
     cmd.arg("pr")
         .arg("create")
         .arg("--title")
         .arg(title)
         .arg("--body")
-        .arg(body);
-    if let Some(base) = base {
-        if base != "main" {
-            cmd.arg("--base").arg(base);
-        }
-    }
+        .arg(body)
+        .arg("--base")
+        .arg(base);
     let output = cmd.current_dir(repo).output()?;
     if !output.status.success() {
         return Err(OpsError::CommandFailed {
@@ -237,11 +235,12 @@ fn sync_main_repo(repo: &Path, _progress: &impl Progress) -> OpsResult<()> {
 }
 
 fn commits_behind_main(repo: &Path) -> OpsResult<i32> {
-    let base_ref = default_base_ref(repo)?;
+    let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
+    let base_branch = get_default_branch(&main_repo)?;
     let output = Command::new("git")
         .arg("rev-list")
         .arg("--count")
-        .arg(format!("HEAD..{}", base_ref))
+        .arg(format!("HEAD..origin/{}", base_branch))
         .current_dir(repo)
         .output()?;
     if !output.status.success() {
@@ -271,7 +270,7 @@ fn has_unpushed_commits(repo: &Path) -> OpsResult<bool> {
     Ok(count > 0)
 }
 
-fn pr_target(repo: &Path) -> OpsResult<Option<String>> {
+fn pr_target(repo: &Path) -> OpsResult<String> {
     let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
     let current_branch =
         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
@@ -282,13 +281,13 @@ fn pr_target(repo: &Path) -> OpsResult<Option<String>> {
             .find(|wt| wt.branch.as_deref() == Some(&current_branch))
         {
             if let Some(base_branch) = state.base_branch {
-                let target = resolve_pr_target(repo, &base_branch)?;
-                return Ok(Some(target));
+                return resolve_pr_target(repo, &base_branch);
             }
         }
     }
 
-    Ok(None)
+    let default = get_default_branch(&main_repo)?;
+    Ok(default)
 }
 
 fn resolve_pr_target(repo: &Path, base_branch: &str) -> OpsResult<String> {
@@ -315,22 +314,6 @@ fn resolve_pr_target(repo: &Path, base_branch: &str) -> OpsResult<String> {
         }
     }
     Ok(base_branch.to_string())
-}
-
-pub fn default_base_ref(repo: &Path) -> OpsResult<String> {
-    let output = Command::new("git")
-        .arg("rev-parse")
-        .arg("--abbrev-ref")
-        .arg("origin/HEAD")
-        .current_dir(repo)
-        .output()?;
-    if output.status.success() {
-        let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !raw.is_empty() {
-            return Ok(raw);
-        }
-    }
-    Ok("origin/main".to_string())
 }
 
 fn open_url(url: &str) {

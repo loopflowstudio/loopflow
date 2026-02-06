@@ -13,6 +13,7 @@ pub struct CommitOptions {
     pub add: bool,
     pub lint: bool,
     pub push: bool,
+    pub create_draft_pr: bool,
     pub task: String,
     pub flow_parents: Vec<String>,
     pub message: Option<String>,
@@ -27,7 +28,9 @@ pub fn commit_workflow(
         progress.status("Nothing to commit");
         if options.push {
             push_with_upstream_if_needed(repo)?;
-            ensure_draft_pr(repo, progress)?;
+            if options.create_draft_pr {
+                ensure_draft_pr(repo, progress)?;
+            }
         }
         return Ok(false);
     }
@@ -64,7 +67,9 @@ pub fn commit_workflow(
 
     if options.push {
         push_with_upstream_if_needed(repo)?;
-        ensure_draft_pr(repo, progress)?;
+        if options.create_draft_pr {
+            ensure_draft_pr(repo, progress)?;
+        }
     }
 
     Ok(true)
@@ -163,7 +168,8 @@ pub fn commit_workflow_traced(options: &CommitOptions) -> String {
         json!({
             "add": options.add,
             "lint": options.lint,
-            "push": options.push
+            "push": options.push,
+            "create_draft_pr": options.create_draft_pr
         }),
     );
 

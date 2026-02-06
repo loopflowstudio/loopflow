@@ -53,6 +53,7 @@ pub fn create_or_update_pr(
         add: true,
         lint: false,
         push: true,
+        create_draft_pr: false,
         task: "commit".to_string(),
         flow_parents: Vec::new(),
         message: None,

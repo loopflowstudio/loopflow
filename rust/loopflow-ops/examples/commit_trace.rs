@@ -23,6 +23,7 @@ fn main() {
         add,
         lint,
         push,
+        create_draft_pr: false,
         task: "test".to_string(),
         flow_parents: vec![],
         message: None,

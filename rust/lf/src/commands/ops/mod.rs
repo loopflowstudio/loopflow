@@ -178,6 +178,7 @@ fn commit_current(
             add,
             lint,
             push,
+            create_draft_pr: true,
             task: "commit".to_string(),
             flow_parents: Vec::new(),
             message: message.map(str::to_string),

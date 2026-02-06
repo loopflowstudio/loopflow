@@ -17,12 +17,13 @@ cargo fmt                     # Format
 loopflow-engine/
 ├── agent.rs      # Agent command building (Claude, Codex, Gemini)
 ├── builtins.rs   # Embedded built-in steps, flows, directions
+├── command.rs    # Shell command execution with structured errors
 ├── config.rs     # Config loading (~/.lf/, .lf/)
 ├── error.rs      # Typed errors with thiserror
 ├── event.rs      # Lifecycle events for runs
 ├── flow.rs       # Flow/step/direction parsing from YAML
 ├── git.rs        # Git operations (rebase, push, branch)
-├── naming.rs     # Branch name generation
+├── naming.rs     # Branch name generation (schema-based)
 ├── prompt.rs     # Context gathering and prompt formatting
 ├── worktree.rs   # Worktree creation/removal
 └── worktrees.rs  # Worktree listing/management

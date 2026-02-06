@@ -66,6 +66,14 @@ impl TestRepo {
         run_git(self.repo.as_path(), &["checkout", name]);
     }
 
+    pub fn push(&self) {
+        run_git(self.repo.as_path(), &["push"]);
+    }
+
+    pub fn push_new_branch(&self, branch: &str) {
+        run_git(self.repo.as_path(), &["push", "-u", "origin", branch]);
+    }
+
     pub fn head_sha(&self) -> String {
         run_git_output(self.repo.as_path(), &["rev-parse", "HEAD"])
     }

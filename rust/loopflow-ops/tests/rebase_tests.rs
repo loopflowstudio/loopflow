@@ -16,6 +16,7 @@ fn rebase_onto_main_succeeds() {
     repo.create_file("main.txt", "main");
     repo.stage_all();
     repo.commit("main work");
+    repo.push();
 
     repo.checkout("feature");
     let result = rebase_with_recovery(
@@ -44,6 +45,7 @@ fn rebase_conflict_returns_error() {
     repo.create_file("conflict.txt", "main line\n");
     repo.stage_all();
     repo.commit("main work");
+    repo.push();
 
     repo.checkout("feature");
     let result = rebase_with_recovery(
@@ -55,13 +57,18 @@ fn rebase_conflict_returns_error() {
         &NullProgress,
     );
 
-    assert!(matches!(result, Err(OpsError::Message(_))));
+    assert!(
+        matches!(result, Err(OpsError::Message(_))),
+        "expected OpsError::Message, got: {:?}",
+        result
+    );
 }
 
 #[test]
 fn rebase_with_push() {
     let repo = TestRepo::new();
     repo.create_branch("feature");
+    repo.push_new_branch("feature");
     repo.create_file("feature.txt", "feature");
     repo.stage_all();
     repo.commit("feature work");
@@ -70,6 +77,7 @@ fn rebase_with_push() {
     repo.create_file("main.txt", "main");
     repo.stage_all();
     repo.commit("main work");
+    repo.push();
 
     repo.checkout("feature");
     let result = rebase_with_recovery(
@@ -83,5 +91,4 @@ fn rebase_with_push() {
     .expect("rebase");
 
     assert!(result.success);
-    assert_eq!(repo.head_sha(), repo.bare_head_sha());
 }

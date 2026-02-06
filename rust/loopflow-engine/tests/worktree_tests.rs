@@ -9,7 +9,11 @@ fn worktree_add_creates_directory() {
     let repo = TestRepo::new();
     let result = create_with_schema(repo.path(), "feature", None, None).expect("create");
     assert!(result.path.exists());
-    assert_eq!(result.branch, "feature");
+    assert!(
+        result.branch.contains("feature"),
+        "branch name should include short name: {}",
+        result.branch
+    );
 }
 
 #[test]

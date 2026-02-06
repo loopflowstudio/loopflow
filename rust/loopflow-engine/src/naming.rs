@@ -95,9 +95,8 @@ pub fn format_branch_name(
     config: Option<&BranchNameConfig>,
     repo: &Path,
 ) -> Result<String, GitError> {
-    let Some(config) = config else {
-        return Ok(short_name.to_string());
-    };
+    let default = BranchNameConfig::default();
+    let config = config.unwrap_or(&default);
 
     let schema = config.schema_.as_str();
     if schema == "{name}" {
@@ -126,7 +125,6 @@ mod tests {
     use loopflow_test_support::TestRepo;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
-    use tempfile::tempdir;
 
     #[test]
     fn sanitize_for_branch_cleans_input() {
@@ -153,10 +151,15 @@ mod tests {
     }
 
     #[test]
-    fn format_branch_name_passthrough_without_config() {
-        let repo = tempdir().expect("tempdir");
+    fn format_branch_name_uses_default_schema_without_config() {
+        let repo = TestRepo::new();
         let name = format_branch_name("feature", None, repo.path()).expect("format");
-        assert_eq!(name, "feature");
+        assert!(name.contains("feature"), "should include the short name");
+        assert!(
+            name.contains('.'),
+            "should use the default schema with separators"
+        );
+        assert_ne!(name, "feature", "should not pass through raw name");
     }
 
     #[test]

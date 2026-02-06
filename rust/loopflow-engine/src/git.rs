@@ -297,6 +297,11 @@ pub fn worktree_add(
         ],
     )?;
     if !output.status.success() {
+        // A failing post-checkout hook causes git to exit non-zero even when
+        // the worktree was created successfully. Verify before reporting failure.
+        if path.join(".git").exists() {
+            return Ok(());
+        }
         return Err(GitError::CommandFailed {
             command: format!(
                 "git worktree add -b {} {} {}",

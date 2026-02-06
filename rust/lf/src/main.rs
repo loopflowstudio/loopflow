@@ -111,6 +111,11 @@ fn reorder_args(args: Vec<String>) -> Vec<String> {
 }
 
 fn main() -> anyhow::Result<()> {
+    // Ensure Ctrl+C terminates lf. Without this, cmd.output() and
+    // child.wait() retry on EINTR and the process hangs while the
+    // child agent catches SIGINT and keeps running.
+    ctrlc::set_handler(|| std::process::exit(130)).expect("failed to set Ctrl+C handler");
+
     // Initialize tracing with RUST_LOG env filter
     // Usage: RUST_LOG=lf=debug lf debug
     let filter = EnvFilter::try_from_default_env()

@@ -1,0 +1,8 @@
+- review
+- fork:
+    step: reduce
+    drafts:
+      - direction: infra-engineer
+      - direction: designer
+      - direction: product-engineer
+- publish

@@ -106,7 +106,15 @@ def write_version(version: str) -> None:
 def build_local() -> tuple[bool, str]:
     """Build wheel with maturin. Returns (success, output)."""
     result = subprocess.run(
-        ["uv", "run", "maturin", "build", "--release"],
+        [
+            "uv",
+            "run",
+            "maturin",
+            "build",
+            "--release",
+            "--manifest-path",
+            str(ROOT / "rust" / "loopflow-py" / "Cargo.toml"),
+        ],
         cwd=ROOT,
         capture_output=True,
         text=True,

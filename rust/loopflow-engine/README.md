@@ -19,7 +19,6 @@ loopflow-engine/
 ├── config.rs    # Config loading (~/.lf/, .lf/)
 ├── flow.rs      # Flow/step/direction parsing from YAML
 ├── prompt.rs    # Context gathering and prompt formatting
-├── python.rs    # PyO3 bindings for Python integration
 ├── git.rs       # Git operations (rebase, push, branch)
 ├── worktree.rs  # Worktree creation/removal
 ├── error.rs     # Typed errors with thiserror
@@ -120,7 +119,7 @@ Working:
 - Context assembly with docs, diff, clipboard
 - tiktoken-rs token counting
 - Config loading with global/repo merging
-- PyO3 bindings for Python integration
+- PyO3 bindings available via rust/loopflow-py
 
 Not yet implemented:
 - Summary loading

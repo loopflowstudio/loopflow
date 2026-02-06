@@ -32,8 +32,8 @@ requires = ["maturin>=1.4,<2.0"]
 build-backend = "maturin"
 
 [tool.maturin]
-bindings = "bin"
-manifest-path = "rust/lf/Cargo.toml"
+bindings = "pyo3"
+manifest-path = "rust/loopflow-py/Cargo.toml"
 strip = true
 
 [tool.ruff]

@@ -135,16 +135,15 @@ lf review -d ceo
 ## Install
 
 ```bash
-uv tool install loopflow
+curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh
 ```
 
 Built-in steps and flows included. `lf init` sets up your coding agent and preferences.
 
 ```bash
-LF_RUST=0 lf debug    # force Python fallback
+cargo install --git https://github.com/loopflowstudio/loopflow --bin lf --bin lfd
 ```
-
-Set `LF_RUST=0` if you need the Python CLI instead of the bundled Rust binary.
+Install the Rust binaries directly with cargo.
 
 [Documentation →](docs/index.md)
 

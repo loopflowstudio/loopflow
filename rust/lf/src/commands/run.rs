@@ -112,8 +112,7 @@ pub fn run(
     let mut components = components;
     drop_native_instruction_docs(&mut components, &repo_root);
     let trim_start = Instant::now();
-    let (components, breakdown) =
-        trim_context_with_breakdown(components, DEFAULT_CONTEXT_BUDGET);
+    let (components, breakdown) = trim_context_with_breakdown(components, DEFAULT_CONTEXT_BUDGET);
     debug!(
         elapsed_ms = trim_start.elapsed().as_millis(),
         "trimmed context"

@@ -28,7 +28,10 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
     /// The API normalizes worktree paths to their main repo.
     public func listWaves(repo: URL) async throws -> [Wave] {
         var components = URLComponents(url: apiBaseURL.appendingPathComponent("waves"), resolvingAgainstBaseURL: false)!
-        components.queryItems = [URLQueryItem(name: "repo", value: repo.path)]
+        components.queryItems = [
+            URLQueryItem(name: "repo", value: repo.path),
+            URLQueryItem(name: "expand[]", value: "active_run"),
+        ]
 
         guard let url = components.url else {
             LoggingService.lfd("listWaves: invalid URL for repo=\(repo.path)")
@@ -216,6 +219,20 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
             prState = PRState(rawValue: stateStr.lowercased())
         }
 
+        var prNumber: Int? = json["pr_number"] as? Int
+        if prURL == nil || prState == nil || prNumber == nil {
+            if let activeRun = json["active_run"] as? [String: Any],
+               let pr = activeRun["pr"] as? [String: Any],
+               let urlString = pr["url"] as? String,
+               let url = URL(string: urlString) {
+                prURL = url
+                prNumber = pr["number"] as? Int
+                if let state = pr["state"] as? String {
+                    prState = PRState(rawValue: state.lowercased())
+                }
+            }
+        }
+
         // Parse staleness
         var staleness: Staleness = .active
         if let stalenessStr = json["staleness"] as? String {
@@ -291,7 +308,7 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
             aheadRemote: json["ahead_remote"] as? Int ?? 0,
             behindRemote: json["behind_remote"] as? Int ?? 0,
             prURL: prURL,
-            prNumber: json["pr_number"] as? Int,
+            prNumber: prNumber,
             prState: prState,
             staleness: staleness,
             recentSteps: recentSteps,

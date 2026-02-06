@@ -10,7 +10,6 @@ use axum::{Json, Router};
 use crate::auth;
 use crate::http::dto::{ErrorDetail, ErrorResponse};
 use crate::http::routes::{hooks, system, wave_runs, waves, worktrees, ws};
-use crate::id::LfdId;
 use crate::store::{SharedStore, StoreError};
 
 pub use state::HttpState;
@@ -40,6 +39,10 @@ pub fn router(state: HttpState) -> Router {
         .route(
             "/waves/:wave_id/runs",
             get(wave_runs::list_wave_runs_for_wave_handler),
+        )
+        .route(
+            "/waves/:wave_id/logs",
+            get(wave_runs::wave_logs_handler),
         )
         .route("/wave_runs", get(wave_runs::list_wave_runs_handler))
         .route("/worktrees", get(worktrees::list_worktrees_handler))
@@ -111,12 +114,6 @@ pub fn map_store_error(err: StoreError) -> (StatusCode, Json<ErrorResponse>) {
             api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
         }
     }
-}
-
-pub fn parse_id(value: &str) -> Result<LfdId, (StatusCode, Json<ErrorResponse>)> {
-    value
-        .parse::<LfdId>()
-        .map_err(|err| api_error_with_param(StatusCode::BAD_REQUEST, err.to_string(), "id"))
 }
 
 pub async fn run_store<T, F>(store: &SharedStore, f: F) -> Result<T, StoreError>

@@ -48,7 +48,7 @@ def update_wave(
     direction: Optional[list[str]] = None,
     area: Optional[list[str]] = None,
     stimulus: Optional[Stimulus] = None,
-    paused: Optional[bool] = None,
+    status: Optional[str] = None,
 ) -> Wave:
     return _client().update_wave(
         name_or_id,
@@ -56,7 +56,7 @@ def update_wave(
         direction=direction,
         area=area,
         stimulus=stimulus,
-        paused=paused,
+        status=status,
     )
 
 
@@ -110,6 +110,14 @@ def wave_runs(
     return _client().wave_runs(wave_id=wave_id, repo=repo, limit=limit)
 
 
+def land(name_or_id: str) -> dict:
+    return _client().land_wave(name_or_id)
+
+
+def wave_logs(name_or_id: str):
+    return _client().wave_logs(name_or_id)
+
+
 __all__ = [
     "Client",
     "LoopflowError",
@@ -128,5 +136,7 @@ __all__ = [
     "run_wave",
     "stop_wave",
     "land_wave",
+    "land",
     "wave_runs",
+    "wave_logs",
 ]

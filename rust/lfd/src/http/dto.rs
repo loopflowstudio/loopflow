@@ -168,7 +168,11 @@ pub fn format_datetime(datetime: Option<OffsetDateTime>) -> Option<String> {
         .ok()
 }
 
-pub fn wave_run_dto(run: WaveRun, wave: Option<&Wave>) -> WaveRunDto {
+pub fn wave_run_dto(
+    run: WaveRun,
+    wave: Option<&Wave>,
+    pr: Option<PullRequestDto>,
+) -> WaveRunDto {
     let (flow, repo, direction, area) = wave
         .map(|wave| {
             (
@@ -193,7 +197,7 @@ pub fn wave_run_dto(run: WaveRun, wave: Option<&Wave>) -> WaveRunDto {
         status: wave_run_status_str(run.status),
         local_worktree: run.worktree,
         remote_branch: run.branch,
-        pr: None,
+        pr,
         started_at: format_datetime(run.started_at),
         ended_at: format_datetime(run.ended_at),
         error: run.error,

@@ -14,7 +14,7 @@ Separately, the lfd HTTP surface needs a Stripe-style v1 contract so clients con
 ## Who uses what
 
 **`lfq`** — devops persona. Self-hosted developer checking if their server is running, viewing wave status, troubleshooting. Quick terminal feedback.  
-**`import loopflow`** — product/orchestration persona. Building systems that dynamically create and configure waves in response to incoming data. Python is the API for the wave data model; HTTP is an implementation detail.  
+**`import loopflow`** — product/orchestration persona (humans or robots). Building systems that dynamically create and configure waves in response to incoming data. Python is the API for the wave data model; HTTP is an implementation detail.  
 **Concerto** (Swift) — primary GUI. Its Swift client and this Python package are sibling clients to the same lfd API. They should converge on the same abstractions.
 
 ## Three binaries
@@ -47,9 +47,10 @@ lfq run engbot       # start a wave
 lfq stop engbot      # stop a wave
 lfq create engbot    # create a wave
 lfq delete engbot    # delete a wave
+lfq land engbot      # land the wave's branch
 ```
 
-Priority: R >> D > C >>> U. Config updates happen through Python or Concerto.
+Priority: R >> D > C >>> U. Config updates happen through Python or Concerto. lfq prints human-friendly tables by default.
 
 ---
 
@@ -75,7 +76,7 @@ loopflow.create_wave("engbot", repo=".", flow="ship",
                      area=["src/"])
 
 # Update
-loopflow.update_wave("engbot", flow="grind", paused=True)
+loopflow.update_wave("engbot", flow="grind", status="paused")
 loopflow.update_wave("engbot", direction=["designer", "infra-engineer"])
 
 # Actions
@@ -103,6 +104,13 @@ class Stimulus(BaseModel):
     kind: str  # manual, once, loop, watch, cron
     cron: str | None = None
 
+class PullRequest(BaseModel):
+    url: str
+    number: int | None = None
+    state: str | None = None
+    title: str | None = None
+    branch: str | None = None
+
 class WaveRun(BaseModel):
     id: str
     wave_id: str
@@ -111,7 +119,7 @@ class WaveRun(BaseModel):
     status: str  # pending, running, waiting, completed, failed, cancelled
     local_worktree: str
     remote_branch: str
-    pr: dict | None = None
+    pr: PullRequest | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
     error: str | None = None

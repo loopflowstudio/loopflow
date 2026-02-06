@@ -77,7 +77,7 @@ class Client:
         direction: Optional[list[str]] = None,
         area: Optional[list[str]] = None,
         stimulus: Optional[Stimulus] = None,
-        paused: Optional[bool] = None,
+        status: Optional[str] = None,
     ) -> Wave:
         body: dict[str, Any] = {}
         if flow is not None:
@@ -88,8 +88,8 @@ class Client:
             body["area"] = area
         if stimulus is not None:
             body["stimulus"] = stimulus.model_dump(exclude_none=True)
-        if paused is not None:
-            body["paused"] = paused
+        if status is not None:
+            body["paused"] = status == "paused"
         payload = self._request_json("PATCH", f"/v1/waves/{name_or_id}", json=body)
         return Wave.model_validate(payload)
 
@@ -156,6 +156,23 @@ class Client:
         payload = self._request_json("GET", "/v1/wave_runs", params=params)
         data = payload.get("data", [])
         return [WaveRun.model_validate(item) for item in data]
+
+    def wave_logs(self, name_or_id: str):
+        try:
+            with self._client.stream(
+                "GET",
+                f"/v1/waves/{name_or_id}/logs",
+            ) as response:
+                if response.status_code >= 400:
+                    message = _extract_error_message(response)
+                    if response.status_code == 412:
+                        raise WaveAlreadyRunning(message)
+                    raise LoopflowError(message)
+                for line in response.iter_lines():
+                    if line:
+                        yield line
+        except httpx.RequestError as exc:
+            raise ConnectionError(str(exc)) from exc
 
     def _request_json(
         self,

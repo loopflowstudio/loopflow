@@ -10,7 +10,7 @@ use crate::http::dto::{
 };
 use crate::http::routes::{build_wave_dto, resolve_wave_id};
 use crate::http::state::HttpState;
-use crate::http::{api_error, map_store_error, parse_id, run_store, ApiResult};
+use crate::http::{api_error, map_store_error, run_store, ApiResult};
 use crate::id::LfdId;
 use crate::store::{SharedStore, StoreError};
 use crate::types::{Event, Wave, WaveRun, WaveRunStatus};

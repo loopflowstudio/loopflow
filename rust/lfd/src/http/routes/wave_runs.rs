@@ -1,14 +1,21 @@
 use std::collections::{HashMap, HashSet};
 
+use axum::body::Body;
 use axum::extract::{Path, Query, State};
+use axum::http::header;
 use axum::Json;
+use axum::response::Response;
+use bytes::Bytes;
+use futures_util::StreamExt;
 use serde::Deserialize;
+use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 
 use crate::http::dto::{wave_run_dto, ListResponse, WaveRunDto};
 use crate::http::state::HttpState;
 use crate::http::{map_store_error, run_store, ApiResult};
-use crate::http::routes::resolve_wave_id;
+use crate::http::routes::{pr_for_run, resolve_wave_id};
 use crate::id::LfdId;
+use crate::output::OutputEvent;
 use crate::types::{Wave, WaveRun};
 
 #[derive(Deserialize, Default)]
@@ -34,6 +41,62 @@ pub async fn list_wave_runs_for_wave_handler(
 ) -> ApiResult<ListResponse<WaveRunDto>> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
     list_wave_runs(&state, Some(wave_id), query).await
+}
+
+pub async fn wave_logs_handler(
+    State(state): State<HttpState>,
+    Path(wave_id): Path<String>,
+) -> Result<Response, (axum::http::StatusCode, Json<crate::http::dto::ErrorResponse>)> {
+    let wave_id = resolve_wave_id(&state, &wave_id).await?;
+    let output_rx = state.output_hub.subscribe();
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(128);
+    let store = state.store.clone();
+
+    tokio::spawn(async move {
+        let mut stream = BroadcastStream::new(output_rx);
+        let mut cache: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+        while let Some(event) = stream.next().await {
+            let Ok(OutputEvent {
+                wave_run_id,
+                agent_id: _,
+                text,
+            }) = event
+            else {
+                continue;
+            };
+
+            let include = if let Some(hit) = cache.get(&wave_run_id) {
+                *hit
+            } else {
+                let run_id = LfdId::from_raw(wave_run_id.clone());
+                let target = wave_id.clone();
+                let result = run_store(&store, move |store| store.get_wave_run(&run_id)).await;
+                let matches = match result {
+                    Ok(Some(run)) => run.wave_id == target,
+                    _ => false,
+                };
+                cache.insert(wave_run_id.clone(), matches);
+                matches
+            };
+
+            if include
+                && tx
+                    .send(Ok(Bytes::from(format!("{text}\n"))))
+                    .await
+                    .is_err()
+            {
+                break;
+            }
+        }
+    });
+
+    let stream = ReceiverStream::new(rx);
+    let body = Body::from_stream(stream);
+    let mut response = Response::new(body);
+    response
+        .headers_mut()
+        .insert(header::CONTENT_TYPE, header::HeaderValue::from_static("text/plain"));
+    Ok(response)
 }
 
 async fn list_wave_runs(
@@ -73,13 +136,14 @@ async fn list_wave_runs(
         query.ending_before.as_deref(),
     );
 
-    let data = runs
-        .into_iter()
-        .map(|run| {
-            let wave = wave_map.get(&run.wave_id);
-            wave_run_dto(run, wave)
-        })
-        .collect::<Vec<_>>();
+    let mut data = Vec::with_capacity(runs.len());
+    for run in runs {
+        let wave = wave_map.get(&run.wave_id);
+        let pr = pr_for_run(&state.store, &run, wave)
+            .await
+            .map_err(map_store_error)?;
+        data.push(wave_run_dto(run, wave, pr));
+    }
 
     Ok(Json(ListResponse::new(data, has_more)))
 }

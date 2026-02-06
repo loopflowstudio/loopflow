@@ -145,6 +145,29 @@ cargo install --git https://github.com/loopflowstudio/loopflow --bin lf --bin lf
 ```
 Install the Rust binaries directly with cargo.
 
+## Query lfd (lfq)
+
+```bash
+uv tool install loopflow
+lfq                  # status overview
+lfq list             # list waves
+lfq logs engbot      # tail agent output
+```
+
+## Python API
+
+```bash
+uv pip install loopflow
+```
+
+```python
+import loopflow
+
+loopflow.waves()
+loopflow.create_wave("engbot", repo=".", flow="ship", direction=["product-engineer"])
+loopflow.run_wave("engbot")
+```
+
 [Documentation →](docs/index.md)
 
 ## Integrations

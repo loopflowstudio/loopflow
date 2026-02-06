@@ -7,11 +7,12 @@ pub mod ws;
 
 use axum::http::StatusCode;
 use axum::Json;
+use std::path::Path;
 
-use crate::http::dto::{wave_dto, wave_run_dto, ErrorResponse, WaveDto};
+use crate::http::dto::{wave_dto, wave_run_dto, ErrorResponse, PullRequestDto, WaveDto};
 use crate::http::run_store;
 use crate::store::{SharedStore, StoreError};
-use crate::types::Wave;
+use crate::types::{Wave, WaveRun};
 
 pub async fn resolve_wave_id(
     state: &crate::http::HttpState,
@@ -58,7 +59,7 @@ pub async fn build_wave_dto(
     } else {
         active
             .as_ref()
-            .map(|run| wave_run_dto(run.clone(), Some(&wave)).status.clone())
+            .map(|run| wave_run_dto(run.clone(), Some(&wave), None).status.clone())
             .unwrap_or_else(|| "idle".to_string())
     };
 
@@ -76,12 +77,52 @@ pub async fn build_wave_dto(
     };
 
     let active_run = if include_active_run {
-        active.map(|run| wave_run_dto(run, Some(&wave)))
+        let pr = if let Some(run) = active.as_ref() {
+            pr_for_run(store, run, Some(&wave)).await?
+        } else {
+            None
+        };
+        active.map(|run| wave_run_dto(run, Some(&wave), pr))
     } else {
         None
     };
 
     Ok(wave_dto(&wave, status, iteration, active_run))
+}
+
+pub async fn pr_for_run(
+    _store: &SharedStore,
+    run: &WaveRun,
+    wave: Option<&Wave>,
+) -> Result<Option<PullRequestDto>, StoreError> {
+    let worktree = if !run.worktree.is_empty() {
+        run.worktree.clone()
+    } else {
+        wave.map(|wave| wave.repo.clone()).unwrap_or_default()
+    };
+
+    if worktree.is_empty() {
+        return Ok(None);
+    }
+
+    let worktree_path = worktree.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        loopflow_ops::current_pr(Path::new(&worktree_path))
+    })
+    .await
+    .map_err(|err| StoreError::InvalidData(err.to_string()))?;
+
+    match result {
+        Ok(Some(pr)) => Ok(Some(PullRequestDto {
+            url: pr.url,
+            number: Some(pr.number as u32),
+            state: Some(pr.state),
+            title: None,
+            branch: Some(pr.branch),
+        })),
+        Ok(None) => Ok(None),
+        Err(_) => Ok(None),
+    }
 }
 
 // Note: wave_run_dto is used directly in wave run routes.

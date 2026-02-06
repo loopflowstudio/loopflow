@@ -18,6 +18,28 @@ python -m pytest test_calc.py    # see the bug
 lf debug -c                       # fix it
 ```
 
+## Query lfd
+
+```bash
+lfq                  # status overview
+lfq list             # list waves
+lfq logs engbot      # tail agent output
+```
+
+## Python API
+
+```bash
+uv pip install loopflow
+```
+
+```python
+import loopflow
+
+loopflow.waves()
+loopflow.create_wave("engbot", repo=".", flow="ship", direction=["product-engineer"])
+loopflow.run_wave("engbot")
+```
+
 ---
 
 ## Why Flows?

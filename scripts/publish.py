@@ -170,11 +170,9 @@ def _install_binaries() -> tuple[bool, str]:
     result = subprocess.run(
         ["cargo", "build", "-p", "lf", "-p", "lfd", "--release"],
         cwd=ROOT,
-        capture_output=True,
-        text=True,
     )
     if result.returncode != 0:
-        return False, result.stdout + result.stderr
+        return False, "cargo build failed (see output above)"
 
     built = ROOT / "target" / "release"
     for name in ("lf", "lfd"):

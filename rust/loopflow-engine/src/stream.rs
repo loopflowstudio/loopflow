@@ -330,15 +330,26 @@ fn parse_result(v: &serde_json::Value) -> StreamEvent {
         Some("error") => ResultSubtype::Error,
         _ => ResultSubtype::Success,
     };
-    // Claude: cost_usd, duration_secs at top level
-    let cost_usd = v.get("cost_usd").and_then(|c| c.as_f64());
-    // Gemini: stats.duration_ms
-    let duration_secs = v.get("duration_secs").and_then(|d| d.as_f64()).or_else(|| {
-        v.get("stats")
-            .and_then(|s| s.get("duration_ms"))
-            .and_then(|d| d.as_f64())
-            .map(|ms| ms / 1000.0)
-    });
+    // Claude: total_cost_usd (or cost_usd for older versions)
+    let cost_usd = v
+        .get("total_cost_usd")
+        .or_else(|| v.get("cost_usd"))
+        .and_then(|c| c.as_f64());
+    // Claude: duration_ms; Gemini: stats.duration_ms; fallback: duration_secs
+    let duration_secs = v
+        .get("duration_secs")
+        .and_then(|d| d.as_f64())
+        .or_else(|| {
+            v.get("duration_ms")
+                .and_then(|d| d.as_f64())
+                .map(|ms| ms / 1000.0)
+        })
+        .or_else(|| {
+            v.get("stats")
+                .and_then(|s| s.get("duration_ms"))
+                .and_then(|d| d.as_f64())
+                .map(|ms| ms / 1000.0)
+        });
     StreamEvent::Result {
         subtype,
         cost_usd,
@@ -539,13 +550,28 @@ mod tests {
     #[test]
     fn claude_result_success() {
         let mut parser = StreamParser::new();
-        let line = r#"{"type":"result","subtype":"success","cost_usd":0.05,"duration_secs":45.2}"#;
+        let line =
+            r#"{"type":"result","subtype":"success","total_cost_usd":0.05,"duration_ms":45200}"#;
         assert_eq!(
             parser.feed_line(line),
             ParseResult::Events(vec![StreamEvent::Result {
                 subtype: ResultSubtype::Success,
                 cost_usd: Some(0.05),
                 duration_secs: Some(45.2),
+            }])
+        );
+    }
+
+    #[test]
+    fn claude_result_legacy_field_names() {
+        let mut parser = StreamParser::new();
+        let line = r#"{"type":"result","subtype":"success","cost_usd":0.03,"duration_secs":30.0}"#;
+        assert_eq!(
+            parser.feed_line(line),
+            ParseResult::Events(vec![StreamEvent::Result {
+                subtype: ResultSubtype::Success,
+                cost_usd: Some(0.03),
+                duration_secs: Some(30.0),
             }])
         );
     }

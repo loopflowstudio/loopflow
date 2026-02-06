@@ -14,7 +14,7 @@ pub enum OpsError {
     Load(#[from] LoadError),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("command failed: {command}")]
+    #[error("command failed: {command}\n{stderr}")]
     CommandFailed { command: String, stderr: String },
     #[error("agent failed: {0}")]
     AgentFailed(String),

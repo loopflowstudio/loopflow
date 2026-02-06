@@ -353,7 +353,17 @@ fn launch_streaming(
                 stdout_content.push('\n');
             }
             StreamKind::Stderr => {
-                eprintln!("{line}");
+                if use_color.is_some() {
+                    // In Human mode, Claude --verbose duplicates stream-json
+                    // on stderr. Parse it and skip recognized events to avoid
+                    // printing raw JSON alongside formatted output.
+                    match parser.feed_line(&line) {
+                        ParseResult::Events(_) | ParseResult::Skipped => {}
+                        ParseResult::Passthrough => eprintln!("{line}"),
+                    }
+                } else {
+                    eprintln!("{line}");
+                }
                 stderr_content.push_str(&line);
                 stderr_content.push('\n');
             }

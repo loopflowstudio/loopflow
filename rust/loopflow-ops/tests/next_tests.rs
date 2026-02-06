@@ -11,8 +11,10 @@ const MOCK_CLAUDE: &str = "#!/bin/sh\necho '{\"title\":\"test commit\",\"body\":
 fn write_gh_script(pr_number: Option<u64>, pr_state: Option<&str>) -> String {
     let number = pr_number.map(|n| n.to_string()).unwrap_or_default();
     let state = pr_state.unwrap_or("");
+    // The mock checks the current branch: only return PR data when on a non-main branch.
+    // This prevents enable_auto_merge from triggering after reset_to_main.
     format!(
-        "#!/bin/sh\ncase \"$1 $2\" in\n  'pr list') echo '[]'; exit 0;;\n  'pr create') echo 'https://example.com/pr/1'; exit 0;;\n  'pr view')\n    if echo \"$@\" | grep -q 'number'; then\n      echo '{number}'; exit 0;\n    fi\n    if echo \"$@\" | grep -q 'state'; then\n      echo '{state}'; exit 0;\n    fi\n    if echo \"$@\" | grep -q 'url'; then\n      echo 'https://example.com/pr/1'; exit 0;\n    fi\n    echo ''; exit 0;;\n  'pr edit') exit 0;;\n  'pr merge') exit 0;;\nesac\nexit 0\n"
+        "#!/bin/sh\ncase \"$1 $2\" in\n  'pr list') echo '[]'; exit 0;;\n  'pr create') echo 'https://example.com/pr/1'; exit 0;;\n  'pr view')\n    branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)\n    if [ \"$branch\" = \"main\" ]; then\n      exit 1\n    fi\n    if echo \"$@\" | grep -q 'number'; then\n      echo '{number}'; exit 0;\n    fi\n    if echo \"$@\" | grep -q 'state'; then\n      echo '{state}'; exit 0;\n    fi\n    if echo \"$@\" | grep -q 'url'; then\n      echo 'https://example.com/pr/1'; exit 0;\n    fi\n    echo ''; exit 0;;\n  'pr edit') exit 0;;\n  'pr merge') exit 0;;\nesac\nexit 0\n"
     )
 }
 
@@ -57,6 +59,8 @@ fn next_with_naming_schema() {
         ".lf/config.yaml",
         "branch_names:\n  schema: '{user}/{words}'\n",
     );
+    repo.stage_all();
+    repo.commit("add config");
     repo.create_branch("feature");
 
     let result = next_branch(
@@ -111,6 +115,8 @@ fn next_appends_suffix_on_branch_name_collision() {
     let repo = TestRepo::new();
     // Schema {name} produces "wave" — but that branch already exists, triggering collision
     repo.create_file(".lf/config.yaml", "branch_names:\n  schema: '{name}'\n");
+    repo.stage_all();
+    repo.commit("add config");
     repo.create_branch("wave");
 
     let result = next_branch(

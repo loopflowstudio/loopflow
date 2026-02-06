@@ -123,7 +123,6 @@ Working:
 - Context assembly with docs, diff, clipboard
 - tiktoken-rs token counting
 - Config loading with global/repo merging
-- PyO3 bindings available via rust/loopflow-py
 
 Not yet implemented:
 - Summary loading

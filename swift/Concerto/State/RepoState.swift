@@ -690,7 +690,7 @@ final class RepoState {
                 }
             }
 
-        case .running, .completed:
+        case .running, .completed, .paused:
             break  // No notification needed
         }
     }

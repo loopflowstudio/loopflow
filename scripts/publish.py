@@ -142,10 +142,7 @@ def _check_on_main() -> None:
 
 def _build_wheel() -> tuple[bool, str]:
     result = subprocess.run(
-        [
-            "uv", "run", "maturin", "build", "--release",
-            "--manifest-path", str(ROOT / "rust" / "loopflow-py" / "Cargo.toml"),
-        ],
+        ["uv", "run", "hatchling", "build"],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -154,9 +151,9 @@ def _build_wheel() -> tuple[bool, str]:
 
 
 def _install_wheel() -> tuple[bool, str]:
-    wheels = sorted((ROOT / "target" / "wheels").glob("loopflow-*.whl"))
+    wheels = sorted((ROOT / "dist").glob("loopflow-*.whl"))
     if not wheels:
-        return False, "No wheel found in target/wheels/"
+        return False, "No wheel found in dist/"
     result = subprocess.run(
         ["uv", "pip", "install", "--force-reinstall", str(wheels[-1])],
         capture_output=True,

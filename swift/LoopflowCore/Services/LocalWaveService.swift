@@ -137,15 +137,13 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
 
         // Create wave via lfd HTTP API with minimal config
         // User configures area, direction, flow in detail panel before running
-        var components = URLComponents(url: apiBaseURL.appendingPathComponent("waves"), resolvingAgainstBaseURL: false)!
-        components.queryItems = [URLQueryItem(name: "repo", value: repo.path)]
-
-        var request = URLRequest(url: components.url!)
+        var request = URLRequest(url: apiBaseURL.appendingPathComponent("waves"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         // Create with defaults - lfd requires non-empty direction/area
         let body: [String: Any] = [
+            "repo": repo.path,
             "name": name.isEmpty ? NSNull() : name,
             "flow": "design",  // Default flow (single step)
             "direction": ["default"],
@@ -153,7 +151,7 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        LoggingService.lfd("createWave: POST \(components.url!) body=\(body)")
+        LoggingService.lfd("createWave: POST \(request.url!) body=\(body)")
 
         do {
             // Use longSession - createWave does git fetch + worktree add + push
@@ -268,6 +266,9 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
             runStartedAt = dateFormatter.date(from: dateStr)
         }
 
+        let status = WaveStatus(rawValue: json["status"] as? String ?? "idle") ?? .idle
+        let paused = status == .paused
+
         return Wave(
             id: json["id"] as? String ?? UUID().uuidString,
             name: json["name"] as? String ?? "",
@@ -276,8 +277,8 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
             flow: json["flow"] as? String ?? "design",
             repo: json["repo"] as? String ?? "",
             stimulus: stimulus,
-            paused: json["paused"] as? Bool ?? true,
-            status: WaveStatus(rawValue: json["status"] as? String ?? "idle") ?? .idle,
+            paused: paused,
+            status: status,
             iteration: json["iteration"] as? Int ?? 0,
             worktreePath: json["worktree"] as? String,
             branch: json["branch"] as? String,
@@ -519,6 +520,19 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
         let status = WaveRunStatus(rawValue: statusStr) ?? .pending
         let iteration = normalizeInt(json["iteration"])
 
+        let pr: PullRequest?
+        if let prData = json["pr"] as? [String: Any],
+           let urlString = prData["url"] as? String,
+           let url = URL(string: urlString) {
+            let number = prData["number"] as? Int
+            let state = (prData["state"] as? String).map { $0.lowercased() }.flatMap { PRState(rawValue: $0) }
+            let title = prData["title"] as? String
+            let branch = prData["branch"] as? String
+            pr = PullRequest(url: url, number: number, state: state, title: title, branch: branch)
+        } else {
+            pr = nil
+        }
+
         return WaveRun(
             id: id,
             waveId: waveId,
@@ -528,11 +542,11 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
             direction: direction,
             status: status,
             iteration: iteration,
-            worktree: json["worktree"] as? String,
-            branch: json["branch"] as? String,
+            worktree: json["local_worktree"] as? String,
+            branch: json["remote_branch"] as? String,
             currentStep: json["current_step"] as? String,
             error: json["error"] as? String,
-            prUrl: json["pr_url"] as? String,
+            pr: pr,
             startedAt: parseDate(json["started_at"]),
             endedAt: parseDate(json["ended_at"]),
             createdAt: parseDate(json["created_at"]) ?? Date()

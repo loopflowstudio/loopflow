@@ -6,7 +6,8 @@ use serde::Deserialize;
 
 use crate::http::dto::{wave_run_dto, ListResponse, WaveRunDto};
 use crate::http::state::HttpState;
-use crate::http::{map_store_error, parse_id, run_store, ApiResult};
+use crate::http::{map_store_error, run_store, ApiResult};
+use crate::http::routes::resolve_wave_id;
 use crate::id::LfdId;
 use crate::types::{Wave, WaveRun};
 
@@ -31,7 +32,7 @@ pub async fn list_wave_runs_for_wave_handler(
     Path(wave_id): Path<String>,
     Query(query): Query<ListWaveRunsQuery>,
 ) -> ApiResult<ListResponse<WaveRunDto>> {
-    let wave_id = parse_id(&wave_id)?;
+    let wave_id = resolve_wave_id(&state, &wave_id).await?;
     list_wave_runs(&state, Some(wave_id), query).await
 }
 
@@ -41,7 +42,7 @@ async fn list_wave_runs(
     query: ListWaveRunsQuery,
 ) -> ApiResult<ListResponse<WaveRunDto>> {
     let query_wave_id = match query.wave_id.as_deref() {
-        Some(id) => Some(parse_id(id)?),
+        Some(id) => Some(resolve_wave_id(state, id).await?),
         None => None,
     };
     let wave_id = path_wave_id.or(query_wave_id);

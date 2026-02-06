@@ -46,6 +46,7 @@ public enum WaveStatus: String, Sendable, Codable {
     case waiting
     case completed
     case error
+    case paused
 
     public var color: Color {
         switch self {
@@ -54,6 +55,7 @@ public enum WaveStatus: String, Sendable, Codable {
         case .idle: return .gray
         case .completed: return .green
         case .error: return .red
+        case .paused: return .gray
         }
     }
 
@@ -64,6 +66,7 @@ public enum WaveStatus: String, Sendable, Codable {
         case .idle: return "circle"
         case .completed: return "checkmark.circle.fill"
         case .error: return "xmark.circle.fill"
+        case .paused: return "pause.circle"
         }
     }
 }

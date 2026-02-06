@@ -76,9 +76,9 @@ pub struct WaveDto {
     pub flow: String,
     pub direction: Vec<String>,
     pub area: Vec<String>,
-    pub paused: bool,
     pub created_at: Option<String>,
     pub status: String,
+    pub iteration: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_run: Option<WaveRunDto>,
 }
@@ -95,13 +95,28 @@ pub struct WaveRunDto {
     pub iteration: u32,
     pub step_index: u32,
     pub status: String,
-    pub worktree: String,
-    pub branch: String,
+    pub local_worktree: String,
+    pub remote_branch: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr: Option<PullRequestDto>,
     pub started_at: Option<String>,
     pub ended_at: Option<String>,
     pub error: Option<String>,
     pub flow_parents: Vec<String>,
     pub created_at: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PullRequestDto {
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub number: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -114,6 +129,13 @@ pub struct RunWaveResponse {
 #[derive(Debug, Serialize)]
 pub struct StopWaveResponse {
     pub stopped: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ContinueWaveResponse {
+    pub continued: bool,
+    pub wave_id: String,
+    pub wave_run_id: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -169,8 +191,9 @@ pub fn wave_run_dto(run: WaveRun, wave: Option<&Wave>) -> WaveRunDto {
         iteration: run.iteration,
         step_index: run.step_index,
         status: wave_run_status_str(run.status),
-        worktree: run.worktree,
-        branch: run.branch,
+        local_worktree: run.worktree,
+        remote_branch: run.branch,
+        pr: None,
         started_at: format_datetime(run.started_at),
         ended_at: format_datetime(run.ended_at),
         error: run.error,
@@ -179,7 +202,12 @@ pub fn wave_run_dto(run: WaveRun, wave: Option<&Wave>) -> WaveRunDto {
     }
 }
 
-pub fn wave_dto(wave: &Wave, status: String, active_run: Option<WaveRunDto>) -> WaveDto {
+pub fn wave_dto(
+    wave: &Wave,
+    status: String,
+    iteration: u32,
+    active_run: Option<WaveRunDto>,
+) -> WaveDto {
     WaveDto {
         id: wave.id.to_string(),
         object: "wave".to_string(),
@@ -188,9 +216,9 @@ pub fn wave_dto(wave: &Wave, status: String, active_run: Option<WaveRunDto>) -> 
         flow: wave.flow.clone(),
         direction: wave.direction.clone(),
         area: wave.area.clone(),
-        paused: wave.paused,
         created_at: format_datetime(wave.created_at),
         status,
+        iteration,
         active_run,
     }
 }

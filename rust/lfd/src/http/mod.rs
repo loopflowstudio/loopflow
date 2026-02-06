@@ -32,6 +32,10 @@ pub fn router(state: HttpState) -> Router {
         )
         .route("/waves/:wave_id/run", post(waves::run_wave_handler))
         .route("/waves/:wave_id/stop", post(waves::stop_wave_handler))
+        .route(
+            "/waves/:wave_id/continue",
+            post(waves::continue_wave_handler),
+        )
         .route("/waves/:wave_id/land", post(waves::land_wave_handler))
         .route(
             "/waves/:wave_id/runs",

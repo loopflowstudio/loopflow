@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod builtins;
+pub mod command;
 pub mod config;
 pub mod error;
 pub mod event;
@@ -15,6 +16,7 @@ pub use agent::{
     build_model_command, check_cli_available, launch_agent, DefaultRunner, LaunchConfig,
     LaunchResult, Runner,
 };
+pub use command::{run_command, CommandError};
 pub use config::{load_config, load_config_or_default, parse_model, Config};
 pub use error::{CoreError, GitError, LoadError, StoreError};
 pub use flow::{

@@ -138,8 +138,8 @@ def install_local() -> tuple[bool, str]:
 
 
 def install_local_binaries() -> tuple[bool, str]:
-    """Build lf/lfd and install to ~/.loopflow/bin (or LF_INSTALL_DIR)."""
-    install_dir = os.environ.get("LF_INSTALL_DIR", str(Path.home() / ".loopflow" / "bin"))
+    """Build lf/lfd and install to ~/.local/bin (or LF_INSTALL_DIR)."""
+    install_dir = os.environ.get("LF_INSTALL_DIR", str(Path.home() / ".local" / "bin"))
     install_path = Path(install_dir)
     install_path.mkdir(parents=True, exist_ok=True)
 

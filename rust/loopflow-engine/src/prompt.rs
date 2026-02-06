@@ -54,6 +54,10 @@ pub struct ContextBreakdown {
     pub diff_tier: DiffTier,
     pub diff_file_count: usize,
     pub doc_count: usize,
+    pub area_name: Option<String>,
+    pub area_doc_count: usize,
+    pub has_clipboard: bool,
+    pub wave_name: Option<String>,
 }
 
 impl ContextBreakdown {
@@ -115,6 +119,10 @@ pub struct PromptComponents {
     pub diff_tier: DiffTier,
     /// Number of files changed on branch (for display)
     pub diff_file_count: usize,
+    /// Docs gathered from area parent directories
+    pub area_docs: Vec<Document>,
+    /// Area path for display
+    pub area: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -211,10 +219,21 @@ pub fn analyze_context(components: &PromptComponents) -> ContextBreakdown {
     }
     b.doc_count = components.docs.len() + components.summaries.len();
 
+    // Area
+    for doc in &components.area_docs {
+        b.area += count_tokens(&doc.content);
+    }
+    b.area_name = components.area.clone();
+    b.area_doc_count = components.area_docs.len();
+
     // Clipboard
     if let Some(ref clip) = components.clipboard {
         b.clipboard = count_tokens(clip);
     }
+    b.has_clipboard = components.clipboard.is_some();
+
+    // Wave
+    b.wave_name = components.wave.clone();
 
     b
 }
@@ -286,13 +305,35 @@ pub fn trim_context_with_breakdown(
     breakdown.docs += doc_tokens.iter().sum::<usize>();
     breakdown.doc_count = components.docs.len() + components.summaries.len();
 
+    // Area
+    let mut area_doc_tokens: Vec<usize> = components
+        .area_docs
+        .iter()
+        .map(|doc| cached_doc_tokens(doc, &repo_root, &mut cache))
+        .collect();
+    breakdown.area += area_doc_tokens.iter().sum::<usize>();
+    breakdown.area_name = components.area.clone();
+    breakdown.area_doc_count = components.area_docs.len();
+
     if let Some(ref clip) = components.clipboard {
         breakdown.clipboard = count_tokens(clip);
     }
+    breakdown.has_clipboard = components.clipboard.is_some();
+    breakdown.wave_name = components.wave.clone();
 
     let mut total = breakdown.total();
     if total > max_tokens {
-        // 1. Drop docs (summaries first, then docs)
+        // 1. Drop area docs first (supplementary architectural context)
+        while total > max_tokens && !components.area_docs.is_empty() {
+            components.area_docs.pop();
+            if let Some(tokens) = area_doc_tokens.pop() {
+                breakdown.area = breakdown.area.saturating_sub(tokens);
+                total = total.saturating_sub(tokens);
+                breakdown.area_doc_count = breakdown.area_doc_count.saturating_sub(1);
+            }
+        }
+
+        // 2. Drop docs (summaries first, then docs)
         while total > max_tokens && !components.summaries.is_empty() {
             components.summaries.pop();
             if let Some(tokens) = summary_tokens.pop() {
@@ -310,7 +351,7 @@ pub fn trim_context_with_breakdown(
             }
         }
 
-        // 2. Drop diff context
+        // 3. Drop diff context
         while total > max_tokens && !components.diff_files.is_empty() {
             components.diff_files.pop();
             if let Some(tokens) = diff_file_tokens.pop() {
@@ -327,7 +368,7 @@ pub fn trim_context_with_breakdown(
             total = total.saturating_sub(diff_string_tokens);
         }
 
-        // 3. Drop clipboard as last resort
+        // 4. Drop clipboard as last resort
         if total > max_tokens && components.clipboard.is_some() {
             components.clipboard = None;
             breakdown.clipboard = 0;
@@ -344,15 +385,13 @@ pub fn trim_context_with_breakdown(
 
 /// Trim context to fit within token budget.
 ///
-/// Priority (never dropped → dropped first):
-/// 1. Step (never dropped)
-/// 2. Directions (never dropped)
-/// 3. System/loopflow doc (never dropped)
-/// 4. Diff (droppable)
-/// 5. Docs (droppable)
-/// 6. Area (droppable, dropped first — not yet populated)
+/// Protected (never dropped): step, directions, system/loopflow doc.
 ///
-/// Clipboard is dropped as last resort before protected content.
+/// Drop order (first dropped → last resort):
+/// 1. Area docs (supplementary architectural context)
+/// 2. Summaries, then docs
+/// 3. Diff files, then diff string
+/// 4. Clipboard (last resort)
 pub fn trim_context(components: PromptComponents, max_tokens: usize) -> PromptComponents {
     trim_context_with_breakdown(components, max_tokens).0
 }
@@ -443,6 +482,19 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
     // Load bundled LOOPFLOW.md (system instructions, always included)
     let loopflow_doc = Some(crate::builtins::LOOPFLOW_DOC.to_string());
 
+    // Gather area docs (parent READMEs when -a is set)
+    let area_start = Instant::now();
+    let area_docs = if let Some(ref area) = opts.area {
+        gather_area_docs(repo_root, area)
+    } else {
+        Vec::new()
+    };
+    debug!(
+        elapsed_ms = area_start.elapsed().as_millis(),
+        count = area_docs.len(),
+        "gathered area docs"
+    );
+
     debug!(elapsed_ms = start.elapsed().as_millis(), "gathered context");
     Ok(PromptComponents {
         run_mode: opts.run_mode.clone(),
@@ -459,6 +511,8 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         message: opts.message.clone(),
         diff_tier,
         diff_file_count,
+        area_docs,
+        area: opts.area.clone(),
     })
 }
 
@@ -545,6 +599,78 @@ fn gather_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document>, Co
     }
 
     Ok(docs)
+}
+
+/// Gather .md docs from ancestor directories of an area path.
+///
+/// For area "src/api/handlers", collects .md files from:
+/// - src/ (e.g., src/README.md)
+/// - src/api/ (e.g., src/api/README.md)
+///
+/// Does NOT include the area directory itself (that's the working scope,
+/// not architectural context) or the repo root (already gathered by gather_docs).
+fn gather_area_docs(repo_root: &Path, area: &str) -> Vec<Document> {
+    let area_path = Path::new(area);
+    let mut ancestors = Vec::new();
+
+    // Collect parent paths (excluding the area itself and repo root)
+    let mut current = area_path.to_path_buf();
+    while let Some(parent) = current.parent() {
+        if parent.as_os_str().is_empty() {
+            break;
+        }
+        ancestors.push(parent.to_path_buf());
+        current = parent.to_path_buf();
+    }
+
+    // Process from shallowest to deepest
+    ancestors.reverse();
+
+    let mut docs = Vec::new();
+    let mut seen = HashSet::new();
+
+    for ancestor in &ancestors {
+        let abs_dir = repo_root.join(ancestor);
+        if !abs_dir.is_dir() {
+            continue;
+        }
+
+        let mut entries: Vec<_> = match fs::read_dir(&abs_dir) {
+            Ok(entries) => entries
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    let path = e.path();
+                    path.is_file() && path.extension().map(|ext| ext == "md").unwrap_or(false)
+                })
+                .collect(),
+            Err(_) => continue,
+        };
+        entries.sort_by_key(|e| e.path());
+
+        for entry in entries {
+            let path = entry.path();
+            let rel_path = path
+                .strip_prefix(repo_root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .to_string();
+
+            if seen.contains(&rel_path) {
+                continue;
+            }
+
+            if let Ok(content) = fs::read_to_string(&path) {
+                seen.insert(rel_path.clone());
+                docs.push(Document {
+                    path: rel_path,
+                    content,
+                    category: "area".to_string(),
+                });
+            }
+        }
+    }
+
+    docs
 }
 
 /// Recursively gather .md files from a directory.
@@ -1019,6 +1145,28 @@ pub fn format_prompt(components: &PromptComponents) -> String {
         ));
     }
 
+    // 3.5. Area docs (parent directory READMEs when -a is set)
+    if !components.area_docs.is_empty() {
+        let area_label = components.area.as_deref().unwrap_or("area");
+        let area_parts: Vec<String> = components
+            .area_docs
+            .iter()
+            .map(|doc| {
+                let name = Path::new(&doc.path)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| doc.path.clone());
+                format!("<lf:{}>\n{}\n</lf:{}>", name, doc.content, name)
+            })
+            .collect();
+        let area_body = area_parts.join("\n\n");
+        parts.push(format!(
+            "Area docs for `{}`. Architectural context from parent directories.\n\n\
+             <lf:area>\n{}\n</lf:area>",
+            area_label, area_body
+        ));
+    }
+
     // 4. Instructions (direction, then step)
     if !components.directions.is_empty() {
         if components.directions.len() == 1 {
@@ -1176,6 +1324,28 @@ pub fn format_context_prompt(components: &PromptComponents) -> String {
             "Pre-generated codebase summaries.\n\n\
              <lf:summaries>\n{}\n</lf:summaries>",
             summaries_body
+        ));
+    }
+
+    // 3.5. Area docs (parent directory READMEs when -a is set)
+    if !components.area_docs.is_empty() {
+        let area_label = components.area.as_deref().unwrap_or("area");
+        let area_parts: Vec<String> = components
+            .area_docs
+            .iter()
+            .map(|doc| {
+                let name = Path::new(&doc.path)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| doc.path.clone());
+                format!("<lf:{}>\n{}\n</lf:{}>", name, doc.content, name)
+            })
+            .collect();
+        let area_body = area_parts.join("\n\n");
+        parts.push(format!(
+            "Area docs for `{}`. Architectural context from parent directories.\n\n\
+             <lf:area>\n{}\n</lf:area>",
+            area_label, area_body
         ));
     }
 

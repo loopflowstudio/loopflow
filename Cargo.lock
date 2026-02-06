@@ -1297,6 +1297,7 @@ dependencies = [
  "clap",
  "dirs",
  "ignore",
+ "loopflow-test-support",
  "once_cell",
  "rand 0.8.5",
  "serde",
@@ -1315,10 +1316,19 @@ version = "0.8.0"
 dependencies = [
  "hex",
  "loopflow-engine",
+ "loopflow-test-support",
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "thiserror",
+]
+
+[[package]]
+name = "loopflow-test-support"
+version = "0.8.0"
+dependencies = [
+ "tempfile",
 ]
 
 [[package]]

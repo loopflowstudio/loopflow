@@ -72,15 +72,29 @@ pub fn format_context_header(breakdown: &ContextBreakdown, budget: usize) -> Str
     lines.push(format_row("diff", breakdown.diff, &diff_detail));
 
     // Docs
-    let docs_detail = if breakdown.doc_count == 0 {
-        "\u{2014}".to_string()
-    } else {
-        format!("{} files", breakdown.doc_count)
-    };
-    lines.push(format_row("docs", breakdown.docs, &docs_detail));
+    if breakdown.doc_count > 0 {
+        let docs_detail = format!("{} files", breakdown.doc_count);
+        lines.push(format_row("docs", breakdown.docs, &docs_detail));
+    }
 
     // Area
-    lines.push(format_row("area", breakdown.area, "\u{2014}"));
+    if breakdown.area_doc_count > 0 {
+        let area_detail = match &breakdown.area_name {
+            Some(name) => format!("{} ({} files)", name, breakdown.area_doc_count),
+            None => format!("{} files", breakdown.area_doc_count),
+        };
+        lines.push(format_row("area", breakdown.area, &area_detail));
+    }
+
+    // Wave
+    if let Some(ref wave) = breakdown.wave_name {
+        lines.push(format_row("wave", 0, wave));
+    }
+
+    // Clipboard
+    if breakdown.has_clipboard {
+        lines.push(format_row("clipboard", breakdown.clipboard, ""));
+    }
 
     // Separator + total
     lines.push(format!("  {}", "\u{2500}".repeat(35)));

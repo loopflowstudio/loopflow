@@ -4,6 +4,7 @@ members = [
   "rust/loopflow-engine",
   "rust/loopflow-ops",
   "rust/loopflow-py",
+  "rust/loopflow-test-support",
   "rust/lf",
   "rust/lfd",
 ]
@@ -23,4 +24,4 @@ targets = [
   "x86_64-unknown-linux-gnu",
   "aarch64-unknown-linux-gnu",
 ]
-install-path = "~/.loopflow/bin"
+install-path = "~/.local/bin"

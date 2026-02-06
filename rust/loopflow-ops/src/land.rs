@@ -1,14 +1,16 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use loopflow_engine::git::{get_default_branch, is_clean, land as git_land, LandStrategy};
+use loopflow_engine::git::{
+    current_branch, get_default_branch, is_clean, land as git_land, LandStrategy,
+};
 use loopflow_engine::worktrees::{main_repo_root, worktree_path};
 
 use crate::commit::{commit_workflow, CommitOptions};
 use crate::error::{OpsError, OpsResult};
 use crate::messages::generate_pr_message;
 use crate::progress::Progress;
-use crate::util::stderr_from_output;
+use loopflow_engine::command::run_command;
 
 #[derive(Debug, Clone)]
 pub struct LandOptions {
@@ -26,14 +28,35 @@ pub struct LandResult {
 
 pub fn land(repo: &Path, options: &LandOptions, progress: &impl Progress) -> OpsResult<LandResult> {
     let (repo_root, main_repo) = resolve_repos(repo, options.worktree.as_deref())?;
-    if options.strict && !is_clean(&repo_root)? {
+    let feature_branch = current_branch(&repo_root)?
+        .ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
+    prepare_land(&repo_root, options, progress)?;
+    let main_branch = rebase_land(&repo_root, &main_repo, progress)?;
+    clear_scratch(&repo_root, progress)?;
+
+    if options.local {
+        finalize_local(&repo_root, &main_branch, &feature_branch, progress)?;
+        return Ok(LandResult { merged: true });
+    }
+
+    ensure_pr(&repo_root, options, progress)?;
+    finalize_remote(&repo_root, progress)?;
+    Ok(LandResult { merged: true })
+}
+
+fn prepare_land(
+    repo_root: &Path,
+    options: &LandOptions,
+    progress: &impl Progress,
+) -> OpsResult<()> {
+    if options.strict && !is_clean(repo_root)? {
         return Err(OpsError::Message(
             "uncommitted changes; commit, stash, or rerun without --strict".to_string(),
         ));
     }
 
     if options.lint {
-        crate::lint::ensure_lint_passes(&repo_root, progress)?;
+        crate::lint::ensure_lint_passes(repo_root, progress)?;
     }
 
     if !options.strict {
@@ -46,35 +69,46 @@ pub fn land(repo: &Path, options: &LandOptions, progress: &impl Progress) -> Ops
             flow_parents: Vec::new(),
             message: None,
         };
-        let _ = commit_workflow(&repo_root, &commit_options, progress)?;
+        let _ = commit_workflow(repo_root, &commit_options, progress)?;
     }
 
-    let main_branch = get_default_branch(&main_repo)?;
+    Ok(())
+}
+
+fn rebase_land(repo_root: &Path, main_repo: &Path, progress: &impl Progress) -> OpsResult<String> {
+    let main_branch = get_default_branch(main_repo)?;
     crate::rebase::rebase_with_recovery(
-        &repo_root,
+        repo_root,
         &crate::rebase::RebaseOptions {
             onto: format!("origin/{main_branch}"),
             push: true,
         },
         progress,
     )?;
+    Ok(main_branch)
+}
 
-    clear_scratch(&repo_root, progress)?;
+fn finalize_local(
+    repo_root: &Path,
+    main_branch: &str,
+    feature_branch: &str,
+    progress: &impl Progress,
+) -> OpsResult<()> {
+    progress.status("Merging locally...");
+    let _ = git_land(repo_root, LandStrategy::LocalMerge, main_branch)?;
+    delete_remote_branch(repo_root, feature_branch)?;
+    Ok(())
+}
 
-    if options.local {
-        progress.status("Merging locally...");
-        let _ = git_land(&repo_root, LandStrategy::LocalMerge, &main_branch)?;
-        return Ok(LandResult { merged: true });
-    }
-
+fn ensure_pr(repo_root: &Path, options: &LandOptions, progress: &impl Progress) -> OpsResult<()> {
     if !crate::pr::gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
 
-    if !crate::pr::pr_exists_for_current_branch(&repo_root)? {
+    if !crate::pr::pr_exists_for_current_branch(repo_root)? {
         if options.create_pr {
             let _ = crate::pr::create_or_update_pr(
-                &repo_root,
+                repo_root,
                 &crate::pr::PrOptions {
                     refresh: true,
                     lint: false,
@@ -88,17 +122,21 @@ pub fn land(repo: &Path, options: &LandOptions, progress: &impl Progress) -> Ops
         }
     }
 
-    progress.status("Updating PR...");
-    let message = generate_pr_message(&repo_root)?;
-    update_pr_message(&repo_root, &message.title, &message.body)?;
-    mark_ready(&repo_root)?;
-    enable_auto_merge(&repo_root, &message.title, &message.body)?;
+    Ok(())
+}
 
-    if let Some(url) = current_pr_url(&repo_root)? {
+fn finalize_remote(repo_root: &Path, progress: &impl Progress) -> OpsResult<()> {
+    progress.status("Updating PR...");
+    let message = generate_pr_message(repo_root)?;
+    update_pr_message(repo_root, &message.title, &message.body)?;
+    mark_ready(repo_root)?;
+    enable_auto_merge(repo_root, &message.title, &message.body)?;
+
+    if let Some(url) = current_pr_url(repo_root)? {
         open_url(&url);
     }
 
-    Ok(LandResult { merged: true })
+    Ok(())
 }
 
 fn resolve_repos(repo: &Path, worktree: Option<&str>) -> OpsResult<(PathBuf, PathBuf)> {
@@ -168,33 +206,27 @@ fn has_staged_changes(repo: &Path) -> OpsResult<bool> {
 }
 
 fn update_pr_message(repo: &Path, title: &str, body: &str) -> OpsResult<()> {
-    let output = Command::new("gh")
-        .arg("pr")
+    let mut cmd = Command::new("gh");
+    cmd.arg("pr")
         .arg("edit")
         .arg("--title")
         .arg(title)
         .arg("--body")
         .arg(body)
-        .current_dir(repo)
-        .output()?;
-    if !output.status.success() {
+        .current_dir(repo);
+    if let Err(err) = run_command(&mut cmd) {
         return Err(OpsError::CommandFailed {
-            command: "gh pr edit".to_string(),
-            stderr: stderr_from_output(&output),
+            command: err.command_line(),
+            stderr: err.stderr,
         });
     }
     Ok(())
 }
 
 fn mark_ready(repo: &Path) -> OpsResult<()> {
-    let output = Command::new("gh")
-        .arg("pr")
-        .arg("ready")
-        .current_dir(repo)
-        .output()?;
-    if output.status.success() {
-        return Ok(());
-    }
+    let mut cmd = Command::new("gh");
+    cmd.arg("pr").arg("ready").current_dir(repo);
+    let _ = run_command(&mut cmd);
     Ok(())
 }
 
@@ -209,29 +241,42 @@ fn enable_auto_merge(repo: &Path, title: &str, body: &str) -> OpsResult<()> {
     if !body.trim().is_empty() {
         cmd.arg("--body").arg(body);
     }
-    let output = cmd.current_dir(repo).output()?;
-    if !output.status.success() {
+    cmd.current_dir(repo);
+    if let Err(err) = run_command(&mut cmd) {
         return Err(OpsError::CommandFailed {
-            command: "gh pr merge --auto".to_string(),
-            stderr: stderr_from_output(&output),
+            command: err.command_line(),
+            stderr: err.stderr,
+        });
+    }
+    Ok(())
+}
+
+fn delete_remote_branch(repo: &Path, branch: &str) -> OpsResult<()> {
+    let mut cmd = Command::new("git");
+    cmd.args(["push", "origin", "--delete", branch])
+        .current_dir(repo);
+    if let Err(err) = run_command(&mut cmd) {
+        return Err(OpsError::CommandFailed {
+            command: err.command_line(),
+            stderr: err.stderr,
         });
     }
     Ok(())
 }
 
 fn current_pr_url(repo: &Path) -> OpsResult<Option<String>> {
-    let output = Command::new("gh")
-        .arg("pr")
+    let mut cmd = Command::new("gh");
+    cmd.arg("pr")
         .arg("view")
         .arg("--json")
         .arg("url")
         .arg("-q")
         .arg(".url")
-        .current_dir(repo)
-        .output()?;
-    if !output.status.success() {
-        return Ok(None);
-    }
+        .current_dir(repo);
+    let output = match run_command(&mut cmd) {
+        Ok(output) => output,
+        Err(_) => return Ok(None),
+    };
     let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if url.is_empty() {
         Ok(None)

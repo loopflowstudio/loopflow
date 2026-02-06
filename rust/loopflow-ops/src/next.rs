@@ -3,7 +3,9 @@ use std::process::Command;
 use std::time::Duration;
 
 use loopflow_engine::config::load_config_or_default;
-use loopflow_engine::git::{create_branch, current_branch, get_default_branch, push_with_upstream};
+use loopflow_engine::git::{
+    create_branch, current_branch, get_default_branch, push_with_upstream, sync_main,
+};
 use loopflow_engine::naming::format_branch_name;
 use loopflow_engine::worktrees::{main_repo_root, worktree_short_name};
 
@@ -41,6 +43,15 @@ pub fn next_branch(
             "cannot run next from {}",
             base_branch
         )));
+    }
+
+    if let Some(pr_number) = current_pr_number(repo)? {
+        if let Some(state) = pr_state(repo, pr_number)? {
+            if state.to_uppercase() == "MERGED" {
+                progress.status("PR already merged, starting fresh from main...");
+                reset_to_main(repo, &base_branch)?;
+            }
+        }
     }
 
     let commit_options = CommitOptions {
@@ -198,4 +209,23 @@ fn wait_for_merge(repo: &Path, number: u64, progress: &impl Progress) -> OpsResu
         std::thread::sleep(Duration::from_secs(5));
     }
     Err(OpsError::Message("timeout waiting for merge".to_string()))
+}
+
+fn reset_to_main(repo: &Path, base_branch: &str) -> OpsResult<()> {
+    let status = Command::new("git")
+        .args(["checkout", base_branch])
+        .current_dir(repo)
+        .status()?;
+    if !status.success() {
+        return Err(OpsError::Message(format!(
+            "failed to checkout {}",
+            base_branch
+        )));
+    }
+    if !sync_main(repo, base_branch)? {
+        return Err(OpsError::Message(
+            "working tree dirty; sync aborted".to_string(),
+        ));
+    }
+    Ok(())
 }

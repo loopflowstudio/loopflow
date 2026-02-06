@@ -148,7 +148,7 @@ jobs:
           set -eu
 
           REPO="loopflowstudio/loopflow"
-          INSTALL_DIR="${LF_INSTALL_DIR:-$HOME/.loopflow/bin}"
+          INSTALL_DIR="${LF_INSTALL_DIR:-$HOME/.local/bin}"
 
           detect_target() {
             os=$(uname -s)

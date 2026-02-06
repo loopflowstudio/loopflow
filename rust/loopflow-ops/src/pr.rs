@@ -281,7 +281,9 @@ fn pr_target(repo: &Path) -> OpsResult<String> {
             .find(|wt| wt.branch.as_deref() == Some(&current_branch))
         {
             if let Some(base_branch) = state.base_branch {
-                return resolve_pr_target(repo, &base_branch);
+                if base_branch != current_branch {
+                    return resolve_pr_target(repo, &base_branch);
+                }
             }
         }
     }

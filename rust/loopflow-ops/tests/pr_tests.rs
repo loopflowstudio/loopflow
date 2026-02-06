@@ -25,6 +25,12 @@ fn noop_script() -> &'static str {
     "#!/bin/sh\nexit 0\n"
 }
 
+fn write_gh_script_reject_base(expected_reject: &str) -> String {
+    format!(
+        "#!/bin/sh\ncase \"$1 $2\" in\n  'pr list')\n    echo '[]'; exit 0;;\n  'pr diff') exit 1;;\n  'pr create')\n    base=\"\"\n    while [ \"$#\" -gt 0 ]; do\n      if [ \"$1\" = \"--base\" ]; then\n        shift\n        base=\"$1\"\n      fi\n      shift\n    done\n    if [ \"$base\" = \"{expected_reject}\" ]; then\n      echo \"base branch matches head\" >&2\n      exit 1\n    fi\n    echo 'https://example.com/pr/1'\n    exit 0;;\n  'pr edit') exit 0;;\n  'pr ready') exit 0;;\n  'pr view') echo 'OPEN'; exit 0;;\nesac\nexit 0\n"
+    )
+}
+
 fn push_branch(repo: &TestRepo, name: &str) {
     let _ = Command::new("git")
         .args(["push", "-u", "origin", name])
@@ -117,5 +123,32 @@ fn pr_skips_when_no_diff() {
 
     assert!(!result.created);
     assert!(!result.updated);
+    assert_eq!(result.url, "https://example.com/pr/1");
+}
+
+#[test]
+fn pr_create_uses_default_base_when_upstream_matches_head() {
+    let gh_script = write_gh_script_reject_base("feature");
+    let claude_script = write_claude_script();
+    let _env = EnvGuard::new(&[
+        ("gh", gh_script.as_str()),
+        ("claude", claude_script.as_str()),
+        ("open", noop_script()),
+    ]);
+    let repo = TestRepo::new();
+    repo.create_branch("feature");
+    push_branch(&repo, "feature");
+
+    let result = create_or_update_pr(
+        repo.path(),
+        &PrOptions {
+            refresh: false,
+            lint: false,
+        },
+        &NullProgress,
+    )
+    .expect("pr");
+
+    assert!(result.created);
     assert_eq!(result.url, "https://example.com/pr/1");
 }

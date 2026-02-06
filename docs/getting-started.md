@@ -8,8 +8,14 @@ title: Get Started
 ## Install
 
 ```bash
-uv tool install loopflow
+curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh
 lf init
+```
+
+Install the Python CLI/API (lfq + loopflow) separately:
+
+```bash
+uv tool install loopflow
 ```
 
 Requires macOS and one of: [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), or [Gemini CLI](https://github.com/google-gemini/gemini-cli).
@@ -101,7 +107,13 @@ lf ops land    # submit to merge queue
 Run waves overnight, review PRs when you wake.
 
 ```bash
-lfd loop ship src/
+lfq create shipper --repo .
+python - <<'PY'
+import loopflow
+
+loopflow.update_wave("shipper", flow="ship", area=["src/"])
+loopflow.run_wave("shipper")
+PY
 ```
 
 A wave is **area × direction × flow × stimulus**. [Learn more →](waves.md)

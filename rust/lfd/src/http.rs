@@ -1,9 +1,8 @@
-use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{ConnectInfo, Path, Query, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -13,12 +12,10 @@ use time::OffsetDateTime;
 use tokio::time::{interval, Duration};
 use tokio_stream::wrappers::BroadcastStream;
 
-use crate::auth::AuthContext;
 use crate::events::EventHub;
 use crate::executor::WaveExecutor;
 use crate::id::LfdId;
 use crate::output::OutputHub;
-use crate::registration::{RegistrationClient, RegistrationState};
 use crate::scheduler::Scheduler;
 use crate::store::{SharedStore, StoreError};
 use crate::types::{AgentStatus, Event, Wave, WaveRun, WaveRunStatus};
@@ -31,9 +28,7 @@ pub struct HttpState {
     pub event_hub: EventHub,
     #[allow(dead_code)] // Reserved for output streaming endpoints.
     pub output_hub: OutputHub,
-    pub auth: AuthContext,
     pub started_at: OffsetDateTime,
-    pub registration: Option<RegistrationClient>,
 }
 
 #[derive(Serialize)]
@@ -43,7 +38,6 @@ struct HealthResponse {
     database: bool,
     waves_running: u32,
     agents_active: u32,
-    registration: Option<RegistrationState>,
 }
 
 #[derive(Serialize)]
@@ -54,7 +48,6 @@ struct StatusResponse {
     agents_active: u32,
     slots_used: u32,
     slots_total: u32,
-    registration: Option<RegistrationState>,
 }
 
 #[derive(Serialize)]
@@ -91,26 +84,17 @@ pub fn router(state: HttpState) -> Router {
 
 async fn health_handler(State(state): State<HttpState>) -> Json<HealthResponse> {
     let counts = counts(&state).await;
-    let registration = match &state.registration {
-        Some(client) => Some(client.status().await),
-        None => None,
-    };
     Json(HealthResponse {
         status: if counts.database_ok { "ok" } else { "degraded" }.to_string(),
         uptime_seconds: (OffsetDateTime::now_utc() - state.started_at).whole_seconds(),
         database: counts.database_ok,
         waves_running: counts.waves_running,
         agents_active: counts.agents_active,
-        registration,
     })
 }
 
 async fn status_handler(State(state): State<HttpState>) -> Json<StatusResponse> {
     let counts = counts(&state).await;
-    let registration = match &state.registration {
-        Some(client) => Some(client.status().await),
-        None => None,
-    };
     Json(StatusResponse {
         pid: std::process::id(),
         waves_defined: counts.waves_defined,
@@ -118,7 +102,6 @@ async fn status_handler(State(state): State<HttpState>) -> Json<StatusResponse> 
         agents_active: counts.agents_active,
         slots_used: state.scheduler.slots_used(),
         slots_total: state.scheduler.max_slots() as u32,
-        registration,
     })
 }
 
@@ -247,18 +230,10 @@ struct LandWaveResponse {
     merged: bool,
 }
 
-#[derive(Deserialize)]
-struct WsQuery {
-    token: Option<String>,
-}
-
 async fn list_waves_handler(
     State(state): State<HttpState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
     Query(query): Query<ListWavesQuery>,
 ) -> ApiResult<ListWavesResponse> {
-    ensure_auth(&state, &headers, &peer, None).await?;
     let waves = run_store(&state.store, move |store| {
         store.list_waves(query.repo.as_deref())
     })
@@ -272,11 +247,8 @@ async fn list_waves_handler(
 
 async fn create_wave_handler(
     State(state): State<HttpState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
     Json(payload): Json<CreateWaveRequest>,
 ) -> ApiResult<WaveResponse> {
-    ensure_auth(&state, &headers, &peer, None).await?;
     let id = LfdId::new();
     let name = payload.name.unwrap_or_else(|| format!("wave-{}", id));
     let flow = payload.flow.unwrap_or_else(|| "ship".to_string());
@@ -307,11 +279,8 @@ async fn create_wave_handler(
 
 async fn get_wave_handler(
     State(state): State<HttpState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
     Path(wave_id): Path<String>,
 ) -> ApiResult<WaveResponse> {
-    ensure_auth(&state, &headers, &peer, None).await?;
     let wave_id = parse_id(&wave_id)?;
     let wave = run_store(&state.store, move |store| store.get_wave(&wave_id))
         .await
@@ -325,12 +294,9 @@ async fn get_wave_handler(
 
 async fn update_wave_handler(
     State(state): State<HttpState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
     Path(wave_id): Path<String>,
     Json(payload): Json<UpdateWaveRequest>,
 ) -> ApiResult<WaveResponse> {
-    ensure_auth(&state, &headers, &peer, None).await?;
     let wave_id = parse_id(&wave_id)?;
     let mut wave = run_store(&state.store, {
         let wave_id = wave_id.clone();
@@ -372,11 +338,8 @@ async fn update_wave_handler(
 
 async fn delete_wave_handler(
     State(state): State<HttpState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
     Path(wave_id): Path<String>,
 ) -> ApiResult<serde_json::Value> {
-    ensure_auth(&state, &headers, &peer, None).await?;
     let wave_id = parse_id(&wave_id)?;
     let wave_id_for_delete = wave_id.clone();
     run_store(&state.store, move |store| {
@@ -392,12 +355,9 @@ async fn delete_wave_handler(
 
 async fn run_wave_handler(
     State(state): State<HttpState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
     Path(wave_id): Path<String>,
     payload: Option<Json<RunWaveRequest>>,
 ) -> ApiResult<RunWaveResponse> {
-    ensure_auth(&state, &headers, &peer, None).await?;
     let wave_id = parse_id(&wave_id)?;
     let payload = payload.map(|Json(value)| value).unwrap_or_default();
     let mut wave = run_store(&state.store, {
@@ -503,11 +463,8 @@ async fn run_wave_handler(
 
 async fn stop_wave_handler(
     State(state): State<HttpState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
     Path(wave_id): Path<String>,
 ) -> ApiResult<StopWaveResponse> {
-    ensure_auth(&state, &headers, &peer, None).await?;
     let wave_id = parse_id(&wave_id)?;
     let run = run_store(&state.store, {
         let wave_id = wave_id.clone();
@@ -533,12 +490,9 @@ async fn stop_wave_handler(
 
 async fn land_wave_handler(
     State(state): State<HttpState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
     Path(wave_id): Path<String>,
     payload: Option<Json<LandWaveRequest>>,
 ) -> ApiResult<LandWaveResponse> {
-    ensure_auth(&state, &headers, &peer, None).await?;
     let wave_id = parse_id(&wave_id)?;
     let payload = payload.map(|Json(value)| value).unwrap_or_default();
     let wave = run_store(&state.store, move |store| store.get_wave(&wave_id))
@@ -587,13 +541,8 @@ async fn land_wave_handler(
 
 async fn git_hook_handler(
     State(state): State<HttpState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Json(payload): Json<GitHookRequest>,
 ) -> ApiResult<serde_json::Value> {
-    if !peer.ip().is_loopback() {
-        return Err(api_error(StatusCode::FORBIDDEN, "hooks require localhost"));
-    }
-
     state.event_hub.send(Event::worktree_updated(
         payload.repo.clone(),
         payload.repo,
@@ -605,12 +554,8 @@ async fn git_hook_handler(
 
 async fn ws_handler(
     State(state): State<HttpState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
-    Query(query): Query<WsQuery>,
     ws: WebSocketUpgrade,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
-    ensure_auth(&state, &headers, &peer, query.token).await?;
     Ok(ws.on_upgrade(move |socket| handle_ws(socket, state)))
 }
 
@@ -674,65 +619,6 @@ async fn handle_ws(mut socket: WebSocket, state: HttpState) {
             }
         }
     }
-}
-
-async fn ensure_auth(
-    state: &HttpState,
-    headers: &HeaderMap,
-    peer: &SocketAddr,
-    query_token: Option<String>,
-) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
-    if peer.ip().is_loopback() {
-        return Ok(());
-    }
-
-    if !state.auth.enabled || !state.auth.registered {
-        return Err(api_error(
-            StatusCode::FORBIDDEN,
-            "remote access requires loopflow.studio registration",
-        ));
-    }
-
-    let token = query_token
-        .or_else(|| extract_token(headers))
-        .ok_or_else(|| api_error(StatusCode::UNAUTHORIZED, "missing connection token"))?;
-
-    let Some(validator) = &state.auth.validator else {
-        return Ok(());
-    };
-
-    if validator.validate(&token).await {
-        Ok(())
-    } else {
-        Err(api_error(
-            StatusCode::UNAUTHORIZED,
-            "invalid connection token",
-        ))
-    }
-}
-
-fn extract_token(headers: &HeaderMap) -> Option<String> {
-    if let Some(value) = headers.get("x-loopflow-connection-token") {
-        if let Ok(token) = value.to_str() {
-            return Some(token.to_string());
-        }
-    }
-    if let Some(value) = headers.get("connection-token") {
-        if let Ok(token) = value.to_str() {
-            return Some(token.to_string());
-        }
-    }
-    if let Some(value) = headers.get("authorization") {
-        if let Ok(auth) = value.to_str() {
-            if let Some(token) = auth.strip_prefix("Bearer ") {
-                return Some(token.trim().to_string());
-            }
-            if let Some(token) = auth.strip_prefix("bearer ") {
-                return Some(token.trim().to_string());
-            }
-        }
-    }
-    None
 }
 
 fn api_error(status: StatusCode, message: impl Into<String>) -> (StatusCode, Json<ErrorResponse>) {

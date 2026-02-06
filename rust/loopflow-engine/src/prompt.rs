@@ -330,7 +330,6 @@ pub fn trim_context_with_breakdown(
         // 3. Drop clipboard as last resort
         if total > max_tokens && components.clipboard.is_some() {
             components.clipboard = None;
-            total = total.saturating_sub(breakdown.clipboard);
             breakdown.clipboard = 0;
         }
     }
@@ -354,7 +353,7 @@ pub fn trim_context_with_breakdown(
 /// 6. Area (droppable, dropped first — not yet populated)
 ///
 /// Clipboard is dropped as last resort before protected content.
-pub fn trim_context(mut components: PromptComponents, max_tokens: usize) -> PromptComponents {
+pub fn trim_context(components: PromptComponents, max_tokens: usize) -> PromptComponents {
     trim_context_with_breakdown(components, max_tokens).0
 }
 

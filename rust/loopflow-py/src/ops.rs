@@ -50,6 +50,7 @@ pub struct PyRebaseResult {
         message=None
     )
 )]
+#[allow(clippy::too_many_arguments)]
 fn py_commit_workflow(
     repo: &str,
     add: bool,

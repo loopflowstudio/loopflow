@@ -4,26 +4,24 @@ use std::sync::Arc;
 
 use tokio::signal;
 use tokio_util::sync::CancellationToken;
-use tonic::transport::Server;
 
+mod events;
 mod executor;
 mod http;
 mod id;
 mod loops;
 mod obs;
 mod output;
-mod proto;
 mod scheduler;
-mod server;
 mod sessions;
 mod store;
+mod types;
 
+use crate::events::EventHub;
 use executor::WaveExecutor;
 use http::HttpState;
 use output::OutputHub;
-use proto::control::control_service_server::ControlServiceServer;
 use scheduler::Scheduler;
-use server::ControlServer;
 use store::postgres::PostgresStore;
 use store::sqlite::SqliteStore;
 use store::SharedStore;
@@ -49,9 +47,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let grpc_addr: SocketAddr = std::env::var("LFD_GRPC_ADDR")
-        .unwrap_or_else(|_| "127.0.0.1:50051".to_string())
-        .parse()?;
     let http_addr: SocketAddr = std::env::var("LFD_HTTP_ADDR")
         .unwrap_or_else(|_| "127.0.0.1:8080".to_string())
         .parse()?;
@@ -75,6 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let scheduler = Arc::new(Scheduler::new(max_slots));
     let output = OutputHub::new(2048);
+    let event_hub = EventHub::new(1024);
     let executor = WaveExecutor::new(store.clone(), scheduler.clone(), output.clone());
     let cancel = CancellationToken::new();
     let loop_handles =
@@ -82,21 +78,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .clone()
             .start_loops(store.clone(), executor.clone(), cancel.clone());
 
-    let grpc_server = ControlServer::new(store.clone(), scheduler.clone(), executor, output);
-
     let http_state = HttpState {
         store: store.clone(),
         scheduler: scheduler.clone(),
+        executor: Arc::new(executor),
+        event_hub,
+        output_hub: output,
         started_at: time::OffsetDateTime::now_utc(),
     };
     let http_router = http::router(http_state);
-
-    let grpc_task = tokio::spawn(async move {
-        Server::builder()
-            .add_service(ControlServiceServer::new(grpc_server))
-            .serve(grpc_addr)
-            .await
-    });
 
     let http_task = tokio::spawn(async move {
         let listener = tokio::net::TcpListener::bind(http_addr).await?;
@@ -104,9 +94,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     tokio::select! {
-        result = grpc_task => {
-            result??;
-        }
         result = http_task => {
             result??;
         }

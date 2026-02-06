@@ -15,14 +15,17 @@ cargo fmt                     # Format
 
 ```
 loopflow-engine/
-├── agent.rs     # Agent command building (Claude, Codex, Gemini)
-├── config.rs    # Config loading (~/.lf/, .lf/)
-├── flow.rs      # Flow/step/direction parsing from YAML
-├── prompt.rs    # Context gathering and prompt formatting
-├── git.rs       # Git operations (rebase, push, branch)
-├── worktree.rs  # Worktree creation/removal
-├── error.rs     # Typed errors with thiserror
-└── event.rs     # Lifecycle events for runs
+├── agent.rs      # Agent command building (Claude, Codex, Gemini)
+├── builtins.rs   # Embedded built-in steps, flows, directions
+├── config.rs     # Config loading (~/.lf/, .lf/)
+├── error.rs      # Typed errors with thiserror
+├── event.rs      # Lifecycle events for runs
+├── flow.rs       # Flow/step/direction parsing from YAML
+├── git.rs        # Git operations (rebase, push, branch)
+├── naming.rs     # Branch name generation
+├── prompt.rs     # Context gathering and prompt formatting
+├── worktree.rs   # Worktree creation/removal
+└── worktrees.rs  # Worktree listing/management
 ```
 
 ## Core API
@@ -123,5 +126,4 @@ Working:
 
 Not yet implemented:
 - Summary loading
-- Bundled LOOPFLOW.md embedding
 - LLM-based fork prompt selection

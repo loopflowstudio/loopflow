@@ -137,6 +137,32 @@ def install_local() -> tuple[bool, str]:
     return result.returncode == 0, result.stdout + result.stderr
 
 
+def install_local_binaries() -> tuple[bool, str]:
+    """Build lf/lfd and install to ~/.loopflow/bin (or LF_INSTALL_DIR)."""
+    install_dir = os.environ.get("LF_INSTALL_DIR", str(Path.home() / ".loopflow" / "bin"))
+    install_path = Path(install_dir)
+    install_path.mkdir(parents=True, exist_ok=True)
+
+    result = subprocess.run(
+        ["cargo", "build", "-p", "lf", "-p", "lfd", "--release"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return False, result.stdout + result.stderr
+
+    built = ROOT / "target" / "release"
+    for name in ("lf", "lfd"):
+        src = built / name
+        if src.exists():
+            dst = install_path / name
+            dst.write_bytes(src.read_bytes())
+            dst.chmod(0o755)
+
+    return True, f"Installed lf/lfd to {install_path}"
+
+
 # --- Release flow ---
 
 
@@ -454,6 +480,13 @@ def main() -> int:
             print(f"Install failed:\n{output}", file=sys.stderr)
             return 1
         print("Installed.")
+
+        print("Installing lf/lfd binaries...")
+        ok, output = install_local_binaries()
+        if not ok:
+            print(f"Binary install failed:\n{output}", file=sys.stderr)
+            return 1
+        print(output)
 
         # Show installed binaries
         result = subprocess.run(["which", "lf"], capture_output=True, text=True)

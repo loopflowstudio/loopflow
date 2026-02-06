@@ -160,6 +160,7 @@ fn py_parse_model(model: &str) -> (String, Option<String>) {
         wave=None
     )
 )]
+#[allow(clippy::too_many_arguments)]
 fn py_gather_context(
     repo_root: &str,
     step: Option<&str>,
@@ -208,6 +209,7 @@ fn py_gather_context(
         cwd=None
     )
 )]
+#[allow(clippy::too_many_arguments)]
 fn py_launch_agent(
     model: &str,
     prompt: &str,

@@ -15,15 +15,18 @@ cargo fmt                     # Format
 
 ```
 loopflow-engine/
-├── agent.rs     # Agent command building (Claude, Codex, Gemini)
-├── config.rs    # Config loading (~/.lf/, .lf/)
-├── flow.rs      # Flow/step/direction parsing from YAML
-├── prompt.rs    # Context gathering and prompt formatting
-├── python.rs    # PyO3 bindings for Python integration
-├── git.rs       # Git operations (rebase, push, branch)
-├── worktree.rs  # Worktree creation/removal
-├── error.rs     # Typed errors with thiserror
-└── event.rs     # Lifecycle events for runs
+├── agent.rs      # Agent command building (Claude, Codex, Gemini)
+├── builtins.rs   # Embedded built-in steps, flows, directions
+├── command.rs    # Shell command execution with structured errors
+├── config.rs     # Config loading (~/.lf/, .lf/)
+├── error.rs      # Typed errors with thiserror
+├── event.rs      # Lifecycle events for runs
+├── flow.rs       # Flow/step/direction parsing from YAML
+├── git.rs        # Git operations (rebase, push, branch)
+├── naming.rs     # Branch name generation (schema-based)
+├── prompt.rs     # Context gathering and prompt formatting
+├── worktree.rs   # Worktree creation/removal
+└── worktrees.rs  # Worktree listing/management
 ```
 
 ## Core API
@@ -120,9 +123,8 @@ Working:
 - Context assembly with docs, diff, clipboard
 - tiktoken-rs token counting
 - Config loading with global/repo merging
-- PyO3 bindings for Python integration
+- PyO3 bindings available via rust/loopflow-py
 
 Not yet implemented:
 - Summary loading
-- Bundled LOOPFLOW.md embedding
 - LLM-based fork prompt selection

@@ -1,0 +1,8 @@
+[package]
+name = "loopflow-test-support"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tempfile = "3.9"

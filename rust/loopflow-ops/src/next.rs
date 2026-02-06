@@ -3,8 +3,10 @@ use std::process::Command;
 use std::time::Duration;
 
 use loopflow_engine::config::load_config_or_default;
-use loopflow_engine::git::{create_branch, current_branch, get_default_branch, push_with_upstream};
-use loopflow_engine::naming::format_branch_name;
+use loopflow_engine::git::{
+    create_branch, current_branch, get_default_branch, push_with_upstream, sync_main,
+};
+use loopflow_engine::naming::{format_branch_name, generate_word_pair};
 use loopflow_engine::worktrees::{main_repo_root, worktree_short_name};
 
 use crate::commit::{commit_workflow, CommitOptions};
@@ -43,10 +45,20 @@ pub fn next_branch(
         )));
     }
 
+    if let Some(pr_number) = current_pr_number(repo)? {
+        if let Some(state) = pr_state(repo, pr_number)? {
+            if state.to_uppercase() == "MERGED" {
+                progress.status("PR already merged, starting fresh from main...");
+                reset_to_main(repo, &base_branch)?;
+            }
+        }
+    }
+
     let commit_options = CommitOptions {
         add: true,
         lint: false,
         push: true,
+        create_draft_pr: true,
         task: "commit".to_string(),
         flow_parents: Vec::new(),
         message: None,
@@ -93,8 +105,14 @@ pub fn next_branch(
     // Generate new branch using schema
     let config = load_config_or_default(Some(repo));
     let branch_config = config.branch_names.as_ref();
-    let new_branch = format_branch_name(&wave_name, branch_config, repo)
+    let mut new_branch = format_branch_name(&wave_name, branch_config, repo)
         .map_err(|e| OpsError::Message(format!("failed to generate branch name: {e}")))?;
+
+    // If the generated name already exists (e.g. same-minute timestamp across next runs),
+    // append a word pair to ensure uniqueness and easier identification.
+    while branch_exists(repo, &new_branch) {
+        new_branch = format!("{new_branch}.{}", generate_word_pair());
+    }
 
     progress.status(&format!("Creating branch: {}", new_branch));
     create_branch(repo, &new_branch)?;
@@ -197,4 +215,32 @@ fn wait_for_merge(repo: &Path, number: u64, progress: &impl Progress) -> OpsResu
         std::thread::sleep(Duration::from_secs(5));
     }
     Err(OpsError::Message("timeout waiting for merge".to_string()))
+}
+
+fn branch_exists(repo: &Path, name: &str) -> bool {
+    Command::new("git")
+        .args(["show-ref", "--verify", &format!("refs/heads/{name}")])
+        .current_dir(repo)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn reset_to_main(repo: &Path, base_branch: &str) -> OpsResult<()> {
+    let status = Command::new("git")
+        .args(["checkout", base_branch])
+        .current_dir(repo)
+        .status()?;
+    if !status.success() {
+        return Err(OpsError::Message(format!(
+            "failed to checkout {}",
+            base_branch
+        )));
+    }
+    if !sync_main(repo, base_branch)? {
+        return Err(OpsError::Message(
+            "working tree dirty; sync aborted".to_string(),
+        ));
+    }
+    Ok(())
 }

@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::Path;
 use std::process::Command;
 
@@ -32,6 +33,29 @@ pub fn ensure_lint_passes(repo: &Path, progress: &impl Progress) -> OpsResult<bo
     }
 }
 
+fn has_python_files(dir: &Path) -> bool {
+    if !dir.is_dir() {
+        return false;
+    }
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(_) => return false,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            if let Some(ext) = path.extension() {
+                if ext == "py" {
+                    return true;
+                }
+            }
+        } else if path.is_dir() && has_python_files(&path) {
+            return true;
+        }
+    }
+    false
+}
+
 fn check_lint(repo: &Path, lint_check: Option<&str>) -> OpsResult<Option<bool>> {
     if let Some(cmd) = lint_check {
         let status = Command::new("sh")
@@ -47,10 +71,10 @@ fn check_lint(repo: &Path, lint_check: Option<&str>) -> OpsResult<Option<bool>> 
     }
 
     let mut targets = Vec::new();
-    if repo.join("src").is_dir() {
+    if has_python_files(&repo.join("src")) {
         targets.push("src/");
     }
-    if repo.join("tests").is_dir() {
+    if has_python_files(&repo.join("tests")) {
         targets.push("tests/");
     }
     if targets.is_empty() {
@@ -106,6 +130,7 @@ fn run_lint_agent(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
         chrome: config.chrome,
         cwd: Some(repo.to_path_buf()),
         context_file: None,
+        ..Default::default()
     };
 
     progress.status("Launching lint fixer...");

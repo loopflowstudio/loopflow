@@ -7,6 +7,9 @@ struct Credentials {
     token: Option<String>,
 }
 
+/// Load JWT from `~/.lf/credentials.json`.
+///
+/// Checks both `jwt` and `token` fields, returns first non-empty one.
 pub fn load_jwt() -> Option<String> {
     let credentials_path = credentials_path();
     if !credentials_path.exists() {

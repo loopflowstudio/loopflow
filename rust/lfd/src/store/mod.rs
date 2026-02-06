@@ -133,7 +133,7 @@ pub type SharedStore = Arc<dyn RunStore>;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{ForkRun, ForkRunStatus, RunStore};
     use crate::id::LfdId;
     use crate::types::{
         Agent, AgentStatus, PendingActivation, Stimulus, StimulusKind, Wave, WaveRun, WaveRunStatus,

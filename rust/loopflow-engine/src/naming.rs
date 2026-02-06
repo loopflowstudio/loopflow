@@ -77,7 +77,7 @@ fn generate_word_pair_with_rng<R: Rng + ?Sized>(rng: &mut R) -> String {
     format!("{magical}-{musical}")
 }
 
-fn generate_word_pair() -> String {
+pub fn generate_word_pair() -> String {
     let mut rng = rand::thread_rng();
     generate_word_pair_with_rng(&mut rng)
 }
@@ -95,21 +95,21 @@ pub fn format_branch_name(
     config: Option<&BranchNameConfig>,
     repo: &Path,
 ) -> Result<String, GitError> {
-    let Some(config) = config else {
-        return Ok(short_name.to_string());
-    };
+    let default = BranchNameConfig::default();
+    let config = config.unwrap_or(&default);
 
     let schema = config.schema_.as_str();
     if schema == "{name}" {
-        return Ok(short_name.to_string());
+        return Ok(sanitize_for_branch(short_name));
     }
 
     let user = git_username(repo)?;
+    let name = sanitize_for_branch(short_name);
     let ts = generate_timestamp();
     let date = generate_date();
     let words = generate_word_pair();
 
-    let mut result = schema.replace("{name}", short_name);
+    let mut result = schema.replace("{name}", &name);
     result = result.replace("{user}", &user);
     result = result.replace("{timestamp}", &ts);
     result = result.replace("{ts}", &ts);
@@ -122,9 +122,9 @@ pub fn format_branch_name(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use loopflow_test_support::TestRepo;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
-    use tempfile::tempdir;
 
     #[test]
     fn sanitize_for_branch_cleans_input() {
@@ -133,10 +133,79 @@ mod tests {
     }
 
     #[test]
-    fn format_branch_name_passthrough_without_config() {
-        let repo = tempdir().expect("tempdir");
+    fn sanitize_removes_special_chars() {
+        let cleaned = sanitize_for_branch("feat/my thing!");
+        assert_eq!(cleaned, "feat-my-thing");
+    }
+
+    #[test]
+    fn sanitize_collapses_hyphens() {
+        let cleaned = sanitize_for_branch("a---b");
+        assert_eq!(cleaned, "a-b");
+    }
+
+    #[test]
+    fn sanitize_trims_leading_trailing() {
+        let cleaned = sanitize_for_branch("-foo-");
+        assert_eq!(cleaned, "foo");
+    }
+
+    #[test]
+    fn format_branch_name_uses_default_schema_without_config() {
+        let repo = TestRepo::new();
         let name = format_branch_name("feature", None, repo.path()).expect("format");
-        assert_eq!(name, "feature");
+        assert!(name.contains("feature"), "should include the short name");
+        assert!(
+            name.contains('.'),
+            "should use the default schema with separators"
+        );
+        assert_ne!(name, "feature", "should not pass through raw name");
+    }
+
+    #[test]
+    fn format_branch_name_with_schema() {
+        let repo = TestRepo::new();
+        let config = BranchNameConfig {
+            schema_: "{user}/{words}".to_string(),
+        };
+        let name = format_branch_name("feature", Some(&config), repo.path()).expect("format");
+        assert!(name.starts_with("jack/"));
+        let suffix = name.trim_start_matches("jack/");
+        assert!(suffix.contains('-'));
+    }
+
+    #[test]
+    fn format_branch_name_with_timestamp() {
+        let repo = TestRepo::new();
+        let config = BranchNameConfig {
+            schema_: "{ts}".to_string(),
+        };
+        let name = format_branch_name("feature", Some(&config), repo.path()).expect("format");
+        let parts: Vec<&str> = name.split('_').collect();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0].len(), 8);
+        assert_eq!(parts[1].len(), 4);
+    }
+
+    #[test]
+    fn format_branch_name_with_date() {
+        let repo = TestRepo::new();
+        let config = BranchNameConfig {
+            schema_: "{date}".to_string(),
+        };
+        let name = format_branch_name("feature", Some(&config), repo.path()).expect("format");
+        assert_eq!(name.len(), 8);
+        assert!(name.chars().all(|c| c.is_ascii_digit()));
+    }
+
+    #[test]
+    fn format_branch_name_with_name() {
+        let repo = TestRepo::new();
+        let config = BranchNameConfig {
+            schema_: "{name}".to_string(),
+        };
+        let name = format_branch_name("My Feature!", Some(&config), repo.path()).expect("format");
+        assert_eq!(name, "my-feature");
     }
 
     #[test]
@@ -145,5 +214,23 @@ mod tests {
         let pair = generate_word_pair_with_rng(&mut rng);
         assert!(!pair.is_empty());
         assert!(pair.contains('-'));
+    }
+
+    #[test]
+    fn word_pairs_are_two_words() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let pair = generate_word_pair_with_rng(&mut rng);
+        let parts: Vec<&str> = pair.split('-').collect();
+        assert_eq!(parts.len(), 2);
+        assert!(parts.iter().all(|p| !p.is_empty()));
+    }
+
+    #[test]
+    fn word_pairs_vary_with_different_seeds() {
+        let mut rng_a = StdRng::seed_from_u64(1);
+        let mut rng_b = StdRng::seed_from_u64(2);
+        let a = generate_word_pair_with_rng(&mut rng_a);
+        let b = generate_word_pair_with_rng(&mut rng_b);
+        assert_ne!(a, b);
     }
 }

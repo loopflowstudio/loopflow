@@ -5,9 +5,13 @@
 
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
+use std::sync::{mpsc, Mutex, OnceLock};
+use std::thread;
+use std::time::Instant;
 
 use crate::config::parse_model;
 use crate::error::CoreError;
+use crate::stream::{format_event, ParseResult, StreamFormat, StreamParser};
 
 /// Result from launching a runner.
 #[derive(Debug, Clone, Default)]
@@ -35,6 +39,8 @@ pub struct LaunchConfig {
     /// Path to context file for system prompt loading (model-agnostic).
     /// For Claude, this uses --append-system-prompt-file.
     pub context_file: Option<std::path::PathBuf>,
+    /// How to display streaming output (Raw = dump JSON, Human = formatted).
+    pub stream_format: StreamFormat,
 }
 
 /// Build Claude CLI command.
@@ -179,6 +185,7 @@ pub fn launch_agent(
     prompt: &str,
     config: &LaunchConfig,
 ) -> Result<LaunchResult, CoreError> {
+    let start = Instant::now();
     let (backend, variant) = parse_model(model);
 
     let mut launch_config = config.clone();
@@ -193,10 +200,17 @@ pub fn launch_agent(
 
     let program = &cmd_args[0];
     let args = &cmd_args[1..];
+    tracing::debug!(
+        elapsed_ms = start.elapsed().as_millis(),
+        "launch_agent prepared command"
+    );
+    tracing::debug!(program, args = ?args, "spawning agent command");
 
     let mut cmd = Command::new(program);
     cmd.args(args);
-    cmd.arg(prompt);
+    if !prompt.is_empty() {
+        cmd.arg(prompt);
+    }
 
     if let Some(ref cwd) = config.cwd {
         cmd.current_dir(cwd);
@@ -214,7 +228,7 @@ pub fn launch_agent(
 
     if config.auto && config.stream {
         // Stream mode: capture stdout line by line
-        launch_streaming(&mut cmd)
+        launch_streaming(&mut cmd, config.stream_format)
     } else if config.auto {
         // Batch mode: capture all output
         launch_batch(&mut cmd)
@@ -225,7 +239,12 @@ pub fn launch_agent(
 }
 
 fn launch_batch(cmd: &mut Command) -> Result<LaunchResult, CoreError> {
+    let start = Instant::now();
     let output = cmd.output()?;
+    tracing::debug!(
+        elapsed_ms = start.elapsed().as_millis(),
+        "agent batch completed"
+    );
     Ok(LaunchResult {
         exit_code: output.status.code().unwrap_or(1),
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
@@ -234,7 +253,17 @@ fn launch_batch(cmd: &mut Command) -> Result<LaunchResult, CoreError> {
 }
 
 fn launch_interactive(cmd: &mut Command) -> Result<LaunchResult, CoreError> {
-    let status = cmd.status()?;
+    let start = Instant::now();
+    let mut child = cmd.spawn()?;
+    tracing::debug!(
+        elapsed_ms = start.elapsed().as_millis(),
+        "agent spawned (interactive)"
+    );
+    let status = child.wait()?;
+    tracing::debug!(
+        elapsed_ms = start.elapsed().as_millis(),
+        "agent interactive completed"
+    );
     Ok(LaunchResult {
         exit_code: status.code().unwrap_or(1),
         stdout: String::new(),
@@ -242,31 +271,113 @@ fn launch_interactive(cmd: &mut Command) -> Result<LaunchResult, CoreError> {
     })
 }
 
-fn launch_streaming(cmd: &mut Command) -> Result<LaunchResult, CoreError> {
+fn launch_streaming(
+    cmd: &mut Command,
+    stream_format: StreamFormat,
+) -> Result<LaunchResult, CoreError> {
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
+    let start = Instant::now();
     let mut child = cmd.spawn()?;
-    let mut stdout_content = String::new();
+    tracing::debug!(elapsed_ms = start.elapsed().as_millis(), "agent spawned");
 
-    if let Some(stdout) = child.stdout.take() {
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| CoreError::ExecutionFailed("Failed to capture stdout".to_string()))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| CoreError::ExecutionFailed("Failed to capture stderr".to_string()))?;
+
+    enum StreamKind {
+        Stdout,
+        Stderr,
+    }
+
+    let (tx, rx) = mpsc::channel::<(StreamKind, String)>();
+
+    let tx_out = tx.clone();
+    let stdout_handle = thread::spawn(move || {
         let reader = BufReader::new(stdout);
         for line in reader.lines().map_while(Result::ok) {
-            stdout_content.push_str(&line);
-            stdout_content.push('\n');
+            let _ = tx_out.send((StreamKind::Stdout, line));
+        }
+    });
+
+    let tx_err = tx.clone();
+    let stderr_handle = thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines().map_while(Result::ok) {
+            let _ = tx_err.send((StreamKind::Stderr, line));
+        }
+    });
+
+    drop(tx);
+
+    let mut stdout_content = String::new();
+    let mut stderr_content = String::new();
+    let mut logged_first_output = false;
+    let mut parser = StreamParser::new();
+
+    let use_color = match stream_format {
+        StreamFormat::Human(c) => Some(c),
+        StreamFormat::Raw => None,
+    };
+
+    for (stream, line) in rx {
+        if !logged_first_output {
+            tracing::info!(
+                elapsed_ms = start.elapsed().as_millis(),
+                "agent produced first output"
+            );
+            logged_first_output = true;
+        }
+        match stream {
+            StreamKind::Stdout => {
+                if let Some(color) = use_color {
+                    match parser.feed_line(&line) {
+                        ParseResult::Events(events) => {
+                            for event in &events {
+                                format_event(event, color);
+                            }
+                        }
+                        ParseResult::Skipped => {}
+                        ParseResult::Passthrough => println!("{line}"),
+                    }
+                } else {
+                    println!("{line}");
+                }
+                stdout_content.push_str(&line);
+                stdout_content.push('\n');
+            }
+            StreamKind::Stderr => {
+                if use_color.is_some() {
+                    // In Human mode, Claude --verbose duplicates stream-json
+                    // on stderr. Parse it and skip recognized events to avoid
+                    // printing raw JSON alongside formatted output.
+                    match parser.feed_line(&line) {
+                        ParseResult::Events(_) | ParseResult::Skipped => {}
+                        ParseResult::Passthrough => eprintln!("{line}"),
+                    }
+                } else {
+                    eprintln!("{line}");
+                }
+                stderr_content.push_str(&line);
+                stderr_content.push('\n');
+            }
         }
     }
 
     let status = child.wait()?;
-    let stderr_content = child
-        .stderr
-        .take()
-        .map(|mut s| {
-            let mut buf = String::new();
-            std::io::Read::read_to_string(&mut s, &mut buf).ok();
-            buf
-        })
-        .unwrap_or_default();
+    tracing::debug!(
+        elapsed_ms = start.elapsed().as_millis(),
+        "agent streaming completed"
+    );
+
+    let _ = stdout_handle.join();
+    let _ = stderr_handle.join();
 
     Ok(LaunchResult {
         exit_code: status.code().unwrap_or(1),
@@ -277,13 +388,27 @@ fn launch_streaming(cmd: &mut Command) -> Result<LaunchResult, CoreError> {
 
 /// Check if a CLI is available.
 pub fn check_cli_available(cli: &str) -> bool {
-    Command::new(cli)
+    static CACHE: OnceLock<Mutex<std::collections::HashMap<String, bool>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
+    if let Ok(guard) = cache.lock() {
+        if let Some(value) = guard.get(cli) {
+            return *value;
+        }
+    }
+
+    let available = Command::new(cli)
         .arg("--version")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
         .map(|s| s.success())
-        .unwrap_or(false)
+        .unwrap_or(false);
+
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(cli.to_string(), available);
+    }
+
+    available
 }
 
 /// Agent runner trait for dependency injection in tests.

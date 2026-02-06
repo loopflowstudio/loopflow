@@ -117,8 +117,16 @@ pub fn next_action(items: &[ConcreteItem], step_index: usize) -> FlowAction {
 }
 
 pub fn load_flow(name: &str, repo: &Path) -> Result<Flow, LoadError> {
-    let flow_path = find_flow_path(name, repo)?;
-    let content = fs::read_to_string(&flow_path)?;
+    let content = match find_flow_path(name, repo) {
+        Ok(flow_path) => fs::read_to_string(&flow_path)?,
+        Err(LoadError::FlowNotFound(_)) => {
+            let Some(builtin) = crate::builtins::get_builtin_flow(name) else {
+                return Err(LoadError::FlowNotFound(name.to_string()));
+            };
+            builtin.to_string()
+        }
+        Err(err) => return Err(err),
+    };
     let value: Value =
         serde_yaml::from_str(&content).map_err(|err| LoadError::InvalidFlow(err.to_string()))?;
     let items = parse_flow_items(&value)?;
@@ -214,12 +222,23 @@ fn parse_frontmatter_value(value: &Value) -> StepFrontmatter {
 }
 
 pub fn load_direction(name: &str, repo: &Path) -> Result<Direction, LoadError> {
-    let direction_path = find_direction_path(name, repo)?;
-    let content = fs::read_to_string(&direction_path)?;
+    let (content, source) = match find_direction_path(name, repo) {
+        Ok(direction_path) => (fs::read_to_string(&direction_path)?, direction_path),
+        Err(LoadError::DirectionNotFound(_)) => {
+            let Some(builtin) = crate::builtins::get_builtin_direction(name) else {
+                return Err(LoadError::DirectionNotFound(name.to_string()));
+            };
+            (
+                builtin.to_string(),
+                PathBuf::from(format!("builtin:{name}")),
+            )
+        }
+        Err(err) => return Err(err),
+    };
     Ok(Direction {
         name: name.to_string(),
         content,
-        source: direction_path,
+        source,
     })
 }
 
@@ -566,17 +585,7 @@ mod tests {
     #[test]
     fn load_step_finds_all_builtins() {
         let tmp = TempDir::new().unwrap();
-        let builtins = [
-            "debug",
-            "implement",
-            "design",
-            "review",
-            "iterate",
-            "polish",
-            "lint",
-        ];
-
-        for name in builtins {
+        for name in crate::builtins::builtin_step_names() {
             let result = load_step(name, tmp.path());
             assert!(
                 result.is_ok(),
@@ -659,6 +668,28 @@ Be careful.
         let err = result.unwrap_err();
         assert!(err.to_string().contains("nonexistent"));
         assert!(err.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn load_flow_finds_builtin_flow() {
+        let tmp = TempDir::new().unwrap();
+        let result = load_flow("ship", tmp.path());
+        assert!(
+            result.is_ok(),
+            "builtin 'ship' flow should be found: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn load_direction_finds_builtin_direction() {
+        let tmp = TempDir::new().unwrap();
+        let result = load_direction("product-engineer", tmp.path());
+        assert!(
+            result.is_ok(),
+            "builtin direction should be found: {:?}",
+            result.err()
+        );
     }
 
     #[test]

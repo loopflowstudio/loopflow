@@ -40,10 +40,6 @@ impl RegistrationClient {
         }
     }
 
-    pub async fn set_enabled(&self, enabled: bool) {
-        self.state.write().await.enabled = enabled;
-    }
-
     pub async fn status(&self) -> RegistrationState {
         self.state.read().await.clone()
     }
@@ -198,7 +194,6 @@ impl ConnectionValidator {
             return false;
         }
 
-        // Check cache
         {
             let cache = self.cache.read().await;
             if let Some((valid, expires)) = cache.get(token) {
@@ -208,10 +203,8 @@ impl ConnectionValidator {
             }
         }
 
-        // Validate with server
         let valid = self.validate_remote(token).await.unwrap_or(false);
 
-        // Cache result for 60 seconds
         {
             let mut cache = self.cache.write().await;
             cache.insert(

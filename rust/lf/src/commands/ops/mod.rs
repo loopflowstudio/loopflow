@@ -15,6 +15,13 @@ use std::process::Command;
 pub fn run(op: &OpsCommand) -> Result<()> {
     let progress = CliProgress;
     match op {
+        OpsCommand::Cp {
+            paths,
+            exclude,
+            lfdocs,
+            no_lfdocs,
+        } => copy_context(paths, exclude, *lfdocs, *no_lfdocs),
+        OpsCommand::Doctor => doctor(),
         OpsCommand::Rebase { onto } => rebase_current(onto.as_deref(), &progress),
         OpsCommand::Push { force } => push_current(*force),
         OpsCommand::Land {
@@ -171,6 +178,7 @@ fn commit_current(
             add,
             lint,
             push,
+            create_draft_pr: true,
             task: "commit".to_string(),
             flow_parents: Vec::new(),
             message: message.map(str::to_string),
@@ -526,3 +534,208 @@ const SHELL_INSTALL_LINE_ZSH: &str =
     "if command -v lf >/dev/null 2>&1; then eval \"$(command lf ops shell init zsh)\"; fi";
 const SHELL_INSTALL_LINE_BASH: &str =
     "if command -v lf >/dev/null 2>&1; then eval \"$(command lf ops shell init bash)\"; fi";
+
+// ==========================================================================
+// lf ops cp
+// ==========================================================================
+
+fn copy_context(
+    paths: &[String],
+    exclude: &[String],
+    _lfdocs: bool,
+    no_lfdocs: bool,
+) -> Result<()> {
+    use loopflow_engine::prompt::{count_tokens, gather_context, Document, GatherContextOpts};
+    use std::collections::HashSet;
+
+    let repo_root = find_repo_root()?;
+
+    // Determine whether to include lfdocs (default true unless --no-lfdocs)
+    // --lfdocs is just for explicit confirmation, default is true
+    let include_lfdocs = !no_lfdocs;
+
+    // Gather context
+    let has_paths = !paths.is_empty();
+    let opts = GatherContextOpts {
+        repo_root: repo_root.clone(),
+        lfdocs: include_lfdocs,
+        diff_files: !has_paths, // Use diff files if no paths specified
+        files: paths.to_vec(),
+        ..Default::default()
+    };
+
+    let components = gather_context(&opts)?;
+
+    // Collect all documents to format
+    let mut all_docs: Vec<Document> = Vec::new();
+    all_docs.extend(components.diff_files);
+    all_docs.extend(components.docs);
+
+    // Apply exclusion patterns
+    if !exclude.is_empty() {
+        let exclude_set: HashSet<&str> = exclude.iter().map(|s| s.as_str()).collect();
+        all_docs.retain(|doc| !exclude_set.iter().any(|pattern| doc.path.contains(pattern)));
+    }
+
+    if all_docs.is_empty() {
+        println!("No files to copy.");
+        return Ok(());
+    }
+
+    // Format files as raw content (similar to Python's format_files_raw)
+    let mut output = String::new();
+    for doc in &all_docs {
+        output.push_str(&format!("=== {} ===\n", doc.path));
+        output.push_str(&doc.content);
+        if !doc.content.ends_with('\n') {
+            output.push('\n');
+        }
+        output.push('\n');
+    }
+
+    // Copy to clipboard
+    copy_to_clipboard(&output)?;
+
+    // Display token tree
+    let mut total_tokens = 0;
+    for doc in &all_docs {
+        let tokens = count_tokens(&doc.content);
+        total_tokens += tokens;
+        println!("{:>6} tokens  {}", tokens, doc.path);
+    }
+    println!("─────────────");
+    println!("{:>6} tokens  total", total_tokens);
+    println!("\nCopied to clipboard.");
+
+    Ok(())
+}
+
+fn copy_to_clipboard(text: &str) -> Result<()> {
+    loopflow_engine::clipboard::write(text)?;
+    Ok(())
+}
+
+// ==========================================================================
+// lf ops doctor
+// ==========================================================================
+
+fn doctor() -> Result<()> {
+    use std::path::Path;
+
+    let repo_root = find_repo_root().ok();
+
+    // Repo status
+    if let Some(ref root) = repo_root {
+        let lf_dir = root.join(".lf");
+        if lf_dir.join("steps").is_dir() || lf_dir.join("flows").is_dir() {
+            println!("✓ task files found");
+        } else {
+            println!("- no task files (run: lf init)");
+        }
+    } else {
+        println!("- not in a git repo");
+    }
+
+    let mut all_ok = true;
+
+    // Required: worktrunk (wt)
+    if which("wt") {
+        println!("✓ wt");
+    } else {
+        println!("✗ wt - Run: lf init");
+        all_ok = false;
+    }
+
+    let is_macos = cfg!(target_os = "macos");
+
+    // Optional: npm
+    if which("npm") {
+        println!("✓ npm");
+    } else if is_macos {
+        println!("- npm: brew install node");
+    } else {
+        println!("- npm: https://nodejs.org/");
+    }
+
+    // Optional: coding agents
+    if check_claude_available() {
+        println!("✓ claude");
+    } else {
+        println!("- claude: lf init");
+    }
+
+    if check_codex_available() {
+        println!("✓ codex");
+    } else {
+        println!("- codex: npm install -g @openai/codex");
+    }
+
+    if check_gemini_available() {
+        println!("✓ gemini");
+    } else {
+        println!("- gemini: npm install -g @google/gemini-cli");
+    }
+
+    // Optional: IDE/terminals (macOS-only apps)
+    if is_macos {
+        if which("warp") {
+            println!("✓ warp");
+        } else {
+            println!("- warp: brew install --cask warp");
+        }
+
+        if which("cursor") {
+            println!("✓ cursor");
+        } else {
+            println!("- cursor: brew install --cask cursor");
+        }
+    }
+
+    // Optional: superpowers
+    let superpowers_path = dirs::home_dir()
+        .map(|h| h.join(".superpowers"))
+        .unwrap_or_else(|| Path::new("~/.superpowers").to_path_buf());
+    if superpowers_path.exists() {
+        println!("✓ superpowers");
+    } else {
+        println!("- superpowers: git clone https://github.com/obra/superpowers ~/.superpowers");
+    }
+
+    // Optional: gh for PR creation
+    if which("gh") {
+        println!("✓ gh");
+    } else if is_macos {
+        println!("- gh: brew install gh");
+    } else {
+        println!("- gh: https://cli.github.com/");
+    }
+
+    if all_ok {
+        Ok(())
+    } else {
+        Err(anyhow!("some required dependencies are missing"))
+    }
+}
+
+fn which(cmd: &str) -> bool {
+    Command::new("which")
+        .arg(cmd)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn check_claude_available() -> bool {
+    // Check for claude CLI
+    which("claude")
+}
+
+fn check_codex_available() -> bool {
+    // Check for codex CLI
+    which("codex")
+}
+
+fn check_gemini_available() -> bool {
+    // Check for gemini CLI
+    which("gemini")
+}

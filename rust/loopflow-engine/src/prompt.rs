@@ -3,13 +3,17 @@
 //! This module handles gathering all context components (docs, diff, clipboard, etc.)
 //! and assembling them into a formatted prompt.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Instant;
 
 use crate::error::CoreError;
 use crate::flow::{load_direction, load_step, Direction, Step};
+use once_cell::sync::Lazy;
+use tiktoken_rs::CoreBPE;
+use tracing::debug;
 
 /// A document included in context.
 #[derive(Debug, Clone)]
@@ -17,6 +21,55 @@ pub struct Document {
     pub path: String,
     pub content: String,
     pub category: String,
+}
+
+/// Default maximum tokens for pre-fill context.
+pub const DEFAULT_CONTEXT_BUDGET: usize = 75_000;
+
+/// How diff context is represented after tiering.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum DiffTier {
+    /// Full unified diff (< 15k tokens)
+    UnifiedDiff,
+    /// Stat-only summary (fallback for large diffs)
+    StatOnly,
+    /// No diff context
+    #[default]
+    None,
+}
+
+/// Per-category token counts for the assembled context.
+#[derive(Debug, Clone, Default)]
+pub struct ContextBreakdown {
+    pub step: usize,
+    pub direction: usize,
+    pub system: usize,
+    pub diff: usize,
+    pub docs: usize,
+    pub area: usize,
+    pub clipboard: usize,
+    /// Display metadata
+    pub step_name: Option<String>,
+    pub direction_names: Vec<String>,
+    pub diff_tier: DiffTier,
+    pub diff_file_count: usize,
+    pub doc_count: usize,
+    pub area_name: Option<String>,
+    pub area_doc_count: usize,
+    pub has_clipboard: bool,
+    pub wave_name: Option<String>,
+}
+
+impl ContextBreakdown {
+    pub fn total(&self) -> usize {
+        self.step
+            + self.direction
+            + self.system
+            + self.diff
+            + self.docs
+            + self.area
+            + self.clipboard
+    }
 }
 
 /// Options for gathering context.
@@ -62,106 +115,302 @@ pub struct PromptComponents {
     pub loopflow_doc: Option<String>,
     /// User message (positional args after step/flow name)
     pub message: Option<String>,
+    /// How diff context was tiered
+    pub diff_tier: DiffTier,
+    /// Number of files changed on branch (for display)
+    pub diff_file_count: usize,
+    /// Docs gathered from area parent directories
+    pub area_docs: Vec<Document>,
+    /// Area path for display
+    pub area: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct TokenCacheEntry {
+    mtime_secs: u64,
+    size: u64,
+    tokens: usize,
 }
 
 /// Count tokens using tiktoken (cl100k_base encoding).
 /// Falls back to byte length / 3 if tiktoken fails.
 pub fn count_tokens(text: &str) -> usize {
-    // Try tiktoken first
-    if let Ok(bpe) = tiktoken_rs::cl100k_base() {
+    static BPE: Lazy<Option<CoreBPE>> = Lazy::new(|| tiktoken_rs::cl100k_base().ok());
+    if let Some(bpe) = BPE.as_ref() {
         return std::cmp::max(bpe.encode_ordinary(text).len(), 1);
     }
     // Fallback: rough estimate
     std::cmp::max(text.len() / 3, 1)
 }
 
-/// Analyze total token count of components.
+fn cached_doc_tokens(
+    doc: &Document,
+    repo_root: &Path,
+    cache: &mut HashMap<String, TokenCacheEntry>,
+) -> usize {
+    let abs_path = repo_root.join(&doc.path);
+    let key = abs_path.to_string_lossy().to_string();
+    let Ok(metadata) = fs::metadata(&abs_path) else {
+        return count_tokens(&doc.content);
+    };
+    let size = metadata.len();
+    let mtime_secs = metadata
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if let Some(entry) = cache.get(&key) {
+        if entry.size == size && entry.mtime_secs == mtime_secs {
+            return entry.tokens;
+        }
+    }
+    let tokens = count_tokens(&doc.content);
+    cache.insert(
+        key,
+        TokenCacheEntry {
+            mtime_secs,
+            size,
+            tokens,
+        },
+    );
+    tokens
+}
+
+/// Analyze token usage per category.
+pub fn analyze_context(components: &PromptComponents) -> ContextBreakdown {
+    let mut b = ContextBreakdown::default();
+
+    // System (loopflow doc)
+    if let Some(ref doc) = components.loopflow_doc {
+        b.system = count_tokens(doc);
+    }
+
+    // Step
+    if let Some(ref step) = components.step {
+        if let Some(ref content) = step.content {
+            b.step = count_tokens(content);
+        }
+        b.step_name = Some(step.name.clone());
+    }
+
+    // Directions
+    for dir in &components.directions {
+        b.direction += count_tokens(&dir.content);
+        b.direction_names.push(dir.name.clone());
+    }
+
+    // Diff (unified diff string + full file contents both count as "diff")
+    if let Some(ref diff) = components.diff {
+        b.diff += count_tokens(diff);
+    }
+    for doc in &components.diff_files {
+        b.diff += count_tokens(&doc.content);
+    }
+    b.diff_file_count = components.diff_file_count;
+    b.diff_tier = components.diff_tier.clone();
+
+    // Docs
+    for doc in &components.docs {
+        b.docs += count_tokens(&doc.content);
+    }
+    for doc in &components.summaries {
+        b.docs += count_tokens(&doc.content);
+    }
+    b.doc_count = components.docs.len() + components.summaries.len();
+
+    // Area
+    for doc in &components.area_docs {
+        b.area += count_tokens(&doc.content);
+    }
+    b.area_name = components.area.clone();
+    b.area_doc_count = components.area_docs.len();
+
+    // Clipboard
+    if let Some(ref clip) = components.clipboard {
+        b.clipboard = count_tokens(clip);
+    }
+    b.has_clipboard = components.clipboard.is_some();
+
+    // Wave
+    b.wave_name = components.wave.clone();
+
+    b
+}
+
+/// Backward-compatible total token count.
 pub fn analyze_tokens(components: &PromptComponents) -> usize {
-    let mut total = 0;
+    analyze_context(components).total()
+}
+
+/// Trim context and return token breakdown without re-tokenizing.
+pub fn trim_context_with_breakdown(
+    mut components: PromptComponents,
+    max_tokens: usize,
+) -> (PromptComponents, ContextBreakdown) {
+    let repo_root = PathBuf::from(&components.repo_root);
+    static TOKEN_CACHE: Lazy<std::sync::Mutex<HashMap<String, TokenCacheEntry>>> =
+        Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
+    let mut cache = TOKEN_CACHE
+        .lock()
+        .map(|guard| guard.clone())
+        .unwrap_or_default();
+
+    let mut breakdown = ContextBreakdown::default();
 
     if let Some(ref doc) = components.loopflow_doc {
-        total += count_tokens(doc);
-    }
-
-    for doc in &components.docs {
-        total += count_tokens(&doc.content);
-    }
-
-    if let Some(ref diff) = components.diff {
-        total += count_tokens(diff);
-    }
-
-    for doc in &components.diff_files {
-        total += count_tokens(&doc.content);
+        breakdown.system = count_tokens(doc);
     }
 
     if let Some(ref step) = components.step {
         if let Some(ref content) = step.content {
-            total += count_tokens(content);
+            breakdown.step = count_tokens(content);
         }
+        breakdown.step_name = Some(step.name.clone());
     }
 
     for dir in &components.directions {
-        total += count_tokens(&dir.content);
+        breakdown.direction += count_tokens(&dir.content);
+        breakdown.direction_names.push(dir.name.clone());
     }
 
-    for summary in &components.summaries {
-        total += count_tokens(&summary.content);
+    let diff_string_tokens = if let Some(ref diff) = components.diff {
+        let tokens = count_tokens(diff);
+        breakdown.diff += tokens;
+        tokens
+    } else {
+        0
+    };
+
+    let mut diff_file_tokens: Vec<usize> = components
+        .diff_files
+        .iter()
+        .map(|doc| cached_doc_tokens(doc, &repo_root, &mut cache))
+        .collect();
+    breakdown.diff += diff_file_tokens.iter().sum::<usize>();
+    breakdown.diff_file_count = components.diff_file_count;
+    breakdown.diff_tier = components.diff_tier.clone();
+
+    let mut summary_tokens: Vec<usize> = components
+        .summaries
+        .iter()
+        .map(|doc| cached_doc_tokens(doc, &repo_root, &mut cache))
+        .collect();
+    let mut doc_tokens: Vec<usize> = components
+        .docs
+        .iter()
+        .map(|doc| cached_doc_tokens(doc, &repo_root, &mut cache))
+        .collect();
+    breakdown.docs += summary_tokens.iter().sum::<usize>();
+    breakdown.docs += doc_tokens.iter().sum::<usize>();
+    breakdown.doc_count = components.docs.len() + components.summaries.len();
+
+    // Area
+    let mut area_doc_tokens: Vec<usize> = components
+        .area_docs
+        .iter()
+        .map(|doc| cached_doc_tokens(doc, &repo_root, &mut cache))
+        .collect();
+    breakdown.area += area_doc_tokens.iter().sum::<usize>();
+    breakdown.area_name = components.area.clone();
+    breakdown.area_doc_count = components.area_docs.len();
+
+    if let Some(ref clip) = components.clipboard {
+        breakdown.clipboard = count_tokens(clip);
+    }
+    breakdown.has_clipboard = components.clipboard.is_some();
+    breakdown.wave_name = components.wave.clone();
+
+    let mut total = breakdown.total();
+    if total > max_tokens {
+        // 1. Drop area docs first (supplementary architectural context)
+        while total > max_tokens && !components.area_docs.is_empty() {
+            components.area_docs.pop();
+            if let Some(tokens) = area_doc_tokens.pop() {
+                breakdown.area = breakdown.area.saturating_sub(tokens);
+                total = total.saturating_sub(tokens);
+                breakdown.area_doc_count = breakdown.area_doc_count.saturating_sub(1);
+            }
+        }
+
+        // 2. Drop docs (summaries first, then docs)
+        while total > max_tokens && !components.summaries.is_empty() {
+            components.summaries.pop();
+            if let Some(tokens) = summary_tokens.pop() {
+                breakdown.docs = breakdown.docs.saturating_sub(tokens);
+                total = total.saturating_sub(tokens);
+                breakdown.doc_count = breakdown.doc_count.saturating_sub(1);
+            }
+        }
+        while total > max_tokens && !components.docs.is_empty() {
+            components.docs.pop();
+            if let Some(tokens) = doc_tokens.pop() {
+                breakdown.docs = breakdown.docs.saturating_sub(tokens);
+                total = total.saturating_sub(tokens);
+                breakdown.doc_count = breakdown.doc_count.saturating_sub(1);
+            }
+        }
+
+        // 3. Drop diff context
+        while total > max_tokens && !components.diff_files.is_empty() {
+            components.diff_files.pop();
+            if let Some(tokens) = diff_file_tokens.pop() {
+                breakdown.diff = breakdown.diff.saturating_sub(tokens);
+                total = total.saturating_sub(tokens);
+                breakdown.diff_file_count = breakdown.diff_file_count.saturating_sub(1);
+            }
+        }
+        if total > max_tokens && components.diff.is_some() {
+            components.diff = None;
+            breakdown.diff_tier = DiffTier::None;
+            components.diff_tier = DiffTier::None;
+            breakdown.diff = breakdown.diff.saturating_sub(diff_string_tokens);
+            total = total.saturating_sub(diff_string_tokens);
+        }
+
+        // 4. Drop clipboard as last resort
+        if total > max_tokens && components.clipboard.is_some() {
+            components.clipboard = None;
+            breakdown.clipboard = 0;
+        }
     }
 
-    if let Some(ref clipboard) = components.clipboard {
-        total += count_tokens(clipboard);
+    components.diff_file_count = components.diff_files.len();
+    if let Ok(mut guard) = TOKEN_CACHE.lock() {
+        *guard = cache;
     }
 
-    total
+    (components, breakdown)
 }
 
 /// Trim context to fit within token budget.
-/// Priority: keep step, directions, diff_files; drop docs and summaries first.
-pub fn trim_context(mut components: PromptComponents, max_tokens: usize) -> PromptComponents {
-    let mut total = analyze_tokens(&components);
-    if total <= max_tokens {
-        return components;
-    }
-
-    // Drop summaries first
-    while total > max_tokens && !components.summaries.is_empty() {
-        components.summaries.pop();
-        total = analyze_tokens(&components);
-    }
-
-    // Drop docs next
-    while total > max_tokens && !components.docs.is_empty() {
-        components.docs.pop();
-        total = analyze_tokens(&components);
-    }
-
-    // Drop diff
-    if total > max_tokens && components.diff.is_some() {
-        components.diff = None;
-        total = analyze_tokens(&components);
-    }
-
-    // Last resort: drop diff_files
-    while total > max_tokens && !components.diff_files.is_empty() {
-        components.diff_files.pop();
-        total = analyze_tokens(&components);
-    }
-
-    components
+///
+/// Protected (never dropped): step, directions, system/loopflow doc.
+///
+/// Drop order (first dropped → last resort):
+/// 1. Area docs (supplementary architectural context)
+/// 2. Summaries, then docs
+/// 3. Diff files, then diff string
+/// 4. Clipboard (last resort)
+pub fn trim_context(components: PromptComponents, max_tokens: usize) -> PromptComponents {
+    trim_context_with_breakdown(components, max_tokens).0
 }
 
 /// Gather all prompt components.
 pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, CoreError> {
+    let start = Instant::now();
     let repo_root = &opts.repo_root;
 
     // Load step
+    let step_start = Instant::now();
     let step = match &opts.step {
         Some(step_name) => Some(load_step(step_name, repo_root)?),
         None => None,
     };
+    debug!(elapsed_ms = step_start.elapsed().as_millis(), "loaded step");
 
     // Load directions
+    let directions_start = Instant::now();
     let mut directions = Vec::new();
     if let Some(ref step) = step {
         for name in &step.directions {
@@ -171,41 +420,82 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
     for name in &opts.directions {
         directions.push(load_direction(name, repo_root)?);
     }
+    debug!(
+        elapsed_ms = directions_start.elapsed().as_millis(),
+        count = directions.len(),
+        "loaded directions"
+    );
 
     // Gather docs
+    let docs_start = Instant::now();
     let docs = if opts.lfdocs {
         gather_docs(repo_root, opts.wave.as_deref())?
     } else {
         Vec::new()
     };
+    debug!(
+        elapsed_ms = docs_start.elapsed().as_millis(),
+        count = docs.len(),
+        "gathered docs"
+    );
 
-    // Gather diff files
+    // Gather diff context (tiered: unified diff or stat)
+    let diff_start = Instant::now();
+    let (diff, diff_tier, diff_file_count) = if opts.diff_files || opts.diff {
+        gather_diff_tiered(repo_root)?
+    } else {
+        (None, DiffTier::None, 0)
+    };
+    debug!(
+        elapsed_ms = diff_start.elapsed().as_millis(),
+        ?diff_tier,
+        has_diff = diff.is_some(),
+        "gathered diff"
+    );
+
+    // Gather explicitly requested files
+    let files_start = Instant::now();
     let mut diff_files = Vec::new();
-    if opts.diff_files {
-        diff_files.extend(gather_diff_files(repo_root)?);
-    }
     if !opts.files.is_empty() {
         diff_files.extend(gather_files(repo_root, &opts.files)?);
+        dedup_documents(&mut diff_files);
     }
-    dedup_documents(&mut diff_files);
-
-    // Gather raw diff
-    let diff = if opts.diff {
-        gather_diff(repo_root)?
-    } else {
-        None
-    };
+    debug!(
+        elapsed_ms = files_start.elapsed().as_millis(),
+        count = diff_files.len(),
+        "gathered explicit files"
+    );
 
     // Gather clipboard
+    let clipboard_start = Instant::now();
     let clipboard = if opts.clipboard {
         read_clipboard()
     } else {
         None
     };
+    debug!(
+        elapsed_ms = clipboard_start.elapsed().as_millis(),
+        has_clipboard = clipboard.is_some(),
+        "read clipboard"
+    );
 
-    // Load bundled LOOPFLOW.md
+    // Load bundled LOOPFLOW.md (system instructions, always included)
     let loopflow_doc = Some(crate::builtins::LOOPFLOW_DOC.to_string());
 
+    // Gather area docs (parent READMEs when -a is set)
+    let area_start = Instant::now();
+    let area_docs = if let Some(ref area) = opts.area {
+        gather_area_docs(repo_root, area)
+    } else {
+        Vec::new()
+    };
+    debug!(
+        elapsed_ms = area_start.elapsed().as_millis(),
+        count = area_docs.len(),
+        "gathered area docs"
+    );
+
+    debug!(elapsed_ms = start.elapsed().as_millis(), "gathered context");
     Ok(PromptComponents {
         run_mode: opts.run_mode.clone(),
         docs,
@@ -219,6 +509,10 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         wave: opts.wave.clone(),
         loopflow_doc,
         message: opts.message.clone(),
+        diff_tier,
+        diff_file_count,
+        area_docs,
+        area: opts.area.clone(),
     })
 }
 
@@ -305,6 +599,78 @@ fn gather_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document>, Co
     }
 
     Ok(docs)
+}
+
+/// Gather .md docs from ancestor directories of an area path.
+///
+/// For area "src/api/handlers", collects .md files from:
+/// - src/ (e.g., src/README.md)
+/// - src/api/ (e.g., src/api/README.md)
+///
+/// Does NOT include the area directory itself (that's the working scope,
+/// not architectural context) or the repo root (already gathered by gather_docs).
+fn gather_area_docs(repo_root: &Path, area: &str) -> Vec<Document> {
+    let area_path = Path::new(area);
+    let mut ancestors = Vec::new();
+
+    // Collect parent paths (excluding the area itself and repo root)
+    let mut current = area_path.to_path_buf();
+    while let Some(parent) = current.parent() {
+        if parent.as_os_str().is_empty() {
+            break;
+        }
+        ancestors.push(parent.to_path_buf());
+        current = parent.to_path_buf();
+    }
+
+    // Process from shallowest to deepest
+    ancestors.reverse();
+
+    let mut docs = Vec::new();
+    let mut seen = HashSet::new();
+
+    for ancestor in &ancestors {
+        let abs_dir = repo_root.join(ancestor);
+        if !abs_dir.is_dir() {
+            continue;
+        }
+
+        let mut entries: Vec<_> = match fs::read_dir(&abs_dir) {
+            Ok(entries) => entries
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    let path = e.path();
+                    path.is_file() && path.extension().map(|ext| ext == "md").unwrap_or(false)
+                })
+                .collect(),
+            Err(_) => continue,
+        };
+        entries.sort_by_key(|e| e.path());
+
+        for entry in entries {
+            let path = entry.path();
+            let rel_path = path
+                .strip_prefix(repo_root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .to_string();
+
+            if seen.contains(&rel_path) {
+                continue;
+            }
+
+            if let Ok(content) = fs::read_to_string(&path) {
+                seen.insert(rel_path.clone());
+                docs.push(Document {
+                    path: rel_path,
+                    content,
+                    category: "area".to_string(),
+                });
+            }
+        }
+    }
+
+    docs
 }
 
 /// Recursively gather .md files from a directory.
@@ -425,9 +791,19 @@ fn gather_all_text_files(repo_root: &Path) -> Result<Vec<Document>, CoreError> {
     Ok(docs)
 }
 
-/// Get files changed on this branch vs main.
-fn gather_diff_files(repo_root: &Path) -> Result<Vec<Document>, CoreError> {
-    // Get current branch
+/// Token threshold for tiered diff: below this, include full unified diff.
+const DIFF_TIER_THRESHOLD: usize = 15_000;
+/// Heuristic limits for attempting full diff.
+const DIFF_MAX_FILES_FOR_FULL: usize = 20;
+const DIFF_MAX_LINES_FOR_FULL: usize = 800;
+
+/// Gather diff context with automatic tier selection.
+///
+/// - If unified diff is under 15k tokens, include full diff.
+/// - Otherwise, fall back to diff stat (file list + lines changed).
+///
+/// Returns (diff_string, tier, file_count).
+fn gather_diff_tiered(repo_root: &Path) -> Result<(Option<String>, DiffTier, usize), CoreError> {
     let branch_output = Command::new("git")
         .args(["branch", "--show-current"])
         .current_dir(repo_root)
@@ -437,105 +813,90 @@ fn gather_diff_files(repo_root: &Path) -> Result<Vec<Document>, CoreError> {
         .trim()
         .to_string();
     if branch.is_empty() || branch == "main" {
-        return Ok(Vec::new());
+        return Ok((None, DiffTier::None, 0));
     }
 
-    // Get base ref
-    let base_ref = get_default_base_ref(repo_root);
+    let base_branch = crate::git::get_default_branch(repo_root).unwrap_or("main".to_string());
+    let diff_ref = format!("origin/{}...HEAD", base_branch);
 
-    // Get list of changed files
-    let diff_output = Command::new("git")
-        .args(["diff", "--name-only", &format!("{}...HEAD", base_ref)])
+    // Count changed files
+    let name_output = Command::new("git")
+        .args(["diff", "--name-only", &diff_ref])
+        .current_dir(repo_root)
+        .output()?;
+    let file_count = if name_output.status.success() {
+        String::from_utf8_lossy(&name_output.stdout)
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .count()
+    } else {
+        0
+    };
+
+    if file_count == 0 {
+        return Ok((None, DiffTier::None, 0));
+    }
+
+    let shortstat_output = Command::new("git")
+        .args(["diff", "--shortstat", &diff_ref])
+        .current_dir(repo_root)
+        .output()?;
+    let shortstat = if shortstat_output.status.success() {
+        String::from_utf8_lossy(&shortstat_output.stdout).to_string()
+    } else {
+        String::new()
+    };
+
+    let total_lines = parse_shortstat_total_lines(&shortstat).unwrap_or(0);
+
+    let stat_output = Command::new("git")
+        .args(["diff", "--stat", &diff_ref])
         .current_dir(repo_root)
         .output()?;
 
-    if !diff_output.status.success() {
-        return Ok(Vec::new());
-    }
+    let stat = if stat_output.status.success() {
+        String::from_utf8_lossy(&stat_output.stdout).to_string()
+    } else {
+        String::new()
+    };
 
-    let mut docs = Vec::new();
-    let files = String::from_utf8_lossy(&diff_output.stdout);
+    let allow_full_diff =
+        file_count <= DIFF_MAX_FILES_FOR_FULL && total_lines <= DIFF_MAX_LINES_FOR_FULL;
 
-    for line in files.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
+    if allow_full_diff {
+        let diff_output = Command::new("git")
+            .args(["diff", &diff_ref])
+            .current_dir(repo_root)
+            .output()?;
 
-        let file_path = repo_root.join(line);
-        if file_path.exists() {
-            if let Ok(content) = fs::read_to_string(&file_path) {
-                docs.push(Document {
-                    path: line.to_string(),
-                    content,
-                    category: "diff_files".to_string(),
-                });
+        if diff_output.status.success() {
+            let diff = String::from_utf8_lossy(&diff_output.stdout).to_string();
+            if !diff.trim().is_empty() && count_tokens(&diff) < DIFF_TIER_THRESHOLD {
+                return Ok((Some(diff), DiffTier::UnifiedDiff, file_count));
             }
         }
     }
 
-    Ok(docs)
+    if !stat.trim().is_empty() {
+        return Ok((Some(stat), DiffTier::StatOnly, file_count));
+    }
+
+    Ok((None, DiffTier::None, file_count))
 }
 
-/// Get raw diff against base branch.
-fn gather_diff(repo_root: &Path) -> Result<Option<String>, CoreError> {
-    // Get current branch
-    let branch_output = Command::new("git")
-        .args(["branch", "--show-current"])
-        .current_dir(repo_root)
-        .output()?;
-
-    let branch = String::from_utf8_lossy(&branch_output.stdout)
-        .trim()
-        .to_string();
-    if branch.is_empty() || branch == "main" {
-        return Ok(None);
+fn parse_shortstat_total_lines(output: &str) -> Option<usize> {
+    let numbers: Vec<usize> = output
+        .split_whitespace()
+        .filter_map(|token| token.parse::<usize>().ok())
+        .collect();
+    if numbers.len() <= 1 {
+        return Some(0);
     }
-
-    let base_ref = get_default_base_ref(repo_root);
-
-    let diff_output = Command::new("git")
-        .args(["diff", &format!("{}...HEAD", base_ref)])
-        .current_dir(repo_root)
-        .output()?;
-
-    if !diff_output.status.success() {
-        return Ok(None);
-    }
-
-    let diff = String::from_utf8_lossy(&diff_output.stdout).to_string();
-    if diff.trim().is_empty() {
-        return Ok(None);
-    }
-
-    Ok(Some(diff))
+    Some(numbers[1..].iter().sum())
 }
 
-/// Get default base ref for diffs.
-fn get_default_base_ref(repo_root: &Path) -> String {
-    // Try origin/main first
-    let check = Command::new("git")
-        .args(["rev-parse", "--verify", "origin/main"])
-        .current_dir(repo_root)
-        .output();
-
-    if check.map(|o| o.status.success()).unwrap_or(false) {
-        return "origin/main".to_string();
-    }
-
-    "main".to_string()
-}
-
-/// Read clipboard content (macOS only).
 fn read_clipboard() -> Option<String> {
-    let output = Command::new("pbpaste").output().ok()?;
-    if output.status.success() {
-        let text = String::from_utf8_lossy(&output.stdout).to_string();
-        if !text.trim().is_empty() {
-            return Some(text);
-        }
-    }
-    None
+    crate::clipboard::read()
 }
 
 fn build_gitignore(repo_root: &Path) -> ignore::gitignore::Gitignore {
@@ -568,6 +929,18 @@ fn resolve_path(repo_root: &Path, file: &str) -> Option<PathBuf> {
     }
 }
 
+/// File names that are always excluded from context (lock files, etc.).
+const ALWAYS_EXCLUDE: &[&str] = &[
+    "Cargo.lock",
+    "uv.lock",
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "Gemfile.lock",
+    "poetry.lock",
+    "composer.lock",
+];
+
 fn should_exclude(repo_root: &Path, path: &Path, gitignore: &ignore::gitignore::Gitignore) -> bool {
     if path
         .components()
@@ -576,10 +949,54 @@ fn should_exclude(repo_root: &Path, path: &Path, gitignore: &ignore::gitignore::
         return true;
     }
 
+    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+        if ALWAYS_EXCLUDE.contains(&name) {
+            return true;
+        }
+    }
+
     let relative = path.strip_prefix(repo_root).unwrap_or(path);
     gitignore
         .matched_path_or_any_parents(relative, path.is_dir())
         .is_ignore()
+}
+
+/// Files that coding agents load natively. All are skipped from lf docs to
+/// avoid duplication — whichever agent runs will pick up its own file.
+const AGENT_NATIVE_FILES: &[&str] = &["CLAUDE.md", "AGENTS.md", "GEMINI.md"];
+
+/// Remove docs that duplicate any agent's natively-loaded instruction file.
+///
+/// Skips all known native files (CLAUDE.md, AGENTS.md, GEMINI.md) and any
+/// files they symlink to (e.g. CLAUDE.md -> STYLE.md also drops STYLE.md).
+pub fn drop_native_instruction_docs(components: &mut PromptComponents, repo_root: &Path) {
+    // Collect canonical paths of all native files (resolves symlinks)
+    let canonical_paths: Vec<_> = AGENT_NATIVE_FILES
+        .iter()
+        .filter_map(|f| fs::canonicalize(repo_root.join(f)).ok())
+        .collect();
+
+    components.docs.retain(|doc| {
+        let name = Path::new(&doc.path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+
+        // Drop the native files themselves
+        if AGENT_NATIVE_FILES.contains(&name) {
+            return false;
+        }
+
+        // Drop symlink partners (CLAUDE.md -> STYLE.md or STYLE.md -> CLAUDE.md)
+        let doc_path = repo_root.join(&doc.path);
+        if let Ok(doc_canon) = fs::canonicalize(&doc_path) {
+            if canonical_paths.contains(&doc_canon) {
+                return false;
+            }
+        }
+
+        true
+    });
 }
 
 fn read_text_file(path: &Path) -> Option<String> {
@@ -702,6 +1119,28 @@ pub fn format_prompt(components: &PromptComponents) -> String {
             "Pre-generated codebase summaries.\n\n\
              <lf:summaries>\n{}\n</lf:summaries>",
             summaries_body
+        ));
+    }
+
+    // 3.5. Area docs (parent directory READMEs when -a is set)
+    if !components.area_docs.is_empty() {
+        let area_label = components.area.as_deref().unwrap_or("area");
+        let area_parts: Vec<String> = components
+            .area_docs
+            .iter()
+            .map(|doc| {
+                let name = Path::new(&doc.path)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| doc.path.clone());
+                format!("<lf:{}>\n{}\n</lf:{}>", name, doc.content, name)
+            })
+            .collect();
+        let area_body = area_parts.join("\n\n");
+        parts.push(format!(
+            "Area docs for `{}`. Architectural context from parent directories.\n\n\
+             <lf:area>\n{}\n</lf:area>",
+            area_label, area_body
         ));
     }
 
@@ -862,6 +1301,28 @@ pub fn format_context_prompt(components: &PromptComponents) -> String {
             "Pre-generated codebase summaries.\n\n\
              <lf:summaries>\n{}\n</lf:summaries>",
             summaries_body
+        ));
+    }
+
+    // 3.5. Area docs (parent directory READMEs when -a is set)
+    if !components.area_docs.is_empty() {
+        let area_label = components.area.as_deref().unwrap_or("area");
+        let area_parts: Vec<String> = components
+            .area_docs
+            .iter()
+            .map(|doc| {
+                let name = Path::new(&doc.path)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| doc.path.clone());
+                format!("<lf:{}>\n{}\n</lf:{}>", name, doc.content, name)
+            })
+            .collect();
+        let area_body = area_parts.join("\n\n");
+        parts.push(format!(
+            "Area docs for `{}`. Architectural context from parent directories.\n\n\
+             <lf:area>\n{}\n</lf:area>",
+            area_label, area_body
         ));
     }
 

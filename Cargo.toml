@@ -3,11 +3,25 @@ resolver = "2"
 members = [
   "rust/loopflow-engine",
   "rust/loopflow-ops",
-  "rust/lfd",
+  "rust/loopflow-py",
+  "rust/loopflow-test-support",
   "rust/lf",
+  "rust/lfd",
 ]
 
 [workspace.package]
-version = "0.7.1"
+version = "0.8.0"
 edition = "2021"
 license = "MIT"
+
+[workspace.metadata.dist]
+cargo-dist-version = "0.27.0"
+ci = "github"
+installers = ["shell", "homebrew"]
+targets = [
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+]
+install-path = "~/.local/bin"

@@ -1,13 +1,25 @@
 use serde::Deserialize;
 use std::path::PathBuf;
 
-const DEFAULT_AUTH_BASE_URL: &str = "https://loopflow.studio";
+const DEFAULT_AUTH_BASE_URL: &str = "https://auth.loopflow.studio";
 
-#[derive(Debug, Clone, Default, Deserialize)]
+/// Auth config from `~/.lf/lfd.yaml`.
+///
+/// loopflow.studio is hard-coded as the auth provider. Auth is required
+/// automatically when binding to a non-loopback address — there's no toggle.
+/// `base_url` exists only for dev/staging overrides.
+#[derive(Debug, Clone, Deserialize)]
 pub struct AuthConfig {
-    pub provider: Option<String>,
     #[serde(default = "default_base_url")]
     pub base_url: String,
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            base_url: default_base_url(),
+        }
+    }
 }
 
 fn default_base_url() -> String {

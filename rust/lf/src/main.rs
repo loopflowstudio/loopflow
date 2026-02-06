@@ -1,223 +1,8 @@
-use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use clap::Parser;
 use tracing::debug;
 use tracing_subscriber::EnvFilter;
 
-mod commands;
-mod discovery;
-mod output;
-
-#[derive(Parser, Debug)]
-#[command(name = "lf")]
-#[command(about = "Run steps and flows with coding agents")]
-#[command(version)]
-pub struct Cli {
-    #[command(subcommand)]
-    command: Option<Commands>,
-
-    /// List available steps and flows
-    #[arg(short, long)]
-    list: bool,
-
-    /// Direction(s) to apply (repeatable or comma-separated)
-    #[arg(
-        short = 'd',
-        long = "direction",
-        value_delimiter = ',',
-        short_alias = 'D'
-    )]
-    direction: Vec<String>,
-
-    /// Area scope (paths to include in context)
-    #[arg(short = 'a', long = "area", short_alias = 'A')]
-    area: Vec<PathBuf>,
-
-    /// Include clipboard content in prompt
-    #[arg(short = 'c', long = "clipboard", short_alias = 'C')]
-    clipboard: bool,
-
-    /// Model to use (backend or backend:variant)
-    #[arg(short = 'm', long = "model", short_alias = 'M')]
-    model: Option<String>,
-
-    /// Skip permission prompts
-    #[arg(long)]
-    yolo: bool,
-
-    /// Run interactively
-    #[arg(short = 'i', long = "interactive", short_alias = 'I')]
-    interactive: bool,
-
-    /// Run in batch/headless mode
-    #[arg(short = 'b', long = "batch", short_alias = 'B')]
-    batch: bool,
-
-    /// Copy prompt to clipboard and open web client
-    #[arg(long)]
-    web: bool,
-
-    /// Enable Chrome integration (Claude)
-    #[arg(long)]
-    chrome: bool,
-
-    /// Disable Chrome integration (Claude)
-    #[arg(long = "no-chrome", overrides_with = "chrome")]
-    no_chrome: bool,
-
-    /// Wave name for roadmap scoping
-    #[arg(short = 'w', long = "wave", short_alias = 'W')]
-    wave: Option<String>,
-}
-
-impl Cli {
-    /// Get chrome setting: Some(true) if --chrome, Some(false) if --no-chrome, None if neither.
-    pub fn chrome_setting(&self) -> Option<bool> {
-        if self.chrome {
-            Some(true)
-        } else if self.no_chrome {
-            Some(false)
-        } else {
-            None
-        }
-    }
-}
-
-#[derive(Subcommand, Debug)]
-enum Commands {
-    /// Run a step or flow
-    Run {
-        name: String,
-        #[arg(trailing_var_arg = true)]
-        args: Vec<String>,
-    },
-    /// Run an inline prompt
-    #[command(name = ":")]
-    Inline {
-        #[arg(trailing_var_arg = true)]
-        prompt: Vec<String>,
-    },
-    /// Git operations
-    Ops {
-        #[command(subcommand)]
-        op: OpsCommand,
-    },
-    /// External: step/flow name (when no subcommand matches)
-    #[command(external_subcommand)]
-    External(Vec<String>),
-}
-
-#[derive(Subcommand, Debug)]
-pub enum OpsCommand {
-    Rebase {
-        onto: Option<String>,
-    },
-    Push {
-        #[arg(long)]
-        force: bool,
-    },
-    Land {
-        #[arg(long)]
-        strict: bool,
-        #[arg(long)]
-        local: bool,
-        #[arg(short = 'c', long = "create-pr")]
-        create_pr: bool,
-        #[arg(short = 'w', long = "worktree")]
-        worktree: Option<String>,
-        #[arg(long = "no-lint")]
-        no_lint: bool,
-    },
-    Pr {
-        #[arg(short = 'r', long = "refresh")]
-        refresh: bool,
-        #[arg(long = "no-lint")]
-        no_lint: bool,
-    },
-    Sync,
-    Next {
-        #[arg(long)]
-        block: bool,
-        #[arg(short = 'c', long = "create-pr")]
-        create_pr: bool,
-        #[arg(long = "no-rebase")]
-        no_rebase: bool,
-    },
-    Commit {
-        #[arg(short = 'm', long = "message", short_alias = 'M')]
-        message: Option<String>,
-        #[arg(short = 'p', long = "push", short_alias = 'P')]
-        push: bool,
-        #[arg(long = "no-add")]
-        no_add: bool,
-        #[arg(long = "no-lint")]
-        no_lint: bool,
-    },
-    Abandon {
-        branch: Option<String>,
-        #[arg(short = 'f', long)]
-        force: bool,
-    },
-    /// Worktree operations
-    Wt {
-        #[command(subcommand)]
-        cmd: WtCommand,
-    },
-    /// Shell integration
-    Shell {
-        #[command(subcommand)]
-        cmd: ShellCommand,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum WtCommand {
-    Create {
-        name: String,
-        #[arg(short = 'b', long = "base")]
-        base: Option<String>,
-        #[arg(short = 's', long = "stack")]
-        stack: bool,
-    },
-    Switch {
-        name: String,
-    },
-    List {
-        #[arg(long)]
-        format: Option<String>,
-        #[arg(long)]
-        full: bool,
-        #[arg(long)]
-        sync: bool,
-    },
-    Prune {
-        #[arg(long)]
-        dry_run: bool,
-        #[arg(long)]
-        force: bool,
-        #[arg(long)]
-        debug: bool,
-    },
-    Ci {
-        #[arg(short = 'w', long = "watch")]
-        watch: bool,
-        #[arg(short = 'l', long = "logs")]
-        logs: bool,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum ShellCommand {
-    Init {
-        shell: Option<String>,
-    },
-    Install {
-        shell: Option<String>,
-    },
-    Directive {
-        #[arg(trailing_var_arg = true)]
-        command: Vec<String>,
-    },
-}
+use lf::{Cli, Commands};
 
 /// Flags that take a value (next arg is the value).
 const VALUE_FLAGS: &[&str] = &[
@@ -326,13 +111,17 @@ fn reorder_args(args: Vec<String>) -> Vec<String> {
 }
 
 fn main() -> anyhow::Result<()> {
+    // Ensure Ctrl+C terminates lf. Without this, cmd.output() and
+    // child.wait() retry on EINTR and the process hangs while the
+    // child agent catches SIGINT and keeps running.
+    ctrlc::set_handler(|| std::process::exit(130)).expect("failed to set Ctrl+C handler");
+
     // Initialize tracing with RUST_LOG env filter
     // Usage: RUST_LOG=lf=debug lf debug
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("lf=info,loopflow_engine=info"));
     tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::from_default_env()
-                .add_directive("lf=warn".parse().expect("valid directive")),
-        )
+        .with_env_filter(filter)
         .with_writer(std::io::stderr)
         .without_time()
         .init();
@@ -345,21 +134,21 @@ fn main() -> anyhow::Result<()> {
     debug!(?cli, "parsed CLI arguments");
 
     if cli.list {
-        return commands::list::show_all();
+        return lf::commands::list::show_all();
     }
 
     match &cli.command {
-        Some(Commands::Run { name, args }) => commands::run::run(Some(name), args, None, &cli),
+        Some(Commands::Run { name, args }) => lf::commands::run::run(Some(name), args, None, &cli),
         Some(Commands::Inline { prompt }) => {
             let text = prompt.join(" ");
-            commands::run::run(None, &[], Some(&text), &cli)
+            lf::commands::run::run(None, &[], Some(&text), &cli)
         }
-        Some(Commands::Ops { op }) => commands::ops::run(op),
+        Some(Commands::Ops { op }) => lf::commands::ops::run(op),
         Some(Commands::External(args)) => {
-            let (name, step_args) = commands::run::split_step_args(args)?;
-            commands::run::run(Some(&name), &step_args, None, &cli)
+            let (name, step_args) = lf::commands::run::split_step_args(args)?;
+            lf::commands::run::run(Some(&name), &step_args, None, &cli)
         }
-        None => commands::run::run(None, &[], None, &cli),
+        None => lf::commands::run::run(None, &[], None, &cli),
     }
 }
 

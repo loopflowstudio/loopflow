@@ -1,16 +1,19 @@
 use std::path::Path;
 
 use loopflow_engine::git::{commit, current_branch, is_clean, push, push_with_upstream, stage_all};
+use serde_json::json;
 
 use crate::error::{OpsError, OpsResult};
 use crate::messages::generate_commit_message;
 use crate::progress::Progress;
+use crate::trace::{MockResponses, Tracer};
 
 #[derive(Debug, Clone)]
 pub struct CommitOptions {
     pub add: bool,
     pub lint: bool,
     pub push: bool,
+    pub create_draft_pr: bool,
     pub task: String,
     pub flow_parents: Vec<String>,
     pub message: Option<String>,
@@ -25,7 +28,9 @@ pub fn commit_workflow(
         progress.status("Nothing to commit");
         if options.push {
             push_with_upstream_if_needed(repo)?;
-            ensure_draft_pr(repo, progress)?;
+            if options.create_draft_pr {
+                ensure_draft_pr(repo, progress)?;
+            }
         }
         return Ok(false);
     }
@@ -62,7 +67,9 @@ pub fn commit_workflow(
 
     if options.push {
         push_with_upstream_if_needed(repo)?;
-        ensure_draft_pr(repo, progress)?;
+        if options.create_draft_pr {
+            ensure_draft_pr(repo, progress)?;
+        }
     }
 
     Ok(true)
@@ -151,4 +158,81 @@ fn push_with_upstream_if_needed(repo: &Path) -> OpsResult<()> {
 
 pub(crate) fn push_with_upstream_or_error(repo: &Path) -> OpsResult<()> {
     push_with_upstream_if_needed(repo)
+}
+
+/// Traced version of commit_workflow for parity testing.
+/// Returns JSON trace instead of executing operations.
+pub fn commit_workflow_traced(options: &CommitOptions) -> String {
+    let mut tracer = Tracer::new(
+        "commit",
+        json!({
+            "add": options.add,
+            "lint": options.lint,
+            "push": options.push,
+            "create_draft_pr": options.create_draft_pr
+        }),
+    );
+
+    // Check if repo is dirty
+    tracer.trace_result("git:status", MockResponses::git_status());
+    let is_dirty = MockResponses::git_status() == "dirty";
+
+    if !is_dirty {
+        return tracer.to_json();
+    }
+
+    // Stage changes
+    if options.add {
+        tracer.trace("git:add_all");
+    }
+
+    // Run lint
+    if options.lint {
+        let lint_result = MockResponses::lint_run();
+        tracer.trace_result("lint:run", lint_result);
+        if lint_result != "pass" {
+            return tracer.to_json();
+        }
+    }
+
+    // Check if anything staged
+    tracer.trace_result("git:diff_cached", MockResponses::git_diff_cached());
+    let has_staged = MockResponses::git_diff_cached() == "has_changes";
+
+    if !has_staged {
+        return tracer.to_json();
+    }
+
+    // Agent generates commit message
+    let (title, _body) = MockResponses::agent_commit_message();
+    tracer.trace_args(
+        "agent:run",
+        json!({
+            "prompt_hash": "mock_hash",
+            "model": "claude:opus"
+        }),
+    );
+
+    // Commit
+    let message = format!("lf test: {}", title);
+    tracer.trace_args("git:commit", json!({"message": message}));
+
+    // Push
+    if options.push {
+        let has_upstream = MockResponses::git_has_upstream();
+        tracer.trace_result("git:has_upstream", &has_upstream.to_string());
+
+        if has_upstream {
+            tracer.trace("git:push");
+
+            let pr_exists = MockResponses::gh_pr_exists();
+            tracer.trace_result("gh:pr_exists", &pr_exists.to_string());
+
+            if !pr_exists {
+                tracer.trace("gh:pr_create_draft");
+            }
+        }
+    }
+
+    tracer.to_json()
 }

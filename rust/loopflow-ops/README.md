@@ -7,6 +7,7 @@ let options = CommitOptions {
     add: true,
     lint: true,
     push: true,
+    create_draft_pr: true,
     task: "commit".to_string(),
     flow_parents: Vec::new(),
     message: None,

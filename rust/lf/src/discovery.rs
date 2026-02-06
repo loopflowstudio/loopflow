@@ -1,7 +1,7 @@
 use anyhow::Result;
 use loopflow_engine::Step;
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 // =============================================================================
 // Built-in step metadata for formatted listing
@@ -60,15 +60,48 @@ pub fn is_step_interactive(repo: &Path, name: &str) -> bool {
 pub struct SkillSource {
     pub name: String,
     pub prefix: String,
+    pub path: Option<PathBuf>,
     pub skills: Vec<String>,
+    pub kind: SkillSourceKind,
 }
 
-/// Discover external skill sources (superpowers, rams).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SkillSourceKind {
+    /// Directory of skills (e.g., superpowers)
+    Directory,
+    /// Single file skill (e.g., rams)
+    SingleFile,
+}
+
+/// Discover external skill sources (config, superpowers, rams).
 pub fn discover_skill_sources(repo: Option<&Path>) -> Vec<SkillSource> {
     let mut sources = Vec::new();
     let mut seen_prefixes = HashSet::new();
 
-    // Check for superpowers
+    // 1. Config-defined sources (checked first)
+    if let Some(repo_root) = repo {
+        if let Ok(Some(config)) = loopflow_engine::load_config(Some(repo_root)) {
+            for source_config in &config.skill_sources {
+                let path = expand_tilde(&source_config.path);
+                if !path.exists() {
+                    continue;
+                }
+                let skills = discover_superpowers_skills(&path);
+                if !skills.is_empty() {
+                    sources.push(SkillSource {
+                        name: source_config.name.clone(),
+                        prefix: source_config.prefix.clone(),
+                        path: Some(path),
+                        skills,
+                        kind: SkillSourceKind::Directory,
+                    });
+                    seen_prefixes.insert(source_config.prefix.clone());
+                }
+            }
+        }
+    }
+
+    // 2. Auto-detect superpowers
     let sp_paths = [
         repo.map(|r| r.join("superpowers")),
         dirs::home_dir().map(|h| h.join(".superpowers")),
@@ -85,7 +118,9 @@ pub fn discover_skill_sources(repo: Option<&Path>) -> Vec<SkillSource> {
                 sources.push(SkillSource {
                     name: "superpowers".to_string(),
                     prefix: "sp".to_string(),
+                    path: Some(path),
                     skills,
+                    kind: SkillSourceKind::Directory,
                 });
                 seen_prefixes.insert("sp".to_string());
             }
@@ -100,7 +135,9 @@ pub fn discover_skill_sources(repo: Option<&Path>) -> Vec<SkillSource> {
                 sources.push(SkillSource {
                     name: "rams.ai".to_string(),
                     prefix: "rams".to_string(),
+                    path: Some(rams_path.parent().unwrap_or(&home).to_path_buf()),
                     skills: vec!["rams".to_string()],
+                    kind: SkillSourceKind::SingleFile,
                 });
             }
         }
@@ -136,7 +173,24 @@ fn discover_superpowers_skills(source_path: &Path) -> Vec<String> {
 }
 
 fn normalize_skill_name(dir_name: &str) -> String {
-    dir_name.to_lowercase().replace('_', "-")
+    let mut name = dir_name.to_lowercase().replace('_', "-");
+
+    // Known abbreviations
+    if name == "test-driven-development" {
+        return "tdd".to_string();
+    }
+
+    // Strip -ing suffix (brainstorming -> brainstorm)
+    if let Some(stripped) = name.strip_suffix("ing") {
+        name = stripped.to_string();
+    }
+
+    // Strip trailing -s (writing-plans -> writing-plan)
+    if let Some(stripped) = name.strip_suffix('s') {
+        name = stripped.to_string();
+    }
+
+    name
 }
 
 /// List all external skills as (prefixed_name, source_name) tuples.
@@ -156,8 +210,15 @@ pub fn list_all_skills(sources: &[SkillSource]) -> Vec<(String, String)> {
 // Step discovery (user, global, builtin)
 // =============================================================================
 
-/// Discover a step by name, checking repo → global.
+/// Discover a step by name, checking skills → repo → global → builtins.
 pub fn discover_step(repo: &Path, name: &str) -> Result<Step> {
+    // Check if it's a skill reference (prefix:name)
+    if name.contains(':') {
+        if let Some(step) = find_skill(name, Some(repo)) {
+            return Ok(step);
+        }
+    }
+
     let repo_paths = [
         repo.join(".lf/steps").join(format!("{name}.md")),
         repo.join(".claude/commands").join(format!("{name}.md")),
@@ -181,6 +242,67 @@ pub fn discover_step(repo: &Path, name: &str) -> Result<Step> {
     }
 
     loopflow_engine::load_step(name, repo).map_err(Into::into)
+}
+
+/// Resolve a skill reference like "sp:brainstorm" to a Step.
+fn find_skill(name: &str, repo: Option<&Path>) -> Option<Step> {
+    let (prefix, skill_name) = name.split_once(':')?;
+    let sources = discover_skill_sources(repo);
+
+    for source in &sources {
+        if source.prefix != prefix {
+            continue;
+        }
+        if !source.skills.contains(&skill_name.to_string()) {
+            continue;
+        }
+
+        let prompt_path = find_skill_prompt_path(source, skill_name)?;
+        let content = std::fs::read_to_string(&prompt_path).ok()?;
+
+        return Some(Step {
+            name: name.to_string(),
+            content: Some(content),
+            model: None,
+            directions: Vec::new(),
+            interactive: Some(true),
+        });
+    }
+
+    None
+}
+
+/// Find the prompt file for a skill within a source.
+fn find_skill_prompt_path(source: &SkillSource, skill_name: &str) -> Option<PathBuf> {
+    let source_path = source.path.as_ref()?;
+
+    match source.kind {
+        SkillSourceKind::SingleFile => {
+            let candidate = source_path.join(format!("{skill_name}.md"));
+            candidate.is_file().then_some(candidate)
+        }
+        SkillSourceKind::Directory => {
+            let skills_dir = source_path.join("skills");
+            if !skills_dir.exists() {
+                return None;
+            }
+            // Walk skill directories, matching normalized names
+            let entries = std::fs::read_dir(&skills_dir).ok()?;
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    let normalized = normalize_skill_name(&path.file_name()?.to_string_lossy());
+                    if normalized == skill_name {
+                        let skill_file = path.join("SKILL.md");
+                        if skill_file.is_file() {
+                            return Some(skill_file);
+                        }
+                    }
+                }
+            }
+            None
+        }
+    }
 }
 
 /// List repo-local steps (.lf/steps/, .claude/commands/).
@@ -284,6 +406,36 @@ pub fn list_all_steps(repo: Option<&Path>) -> StepListResult {
 }
 
 // =============================================================================
+// Direction discovery
+// =============================================================================
+
+/// List builtin + repo directions for display.
+pub fn list_directions(repo: Option<&Path>) -> Vec<String> {
+    let mut directions: HashSet<String> = loopflow_engine::builtins::builtin_direction_names()
+        .into_iter()
+        .map(|name| name.to_string())
+        .collect();
+
+    if let Some(repo) = repo {
+        let dir = repo.join(".lf/directions");
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().map(|e| e == "md").unwrap_or(false) {
+                    if let Some(name) = path.file_stem() {
+                        directions.insert(name.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    let mut list: Vec<_> = directions.into_iter().collect();
+    list.sort();
+    list
+}
+
+// =============================================================================
 // Flow discovery and step chain extraction
 // =============================================================================
 
@@ -329,6 +481,16 @@ fn extract_flow_step_names(path: &Path) -> Vec<String> {
     };
 
     extract_step_names_from_value(&value)
+}
+
+/// Expand ~ to home directory.
+fn expand_tilde(path: &str) -> PathBuf {
+    if let Some(rest) = path.strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest);
+        }
+    }
+    PathBuf::from(path)
 }
 
 fn extract_step_names_from_value(value: &serde_yaml::Value) -> Vec<String> {

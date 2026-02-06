@@ -6,6 +6,8 @@ use loopflow_ops::{next_branch, NextOptions, NullProgress};
 use loopflow_test_support::TestRepo;
 use support::EnvGuard;
 
+const MOCK_CLAUDE: &str = "#!/bin/sh\necho '{\"title\":\"test commit\",\"body\":\"\"}'\n";
+
 fn write_gh_script(pr_number: Option<u64>, pr_state: Option<&str>) -> String {
     let number = pr_number.map(|n| n.to_string()).unwrap_or_default();
     let state = pr_state.unwrap_or("");
@@ -49,7 +51,7 @@ fn next_creates_branch_from_current() {
 #[test]
 fn next_with_naming_schema() {
     let gh_script = write_gh_script(None, None);
-    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str()), ("claude", MOCK_CLAUDE)]);
     let repo = TestRepo::new();
     repo.create_file(
         ".lf/config.yaml",
@@ -75,7 +77,7 @@ fn next_with_naming_schema() {
 #[test]
 fn next_detects_merged_pr_starts_fresh() {
     let gh_script = write_gh_script(Some(12), Some("MERGED"));
-    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str()), ("claude", MOCK_CLAUDE)]);
     let repo = TestRepo::new();
     repo.create_branch("feature");
     repo.create_file("feature.txt", "feature");

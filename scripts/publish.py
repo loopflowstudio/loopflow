@@ -118,7 +118,16 @@ def _install_wheel() -> tuple[bool, str]:
 
 
 def _install_binaries() -> tuple[bool, str]:
-    install_dir = os.environ.get("LF_INSTALL_DIR", str(Path.home() / ".local" / "bin"))
+    env_dir = os.environ.get("LF_INSTALL_DIR")
+    if env_dir:
+        install_dir = env_dir
+    else:
+        default_dir = Path.home() / ".local" / "bin"
+        if sys.platform == "darwin":
+            mac_dir = Path("/usr/local/bin")
+            if mac_dir.exists() and os.access(mac_dir, os.W_OK):
+                default_dir = mac_dir
+        install_dir = str(default_dir)
     install_path = Path(install_dir)
     install_path.mkdir(parents=True, exist_ok=True)
 

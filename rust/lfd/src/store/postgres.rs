@@ -26,11 +26,13 @@ const MIGRATION_001: &str = include_str!("migrations/postgres/001_initial.sql");
 const MIGRATION_002: &str = include_str!("migrations/postgres/002_flow_parents.sql");
 const MIGRATION_003: &str = include_str!("migrations/postgres/003_run_snapshots.sql");
 
-const MIGRATIONS: [(&str, &str); 3] = [
+const BASELINE_MIGRATIONS: [(&str, &str); 3] = [
     ("001_initial", MIGRATION_001),
     ("002_flow_parents", MIGRATION_002),
     ("003_run_snapshots", MIGRATION_003),
 ];
+
+const INCREMENTAL_MIGRATIONS: [(&str, &str); 0] = [];
 
 const MIGRATIONS: [(&str, &str); 3] = [
     ("001_initial", MIGRATION_001),
@@ -985,7 +987,8 @@ impl PostgresMigrator {
             let mut client = client;
             let transaction = client.transaction().await?;
             ensure_schema_migrations(&transaction).await?;
-            apply_migrations(&transaction).await?;
+            let is_new = current.is_empty() || current == "unknown";
+            apply_migrations(&transaction, is_new).await?;
             transaction
                 .execute(
                     "UPDATE meta SET value = $1 WHERE key = 'schema_version'",
@@ -1230,7 +1233,8 @@ async fn migrate_async(database_url: &str) -> StoreResult<String> {
     });
     let transaction = client.transaction().await?;
     ensure_schema_migrations(&transaction).await?;
-    apply_migrations(&transaction).await?;
+    let is_new = current.is_empty() || current == "unknown";
+    apply_migrations(&transaction, is_new).await?;
     transaction
         .execute(
             "UPDATE meta SET value = $1 WHERE key = 'schema_version'",
@@ -1258,7 +1262,10 @@ async fn ensure_schema_migrations(
     Ok(())
 }
 
-async fn apply_migrations(transaction: &tokio_postgres::Transaction<'_>) -> StoreResult<()> {
+async fn apply_migrations(
+    transaction: &tokio_postgres::Transaction<'_>,
+    is_new: bool,
+) -> StoreResult<()> {
     let rows = transaction
         .query("SELECT version FROM schema_migrations", &[])
         .await?;
@@ -1266,17 +1273,8 @@ async fn apply_migrations(transaction: &tokio_postgres::Transaction<'_>) -> Stor
         rows.into_iter().map(|row| row.get(0)).collect();
 
     let timestamp = now_unix();
-    for (name, sql) in MIGRATIONS {
-        if applied.contains(name) {
-            continue;
-        }
+    for (_name, sql) in BASELINE_MIGRATIONS {
         transaction.batch_execute(sql).await?;
-        transaction
-            .execute(
-                "INSERT INTO schema_migrations (version, applied_at) VALUES ($1, $2)",
-                &[&name, &timestamp],
-            )
-            .await?;
     }
 
     if applied.is_empty() {
@@ -1288,6 +1286,21 @@ async fn apply_migrations(transaction: &tokio_postgres::Transaction<'_>) -> Stor
                 &[&baseline_version, &timestamp],
             )
             .await?;
+    }
+
+    if !is_new {
+        for (name, sql) in INCREMENTAL_MIGRATIONS {
+            if applied.contains(name) {
+                continue;
+            }
+            transaction.batch_execute(sql).await?;
+            transaction
+                .execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES ($1, $2)",
+                    &[&name, &timestamp],
+                )
+                .await?;
+        }
     }
 
     Ok(())

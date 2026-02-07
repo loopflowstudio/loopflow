@@ -8,7 +8,7 @@ pub mod ws;
 use crate::http::dto::{wave_dto, wave_run_dto, ErrorResponse, WaveDto};
 use crate::http::run_store;
 use crate::store::{SharedStore, StoreError};
-use crate::types::{Wave, WaveStatus};
+use crate::types::Wave;
 use axum::http::StatusCode;
 use axum::Json;
 

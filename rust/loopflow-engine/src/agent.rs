@@ -106,7 +106,9 @@ pub fn build_codex_command(config: &LaunchConfig) -> Vec<String> {
     }
 
     if config.stream {
-        cmd.push("--json".to_string());
+        if matches!(config.stream_format, StreamFormat::Raw) {
+            cmd.push("--json".to_string());
+        }
     }
 
     if config.skip_permissions {

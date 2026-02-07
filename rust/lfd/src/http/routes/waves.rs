@@ -2,6 +2,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 use serde::Deserialize;
+use std::str::FromStr;
 use time::OffsetDateTime;
 
 use crate::http::dto::{
@@ -578,7 +579,7 @@ fn create_wave_run_with_id(
     Ok(run)
 }
 
-fn resolve_current_step_name(run: &WaveRun, wave: &Wave, step_index: u32) -> String {
+fn resolve_current_step_name(run: &WaveRun, _wave: &Wave, step_index: u32) -> String {
     use loopflow_engine::flow::{expand_flow, load_flow, next_action, FlowAction};
     let repo = std::path::Path::new(&run.snapshot.repo);
     let name = load_flow(&run.snapshot.flow, repo)

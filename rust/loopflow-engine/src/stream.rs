@@ -192,13 +192,11 @@ fn parse_codex_item(v: &serde_json::Value) -> Vec<StreamEvent> {
     let event_type = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
     match item_type {
-        "agent_message" => {
+        "agent_message" | "assistant_message" | "message" => {
             // Only emit text on item.completed (full message)
             if event_type == "item.completed" {
-                if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
-                    if !text.is_empty() {
-                        return vec![StreamEvent::Text(text.to_string())];
-                    }
+                if let Some(text) = extract_codex_text(item) {
+                    return vec![StreamEvent::Text(text)];
                 }
             }
             vec![]
@@ -258,11 +256,16 @@ fn parse_codex_turn_completed(v: &serde_json::Value) -> Vec<StreamEvent> {
     // Codex doesn't report cost or duration in the JSON output
     let usage = v.get("usage");
     let _ = usage; // available for future use
-    vec![StreamEvent::Result {
+    let mut events = Vec::new();
+    if let Some(text) = extract_codex_turn_text(v) {
+        events.push(StreamEvent::Text(text));
+    }
+    events.push(StreamEvent::Result {
         subtype: ResultSubtype::Success,
         cost_usd: None,
         duration_secs: None,
-    }]
+    });
+    events
 }
 
 // ── Gemini parsing ──────────────────────────────────────────────────────────
@@ -277,6 +280,56 @@ fn parse_gemini_message(v: &serde_json::Value) -> Option<StreamEvent> {
         return None;
     }
     Some(StreamEvent::Text(content.to_string()))
+}
+
+fn extract_codex_text(item: &serde_json::Value) -> Option<String> {
+    if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
+        if !text.is_empty() {
+            return Some(text.to_string());
+        }
+    }
+
+    if let Some(message) = item.get("message").and_then(|m| m.as_str()) {
+        if !message.is_empty() {
+            return Some(message.to_string());
+        }
+    }
+
+    if let Some(content) = item.get("content").and_then(|c| c.as_array()) {
+        let mut parts = Vec::new();
+        for block in content {
+            if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                if !text.is_empty() {
+                    parts.push(text);
+                }
+            }
+        }
+        if !parts.is_empty() {
+            return Some(parts.join(""));
+        }
+    }
+
+    None
+}
+
+fn extract_codex_turn_text(v: &serde_json::Value) -> Option<String> {
+    let candidates = [
+        v.get("output_text"),
+        v.get("text"),
+        v.get("final_text"),
+        v.get("response").and_then(|r| r.get("text")),
+        v.get("response").and_then(|r| r.get("output_text")),
+    ];
+
+    for candidate in candidates.into_iter().flatten() {
+        if let Some(text) = candidate.as_str() {
+            if !text.is_empty() {
+                return Some(text.to_string());
+            }
+        }
+    }
+
+    None
 }
 
 fn parse_gemini_tool_use(v: &serde_json::Value) -> Option<StreamEvent> {

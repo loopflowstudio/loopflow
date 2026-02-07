@@ -107,11 +107,6 @@ def wave_runs(
 ) -> list[WaveRun]:
     return _client().wave_runs(wave_id=wave_id, repo=repo, limit=limit)
 
-
-def land(name_or_id: str) -> dict:
-    return _client().land_wave(name_or_id)
-
-
 def wave_logs(name_or_id: str) -> Iterator[str]:
     return _client().wave_logs(name_or_id)
 
@@ -132,7 +127,6 @@ __all__ = [
     "run_wave",
     "stop_wave",
     "land_wave",
-    "land",
     "wave_runs",
     "wave_logs",
 ]

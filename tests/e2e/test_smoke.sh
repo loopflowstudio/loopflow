@@ -24,7 +24,7 @@ git push -u origin main >/dev/null
 mkdir -p .lf/steps
 echo "# Test" > .lf/steps/debug.md
 
-cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p loopflow-engine --bin lf-prompt -- \
+cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p loopflow --bin lf-prompt -- \
   --repo "$repo_dir" \
   --step debug \
   --run-mode auto \
@@ -33,7 +33,7 @@ cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p loopflow-engine --bin lf-pro
   --diff false \
   | grep -q "Test"
 
-cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p lf -- ops wt create smoke-test >/dev/null
+cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p loopflow --bin lf -- ops wt create smoke-test >/dev/null
 
 repo_name=$(basename "$repo_dir")
 wt_path="$(dirname "$repo_dir")/${repo_name}.smoke-test"
@@ -47,7 +47,7 @@ cd "$wt_path"
 echo "change" > file.txt
 git add file.txt
 
-cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p lf -- \
+cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p loopflow --bin lf -- \
   ops commit -m "smoke test" --no-lint >/dev/null
 
 git log -1 --pretty=%B | grep -q "smoke test"

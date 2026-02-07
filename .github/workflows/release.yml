@@ -6,39 +6,8 @@ on:
       - "v*"
 
 jobs:
-  # Verify tag version matches Cargo.toml and pyproject.toml
-  check-version:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Extract tag version
-        id: tag
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-      - name: Check VERSION
-        run: |
-          file_version=$(cat VERSION | tr -d '\n')
-          if [ "$file_version" != "${{ steps.tag.outputs.version }}" ]; then
-            echo "::error::Tag ${{ steps.tag.outputs.version }} != VERSION $file_version"
-            exit 1
-          fi
-      - name: Check Cargo.toml
-        run: |
-          cargo_version=$(grep -m1 '^version' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
-          if [ "$cargo_version" != "${{ steps.tag.outputs.version }}" ]; then
-            echo "::error::Tag ${{ steps.tag.outputs.version }} != Cargo.toml $cargo_version"
-            exit 1
-          fi
-      - name: Check pyproject.toml
-        run: |
-          pyproject_version=$(grep -m1 '^version' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
-          if [ "$pyproject_version" != "${{ steps.tag.outputs.version }}" ]; then
-            echo "::error::Tag ${{ steps.tag.outputs.version }} != pyproject.toml $pyproject_version"
-            exit 1
-          fi
-
   # Build Python wheels with maturin (packages Rust binary into a wheel)
   build-wheels:
-    needs: check-version
     strategy:
       matrix:
         include:
@@ -55,6 +24,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: Set version from tag
+        run: sed -i 's/^version = "0.0.0"/version = "'"${GITHUB_REF_NAME#v}"'"/' Cargo.toml
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -86,9 +57,8 @@ jobs:
         with:
           packages-dir: dist/
 
-  # Build native binaries for cargo-dist (GitHub Releases, shell installer, Homebrew)
+  # Build native binaries (GitHub Releases, shell installer)
   build-native:
-    needs: check-version
     strategy:
       matrix:
         include:
@@ -103,11 +73,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: Set version from tag
+        run: sed -i 's/^version = "0.0.0"/version = "'"${GITHUB_REF_NAME#v}"'"/' Cargo.toml
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }} -p lf -p lfd
+        run: cargo build --release --target ${{ matrix.target }} -p loopflow
       - name: Package
         run: |
           cd target/${{ matrix.target }}/release
@@ -116,6 +88,19 @@ jobs:
         with:
           name: native-${{ matrix.target }}
           path: lf-*.tar.gz
+
+  # Publish to crates.io
+  publish-crates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set version from tag
+        run: sed -i 's/^version = "0.0.0"/version = "'"${GITHUB_REF_NAME#v}"'"/' Cargo.toml
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Publish to crates.io
+        run: cargo publish -p loopflow
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
   # Create GitHub Release with native binaries and wheels
   release:

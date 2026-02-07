@@ -278,6 +278,13 @@ def find_concerto_executable(
     repo_root = Path(__file__).parent.parent
     swift_dir = repo_root / "swift"
     if swift_dir.exists():
+        print("Generating Xcode project...")
+        _run_command(
+            ["xcodegen", "generate"],
+            cwd=swift_dir,
+            capture_output=not verbose,
+            label="xcodegen generate",
+        )
         print("Building Concerto...")
         build_args = [
             "xcodebuild",

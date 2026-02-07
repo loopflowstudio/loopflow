@@ -60,7 +60,7 @@ All five must pass for PRs to merge.
 Prompt parity and golden prompt tests live in Rust.
 
 ```bash
-cargo test -p loopflow-engine golden_prompt
+cargo test -p loopflow golden_prompt
 uv run pytest tests/parity/test_prompt_parity.py
 ```
 

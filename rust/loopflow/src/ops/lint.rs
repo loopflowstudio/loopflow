@@ -1,0 +1,143 @@
+use std::fs;
+use std::path::Path;
+use std::process::Command;
+
+use crate::engine::config::load_config_or_default;
+use crate::engine::prompt::{format_prompt, gather_context, GatherContextOpts};
+use crate::engine::{launch_agent, LaunchConfig};
+
+use crate::ops::error::{OpsError, OpsResult};
+use crate::ops::progress::Progress;
+use crate::ops::util::command_exists;
+
+pub fn ensure_lint_passes(repo: &Path, progress: &impl Progress) -> OpsResult<bool> {
+    let config = load_config_or_default(Some(repo));
+    match check_lint(repo, config.lint_check.as_deref())? {
+        Some(true) => {
+            progress.status("Lint passed");
+            return Ok(true);
+        }
+        Some(false) => progress.status("Lint issues found, running fixer..."),
+        None => {
+            progress.status("Lint skipped (no checker configured)");
+            return Ok(true);
+        }
+    }
+
+    run_lint_agent(repo, progress)?;
+
+    match check_lint(repo, config.lint_check.as_deref())? {
+        Some(true) => Ok(true),
+        Some(false) => Err(OpsError::LintFailed),
+        None => Ok(true),
+    }
+}
+
+fn has_python_files(dir: &Path) -> bool {
+    if !dir.is_dir() {
+        return false;
+    }
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(_) => return false,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            if let Some(ext) = path.extension() {
+                if ext == "py" {
+                    return true;
+                }
+            }
+        } else if path.is_dir() && has_python_files(&path) {
+            return true;
+        }
+    }
+    false
+}
+
+fn check_lint(repo: &Path, lint_check: Option<&str>) -> OpsResult<Option<bool>> {
+    if let Some(cmd) = lint_check {
+        let status = Command::new("sh")
+            .arg("-c")
+            .arg(cmd)
+            .current_dir(repo)
+            .status()?;
+        return Ok(Some(status.success()));
+    }
+
+    if !command_exists("ruff") {
+        return Ok(None);
+    }
+
+    let mut targets = Vec::new();
+    if has_python_files(&repo.join("src")) {
+        targets.push("src/");
+    }
+    if has_python_files(&repo.join("tests")) {
+        targets.push("tests/");
+    }
+    if targets.is_empty() {
+        return Ok(None);
+    }
+
+    let check_status = Command::new("ruff")
+        .arg("check")
+        .args(&targets)
+        .current_dir(repo)
+        .status()?;
+    if !check_status.success() {
+        return Ok(Some(false));
+    }
+
+    let fmt_status = Command::new("ruff")
+        .arg("format")
+        .arg("--check")
+        .args(&targets)
+        .current_dir(repo)
+        .status()?;
+
+    Ok(Some(fmt_status.success()))
+}
+
+fn run_lint_agent(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
+    let config = load_config_or_default(Some(repo));
+    let opts = GatherContextOpts {
+        repo_root: repo.to_path_buf(),
+        step: Some("lint".to_string()),
+        inline: None,
+        step_args: Vec::new(),
+        message: None,
+        run_mode: Some("auto".to_string()),
+        directions: config.direction.unwrap_or_default(),
+        files: Vec::new(),
+        lfdocs: config.lfdocs,
+        diff_files: config.diff_files,
+        diff: config.diff,
+        clipboard: config.paste,
+        area: config.area,
+        wave: None,
+    };
+
+    let components = gather_context(&opts)?;
+    let prompt = format_prompt(&components);
+
+    let launch_config = LaunchConfig {
+        auto: true,
+        stream: false,
+        skip_permissions: true,
+        model_variant: None,
+        chrome: config.chrome,
+        cwd: Some(repo.to_path_buf()),
+        context_file: None,
+        ..Default::default()
+    };
+
+    progress.status("Launching lint fixer...");
+    let result = launch_agent(&config.agent_model, &prompt, &launch_config)
+        .map_err(|err| OpsError::AgentFailed(err.to_string()))?;
+    if result.exit_code != 0 {
+        return Err(OpsError::AgentFailed(result.stderr));
+    }
+    Ok(())
+}

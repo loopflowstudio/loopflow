@@ -1,15 +1,12 @@
 [workspace]
 resolver = "2"
 members = [
-  "rust/loopflow-engine",
-  "rust/loopflow-ops",
+  "rust/loopflow",
   "rust/loopflow-test-support",
-  "rust/lf",
-  "rust/lfd",
 ]
 
 [workspace.package]
-version = "0.8.0"
+version = "0.0.0"
 edition = "2021"
 license = "MIT"
 

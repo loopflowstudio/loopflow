@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Publish loopflow to PyPI and Concerto DMG to R2.
+"""Publish loopflow. Version comes from git tags.
 
-publish.py                # publish current version (tag + push)
-publish.py minor          # bump to next minor, then publish
+publish.py                # recover: re-push tag, rerun CI if needed
+publish.py patch          # bump patch, tag, push tag → CI releases
 publish.py local          # build and install locally
 publish.py dmg            # upload existing DMG
 publish.py screenshots    # generate screenshots
@@ -10,7 +10,6 @@ publish.py screenshots    # generate screenshots
 
 import json
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -20,7 +19,6 @@ from urllib.request import Request, urlopen
 import typer
 
 ROOT = Path(__file__).parent.parent
-VERSION_FILE = ROOT / "VERSION"
 R2_PUBLIC_URL = "https://downloads.loopflow.studio"
 
 app = typer.Typer(
@@ -33,42 +31,13 @@ app = typer.Typer(
 
 
 def _get_version() -> str:
-    if VERSION_FILE.exists():
-        return VERSION_FILE.read_text().strip()
-    pyproject = ROOT / "pyproject.toml"
-    content = pyproject.read_text()
-    match = re.search(r'^version = "([^"]+)"', content, re.MULTILINE)
-    if match:
-        return match.group(1)
-    raise RuntimeError("Could not find version")
-
-
-def _check_versions() -> str:
-    """Verify VERSION, Cargo.toml, and pyproject.toml all agree. Returns version or raises."""
-    versions: dict[str, str] = {}
-
-    if VERSION_FILE.exists():
-        versions["VERSION"] = VERSION_FILE.read_text().strip()
-
-    cargo = ROOT / "Cargo.toml"
-    if cargo.exists():
-        m = re.search(r'^version = "([^"]+)"', cargo.read_text(), re.MULTILINE)
-        if m:
-            versions["Cargo.toml"] = m.group(1)
-
-    pyproject = ROOT / "pyproject.toml"
-    if pyproject.exists():
-        m = re.search(r'^version = "([^"]+)"', pyproject.read_text(), re.MULTILINE)
-        if m:
-            versions["pyproject.toml"] = m.group(1)
-
-    unique = set(versions.values())
-    if len(unique) != 1:
-        lines = [f"  {f}: {v}" for f, v in versions.items()]
-        typer.echo("Version mismatch:\n" + "\n".join(lines), err=True)
-        raise typer.Exit(code=1)
-
-    return list(unique)[0]
+    result = subprocess.run(
+        ["git", "describe", "--tags", "--abbrev=0"],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("No version tags found")
+    return result.stdout.strip().lstrip("v")
 
 
 def _bump_version(version: str, bump_type: str) -> str:
@@ -83,20 +52,6 @@ def _bump_version(version: str, bump_type: str) -> str:
         return f"{major}.{minor + 1}.0"
     else:
         return f"{major}.{minor}.{patch + 1}"
-
-
-def _write_version(version: str) -> None:
-    VERSION_FILE.write_text(version + "\n")
-
-    pyproject = ROOT / "pyproject.toml"
-    content = pyproject.read_text()
-    content = re.sub(r'^version = "[^"]+"', f'version = "{version}"', content, flags=re.MULTILINE)
-    pyproject.write_text(content)
-
-    cargo_toml = ROOT / "Cargo.toml"
-    content = cargo_toml.read_text()
-    content = re.sub(r'^version = "[^"]+"', f'version = "{version}"', content, flags=re.MULTILINE)
-    cargo_toml.write_text(content)
 
 
 # --- Preconditions ---
@@ -168,7 +123,7 @@ def _install_binaries() -> tuple[bool, str]:
     install_path.mkdir(parents=True, exist_ok=True)
 
     result = subprocess.run(
-        ["cargo", "build", "-p", "lf", "-p", "lfd", "--release"],
+        ["cargo", "build", "-p", "loopflow", "--release"],
         cwd=ROOT,
     )
     if result.returncode != 0:
@@ -267,7 +222,7 @@ def _pypi_has_version(version: str) -> bool:
         return False
 
 
-CRATE_NAMES = ["loopflow-engine", "loopflow-ops"]
+CRATE_NAMES = ["loopflow"]
 
 
 def _crates_has_version(version: str) -> bool:
@@ -382,10 +337,7 @@ def _ensure_released(version: str) -> None:
     else:
         typer.echo(f"Tag {tag} already exists at HEAD.")
 
-    # Step 2: Ensure main is pushed
-    subprocess.run(["git", "push", "origin", "main"], cwd=ROOT, check=True)
-
-    # Step 3: Ensure tag is on remote at HEAD
+    # Step 2: Ensure tag is on remote at HEAD
     remote_sha = _remote_tag_sha(tag)
     if remote_sha is None:
         typer.echo(f"Pushing tag {tag}...")
@@ -429,7 +381,7 @@ def _ensure_released(version: str) -> None:
 
 def _release(bump_type: str, dry_run: bool, skip_dmg: bool, skip_screenshots: bool) -> None:
     _check_on_main()
-    version = _check_versions()
+    version = _get_version()
     new_version = _bump_version(version, bump_type)
 
     if dry_run:
@@ -437,8 +389,7 @@ def _release(bump_type: str, dry_run: bool, skip_dmg: bool, skip_screenshots: bo
             typer.echo("Would generate screenshots")
         if not skip_dmg:
             typer.echo("Would build and upload DMG")
-        typer.echo(f"Would bump version: {version} → {new_version}")
-        typer.echo(f"Would commit and tag v{new_version}")
+        typer.echo(f"Would tag v{new_version} (current: v{version})")
         typer.echo("Would push tag to trigger CI release")
         return
 
@@ -464,14 +415,10 @@ def _release(bump_type: str, dry_run: bool, skip_dmg: bool, skip_screenshots: bo
             else:
                 typer.echo(output)
 
-    typer.echo(f"Bumping version: {version} → {new_version}")
-    _write_version(new_version)
-    subprocess.run(["git", "add", "VERSION", "pyproject.toml", "Cargo.toml", "Cargo.lock"], cwd=ROOT, check=True)
-    subprocess.run(["git", "commit", "-m", f"release: v{new_version}"], cwd=ROOT, check=True)
-
+    typer.echo(f"Tagging v{new_version} (was v{version})")
     _ensure_released(new_version)
     typer.echo(f"\nPublished v{new_version}")
-    typer.echo("CI will build and publish to PyPI.")
+    typer.echo("CI will build and publish.")
 
 
 # --- Service management ---
@@ -496,20 +443,20 @@ def publish(
     ctx: typer.Context,
     dry_run: bool = typer.Option(False, "-n", "--dry-run", help="Show what would be done"),
 ):
-    """Publish current version, or use a subcommand (patch/minor/major/local/dmg/screenshots)."""
+    """Recover latest release: re-push tag, rerun CI if needed."""
     if ctx.invoked_subcommand is not None:
         return
 
     _check_on_main()
-    version = _check_versions()
+    version = _get_version()
 
     if dry_run:
-        typer.echo(f"Would tag and push v{version}")
+        typer.echo(f"Would ensure v{version} is released (re-push tag, check CI)")
         return
 
     _ensure_released(version)
-    typer.echo(f"\nPublished v{version}")
-    typer.echo("CI will build and publish to PyPI.")
+    typer.echo(f"\nv{version} release ensured.")
+    typer.echo("CI will build and publish.")
 
 
 @app.command()

@@ -20,7 +20,7 @@ import re
 import subprocess
 from pathlib import Path
 
-SCHEMA_PATH = Path(__file__).parent.parent / "rust/lfd/src/store/schema.rs"
+SCHEMA_PATH = Path(__file__).parent.parent / "rust/loopflow/src/lfd/store/schema.rs"
 
 
 def get_git_sha() -> str:

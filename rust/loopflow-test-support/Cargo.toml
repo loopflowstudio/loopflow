@@ -3,6 +3,7 @@ name = "loopflow-test-support"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
 
 [dependencies]
 tempfile = "3.9"

@@ -307,10 +307,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fac4744fb15ae8337dc853fee7fb3f4e48c0fbaa23d0afe49c447b4fab126118"
 dependencies = [
  "iana-time-zone",
- "js-sys",
  "num-traits",
  "serde",
- "wasm-bindgen",
  "windows-link",
 ]
 
@@ -1281,62 +1279,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
-name = "lf"
-version = "0.8.0"
-dependencies = [
- "anyhow",
- "atty",
- "clap",
- "ctrlc",
- "dirs",
- "loopflow-engine",
- "loopflow-ops",
- "serde",
- "serde_json",
- "serde_yaml",
- "tempfile",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "lfd"
-version = "0.8.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "axum",
- "bytes",
- "chrono",
- "cron",
- "deadpool-postgres",
- "dirs",
- "futures-util",
- "gethostname",
- "git2",
- "loopflow-engine",
- "loopflow-ops",
- "portable-pty",
- "reqwest",
- "rusqlite",
- "serde",
- "serde_json",
- "serde_yaml",
- "tempfile",
- "testcontainers",
- "thiserror",
- "time",
- "tokio",
- "tokio-postgres",
- "tokio-stream",
- "tokio-util",
- "tower-http 0.5.2",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
 name = "libc"
 version = "0.2.180"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1431,43 +1373,53 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
-name = "loopflow-engine"
-version = "0.8.0"
+name = "loopflow"
+version = "0.0.0"
 dependencies = [
+ "anyhow",
+ "async-trait",
+ "atty",
+ "axum",
+ "bytes",
  "chrono",
  "clap",
+ "cron",
+ "ctrlc",
+ "deadpool-postgres",
  "dirs",
+ "futures-util",
+ "gethostname",
+ "git2",
+ "hex",
  "ignore",
  "loopflow-test-support",
  "once_cell",
+ "portable-pty",
  "rand 0.8.5",
+ "reqwest",
+ "rusqlite",
  "serde",
  "serde_json",
  "serde_yaml",
+ "sha2",
  "tempfile",
+ "testcontainers",
  "thiserror",
  "tiktoken-rs",
+ "time",
+ "tokio",
+ "tokio-postgres",
+ "tokio-stream",
+ "tokio-util",
+ "tower-http 0.5.2",
  "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 
 [[package]]
-name = "loopflow-ops"
-version = "0.8.0"
-dependencies = [
- "hex",
- "loopflow-engine",
- "loopflow-test-support",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror",
-]
-
-[[package]]
 name = "loopflow-test-support"
-version = "0.8.0"
+version = "0.0.0"
 dependencies = [
  "tempfile",
 ]

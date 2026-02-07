@@ -97,7 +97,7 @@ def _check_on_main() -> None:
 
 def _build_wheel() -> tuple[bool, str]:
     result = subprocess.run(
-        ["uv", "run", "hatchling", "build"],
+        ["uv", "build"],
         cwd=ROOT,
         capture_output=True,
         text=True,

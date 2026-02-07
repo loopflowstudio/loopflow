@@ -13,7 +13,7 @@ use crate::http::state::HttpState;
 use crate::http::{api_error, map_store_error, run_store, ApiResult};
 use crate::id::LfdId;
 use crate::store::{SharedStore, StoreError};
-use crate::types::{Event, Wave, WaveRun, WaveRunStatus};
+use crate::types::{Event, Wave, WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus};
 
 #[derive(Deserialize)]
 pub(crate) struct ListWavesQuery {
@@ -84,7 +84,7 @@ pub(crate) struct UpdateWaveRequest {
     flow: Option<String>,
     direction: Option<Vec<String>>,
     area: Option<Vec<String>>,
-    paused: Option<bool>,
+    status: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -141,7 +141,8 @@ pub async fn create_wave_handler(
         flow,
         direction: payload.direction.unwrap_or_default(),
         area: payload.area.unwrap_or_default(),
-        paused: false,
+        status: WaveStatus::Idle,
+        iteration: 0,
         created_at: Some(OffsetDateTime::now_utc()),
     };
     let wave_clone = wave.clone();
@@ -205,8 +206,10 @@ pub async fn update_wave_handler(
             wave.area = area;
         }
     }
-    if let Some(paused) = payload.paused {
-        wave.paused = paused;
+    if let Some(status) = payload.status {
+        wave.status = WaveStatus::from_str(&status).map_err(|_| {
+            api_error(StatusCode::BAD_REQUEST, "invalid status")
+        })?;
     }
 
     let wave_clone = wave.clone();
@@ -271,7 +274,6 @@ pub async fn run_wave_handler(
         ));
     }
 
-    wave.paused = false;
     if let Some(flow) = payload.flow {
         wave.flow = flow;
     }
@@ -335,6 +337,10 @@ pub async fn run_wave_handler(
                 run.error = Some(err.to_string());
                 run.ended_at = Some(OffsetDateTime::now_utc());
                 let _ = store.update_wave_run(&run);
+                if let Ok(Some(mut wave)) = store.get_wave(&run.wave_id) {
+                    wave.status = WaveStatus::Failed;
+                    let _ = store.update_wave(&wave);
+                }
             }
         }
         scheduler.release(run_id_for_release.as_str());
@@ -371,6 +377,16 @@ pub async fn stop_wave_handler(
         run_store(&state.store, move |store| store.update_wave_run(&run_clone))
             .await
             .map_err(map_store_error)?;
+        let wave_id = run.wave_id.clone();
+        run_store(&state.store, move |store| {
+            if let Some(mut wave) = store.get_wave(&wave_id)? {
+                wave.status = WaveStatus::Failed;
+                store.update_wave(&wave)?;
+            }
+            Ok(())
+        })
+        .await
+        .map_err(map_store_error)?;
     }
 
     state.event_hub.send(Event::wave_stopped(wave_id));
@@ -398,7 +414,7 @@ pub async fn continue_wave_handler(
         ));
     }
 
-    let wave = run_store(&state.store, {
+    let mut wave = run_store(&state.store, {
         let wave_id = wave_id.clone();
         move |store| store.get_wave(&wave_id)
     })
@@ -408,13 +424,13 @@ pub async fn continue_wave_handler(
 
     // Resolve worktree and check for uncommitted changes.
     let worktree = if run.worktree.is_empty() {
-        wave.repo.clone()
+        run.snapshot.repo.clone()
     } else {
         run.worktree.clone()
     };
 
     // Resolve the current step name for the commit message.
-    let step_name = resolve_current_step_name(&wave, run.step_index);
+    let step_name = resolve_current_step_name(&run, &wave, run.step_index);
 
     let worktree_path = worktree.clone();
     let step_name_for_commit = step_name.clone();
@@ -430,6 +446,11 @@ pub async fn continue_wave_handler(
     run.status = WaveRunStatus::Running;
     let run_clone = run.clone();
     run_store(&state.store, move |store| store.update_wave_run(&run_clone))
+        .await
+        .map_err(map_store_error)?;
+    wave.status = WaveStatus::Running;
+    let wave_clone = wave.clone();
+    run_store(&state.store, move |store| store.update_wave(&wave_clone))
         .await
         .map_err(map_store_error)?;
 

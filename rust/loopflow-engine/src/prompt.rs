@@ -601,19 +601,22 @@ fn gather_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document>, Co
     Ok(docs)
 }
 
-/// Gather .md docs from ancestor directories of an area path.
+/// Gather .md docs from the area directory and its ancestors.
 ///
 /// For area "src/api/handlers", collects .md files from:
 /// - src/ (e.g., src/README.md)
 /// - src/api/ (e.g., src/api/README.md)
+/// - src/api/handlers/ (e.g., src/api/handlers/README.md)
 ///
-/// Does NOT include the area directory itself (that's the working scope,
-/// not architectural context) or the repo root (already gathered by gather_docs).
+/// Does NOT include the repo root (already gathered by gather_docs).
 fn gather_area_docs(repo_root: &Path, area: &str) -> Vec<Document> {
     let area_path = Path::new(area);
     let mut ancestors = Vec::new();
 
-    // Collect parent paths (excluding the area itself and repo root)
+    // Include the area directory itself and its ancestors (excluding repo root)
+    if !area_path.as_os_str().is_empty() {
+        ancestors.push(area_path.to_path_buf());
+    }
     let mut current = area_path.to_path_buf();
     while let Some(parent) = current.parent() {
         if parent.as_os_str().is_empty() {

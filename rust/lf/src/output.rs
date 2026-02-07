@@ -43,14 +43,19 @@ use loopflow_engine::prompt::{ContextBreakdown, DiffTier};
 
 /// Format the context header table for stderr output.
 pub fn format_context_header(breakdown: &ContextBreakdown, budget: usize) -> String {
-    let bar = "\u{2500}".repeat(37);
     let mut lines = Vec::new();
 
-    lines.push(format!("\u{2500}\u{2500} context {}", bar));
+    // Step name as prominent header
+    let title = breakdown.step_name.as_deref().unwrap_or("context");
+    let bar_len = 45usize.saturating_sub(title.len() + 4);
+    lines.push(format!(
+        "\u{2500}\u{2500} {} {}",
+        title,
+        "\u{2500}".repeat(bar_len)
+    ));
 
-    // Step
-    let step_detail = breakdown.step_name.as_deref().unwrap_or("\u{2014}");
-    lines.push(format_row("step", breakdown.step, step_detail));
+    // Step tokens
+    lines.push(format_row("step", breakdown.step, ""));
 
     // Direction
     let dir_detail = if breakdown.direction_names.is_empty() {
@@ -183,7 +188,7 @@ mod tests {
     fn format_context_header_empty() {
         let breakdown = ContextBreakdown::default();
         let header = format_context_header(&breakdown, 75_000);
-        assert!(header.contains("context"));
+        assert!(header.contains("\u{2500}\u{2500} context \u{2500}"));
         assert!(header.contains("total"));
         assert!(header.contains("0% of 75k"));
     }
@@ -204,7 +209,7 @@ mod tests {
             ..Default::default()
         };
         let header = format_context_header(&breakdown, 75_000);
-        assert!(header.contains("implement"));
+        assert!(header.contains("\u{2500}\u{2500} implement \u{2500}"));
         assert!(header.contains("product-engineer"));
         assert!(header.contains("unified (8 files)"));
         assert!(header.contains("3 files"));

@@ -62,6 +62,7 @@ pub trait RunStore: Send + Sync {
     // Wave management
     fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>>;
     fn get_wave(&self, wave_id: &LfdId) -> StoreResult<Option<Wave>>;
+    fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>>;
     fn create_wave(&self, wave: &Wave) -> StoreResult<()>;
     fn update_wave(&self, wave: &Wave) -> StoreResult<()>;
     fn delete_wave(&self, wave_id: &LfdId) -> StoreResult<()>;
@@ -137,6 +138,7 @@ mod tests {
     use crate::id::LfdId;
     use crate::types::{
         Agent, AgentStatus, PendingActivation, Stimulus, StimulusKind, Wave, WaveRun, WaveRunStatus,
+        WaveRunSnapshot, WaveStatus,
     };
     use std::env;
     use std::path::PathBuf;
@@ -152,7 +154,8 @@ mod tests {
             flow: "default".to_string(),
             direction: vec!["focus".to_string()],
             area: vec!["src".to_string()],
-            paused: false,
+            status: WaveStatus::Idle,
+            iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
         }
     }
@@ -204,10 +207,10 @@ mod tests {
         let loaded = store.get_wave(&wave.id).unwrap().unwrap();
         assert_eq!(loaded.name, wave.name);
 
-        wave.paused = true;
+        wave.status = WaveStatus::Paused;
         store.update_wave(&wave).unwrap();
         let updated = store.get_wave(&wave.id).unwrap().unwrap();
-        assert!(updated.paused);
+        assert_eq!(updated.status, WaveStatus::Paused);
 
         let repo_waves = store.list_waves(Some(&wave.repo)).unwrap();
         assert!(!repo_waves.is_empty());
@@ -230,6 +233,13 @@ mod tests {
         let run = WaveRun {
             id: LfdId::new(),
             wave_id: wave.id.clone(),
+            snapshot: WaveRunSnapshot {
+                repo: wave.repo.clone(),
+                flow: wave.flow.clone(),
+                direction: wave.direction.clone(),
+                area: wave.area.clone(),
+                pr: None,
+            },
             iteration: 1,
             step_index: 0,
             status: WaveRunStatus::Running,

@@ -7,6 +7,63 @@ use crate::id::LfdId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
+pub enum WaveStatus {
+    #[default]
+    Idle = 1,
+    Running = 2,
+    Waiting = 3,
+    Paused = 4,
+    Failed = 5,
+    Completed = 6,
+}
+
+impl WaveStatus {
+    pub fn from_i32(value: i32) -> Self {
+        match value {
+            1 => Self::Idle,
+            2 => Self::Running,
+            3 => Self::Waiting,
+            4 => Self::Paused,
+            5 => Self::Failed,
+            6 => Self::Completed,
+            _ => Self::Idle,
+        }
+    }
+
+    pub fn as_i32(&self) -> i32 {
+        *self as i32
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Running => "running",
+            Self::Waiting => "waiting",
+            Self::Paused => "paused",
+            Self::Failed => "failed",
+            Self::Completed => "completed",
+        }
+    }
+}
+
+impl std::str::FromStr for WaveStatus {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "idle" => Ok(Self::Idle),
+            "running" => Ok(Self::Running),
+            "waiting" => Ok(Self::Waiting),
+            "paused" => Ok(Self::Paused),
+            "failed" => Ok(Self::Failed),
+            "completed" => Ok(Self::Completed),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
 pub enum WaveRunStatus {
     #[default]
     Unspecified = 0,
@@ -42,7 +99,8 @@ pub struct Wave {
     pub flow: String,
     pub direction: Vec<String>,
     pub area: Vec<String>,
-    pub paused: bool,
+    pub status: WaveStatus,
+    pub iteration: u32,
     #[serde(with = "time::serde::rfc3339::option")]
     pub created_at: Option<OffsetDateTime>,
 }
@@ -57,16 +115,36 @@ impl Wave {
             flow: String::new(),
             direction: Vec::new(),
             area: Vec::new(),
-            paused: false,
+            status: WaveStatus::Idle,
+            iteration: 0,
             created_at: Some(OffsetDateTime::now_utc()),
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PullRequest {
+    pub url: String,
+    pub number: Option<u32>,
+    pub state: Option<String>,
+    pub title: Option<String>,
+    pub branch: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct WaveRunSnapshot {
+    pub repo: String,
+    pub flow: String,
+    pub direction: Vec<String>,
+    pub area: Vec<String>,
+    pub pr: Option<PullRequest>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WaveRun {
     pub id: LfdId,
     pub wave_id: LfdId,
+    pub snapshot: WaveRunSnapshot,
     pub iteration: u32,
     pub step_index: u32,
     pub status: WaveRunStatus,

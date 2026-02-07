@@ -10,7 +10,8 @@ use tokio_postgres::{NoTls, Row};
 use crate::id::LfdId;
 use crate::store::{ForkRun, ForkRunStatus, RunStore, StoreError, StoreResult};
 use crate::types::{
-    Agent, AgentStatus, PendingActivation, Stimulus, StimulusKind, Wave, WaveRun, WaveRunStatus,
+    Agent, AgentStatus, PendingActivation, PullRequest, Stimulus, StimulusKind, Wave, WaveRun,
+    WaveRunSnapshot, WaveRunStatus, WaveStatus,
 };
 
 const RETRY_DELAYS: [Duration; 3] = [
@@ -19,9 +20,10 @@ const RETRY_DELAYS: [Duration; 3] = [
     Duration::from_secs(2),
 ];
 
-const SCHEMA_VERSION: u32 = 3;
+const SCHEMA_VERSION: u32 = 4;
 const MIGRATION_001: &str = include_str!("migrations/postgres/001_initial.sql");
 const MIGRATION_002: &str = include_str!("migrations/postgres/002_flow_parents.sql");
+const MIGRATION_003: &str = include_str!("migrations/postgres/003_run_snapshots.sql");
 
 // NOTE: Sync trait with block_on bridging
 //
@@ -118,7 +120,7 @@ impl PostgresStore {
                 client
                     .query(
                         "
-                        SELECT id, name, repo, flow, direction, area, paused, created_at
+                        SELECT id, name, repo, flow, direction, area, paused, status, iteration, created_at
                         FROM waves
                         WHERE repo = $1
                         ORDER BY created_at DESC
@@ -130,7 +132,7 @@ impl PostgresStore {
                 client
                     .query(
                         "
-                        SELECT id, name, repo, flow, direction, area, paused, created_at
+                        SELECT id, name, repo, flow, direction, area, paused, status, iteration, created_at
                         FROM waves
                         ORDER BY created_at DESC
                         ",
@@ -164,7 +166,7 @@ impl PostgresStore {
                         paused, status, iteration, worktree, branch, pr_limit, merge_mode, pid,
                         created_at, last_main_sha, consecutive_failures, pending_activations,
                         step_index
-                    ) VALUES ($1, $2, $3, $4, $5, $6, 1, '', $7, 1, 0, '', '', 0, 0, NULL, $8, NULL, 0, 0, 0)
+                    ) VALUES ($1, $2, $3, $4, $5, $6, 1, '', $7, $8, $9, '', '', 0, 0, NULL, $10, NULL, 0, 0, 0)
                     ON CONFLICT(id) DO UPDATE SET
                         name = excluded.name,
                         repo = excluded.repo,
@@ -172,6 +174,8 @@ impl PostgresStore {
                         direction = excluded.direction,
                         area = excluded.area,
                         paused = excluded.paused,
+                        status = excluded.status,
+                        iteration = excluded.iteration,
                         created_at = excluded.created_at
                     ",
                     &[
@@ -181,7 +185,9 @@ impl PostgresStore {
                         &wave.flow,
                         &direction_json,
                         &area_json,
-                        &wave.paused,
+                        &(wave.status == WaveStatus::Paused),
+                        &wave.status.as_i32(),
+                        &(wave.iteration as i32),
                         &created_at,
                     ],
                 )
@@ -230,11 +236,29 @@ impl RunStore for PostgresStore {
             let row = client
                 .query_opt(
                     "
-                    SELECT id, name, repo, flow, direction, area, paused, created_at
+                    SELECT id, name, repo, flow, direction, area, paused, status, iteration, created_at
                     FROM waves
                     WHERE id = $1
                     ",
                     &[&wave_id],
+                )
+                .await?;
+
+            row.map(|row| map_wave_row(&row)).transpose()
+        })
+    }
+
+    fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>> {
+        let name = name.to_string();
+        self.with_client(|client| async move {
+            let row = client
+                .query_opt(
+                    "
+                    SELECT id, name, repo, flow, direction, area, paused, status, iteration, created_at
+                    FROM waves
+                    WHERE name = $1
+                    ",
+                    &[&name],
                 )
                 .await?;
 
@@ -268,7 +292,8 @@ impl RunStore for PostgresStore {
             let mut query = String::from(
                 "
                 SELECT id, wave_id, iteration, step_index, status, worktree, branch,
-                       started_at, ended_at, error, flow_parents
+                       started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
+                       snapshot_area, snapshot_pr, flow_parents
                 FROM wave_runs
                 ",
             );
@@ -300,7 +325,8 @@ impl RunStore for PostgresStore {
                 .query_opt(
                     "
                     SELECT id, wave_id, iteration, step_index, status, worktree, branch,
-                           started_at, ended_at, error, flow_parents
+                           started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
+                           snapshot_area, snapshot_pr, flow_parents
                     FROM wave_runs
                     WHERE id = $1
                     ",
@@ -322,7 +348,8 @@ impl RunStore for PostgresStore {
                 .query_opt(
                     "
                     SELECT id, wave_id, iteration, step_index, status, worktree, branch,
-                           started_at, ended_at, error, flow_parents
+                           started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
+                           snapshot_area, snapshot_pr, flow_parents
                     FROM wave_runs
                     WHERE wave_id = $1 AND status = ANY($2)
                     ORDER BY started_at DESC
@@ -348,8 +375,9 @@ impl RunStore for PostgresStore {
                     "
                     INSERT INTO wave_runs (
                         id, wave_id, iteration, step_index, status, worktree, branch,
-                        started_at, ended_at, error, flow_parents
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                        started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
+                        snapshot_area, snapshot_pr, flow_parents
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
                     ",
                     &[
                         &run.id,
@@ -362,6 +390,11 @@ impl RunStore for PostgresStore {
                         &started_at,
                         &ended_at,
                         &run.error,
+                        &run.snapshot.repo,
+                        &run.snapshot.flow,
+                        &serde_json::to_value(&run.snapshot.direction)?,
+                        &serde_json::to_value(&run.snapshot.area)?,
+                        &serialize_pr(&run.snapshot.pr)?,
                         &flow_parents_json,
                     ],
                 )
@@ -385,8 +418,13 @@ impl RunStore for PostgresStore {
                         started_at = $6,
                         ended_at = $7,
                         error = $8,
-                        flow_parents = $9
-                    WHERE id = $10
+                        snapshot_repo = $9,
+                        snapshot_flow = $10,
+                        snapshot_direction = $11,
+                        snapshot_area = $12,
+                        snapshot_pr = $13,
+                        flow_parents = $14
+                    WHERE id = $15
                     ",
                     &[
                         &(run.iteration as i32),
@@ -397,6 +435,11 @@ impl RunStore for PostgresStore {
                         &run.started_at.map(|dt| dt.unix_timestamp()),
                         &run.ended_at.map(|dt| dt.unix_timestamp()),
                         &run.error,
+                        &run.snapshot.repo,
+                        &run.snapshot.flow,
+                        &serde_json::to_value(&run.snapshot.direction)?,
+                        &serde_json::to_value(&run.snapshot.area)?,
+                        &serialize_pr(&run.snapshot.pr)?,
                         &flow_parents_json,
                         &run.id,
                     ],
@@ -935,6 +978,9 @@ impl PostgresMigrator {
             if current < 3 {
                 transaction.batch_execute(MIGRATION_002).await?;
             }
+            if current < 4 {
+                transaction.batch_execute(MIGRATION_003).await?;
+            }
             transaction.commit().await?;
             Ok(SCHEMA_VERSION)
         })
@@ -984,8 +1030,14 @@ fn map_wave_row(row: &Row) -> StoreResult<Wave> {
     let area_json: serde_json::Value = row.get(5);
     let direction = parse_json_vec(direction_json)?;
     let area = parse_json_vec(area_json)?;
-
-    let created_at = unix_to_datetime(row.get::<_, i64>(7));
+    let paused: bool = row.get(6);
+    let status_value: i32 = row.get(7);
+    let iteration: i32 = row.get(8);
+    let created_at = unix_to_datetime(row.get::<_, i64>(9));
+    let mut status = WaveStatus::from_i32(status_value);
+    if paused {
+        status = WaveStatus::Paused;
+    }
 
     Ok(Wave {
         id: row.get(0),
@@ -994,7 +1046,8 @@ fn map_wave_row(row: &Row) -> StoreResult<Wave> {
         flow: row.get(3),
         direction,
         area,
-        paused: row.get(6),
+        status,
+        iteration: iteration as u32,
         created_at: Some(created_at),
     })
 }
@@ -1002,12 +1055,23 @@ fn map_wave_row(row: &Row) -> StoreResult<Wave> {
 fn map_wave_run_row(row: &Row) -> StoreResult<WaveRun> {
     let started_at = unix_to_datetime(row.get::<_, i64>(7));
     let ended_at: Option<i64> = row.get(8);
-    let flow_parents_json: serde_json::Value = row.get(10);
+    let snapshot_direction_json: serde_json::Value = row.get(12);
+    let snapshot_area_json: serde_json::Value = row.get(13);
+    let snapshot_pr_json: Option<serde_json::Value> = row.get(14);
+    let flow_parents_json: serde_json::Value = row.get(15);
     let flow_parents = parse_json_vec(flow_parents_json)?;
+    let snapshot = WaveRunSnapshot {
+        repo: row.get(10),
+        flow: row.get(11),
+        direction: parse_json_vec(snapshot_direction_json)?,
+        area: parse_json_vec(snapshot_area_json)?,
+        pr: parse_pr(snapshot_pr_json)?,
+    };
 
     Ok(WaveRun {
         id: row.get(0),
         wave_id: row.get(1),
+        snapshot,
         iteration: row.get::<_, i32>(2) as u32,
         step_index: row.get::<_, i32>(3) as u32,
         status: WaveRunStatus::from_i32(row.get::<_, i32>(4)),
@@ -1085,6 +1149,22 @@ fn map_agent_row(row: &Row) -> StoreResult<Agent> {
 
 fn parse_json_vec(value: serde_json::Value) -> StoreResult<Vec<String>> {
     serde_json::from_value::<Vec<String>>(value).map_err(StoreError::Serde)
+}
+
+fn serialize_pr(value: &Option<PullRequest>) -> StoreResult<serde_json::Value> {
+    match value {
+        Some(pr) => serde_json::to_value(pr).map_err(StoreError::Serde),
+        None => Ok(serde_json::Value::Null),
+    }
+}
+
+fn parse_pr(value: Option<serde_json::Value>) -> StoreResult<Option<PullRequest>> {
+    match value {
+        Some(value) if !value.is_null() => {
+            serde_json::from_value::<PullRequest>(value).map(Some).map_err(StoreError::Serde)
+        }
+        _ => Ok(None),
+    }
 }
 
 fn is_undefined_table(err: &tokio_postgres::Error) -> bool {

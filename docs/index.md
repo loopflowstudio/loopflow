@@ -10,12 +10,35 @@ Orchestrate waves of autonomous work.
 ## Try it
 
 ```bash
-uv tool install loopflow
+curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh
 git clone https://github.com/loopflowstudio/loopflow-demos
 cd loopflow-demos/calculator
 python -m pytest test_calc.py    # see the bug
 # copy error to clipboard
 lf debug -c                       # fix it
+```
+
+## Query lfd
+
+```bash
+uv tool install loopflow
+lfq                  # status overview
+lfq list             # list waves
+lfq logs engbot      # tail agent output
+```
+
+## Python API
+
+```bash
+uv pip install loopflow
+```
+
+```python
+import loopflow.api as loopflow
+
+loopflow.waves()
+loopflow.create_wave("engbot", repo=".", flow="ship", direction=["product-engineer"])
+loopflow.run_wave("engbot")
 ```
 
 ---
@@ -148,17 +171,27 @@ Directions compose. A `product-engineer` direction sets intent. A `designer` dir
 
 ## Area
 
-The path you pass to `lfd`. Scopes what the wave works on.
+The path you pass to `lfq`/`loopflow` when configuring waves. Scopes what the wave works on.
 
 ```bash
-lfd loop ship src/api/        # work on src/api/
-lfd loop ship .               # work on everything
+lfq create shipper .
+python - <<'PY'
+import loopflow.api as loopflow
+
+loopflow.update_wave("shipper", flow="ship", area=["src/api/"])
+loopflow.run_wave("shipper")
+PY
 ```
 
 Combined with flow and direction, area defines the wave:
 
 ```bash
-lfd loop ship src/api/ --direction product-engineer
+python - <<'PY'
+import loopflow.api as loopflow
+
+loopflow.update_wave("shipper", flow="ship", area=["src/api/"], direction=["product-engineer"])
+loopflow.run_wave("shipper")
+PY
 ```
 
 ---

@@ -7,15 +7,12 @@ import SwiftUI
 import LoopflowCore
 
 struct WaveDetailPanel: View {
-    let wave: Wave
+    let wave: WaveViewModel
 
     @Environment(RepoState.self) private var repoState
     @Environment(SessionState.self) private var sessionState
     @Environment(\.colorScheme) private var colorScheme
-    @AppStorage("changedFilesExpanded") private var changedFilesExpanded = true
 
-    @State private var fileStats: [FileDiffStat] = []
-    @State private var isLoadingFiles = false
     @State private var actionError: String?
     @State private var showingActionError = false
     @State private var showingStopConfirmation = false
@@ -27,10 +24,9 @@ struct WaveDetailPanel: View {
 
     private let terminalLauncher = TerminalLauncher()
     private let elapsedTimeTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-    private let worktreeService = WorktreeService()
 
-    private var ideApp: IDEApp { repoState.config?.ideApp ?? .cursor }
-    private var terminalApp: TerminalApp { repoState.config?.terminalApp ?? .warp }
+    private var ideApp: IDEApp { .cursor }
+    private var terminalApp: TerminalApp { .warp }
     private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     var body: some View {
@@ -43,12 +39,6 @@ struct WaveDetailPanel: View {
             }
         }
         .background(palette.background)
-        .onAppear {
-            loadData()
-        }
-        .onChange(of: wave.id) {
-            loadData()
-        }
         .alert("Error", isPresented: $showingActionError) {
             Button("OK") { actionError = nil }
         } message: {
@@ -88,7 +78,7 @@ struct WaveDetailPanel: View {
 
             ScrollView {
                 VStack(spacing: 16) {
-                    if wave.area == nil {
+                    if wave.area.isEmpty {
                         AreaPicker(wave: wave)
                     } else if wave.status == .idle {
                         StepRunner(wave: wave)
@@ -102,7 +92,6 @@ struct WaveDetailPanel: View {
 
                     if wave.worktreePath != nil {
                         quickActionsBar
-                        changedFilesSection
                     }
                 }
                 .padding(20)
@@ -310,21 +299,6 @@ struct WaveDetailPanel: View {
                 .buttonStyle(DarkButtonStyle())
                 .help("Open in \(ideApp.displayName)")
 
-                if wave.hasDiff {
-                    Button {
-                        landBranch()
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "airplane.arrival")
-                                .font(.system(size: 12))
-                            Text("Land")
-                                .font(.caption)
-                        }
-                    }
-                    .buttonStyle(DarkButtonStyle())
-                    .help("Land branch (creates PR if needed)")
-                }
-
                 Spacer()
             }
         }
@@ -367,7 +341,7 @@ struct WaveDetailPanel: View {
                         FlowProgressPills(
                             steps: wave.flowSteps ?? [wave.flow],
                             currentIndex: wave.stepIndex,
-                            startedAt: wave.runStartedAt
+                            startedAt: wave.activeRun?.startedAt ?? wave.runStartedAt
                         )
 
                     case .completed:
@@ -376,13 +350,13 @@ struct WaveDetailPanel: View {
                         Text("Completed")
                             .foregroundStyle(.secondary)
 
-                    case .error:
+                    case .failed:
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(.red)
-                        Text("Error occurred")
+                        Text("Failed")
                             .foregroundStyle(.secondary)
 
-                    case .idle, .waiting:
+                    case .idle, .waiting, .paused:
                         EmptyView()
                     }
                 }
@@ -442,194 +416,7 @@ struct WaveDetailPanel: View {
         }
     }
 
-    // MARK: - Changed Files Section
-
-    private var changedFilesSection: some View {
-        DisclosureGroup(isExpanded: $changedFilesExpanded) {
-            if isLoadingFiles {
-                ProgressView()
-                    .scaleEffect(0.8)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
-            } else if fileStats.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "doc.text")
-                        .font(.title2)
-                        .foregroundStyle(.tertiary)
-                    Text("No changes")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 24)
-            } else {
-                VStack(spacing: 6) {
-                    fileSummaryBar
-
-                    ForEach(fileStats) { file in
-                        fileRow(file)
-                    }
-                }
-                .padding(.vertical, 12)
-            }
-        } label: {
-            HStack {
-                Image(systemName: "doc.text.fill")
-                    .font(.subheadline)
-                Text("Changed Files")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                if !fileStats.isEmpty {
-                    Text("(\(fileStats.count))")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-                Spacer()
-            }
-            .foregroundStyle(.primary)
-        }
-        .padding(16)
-        .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-    }
-
-    private var fileSummaryBar: some View {
-        let totalAdditions = fileStats.reduce(0) { $0 + $1.additions }
-        let totalDeletions = fileStats.reduce(0) { $0 + $1.deletions }
-
-        return HStack(spacing: 16) {
-            HStack(spacing: 4) {
-                Text("+\(totalAdditions)")
-                    .font(.system(.caption, design: .monospaced))
-                    .fontWeight(.medium)
-                    .foregroundStyle(.green)
-            }
-
-            HStack(spacing: 4) {
-                Text("-\(totalDeletions)")
-                    .font(.system(.caption, design: .monospaced))
-                    .fontWeight(.medium)
-                    .foregroundStyle(.red)
-            }
-
-            Spacer()
-
-            Text("\(fileStats.count) files changed")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(palette.background)
-        )
-    }
-
-    private func fileRow(_ file: FileDiffStat) -> some View {
-        HStack(spacing: 8) {
-            fileIcon(for: file.fileExtension)
-                .frame(width: 16)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(file.filename)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .lineLimit(1)
-
-                if !file.directory.isEmpty {
-                    Text(file.directory)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
-            }
-
-            Spacer()
-
-            changeBar(additions: file.additions, deletions: file.deletions)
-
-            HStack(spacing: 8) {
-                Text("+\(file.additions)")
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(.green)
-
-                Text("-\(file.deletions)")
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(.red)
-            }
-            .frame(width: 70, alignment: .trailing)
-        }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(palette.background)
-        )
-    }
-
-    private func fileIcon(for ext: String) -> some View {
-        let (icon, color): (String, Color) = switch ext {
-        case "swift": ("swift", .orange)
-        case "py": ("text.page", .blue)
-        case "ts", "tsx", "js", "jsx": ("curlybraces", .yellow)
-        case "md": ("doc.richtext", .purple)
-        case "yaml", "yml", "json": ("gearshape", .gray)
-        case "css", "scss": ("paintbrush", .pink)
-        case "html": ("chevron.left.forwardslash.chevron.right", .orange)
-        default: ("doc", .gray)
-        }
-
-        return Image(systemName: icon)
-            .font(.caption)
-            .foregroundStyle(color)
-    }
-
-    private func changeBar(additions: Int, deletions: Int) -> some View {
-        let total = additions + deletions
-        let maxBlocks = 5
-        let addBlocks: Int
-        if total > 0 && additions > 0 {
-            addBlocks = max(1, Int(round(Double(additions) / Double(total) * Double(maxBlocks))))
-        } else {
-            addBlocks = 0
-        }
-        let delBlocks = total > 0 ? maxBlocks - addBlocks : 0
-
-        return HStack(spacing: 1) {
-            ForEach(0..<addBlocks, id: \.self) { _ in
-                Rectangle()
-                    .fill(Color.green)
-                    .frame(width: 6, height: 10)
-            }
-            ForEach(0..<delBlocks, id: \.self) { _ in
-                Rectangle()
-                    .fill(Color.red)
-                    .frame(width: 6, height: 10)
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 2))
-    }
-
     // MARK: - Actions
-
-    private func loadData() {
-        guard let path = wave.worktreePath else { return }
-        loadFileStats(worktreePath: path)
-    }
-
-    private func loadFileStats(worktreePath: String) {
-        isLoadingFiles = true
-        Task {
-            do {
-                let worktreeURL = URL(fileURLWithPath: worktreePath)
-                fileStats = try await worktreeService.getDiffStats("main...HEAD", in: worktreeURL)
-            } catch {
-                fileStats = []
-            }
-            isLoadingFiles = false
-        }
-    }
 
     private func launchInteractive() {
         guard let path = wave.worktreePath else { return }
@@ -683,19 +470,6 @@ struct WaveDetailPanel: View {
         } catch {
             actionError = "Failed to open \(ideApp.displayName): \(error.localizedDescription)"
             showingActionError = true
-        }
-    }
-
-    private func landBranch() {
-        Task {
-            do {
-                try await repoState.landBranch(for: wave)
-            } catch {
-                await MainActor.run {
-                    actionError = "Failed to land branch: \(error.localizedDescription)"
-                    showingActionError = true
-                }
-            }
         }
     }
 

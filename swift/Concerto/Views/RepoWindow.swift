@@ -10,7 +10,6 @@ struct RepoWindow: View {
 
     @State private var repoState = RepoState()
     @State private var sessionState = SessionState()
-    @State private var launcherState = LauncherState()
 
     @State private var setupComplete = false
     @State private var hasCheckedSetup = false
@@ -28,7 +27,6 @@ struct RepoWindow: View {
                 ContentView()
                     .environment(repoState)
                     .environment(sessionState)
-                    .environment(launcherState)
             }
         }
         .background(WindowAccessor(repoURL: repoURL))
@@ -50,7 +48,7 @@ struct RepoWindow: View {
             // Then open repo if setup is complete
             if setupComplete, let url = repoURL, !hasOpenedRepo {
                 hasOpenedRepo = true
-                await repoState.openRepo(url, launcherState: launcherState, sessionState: sessionState)
+                await repoState.openRepo(url, sessionState: sessionState)
                 recentsService.addRecent(url)
             }
         }
@@ -58,7 +56,7 @@ struct RepoWindow: View {
             if complete, let url = repoURL, !hasOpenedRepo {
                 hasOpenedRepo = true
                 Task {
-                    await repoState.openRepo(url, launcherState: launcherState, sessionState: sessionState)
+                    await repoState.openRepo(url, sessionState: sessionState)
                     recentsService.addRecent(url)
                 }
             }

@@ -138,7 +138,17 @@ fn main() -> anyhow::Result<()> {
     }
 
     match &cli.command {
-        Some(Commands::Run { name, args }) => lf::commands::run::run(Some(name), args, None, &cli),
+        Some(Commands::Run { name, args }) => {
+            let repo_root = lf::commands::util::find_repo_root()?;
+            match lf::discovery::discover_target(&repo_root, name)? {
+                lf::discovery::Target::Step(_) => {
+                    lf::commands::run::run(Some(name), args, None, &cli)
+                }
+                lf::discovery::Target::Flow(flow) => {
+                    lf::commands::flow::run(&flow, args, &cli, &repo_root)
+                }
+            }
+        }
         Some(Commands::Inline { prompt }) => {
             let text = prompt.join(" ");
             lf::commands::run::run(None, &[], Some(&text), &cli)
@@ -146,7 +156,15 @@ fn main() -> anyhow::Result<()> {
         Some(Commands::Ops { op }) => lf::commands::ops::run(op),
         Some(Commands::External(args)) => {
             let (name, step_args) = lf::commands::run::split_step_args(args)?;
-            lf::commands::run::run(Some(&name), &step_args, None, &cli)
+            let repo_root = lf::commands::util::find_repo_root()?;
+            match lf::discovery::discover_target(&repo_root, &name)? {
+                lf::discovery::Target::Step(_) => {
+                    lf::commands::run::run(Some(&name), &step_args, None, &cli)
+                }
+                lf::discovery::Target::Flow(flow) => {
+                    lf::commands::flow::run(&flow, &step_args, &cli, &repo_root)
+                }
+            }
         }
         None => lf::commands::run::run(None, &[], None, &cli),
     }

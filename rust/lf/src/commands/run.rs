@@ -272,7 +272,11 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
         "agent finished"
     );
     debug!(exit_code = result.exit_code, "agent completed");
-    std::process::exit(result.exit_code);
+    if result.exit_code == 0 {
+        Ok(())
+    } else {
+        Err(anyhow!("agent exited with code {}", result.exit_code))
+    }
 }
 
 pub fn split_step_args(args: &[String]) -> Result<(String, Vec<String>)> {

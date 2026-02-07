@@ -1,5 +1,5 @@
 // Loopflow Concerto app entry point.
-// macOS 15+ native app for managing worktrees and launching LLM coding sessions.
+// macOS 15+ native app for managing waves and launching LLM coding sessions.
 
 import SwiftUI
 import LoopflowCore
@@ -87,27 +87,12 @@ struct ConcertoApp: App {
                 .keyboardShortcut("4", modifiers: [.command])
             }
 
-            // Edit menu shortcuts
-            CommandGroup(after: .textEditing) {
-                Button("Focus Prompt") {
-                    NotificationCenter.default.post(name: .focusPromptInput, object: nil)
-                }
-                .keyboardShortcut("l", modifiers: .command)
-            }
-
             // View menu - command palette and navigation
             CommandGroup(after: .sidebar) {
                 Button("Command Palette") {
                     NotificationCenter.default.post(name: .toggleCommandPalette, object: nil)
                 }
                 .keyboardShortcut("k", modifiers: .command)
-
-                Divider()
-
-                Button("New Workspace") {
-                    NotificationCenter.default.post(name: .showNewWorktreeSheet, object: nil)
-                }
-                .keyboardShortcut("n", modifiers: .command)
 
                 Divider()
 

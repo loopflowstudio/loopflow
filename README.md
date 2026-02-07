@@ -112,17 +112,19 @@ lf flow roadmap-reduce    # runs reduce 3x with different perspectives
 Once you have played with chaining steps into flows, you're ready to start running waves.
 
 ```bash
-lfd create engbot                         # create a wave
-lfd area engbot src/                      # set area
-lfd direction engbot product-engineer     # set direction
-lfd flow engbot ship                      # set flow
-lfd loop engbot                           # start looping
+lfq create engbot .                # create a wave
+lfq run engbot                            # start a wave
 ```
 
-Runs the `ship` flow on `src/` continuously using the `product-engineer` direction, creating PRs until stopped.
+Configure flow/area/direction with `loopflow.update_wave(...)`, then start it with `loopflow.run_wave(...)`.
 
 ```bash
-lfd watch ship designs/ -d designer       # ship when designs/ changes on main
+python - <<'PY'
+import loopflow.api as loopflow
+
+loopflow.update_wave("engbot", flow="ship", direction=["designer"], area=["designs/"])
+loopflow.run_wave("engbot")
+PY
 ```
 
 You can compose multiple directions to add additional nuance or perspectives.
@@ -144,6 +146,32 @@ Built-in steps and flows included. `lf init` sets up your coding agent and prefe
 cargo install --git https://github.com/loopflowstudio/loopflow --bin lf --bin lfd
 ```
 Install the Rust binaries directly with cargo.
+
+## Query lfd (lfq)
+
+```bash
+uv tool install loopflow
+lfq                  # status overview
+lfq list             # list waves
+lfq logs engbot      # tail agent output
+```
+
+`uv tool install loopflow` installs the Python CLI (`lfq`) and Python API only.  
+Use the install script or cargo to install `lf` and `lfd`.
+
+## Python API
+
+```bash
+uv pip install loopflow
+```
+
+```python
+import loopflow.api as loopflow
+
+loopflow.waves()
+loopflow.create_wave("engbot", repo=".", flow="ship", direction=["product-engineer"])
+loopflow.run_wave("engbot")
+```
 
 [Documentation →](docs/index.md)
 

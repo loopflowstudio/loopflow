@@ -25,6 +25,14 @@ pub struct PrResult {
     pub updated: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct PrInfo {
+    pub url: String,
+    pub number: u64,
+    pub state: String,
+    pub branch: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct GhPr {
     url: String,
@@ -142,6 +150,27 @@ fn get_pr_diff(repo: &Path) -> OpsResult<Option<String>> {
 
 pub fn pr_exists_for_current_branch(repo: &Path) -> OpsResult<bool> {
     Ok(find_open_pr(repo)?.is_some())
+}
+
+pub fn current_pr(repo: &Path) -> OpsResult<Option<PrInfo>> {
+    if !gh_available() {
+        return Ok(None);
+    }
+
+    let branch =
+        current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
+
+    if let Some(pr) = find_open_pr(repo)? {
+        let state = if pr.is_draft { "draft" } else { "open" }.to_string();
+        return Ok(Some(PrInfo {
+            url: pr.url,
+            number: pr.number,
+            state,
+            branch,
+        }));
+    }
+
+    Ok(None)
 }
 
 fn find_open_pr(repo: &Path) -> OpsResult<Option<GhPr>> {

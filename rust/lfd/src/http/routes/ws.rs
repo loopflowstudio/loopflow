@@ -7,7 +7,7 @@ use tokio::time::{interval, Duration};
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::http::dto::ErrorResponse;
-use crate::http::routes::build_wave_views;
+use crate::http::routes::build_wave_dtos;
 use crate::http::run_store;
 use crate::http::state::HttpState;
 
@@ -84,11 +84,11 @@ async fn handle_ws(mut socket: WebSocket, state: HttpState) {
 
 async fn current_snapshot(
     store: &crate::store::SharedStore,
-) -> Result<Vec<crate::http::dto::WaveViewDto>, String> {
+) -> Result<Vec<crate::http::dto::WaveDto>, String> {
     let waves = run_store(store, move |store| store.list_waves(None))
         .await
         .map_err(|err| err.to_string())?;
-    build_wave_views(store, waves)
+    build_wave_dtos(store, waves, true)
         .await
         .map_err(|err| err.to_string())
 }

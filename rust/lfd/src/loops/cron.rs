@@ -12,7 +12,7 @@ use crate::executor::WaveExecutor;
 use crate::id::LfdId;
 use crate::scheduler::Scheduler;
 use crate::store::SharedStore;
-use crate::types::{PendingActivation, StimulusKind};
+use crate::types::{PendingActivation, StimulusKind, WaveStatus};
 
 pub fn spawn_cron_poller(
     store: SharedStore,
@@ -65,7 +65,7 @@ async fn check_cron_stimuli(
             }
         };
 
-        if wave.paused {
+        if wave.status == WaveStatus::Paused {
             continue;
         }
 

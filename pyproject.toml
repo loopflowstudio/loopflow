@@ -20,6 +20,10 @@ classifiers = [
     "Programming Language :: Rust",
     "Topic :: Software Development",
 ]
+dependencies = ["httpx>=0.27", "pydantic>=2.0", "typer>=0.9", "rich>=13.0"]
+
+[dependency-groups]
+dev = ["boto3", "pyyaml>=6.0", "hatchling"]
 
 [project.urls]
 Homepage = "https://loopflowstudio.github.io/loopflow/"
@@ -27,14 +31,15 @@ Repository = "https://github.com/loopflowstudio/loopflow"
 Documentation = "https://loopflowstudio.github.io/loopflow/"
 Issues = "https://github.com/loopflowstudio/loopflow/issues"
 
-[build-system]
-requires = ["maturin>=1.4,<2.0"]
-build-backend = "maturin"
+[project.scripts]
+lfq = "loopflow.cli:app"
 
-[tool.maturin]
-bindings = "pyo3"
-manifest-path = "rust/loopflow-py/Cargo.toml"
-strip = true
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["python/loopflow"]
 
 [tool.ruff]
 line-length = 100

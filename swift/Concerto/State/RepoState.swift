@@ -1,4 +1,4 @@
-// Primary data state - waves, flows, directions, config, worktrees.
+// Primary data state - waves, flows, and lfd connection.
 
 import Foundation
 import SwiftUI
@@ -64,45 +64,93 @@ final class RepoState {
     }
 
     var currentRepo: URL?
-    var config: LoopflowConfig?
-    var worktrees: [Worktree] = []
-    var prompts: [PromptCard] = []
     var flows: [Flow] = []
-    var directions: [Direction] = []
-    var waves: [Wave] = []
+    var waves: [WaveViewModel] = [] {
+        didSet {
+            waveGroups = buildWaveGroups(from: waves)
+        }
+    }
 
     // Selection
-    var selectedWave: Wave?
-    var selectedFlow: Flow?
+    var selectedWave: WaveViewModel?
 
     // Loading
     var isLoading: Bool = false
     var errorMessage: String?
-    var refreshMessage: String?
-    var isRefreshingWorktrees: Bool = false
 
     // Daemon connection
     var lfdConnected: Bool = false
 
     // Services
-    private let worktreeService = WorktreeService()
-    private let configLoader = ConfigLoader()
-    private let promptService = PromptService()
-    private let flowService = FlowService()
     private let waveService = LocalWaveService()
-    private let directionService = DirectionService()
-    private var eventService: (any EventServiceProtocol)?
-
-    // Background tasks
-    private var autoSyncTask: Task<Void, Never>?
-    private var listDebounceTask: Task<Void, Never>?
-    private var autoPruneInFlight: Bool = false
+    private var eventService: LocalEventService?
 
     // Track previous wave statuses for notification transitions
     private var previousWaveStatuses: [String: WaveStatus] = [:]
 
-    // Keep reference to session state for event handling
-    private weak var _sessionState: SessionState?
+    struct WaveGroups {
+        let blocked: [WaveViewModel]
+        let pr: [WaveViewModel]
+        let recentActivity: [WaveViewModel]
+        let active: [WaveViewModel]
+        let idle: [WaveViewModel]
+
+        var attentionCount: Int { blocked.count + pr.count }
+        var allInOrder: [WaveViewModel] { blocked + pr + recentActivity + active + idle }
+    }
+
+    var waveGroups: WaveGroups = WaveGroups(
+        blocked: [],
+        pr: [],
+        recentActivity: [],
+        active: [],
+        idle: []
+    )
+
+    private func buildWaveGroups(from waves: [WaveViewModel]) -> WaveGroups {
+        let blocked = waves.filter { $0.status == .failed }
+        let pr = waves.filter { wave in
+            wave.status != .failed && pendingPR(for: wave) != nil
+        }
+
+        let hourAgo = Date().addingTimeInterval(-3600)
+        let recentActivity = Array(waves
+            .filter { wave in
+                guard let lastActivity = wave.lastActivityAt else { return false }
+                return lastActivity > hourAgo && wave.status != .failed && pendingPR(for: wave) == nil
+            }
+            .sorted { ($0.lastActivityAt ?? .distantPast) > ($1.lastActivityAt ?? .distantPast) }
+            .prefix(5))
+
+        let recentIds = Set(recentActivity.map(\.id))
+
+        let active = waves.filter { wave in
+            (wave.status == .running || wave.status == .waiting)
+                && pendingPR(for: wave) == nil
+                && !recentIds.contains(wave.id)
+        }
+
+        let idle = waves.filter { wave in
+            wave.status == .idle
+                && pendingPR(for: wave) == nil
+                && !recentIds.contains(wave.id)
+        }
+
+        return WaveGroups(
+            blocked: blocked,
+            pr: pr,
+            recentActivity: recentActivity,
+            active: active,
+            idle: idle
+        )
+    }
+
+    private func pendingPR(for wave: WaveViewModel) -> (number: Int, url: URL?)? {
+        guard let prNumber = wave.prNumber, wave.prState == .open else {
+            return nil
+        }
+        return (number: prNumber, url: wave.prURL)
+    }
 
     static func uiTestMode() -> UITestMode? {
         let args = ProcessInfo.processInfo.arguments
@@ -117,10 +165,7 @@ final class RepoState {
 
     func configureForUITest(_ mode: UITestMode, repoURL: URL) {
         currentRepo = repoURL
-        config = nil
-        prompts = []
         flows = []
-        directions = []
         waves = []
         selectedWave = nil
         isLoading = false
@@ -129,29 +174,10 @@ final class RepoState {
 
         switch mode {
         case .emptyWorkspaces:
-            worktrees = []
+            waves = []
         case .sampleWorkspaces:
-            worktrees = [
-                Worktree(
-                    path: "/tmp/loopflow-ui-tests/feature-a",
-                    branch: "feature-a",
-                    baseBranch: "main",
-                    isDirty: false,
-                    aheadMain: 2,
-                    behindMain: 0,
-                    aheadRemote: 0,
-                    behindRemote: 0,
-                    prURL: URL(string: "https://github.com/org/repo/pull/12"),
-                    prNumber: 12,
-                    prState: .open,
-                    hasCodeWorkspace: false,
-                    isRebasing: false,
-                    isMerging: false,
-                    hasDiff: true
-                )
-            ]
+            configureMockWaves()
         case .mockWaves:
-            worktrees = []
             configureMockWaves()
             if let selectBranch {
                 selectedWave = waves.first { $0.branch == selectBranch }
@@ -162,112 +188,78 @@ final class RepoState {
     func configureMockWaves() {
         lfdConnected = true
         waves = [
-            Wave(
-                id: "mock-wave-1",
-                name: "swift-falcon",
-                area: ["src/auth"],
-                direction: [],
-                flow: "ship",
-                repo: currentRepo?.path ?? "/tmp/demo",
-                stimulus: Stimulus(kind: .loop),
-                paused: false,
-                status: .running,
-                iteration: 3,
-                worktreePath: nil,
+            WaveViewModel(
+                api: Wave(
+                    id: "mock-wave-1",
+                    name: "swift-falcon",
+                    repo: currentRepo?.path ?? "/tmp/demo",
+                    flow: "ship",
+                    direction: [],
+                    area: ["src/auth"],
+                    stimulus: Stimulus(kind: .loop),
+                    status: .running,
+                    iteration: 3
+                ),
                 branch: "wave-auth-feature",
                 prLimit: 5,
                 mergeMode: .pr,
-                pid: 12345,
-                createdAt: Date().addingTimeInterval(-3600)
+                pid: 12345
             ),
-            Wave(
-                id: "mock-wave-2",
-                name: "crystal-melody",
-                area: ["src/api"],
-                direction: ["product-engineer"],
-                flow: "ship",
-                repo: currentRepo?.path ?? "/tmp/demo",
-                stimulus: Stimulus(kind: .loop),
-                paused: false,
-                status: .waiting,
-                iteration: 5,
-                worktreePath: nil,
+            WaveViewModel(
+                api: Wave(
+                    id: "mock-wave-2",
+                    name: "crystal-melody",
+                    repo: currentRepo?.path ?? "/tmp/demo",
+                    flow: "ship",
+                    direction: ["product-engineer"],
+                    area: ["src/api"],
+                    stimulus: Stimulus(kind: .loop),
+                    status: .waiting,
+                    iteration: 5
+                ),
                 branch: "wave-api-refactor",
                 prLimit: 3,
-                mergeMode: .pr,
-                pid: nil,
-                createdAt: Date().addingTimeInterval(-7200)
+                mergeMode: .pr
             ),
-            Wave(
-                id: "mock-wave-3",
-                name: "Quick fix",
-                area: ["."],
-                direction: [],
-                flow: "debug",
-                repo: currentRepo?.path ?? "/tmp/demo",
-                stimulus: Stimulus(kind: .manual),
-                paused: true,
-                status: .idle,
-                iteration: 0,
-                worktreePath: nil,
-                branch: nil,
+            WaveViewModel(
+                api: Wave(
+                    id: "mock-wave-3",
+                    name: "Quick fix",
+                    repo: currentRepo?.path ?? "/tmp/demo",
+                    flow: "debug",
+                    direction: [],
+                    area: ["."],
+                    stimulus: Stimulus(kind: .manual),
+                    status: .idle,
+                    iteration: 0
+                ),
                 prLimit: 5,
-                mergeMode: .pr,
-                pid: nil,
-                createdAt: Date().addingTimeInterval(-86400)
+                mergeMode: .pr
             ),
-            Wave(
-                id: "mock-wave-4",
-                name: "Nightly polish",
-                area: ["."],
-                direction: [],
-                flow: "polish",
-                repo: currentRepo?.path ?? "/tmp/demo",
-                stimulus: Stimulus(kind: .cron, cron: "0 9 * * *"),
-                paused: true,
-                status: .idle,
-                iteration: 12,
-                worktreePath: nil,
-                branch: nil,
+            WaveViewModel(
+                api: Wave(
+                    id: "mock-wave-4",
+                    name: "Nightly polish",
+                    repo: currentRepo?.path ?? "/tmp/demo",
+                    flow: "polish",
+                    direction: [],
+                    area: ["."],
+                    stimulus: Stimulus(kind: .cron, cron: "0 9 * * *"),
+                    status: .idle,
+                    iteration: 12
+                ),
                 prLimit: 5,
-                mergeMode: .pr,
-                pid: nil,
-                createdAt: Date().addingTimeInterval(-172800)
+                mergeMode: .pr
             )
         ]
         lfdConnected = true
     }
 
-    func openRepo(_ url: URL, launcherState: LauncherState, sessionState: SessionState, skipBackgroundRefresh: Bool = false) async {
+    func openRepo(_ url: URL, sessionState: SessionState, skipBackgroundRefresh: Bool = false) async {
         let startTime = CFAbsoluteTimeGetCurrent()
         currentRepo = url
         isLoading = true
         errorMessage = nil
-        _sessionState = sessionState
-
-        do {
-            let t0 = CFAbsoluteTimeGetCurrent()
-            config = try configLoader.load(from: url)
-            LoggingService.append("openRepo.config elapsed=\(Int((CFAbsoluteTimeGetCurrent() - t0) * 1000))ms")
-
-            // Initialize launcher state from config
-            launcherState.initializeFromConfig(config, repoURL: url, directions: directions)
-
-            // Load prompts and goals
-            let t2 = CFAbsoluteTimeGetCurrent()
-            prompts = try promptService.loadPrompts(from: url, config: config)
-            flows = flowService.loadFlows(from: url)
-            refreshDirections()
-            LoggingService.append("openRepo.prompts elapsed=\(Int((CFAbsoluteTimeGetCurrent() - t2) * 1000))ms")
-
-            // Re-initialize launcher goals after goals are loaded
-            if let directionNames = config?.directionNames, !directionNames.isEmpty {
-                launcherState.selectedDirections = directions.filter { directionNames.contains($0.name) }
-            }
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-
         isLoading = false
         LoggingService.append("openRepo.total elapsed=\(Int((CFAbsoluteTimeGetCurrent() - startTime) * 1000))ms")
 
@@ -277,215 +269,9 @@ final class RepoState {
                 let setupService = SetupService()
                 try? await setupService.ensureDaemonRunning()
                 startEventSubscription(sessionState: sessionState)
-
-                await refreshWaves()
                 await refreshFlowsAsync()
-                await launcherState.estimateTokens(repoURL: url)
-            }
-
-            startAutoSyncTimer()
-        }
-    }
-
-    // MARK: - Refresh Operations
-
-    func listWorktrees() {
-        listDebounceTask?.cancel()
-        listDebounceTask = Task {
-            try? await Task.sleep(for: .milliseconds(100))
-            guard !Task.isCancelled else { return }
-            await _listWorktrees()
-        }
-    }
-
-    private func _listWorktrees() async {
-        guard let repo = currentRepo else { return }
-        do {
-            worktrees = try await worktreeService.list(in: repo)
-        } catch {
-            // Silent failure for background refresh
-        }
-    }
-
-    func refreshWorktrees(showFeedback: Bool = false) async {
-        guard let repo = currentRepo else { return }
-
-        do {
-            if showFeedback {
-                isRefreshingWorktrees = true
-                refreshMessage = "Syncing..."
-            }
-            let syncSucceeded = (try? await worktreeService.sync(in: repo)) != nil
-            worktrees = try await worktreeService.list(in: repo)
-
-            if showFeedback {
-                refreshMessage = syncSucceeded ? "Refreshed" : "Refresh (sync failed)"
-            }
-        } catch {
-            errorMessage = error.localizedDescription
-            if showFeedback {
-                refreshMessage = "Refresh failed"
             }
         }
-
-        if showFeedback {
-            isRefreshingWorktrees = false
-            Task { @MainActor in
-                try? await Task.sleep(for: .seconds(2))
-                if refreshMessage != nil {
-                    refreshMessage = nil
-                }
-            }
-        }
-    }
-
-    private func syncAndEnrich() async {
-        guard let repo = currentRepo else { return }
-
-        _ = try? await worktreeService.sync(in: repo)
-        await _listWorktrees()
-
-        let lfdAvailable = await waveService.checkAvailability()
-        if !lfdAvailable {
-            await detectStaleness()
-            await fetchCIStatus()
-        }
-    }
-
-    private func detectStaleness() async {
-        guard let repo = currentRepo else { return }
-
-        let prunable = await worktreeService.getPrunableBranches(in: repo)
-        var stalenessMap = await worktreeService.detectStalenessForAll(worktrees, in: repo)
-
-        for branch in prunable {
-            stalenessMap[branch] = .merged
-        }
-
-        for i in worktrees.indices {
-            if let staleness = stalenessMap[worktrees[i].branch] {
-                worktrees[i].staleness = staleness
-            }
-        }
-
-        await autoPruneCompletedWorktrees(stalenessMap, in: repo)
-    }
-
-    private func fetchCIStatus() async {
-        guard let repo = currentRepo else { return }
-
-        let ciStatusMap = await worktreeService.getCIStatusForAll(worktrees, in: repo)
-
-        for i in worktrees.indices {
-            if let status = ciStatusMap[worktrees[i].branch] {
-                worktrees[i].ciStatus = status
-            }
-        }
-    }
-
-    private func autoPruneCompletedWorktrees(_ stalenessMap: [String: Staleness], in repo: URL) async {
-        if autoPruneInFlight { return }
-
-        let candidates = worktrees.filter { worktree in
-            guard worktree.branch != "main", worktree.branch != "master" else { return false }
-            guard worktree.isDirty == false, worktree.isMerging == false, worktree.isRebasing == false else { return false }
-            guard let staleness = stalenessMap[worktree.branch] else { return false }
-
-            switch staleness {
-            case .merged:
-                return true
-            case .remoteDeleted:
-                return worktree.aheadMain == 0
-            case .active, .inactive:
-                return false
-            }
-        }
-
-        if candidates.isEmpty { return }
-
-        autoPruneInFlight = true
-        let branchesToPrune = Set(candidates.map(\.branch))
-
-        worktrees.removeAll { branchesToPrune.contains($0.branch) }
-        // Clear selected wave if its branch is being pruned
-        if let selected = selectedWave, let branch = selected.branch, branchesToPrune.contains(branch) {
-            selectedWave = nil
-        }
-
-        Task.detached { [worktreeService] in
-            for branch in branchesToPrune {
-                _ = try? await worktreeService.remove(name: branch, in: repo)
-            }
-        }
-
-        autoPruneInFlight = false
-    }
-
-    private func startAutoSyncTimer() {
-        autoSyncTask?.cancel()
-        autoSyncTask = Task { [weak self] in
-            while !Task.isCancelled {
-                guard let self else { return }
-                await self.syncAndEnrich()
-                try? await Task.sleep(for: .seconds(60))
-            }
-        }
-    }
-
-    // MARK: - Worktree Operations
-
-    func createWorktree(name: String, baseBranch: String? = nil) async throws {
-        guard let repo = currentRepo else { return }
-        try await worktreeService.create(name: name, in: repo, baseBranch: baseBranch)
-        await _listWorktrees()
-    }
-
-    func deleteWorktree(_ worktree: Worktree) async throws {
-        guard let repo = currentRepo else { return }
-        try await worktreeService.remove(name: worktree.branch, in: repo)
-        listWorktrees()
-    }
-
-    func createPR(for worktree: Worktree) async throws {
-        let worktreeURL = URL(fileURLWithPath: worktree.path)
-        try await worktreeService.createPR(in: worktreeURL)
-        listWorktrees()
-    }
-
-    func landPR(for worktree: Worktree) async throws {
-        let worktreeURL = URL(fileURLWithPath: worktree.path)
-        try await worktreeService.landPR(in: worktreeURL)
-        listWorktrees()
-    }
-
-    func landBranch(for worktree: Worktree) async throws {
-        let worktreeURL = URL(fileURLWithPath: worktree.path)
-        try await worktreeService.landBranch(in: worktreeURL)
-        listWorktrees()
-    }
-
-    func landBranch(for wave: Wave) async throws {
-        guard let path = wave.worktreePath else {
-            throw WorktreeService.WorktreeError.notFound
-        }
-        let worktreeURL = URL(fileURLWithPath: path)
-        try await worktreeService.landBranch(in: worktreeURL)
-        await refreshWaves()
-    }
-
-    func syncMain() async throws {
-        guard let repo = currentRepo else { return }
-        try await worktreeService.sync(in: repo)
-        listWorktrees()
-    }
-
-    func pruneWorktrees(dryRun: Bool = false) async throws -> [String] {
-        guard let repo = currentRepo else { return [] }
-        let pruned = try await worktreeService.prune(in: repo, dryRun: dryRun)
-        if !dryRun {
-            listWorktrees()
-        }
-        return pruned
     }
 
     // MARK: - Event Subscription
@@ -498,23 +284,35 @@ final class RepoState {
 
         Task {
             await eventService?.subscribe(
-                patterns: ["worktree.*", "session.*", "output.line", "wave.*"],
                 onEvent: { [weak self, weak sessionState] event in
                     Task { @MainActor in
                         guard let self, let sessionState else { return }
                         switch event {
-                        case .worktree(let worktreeEvent):
-                            self.handleWorktreeEvent(worktreeEvent)
-                        case .session(let sessionEvent):
-                            self.handleSessionEvent(sessionEvent, sessionState: sessionState)
+                        case .connected(let connected):
+                            self.lfdConnected = true
+                            self.waves = connected.waves.map { WaveViewModel(api: $0) }
+                            for wave in self.waves {
+                                self.previousWaveStatuses[wave.id] = wave.status
+                            }
+                        case .wave(let waveEvent):
+                            await self.handleWaveEvent(waveEvent)
                         case .output(let outputEvent):
                             sessionState.appendOutput(
-                                sessionId: outputEvent.sessionId,
+                                sessionId: outputEvent.agentId,
                                 text: outputEvent.text,
                                 timestamp: outputEvent.timestamp
                             )
-                        case .wave(_):
-                            await self.refreshWaves()
+                        case .agentStarted(let started):
+                            sessionState.startSession(
+                                id: started.agentId,
+                                waveId: nil,
+                                step: started.step,
+                                worktree: started.worktree
+                            )
+                        case .agentEnded(let ended):
+                            sessionState.endSession(id: ended.agentId, status: ended.status)
+                        case .worktree:
+                            break
                         }
                     }
                 },
@@ -528,96 +326,44 @@ final class RepoState {
         }
     }
 
-    private func handleWorktreeEvent(_ event: WorktreeEvent) {
-        if event.name == "worktree.pruned", let branch = event.branch {
-            worktrees.removeAll { $0.branch == branch }
-            // Clear selected wave if its branch was pruned
-            if selectedWave?.branch == branch {
+    private func handleWaveEvent(_ event: WaveEvent) async {
+        switch event.type {
+        case .created, .updated, .started, .stopped, .waiting:
+            if let wave = try? await waveService.getWave(event.waveId) {
+                upsertWave(WaveViewModel(api: wave))
+            }
+        case .deleted:
+            waves.removeAll { $0.id == event.waveId }
+            if selectedWave?.id == event.waveId {
                 selectedWave = nil
             }
-            return
-        }
-
-        if let updatedWorktree = event.worktree, let branch = event.branch {
-            if let index = worktrees.firstIndex(where: { $0.branch == branch }) {
-                worktrees[index] = updatedWorktree
-            } else {
-                worktrees.append(updatedWorktree)
-            }
-            // Refresh waves to get updated worktree state
-            Task { await refreshWaves() }
-            return
-        }
-
-        listWorktrees()
-    }
-
-    private func handleSessionEvent(_ event: SessionEvent, sessionState: SessionState) {
-        if event.status == nil {
-            // session.started
-            sessionState.startSession(
-                id: event.id,
-                waveId: nil,
-                step: event.step ?? "step",
-                worktree: event.worktree ?? ""
-            )
-        } else if event.status == "completed" || event.status == "error" {
-            sessionState.endSession(id: event.id, status: event.status ?? "completed")
         }
     }
 
-    // MARK: - Directions & Flows
+    private func upsertWave(_ wave: WaveViewModel) {
+        let oldStatus = previousWaveStatuses[wave.id]
+        if oldStatus != wave.status {
+            handleWaveStatusChange(wave: wave, from: oldStatus, to: wave.status)
+        }
+        previousWaveStatuses[wave.id] = wave.status
 
-    func refreshDirections() {
-        guard let repo = currentRepo else { return }
-        directions = directionService.loadDirections(from: repo)
+        if let index = waves.firstIndex(where: { $0.id == wave.id }) {
+            waves[index] = wave
+        } else {
+            waves.insert(wave, at: 0)
+        }
+        if selectedWave?.id == wave.id {
+            selectedWave = wave
+        }
     }
 
-    func refreshFlows() {
-        guard let repo = currentRepo else { return }
-        flows = flowService.loadFlows(from: repo)
-    }
+    // MARK: - Flows
 
     func refreshFlowsAsync() async {
         guard let repo = currentRepo else { return }
-        let loaded = await flowService.loadFlowsAsync(from: repo)
+        let loaded = (try? await waveService.listFlows(repo: repo)) ?? []
         if !loaded.isEmpty {
             flows = loaded
-        }
-    }
-
-    func createFlow(name: String) {
-        guard let repo = currentRepo else { return }
-        let newFlow = Flow(name: name, steps: [])
-        do {
-            try flowService.saveFlow(newFlow, in: repo)
-            refreshFlows()
-            selectedFlow = flows.first { $0.name == name }
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    func saveFlow(_ flow: Flow) {
-        guard let repo = currentRepo else { return }
-        do {
-            try flowService.saveFlow(flow, in: repo)
-            refreshFlows()
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    func deleteFlow(_ flow: Flow) {
-        guard let repo = currentRepo else { return }
-        do {
-            try flowService.deleteFlow(named: flow.name, in: repo)
-            if selectedFlow?.name == flow.name {
-                selectedFlow = nil
-            }
-            refreshFlows()
-        } catch {
-            errorMessage = error.localizedDescription
         }
     }
 
@@ -632,9 +378,10 @@ final class RepoState {
         do {
             let newWaves = try await waveService.listWaves(repo: repo)
             LoggingService.model("refreshWaves: got \(newWaves.count) waves")
+            let newViewModels = newWaves.map { WaveViewModel(api: $0) }
 
             // Detect status transitions and notify
-            for wave in newWaves {
+            for wave in newViewModels {
                 let oldStatus = previousWaveStatuses[wave.id]
                 let newStatus = wave.status
 
@@ -645,7 +392,7 @@ final class RepoState {
                 previousWaveStatuses[wave.id] = newStatus
             }
 
-            waves = newWaves
+            waves = newViewModels
             if let selected = selectedWave,
                let updated = waves.first(where: { $0.id == selected.id }) {
                 selectedWave = updated
@@ -656,7 +403,7 @@ final class RepoState {
         }
     }
 
-    private func handleWaveStatusChange(wave: Wave, from oldStatus: WaveStatus?, to newStatus: WaveStatus) {
+    private func handleWaveStatusChange(wave: WaveViewModel, from oldStatus: WaveStatus?, to newStatus: WaveStatus) {
         switch newStatus {
         case .waiting:
             // Get current step from recentSteps if available
@@ -667,7 +414,7 @@ final class RepoState {
                 step: step
             )
 
-        case .error:
+        case .failed:
             // Use step name for error message
             let step = wave.recentSteps.first?.step ?? "unknown step"
             let message = "Error in \(step)"
@@ -690,7 +437,7 @@ final class RepoState {
                 }
             }
 
-        case .running, .completed:
+        case .running, .completed, .paused:
             break  // No notification needed
         }
     }
@@ -705,15 +452,16 @@ final class RepoState {
         LoggingService.model("createWave: name=\(waveName) repo=\(repo.path)")
 
         let wave = try await waveService.createWave(name: waveName, repo: repo)
+        let viewModel = WaveViewModel(api: wave)
 
-        LoggingService.model("createWave: success, inserting wave id=\(wave.id)")
-        waves.insert(wave, at: 0)
-        selectedWave = wave
+        LoggingService.model("createWave: success, inserting wave id=\(viewModel.id)")
+        waves.insert(viewModel, at: 0)
+        selectedWave = viewModel
         LoggingService.model("createWave: selectedWave=\(wave.id)")
     }
 
     func runWave(
-        wave: Wave,
+        wave: WaveViewModel,
         area: [String]? = nil,
         direction: [String]? = nil,
         flow: String? = nil,
@@ -730,19 +478,20 @@ final class RepoState {
         await refreshWaves()
     }
 
-    func stopWave(_ wave: Wave) async throws {
+    func stopWave(_ wave: WaveViewModel) async throws {
         try await waveService.stop(wave.id)
         await refreshWaves()
     }
 
-    func cloneWave(_ wave: Wave) async throws -> Wave {
+    func cloneWave(_ wave: WaveViewModel) async throws -> WaveViewModel {
         let cloned = try await waveService.cloneWave(wave.id, name: nil)
-        waves.insert(cloned, at: 0)
-        selectedWave = cloned
-        return cloned
+        let viewModel = WaveViewModel(api: cloned)
+        waves.insert(viewModel, at: 0)
+        selectedWave = viewModel
+        return viewModel
     }
 
-    func deleteWave(_ wave: Wave) async throws {
+    func deleteWave(_ wave: WaveViewModel) async throws {
         try await waveService.deleteWave(wave.id)
         waves.removeAll { $0.id == wave.id }
         if selectedWave?.id == wave.id {
@@ -750,37 +499,35 @@ final class RepoState {
         }
     }
 
-    func renameWave(_ wave: Wave, to newName: String) async throws {
+    func renameWave(_ wave: WaveViewModel, to newName: String) async throws {
         _ = try await waveService.updateWave(wave.id, config: WaveConfigUpdate(name: newName))
         await refreshWaves()
     }
 
     func updateWave(
-        _ wave: Wave,
+        _ wave: WaveViewModel,
         area: [String]? = nil,
         direction: [String]? = nil,
         flow: String? = nil,
         stimulus: Stimulus? = nil,
-        paused: Bool? = nil
+        status: WaveStatus? = nil
     ) async throws {
         let config = WaveConfigUpdate(
             area: area,
             direction: direction,
             flow: flow,
             stimulus: stimulus,
-            paused: paused
+            status: status
         )
         _ = try await waveService.updateWave(wave.id, config: config)
         await refreshWaves()
     }
 
-    func connectLfd() async throws {
+    func connectLfd(sessionState: SessionState) async throws {
         LoggingService.lfd("connectLfd: starting")
         try? await waveService.connectLfd()
         LoggingService.lfd("connectLfd: waveService.connectLfd completed")
-        if let sessionState = _sessionState {
-            startEventSubscription(sessionState: sessionState)
-            LoggingService.lfd("connectLfd: event subscription started")
-        }
+        startEventSubscription(sessionState: sessionState)
+        LoggingService.lfd("connectLfd: event subscription started")
     }
 }

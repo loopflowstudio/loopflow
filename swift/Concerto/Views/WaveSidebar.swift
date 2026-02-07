@@ -16,65 +16,20 @@ struct WaveSidebar: View {
     @State private var keyboardFocusedId: String?
     @FocusState private var isSidebarFocused: Bool
 
-    // MARK: - Wave Sections
-
-    private var blockedWaves: [Wave] {
-        repoState.waves.filter { $0.status == .error }
+    private var waveGroups: RepoState.WaveGroups {
+        repoState.waveGroups
     }
 
-    private var prWaves: [Wave] {
-        repoState.waves.filter { wave in
-            wave.status != .error && pendingPR(for: wave) != nil
-        }
-    }
-
-    /// Waves with activity in the last hour, excluding those already in blocked/PR sections.
-    private var recentActivityWaves: [Wave] {
-        let hourAgo = Date().addingTimeInterval(-3600)
-        return Array(repoState.waves
-            .filter { wave in
-                guard let lastActivity = wave.lastActivityAt else { return false }
-                return lastActivity > hourAgo && wave.status != .error && pendingPR(for: wave) == nil
-            }
-            .sorted { ($0.lastActivityAt ?? .distantPast) > ($1.lastActivityAt ?? .distantPast) }
-            .prefix(5))
-    }
-
-    /// IDs of waves shown in Recent Activity (to avoid duplication).
-    private var recentActivityWaveIds: Set<String> {
-        Set(recentActivityWaves.map(\.id))
-    }
-
-    private var activeWaves: [Wave] {
-        repoState.waves.filter { wave in
-            (wave.status == .running || wave.status == .waiting) &&
-            pendingPR(for: wave) == nil &&
-            !recentActivityWaveIds.contains(wave.id)
-        }
-    }
-
-    private var idleWaves: [Wave] {
-        repoState.waves.filter { wave in
-            wave.status == .idle &&
-            pendingPR(for: wave) == nil &&
-            !recentActivityWaveIds.contains(wave.id)
-        }
-    }
-
-    private var attentionCount: Int {
-        blockedWaves.count + prWaves.count
-    }
-
-    private var allWavesInOrder: [Wave] {
-        blockedWaves + prWaves + recentActivityWaves + activeWaves + idleWaves
-    }
-
-    private func pendingPR(for wave: Wave) -> (number: Int, url: URL?)? {
+    private func pendingPR(for wave: WaveViewModel) -> (number: Int, url: URL?)? {
         guard let prNumber = wave.prNumber,
               wave.prState == .open else {
             return nil
         }
         return (number: prNumber, url: wave.prURL)
+    }
+
+    private var allWavesInOrder: [WaveViewModel] {
+        waveGroups.allInOrder
     }
 
     private func sectionHeader(_ title: String, icon: String, color: Color, count: Int) -> some View {
@@ -97,7 +52,7 @@ struct WaveSidebar: View {
         .padding(.bottom, 4)
     }
 
-    private func waveRows(_ waves: [Wave]) -> some View {
+    private func waveRows(_ waves: [WaveViewModel]) -> some View {
         ForEach(waves) { wave in
             WaveRow(
                 wave: wave,
@@ -159,17 +114,17 @@ struct WaveSidebar: View {
                 .foregroundStyle(.white.opacity(0.7))
                 .help("Waves are autonomous AI workers that run flows on your codebase")
 
-            if attentionCount > 0 {
+            if waveGroups.attentionCount > 0 {
                 HStack(spacing: 4) {
                     Circle()
                         .fill(Color.statusWarning)
                         .frame(width: 6, height: 6)
-                    Text("\(attentionCount)")
+                    Text("\(waveGroups.attentionCount)")
                         .font(.caption2)
                         .fontWeight(.medium)
                         .foregroundStyle(Color.statusWarning)
                 }
-                .help("\(attentionCount) wave\(attentionCount == 1 ? "" : "s") need\(attentionCount == 1 ? "s" : "") attention")
+                .help("\(waveGroups.attentionCount) wave\(waveGroups.attentionCount == 1 ? "" : "s") need\(waveGroups.attentionCount == 1 ? "s" : "") attention")
             }
 
             Spacer()
@@ -232,7 +187,7 @@ struct WaveSidebar: View {
                 Button {
                     Task {
                         do {
-                            try await repoState.connectLfd()
+                            try await repoState.connectLfd(sessionState: sessionState)
                         } catch {
                             actionError = "Failed to connect: \(error.localizedDescription)"
                             showingActionError = true
@@ -300,7 +255,7 @@ struct WaveSidebar: View {
 
     private func launchQuickExperiment(step: String) {
         guard let repo = repoState.currentRepo else { return }
-        let terminal = repoState.config?.terminalApp ?? .warp
+        let terminal = TerminalApp.warp
         do {
             try TerminalLauncher().launchStep(step, terminal: terminal, at: repo)
         } catch {
@@ -313,29 +268,29 @@ struct WaveSidebar: View {
         @Bindable var repoState = repoState
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 4) {
-                if !blockedWaves.isEmpty {
-                    sectionHeader("Needs Attention", icon: "exclamationmark.triangle.fill", color: .orange, count: blockedWaves.count)
-                    waveRows(blockedWaves)
+                if !waveGroups.blocked.isEmpty {
+                    sectionHeader("Needs Attention", icon: "exclamationmark.triangle.fill", color: .orange, count: waveGroups.blocked.count)
+                    waveRows(waveGroups.blocked)
                 }
 
-                if !prWaves.isEmpty {
-                    sectionHeader("Open PRs", icon: "arrow.triangle.pull", color: .green, count: prWaves.count)
-                    waveRows(prWaves)
+                if !waveGroups.pr.isEmpty {
+                    sectionHeader("Open PRs", icon: "arrow.triangle.pull", color: .green, count: waveGroups.pr.count)
+                    waveRows(waveGroups.pr)
                 }
 
-                if !recentActivityWaves.isEmpty {
-                    sectionHeader("Recent Activity", icon: "clock.arrow.circlepath", color: .cyan, count: recentActivityWaves.count)
-                    waveRows(recentActivityWaves)
+                if !waveGroups.recentActivity.isEmpty {
+                    sectionHeader("Recent Activity", icon: "clock.arrow.circlepath", color: .cyan, count: waveGroups.recentActivity.count)
+                    waveRows(waveGroups.recentActivity)
                 }
 
-                if !activeWaves.isEmpty {
-                    sectionHeader("Active", icon: "circle.fill", color: .blue, count: activeWaves.count)
-                    waveRows(activeWaves)
+                if !waveGroups.active.isEmpty {
+                    sectionHeader("Active", icon: "circle.fill", color: .blue, count: waveGroups.active.count)
+                    waveRows(waveGroups.active)
                 }
 
-                if !idleWaves.isEmpty {
-                    sectionHeader("Idle", icon: "circle", color: .white.opacity(0.5), count: idleWaves.count)
-                    waveRows(idleWaves)
+                if !waveGroups.idle.isEmpty {
+                    sectionHeader("Idle", icon: "circle", color: .white.opacity(0.5), count: waveGroups.idle.count)
+                    waveRows(waveGroups.idle)
                 }
             }
             .padding(.horizontal, 8)
@@ -386,7 +341,7 @@ struct WaveSidebar: View {
                 // Ensure lfd is connected before creating wave
                 if !repoState.lfdConnected {
                     LoggingService.ui("createWave: lfd not connected, attempting connect")
-                    try await repoState.connectLfd()
+                    try await repoState.connectLfd(sessionState: sessionState)
                     // Brief delay to let the daemon start
                     try await Task.sleep(for: .milliseconds(500))
                     LoggingService.ui("createWave: connect completed, lfdConnected=\(repoState.lfdConnected)")

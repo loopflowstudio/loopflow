@@ -18,26 +18,19 @@ final class SessionState {
     // Interactive session (one at a time for MVP)
     var interactiveSession: InteractiveSession?
 
-    // UI toggle for streaming log view
-    var showResultsLog: Bool = false
-
     struct ActiveSession {
         let id: String
         let waveId: String?
         let step: String
         let worktree: String
         let startedAt: Date
-        var baseline: StepRunBaseline?
         var output: [OutputLine] = []
-        var result: StepRunResult?
+        var status: String?
 
         var isRunning: Bool {
-            result?.status == .running || result == nil
+            status == nil || status == "running" || status == "waiting"
         }
     }
-
-    // Services
-    private let resultsService = ResultsService()
 
     // MARK: - Session Lifecycle
 
@@ -47,25 +40,9 @@ final class SessionState {
             waveId: waveId,
             step: step,
             worktree: worktree,
-            startedAt: Date()
+            startedAt: Date(),
+            status: "running"
         )
-
-        // Capture baseline
-        Task {
-            let baseline = await resultsService.captureBaseline(
-                stepRunId: id,
-                worktree: URL(fileURLWithPath: worktree)
-            )
-            await MainActor.run {
-                activeSessions[id]?.baseline = baseline
-                activeSessions[id]?.result = StepRunResult.running(
-                    stepRunId: id,
-                    step: step,
-                    worktree: worktree,
-                    startedAt: activeSessions[id]?.startedAt ?? Date()
-                )
-            }
-        }
     }
 
     func appendOutput(sessionId: String, text: String, timestamp: Date) {
@@ -81,23 +58,7 @@ final class SessionState {
     }
 
     func endSession(id: String, status: String) {
-        guard let session = activeSessions[id],
-              let baseline = session.baseline else { return }
-
-        let resultStatus: StepRunResultStatus = status == "completed" ? .completed : .error
-
-        Task {
-            let result = await resultsService.computeResults(
-                baseline: baseline,
-                step: session.step,
-                status: resultStatus,
-                startedAt: session.startedAt,
-                endedAt: Date()
-            )
-            await MainActor.run {
-                activeSessions[id]?.result = result
-            }
-        }
+        activeSessions[id]?.status = status
     }
 
     func clearCompletedSessions() {
@@ -132,19 +93,6 @@ final class SessionState {
         return String(text.prefix(maxLength - 3)) + "..."
     }
 
-    func currentResult(for worktreePath: String?) -> StepRunResult? {
-        let results = activeSessions.values.compactMap { $0.result }
-        let filtered: [StepRunResult]
-
-        if let path = worktreePath {
-            filtered = results.filter { $0.worktree == path }
-        } else {
-            filtered = results
-        }
-
-        return filtered.sorted { $0.startedAt > $1.startedAt }.first
-    }
-
     // MARK: - Interactive Sessions
 
     func launchInteractiveSession(waveId: String, step: String, worktreePath: String, prompt: String? = nil) {
@@ -164,26 +112,4 @@ final class SessionState {
         interactiveSession?.waveId == waveId
     }
 
-    // MARK: - Diff Preview
-
-    func loadDiffPreview(sessionId: String, fileIndex: Int) async {
-        guard var session = activeSessions[sessionId],
-              var result = session.result,
-              fileIndex < result.filesChanged.count,
-              result.filesChanged[fileIndex].diffPreview == nil,
-              let baseline = session.baseline else { return }
-
-        let file = result.filesChanged[fileIndex]
-        let worktree = URL(fileURLWithPath: result.worktree)
-
-        let preview = await resultsService.loadDiffPreview(
-            for: file,
-            baselineSHA: baseline.headSHA,
-            in: worktree
-        )
-
-        result.filesChanged[fileIndex].diffPreview = preview
-        session.result = result
-        activeSessions[sessionId] = session
-    }
 }

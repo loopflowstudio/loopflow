@@ -1,136 +1,124 @@
-// Service for subscribing to lfd events via Unix socket.
+// Service for subscribing to lfd events via WebSocket.
 
 import Foundation
-import Network
 import os.log
 
 private let logger = Logger(subsystem: "com.loopflow.concerto", category: "lfd-events")
 
-// Event types from lfd
-
-public struct WorktreeEvent: Sendable {
-    public let name: String
-    public let branch: String?
-    public let path: String?
-    public let reason: String?
-    public let repo: String?
-    public let worktree: Worktree?  // Full status for in-place updates (rich events)
+public struct ConnectedEvent: Sendable {
+    public let timestamp: Date
+    public let waves: [Wave]
 }
 
-public struct SessionEvent: Sendable {
-    public let id: String
-    public let step: String?  // The prompt/step name (daemon sends as "task")
-    public let status: String?
-    public let worktree: String?
+public enum WaveEventType: String, Sendable {
+    case created
+    case updated
+    case deleted
+    case started
+    case stopped
+    case waiting
+}
+
+public struct WaveEvent: Sendable {
+    public let type: WaveEventType
+    public let waveId: String
+    public let waveRunId: String?
+    public let step: String?
+    public let name: String?
+    public let timestamp: Date
+}
+
+public struct WorktreeEvent: Sendable {
+    public let worktree: String
+    public let repo: String
+    public let branch: String?
+    public let timestamp: Date
+}
+
+public struct AgentStartedEvent: Sendable {
+    public let agentId: String
+    public let step: String
+    public let worktree: String
+    public let timestamp: Date
+}
+
+public struct AgentEndedEvent: Sendable {
+    public let agentId: String
+    public let status: String
+    public let timestamp: Date
 }
 
 public struct OutputEvent: Sendable {
-    public let sessionId: String
+    public let agentId: String
     public let text: String
     public let timestamp: Date
 }
 
-public struct WaveEvent: Sendable {
-    public let name: String
-    public let waveId: String?
-    public let stimulus: String?
-}
-
 public enum LFDEvent: Sendable {
-    case worktree(WorktreeEvent)
-    case session(SessionEvent)
-    case output(OutputEvent)
+    case connected(ConnectedEvent)
     case wave(WaveEvent)
+    case worktree(WorktreeEvent)
+    case agentStarted(AgentStartedEvent)
+    case agentEnded(AgentEndedEvent)
+    case output(OutputEvent)
 }
 
-public actor LocalEventService: EventServiceProtocol {
-    private var connection: NWConnection?
-    private let socketPath = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".lf/lfd.sock")
+public actor LocalEventService {
+    private let session: URLSession
+    private let wsURL = URL(string: "ws://127.0.0.1:\(lfdDefaultPort)/ws")!
+    private var webSocketTask: URLSessionWebSocketTask?
     private var onEvent: (@Sendable (LFDEvent) -> Void)?
     private var onConnectionChange: (@Sendable (Bool) -> Void)?
-    private var patterns: [String] = []
     private var reconnectTask: Task<Void, Never>?
-    private var _isConnected = false
     private var reconnectAttempts = 0
+    private var _isConnected = false
 
-    public init() {}
+    public init() {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 5
+        config.timeoutIntervalForResource = 10
+        session = URLSession(configuration: config)
+    }
 
     public var isConnected: Bool { _isConnected }
 
     public func subscribe(
-        patterns: [String],
         onEvent: @escaping @Sendable (LFDEvent) -> Void,
         onConnectionChange: @escaping @Sendable (Bool) -> Void
     ) async {
-        self.patterns = patterns
         self.onEvent = onEvent
         self.onConnectionChange = onConnectionChange
 
-        LoggingService.lfd("EventService.subscribe: patterns=\(patterns)")
+        LoggingService.lfd("EventService.subscribe: connecting to ws")
         await connect()
         startReconnectLoop()
     }
 
     private func connect() async {
-        // Check if socket exists before attempting connection
-        logger.debug("connect() checking socket at: \(self.socketPath.path)")
-        guard FileManager.default.fileExists(atPath: socketPath.path) else {
-            logger.debug("socket does not exist")
-            LoggingService.append("socket not found at \(socketPath.path)", category: LoggingService.Category.lfd)
-            updateConnectionState(false)
-            return
-        }
-        logger.debug("socket exists, creating connection")
-        LoggingService.append("connecting to \(socketPath.path)", category: LoggingService.Category.lfd)
+        guard webSocketTask == nil else { return }
+        LoggingService.append("connecting to \(wsURL.absoluteString)", category: LoggingService.Category.lfd)
 
-        // Unix sockets need stream-based parameters (like TCP)
-        let params = NWParameters.tcp
-        let endpoint = NWEndpoint.unix(path: socketPath.path)
-        connection = NWConnection(to: endpoint, using: params)
-
-        connection?.stateUpdateHandler = { [weak self] state in
-            Task {
-                switch state {
-                case .ready:
-                    await self?.handleConnected()
-                case .failed, .cancelled:
-                    await self?.handleDisconnected()
-                default:
-                    break
-                }
-            }
-        }
-
-        connection?.start(queue: .main)
+        let task = session.webSocketTask(with: wsURL)
+        webSocketTask = task
+        task.resume()
+        receiveLoop()
     }
 
     private func handleConnected() {
-        logger.info("connected to lfd")
-        LoggingService.append("connected", category: LoggingService.Category.lfd)
         updateConnectionState(true)
-        reconnectAttempts = 0  // Reset for next disconnect
-
-        // Send subscribe request
-        let patternsJson = patterns.map { "\"\($0)\"" }.joined(separator: ",")
-        let request = "{\"method\":\"subscribe\",\"params\":{\"events\":[\(patternsJson)]}}\n"
-        connection?.send(content: request.data(using: .utf8), completion: .idempotent)
-
-        // Start receiving events
-        receiveLoop()
+        reconnectAttempts = 0
     }
 
     private func handleDisconnected() {
         logger.info("disconnected from lfd")
         LoggingService.append("disconnected", category: LoggingService.Category.lfd)
-        connection?.cancel()
-        connection = nil
+        webSocketTask?.cancel(with: .goingAway, reason: nil)
+        webSocketTask = nil
         updateConnectionState(false)
     }
 
     private func updateConnectionState(_ connected: Bool) {
         guard _isConnected != connected else { return }
-        logger.debug("connection state changed: \(connected)")
         _isConnected = connected
         onConnectionChange?(connected)
     }
@@ -140,8 +128,7 @@ public actor LocalEventService: EventServiceProtocol {
         reconnectAttempts = 0
         reconnectTask = Task {
             while !Task.isCancelled {
-                // Fast reconnect at startup (0.5s for first 10 attempts), then slow down to 5s
-                let delay: Duration = reconnectAttempts < 10 ? .milliseconds(500) : .seconds(5)
+                let delay: Duration = reconnectAttempts < 10 ? .seconds(1) : .seconds(5)
                 try? await Task.sleep(for: delay)
                 guard !Task.isCancelled else { return }
 
@@ -154,95 +141,173 @@ public actor LocalEventService: EventServiceProtocol {
     }
 
     private func receiveLoop() {
-        connection?.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, _, error in
-            guard let self = self else { return }
+        webSocketTask?.receive { [weak self] result in
+            guard let self else { return }
+            Task {
+                await self.handleReceive(result)
+            }
+        }
+    }
 
-            if let data = data {
-                // lfd sends newline-delimited JSON
-                if let text = String(data: data, encoding: .utf8) {
-                    for line in text.split(separator: "\n") {
-                        if let lineData = line.data(using: .utf8),
-                           let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
-                           let eventName = json["event"] as? String,
-                           let eventData = json["data"] as? [String: Any] {
-                            // Parse event synchronously (nonisolated function)
-                            let event = Self.parseEvent(name: eventName, data: eventData)
-                            Task { await self.handleEvent(event) }
-                        }
-                    }
+    private func handleReceive(_ result: Result<URLSessionWebSocketTask.Message, Error>) async {
+        switch result {
+        case .failure:
+            await handleDisconnected()
+            return
+        case .success(let message):
+            if let text = extractText(from: message),
+               let event = Self.parseEvent(text: text) {
+                if case .connected = event {
+                    handleConnected()
                 }
+                onEvent?(event)
             }
+        }
 
-            if error == nil {
-                Task { await self.receiveLoop() }
-            }
+        receiveLoop()
+    }
+
+    private func extractText(from message: URLSessionWebSocketTask.Message) -> String? {
+        switch message {
+        case .string(let text):
+            return text
+        case .data(let data):
+            return String(data: data, encoding: .utf8)
+        @unknown default:
+            return nil
         }
     }
 
-    private nonisolated static func parseEvent(name: String, data: [String: Any]) -> LFDEvent {
-        if name.hasPrefix("worktree.") {
-            // Parse rich worktree data if present (lfd sends full status for in-place updates)
-            var worktree: Worktree? = nil
-            if let worktreeData = data["worktree"] as? [String: Any],
-               let jsonData = try? JSONSerialization.data(withJSONObject: worktreeData),
-               let worktreeJSON = try? JSONDecoder().decode(WorktreeJSON.self, from: jsonData) {
-                worktree = Worktree(from: worktreeJSON)
-            }
-
-            return .worktree(WorktreeEvent(
-                name: name,
-                branch: data["branch"] as? String,
-                path: data["path"] as? String,
-                reason: data["reason"] as? String,
-                repo: data["repo"] as? String,
-                worktree: worktree
-            ))
+    private nonisolated static func parseEvent(text: String) -> LFDEvent? {
+        guard let data = text.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = json["type"] as? String else {
+            return nil
         }
 
-        if name.hasPrefix("session.") {
-            return .session(SessionEvent(
-                id: data["id"] as? String ?? "",
-                step: data["step"] as? String,
-                status: data["status"] as? String,
-                worktree: data["worktree"] as? String
-            ))
-        }
-
-        if name == "output.line" {
-            let timestamp: Date
-            if let isoString = data["timestamp"] as? String {
-                timestamp = ISO8601DateFormatter().date(from: isoString) ?? Date()
-            } else {
-                timestamp = Date()
-            }
-            return .output(OutputEvent(
-                sessionId: data["session_id"] as? String ?? "",
-                text: data["text"] as? String ?? "",
-                timestamp: timestamp
-            ))
-        }
-
-        if name.hasPrefix("wave.") {
+        switch type {
+        case "connected":
+            let timestamp = parseTimestamp(json["timestamp"])
+            let wavesData = json["waves"] as? [[String: Any]] ?? []
+            let waves = wavesData.map { LocalWaveService.parseWaveFromJSON($0) }
+            return .connected(ConnectedEvent(timestamp: timestamp, waves: waves))
+        case "ping":
+            return nil
+        case "wave_created":
+            guard let waveId = json["wave_id"] as? String else { return nil }
             return .wave(WaveEvent(
-                name: name,
-                waveId: data["wave_id"] as? String ?? data["id"] as? String,
-                stimulus: data["stimulus"] as? String
+                type: .created,
+                waveId: waveId,
+                waveRunId: nil,
+                step: nil,
+                name: json["name"] as? String,
+                timestamp: parseTimestamp(json["timestamp"])
             ))
+        case "wave_updated":
+            guard let waveId = json["wave_id"] as? String else { return nil }
+            return .wave(WaveEvent(
+                type: .updated,
+                waveId: waveId,
+                waveRunId: nil,
+                step: nil,
+                name: nil,
+                timestamp: parseTimestamp(json["timestamp"])
+            ))
+        case "wave_deleted":
+            guard let waveId = json["wave_id"] as? String else { return nil }
+            return .wave(WaveEvent(
+                type: .deleted,
+                waveId: waveId,
+                waveRunId: nil,
+                step: nil,
+                name: nil,
+                timestamp: parseTimestamp(json["timestamp"])
+            ))
+        case "wave_started":
+            guard let waveId = json["wave_id"] as? String else { return nil }
+            return .wave(WaveEvent(
+                type: .started,
+                waveId: waveId,
+                waveRunId: json["wave_run_id"] as? String,
+                step: nil,
+                name: nil,
+                timestamp: parseTimestamp(json["timestamp"])
+            ))
+        case "wave_stopped":
+            guard let waveId = json["wave_id"] as? String else { return nil }
+            return .wave(WaveEvent(
+                type: .stopped,
+                waveId: waveId,
+                waveRunId: nil,
+                step: nil,
+                name: nil,
+                timestamp: parseTimestamp(json["timestamp"])
+            ))
+        case "wave_waiting":
+            guard let waveId = json["wave_id"] as? String else { return nil }
+            return .wave(WaveEvent(
+                type: .waiting,
+                waveId: waveId,
+                waveRunId: json["wave_run_id"] as? String,
+                step: json["step"] as? String,
+                name: nil,
+                timestamp: parseTimestamp(json["timestamp"])
+            ))
+        case "worktree_updated":
+            guard let worktree = json["worktree"] as? String,
+                  let repo = json["repo"] as? String else { return nil }
+            return .worktree(WorktreeEvent(
+                worktree: worktree,
+                repo: repo,
+                branch: json["branch"] as? String,
+                timestamp: parseTimestamp(json["timestamp"])
+            ))
+        case "agent_started":
+            guard let agentId = json["agent_id"] as? String,
+                  let step = json["step"] as? String,
+                  let worktree = json["worktree"] as? String else { return nil }
+            return .agentStarted(AgentStartedEvent(
+                agentId: agentId,
+                step: step,
+                worktree: worktree,
+                timestamp: parseTimestamp(json["timestamp"])
+            ))
+        case "agent_ended":
+            guard let agentId = json["agent_id"] as? String,
+                  let status = json["status"] as? String else { return nil }
+            return .agentEnded(AgentEndedEvent(
+                agentId: agentId,
+                status: status,
+                timestamp: parseTimestamp(json["timestamp"])
+            ))
+        case "output_line":
+            guard let agentId = json["agent_id"] as? String,
+                  let text = json["text"] as? String else { return nil }
+            return .output(OutputEvent(
+                agentId: agentId,
+                text: text,
+                timestamp: parseTimestamp(json["timestamp"])
+            ))
+        default:
+            return nil
         }
-
-        // Default to worktree event for unknown patterns
-        return .worktree(WorktreeEvent(name: name, branch: nil, path: nil, reason: nil, repo: nil, worktree: nil))
     }
 
-    private func handleEvent(_ event: LFDEvent) {
-        onEvent?(event)
+    private nonisolated static func parseTimestamp(_ value: Any?) -> Date {
+        guard let string = value as? String else { return Date() }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: string) {
+            return date
+        }
+        return ISO8601DateFormatter().date(from: string) ?? Date()
     }
 
     public func disconnect() async {
         reconnectTask?.cancel()
         reconnectTask = nil
-        connection?.cancel()
-        connection = nil
+        webSocketTask?.cancel(with: .normalClosure, reason: nil)
+        webSocketTask = nil
         onEvent = nil
         onConnectionChange = nil
         updateConnectionState(false)

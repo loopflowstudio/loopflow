@@ -4,13 +4,12 @@ import SwiftUI
 import LoopflowCore
 
 struct NextActionsBar: View {
-    let wave: Wave
+    let wave: WaveViewModel
 
     @Environment(RepoState.self) private var repoState
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var showingStimulusPicker = false
-    @State private var isCreatingPR = false
     @State private var isArchiving = false
     @State private var errorMessage: String?
     @State private var showingError = false
@@ -50,26 +49,6 @@ struct NextActionsBar: View {
                 StimulusPicker(wave: wave, isPresented: $showingStimulusPicker)
             }
 
-            // Create PR button
-            if wave.hasDiff {
-                Button {
-                    createPR()
-                } label: {
-                    HStack(spacing: Spacing.xs) {
-                        if isCreatingPR {
-                            ProgressView()
-                                .scaleEffect(0.6)
-                        } else {
-                            Image(systemName: "arrow.up.right.square")
-                                .font(.caption)
-                        }
-                        Text("Create PR")
-                    }
-                }
-                .buttonStyle(DarkButtonStyle())
-                .disabled(isCreatingPR)
-            }
-
             // Archive button
             Button {
                 archive()
@@ -98,33 +77,12 @@ struct NextActionsBar: View {
         }
     }
 
-    private func createPR() {
-        guard let path = wave.worktreePath else { return }
-
-        isCreatingPR = true
-        Task {
-            do {
-                let worktreeService = WorktreeService()
-                try await worktreeService.createPR(in: URL(fileURLWithPath: path))
-                await repoState.refreshWaves()
-            } catch {
-                await MainActor.run {
-                    errorMessage = error.localizedDescription
-                    showingError = true
-                }
-            }
-            await MainActor.run {
-                isCreatingPR = false
-            }
-        }
-    }
-
     private func archive() {
         // Archive by stopping and setting stimulus to manual (paused)
         isArchiving = true
         Task {
             do {
-                try await repoState.updateWave(wave, stimulus: Stimulus(kind: .manual), paused: true)
+                try await repoState.updateWave(wave, stimulus: Stimulus(kind: .manual), status: .paused)
             } catch {
                 await MainActor.run {
                     errorMessage = error.localizedDescription
@@ -141,7 +99,7 @@ struct NextActionsBar: View {
 // MARK: - Stimulus Picker Sheet
 
 struct StimulusPicker: View {
-    let wave: Wave
+    let wave: WaveViewModel
     @Binding var isPresented: Bool
 
     @Environment(RepoState.self) private var repoState
@@ -284,7 +242,7 @@ struct StimulusPicker: View {
 
             do {
                 // Set stimulus and unpause
-                try await repoState.updateWave(wave, stimulus: stimulus, paused: false)
+                try await repoState.updateWave(wave, stimulus: stimulus, status: .idle)
                 // Start running
                 try await repoState.runWave(wave: wave, stimulus: stimulus)
                 await MainActor.run {
@@ -304,13 +262,15 @@ struct StimulusPicker: View {
     let repoState = RepoState()
     repoState.configureMockWaves()
 
-    let wave = Wave(
-        id: "test",
-        name: "test-wave",
-        area: ["src/api"],
-        direction: ["product-engineer"],
-        flow: "design",
-        repo: "/tmp/test-repo",
+    let wave = WaveViewModel(
+        api: Wave(
+            id: "test",
+            name: "test-wave",
+            repo: "/tmp/test-repo",
+            flow: "design",
+            direction: ["product-engineer"],
+            area: ["src/api"]
+        ),
         worktreePath: "/tmp/test-worktree",
         hasDiff: true,
         recentSteps: [

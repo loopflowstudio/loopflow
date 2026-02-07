@@ -1,61 +1,68 @@
-// Tests for Wave model and Stimulus struct.
+// Tests for WaveViewModel and Stimulus struct.
 
 import Foundation
 import SwiftUI
 import Testing
 @testable import LoopflowCore
 
-@Suite("Wave Model")
+@Suite("Wave View Model")
 struct WaveModelTests {
+    private func makeWave(
+        id: String = "test-id",
+        name: String = "",
+        repo: String = "/tmp/repo",
+        flow: String = "design",
+        direction: [String] = [],
+        area: [String] = [],
+        stimulus: Stimulus = Stimulus(kind: .once),
+        status: WaveStatus = .idle,
+        iteration: Int = 0,
+        recentSteps: [StepRun] = [],
+        waitingReason: WaitingReason? = nil
+    ) -> WaveViewModel {
+        WaveViewModel(
+            api: Wave(
+                id: id,
+                name: name,
+                repo: repo,
+                flow: flow,
+                direction: direction,
+                area: area,
+                stimulus: stimulus,
+                status: status,
+                iteration: iteration
+            ),
+            recentSteps: recentSteps,
+            waitingReason: waitingReason
+        )
+    }
 
     // MARK: - Display Name
 
     @Test("displayName uses name when set")
     func displayNameUsesName() {
-        let wave = Wave(
-            id: "test-id",
-            name: "swift-falcon",
-            repo: "/tmp/repo"
-        )
+        let wave = makeWave(name: "swift-falcon")
 
         #expect(wave.displayName == "swift-falcon")
     }
 
     @Test("displayName generates from area and flow when name is empty")
     func displayNameGeneratesFromConfig() {
-        let wave = Wave(
-            id: "test-id",
-            name: "",
-            area: ["src/auth"],
-            flow: "ship",
-            repo: "/tmp/repo"
-        )
+        let wave = makeWave(flow: "ship", area: ["src/auth"])
 
         #expect(wave.displayName == "src/auth · ship")
     }
 
     @Test("displayName shows 'root' for dot area")
     func displayNameRootForDotArea() {
-        let wave = Wave(
-            id: "test-id",
-            name: "",
-            area: ["."],
-            flow: "debug",
-            repo: "/tmp/repo"
-        )
+        let wave = makeWave(flow: "debug", area: ["."])
 
         #expect(wave.displayName == "root · debug")
     }
 
     @Test("displayName shows default flow when empty")
     func displayNameDefaultFlow() {
-        let wave = Wave(
-            id: "test-id",
-            name: "",
-            area: nil,
-            flow: "",
-            repo: "/tmp/repo"
-        )
+        let wave = makeWave(flow: "", area: [])
 
         #expect(wave.displayName == "root · default")
     }
@@ -64,7 +71,7 @@ struct WaveModelTests {
 
     @Test("statusIndicator returns green circle for running")
     func statusIndicatorRunning() {
-        let wave = Wave(id: "test", repo: "/tmp", status: .running)
+        let wave = makeWave(id: "test", repo: "/tmp", status: .running)
         let indicator = wave.statusIndicator
 
         #expect(indicator.icon == "circle.fill")
@@ -73,7 +80,7 @@ struct WaveModelTests {
 
     @Test("statusIndicator returns yellow half-circle for waiting")
     func statusIndicatorWaiting() {
-        let wave = Wave(id: "test", repo: "/tmp", status: .waiting)
+        let wave = makeWave(id: "test", repo: "/tmp", status: .waiting)
         let indicator = wave.statusIndicator
 
         #expect(indicator.icon == "circle.lefthalf.filled")
@@ -82,7 +89,7 @@ struct WaveModelTests {
 
     @Test("statusIndicator returns gray circle for idle")
     func statusIndicatorIdle() {
-        let wave = Wave(id: "test", repo: "/tmp", status: .idle)
+        let wave = makeWave(id: "test", repo: "/tmp", status: .idle)
         let indicator = wave.statusIndicator
 
         #expect(indicator.icon == "circle")
@@ -91,7 +98,7 @@ struct WaveModelTests {
 
     @Test("statusIndicator returns clock for idle cron wave")
     func statusIndicatorIdleCron() {
-        let wave = Wave(
+        let wave = makeWave(
             id: "test",
             repo: "/tmp",
             stimulus: Stimulus(kind: .cron, cron: "0 9 * * *"),
@@ -103,9 +110,9 @@ struct WaveModelTests {
         #expect(indicator.color == .gray)
     }
 
-    @Test("statusIndicator returns red X for error")
-    func statusIndicatorError() {
-        let wave = Wave(id: "test", repo: "/tmp", status: .error)
+    @Test("statusIndicator returns red X for failed")
+    func statusIndicatorFailed() {
+        let wave = makeWave(id: "test", repo: "/tmp", status: .failed)
         let indicator = wave.statusIndicator
 
         #expect(indicator.icon == "xmark.circle.fill")
@@ -114,7 +121,7 @@ struct WaveModelTests {
 
     @Test("statusIndicator returns green checkmark for completed")
     func statusIndicatorCompleted() {
-        let wave = Wave(id: "test", repo: "/tmp", status: .completed)
+        let wave = makeWave(id: "test", repo: "/tmp", status: .completed)
         let indicator = wave.statusIndicator
 
         #expect(indicator.icon == "checkmark.circle.fill")
@@ -125,35 +132,31 @@ struct WaveModelTests {
 
     @Test("areaDisplay joins multiple areas")
     func areaDisplayJoins() {
-        let wave = Wave(
-            id: "test",
-            area: ["src/", "lib/"],
-            repo: "/tmp"
-        )
+        let wave = makeWave(id: "test", repo: "/tmp", area: ["src/", "lib/"])
 
         #expect(wave.areaDisplay == "src/, lib/")
     }
 
     @Test("areaDisplay returns dot for root area")
     func areaDisplayDot() {
-        let wave = Wave(id: "test", area: ["."], repo: "/tmp")
+        let wave = makeWave(id: "test", repo: "/tmp", area: ["."])
 
         #expect(wave.areaDisplay == ".")
     }
 
     @Test("areaDisplay returns empty for nil area")
     func areaDisplayNil() {
-        let wave = Wave(id: "test", area: nil, repo: "/tmp")
+        let wave = makeWave(id: "test", repo: "/tmp", area: [])
 
         #expect(wave.areaDisplay == "")
     }
 
     @Test("directionDisplay joins multiple goals")
     func directionDisplayJoins() {
-        let wave = Wave(
+        let wave = makeWave(
             id: "test",
-            direction: ["product-engineer", "designer"],
-            repo: "/tmp"
+            repo: "/tmp",
+            direction: ["product-engineer", "designer"]
         )
 
         #expect(wave.directionDisplay == "product-engineer, designer")
@@ -161,28 +164,28 @@ struct WaveModelTests {
 
     @Test("directionDisplay returns empty for nil direction")
     func directionDisplayNil() {
-        let wave = Wave(id: "test", direction: nil, repo: "/tmp")
+        let wave = makeWave(id: "test", repo: "/tmp", direction: [])
 
         #expect(wave.directionDisplay == "")
     }
 
     @Test("flowDisplay returns flow name")
     func flowDisplayName() {
-        let wave = Wave(id: "test", flow: "polish", repo: "/tmp")
+        let wave = makeWave(id: "test", repo: "/tmp", flow: "polish")
 
         #expect(wave.flowDisplay == "polish")
     }
 
     @Test("flowDisplay returns ship for empty flow")
     func flowDisplayDefault() {
-        let wave = Wave(id: "test", flow: "", repo: "/tmp")
+        let wave = makeWave(id: "test", repo: "/tmp", flow: "")
 
         #expect(wave.flowDisplay == "ship")
     }
 
     @Test("shortId returns first 7 characters")
     func shortIdTruncates() {
-        let wave = Wave(id: "abcdefghijklmnop", repo: "/tmp")
+        let wave = makeWave(id: "abcdefghijklmnop", repo: "/tmp")
 
         #expect(wave.shortId == "abcdefg")
     }
@@ -191,14 +194,14 @@ struct WaveModelTests {
 
     @Test("isConfigured returns true when area is set")
     func isConfiguredWithArea() {
-        let wave = Wave(id: "test", area: ["src/"], repo: "/tmp")
+        let wave = makeWave(id: "test", repo: "/tmp", area: ["src/"])
 
         #expect(wave.isConfigured == true)
     }
 
     @Test("isConfigured returns false when area is nil")
     func isConfiguredWithoutArea() {
-        let wave = Wave(id: "test", area: nil, repo: "/tmp")
+        let wave = makeWave(id: "test", repo: "/tmp", area: [])
 
         #expect(wave.isConfigured == false)
     }
@@ -207,11 +210,11 @@ struct WaveModelTests {
 
     @Test("detailText combines area, flow, and stimulus")
     func detailTextCombines() {
-        let wave = Wave(
+        let wave = makeWave(
             id: "test",
-            area: ["src/"],
-            flow: "ship",
             repo: "/tmp",
+            flow: "ship",
+            area: ["src/"],
             stimulus: Stimulus(kind: .loop)
         )
 
@@ -220,11 +223,11 @@ struct WaveModelTests {
 
     @Test("detailText omits manual stimulus")
     func detailTextOmitsManual() {
-        let wave = Wave(
+        let wave = makeWave(
             id: "test",
-            area: ["."],
-            flow: "debug",
             repo: "/tmp",
+            flow: "debug",
+            area: ["."],
             stimulus: Stimulus(kind: .manual)
         )
 
@@ -235,14 +238,14 @@ struct WaveModelTests {
 
     @Test("iterationText shows iter count when positive")
     func iterationTextPositive() {
-        let wave = Wave(id: "test", repo: "/tmp", iteration: 5)
+        let wave = makeWave(id: "test", repo: "/tmp", iteration: 5)
 
         #expect(wave.iterationText == "iter 5")
     }
 
     @Test("iterationText is empty when zero")
     func iterationTextZero() {
-        let wave = Wave(id: "test", repo: "/tmp", iteration: 0)
+        let wave = makeWave(id: "test", repo: "/tmp", iteration: 0)
 
         #expect(wave.iterationText == "")
     }
@@ -251,7 +254,7 @@ struct WaveModelTests {
 
     @Test("lastActivityAt returns nil when no recent steps")
     func lastActivityAtNilWithNoSteps() {
-        let wave = Wave(id: "test", repo: "/tmp", recentSteps: [])
+        let wave = makeWave(id: "test", repo: "/tmp", recentSteps: [])
 
         #expect(wave.lastActivityAt == nil)
     }
@@ -271,7 +274,7 @@ struct WaveModelTests {
             model: "claude",
             runMode: "auto"
         )
-        let wave = Wave(id: "test", repo: "/tmp", recentSteps: [step])
+        let wave = makeWave(id: "test", repo: "/tmp", recentSteps: [step])
 
         #expect(wave.lastActivityAt == endDate)
     }
@@ -290,14 +293,14 @@ struct WaveModelTests {
             model: "claude",
             runMode: "auto"
         )
-        let wave = Wave(id: "test", repo: "/tmp", recentSteps: [step])
+        let wave = makeWave(id: "test", repo: "/tmp", recentSteps: [step])
 
         #expect(wave.lastActivityAt == startDate)
     }
 
     @Test("lastActivityDescription returns nil when no recent steps")
     func lastActivityDescriptionNilWithNoSteps() {
-        let wave = Wave(id: "test", repo: "/tmp", recentSteps: [])
+        let wave = makeWave(id: "test", repo: "/tmp", recentSteps: [])
 
         #expect(wave.lastActivityDescription == nil)
     }
@@ -315,7 +318,7 @@ struct WaveModelTests {
             model: "claude",
             runMode: "auto"
         )
-        let wave = Wave(id: "test", repo: "/tmp", recentSteps: [step])
+        let wave = makeWave(id: "test", repo: "/tmp", recentSteps: [step])
         let description = wave.lastActivityDescription
 
         #expect(description != nil)
@@ -325,6 +328,16 @@ struct WaveModelTests {
 
 @Suite("WaitingReason")
 struct WaitingReasonTests {
+
+    private func makeViewModel(
+        status: WaveStatus = .idle,
+        waitingReason: WaitingReason? = nil
+    ) -> WaveViewModel {
+        WaveViewModel(
+            api: Wave(id: "test", repo: "/tmp", status: status),
+            waitingReason: waitingReason
+        )
+    }
 
     @Test("description shows count fraction")
     func descriptionShowsCountFraction() {
@@ -342,9 +355,7 @@ struct WaitingReasonTests {
 
     @Test("Wave with waitingReason stores it correctly")
     func waveStoresWaitingReason() {
-        let wave = Wave(
-            id: "test",
-            repo: "/tmp",
+        let wave = makeViewModel(
             status: .waiting,
             waitingReason: .prLimitReached(open: 2, limit: 3)
         )
@@ -360,7 +371,7 @@ struct WaitingReasonTests {
 
     @Test("Wave without waitingReason has nil")
     func waveWithoutWaitingReasonHasNil() {
-        let wave = Wave(id: "test", repo: "/tmp", status: .idle)
+        let wave = makeViewModel(status: .idle)
 
         #expect(wave.waitingReason == nil)
     }
@@ -426,7 +437,7 @@ struct WaveStatusTests {
         #expect(WaveStatus.waiting.color == .yellow)
         #expect(WaveStatus.idle.color == .gray)
         #expect(WaveStatus.completed.color == .green)
-        #expect(WaveStatus.error.color == .red)
+        #expect(WaveStatus.failed.color == .red)
     }
 
     @Test("icon returns correct SF Symbol")
@@ -435,7 +446,7 @@ struct WaveStatusTests {
         #expect(WaveStatus.waiting.icon == "circle.lefthalf.filled")
         #expect(WaveStatus.idle.icon == "circle")
         #expect(WaveStatus.completed.icon == "checkmark.circle.fill")
-        #expect(WaveStatus.error.icon == "xmark.circle.fill")
+        #expect(WaveStatus.failed.icon == "xmark.circle.fill")
     }
 }
 

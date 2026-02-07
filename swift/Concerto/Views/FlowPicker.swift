@@ -5,7 +5,7 @@ import SwiftUI
 import LoopflowCore
 
 struct FlowPicker: View {
-    let wave: Wave
+    let wave: WaveViewModel
 
     @Environment(RepoState.self) private var repoState
     @Environment(SessionState.self) private var sessionState

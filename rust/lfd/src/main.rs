@@ -56,7 +56,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let http_addr: SocketAddr = std::env::var("LFD_HTTP_ADDR")
-        .unwrap_or_else(|_| "127.0.0.1:8080".to_string())
+        .unwrap_or_else(|_| "127.0.0.1:2486".to_string())
         .parse()?;
     let db_path = std::env::var("LFD_DB_PATH")
         .map(PathBuf::from)

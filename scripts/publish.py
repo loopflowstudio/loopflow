@@ -142,10 +142,7 @@ def _check_on_main() -> None:
 
 def _build_wheel() -> tuple[bool, str]:
     result = subprocess.run(
-        [
-            "uv", "run", "maturin", "build", "--release",
-            "--manifest-path", str(ROOT / "rust" / "loopflow-py" / "Cargo.toml"),
-        ],
+        ["uv", "run", "hatchling", "build"],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -154,11 +151,11 @@ def _build_wheel() -> tuple[bool, str]:
 
 
 def _install_wheel() -> tuple[bool, str]:
-    wheels = sorted((ROOT / "target" / "wheels").glob("loopflow-*.whl"))
+    wheels = sorted((ROOT / "dist").glob("loopflow-*.whl"))
     if not wheels:
-        return False, "No wheel found in target/wheels/"
+        return False, "No wheel found in dist/"
     result = subprocess.run(
-        ["uv", "tool", "install", "--force", str(wheels[-1])],
+        ["uv", "pip", "install", "--force-reinstall", str(wheels[-1])],
         capture_output=True,
         text=True,
     )
@@ -173,11 +170,9 @@ def _install_binaries() -> tuple[bool, str]:
     result = subprocess.run(
         ["cargo", "build", "-p", "lf", "-p", "lfd", "--release"],
         cwd=ROOT,
-        capture_output=True,
-        text=True,
     )
     if result.returncode != 0:
-        return False, result.stdout + result.stderr
+        return False, "cargo build failed (see output above)"
 
     built = ROOT / "target" / "release"
     for name in ("lf", "lfd"):
@@ -479,6 +474,20 @@ def _release(bump_type: str, dry_run: bool, skip_dmg: bool, skip_screenshots: bo
     typer.echo("CI will build and publish to PyPI.")
 
 
+# --- Service management ---
+
+
+def _restart_lfd() -> None:
+    label = "com.loopflow.lfd"
+    plist = Path.home() / "Library" / "LaunchAgents" / f"{label}.plist"
+    if not plist.exists():
+        typer.echo("lfd launchd plist not found, skipping restart.")
+        return
+    typer.echo("Restarting lfd...")
+    subprocess.run(["launchctl", "stop", label], capture_output=True, timeout=10)
+    typer.echo("lfd restarted.")
+
+
 # --- Commands ---
 
 
@@ -540,8 +549,9 @@ def local(
     """Build and install locally (no publish)."""
     if dry_run:
         typer.echo("Would build wheel with maturin")
-        typer.echo("Would install with uv tool install")
+        typer.echo("Would install wheel with uv pip install")
         typer.echo("Would install lf/lfd binaries")
+        typer.echo("Would restart lfd")
         return
 
     typer.echo("Building wheel...")
@@ -569,6 +579,8 @@ def local(
         result = subprocess.run(["which", name], capture_output=True, text=True)
         if result.returncode == 0:
             typer.echo(f"{name}: {result.stdout.strip()}")
+
+    _restart_lfd()
 
 
 @app.command()

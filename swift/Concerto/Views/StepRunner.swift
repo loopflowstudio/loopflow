@@ -4,7 +4,7 @@ import SwiftUI
 import LoopflowCore
 
 struct StepRunner: View {
-    let wave: Wave
+    let wave: WaveViewModel
 
     @Environment(RepoState.self) private var repoState
     @Environment(SessionState.self) private var sessionState
@@ -310,17 +310,15 @@ struct StepRunner: View {
             Step(prompt: "gate")
         ], type: .flow)
     ]
-    repoState.directions = [
-        Direction(id: "product-engineer", name: "product-engineer", content: "", path: URL(fileURLWithPath: "/"))
-    ]
-
-    let wave = Wave(
-        id: "test",
-        name: "test-wave",
-        area: ["src/api"],
-        direction: ["product-engineer"],
-        flow: "design",
-        repo: "/tmp/test-repo",
+    let wave = WaveViewModel(
+        api: Wave(
+            id: "test",
+            name: "test-wave",
+            repo: "/tmp/test-repo",
+            flow: "design",
+            direction: ["product-engineer"],
+            area: ["src/api"]
+        ),
         worktreePath: "/tmp/test-worktree"
     )
 

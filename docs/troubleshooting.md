@@ -9,7 +9,7 @@ Common issues and solutions.
 
 ## lfd daemon not running
 
-**Symptom:** `lfd status` shows nothing or errors.
+**Symptom:** `lfq` shows nothing or errors.
 
 Check if installed:
 
@@ -75,12 +75,12 @@ lf ops wt prune
 
 ## Loop stuck in WAITING
 
-**Symptom:** `lfd status` shows a loop in WAITING state.
+**Symptom:** `lfq list` shows a wave in WAITING state.
 
 The loop hit its PR limit. Options:
 
 1. Review and merge outstanding PRs
-2. Increase the limit: `lfd loop <flow> <area> --limit 10`
+2. Adjust the wave config in Concerto or via the Python API
 3. Land accumulated work: see [Waves](waves.md) for loop management
 
 ## Context too large

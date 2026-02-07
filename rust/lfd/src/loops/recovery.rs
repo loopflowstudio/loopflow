@@ -7,7 +7,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::executor::WaveExecutor;
 use crate::store::SharedStore;
-use crate::types::{AgentStatus, WaveRunStatus};
+use crate::types::{AgentStatus, WaveRunStatus, WaveStatus};
 
 pub fn spawn_recovery_loop(
     store: SharedStore,
@@ -56,6 +56,10 @@ fn recover_stuck_runs(store: &SharedStore) {
                 run.error = Some("agent stuck >4h".to_string());
                 run.ended_at = Some(OffsetDateTime::now_utc());
                 let _ = store.update_wave_run(&run);
+                if let Ok(Some(mut wave)) = store.get_wave(&run.wave_id) {
+                    wave.status = WaveStatus::Failed;
+                    let _ = store.update_wave(&wave);
+                }
             }
         }
     }

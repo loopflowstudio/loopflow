@@ -4,7 +4,7 @@ import SwiftUI
 import LoopflowCore
 
 struct WaitingStateCard: View {
-    let wave: Wave
+    let wave: WaveViewModel
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var showCollapseConfirmation = false
@@ -203,11 +203,13 @@ struct WaitingStateCard: View {
 }
 
 #Preview {
-    let wave = Wave(
-        id: "test",
-        name: "test-wave",
-        repo: "/Users/jack/src/loopflow",
-        status: .waiting,
+    let wave = WaveViewModel(
+        api: Wave(
+            id: "test",
+            name: "test-wave",
+            repo: "/Users/jack/src/loopflow",
+            status: .waiting
+        ),
         worktreePath: "/Users/jack/src/loopflow-worktree",
         prLimit: 5,
         waitingReason: .prLimitReached(open: 2, limit: 5)

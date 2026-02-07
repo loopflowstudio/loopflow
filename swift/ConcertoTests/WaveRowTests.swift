@@ -11,26 +11,28 @@ import ViewInspector
 struct WaveRowViewTests {
     private func makeWave(
         name: String = "swift-falcon",
-        area: [String]? = ["src/"],
+        area: [String] = ["src/"],
         flow: String = "ship",
         status: WaveStatus = .idle,
         iteration: Int = 0,
         stimulus: Stimulus = Stimulus(kind: .manual)
-    ) -> Wave {
-        Wave(
-            id: "test-wave-id",
-            name: name,
-            area: area,
-            flow: flow,
-            repo: "/tmp/repo",
-            stimulus: stimulus,
-            status: status,
-            iteration: iteration
+    ) -> WaveViewModel {
+        WaveViewModel(
+            api: Wave(
+                id: "test-wave-id",
+                name: name,
+                repo: "/tmp/repo",
+                flow: flow,
+                area: area,
+                stimulus: stimulus,
+                status: status,
+                iteration: iteration
+            )
         )
     }
 
     private func makeRow(
-        wave: Wave,
+        wave: WaveViewModel,
         isSelected: Bool = false,
         liveOutput: [OutputLine] = [],
         pendingPR: (number: Int, url: URL?)? = nil

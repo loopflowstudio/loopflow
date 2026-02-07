@@ -6,7 +6,7 @@ use crate::executor::WaveExecutor;
 use crate::id::LfdId;
 use crate::scheduler::Scheduler;
 use crate::store::SharedStore;
-use crate::types::{Wave, WaveRun, WaveRunStatus};
+use crate::types::{Wave, WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus};
 
 pub fn create_wave_run_with_id(
     store: &SharedStore,
@@ -22,6 +22,13 @@ pub fn create_wave_run_with_id(
     let run = WaveRun {
         id: run_id.clone(),
         wave_id: wave.id.clone(),
+        snapshot: WaveRunSnapshot {
+            repo: wave.repo.clone(),
+            flow: wave.flow.clone(),
+            direction: wave.direction.clone(),
+            area: wave.area.clone(),
+            pr: None,
+        },
         iteration,
         step_index: 0,
         status: WaveRunStatus::Running,
@@ -33,6 +40,11 @@ pub fn create_wave_run_with_id(
         flow_parents: Vec::new(),
     };
     store.create_wave_run(&run)?;
+    if let Ok(Some(mut wave)) = store.get_wave(&wave.id) {
+        wave.status = WaveStatus::Running;
+        wave.iteration = iteration;
+        let _ = store.update_wave(&wave);
+    }
     Ok(run)
 }
 
@@ -58,6 +70,10 @@ async fn execute_run_inner(store: &SharedStore, executor: &WaveExecutor, run: &W
             run.error = Some(err.to_string());
             run.ended_at = Some(OffsetDateTime::now_utc());
             let _ = store.update_wave_run(&run);
+            if let Ok(Some(mut wave)) = store.get_wave(&run.wave_id) {
+                wave.status = WaveStatus::Failed;
+                let _ = store.update_wave(&wave);
+            }
         }
     }
 }

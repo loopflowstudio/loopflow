@@ -6,6 +6,7 @@ import SwiftUI
 public enum WaveRunStatus: String, Sendable, Codable {
     case pending
     case running
+    case waiting
     case completed
     case failed
     case cancelled
@@ -13,6 +14,7 @@ public enum WaveRunStatus: String, Sendable, Codable {
     public var color: Color {
         switch self {
         case .running: return .green
+        case .waiting: return .yellow
         case .pending: return .blue
         case .completed: return .gray
         case .failed: return .red
@@ -21,7 +23,7 @@ public enum WaveRunStatus: String, Sendable, Codable {
     }
 }
 
-public struct WaveRun: Sendable, Identifiable {
+public struct WaveRun: Sendable, Identifiable, Hashable {
     public let id: String
     public let waveId: String?
 
@@ -32,12 +34,13 @@ public struct WaveRun: Sendable, Identifiable {
 
     public var status: WaveRunStatus
     public var iteration: Int
+    public var stepIndex: Int
 
     public var worktree: String?
     public var branch: String?
     public var currentStep: String?
     public var error: String?
-    public var prUrl: String?
+    public var pr: PullRequest?
 
     public var startedAt: Date?
     public var endedAt: Date?
@@ -52,11 +55,12 @@ public struct WaveRun: Sendable, Identifiable {
         direction: [String] = [],
         status: WaveRunStatus = .pending,
         iteration: Int = 0,
+        stepIndex: Int = 0,
         worktree: String? = nil,
         branch: String? = nil,
         currentStep: String? = nil,
         error: String? = nil,
-        prUrl: String? = nil,
+        pr: PullRequest? = nil,
         startedAt: Date? = nil,
         endedAt: Date? = nil,
         createdAt: Date = Date()
@@ -69,11 +73,12 @@ public struct WaveRun: Sendable, Identifiable {
         self.direction = direction
         self.status = status
         self.iteration = iteration
+        self.stepIndex = stepIndex
         self.worktree = worktree
         self.branch = branch
         self.currentStep = currentStep
         self.error = error
-        self.prUrl = prUrl
+        self.pr = pr
         self.startedAt = startedAt
         self.endedAt = endedAt
         self.createdAt = createdAt
@@ -96,6 +101,7 @@ public struct WaveRun: Sendable, Identifiable {
     public var statusText: String {
         switch status {
         case .running: return currentStep ?? "Running"
+        case .waiting: return "Waiting"
         case .pending: return "Pending"
         case .completed: return "Completed"
         case .failed: return "Failed"

@@ -105,7 +105,7 @@ pub fn build_codex_command(config: &LaunchConfig) -> Vec<String> {
         cmd.push(cwd.to_string_lossy().to_string());
     }
 
-    if config.stream {
+    if config.stream && matches!(config.stream_format, StreamFormat::Raw) {
         cmd.push("--json".to_string());
     }
 

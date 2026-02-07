@@ -78,21 +78,16 @@ See `Concerto/Services/Ghostty/README.md` for integration details.
 
 ## Communication with lfd
 
-Three patterns, intentionally different:
+Two patterns, intentionally different:
 
 1. **HTTP services** (LocalWaveService.swift)
    - Reads waves + runs from lfd HTTP API
    - Used for primary wave data
 
-2. **Socket subscription** (LocalEventService.swift)
-   - Connects to ~/.lf/lfd.sock
-   - Subscribes to events (session.*, agent.*, worktree.*)
+2. **WebSocket subscription** (LocalEventService.swift)
+   - Connects to `ws://127.0.0.1:2486/ws`
+   - Subscribes to wave + agent + output events
    - Used for live UI updates
-
-3. **Direct DB reads** (SessionService.swift)
-   - Reads ~/.lf/lfd.db directly via SQLite
-   - Used for history queries
-   - Works even if daemon isn't running
 
 ## UI Tests
 

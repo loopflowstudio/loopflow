@@ -5,7 +5,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use std::net::SocketAddr;
 
-use crate::http::dto::ErrorResponse;
+use crate::http::dto::{ErrorDetail, ErrorResponse};
 use crate::http::state::HttpState;
 use crate::registration::ConnectionValidator;
 
@@ -120,7 +120,11 @@ fn auth_error(status: StatusCode, message: &str) -> Response {
     (
         status,
         Json(ErrorResponse {
-            error: message.to_string(),
+            error: ErrorDetail {
+                error_type: "invalid_request_error".to_string(),
+                message: message.to_string(),
+                param: None,
+            },
         }),
     )
         .into_response()

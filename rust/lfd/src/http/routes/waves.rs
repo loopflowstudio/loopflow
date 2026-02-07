@@ -2,21 +2,73 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 use serde::Deserialize;
+use std::str::FromStr;
 use time::OffsetDateTime;
 
 use crate::http::dto::{
-    LandWaveResponse, ListWavesResponse, RunWaveResponse, StopWaveResponse, WaveResponse,
+    ContinueWaveResponse, DeletedResourceResponse, LandWaveResponse, ListResponse, RunWaveResponse,
+    StopWaveResponse, WaveDto,
 };
-use crate::http::routes::build_wave_view;
+use crate::http::routes::{build_wave_dto, resolve_wave_id};
 use crate::http::state::HttpState;
-use crate::http::{api_error, map_store_error, parse_id, run_store, ApiResult};
+use crate::http::{api_error, map_store_error, run_store, ApiResult};
 use crate::id::LfdId;
 use crate::store::{SharedStore, StoreError};
-use crate::types::{Event, Wave, WaveRun, WaveRunStatus};
+use crate::types::{Event, Wave, WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus};
 
 #[derive(Deserialize)]
 pub(crate) struct ListWavesQuery {
     repo: Option<String>,
+    limit: Option<u32>,
+    starting_after: Option<String>,
+    ending_before: Option<String>,
+    #[serde(default, rename = "expand[]")]
+    expand: ExpandParam,
+}
+
+#[derive(Deserialize, Default)]
+pub(crate) struct ExpandQuery {
+    #[serde(default, rename = "expand[]")]
+    expand: ExpandParam,
+}
+
+/// Accept `expand[]=value` as either a single string or repeated params.
+#[derive(Default, Clone)]
+pub(crate) struct ExpandParam(Vec<String>);
+
+impl ExpandParam {
+    fn contains(&self, value: &str) -> bool {
+        self.0.iter().any(|v| v == value)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ExpandParam {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de;
+
+        struct ExpandVisitor;
+        impl<'de> de::Visitor<'de> for ExpandVisitor {
+            type Value = ExpandParam;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a string or list of strings")
+            }
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<ExpandParam, E> {
+                Ok(ExpandParam(vec![v.to_string()]))
+            }
+            fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<ExpandParam, A::Error> {
+                let mut values = Vec::new();
+                while let Some(v) = seq.next_element::<String>()? {
+                    values.push(v);
+                }
+                Ok(ExpandParam(values))
+            }
+        }
+
+        deserializer.deserialize_any(ExpandVisitor)
+    }
 }
 
 #[derive(Deserialize)]
@@ -33,7 +85,7 @@ pub(crate) struct UpdateWaveRequest {
     flow: Option<String>,
     direction: Option<Vec<String>>,
     area: Option<Vec<String>>,
-    paused: Option<bool>,
+    status: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -55,22 +107,29 @@ pub(crate) struct LandWaveRequest {
 pub async fn list_waves_handler(
     State(state): State<HttpState>,
     Query(query): Query<ListWavesQuery>,
-) -> ApiResult<ListWavesResponse> {
+) -> ApiResult<ListResponse<WaveDto>> {
     let waves = run_store(&state.store, move |store| {
         store.list_waves(query.repo.as_deref())
     })
     .await
     .map_err(map_store_error)?;
-    let views = crate::http::routes::build_wave_views(&state.store, waves)
+    let include_active_run = query.expand.contains("active_run");
+    let (waves, has_more) = paginate_waves(
+        waves,
+        query.limit,
+        query.starting_after.as_deref(),
+        query.ending_before.as_deref(),
+    );
+    let views = crate::http::routes::build_wave_dtos(&state.store, waves, include_active_run)
         .await
         .map_err(map_store_error)?;
-    Ok(Json(ListWavesResponse { waves: views }))
+    Ok(Json(ListResponse::new(views, has_more)))
 }
 
 pub async fn create_wave_handler(
     State(state): State<HttpState>,
     Json(payload): Json<CreateWaveRequest>,
-) -> ApiResult<WaveResponse> {
+) -> ApiResult<WaveDto> {
     let id = LfdId::new();
     let name = payload.name.unwrap_or_else(|| format!("wave-{}", id));
     let flow = payload.flow.unwrap_or_else(|| "ship".to_string());
@@ -81,7 +140,8 @@ pub async fn create_wave_handler(
         flow,
         direction: payload.direction.unwrap_or_default(),
         area: payload.area.unwrap_or_default(),
-        paused: false,
+        status: WaveStatus::Idle,
+        iteration: 0,
         created_at: Some(OffsetDateTime::now_utc()),
     };
     let wave_clone = wave.clone();
@@ -93,33 +153,35 @@ pub async fn create_wave_handler(
         .event_hub
         .send(Event::wave_created(wave.id.clone(), wave.name.clone()));
 
-    let view = build_wave_view(&state.store, wave)
+    let view = build_wave_dto(&state.store, wave, false)
         .await
         .map_err(map_store_error)?;
-    Ok(Json(WaveResponse { wave: view }))
+    Ok(Json(view))
 }
 
 pub async fn get_wave_handler(
     State(state): State<HttpState>,
     Path(wave_id): Path<String>,
-) -> ApiResult<WaveResponse> {
-    let wave_id = parse_id(&wave_id)?;
+    Query(query): Query<ExpandQuery>,
+) -> ApiResult<WaveDto> {
+    let wave_id = resolve_wave_id(&state, &wave_id).await?;
     let wave = run_store(&state.store, move |store| store.get_wave(&wave_id))
         .await
         .map_err(map_store_error)?
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
-    let view = build_wave_view(&state.store, wave)
+    let include_active_run = query.expand.contains("active_run");
+    let view = build_wave_dto(&state.store, wave, include_active_run)
         .await
         .map_err(map_store_error)?;
-    Ok(Json(WaveResponse { wave: view }))
+    Ok(Json(view))
 }
 
 pub async fn update_wave_handler(
     State(state): State<HttpState>,
     Path(wave_id): Path<String>,
     Json(payload): Json<UpdateWaveRequest>,
-) -> ApiResult<WaveResponse> {
-    let wave_id = parse_id(&wave_id)?;
+) -> ApiResult<WaveDto> {
+    let wave_id = resolve_wave_id(&state, &wave_id).await?;
     let mut wave = run_store(&state.store, {
         let wave_id = wave_id.clone();
         move |store| store.get_wave(&wave_id)
@@ -141,8 +203,9 @@ pub async fn update_wave_handler(
             wave.area = area;
         }
     }
-    if let Some(paused) = payload.paused {
-        wave.paused = paused;
+    if let Some(status) = payload.status {
+        wave.status = WaveStatus::from_str(&status)
+            .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid status"))?;
     }
 
     let wave_clone = wave.clone();
@@ -152,17 +215,17 @@ pub async fn update_wave_handler(
 
     state.event_hub.send(Event::wave_updated(wave.id.clone()));
 
-    let view = build_wave_view(&state.store, wave)
+    let view = build_wave_dto(&state.store, wave, false)
         .await
         .map_err(map_store_error)?;
-    Ok(Json(WaveResponse { wave: view }))
+    Ok(Json(view))
 }
 
 pub async fn delete_wave_handler(
     State(state): State<HttpState>,
     Path(wave_id): Path<String>,
-) -> ApiResult<serde_json::Value> {
-    let wave_id = parse_id(&wave_id)?;
+) -> ApiResult<DeletedResourceResponse> {
+    let wave_id = resolve_wave_id(&state, &wave_id).await?;
     let wave_id_for_delete = wave_id.clone();
     run_store(&state.store, move |store| {
         store.delete_wave(&wave_id_for_delete)
@@ -170,9 +233,13 @@ pub async fn delete_wave_handler(
     .await
     .map_err(map_store_error)?;
 
-    state.event_hub.send(Event::wave_deleted(wave_id));
+    state.event_hub.send(Event::wave_deleted(wave_id.clone()));
 
-    Ok(Json(serde_json::json!({ "deleted": true })))
+    Ok(Json(DeletedResourceResponse {
+        id: wave_id.to_string(),
+        object: "wave".to_string(),
+        deleted: true,
+    }))
 }
 
 pub async fn run_wave_handler(
@@ -180,7 +247,7 @@ pub async fn run_wave_handler(
     Path(wave_id): Path<String>,
     payload: Option<Json<RunWaveRequest>>,
 ) -> ApiResult<RunWaveResponse> {
-    let wave_id = parse_id(&wave_id)?;
+    let wave_id = resolve_wave_id(&state, &wave_id).await?;
     let payload = payload.map(|Json(value)| value).unwrap_or_default();
     let mut wave = run_store(&state.store, {
         let wave_id = wave_id.clone();
@@ -203,7 +270,6 @@ pub async fn run_wave_handler(
         ));
     }
 
-    wave.paused = false;
     if let Some(flow) = payload.flow {
         wave.flow = flow;
     }
@@ -267,6 +333,10 @@ pub async fn run_wave_handler(
                 run.error = Some(err.to_string());
                 run.ended_at = Some(OffsetDateTime::now_utc());
                 let _ = store.update_wave_run(&run);
+                if let Ok(Some(mut wave)) = store.get_wave(&run.wave_id) {
+                    wave.status = WaveStatus::Failed;
+                    let _ = store.update_wave(&wave);
+                }
             }
         }
         scheduler.release(run_id_for_release.as_str());
@@ -287,7 +357,7 @@ pub async fn stop_wave_handler(
     State(state): State<HttpState>,
     Path(wave_id): Path<String>,
 ) -> ApiResult<StopWaveResponse> {
-    let wave_id = parse_id(&wave_id)?;
+    let wave_id = resolve_wave_id(&state, &wave_id).await?;
     let run = run_store(&state.store, {
         let wave_id = wave_id.clone();
         move |store| store.get_active_wave_run(&wave_id)
@@ -303,6 +373,16 @@ pub async fn stop_wave_handler(
         run_store(&state.store, move |store| store.update_wave_run(&run_clone))
             .await
             .map_err(map_store_error)?;
+        let wave_id = run.wave_id.clone();
+        run_store(&state.store, move |store| {
+            if let Some(mut wave) = store.get_wave(&wave_id)? {
+                wave.status = WaveStatus::Failed;
+                store.update_wave(&wave)?;
+            }
+            Ok(())
+        })
+        .await
+        .map_err(map_store_error)?;
     }
 
     state.event_hub.send(Event::wave_stopped(wave_id));
@@ -310,12 +390,110 @@ pub async fn stop_wave_handler(
     Ok(Json(StopWaveResponse { stopped: true }))
 }
 
+pub async fn continue_wave_handler(
+    State(state): State<HttpState>,
+    Path(wave_id): Path<String>,
+) -> ApiResult<ContinueWaveResponse> {
+    let wave_id = resolve_wave_id(&state, &wave_id).await?;
+    let mut run = run_store(&state.store, {
+        let wave_id = wave_id.clone();
+        move |store| store.get_active_wave_run(&wave_id)
+    })
+    .await
+    .map_err(map_store_error)?
+    .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "no active run for wave"))?;
+
+    if run.status != WaveRunStatus::Waiting {
+        return Err(api_error(
+            StatusCode::PRECONDITION_FAILED,
+            "wave run is not waiting for interactive input",
+        ));
+    }
+
+    let mut wave = run_store(&state.store, {
+        let wave_id = wave_id.clone();
+        move |store| store.get_wave(&wave_id)
+    })
+    .await
+    .map_err(map_store_error)?
+    .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
+
+    // Resolve worktree and check for uncommitted changes.
+    let worktree = if run.worktree.is_empty() {
+        run.snapshot.repo.clone()
+    } else {
+        run.worktree.clone()
+    };
+
+    // Resolve the current step name for the commit message.
+    let step_name = resolve_current_step_name(&run, &wave, run.step_index);
+
+    let worktree_path = worktree.clone();
+    let step_name_for_commit = step_name.clone();
+    tokio::task::spawn_blocking(move || {
+        auto_commit_if_dirty(std::path::Path::new(&worktree_path), &step_name_for_commit)
+    })
+    .await
+    .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
+    .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+
+    // Advance to the next step.
+    run.step_index += 1;
+    run.status = WaveRunStatus::Running;
+    let run_clone = run.clone();
+    run_store(&state.store, move |store| store.update_wave_run(&run_clone))
+        .await
+        .map_err(map_store_error)?;
+    wave.status = WaveStatus::Running;
+    let wave_clone = wave.clone();
+    run_store(&state.store, move |store| store.update_wave(&wave_clone))
+        .await
+        .map_err(map_store_error)?;
+
+    // Re-acquire scheduler slot (idempotent for same run_id).
+    let (acquired, _) = state.scheduler.acquire(run.id.as_str()).await;
+    if !acquired {
+        return Err(api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no scheduler slots available",
+        ));
+    }
+
+    // Spawn executor to continue the flow.
+    let exec = state.executor.clone();
+    let store = state.store.clone();
+    let scheduler = state.scheduler.clone();
+    let run_id = run.id.clone();
+    tokio::spawn(async move {
+        if let Err(err) = exec.execute(&run_id).await {
+            tracing::error!(run_id = %run_id, error = %err, "run execution failed");
+            if let Ok(Some(mut run)) = store.get_wave_run(&run_id) {
+                run.status = WaveRunStatus::Failed;
+                run.error = Some(err.to_string());
+                run.ended_at = Some(OffsetDateTime::now_utc());
+                let _ = store.update_wave_run(&run);
+            }
+        }
+        scheduler.release(run_id.as_str());
+    });
+
+    state
+        .event_hub
+        .send(Event::wave_started(wave_id.clone(), run.id.clone()));
+
+    Ok(Json(ContinueWaveResponse {
+        continued: true,
+        wave_id: wave_id.to_string(),
+        wave_run_id: run.id.to_string(),
+    }))
+}
+
 pub async fn land_wave_handler(
     State(state): State<HttpState>,
     Path(wave_id): Path<String>,
     payload: Option<Json<LandWaveRequest>>,
 ) -> ApiResult<LandWaveResponse> {
-    let wave_id = parse_id(&wave_id)?;
+    let wave_id = resolve_wave_id(&state, &wave_id).await?;
     let payload = payload.map(|Json(value)| value).unwrap_or_default();
     let wave = run_store(&state.store, move |store| store.get_wave(&wave_id))
         .await
@@ -375,6 +553,13 @@ fn create_wave_run_with_id(
     let run = WaveRun {
         id: run_id.clone(),
         wave_id: wave.id.clone(),
+        snapshot: WaveRunSnapshot {
+            repo: wave.repo.clone(),
+            flow: wave.flow.clone(),
+            direction: wave.direction.clone(),
+            area: wave.area.clone(),
+            pr: None,
+        },
         iteration,
         step_index: 0,
         status: WaveRunStatus::Running,
@@ -386,5 +571,71 @@ fn create_wave_run_with_id(
         flow_parents: Vec::new(),
     };
     store.create_wave_run(&run)?;
+    if let Ok(Some(mut wave)) = store.get_wave(&wave.id) {
+        wave.status = WaveStatus::Running;
+        wave.iteration = iteration;
+        let _ = store.update_wave(&wave);
+    }
     Ok(run)
+}
+
+fn resolve_current_step_name(run: &WaveRun, _wave: &Wave, step_index: u32) -> String {
+    use loopflow_engine::flow::{expand_flow, load_flow, next_action, FlowAction};
+    let repo = std::path::Path::new(&run.snapshot.repo);
+    let name = load_flow(&run.snapshot.flow, repo)
+        .ok()
+        .and_then(|flow| expand_flow(&flow, repo).ok())
+        .and_then(|plan| match next_action(&plan, step_index as usize) {
+            FlowAction::WaitInteractive { step } => Some(step.step.name),
+            FlowAction::RunStep { step } => Some(step.step.name),
+            _ => None,
+        });
+    name.unwrap_or_else(|| format!("step-{step_index}"))
+}
+
+fn auto_commit_if_dirty(worktree: &std::path::Path, step_name: &str) -> Result<(), String> {
+    use loopflow_engine::git::{commit, is_clean, stage_all};
+    if is_clean(worktree).map_err(|e| e.to_string())? {
+        return Ok(());
+    }
+    stage_all(worktree).map_err(|e| e.to_string())?;
+    let message = format!("lfd: auto-commit after interactive step '{step_name}'");
+    commit(worktree, &message).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn paginate_waves(
+    waves: Vec<Wave>,
+    limit: Option<u32>,
+    starting_after: Option<&str>,
+    ending_before: Option<&str>,
+) -> (Vec<Wave>, bool) {
+    let mut items = waves;
+    if let Some(starting_after) = starting_after {
+        if let Some(pos) = items
+            .iter()
+            .position(|wave| wave.id.to_string() == starting_after)
+        {
+            items = items.split_off(pos + 1);
+        }
+    }
+    if let Some(ending_before) = ending_before {
+        if let Some(pos) = items
+            .iter()
+            .position(|wave| wave.id.to_string() == ending_before)
+        {
+            items.truncate(pos);
+        }
+    }
+
+    let mut has_more = false;
+    if let Some(limit) = limit {
+        let limit = limit as usize;
+        if items.len() > limit {
+            items.truncate(limit);
+            has_more = true;
+        }
+    }
+
+    (items, has_more)
 }

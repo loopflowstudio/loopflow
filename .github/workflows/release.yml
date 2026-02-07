@@ -6,57 +6,6 @@ on:
       - "v*"
 
 jobs:
-  # Build Python wheels with maturin (packages Rust binary into a wheel)
-  build-wheels:
-    strategy:
-      matrix:
-        include:
-          - os: macos-latest
-            target: aarch64-apple-darwin
-          - os: macos-15-intel
-            target: x86_64-apple-darwin
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            manylinux: auto
-          - os: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            manylinux: auto
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set version from tag
-        run: sed -i.bak 's/^version = "0.0.0"/version = "'"${GITHUB_REF_NAME#v}"'"/' Cargo.toml && rm Cargo.toml.bak
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-      - uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.target }}
-          args: --release --out dist --manifest-path rust/loopflow-py/Cargo.toml
-          manylinux: ${{ matrix.manylinux }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: wheels-${{ matrix.target }}
-          path: dist/*.whl
-
-  # Publish wheels to PyPI
-  publish-pypi:
-    needs: build-wheels
-    runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: wheels-*
-          merge-multiple: true
-          path: dist
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: dist/
-
   # Build native binaries (GitHub Releases, shell installer)
   build-native:
     strategy:
@@ -98,23 +47,36 @@ jobs:
         run: sed -i.bak 's/^version = "0.0.0"/version = "'"${GITHUB_REF_NAME#v}"'"/' Cargo.toml && rm Cargo.toml.bak
       - uses: dtolnay/rust-toolchain@stable
       - name: Publish to crates.io
-        run: cargo publish -p loopflow
+        run: cargo publish -p loopflow --allow-dirty
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-  # Create GitHub Release with native binaries and wheels
+  # Publish pure Python package to PyPI
+  publish-pypi:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v4
+      - name: Build package
+        run: uv build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+
+  # Create GitHub Release with native binaries
   release:
-    needs: [build-wheels, build-native]
+    needs: build-native
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: wheels-*
-          merge-multiple: true
-          path: dist/wheels
       - uses: actions/download-artifact@v4
         with:
           pattern: native-*
@@ -178,6 +140,5 @@ jobs:
         with:
           generate_release_notes: true
           files: |
-            dist/wheels/*.whl
             dist/native/*.tar.gz
             dist/install.sh

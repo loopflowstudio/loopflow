@@ -1,3 +1,0 @@
-- Assumed wave detail no longer exposes land/PR actions or file diff stats now that WorktreeService and related models were removed.
-- Defaulted terminal/IDE choices to Warp and Cursor after removing LoopflowConfig preferences.
-- Added `/v1/flows` for flow + step listing; Concerto now uses this endpoint instead of legacy `/flows`.

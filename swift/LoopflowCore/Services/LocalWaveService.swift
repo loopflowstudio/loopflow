@@ -255,7 +255,7 @@ public struct LocalWaveService: @unchecked Sendable {
                 return []
             }
 
-            return runsData.compactMap { parseWaveRunFromJSON($0) }
+            return runsData.compactMap { Self.parseWaveRunFromJSON($0) }
         } catch {
             LoggingService.lfd("listWaveRuns: error=\(error.localizedDescription)")
             return []
@@ -357,7 +357,7 @@ public struct LocalWaveService: @unchecked Sendable {
         let statusValue = json["status"] as? String ?? "idle"
         let normalizedStatus = statusValue == "error" ? "failed" : statusValue
         let status = WaveStatus(rawValue: normalizedStatus) ?? .idle
-        let activeRun = (json["active_run"] as? [String: Any]).flatMap(parseWaveRunFromJSON)
+        let activeRun = (json["active_run"] as? [String: Any]).flatMap(Self.parseWaveRunFromJSON)
 
         return Wave(
             id: json["id"] as? String ?? UUID().uuidString,

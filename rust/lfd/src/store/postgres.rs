@@ -34,12 +34,6 @@ const BASELINE_MIGRATIONS: [(&str, &str); 3] = [
 
 const INCREMENTAL_MIGRATIONS: [(&str, &str); 0] = [];
 
-const MIGRATIONS: [(&str, &str); 3] = [
-    ("001_initial", MIGRATION_001),
-    ("002_flow_parents", MIGRATION_002),
-    ("003_run_snapshots", MIGRATION_003),
-];
-
 // NOTE: Sync trait with block_on bridging
 //
 // This design prioritizes trait compatibility with SqliteStore over async efficiency.

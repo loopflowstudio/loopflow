@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Optional
+from typing import Any, Optional
 
 from .client import Client
 from .models import PullRequest, Stimulus, Wave, WaveRun
@@ -16,11 +16,11 @@ def _client() -> Client:
     return _default_client
 
 
-def health() -> dict:
+def health() -> dict[str, Any]:
     return _client().health()
 
 
-def status() -> dict:
+def status() -> dict[str, Any]:
     return _client().status()
 
 
@@ -69,7 +69,7 @@ def run_wave(
     flow: Optional[str] = None,
     direction: Optional[list[str]] = None,
     area: Optional[list[str]] = None,
-) -> dict:
+) -> dict[str, Any]:
     return _client().run_wave(
         name_or_id,
         flow=flow,
@@ -78,7 +78,7 @@ def run_wave(
     )
 
 
-def stop_wave(name_or_id: str) -> dict:
+def stop_wave(name_or_id: str) -> dict[str, Any]:
     return _client().stop_wave(name_or_id)
 
 
@@ -89,7 +89,7 @@ def land_wave(
     create_pr: Optional[bool] = None,
     worktree: Optional[str] = None,
     lint: Optional[bool] = None,
-) -> dict:
+) -> dict[str, Any]:
     return _client().land_wave(
         name_or_id,
         strict=strict,
@@ -106,6 +106,7 @@ def wave_runs(
     limit: Optional[int] = None,
 ) -> list[WaveRun]:
     return _client().wave_runs(wave_id=wave_id, repo=repo, limit=limit)
+
 
 def wave_logs(name_or_id: str) -> Iterator[str]:
     return _client().wave_logs(name_or_id)

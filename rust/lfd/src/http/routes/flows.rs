@@ -29,7 +29,7 @@ struct FlowsResult {
 }
 
 #[derive(Debug, Serialize)]
-struct FlowsResponse {
+pub(crate) struct FlowsResponse {
     ok: bool,
     result: FlowsResult,
 }

@@ -2,7 +2,7 @@ use serde::Serialize;
 use time::OffsetDateTime;
 
 use crate::registration::RegistrationState;
-use crate::types::{Wave, WaveRun, WaveRunStatus, WaveStatus};
+use crate::types::{Wave, WaveRun, WaveRunStatus};
 
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {
@@ -211,14 +211,4 @@ pub fn wave_run_status_str(status: WaveRunStatus) -> String {
         WaveRunStatus::Unspecified => "unknown",
     }
     .to_string()
-}
-
-pub fn wave_status_from_run(run: WaveRunStatus) -> WaveStatus {
-    match run {
-        WaveRunStatus::Pending | WaveRunStatus::Running => WaveStatus::Running,
-        WaveRunStatus::Waiting => WaveStatus::Waiting,
-        WaveRunStatus::Completed => WaveStatus::Completed,
-        WaveRunStatus::Failed => WaveStatus::Failed,
-        WaveRunStatus::Unspecified => WaveStatus::Idle,
-    }
 }

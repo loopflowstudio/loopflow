@@ -128,27 +128,4 @@ public struct StepRun: Sendable, Identifiable, Codable, Hashable {
         self.model = model
         self.runMode = runMode
     }
-
-    /// Initialize from lfd JSON response (has fewer fields than full StepRun).
-    public init(from json: StepRunJSON) {
-        self.id = json.id
-        self.step = json.step
-        self.status = json.status
-        self.repo = ""  // Not provided by lfd summary
-        self.worktree = ""  // Not provided by lfd summary
-        self.model = ""  // Not provided by lfd summary
-        self.runMode = ""  // Not provided by lfd summary
-
-        let dateFormatter = ISO8601DateFormatter()
-        if let startStr = json.startedAt {
-            self.startedAt = dateFormatter.date(from: startStr) ?? Date()
-        } else {
-            self.startedAt = Date()
-        }
-        if let endStr = json.endedAt {
-            self.endedAt = dateFormatter.date(from: endStr)
-        } else {
-            self.endedAt = nil
-        }
-    }
 }

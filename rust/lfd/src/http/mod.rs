@@ -9,7 +9,7 @@ use axum::{Json, Router};
 
 use crate::auth;
 use crate::http::dto::{ErrorDetail, ErrorResponse};
-use crate::http::routes::{hooks, system, wave_runs, waves, ws};
+use crate::http::routes::{flows, hooks, system, wave_runs, waves, ws};
 use crate::store::{SharedStore, StoreError};
 
 pub use state::HttpState;
@@ -19,6 +19,7 @@ pub type ApiResult<T> = Result<Json<T>, (StatusCode, Json<ErrorResponse>)>;
 pub fn router(state: HttpState) -> Router {
     // API routes — protected by auth middleware.
     let api_routes = Router::new()
+        .route("/flows", get(flows::list_flows_handler))
         .route(
             "/waves",
             get(waves::list_waves_handler).post(waves::create_wave_handler),

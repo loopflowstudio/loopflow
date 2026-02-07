@@ -7,13 +7,13 @@ use rusqlite::{params, Connection, OptionalExtension, Row, ToSql};
 use time::OffsetDateTime;
 
 use crate::id::LfdId;
-use crate::store::{ForkRun, ForkRunStatus, RunStore, StoreError, StoreResult};
+use crate::store::{
+    schema::SCHEMA_VERSION, ForkRun, ForkRunStatus, RunStore, StoreError, StoreResult,
+};
 use crate::types::{
     Agent, AgentStatus, PendingActivation, PullRequest, Stimulus, StimulusKind, Wave, WaveRun,
     WaveRunSnapshot, WaveRunStatus, WaveStatus,
 };
-
-const SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug)]
 pub struct SqliteStore {
@@ -46,7 +46,7 @@ impl SqliteStore {
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
-            INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', '4');
+            INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', '');
 
             CREATE TABLE IF NOT EXISTS waves (
                 id TEXT PRIMARY KEY,
@@ -158,8 +158,18 @@ impl SqliteStore {
             "flow_parents",
             "TEXT NOT NULL DEFAULT '[]'",
         )?;
-        ensure_column(&conn, "wave_runs", "snapshot_repo", "TEXT NOT NULL DEFAULT ''")?;
-        ensure_column(&conn, "wave_runs", "snapshot_flow", "TEXT NOT NULL DEFAULT ''")?;
+        ensure_column(
+            &conn,
+            "wave_runs",
+            "snapshot_repo",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        ensure_column(
+            &conn,
+            "wave_runs",
+            "snapshot_flow",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
         ensure_column(
             &conn,
             "wave_runs",
@@ -175,11 +185,23 @@ impl SqliteStore {
         ensure_column(&conn, "wave_runs", "snapshot_pr", "TEXT")?;
         ensure_column(&conn, "fork_runs", "wave_run_id", "TEXT")?;
 
+        conn.execute(
+            "
+            UPDATE wave_runs
+            SET snapshot_repo = (SELECT repo FROM waves WHERE waves.id = wave_runs.wave_id),
+                snapshot_flow = (SELECT flow FROM waves WHERE waves.id = wave_runs.wave_id),
+                snapshot_direction = (SELECT direction FROM waves WHERE waves.id = wave_runs.wave_id),
+                snapshot_area = (SELECT area FROM waves WHERE waves.id = wave_runs.wave_id)
+            WHERE snapshot_repo = ''
+            ",
+            [],
+        )?;
+
         // Migrate existing stimulus data from waves to stimuli table
         Self::migrate_stimuli_from_waves(&conn)?;
         conn.execute(
-            "UPDATE meta SET value = '4' WHERE key = 'schema_version'",
-            [],
+            "UPDATE meta SET value = ?1 WHERE key = 'schema_version'",
+            params![SCHEMA_VERSION],
         )?;
 
         Ok(())
@@ -315,7 +337,7 @@ impl RunStore for SqliteStore {
         Ok(())
     }
 
-    fn schema_version(&self) -> StoreResult<u32> {
+    fn schema_version(&self) -> StoreResult<String> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let version: Option<String> = conn
             .query_row(
@@ -324,12 +346,7 @@ impl RunStore for SqliteStore {
                 |row| row.get(0),
             )
             .optional()?;
-        let parsed = version
-            .as_deref()
-            .unwrap_or("1")
-            .parse::<u32>()
-            .unwrap_or(SCHEMA_VERSION);
-        Ok(parsed)
+        Ok(version.unwrap_or_else(|| SCHEMA_VERSION.to_string()))
     }
 
     fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {

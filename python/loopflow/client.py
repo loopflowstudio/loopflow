@@ -90,7 +90,7 @@ class Client:
         if stimulus is not None:
             body["stimulus"] = stimulus.model_dump(exclude_none=True)
         if status is not None:
-            body["paused"] = status == "paused"
+            body["status"] = status
         payload = self._request_json("PATCH", f"/v1/waves/{name_or_id}", json=body)
         return Wave.model_validate(payload)
 

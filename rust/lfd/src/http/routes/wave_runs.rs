@@ -1,5 +1,3 @@
-use std::collections::{HashMap, HashSet};
-
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::http::header;
@@ -11,12 +9,12 @@ use serde::Deserialize;
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 
 use crate::http::dto::{wave_run_dto, ListResponse, WaveRunDto};
-use crate::http::routes::{pr_for_run, resolve_wave_id};
+use crate::http::routes::resolve_wave_id;
 use crate::http::state::HttpState;
 use crate::http::{map_store_error, run_store, ApiResult};
 use crate::id::LfdId;
 use crate::output::OutputEvent;
-use crate::types::{Wave, WaveRun};
+use crate::types::WaveRun;
 
 #[derive(Deserialize, Default)]
 pub(crate) struct ListWaveRunsQuery {
@@ -119,16 +117,10 @@ async fn list_wave_runs(
     .await
     .map_err(map_store_error)?;
 
-    let wave_map = load_wave_map(state, &runs, query.repo.clone()).await?;
     let mut filtered = runs;
 
     if let Some(repo) = query.repo.as_deref() {
-        filtered.retain(|run| {
-            wave_map
-                .get(&run.wave_id)
-                .map(|wave| wave.repo == repo)
-                .unwrap_or(false)
-        });
+        filtered.retain(|run| run.snapshot.repo == repo);
     }
 
     let (runs, has_more) = paginate_wave_runs(
@@ -140,66 +132,10 @@ async fn list_wave_runs(
 
     let mut data = Vec::with_capacity(runs.len());
     for run in runs {
-        let wave = wave_map.get(&run.wave_id);
-        let pr = pr_for_run(&state.store, &run, wave)
-            .await
-            .map_err(map_store_error)?;
-        data.push(wave_run_dto(run, wave, pr));
+        data.push(wave_run_dto(run));
     }
 
     Ok(Json(ListResponse::new(data, has_more)))
-}
-
-async fn load_wave_map(
-    state: &HttpState,
-    runs: &[WaveRun],
-    repo: Option<String>,
-) -> Result<
-    HashMap<LfdId, Wave>,
-    (
-        axum::http::StatusCode,
-        Json<crate::http::dto::ErrorResponse>,
-    ),
-> {
-    let wave_ids: HashSet<LfdId> = runs.iter().map(|run| run.wave_id.clone()).collect();
-
-    let repo_waves = if let Some(repo) = repo {
-        run_store(&state.store, move |store| {
-            store.list_waves(Some(repo.as_str()))
-        })
-        .await
-        .map_err(map_store_error)?
-    } else {
-        Vec::new()
-    };
-
-    let mut wave_map: HashMap<LfdId, Wave> = repo_waves
-        .into_iter()
-        .map(|wave| (wave.id.clone(), wave))
-        .collect();
-
-    let missing: Vec<LfdId> = wave_ids
-        .into_iter()
-        .filter(|id| !wave_map.contains_key(id))
-        .collect();
-
-    if !missing.is_empty() {
-        let fetched = run_store(&state.store, move |store| {
-            let mut map = HashMap::new();
-            for id in missing {
-                if let Some(wave) = store.get_wave(&id)? {
-                    map.insert(id, wave);
-                }
-            }
-            Ok(map)
-        })
-        .await
-        .map_err(map_store_error)?;
-
-        wave_map.extend(fetched);
-    }
-
-    Ok(wave_map)
 }
 
 fn paginate_wave_runs(

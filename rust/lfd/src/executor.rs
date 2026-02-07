@@ -23,7 +23,7 @@ use crate::id::LfdId;
 use crate::output::{OutputEvent, OutputHub};
 use crate::scheduler::Scheduler;
 use crate::store::{ForkRun, ForkRunStatus, SharedStore};
-use crate::types::{Agent, AgentStatus, Wave, WaveRun, WaveRunStatus};
+use crate::types::{Agent, AgentStatus, Wave, WaveRun, WaveRunStatus, WaveStatus};
 
 #[async_trait]
 pub trait StepRunner: Send + Sync {
@@ -155,8 +155,8 @@ impl WaveExecutor {
             .store
             .get_wave(&run.wave_id)?
             .ok_or_else(|| anyhow!("wave not found"))?;
-        let flow = load_flow(&wave.flow, Path::new(&wave.repo))?;
-        let plan = expand_flow(&flow, Path::new(&wave.repo))?;
+        let flow = load_flow(&run.snapshot.flow, Path::new(&run.snapshot.repo))?;
+        let plan = expand_flow(&flow, Path::new(&run.snapshot.repo))?;
 
         loop {
             let current_flow_parents = flow_parents_for_index(&plan, run.step_index);
@@ -178,6 +178,7 @@ impl WaveExecutor {
                         run.ended_at = Some(OffsetDateTime::now_utc());
                         run.error = Some(format!("step {} failed", step.step.name));
                         self.store.update_wave_run(&run)?;
+                        self.set_wave_status(&wave.id, WaveStatus::Failed);
                         return Ok(());
                     }
                 }
@@ -187,10 +188,10 @@ impl WaveExecutor {
                         .model
                         .clone()
                         .unwrap_or_else(|| "unknown".to_string());
-                    let worktree = worktree_path(&run, &wave);
+                    let worktree = worktree_path(&run);
                     let agent = build_agent_for_step(
                         &run.id,
-                        &wave.repo,
+                        &run.snapshot.repo,
                         &worktree,
                         &step,
                         AgentStatus::Waiting,
@@ -200,6 +201,7 @@ impl WaveExecutor {
                     run.status = WaveRunStatus::Waiting;
                     run.flow_parents = step.flow_parents.clone();
                     self.store.update_wave_run(&run)?;
+                    self.set_wave_status(&wave.id, WaveStatus::Waiting);
                     return Ok(());
                 }
                 FlowAction::Fork { fork } => match &fork.select {
@@ -214,21 +216,29 @@ impl WaveExecutor {
                     run.status = WaveRunStatus::Completed;
                     run.ended_at = Some(OffsetDateTime::now_utc());
                     self.store.update_wave_run(&run)?;
+                    self.set_wave_status(&wave.id, WaveStatus::Completed);
                     return Ok(());
                 }
             }
         }
     }
 
+    fn set_wave_status(&self, wave_id: &LfdId, status: WaveStatus) {
+        if let Ok(Some(mut wave)) = self.store.get_wave(wave_id) {
+            wave.status = status;
+            let _ = self.store.update_wave(&wave);
+        }
+    }
+
     async fn run_step(&self, wave: &Wave, run: &mut WaveRun, step: &ConcreteStep) -> Result<i32> {
-        let worktree = worktree_path(run, wave);
+        let worktree = worktree_path(run);
         let (prompt, model, launch) =
-            build_step_prompt(&worktree, step, &wave.direction, Some(&wave.name))?;
+            build_step_prompt(&worktree, step, &run.snapshot.direction, Some(&wave.name))?;
         let cmd = build_agent_command(&model, &prompt, &launch);
 
         let agent = build_agent_for_step(
             &run.id,
-            &wave.repo,
+            &run.snapshot.repo,
             &worktree,
             step,
             AgentStatus::Running,
@@ -270,6 +280,7 @@ impl WaveExecutor {
             run.status = WaveRunStatus::Failed;
             run.error = Some("fork has no branches".to_string());
             self.store.update_wave_run(run)?;
+            self.set_wave_status(&wave.id, WaveStatus::Failed);
             return Ok(());
         }
 
@@ -283,6 +294,7 @@ impl WaveExecutor {
             run.status = WaveRunStatus::Failed;
             run.error = Some("interactive fork branches are not supported".to_string());
             self.store.update_wave_run(run)?;
+            self.set_wave_status(&wave.id, WaveStatus::Failed);
             return Ok(());
         }
 
@@ -291,6 +303,7 @@ impl WaveExecutor {
             run.status = WaveRunStatus::Failed;
             run.error = Some(format!("fork step {} failed", selected.step.name));
             self.store.update_wave_run(run)?;
+            self.set_wave_status(&wave.id, WaveStatus::Failed);
             return Ok(());
         }
 
@@ -314,13 +327,14 @@ impl WaveExecutor {
                 run.status = WaveRunStatus::Failed;
                 run.error = Some("interactive fork branches are not supported".to_string());
                 self.store.update_wave_run(run)?;
+                self.set_wave_status(&wave.id, WaveStatus::Failed);
                 return Ok(());
             }
 
-            let fork_worktree = fork_worktree_path(run, wave, index as u32);
+            let fork_worktree = fork_worktree_path(run, index as u32);
             if !Path::new(&fork_worktree).exists() {
                 create_worktree(
-                    Path::new(&wave.repo),
+                    Path::new(&run.snapshot.repo),
                     Path::new(&fork_worktree),
                     &format!("{}-fork-{}", run.id, index),
                 )?;
@@ -342,7 +356,7 @@ impl WaveExecutor {
         let (tx, mut rx) = mpsc::channel(fork_runs.len());
         let mut handles = Vec::new();
 
-        let wave_directions = wave.direction.clone();
+        let wave_directions = run.snapshot.direction.clone();
         for (fork_run, step) in fork_runs.iter() {
             let store = self.store.clone();
             let runner = self.runner.clone();
@@ -351,7 +365,7 @@ impl WaveExecutor {
             let cancel = cancel.clone();
             let tx = tx.clone();
             let wave_run_id = run.id.clone();
-            let wave_repo = wave.repo.clone();
+            let wave_repo = run.snapshot.repo.clone();
             let worktree = fork_run.worktree.clone();
             let fork_run_id = fork_run.id.clone();
             let fork_run = fork_run.clone();
@@ -451,6 +465,7 @@ impl WaveExecutor {
             run.status = WaveRunStatus::Failed;
             run.error = Some(error);
             self.store.update_wave_run(run)?;
+            self.set_wave_status(&wave.id, WaveStatus::Failed);
             return Ok(());
         }
 
@@ -471,6 +486,7 @@ impl WaveExecutor {
                 run.status = WaveRunStatus::Failed;
                 run.error = Some(format!("synthesize {} failed", step_name));
                 self.store.update_wave_run(run)?;
+                self.set_wave_status(&wave.id, WaveStatus::Failed);
                 return Ok(());
             }
         }
@@ -495,16 +511,16 @@ impl WaveExecutor {
     }
 }
 
-fn worktree_path(run: &WaveRun, wave: &Wave) -> String {
+fn worktree_path(run: &WaveRun) -> String {
     if run.worktree.is_empty() {
-        wave.repo.clone()
+        run.snapshot.repo.clone()
     } else {
         run.worktree.clone()
     }
 }
 
-fn fork_worktree_path(run: &WaveRun, wave: &Wave, branch_index: u32) -> String {
-    let base = worktree_path(run, wave);
+fn fork_worktree_path(run: &WaveRun, branch_index: u32) -> String {
+    let base = worktree_path(run);
     format!("{base}-fork-{branch_index}")
 }
 

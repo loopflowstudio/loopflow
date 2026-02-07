@@ -8,7 +8,7 @@ use crate::executor::WaveExecutor;
 use crate::id::LfdId;
 use crate::scheduler::Scheduler;
 use crate::store::SharedStore;
-use crate::types::StimulusKind;
+use crate::types::{StimulusKind, WaveStatus};
 
 pub fn spawn_loop_ticker(
     scheduler: std::sync::Arc<Scheduler>,
@@ -59,7 +59,7 @@ async fn tick_loop_waves(
             }
         };
 
-        if wave.paused {
+        if wave.status == WaveStatus::Paused {
             continue;
         }
 

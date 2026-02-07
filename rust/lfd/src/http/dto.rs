@@ -2,7 +2,7 @@ use serde::Serialize;
 use time::OffsetDateTime;
 
 use crate::registration::RegistrationState;
-use crate::types::{Wave, WaveRun, WaveRunStatus};
+use crate::types::{Wave, WaveRun, WaveRunStatus, WaveStatus};
 
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {
@@ -156,32 +156,27 @@ pub fn format_datetime(datetime: Option<OffsetDateTime>) -> Option<String> {
         .ok()
 }
 
-pub fn wave_run_dto(run: WaveRun, wave: Option<&Wave>, pr: Option<PullRequestDto>) -> WaveRunDto {
-    let (flow, repo, direction, area) = wave
-        .map(|wave| {
-            (
-                wave.flow.clone(),
-                wave.repo.clone(),
-                wave.direction.clone(),
-                wave.area.clone(),
-            )
-        })
-        .unwrap_or_else(|| (String::new(), String::new(), Vec::new(), Vec::new()));
-
+pub fn wave_run_dto(run: WaveRun) -> WaveRunDto {
     WaveRunDto {
         id: run.id.to_string(),
         object: "wave_run".to_string(),
         wave_id: run.wave_id.to_string(),
-        flow,
-        repo,
-        direction,
-        area,
+        flow: run.snapshot.flow.clone(),
+        repo: run.snapshot.repo.clone(),
+        direction: run.snapshot.direction.clone(),
+        area: run.snapshot.area.clone(),
         iteration: run.iteration,
         step_index: run.step_index,
         status: wave_run_status_str(run.status),
         local_worktree: run.worktree,
         remote_branch: run.branch,
-        pr,
+        pr: run.snapshot.pr.map(|pr| PullRequestDto {
+            url: pr.url,
+            number: pr.number,
+            state: pr.state,
+            title: pr.title,
+            branch: pr.branch,
+        }),
         started_at: format_datetime(run.started_at),
         ended_at: format_datetime(run.ended_at),
         error: run.error,
@@ -190,12 +185,7 @@ pub fn wave_run_dto(run: WaveRun, wave: Option<&Wave>, pr: Option<PullRequestDto
     }
 }
 
-pub fn wave_dto(
-    wave: &Wave,
-    status: String,
-    iteration: u32,
-    active_run: Option<WaveRunDto>,
-) -> WaveDto {
+pub fn wave_dto(wave: &Wave, active_run: Option<WaveRunDto>) -> WaveDto {
     WaveDto {
         id: wave.id.to_string(),
         object: "wave".to_string(),
@@ -205,8 +195,8 @@ pub fn wave_dto(
         direction: wave.direction.clone(),
         area: wave.area.clone(),
         created_at: format_datetime(wave.created_at),
-        status,
-        iteration,
+        status: wave.status.as_str().to_string(),
+        iteration: wave.iteration,
         active_run,
     }
 }
@@ -221,4 +211,14 @@ pub fn wave_run_status_str(status: WaveRunStatus) -> String {
         WaveRunStatus::Unspecified => "unknown",
     }
     .to_string()
+}
+
+pub fn wave_status_from_run(run: WaveRunStatus) -> WaveStatus {
+    match run {
+        WaveRunStatus::Pending | WaveRunStatus::Running => WaveStatus::Running,
+        WaveRunStatus::Waiting => WaveStatus::Waiting,
+        WaveRunStatus::Completed => WaveStatus::Completed,
+        WaveRunStatus::Failed => WaveStatus::Failed,
+        WaveRunStatus::Unspecified => WaveStatus::Idle,
+    }
 }

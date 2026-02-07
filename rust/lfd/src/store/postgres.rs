@@ -8,7 +8,9 @@ use tokio_postgres::types::ToSql;
 use tokio_postgres::{NoTls, Row};
 
 use crate::id::LfdId;
-use crate::store::{ForkRun, ForkRunStatus, RunStore, StoreError, StoreResult};
+use crate::store::{
+    schema::SCHEMA_VERSION, ForkRun, ForkRunStatus, RunStore, StoreError, StoreResult,
+};
 use crate::types::{
     Agent, AgentStatus, PendingActivation, PullRequest, Stimulus, StimulusKind, Wave, WaveRun,
     WaveRunSnapshot, WaveRunStatus, WaveStatus,
@@ -20,10 +22,21 @@ const RETRY_DELAYS: [Duration; 3] = [
     Duration::from_secs(2),
 ];
 
-const SCHEMA_VERSION: u32 = 4;
 const MIGRATION_001: &str = include_str!("migrations/postgres/001_initial.sql");
 const MIGRATION_002: &str = include_str!("migrations/postgres/002_flow_parents.sql");
 const MIGRATION_003: &str = include_str!("migrations/postgres/003_run_snapshots.sql");
+
+const MIGRATIONS: [(&str, &str); 3] = [
+    ("001_initial", MIGRATION_001),
+    ("002_flow_parents", MIGRATION_002),
+    ("003_run_snapshots", MIGRATION_003),
+];
+
+const MIGRATIONS: [(&str, &str); 3] = [
+    ("001_initial", MIGRATION_001),
+    ("002_flow_parents", MIGRATION_002),
+    ("003_run_snapshots", MIGRATION_003),
+];
 
 // NOTE: Sync trait with block_on bridging
 //
@@ -50,7 +63,7 @@ impl PostgresStore {
         let pool = build_pool(database_url)?;
         let store = Self { pool, runtime };
         let version = store.schema_version()?;
-        if version == 0 {
+        if version.is_empty() || version == "unknown" {
             return Err(StoreError::InvalidData(
                 "postgres schema missing; run `lfd migrate`".to_string(),
             ));
@@ -65,7 +78,7 @@ impl PostgresStore {
             .expect("failed to build postgres runtime");
         let pool = build_pool(database_url)?;
         let version = schema_version_async(&pool).await?;
-        if version == 0 {
+        if version.is_empty() || version == "unknown" {
             return Err(StoreError::InvalidData(
                 "postgres schema missing; run `lfd migrate`".to_string(),
             ));
@@ -74,7 +87,7 @@ impl PostgresStore {
     }
 
     #[allow(dead_code)]
-    pub fn migrate(database_url: &str) -> StoreResult<u32> {
+    pub fn migrate(database_url: &str) -> StoreResult<String> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -84,11 +97,11 @@ impl PostgresStore {
         migrator.migrate()
     }
 
-    pub async fn migrate_async(database_url: &str) -> StoreResult<u32> {
+    pub async fn migrate_async(database_url: &str) -> StoreResult<String> {
         migrate_async(database_url).await
     }
 
-    pub async fn migrate_status_async(database_url: &str) -> StoreResult<u32> {
+    pub async fn migrate_status_async(database_url: &str) -> StoreResult<String> {
         schema_version_direct(database_url).await
     }
 
@@ -205,7 +218,7 @@ impl RunStore for PostgresStore {
         })
     }
 
-    fn schema_version(&self) -> StoreResult<u32> {
+    fn schema_version(&self) -> StoreResult<String> {
         self.with_client(|client| async move {
             match client
                 .query_opt("SELECT value FROM meta WHERE key = 'schema_version'", &[])
@@ -213,13 +226,12 @@ impl RunStore for PostgresStore {
             {
                 Ok(Some(row)) => {
                     let value: String = row.get(0);
-                    let parsed = value.parse::<u32>().unwrap_or(SCHEMA_VERSION);
-                    Ok(parsed)
+                    Ok(value)
                 }
-                Ok(None) => Ok(0),
+                Ok(None) => Ok("unknown".to_string()),
                 Err(err) => {
                     if is_undefined_table(&err) {
-                        return Ok(0);
+                        return Ok("unknown".to_string());
                     }
                     Err(err.into())
                 }
@@ -959,30 +971,29 @@ impl PostgresMigrator {
         })
     }
 
-    fn schema_version(&self) -> StoreResult<u32> {
+    fn schema_version(&self) -> StoreResult<String> {
         self.with_client(|client| async move { schema_version_client(&client).await })
     }
 
-    fn migrate(&self) -> StoreResult<u32> {
+    fn migrate(&self) -> StoreResult<String> {
         let current = self.schema_version()?;
-        if current >= SCHEMA_VERSION {
+        if current == SCHEMA_VERSION {
             return Ok(current);
         }
 
         self.with_client(|client| async move {
             let mut client = client;
             let transaction = client.transaction().await?;
-            if current < 2 {
-                transaction.batch_execute(MIGRATION_001).await?;
-            }
-            if current < 3 {
-                transaction.batch_execute(MIGRATION_002).await?;
-            }
-            if current < 4 {
-                transaction.batch_execute(MIGRATION_003).await?;
-            }
+            ensure_schema_migrations(&transaction).await?;
+            apply_migrations(&transaction).await?;
+            transaction
+                .execute(
+                    "UPDATE meta SET value = $1 WHERE key = 'schema_version'",
+                    &[&SCHEMA_VERSION],
+                )
+                .await?;
             transaction.commit().await?;
-            Ok(SCHEMA_VERSION)
+            Ok(SCHEMA_VERSION.to_string())
         })
     }
 }
@@ -1160,9 +1171,9 @@ fn serialize_pr(value: &Option<PullRequest>) -> StoreResult<serde_json::Value> {
 
 fn parse_pr(value: Option<serde_json::Value>) -> StoreResult<Option<PullRequest>> {
     match value {
-        Some(value) if !value.is_null() => {
-            serde_json::from_value::<PullRequest>(value).map(Some).map_err(StoreError::Serde)
-        }
+        Some(value) if !value.is_null() => serde_json::from_value::<PullRequest>(value)
+            .map(Some)
+            .map_err(StoreError::Serde),
         _ => Ok(None),
     }
 }
@@ -1173,32 +1184,31 @@ fn is_undefined_table(err: &tokio_postgres::Error) -> bool {
         .unwrap_or(false)
 }
 
-async fn schema_version_client(client: &tokio_postgres::Client) -> StoreResult<u32> {
+async fn schema_version_client(client: &tokio_postgres::Client) -> StoreResult<String> {
     match client
         .query_opt("SELECT value FROM meta WHERE key = 'schema_version'", &[])
         .await
     {
         Ok(Some(row)) => {
             let value: String = row.get(0);
-            let parsed = value.parse::<u32>().unwrap_or(SCHEMA_VERSION);
-            Ok(parsed)
+            Ok(value)
         }
-        Ok(None) => Ok(0),
+        Ok(None) => Ok("unknown".to_string()),
         Err(err) => {
             if is_undefined_table(&err) {
-                return Ok(0);
+                return Ok("unknown".to_string());
             }
             Err(err.into())
         }
     }
 }
 
-async fn schema_version_async(pool: &Pool) -> StoreResult<u32> {
+async fn schema_version_async(pool: &Pool) -> StoreResult<String> {
     let client = pool.get().await?;
     schema_version_client(&client).await
 }
 
-async fn schema_version_direct(database_url: &str) -> StoreResult<u32> {
+async fn schema_version_direct(database_url: &str) -> StoreResult<String> {
     let (client, connection) = tokio_postgres::connect(database_url, NoTls).await?;
     let connection_task = tokio::spawn(async move {
         let _ = connection.await;
@@ -1208,9 +1218,9 @@ async fn schema_version_direct(database_url: &str) -> StoreResult<u32> {
     result
 }
 
-async fn migrate_async(database_url: &str) -> StoreResult<u32> {
+async fn migrate_async(database_url: &str) -> StoreResult<String> {
     let current = schema_version_direct(database_url).await?;
-    if current >= SCHEMA_VERSION {
+    if current == SCHEMA_VERSION {
         return Ok(current);
     }
 
@@ -1219,8 +1229,66 @@ async fn migrate_async(database_url: &str) -> StoreResult<u32> {
         let _ = connection.await;
     });
     let transaction = client.transaction().await?;
-    transaction.batch_execute(MIGRATION_001).await?;
+    ensure_schema_migrations(&transaction).await?;
+    apply_migrations(&transaction).await?;
+    transaction
+        .execute(
+            "UPDATE meta SET value = $1 WHERE key = 'schema_version'",
+            &[&SCHEMA_VERSION],
+        )
+        .await?;
     transaction.commit().await?;
     connection_task.abort();
-    Ok(SCHEMA_VERSION)
+    Ok(SCHEMA_VERSION.to_string())
+}
+
+async fn ensure_schema_migrations(
+    transaction: &tokio_postgres::Transaction<'_>,
+) -> StoreResult<()> {
+    transaction
+        .batch_execute(
+            "
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                version TEXT PRIMARY KEY,
+                applied_at BIGINT NOT NULL
+            );
+            ",
+        )
+        .await?;
+    Ok(())
+}
+
+async fn apply_migrations(transaction: &tokio_postgres::Transaction<'_>) -> StoreResult<()> {
+    let rows = transaction
+        .query("SELECT version FROM schema_migrations", &[])
+        .await?;
+    let applied: std::collections::HashSet<String> =
+        rows.into_iter().map(|row| row.get(0)).collect();
+
+    let timestamp = now_unix();
+    for (name, sql) in MIGRATIONS {
+        if applied.contains(name) {
+            continue;
+        }
+        transaction.batch_execute(sql).await?;
+        transaction
+            .execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES ($1, $2)",
+                &[&name, &timestamp],
+            )
+            .await?;
+    }
+
+    if applied.is_empty() {
+        let baseline_version = format!("baseline:{}", SCHEMA_VERSION);
+        transaction
+            .execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES ($1, $2)
+                 ON CONFLICT (version) DO NOTHING",
+                &[&baseline_version, &timestamp],
+            )
+            .await?;
+    }
+
+    Ok(())
 }

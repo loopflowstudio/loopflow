@@ -2,7 +2,76 @@
 
 import Foundation
 
-public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
+public struct WaveConfigUpdate: Sendable {
+    public var name: String?
+    public var area: [String]?
+    public var direction: [String]?
+    public var flow: String?
+    public var stimulus: Stimulus?
+    public var status: WaveStatus?
+
+    public init(
+        name: String? = nil,
+        area: [String]? = nil,
+        direction: [String]? = nil,
+        flow: String? = nil,
+        stimulus: Stimulus? = nil,
+        status: WaveStatus? = nil
+    ) {
+        self.name = name
+        self.area = area
+        self.direction = direction
+        self.flow = flow
+        self.stimulus = stimulus
+        self.status = status
+    }
+}
+
+public struct RunOverrides: Sendable {
+    public var area: [String]?
+    public var direction: [String]?
+    public var flow: String?
+    public var stimulus: Stimulus?
+
+    public init(
+        area: [String]? = nil,
+        direction: [String]? = nil,
+        flow: String? = nil,
+        stimulus: Stimulus? = nil
+    ) {
+        self.area = area
+        self.direction = direction
+        self.flow = flow
+        self.stimulus = stimulus
+    }
+}
+
+public struct ConnectionInfo: Sendable {
+    public let worktree: String
+    public let step: String
+    public let agentId: String
+    public let promptFile: String
+    public let waveRunId: String?
+    public let stepIndex: Int
+
+    public init(
+        worktree: String,
+        step: String,
+        agentId: String,
+        promptFile: String,
+        waveRunId: String?,
+        stepIndex: Int
+    ) {
+        self.worktree = worktree
+        self.step = step
+        self.agentId = agentId
+        self.promptFile = promptFile
+        self.waveRunId = waveRunId
+        self.stepIndex = stepIndex
+    }
+}
+
+public struct LocalWaveService: @unchecked Sendable {
     public init() {}
     private let baseURL = lfdBaseURL
     private let apiBaseURL = lfdApiBaseURL
@@ -62,11 +131,87 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
                 return []
             }
 
-            let waves = wavesData.map { parseWaveFromJSON($0) }
+            let waves = wavesData.map { Self.parseWaveFromJSON($0) }
             LoggingService.lfd("listWaves: found \(waves.count) waves")
             return waves
         } catch {
             LoggingService.lfd("listWaves: error=\(error.localizedDescription)")
+            return []
+        }
+    }
+
+    /// Fetch a single wave by id.
+    public func getWave(_ id: String) async throws -> Wave {
+        var components = URLComponents(url: apiBaseURL.appendingPathComponent("waves/\(id)"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "expand[]", value: "active_run")]
+
+        guard let url = components.url else {
+            throw WaveServiceError.commandFailed("Invalid wave URL")
+        }
+
+        LoggingService.lfd("getWave: GET \(url)")
+
+        let (data, response) = try await session.data(from: url)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw WaveServiceError.commandFailed("No response from lfd")
+        }
+
+        guard httpResponse.statusCode == 200 else {
+            let errorMsg = Self.parseErrorMessage(data)
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(httpResponse.statusCode)")
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+
+        return Self.parseWaveFromJSON(json)
+    }
+
+    /// List flows and steps from lfd.
+    public func listFlows(repo: URL) async throws -> [Flow] {
+        var components = URLComponents(url: apiBaseURL.appendingPathComponent("flows"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "repo", value: repo.path)]
+
+        guard let url = components.url else {
+            LoggingService.lfd("listFlows: invalid URL")
+            return []
+        }
+
+        LoggingService.lfd("listFlows: GET \(url)")
+
+        do {
+            let (data, response) = try await session.data(from: url)
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                return []
+            }
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let result = json["result"] as? [String: Any] else {
+                return []
+            }
+
+            var allFlows: [Flow] = []
+            if let flowsData = result["flows"] as? [[String: Any]] {
+                for flowDict in flowsData {
+                    guard let name = flowDict["name"] as? String else { continue }
+                    let stepNames = flowDict["steps"] as? [String] ?? []
+                    let steps = stepNames.map { Step(prompt: $0) }
+                    allFlows.append(Flow(name: name, steps: steps, type: .flow))
+                }
+            }
+
+            if let stepsData = result["steps"] as? [[String: Any]] {
+                for stepDict in stepsData {
+                    guard let name = stepDict["name"] as? String else { continue }
+                    allFlows.append(Flow(name: name, steps: [Step(prompt: name)], type: .step))
+                }
+            }
+
+            let flows = allFlows.filter { $0.type == .flow }.sorted { $0.name < $1.name }
+            let steps = allFlows.filter { $0.type == .step }.sorted { $0.name < $1.name }
+            return flows + steps
+        } catch {
             return []
         }
     }
@@ -174,12 +319,12 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
             }
 
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                let errorMsg = parseErrorMessage(data) ?? "Invalid response"
+                let errorMsg = Self.parseErrorMessage(data) ?? "Invalid response"
                 LoggingService.lfd("createWave: invalid response error=\(errorMsg)")
                 throw WaveServiceError.commandFailed(errorMsg)
             }
 
-            let wave = parseWaveFromJSON(json)
+            let wave = Self.parseWaveFromJSON(json)
             LoggingService.lfd("createWave: success id=\(wave.id) name=\(wave.name)")
             return wave
         } catch let error as WaveServiceError {
@@ -190,7 +335,7 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
         }
     }
 
-    private func parseWaveFromJSON(_ json: [String: Any]) -> Wave {
+    static func parseWaveFromJSON(_ json: [String: Any]) -> Wave {
         let dateFormatter = ISO8601DateFormatter()
         dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
 
@@ -202,128 +347,34 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
             stimulus = Stimulus(kind: .once)
         }
 
-        var createdAt = Date()
+        let createdAt: Date?
         if let dateStr = json["created_at"] as? String {
-            createdAt = dateFormatter.date(from: dateStr) ?? Date()
+            createdAt = dateFormatter.date(from: dateStr) ?? ISO8601DateFormatter().date(from: dateStr)
+        } else {
+            createdAt = nil
         }
 
-        // Parse PR URL
-        var prURL: URL?
-        if let urlStr = json["pr_url"] as? String {
-            prURL = URL(string: urlStr)
-        }
-
-        // Parse PR state
-        var prState: PRState?
-        if let stateStr = json["pr_state"] as? String {
-            prState = PRState(rawValue: stateStr.lowercased())
-        }
-
-        var prNumber: Int? = json["pr_number"] as? Int
-        if prURL == nil || prState == nil || prNumber == nil {
-            if let activeRun = json["active_run"] as? [String: Any],
-               let pr = activeRun["pr"] as? [String: Any],
-               let urlString = pr["url"] as? String,
-               let url = URL(string: urlString) {
-                prURL = url
-                prNumber = pr["number"] as? Int
-                if let state = pr["state"] as? String {
-                    prState = PRState(rawValue: state.lowercased())
-                }
-            }
-        }
-
-        // Parse staleness
-        var staleness: Staleness = .active
-        if let stalenessStr = json["staleness"] as? String {
-            switch stalenessStr {
-            case "merged": staleness = .merged
-            case "remote_deleted": staleness = .remoteDeleted
-            default:
-                if let days = json["staleness_days"] as? Int {
-                    staleness = .inactive(days: days)
-                }
-            }
-        }
-
-        // Parse recent steps
-        var recentSteps: [StepRun] = []
-        if let stepsData = json["recent_steps"] as? [[String: Any]] {
-            recentSteps = stepsData.compactMap { stepJson -> StepRun? in
-                guard let id = stepJson["id"] as? String,
-                      let step = stepJson["step"] as? String,
-                      let status = stepJson["status"] as? String else {
-                    return nil
-                }
-                let stepRunJSON = StepRunJSON(
-                    id: id,
-                    step: step,
-                    status: status,
-                    startedAt: stepJson["started_at"] as? String,
-                    endedAt: stepJson["ended_at"] as? String
-                )
-                return StepRun(from: stepRunJSON)
-            }
-        }
-
-        // Parse waiting reason
-        var waitingReason: WaitingReason?
-        if let reason = json["waiting_reason"] as? String,
-           reason == "pr_limit_reached",
-           let openPRs = json["open_prs"] as? Int {
-            let prLimit = json["pr_limit"] as? Int ?? 5
-            waitingReason = .prLimitReached(open: openPRs, limit: prLimit)
-        }
-
-        // Parse flow progress fields
-        let stepIndex = json["step_index"] as? Int ?? 0
-        let flowSteps = json["flow_steps"] as? [String]
-        var runStartedAt: Date?
-        if let dateStr = json["run_started_at"] as? String {
-            runStartedAt = dateFormatter.date(from: dateStr)
-        }
-
-        let status = WaveStatus(rawValue: json["status"] as? String ?? "idle") ?? .idle
-        let paused = status == .paused
+        let statusValue = json["status"] as? String ?? "idle"
+        let normalizedStatus = statusValue == "error" ? "failed" : statusValue
+        let status = WaveStatus(rawValue: normalizedStatus) ?? .idle
+        let activeRun = (json["active_run"] as? [String: Any]).flatMap(parseWaveRunFromJSON)
 
         return Wave(
             id: json["id"] as? String ?? UUID().uuidString,
             name: json["name"] as? String ?? "",
-            area: json["area"] as? [String],
-            direction: json["direction"] as? [String],
-            flow: json["flow"] as? String ?? "design",
             repo: json["repo"] as? String ?? "",
+            flow: json["flow"] as? String ?? "design",
+            direction: normalizeStringList(json["direction"]),
+            area: normalizeStringList(json["area"]),
             stimulus: stimulus,
-            paused: paused,
             status: status,
             iteration: json["iteration"] as? Int ?? 0,
-            worktreePath: json["worktree"] as? String,
-            branch: json["branch"] as? String,
-            isDirty: json["is_dirty"] as? Bool ?? false,
-            isRebasing: json["is_rebasing"] as? Bool ?? false,
-            isMerging: json["is_merging"] as? Bool ?? false,
-            hasDiff: json["has_diff"] as? Bool ?? false,
-            aheadMain: json["ahead_main"] as? Int ?? 0,
-            behindMain: json["behind_main"] as? Int ?? 0,
-            aheadRemote: json["ahead_remote"] as? Int ?? 0,
-            behindRemote: json["behind_remote"] as? Int ?? 0,
-            prURL: prURL,
-            prNumber: prNumber,
-            prState: prState,
-            staleness: staleness,
-            recentSteps: recentSteps,
-            prLimit: json["pr_limit"] as? Int ?? 5,
-            mergeMode: MergeMode(rawValue: json["merge_mode"] as? String ?? "pr") ?? .pr,
-            pid: json["pid"] as? Int,
-            createdAt: createdAt,
-            waitingReason: waitingReason,
-            stepIndex: stepIndex,
-            flowSteps: flowSteps,
-            runStartedAt: runStartedAt
+            activeRun: activeRun,
+            createdAt: createdAt
         )
     }
 
-    /// Update wave configuration (name, area, direction, flow, stimulus, paused).
+    /// Update wave configuration (name, area, direction, flow, stimulus, status).
     public func updateWave(_ id: String, config: WaveConfigUpdate) async throws -> Wave {
         let url = apiBaseURL.appendingPathComponent("waves/\(id)")
 
@@ -341,7 +392,7 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
             if let cron = stimulus.cron { stimDict["cron"] = cron }
             body["stimulus"] = stimDict
         }
-        if let paused = config.paused { body["paused"] = paused }
+        if let status = config.status { body["status"] = status.rawValue }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -349,16 +400,16 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
 
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-            let errorMsg = parseErrorMessage(data)
+            let errorMsg = Self.parseErrorMessage(data)
             throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            let errorMsg = parseErrorMessage(data)
+            let errorMsg = Self.parseErrorMessage(data)
             throw WaveServiceError.commandFailed(errorMsg ?? "Invalid response")
         }
 
-        return parseWaveFromJSON(json)
+        return Self.parseWaveFromJSON(json)
     }
 
     /// Run wave, optionally with one-time overrides.
@@ -390,12 +441,12 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
 
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-            let errorMsg = parseErrorMessage(data)
+            let errorMsg = Self.parseErrorMessage(data)
             throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
         }
 
         guard (try? JSONSerialization.jsonObject(with: data)) != nil else {
-            let errorMsg = parseErrorMessage(data)
+            let errorMsg = Self.parseErrorMessage(data)
             throw WaveServiceError.commandFailed(errorMsg ?? "Invalid response")
         }
     }
@@ -456,16 +507,16 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
 
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-            let errorMsg = parseErrorMessage(data)
+            let errorMsg = Self.parseErrorMessage(data)
             throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            let errorMsg = parseErrorMessage(data)
+            let errorMsg = Self.parseErrorMessage(data)
             throw WaveServiceError.commandFailed(errorMsg ?? "Invalid response")
         }
 
-        return parseWaveFromJSON(json)
+        return Self.parseWaveFromJSON(json)
     }
 
     /// Delete a wave.
@@ -479,12 +530,12 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
 
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-            let errorMsg = parseErrorMessage(data)
+            let errorMsg = Self.parseErrorMessage(data)
             throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
         }
 
         guard (try? JSONSerialization.jsonObject(with: data)) != nil else {
-            let errorMsg = parseErrorMessage(data)
+            let errorMsg = Self.parseErrorMessage(data)
             throw WaveServiceError.commandFailed(errorMsg ?? "Invalid response")
         }
     }
@@ -502,7 +553,7 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
 
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-            let errorMsg = parseErrorMessage(data)
+            let errorMsg = Self.parseErrorMessage(data)
             throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
         }
 
@@ -523,7 +574,7 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
 
     // MARK: - Private helpers
 
-    private func parseWaveRunFromJSON(_ json: [String: Any]) -> WaveRun? {
+    private static func parseWaveRunFromJSON(_ json: [String: Any]) -> WaveRun? {
         guard let id = json["id"] as? String,
               let flow = json["flow"] as? String,
               let repoPath = json["repo"] as? String else {
@@ -531,11 +582,12 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
         }
 
         let waveId = json["wave_id"] as? String
-        let area = normalizeArea(json["area"])
+        let area = normalizeAreaDisplay(json["area"])
         let direction = normalizeDirection(json["direction"])
         let statusStr = json["status"] as? String ?? WaveRunStatus.pending.rawValue
         let status = WaveRunStatus(rawValue: statusStr) ?? .pending
         let iteration = normalizeInt(json["iteration"])
+        let stepIndex = normalizeInt(json["step_index"])
 
         let pr: PullRequest?
         if let prData = json["pr"] as? [String: Any],
@@ -559,6 +611,7 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
             direction: direction,
             status: status,
             iteration: iteration,
+            stepIndex: stepIndex,
             worktree: json["local_worktree"] as? String,
             branch: json["remote_branch"] as? String,
             currentStep: json["current_step"] as? String,
@@ -570,7 +623,13 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
         )
     }
 
-    private func normalizeArea(_ value: Any?) -> String {
+    private static func normalizeStringList(_ value: Any?) -> [String] {
+        if let list = value as? [String] { return list }
+        if let str = value as? String { return decodeStringArray(str) }
+        return []
+    }
+
+    private static func normalizeAreaDisplay(_ value: Any?) -> String {
         if let area = value as? String {
             let decoded = decodeStringArray(area)
             if decoded.count == 1 { return decoded[0] }
@@ -584,19 +643,17 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
         return "."
     }
 
-    private func normalizeDirection(_ value: Any?) -> [String] {
-        if let list = value as? [String] { return list }
-        if let str = value as? String { return decodeStringArray(str) }
-        return []
+    private static func normalizeDirection(_ value: Any?) -> [String] {
+        normalizeStringList(value)
     }
 
-    private func normalizeInt(_ value: Any?) -> Int {
+    private static func normalizeInt(_ value: Any?) -> Int {
         if let intValue = value as? Int { return intValue }
         if let doubleValue = value as? Double { return Int(doubleValue) }
         return 0
     }
 
-    private func parseDate(_ value: Any?) -> Date? {
+    private static func parseDate(_ value: Any?) -> Date? {
         guard let dateStr = value as? String else { return nil }
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -606,7 +663,7 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
         return ISO8601DateFormatter().date(from: dateStr)
     }
 
-    private func decodeStringArray(_ str: String?) -> [String] {
+    private static func decodeStringArray(_ str: String?) -> [String] {
         guard let str, !str.isEmpty else { return [] }
         guard let data = str.data(using: .utf8) else { return [str] }
         if let decoded = try? JSONDecoder().decode([String].self, from: data) {
@@ -618,7 +675,7 @@ public struct LocalWaveService: WaveServiceProtocol, @unchecked Sendable {
         return [str]
     }
 
-    private func parseErrorMessage(_ data: Data) -> String? {
+    private static func parseErrorMessage(_ data: Data) -> String? {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
         }

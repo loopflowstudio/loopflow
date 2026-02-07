@@ -6,7 +6,7 @@ import AppKit
 import LoopflowCore
 
 struct WaveRow: View {
-    let wave: Wave
+    let wave: WaveViewModel
     let isSelected: Bool
     var isKeyboardFocused: Bool = false
     let liveOutput: [OutputLine]
@@ -164,7 +164,7 @@ struct WaveRow: View {
             }
             return "Idle"
         case .completed: return "Completed"
-        case .error: return "Error"
+        case .failed: return "Failed"
         case .paused: return "Paused"
         }
     }

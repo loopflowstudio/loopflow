@@ -4,6 +4,7 @@ use crate::id::LfdId;
 use crate::types::{Agent, PendingActivation, Stimulus, Wave, WaveRun};
 
 pub mod postgres;
+pub mod schema;
 pub mod sqlite;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,7 +58,7 @@ pub type StoreResult<T> = Result<T, StoreError>;
 #[allow(dead_code)]
 pub trait RunStore: Send + Sync {
     fn health_check(&self) -> StoreResult<()>;
-    fn schema_version(&self) -> StoreResult<u32>;
+    fn schema_version(&self) -> StoreResult<String>;
 
     // Wave management
     fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>>;
@@ -137,8 +138,8 @@ mod tests {
     use super::{ForkRun, ForkRunStatus, RunStore};
     use crate::id::LfdId;
     use crate::types::{
-        Agent, AgentStatus, PendingActivation, Stimulus, StimulusKind, Wave, WaveRun, WaveRunStatus,
-        WaveRunSnapshot, WaveStatus,
+        Agent, AgentStatus, PendingActivation, Stimulus, StimulusKind, Wave, WaveRun,
+        WaveRunSnapshot, WaveRunStatus, WaveStatus,
     };
     use std::env;
     use std::path::PathBuf;

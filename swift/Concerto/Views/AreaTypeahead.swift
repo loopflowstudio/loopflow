@@ -145,7 +145,7 @@ struct AreaChip: View {
 // MARK: - Area Typeahead
 
 struct AreaTypeahead: View {
-    let wave: Wave
+    let wave: WaveViewModel
     let onSelect: ([String]) -> Void
 
     @Environment(RepoState.self) private var repoState
@@ -191,7 +191,7 @@ struct AreaTypeahead: View {
             .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
         }
         .onAppear {
-            selectedAreas = wave.area ?? []
+            selectedAreas = wave.area
         }
     }
 
@@ -314,12 +314,15 @@ struct AreaTypeahead: View {
     let repoState = RepoState()
     repoState.currentRepo = URL(fileURLWithPath: "/Users/jack/src/loopflow")
 
-    let wave = Wave(
-        id: "test",
-        name: "test-wave",
-        area: ["src/loopflow"],
-        flow: "design",
-        repo: "/Users/jack/src/loopflow",
+    let wave = WaveViewModel(
+        api: Wave(
+            id: "test",
+            name: "test-wave",
+            repo: "/Users/jack/src/loopflow",
+            flow: "design",
+            direction: [],
+            area: ["src/loopflow"]
+        ),
         recentSteps: []
     )
 

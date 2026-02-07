@@ -12,7 +12,6 @@ struct ScreenshotWindow: View {
     let recentsService: RecentsService
     @State private var repoState = RepoState()
     @State private var sessionState = SessionState()
-    @State private var launcherState = LauncherState()
     @State private var hasLoaded = false
     @State private var hasCaptured = false
 
@@ -21,7 +20,6 @@ struct ScreenshotWindow: View {
         ScreenshotLayout()
             .environment(repoState)
             .environment(sessionState)
-            .environment(launcherState)
             .task {
                 await setupState()
             }
@@ -40,7 +38,7 @@ struct ScreenshotWindow: View {
         // Open the repo if specified (skip background refresh in mock mode to avoid overwriting mock data)
         if let repoPath = mode.repoPath {
             let repoURL = URL(fileURLWithPath: (repoPath as NSString).expandingTildeInPath)
-            await repoState.openRepo(repoURL, launcherState: launcherState, sessionState: sessionState, skipBackgroundRefresh: mode.mockLoops)
+            await repoState.openRepo(repoURL, sessionState: sessionState, skipBackgroundRefresh: mode.mockLoops)
         }
 
         // Configure mock waves if requested
@@ -106,7 +104,6 @@ struct ScreenshotWindow: View {
 private struct ScreenshotLayout: View {
     @Environment(RepoState.self) private var repoState
     @Environment(SessionState.self) private var sessionState
-    @Environment(LauncherState.self) private var launcherState
     @Environment(\.colorScheme) private var colorScheme
 
     private var palette: LoopflowPalette {

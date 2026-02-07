@@ -1,17 +1,16 @@
+pub mod flows;
 pub mod hooks;
 pub mod system;
 pub mod wave_runs;
 pub mod waves;
 pub mod ws;
 
-use axum::http::StatusCode;
-use axum::Json;
-use std::path::Path;
-
-use crate::http::dto::{wave_dto, wave_run_dto, ErrorResponse, PullRequestDto, WaveDto};
+use crate::http::dto::{wave_dto, wave_run_dto, ErrorResponse, WaveDto};
 use crate::http::run_store;
 use crate::store::{SharedStore, StoreError};
-use crate::types::{Wave, WaveRun};
+use crate::types::{Wave, WaveStatus};
+use axum::http::StatusCode;
+use axum::Json;
 
 pub async fn resolve_wave_id(
     state: &crate::http::HttpState,
@@ -22,14 +21,10 @@ pub async fn resolve_wave_id(
     }
 
     let name = value.to_string();
-    let waves = run_store(&state.store, move |store| store.list_waves(None))
+    let wave = run_store(&state.store, move |store| store.get_wave_by_name(&name))
         .await
         .map_err(crate::http::map_store_error)?;
-
-    waves
-        .into_iter()
-        .find(|wave| wave.name == name)
-        .map(|wave| wave.id)
+    wave.map(|wave| wave.id)
         .ok_or_else(|| crate::http::api_error(StatusCode::NOT_FOUND, "wave not found"))
 }
 
@@ -53,72 +48,11 @@ pub async fn build_wave_dto(
     let wave_id = wave.id.clone();
     let active = run_store(store, move |store| store.get_active_wave_run(&wave_id)).await?;
 
-    let status = if wave.paused {
-        "paused".to_string()
-    } else {
-        active
-            .as_ref()
-            .map(|run| wave_run_dto(run.clone(), Some(&wave), None).status.clone())
-            .unwrap_or_else(|| "idle".to_string())
-    };
-
-    let iteration = if let Some(run) = active.as_ref() {
-        run.iteration
-    } else {
-        let wave_id = wave.id.clone();
-        let last_run = run_store(store, move |store| {
-            store.list_wave_runs(Some(&wave_id), Some(1))
-        })
-        .await?
-        .into_iter()
-        .next();
-        last_run.map(|run| run.iteration).unwrap_or(0)
-    };
-
     let active_run = if include_active_run {
-        let pr = if let Some(run) = active.as_ref() {
-            pr_for_run(store, run, Some(&wave)).await?
-        } else {
-            None
-        };
-        active.map(|run| wave_run_dto(run, Some(&wave), pr))
+        active.map(wave_run_dto)
     } else {
         None
     };
 
-    Ok(wave_dto(&wave, status, iteration, active_run))
-}
-
-pub async fn pr_for_run(
-    _store: &SharedStore,
-    run: &WaveRun,
-    wave: Option<&Wave>,
-) -> Result<Option<PullRequestDto>, StoreError> {
-    let worktree = if !run.worktree.is_empty() {
-        run.worktree.clone()
-    } else {
-        wave.map(|wave| wave.repo.clone()).unwrap_or_default()
-    };
-
-    if worktree.is_empty() {
-        return Ok(None);
-    }
-
-    let worktree_path = worktree.clone();
-    let result =
-        tokio::task::spawn_blocking(move || loopflow_ops::current_pr(Path::new(&worktree_path)))
-            .await
-            .map_err(|err| StoreError::InvalidData(err.to_string()))?;
-
-    match result {
-        Ok(Some(pr)) => Ok(Some(PullRequestDto {
-            url: pr.url,
-            number: Some(pr.number as u32),
-            state: Some(pr.state),
-            title: None,
-            branch: Some(pr.branch),
-        })),
-        Ok(None) => Ok(None),
-        Err(_) => Ok(None),
-    }
+    Ok(wave_dto(&wave, active_run))
 }

@@ -45,7 +45,7 @@ public enum WaveStatus: String, Sendable, Codable {
     case running
     case waiting
     case completed
-    case error
+    case failed
     case paused
 
     public var color: Color {
@@ -54,7 +54,7 @@ public enum WaveStatus: String, Sendable, Codable {
         case .waiting: return .yellow
         case .idle: return .gray
         case .completed: return .green
-        case .error: return .red
+        case .failed: return .red
         case .paused: return .gray
         }
     }
@@ -65,7 +65,7 @@ public enum WaveStatus: String, Sendable, Codable {
         case .waiting: return "circle.lefthalf.filled"
         case .idle: return "circle"
         case .completed: return "checkmark.circle.fill"
-        case .error: return "xmark.circle.fill"
+        case .failed: return "xmark.circle.fill"
         case .paused: return "pause.circle"
         }
     }
@@ -140,229 +140,40 @@ public func shellEscape(_ string: String) -> String {
 
 public struct Wave: Sendable, Identifiable, Hashable {
     public let id: String
-    public var name: String  // User-visible name (e.g., "swift-falcon")
-    public var area: [String]?  // Optional, validated at run-time
-    public var direction: [String]?  // Optional, validated at run-time
+    public var name: String
+    public var repo: String
     public var flow: String
-    public let repo: String
-
+    public var direction: [String]
+    public var area: [String]
     public var stimulus: Stimulus
-    public var paused: Bool  // When true, stimulus doesn't fire (manual mode)
     public var status: WaveStatus
     public var iteration: Int
-
-    // Worktree (waves always have worktrees)
-    public var worktreePath: String?  // Path to the worktree
-    public var branch: String?  // Git branch (auto-generated)
-
-    // Git status (enriched from daemon)
-    public var isDirty: Bool
-    public var isRebasing: Bool
-    public var isMerging: Bool
-    public var hasDiff: Bool
-    public var aheadMain: Int
-    public var behindMain: Int
-    public var aheadRemote: Int
-    public var behindRemote: Int
-
-    // PR status
-    public var prURL: URL?
-    public var prNumber: Int?
-    public var prState: PRState?
-
-    // Staleness
-    public var staleness: Staleness
-    public var recentSteps: [StepRun]
-
-    // Config
-    public var prLimit: Int
-    public var mergeMode: MergeMode
-    public var pid: Int?
-    public var createdAt: Date
-
-    // Watch state
-    public var lastMainSha: String?
-
-    // Waiting state
-    public var waitingReason: WaitingReason?
-
-    // Flow progress (for running state UI)
-    public var stepIndex: Int
-    public var flowSteps: [String]?
-    public var runStartedAt: Date?
+    public var activeRun: WaveRun?
+    public var createdAt: Date?
 
     public init(
         id: String,
         name: String = "",
-        area: [String]? = nil,
-        direction: [String]? = nil,
-        flow: String = "design",
         repo: String,
+        flow: String = "design",
+        direction: [String] = [],
+        area: [String] = [],
         stimulus: Stimulus = Stimulus(kind: .once),
-        paused: Bool = true,
         status: WaveStatus = .idle,
         iteration: Int = 0,
-        worktreePath: String? = nil,
-        branch: String? = nil,
-        isDirty: Bool = false,
-        isRebasing: Bool = false,
-        isMerging: Bool = false,
-        hasDiff: Bool = false,
-        aheadMain: Int = 0,
-        behindMain: Int = 0,
-        aheadRemote: Int = 0,
-        behindRemote: Int = 0,
-        prURL: URL? = nil,
-        prNumber: Int? = nil,
-        prState: PRState? = nil,
-        staleness: Staleness = .active,
-        recentSteps: [StepRun] = [],
-        prLimit: Int = 5,
-        mergeMode: MergeMode = .pr,
-        pid: Int? = nil,
-        createdAt: Date = Date(),
-        lastMainSha: String? = nil,
-        waitingReason: WaitingReason? = nil,
-        stepIndex: Int = 0,
-        flowSteps: [String]? = nil,
-        runStartedAt: Date? = nil
+        activeRun: WaveRun? = nil,
+        createdAt: Date? = nil
     ) {
         self.id = id
         self.name = name
-        self.area = area
-        self.direction = direction
-        self.flow = flow
         self.repo = repo
+        self.flow = flow
+        self.direction = direction
+        self.area = area
         self.stimulus = stimulus
-        self.paused = paused
         self.status = status
         self.iteration = iteration
-        self.worktreePath = worktreePath
-        self.branch = branch
-        self.isDirty = isDirty
-        self.isRebasing = isRebasing
-        self.isMerging = isMerging
-        self.hasDiff = hasDiff
-        self.aheadMain = aheadMain
-        self.behindMain = behindMain
-        self.aheadRemote = aheadRemote
-        self.behindRemote = behindRemote
-        self.prURL = prURL
-        self.prNumber = prNumber
-        self.prState = prState
-        self.staleness = staleness
-        self.recentSteps = recentSteps
-        self.prLimit = prLimit
-        self.mergeMode = mergeMode
-        self.pid = pid
+        self.activeRun = activeRun
         self.createdAt = createdAt
-        self.lastMainSha = lastMainSha
-        self.waitingReason = waitingReason
-        self.stepIndex = stepIndex
-        self.flowSteps = flowSteps
-        self.runStartedAt = runStartedAt
-    }
-
-    /// Check if wave has required config for running.
-    public var isConfigured: Bool {
-        area != nil
-    }
-
-
-    public var shortId: String { String(id.prefix(7)) }
-
-    /// User-visible display name. Uses the name if set, otherwise generates from area/flow.
-    public var displayName: String {
-        if !name.isEmpty { return name }
-        return generateNameFromInput()
-    }
-
-    private func generateNameFromInput() -> String {
-        // Generate a display name from the wave's configuration
-        let areaStr: String
-        if let firstArea = area?.first {
-            areaStr = firstArea == "." ? "root" : firstArea
-        } else {
-            areaStr = "root"
-        }
-        return "\(areaStr) · \(flow.isEmpty ? "default" : flow)"
-    }
-
-    public var areaDisplay: String {
-        guard let area = area else { return "" }
-        return area.first == "." ? "." : area.joined(separator: ", ")
-    }
-
-    public var directionDisplay: String {
-        guard let direction = direction else { return "" }
-        return direction.isEmpty ? "" : direction.joined(separator: ", ")
-    }
-
-    public var flowDisplay: String {
-        flow.isEmpty ? "ship" : flow
-    }
-
-    public var statusText: String {
-        switch status {
-        case .running: return "Running"
-        case .waiting: return "Waiting"
-        case .idle: return "Idle"
-        case .completed: return "Completed"
-        case .error: return "Error"
-        case .paused: return "Paused"
-        }
-    }
-
-    public var iterationText: String {
-        iteration > 0 ? "iter \(iteration)" : ""
-    }
-
-    public var detailText: String {
-        var parts: [String] = []
-        if !areaDisplay.isEmpty { parts.append(areaDisplay) }
-        if !flowDisplay.isEmpty { parts.append(flowDisplay) }
-        if stimulus.kind != .manual { parts.append(stimulus.kind.rawValue) }
-        return parts.joined(separator: " · ")
-    }
-
-    public var stimulusText: String {
-        stimulus.description
-    }
-
-    /// Status indicator combining status and stimulus
-    public var statusIndicator: (icon: String, color: Color) {
-        switch status {
-        case .running:
-            return ("circle.fill", .green)
-        case .waiting:
-            return ("circle.lefthalf.filled", .yellow)
-        case .error:
-            return ("xmark.circle.fill", .red)
-        case .completed:
-            return ("checkmark.circle.fill", .green)
-        case .idle:
-            if stimulus.kind == .cron {
-                return ("clock", .gray)
-            }
-            return ("circle", .gray)
-        case .paused:
-            return ("pause.circle", .gray)
-        }
-    }
-
-    // MARK: - Activity Tracking
-
-    /// When the wave last had activity (most recent step's end or start time).
-    public var lastActivityAt: Date? {
-        recentSteps.first?.endedAt ?? recentSteps.first?.startedAt
-    }
-
-    /// Human-readable description of the last activity (e.g., "implement 2m ago").
-    public var lastActivityDescription: String? {
-        guard let step = recentSteps.first else { return nil }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        let time = formatter.localizedString(for: step.endedAt ?? step.startedAt, relativeTo: Date())
-        return "\(step.step) \(time)"
     }
 }

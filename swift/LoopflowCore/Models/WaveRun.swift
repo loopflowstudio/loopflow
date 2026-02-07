@@ -23,7 +23,7 @@ public enum WaveRunStatus: String, Sendable, Codable {
     }
 }
 
-public struct WaveRun: Sendable, Identifiable {
+public struct WaveRun: Sendable, Identifiable, Hashable {
     public let id: String
     public let waveId: String?
 
@@ -34,6 +34,7 @@ public struct WaveRun: Sendable, Identifiable {
 
     public var status: WaveRunStatus
     public var iteration: Int
+    public var stepIndex: Int
 
     public var worktree: String?
     public var branch: String?
@@ -54,6 +55,7 @@ public struct WaveRun: Sendable, Identifiable {
         direction: [String] = [],
         status: WaveRunStatus = .pending,
         iteration: Int = 0,
+        stepIndex: Int = 0,
         worktree: String? = nil,
         branch: String? = nil,
         currentStep: String? = nil,
@@ -71,6 +73,7 @@ public struct WaveRun: Sendable, Identifiable {
         self.direction = direction
         self.status = status
         self.iteration = iteration
+        self.stepIndex = stepIndex
         self.worktree = worktree
         self.branch = branch
         self.currentStep = currentStep

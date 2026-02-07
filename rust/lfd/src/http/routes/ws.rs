@@ -88,7 +88,7 @@ async fn current_snapshot(
     let waves = run_store(store, move |store| store.list_waves(None))
         .await
         .map_err(|err| err.to_string())?;
-    build_wave_dtos(store, waves, false)
+    build_wave_dtos(store, waves, true)
         .await
         .map_err(|err| err.to_string())
 }

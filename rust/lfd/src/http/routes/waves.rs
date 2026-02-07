@@ -112,9 +112,7 @@ pub async fn list_waves_handler(
     })
     .await
     .map_err(map_store_error)?;
-    let include_active_run = query
-        .expand
-        .contains("active_run");
+    let include_active_run = query.expand.contains("active_run");
     let (waves, has_more) = paginate_waves(
         waves,
         query.limit,
@@ -170,9 +168,7 @@ pub async fn get_wave_handler(
         .await
         .map_err(map_store_error)?
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
-    let include_active_run = query
-        .expand
-        .contains("active_run");
+    let include_active_run = query.expand.contains("active_run");
     let view = build_wave_dto(&state.store, wave, include_active_run)
         .await
         .map_err(map_store_error)?;
@@ -207,9 +203,8 @@ pub async fn update_wave_handler(
         }
     }
     if let Some(status) = payload.status {
-        wave.status = WaveStatus::from_str(&status).map_err(|_| {
-            api_error(StatusCode::BAD_REQUEST, "invalid status")
-        })?;
+        wave.status = WaveStatus::from_str(&status)
+            .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid status"))?;
     }
 
     let wave_clone = wave.clone();
@@ -557,6 +552,13 @@ fn create_wave_run_with_id(
     let run = WaveRun {
         id: run_id.clone(),
         wave_id: wave.id.clone(),
+        snapshot: WaveRunSnapshot {
+            repo: wave.repo.clone(),
+            flow: wave.flow.clone(),
+            direction: wave.direction.clone(),
+            area: wave.area.clone(),
+            pr: None,
+        },
         iteration,
         step_index: 0,
         status: WaveRunStatus::Running,
@@ -568,13 +570,18 @@ fn create_wave_run_with_id(
         flow_parents: Vec::new(),
     };
     store.create_wave_run(&run)?;
+    if let Ok(Some(mut wave)) = store.get_wave(&wave.id) {
+        wave.status = WaveStatus::Running;
+        wave.iteration = iteration;
+        let _ = store.update_wave(&wave);
+    }
     Ok(run)
 }
 
-fn resolve_current_step_name(wave: &Wave, step_index: u32) -> String {
+fn resolve_current_step_name(run: &WaveRun, wave: &Wave, step_index: u32) -> String {
     use loopflow_engine::flow::{expand_flow, load_flow, next_action, FlowAction};
-    let repo = std::path::Path::new(&wave.repo);
-    let name = load_flow(&wave.flow, repo)
+    let repo = std::path::Path::new(&run.snapshot.repo);
+    let name = load_flow(&run.snapshot.flow, repo)
         .ok()
         .and_then(|flow| expand_flow(&flow, repo).ok())
         .and_then(|plan| match next_action(&plan, step_index as usize) {

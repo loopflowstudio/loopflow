@@ -55,7 +55,7 @@ impl std::str::FromStr for WaveStatus {
             "running" => Ok(Self::Running),
             "waiting" => Ok(Self::Waiting),
             "paused" => Ok(Self::Paused),
-            "failed" => Ok(Self::Failed),
+            "failed" | "error" => Ok(Self::Failed),
             "completed" => Ok(Self::Completed),
             _ => Err(()),
         }
@@ -164,6 +164,7 @@ impl WaveRun {
         Self {
             id,
             wave_id,
+            snapshot: WaveRunSnapshot::default(),
             iteration: 0,
             step_index: 0,
             status: WaveRunStatus::Pending,

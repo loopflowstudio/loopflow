@@ -15,4 +15,13 @@ ALTER TABLE wave_runs
 
 CREATE INDEX IF NOT EXISTS idx_waves_name ON waves(name);
 
+UPDATE wave_runs
+SET snapshot_repo = waves.repo,
+    snapshot_flow = waves.flow,
+    snapshot_direction = waves.direction,
+    snapshot_area = waves.area
+FROM waves
+WHERE wave_runs.wave_id = waves.id
+  AND wave_runs.snapshot_repo = '';
+
 UPDATE meta SET value = '4' WHERE key = 'schema_version';

@@ -4,24 +4,19 @@ import SwiftUI
 import LoopflowCore
 
 struct DirectionPills: View {
-    let wave: Wave
+    let wave: WaveViewModel
 
     @Environment(RepoState.self) private var repoState
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var showingPicker = false
     @State private var isSaving = false
+    @State private var newDirection = ""
 
     private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     private var currentDirections: [String] {
-        wave.direction ?? []
-    }
-
-    private var availableDirections: [Direction] {
-        repoState.directions.filter { dir in
-            !currentDirections.contains(dir.name)
-        }
+        wave.direction
     }
 
     var body: some View {
@@ -39,20 +34,19 @@ struct DirectionPills: View {
             }
 
             // Add button
-            if !availableDirections.isEmpty {
-                Button {
-                    showingPicker = true
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .padding(6)
-                        .background(Circle().fill(palette.surface))
-                }
-                .buttonStyle(.plain)
-                .popover(isPresented: $showingPicker) {
-                    directionPicker
-                }
+            Button {
+                newDirection = ""
+                showingPicker = true
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(6)
+                    .background(Circle().fill(palette.surface))
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showingPicker) {
+                directionPicker
             }
 
             if isSaving {
@@ -68,24 +62,29 @@ struct DirectionPills: View {
                 .font(.headline)
                 .padding(.bottom, Spacing.xs)
 
-            ForEach(availableDirections) { direction in
-                Button {
-                    addDirection(direction.name)
-                    showingPicker = false
-                } label: {
-                    HStack {
-                        Text(direction.displayName)
-                            .font(.subheadline)
-                        Spacer()
-                    }
-                    .padding(.vertical, Spacing.xs)
-                    .contentShape(Rectangle())
+            TextField("Direction name", text: $newDirection)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit {
+                    commitDirection()
                 }
-                .buttonStyle(.plain)
+
+            HStack {
+                Spacer()
+                Button("Add") {
+                    commitDirection()
+                }
+                .disabled(newDirection.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(Spacing.md)
-        .frame(minWidth: 180)
+        .frame(minWidth: 200)
+    }
+
+    private func commitDirection() {
+        let trimmed = newDirection.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        addDirection(trimmed)
+        showingPicker = false
     }
 
     private func addDirection(_ name: String) {
@@ -150,19 +149,16 @@ struct DirectionPill: View {
 #Preview {
     let repoState = RepoState()
     repoState.configureMockWaves()
-    repoState.directions = [
-        Direction(id: "product-engineer", name: "product-engineer", content: "", path: URL(fileURLWithPath: "/")),
-        Direction(id: "designer", name: "designer", content: "", path: URL(fileURLWithPath: "/")),
-        Direction(id: "security", name: "security", content: "", path: URL(fileURLWithPath: "/"))
-    ]
 
-    let wave = Wave(
-        id: "test",
-        name: "test-wave",
-        area: ["."],
-        direction: ["product-engineer"],
-        flow: "design",
-        repo: "/tmp/test-repo"
+    let wave = WaveViewModel(
+        api: Wave(
+            id: "test",
+            name: "test-wave",
+            repo: "/tmp/test-repo",
+            flow: "design",
+            direction: ["product-engineer"],
+            area: ["."]
+        )
     )
 
     return DirectionPills(wave: wave)

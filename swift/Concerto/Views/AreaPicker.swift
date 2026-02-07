@@ -5,12 +5,10 @@ import LoopflowCore
 import AppKit
 
 struct AreaPicker: View {
-    let wave: Wave
+    let wave: WaveViewModel
 
     @Environment(RepoState.self) private var repoState
     @Environment(\.colorScheme) private var colorScheme
-
-    @State private var inferredPaths: [String] = []
 
     private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
     private let recentAreasService = RecentAreasService()
@@ -55,27 +53,6 @@ struct AreaPicker: View {
                                     selectArea(area)
                                 } label: {
                                     areaRow(path: area, icon: "clock")
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                }
-
-                // Inferred from branch
-                if wave.hasDiff && !inferredPaths.isEmpty {
-                    VStack(alignment: .leading, spacing: Spacing.sm) {
-                        Text("From Current Changes")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.leading, Spacing.xs)
-
-                        VStack(spacing: Spacing.xs) {
-                            ForEach(inferredPaths, id: \.self) { path in
-                                Button {
-                                    selectArea(path)
-                                } label: {
-                                    areaRow(path: path, icon: "arrow.triangle.branch")
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -138,9 +115,6 @@ struct AreaPicker: View {
         .padding(Spacing.xl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.background)
-        .task {
-            await loadInferredPaths()
-        }
     }
 
     private func areaRow(path: String, icon: String, actualPath: String? = nil) -> some View {
@@ -194,28 +168,6 @@ struct AreaPicker: View {
         }
     }
 
-    private func loadInferredPaths() async {
-        guard wave.hasDiff, let worktreePath = wave.worktreePath else { return }
-
-        let worktreeURL = URL(fileURLWithPath: worktreePath)
-        let worktreeService = WorktreeService()
-
-        do {
-            let stats = try await worktreeService.getDiffStats("main...HEAD", in: worktreeURL)
-
-            // Extract unique directories
-            var dirs = Set<String>()
-            for stat in stats {
-                let dir = stat.directory.isEmpty ? "." : stat.directory
-                dirs.insert(dir)
-            }
-
-            // Sort and limit
-            inferredPaths = Array(dirs.sorted().prefix(3))
-        } catch {
-            inferredPaths = []
-        }
-    }
 }
 
 #Preview {
@@ -223,12 +175,13 @@ struct AreaPicker: View {
     repoState.configureMockWaves()
     repoState.currentRepo = URL(fileURLWithPath: "/tmp/test-repo")
 
-    let wave = Wave(
-        id: "test",
-        name: "test-wave",
-        area: nil,
-        flow: "design",
-        repo: "/tmp/test-repo",
+    let wave = WaveViewModel(
+        api: Wave(
+            id: "test",
+            name: "test-wave",
+            repo: "/tmp/test-repo",
+            flow: "design"
+        ),
         hasDiff: true,
         recentSteps: []
     )

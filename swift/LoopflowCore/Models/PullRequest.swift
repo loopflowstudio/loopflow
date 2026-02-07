@@ -2,6 +2,22 @@
 
 import Foundation
 
+public enum PRState: String, Sendable, Codable {
+    case open
+    case merged
+    case closed
+    case draft
+
+    public var displayText: String {
+        switch self {
+        case .open: return "Open"
+        case .merged: return "Merged"
+        case .closed: return "Closed"
+        case .draft: return "Draft"
+        }
+    }
+}
+
 public struct PullRequest: Sendable, Hashable, Codable {
     public let url: URL
     public let number: Int?

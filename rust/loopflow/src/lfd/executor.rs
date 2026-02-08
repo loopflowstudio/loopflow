@@ -266,7 +266,9 @@ impl WaveExecutor {
                     run.status = WaveRunStatus::Completed;
                     run.ended_at = Some(OffsetDateTime::now_utc());
                     self.store.update_wave_run(&run)?;
-                    self.set_wave_status(&wave.id, WaveStatus::Completed);
+                    // Wave goes back to Idle after a run completes — the run
+                    // is done, but the wave is ready for its next iteration.
+                    self.set_wave_status(&wave.id, WaveStatus::Idle);
                     return Ok(());
                 }
             }

@@ -115,6 +115,8 @@ pub struct PromptComponents {
     pub loopflow_doc: Option<String>,
     /// User message (positional args after step/flow name)
     pub message: Option<String>,
+    /// Inline prompt text (from `lf : "text"`)
+    pub inline: Option<String>,
     /// How diff context was tiered
     pub diff_tier: DiffTier,
     /// Number of files changed on branch (for display)
@@ -509,6 +511,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         wave: opts.wave.clone(),
         loopflow_doc,
         message: opts.message.clone(),
+        inline: opts.inline.clone(),
         diff_tier,
         diff_file_count,
         area_docs,
@@ -1403,18 +1406,22 @@ pub fn format_context_prompt(components: &PromptComponents) -> String {
 ///
 /// This is passed as the CLI argument when using `--append-system-prompt-file`.
 pub fn format_task_prompt(components: &PromptComponents) -> String {
-    let Some(ref step) = components.step else {
-        return String::new();
-    };
-
-    if let Some(ref content) = step.content {
-        format!(
-            "<lf:step:{}>\n{}\n</lf:step:{}>",
-            step.name, content, step.name
-        )
-    } else {
-        format!("<lf:step:{}>\n</lf:step:{}>", step.name, step.name)
+    if let Some(ref step) = components.step {
+        if let Some(ref content) = step.content {
+            return format!(
+                "<lf:step:{}>\n{}\n</lf:step:{}>",
+                step.name, content, step.name
+            );
+        } else {
+            return format!("<lf:step:{}>\n</lf:step:{}>", step.name, step.name);
+        }
     }
+
+    if let Some(ref inline) = components.inline {
+        return inline.clone();
+    }
+
+    String::new()
 }
 
 /// Write prompt to log file and return the path.
@@ -2440,10 +2447,40 @@ directions:
     }
 
     #[test]
-    fn format_task_prompt_empty_when_no_step() {
+    fn format_task_prompt_empty_when_no_step_or_inline() {
         let components = PromptComponents::default();
         let task = format_task_prompt(&components);
         assert!(task.is_empty());
+    }
+
+    #[test]
+    fn format_task_prompt_uses_inline_when_no_step() {
+        let components = PromptComponents {
+            inline: Some("Fix the bug in main.rs".to_string()),
+            ..Default::default()
+        };
+
+        let task = format_task_prompt(&components);
+        assert_eq!(task, "Fix the bug in main.rs");
+    }
+
+    #[test]
+    fn format_task_prompt_step_takes_priority_over_inline() {
+        let components = PromptComponents {
+            step: Some(Step {
+                name: "implement".to_string(),
+                content: Some("Build it.".to_string()),
+                model: None,
+                directions: vec![],
+                interactive: None,
+            }),
+            inline: Some("ignored inline text".to_string()),
+            ..Default::default()
+        };
+
+        let task = format_task_prompt(&components);
+        assert!(task.contains("Build it."));
+        assert!(!task.contains("ignored inline text"));
     }
 
     #[test]

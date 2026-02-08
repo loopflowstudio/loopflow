@@ -180,12 +180,25 @@ pub fn get_default_branch(repo: &Path) -> Result<String, GitError> {
     Ok(raw)
 }
 
-/// Return true if working tree is clean.
+/// Return true if working tree is clean (including untracked files).
 pub fn is_clean(repo: &Path) -> Result<bool, GitError> {
     let output = run_git(repo, &["status", "--porcelain"])?;
     if !output.status.success() {
         return Err(GitError::CommandFailed {
             command: "git status --porcelain".to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().is_empty())
+}
+
+/// Return true if tracked files have no staged or unstaged changes.
+/// Ignores untracked files — safe for operations like `reset --hard` that preserve them.
+pub fn is_index_clean(repo: &Path) -> Result<bool, GitError> {
+    let output = run_git(repo, &["status", "--porcelain", "--untracked-files=no"])?;
+    if !output.status.success() {
+        return Err(GitError::CommandFailed {
+            command: "git status --porcelain --untracked-files=no".to_string(),
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         });
     }
@@ -237,7 +250,7 @@ pub fn sync_main(repo: &Path, main_branch: &str) -> Result<bool, GitError> {
         return Ok(true);
     }
 
-    if !is_clean(repo)? {
+    if !is_index_clean(repo)? {
         return Ok(false);
     }
 

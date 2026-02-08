@@ -1,7 +1,8 @@
 use std::process::Command;
 
 use loopflow::engine::git::{
-    commit, create_branch, current_branch, get_default_branch, is_ancestor, is_clean, rebase,
+    commit, create_branch, current_branch, get_default_branch, is_ancestor, is_clean,
+    is_index_clean, rebase,
 };
 use loopflow_test_support::TestRepo;
 
@@ -161,11 +162,25 @@ fn rebase_feature_onto_main() {
 
 // Note: sync_main requires a remote, so we test the is_clean prerequisite instead
 #[test]
-fn sync_would_fail_on_dirty_tree() {
+fn sync_would_fail_on_staged_changes() {
     let repo = TestRepo::new();
 
     repo.create_file("dirty.txt", "uncommitted");
+    repo.stage_all();
 
-    // sync_main checks is_clean first - verify the check would fail
+    // Staged changes should block sync
     assert!(!is_clean(repo.path()).unwrap());
+    assert!(!is_index_clean(repo.path()).unwrap());
+}
+
+#[test]
+fn untracked_files_dont_block_sync() {
+    let repo = TestRepo::new();
+
+    repo.create_file("scratch/notes.md", "untracked content");
+
+    // is_clean sees untracked files
+    assert!(!is_clean(repo.path()).unwrap());
+    // is_index_clean ignores them — sync_main should proceed
+    assert!(is_index_clean(repo.path()).unwrap());
 }

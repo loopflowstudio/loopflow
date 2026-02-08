@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use loopflow::engine::{format_prompt, gather_context, GatherContextOpts};
+use loopflow::engine::{format_prompt, format_task_prompt, gather_context, GatherContextOpts};
 use tempfile::TempDir;
 
 fn init_repo(dir: &Path) {
@@ -109,6 +109,11 @@ fn gather_context_with_inline_prompt() {
 
     // No step when using inline
     assert!(components.step.is_none());
+    // Inline text is preserved in components
+    assert_eq!(components.inline.as_deref(), Some("Fix the bug in main.rs"));
+    // format_task_prompt uses the inline text as the initial prompt
+    let task = format_task_prompt(&components);
+    assert_eq!(task, "Fix the bug in main.rs");
 }
 
 #[test]

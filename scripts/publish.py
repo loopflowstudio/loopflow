@@ -21,6 +21,7 @@ import typer
 
 ROOT = Path(__file__).parent.parent
 R2_PUBLIC_URL = "https://downloads.loopflow.studio"
+DEFAULT_INSTALL_DIR = Path.home() / ".local" / "bin"
 
 app = typer.Typer(
     help="Build and publish loopflow.",
@@ -130,18 +131,8 @@ def _install_wheel() -> tuple[bool, str]:
     return result.returncode == 0, result.stdout + result.stderr
 
 
-def _install_binaries() -> tuple[bool, str]:
-    env_dir = os.environ.get("LF_INSTALL_DIR")
-    if env_dir:
-        install_dir = env_dir
-    else:
-        default_dir = Path.home() / ".local" / "bin"
-        if sys.platform == "darwin":
-            mac_dir = Path("/usr/local/bin")
-            if mac_dir.exists() and os.access(mac_dir, os.W_OK):
-                default_dir = mac_dir
-        install_dir = str(default_dir)
-    install_path = Path(install_dir)
+def _install_binaries() -> tuple[bool, str, Path | None]:
+    install_path = _resolve_install_dir()
     install_path.mkdir(parents=True, exist_ok=True)
 
     result = subprocess.run(
@@ -149,19 +140,73 @@ def _install_binaries() -> tuple[bool, str]:
         cwd=ROOT,
     )
     if result.returncode != 0:
-        return False, "cargo build failed (see output above)"
+        return False, "cargo build failed (see output above)", None
 
     built = ROOT / "target" / "release"
     for name in ("lf", "lfd"):
         src = built / name
         if src.exists():
             dst = install_path / name
-            if dst.exists():
-                dst.unlink()
-            shutil.copy2(src, dst)
-            dst.chmod(0o755)
+            _install_binary(src, dst)
 
-    return True, f"Installed lf/lfd to {install_path}"
+    return True, f"Installed lf/lfd to {install_path}", install_path
+
+
+def _resolve_install_dir() -> Path:
+    env_dir = os.environ.get("LF_INSTALL_DIR")
+    if env_dir:
+        return Path(env_dir).expanduser()
+
+    existing = shutil.which("lf")
+    if existing:
+        existing_path = Path(existing).expanduser()
+        parent = existing_path.parent
+        user_dirs = {
+            (Path.home() / ".local" / "bin").resolve(),
+            (Path.home() / ".lf" / "bin").resolve(),
+        }
+        try:
+            parent_resolved = parent.resolve()
+            if parent_resolved in user_dirs and _is_writable(parent):
+                return parent
+            if (
+                parent_resolved == Path("/usr/local/bin")
+                and _is_writable(parent)
+                and _looks_like_loopflow(existing_path)
+            ):
+                return parent
+        except OSError:
+            pass
+
+    return DEFAULT_INSTALL_DIR
+
+
+def _is_writable(path: Path) -> bool:
+    return path.exists() and path.is_dir() and os.access(path, os.W_OK)
+
+
+def _looks_like_loopflow(binary: Path) -> bool:
+    try:
+        result = subprocess.run(
+            [str(binary), "--help"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return False
+    return "Run steps and flows with coding agents" in result.stdout
+
+
+def _install_binary(src: Path, dst: Path) -> None:
+    tmp = dst.with_name(f".{dst.name}.tmp.{os.getpid()}")
+    try:
+        shutil.copyfile(src, tmp)
+        tmp.chmod(0o755)
+        tmp.replace(dst)
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
 
 
 def _build_dmg() -> tuple[bool, str]:
@@ -540,16 +585,25 @@ def local(
     typer.echo("Installed.")
 
     typer.echo("Installing lf/lfd binaries...")
-    ok, output = _install_binaries()
+    ok, output, install_path = _install_binaries()
     if not ok:
         typer.echo(f"Binary install failed:\n{output}", err=True)
         raise typer.Exit(code=1)
     typer.echo(output)
 
+    install_path = install_path or DEFAULT_INSTALL_DIR
     for name in ("lf", "lfd"):
         result = subprocess.run(["which", name], capture_output=True, text=True)
         if result.returncode == 0:
-            typer.echo(f"{name}: {result.stdout.strip()}")
+            resolved = Path(result.stdout.strip())
+            expected = install_path / name
+            typer.echo(f"{name}: {resolved}")
+            if resolved != expected:
+                typer.echo(
+                    f"Note: {name} resolves to {resolved}, not {expected}. "
+                    f"Add {install_path} to PATH to use the freshly installed binary.",
+                    err=True,
+                )
 
     _restart_lfd()
 

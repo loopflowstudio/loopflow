@@ -89,7 +89,27 @@ jobs:
           set -eu
 
           REPO="loopflowstudio/loopflow"
-          INSTALL_DIR="${LF_INSTALL_DIR:-$HOME/.local/bin}"
+          DEFAULT_INSTALL_DIR="$HOME/.local/bin"
+
+          resolve_install_dir() {
+            if [ -n "${LF_INSTALL_DIR:-}" ]; then
+              echo "$LF_INSTALL_DIR"
+              return
+            fi
+
+            if command -v lf >/dev/null 2>&1; then
+              lf_path="$(command -v lf)"
+              lf_dir="$(dirname "$lf_path")"
+              case "$lf_dir" in
+                "$HOME/.lf/bin"|"$HOME/.local/bin")
+                  echo "$lf_dir"
+                  return
+                  ;;
+              esac
+            fi
+
+            echo "$DEFAULT_INSTALL_DIR"
+          }
 
           detect_target() {
             os=$(uname -s)
@@ -114,6 +134,7 @@ jobs:
           main() {
             target=$(detect_target)
             version="${1:-latest}"
+            install_dir="$(resolve_install_dir)"
 
             if [ "$version" = "latest" ]; then
               url="https://github.com/$REPO/releases/latest/download/lf-$target.tar.gz"
@@ -122,14 +143,30 @@ jobs:
             fi
 
             echo "Installing lf ($target)..."
-            mkdir -p "$INSTALL_DIR"
-            curl -fsSL "$url" | tar xz -C "$INSTALL_DIR"
-            chmod +x "$INSTALL_DIR/lf" "$INSTALL_DIR/lfd"
-            echo "Installed to $INSTALL_DIR/lf"
+            mkdir -p "$install_dir"
+
+            tmpdir="$(mktemp -d)"
+            cleanup() {
+              rm -rf "$tmpdir"
+            }
+            trap cleanup EXIT INT TERM
+
+            curl -fsSL "$url" | tar xz -C "$tmpdir"
+
+            for bin in lf lfd; do
+              src="$tmpdir/$bin"
+              dst="$install_dir/$bin"
+              tmp="$install_dir/.${bin}.tmp.$$"
+              cp "$src" "$tmp"
+              chmod +x "$tmp"
+              mv -f "$tmp" "$dst"
+            done
+
+            echo "Installed to $install_dir/lf"
 
             case ":$PATH:" in
-              *":$INSTALL_DIR:"*) ;;
-              *) echo "Add to PATH: export PATH=\"$INSTALL_DIR:\$PATH\"" ;;
+              *":$install_dir:"*) ;;
+              *) echo "Add to PATH: export PATH=\"$install_dir:\$PATH\"" ;;
             esac
           }
 

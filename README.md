@@ -140,6 +140,8 @@ lf review -d ceo
 curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh
 ```
 
+Default install location is `~/.local/bin`. Override with `LF_INSTALL_DIR=/path`.
+
 Built-in steps and flows included. `lf init` sets up your coding agent and preferences.
 
 ```bash

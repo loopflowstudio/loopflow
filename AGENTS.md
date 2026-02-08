@@ -99,12 +99,12 @@ Use `uv` for Python package management. Never use pip directly.
 ```bash
 # Python
 uv sync                       # Install dependencies
-uv run pytest tests/          # Run Python tests
+uv run pytest python/tests/   # Run Python tests
 uv run lf agent --help        # Run commands
 
 # Or activate the venv
 source .venv/bin/activate
-pytest tests/
+pytest python/tests/
 
 # Rust
 cargo build                   # Build all crates

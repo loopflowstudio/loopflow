@@ -6,7 +6,7 @@ CI runs five test suites. All must pass before merging.
 
 ```bash
 # Run all tests (what CI runs)
-uv run pytest tests/                    # Python
+uv run pytest python/tests/             # Python
 cargo test --all                        # Rust
 swift test --package-path swift         # Swift package
 cd swift && xcodegen generate && xcodebuild test -project LoopflowSwift.xcodeproj -scheme Concerto -destination 'platform=macOS'  # Concerto UI
@@ -15,11 +15,11 @@ tests/e2e/test_smoke.sh                 # E2E smoke
 
 ## Python Tests
 
-Unit and integration tests for the loopflow CLI.
+Unit and integration tests for the Python client (`python/loopflow/`).
 
 ```bash
-uv run pytest tests/           # All Python tests
-uv run pytest tests/test_foo.py::test_bar -v  # Single test
+uv run pytest python/tests/                          # All Python tests
+uv run pytest python/tests/test_client.py::TestClientErrors -v  # Single class
 ```
 
 ## Swift Tests
@@ -48,7 +48,7 @@ See `.github/workflows/ci.yml`. Five parallel jobs:
 | Job | Runner | Command |
 |-----|--------|---------|
 | `rust-test` | ubuntu-latest | `cargo fmt`, `cargo clippy`, `cargo test --all` |
-| `loopflow-test` | ubuntu-latest | `uv run pytest tests/` |
+| `python-test` | ubuntu-latest | `uv run pytest python/tests/` |
 | `e2e-smoke` | ubuntu-latest | `tests/e2e/test_smoke.sh` |
 | `swift-test` | macos-15 | `swift test --package-path swift` |
 | `concerto-ui-test` | macos-15 | xcodegen + xcodebuild |

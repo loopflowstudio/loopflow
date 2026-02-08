@@ -295,6 +295,7 @@ final class RepoState {
                             for wave in self.waves {
                                 self.previousWaveStatuses[wave.id] = wave.status
                             }
+                            await self.refreshFlowsAsync()
                         case .wave(let waveEvent):
                             await self.handleWaveEvent(waveEvent)
                         case .output(let outputEvent):

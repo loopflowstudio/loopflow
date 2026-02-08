@@ -494,7 +494,18 @@ public struct LocalWaveService: @unchecked Sendable {
     }
 
     public func stop(_ id: String) async throws {
-        try await runShellCommand(["lfd", "stop", id])
+        let url = apiBaseURL.appendingPathComponent("waves/\(id)/stop")
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+
+        let (data, response) = try await session.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let errorMsg = Self.parseErrorMessage(data)
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+        }
     }
 
     /// Clone a wave with a new name.

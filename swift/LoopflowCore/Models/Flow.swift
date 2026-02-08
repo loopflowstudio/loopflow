@@ -53,8 +53,4 @@ public struct Flow: Sendable, Codable, Identifiable, Equatable {
         }
     }
 
-    /// Number of steps (for display).
-    public var stepCount: Int {
-        steps.count
-    }
 }

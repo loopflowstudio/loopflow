@@ -48,22 +48,6 @@ public struct Step: Sendable, Codable, Equatable, Identifiable {
         self.config = try container.decodeIfPresent(StepConfig.self, forKey: .config)
     }
 
-    public var hasConfig: Bool {
-        guard let config = config else { return false }
-        return !config.isEmpty
-    }
-}
-
-/// A FlowStep is a Step with its parent Flow context.
-public struct FlowStep: Sendable, Codable, Equatable, Identifiable {
-    public var id: UUID = UUID()
-    public var step: Step
-    public var flow: String
-
-    public init(step: Step, flow: String) {
-        self.step = step
-        self.flow = flow
-    }
 }
 
 // MARK: - Step Execution
@@ -98,12 +82,6 @@ public struct StepRun: Sendable, Identifiable, Codable, Hashable {
 
     public var isError: Bool {
         status == "error"
-    }
-
-    public var relativeTime: String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: startedAt, relativeTo: Date())
     }
 
     /// Memberwise initializer (required since we add a custom init).

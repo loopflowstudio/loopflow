@@ -2,7 +2,7 @@
 """Development commands for Concerto (Swift app) and GhosttyKit.
 
 Usage:
-    uv run python swift/scripts/dev.py <command>
+    uv run python scripts/dev.py <command>
 
 Commands:
     build           Build the app
@@ -29,8 +29,8 @@ import tempfile
 import time
 from pathlib import Path
 
-SWIFT_DIR = Path(__file__).parent.parent
-REPO_ROOT = SWIFT_DIR.parent
+REPO_ROOT = Path(__file__).parent.parent
+SWIFT_DIR = REPO_ROOT / "swift"
 GHOSTTY_DIR = REPO_ROOT / "vendor" / "ghostty"
 DEV_APP = Path.home() / "Applications" / "Concerto Dev.app"
 R2_URL = "https://bin.loopflow.studio"
@@ -199,10 +199,19 @@ def cmd_lfd() -> int:
     os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "0"
     os.environ["GRPC_VERBOSITY"] = "ERROR"
 
-    # Run from this branch - use exec so Ctrl+C works
-    print("Starting lfd from this branch...")
-    os.chdir(REPO_ROOT)
-    os.execvp("uv", ["uv", "run", "lfd", "serve"])
+    # Build lfd from this branch
+    print("Building lfd...")
+    result = run(["cargo", "build", "--bin", "lfd"], cwd=REPO_ROOT, check=False)
+    if result.returncode != 0:
+        return result.returncode
+
+    # Enable verbose logging
+    os.environ["RUST_LOG"] = "loopflow=debug,tower_http=debug"
+
+    # Run the local debug binary - use exec so Ctrl+C works
+    lfd_bin = str(REPO_ROOT / "target" / "debug" / "lfd")
+    print("Starting lfd from this branch (debug logging enabled)...")
+    os.execv(lfd_bin, [lfd_bin, "serve"])
 
 
 def _install_dev_app() -> None:

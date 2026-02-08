@@ -41,7 +41,7 @@ class Wave(BaseModel):
     flow: str
     direction: list[str]
     area: list[str]
-    stimulus: Stimulus
+    stimulus: Optional[Stimulus] = None
     status: str
     iteration: int
     active_run: Optional[WaveRun] = None

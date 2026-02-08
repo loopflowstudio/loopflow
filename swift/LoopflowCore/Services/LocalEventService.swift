@@ -49,6 +49,7 @@ public struct AgentEndedEvent: Sendable {
 }
 
 public struct OutputEvent: Sendable {
+    public let waveId: String
     public let agentId: String
     public let text: String
     public let timestamp: Date
@@ -152,7 +153,7 @@ public actor LocalEventService {
     private func handleReceive(_ result: Result<URLSessionWebSocketTask.Message, Error>) async {
         switch result {
         case .failure:
-            await handleDisconnected()
+            handleDisconnected()
             return
         case .success(let message):
             if let text = extractText(from: message),
@@ -281,9 +282,11 @@ public actor LocalEventService {
                 timestamp: parseTimestamp(json["timestamp"])
             ))
         case "output_line":
-            guard let agentId = json["agent_id"] as? String,
+            guard let waveId = json["wave_id"] as? String,
+                  let agentId = json["agent_id"] as? String,
                   let text = json["text"] as? String else { return nil }
             return .output(OutputEvent(
+                waveId: waveId,
                 agentId: agentId,
                 text: text,
                 timestamp: parseTimestamp(json["timestamp"])

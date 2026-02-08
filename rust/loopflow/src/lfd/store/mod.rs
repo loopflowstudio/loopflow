@@ -314,6 +314,54 @@ mod tests {
         assert!(store.get_wave(&wave.id).unwrap().is_none());
     }
 
+    /// get_active_wave_run must return failed runs so the UI can display
+    /// error details. Previously only pending/running/waiting were included.
+    fn run_active_run_includes_failed(store: &dyn RunStore) {
+        let wave = make_wave("/repo-fail-test");
+        store.create_wave(&wave).unwrap();
+
+        let mut run = WaveRun {
+            id: LfdId::new(),
+            wave_id: wave.id.clone(),
+            snapshot: WaveRunSnapshot {
+                repo: wave.repo.clone(),
+                flow: wave.flow.clone(),
+                direction: wave.direction.clone(),
+                area: wave.area.clone(),
+                pr: None,
+            },
+            iteration: 0,
+            step_index: 1,
+            status: WaveRunStatus::Running,
+            worktree: "/repo".to_string(),
+            branch: "main".to_string(),
+            started_at: Some(OffsetDateTime::now_utc()),
+            ended_at: None,
+            error: None,
+            flow_parents: Vec::new(),
+        };
+        store.create_wave_run(&run).unwrap();
+
+        // Should find the running run
+        let active = store.get_active_wave_run(&wave.id).unwrap();
+        assert!(active.is_some(), "should find running run");
+
+        // Mark as failed with an error message
+        run.status = WaveRunStatus::Failed;
+        run.error = Some("step reduce failed".to_string());
+        run.ended_at = Some(OffsetDateTime::now_utc());
+        store.update_wave_run(&run).unwrap();
+
+        // Should still find the failed run
+        let active = store.get_active_wave_run(&wave.id).unwrap();
+        assert!(active.is_some(), "should find failed run");
+        let active = active.unwrap();
+        assert_eq!(active.status, WaveRunStatus::Failed);
+        assert_eq!(active.error.as_deref(), Some("step reduce failed"));
+
+        store.delete_wave(&wave.id).unwrap();
+    }
+
     fn reset_postgres(url: &str) {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
@@ -341,6 +389,7 @@ mod tests {
             .to_string();
         let store = super::sqlite::SqliteStore::new(&PathBuf::from(path)).unwrap();
         run_store_suite(&store);
+        run_active_run_includes_failed(&store);
     }
 
     #[test]
@@ -355,6 +404,7 @@ mod tests {
             reset_postgres(&url);
             let store = super::postgres::PostgresStore::connect(&url).unwrap();
             run_store_suite(&store);
+            run_active_run_includes_failed(&store);
             return;
         }
 
@@ -375,5 +425,6 @@ mod tests {
         reset_postgres(&url);
         let store = super::postgres::PostgresStore::connect(&url).unwrap();
         run_store_suite(&store);
+        run_active_run_includes_failed(&store);
     }
 }

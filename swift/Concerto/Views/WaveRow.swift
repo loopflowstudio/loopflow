@@ -9,12 +9,16 @@ struct WaveRow: View {
     let wave: WaveViewModel
     let isSelected: Bool
     var isKeyboardFocused: Bool = false
-    let liveOutput: [OutputLine]
     var pendingPR: (number: Int, url: URL?)? = nil  // PR awaiting review
     let onSelect: () -> Void
     var onDelete: (() -> Void)? = nil
+    var onRename: ((String) -> Void)? = nil
+    @Binding var isEditingAnyName: Bool
 
     @State private var isHovering = false
+    @State private var isEditingName = false
+    @State private var editingName = ""
+    @FocusState private var isNameFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -26,12 +30,27 @@ struct WaveRow: View {
                     .help(statusHelpText)
                     .accessibilityIdentifier("wave-status")
 
-                // Display name (user-visible name, not area)
-                Text(wave.displayName)
-                    .fontWeight(.medium)
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .accessibilityIdentifier("wave-name")
+                // Display name (click to edit)
+                if isEditingName {
+                    TextField("Wave name", text: $editingName)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.white)
+                        .textFieldStyle(.plain)
+                        .focused($isNameFocused)
+                        .onSubmit { commitNameEdit() }
+                        .onExitCommand { cancelNameEdit() }
+                        .accessibilityIdentifier("wave-name-edit")
+                } else {
+                    Text(wave.displayName)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .accessibilityIdentifier("wave-name")
+                        .onTapGesture {
+                            guard isSelected else { return }
+                            startNameEdit()
+                        }
+                }
 
                 Spacer()
 
@@ -116,10 +135,9 @@ struct WaveRow: View {
                 }
             }
 
-            // Live output when selected or running
-            if (isSelected || wave.status == .running) && !liveOutput.isEmpty {
-                LoopLiveOutput(lines: liveOutput)
-                    .frame(height: 80)
+            // Live output when selected (isolated observation scope)
+            if isSelected {
+                SidebarLiveOutput(waveId: wave.id)
             }
         }
         .padding(.horizontal, 12)
@@ -152,6 +170,43 @@ struct WaveRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Wave: \(wave.displayName)")
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        .onChange(of: isNameFocused) { _, focused in
+            if !focused && isEditingName {
+                commitNameEdit()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .editWaveName)) { _ in
+            if isSelected {
+                startNameEdit()
+            }
+        }
+    }
+
+    // MARK: - Name Editing
+
+    private func startNameEdit() {
+        editingName = wave.name
+        isEditingName = true
+        isEditingAnyName = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(50))
+            isNameFocused = true
+        }
+    }
+
+    private func commitNameEdit() {
+        let newName = editingName.trimmingCharacters(in: .whitespacesAndNewlines)
+        isEditingName = false
+        isEditingAnyName = false
+        isNameFocused = false
+        guard !newName.isEmpty, newName != wave.name else { return }
+        onRename?(newName)
+    }
+
+    private func cancelNameEdit() {
+        isEditingName = false
+        isEditingAnyName = false
+        isNameFocused = false
     }
 
     private var statusHelpText: String {
@@ -185,5 +240,20 @@ struct WaveRow: View {
         formatter.unitsStyle = .full
         let time = formatter.localizedString(for: step.endedAt ?? step.startedAt, relativeTo: Date())
         return "\(step.step), \(time)"
+    }
+}
+
+/// Isolated view for sidebar live output. Has its own observation scope
+/// so output changes only re-render this view, not the entire sidebar.
+private struct SidebarLiveOutput: View {
+    let waveId: String
+    @Environment(OutputBuffer.self) private var outputBuffer
+
+    var body: some View {
+        let lines = outputBuffer.output(for: waveId)
+        if !lines.isEmpty {
+            LiveOutput(lines: lines)
+                .frame(height: 80)
+        }
     }
 }

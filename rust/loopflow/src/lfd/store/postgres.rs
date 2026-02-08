@@ -351,6 +351,7 @@ impl RunStore for PostgresStore {
                 WaveRunStatus::Pending.as_i32(),
                 WaveRunStatus::Running.as_i32(),
                 WaveRunStatus::Waiting.as_i32(),
+                WaveRunStatus::Failed.as_i32(),
             ];
             let row = client
                 .query_opt(

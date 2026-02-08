@@ -1461,6 +1461,11 @@ pub fn format_task_prompt(components: &PromptComponents) -> String {
         }
     }
 
+    // User message (inline prompt or positional args)
+    if let Some(ref message) = components.message {
+        parts.push(message.clone());
+    }
+
     parts.join("\n\n")
 }
 
@@ -2487,10 +2492,38 @@ directions:
     }
 
     #[test]
-    fn format_task_prompt_empty_when_no_step() {
+    fn format_task_prompt_empty_when_no_step_or_message() {
         let components = PromptComponents::default();
         let task = format_task_prompt(&components);
         assert!(task.is_empty());
+    }
+
+    #[test]
+    fn format_task_prompt_includes_message() {
+        let components = PromptComponents {
+            message: Some("fix the login bug".to_string()),
+            ..Default::default()
+        };
+        let task = format_task_prompt(&components);
+        assert_eq!(task, "fix the login bug");
+    }
+
+    #[test]
+    fn format_task_prompt_message_with_step() {
+        let components = PromptComponents {
+            step: Some(Step {
+                name: "debug".to_string(),
+                content: Some("Debug the error.".to_string()),
+                model: None,
+                directions: vec![],
+                interactive: None,
+            }),
+            message: Some("login page crashes".to_string()),
+            ..Default::default()
+        };
+        let task = format_task_prompt(&components);
+        assert!(task.contains("<lf:step:debug>"));
+        assert!(task.contains("login page crashes"));
     }
 
     #[test]

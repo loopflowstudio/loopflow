@@ -8,7 +8,7 @@ struct InteractiveSessionView: View {
     let session: InteractiveSession
 
     @Environment(RepoState.self) private var repoState
-    @Environment(SessionState.self) private var sessionState
+    @Environment(OutputBuffer.self) private var outputBuffer
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var ghosttyManager = GhosttyManager.shared
 
@@ -29,10 +29,10 @@ struct InteractiveSessionView: View {
         .background(palette.background)
         .task {
             // Set up callback for when terminal process exits
-            let currentSessionState = sessionState
+            let currentOutputBuffer = outputBuffer
             GhosttyManager.shared.onSessionClosed = {
                 Task { @MainActor in
-                    currentSessionState.endInteractiveSession()
+                    currentOutputBuffer.endInteractiveSession()
                 }
             }
         }
@@ -149,13 +149,13 @@ struct InteractiveSessionView: View {
         // Destroy the terminal surface, killing the child process (SIGTERM)
         GhosttyManager.shared.destroyActiveSession()
         // Clear the session state - wave stays in WAITING, can reconnect
-        sessionState.endInteractiveSession()
+        outputBuffer.endInteractiveSession()
     }
 
     private func continueSession() {
         // Send EOF (Ctrl+D = ASCII 4) to terminal
         // Process will exit gracefully, triggering onSessionClosed callback
-        // which calls sessionState.endInteractiveSession()
+        // which calls outputBuffer.endInteractiveSession()
         // Daemon sees exit code 0, advances flow
         let eof = "\u{04}"
         GhosttyManager.shared.sendText(eof)
@@ -173,11 +173,11 @@ struct InteractiveSessionView: View {
         step: "design",
         worktreePath: "/tmp/test-worktree"
     )
-    let sessionState = SessionState()
-    sessionState.interactiveSession = session
+    let outputBuffer = OutputBuffer()
+    outputBuffer.interactiveSession = session
 
     return InteractiveSessionView(session: session)
         .environment(repoState)
-        .environment(sessionState)
+        .environment(outputBuffer)
         .frame(width: 600, height: 500)
 }

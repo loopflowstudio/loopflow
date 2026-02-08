@@ -5,7 +5,7 @@ import LoopflowCore
 
 struct EmbeddedTerminalPanel: View {
     @Environment(RepoState.self) private var repoState
-    @Environment(SessionState.self) private var sessionState
+    @Environment(OutputBuffer.self) private var outputBuffer
     @State private var isExpanded = false
     @StateObject private var ghosttyManager = GhosttyManager.shared
     @State private var terminalHeight: CGFloat = 250
@@ -19,7 +19,7 @@ struct EmbeddedTerminalPanel: View {
     var body: some View {
         VStack(spacing: 0) {
             // Header bar
-            if !sessionState.activeSessionIds.isEmpty || hasActiveWorktree {
+            if hasActiveWorktree {
                 terminalHeader
             }
 
@@ -31,7 +31,7 @@ struct EmbeddedTerminalPanel: View {
     }
 
     private var hasActiveWorktree: Bool {
-        repoState.selectedWave?.worktreePath != nil || !sessionState.activeSessionIds.isEmpty
+        repoState.selectedWave?.worktreePath != nil
     }
 
     private var effectiveWorktree: String? {
@@ -44,12 +44,12 @@ struct EmbeddedTerminalPanel: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            if !sessionState.activeSessionIds.isEmpty {
+            if let wave = repoState.selectedWave, wave.status == .running {
                 Circle()
                     .fill(.green)
                     .frame(width: 8, height: 8)
 
-                Text("\(sessionState.activeSessionIds.count) running")
+                Text("running")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -136,6 +136,6 @@ struct EmbeddedTerminalPanel: View {
 #Preview {
     EmbeddedTerminalPanel()
         .environment(RepoState())
-        .environment(SessionState())
+        .environment(OutputBuffer())
         .frame(width: 600)
 }

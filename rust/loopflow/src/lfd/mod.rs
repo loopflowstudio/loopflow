@@ -70,6 +70,11 @@ pub fn default_db_path() -> PathBuf {
     home.join(".lf").join("lfd.db")
 }
 
+pub fn default_output_dir() -> PathBuf {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    home.join(".lf").join("output")
+}
+
 pub fn default_max_slots() -> usize {
     std::thread::available_parallelism()
         .map(|count| std::cmp::max(1, count.get() / 2))

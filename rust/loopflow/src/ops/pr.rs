@@ -55,8 +55,7 @@ pub fn create_or_update_pr(
         crate::ops::lint::ensure_lint_passes(repo, progress)?;
     }
 
-    sync_main_repo(repo, progress)?;
-
+    // Commit before sync — sync_main checks is_clean() and fails on dirty trees
     let commit_options = CommitOptions {
         add: true,
         lint: false,
@@ -67,6 +66,8 @@ pub fn create_or_update_pr(
         message: None,
     };
     let _ = commit_workflow(repo, &commit_options, progress)?;
+
+    sync_main_repo(repo, progress)?;
 
     if commits_behind_main(repo)? > 0 {
         progress.status("Branch behind base, rebasing...");

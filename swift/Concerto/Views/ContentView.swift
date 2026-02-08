@@ -11,7 +11,7 @@ extension Notification.Name {
 
 struct ContentView: View {
     @Environment(RepoState.self) private var repoState
-    @Environment(SessionState.self) private var sessionState
+    @Environment(OutputBuffer.self) private var outputBuffer
 
     @State private var showingError = false
     @State private var showCommandPalette = false
@@ -131,5 +131,5 @@ struct ContentView: View {
 #Preview {
     ContentView()
         .environment(RepoState())
-        .environment(SessionState())
+        .environment(OutputBuffer())
 }

@@ -1,6 +1,5 @@
 // Wave detail panel. Adapts to wave state:
-// - No area → AreaPicker (pick where to work)
-// - Has area, idle → StepRunner (run individual steps)
+// - Idle → StepRunner (run individual steps)
 // - Running/waiting/etc → Progress + actions
 
 import SwiftUI
@@ -10,13 +9,12 @@ struct WaveDetailPanel: View {
     let wave: WaveViewModel
 
     @Environment(RepoState.self) private var repoState
-    @Environment(SessionState.self) private var sessionState
+    @Environment(OutputBuffer.self) private var outputBuffer
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var actionError: String?
     @State private var showingActionError = false
     @State private var showingStopConfirmation = false
-    @State private var isCloning = false
     @State private var editingName: String = ""
     @State private var isEditingName = false
     @State private var currentTime = Date()
@@ -31,8 +29,8 @@ struct WaveDetailPanel: View {
 
     var body: some View {
         Group {
-            if sessionState.hasActiveSession(for: wave.id),
-               let session = sessionState.interactiveSession {
+            if outputBuffer.hasActiveSession(for: wave.id),
+               let session = outputBuffer.interactiveSession {
                 InteractiveSessionView(session: session)
             } else {
                 blendedView
@@ -60,11 +58,26 @@ struct WaveDetailPanel: View {
                 startNameEdit()
             }
         }
+        .onChange(of: isNameFocused) { _, focused in
+            if !focused && isEditingName {
+                commitNameChange()
+            }
+        }
         .onReceive(elapsedTimeTimer) { time in
             // Update current time for elapsed time display (only when running)
             if wave.status == .running {
                 currentTime = time
             }
+        }
+        .onAppear {
+            outputBuffer.startStreaming(waveId: wave.id)
+        }
+        .onDisappear {
+            outputBuffer.stopStreaming(waveId: wave.id)
+        }
+        .onChange(of: wave.id) { oldId, newId in
+            outputBuffer.stopStreaming(waveId: oldId)
+            outputBuffer.startStreaming(waveId: newId)
         }
     }
 
@@ -78,15 +91,14 @@ struct WaveDetailPanel: View {
 
             ScrollView {
                 VStack(spacing: 16) {
-                    if wave.area.isEmpty {
-                        AreaPicker(wave: wave)
-                    } else if wave.status == .idle {
+                    if wave.status == .idle {
                         StepRunner(wave: wave)
                         if !wave.recentSteps.isEmpty {
                             Divider()
                             NextActionsBar(wave: wave)
                         }
                     } else {
+                        waveConfigSummary
                         runProgressSection
                     }
 
@@ -127,7 +139,7 @@ struct WaveDetailPanel: View {
                         Text(wave.displayName)
                             .font(.title2)
                             .fontWeight(.semibold)
-                            .onTapGesture(count: 2) {
+                            .onTapGesture {
                                 startNameEdit()
                             }
                     }
@@ -149,25 +161,6 @@ struct WaveDetailPanel: View {
             }
 
             Spacer()
-
-            // Clone button (prominent)
-            Button {
-                cloneWave()
-            } label: {
-                HStack(spacing: 4) {
-                    if isCloning {
-                        ProgressView()
-                            .scaleEffect(0.6)
-                    } else {
-                        Image(systemName: "doc.on.doc")
-                            .font(.caption)
-                    }
-                    Text("Clone")
-                }
-            }
-            .buttonStyle(DarkButtonStyle())
-            .disabled(isCloning)
-            .help("Create a copy of this wave")
 
             // PR badge if available (from Wave fields)
             if let prNumber = wave.prNumber, let prState = wave.prState {
@@ -220,6 +213,45 @@ struct WaveDetailPanel: View {
         }
         .buttonStyle(.plain)
         .help("View PR on GitHub")
+    }
+
+    // MARK: - Wave Config Summary (read-only, shown when running)
+
+    private var waveConfigSummary: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(spacing: Spacing.lg) {
+                if !wave.areaDisplay.isEmpty {
+                    Label {
+                        Text(wave.areaDisplay)
+                            .font(.caption)
+                    } icon: {
+                        Image(systemName: "folder")
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(.secondary)
+                }
+
+                if !wave.directionDisplay.isEmpty && wave.directionDisplay != "default" {
+                    Label {
+                        Text(wave.directionDisplay)
+                            .font(.caption)
+                    } icon: {
+                        Image(systemName: "target")
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(.secondary)
+                }
+
+                Label {
+                    Text(wave.flowDisplay)
+                        .font(.caption)
+                } icon: {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.caption2)
+                }
+                .foregroundStyle(.secondary)
+            }
+        }
     }
 
     // MARK: - Idle Wave View
@@ -312,27 +344,8 @@ struct WaveDetailPanel: View {
             WaitingStateCard(wave: wave)
         } else {
             VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    Text("Progress")
-                        .font(.headline)
-                    Spacer()
-
-                    // Connect button for running waves
-                    if wave.status == .running, let path = wave.worktreePath {
-                        Button {
-                            connectToRunning(path: path)
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "terminal")
-                                    .font(.caption)
-                                Text("Connect")
-                                    .font(.caption)
-                            }
-                        }
-                        .buttonStyle(DarkButtonStyle())
-                        .help("Connect to running terminal")
-                    }
-                }
+                Text("Progress")
+                    .font(.headline)
 
                 // Status description with progress
                 HStack(spacing: 8) {
@@ -362,9 +375,14 @@ struct WaveDetailPanel: View {
                 }
                 .font(.subheadline)
 
+                // Error detail for failed runs
+                if wave.status == .failed {
+                    failedRunDetail
+                }
+
                 // Activity summary (recent output line)
                 if wave.status == .running,
-                   let recentOutput = sessionState.recentOutput(for: wave.id) {
+                   let recentOutput = outputBuffer.recentOutput(for: wave.id) {
                     Text(recentOutput)
                         .font(.caption)
                         .foregroundStyle(.tertiary)
@@ -376,8 +394,8 @@ struct WaveDetailPanel: View {
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
 
-                // Live output
-                if wave.status == .running {
+                // Live output (running or any buffered output)
+                if wave.status == .running || !outputBuffer.output(for: wave.id).isEmpty {
                     liveOutputSection
                 }
             }
@@ -387,31 +405,69 @@ struct WaveDetailPanel: View {
         }
     }
 
+    private var failedRunDetail: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Error message from the run
+            if let error = wave.activeRun?.error {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                        .font(.caption)
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.primary)
+                        .textSelection(.enabled)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.red.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else {
+                Text("No error details available.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+
+            // Failed step context
+            if let step = wave.activeRun?.currentStep {
+                Text("Failed during: \(step)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            // Retry button
+            Button {
+                retryWave()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.caption)
+                    Text("Retry")
+                }
+            }
+            .buttonStyle(DarkButtonStyle())
+        }
+    }
+
     private var liveOutputSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Live Output")
+            Text(wave.status == .running ? "Live Output" : "Output")
                 .font(.caption)
                 .fontWeight(.medium)
                 .foregroundStyle(.secondary)
 
-            if let path = wave.worktreePath {
-                GhosttyTerminalView(workingDirectory: path)
-                    .frame(height: 200)
+            let output = outputBuffer.output(for: wave.id)
+            if output.isEmpty {
+                Text("Waiting for output…")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(palette.background)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
-                let output = sessionState.output(for: wave.id)
-                if output.isEmpty {
-                    Text("Waiting for output...")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                        .background(palette.background)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                } else {
-                    LoopLiveOutput(lines: output)
-                        .frame(height: 120)
-                }
+                LiveOutput(lines: output)
+                    .frame(minHeight: 120, maxHeight: 300)
             }
         }
     }
@@ -420,39 +476,11 @@ struct WaveDetailPanel: View {
 
     private func launchInteractive() {
         guard let path = wave.worktreePath else { return }
-        sessionState.launchInteractiveSession(
+        outputBuffer.launchInteractiveSession(
             waveId: wave.id,
             step: wave.flow,
             worktreePath: path
         )
-    }
-
-    private func connectToRunning(path: String) {
-        // Open a shell terminal in the worktree directory
-        // This lets users inspect/interact while the wave runs
-        do {
-            try terminalLauncher.launchTerminal(terminalApp, at: URL(fileURLWithPath: path))
-        } catch {
-            actionError = "Failed to connect: \(error.localizedDescription)"
-            showingActionError = true
-        }
-    }
-
-    private func cloneWave() {
-        isCloning = true
-        Task {
-            do {
-                _ = try await repoState.cloneWave(wave)
-            } catch {
-                await MainActor.run {
-                    actionError = "Failed to clone wave: \(error.localizedDescription)"
-                    showingActionError = true
-                }
-            }
-            await MainActor.run {
-                isCloning = false
-            }
-        }
     }
 
     private func openInTerminal(path: String) {
@@ -480,6 +508,20 @@ struct WaveDetailPanel: View {
             } catch {
                 await MainActor.run {
                     actionError = "Failed to stop wave: \(error.localizedDescription)"
+                    showingActionError = true
+                }
+            }
+        }
+    }
+
+    private func retryWave() {
+        Task {
+            do {
+                outputBuffer.clearOutput(for: wave.id)
+                try await repoState.runWave(wave: wave)
+            } catch {
+                await MainActor.run {
+                    actionError = "Failed to retry wave: \(error.localizedDescription)"
                     showingActionError = true
                 }
             }
@@ -529,6 +571,6 @@ struct WaveDetailPanel: View {
     let wave = repoState.waves.first!
     return WaveDetailPanel(wave: wave)
         .environment(repoState)
-        .environment(SessionState())
+        .environment(OutputBuffer())
         .frame(width: 600, height: 700)
 }

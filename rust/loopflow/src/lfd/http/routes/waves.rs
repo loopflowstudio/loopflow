@@ -82,6 +82,7 @@ pub struct CreateWaveRequest {
 
 #[derive(Deserialize, Default)]
 pub struct UpdateWaveRequest {
+    name: Option<String>,
     flow: Option<String>,
     direction: Option<Vec<String>>,
     area: Option<Vec<String>>,
@@ -190,6 +191,11 @@ pub async fn update_wave_handler(
     .map_err(map_store_error)?
     .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
 
+    if let Some(name) = payload.name {
+        if !name.is_empty() {
+            wave.name = name;
+        }
+    }
     if let Some(flow) = payload.flow {
         wave.flow = flow;
     }

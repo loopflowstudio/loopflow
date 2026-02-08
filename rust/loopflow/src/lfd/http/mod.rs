@@ -6,6 +6,7 @@ use axum::http::StatusCode;
 use axum::middleware;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use tower_http::trace::TraceLayer;
 
 use crate::lfd::auth;
 use crate::lfd::http::dto::{ErrorDetail, ErrorResponse};
@@ -64,6 +65,7 @@ pub fn router(state: HttpState) -> Router {
         .nest("/v1", api_routes)
         .merge(protected_routes)
         .route("/hooks/git", post(hooks::git_hook_handler))
+        .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
 

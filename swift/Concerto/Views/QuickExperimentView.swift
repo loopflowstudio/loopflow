@@ -71,17 +71,17 @@ struct SidebarPreviewView: View {
 
             // Mock section structure
             VStack(alignment: .leading, spacing: Spacing.xxs) {
-                previewSection("Needs Attention", icon: "exclamationmark.triangle.fill", color: .orange, count: 2)
-                previewSection("Open PRs", icon: "arrow.triangle.pull", color: .green, count: 1)
-                previewSection("Active", icon: "circle.fill", color: .blue, count: nil)
-                previewSection("Idle", icon: "circle", color: .white.opacity(0.5), count: nil)
+                previewSection("Needs Attention", icon: "exclamationmark.triangle.fill", color: .orange)
+                previewSection("Open PRs", icon: "arrow.triangle.pull", color: .green)
+                previewSection("Active", icon: "circle.fill", color: .blue)
+                previewSection("Idle", icon: "circle", color: .white.opacity(0.5))
             }
             .padding(.leading, Spacing.xs)
         }
         .padding(.horizontal, Spacing.md)
     }
 
-    private func previewSection(_ title: String, icon: String, color: Color, count: Int?) -> some View {
+    private func previewSection(_ title: String, icon: String, color: Color) -> some View {
         HStack(spacing: Spacing.xs) {
             Image(systemName: icon)
                 .font(.system(size: 8))
@@ -90,12 +90,6 @@ struct SidebarPreviewView: View {
             Text(title)
                 .font(.caption2)
                 .foregroundStyle(.white.opacity(0.4))
-
-            if let count {
-                Text("(\(count))")
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.3))
-            }
         }
     }
 }

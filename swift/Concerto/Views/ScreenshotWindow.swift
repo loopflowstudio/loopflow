@@ -11,7 +11,7 @@ struct ScreenshotWindow: View {
     let mode: RepoState.ScreenshotMode
     let recentsService: RecentsService
     @State private var repoState = RepoState()
-    @State private var sessionState = SessionState()
+    @State private var outputBuffer = OutputBuffer()
     @State private var hasLoaded = false
     @State private var hasCaptured = false
 
@@ -19,7 +19,7 @@ struct ScreenshotWindow: View {
         // Use HStack layout for screenshot mode - NavigationSplitView doesn't capture properly
         ScreenshotLayout()
             .environment(repoState)
-            .environment(sessionState)
+            .environment(outputBuffer)
             .task {
                 await setupState()
             }
@@ -38,7 +38,7 @@ struct ScreenshotWindow: View {
         // Open the repo if specified (skip background refresh in mock mode to avoid overwriting mock data)
         if let repoPath = mode.repoPath {
             let repoURL = URL(fileURLWithPath: (repoPath as NSString).expandingTildeInPath)
-            await repoState.openRepo(repoURL, sessionState: sessionState, skipBackgroundRefresh: mode.mockLoops)
+            await repoState.openRepo(repoURL, outputBuffer: outputBuffer, skipBackgroundRefresh: mode.mockLoops)
         }
 
         // Configure mock waves if requested
@@ -103,7 +103,7 @@ struct ScreenshotWindow: View {
 /// NavigationSplitView's sidebar doesn't capture properly with bitmapImageRepForCachingDisplay.
 private struct ScreenshotLayout: View {
     @Environment(RepoState.self) private var repoState
-    @Environment(SessionState.self) private var sessionState
+    @Environment(OutputBuffer.self) private var outputBuffer
     @Environment(\.colorScheme) private var colorScheme
 
     private var palette: LoopflowPalette {

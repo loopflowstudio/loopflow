@@ -78,6 +78,7 @@ pub enum Event {
 
     // Output
     OutputLine {
+        wave_id: LfdId,
         agent_id: LfdId,
         text: String,
         #[serde(with = "time::serde::rfc3339")]

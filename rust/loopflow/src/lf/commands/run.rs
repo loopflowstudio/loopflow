@@ -109,7 +109,7 @@ fn build_prompt(
         step: step.map(|s| s.to_string()),
         inline: inline.map(|s| s.to_string()),
         step_args: step_args.to_vec(),
-        message: None,
+        message: inline.map(|s| s.to_string()),
         run_mode: Some(
             if is_interactive {
                 "interactive"

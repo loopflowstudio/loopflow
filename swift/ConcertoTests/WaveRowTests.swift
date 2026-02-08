@@ -34,15 +34,14 @@ struct WaveRowViewTests {
     private func makeRow(
         wave: WaveViewModel,
         isSelected: Bool = false,
-        liveOutput: [OutputLine] = [],
         pendingPR: (number: Int, url: URL?)? = nil
     ) -> WaveRow {
         WaveRow(
             wave: wave,
             isSelected: isSelected,
-            liveOutput: liveOutput,
             pendingPR: pendingPR,
-            onSelect: {}
+            onSelect: {},
+            isEditingAnyName: .constant(false)
         )
     }
 

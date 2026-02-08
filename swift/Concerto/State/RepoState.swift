@@ -65,6 +65,7 @@ final class RepoState {
 
     var currentRepo: URL?
     var flows: [Flow] = []
+    var availableDirections: [String] = []
     var waves: [WaveViewModel] = [] {
         didSet {
             waveGroups = buildWaveGroups(from: waves)
@@ -255,7 +256,7 @@ final class RepoState {
         lfdConnected = true
     }
 
-    func openRepo(_ url: URL, sessionState: SessionState, skipBackgroundRefresh: Bool = false) async {
+    func openRepo(_ url: URL, outputBuffer: OutputBuffer, skipBackgroundRefresh: Bool = false) async {
         let startTime = CFAbsoluteTimeGetCurrent()
         currentRepo = url
         isLoading = true
@@ -268,7 +269,7 @@ final class RepoState {
             Task {
                 let setupService = SetupService()
                 try? await setupService.ensureDaemonRunning()
-                startEventSubscription(sessionState: sessionState)
+                startEventSubscription(outputBuffer: outputBuffer)
                 await refreshFlowsAsync()
             }
         }
@@ -276,7 +277,7 @@ final class RepoState {
 
     // MARK: - Event Subscription
 
-    func startEventSubscription(sessionState: SessionState) {
+    func startEventSubscription(outputBuffer: OutputBuffer) {
         LoggingService.append("startEventSubscription called", category: LoggingService.Category.lfd)
         if eventService != nil { return }
         LoggingService.append("creating LocalEventService", category: LoggingService.Category.lfd)
@@ -284,9 +285,9 @@ final class RepoState {
 
         Task {
             await eventService?.subscribe(
-                onEvent: { [weak self, weak sessionState] event in
+                onEvent: { [weak self, weak outputBuffer] event in
                     Task { @MainActor in
-                        guard let self, let sessionState else { return }
+                        guard let self, let outputBuffer else { return }
                         switch event {
                         case .connected(let connected):
                             self.lfdConnected = true
@@ -297,21 +298,12 @@ final class RepoState {
                         case .wave(let waveEvent):
                             await self.handleWaveEvent(waveEvent)
                         case .output(let outputEvent):
-                            sessionState.appendOutput(
-                                sessionId: outputEvent.agentId,
+                            outputBuffer.appendOutput(
+                                waveId: outputEvent.waveId,
                                 text: outputEvent.text,
                                 timestamp: outputEvent.timestamp
                             )
-                        case .agentStarted(let started):
-                            sessionState.startSession(
-                                id: started.agentId,
-                                waveId: nil,
-                                step: started.step,
-                                worktree: started.worktree
-                            )
-                        case .agentEnded(let ended):
-                            sessionState.endSession(id: ended.agentId, status: ended.status)
-                        case .worktree:
+                        case .agentStarted, .agentEnded, .worktree:
                             break
                         }
                     }
@@ -361,10 +353,11 @@ final class RepoState {
 
     func refreshFlowsAsync() async {
         guard let repo = currentRepo else { return }
-        let loaded = (try? await waveService.listFlows(repo: repo)) ?? []
-        if !loaded.isEmpty {
-            flows = loaded
+        guard let result = try? await waveService.listFlowsAndDirections(repo: repo) else { return }
+        if !result.flows.isEmpty {
+            flows = result.flows
         }
+        availableDirections = result.directions
     }
 
     // MARK: - Waves
@@ -523,11 +516,11 @@ final class RepoState {
         await refreshWaves()
     }
 
-    func connectLfd(sessionState: SessionState) async throws {
+    func connectLfd(outputBuffer: OutputBuffer) async throws {
         LoggingService.lfd("connectLfd: starting")
         try? await waveService.connectLfd()
         LoggingService.lfd("connectLfd: waveService.connectLfd completed")
-        startEventSubscription(sessionState: sessionState)
+        startEventSubscription(outputBuffer: outputBuffer)
         LoggingService.lfd("connectLfd: event subscription started")
     }
 }

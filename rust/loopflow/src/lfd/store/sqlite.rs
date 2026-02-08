@@ -457,7 +457,7 @@ impl RunStore for SqliteStore {
                    started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
                    snapshot_area, snapshot_pr, flow_parents
             FROM wave_runs
-            WHERE wave_id = ?1 AND status IN (?2, ?3, ?4)
+            WHERE wave_id = ?1 AND status IN (?2, ?3, ?4, ?5)
             ORDER BY started_at DESC
             LIMIT 1
             ",
@@ -468,7 +468,8 @@ impl RunStore for SqliteStore {
                     wave_id,
                     WaveRunStatus::Pending.as_i32(),
                     WaveRunStatus::Running.as_i32(),
-                    WaveRunStatus::Waiting.as_i32()
+                    WaveRunStatus::Waiting.as_i32(),
+                    WaveRunStatus::Failed.as_i32(),
                 ],
                 map_wave_run_row,
             )

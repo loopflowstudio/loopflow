@@ -12,6 +12,8 @@ curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/i
 lf init
 ```
 
+Default install location is `~/.local/bin`. Override with `LF_INSTALL_DIR=/path`.
+
 Install the Python CLI/API (lfq + loopflow) separately:
 
 ```bash

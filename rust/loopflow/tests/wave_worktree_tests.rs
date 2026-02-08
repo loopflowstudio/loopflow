@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use loopflow::engine::worktrees::worktree_path;
+use loopflow::engine::git::{branch_rename, current_branch, worktree_move};
+use loopflow::engine::naming::sanitize_for_branch;
+use loopflow::engine::worktrees::{branch_exists, worktree_path};
 use loopflow::lfd::executor::{create_wave_run_with_id, ensure_wave_worktree};
 use loopflow::lfd::id::LfdId;
 use loopflow::lfd::store::sqlite::SqliteStore;
@@ -122,4 +124,72 @@ fn ensure_wave_worktree_reuses_existing() {
     let (path2, branch2) = ensure_wave_worktree(repo.path(), "reduce").unwrap();
     assert_eq!(path1, path2);
     assert_eq!(branch1, branch2);
+}
+
+#[test]
+fn wave_rename_moves_worktree() {
+    let repo = TestRepo::new();
+    let (_wt_path, _branch) = ensure_wave_worktree(repo.path(), "old-wave").unwrap();
+
+    let old_wt = worktree_path(repo.path(), "old-wave");
+    let new_wt = worktree_path(repo.path(), "new-wave");
+    assert!(old_wt.exists());
+
+    worktree_move(repo.path(), &old_wt, &new_wt).unwrap();
+
+    assert!(!old_wt.exists(), "old worktree should be gone");
+    assert!(new_wt.exists(), "new worktree should exist");
+}
+
+#[test]
+fn wave_rename_renames_branch() {
+    let repo = TestRepo::new();
+    let (_wt_path, old_branch) = ensure_wave_worktree(repo.path(), "old-wave").unwrap();
+
+    let old_sanitized = sanitize_for_branch("old-wave");
+    let new_sanitized = sanitize_for_branch("new-wave");
+    let new_branch = old_branch.replacen(&old_sanitized, &new_sanitized, 1);
+
+    // Move worktree first (branch rename operates on repo, not worktree path).
+    let old_wt = worktree_path(repo.path(), "old-wave");
+    let new_wt = worktree_path(repo.path(), "new-wave");
+    worktree_move(repo.path(), &old_wt, &new_wt).unwrap();
+
+    branch_rename(repo.path(), &old_branch, &new_branch).unwrap();
+
+    let current = current_branch(&new_wt).unwrap().unwrap();
+    assert_eq!(current, new_branch);
+    assert!(
+        current.contains("new-wave"),
+        "branch should contain the new wave name"
+    );
+}
+
+#[test]
+fn wave_rename_detects_destination_conflict() {
+    let repo = TestRepo::new();
+    ensure_wave_worktree(repo.path(), "wave-a").unwrap();
+    ensure_wave_worktree(repo.path(), "wave-b").unwrap();
+
+    // Our rename logic checks new_wt.exists() before attempting git worktree move.
+    let new_wt = worktree_path(repo.path(), "wave-b");
+    assert!(
+        new_wt.exists(),
+        "destination worktree should exist, blocking rename"
+    );
+}
+
+#[test]
+fn wave_rename_branch_exists_check() {
+    let repo = TestRepo::new();
+    let (_wt_path, old_branch) = ensure_wave_worktree(repo.path(), "alpha").unwrap();
+
+    assert!(
+        branch_exists(repo.path(), &old_branch).unwrap(),
+        "branch should exist after worktree creation"
+    );
+    assert!(
+        !branch_exists(repo.path(), "nonexistent-branch").unwrap(),
+        "nonexistent branch should not exist"
+    );
 }

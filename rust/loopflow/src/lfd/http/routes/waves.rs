@@ -5,9 +5,11 @@ use serde::Deserialize;
 use std::str::FromStr;
 use time::OffsetDateTime;
 
+use crate::engine::git::{branch_rename, current_branch, delete_remote_branch, push_with_upstream};
+use crate::engine::naming::sanitize_for_branch;
 use crate::engine::worktree::remove_worktree;
-use crate::engine::worktrees::worktree_path;
-use crate::lfd::executor::{create_wave_run_with_id, kill_process};
+use crate::engine::worktrees::{branch_exists, worktree_path};
+use crate::lfd::executor::{create_wave_run_with_id, ensure_wave_worktree, kill_process};
 use crate::lfd::http::dto::{
     ContinueWaveResponse, DeletedResourceResponse, LandWaveResponse, ListResponse, RunWaveResponse,
     StopWaveResponse, WaveDto,
@@ -170,6 +172,25 @@ pub async fn create_wave_handler(
         .await
         .map_err(map_store_error)?;
 
+    // Create worktree eagerly so it exists immediately.
+    let repo_for_wt = wave.repo.clone();
+    let name_for_wt = wave.name.clone();
+    let wt_result = tokio::task::spawn_blocking(move || {
+        ensure_wave_worktree(std::path::Path::new(&repo_for_wt), &name_for_wt)
+    })
+    .await
+    .map_err(|err| err.to_string())
+    .and_then(|r| r.map_err(|err| err.to_string()));
+
+    if let Err(err) = wt_result {
+        let wave_id = wave.id.clone();
+        let _ = run_store(&state.store, move |store| store.delete_wave(&wave_id)).await;
+        return Err(api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to create worktree: {err}"),
+        ));
+    }
+
     state
         .event_hub
         .send(Event::wave_created(wave.id.clone(), wave.name.clone()));
@@ -211,11 +232,58 @@ pub async fn update_wave_handler(
     .map_err(map_store_error)?
     .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
 
-    if let Some(name) = payload.name {
-        if !name.is_empty() {
-            wave.name = name;
+    // Handle rename: move worktree + rename branch before updating DB.
+    if let Some(ref name) = payload.name {
+        if !name.is_empty() && *name != wave.name {
+            let new_name = name.clone();
+
+            // Check for duplicate name in same repo.
+            let repo_for_check = wave.repo.clone();
+            let name_for_check = new_name.clone();
+            let existing = run_store(&state.store, move |store| {
+                let waves = store.list_waves(Some(&repo_for_check))?;
+                Ok(waves.into_iter().any(|w| w.name == name_for_check))
+            })
+            .await
+            .map_err(map_store_error)?;
+            if existing {
+                return Err(api_error(
+                    StatusCode::CONFLICT,
+                    format!("wave '{}' already exists in this repo", new_name),
+                ));
+            }
+
+            // Reject rename while wave is running or waiting.
+            let active_run = run_store(&state.store, {
+                let wave_id = wave.id.clone();
+                move |store| store.get_active_wave_run(&wave_id)
+            })
+            .await
+            .map_err(map_store_error)?;
+            if let Some(run) = active_run {
+                if matches!(run.status, WaveRunStatus::Running | WaveRunStatus::Waiting) {
+                    return Err(api_error(
+                        StatusCode::PRECONDITION_FAILED,
+                        "cannot rename wave while running",
+                    ));
+                }
+            }
+
+            // Move worktree + rename branch on disk.
+            let old_name = wave.name.clone();
+            let repo = wave.repo.clone();
+            let new_name_for_wt = new_name.clone();
+            tokio::task::spawn_blocking(move || {
+                rename_wave_worktree(std::path::Path::new(&repo), &old_name, &new_name_for_wt)
+            })
+            .await
+            .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
+            .map_err(|err| api_error(StatusCode::CONFLICT, err))?;
+
+            wave.name = new_name;
         }
     }
+
     if let Some(flow) = payload.flow {
         wave.flow = flow;
     }
@@ -634,6 +702,57 @@ fn resolve_current_step_name(run: &WaveRun, _wave: &Wave, step_index: u32) -> St
             _ => None,
         });
     name.unwrap_or_else(|| format!("step-{step_index}"))
+}
+
+/// Move a wave's worktree and rename its branch to match the new name.
+/// Returns Ok(()) if no worktree exists (legacy wave). Returns Err with a
+/// user-facing message if the rename is not possible.
+fn rename_wave_worktree(
+    repo: &std::path::Path,
+    old_name: &str,
+    new_name: &str,
+) -> Result<(), String> {
+    use crate::engine::git::worktree_move;
+
+    let old_wt = worktree_path(repo, old_name);
+    if !old_wt.exists() {
+        return Ok(());
+    }
+
+    let new_wt = worktree_path(repo, new_name);
+    if new_wt.exists() {
+        return Err(format!(
+            "destination worktree already exists: {}",
+            new_wt.display()
+        ));
+    }
+
+    // Compute new branch name by substituting the sanitized wave name.
+    let old_branch = current_branch(&old_wt)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "worktree is in detached HEAD state".to_string())?;
+
+    let old_sanitized = sanitize_for_branch(old_name);
+    let new_sanitized = sanitize_for_branch(new_name);
+    let new_branch = old_branch.replacen(&old_sanitized, &new_sanitized, 1);
+
+    if new_branch != old_branch && branch_exists(repo, &new_branch).map_err(|e| e.to_string())? {
+        return Err(format!("branch already exists: {new_branch}"));
+    }
+
+    // Move worktree directory.
+    worktree_move(repo, &old_wt, &new_wt).map_err(|e| e.to_string())?;
+
+    // Rename branch.
+    if new_branch != old_branch {
+        branch_rename(repo, &old_branch, &new_branch).map_err(|e| e.to_string())?;
+
+        // Update remote (best-effort).
+        let _ = push_with_upstream(repo, "origin", &new_branch);
+        let _ = delete_remote_branch(repo, "origin", &old_branch);
+    }
+
+    Ok(())
 }
 
 fn auto_commit_if_dirty(worktree: &std::path::Path, step_name: &str) -> Result<(), String> {

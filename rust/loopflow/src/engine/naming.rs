@@ -19,7 +19,7 @@ const MUSICAL: &[&str] = &[
     "sonata", "tempo", "trill", "tune", "verse", "waltz",
 ];
 
-fn sanitize_for_branch(value: &str) -> String {
+pub fn sanitize_for_branch(value: &str) -> String {
     let mut out = String::new();
     let mut last_was_dash = false;
     for ch in value.chars() {

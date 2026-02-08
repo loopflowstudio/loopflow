@@ -141,6 +141,17 @@ pub fn delete_local_branch(repo: &Path, branch: &str) -> Result<(), GitError> {
     Ok(())
 }
 
+pub fn branch_rename(repo: &Path, old_name: &str, new_name: &str) -> Result<(), GitError> {
+    let output = run_git(repo, &["branch", "-m", old_name, new_name])?;
+    if !output.status.success() {
+        return Err(GitError::CommandFailed {
+            command: format!("git branch -m {} {}", old_name, new_name),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        });
+    }
+    Ok(())
+}
+
 /// Get current branch name. Returns None if in detached HEAD state.
 pub fn current_branch(repo: &Path) -> Result<Option<String>, GitError> {
     let output = run_git(repo, &["symbolic-ref", "--short", "HEAD"])?;
@@ -647,6 +658,18 @@ mod tests {
         checkout(repo.path(), "main").expect("checkout main");
 
         delete_local_branch(repo.path(), "feature").expect("delete branch");
+    }
+
+    #[test]
+    fn git_branch_rename() {
+        let repo = init_repo();
+        commit_file(repo.path(), "README.md", "hello");
+        checkout_new_branch(repo.path(), "old-name").expect("create branch");
+        branch_rename(repo.path(), "old-name", "new-name").expect("rename branch");
+        assert_eq!(
+            current_branch(repo.path()).unwrap(),
+            Some("new-name".to_string())
+        );
     }
 
     #[test]

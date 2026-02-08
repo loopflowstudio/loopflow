@@ -10,6 +10,7 @@ publish.py screenshots    # generate screenshots
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -109,8 +110,20 @@ def _install_wheel() -> tuple[bool, str]:
     wheels = sorted((ROOT / "dist").glob("loopflow-*.whl"))
     if not wheels:
         return False, "No wheel found in dist/"
+    wheel = str(wheels[-1])
+
+    # Install into local venv (uv run lfq)
     result = subprocess.run(
-        ["uv", "pip", "install", "--force-reinstall", str(wheels[-1])],
+        ["uv", "pip", "install", "--force-reinstall", wheel],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return False, result.stdout + result.stderr
+
+    # Install as global tool (lfq on PATH)
+    result = subprocess.run(
+        ["uv", "tool", "install", "--force", "--reinstall", wheel],
         capture_output=True,
         text=True,
     )
@@ -143,7 +156,9 @@ def _install_binaries() -> tuple[bool, str]:
         src = built / name
         if src.exists():
             dst = install_path / name
-            dst.write_bytes(src.read_bytes())
+            if dst.exists():
+                dst.unlink()
+            shutil.copy2(src, dst)
             dst.chmod(0o755)
 
     return True, f"Installed lf/lfd to {install_path}"

@@ -13,8 +13,8 @@ use crate::lfd::http::routes::{build_wave_dto, resolve_wave_id};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, run_store, ApiResult};
 use crate::lfd::id::LfdId;
-use crate::lfd::store::{SharedStore, StoreError};
-use crate::lfd::types::{Event, Wave, WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus};
+use crate::lfd::loops::common::create_wave_run_with_id;
+use crate::lfd::types::{Event, Wave, WaveRun, WaveRunStatus, WaveStatus};
 
 #[derive(Deserialize)]
 pub struct ListWavesQuery {
@@ -316,7 +316,7 @@ pub async fn run_wave_handler(
         Ok(Ok(run)) => run,
         Ok(Err(err)) => {
             state.scheduler.release(run_id.as_str());
-            return Err(map_store_error(err));
+            return Err(api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()));
         }
         Err(err) => {
             state.scheduler.release(run_id.as_str());
@@ -543,46 +543,6 @@ pub async fn land_wave_handler(
     .map_err(|err| api_error(StatusCode::BAD_REQUEST, err.to_string()))?;
 
     Ok(Json(LandWaveResponse { merged: true }))
-}
-
-fn create_wave_run_with_id(
-    store: &SharedStore,
-    wave: &Wave,
-    run_id: &LfdId,
-) -> Result<WaveRun, StoreError> {
-    let last_run = store
-        .list_wave_runs(Some(&wave.id), Some(1))?
-        .into_iter()
-        .next();
-    let iteration = last_run.map(|run| run.iteration + 1).unwrap_or(0);
-
-    let run = WaveRun {
-        id: run_id.clone(),
-        wave_id: wave.id.clone(),
-        snapshot: WaveRunSnapshot {
-            repo: wave.repo.clone(),
-            flow: wave.flow.clone(),
-            direction: wave.direction.clone(),
-            area: wave.area.clone(),
-            pr: None,
-        },
-        iteration,
-        step_index: 0,
-        status: WaveRunStatus::Running,
-        worktree: wave.repo.clone(),
-        branch: String::new(),
-        started_at: Some(OffsetDateTime::now_utc()),
-        ended_at: None,
-        error: None,
-        flow_parents: Vec::new(),
-    };
-    store.create_wave_run(&run)?;
-    if let Ok(Some(mut wave)) = store.get_wave(&wave.id) {
-        wave.status = WaveStatus::Running;
-        wave.iteration = iteration;
-        let _ = store.update_wave(&wave);
-    }
-    Ok(run)
 }
 
 fn resolve_current_step_name(run: &WaveRun, _wave: &Wave, step_index: u32) -> String {

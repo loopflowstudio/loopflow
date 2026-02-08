@@ -175,67 +175,6 @@ fn cached_doc_tokens(
     tokens
 }
 
-/// Analyze token usage per category.
-pub fn analyze_context(components: &PromptComponents) -> ContextBreakdown {
-    let mut b = ContextBreakdown::default();
-
-    // System (loopflow doc)
-    if let Some(ref doc) = components.loopflow_doc {
-        b.system = count_tokens(doc);
-    }
-
-    // Step
-    if let Some(ref step) = components.step {
-        if let Some(ref content) = step.content {
-            b.step = count_tokens(content);
-        }
-        b.step_name = Some(step.name.clone());
-    }
-
-    // Directions
-    for dir in &components.directions {
-        b.direction += count_tokens(&dir.content);
-        b.direction_names.push(dir.name.clone());
-    }
-
-    // Diff (unified diff string + full file contents both count as "diff")
-    if let Some(ref diff) = components.diff {
-        b.diff += count_tokens(diff);
-    }
-    for doc in &components.diff_files {
-        b.diff += count_tokens(&doc.content);
-    }
-    b.diff_file_count = components.diff_file_count;
-    b.diff_tier = components.diff_tier.clone();
-
-    // Docs
-    for doc in &components.docs {
-        b.docs += count_tokens(&doc.content);
-    }
-    for doc in &components.summaries {
-        b.docs += count_tokens(&doc.content);
-    }
-    b.doc_count = components.docs.len() + components.summaries.len();
-
-    // Area
-    for doc in &components.area_docs {
-        b.area += count_tokens(&doc.content);
-    }
-    b.area_name = components.area.clone();
-    b.area_doc_count = components.area_docs.len();
-
-    // Clipboard
-    if let Some(ref clip) = components.clipboard {
-        b.clipboard = count_tokens(clip);
-    }
-    b.has_clipboard = components.clipboard.is_some();
-
-    // Wave
-    b.wave_name = components.wave.clone();
-
-    b
-}
-
 /// Trim context and return token breakdown without re-tokenizing.
 pub fn trim_context_with_breakdown(
     mut components: PromptComponents,
@@ -356,7 +295,6 @@ pub fn trim_context_with_breakdown(
         if total > max_tokens && components.diff.is_some() {
             components.diff = None;
             breakdown.diff_tier = DiffTier::None;
-            components.diff_tier = DiffTier::None;
             breakdown.diff = breakdown.diff.saturating_sub(diff_string_tokens);
             total = total.saturating_sub(diff_string_tokens);
         }

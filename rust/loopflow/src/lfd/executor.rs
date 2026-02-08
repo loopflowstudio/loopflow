@@ -218,11 +218,7 @@ impl WaveExecutor {
                         run.flow_parents = flow_parents_for_index(&plan, run.step_index);
                         self.store.update_wave_run(&run)?;
                     } else {
-                        run.status = WaveRunStatus::Failed;
-                        run.ended_at = Some(OffsetDateTime::now_utc());
-                        run.error = Some(format!("step {} failed", step.step.name));
-                        self.store.update_wave_run(&run)?;
-                        self.set_wave_status(&wave.id, WaveStatus::Failed);
+                        self.fail_run(&mut run, &wave, format!("step {} failed", step.step.name))?;
                         return Ok(());
                     }
                 }
@@ -232,7 +228,7 @@ impl WaveExecutor {
                         .model
                         .clone()
                         .unwrap_or_else(|| "unknown".to_string());
-                    let worktree = run_worktree_path(&run);
+                    let worktree = run.worktree.clone();
                     let agent = build_agent_for_step(
                         &run.id,
                         &run.snapshot.repo,
@@ -282,8 +278,17 @@ impl WaveExecutor {
         }
     }
 
+    fn fail_run(&self, run: &mut WaveRun, wave: &Wave, error: String) -> Result<()> {
+        run.status = WaveRunStatus::Failed;
+        run.ended_at = Some(OffsetDateTime::now_utc());
+        run.error = Some(error);
+        self.store.update_wave_run(run)?;
+        self.set_wave_status(&wave.id, WaveStatus::Failed);
+        Ok(())
+    }
+
     async fn run_step(&self, wave: &Wave, run: &mut WaveRun, step: &ConcreteStep) -> Result<i32> {
-        let worktree = run_worktree_path(run);
+        let worktree = run.worktree.clone();
         debug!(run_id = %run.id, step = %step.step.name, worktree = %worktree, "building step prompt");
         let (prompt, model, launch) =
             build_step_prompt(&worktree, step, &run.snapshot.direction, Some(&wave.name))?;
@@ -332,10 +337,7 @@ impl WaveExecutor {
         fork: &ConcreteFork,
     ) -> Result<()> {
         if fork.branches.is_empty() {
-            run.status = WaveRunStatus::Failed;
-            run.error = Some("fork has no branches".to_string());
-            self.store.update_wave_run(run)?;
-            self.set_wave_status(&wave.id, WaveStatus::Failed);
+            self.fail_run(run, wave, "fork has no branches".to_string())?;
             return Ok(());
         }
 
@@ -346,19 +348,21 @@ impl WaveExecutor {
             .clone();
 
         if selected.step.interactive.unwrap_or(false) {
-            run.status = WaveRunStatus::Failed;
-            run.error = Some("interactive fork branches are not supported".to_string());
-            self.store.update_wave_run(run)?;
-            self.set_wave_status(&wave.id, WaveStatus::Failed);
+            self.fail_run(
+                run,
+                wave,
+                "interactive fork branches are not supported".to_string(),
+            )?;
             return Ok(());
         }
 
         let exit_code = self.run_step(wave, run, &selected).await?;
         if exit_code != 0 {
-            run.status = WaveRunStatus::Failed;
-            run.error = Some(format!("fork step {} failed", selected.step.name));
-            self.store.update_wave_run(run)?;
-            self.set_wave_status(&wave.id, WaveStatus::Failed);
+            self.fail_run(
+                run,
+                wave,
+                format!("fork step {} failed", selected.step.name),
+            )?;
             return Ok(());
         }
 
@@ -379,10 +383,11 @@ impl WaveExecutor {
         let mut fork_runs = Vec::new();
         for (index, branch) in fork.branches.iter().enumerate() {
             if branch.step.interactive.unwrap_or(false) {
-                run.status = WaveRunStatus::Failed;
-                run.error = Some("interactive fork branches are not supported".to_string());
-                self.store.update_wave_run(run)?;
-                self.set_wave_status(&wave.id, WaveStatus::Failed);
+                self.fail_run(
+                    run,
+                    wave,
+                    "interactive fork branches are not supported".to_string(),
+                )?;
                 return Ok(());
             }
 
@@ -568,31 +573,19 @@ impl WaveExecutor {
                 handle.abort();
             }
             self.cleanup_fork(run, &fork_runs).await;
-            run.status = WaveRunStatus::Failed;
-            run.error = Some(error);
-            self.store.update_wave_run(run)?;
-            self.set_wave_status(&wave.id, WaveStatus::Failed);
+            self.fail_run(run, wave, error)?;
             return Ok(());
         }
 
         if let Some(step_name) = fork.synthesize.as_deref() {
             let synth_step = ConcreteStep {
-                step: Step {
-                    name: step_name.to_string(),
-                    model: None,
-                    directions: Vec::new(),
-                    interactive: None,
-                    content: None,
-                },
+                step: Step::named(step_name),
                 flow_parents: fork.flow_parents.clone(),
             };
             let exit_code = self.run_step(wave, run, &synth_step).await?;
             if exit_code != 0 {
                 self.cleanup_fork(run, &fork_runs).await;
-                run.status = WaveRunStatus::Failed;
-                run.error = Some(format!("synthesize {} failed", step_name));
-                self.store.update_wave_run(run)?;
-                self.set_wave_status(&wave.id, WaveStatus::Failed);
+                self.fail_run(run, wave, format!("synthesize {} failed", step_name))?;
                 return Ok(());
             }
         }
@@ -675,10 +668,6 @@ pub fn ensure_wave_worktree(main_repo: &Path, wave_name: &str) -> anyhow::Result
     Ok((result.path.to_string_lossy().to_string(), result.branch))
 }
 
-fn run_worktree_path(run: &WaveRun) -> String {
-    run.worktree.clone()
-}
-
 /// Kill a process by PID using SIGTERM.
 pub fn kill_process(pid: u32) {
     let _ = std::process::Command::new("kill")
@@ -688,8 +677,7 @@ pub fn kill_process(pid: u32) {
 }
 
 fn fork_worktree_path(run: &WaveRun, branch_index: u32) -> String {
-    let base = run_worktree_path(run);
-    format!("{base}-fork-{branch_index}")
+    format!("{}-fork-{branch_index}", run.worktree)
 }
 
 fn merge_directions(base: &[String], extra: &[String]) -> Vec<String> {

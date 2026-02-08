@@ -14,7 +14,6 @@ use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{map_store_error, run_store, ApiResult};
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputEvent;
-use crate::lfd::types::WaveRun;
 
 #[derive(Deserialize, Default)]
 pub struct ListWaveRunsQuery {
@@ -173,11 +172,12 @@ async fn list_wave_runs(
         filtered.retain(|run| run.snapshot.repo == repo);
     }
 
-    let (runs, has_more) = paginate_wave_runs(
+    let (runs, has_more) = super::paginate(
         filtered,
         query.limit,
         query.starting_after.as_deref(),
         query.ending_before.as_deref(),
+        |r| &r.id,
     );
 
     let mut data = Vec::with_capacity(runs.len());
@@ -186,40 +186,4 @@ async fn list_wave_runs(
     }
 
     Ok(Json(ListResponse::new(data, has_more)))
-}
-
-fn paginate_wave_runs(
-    runs: Vec<WaveRun>,
-    limit: Option<u32>,
-    starting_after: Option<&str>,
-    ending_before: Option<&str>,
-) -> (Vec<WaveRun>, bool) {
-    let mut items = runs;
-    if let Some(starting_after) = starting_after {
-        if let Some(pos) = items
-            .iter()
-            .position(|run| run.id.to_string() == starting_after)
-        {
-            items = items.split_off(pos + 1);
-        }
-    }
-    if let Some(ending_before) = ending_before {
-        if let Some(pos) = items
-            .iter()
-            .position(|run| run.id.to_string() == ending_before)
-        {
-            items.truncate(pos);
-        }
-    }
-
-    let mut has_more = false;
-    if let Some(limit) = limit {
-        let limit = limit as usize;
-        if items.len() > limit {
-            items.truncate(limit);
-            has_more = true;
-        }
-    }
-
-    (items, has_more)
 }

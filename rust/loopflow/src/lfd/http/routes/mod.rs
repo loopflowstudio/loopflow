@@ -7,6 +7,7 @@ pub mod ws;
 
 use crate::lfd::http::dto::{wave_dto, wave_run_dto, ErrorResponse, WaveDto};
 use crate::lfd::http::run_store;
+use crate::lfd::id::LfdId;
 use crate::lfd::store::{SharedStore, StoreError};
 use crate::lfd::types::Wave;
 use axum::http::StatusCode;
@@ -55,4 +56,33 @@ pub async fn build_wave_dto(
     };
 
     Ok(wave_dto(&wave, active_run))
+}
+
+/// Cursor-based pagination over a list of items with an `id: LfdId` field.
+pub fn paginate<T>(
+    mut items: Vec<T>,
+    limit: Option<u32>,
+    starting_after: Option<&str>,
+    ending_before: Option<&str>,
+    id: fn(&T) -> &LfdId,
+) -> (Vec<T>, bool) {
+    if let Some(cursor) = starting_after {
+        if let Some(pos) = items.iter().position(|item| id(item).as_str() == cursor) {
+            items = items.split_off(pos + 1);
+        }
+    }
+    if let Some(cursor) = ending_before {
+        if let Some(pos) = items.iter().position(|item| id(item).as_str() == cursor) {
+            items.truncate(pos);
+        }
+    }
+    let mut has_more = false;
+    if let Some(limit) = limit {
+        let limit = limit as usize;
+        if items.len() > limit {
+            items.truncate(limit);
+            has_more = true;
+        }
+    }
+    (items, has_more)
 }

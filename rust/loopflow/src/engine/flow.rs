@@ -19,6 +19,18 @@ pub struct Step {
     pub content: Option<String>,
 }
 
+impl Step {
+    pub fn named(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            model: None,
+            directions: Vec::new(),
+            interactive: None,
+            content: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", content = "data")]
 pub enum FlowItem {
@@ -126,13 +138,7 @@ pub fn load_flow(name: &str, repo: &Path) -> Result<Flow, LoadError> {
                 // Auto-wrap a step name as a single-step flow.
                 return Ok(Flow {
                     name: name.to_string(),
-                    items: vec![FlowItem::Step(Step {
-                        name: name.to_string(),
-                        model: None,
-                        directions: Vec::new(),
-                        interactive: None,
-                        content: None,
-                    })],
+                    items: vec![FlowItem::Step(Step::named(name))],
                 });
             } else {
                 return Err(LoadError::FlowNotFound(name.to_string()));
@@ -332,13 +338,7 @@ fn parse_flow_items(value: &Value) -> Result<Vec<FlowItem>, LoadError> {
 
 fn parse_flow_item(value: &Value) -> Result<FlowItem, LoadError> {
     match value {
-        Value::String(name) => Ok(FlowItem::Step(Step {
-            name: name.to_string(),
-            model: None,
-            directions: Vec::new(),
-            interactive: None,
-            content: None,
-        })),
+        Value::String(name) => Ok(FlowItem::Step(Step::named(name))),
         Value::Mapping(map) => parse_flow_mapping(map),
         _ => Err(LoadError::InvalidFlow(
             "flow item must be string or mapping".to_string(),
@@ -363,13 +363,7 @@ fn parse_flow_mapping(map: &serde_yaml::Mapping) -> Result<FlowItem, LoadError> 
 
 fn parse_step_value(value: &Value) -> Result<Step, LoadError> {
     match value {
-        Value::String(name) => Ok(Step {
-            name: name.to_string(),
-            model: None,
-            directions: Vec::new(),
-            interactive: None,
-            content: None,
-        }),
+        Value::String(name) => Ok(Step::named(name)),
         Value::Mapping(map) => {
             let name = match map.get(key("name")) {
                 Some(Value::String(name)) => name.to_string(),

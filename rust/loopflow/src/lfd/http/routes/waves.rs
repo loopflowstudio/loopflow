@@ -117,11 +117,12 @@ pub async fn list_waves_handler(
     .await
     .map_err(map_store_error)?;
     let include_active_run = query.expand.contains("active_run");
-    let (waves, has_more) = paginate_waves(
+    let (waves, has_more) = super::paginate(
         waves,
         query.limit,
         query.starting_after.as_deref(),
         query.ending_before.as_deref(),
+        |w| &w.id,
     );
     let views = crate::lfd::http::routes::build_wave_dtos(&state.store, waves, include_active_run)
         .await
@@ -644,40 +645,4 @@ fn auto_commit_if_dirty(worktree: &std::path::Path, step_name: &str) -> Result<(
     let message = format!("lfd: auto-commit after interactive step '{step_name}'");
     commit(worktree, &message).map_err(|e| e.to_string())?;
     Ok(())
-}
-
-fn paginate_waves(
-    waves: Vec<Wave>,
-    limit: Option<u32>,
-    starting_after: Option<&str>,
-    ending_before: Option<&str>,
-) -> (Vec<Wave>, bool) {
-    let mut items = waves;
-    if let Some(starting_after) = starting_after {
-        if let Some(pos) = items
-            .iter()
-            .position(|wave| wave.id.to_string() == starting_after)
-        {
-            items = items.split_off(pos + 1);
-        }
-    }
-    if let Some(ending_before) = ending_before {
-        if let Some(pos) = items
-            .iter()
-            .position(|wave| wave.id.to_string() == ending_before)
-        {
-            items.truncate(pos);
-        }
-    }
-
-    let mut has_more = false;
-    if let Some(limit) = limit {
-        let limit = limit as usize;
-        if items.len() > limit {
-            items.truncate(limit);
-            has_more = true;
-        }
-    }
-
-    (items, has_more)
 }

@@ -82,7 +82,7 @@ pub fn worktree_short_name(repo: &Path) -> Option<String> {
     }
 }
 
-fn branch_exists(repo: &Path, branch: &str) -> Result<bool, GitError> {
+pub fn branch_exists(repo: &Path, branch: &str) -> Result<bool, GitError> {
     let output = Command::new("git")
         .arg("-C")
         .arg(repo)

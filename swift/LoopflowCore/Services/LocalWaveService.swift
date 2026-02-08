@@ -376,6 +376,8 @@ public struct LocalWaveService: @unchecked Sendable {
             stimulus: stimulus,
             status: status,
             iteration: json["iteration"] as? Int ?? 0,
+            localWorktree: json["local_worktree"] as? String,
+            remoteBranch: json["remote_branch"] as? String,
             activeRun: activeRun,
             createdAt: createdAt
         )

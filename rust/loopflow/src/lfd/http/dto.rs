@@ -80,6 +80,10 @@ pub struct WaveDto {
     pub status: String,
     pub iteration: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_worktree: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote_branch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub active_run: Option<WaveRunDto>,
 }
 
@@ -185,7 +189,12 @@ pub fn wave_run_dto(run: WaveRun) -> WaveRunDto {
     }
 }
 
-pub fn wave_dto(wave: &Wave, active_run: Option<WaveRunDto>) -> WaveDto {
+pub fn wave_dto(
+    wave: &Wave,
+    active_run: Option<WaveRunDto>,
+    local_worktree: Option<String>,
+    remote_branch: Option<String>,
+) -> WaveDto {
     WaveDto {
         id: wave.id.to_string(),
         object: "wave".to_string(),
@@ -197,6 +206,8 @@ pub fn wave_dto(wave: &Wave, active_run: Option<WaveRunDto>) -> WaveDto {
         created_at: format_datetime(wave.created_at),
         status: wave.status.as_str().to_string(),
         iteration: wave.iteration,
+        local_worktree,
+        remote_branch,
         active_run,
     }
 }

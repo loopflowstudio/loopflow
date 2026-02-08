@@ -5,7 +5,8 @@ use crate::engine::naming::format_branch_name;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct WorktreeState {
@@ -50,10 +51,15 @@ pub fn main_repo_root(repo: &Path) -> Result<PathBuf, GitError> {
 }
 
 pub fn worktree_path(repo: &Path, name: &str) -> PathBuf {
+    let repo_root = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
     let sanitized = name.replace(['/', '\\'], "-");
-    let repo_name = repo.file_name().and_then(|n| n.to_str()).unwrap_or("repo");
-    repo.parent()
-        .unwrap_or(repo)
+    let repo_name = repo_root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("repo");
+    repo_root
+        .parent()
+        .unwrap_or(repo_root.as_path())
         .join(format!("{repo_name}.{sanitized}"))
 }
 
@@ -232,12 +238,7 @@ pub fn create_with_schema(
     };
 
     worktree_add(repo, &worktree_path, &branch_name, base_ref)?;
-
-    let _ = Command::new("git")
-        .arg("-C")
-        .arg(&worktree_path)
-        .args(["push", "-u", "origin", &branch_name])
-        .status();
+    schedule_upstream_sync(worktree_path.clone(), branch_name.clone());
 
     Ok(CreateWorktreeResult {
         path: worktree_path,
@@ -245,6 +246,40 @@ pub fn create_with_schema(
         base_branch,
         base_commit,
     })
+}
+
+pub fn schedule_upstream_sync(worktree: PathBuf, branch: String) {
+    thread::spawn(move || {
+        // Don't block the caller on network/auth issues. Retry in the background.
+        for backoff_secs in [0_u64, 2, 5, 15, 30, 60] {
+            if backoff_secs > 0 {
+                thread::sleep(Duration::from_secs(backoff_secs));
+            }
+            if upstream_branch(&worktree).is_some() {
+                return;
+            }
+            if push_branch_with_upstream(&worktree, &branch).is_ok() {
+                return;
+            }
+        }
+    });
+}
+
+fn push_branch_with_upstream(worktree: &Path, branch: &str) -> Result<(), GitError> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(worktree)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GCM_INTERACTIVE", "Never")
+        .args(["push", "-u", "origin", branch])
+        .output()?;
+    if !output.status.success() {
+        return Err(GitError::CommandFailed {
+            command: format!("git push -u origin {branch}"),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        });
+    }
+    Ok(())
 }
 
 pub fn preserve_worktree(repo: &Path, worktree: &Path) -> Result<PathBuf, GitError> {

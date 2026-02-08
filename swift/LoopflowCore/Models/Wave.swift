@@ -148,6 +148,8 @@ public struct Wave: Sendable, Identifiable, Hashable {
     public var stimulus: Stimulus
     public var status: WaveStatus
     public var iteration: Int
+    public var localWorktree: String?
+    public var remoteBranch: String?
     public var activeRun: WaveRun?
     public var createdAt: Date?
 
@@ -161,6 +163,8 @@ public struct Wave: Sendable, Identifiable, Hashable {
         stimulus: Stimulus = Stimulus(kind: .once),
         status: WaveStatus = .idle,
         iteration: Int = 0,
+        localWorktree: String? = nil,
+        remoteBranch: String? = nil,
         activeRun: WaveRun? = nil,
         createdAt: Date? = nil
     ) {
@@ -173,6 +177,8 @@ public struct Wave: Sendable, Identifiable, Hashable {
         self.stimulus = stimulus
         self.status = status
         self.iteration = iteration
+        self.localWorktree = localWorktree
+        self.remoteBranch = remoteBranch
         self.activeRun = activeRun
         self.createdAt = createdAt
     }

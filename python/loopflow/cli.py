@@ -23,13 +23,20 @@ def _wave_table(waves: list[Wave]) -> Table:
     table.add_column("flow")
     table.add_column("iter", justify="right")
     table.add_column("repo")
+    table.add_column("local_worktree")
+    table.add_column("remote_branch")
     for wave in waves:
+        run = wave.active_run
+        local_worktree = (run.local_worktree if run else None) or wave.local_worktree or "-"
+        remote_branch = (run.remote_branch if run else None) or wave.remote_branch or wave.branch or "-"
         table.add_row(
             wave.name,
             wave.status,
             wave.flow,
             str(wave.iteration),
             wave.repo,
+            local_worktree,
+            remote_branch,
         )
     return table
 

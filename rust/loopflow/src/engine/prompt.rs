@@ -800,28 +800,22 @@ fn gather_diff_tiered(repo_root: &Path) -> Result<(Option<String>, DiffTier, usi
         crate::engine::git::get_default_branch(repo_root).unwrap_or("main".to_string());
     let diff_ref = format!("origin/{}...HEAD", base_branch);
 
-    // Count changed files (committed changes vs base branch)
+    // Check for committed changes vs base branch. If none, fall back to
+    // uncommitted working tree diff (handles branches with only staged changes).
     let name_output = Command::new("git")
         .args(["diff", "--name-only", &diff_ref])
         .current_dir(repo_root)
         .output()?;
-    let file_count = if name_output.status.success() {
-        String::from_utf8_lossy(&name_output.stdout)
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .count()
+    let has_committed_changes = name_output.status.success()
+        && name_output.stdout.iter().any(|&b| !b.is_ascii_whitespace());
+
+    let effective_ref = if has_committed_changes {
+        diff_ref.as_str()
     } else {
-        0
+        "HEAD"
     };
 
-    // If no committed changes, fall back to uncommitted working tree diff.
-    // This handles the case where a branch exists but all changes are still
-    // in the working tree (not yet committed).
-    if file_count == 0 {
-        return gather_diff_tiered_with_ref(repo_root, "HEAD");
-    }
-
-    gather_diff_tiered_with_ref(repo_root, &diff_ref)
+    gather_diff_tiered_with_ref(repo_root, effective_ref)
 }
 
 /// Gather tiered diff against a given ref (e.g. `origin/main...HEAD` or `HEAD`).

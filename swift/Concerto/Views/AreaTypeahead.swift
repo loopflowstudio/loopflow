@@ -2,147 +2,6 @@
 
 import SwiftUI
 import LoopflowCore
-import AppKit
-
-// MARK: - Ghost Text Field (Fish-style autocomplete)
-
-struct GhostTextField: NSViewRepresentable {
-    @Binding var text: String
-    let ghost: String
-    let placeholder: String
-    let onTab: () -> Void
-    let onEnter: () -> Void
-    let onBackspace: () -> Void
-
-    func makeNSView(context: Context) -> NSTextField {
-        let field = NSTextField()
-        field.isBordered = false
-        field.drawsBackground = false
-        field.focusRingType = .none
-        field.placeholderString = placeholder
-        field.delegate = context.coordinator
-        field.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
-        return field
-    }
-
-    func updateNSView(_ nsView: NSTextField, context: Context) {
-        if nsView.stringValue != text {
-            nsView.stringValue = text
-        }
-
-        // Update ghost text as attributed string
-        let fullText = NSMutableAttributedString(
-            string: text,
-            attributes: [
-                .foregroundColor: NSColor.labelColor,
-                .font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-            ]
-        )
-
-        if !ghost.isEmpty && !text.isEmpty {
-            let ghostPart = NSAttributedString(
-                string: ghost,
-                attributes: [
-                    .foregroundColor: NSColor.tertiaryLabelColor,
-                    .font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-                ]
-            )
-            fullText.append(ghostPart)
-        }
-
-        // Only update if different to avoid cursor jumping
-        if nsView.attributedStringValue.string != fullText.string {
-            nsView.attributedStringValue = fullText
-            // Keep cursor at end of real text
-            nsView.currentEditor()?.selectedRange = NSRange(location: text.count, length: 0)
-        }
-    }
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
-
-    class Coordinator: NSObject, NSTextFieldDelegate {
-        var parent: GhostTextField
-
-        init(_ parent: GhostTextField) {
-            self.parent = parent
-        }
-
-        func controlTextDidChange(_ obj: Notification) {
-            guard let field = obj.object as? NSTextField else { return }
-            parent.text = field.stringValue
-        }
-
-        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-            if commandSelector == #selector(NSResponder.insertTab(_:)) {
-                parent.onTab()
-                return true
-            }
-            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
-                parent.onEnter()
-                return true
-            }
-            if commandSelector == #selector(NSResponder.deleteBackward(_:)) {
-                if parent.text.isEmpty {
-                    parent.onBackspace()
-                    return true
-                }
-            }
-            return false
-        }
-    }
-}
-
-// MARK: - Area Chip
-
-struct AreaChip: View {
-    let path: String
-    let onRemove: () -> Void
-
-    @Environment(\.colorScheme) private var colorScheme
-    @State private var isHovered = false
-
-    private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
-
-    private var displayPath: String {
-        if path == "." { return "." }
-        if path.count > 30 {
-            return "…" + String(path.suffix(28))
-        }
-        return path
-    }
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: path == "." ? "house" : "folder")
-                .font(.system(size: 10))
-                .foregroundStyle(palette.accent)
-
-            Text(displayPath)
-                .font(.system(size: 12, design: .monospaced))
-                .lineLimit(1)
-
-            Button {
-                onRemove()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .opacity(isHovered ? 1 : 0.6)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(palette.accent.opacity(0.15))
-        .clipShape(RoundedRectangle(cornerRadius: 4))
-        .onHover { isHovered = $0 }
-        .help(path)
-    }
-}
-
-// MARK: - Area Typeahead
 
 struct AreaTypeahead: View {
     let wave: WaveViewModel
@@ -164,17 +23,18 @@ struct AreaTypeahead: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            // Token input area
             HStack(spacing: 4) {
-                // Existing chips
                 ForEach(selectedAreas, id: \.self) { area in
-                    AreaChip(path: area) {
+                    TypeaheadChip(
+                        icon: area == "." ? "house" : "folder",
+                        label: displayPath(area),
+                        helpText: area
+                    ) {
                         selectedAreas.removeAll { $0 == area }
                         commitAreas()
                     }
                 }
 
-                // Ghost text input
                 GhostTextField(
                     text: $inputText,
                     ghost: computeGhostCompletion(for: inputText),
@@ -193,6 +53,16 @@ struct AreaTypeahead: View {
         .onAppear {
             selectedAreas = wave.area
         }
+    }
+
+    // MARK: - Display
+
+    private func displayPath(_ path: String) -> String {
+        if path == "." { return "." }
+        if path.count > 30 {
+            return "…" + String(path.suffix(28))
+        }
+        return path
     }
 
     // MARK: - Path Completion Logic
@@ -240,8 +110,6 @@ struct AreaTypeahead: View {
         return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
     }
 
-    /// Compute ghost completion for given input text.
-    /// Returns the suffix to append (e.g., "ripts" for input "sc" matching "scripts").
     private func computeGhostCompletion(for text: String) -> String {
         if text.isEmpty { return "" }
 
@@ -269,7 +137,6 @@ struct AreaTypeahead: View {
     // MARK: - Actions
 
     private func acceptGhost() {
-        // Compute ghost inline to avoid stale values
         let ghost = computeGhostCompletion(for: inputText)
 
         guard !ghost.isEmpty else {

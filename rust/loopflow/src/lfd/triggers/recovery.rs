@@ -1,11 +1,10 @@
-use std::process::Command;
 use std::time::Duration;
 
 use time::OffsetDateTime;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::lfd::executor::WaveExecutor;
+use crate::lfd::executor::{kill_process, WaveExecutor};
 use crate::lfd::store::SharedStore;
 use crate::lfd::types::{AgentStatus, WaveRunStatus, WaveStatus};
 
@@ -44,7 +43,7 @@ fn recover_stuck_runs(store: &SharedStore) {
         tracing::warn!(agent_id = %agent.id, pid = ?agent.pid, "step run stuck >4h, terminating");
 
         if let Some(pid) = agent.pid {
-            let _ = kill_process(pid);
+            kill_process(pid);
         }
 
         let now = OffsetDateTime::now_utc().unix_timestamp();
@@ -63,11 +62,4 @@ fn recover_stuck_runs(store: &SharedStore) {
             }
         }
     }
-}
-
-fn kill_process(pid: u32) -> std::io::Result<()> {
-    Command::new("kill")
-        .args(["-TERM", &pid.to_string()])
-        .status()?;
-    Ok(())
 }

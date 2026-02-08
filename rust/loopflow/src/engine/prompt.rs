@@ -77,9 +77,7 @@ impl ContextBreakdown {
 pub struct GatherContextOpts {
     pub repo_root: PathBuf,
     pub step: Option<String>,
-    pub inline: Option<String>,
-    pub step_args: Vec<String>,
-    /// User message (positional args after step/flow name)
+    /// User message (positional args after step/flow name, or inline prompt)
     pub message: Option<String>,
     pub run_mode: Option<String>,
     pub directions: Vec<String>,
@@ -175,72 +173,6 @@ fn cached_doc_tokens(
         },
     );
     tokens
-}
-
-/// Analyze token usage per category.
-pub fn analyze_context(components: &PromptComponents) -> ContextBreakdown {
-    let mut b = ContextBreakdown::default();
-
-    // System (loopflow doc)
-    if let Some(ref doc) = components.loopflow_doc {
-        b.system = count_tokens(doc);
-    }
-
-    // Step
-    if let Some(ref step) = components.step {
-        if let Some(ref content) = step.content {
-            b.step = count_tokens(content);
-        }
-        b.step_name = Some(step.name.clone());
-    }
-
-    // Directions
-    for dir in &components.directions {
-        b.direction += count_tokens(&dir.content);
-        b.direction_names.push(dir.name.clone());
-    }
-
-    // Diff (unified diff string + full file contents both count as "diff")
-    if let Some(ref diff) = components.diff {
-        b.diff += count_tokens(diff);
-    }
-    for doc in &components.diff_files {
-        b.diff += count_tokens(&doc.content);
-    }
-    b.diff_file_count = components.diff_file_count;
-    b.diff_tier = components.diff_tier.clone();
-
-    // Docs
-    for doc in &components.docs {
-        b.docs += count_tokens(&doc.content);
-    }
-    for doc in &components.summaries {
-        b.docs += count_tokens(&doc.content);
-    }
-    b.doc_count = components.docs.len() + components.summaries.len();
-
-    // Area
-    for doc in &components.area_docs {
-        b.area += count_tokens(&doc.content);
-    }
-    b.area_name = components.area.clone();
-    b.area_doc_count = components.area_docs.len();
-
-    // Clipboard
-    if let Some(ref clip) = components.clipboard {
-        b.clipboard = count_tokens(clip);
-    }
-    b.has_clipboard = components.clipboard.is_some();
-
-    // Wave
-    b.wave_name = components.wave.clone();
-
-    b
-}
-
-/// Backward-compatible total token count.
-pub fn analyze_tokens(components: &PromptComponents) -> usize {
-    analyze_context(components).total()
 }
 
 /// Trim context and return token breakdown without re-tokenizing.
@@ -363,7 +295,6 @@ pub fn trim_context_with_breakdown(
         if total > max_tokens && components.diff.is_some() {
             components.diff = None;
             breakdown.diff_tier = DiffTier::None;
-            components.diff_tier = DiffTier::None;
             breakdown.diff = breakdown.diff.saturating_sub(diff_string_tokens);
             total = total.saturating_sub(diff_string_tokens);
         }
@@ -385,17 +316,6 @@ pub fn trim_context_with_breakdown(
 
 /// Trim context to fit within token budget.
 ///
-/// Protected (never dropped): step, directions, system/loopflow doc.
-///
-/// Drop order (first dropped → last resort):
-/// 1. Area docs (supplementary architectural context)
-/// 2. Summaries, then docs
-/// 3. Diff files, then diff string
-/// 4. Clipboard (last resort)
-pub fn trim_context(components: PromptComponents, max_tokens: usize) -> PromptComponents {
-    trim_context_with_breakdown(components, max_tokens).0
-}
-
 /// Gather all prompt components.
 pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, CoreError> {
     let start = Instant::now();
@@ -721,6 +641,11 @@ fn gather_files(repo_root: &Path, files: &[String]) -> Result<Vec<Document>, Cor
             None => continue,
         };
 
+        if path.is_dir() {
+            gather_dir_files(repo_root, &path, &gitignore, &mut seen, &mut docs)?;
+            continue;
+        }
+
         if !path.is_file() {
             continue;
         }
@@ -753,6 +678,58 @@ fn gather_files(repo_root: &Path, files: &[String]) -> Result<Vec<Document>, Cor
     }
 
     Ok(docs)
+}
+
+/// Walk a directory and collect text files, respecting gitignore.
+fn gather_dir_files(
+    repo_root: &Path,
+    dir: &Path,
+    gitignore: &ignore::gitignore::Gitignore,
+    seen: &mut HashSet<PathBuf>,
+    docs: &mut Vec<Document>,
+) -> Result<(), CoreError> {
+    let walker = ignore::WalkBuilder::new(dir)
+        .hidden(true)
+        .standard_filters(true)
+        .build();
+
+    let mut entries: Vec<_> = walker
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_file())
+        .collect();
+    entries.sort_by(|a, b| a.path().cmp(b.path()));
+
+    for entry in entries {
+        let path = entry.into_path();
+
+        if should_exclude(repo_root, &path, gitignore) {
+            continue;
+        }
+
+        let canonical = path.canonicalize().unwrap_or(path.clone());
+        if !seen.insert(canonical) {
+            continue;
+        }
+
+        let content = match read_text_file(&path) {
+            Some(content) => content,
+            None => continue,
+        };
+
+        let rel_path = path
+            .strip_prefix(repo_root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .to_string();
+
+        docs.push(Document {
+            path: rel_path,
+            content,
+            category: "diff_files".to_string(),
+        });
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1048,16 +1025,43 @@ fn ensure_gitignore_entry(repo_root: &Path, entry: &str) -> Result<(), CoreError
     Ok(())
 }
 
-/// Format all components into the final prompt string.
-pub fn format_prompt(components: &PromptComponents) -> String {
+/// Format direction tags as XML blocks.
+fn format_direction_tags(directions: &[Direction]) -> String {
+    if directions.len() == 1 {
+        let d = &directions[0];
+        format!(
+            "<lf:direction:{}>\n{}\n</lf:direction:{}>",
+            d.name, d.content, d.name
+        )
+    } else {
+        let parts: Vec<String> = directions
+            .iter()
+            .map(|d| {
+                format!(
+                    "<lf:direction:{}>\n{}\n</lf:direction:{}>",
+                    d.name, d.content, d.name
+                )
+            })
+            .collect();
+        format!("<lf:directions>\n{}\n</lf:directions>", parts.join("\n"))
+    }
+}
+
+/// Render shared reference context sections.
+///
+/// These sections are common to both `format_prompt` (all-in-one) and
+/// `format_context_prompt` (system prompt file). Extracted to avoid duplication.
+///
+/// Order: loopflow_doc, run_mode, wave, docs, summaries, area_docs, diff+diff_files.
+fn format_reference_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
 
-    // 1. System docs (loopflow)
+    // System docs (loopflow)
     if let Some(ref doc) = components.loopflow_doc {
         parts.push(format!("<lf:loopflow>\n{}\n</lf:loopflow>", doc));
     }
 
-    // 2. Run mode
+    // Run mode
     if components.run_mode.as_deref() == Some("auto") {
         parts.push(
             "Run mode is auto (headless). Proceed without pausing for questions. \
@@ -1073,7 +1077,7 @@ pub fn format_prompt(components: &PromptComponents) -> String {
         );
     }
 
-    // 2.5. Wave context
+    // Wave context
     if let Some(ref wave) = components.wave {
         parts.push(format!(
             "<lf:wave name=\"{}\">\n\
@@ -1084,7 +1088,7 @@ pub fn format_prompt(components: &PromptComponents) -> String {
         ));
     }
 
-    // 3. Reference material (docs, summaries)
+    // Reference material (docs, summaries)
     if !components.docs.is_empty() {
         let doc_parts: Vec<String> = components
             .docs
@@ -1126,7 +1130,7 @@ pub fn format_prompt(components: &PromptComponents) -> String {
         ));
     }
 
-    // 3.5. Area docs (parent directory READMEs when -a is set)
+    // Area docs (parent directory READMEs when -a is set)
     if !components.area_docs.is_empty() {
         let area_label = components.area.as_deref().unwrap_or("area");
         let area_parts: Vec<String> = components
@@ -1148,47 +1152,7 @@ pub fn format_prompt(components: &PromptComponents) -> String {
         ));
     }
 
-    // 4. Instructions (direction, then step)
-    if !components.directions.is_empty() {
-        if components.directions.len() == 1 {
-            let d = &components.directions[0];
-            parts.push(format!(
-                "Direction for this work.\n\n\
-                 <lf:direction:{}>\n{}\n</lf:direction:{}>",
-                d.name, d.content, d.name
-            ));
-        } else {
-            let direction_parts: Vec<String> = components
-                .directions
-                .iter()
-                .map(|d| {
-                    format!(
-                        "<lf:direction:{}>\n{}\n</lf:direction:{}>",
-                        d.name, d.content, d.name
-                    )
-                })
-                .collect();
-            parts.push(format!(
-                "Directions for this work.\n\n\
-                 <lf:directions>\n{}\n</lf:directions>",
-                direction_parts.join("\n")
-            ));
-        }
-    }
-
-    if let Some(ref step) = components.step {
-        let step_tag = if let Some(ref content) = step.content {
-            format!(
-                "<lf:step:{}>\n{}\n</lf:step:{}>",
-                step.name, content, step.name
-            )
-        } else {
-            format!("<lf:step:{}>\n</lf:step:{}>", step.name, step.name)
-        };
-        parts.push(format!("The step.\n\n{}", step_tag));
-    }
-
-    // 5. Working context (diff, diff_files, clipboard)
+    // Working context (diff, diff_files)
     if components.diff.is_some() || !components.diff_files.is_empty() {
         let mut diff_parts = Vec::new();
 
@@ -1207,206 +1171,11 @@ pub fn format_prompt(components: &PromptComponents) -> String {
         ));
     }
 
-    if let Some(ref clipboard) = components.clipboard {
-        parts.push(format!(
-            "Content from clipboard.\n\n\
-             <lf:clipboard>\n{}\n</lf:clipboard>",
-            clipboard
-        ));
-    }
-
-    // 6. User message (additional instructions)
-    if let Some(ref message) = components.message {
-        parts.push(format!(
-            "Additional instructions from user.\n\n\
-             <lf:message>\n{}\n</lf:message>",
-            message
-        ));
-    }
-
-    parts.join("\n\n")
+    parts
 }
 
-/// Format context components for system prompt (everything except step).
-///
-/// This is used with `--append-system-prompt-file` to load context into the
-/// system prompt without a tool call, keeping input history clean.
-pub fn format_context_prompt(components: &PromptComponents) -> String {
-    let mut parts = Vec::new();
-
-    // 1. System docs (loopflow)
-    if let Some(ref doc) = components.loopflow_doc {
-        parts.push(format!("<lf:loopflow>\n{}\n</lf:loopflow>", doc));
-    }
-
-    // 2. Run mode
-    if components.run_mode.as_deref() == Some("auto") {
-        parts.push(
-            "Run mode is auto (headless). Proceed without pausing for questions. \
-             If you need clarification, make the best assumption you can and append \
-             any open questions to `scratch/questions.md`."
-                .to_string(),
-        );
-    } else if components.run_mode.as_deref() == Some("interactive") {
-        parts.push(
-            "Run mode is interactive. This is a conversation—ask questions, \
-             propose approaches, and wait for feedback before taking major actions."
-                .to_string(),
-        );
-    }
-
-    // 2.5. Wave context
-    if let Some(ref wave) = components.wave {
-        parts.push(format!(
-            "<lf:wave name=\"{}\">\n\
-             You are building toward the {} program of work.\n\
-             Roadmap context is included in docs below.\n\
-             </lf:wave>",
-            wave, wave
-        ));
-    }
-
-    // 3. Reference material (docs, summaries)
-    if !components.docs.is_empty() {
-        let doc_parts: Vec<String> = components
-            .docs
-            .iter()
-            .map(|doc| {
-                let name = Path::new(&doc.path)
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_else(|| doc.path.clone());
-                format!("<lf:{}>\n{}\n</lf:{}>", name, doc.content, name)
-            })
-            .collect();
-
-        let docs_body = doc_parts.join("\n\n");
-        parts.push(format!(
-            "Repository documentation. Follow STYLE carefully. \
-             May include design artifacts (scratch/) and internal docs (reports/).\n\n\
-             <lf:docs>\n{}\n</lf:docs>",
-            docs_body
-        ));
-    }
-
-    if !components.summaries.is_empty() {
-        let summary_parts: Vec<String> = components
-            .summaries
-            .iter()
-            .map(|s| {
-                format!(
-                    "<lf:summary path=\"{}\">\n{}\n</lf:summary>",
-                    s.path, s.content
-                )
-            })
-            .collect();
-        let summaries_body = summary_parts.join("\n\n");
-        parts.push(format!(
-            "Pre-generated codebase summaries.\n\n\
-             <lf:summaries>\n{}\n</lf:summaries>",
-            summaries_body
-        ));
-    }
-
-    // 3.5. Area docs (parent directory READMEs when -a is set)
-    if !components.area_docs.is_empty() {
-        let area_label = components.area.as_deref().unwrap_or("area");
-        let area_parts: Vec<String> = components
-            .area_docs
-            .iter()
-            .map(|doc| {
-                let name = Path::new(&doc.path)
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_else(|| doc.path.clone());
-                format!("<lf:{}>\n{}\n</lf:{}>", name, doc.content, name)
-            })
-            .collect();
-        let area_body = area_parts.join("\n\n");
-        parts.push(format!(
-            "Area docs for `{}`. Architectural context from parent directories.\n\n\
-             <lf:area>\n{}\n</lf:area>",
-            area_label, area_body
-        ));
-    }
-
-    // 4. Directions (but NOT step - step goes in task prompt)
-    if !components.directions.is_empty() {
-        if components.directions.len() == 1 {
-            let d = &components.directions[0];
-            parts.push(format!(
-                "Direction for this work.\n\n\
-                 <lf:direction:{}>\n{}\n</lf:direction:{}>",
-                d.name, d.content, d.name
-            ));
-        } else {
-            let direction_parts: Vec<String> = components
-                .directions
-                .iter()
-                .map(|d| {
-                    format!(
-                        "<lf:direction:{}>\n{}\n</lf:direction:{}>",
-                        d.name, d.content, d.name
-                    )
-                })
-                .collect();
-            parts.push(format!(
-                "Directions for this work.\n\n\
-                 <lf:directions>\n{}\n</lf:directions>",
-                direction_parts.join("\n")
-            ));
-        }
-    }
-
-    // 5. Working context (diff, diff_files, clipboard)
-    if components.diff.is_some() || !components.diff_files.is_empty() {
-        let mut diff_parts = Vec::new();
-
-        if let Some(ref diff) = components.diff {
-            diff_parts.push(format!("<lf:diff>\n{}\n</lf:diff>", diff));
-        }
-
-        if !components.diff_files.is_empty() {
-            let files_content = format_files(&components.diff_files);
-            diff_parts.push(files_content);
-        }
-
-        parts.push(format!(
-            "Changes on this branch (diff against main).\n\n{}",
-            diff_parts.join("\n\n")
-        ));
-    }
-
-    if let Some(ref clipboard) = components.clipboard {
-        parts.push(format!(
-            "Content from clipboard.\n\n\
-             <lf:clipboard>\n{}\n</lf:clipboard>",
-            clipboard
-        ));
-    }
-
-    // Note: step is NOT included in context - it goes in task prompt
-
-    // 6. User message (additional instructions)
-    if let Some(ref message) = components.message {
-        parts.push(format!(
-            "Additional instructions from user.\n\n\
-             <lf:message>\n{}\n</lf:message>",
-            message
-        ));
-    }
-
-    parts.join("\n\n")
-}
-
-/// Format step/task for user message (just the step content).
-///
-/// This is passed as the CLI argument when using `--append-system-prompt-file`.
-pub fn format_task_prompt(components: &PromptComponents) -> String {
-    let Some(ref step) = components.step else {
-        return String::new();
-    };
-
+/// Format step tag.
+fn format_step_tag(step: &Step) -> String {
     if let Some(ref content) = step.content {
         format!(
             "<lf:step:{}>\n{}\n</lf:step:{}>",
@@ -1415,6 +1184,89 @@ pub fn format_task_prompt(components: &PromptComponents) -> String {
     } else {
         format!("<lf:step:{}>\n</lf:step:{}>", step.name, step.name)
     }
+}
+
+/// Format all components into the final prompt string.
+///
+/// Used by the daemon, ops callers, and for prompt logging.
+pub fn format_prompt(components: &PromptComponents) -> String {
+    let mut parts = format_reference_sections(components);
+
+    // Task sections: step, directions, clipboard, message
+    if let Some(ref step) = components.step {
+        parts.push(format!("The step.\n\n{}", format_step_tag(step)));
+    }
+
+    if !components.directions.is_empty() {
+        let label = if components.directions.len() == 1 {
+            "Direction"
+        } else {
+            "Directions"
+        };
+        parts.push(format!(
+            "{label} for this work.\n\n{}",
+            format_direction_tags(&components.directions)
+        ));
+    }
+
+    if let Some(ref clipboard) = components.clipboard {
+        parts.push(format!(
+            "Content from clipboard.\n\n\
+             <lf:clipboard>\n{}\n</lf:clipboard>",
+            clipboard
+        ));
+    }
+
+    if let Some(ref message) = components.message {
+        parts.push(format!(
+            "Additional instructions from user.\n\n\
+             <lf:message>\n{}\n</lf:message>",
+            message
+        ));
+    }
+
+    parts.join("\n\n")
+}
+
+/// Format context components for system prompt (everything except task).
+///
+/// This is used with `--append-system-prompt-file` to load context into the
+/// system prompt, keeping input history clean. Step, directions, and message
+/// go in the task prompt instead.
+pub fn format_context_prompt(components: &PromptComponents) -> String {
+    let mut parts = format_reference_sections(components);
+
+    if let Some(ref clipboard) = components.clipboard {
+        parts.push(format!(
+            "Content from clipboard.\n\n\
+             <lf:clipboard>\n{}\n</lf:clipboard>",
+            clipboard
+        ));
+    }
+
+    parts.join("\n\n")
+}
+
+/// Format task prompt for user message (directions + step + free text).
+///
+/// This is passed as the CLI argument when using `--append-system-prompt-file`.
+/// Order: direction(s), step, message.
+pub fn format_task_prompt(components: &PromptComponents) -> String {
+    let mut parts = Vec::new();
+
+    if !components.directions.is_empty() {
+        parts.push(format_direction_tags(&components.directions));
+    }
+
+    if let Some(ref step) = components.step {
+        parts.push(format_step_tag(step));
+    }
+
+    if let Some(ref message) = components.message {
+        parts.push(message.clone());
+    }
+
+    parts.join("\n\n")
 }
 
 /// Write prompt to log file and return the path.
@@ -1513,69 +1365,6 @@ mod tests {
     }
 
     #[test]
-    fn analyze_tokens_empty() {
-        let components = PromptComponents::default();
-        assert_eq!(analyze_tokens(&components), 0);
-    }
-
-    #[test]
-    fn analyze_tokens_with_content() {
-        let components = PromptComponents {
-            docs: vec![Document {
-                path: "test.md".to_string(),
-                content: "Hello world".to_string(),
-                category: "docs".to_string(),
-            }],
-            clipboard: Some("Clipboard content".to_string()),
-            ..Default::default()
-        };
-
-        let tokens = analyze_tokens(&components);
-        assert!(tokens > 0);
-    }
-
-    #[test]
-    fn analyze_tokens_counts_all_sections() {
-        let components = PromptComponents {
-            loopflow_doc: Some("Loopflow doc".to_string()),
-            docs: vec![Document {
-                path: "test.md".to_string(),
-                content: "Doc content".to_string(),
-                category: "docs".to_string(),
-            }],
-            diff: Some("diff content".to_string()),
-            diff_files: vec![Document {
-                path: "file.rs".to_string(),
-                content: "fn main() {}".to_string(),
-                category: "diff_files".to_string(),
-            }],
-            step: Some(Step {
-                name: "implement".to_string(),
-                content: Some("Implement the feature".to_string()),
-                model: None,
-                directions: vec![],
-                interactive: None,
-            }),
-            directions: vec![Direction {
-                name: "concise".to_string(),
-                content: "Be concise".to_string(),
-                source: PathBuf::from(".lf/directions/concise.md"),
-            }],
-            summaries: vec![Document {
-                path: "summary.md".to_string(),
-                content: "Summary content".to_string(),
-                category: "summaries".to_string(),
-            }],
-            clipboard: Some("Clipboard".to_string()),
-            ..Default::default()
-        };
-
-        let tokens = analyze_tokens(&components);
-        // Should count all sections - tiktoken gives different counts than byte estimation
-        assert!(tokens > 0);
-    }
-
-    #[test]
     fn trim_context_under_budget() {
         let mut components = PromptComponents::default();
         components.docs.push(Document {
@@ -1584,7 +1373,7 @@ mod tests {
             category: "docs".to_string(),
         });
 
-        let trimmed = trim_context(components.clone(), 1000000);
+        let trimmed = trim_context_with_breakdown(components.clone(), 1000000).0;
         assert_eq!(trimmed.docs.len(), 1);
     }
 
@@ -1606,7 +1395,7 @@ mod tests {
 
         // Set budget to only fit docs, not summaries
         let doc_tokens = count_tokens("Doc content");
-        let trimmed = trim_context(components, doc_tokens + 5);
+        let trimmed = trim_context_with_breakdown(components, doc_tokens + 5).0;
 
         assert!(trimmed.summaries.is_empty());
         assert_eq!(trimmed.docs.len(), 1);
@@ -1642,7 +1431,7 @@ mod tests {
         // Get token count of step only
         let step_tokens = count_tokens("x");
         // Budget allows step but not docs
-        let trimmed = trim_context(components, step_tokens + 1);
+        let trimmed = trim_context_with_breakdown(components, step_tokens + 1).0;
         assert!(trimmed.docs.is_empty());
         assert!(trimmed.step.is_some());
     }
@@ -1665,7 +1454,7 @@ mod tests {
         // Get token count of step only
         let step_tokens = count_tokens("x");
         // Budget allows step but not diff
-        let trimmed = trim_context(components, step_tokens + 1);
+        let trimmed = trim_context_with_breakdown(components, step_tokens + 1).0;
         assert!(trimmed.diff.is_none());
         assert!(trimmed.step.is_some());
     }
@@ -1688,7 +1477,7 @@ mod tests {
             ..Default::default()
         };
 
-        let trimmed = trim_context(components, 5);
+        let trimmed = trim_context_with_breakdown(components, 5).0;
         assert!(trimmed.step.is_some());
         assert!(trimmed.docs.is_empty());
     }
@@ -1975,23 +1764,23 @@ mod tests {
 
         let prompt = format_prompt(&components);
 
-        // Verify order: loopflow -> run_mode -> wave -> docs -> directions -> step -> diff -> clipboard
+        // Verify order: loopflow -> run_mode -> wave -> docs -> diff -> step -> direction -> clipboard
         let loopflow_pos = prompt.find("<lf:loopflow>").unwrap();
         let auto_pos = prompt.find("Run mode is auto").unwrap();
         let wave_pos = prompt.find("<lf:wave").unwrap();
         let docs_pos = prompt.find("<lf:docs>").unwrap();
-        let direction_pos = prompt.find("<lf:direction:concise>").unwrap();
-        let step_pos = prompt.find("<lf:step:implement>").unwrap();
         let diff_pos = prompt.find("<lf:diff>").unwrap();
+        let step_pos = prompt.find("<lf:step:implement>").unwrap();
+        let direction_pos = prompt.find("<lf:direction:concise>").unwrap();
         let clipboard_pos = prompt.find("<lf:clipboard>").unwrap();
 
         assert!(loopflow_pos < auto_pos);
         assert!(auto_pos < wave_pos);
         assert!(wave_pos < docs_pos);
-        assert!(docs_pos < direction_pos);
-        assert!(direction_pos < step_pos);
-        assert!(step_pos < diff_pos);
-        assert!(diff_pos < clipboard_pos);
+        assert!(docs_pos < diff_pos);
+        assert!(diff_pos < step_pos);
+        assert!(step_pos < direction_pos);
+        assert!(direction_pos < clipboard_pos);
     }
 
     #[test]
@@ -2396,11 +2185,11 @@ directions:
         assert!(context.contains("Run mode is interactive"));
         assert!(context.contains("<lf:docs>"));
         assert!(context.contains("# Project"));
-        assert!(context.contains("<lf:direction:concise>"));
         assert!(context.contains("<lf:clipboard>"));
-        // Should NOT include step
+        // Should NOT include step or directions (both go in task prompt)
         assert!(!context.contains("<lf:step:debug>"));
         assert!(!context.contains("Fix the error."));
+        assert!(!context.contains("<lf:direction:concise>"));
     }
 
     #[test]
@@ -2440,10 +2229,38 @@ directions:
     }
 
     #[test]
-    fn format_task_prompt_empty_when_no_step() {
+    fn format_task_prompt_empty_when_no_step_or_message() {
         let components = PromptComponents::default();
         let task = format_task_prompt(&components);
         assert!(task.is_empty());
+    }
+
+    #[test]
+    fn format_task_prompt_includes_message() {
+        let components = PromptComponents {
+            message: Some("fix the login bug".to_string()),
+            ..Default::default()
+        };
+        let task = format_task_prompt(&components);
+        assert_eq!(task, "fix the login bug");
+    }
+
+    #[test]
+    fn format_task_prompt_message_with_step() {
+        let components = PromptComponents {
+            step: Some(Step {
+                name: "debug".to_string(),
+                content: Some("Debug the error.".to_string()),
+                model: None,
+                directions: vec![],
+                interactive: None,
+            }),
+            message: Some("login page crashes".to_string()),
+            ..Default::default()
+        };
+        let task = format_task_prompt(&components);
+        assert!(task.contains("<lf:step:debug>"));
+        assert!(task.contains("login page crashes"));
     }
 
     #[test]

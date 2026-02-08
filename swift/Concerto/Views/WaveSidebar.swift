@@ -5,7 +5,7 @@ import LoopflowCore
 
 struct WaveSidebar: View {
     @Environment(RepoState.self) private var repoState
-    @Environment(SessionState.self) private var sessionState
+    @Environment(OutputBuffer.self) private var outputBuffer
 
     @State private var showingDiagnostics = false
     @State private var actionError: String?
@@ -14,6 +14,7 @@ struct WaveSidebar: View {
 
     // Keyboard navigation state
     @State private var keyboardFocusedId: String?
+    @State private var isEditingWaveName = false
     @FocusState private var isSidebarFocused: Bool
 
     private var waveGroups: RepoState.WaveGroups {
@@ -58,7 +59,6 @@ struct WaveSidebar: View {
                 wave: wave,
                 isSelected: repoState.selectedWave?.id == wave.id,
                 isKeyboardFocused: keyboardFocusedId == wave.id,
-                liveOutput: sessionState.output(for: wave.id),
                 pendingPR: pendingPR(for: wave),
                 onSelect: {
                     repoState.selectedWave = wave
@@ -68,7 +68,13 @@ struct WaveSidebar: View {
                     Task {
                         try? await repoState.deleteWave(wave)
                     }
-                }
+                },
+                onRename: { newName in
+                    Task {
+                        try? await repoState.renameWave(wave, to: newName)
+                    }
+                },
+                isEditingAnyName: $isEditingWaveName
             )
         }
     }
@@ -187,7 +193,7 @@ struct WaveSidebar: View {
                 Button {
                     Task {
                         do {
-                            try await repoState.connectLfd(sessionState: sessionState)
+                            try await repoState.connectLfd(outputBuffer: outputBuffer)
                         } catch {
                             actionError = "Failed to connect: \(error.localizedDescription)"
                             showingActionError = true
@@ -201,8 +207,6 @@ struct WaveSidebar: View {
                 .controlSize(.small)
             }
 
-            Spacer()
-                .frame(maxHeight: .infinity)
             Spacer()
                 .frame(maxHeight: .infinity)
         }
@@ -307,6 +311,7 @@ struct WaveSidebar: View {
             return .handled
         }
         .onKeyPress(.return) {
+            guard !isEditingWaveName else { return .ignored }
             if let id = keyboardFocusedId,
                let wave = repoState.waves.first(where: { $0.id == id }) {
                 repoState.selectedWave = wave
@@ -341,7 +346,7 @@ struct WaveSidebar: View {
                 // Ensure lfd is connected before creating wave
                 if !repoState.lfdConnected {
                     LoggingService.ui("createWave: lfd not connected, attempting connect")
-                    try await repoState.connectLfd(sessionState: sessionState)
+                    try await repoState.connectLfd(outputBuffer: outputBuffer)
                     // Brief delay to let the daemon start
                     try await Task.sleep(for: .milliseconds(500))
                     LoggingService.ui("createWave: connect completed, lfdConnected=\(repoState.lfdConnected)")
@@ -380,6 +385,6 @@ extension Notification.Name {
     state.configureMockWaves()
     return WaveSidebar()
         .environment(state)
-        .environment(SessionState())
+        .environment(OutputBuffer())
         .frame(width: 280, height: 400)
 }

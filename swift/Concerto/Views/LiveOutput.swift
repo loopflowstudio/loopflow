@@ -1,9 +1,9 @@
-// Compact live output view for loops in the sidebar.
+// LiveOutput - streaming read-only output view for agent runs.
 
 import SwiftUI
 import LoopflowCore
 
-struct LoopLiveOutput: View {
+struct LiveOutput: View {
     let lines: [OutputLine]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 

@@ -5,7 +5,6 @@ pub mod events;
 pub mod executor;
 pub mod http;
 pub mod id;
-pub mod loops;
 pub mod machine_id;
 pub mod obs;
 pub mod output;
@@ -13,6 +12,7 @@ pub mod registration;
 pub mod scheduler;
 pub mod sessions;
 pub mod store;
+pub mod triggers;
 pub mod types;
 
 use std::path::PathBuf;
@@ -68,6 +68,11 @@ pub async fn setup_registration(
 pub fn default_db_path() -> PathBuf {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     home.join(".lf").join("lfd.db")
+}
+
+pub fn default_output_dir() -> PathBuf {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    home.join(".lf").join("output")
 }
 
 pub fn default_max_slots() -> usize {

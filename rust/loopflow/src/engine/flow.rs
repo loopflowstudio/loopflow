@@ -19,6 +19,18 @@ pub struct Step {
     pub content: Option<String>,
 }
 
+impl Step {
+    pub fn named(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            model: None,
+            directions: Vec::new(),
+            interactive: None,
+            content: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", content = "data")]
 pub enum FlowItem {
@@ -120,10 +132,17 @@ pub fn load_flow(name: &str, repo: &Path) -> Result<Flow, LoadError> {
     let content = match find_flow_path(name, repo) {
         Ok(flow_path) => fs::read_to_string(&flow_path)?,
         Err(LoadError::FlowNotFound(_)) => {
-            let Some(builtin) = crate::engine::builtins::get_builtin_flow(name) else {
+            if let Some(builtin) = crate::engine::builtins::get_builtin_flow(name) {
+                builtin.to_string()
+            } else if load_step(name, repo).is_ok() {
+                // Auto-wrap a step name as a single-step flow.
+                return Ok(Flow {
+                    name: name.to_string(),
+                    items: vec![FlowItem::Step(Step::named(name))],
+                });
+            } else {
                 return Err(LoadError::FlowNotFound(name.to_string()));
-            };
-            builtin.to_string()
+            }
         }
         Err(err) => return Err(err),
     };
@@ -319,13 +338,7 @@ fn parse_flow_items(value: &Value) -> Result<Vec<FlowItem>, LoadError> {
 
 fn parse_flow_item(value: &Value) -> Result<FlowItem, LoadError> {
     match value {
-        Value::String(name) => Ok(FlowItem::Step(Step {
-            name: name.to_string(),
-            model: None,
-            directions: Vec::new(),
-            interactive: None,
-            content: None,
-        })),
+        Value::String(name) => Ok(FlowItem::Step(Step::named(name))),
         Value::Mapping(map) => parse_flow_mapping(map),
         _ => Err(LoadError::InvalidFlow(
             "flow item must be string or mapping".to_string(),
@@ -350,13 +363,7 @@ fn parse_flow_mapping(map: &serde_yaml::Mapping) -> Result<FlowItem, LoadError> 
 
 fn parse_step_value(value: &Value) -> Result<Step, LoadError> {
     match value {
-        Value::String(name) => Ok(Step {
-            name: name.to_string(),
-            model: None,
-            directions: Vec::new(),
-            interactive: None,
-            content: None,
-        }),
+        Value::String(name) => Ok(Step::named(name)),
         Value::Mapping(map) => {
             let name = match map.get(key("name")) {
                 Some(Value::String(name)) => name.to_string(),
@@ -390,17 +397,51 @@ fn parse_fork_value(value: &Value) -> Result<FlowItem, LoadError> {
     let map = value
         .as_mapping()
         .ok_or_else(|| LoadError::InvalidFlow("fork must be mapping".to_string()))?;
-    let branches_value = map
-        .get(key("branches"))
-        .ok_or_else(|| LoadError::InvalidFlow("fork missing branches".to_string()))?;
-    let branches = match branches_value {
-        Value::Sequence(seq) => seq.iter().map(parse_flow_item).collect::<Result<_, _>>()?,
-        _ => {
-            return Err(LoadError::InvalidFlow(
-                "fork branches must be list".to_string(),
-            ))
+
+    // Two formats:
+    // 1. Explicit branches: fork: { branches: [...] }
+    // 2. Shorthand: fork: { step: "reduce", drafts: [{ direction: "..." }, ...] }
+    let branches = if let Some(branches_value) = map.get(key("branches")) {
+        match branches_value {
+            Value::Sequence(seq) => seq.iter().map(parse_flow_item).collect::<Result<_, _>>()?,
+            _ => {
+                return Err(LoadError::InvalidFlow(
+                    "fork branches must be list".to_string(),
+                ))
+            }
         }
+    } else if let Some(step_value) = map.get(key("step")) {
+        let step_name = step_value
+            .as_str()
+            .ok_or_else(|| LoadError::InvalidFlow("fork step must be string".to_string()))?;
+        let drafts = map
+            .get(key("drafts"))
+            .ok_or_else(|| LoadError::InvalidFlow("fork with step requires drafts".to_string()))?;
+        let drafts_seq = drafts
+            .as_sequence()
+            .ok_or_else(|| LoadError::InvalidFlow("fork drafts must be list".to_string()))?;
+
+        let mut branches = Vec::new();
+        for draft in drafts_seq {
+            let draft_map = draft
+                .as_mapping()
+                .ok_or_else(|| LoadError::InvalidFlow("fork draft must be mapping".to_string()))?;
+            let directions = parse_string_list(draft_map.get(key("direction")));
+            branches.push(FlowItem::Step(Step {
+                name: step_name.to_string(),
+                model: None,
+                directions,
+                interactive: None,
+                content: None,
+            }));
+        }
+        branches
+    } else {
+        return Err(LoadError::InvalidFlow(
+            "fork must have branches or step+drafts".to_string(),
+        ));
     };
+
     let synthesize = map
         .get(key("synthesize"))
         .and_then(|val| val.as_str())
@@ -472,6 +513,32 @@ fn expand_with_chain(
     for item in &flow.items {
         match item {
             FlowItem::Step(step) => {
+                // A plain string in flow YAML is parsed as Step, but it might
+                // actually be a sub-flow name. If the step has no inline content,
+                // check if a flow with this name exists and expand it.
+                if step.content.is_none() && !chain.contains(&step.name) {
+                    if let Ok(nested) = load_flow(&step.name, repo) {
+                        // Only expand if it resolved as a multi-step flow, not
+                        // if load_flow auto-wrapped a step as a single-step flow.
+                        if nested.items.len() > 1
+                            || nested
+                                .items
+                                .first()
+                                .map(|i| !matches!(i, FlowItem::Step(s) if s.name == step.name))
+                                .unwrap_or(false)
+                        {
+                            let mut nested_chain = chain.clone();
+                            nested_chain.push(step.name.clone());
+                            items.extend(expand_with_chain(
+                                &nested,
+                                repo,
+                                nested_chain,
+                                depth + 1,
+                            )?);
+                            continue;
+                        }
+                    }
+                }
                 items.push(ConcreteItem::Step(ConcreteStep {
                     step: step.clone(),
                     flow_parents: chain.clone(),
@@ -718,6 +785,62 @@ Be careful.
         let items = expand_flow(&flow, repo.path()).unwrap();
         let action = next_action(&items, 0);
         assert!(matches!(action, FlowAction::WaitInteractive { .. }));
+    }
+
+    #[test]
+    fn load_flow_expands_all_builtin_flows() {
+        let tmp = TempDir::new().unwrap();
+        for name in crate::engine::builtins::builtin_flow_names() {
+            let flow = load_flow(name, tmp.path());
+            assert!(
+                flow.is_ok(),
+                "builtin flow '{}' should load: {:?}",
+                name,
+                flow.err()
+            );
+            let flow = flow.unwrap();
+            let expanded = expand_flow(&flow, tmp.path());
+            assert!(
+                expanded.is_ok(),
+                "builtin flow '{}' should expand: {:?}",
+                name,
+                expanded.err()
+            );
+        }
+    }
+
+    #[test]
+    fn parse_fork_step_drafts_shorthand() {
+        let yaml = r#"
+- review
+- fork:
+    step: reduce
+    drafts:
+      - direction: infra-engineer
+      - direction: designer
+      - direction: product-engineer
+- publish
+"#;
+        let value: Value = serde_yaml::from_str(yaml).unwrap();
+        let items = parse_flow_items(&value).unwrap();
+        assert_eq!(items.len(), 3);
+
+        // Second item should be a Fork with 3 branches
+        match &items[1] {
+            FlowItem::Fork { branches, .. } => {
+                assert_eq!(branches.len(), 3);
+                for branch in branches {
+                    match branch {
+                        FlowItem::Step(step) => {
+                            assert_eq!(step.name, "reduce");
+                            assert_eq!(step.directions.len(), 1);
+                        }
+                        _ => panic!("expected Step branch"),
+                    }
+                }
+            }
+            _ => panic!("expected Fork item"),
+        }
     }
 
     #[test]

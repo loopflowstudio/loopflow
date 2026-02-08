@@ -130,10 +130,6 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         activeRun?.stepIndex ?? 0
     }
 
-    public var isConfigured: Bool {
-        !area.isEmpty
-    }
-
     public var shortId: String { String(id.prefix(7)) }
 
     public var displayName: String {

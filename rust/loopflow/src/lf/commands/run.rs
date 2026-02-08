@@ -14,20 +14,15 @@ use tracing::{debug, info, instrument, trace};
 
 /// Unified entry point for running steps, inline prompts, or interactive chat.
 ///
-/// | step | inline | behavior |
-/// |------|--------|----------|
-/// | Some | None   | Run named step |
-/// | None | Some   | Run inline prompt |
-/// | Some | Some   | Run step with inline as message/focus |
-/// | None | None   | Interactive chat |
-#[instrument(skip(cli), fields(step = ?step, has_inline = inline.is_some()))]
-pub fn run(
-    step: Option<&str>,
-    step_args: &[String],
-    inline: Option<&str>,
-    cli: &Cli,
-) -> Result<()> {
-    let built = build_prompt(step, step_args, inline, cli)?;
+/// | step    | message | behavior                              |
+/// |---------|---------|---------------------------------------|
+/// | Some    | None    | Run named step                        |
+/// | None    | Some    | Run inline prompt                     |
+/// | Some    | Some    | Run step with message as extra context |
+/// | None    | None    | Interactive chat                      |
+#[instrument(skip(cli), fields(step = ?step, has_message = message.is_some()))]
+pub fn run(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> {
+    let built = build_prompt(step, message, cli)?;
     print_context_header(&built, cli);
     launch_prompt(&built, cli)
 }
@@ -47,12 +42,7 @@ struct PromptBuild {
     log_name: String,
 }
 
-fn build_prompt(
-    step: Option<&str>,
-    step_args: &[String],
-    inline: Option<&str>,
-    cli: &Cli,
-) -> Result<PromptBuild> {
+fn build_prompt(step: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<PromptBuild> {
     let start = Instant::now();
     let repo_root = find_repo_root()?;
     debug!(elapsed_ms = start.elapsed().as_millis(), "found repo root");
@@ -92,7 +82,7 @@ fn build_prompt(
                 || step
                     .map(|s| config.interactive.contains(&s.to_string()))
                     .unwrap_or(false)
-                || (step.is_none() && inline.is_none())));
+                || (step.is_none() && message.is_none())));
 
     let area = if !cli.area.is_empty() {
         cli.area.first().map(|p| p.to_string_lossy().to_string())
@@ -107,9 +97,7 @@ fn build_prompt(
     let components = gather_context(&GatherContextOpts {
         repo_root: repo_root.clone(),
         step: step.map(|s| s.to_string()),
-        inline: inline.map(|s| s.to_string()),
-        step_args: step_args.to_vec(),
-        message: None,
+        message: message.map(|s| s.to_string()),
         run_mode: Some(
             if is_interactive {
                 "interactive"
@@ -157,7 +145,7 @@ fn build_prompt(
     let step_name = step.map(|value| value.to_string());
     let log_name = step_name
         .as_deref()
-        .unwrap_or(if inline.is_some() { "inline" } else { "chat" })
+        .unwrap_or(if message.is_some() { "inline" } else { "chat" })
         .to_string();
 
     Ok(PromptBuild {

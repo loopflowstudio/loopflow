@@ -537,23 +537,18 @@ const SHELL_INSTALL_LINE_BASH: &str =
 // lf ops cp
 // ==========================================================================
 
-fn copy_context(
-    paths: &[String],
-    exclude: &[String],
-    _lfdocs: bool,
-    no_lfdocs: bool,
-) -> Result<()> {
+fn copy_context(paths: &[String], exclude: &[String], lfdocs: bool, no_lfdocs: bool) -> Result<()> {
     use crate::engine::prompt::{count_tokens, gather_context, Document, GatherContextOpts};
     use std::collections::HashSet;
 
     let repo_root = find_repo_root()?;
 
-    // Determine whether to include lfdocs (default true unless --no-lfdocs)
-    // --lfdocs is just for explicit confirmation, default is true
-    let include_lfdocs = !no_lfdocs;
+    // When paths are given, skip lfdocs unless --lfdocs is explicit.
+    // When no paths, include lfdocs by default unless --no-lfdocs.
+    let has_paths = !paths.is_empty();
+    let include_lfdocs = if has_paths { lfdocs } else { !no_lfdocs };
 
     // Gather context
-    let has_paths = !paths.is_empty();
     let opts = GatherContextOpts {
         repo_root: repo_root.clone(),
         lfdocs: include_lfdocs,

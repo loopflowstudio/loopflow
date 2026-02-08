@@ -6,8 +6,8 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::lfd::executor::WaveExecutor;
-use crate::lfd::loops;
 use crate::lfd::store::SharedStore;
+use crate::lfd::triggers;
 
 #[derive(Debug)]
 pub struct Scheduler {
@@ -82,25 +82,25 @@ impl Scheduler {
         cancel: CancellationToken,
     ) -> Vec<JoinHandle<()>> {
         vec![
-            loops::spawn_loop_ticker(
+            triggers::spawn_loop_ticker(
                 self.clone(),
                 store.clone(),
                 executor.clone(),
                 cancel.clone(),
             ),
-            loops::spawn_watch_poller(
+            triggers::spawn_watch_poller(
                 store.clone(),
                 executor.clone(),
                 self.clone(),
                 cancel.clone(),
             ),
-            loops::spawn_cron_poller(
+            triggers::spawn_cron_poller(
                 store.clone(),
                 executor.clone(),
                 self.clone(),
                 cancel.clone(),
             ),
-            loops::spawn_recovery_loop(store, executor, cancel),
+            triggers::spawn_recovery_loop(store, executor, cancel),
         ]
     }
 }

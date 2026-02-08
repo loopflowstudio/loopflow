@@ -17,5 +17,6 @@ swift/dist/
 .lf/log/
 .lf/summaries/
 *.profraw
+*.actual.md
 .DS_Store
 target/

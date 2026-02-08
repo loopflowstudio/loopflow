@@ -84,28 +84,4 @@ public struct WaveRun: Sendable, Identifiable, Hashable {
         self.createdAt = createdAt
     }
 
-    public var shortId: String { String(id.prefix(7)) }
-
-    public var areaDisplay: String {
-        area == "." ? "root" : area
-    }
-
-    public var directionDisplay: String {
-        direction.isEmpty ? "default" : direction.joined(separator: ", ")
-    }
-
-    public var flowDisplay: String {
-        flow.isEmpty ? "default" : flow
-    }
-
-    public var statusText: String {
-        switch status {
-        case .running: return currentStep ?? "Running"
-        case .waiting: return "Waiting"
-        case .pending: return "Pending"
-        case .completed: return "Completed"
-        case .failed: return "Failed"
-        case .cancelled: return "Cancelled"
-        }
-    }
 }

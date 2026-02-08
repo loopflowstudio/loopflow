@@ -10,6 +10,8 @@ use crate::lfd::http::dto::ErrorResponse;
 use crate::lfd::http::routes::build_wave_dtos;
 use crate::lfd::http::run_store;
 use crate::lfd::http::state::HttpState;
+use crate::lfd::id::LfdId;
+use crate::lfd::types::Event;
 
 pub async fn ws_handler(
     State(state): State<HttpState>,
@@ -50,6 +52,7 @@ async fn handle_ws(mut socket: WebSocket, state: HttpState) {
 
     let (mut sender, mut receiver) = socket.split();
     let mut events = BroadcastStream::new(state.event_hub.subscribe());
+    let mut output = BroadcastStream::new(state.output_hub.subscribe());
     let mut ticker = interval(Duration::from_secs(30));
 
     loop {
@@ -63,6 +66,20 @@ async fn handle_ws(mut socket: WebSocket, state: HttpState) {
             maybe_event = events.next() => {
                 let Some(event) = maybe_event else { break };
                 if let Ok(event) = event {
+                    let json = serde_json::to_string(&event).unwrap_or_default();
+                    if sender.send(Message::Text(json)).await.is_err() {
+                        break;
+                    }
+                }
+            }
+            maybe_output = output.next() => {
+                if let Some(Ok(output_event)) = maybe_output {
+                    let event = Event::OutputLine {
+                        wave_id: LfdId::from_raw(output_event.wave_id),
+                        agent_id: LfdId::from_raw(output_event.agent_id),
+                        text: output_event.text,
+                        timestamp: Event::now(),
+                    };
                     let json = serde_json::to_string(&event).unwrap_or_default();
                     if sender.send(Message::Text(json)).await.is_err() {
                         break;

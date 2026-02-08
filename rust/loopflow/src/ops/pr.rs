@@ -55,8 +55,7 @@ pub fn create_or_update_pr(
         crate::ops::lint::ensure_lint_passes(repo, progress)?;
     }
 
-    sync_main_repo(repo, progress)?;
-
+    // Commit before sync — sync_main checks is_clean() and fails on dirty trees
     let commit_options = CommitOptions {
         add: true,
         lint: false,
@@ -67,6 +66,8 @@ pub fn create_or_update_pr(
         message: None,
     };
     let _ = commit_workflow(repo, &commit_options, progress)?;
+
+    sync_main_repo(repo)?;
 
     if commits_behind_main(repo)? > 0 {
         progress.status("Branch behind base, rebasing...");
@@ -252,14 +253,13 @@ fn create_pr(repo: &Path, title: &str, body: &str, base: &str) -> OpsResult<Stri
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-fn sync_main_repo(repo: &Path, _progress: &impl Progress) -> OpsResult<()> {
+fn sync_main_repo(repo: &Path) -> OpsResult<()> {
     let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
     let base_branch = get_default_branch(&main_repo)?;
-    if !sync_main(&main_repo, &base_branch)? {
-        return Err(OpsError::Message(
-            "working tree dirty; sync aborted".to_string(),
-        ));
-    }
+    // Just fetch origin/main — all downstream code uses origin/ refs.
+    // Best-effort: sync_main will also update local main if it's clean,
+    // but we don't block on it.
+    let _ = sync_main(&main_repo, &base_branch);
     Ok(())
 }
 

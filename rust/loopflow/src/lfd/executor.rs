@@ -8,14 +8,22 @@ use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+use tracing::{debug, error, info, warn};
+
 use crate::engine::agent::{build_agent_command, LaunchConfig};
-use crate::engine::config::load_config_or_default;
+use crate::engine::config::{load_config, load_config_or_default};
 use crate::engine::flow::{
     expand_flow, load_flow, next_action, ConcreteFork, ConcreteItem, ConcreteStep, FlowAction,
     ForkSelect, Step,
 };
-use crate::engine::prompt::{format_prompt, gather_context, GatherContextOpts};
+use crate::engine::git::current_branch;
+use crate::engine::prompt::{
+    drop_native_instruction_docs, format_context_prompt, format_prompt, format_task_prompt,
+    gather_context, trim_context_with_breakdown, write_prompt_log, GatherContextOpts,
+    DEFAULT_CONTEXT_BUDGET,
+};
 use crate::engine::worktree::{create_worktree, remove_worktree};
+use crate::engine::worktrees::{create_with_schema, worktree_path as wave_worktree_path};
 
 use time::OffsetDateTime;
 
@@ -23,7 +31,9 @@ use crate::lfd::id::LfdId;
 use crate::lfd::output::{OutputEvent, OutputHub};
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::{ForkRun, ForkRunStatus, SharedStore};
-use crate::lfd::types::{Agent, AgentStatus, Wave, WaveRun, WaveRunStatus, WaveStatus};
+use crate::lfd::types::{
+    Agent, AgentStatus, Wave, WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus,
+};
 
 #[async_trait]
 pub trait StepRunner: Send + Sync {
@@ -31,14 +41,28 @@ pub trait StepRunner: Send + Sync {
         &self,
         cmd: Vec<String>,
         cwd: &Path,
+        wave_id: &str,
         agent_id: &str,
         wave_run_id: &str,
         output: &OutputHub,
     ) -> Result<i32>;
 }
 
-#[derive(Debug, Default)]
-pub struct AgentRunner;
+pub struct AgentRunner {
+    store: SharedStore,
+}
+
+impl std::fmt::Debug for AgentRunner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AgentRunner").finish()
+    }
+}
+
+impl AgentRunner {
+    pub fn new(store: SharedStore) -> Self {
+        Self { store }
+    }
+}
 
 #[async_trait]
 impl StepRunner for AgentRunner {
@@ -46,6 +70,7 @@ impl StepRunner for AgentRunner {
         &self,
         cmd: Vec<String>,
         cwd: &Path,
+        wave_id: &str,
         agent_id: &str,
         wave_run_id: &str,
         output: &OutputHub,
@@ -61,6 +86,17 @@ impl StepRunner for AgentRunner {
         command.stderr(std::process::Stdio::piped());
 
         let mut child = command.spawn()?;
+
+        // Record the PID so the process can be killed on stop.
+        if let Some(pid) = child.id() {
+            let agent_lfd_id = LfdId::from_raw(agent_id);
+            let _ = self.store.update_agent_status(
+                &agent_lfd_id,
+                AgentStatus::Running.as_i32(),
+                Some(pid),
+            );
+        }
+
         let stdout = child
             .stdout
             .take()
@@ -73,12 +109,14 @@ impl StepRunner for AgentRunner {
         let stdout_task = tokio::spawn(read_stream(
             stdout,
             output.clone(),
+            wave_id.to_string(),
             wave_run_id.to_string(),
             agent_id.to_string(),
         ));
         let stderr_task = tokio::spawn(read_stream(
             stderr,
             output.clone(),
+            wave_id.to_string(),
             wave_run_id.to_string(),
             agent_id.to_string(),
         ));
@@ -95,12 +133,14 @@ impl StepRunner for AgentRunner {
 async fn read_stream<R: tokio::io::AsyncRead + Unpin>(
     reader: R,
     output: OutputHub,
+    wave_id: String,
     wave_run_id: String,
     agent_id: String,
 ) {
     let mut lines = BufReader::new(reader).lines();
     while let Ok(Some(line)) = lines.next_line().await {
         output.send(OutputEvent {
+            wave_id: wave_id.clone(),
             wave_run_id: wave_run_id.clone(),
             agent_id: agent_id.clone(),
             text: line,
@@ -118,11 +158,12 @@ pub struct WaveExecutor {
 
 impl WaveExecutor {
     pub fn new(store: SharedStore, scheduler: Arc<Scheduler>, output: OutputHub) -> Self {
+        let runner = Arc::new(AgentRunner::new(store.clone()));
         Self {
             store,
             scheduler,
             output,
-            runner: Arc::new(AgentRunner),
+            runner,
         }
     }
 
@@ -155,8 +196,10 @@ impl WaveExecutor {
             .store
             .get_wave(&run.wave_id)?
             .ok_or_else(|| anyhow!("wave not found"))?;
+        info!(run_id = %run.id, flow = %run.snapshot.flow, repo = %run.snapshot.repo, "loading flow");
         let flow = load_flow(&run.snapshot.flow, Path::new(&run.snapshot.repo))?;
         let plan = expand_flow(&flow, Path::new(&run.snapshot.repo))?;
+        debug!(run_id = %run.id, plan_items = plan.len(), "flow expanded");
 
         loop {
             let current_flow_parents = flow_parents_for_index(&plan, run.step_index);
@@ -167,6 +210,7 @@ impl WaveExecutor {
 
             match next_action(&plan, run.step_index as usize) {
                 FlowAction::RunStep { step } => {
+                    info!(run_id = %run.id, step = %step.step.name, step_index = run.step_index, "running step");
                     let exit_code = self.run_step(&wave, &mut run, &step).await?;
                     if exit_code == 0 {
                         run.step_index += 1;
@@ -174,11 +218,7 @@ impl WaveExecutor {
                         run.flow_parents = flow_parents_for_index(&plan, run.step_index);
                         self.store.update_wave_run(&run)?;
                     } else {
-                        run.status = WaveRunStatus::Failed;
-                        run.ended_at = Some(OffsetDateTime::now_utc());
-                        run.error = Some(format!("step {} failed", step.step.name));
-                        self.store.update_wave_run(&run)?;
-                        self.set_wave_status(&wave.id, WaveStatus::Failed);
+                        self.fail_run(&mut run, &wave, format!("step {} failed", step.step.name))?;
                         return Ok(());
                     }
                 }
@@ -188,7 +228,7 @@ impl WaveExecutor {
                         .model
                         .clone()
                         .unwrap_or_else(|| "unknown".to_string());
-                    let worktree = worktree_path(&run);
+                    let worktree = run.worktree.clone();
                     let agent = build_agent_for_step(
                         &run.id,
                         &run.snapshot.repo,
@@ -206,9 +246,17 @@ impl WaveExecutor {
                 }
                 FlowAction::Fork { fork } => match &fork.select {
                     ForkSelect::All => {
+                        info!(
+                            run_id = %run.id,
+                            branches = fork.branches.len(),
+                            step_index = run.step_index,
+                            synthesize = ?fork.synthesize,
+                            "running fork (all branches)"
+                        );
                         self.run_fork(&wave, &mut run, &plan, &fork).await?;
                     }
                     ForkSelect::One | ForkSelect::Prompt { .. } => {
+                        info!(run_id = %run.id, step_index = run.step_index, "running fork (choose)");
                         self.run_choose(&wave, &mut run, &plan, &fork).await?;
                     }
                 },
@@ -230,11 +278,22 @@ impl WaveExecutor {
         }
     }
 
+    fn fail_run(&self, run: &mut WaveRun, wave: &Wave, error: String) -> Result<()> {
+        run.status = WaveRunStatus::Failed;
+        run.ended_at = Some(OffsetDateTime::now_utc());
+        run.error = Some(error);
+        self.store.update_wave_run(run)?;
+        self.set_wave_status(&wave.id, WaveStatus::Failed);
+        Ok(())
+    }
+
     async fn run_step(&self, wave: &Wave, run: &mut WaveRun, step: &ConcreteStep) -> Result<i32> {
-        let worktree = worktree_path(run);
+        let worktree = run.worktree.clone();
+        debug!(run_id = %run.id, step = %step.step.name, worktree = %worktree, "building step prompt");
         let (prompt, model, launch) =
             build_step_prompt(&worktree, step, &run.snapshot.direction, Some(&wave.name))?;
         let cmd = build_agent_command(&model, &prompt, &launch);
+        info!(run_id = %run.id, step = %step.step.name, model = %model, "launching agent");
 
         let agent = build_agent_for_step(
             &run.id,
@@ -252,6 +311,7 @@ impl WaveExecutor {
             .run(
                 cmd,
                 Path::new(&worktree),
+                run.wave_id.as_str(),
                 agent_id.as_str(),
                 run.id.as_str(),
                 &self.output,
@@ -277,10 +337,7 @@ impl WaveExecutor {
         fork: &ConcreteFork,
     ) -> Result<()> {
         if fork.branches.is_empty() {
-            run.status = WaveRunStatus::Failed;
-            run.error = Some("fork has no branches".to_string());
-            self.store.update_wave_run(run)?;
-            self.set_wave_status(&wave.id, WaveStatus::Failed);
+            self.fail_run(run, wave, "fork has no branches".to_string())?;
             return Ok(());
         }
 
@@ -291,19 +348,21 @@ impl WaveExecutor {
             .clone();
 
         if selected.step.interactive.unwrap_or(false) {
-            run.status = WaveRunStatus::Failed;
-            run.error = Some("interactive fork branches are not supported".to_string());
-            self.store.update_wave_run(run)?;
-            self.set_wave_status(&wave.id, WaveStatus::Failed);
+            self.fail_run(
+                run,
+                wave,
+                "interactive fork branches are not supported".to_string(),
+            )?;
             return Ok(());
         }
 
         let exit_code = self.run_step(wave, run, &selected).await?;
         if exit_code != 0 {
-            run.status = WaveRunStatus::Failed;
-            run.error = Some(format!("fork step {} failed", selected.step.name));
-            self.store.update_wave_run(run)?;
-            self.set_wave_status(&wave.id, WaveStatus::Failed);
+            self.fail_run(
+                run,
+                wave,
+                format!("fork step {} failed", selected.step.name),
+            )?;
             return Ok(());
         }
 
@@ -324,15 +383,23 @@ impl WaveExecutor {
         let mut fork_runs = Vec::new();
         for (index, branch) in fork.branches.iter().enumerate() {
             if branch.step.interactive.unwrap_or(false) {
-                run.status = WaveRunStatus::Failed;
-                run.error = Some("interactive fork branches are not supported".to_string());
-                self.store.update_wave_run(run)?;
-                self.set_wave_status(&wave.id, WaveStatus::Failed);
+                self.fail_run(
+                    run,
+                    wave,
+                    "interactive fork branches are not supported".to_string(),
+                )?;
                 return Ok(());
             }
 
             let fork_worktree = fork_worktree_path(run, index as u32);
             if !Path::new(&fork_worktree).exists() {
+                debug!(
+                    run_id = %run.id,
+                    branch_index = index,
+                    step = %branch.step.name,
+                    worktree = %fork_worktree,
+                    "creating fork worktree"
+                );
                 create_worktree(
                     Path::new(&run.snapshot.repo),
                     Path::new(&fork_worktree),
@@ -364,6 +431,7 @@ impl WaveExecutor {
             let scheduler = self.scheduler.clone();
             let cancel = cancel.clone();
             let tx = tx.clone();
+            let fork_wave_id = wave.id.clone();
             let wave_run_id = run.id.clone();
             let wave_repo = run.snapshot.repo.clone();
             let worktree = fork_run.worktree.clone();
@@ -390,16 +458,36 @@ impl WaveExecutor {
                     ..fork_run.clone()
                 });
 
+                debug!(
+                    fork_run_id = %fork_run_id,
+                    step = %step.step.name,
+                    worktree = %worktree,
+                    directions = ?wave_directions,
+                    "building fork branch prompt"
+                );
                 let prompt = build_step_prompt(&worktree, &step, &wave_directions, None);
                 let (prompt, model, launch) = match prompt {
                     Ok(result) => result,
                     Err(err) => {
+                        error!(
+                            fork_run_id = %fork_run_id,
+                            step = %step.step.name,
+                            error = %err,
+                            "fork branch prompt build failed"
+                        );
                         let _ = tx.send((fork_run_id.to_string(), Err(err))).await;
                         scheduler.release(fork_run_id.as_str());
                         return;
                     }
                 };
                 let cmd = build_agent_command(&model, &prompt, &launch);
+                info!(
+                    fork_run_id = %fork_run_id,
+                    step = %step.step.name,
+                    model = %model,
+                    cmd_len = cmd.len(),
+                    "launching fork branch agent"
+                );
                 let agent = build_agent_for_step(
                     &wave_run_id,
                     &wave_repo,
@@ -414,15 +502,34 @@ impl WaveExecutor {
                     .run(
                         cmd,
                         Path::new(&worktree),
+                        fork_wave_id.as_str(),
                         agent.id.as_str(),
                         wave_run_id.as_str(),
                         &output,
                     )
                     .await;
 
-                let status = match result {
-                    Ok(0) => ForkRunStatus::Completed,
-                    _ => ForkRunStatus::Failed,
+                // End the agent in the store (mirrors run_step behavior).
+                let ended_at = time::OffsetDateTime::now_utc().unix_timestamp();
+                let agent_status = match &result {
+                    Ok(0) => AgentStatus::Completed,
+                    _ => AgentStatus::Failed,
+                };
+                let _ = store.end_agent(&agent.id, agent_status.as_i32(), ended_at);
+
+                let status = match &result {
+                    Ok(0) => {
+                        info!(fork_run_id = %fork_run_id, step = %step.step.name, "fork branch completed");
+                        ForkRunStatus::Completed
+                    }
+                    Ok(code) => {
+                        warn!(fork_run_id = %fork_run_id, step = %step.step.name, exit_code = code, "fork branch failed");
+                        ForkRunStatus::Failed
+                    }
+                    Err(err) => {
+                        error!(fork_run_id = %fork_run_id, step = %step.step.name, error = %err, "fork branch error");
+                        ForkRunStatus::Failed
+                    }
                 };
                 let _ = store.upsert_fork_run(&ForkRun {
                     status,
@@ -437,56 +544,48 @@ impl WaveExecutor {
 
         let mut failures = None;
         let mut completed = 0usize;
+        let total = fork_runs.len();
+        debug!(run_id = %run.id, total_branches = total, "waiting for fork results");
         while let Some((fork_id, result)) = rx.recv().await {
             match result {
                 Ok(0) => {
                     completed += 1;
-                    if completed == fork_runs.len() {
+                    debug!(run_id = %run.id, completed, total, "fork branch done");
+                    if completed == total {
                         break;
                     }
                 }
                 Ok(code) => {
-                    failures = Some(format!("fork branch {} failed ({})", fork_id, code));
+                    failures = Some(format!("fork branch {} exited with code {}", fork_id, code));
                     break;
                 }
                 Err(err) => {
-                    failures = Some(format!("fork branch {} failed: {}", fork_id, err));
+                    failures = Some(format!("fork branch {} error: {}", fork_id, err));
                     break;
                 }
             }
         }
 
         if let Some(error) = failures {
+            error!(run_id = %run.id, error = %error, "fork failed");
             cancel.cancel();
             for handle in handles {
                 handle.abort();
             }
             self.cleanup_fork(run, &fork_runs).await;
-            run.status = WaveRunStatus::Failed;
-            run.error = Some(error);
-            self.store.update_wave_run(run)?;
-            self.set_wave_status(&wave.id, WaveStatus::Failed);
+            self.fail_run(run, wave, error)?;
             return Ok(());
         }
 
         if let Some(step_name) = fork.synthesize.as_deref() {
             let synth_step = ConcreteStep {
-                step: Step {
-                    name: step_name.to_string(),
-                    model: None,
-                    directions: Vec::new(),
-                    interactive: None,
-                    content: None,
-                },
+                step: Step::named(step_name),
                 flow_parents: fork.flow_parents.clone(),
             };
             let exit_code = self.run_step(wave, run, &synth_step).await?;
             if exit_code != 0 {
                 self.cleanup_fork(run, &fork_runs).await;
-                run.status = WaveRunStatus::Failed;
-                run.error = Some(format!("synthesize {} failed", step_name));
-                self.store.update_wave_run(run)?;
-                self.set_wave_status(&wave.id, WaveStatus::Failed);
+                self.fail_run(run, wave, format!("synthesize {} failed", step_name))?;
                 return Ok(());
             }
         }
@@ -511,17 +610,74 @@ impl WaveExecutor {
     }
 }
 
-fn worktree_path(run: &WaveRun) -> String {
-    if run.worktree.is_empty() {
-        run.snapshot.repo.clone()
-    } else {
-        run.worktree.clone()
+/// Create a wave run with a worktree and branch for the wave.
+pub fn create_wave_run_with_id(
+    store: &SharedStore,
+    wave: &Wave,
+    run_id: &LfdId,
+) -> anyhow::Result<WaveRun> {
+    let last_run = store
+        .list_wave_runs(Some(&wave.id), Some(1))?
+        .into_iter()
+        .next();
+    let iteration = last_run.map(|run| run.iteration + 1).unwrap_or(0);
+
+    let main_repo = Path::new(&wave.repo);
+    let (wt_path, branch) = ensure_wave_worktree(main_repo, &wave.name)?;
+
+    let run = WaveRun {
+        id: run_id.clone(),
+        wave_id: wave.id.clone(),
+        snapshot: WaveRunSnapshot {
+            repo: wave.repo.clone(),
+            flow: wave.flow.clone(),
+            direction: wave.direction.clone(),
+            area: wave.area.clone(),
+            pr: None,
+        },
+        iteration,
+        step_index: 0,
+        status: WaveRunStatus::Running,
+        worktree: wt_path,
+        branch,
+        started_at: Some(OffsetDateTime::now_utc()),
+        ended_at: None,
+        error: None,
+        flow_parents: Vec::new(),
+    };
+    store.create_wave_run(&run)?;
+    if let Ok(Some(mut wave)) = store.get_wave(&wave.id) {
+        wave.status = WaveStatus::Running;
+        wave.iteration = iteration;
+        let _ = store.update_wave(&wave);
     }
+    Ok(run)
+}
+
+/// Create a worktree for this wave, or reuse the existing one.
+pub fn ensure_wave_worktree(main_repo: &Path, wave_name: &str) -> anyhow::Result<(String, String)> {
+    let wt = wave_worktree_path(main_repo, wave_name);
+    if wt.exists() {
+        let branch = current_branch(&wt)?.unwrap_or_default();
+        return Ok((wt.to_string_lossy().to_string(), branch));
+    }
+
+    let config = load_config(Some(main_repo)).ok().flatten();
+    let branch_config = config.as_ref().and_then(|c| c.branch_names.as_ref());
+    let result = create_with_schema(main_repo, wave_name, None, branch_config)?;
+    Ok((result.path.to_string_lossy().to_string(), result.branch))
+}
+
+/// Kill a process by PID using SIGTERM.
+pub fn kill_process(pid: u32) {
+    let _ = std::process::Command::new("kill")
+        .arg("-TERM")
+        .arg(pid.to_string())
+        .status();
 }
 
 fn fork_worktree_path(run: &WaveRun, branch_index: u32) -> String {
-    let base = worktree_path(run);
-    format!("{base}-fork-{branch_index}")
+    format!("{}-fork-{branch_index}", run.worktree)
 }
 
 fn merge_directions(base: &[String], extra: &[String]) -> Vec<String> {
@@ -556,8 +712,6 @@ fn build_step_prompt(
     let opts = GatherContextOpts {
         repo_root: PathBuf::from(worktree),
         step: Some(step.step.name.clone()),
-        inline: None,
-        step_args: Vec::new(),
         message: None,
         run_mode: Some("auto".to_string()),
         directions,
@@ -570,8 +724,27 @@ fn build_step_prompt(
         wave: wave.map(str::to_string),
     };
 
-    let components = gather_context(&opts)?;
-    let prompt = format_prompt(&components);
+    let mut components = gather_context(&opts)?;
+    let repo_root = PathBuf::from(worktree);
+    drop_native_instruction_docs(&mut components, &repo_root);
+    let (components, _breakdown) = trim_context_with_breakdown(components, DEFAULT_CONTEXT_BUDGET);
+
+    // Log full prompt, then write context/task split for --append-system-prompt-file
+    let _ = write_prompt_log(
+        &repo_root,
+        &format_prompt(&components),
+        &step.step.name,
+        None,
+    );
+    let task_prompt = format_task_prompt(&components);
+    let context_file = write_prompt_log(
+        &repo_root,
+        &format_context_prompt(&components),
+        &format!("{}.context", step.step.name),
+        None,
+    )
+    .ok();
+
     let model = step
         .step
         .model
@@ -583,12 +756,12 @@ fn build_step_prompt(
         skip_permissions: config.yolo,
         model_variant: None,
         chrome: config.chrome,
-        cwd: Some(PathBuf::from(worktree)),
-        context_file: None,
+        cwd: Some(repo_root),
+        context_file,
         ..Default::default()
     };
 
-    Ok((prompt, model, launch))
+    Ok((task_prompt, model, launch))
 }
 
 fn build_agent_for_step(

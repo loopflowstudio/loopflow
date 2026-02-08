@@ -63,8 +63,6 @@ fn gather_context_with_step() {
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         step: Some("implement".to_string()),
-        inline: None,
-        step_args: vec![],
         message: None,
         run_mode: Some("auto".to_string()),
         directions: vec![],
@@ -92,9 +90,7 @@ fn gather_context_with_inline_prompt() {
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         step: None,
-        inline: Some("Fix the bug in main.rs".to_string()),
-        step_args: vec![],
-        message: None,
+        message: Some("Fix the bug in main.rs".to_string()),
         run_mode: Some("interactive".to_string()),
         directions: vec![],
         files: vec![],
@@ -125,8 +121,6 @@ fn gather_context_with_directions() {
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         step: Some("review".to_string()),
-        inline: None,
-        step_args: vec![],
         message: None,
         run_mode: Some("auto".to_string()),
         directions: vec!["concise".to_string(), "security".to_string()],
@@ -160,8 +154,6 @@ fn gather_context_includes_readme() {
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         step: Some("implement".to_string()),
-        inline: None,
-        step_args: vec![],
         message: None,
         run_mode: Some("auto".to_string()),
         directions: vec![],
@@ -202,8 +194,6 @@ fn gather_context_includes_scratch_docs() {
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         step: Some("implement".to_string()),
-        inline: None,
-        step_args: vec![],
         message: None,
         run_mode: Some("auto".to_string()),
         directions: vec![],
@@ -248,8 +238,6 @@ fn gather_context_with_wave() {
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         step: Some("implement".to_string()),
-        inline: None,
-        step_args: vec![],
         message: None,
         run_mode: Some("auto".to_string()),
         directions: vec![],
@@ -281,8 +269,6 @@ fn gather_context_preserves_run_mode() {
     let auto = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         step: Some("debug".to_string()),
-        inline: None,
-        step_args: vec![],
         message: None,
         run_mode: Some("auto".to_string()),
         directions: vec![],
@@ -299,8 +285,6 @@ fn gather_context_preserves_run_mode() {
     let interactive = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         step: Some("debug".to_string()),
-        inline: None,
-        step_args: vec![],
         message: None,
         run_mode: Some("interactive".to_string()),
         directions: vec![],
@@ -334,8 +318,6 @@ fn format_prompt_includes_step_content() {
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         step: Some("implement".to_string()),
-        inline: None,
-        step_args: vec![],
         message: None,
         run_mode: Some("auto".to_string()),
         directions: vec![],
@@ -365,8 +347,6 @@ fn format_prompt_includes_auto_mode_header() {
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         step: Some("implement".to_string()),
-        inline: None,
-        step_args: vec![],
         message: None,
         run_mode: Some("auto".to_string()),
         directions: vec![],
@@ -397,8 +377,6 @@ fn format_prompt_includes_directions() {
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         step: Some("review".to_string()),
-        inline: None,
-        step_args: vec![],
         message: None,
         run_mode: Some("auto".to_string()),
         directions: vec!["concise".to_string()],
@@ -434,8 +412,6 @@ fn format_prompt_includes_wave_context() {
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         step: Some("implement".to_string()),
-        inline: None,
-        step_args: vec![],
         message: None,
         run_mode: Some("auto".to_string()),
         directions: vec![],
@@ -506,8 +482,6 @@ fn wave_filtering_includes_only_specified_wave() {
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         step: Some("implement".to_string()),
-        inline: None,
-        step_args: vec![],
         message: None,
         run_mode: Some("auto".to_string()),
         directions: vec![],
@@ -565,8 +539,6 @@ fn wave_filtering_excludes_all_roadmap_when_no_wave() {
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         step: Some("implement".to_string()),
-        inline: None,
-        step_args: vec![],
         message: None,
         run_mode: Some("auto".to_string()),
         directions: vec![],
@@ -615,8 +587,6 @@ fn wave_filtering_handles_nonexistent_wave() {
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         step: Some("implement".to_string()),
-        inline: None,
-        step_args: vec![],
         message: None,
         run_mode: Some("auto".to_string()),
         directions: vec![],
@@ -683,8 +653,6 @@ fn wave_filtering_includes_all_files_in_wave_directory() {
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         step: Some("implement".to_string()),
-        inline: None,
-        step_args: vec![],
         message: None,
         run_mode: Some("auto".to_string()),
         directions: vec![],
@@ -729,8 +697,6 @@ fn loopflow_doc_always_included() {
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
         step: Some("implement".to_string()),
-        inline: None,
-        step_args: vec![],
         message: None,
         run_mode: Some("auto".to_string()),
         directions: vec![],

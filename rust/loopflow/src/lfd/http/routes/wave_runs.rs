@@ -14,7 +14,6 @@ use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{map_store_error, run_store, ApiResult};
 use crate::lfd::id::LfdId;
 use crate::lfd::output::OutputEvent;
-use crate::lfd::types::WaveRun;
 
 #[derive(Deserialize, Default)]
 pub struct ListWaveRunsQuery {
@@ -41,6 +40,9 @@ pub async fn list_wave_runs_for_wave_handler(
     list_wave_runs(&state, Some(wave_id), query).await
 }
 
+/// Replay + follow: sends persisted output from the log file, then
+/// continues with live broadcast events. Subscribe before read ensures
+/// no lines are lost at the boundary.
 pub async fn wave_logs_handler(
     State(state): State<HttpState>,
     Path(wave_id): Path<String>,
@@ -52,24 +54,61 @@ pub async fn wave_logs_handler(
     ),
 > {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
+
+    // Find the most recent run for this wave (active or completed).
+    let store = state.store.clone();
+    let wid = wave_id.clone();
+    let latest_run = run_store(&store, move |store| {
+        store.list_wave_runs(Some(&wid), Some(1))
+    })
+    .await
+    .map_err(map_store_error)?
+    .into_iter()
+    .next();
+
+    // Step 1: Subscribe to broadcast BEFORE reading the file.
     let output_rx = state.output_hub.subscribe();
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(128);
-    let store = state.store.clone();
+
+    let output_hub = state.output_hub.clone();
 
     tokio::spawn(async move {
+        // Step 2: Replay from log file.
+        let mut replayed_lines: usize = 0;
+        if let Some(ref run) = latest_run {
+            let run_id_str = run.id.to_string();
+            if let Some((lines, _offset)) = output_hub.read_log(&run_id_str) {
+                for line in &lines {
+                    if tx.send(Ok(Bytes::from(format!("{line}\n")))).await.is_err() {
+                        return;
+                    }
+                }
+                replayed_lines = lines.len();
+            }
+        }
+
+        // Step 3: Forward live broadcast, skipping lines already replayed.
+        // Since we subscribed before reading, some broadcast events may
+        // duplicate what we just sent from the file. Track count to skip.
+        let mut skip_remaining = replayed_lines;
         let mut stream = BroadcastStream::new(output_rx);
         let mut cache: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+
         while let Some(event) = stream.next().await {
             let Ok(OutputEvent {
                 wave_run_id,
                 agent_id: _,
+                wave_id: event_wave_id,
                 text,
             }) = event
             else {
                 continue;
             };
 
-            let include = if let Some(hit) = cache.get(&wave_run_id) {
+            // Filter: only include output for runs belonging to this wave.
+            let include = if event_wave_id == wave_id.to_string() {
+                true
+            } else if let Some(hit) = cache.get(&wave_run_id) {
                 *hit
             } else {
                 let run_id = LfdId::from_raw(wave_run_id.clone());
@@ -83,7 +122,17 @@ pub async fn wave_logs_handler(
                 matches
             };
 
-            if include && tx.send(Ok(Bytes::from(format!("{text}\n")))).await.is_err() {
+            if !include {
+                continue;
+            }
+
+            // Skip lines that were already sent from the file replay.
+            if skip_remaining > 0 {
+                skip_remaining -= 1;
+                continue;
+            }
+
+            if tx.send(Ok(Bytes::from(format!("{text}\n")))).await.is_err() {
                 break;
             }
         }
@@ -123,11 +172,12 @@ async fn list_wave_runs(
         filtered.retain(|run| run.snapshot.repo == repo);
     }
 
-    let (runs, has_more) = paginate_wave_runs(
+    let (runs, has_more) = super::paginate(
         filtered,
         query.limit,
         query.starting_after.as_deref(),
         query.ending_before.as_deref(),
+        |r| &r.id,
     );
 
     let mut data = Vec::with_capacity(runs.len());
@@ -136,40 +186,4 @@ async fn list_wave_runs(
     }
 
     Ok(Json(ListResponse::new(data, has_more)))
-}
-
-fn paginate_wave_runs(
-    runs: Vec<WaveRun>,
-    limit: Option<u32>,
-    starting_after: Option<&str>,
-    ending_before: Option<&str>,
-) -> (Vec<WaveRun>, bool) {
-    let mut items = runs;
-    if let Some(starting_after) = starting_after {
-        if let Some(pos) = items
-            .iter()
-            .position(|run| run.id.to_string() == starting_after)
-        {
-            items = items.split_off(pos + 1);
-        }
-    }
-    if let Some(ending_before) = ending_before {
-        if let Some(pos) = items
-            .iter()
-            .position(|run| run.id.to_string() == ending_before)
-        {
-            items.truncate(pos);
-        }
-    }
-
-    let mut has_more = false;
-    if let Some(limit) = limit {
-        let limit = limit as usize;
-        if items.len() > limit {
-            items.truncate(limit);
-            has_more = true;
-        }
-    }
-
-    (items, has_more)
 }

@@ -69,7 +69,8 @@ impl SqliteStore {
                 last_main_sha TEXT,
                 consecutive_failures INTEGER NOT NULL,
                 pending_activations INTEGER NOT NULL,
-                step_index INTEGER NOT NULL DEFAULT 0
+                step_index INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(name, repo)
             );
             CREATE INDEX IF NOT EXISTS idx_waves_name ON waves(name);
 
@@ -457,7 +458,7 @@ impl RunStore for SqliteStore {
                    started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
                    snapshot_area, snapshot_pr, flow_parents
             FROM wave_runs
-            WHERE wave_id = ?1 AND status IN (?2, ?3, ?4)
+            WHERE wave_id = ?1 AND status IN (?2, ?3, ?4, ?5)
             ORDER BY started_at DESC
             LIMIT 1
             ",
@@ -468,7 +469,8 @@ impl RunStore for SqliteStore {
                     wave_id,
                     WaveRunStatus::Pending.as_i32(),
                     WaveRunStatus::Running.as_i32(),
-                    WaveRunStatus::Waiting.as_i32()
+                    WaveRunStatus::Waiting.as_i32(),
+                    WaveRunStatus::Failed.as_i32(),
                 ],
                 map_wave_run_row,
             )
@@ -991,6 +993,26 @@ impl RunStore for SqliteStore {
             return Err(StoreError::NotFound);
         }
         Ok(())
+    }
+
+    fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<Agent>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "
+            SELECT a.id, a.step, a.repo, a.worktree, a.wave_run_id, a.status,
+                   a.started_at, a.ended_at, a.pid, a.model, a.run_mode
+            FROM agents a
+            JOIN wave_runs r ON a.wave_run_id = r.id
+            WHERE r.wave_id = ?1 AND a.ended_at IS NULL
+            ORDER BY a.started_at DESC
+            ",
+        )?;
+        let rows = stmt.query_map(params![wave_id], map_agent_row)?;
+        let mut agents = Vec::new();
+        for row in rows {
+            agents.push(row?);
+        }
+        Ok(agents)
     }
 
     fn end_active_agent_for_wave(

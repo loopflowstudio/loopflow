@@ -170,13 +170,19 @@ public struct LocalWaveService: @unchecked Sendable {
     }
 
     /// List flows and steps from lfd.
-    public func listFlows(repo: URL) async throws -> [Flow] {
+    /// Result from the /flows endpoint containing flows, steps, and directions.
+    public struct FlowsResult: Sendable {
+        public var flows: [Flow]
+        public var directions: [String]
+    }
+
+    public func listFlowsAndDirections(repo: URL) async throws -> FlowsResult {
         var components = URLComponents(url: apiBaseURL.appendingPathComponent("flows"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "repo", value: repo.path)]
 
         guard let url = components.url else {
             LoggingService.lfd("listFlows: invalid URL")
-            return []
+            return FlowsResult(flows: [], directions: [])
         }
 
         LoggingService.lfd("listFlows: GET \(url)")
@@ -184,11 +190,11 @@ public struct LocalWaveService: @unchecked Sendable {
         do {
             let (data, response) = try await session.data(from: url)
             guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-                return []
+                return FlowsResult(flows: [], directions: [])
             }
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let result = json["result"] as? [String: Any] else {
-                return []
+                return FlowsResult(flows: [], directions: [])
             }
 
             var allFlows: [Flow] = []
@@ -210,9 +216,11 @@ public struct LocalWaveService: @unchecked Sendable {
 
             let flows = allFlows.filter { $0.type == .flow }.sorted { $0.name < $1.name }
             let steps = allFlows.filter { $0.type == .step }.sorted { $0.name < $1.name }
-            return flows + steps
+            let directions = (result["directions"] as? [String]) ?? []
+
+            return FlowsResult(flows: flows + steps, directions: directions)
         } catch {
-            return []
+            return FlowsResult(flows: [], directions: [])
         }
     }
 
@@ -289,13 +297,12 @@ public struct LocalWaveService: @unchecked Sendable {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        // Create with defaults - lfd requires non-empty direction/area
+        // Create with defaults - area left empty, user configures in detail panel
         let body: [String: Any] = [
             "repo": repo.path,
             "name": name.isEmpty ? NSNull() : name,
             "flow": "design",  // Default flow (single step)
             "direction": ["default"],
-            "area": ["."]  // Root directory
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -487,7 +494,18 @@ public struct LocalWaveService: @unchecked Sendable {
     }
 
     public func stop(_ id: String) async throws {
-        try await runShellCommand(["lfd", "stop", id])
+        let url = apiBaseURL.appendingPathComponent("waves/\(id)/stop")
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+
+        let (data, response) = try await session.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let errorMsg = Self.parseErrorMessage(data)
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+        }
     }
 
     /// Clone a wave with a new name.
@@ -569,6 +587,44 @@ public struct LocalWaveService: @unchecked Sendable {
         } else {
             let errorMsg = json["error"] as? String ?? "Collapse failed"
             throw WaveServiceError.commandFailed(errorMsg)
+        }
+    }
+
+    // MARK: - Output Streaming
+
+    /// Stream output for a wave (replay from disk + live follow).
+    /// Yields one line at a time. The connection stays open for live updates.
+    public func streamOutput(waveId: String) -> AsyncThrowingStream<String, Error> {
+        let url = apiBaseURL.appendingPathComponent("waves/\(waveId)/logs")
+
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    let config = URLSessionConfiguration.default
+                    config.timeoutIntervalForRequest = 300
+                    config.timeoutIntervalForResource = 86400 // Keep alive for a day
+                    let streamSession = URLSession(configuration: config)
+
+                    let (bytes, response) = try await streamSession.bytes(from: url)
+
+                    guard let httpResponse = response as? HTTPURLResponse,
+                          httpResponse.statusCode == 200 else {
+                        continuation.finish()
+                        return
+                    }
+
+                    for try await line in bytes.lines {
+                        continuation.yield(line)
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
         }
     }
 

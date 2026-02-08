@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS waves (
     last_main_sha TEXT,
     consecutive_failures INTEGER NOT NULL,
     pending_activations INTEGER NOT NULL,
-    step_index INTEGER NOT NULL DEFAULT 0
+    step_index INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(name, repo)
 );
 
 CREATE INDEX IF NOT EXISTS idx_waves_repo ON waves(repo);

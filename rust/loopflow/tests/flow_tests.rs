@@ -5,6 +5,12 @@ use loopflow::engine::flow::{ConcreteItem, FlowItem, ForkSelect, Step};
 use loopflow::engine::{expand_flow, load_flow};
 use tempfile::TempDir;
 
+fn write_step(repo: &Path, name: &str, content: &str) {
+    let steps_dir = repo.join(".lf/steps");
+    fs::create_dir_all(&steps_dir).unwrap();
+    fs::write(steps_dir.join(format!("{name}.md")), content).unwrap();
+}
+
 fn write_flow(repo: &Path, name: &str, content: &str) {
     let flows_dir = repo.join(".lf/flows");
     fs::create_dir_all(&flows_dir).unwrap();
@@ -163,5 +169,107 @@ fn expand_flow_tracks_parents() {
             assert_eq!(step.flow_parents, vec!["parent", "child"]);
         }
         _ => panic!("expected expanded step"),
+    }
+}
+
+/// Plain string items in flow YAML that match a sub-flow name should be
+/// expanded as sub-flows, not treated as step names. This was the root
+/// cause of `step not found: publish` in roadmap-reduce.
+#[test]
+fn expand_flow_resolves_plain_string_as_subflow() {
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path();
+
+    // "publish" is a flow containing two steps
+    write_flow(repo, "publish", "- step-a\n- step-b");
+    // "parent" references "publish" as a plain string (not `flow: publish`)
+    write_flow(repo, "parent", "- review\n- publish");
+
+    let flow = load_flow("parent", repo).unwrap();
+    let items = expand_flow(&flow, repo).unwrap();
+
+    // Should expand to 3 steps: review, step-a, step-b
+    assert_eq!(items.len(), 3, "publish should expand into its sub-steps");
+    match &items[0] {
+        ConcreteItem::Step(s) => assert_eq!(s.step.name, "review"),
+        _ => panic!("expected step"),
+    }
+    match &items[1] {
+        ConcreteItem::Step(s) => {
+            assert_eq!(s.step.name, "step-a");
+            assert_eq!(s.flow_parents, vec!["parent", "publish"]);
+        }
+        _ => panic!("expected step from publish sub-flow"),
+    }
+    match &items[2] {
+        ConcreteItem::Step(s) => {
+            assert_eq!(s.step.name, "step-b");
+            assert_eq!(s.flow_parents, vec!["parent", "publish"]);
+        }
+        _ => panic!("expected step from publish sub-flow"),
+    }
+}
+
+/// A plain string that is both a step name AND a flow name should NOT
+/// be expanded as a sub-flow (step takes priority to avoid ambiguity).
+#[test]
+fn expand_flow_prefers_step_over_single_step_flow() {
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path();
+
+    // "review" exists as both a step and as a flow (auto-wrapped)
+    write_step(repo, "review", "Review the code.");
+    write_flow(repo, "parent", "- review");
+
+    let flow = load_flow("parent", repo).unwrap();
+    let items = expand_flow(&flow, repo).unwrap();
+
+    // Should keep as a single step (not expand into a sub-flow)
+    assert_eq!(items.len(), 1);
+    match &items[0] {
+        ConcreteItem::Step(s) => {
+            assert_eq!(s.step.name, "review");
+            assert_eq!(s.flow_parents, vec!["parent"]);
+        }
+        _ => panic!("expected step"),
+    }
+}
+
+/// The builtin roadmap-reduce flow should expand to 4 items:
+/// review, fork(reduce×3), consolidate, add-to-roadmap.
+#[test]
+fn builtin_roadmap_reduce_expands_publish_subflow() {
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path();
+
+    let flow = load_flow("roadmap-reduce", repo).unwrap();
+    let items = expand_flow(&flow, repo).unwrap();
+
+    // review + fork + consolidate + add-to-roadmap = 4
+    assert_eq!(
+        items.len(),
+        4,
+        "roadmap-reduce should expand publish into consolidate + add-to-roadmap"
+    );
+
+    // Step 0: review
+    match &items[0] {
+        ConcreteItem::Step(s) => assert_eq!(s.step.name, "review"),
+        _ => panic!("expected review step"),
+    }
+    // Step 1: fork (reduce × 3 directions)
+    assert!(
+        matches!(&items[1], ConcreteItem::Fork(_)),
+        "expected fork at index 1"
+    );
+    // Step 2: consolidate (from publish sub-flow)
+    match &items[2] {
+        ConcreteItem::Step(s) => assert_eq!(s.step.name, "consolidate"),
+        _ => panic!("expected consolidate step"),
+    }
+    // Step 3: add-to-roadmap (from publish sub-flow)
+    match &items[3] {
+        ConcreteItem::Step(s) => assert_eq!(s.step.name, "add-to-roadmap"),
+        _ => panic!("expected add-to-roadmap step"),
     }
 }

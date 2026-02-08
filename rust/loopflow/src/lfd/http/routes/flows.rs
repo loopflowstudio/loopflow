@@ -26,6 +26,7 @@ struct FlowSummary {
 struct FlowsResult {
     flows: Vec<FlowSummary>,
     steps: Vec<StepSummary>,
+    directions: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -40,10 +41,15 @@ pub async fn list_flows_handler(Query(query): Query<ListFlowsQuery>) -> ApiResul
 
     let flows = list_flows(&repo_path);
     let steps = list_steps(&repo_path);
+    let directions = crate::lf::discovery::list_directions(Some(&repo_path));
 
     Ok(Json(FlowsResponse {
         ok: true,
-        result: FlowsResult { flows, steps },
+        result: FlowsResult {
+            flows,
+            steps,
+            directions,
+        },
     }))
 }
 

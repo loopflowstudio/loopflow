@@ -70,7 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => Arc::new(SqliteStore::new(&db_path)?) as SharedStore,
     };
     let scheduler = Arc::new(Scheduler::new(max_slots));
-    let output = OutputHub::new(2048);
+    let output = OutputHub::new(2048, loopflow::lfd::default_output_dir());
     let event_hub = EventHub::new(1024);
     let executor = WaveExecutor::new(store.clone(), scheduler.clone(), output.clone());
     let loop_handles =

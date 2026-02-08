@@ -209,8 +209,6 @@ struct WaveSidebar: View {
 
             Spacer()
                 .frame(maxHeight: .infinity)
-            Spacer()
-                .frame(maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity)
         .padding()

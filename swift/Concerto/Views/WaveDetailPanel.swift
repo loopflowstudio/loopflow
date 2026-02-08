@@ -254,52 +254,6 @@ struct WaveDetailPanel: View {
         }
     }
 
-    // MARK: - Idle Wave View
-
-    private var idleWaveView: some View {
-        VStack(spacing: 16) {
-            // Big start button - prominent green
-            Button {
-                launchInteractive()
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "play.fill")
-                        .font(.title3)
-                    Text("Start \(wave.flowDisplay)")
-                        .font(.title3)
-                        .fontWeight(.semibold)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
-                .background(Color.green)
-                .foregroundStyle(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-            }
-            .buttonStyle(.plain)
-            .disabled(wave.worktreePath == nil)
-            .opacity(wave.worktreePath == nil ? 0.5 : 1)
-
-            // Subtle config summary
-            if !wave.areaDisplay.isEmpty || !wave.directionDisplay.isEmpty {
-                HStack(spacing: 16) {
-                    if !wave.areaDisplay.isEmpty {
-                        Label(wave.areaDisplay, systemImage: "folder")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    if !wave.directionDisplay.isEmpty && wave.directionDisplay != "default" {
-                        Label(wave.directionDisplay, systemImage: "target")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-        }
-        .padding(16)
-        .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-    }
-
     // MARK: - Quick Actions Bar
 
     private var quickActionsBar: some View {

@@ -88,7 +88,6 @@ def cmd_run_debug() -> int:
     print("Press Ctrl+C to quit")
     print("---")
     # Use exec so Ctrl+C goes directly to Concerto
-    import os
     executable = str(DEV_APP / "Contents" / "MacOS" / "Concerto")
     os.execv(executable, [executable])
 

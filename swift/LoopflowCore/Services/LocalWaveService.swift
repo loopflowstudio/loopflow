@@ -302,7 +302,7 @@ public struct LocalWaveService: @unchecked Sendable {
             "repo": repo.path,
             "name": name.isEmpty ? NSNull() : name,
             "flow": "design",  // Default flow (single step)
-            "direction": ["default"],
+            "direction": [],
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 

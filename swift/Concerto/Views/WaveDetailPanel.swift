@@ -97,6 +97,12 @@ struct WaveDetailPanel: View {
                             Divider()
                             NextActionsBar(wave: wave)
                         }
+                    } else if wave.status == .failed {
+                        failedRunDetail
+                        StepRunner(wave: wave)
+                        if !outputBuffer.output(for: wave.id).isEmpty {
+                            liveOutputSection
+                        }
                     } else {
                         waveConfigSummary
                         runProgressSection
@@ -231,7 +237,7 @@ struct WaveDetailPanel: View {
                     .foregroundStyle(.secondary)
                 }
 
-                if !wave.directionDisplay.isEmpty && wave.directionDisplay != "default" {
+                if !wave.directionDisplay.isEmpty {
                     Label {
                         Text(wave.directionDisplay)
                             .font(.caption)

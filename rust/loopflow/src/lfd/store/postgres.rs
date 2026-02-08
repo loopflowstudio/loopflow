@@ -351,7 +351,6 @@ impl RunStore for PostgresStore {
                 WaveRunStatus::Pending.as_i32(),
                 WaveRunStatus::Running.as_i32(),
                 WaveRunStatus::Waiting.as_i32(),
-                WaveRunStatus::Failed.as_i32(),
             ];
             let row = client
                 .query_opt(
@@ -365,6 +364,26 @@ impl RunStore for PostgresStore {
                     LIMIT 1
                     ",
                     &[&wave_id, &&statuses[..]],
+                )
+                .await?;
+            row.map(|row| map_wave_run_row(&row)).transpose()
+        })
+    }
+
+    fn get_latest_wave_run(&self, wave_id: &LfdId) -> StoreResult<Option<WaveRun>> {
+        self.with_client(|client| async move {
+            let row = client
+                .query_opt(
+                    "
+                    SELECT id, wave_id, iteration, step_index, status, worktree, branch,
+                           started_at, ended_at, error, snapshot_repo, snapshot_flow, snapshot_direction,
+                           snapshot_area, snapshot_pr, flow_parents
+                    FROM wave_runs
+                    WHERE wave_id = $1
+                    ORDER BY started_at DESC
+                    LIMIT 1
+                    ",
+                    &[&wave_id],
                 )
                 .await?;
             row.map(|row| map_wave_run_row(&row)).transpose()

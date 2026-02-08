@@ -288,14 +288,10 @@ pub async fn update_wave_handler(
         wave.flow = flow;
     }
     if let Some(direction) = payload.direction {
-        if !direction.is_empty() {
-            wave.direction = direction;
-        }
+        wave.direction = direction;
     }
     if let Some(area) = payload.area {
-        if !area.is_empty() {
-            wave.area = area;
-        }
+        wave.area = area;
     }
     if let Some(status) = payload.status {
         wave.status = WaveStatus::from_str(&status)
@@ -406,14 +402,10 @@ pub async fn run_wave_handler(
         wave.flow = flow;
     }
     if let Some(direction) = payload.direction {
-        if !direction.is_empty() {
-            wave.direction = direction;
-        }
+        wave.direction = direction;
     }
     if let Some(area) = payload.area {
-        if !area.is_empty() {
-            wave.area = area;
-        }
+        wave.area = area;
     }
 
     let wave_clone = wave.clone();
@@ -651,16 +643,16 @@ pub async fn land_wave_handler(
         .map_err(map_store_error)?
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
 
-    let active_run = run_store(&state.store, move |store| {
+    let latest_run = run_store(&state.store, move |store| {
         let wave_id = LfdId::from_raw(wave.id.clone());
-        store.get_active_wave_run(&wave_id)
+        store.get_latest_wave_run(&wave_id)
     })
     .await
     .map_err(map_store_error)?;
 
     let worktree = payload
         .worktree
-        .or_else(|| active_run.as_ref().map(|run| run.worktree.clone()))
+        .or_else(|| latest_run.as_ref().map(|run| run.worktree.clone()))
         .filter(|value| !value.is_empty());
 
     let strict = payload.strict.unwrap_or(false);

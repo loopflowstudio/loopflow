@@ -47,7 +47,7 @@ pub async fn build_wave_dto(
     include_active_run: bool,
 ) -> Result<WaveDto, StoreError> {
     let wave_id = wave.id.clone();
-    let active = run_store(store, move |store| store.get_active_wave_run(&wave_id)).await?;
+    let latest = run_store(store, move |store| store.get_latest_wave_run(&wave_id)).await?;
     let repo = wave.repo.clone();
     let name = wave.name.clone();
     let wave_worktree = tokio::task::spawn_blocking(move || infer_wave_git_state(&repo, &name))
@@ -56,7 +56,7 @@ pub async fn build_wave_dto(
         .flatten();
 
     let active_run = if include_active_run {
-        active.map(wave_run_dto)
+        latest.map(wave_run_dto)
     } else {
         None
     };

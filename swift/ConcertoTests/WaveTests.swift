@@ -190,22 +190,6 @@ struct WaveModelTests {
         #expect(wave.shortId == "abcdefg")
     }
 
-    // MARK: - isConfigured
-
-    @Test("isConfigured returns true when area is set")
-    func isConfiguredWithArea() {
-        let wave = makeWave(id: "test", repo: "/tmp", area: ["src/"])
-
-        #expect(wave.isConfigured == true)
-    }
-
-    @Test("isConfigured returns false when area is nil")
-    func isConfiguredWithoutArea() {
-        let wave = makeWave(id: "test", repo: "/tmp", area: [])
-
-        #expect(wave.isConfigured == false)
-    }
-
     // MARK: - Detail Text
 
     @Test("detailText combines area, flow, and stimulus")

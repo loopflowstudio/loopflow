@@ -721,6 +721,11 @@ fn gather_files(repo_root: &Path, files: &[String]) -> Result<Vec<Document>, Cor
             None => continue,
         };
 
+        if path.is_dir() {
+            gather_dir_files(repo_root, &path, &gitignore, &mut seen, &mut docs)?;
+            continue;
+        }
+
         if !path.is_file() {
             continue;
         }
@@ -753,6 +758,58 @@ fn gather_files(repo_root: &Path, files: &[String]) -> Result<Vec<Document>, Cor
     }
 
     Ok(docs)
+}
+
+/// Walk a directory and collect text files, respecting gitignore.
+fn gather_dir_files(
+    repo_root: &Path,
+    dir: &Path,
+    gitignore: &ignore::gitignore::Gitignore,
+    seen: &mut HashSet<PathBuf>,
+    docs: &mut Vec<Document>,
+) -> Result<(), CoreError> {
+    let walker = ignore::WalkBuilder::new(dir)
+        .hidden(true)
+        .standard_filters(true)
+        .build();
+
+    let mut entries: Vec<_> = walker
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_file())
+        .collect();
+    entries.sort_by(|a, b| a.path().cmp(b.path()));
+
+    for entry in entries {
+        let path = entry.into_path();
+
+        if should_exclude(repo_root, &path, gitignore) {
+            continue;
+        }
+
+        let canonical = path.canonicalize().unwrap_or(path.clone());
+        if !seen.insert(canonical) {
+            continue;
+        }
+
+        let content = match read_text_file(&path) {
+            Some(content) => content,
+            None => continue,
+        };
+
+        let rel_path = path
+            .strip_prefix(repo_root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .to_string();
+
+        docs.push(Document {
+            path: rel_path,
+            content,
+            category: "diff_files".to_string(),
+        });
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1048,6 +1105,28 @@ fn ensure_gitignore_entry(repo_root: &Path, entry: &str) -> Result<(), CoreError
     Ok(())
 }
 
+/// Format direction tags as XML blocks.
+fn format_direction_tags(directions: &[Direction]) -> String {
+    if directions.len() == 1 {
+        let d = &directions[0];
+        format!(
+            "<lf:direction:{}>\n{}\n</lf:direction:{}>",
+            d.name, d.content, d.name
+        )
+    } else {
+        let parts: Vec<String> = directions
+            .iter()
+            .map(|d| {
+                format!(
+                    "<lf:direction:{}>\n{}\n</lf:direction:{}>",
+                    d.name, d.content, d.name
+                )
+            })
+            .collect();
+        format!("<lf:directions>\n{}\n</lf:directions>", parts.join("\n"))
+    }
+}
+
 /// Format all components into the final prompt string.
 pub fn format_prompt(components: &PromptComponents) -> String {
     let mut parts = Vec::new();
@@ -1148,47 +1227,7 @@ pub fn format_prompt(components: &PromptComponents) -> String {
         ));
     }
 
-    // 4. Instructions (direction, then step)
-    if !components.directions.is_empty() {
-        if components.directions.len() == 1 {
-            let d = &components.directions[0];
-            parts.push(format!(
-                "Direction for this work.\n\n\
-                 <lf:direction:{}>\n{}\n</lf:direction:{}>",
-                d.name, d.content, d.name
-            ));
-        } else {
-            let direction_parts: Vec<String> = components
-                .directions
-                .iter()
-                .map(|d| {
-                    format!(
-                        "<lf:direction:{}>\n{}\n</lf:direction:{}>",
-                        d.name, d.content, d.name
-                    )
-                })
-                .collect();
-            parts.push(format!(
-                "Directions for this work.\n\n\
-                 <lf:directions>\n{}\n</lf:directions>",
-                direction_parts.join("\n")
-            ));
-        }
-    }
-
-    if let Some(ref step) = components.step {
-        let step_tag = if let Some(ref content) = step.content {
-            format!(
-                "<lf:step:{}>\n{}\n</lf:step:{}>",
-                step.name, content, step.name
-            )
-        } else {
-            format!("<lf:step:{}>\n</lf:step:{}>", step.name, step.name)
-        };
-        parts.push(format!("The step.\n\n{}", step_tag));
-    }
-
-    // 5. Working context (diff, diff_files, clipboard)
+    // 4. Working context (diff, diff_files — reference material)
     if components.diff.is_some() || !components.diff_files.is_empty() {
         let mut diff_parts = Vec::new();
 
@@ -1204,6 +1243,31 @@ pub fn format_prompt(components: &PromptComponents) -> String {
         parts.push(format!(
             "Changes on this branch (diff against main).\n\n{}",
             diff_parts.join("\n\n")
+        ));
+    }
+
+    // 5. Task prompt (step, directions, clipboard, message)
+    if let Some(ref step) = components.step {
+        let step_tag = if let Some(ref content) = step.content {
+            format!(
+                "<lf:step:{}>\n{}\n</lf:step:{}>",
+                step.name, content, step.name
+            )
+        } else {
+            format!("<lf:step:{}>\n</lf:step:{}>", step.name, step.name)
+        };
+        parts.push(format!("The step.\n\n{}", step_tag));
+    }
+
+    if !components.directions.is_empty() {
+        let label = if components.directions.len() == 1 {
+            "Direction"
+        } else {
+            "Directions"
+        };
+        parts.push(format!(
+            "{label} for this work.\n\n{}",
+            format_direction_tags(&components.directions)
         ));
     }
 
@@ -1330,33 +1394,7 @@ pub fn format_context_prompt(components: &PromptComponents) -> String {
         ));
     }
 
-    // 4. Directions (but NOT step - step goes in task prompt)
-    if !components.directions.is_empty() {
-        if components.directions.len() == 1 {
-            let d = &components.directions[0];
-            parts.push(format!(
-                "Direction for this work.\n\n\
-                 <lf:direction:{}>\n{}\n</lf:direction:{}>",
-                d.name, d.content, d.name
-            ));
-        } else {
-            let direction_parts: Vec<String> = components
-                .directions
-                .iter()
-                .map(|d| {
-                    format!(
-                        "<lf:direction:{}>\n{}\n</lf:direction:{}>",
-                        d.name, d.content, d.name
-                    )
-                })
-                .collect();
-            parts.push(format!(
-                "Directions for this work.\n\n\
-                 <lf:directions>\n{}\n</lf:directions>",
-                direction_parts.join("\n")
-            ));
-        }
-    }
+    // 4. Directions go in task prompt, not context
 
     // 5. Working context (diff, diff_files, clipboard)
     if components.diff.is_some() || !components.diff_files.is_empty() {
@@ -1399,22 +1437,31 @@ pub fn format_context_prompt(components: &PromptComponents) -> String {
     parts.join("\n\n")
 }
 
-/// Format step/task for user message (just the step content).
+/// Format task prompt for user message (directions + step + free text).
 ///
 /// This is passed as the CLI argument when using `--append-system-prompt-file`.
+/// Order: direction(s), step, free text.
 pub fn format_task_prompt(components: &PromptComponents) -> String {
-    let Some(ref step) = components.step else {
-        return String::new();
-    };
+    let mut parts = Vec::new();
 
-    if let Some(ref content) = step.content {
-        format!(
-            "<lf:step:{}>\n{}\n</lf:step:{}>",
-            step.name, content, step.name
-        )
-    } else {
-        format!("<lf:step:{}>\n</lf:step:{}>", step.name, step.name)
+    // Directions
+    if !components.directions.is_empty() {
+        parts.push(format_direction_tags(&components.directions));
     }
+
+    // Step
+    if let Some(ref step) = components.step {
+        if let Some(ref content) = step.content {
+            parts.push(format!(
+                "<lf:step:{}>\n{}\n</lf:step:{}>",
+                step.name, content, step.name
+            ));
+        } else {
+            parts.push(format!("<lf:step:{}>\n</lf:step:{}>", step.name, step.name));
+        }
+    }
+
+    parts.join("\n\n")
 }
 
 /// Write prompt to log file and return the path.
@@ -1975,23 +2022,23 @@ mod tests {
 
         let prompt = format_prompt(&components);
 
-        // Verify order: loopflow -> run_mode -> wave -> docs -> directions -> step -> diff -> clipboard
+        // Verify order: loopflow -> run_mode -> wave -> docs -> diff -> step -> direction -> clipboard
         let loopflow_pos = prompt.find("<lf:loopflow>").unwrap();
         let auto_pos = prompt.find("Run mode is auto").unwrap();
         let wave_pos = prompt.find("<lf:wave").unwrap();
         let docs_pos = prompt.find("<lf:docs>").unwrap();
-        let direction_pos = prompt.find("<lf:direction:concise>").unwrap();
-        let step_pos = prompt.find("<lf:step:implement>").unwrap();
         let diff_pos = prompt.find("<lf:diff>").unwrap();
+        let step_pos = prompt.find("<lf:step:implement>").unwrap();
+        let direction_pos = prompt.find("<lf:direction:concise>").unwrap();
         let clipboard_pos = prompt.find("<lf:clipboard>").unwrap();
 
         assert!(loopflow_pos < auto_pos);
         assert!(auto_pos < wave_pos);
         assert!(wave_pos < docs_pos);
-        assert!(docs_pos < direction_pos);
-        assert!(direction_pos < step_pos);
-        assert!(step_pos < diff_pos);
-        assert!(diff_pos < clipboard_pos);
+        assert!(docs_pos < diff_pos);
+        assert!(diff_pos < step_pos);
+        assert!(step_pos < direction_pos);
+        assert!(direction_pos < clipboard_pos);
     }
 
     #[test]
@@ -2396,11 +2443,11 @@ directions:
         assert!(context.contains("Run mode is interactive"));
         assert!(context.contains("<lf:docs>"));
         assert!(context.contains("# Project"));
-        assert!(context.contains("<lf:direction:concise>"));
         assert!(context.contains("<lf:clipboard>"));
-        // Should NOT include step
+        // Should NOT include step or directions (both go in task prompt)
         assert!(!context.contains("<lf:step:debug>"));
         assert!(!context.contains("Fix the error."));
+        assert!(!context.contains("<lf:direction:concise>"));
     }
 
     #[test]

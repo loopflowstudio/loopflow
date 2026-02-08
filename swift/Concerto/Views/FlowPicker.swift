@@ -8,7 +8,7 @@ struct FlowPicker: View {
     let wave: WaveViewModel
 
     @Environment(RepoState.self) private var repoState
-    @Environment(SessionState.self) private var sessionState
+    @Environment(OutputBuffer.self) private var outputBuffer
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var selectedFlowName: String = ""
@@ -92,7 +92,7 @@ struct FlowPicker: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(isRunning || selectedFlowName.isEmpty || !wave.isConfigured || (isInteractive && wave.worktreePath == nil))
+                .disabled(isRunning || selectedFlowName.isEmpty || (isInteractive && wave.worktreePath == nil))
 
                 // Set as default button
                 if selectedFlowName != wave.flow && !selectedFlowName.isEmpty {
@@ -193,7 +193,7 @@ struct FlowPicker: View {
 
     private func launchInteractiveSession() {
         guard !selectedFlowName.isEmpty, let path = wave.worktreePath else { return }
-        sessionState.launchInteractiveSession(waveId: wave.id, step: selectedFlowName, worktreePath: path)
+        outputBuffer.launchInteractiveSession(waveId: wave.id, step: selectedFlowName, worktreePath: path)
     }
 
     private func setAsDefault() {
@@ -231,7 +231,7 @@ struct FlowPicker: View {
     let wave = repoState.waves.first { $0.status == .idle } ?? repoState.waves.first!
     return FlowPicker(wave: wave)
         .environment(repoState)
-        .environment(SessionState())
+        .environment(OutputBuffer())
         .frame(width: 500)
         .padding()
 }

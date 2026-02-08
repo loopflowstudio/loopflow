@@ -800,34 +800,14 @@ fn gather_diff_tiered(repo_root: &Path) -> Result<(Option<String>, DiffTier, usi
         crate::engine::git::get_default_branch(repo_root).unwrap_or("main".to_string());
     let diff_ref = format!("origin/{}...HEAD", base_branch);
 
-    // Check for committed changes vs base branch. If none, fall back to
-    // uncommitted working tree diff (handles branches with only staged changes).
+    // Count committed changes vs base branch. If none, fall back to
+    // working tree diff (handles branches with only staged changes).
     let name_output = Command::new("git")
         .args(["diff", "--name-only", &diff_ref])
         .current_dir(repo_root)
         .output()?;
-    let has_committed_changes = name_output.status.success()
-        && name_output.stdout.iter().any(|&b| !b.is_ascii_whitespace());
 
-    let effective_ref = if has_committed_changes {
-        diff_ref.as_str()
-    } else {
-        "HEAD"
-    };
-
-    gather_diff_tiered_with_ref(repo_root, effective_ref)
-}
-
-/// Gather tiered diff against a given ref (e.g. `origin/main...HEAD` or `HEAD`).
-fn gather_diff_tiered_with_ref(
-    repo_root: &Path,
-    diff_ref: &str,
-) -> Result<(Option<String>, DiffTier, usize), CoreError> {
-    let name_output = Command::new("git")
-        .args(["diff", "--name-only", diff_ref])
-        .current_dir(repo_root)
-        .output()?;
-    let file_count = if name_output.status.success() {
+    let committed_count = if name_output.status.success() {
         String::from_utf8_lossy(&name_output.stdout)
             .lines()
             .filter(|l| !l.trim().is_empty())
@@ -836,12 +816,31 @@ fn gather_diff_tiered_with_ref(
         0
     };
 
+    let (diff_ref, file_count) = if committed_count > 0 {
+        (diff_ref, committed_count)
+    } else {
+        // No committed changes (or no remote) — try working tree diff against HEAD.
+        let head_output = Command::new("git")
+            .args(["diff", "--name-only", "HEAD"])
+            .current_dir(repo_root)
+            .output()?;
+        let head_count = if head_output.status.success() {
+            String::from_utf8_lossy(&head_output.stdout)
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .count()
+        } else {
+            0
+        };
+        ("HEAD".to_string(), head_count)
+    };
+
     if file_count == 0 {
         return Ok((None, DiffTier::None, 0));
     }
 
     let shortstat_output = Command::new("git")
-        .args(["diff", "--shortstat", diff_ref])
+        .args(["diff", "--shortstat", &diff_ref])
         .current_dir(repo_root)
         .output()?;
     let shortstat = if shortstat_output.status.success() {
@@ -853,7 +852,7 @@ fn gather_diff_tiered_with_ref(
     let total_lines = parse_shortstat_total_lines(&shortstat).unwrap_or(0);
 
     let stat_output = Command::new("git")
-        .args(["diff", "--stat", diff_ref])
+        .args(["diff", "--stat", &diff_ref])
         .current_dir(repo_root)
         .output()?;
 
@@ -868,7 +867,7 @@ fn gather_diff_tiered_with_ref(
 
     if allow_full_diff {
         let diff_output = Command::new("git")
-            .args(["diff", diff_ref])
+            .args(["diff", &diff_ref])
             .current_dir(repo_root)
             .output()?;
 

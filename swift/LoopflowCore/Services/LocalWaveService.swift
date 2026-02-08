@@ -171,7 +171,7 @@ public struct LocalWaveService: @unchecked Sendable {
 
     /// List flows and steps from lfd.
     /// Result from the /flows endpoint containing flows, steps, and directions.
-    public struct FlowsResult {
+    public struct FlowsResult: Sendable {
         public var flows: [Flow]
         public var directions: [String]
     }

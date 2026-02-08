@@ -800,9 +800,37 @@ fn gather_diff_tiered(repo_root: &Path) -> Result<(Option<String>, DiffTier, usi
         crate::engine::git::get_default_branch(repo_root).unwrap_or("main".to_string());
     let diff_ref = format!("origin/{}...HEAD", base_branch);
 
-    // Count changed files
+    // Count changed files (committed changes vs base branch)
     let name_output = Command::new("git")
         .args(["diff", "--name-only", &diff_ref])
+        .current_dir(repo_root)
+        .output()?;
+    let file_count = if name_output.status.success() {
+        String::from_utf8_lossy(&name_output.stdout)
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .count()
+    } else {
+        0
+    };
+
+    // If no committed changes, fall back to uncommitted working tree diff.
+    // This handles the case where a branch exists but all changes are still
+    // in the working tree (not yet committed).
+    if file_count == 0 {
+        return gather_diff_tiered_with_ref(repo_root, "HEAD");
+    }
+
+    gather_diff_tiered_with_ref(repo_root, &diff_ref)
+}
+
+/// Gather tiered diff against a given ref (e.g. `origin/main...HEAD` or `HEAD`).
+fn gather_diff_tiered_with_ref(
+    repo_root: &Path,
+    diff_ref: &str,
+) -> Result<(Option<String>, DiffTier, usize), CoreError> {
+    let name_output = Command::new("git")
+        .args(["diff", "--name-only", diff_ref])
         .current_dir(repo_root)
         .output()?;
     let file_count = if name_output.status.success() {
@@ -819,7 +847,7 @@ fn gather_diff_tiered(repo_root: &Path) -> Result<(Option<String>, DiffTier, usi
     }
 
     let shortstat_output = Command::new("git")
-        .args(["diff", "--shortstat", &diff_ref])
+        .args(["diff", "--shortstat", diff_ref])
         .current_dir(repo_root)
         .output()?;
     let shortstat = if shortstat_output.status.success() {
@@ -831,7 +859,7 @@ fn gather_diff_tiered(repo_root: &Path) -> Result<(Option<String>, DiffTier, usi
     let total_lines = parse_shortstat_total_lines(&shortstat).unwrap_or(0);
 
     let stat_output = Command::new("git")
-        .args(["diff", "--stat", &diff_ref])
+        .args(["diff", "--stat", diff_ref])
         .current_dir(repo_root)
         .output()?;
 
@@ -846,7 +874,7 @@ fn gather_diff_tiered(repo_root: &Path) -> Result<(Option<String>, DiffTier, usi
 
     if allow_full_diff {
         let diff_output = Command::new("git")
-            .args(["diff", &diff_ref])
+            .args(["diff", diff_ref])
             .current_dir(repo_root)
             .output()?;
 
@@ -2279,5 +2307,122 @@ directions:
         let task = format_task_prompt(&components);
         assert!(task.contains("<lf:step:review>"));
         assert!(task.contains("</lf:step:review>"));
+    }
+
+    // ==========================================================================
+    // gather_diff_tiered tests
+    // ==========================================================================
+
+    fn init_git_repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(dir.path())
+            .output()
+            .expect("git init");
+        Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(dir.path())
+            .output()
+            .expect("git config email");
+        Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(dir.path())
+            .output()
+            .expect("git config name");
+        std::fs::write(dir.path().join("README.md"), "# Test").expect("write readme");
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(dir.path())
+            .output()
+            .expect("git add");
+        Command::new("git")
+            .args(["commit", "-m", "init"])
+            .current_dir(dir.path())
+            .output()
+            .expect("git commit");
+        dir
+    }
+
+    #[test]
+    fn gather_diff_tiered_on_main_returns_none() {
+        let repo = init_git_repo();
+        let (diff, tier, _) = gather_diff_tiered(repo.path()).unwrap();
+        assert!(diff.is_none());
+        assert_eq!(tier, DiffTier::None);
+    }
+
+    #[test]
+    fn gather_diff_tiered_uncommitted_changes_on_branch() {
+        let repo = init_git_repo();
+        // Create a branch with no commits ahead of main, just dirty working tree
+        Command::new("git")
+            .args(["checkout", "-b", "feature"])
+            .current_dir(repo.path())
+            .output()
+            .expect("git checkout");
+        std::fs::write(repo.path().join("new_file.rs"), "fn hello() {}").expect("write file");
+        Command::new("git")
+            .args(["add", "new_file.rs"])
+            .current_dir(repo.path())
+            .output()
+            .expect("git add");
+
+        let (diff, tier, count) = gather_diff_tiered(repo.path()).unwrap();
+        // Should fall back to working tree diff (HEAD) and find the staged change
+        assert!(diff.is_some(), "should find uncommitted changes");
+        assert_eq!(tier, DiffTier::UnifiedDiff);
+        assert_eq!(count, 1);
+        assert!(diff.unwrap().contains("fn hello()"));
+    }
+
+    #[test]
+    fn gather_diff_tiered_committed_changes_on_branch() {
+        let repo = init_git_repo();
+        // Set up a bare origin inside the repo's own temp dir to avoid collisions
+        let origin_dir = tempfile::tempdir().expect("origin tempdir");
+        let origin_path = origin_dir.path().join("origin.git");
+        Command::new("git")
+            .args([
+                "clone",
+                "--bare",
+                repo.path().to_str().unwrap(),
+                origin_path.to_str().unwrap(),
+            ])
+            .output()
+            .expect("git clone bare");
+        Command::new("git")
+            .args(["remote", "add", "origin", origin_path.to_str().unwrap()])
+            .current_dir(repo.path())
+            .output()
+            .expect("git remote add");
+        Command::new("git")
+            .args(["fetch", "origin"])
+            .current_dir(repo.path())
+            .output()
+            .expect("git fetch");
+
+        Command::new("git")
+            .args(["checkout", "-b", "feature"])
+            .current_dir(repo.path())
+            .output()
+            .expect("git checkout");
+        std::fs::write(repo.path().join("committed.rs"), "fn committed() {}").expect("write file");
+        Command::new("git")
+            .args(["add", "committed.rs"])
+            .current_dir(repo.path())
+            .output()
+            .expect("git add");
+        Command::new("git")
+            .args(["commit", "-m", "add committed file"])
+            .current_dir(repo.path())
+            .output()
+            .expect("git commit");
+
+        let (diff, tier, count) = gather_diff_tiered(repo.path()).unwrap();
+        assert!(diff.is_some(), "should find committed changes");
+        assert_eq!(tier, DiffTier::UnifiedDiff);
+        assert_eq!(count, 1);
+        assert!(diff.unwrap().contains("fn committed()"));
     }
 }

@@ -892,6 +892,29 @@ impl RunStore for PostgresStore {
         })
     }
 
+    fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<Agent>> {
+        self.with_client(|client| async move {
+            let rows = client
+                .query(
+                    "
+                    SELECT a.id, a.step, a.repo, a.worktree, a.wave_run_id, a.status,
+                           a.started_at, a.ended_at, a.pid, a.model, a.run_mode
+                    FROM agents a
+                    JOIN wave_runs r ON a.wave_run_id = r.id
+                    WHERE r.wave_id = $1 AND a.ended_at IS NULL
+                    ORDER BY a.started_at DESC
+                    ",
+                    &[&wave_id],
+                )
+                .await?;
+            let mut agents = Vec::new();
+            for row in rows {
+                agents.push(map_agent_row(&row)?);
+            }
+            Ok(agents)
+        })
+    }
+
     fn end_active_agent_for_wave(
         &self,
         wave_id: &LfdId,

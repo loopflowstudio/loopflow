@@ -65,8 +65,6 @@ fn run_rebase_agent(repo: &Path, conflicts: &[String], progress: &impl Progress)
     let opts = GatherContextOpts {
         repo_root: repo.to_path_buf(),
         step: None,
-        inline: None,
-        step_args: Vec::new(),
         message: None,
         run_mode: Some("auto".to_string()),
         directions: config.direction.unwrap_or_default(),

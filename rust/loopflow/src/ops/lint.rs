@@ -105,8 +105,6 @@ fn run_lint_agent(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
     let opts = GatherContextOpts {
         repo_root: repo.to_path_buf(),
         step: Some("lint".to_string()),
-        inline: None,
-        step_args: Vec::new(),
         message: None,
         run_mode: Some("auto".to_string()),
         directions: config.direction.unwrap_or_default(),

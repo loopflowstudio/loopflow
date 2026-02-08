@@ -5,7 +5,6 @@ pub mod events;
 pub mod executor;
 pub mod http;
 pub mod id;
-pub mod loops;
 pub mod machine_id;
 pub mod obs;
 pub mod output;
@@ -13,6 +12,7 @@ pub mod registration;
 pub mod scheduler;
 pub mod sessions;
 pub mod store;
+pub mod triggers;
 pub mod types;
 
 use std::path::PathBuf;

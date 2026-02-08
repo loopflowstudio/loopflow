@@ -5,6 +5,9 @@ use serde::Deserialize;
 use std::str::FromStr;
 use time::OffsetDateTime;
 
+use crate::engine::worktree::remove_worktree;
+use crate::engine::worktrees::worktree_path;
+use crate::lfd::executor::{create_wave_run_with_id, kill_process};
 use crate::lfd::http::dto::{
     ContinueWaveResponse, DeletedResourceResponse, LandWaveResponse, ListResponse, RunWaveResponse,
     StopWaveResponse, WaveDto,
@@ -13,8 +16,7 @@ use crate::lfd::http::routes::{build_wave_dto, resolve_wave_id};
 use crate::lfd::http::state::HttpState;
 use crate::lfd::http::{api_error, map_store_error, run_store, ApiResult};
 use crate::lfd::id::LfdId;
-use crate::lfd::loops::common::create_wave_run_with_id;
-use crate::lfd::types::{Event, Wave, WaveRun, WaveRunStatus, WaveStatus};
+use crate::lfd::types::{AgentStatus, Event, Wave, WaveRun, WaveRunStatus, WaveStatus};
 
 #[derive(Deserialize)]
 pub struct ListWavesQuery {
@@ -134,6 +136,23 @@ pub async fn create_wave_handler(
     let id = LfdId::new();
     let name = payload.name.unwrap_or_else(|| format!("wave-{}", id));
     let flow = payload.flow.unwrap_or_else(|| "ship".to_string());
+
+    // Check for duplicate wave name in the same repo.
+    let repo_for_check = payload.repo.clone();
+    let name_for_check = name.clone();
+    let existing = run_store(&state.store, move |store| {
+        let waves = store.list_waves(Some(&repo_for_check))?;
+        Ok(waves.into_iter().any(|w| w.name == name_for_check))
+    })
+    .await
+    .map_err(map_store_error)?;
+    if existing {
+        return Err(api_error(
+            StatusCode::CONFLICT,
+            format!("wave '{}' already exists in this repo", name),
+        ));
+    }
+
     let wave = Wave {
         id: id.clone(),
         name,
@@ -232,12 +251,50 @@ pub async fn delete_wave_handler(
     Path(wave_id): Path<String>,
 ) -> ApiResult<DeletedResourceResponse> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
+
+    // Get wave info before deleting (for worktree cleanup).
+    let wave = run_store(&state.store, {
+        let wave_id = wave_id.clone();
+        move |store| store.get_wave(&wave_id)
+    })
+    .await
+    .map_err(map_store_error)?
+    .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
+
+    // Kill any running agent processes.
+    let agents = run_store(&state.store, {
+        let wave_id = wave_id.clone();
+        move |store| store.get_active_agents_for_wave(&wave_id)
+    })
+    .await
+    .map_err(map_store_error)?;
+    for agent in &agents {
+        if let Some(pid) = agent.pid {
+            kill_process(pid);
+        }
+    }
+
+    // Delete from the store (cascades to wave_runs, agents, etc.).
     let wave_id_for_delete = wave_id.clone();
     run_store(&state.store, move |store| {
         store.delete_wave(&wave_id_for_delete)
     })
     .await
     .map_err(map_store_error)?;
+
+    // Clean up the worktree on disk.
+    let repo = wave.repo.clone();
+    let wave_name = wave.name.clone();
+    tokio::task::spawn_blocking(move || {
+        let wt = worktree_path(std::path::Path::new(&repo), &wave_name);
+        if wt.exists() {
+            if let Err(err) = remove_worktree(&wt, false) {
+                tracing::warn!(worktree = %wt.display(), error = %err, "failed to remove worktree");
+            }
+        }
+    })
+    .await
+    .map_err(|err| api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
 
     state.event_hub.send(Event::wave_deleted(wave_id.clone()));
 
@@ -316,7 +373,10 @@ pub async fn run_wave_handler(
         Ok(Ok(run)) => run,
         Ok(Err(err)) => {
             state.scheduler.release(run_id.as_str());
-            return Err(api_error(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()));
+            return Err(api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                err.to_string(),
+            ));
         }
         Err(err) => {
             state.scheduler.release(run_id.as_str());
@@ -364,6 +424,20 @@ pub async fn stop_wave_handler(
     Path(wave_id): Path<String>,
 ) -> ApiResult<StopWaveResponse> {
     let wave_id = resolve_wave_id(&state, &wave_id).await?;
+
+    // Kill any running agent processes.
+    let agents = run_store(&state.store, {
+        let wave_id = wave_id.clone();
+        move |store| store.get_active_agents_for_wave(&wave_id)
+    })
+    .await
+    .map_err(map_store_error)?;
+    for agent in &agents {
+        if let Some(pid) = agent.pid {
+            kill_process(pid);
+        }
+    }
+
     let run = run_store(&state.store, {
         let wave_id = wave_id.clone();
         move |store| store.get_active_wave_run(&wave_id)
@@ -385,6 +459,12 @@ pub async fn stop_wave_handler(
                 wave.status = WaveStatus::Failed;
                 store.update_wave(&wave)?;
             }
+            // Mark agents as ended in the store.
+            let _ = store.end_active_agent_for_wave(
+                &wave_id,
+                AgentStatus::Failed.as_i32(),
+                OffsetDateTime::now_utc().unix_timestamp(),
+            );
             Ok(())
         })
         .await
@@ -425,11 +505,7 @@ pub async fn continue_wave_handler(
     .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "wave not found"))?;
 
     // Resolve worktree and check for uncommitted changes.
-    let worktree = if run.worktree.is_empty() {
-        run.snapshot.repo.clone()
-    } else {
-        run.worktree.clone()
-    };
+    let worktree = run.worktree.clone();
 
     // Resolve the current step name for the commit message.
     let step_name = resolve_current_step_name(&run, &wave, run.step_index);

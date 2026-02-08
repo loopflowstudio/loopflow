@@ -139,34 +139,44 @@ fn main() -> anyhow::Result<()> {
 
     match &cli.command {
         Some(Commands::Run { name, args }) => {
+            let message = if args.is_empty() {
+                None
+            } else {
+                Some(args.join(" "))
+            };
             let repo_root = loopflow::lf::commands::util::find_repo_root()?;
             match loopflow::lf::discovery::discover_target(&repo_root, name)? {
                 loopflow::lf::discovery::Target::Step(_) => {
-                    loopflow::lf::commands::run::run(Some(name), args, None, &cli)
+                    loopflow::lf::commands::run::run(Some(name), message.as_deref(), &cli)
                 }
                 loopflow::lf::discovery::Target::Flow(flow) => {
-                    loopflow::lf::commands::flow::run(&flow, args, &cli, &repo_root)
+                    loopflow::lf::commands::flow::run(&flow, message.as_deref(), &cli, &repo_root)
                 }
             }
         }
         Some(Commands::Inline { prompt }) => {
             let text = prompt.join(" ");
-            loopflow::lf::commands::run::run(None, &[], Some(&text), &cli)
+            loopflow::lf::commands::run::run(None, Some(&text), &cli)
         }
         Some(Commands::Ops { op }) => loopflow::lf::commands::ops::run(op),
         Some(Commands::External(args)) => {
             let (name, step_args) = loopflow::lf::commands::run::split_step_args(args)?;
+            let message = if step_args.is_empty() {
+                None
+            } else {
+                Some(step_args.join(" "))
+            };
             let repo_root = loopflow::lf::commands::util::find_repo_root()?;
             match loopflow::lf::discovery::discover_target(&repo_root, &name)? {
                 loopflow::lf::discovery::Target::Step(_) => {
-                    loopflow::lf::commands::run::run(Some(&name), &step_args, None, &cli)
+                    loopflow::lf::commands::run::run(Some(&name), message.as_deref(), &cli)
                 }
                 loopflow::lf::discovery::Target::Flow(flow) => {
-                    loopflow::lf::commands::flow::run(&flow, &step_args, &cli, &repo_root)
+                    loopflow::lf::commands::flow::run(&flow, message.as_deref(), &cli, &repo_root)
                 }
             }
         }
-        None => loopflow::lf::commands::run::run(None, &[], None, &cli),
+        None => loopflow::lf::commands::run::run(None, None, &cli),
     }
 }
 

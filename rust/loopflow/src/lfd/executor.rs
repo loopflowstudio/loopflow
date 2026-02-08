@@ -11,13 +11,19 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
 use crate::engine::agent::{build_agent_command, LaunchConfig};
-use crate::engine::config::load_config_or_default;
+use crate::engine::config::{load_config, load_config_or_default};
 use crate::engine::flow::{
     expand_flow, load_flow, next_action, ConcreteFork, ConcreteItem, ConcreteStep, FlowAction,
     ForkSelect, Step,
 };
-use crate::engine::prompt::{format_prompt, gather_context, GatherContextOpts};
+use crate::engine::git::current_branch;
+use crate::engine::prompt::{
+    drop_native_instruction_docs, format_context_prompt, format_prompt, format_task_prompt,
+    gather_context, trim_context_with_breakdown, write_prompt_log, GatherContextOpts,
+    DEFAULT_CONTEXT_BUDGET,
+};
 use crate::engine::worktree::{create_worktree, remove_worktree};
+use crate::engine::worktrees::{create_with_schema, worktree_path as wave_worktree_path};
 
 use time::OffsetDateTime;
 
@@ -25,7 +31,9 @@ use crate::lfd::id::LfdId;
 use crate::lfd::output::{OutputEvent, OutputHub};
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::{ForkRun, ForkRunStatus, SharedStore};
-use crate::lfd::types::{Agent, AgentStatus, Wave, WaveRun, WaveRunStatus, WaveStatus};
+use crate::lfd::types::{
+    Agent, AgentStatus, Wave, WaveRun, WaveRunSnapshot, WaveRunStatus, WaveStatus,
+};
 
 #[async_trait]
 pub trait StepRunner: Send + Sync {
@@ -40,8 +48,21 @@ pub trait StepRunner: Send + Sync {
     ) -> Result<i32>;
 }
 
-#[derive(Debug, Default)]
-pub struct AgentRunner;
+pub struct AgentRunner {
+    store: SharedStore,
+}
+
+impl std::fmt::Debug for AgentRunner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AgentRunner").finish()
+    }
+}
+
+impl AgentRunner {
+    pub fn new(store: SharedStore) -> Self {
+        Self { store }
+    }
+}
 
 #[async_trait]
 impl StepRunner for AgentRunner {
@@ -65,6 +86,17 @@ impl StepRunner for AgentRunner {
         command.stderr(std::process::Stdio::piped());
 
         let mut child = command.spawn()?;
+
+        // Record the PID so the process can be killed on stop.
+        if let Some(pid) = child.id() {
+            let agent_lfd_id = LfdId::from_raw(agent_id);
+            let _ = self.store.update_agent_status(
+                &agent_lfd_id,
+                AgentStatus::Running.as_i32(),
+                Some(pid),
+            );
+        }
+
         let stdout = child
             .stdout
             .take()
@@ -126,11 +158,12 @@ pub struct WaveExecutor {
 
 impl WaveExecutor {
     pub fn new(store: SharedStore, scheduler: Arc<Scheduler>, output: OutputHub) -> Self {
+        let runner = Arc::new(AgentRunner::new(store.clone()));
         Self {
             store,
             scheduler,
             output,
-            runner: Arc::new(AgentRunner),
+            runner,
         }
     }
 
@@ -199,7 +232,7 @@ impl WaveExecutor {
                         .model
                         .clone()
                         .unwrap_or_else(|| "unknown".to_string());
-                    let worktree = worktree_path(&run);
+                    let worktree = run_worktree_path(&run);
                     let agent = build_agent_for_step(
                         &run.id,
                         &run.snapshot.repo,
@@ -250,7 +283,7 @@ impl WaveExecutor {
     }
 
     async fn run_step(&self, wave: &Wave, run: &mut WaveRun, step: &ConcreteStep) -> Result<i32> {
-        let worktree = worktree_path(run);
+        let worktree = run_worktree_path(run);
         debug!(run_id = %run.id, step = %step.step.name, worktree = %worktree, "building step prompt");
         let (prompt, model, launch) =
             build_step_prompt(&worktree, step, &run.snapshot.direction, Some(&wave.name))?;
@@ -584,16 +617,78 @@ impl WaveExecutor {
     }
 }
 
-fn worktree_path(run: &WaveRun) -> String {
-    if run.worktree.is_empty() {
-        run.snapshot.repo.clone()
-    } else {
-        run.worktree.clone()
+/// Create a wave run with a worktree and branch for the wave.
+pub fn create_wave_run_with_id(
+    store: &SharedStore,
+    wave: &Wave,
+    run_id: &LfdId,
+) -> anyhow::Result<WaveRun> {
+    let last_run = store
+        .list_wave_runs(Some(&wave.id), Some(1))?
+        .into_iter()
+        .next();
+    let iteration = last_run.map(|run| run.iteration + 1).unwrap_or(0);
+
+    let main_repo = Path::new(&wave.repo);
+    let (wt_path, branch) = ensure_wave_worktree(main_repo, &wave.name)?;
+
+    let run = WaveRun {
+        id: run_id.clone(),
+        wave_id: wave.id.clone(),
+        snapshot: WaveRunSnapshot {
+            repo: wave.repo.clone(),
+            flow: wave.flow.clone(),
+            direction: wave.direction.clone(),
+            area: wave.area.clone(),
+            pr: None,
+        },
+        iteration,
+        step_index: 0,
+        status: WaveRunStatus::Running,
+        worktree: wt_path,
+        branch,
+        started_at: Some(OffsetDateTime::now_utc()),
+        ended_at: None,
+        error: None,
+        flow_parents: Vec::new(),
+    };
+    store.create_wave_run(&run)?;
+    if let Ok(Some(mut wave)) = store.get_wave(&wave.id) {
+        wave.status = WaveStatus::Running;
+        wave.iteration = iteration;
+        let _ = store.update_wave(&wave);
     }
+    Ok(run)
+}
+
+/// Create a worktree for this wave, or reuse the existing one.
+pub fn ensure_wave_worktree(main_repo: &Path, wave_name: &str) -> anyhow::Result<(String, String)> {
+    let wt = wave_worktree_path(main_repo, wave_name);
+    if wt.exists() {
+        let branch = current_branch(&wt)?.unwrap_or_default();
+        return Ok((wt.to_string_lossy().to_string(), branch));
+    }
+
+    let config = load_config(Some(main_repo)).ok().flatten();
+    let branch_config = config.as_ref().and_then(|c| c.branch_names.as_ref());
+    let result = create_with_schema(main_repo, wave_name, None, branch_config)?;
+    Ok((result.path.to_string_lossy().to_string(), result.branch))
+}
+
+fn run_worktree_path(run: &WaveRun) -> String {
+    run.worktree.clone()
+}
+
+/// Kill a process by PID using SIGTERM.
+pub fn kill_process(pid: u32) {
+    let _ = std::process::Command::new("kill")
+        .arg("-TERM")
+        .arg(pid.to_string())
+        .status();
 }
 
 fn fork_worktree_path(run: &WaveRun, branch_index: u32) -> String {
-    let base = worktree_path(run);
+    let base = run_worktree_path(run);
     format!("{base}-fork-{branch_index}")
 }
 
@@ -629,8 +724,6 @@ fn build_step_prompt(
     let opts = GatherContextOpts {
         repo_root: PathBuf::from(worktree),
         step: Some(step.step.name.clone()),
-        inline: None,
-        step_args: Vec::new(),
         message: None,
         run_mode: Some("auto".to_string()),
         directions,
@@ -643,8 +736,27 @@ fn build_step_prompt(
         wave: wave.map(str::to_string),
     };
 
-    let components = gather_context(&opts)?;
-    let prompt = format_prompt(&components);
+    let mut components = gather_context(&opts)?;
+    let repo_root = PathBuf::from(worktree);
+    drop_native_instruction_docs(&mut components, &repo_root);
+    let (components, _breakdown) = trim_context_with_breakdown(components, DEFAULT_CONTEXT_BUDGET);
+
+    // Log full prompt, then write context/task split for --append-system-prompt-file
+    let _ = write_prompt_log(
+        &repo_root,
+        &format_prompt(&components),
+        &step.step.name,
+        None,
+    );
+    let task_prompt = format_task_prompt(&components);
+    let context_file = write_prompt_log(
+        &repo_root,
+        &format_context_prompt(&components),
+        &format!("{}.context", step.step.name),
+        None,
+    )
+    .ok();
+
     let model = step
         .step
         .model
@@ -656,12 +768,12 @@ fn build_step_prompt(
         skip_permissions: config.yolo,
         model_variant: None,
         chrome: config.chrome,
-        cwd: Some(PathBuf::from(worktree)),
-        context_file: None,
+        cwd: Some(repo_root),
+        context_file,
         ..Default::default()
     };
 
-    Ok((prompt, model, launch))
+    Ok((task_prompt, model, launch))
 }
 
 fn build_agent_for_step(

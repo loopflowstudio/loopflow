@@ -237,7 +237,12 @@ pub fn sync_main(repo: &Path, main_branch: &str) -> Result<bool, GitError> {
         return Ok(true);
     }
 
-    if !is_clean(repo)? {
+    // Only check tracked files — reset --hard doesn't touch untracked files
+    let status = run_git(repo, &["status", "--porcelain", "-uno"])?;
+    if !status.status.success() {
+        return Ok(false);
+    }
+    if !String::from_utf8_lossy(&status.stdout).trim().is_empty() {
         return Ok(false);
     }
 

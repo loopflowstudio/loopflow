@@ -55,8 +55,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     let opts = GatherContextOpts {
         repo_root: args.repo,
         step: args.step,
-        inline: None,
-        step_args: Vec::new(),
         message: None,
         run_mode: args.run_mode,
         directions: args.directions,

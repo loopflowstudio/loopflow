@@ -122,6 +122,7 @@ pub trait RunStore: Send + Sync {
         pid: Option<u32>,
     ) -> StoreResult<()>;
     fn end_agent(&self, agent_id: &LfdId, status: i32, ended_at: i64) -> StoreResult<()>;
+    fn get_active_agents_for_wave(&self, wave_id: &LfdId) -> StoreResult<Vec<Agent>>;
     fn end_active_agent_for_wave(
         &self,
         wave_id: &LfdId,

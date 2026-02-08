@@ -5,10 +5,10 @@ use anyhow::Result;
 use std::path::Path;
 
 /// Run a flow: print pipeline header, then execute each step sequentially.
-pub fn run(flow: &Flow, step_args: &[String], cli: &Cli, repo: &Path) -> Result<()> {
+pub fn run(flow: &Flow, message: Option<&str>, cli: &Cli, repo: &Path) -> Result<()> {
     let items = expand_flow(flow, repo)?;
     print_pipeline_header(&flow.name, &items);
-    run_steps(&items, step_args, cli)
+    run_steps(&items, message, cli)
 }
 
 fn print_pipeline_header(flow_name: &str, items: &[ConcreteItem]) {
@@ -37,7 +37,7 @@ fn print_pipeline_header(flow_name: &str, items: &[ConcreteItem]) {
     );
 }
 
-fn run_steps(items: &[ConcreteItem], step_args: &[String], cli: &Cli) -> Result<()> {
+fn run_steps(items: &[ConcreteItem], message: Option<&str>, cli: &Cli) -> Result<()> {
     let total = items.len();
 
     for index in 0..total {
@@ -54,7 +54,7 @@ fn run_steps(items: &[ConcreteItem], step_args: &[String], cli: &Cli) -> Result<
                     total = total,
                     name = step.step.name,
                 );
-                crate::lf::commands::run::run(Some(&step.step.name), step_args, None, cli)?;
+                crate::lf::commands::run::run(Some(&step.step.name), message, cli)?;
             }
             FlowAction::Fork { fork: _ } => {
                 // TODO: fork execution (parallel branches)

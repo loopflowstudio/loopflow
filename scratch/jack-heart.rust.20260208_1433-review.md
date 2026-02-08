@@ -1,53 +1,72 @@
 # Review: jack-heart.rust.20260208_1433
 
-Four changes shipping together: diff fallback for staged-only branches, store split for active vs latest runs, default direction removal, and failed wave UI.
+Wave lifecycle overhaul: waves return to idle (not completed) after runs finish, the UI shows git state (commits, diff stat) and offers land/next actions, and the API moves to `/v0`.
 
 ## What was implemented
 
-### 1. Diff fallback for staged-only branches (`prompt.rs`)
+### 1. Remove `WaveStatus::Completed`, waves return to idle
 
-`gather_diff_tiered` now checks whether the branch has committed changes vs the base branch. If not (e.g. a branch with only staged but uncommitted changes), it falls back to `git diff HEAD` to show the working tree diff instead of returning nothing.
+`WaveStatus::Completed` is removed from the enum. After a run finishes, the executor sets the wave to `Idle` — the run is done, but the wave is ready for its next iteration. The Swift client maps any lingering `"completed"` strings to `.idle` during JSON parsing.
 
-Extracted `gather_diff_tiered_with_ref` to avoid duplicating the file-counting and tiered diff logic between the two code paths.
+### 2. Auto-create draft PR on run completion
 
-### 2. Store: split `get_active_wave_run` and `get_latest_wave_run`
+When a wave run completes, the executor calls `auto_create_pr` (best-effort) which stages, commits, pushes, and creates a draft PR. The PR reference is stored in the run's snapshot. If any step fails, it logs a warning and continues.
+
+### 3. Store: split `get_active_wave_run` and `get_latest_wave_run`
 
 Previously `get_active_wave_run` included `Failed` status, which was semantically wrong — a failed run is not active. Now:
 
-- `get_active_wave_run` returns only Pending/Running/Waiting runs. Used by triggers (loop ticker, watch, cron) to check if a wave is already running.
-- `get_latest_wave_run` returns the most recent run regardless of status. Used by the HTTP layer to populate the DTO (so the UI can show error details for failed runs) and by `land_wave_handler` (to find the worktree path).
+- `get_active_wave_run` returns only Pending/Running/Waiting runs. Used by triggers to check if a wave is already running.
+- `get_latest_wave_run` returns the most recent run regardless of status. Used by the HTTP layer to populate the DTO and by `land_wave_handler`/`next_wave_handler` to find the worktree.
 
 Both SQLite and Postgres implementations added.
 
-### 3. Remove "default" direction sentinel
+### 4. Git state in wave DTO (commits, diff stat)
 
-- `LocalWaveService.createWave` now sends `direction: []` instead of `["default"]`
-- `DirectionTypeahead.onAppear` no longer filters out `"default"` from selected directions
-- `WaveDetailPanel` no longer hides direction display when it equals `"default"`
-- `update_wave_handler` and `run_wave_handler` no longer guard against empty direction/area arrays — empty is now a valid state meaning "no direction configured"
+`build_wave_dto` now calls `infer_wave_git_state` which returns a `WaveGitState` struct with worktree path, branch, commit log, and diff stat. The DTO includes `commits: Vec<CommitEntryDto>` and `diff_stat: Option<String>`. Python models (`CommitEntry`, `Wave.commits`, `Wave.diff_stat`) and Swift models (`CommitEntry`, `Wave.commits`, `Wave.diffStat`) updated to match.
 
-### 4. Failed wave detail in Concerto
+### 5. Next wave endpoint and UI
 
-`WaveDetailPanel.blendedView` now has a dedicated branch for `wave.status == .failed` that shows `failedRunDetail` (error message) + `StepRunner` (to retry) + live output if available. Previously failed waves fell through to the running/config view.
+New `POST /v0/waves/:wave_id/next` endpoint calls `ops::next_branch` to create a new iteration branch. Python client gets `next_wave()`. Swift `LocalWaveService` gets `nextWave()`. `WaveDetailPanel` shows land/next action buttons when commits exist.
+
+### 6. API route prefix: `/v1` → `/v0`
+
+All API routes moved from `/v1` to `/v0`. Updated in Rust router, Python client, and Swift `LoopflowCore`.
+
+### 7. Diff fallback for staged-only branches
+
+`gather_diff_tiered` checks committed changes vs the base branch. If none, falls back to `git diff HEAD` to capture staged/unstaged working tree changes.
+
+### 8. Remove "default" direction sentinel
+
+Empty direction/area arrays now mean "not configured" instead of `["default"]`. Removed filtering in Swift UI and guards against empty arrays in Rust handlers.
+
+### 9. Concerto idle/failed wave UI
+
+Idle waves now show commit log, diff stat, and ops actions (View PR, Land, Next). Failed waves show error detail + StepRunner for retry + live output. The run progress section was simplified — only running waves show `FlowProgressPills`.
 
 ## Key choices
 
-**Fallback to `HEAD` not `--staged`**: Using `git diff HEAD` catches both staged and unstaged changes. `--staged` alone would miss unstaged modifications. The intent is "show what's different from the last commit" when there are no commits ahead of the base.
+**Idle over Completed**: A wave is a long-lived object that iterates. "Completed" implies finality, but waves loop. Idle means "run finished, ready for next." This removes an entire status and the UI logic around it.
 
-**Separate trait methods vs status parameter**: Adding `get_latest_wave_run` as a separate method rather than parameterizing `get_active_wave_run` with a status filter. Clearer intent at call sites — you either want "is something running?" or "what happened last?".
+**Auto-create PR**: Best-effort, fire-and-forget. If it fails (no remote, auth issue), the wave still succeeds. The PR is stored in the run snapshot, not the wave itself, so each iteration can have its own PR.
 
-**Empty direction/area as valid**: Rather than a sentinel value like `["default"]`, empty arrays mean "not configured." Simpler model, no special-case filtering throughout the UI.
+**`/v0` not `/v1`**: The API isn't stable yet. `/v0` signals pre-1.0 to clients. Breaking changes are expected.
+
+**Separate `get_latest_wave_run` vs parameterizing**: Clearer intent at call sites — "is something running?" vs "what happened last?" are distinct questions.
 
 ## How it fits together
 
-The store split enables the UI change: `build_wave_dto` calls `get_latest_wave_run` so the `active_run` DTO field always includes the most recent run (even if failed), while triggers still use `get_active_wave_run` to avoid re-triggering waves that failed. The Concerto UI then renders failed waves with error details because the DTO now contains the failed run data.
+Run completes → executor sets wave to Idle and auto-creates PR → `build_wave_dto` fetches git state (commits, diff stat) and latest run → Concerto shows idle view with commit log, diff stat, and land/next buttons → user clicks Land (merges to main) or Next (creates new iteration branch) → wave is ready for next run.
 
 ## Risks and bottlenecks
 
-- **`build_wave_dto` naming**: The function parameter `include_active_run` and DTO field `active_run` now refer to the "latest" run, not strictly an "active" one. This is an intentional API stability choice — the JSON field name is a contract with the Swift client — but internal naming could drift in clarity over time.
-- **No remote fallback edge case**: If `origin/<base>` doesn't exist (e.g. fresh local repo with no remote), the `git diff` command fails and the code falls back to `HEAD`. This is correct behavior but worth noting.
+- **`active_run` DTO field name**: Now refers to the latest run (not necessarily active). The JSON field name is kept for Swift client compatibility, but internal naming could drift.
+- **`auto_create_pr` on every completion**: If the wave is configured for looping, each iteration will try to create a PR. Currently best-effort — if a PR already exists, `current_pr` returns it and the snapshot updates. But rapid iterations could create noise.
+- **`WaveStatus::Completed` migration**: Existing database rows with status=6 (the old Completed i32 value) will map to `Idle` via `from_i32`'s fallback. The Swift client explicitly maps `"completed"` → `.idle`. No database migration needed but old status values silently change meaning.
 
 ## What's not included
 
-- No migration of existing waves that have `["default"]` direction stored in the database. They'll display "default" in the direction field until updated. This is acceptable — directions are user-facing labels, not keys.
+- No database migration for old `Completed` status rows — they fall through to `Idle` via the default branch.
+- No pagination or truncation for commit log in the DTO — large branches could send many commits.
 - The `active_run` DTO field name is unchanged to avoid a Swift client migration.

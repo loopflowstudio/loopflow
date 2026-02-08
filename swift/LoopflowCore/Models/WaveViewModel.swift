@@ -51,8 +51,8 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
     ) {
         let activeRun = api.activeRun
         self.api = api
-        self.worktreePath = worktreePath ?? activeRun?.worktree
-        self.branch = branch ?? activeRun?.branch
+        self.worktreePath = worktreePath ?? activeRun?.worktree ?? api.localWorktree
+        self.branch = branch ?? activeRun?.branch ?? api.remoteBranch
         self.isDirty = isDirty
         self.isRebasing = isRebasing
         self.isMerging = isMerging

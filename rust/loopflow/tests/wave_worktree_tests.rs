@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use loopflow::engine::git::{branch_rename, current_branch, worktree_move};
@@ -124,6 +124,28 @@ fn ensure_wave_worktree_reuses_existing() {
     let (path2, branch2) = ensure_wave_worktree(repo.path(), "reduce").unwrap();
     assert_eq!(path1, path2);
     assert_eq!(branch1, branch2);
+}
+
+#[test]
+fn worktree_path_from_worktree_repo_uses_main_repo_parent() {
+    let repo = TestRepo::new();
+    let (existing_wt, _) = ensure_wave_worktree(repo.path(), "seed").unwrap();
+
+    let from_worktree = worktree_path(Path::new(&existing_wt), "beta");
+    let from_main = worktree_path(repo.path(), "beta");
+
+    assert_eq!(from_worktree, from_main);
+}
+
+#[test]
+fn ensure_wave_worktree_from_worktree_repo_avoids_nested_path() {
+    let repo = TestRepo::new();
+    let (existing_wt, _) = ensure_wave_worktree(repo.path(), "seed").unwrap();
+
+    let (new_wt, _branch) = ensure_wave_worktree(Path::new(&existing_wt), "beta").unwrap();
+    let expected = worktree_path(repo.path(), "beta");
+
+    assert_eq!(PathBuf::from(&new_wt), expected);
 }
 
 #[test]

@@ -183,6 +183,28 @@ struct WaveModelTests {
         #expect(wave.flowDisplay == "ship")
     }
 
+    @Test("worktree and branch fall back to wave when no active run")
+    func worktreeBranchFallbackToWave() {
+        let model = WaveViewModel(
+            api: Wave(
+                id: "test",
+                name: "test",
+                repo: "/tmp/repo",
+                flow: "design",
+                direction: [],
+                area: [],
+                stimulus: Stimulus(kind: .once),
+                status: .idle,
+                iteration: 0,
+                localWorktree: "/tmp/repo.test",
+                remoteBranch: "jack/test"
+            )
+        )
+
+        #expect(model.worktreePath == "/tmp/repo.test")
+        #expect(model.branch == "jack/test")
+    }
+
     @Test("shortId returns first 7 characters")
     func shortIdTruncates() {
         let wave = makeWave(id: "abcdefghijklmnop", repo: "/tmp")

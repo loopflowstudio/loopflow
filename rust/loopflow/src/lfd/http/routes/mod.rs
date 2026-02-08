@@ -48,14 +48,24 @@ pub async fn build_wave_dto(
 ) -> Result<WaveDto, StoreError> {
     let wave_id = wave.id.clone();
     let active = run_store(store, move |store| store.get_active_wave_run(&wave_id)).await?;
+    let repo = wave.repo.clone();
+    let name = wave.name.clone();
+    let wave_worktree = tokio::task::spawn_blocking(move || infer_wave_git_state(&repo, &name))
+        .await
+        .ok()
+        .flatten();
 
     let active_run = if include_active_run {
         active.map(wave_run_dto)
     } else {
         None
     };
+    let (local_worktree, remote_branch) = match wave_worktree {
+        Some((worktree, branch)) => (Some(worktree), branch),
+        None => (None, None),
+    };
 
-    Ok(wave_dto(&wave, active_run))
+    Ok(wave_dto(&wave, active_run, local_worktree, remote_branch))
 }
 
 /// Cursor-based pagination over a list of items with an `id: LfdId` field.
@@ -85,4 +95,14 @@ pub fn paginate<T>(
         }
     }
     (items, has_more)
+}
+
+fn infer_wave_git_state(repo: &str, wave_name: &str) -> Option<(String, Option<String>)> {
+    let repo_path = std::path::Path::new(repo);
+    let worktree = crate::engine::worktrees::worktree_path(repo_path, wave_name);
+    if !worktree.exists() {
+        return None;
+    }
+    let branch = crate::engine::git::current_branch(&worktree).ok().flatten();
+    Some((worktree.to_string_lossy().to_string(), branch))
 }

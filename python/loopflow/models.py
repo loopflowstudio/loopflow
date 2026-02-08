@@ -44,6 +44,8 @@ class Wave(BaseModel):
     stimulus: Optional[Stimulus] = None
     status: str
     iteration: int
+    local_worktree: Optional[str] = None
+    remote_branch: Optional[str] = None
     active_run: Optional[WaveRun] = None
     created_at: Optional[datetime] = None
 

@@ -445,13 +445,41 @@ final class RepoState {
         let waveName = name.isEmpty ? NameGenerator.generate() : name
         LoggingService.model("createWave: name=\(waveName) repo=\(repo.path)")
 
-        let wave = try await waveService.createWave(name: waveName, repo: repo)
-        let viewModel = WaveViewModel(api: wave)
+        let pendingId = "pending-\(UUID().uuidString)"
+        let pending = WaveViewModel(
+            api: Wave(
+                id: pendingId,
+                name: waveName,
+                repo: repo.path,
+                flow: "design",
+                direction: ["default"],
+                area: [],
+                stimulus: Stimulus(kind: .once),
+                status: .idle,
+                iteration: 0
+            )
+        )
+        waves.insert(pending, at: 0)
+        selectedWave = pending
 
-        LoggingService.model("createWave: success, inserting wave id=\(viewModel.id)")
-        waves.insert(viewModel, at: 0)
-        selectedWave = viewModel
-        LoggingService.model("createWave: selectedWave=\(wave.id)")
+        do {
+            let wave = try await waveService.createWave(name: waveName, repo: repo)
+            let viewModel = WaveViewModel(api: wave)
+
+            if let index = waves.firstIndex(where: { $0.id == pendingId }) {
+                waves[index] = viewModel
+            } else {
+                waves.insert(viewModel, at: 0)
+            }
+            selectedWave = viewModel
+            LoggingService.model("createWave: selectedWave=\(wave.id)")
+        } catch {
+            waves.removeAll { $0.id == pendingId }
+            if selectedWave?.id == pendingId {
+                selectedWave = nil
+            }
+            throw error
+        }
     }
 
     func runWave(

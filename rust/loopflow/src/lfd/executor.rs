@@ -23,7 +23,9 @@ use crate::engine::prompt::{
     DEFAULT_CONTEXT_BUDGET,
 };
 use crate::engine::worktree::{create_worktree, remove_worktree};
-use crate::engine::worktrees::{create_with_schema, worktree_path as wave_worktree_path};
+use crate::engine::worktrees::{
+    create_with_schema, schedule_upstream_sync, worktree_path as wave_worktree_path,
+};
 
 use time::OffsetDateTime;
 
@@ -659,6 +661,9 @@ pub fn ensure_wave_worktree(main_repo: &Path, wave_name: &str) -> anyhow::Result
     let wt = wave_worktree_path(main_repo, wave_name);
     if wt.exists() {
         let branch = current_branch(&wt)?.unwrap_or_default();
+        if !branch.is_empty() {
+            schedule_upstream_sync(wt.clone(), branch.clone());
+        }
         return Ok((wt.to_string_lossy().to_string(), branch));
     }
 

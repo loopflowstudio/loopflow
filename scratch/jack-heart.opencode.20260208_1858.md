@@ -1,18 +1,23 @@
-# OpenCode Agent Integration — Design Notes
+# OpenCode Agent Integration
 
-## What to build
+## Status
 
-OpenCode (anomalyco/opencode) as a fourth coding agent in loopflow, with the same integration fidelity as Claude, Codex, and Gemini.
+PR 01 (command builder + launch) is complete. PRs 02-04 remain.
 
-## Key Finding: Two OpenCodes
+| PR | Status | Scope |
+|----|--------|-------|
+| 01 | **Done** | `build_opencode_command`, dispatch, `OPENCODE_CONFIG_CONTENT` env var, 4 unit tests |
+| 02 | Next | NDJSON stream parser (`text`, `step_start`, `step_finish`) |
+| 03 | Todo | Context injection wiring (callers pass `context_file` for opencode) |
+| 04 | Todo | Test coverage gaps, README/docs updates |
 
-There are two unrelated projects called "opencode":
-- **opencode-ai/opencode** — Go-based, `-p` flag, smaller project
-- **anomalyco/opencode** (opencode.ai) — TypeScript, `opencode run`, 95k+ stars, actively maintained
+## Key decisions (PR 01)
 
-We target **anomalyco/opencode**.
+- **Unified env var builder from the start.** `OPENCODE_CONFIG_CONTENT` block builds a `serde_json::Map` handling both `permission` and `instructions`. No refactor needed in PR 03.
+- **Context injection via env var, not CLI flag.** Follows the Gemini pattern (`GEMINI_SYSTEM_MD`), not Claude's (`--append-system-prompt-file`).
+- **No default model variant.** `parse_model("opencode")` returns `None` — same as Codex. OpenCode manages its own model config.
 
-## OpenCode CLI Summary
+## OpenCode CLI reference
 
 | Capability | Syntax |
 |-----------|--------|
@@ -23,9 +28,7 @@ We target **anomalyco/opencode**.
 | Context injection | `OPENCODE_CONFIG_CONTENT='{"instructions":["path"]}'` |
 | Interactive | `opencode` (launches TUI) |
 
-## NDJSON Streaming Format
-
-Line-delimited JSON. Each line has `type`, `timestamp`, `sessionID`, `part`:
+## NDJSON format (for PR 02)
 
 ```json
 {"type":"step_start","timestamp":...,"sessionID":"ses_...","part":{"type":"step-start"}}
@@ -33,29 +36,10 @@ Line-delimited JSON. Each line has `type`, `timestamp`, `sessionID`, `part`:
 {"type":"step_finish","timestamp":...,"sessionID":"ses_...","part":{"type":"step-finish","tokens":{...},"cost":0.05}}
 ```
 
-No conflicts with existing agent event types. `"text"` is guarded by checking for `sessionID` field.
+Disambiguate from other agents via `sessionID` field. No type conflicts with Claude/Codex/Gemini.
 
-## Context Injection Strategy
-
-Use `OPENCODE_CONFIG_CONTENT` env var — merges JSON config at runtime without touching user's `opencode.json`:
-
-```json
-{"permission":"allow","instructions":["/tmp/lf-context-abc123.md"]}
-```
-
-OpenCode also reads `AGENTS.md` and `CLAUDE.md` from project root automatically.
-
-## PR Sequencing
-
-| PR | Files | ~Lines | Description |
-|----|-------|--------|-------------|
-| 01 | `agent.rs`, `mod.rs` | ~150 | `build_opencode_command()`, dispatch, permission env var, unit tests |
-| 02 | `stream.rs` | ~200 | NDJSON parser: text, step_start, step_finish events + tests |
-| 03 | `agent.rs` | ~100 | Unified `OPENCODE_CONFIG_CONTENT` builder with permission + instructions |
-| 04 | `agent.rs`, `stream.rs`, `README.md` | ~150 | Remaining test coverage, docs |
-
-## Open Questions
+## Open questions
 
 - Tool call events in NDJSON — format unknown, handle via `Passthrough` for now
-- `opencode run` may hang if `OPENCODE_CONFIG_CONTENT` permission override doesn't work — needs live testing
-- Interactive mode: opencode TUI inherits stdio, should work with `launch_interactive` as-is
+- `OPENCODE_CONFIG_CONTENT` behavior based on docs, not live testing — if the env var doesn't merge correctly, auto mode could hang on permission prompts
+- `opencode run` exit behavior on permission denial unknown (non-zero exit vs hang)

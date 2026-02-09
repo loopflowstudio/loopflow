@@ -13,6 +13,7 @@ use loopflow::lfd::executor::WaveExecutor;
 use loopflow::lfd::http::HttpState;
 use loopflow::lfd::output::OutputHub;
 use loopflow::lfd::scheduler::Scheduler;
+use loopflow::lfd::service;
 use loopflow::lfd::store::postgres::PostgresStore;
 use loopflow::lfd::store::sqlite::SqliteStore;
 use loopflow::lfd::store::SharedStore;
@@ -49,8 +50,6 @@ enum Commands {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-
-    use loopflow::lfd::service;
 
     match cli.command.unwrap_or(Commands::Run) {
         Commands::Run => return run_daemon().await,

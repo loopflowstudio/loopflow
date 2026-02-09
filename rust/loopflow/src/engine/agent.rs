@@ -1,4 +1,4 @@
-//! Agent invocation for spawning coding agent runners (Claude, Codex, Gemini).
+//! Agent invocation for spawning coding agent runners (Claude, Codex, Gemini, OpenCode).
 //!
 //! This module handles building commands and spawning subprocesses for each
 //! supported coding agent. Output can be captured or streamed.
@@ -147,12 +147,35 @@ pub fn build_gemini_command(config: &LaunchConfig) -> Vec<String> {
     cmd
 }
 
+/// Build OpenCode CLI command.
+pub fn build_opencode_command(config: &LaunchConfig) -> Vec<String> {
+    // `opencode run` for batch/auto mode, `opencode` for interactive TUI
+    let mut cmd = if config.auto {
+        vec!["opencode".to_string(), "run".to_string()]
+    } else {
+        vec!["opencode".to_string()]
+    };
+
+    if let Some(ref variant) = config.model_variant {
+        cmd.push("--model".to_string());
+        cmd.push(variant.clone());
+    }
+
+    if config.auto && config.stream {
+        cmd.push("--format".to_string());
+        cmd.push("json".to_string());
+    }
+
+    cmd
+}
+
 /// Build command for any model.
 pub fn build_model_command(model: &str, config: &LaunchConfig) -> Vec<String> {
     match model {
         "claude" => build_claude_command(config),
         "codex" => build_codex_command(config),
         "gemini" => build_gemini_command(config),
+        "opencode" => build_opencode_command(config),
         _ => build_claude_command(config), // default to claude
     }
 }
@@ -222,6 +245,29 @@ pub fn launch_agent(
             cmd.env(
                 "GEMINI_SYSTEM_MD",
                 context_file.to_string_lossy().to_string(),
+            );
+        }
+    }
+
+    // For OpenCode, set OPENCODE_CONFIG_CONTENT env var for permissions and context
+    if backend == "opencode" {
+        let mut oc_config = serde_json::Map::new();
+        if config.auto {
+            oc_config.insert(
+                "permission".into(),
+                serde_json::Value::String("allow".into()),
+            );
+        }
+        if let Some(ref context_file) = config.context_file {
+            oc_config.insert(
+                "instructions".into(),
+                serde_json::json!([context_file.to_string_lossy()]),
+            );
+        }
+        if !oc_config.is_empty() {
+            cmd.env(
+                "OPENCODE_CONFIG_CONTENT",
+                serde_json::Value::Object(oc_config).to_string(),
             );
         }
     }
@@ -566,5 +612,47 @@ mod tests {
         let cmd = build_codex_command(&config);
         assert!(cmd.contains(&"-c".to_string()));
         assert!(cmd.contains(&"model_instructions_file=\"/tmp/context.md\"".to_string()));
+    }
+
+    #[test]
+    fn build_opencode_command_auto() {
+        let config = LaunchConfig {
+            auto: true,
+            ..Default::default()
+        };
+        let cmd = build_opencode_command(&config);
+        assert_eq!(cmd[0], "opencode");
+        assert_eq!(cmd[1], "run");
+    }
+
+    #[test]
+    fn build_opencode_command_interactive() {
+        let config = LaunchConfig::default();
+        let cmd = build_opencode_command(&config);
+        assert_eq!(cmd, vec!["opencode"]);
+    }
+
+    #[test]
+    fn build_opencode_command_with_model() {
+        let config = LaunchConfig {
+            model_variant: Some("anthropic/claude-sonnet-4-5".to_string()),
+            ..Default::default()
+        };
+        let cmd = build_opencode_command(&config);
+        assert!(cmd.contains(&"--model".to_string()));
+        assert!(cmd.contains(&"anthropic/claude-sonnet-4-5".to_string()));
+    }
+
+    #[test]
+    fn build_opencode_command_streaming() {
+        let config = LaunchConfig {
+            auto: true,
+            stream: true,
+            ..Default::default()
+        };
+        let cmd = build_opencode_command(&config);
+        assert!(cmd.contains(&"run".to_string()));
+        assert!(cmd.contains(&"--format".to_string()));
+        assert!(cmd.contains(&"json".to_string()));
     }
 }

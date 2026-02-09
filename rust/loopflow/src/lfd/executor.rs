@@ -892,8 +892,7 @@ fn auto_create_pr(worktree: &Path) -> Option<crate::lfd::types::PullRequest> {
             // matching what `lf ops pr` produces.
             match generate_pr_message(worktree) {
                 Ok(message) => {
-                    if let Err(err) =
-                        update_pr(worktree, pr.number, &message.title, &message.body)
+                    if let Err(err) = update_pr(worktree, pr.number, &message.title, &message.body)
                     {
                         warn!(worktree = %worktree.display(), error = %err, "auto-create PR: failed to update title/body");
                     }

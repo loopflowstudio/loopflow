@@ -80,7 +80,7 @@ struct WaveDetailPanel: View {
         }
         .onAppear {
             outputBuffer.startStreaming(waveId: wave.id)
-            loadRunsIfNeeded(for: selectedTab)
+            loadRuns()
         }
         .onDisappear {
             outputBuffer.stopStreaming(waveId: wave.id)
@@ -88,10 +88,10 @@ struct WaveDetailPanel: View {
         .onChange(of: wave.id) { oldId, newId in
             outputBuffer.stopStreaming(waveId: oldId)
             outputBuffer.startStreaming(waveId: newId)
-            loadRunsIfNeeded(for: selectedTab)
+            loadRuns()
         }
-        .onChange(of: selectedTab) { _, tab in
-            loadRunsIfNeeded(for: tab)
+        .onChange(of: selectedTab) { _, _ in
+            loadRuns()
         }
     }
 
@@ -740,7 +740,7 @@ struct WaveDetailPanel: View {
         await repoState.refreshWaves()
     }
 
-    private func loadRunsIfNeeded(for tab: DetailTab) {
+    private func loadRuns() {
         Task { await fetchRuns() }
     }
 

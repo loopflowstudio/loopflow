@@ -2,7 +2,7 @@ use serde::Serialize;
 use time::OffsetDateTime;
 
 use crate::lfd::registration::RegistrationState;
-use crate::lfd::types::{Wave, WaveRun, WaveRunStatus};
+use crate::lfd::types::{WaveRun, WaveRunStatus};
 
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {
@@ -93,6 +93,7 @@ pub struct WaveDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub diff_stat: Option<String>,
     pub flow_steps: Vec<String>,
+    pub open_pr_count: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_run: Option<WaveRunDto>,
 }
@@ -225,35 +226,6 @@ pub fn wave_run_dto(run: WaveRun) -> WaveRunDto {
         error: run.error,
         flow_parents: run.flow_parents,
         created_at: format_datetime(run.started_at),
-    }
-}
-
-pub fn wave_dto(
-    wave: &Wave,
-    active_run: Option<WaveRunDto>,
-    local_worktree: Option<String>,
-    remote_branch: Option<String>,
-    commits: Vec<CommitEntryDto>,
-    diff_stat: Option<String>,
-    flow_steps: Vec<String>,
-) -> WaveDto {
-    WaveDto {
-        id: wave.id.to_string(),
-        object: "wave".to_string(),
-        name: wave.name.clone(),
-        repo: wave.repo.clone(),
-        flow: wave.flow.clone(),
-        direction: wave.direction.clone(),
-        area: wave.area.clone(),
-        created_at: format_datetime(wave.created_at),
-        status: wave.status.as_str().to_string(),
-        iteration: wave.iteration,
-        local_worktree,
-        remote_branch,
-        commits,
-        diff_stat,
-        flow_steps,
-        active_run,
     }
 }
 

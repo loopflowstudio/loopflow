@@ -147,6 +147,9 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
     public var commits: [CommitEntry] { api.commits }
     public var diffStat: String? { api.diffStat }
     public var flowSteps: [String] { api.flowSteps }
+    public var openPRCount: Int { api.openPRCount }
+    public var effectiveOpenPRCount: Int { max(openPRCount, pendingPR == nil ? 0 : 1) }
+    public var hasOpenPRs: Bool { effectiveOpenPRCount > 0 }
 
     public var statusText: String {
         switch status {

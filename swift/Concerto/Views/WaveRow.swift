@@ -45,35 +45,51 @@ struct WaveRow: View {
 
                 Spacer()
 
-                // PR badge (if pending review) or Flow badge
-                if let pr = wave.pendingPR {
-                    Button {
-                        if let url = pr.url {
-                            NSWorkspace.shared.open(url)
+                HStack(spacing: 6) {
+                    // PR badge (if pending review) or Flow badge
+                    if let pr = wave.pendingPR {
+                        Button {
+                            if let url = pr.url {
+                                NSWorkspace.shared.open(url)
+                            }
+                        } label: {
+                            Text("PR #\(pr.number)")
+                                .font(.caption2)
+                                .fontWeight(.medium)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.statusSuccess.opacity(0.3))
+                                .foregroundStyle(Color.statusSuccess)
+                                .clipShape(Capsule())
                         }
-                    } label: {
-                        Text("PR #\(pr.number)")
+                        .buttonStyle(.plain)
+                    } else if !wave.flow.isEmpty {
+                        Text(wave.flow)
                             .font(.caption2)
                             .fontWeight(.medium)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(Color.statusSuccess.opacity(0.3))
-                            .foregroundStyle(Color.statusSuccess)
+                            .background(Color.white.opacity(0.15))
+                            .foregroundStyle(.white.opacity(0.7))
+                            .clipShape(Capsule())
+                            .accessibilityIdentifier("wave-flow")
+                    }
+
+                    if wave.effectiveOpenPRCount > 1 {
+                        Text("\(wave.effectiveOpenPRCount) open")
+                            .font(.caption2)
+                            .fontWeight(.medium)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.statusWarning.opacity(0.22))
+                            .foregroundStyle(Color.statusWarning)
                             .clipShape(Capsule())
                     }
-                    .buttonStyle(.plain)
-                } else if !wave.flow.isEmpty {
-                    Text(wave.flow)
-                        .font(.caption2)
-                        .fontWeight(.medium)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.white.opacity(0.15))
-                        .foregroundStyle(.white.opacity(0.7))
-                        .clipShape(Capsule())
-                        .accessibilityIdentifier("wave-flow")
                 }
+                .fixedSize()
             }
+            .lineLimit(1)
+            .accessibilityIdentifier("wave-name-row")
 
             // Secondary info line
             HStack(spacing: 4) {

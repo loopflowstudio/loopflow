@@ -1,17 +1,15 @@
 use std::path::Path;
 use std::process::Command;
-use std::time::Duration;
 
 use crate::engine::config::load_config_or_default;
 use crate::engine::git::{
     create_branch, current_branch, get_default_branch, push_with_upstream, sync_main,
 };
 use crate::engine::naming::{format_branch_name, generate_word_pair};
-use crate::engine::worktrees::{main_repo_root, worktree_short_name};
+use crate::engine::worktrees::{branch_exists, main_repo_root, worktree_short_name};
 
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
-use crate::ops::messages::generate_pr_message;
 use crate::ops::progress::Progress;
 
 #[derive(Debug, Clone, Default)]
@@ -76,13 +74,7 @@ pub fn next_branch(
         )?;
     }
 
-    if let Some(pr_number) = current_pr_number(repo)? {
-        mark_pr_ready(repo);
-        enable_auto_merge(repo, pr_number, progress)?;
-        if options.block {
-            wait_for_merge(repo, pr_number, progress)?;
-        }
-    } else if options.create_pr {
+    if current_pr_number(repo)?.is_none() && options.create_pr {
         let _ = crate::ops::pr::create_or_update_pr(
             repo,
             &crate::ops::pr::PrOptions {
@@ -91,9 +83,6 @@ pub fn next_branch(
             },
             progress,
         )?;
-        if let Some(pr_number) = current_pr_number(repo)? {
-            enable_auto_merge(repo, pr_number, progress)?;
-        }
     }
 
     // Infer wave name: explicit > worktree directory > current branch
@@ -111,7 +100,7 @@ pub fn next_branch(
 
     // If the generated name already exists (e.g. same-minute timestamp across next runs),
     // append a word pair to ensure uniqueness and easier identification.
-    while branch_exists(repo, &new_branch) {
+    while branch_exists(repo, &new_branch)? {
         new_branch = format!("{new_branch}.{}", generate_word_pair());
     }
 
@@ -163,76 +152,6 @@ fn pr_state(repo: &Path, number: u64) -> OpsResult<Option<String>> {
     } else {
         Ok(Some(state))
     }
-}
-
-fn mark_pr_ready(repo: &Path) {
-    let _ = Command::new("gh")
-        .arg("pr")
-        .arg("ready")
-        .current_dir(repo)
-        .status();
-}
-
-fn enable_auto_merge(repo: &Path, number: u64, progress: &impl Progress) -> OpsResult<()> {
-    progress.status("Refreshing PR...");
-    let message = generate_pr_message(repo)?;
-
-    let _ = Command::new("gh")
-        .arg("pr")
-        .arg("edit")
-        .arg(number.to_string())
-        .arg("--title")
-        .arg(&message.title)
-        .arg("--body")
-        .arg(&message.body)
-        .current_dir(repo)
-        .status();
-
-    let mut cmd = Command::new("gh");
-    cmd.arg("pr")
-        .arg("merge")
-        .arg(number.to_string())
-        .arg("--squash")
-        .arg("--auto")
-        .arg("--subject")
-        .arg(&message.title);
-    if !message.body.trim().is_empty() {
-        cmd.arg("--body").arg(&message.body);
-    }
-    let status = cmd.current_dir(repo).status()?;
-    if !status.success() {
-        return Err(OpsError::Message("failed to enable auto-merge".to_string()));
-    }
-    Ok(())
-}
-
-fn wait_for_merge(repo: &Path, number: u64, progress: &impl Progress) -> OpsResult<()> {
-    progress.status("Waiting for PR to merge...");
-    let start = std::time::Instant::now();
-    let timeout = Duration::from_secs(600);
-    while start.elapsed() < timeout {
-        if let Some(state) = pr_state(repo, number)? {
-            let state = state.to_uppercase();
-            if state == "MERGED" {
-                progress.status("PR merged");
-                return Ok(());
-            }
-            if state == "CLOSED" {
-                return Err(OpsError::Message("PR closed without merge".to_string()));
-            }
-        }
-        std::thread::sleep(Duration::from_secs(5));
-    }
-    Err(OpsError::Message("timeout waiting for merge".to_string()))
-}
-
-fn branch_exists(repo: &Path, name: &str) -> bool {
-    Command::new("git")
-        .args(["show-ref", "--verify", &format!("refs/heads/{name}")])
-        .current_dir(repo)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
 }
 
 fn reset_to_main(repo: &Path, base_branch: &str) -> OpsResult<()> {

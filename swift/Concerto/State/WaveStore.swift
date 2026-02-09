@@ -11,6 +11,11 @@ struct WaveGroups {
     let idle: [WaveViewModel]
 
     var attentionCount: Int { blocked.count + pr.count }
+    var openPRCount: Int {
+        pr.reduce(0) { total, wave in
+            total + wave.effectiveOpenPRCount
+        }
+    }
     var allInOrder: [WaveViewModel] { blocked + pr + recentActivity + active + idle }
 
     static let empty = WaveGroups(blocked: [], pr: [], recentActivity: [], active: [], idle: [])
@@ -118,8 +123,9 @@ final class WaveStore {
         let allWaves = Array(waves.values)
 
         let blocked = allWaves.filter { $0.status == .failed }
-        let nonFailedWithoutPR = allWaves.filter { $0.status != .failed && $0.pendingPR == nil }
-        let pr = allWaves.filter { $0.status != .failed && $0.pendingPR != nil }
+        let nonFailed = allWaves.filter { $0.status != .failed }
+        let pr = nonFailed.filter(\.hasOpenPRs)
+        let nonFailedWithoutPR = nonFailed.filter { !$0.hasOpenPRs }
 
         let hourAgo = Date().addingTimeInterval(-3600)
         let recentActivity = Array(nonFailedWithoutPR

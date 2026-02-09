@@ -868,7 +868,9 @@ fn build_agent_for_step(
 /// Commit any remaining changes, push, and create a draft PR.
 /// Returns the PR info if successful, None if skipped or failed.
 fn auto_create_pr(worktree: &Path) -> Option<crate::lfd::types::PullRequest> {
-    use crate::ops::{commit_workflow, current_pr, CommitOptions, NullProgress};
+    use crate::ops::{
+        commit_workflow, current_pr, generate_pr_message, update_pr, CommitOptions, NullProgress,
+    };
 
     let commit_options = CommitOptions {
         add: true,
@@ -885,13 +887,30 @@ fn auto_create_pr(worktree: &Path) -> Option<crate::lfd::types::PullRequest> {
     }
 
     match current_pr(worktree) {
-        Ok(Some(pr)) => Some(crate::lfd::types::PullRequest {
-            url: pr.url,
-            number: Some(pr.number as u32),
-            state: Some(pr.state),
-            branch: Some(pr.branch),
-            title: None,
-        }),
+        Ok(Some(pr)) => {
+            // Update the draft PR with an LLM-generated title and description,
+            // matching what `lf ops pr` produces.
+            match generate_pr_message(worktree) {
+                Ok(message) => {
+                    if let Err(err) =
+                        update_pr(worktree, pr.number, &message.title, &message.body)
+                    {
+                        warn!(worktree = %worktree.display(), error = %err, "auto-create PR: failed to update title/body");
+                    }
+                }
+                Err(err) => {
+                    warn!(worktree = %worktree.display(), error = %err, "auto-create PR: failed to generate PR message");
+                }
+            }
+
+            Some(crate::lfd::types::PullRequest {
+                url: pr.url,
+                number: Some(pr.number as u32),
+                state: Some(pr.state),
+                branch: Some(pr.branch),
+                title: None,
+            })
+        }
         Ok(None) => {
             debug!(worktree = %worktree.display(), "auto-create PR: no PR found after push");
             None

@@ -197,7 +197,7 @@ fn find_open_pr(repo: &Path) -> OpsResult<Option<GhPr>> {
     Ok(list.into_iter().next())
 }
 
-fn update_pr(repo: &Path, number: u64, title: &str, body: &str) -> OpsResult<()> {
+pub fn update_pr(repo: &Path, number: u64, title: &str, body: &str) -> OpsResult<()> {
     let output = Command::new("gh")
         .arg("pr")
         .arg("edit")

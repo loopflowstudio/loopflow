@@ -617,7 +617,7 @@ struct WaveDetailPanel: View {
                     Text("Land")
                 }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(DarkButtonStyle())
             .disabled(isLanding || isNexting)
 
             // Next

@@ -110,6 +110,7 @@ struct ContentView: View {
     private var detailContent: some View {
         if let wave = repoState.selectedWave {
             WaveDetailPanel(wave: wave)
+                .id(wave.id)
         } else {
             QuickExperimentDetailView { step in
                 launchQuickExperiment(step: step)

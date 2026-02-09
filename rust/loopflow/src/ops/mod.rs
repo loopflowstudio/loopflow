@@ -22,7 +22,7 @@ pub use land::{land, LandOptions, LandResult};
 pub use lint::ensure_lint_passes;
 pub use messages::{generate_commit_message, generate_pr_message, Message};
 pub use next::{next_branch, NextOptions, NextResult};
-pub use pr::{create_or_update_pr, current_pr, PrInfo, PrOptions, PrResult};
+pub use pr::{create_or_update_pr, current_pr, update_pr, PrInfo, PrOptions, PrResult};
 pub use progress::{NullProgress, Progress};
 pub use rebase::{rebase_with_recovery, RebaseOptions, RebaseResult};
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};

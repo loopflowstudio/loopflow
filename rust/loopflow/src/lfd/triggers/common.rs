@@ -2,22 +2,25 @@ use std::sync::Arc;
 
 use time::OffsetDateTime;
 
+use crate::lfd::events::EventHub;
 pub use crate::lfd::executor::create_wave_run_with_id;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::scheduler::Scheduler;
 use crate::lfd::store::SharedStore;
-use crate::lfd::types::{WaveRunStatus, WaveStatus};
+use crate::lfd::types::{Event, WaveRunStatus, WaveStatus};
 
 /// Spawn a task that executes a wave run and releases a scheduler slot on completion.
 pub fn spawn_run_task_with_slot(
     store: SharedStore,
     executor: WaveExecutor,
     scheduler: Arc<Scheduler>,
+    event_hub: EventHub,
     run: crate::lfd::types::WaveRun,
 ) {
     let run_id_for_release = run.id.clone();
+    event_hub.send(Event::wave_started(run.wave_id.clone(), run.id.clone()));
     tokio::spawn(async move {
-        execute_run_inner(&store, &executor, &run).await;
+        execute_run_inner(&store, &executor, &event_hub, &run).await;
         scheduler.release(run_id_for_release.as_str());
     });
 }
@@ -25,6 +28,7 @@ pub fn spawn_run_task_with_slot(
 async fn execute_run_inner(
     store: &SharedStore,
     executor: &WaveExecutor,
+    event_hub: &EventHub,
     run: &crate::lfd::types::WaveRun,
 ) {
     if let Err(err) = executor.execute(&run.id).await {
@@ -37,6 +41,7 @@ async fn execute_run_inner(
             if let Ok(Some(mut wave)) = store.get_wave(&run.wave_id) {
                 wave.status = WaveStatus::Failed;
                 let _ = store.update_wave(&wave);
+                event_hub.send(Event::wave_updated(run.wave_id.clone()));
             }
         }
     }

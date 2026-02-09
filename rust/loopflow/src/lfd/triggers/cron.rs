@@ -8,6 +8,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use super::common::{create_wave_run_with_id, spawn_run_task_with_slot};
+use crate::lfd::events::EventHub;
 use crate::lfd::executor::WaveExecutor;
 use crate::lfd::id::LfdId;
 use crate::lfd::scheduler::Scheduler;
@@ -18,6 +19,7 @@ pub fn spawn_cron_poller(
     store: SharedStore,
     executor: WaveExecutor,
     scheduler: std::sync::Arc<Scheduler>,
+    event_hub: EventHub,
     cancel: CancellationToken,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
@@ -29,7 +31,7 @@ pub fn spawn_cron_poller(
                     break;
                 }
                 _ = interval.tick() => {
-                    check_cron_stimuli(&store, &executor, &scheduler).await;
+                    check_cron_stimuli(&store, &executor, &scheduler, &event_hub).await;
                 }
             }
         }
@@ -40,6 +42,7 @@ async fn check_cron_stimuli(
     store: &SharedStore,
     executor: &WaveExecutor,
     scheduler: &std::sync::Arc<Scheduler>,
+    event_hub: &EventHub,
 ) {
     let stimuli = match store.list_stimuli_by_kind(StimulusKind::Cron.as_i32()) {
         Ok(stimuli) => stimuli,
@@ -99,6 +102,7 @@ async fn check_cron_stimuli(
                             store.clone(),
                             executor.clone(),
                             scheduler.clone(),
+                            event_hub.clone(),
                             run,
                         );
                         continue;
@@ -142,7 +146,13 @@ async fn check_cron_stimuli(
                     continue;
                 }
             };
-            spawn_run_task_with_slot(store.clone(), executor.clone(), scheduler.clone(), run);
+            spawn_run_task_with_slot(
+                store.clone(),
+                executor.clone(),
+                scheduler.clone(),
+                event_hub.clone(),
+                run,
+            );
         }
     }
 }

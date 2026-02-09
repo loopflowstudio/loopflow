@@ -379,32 +379,15 @@ final class RepoState {
         flow: String? = nil,
         stimulus: Stimulus? = nil
     ) async throws {
-        let snapshot = waveStore.applyOptimistic(wave.id) { $0.status = .running }
-        do {
-            let overrides = RunOverrides(
-                area: area,
-                direction: direction,
-                flow: flow,
-                stimulus: stimulus
-            )
-            try await waveService.run(wave.id, overrides: overrides)
-            waveStore.commitMutation(wave.id)
-            scheduleRefresh(for: wave.id)
-        } catch {
-            if let snapshot { waveStore.rollback(snapshot) }
-            throw error
+        try await optimisticAction(wave.id, mutation: { $0.status = .running }) {
+            let overrides = RunOverrides(area: area, direction: direction, flow: flow, stimulus: stimulus)
+            try await self.waveService.run(wave.id, overrides: overrides)
         }
     }
 
     func stopWave(_ wave: WaveViewModel) async throws {
-        let snapshot = waveStore.applyOptimistic(wave.id) { $0.status = .idle }
-        do {
-            try await waveService.stop(wave.id)
-            waveStore.commitMutation(wave.id)
-            scheduleRefresh(for: wave.id)
-        } catch {
-            if let snapshot { waveStore.rollback(snapshot) }
-            throw error
+        try await optimisticAction(wave.id, mutation: { $0.status = .idle }) {
+            try await self.waveService.stop(wave.id)
         }
     }
 
@@ -450,13 +433,8 @@ final class RepoState {
     }
 
     func renameWave(_ wave: WaveViewModel, to newName: String) async throws {
-        let snapshot = waveStore.applyOptimistic(wave.id) { $0.name = newName }
-        do {
-            _ = try await waveService.updateWave(wave.id, config: WaveConfigUpdate(name: newName))
-            waveStore.commitMutation(wave.id)
-        } catch {
-            if let snapshot { waveStore.rollback(snapshot) }
-            throw error
+        try await optimistic(wave.id, mutation: { $0.name = newName }) {
+            _ = try await self.waveService.updateWave(wave.id, config: WaveConfigUpdate(name: newName))
         }
     }
 
@@ -468,49 +446,27 @@ final class RepoState {
         stimulus: Stimulus? = nil,
         status: WaveStatus? = nil
     ) async throws {
-        let snapshot = waveStore.applyOptimistic(wave.id) { w in
+        try await optimistic(wave.id, mutation: { w in
             if let area { w.area = area }
             if let direction { w.direction = direction }
             if let flow { w.flow = flow }
             if let stimulus { w.stimulus = stimulus }
             if let status { w.status = status }
-        }
-        do {
-            let config = WaveConfigUpdate(
-                area: area,
-                direction: direction,
-                flow: flow,
-                stimulus: stimulus,
-                status: status
-            )
-            _ = try await waveService.updateWave(wave.id, config: config)
-            waveStore.commitMutation(wave.id)
-        } catch {
-            if let snapshot { waveStore.rollback(snapshot) }
-            throw error
+        }) {
+            let config = WaveConfigUpdate(area: area, direction: direction, flow: flow, stimulus: stimulus, status: status)
+            _ = try await self.waveService.updateWave(wave.id, config: config)
         }
     }
 
     func landWave(_ wave: WaveViewModel) async throws {
         inFlightActions.insert(wave.id)
-        do {
-            try await waveService.landWave(wave.id)
-            inFlightActions.remove(wave.id)
-        } catch {
-            inFlightActions.remove(wave.id)
-            throw error
-        }
+        defer { inFlightActions.remove(wave.id) }
+        try await waveService.landWave(wave.id)
     }
 
     func nextWave(_ wave: WaveViewModel) async throws {
-        let snapshot = waveStore.applyOptimistic(wave.id) { $0.status = .idle }
-        do {
-            _ = try await waveService.nextWave(wave.id)
-            waveStore.commitMutation(wave.id)
-            scheduleRefresh(for: wave.id)
-        } catch {
-            if let snapshot { waveStore.rollback(snapshot) }
-            throw error
+        try await optimisticAction(wave.id, mutation: { $0.status = .idle }) {
+            _ = try await self.waveService.nextWave(wave.id)
         }
     }
 
@@ -522,7 +478,34 @@ final class RepoState {
         LoggingService.lfd("connectLfd: event subscription started")
     }
 
-    // MARK: - Timeout Safety Net
+    // MARK: - Optimistic helpers
+
+    /// Apply optimistic mutation, run API call, commit on success or rollback on error.
+    private func optimistic(
+        _ id: String,
+        mutation: (inout WaveViewModel) -> Void,
+        apiCall: () async throws -> Void
+    ) async throws {
+        let snapshot = waveStore.applyOptimistic(id, mutation)
+        do {
+            try await apiCall()
+            waveStore.commitMutation(id)
+        } catch {
+            if let snapshot { waveStore.rollback(snapshot) }
+            throw error
+        }
+    }
+
+    /// Like `optimistic`, but also schedules a safety-net refresh after commit.
+    /// Used for actions (run/stop/next) where the real state arrives via WebSocket.
+    private func optimisticAction(
+        _ id: String,
+        mutation: (inout WaveViewModel) -> Void,
+        apiCall: () async throws -> Void
+    ) async throws {
+        try await optimistic(id, mutation: mutation, apiCall: apiCall)
+        scheduleRefresh(for: id)
+    }
 
     private func scheduleRefresh(for waveId: String, delay: TimeInterval = 10) {
         Task {

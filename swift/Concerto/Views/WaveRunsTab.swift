@@ -6,7 +6,6 @@ struct WaveRunsTab: View {
     let runs: [WaveRun]
     let onCollapse: () async throws -> CollapsePRsResult
     let onAbsorb: (Int) async throws -> AbsorbIntoPRResult
-    let onRefresh: () async -> Void
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -20,13 +19,11 @@ struct WaveRunsTab: View {
     private var palette: LoopflowPalette { LoopflowPalette.make(for: colorScheme) }
 
     private var openPRRuns: [WaveRun] {
-        runs
-            .filter { $0.pr?.state == .open || $0.pr?.state == .draft }
-            .sorted { $0.iteration > $1.iteration }
+        sortedRuns.filter { $0.pr?.state == .open || $0.pr?.state == .draft }
     }
 
     private var absorbTargetPR: PullRequest? {
-        guard wave.commits.count > 0, wave.prURL == nil else { return nil }
+        guard !wave.commits.isEmpty, wave.prURL == nil else { return nil }
         return openPRRuns.first?.pr
     }
 
@@ -151,7 +148,6 @@ struct WaveRunsTab: View {
             if let urlString = result.newPRUrl, let url = URL(string: urlString) {
                 terminalLauncher.openURL(url)
             }
-            await onRefresh()
         } catch {
             actionError = error.localizedDescription
         }
@@ -165,7 +161,6 @@ struct WaveRunsTab: View {
 
         do {
             _ = try await onAbsorb(prNumber)
-            await onRefresh()
         } catch {
             actionError = error.localizedDescription
         }

@@ -80,9 +80,7 @@ struct WaveDetailPanel: View {
         }
         .onAppear {
             outputBuffer.startStreaming(waveId: wave.id)
-            if selectedTab == .runs {
-                Task { await fetchRuns() }
-            }
+            loadRunsIfNeeded(for: selectedTab)
         }
         .onDisappear {
             outputBuffer.stopStreaming(waveId: wave.id)
@@ -90,14 +88,10 @@ struct WaveDetailPanel: View {
         .onChange(of: wave.id) { oldId, newId in
             outputBuffer.stopStreaming(waveId: oldId)
             outputBuffer.startStreaming(waveId: newId)
-            if selectedTab == .runs {
-                Task { await fetchRuns() }
-            }
+            loadRunsIfNeeded(for: selectedTab)
         }
         .onChange(of: selectedTab) { _, tab in
-            if tab == .runs {
-                Task { await fetchRuns() }
-            }
+            loadRunsIfNeeded(for: tab)
         }
     }
 
@@ -153,8 +147,7 @@ struct WaveDetailPanel: View {
                             wave: wave,
                             runs: waveRuns,
                             onCollapse: collapsePRs,
-                            onAbsorb: absorbIntoPR(_:),
-                            onRefresh: refreshRunsAndWaves
+                            onAbsorb: absorbIntoPR(_:)
                         )
                     }
                 }
@@ -207,7 +200,7 @@ struct WaveDetailPanel: View {
                     }
 
                     if !waveRuns.isEmpty {
-                        IterationTimeline(runs: waveRuns, currentIteration: wave.iteration)
+                        IterationTimeline(runs: waveRuns)
                     }
                 }
 
@@ -674,15 +667,6 @@ struct WaveDetailPanel: View {
         }
     }
 
-    private func launchInteractive() {
-        guard let path = wave.worktreePath else { return }
-        outputBuffer.launchInteractiveSession(
-            waveId: wave.id,
-            step: wave.flow,
-            worktreePath: path
-        )
-    }
-
     private func openInTerminal(path: String) {
         do {
             try terminalLauncher.launchTerminal(terminalApp, at: URL(fileURLWithPath: path))
@@ -741,6 +725,11 @@ struct WaveDetailPanel: View {
     private func refreshRunsAndWaves() async {
         await fetchRuns()
         await repoState.refreshWaves()
+    }
+
+    private func loadRunsIfNeeded(for tab: DetailTab) {
+        guard tab == .runs else { return }
+        Task { await fetchRuns() }
     }
 
     private func collapsePRs() async throws -> CollapsePRsResult {

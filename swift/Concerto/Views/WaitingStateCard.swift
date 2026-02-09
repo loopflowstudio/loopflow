@@ -52,20 +52,15 @@ struct WaitingStateCard: View {
     }
 
     private func openPRList() {
-        let repoPath = wave.repo
-
-        if let worktreePath = wave.worktreePath {
-            let ownerRepo = extractOwnerRepo(from: worktreePath) ?? extractOwnerRepoFromPath(repoPath)
-            if let ownerRepo,
-               let url = URL(string: "https://github.com/\(ownerRepo)/pulls?q=is:open+is:pr+author:@me") {
-                terminalLauncher.openURL(url)
-            }
-        } else {
-            if let ownerRepo = extractOwnerRepoFromPath(repoPath),
-               let url = URL(string: "https://github.com/\(ownerRepo)/pulls?q=is:open+is:pr+author:@me") {
-                terminalLauncher.openURL(url)
-            }
+        let ownerRepo =
+            wave.worktreePath.flatMap(extractOwnerRepo(from:))
+            ?? extractOwnerRepoFromPath(wave.repo)
+        guard let ownerRepo,
+              let url = URL(string: "https://github.com/\(ownerRepo)/pulls?q=is:open+is:pr+author:@me")
+        else {
+            return
         }
+        terminalLauncher.openURL(url)
     }
 
     private func extractOwnerRepo(from worktreePath: String) -> String? {

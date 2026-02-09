@@ -3,17 +3,13 @@ import LoopflowCore
 
 struct IterationTimeline: View {
     let runs: [WaveRun]
-    let currentIteration: Int
 
     var body: some View {
         HStack(spacing: Spacing.xs) {
             ForEach(displayRuns) { run in
                 Circle()
                     .fill(dotColor(for: run))
-                    .frame(
-                        width: run.iteration == currentIteration ? 10 : 8,
-                        height: run.iteration == currentIteration ? 10 : 8
-                    )
+                    .frame(width: 8, height: 8)
 
                 if run.id != displayRuns.last?.id {
                     Rectangle()

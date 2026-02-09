@@ -79,7 +79,11 @@ pub fn collapse_prs(
     let mut commits = Vec::new();
     let mut seen = HashSet::new();
     for pr in &open_prs {
-        let branch_commits = commit_range(repo, &base_branch, &pr.head_ref_name)?;
+        let branch_commits = commit_range_from_ref(
+            repo,
+            &format!("origin/{base_branch}"),
+            &format!("origin/{}", pr.head_ref_name),
+        )?;
         for sha in branch_commits {
             if seen.insert(sha.clone()) {
                 commits.push(sha);
@@ -217,20 +221,12 @@ fn list_open_prs(repo: &Path) -> OpsResult<Vec<GhOpenPr>> {
             "--state",
             "open",
             "--json",
-            "number,headRefName,url",
+            "number,headRefName",
         ],
     )?;
     let stdout = output_stdout(&output);
     serde_json::from_str::<Vec<GhOpenPr>>(&stdout)
         .map_err(|err| OpsError::Parse(format!("failed to parse gh pr list: {err}")))
-}
-
-fn commit_range(repo: &Path, base_branch: &str, branch: &str) -> OpsResult<Vec<String>> {
-    commit_range_from_ref(
-        repo,
-        &format!("origin/{base_branch}"),
-        &format!("origin/{branch}"),
-    )
 }
 
 fn commit_range_from_ref(repo: &Path, base_ref: &str, head_ref: &str) -> OpsResult<Vec<String>> {
@@ -375,24 +371,23 @@ fn checkout_target_branch(repo: &Path, target_branch: &str) -> OpsResult<()> {
 }
 
 fn run_git<const N: usize>(repo: &Path, args: [&str; N]) -> OpsResult<Output> {
-    let output = Command::new("git").args(args).current_dir(repo).output()?;
-    if output.status.success() {
-        Ok(output)
-    } else {
-        Err(OpsError::CommandFailed {
-            command: format!("git {}", args.join(" ")),
-            stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        })
-    }
+    run_command(repo, "git", args)
 }
 
 fn run_gh<const N: usize>(repo: &Path, args: [&str; N]) -> OpsResult<Output> {
-    let output = Command::new("gh").args(args).current_dir(repo).output()?;
+    run_command(repo, "gh", args)
+}
+
+fn run_command<const N: usize>(repo: &Path, program: &str, args: [&str; N]) -> OpsResult<Output> {
+    let output = Command::new(program)
+        .args(args)
+        .current_dir(repo)
+        .output()?;
     if output.status.success() {
         Ok(output)
     } else {
         Err(OpsError::CommandFailed {
-            command: format!("gh {}", args.join(" ")),
+            command: format!("{program} {}", args.join(" ")),
             stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
         })
     }

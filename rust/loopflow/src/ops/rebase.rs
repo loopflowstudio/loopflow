@@ -54,8 +54,7 @@ pub fn rebase_with_recovery(
 fn run_rebase_agent(repo: &Path, onto: &str, progress: &impl Progress) -> OpsResult<()> {
     let config = load_config_or_default(Some(repo));
 
-    let step_content = get_builtin_step("rebase")
-        .expect("built-in rebase step must exist");
+    let step_content = get_builtin_step("rebase").expect("built-in rebase step must exist");
 
     let opts = GatherContextOpts {
         repo_root: repo.to_path_buf(),

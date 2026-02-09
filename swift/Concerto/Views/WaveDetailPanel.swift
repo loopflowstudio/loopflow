@@ -6,6 +6,11 @@ import SwiftUI
 import LoopflowCore
 
 struct WaveDetailPanel: View {
+    private enum DetailTab: String, CaseIterable {
+        case current = "Current"
+        case runs = "Runs"
+    }
+
     let wave: WaveViewModel
 
     @Environment(RepoState.self) private var repoState
@@ -18,9 +23,13 @@ struct WaveDetailPanel: View {
     @State private var editingName: String = ""
     @State private var isEditingName = false
     @State private var currentTime = Date()
+    @State private var selectedTab: DetailTab = .current
+    @State private var waveRuns: [WaveRun] = []
+    @State private var isLoadingRuns = false
     @FocusState private var isNameFocused: Bool
 
     private let terminalLauncher = TerminalLauncher()
+    private let waveService = LocalWaveService()
     private let elapsedTimeTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     private var ideApp: IDEApp { .cursor }
@@ -71,6 +80,9 @@ struct WaveDetailPanel: View {
         }
         .onAppear {
             outputBuffer.startStreaming(waveId: wave.id)
+            if selectedTab == .runs {
+                Task { await fetchRuns() }
+            }
         }
         .onDisappear {
             outputBuffer.stopStreaming(waveId: wave.id)
@@ -78,6 +90,14 @@ struct WaveDetailPanel: View {
         .onChange(of: wave.id) { oldId, newId in
             outputBuffer.stopStreaming(waveId: oldId)
             outputBuffer.startStreaming(waveId: newId)
+            if selectedTab == .runs {
+                Task { await fetchRuns() }
+            }
+        }
+        .onChange(of: selectedTab) { _, tab in
+            if tab == .runs {
+                Task { await fetchRuns() }
+            }
         }
     }
 
@@ -91,36 +111,51 @@ struct WaveDetailPanel: View {
 
             ScrollView {
                 VStack(spacing: 16) {
-                    if wave.status == .idle {
-                        StepRunner(wave: wave)
+                    if selectedTab == .current {
+                        if wave.status == .idle {
+                            StepRunner(wave: wave)
 
-                        if !wave.commits.isEmpty {
-                            commitLogSection
+                            if !wave.commits.isEmpty {
+                                commitLogSection
+                            }
+
+                            if let stat = wave.diffStat {
+                                diffStatSection(stat)
+                            }
+
+                            if !wave.commits.isEmpty || wave.prURL != nil {
+                                opsActionsBar
+                            } else if !wave.recentSteps.isEmpty {
+                                Divider()
+                                NextActionsBar(wave: wave)
+                            }
+                        } else if wave.status == .failed {
+                            failedRunDetail
+                            StepRunner(wave: wave)
+                            if !outputBuffer.output(for: wave.id).isEmpty {
+                                liveOutputSection
+                            }
+                        } else {
+                            waveConfigSummary
+                            runProgressSection
                         }
 
-                        if let stat = wave.diffStat {
-                            diffStatSection(stat)
-                        }
-
-                        if !wave.commits.isEmpty || wave.prURL != nil {
-                            opsActionsBar
-                        } else if !wave.recentSteps.isEmpty {
-                            Divider()
-                            NextActionsBar(wave: wave)
-                        }
-                    } else if wave.status == .failed {
-                        failedRunDetail
-                        StepRunner(wave: wave)
-                        if !outputBuffer.output(for: wave.id).isEmpty {
-                            liveOutputSection
+                        if wave.worktreePath != nil {
+                            quickActionsBar
                         }
                     } else {
-                        waveConfigSummary
-                        runProgressSection
-                    }
+                        if isLoadingRuns && waveRuns.isEmpty {
+                            ProgressView("Loading runs…")
+                                .frame(maxWidth: .infinity, alignment: .center)
+                        }
 
-                    if wave.worktreePath != nil {
-                        quickActionsBar
+                        WaveRunsTab(
+                            wave: wave,
+                            runs: waveRuns,
+                            onCollapse: collapsePRs,
+                            onAbsorb: absorbIntoPR(_:),
+                            onRefresh: refreshRunsAndWaves
+                        )
                     }
                 }
                 .padding(20)
@@ -170,6 +205,10 @@ struct WaveDetailPanel: View {
                             .background(palette.surface)
                             .clipShape(Capsule())
                     }
+
+                    if !waveRuns.isEmpty {
+                        IterationTimeline(runs: waveRuns, currentIteration: wave.iteration)
+                    }
                 }
 
                 Text(wave.statusText)
@@ -197,6 +236,13 @@ struct WaveDetailPanel: View {
                 }
                 .buttonStyle(DarkButtonStyle())
             }
+
+            Picker("", selection: $selectedTab) {
+                Text("Current").tag(DetailTab.current)
+                Text("Runs (\(waveRuns.count))").tag(DetailTab.runs)
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 220)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
@@ -680,6 +726,33 @@ struct WaveDetailPanel: View {
                 }
             }
         }
+    }
+
+    private func fetchRuns() async {
+        isLoadingRuns = true
+        defer { isLoadingRuns = false }
+        do {
+            waveRuns = try await waveService.listWaveRuns(waveId: wave.id)
+        } catch {
+            waveRuns = []
+        }
+    }
+
+    private func refreshRunsAndWaves() async {
+        await fetchRuns()
+        await repoState.refreshWaves()
+    }
+
+    private func collapsePRs() async throws -> CollapsePRsResult {
+        let result = try await waveService.collapsePRs(wave.id)
+        await refreshRunsAndWaves()
+        return result
+    }
+
+    private func absorbIntoPR(_ prNumber: Int) async throws -> AbsorbIntoPRResult {
+        let result = try await waveService.absorbIntoPR(wave.id, prNumber: prNumber)
+        await refreshRunsAndWaves()
+        return result
     }
 
     // MARK: - Name Editing

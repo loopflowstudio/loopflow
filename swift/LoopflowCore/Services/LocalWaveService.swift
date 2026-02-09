@@ -651,6 +651,36 @@ public struct LocalWaveService: @unchecked Sendable {
         }
     }
 
+    /// Absorb unpublished commits into an existing PR branch.
+    public func absorbIntoPR(_ id: String, prNumber: Int) async throws -> AbsorbIntoPRResult {
+        let url = apiBaseURL.appendingPathComponent("waves/\(id)/absorb")
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["pr_number": prNumber])
+
+        // Use longSession - absorb performs git fetch/cherry-pick/push
+        let (data, response) = try await longSession.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let errorMsg = Self.parseErrorMessage(data)
+            throw WaveServiceError.commandFailed(errorMsg ?? "HTTP \(statusCode)")
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let ok = json["ok"] as? Bool,
+              ok,
+              let result = json["result"] as? [String: Any],
+              let targetBranch = result["target_branch"] as? String else {
+            throw WaveServiceError.commandFailed("Invalid response")
+        }
+
+        let commitsAbsorbed = result["commits_absorbed"] as? Int ?? 0
+        return AbsorbIntoPRResult(targetBranch: targetBranch, commitsAbsorbed: commitsAbsorbed)
+    }
+
     // MARK: - Output Streaming
 
     /// Stream output for a wave (replay from disk + live follow).
@@ -859,5 +889,15 @@ public struct CollapsePRsResult: Sendable {
     public init(newPRUrl: String?, closedPRs: [Int]) {
         self.newPRUrl = newPRUrl
         self.closedPRs = closedPRs
+    }
+}
+
+public struct AbsorbIntoPRResult: Sendable {
+    public let targetBranch: String
+    public let commitsAbsorbed: Int
+
+    public init(targetBranch: String, commitsAbsorbed: Int) {
+        self.targetBranch = targetBranch
+        self.commitsAbsorbed = commitsAbsorbed
     }
 }

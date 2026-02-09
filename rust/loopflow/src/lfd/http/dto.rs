@@ -162,6 +162,30 @@ pub struct NextWaveResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct CollapseResponse {
+    pub ok: bool,
+    pub result: CollapseResponseResult,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CollapseResponseResult {
+    pub new_pr_url: Option<String>,
+    pub closed_prs: Vec<u64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AbsorbResponse {
+    pub ok: bool,
+    pub result: AbsorbResponseResult,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AbsorbResponseResult {
+    pub target_branch: String,
+    pub commits_absorbed: usize,
+}
+
+#[derive(Debug, Serialize)]
 pub struct DeletedResourceResponse {
     pub id: String,
     pub object: String,

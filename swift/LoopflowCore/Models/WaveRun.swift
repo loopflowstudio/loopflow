@@ -85,3 +85,20 @@ public struct WaveRun: Sendable, Identifiable, Hashable {
     }
 
 }
+
+public extension WaveRun {
+    var duration: String? {
+        guard let startedAt, let endedAt else { return nil }
+        let interval = max(0, endedAt.timeIntervalSince(startedAt))
+        let minutes = Int(interval) / 60
+        let seconds = Int(interval) % 60
+        return "\(minutes)m\(String(format: "%02d", seconds))s"
+    }
+
+    var relativeTime: String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        let reference = endedAt ?? startedAt ?? createdAt
+        return formatter.localizedString(for: reference, relativeTo: Date())
+    }
+}

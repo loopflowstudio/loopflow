@@ -1,4 +1,5 @@
 mod abandon;
+mod collapse;
 mod commit;
 mod error;
 mod land;
@@ -12,6 +13,9 @@ pub mod trace;
 mod util;
 
 pub use abandon::{abandon_branch, AbandonOptions};
+pub use collapse::{
+    absorb_into_pr, collapse_prs, AbsorbOptions, AbsorbResult, CollapseOptions, CollapseResult,
+};
 pub use commit::{commit_workflow, commit_workflow_traced, CommitOptions};
 pub use error::{OpsError, OpsResult};
 pub use land::{land, LandOptions, LandResult};

@@ -397,6 +397,52 @@ struct CollapsePRsResultTests {
     }
 }
 
+@Suite("AbsorbIntoPRResult")
+struct AbsorbIntoPRResultTests {
+
+    @Test("initializes with target branch and absorbed commit count")
+    func initializesWithBranchAndCount() {
+        let result = AbsorbIntoPRResult(targetBranch: "wave-b", commitsAbsorbed: 3)
+
+        #expect(result.targetBranch == "wave-b")
+        #expect(result.commitsAbsorbed == 3)
+    }
+}
+
+@Suite("WaveRun helpers")
+struct WaveRunHelpersTests {
+    @Test("duration formats minutes and seconds")
+    func durationFormatsMinutesAndSeconds() {
+        let start = Date(timeIntervalSince1970: 0)
+        let end = Date(timeIntervalSince1970: 125)
+        let run = WaveRun(
+            id: "run-1",
+            waveId: "wave-1",
+            flow: "ship",
+            area: ".",
+            repo: "/tmp/repo",
+            startedAt: start,
+            endedAt: end
+        )
+
+        #expect(run.duration == "2m05s")
+    }
+
+    @Test("relativeTime returns non-empty value")
+    func relativeTimeNonEmpty() {
+        let run = WaveRun(
+            id: "run-1",
+            waveId: "wave-1",
+            flow: "ship",
+            area: ".",
+            repo: "/tmp/repo",
+            createdAt: Date().addingTimeInterval(-60)
+        )
+
+        #expect(!run.relativeTime.isEmpty)
+    }
+}
+
 @Suite("Stimulus")
 struct StimulusTests {
 
